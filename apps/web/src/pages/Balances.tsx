@@ -237,7 +237,14 @@ function LatestBalances({
             : "表示対象の記録がまだありません。金額がゼロであることを意味しません。"}
         </p>
       ) : null}
-      <Pager {...view} total={rows.length} onChange={setPage} bare />
+      {/* Named by its list: with the balance read model the page holds a second pager. */}
+      <Pager
+        {...view}
+        total={rows.length}
+        onChange={setPage}
+        bare
+        label={summaries ? "最新取得の期間実績・請求のページ" : "項目ごとの最新の記録のページ"}
+      />
     </section>
   );
 }

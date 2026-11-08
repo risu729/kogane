@@ -309,6 +309,14 @@ answered by the routes' own reader `readRewardRoute`
 - 期限が確認できない行は「期限未確認」として一覧に残す。行を落とさない。
 - 確度は文言と理由コードで示す。色だけには載せない。`provider-observed` / `policy-estimated` /
   `期限未確認` を各行に併記する。
+- On a connection whose `/api/meta` does not advertise `rewardsV2`, the page says the
+  connection does not offer rewards and sends no reward request.
+- The page reads only the first page of each route (`offset=0`). When the server's
+  page bound cuts a list, that block says how many rows it shows and that it did not
+  read the rest; it offers no link to a next page.
+- Each expiry panel is named by what tells it apart: a published-snapshot row by its
+  programme, bucket kind and bucket reference; a legacy row by its rule and holding.
+  `apps/web/test/rewards.browser.test.ts` checks these three points.
 
 ## 10. デプロイ順とロールバック
 

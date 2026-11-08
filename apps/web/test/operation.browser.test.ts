@@ -11,6 +11,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { auditView } from "./a11y-audit.ts";
 import {
   OPERATION_RECORD_PATH_PREFIX,
   OPERATION_RECORD_STAGES_BY_KIND,
@@ -314,6 +315,18 @@ describe.if(runnable)("the operator's 依頼の経過 page", () => {
         await page.close();
       }
     }, 60_000);
+
+  test("a collection's trail passes the accessibility audit", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/operations/${PUBLISHED}`);
+      await page.getByRole("heading", { level: 2, name: "報告された収集実行" }).waitFor();
+      // The runs panel and the table it holds are two landmarks with two names.
+      expect(await auditView(page)).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
 
   test("a waiting request says why it waits, and re-reads only when asked", async () => {
     const page = await browser.newPage();
