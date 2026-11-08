@@ -65,6 +65,9 @@ describe("an agent read whose store probe fails", () => {
     it(`answers 503 catalogue_read_failed for ${tools.join(", ")}, as ${route.split("?")[0]} does`, async () => {
       const log = vi.spyOn(console, "log");
       const error = vi.spyOn(console, "error");
+      const last = (await env.DB.prepare(
+        "SELECT coalesce(max(rowid),0) AS n FROM audit_records",
+      ).first<number>("n"))!;
       const routed = await page.route(route);
       expect(routed.status, name).toBe(503);
       expect(routed.body).toMatchObject(REFUSAL);
@@ -82,8 +85,25 @@ describe("an agent read whose store probe fails", () => {
         expect(JSON.parse(text)).toMatchObject(REFUSAL);
         answers.push(overHttp, text);
       }
+      // Each agent call is recorded once, with the closed code alone: the
+      // HTTP path under the tool's operation, `/mcp` under `mcp.request`.
+      const recorded = (
+        await env.DB.prepare("SELECT * FROM audit_records WHERE rowid>? ORDER BY rowid")
+          .bind(last)
+          .all<Record<string, unknown>>()
+      ).results;
+      expect(
+        recorded.map((row) => [row["path"], row["operation"], row["result"], row["result_code"]]),
+      ).toEqual(
+        tools.flatMap((tool) => [
+          ["agent-http", tool.slice("kogane.".length), "failed", "catalogue_read_failed"],
+          ["mcp", "mcp.request", "failed", "catalogue_read_failed"],
+        ]),
+      );
       const logged = [...log.mock.calls, ...error.mock.calls].flat().map(String).join("\n");
-      expect(`${JSON.stringify(answers)}\n${logged}`).not.toContain(FAILURE);
+      expect(`${JSON.stringify(answers)}\n${logged}\n${JSON.stringify(recorded)}`).not.toContain(
+        FAILURE,
+      );
     });
 
     it(`the tool list answers 503 catalogue_read_failed when the ${name} probe fails`, async () => {
