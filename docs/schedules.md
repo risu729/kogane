@@ -43,10 +43,14 @@ A running execution proves it is alive
 ([ADR 0085](adr/0085-collection-lease-heartbeat.md)): it writes the lease's
 `heartbeat_at` on D1's clock with its claim and every minute while it runs. If
 a process dies during collection, its heartbeat stops, and the Processor's
-5-minute tick frees the lease once the heartbeat is 10 minutes old (a lease
-claimed by a build without heartbeats, which has none or only one older than
-its claim: once it is 60 minutes old). Each such
-release is recorded (`alarm.lease.expire`, principal `alarm:processor-tick`).
+5-minute `processor-tick` alarm frees the lease once the heartbeat is 10
+minutes old (a lease claimed by a build without heartbeats, which has none or
+only one older than its claim: once it is 60 minutes old). Each such release
+is recorded (`alarm.lease.expire`, principal `alarm:processor-tick`). Only that
+alarm frees leases: the release workflow's `/bootstrap`, which runs the same
+reservation repair, frees none. While the `processor-tick` job is disabled, or
+its Pipeline tick throws (a failing lane alone does not), no lease is freed;
+the operator can still release one on this page.
 Freeing a lease starts and replays nothing: the next nominal occurrence, or a
 new operations request, simply finds the source free.
 
@@ -61,7 +65,9 @@ Such a run is recorded `uncertain` (`collection_deadline_exceeded` or
 `collection_lease_lost`), since the provider may have been contacted, and is
 never replayed. St George instead records a failed run with the stop as its
 reason; its next scheduled run tries again. Only a refused, challenged or unrecognised St
-George login blocks the source until the operator resumes it.
+George login pauses the source, until the credential secret changes or one
+requested collection (at most once per 24 hours) allows a login; a skipped alarm
+records `st_george_paused_<reason>`.
 
 **停止した実行を解除** remains for the operator, for a source that should not
 wait for the tick. Only after confirming the previous execution stopped, use it.
@@ -107,7 +113,8 @@ named collector RPC and the same lease
 held the request waits (`collection_lease_held`) instead of starting. The
 Processor's dispatch only reads the lease and never releases or replaces it;
 the collector acquires and releases it exactly as for an alarm run, and a
-stopped execution's lease is still released only by the operator. A collector that finds its lease held reports `collection_busy` (alarm
+stopped execution's lease is freed by the `processor-tick` alarm or the
+operator, as above. A collector that finds its lease held reports `collection_busy` (alarm
 receipts included) rather than `collection_failed`. St George does the same
 since 2026-11-08 UTC; before that its session coordinator recorded a refused
 lease as a failed run and refused later runs until the operator resumed it.
@@ -423,8 +430,11 @@ The tests use synthetic local D1 data and synthetic Access keys. They cover
 signed MCP entry, revocation and scope-before-replay, both hard bounds,
 prepare/effect linkage, shared daily budget, rollback, exact retries,
 concurrent joined windows and losing-provenance writes. Production migration
-state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
-the committed MCP financial-reader grant receives no schedule authority.
+state and real-client use were not checked. `MCP_DELEGATIONS` stayed empty
+then, and the committed MCP financial-reader grant received no schedule
+authority; [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+(2026-11-07) removed both, and every MCP client now reads and revises
+maintenance windows over every schedule source, as itself.
 S6 survey acceptance remained unavailable pending the separate owner decision
 (delegated survey decisions since 2026-11-07: [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07));
 no survey grammar, grants, Access, authentication or deployment is changed.

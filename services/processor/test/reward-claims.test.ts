@@ -357,6 +357,7 @@ test("the scheduled lane never runs while the flag is off", async () => {
     "observation_sweep",
     "collection_scan",
     "identity_sweep",
+    "instrument_auto_adoption",
     "balance_projection",
     // Unflagged (ADR 0020).
     "price_promotion",
@@ -376,6 +377,7 @@ test("the scheduled lane never runs while the flag is off", async () => {
     "observation_sweep",
     "collection_scan",
     "identity_sweep",
+    "instrument_auto_adoption",
     "balance_projection",
     "reward_claims_sweep",
     "price_promotion",
@@ -384,7 +386,7 @@ test("the scheduled lane never runs while the flag is off", async () => {
     "audit_overflow",
   ]);
   // Counts and identifiers only: no amount, account label or provider text.
-  expect(Object.keys(lines[4]!).sort()).toEqual([
+  expect(Object.keys(lines[5]!).sort()).toEqual([
     "cursor",
     "enabled",
     "event",

@@ -36,6 +36,7 @@ import {
   d1CommandStore,
   operationListArms,
   operationListSql,
+  projectionRequirementWrite,
   recordCollectorOutcome,
   recordOperationStage,
 } from "../../../packages/application/src/index";
@@ -112,6 +113,7 @@ async function call(
     subject?: string;
     environment?: Record<string, unknown>;
     target?: typeof worker | typeof demo;
+    headers?: Record<string, string>;
   } = {},
 ) {
   const jwt = await token(options.subject, path === "/mcp" ? MCP_AUDIENCE : undefined);
@@ -121,6 +123,7 @@ async function call(
       "cf-access-jwt-assertion": jwt,
       // What an MCP client sends on every POST (Streamable HTTP).
       ...(path === "/mcp" ? MCP_CLIENT_HEADERS : {}),
+      ...options.headers,
     },
   };
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
@@ -515,6 +518,38 @@ describe("the schema is the boundary (G3-08, G3-13)", () => {
     });
     expect(response.status).toBe(413);
     expect(await response.json()).toMatchObject({ error: "request_too_large" });
+  });
+
+  // A page on another site must not drive a signed-in browser's Access
+  // session into an operation (ADR 0078): the same own-origin rule as every
+  // agent path, before a grant is graded or a body is read.
+  it("refuses a request from another origin before it is graded or stored", async () => {
+    const stored = () =>
+      env.DB.prepare("SELECT count(*) AS n FROM ops_requests").first<number>("n");
+    const before = await stored();
+    for (const origin of ["https://elsewhere.invalid", "null", "http://fixture.test"]) {
+      for (const [path, body] of [
+        ["/collections", COLLECTION],
+        ["/projections", { reason: "cross-site" }],
+        ["/sessions/sony-bank/refresh", {}],
+      ] as const) {
+        const response = await call(`${OPS}${path}`, {
+          body,
+          environment: ENABLED,
+          headers: { origin },
+        });
+        expect(response.status, `${origin} ${path}`).toBe(403);
+        expect((await response.json()).error).toBe("origin_not_allowed");
+      }
+    }
+    expect(await stored()).toBe(before);
+    // The Worker's own origin, and a client that sends none (curl), are unaffected.
+    const own = await call(`${OPS}/collections`, {
+      body: { ...COLLECTION, idempotencyKey: "own-origin" },
+      environment: ENABLED,
+      headers: { origin: "https://fixture.test" },
+    });
+    expect(own.status).toBe(202);
   });
 
   it("refuses a query string on an operations route", async () => {
@@ -912,6 +947,150 @@ describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)
     });
     expect(overHttp.status).toBe(503);
     expect((await overHttp.json()).error).toBe("grants_misconfigured");
+  });
+
+  it("follows a published collection to the READ projection alike on HTTP and MCP (ADR 0048)", async () => {
+    // One request per transport, each under its own principal.
+    const overHttp = await ops("/collections", { ...COLLECTION, idempotencyKey: "projected-http" });
+    const request = { ...COLLECTION, idempotencyKey: "projected-mcp" };
+    const prepared = await mcp(
+      "tools/call",
+      { name: "kogane.ops.collection.request", arguments: { ...request, step: "prepare" } },
+      THROUGH_MCP,
+    );
+    const confirmed = await mcp(
+      "tools/call",
+      {
+        name: "kogane.ops.collection.request",
+        arguments: {
+          ...request,
+          step: "confirm",
+          confirmationDigest: prepared.result.structuredContent.confirmation.digest,
+        },
+      },
+      THROUGH_MCP,
+    );
+    expect(confirmed.result.isError).not.toBe(true);
+    const ids = [
+      overHttp.json.operationId as string,
+      confirmed.result.structuredContent.operationId as string,
+    ];
+    // What the Processor records up to publication, through the same services:
+    // the published batch stores the CORE revision READ has to reach.
+    const store = d1CommandStore(env.DB);
+    const publishedAt = "2026-09-07T00:20:00.000Z";
+    for (const operationId of ids) {
+      const stored = (await row(operationId)) as Record<string, any>;
+      const context = {
+        store,
+        operationId,
+        action: "collect" as const,
+        acceptedAt: stored.created_at as string,
+        expiresAt: new Date(Date.parse(stored.created_at) + 24 * 3_600_000).toISOString(),
+        now: "2026-09-07T00:05:00.000Z",
+      };
+      const binding = { connectionId: "sony-bank", terminalSource: "sony-bank" };
+      expect(await claimCollectorStart({ ...context, binding })).toBe(true);
+      await recordCollectorOutcome({
+        store,
+        operationId,
+        now: "2026-09-07T00:06:00.000Z",
+        nowMs: Date.parse("2026-09-07T00:06:00.000Z"),
+        outcome: { kind: "collected", runIds: ["synthetic-projected-run"] },
+      });
+      for (const stage of ["registered", "parsed", "adopted"] as const)
+        await recordOperationStage({
+          store,
+          operationId,
+          stage,
+          state: "completed",
+          now: publishedAt,
+          evidenceRef: "r_1",
+        });
+      await store.batch([
+        {
+          sql: `UPDATE ops_collector_dispatches SET state='published',published_at=?2,
+            finished_at=?2,updated_at=?2 WHERE operation_id=?1 AND state='collected'`,
+          binds: [operationId, publishedAt],
+        },
+        projectionRequirementWrite(operationId, publishedAt),
+      ]);
+    }
+    const revision = (await env.DB.prepare(
+      "SELECT source_revision, core_epoch FROM core_source_revision WHERE id=1",
+    ).first<{ source_revision: number; core_epoch: string }>())!;
+    const follow = async () => {
+      const http = await call(`${OPS}/operations/${ids[0]}`, { environment: ENABLED });
+      expect(http.status).toBe(200);
+      const viaMcp = await mcp(
+        "tools/call",
+        { name: "kogane.ops.operation.get", arguments: { operationId: ids[1] } },
+        THROUGH_MCP,
+      );
+      expect(viaMcp.result.isError).not.toBe(true);
+      return [(await http.json()) as Record<string, any>, viaMcp.result.structuredContent];
+    };
+    const projected = (receipt: Record<string, any>) => ({
+      status: receipt.status,
+      projected: receipt.stages.find((stage: any) => stage.stage === "projected"),
+    });
+    // Nothing is published in READ yet: unavailable, never completed.
+    for (const receipt of await follow())
+      expect(projected(receipt)).toMatchObject({
+        status: "running",
+        projected: { state: "pending", evidenceRef: null, failureCode: "read_model_unavailable" },
+      });
+    // A snapshot verified one revision before publication is behind.
+    const snapshotId = "d".repeat(64);
+    const at = "2026-09-07T00:30:00.000Z";
+    await env.READ.batch([
+      env.READ.prepare(
+        `INSERT INTO read_instance(id,read_instance_id,created_at,contract_version)
+         VALUES(1,'instance-ops-projected',?1,'read-baseline-v1')`,
+      ).bind(at),
+      env.READ.prepare(
+        `INSERT INTO balance_read_snapshots(snapshot_id,content_key,attempt,input_digest,
+           build_digest,contract_version,read_instance_id,source_revision,visibility_revision,
+           core_epoch,status,row_count,output_digest,input_manifest_json,projection_release,
+           created_at,completed_at)
+         VALUES(?1,?1,1,?1,?1,'read-baseline-v1','instance-ops-projected',?2,1,?3,'complete',0,?1,
+           '{}','balance-projection-v1',?4,?4)`,
+      ).bind(snapshotId, revision.source_revision - 1, revision.core_epoch, at),
+      env.READ.prepare(
+        `INSERT INTO balance_snapshot_pointer(id,snapshot_id,source_revision,visibility_revision,
+           core_epoch,read_instance_id,output_digest,switched_at)
+         VALUES(1,?1,?2,1,?3,'instance-ops-projected',?1,?4)`,
+      ).bind(snapshotId, revision.source_revision - 1, revision.core_epoch, at),
+    ]);
+    for (const receipt of await follow())
+      expect(projected(receipt)).toMatchObject({
+        status: "running",
+        projected: { state: "pending", failureCode: "projection_behind" },
+      });
+    // Verified at the revision publication stored: projected, and the request complete.
+    await env.READ.prepare("UPDATE balance_snapshot_pointer SET source_revision=?1 WHERE id=1")
+      .bind(revision.source_revision)
+      .run();
+    const [http, viaMcp] = await follow();
+    expect(projected(http!)).toEqual({
+      status: "completed",
+      projected: {
+        stage: "projected",
+        state: "completed",
+        evidenceRef: `read-snapshot:${snapshotId}`,
+        failureCode: null,
+        attempts: 0,
+        updatedAt: publishedAt,
+      },
+    });
+    expect(projected(viaMcp)).toEqual(projected(http!));
+    expect(viaMcp.stages).toEqual(http!.stages);
+    // A re-send answers with the status a read does.
+    const resent = await ops("/collections", { ...COLLECTION, idempotencyKey: "projected-http" });
+    expect(resent).toEqual({
+      status: 202,
+      json: { operationId: ids[0], status: "completed" },
+    });
   });
 
   it("shows the operator's browser receipt to its MCP principal as the route does (ADR 0086)", async () => {

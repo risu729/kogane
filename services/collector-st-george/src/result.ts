@@ -63,24 +63,18 @@ export function stGeorgeScheduledResult(value: unknown): ScheduledResult {
   else if (result.reason === "persistence-pending") failureCode = "terminal_persistence_pending";
   else if (result.reason === "state-unavailable") failureCode = "collector_state_unavailable";
   else if (FAILURE_CODES.includes(result.reason as FailureCode))
-    failureCode = `st_george_${safeFailureCode(result.reason).replaceAll("-", "_")}`;
+    // A run skipped during a login pause contacted nobody: its own code.
+    failureCode = `st_george_${result.status === "paused" ? "paused_" : ""}${safeFailureCode(
+      result.reason,
+    ).replaceAll("-", "_")}`;
+  // A skipped run wrote nothing: the run that caused the pause is not its run.
+  if (result.status === "paused") return { ...base, runIds: [], failureCode };
   return { ...base, failureCode };
 }
 
 /** Fixed event/keys and closed codes only; never serializes the coordinator response. */
 export function logStGeorgeResult(value: unknown): void {
   try {
-    if (value && typeof value === "object" && "status" in value && value.status === "ready") {
-      console.log(
-        JSON.stringify({
-          event: "st-george-collection-result",
-          status: "ready",
-          failureCode: null,
-          runCount: 0,
-        }),
-      );
-      return;
-    }
     const result = stGeorgeScheduledResult(value);
     console.log(
       JSON.stringify({

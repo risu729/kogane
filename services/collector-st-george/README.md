@@ -60,42 +60,51 @@ Wrangler generates binding types. Secret names are declared in `env.d.ts`:
 - `ST_GEORGE_CREDENTIAL_JSON`: JSON containing `userId`, `securityNumber` and
   `password`. Provision through the existing secret-management workflow; never
   place credentials in the repository, terminal arguments, reports or logs.
-- `ADMIN_TRIGGER_TOKEN`: bearer token of at least 32 characters for administrative operations.
 - `RELAY_TOKEN`: separate bearer token of at least 32 characters for the constrained TCP relay.
 
 Non-secret settings are `COLLECTOR_SCHEMA_VERSION`, `EGRESS_MODE` and
 `RELAY_PUBLIC_URL`. The configured daily schedule is 06:35 JST (`35 21 * * *`
 in UTC), with platform retries disabled. The same durable coordinator serializes
-manual and scheduled collection. Only a refused, challenged or unrecognised
-login (`login-rejected`, `authentication-challenge`, `human-required`, and
-`http-denied`, `bank-request-error` and `unexpected-route`, none observed yet
-and each possibly the bank's answer to a wrong password) blocks later runs until an operator resolves the cause and explicitly resumes collection,
-because another unattended login could lock the account. Every other failure (a
-browser or container crash, a network error, a deadline) is a
-failed run and the next scheduled run tries again (2026-11-08 UTC; before that,
-any failure blocked, which left the collector stopped from 2026-10-07 on a
-`runtime-failed` run). A block of another reason left by that older policy is
-cleared on the next run. The Worker log records each block:
-`st-george-collection-blocked` when a refused, challenged or unrecognised login stores one,
-`st-george-collection-skipped-blocked` for each run it skips (nothing is
-contacted), and `st-george-block-cleared` when a block of that older policy is
-lifted (`cause: "not-a-login-refusal"`) or an operator resumes
-(`cause: "operator-resume"`). Each carries the reason code and the blocking run's id (`null` when the
-stored block has none); the first two also carry `blockedSince` (`null` for a
-block stored before 2026-11-08) and `clearedBy: "operator-resume"`. A lease
-held by another execution answers `busy` and
-records no run. An in-flight marker from an object reset mid-attempt no longer
-blocks: the lease outlives that attempt, so the next run cannot overlap it.
+manual and scheduled collection.
+
+A refused, challenged or unrecognised login (`login-rejected`,
+`authentication-challenge`, `human-required`, and `http-denied`,
+`bank-request-error` and `unexpected-route`, none observed yet and each
+possibly the bank's answer to a wrong password) **pauses** later logins,
+because another unattended login could lock the account. There is no resume
+step ([ADR 0069 amendment](../../docs/adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08),
+owner, 2026-11-08 03:57 UTC). The pause ends by itself in either case:
+
+- the credential changed: the pause keeps a salted PBKDF2 digest of the parsed
+  credential that was refused (never the credential), and the next alarm after
+  `ST_GEORGE_CREDENTIAL_JSON` is updated logs in again;
+- a collection is requested through the operations API
+  (`POST /api/ops/v1/collections` or MCP `kogane.ops.collection.request`,
+  source `st-george`): one login, at most once per 24 hours whoever asks. A
+  second refusal pauses again.
+
+An alarm skipped during a pause contacts nobody, reports no run and records
+`st_george_paused_<reason>`. Every other failure (a browser or container
+crash, a network error, a deadline) is a failed run and the next alarm tries
+again. A block stored before 2026-11-08 is read as a pause without a digest; one
+whose reason no longer pauses is lifted on the next run. A lease held by
+another execution answers `busy` and records no run. An in-flight marker from
+an object reset mid-attempt does not block: the lease outlives that attempt.
+
+The Worker log records `st-george-collection-paused` (reason, run id,
+`pausedSince`), `st-george-collection-skipped-paused` for each skipped alarm,
+and `st-george-pause-lifted` with its `cause` (`credential-changed`,
+`requested-collection` or `not-a-login-refusal`).
+
 Enable this schedule only after authenticated cloud collection and downstream
 publication have been verified.
 
-`GET /health` reports service configuration without contacting the bank.
-Authenticated `POST /trigger` starts or resumes a collection/storage attempt.
-Authenticated `POST /resume` clears a refused, challenged or unrecognised login block;
-it does not start collection or discard a snapshot awaiting storage. Call `/trigger`
-after clearing the blocker. Treat resume as an explicit operator
-decision after resolving the blocker. Neither route accepts account details or
-credentials from a public request.
+`GET /health` reports service configuration without contacting the bank. It and
+the relay's `/tcp` are the only public routes. Collection runs only from the
+alarm and from operations-API requests, both over the private
+`ScheduledCollection` binding under the same lease. The bearer routes
+`POST /trigger` and `POST /resume` and their `ADMIN_TRIGGER_TOKEN` were removed
+on 2026-11-08.
 
 ## Evidence and coverage
 
