@@ -711,7 +711,9 @@ Each source of the summary and each cell of `view: "cells"` carries its
 freshness under `collection-freshness-v1`, counted to the answer's
 `freshnessAsOf`
 ([evidence browser](evidence-browser.md#collection-quality-apicollection-quality));
-the account view carries none.
+the account view carries none. Each summary source with a collector lists its
+provider's data types under `provider-data-types-v1`
+([ADR 0087](adr/0087-provider-data-type-catalogue.md)).
 Its cells carry provider fetch-unit keys (card tokens, account digests,
 connection ids, a branch and account number; ADR 0045), so it needs
 `evidence.read`, the capability of the evidence routes, not `records.read`.

@@ -10,6 +10,10 @@
 // `COLLECTOR_SOURCE_IDS` entries that register under it.
 import { COLLECTOR_SOURCE_IDS, WITHHELD_ARTIFACT_DATASETS } from "../collection/descriptors.ts";
 import {
+  PROVIDER_DATA_TYPES_VERSION,
+  providerDataTypes,
+} from "../collection/provider-data-types.ts";
+import {
   ACCOUNT_COVERAGE_SQL,
   CELL_QUALITY_SQL,
   COLLECTION_QUALITY_ROW_BOUND,
@@ -269,7 +273,7 @@ function schedule(
 }
 
 function sourceReasons(
-  source: Omit<CollectionQualitySource, "reasons" | "freshness">,
+  source: Omit<CollectionQualitySource, "reasons" | "freshness" | "dataTypes">,
 ): SourceReason[] {
   const reasons = new Set<SourceReason>();
   if (source.collectors.length === 0) reasons.add("no_collector");
@@ -375,11 +379,13 @@ export async function queryCollectionQualitySummary(
       ...entry,
       reasons: sourceReasons(entry),
       freshness: collectionFreshness(entry.latestFetchRun?.completedAt ?? null, asOf.date, wait),
+      dataTypes: providerDataTypes(row.source_id),
     };
   });
   return {
     apiVersion: COLLECTION_QUALITY_API_VERSION,
     freshnessAsOf: asOf,
+    dataTypesVersion: PROVIDER_DATA_TYPES_VERSION,
     sources: summaries,
     otherSchedules: schedules.filter((job) => !placed.has(job.id)),
   };

@@ -17,6 +17,9 @@ import {
   type CollectionQualitySummary,
   type CellReason,
   type CollectionFreshness,
+  type DataTypeStatus,
+  type ProviderDataType,
+  type ProviderDataTypeEntry,
   type SourceReason,
 } from "../../../../packages/observation-shared/src/collection-quality-contract.ts";
 
@@ -88,6 +91,63 @@ export function freshnessText(value: CollectionFreshness): string {
     case "no-capture":
       return "取得なし";
   }
+}
+const DATA_TYPE_LABELS: Record<ProviderDataType, string> = {
+  balance: "残高",
+  cash_movement: "入出金明細",
+  card_usage: "カード利用明細",
+  card_statement: "カードの請求・支払額",
+  position: "保有銘柄・数量",
+  execution: "約定・取引履歴",
+  settlement_cash: "証券口座の預り金と入出金",
+  asset_transfer: "証券・暗号資産の入出庫",
+  income: "配当・分配金・利息・報酬",
+  valuation_history: "評価額・資産推移・実現損益",
+  term_deposit: "定期預金等の契約明細",
+  document: "取引報告書・電子交付書面",
+  fx_rate: "為替レート",
+  reward_balance: "ポイント残高",
+  reward_activity: "ポイント履歴",
+  reward_expiry: "ポイントの有効期限",
+};
+const DATA_TYPE_STATUS_LABELS: Record<DataTypeStatus, string> = {
+  collected: "収集・解析済み",
+  partial: "一部のみ収集",
+  not_collected: "未収集",
+};
+function DataTypes({ entries }: { entries: readonly ProviderDataTypeEntry[] | null }): ReactNode {
+  if (entries === null)
+    return (
+      <p className="panel-body">この取得元のデータ種別一覧はありません（収集方法が未登録）。</p>
+    );
+  return (
+    <ul className="panel-body">
+      {entries.map((entry) => (
+        <li key={entry.type} data-status={entry.status}>
+          {DATA_TYPE_LABELS[entry.type]}: {DATA_TYPE_STATUS_LABELS[entry.status]}{" "}
+          <code>{entry.type}</code>
+          {entry.parsers.length ? (
+            <>
+              {" "}
+              · 解析:{" "}
+              {entry.parsers.map((parser) => (
+                <code key={parser}>{parser} </code>
+              ))}
+            </>
+          ) : null}
+          {entry.issue !== null ? (
+            <>
+              {" "}
+              ·{" "}
+              <a href={`https://github.com/risu729/kogane/issues/${entry.issue}`}>
+                残りの対応 #{entry.issue}
+              </a>
+            </>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
 }
 function Freshness({ value }: { value: CollectionFreshness }): ReactNode {
   return (
@@ -471,6 +531,9 @@ export function CollectionQualityPage(): ReactNode {
                         {source.sourceId}
                       </Link>{" "}
                       · <Freshness value={source.freshness} /> ·{" "}
+                      {source.dataTypes?.some((entry) => entry.status !== "collected")
+                        ? `未収集・一部のみのデータ種別 ${source.dataTypes.filter((entry) => entry.status !== "collected").length} 件 · `
+                        : null}
                       {source.reasons.length
                         ? `${source.reasons.length} 個の未完了・未確認理由`
                         : "実行の記録あり（網羅性は個別確認）"}
@@ -494,6 +557,9 @@ export function CollectionQualityPage(): ReactNode {
                     日本時間基準。成否を問わず最新の取得記録の日付。データ種別ごとの新しさは下の一覧）
                   </p>
                   <Reasons codes={selected.reasons} />
+                  <Panel title="取得元が提供するデータ種別">
+                    <DataTypes entries={selected.dataTypes} />
+                  </Panel>
                   <Panel title="最後の試行と取得結果">
                     {selected.schedules.length ? (
                       selected.schedules.map((schedule) => (
