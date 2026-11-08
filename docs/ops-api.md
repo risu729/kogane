@@ -10,8 +10,8 @@ six operation-request kinds are distinct from the newer operator-only
 [schedule settings API](schedules.md#settings-api). A collection or unattended
 session-refresh request reaches a collector only through the named collector RPC
 the alarm uses, and only for a connection the Processor's
-`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names; the committed value names none
-([collector execution](#collector-execution-adr-0048),
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names; the committed value names
+`sony-bank` ([collector execution](#collector-execution-adr-0048),
 [ADR 0048](adr/0048-operation-collector-dispatch.md)).
 
 The six things an operator asks this system to _do_ — collect a source,
@@ -44,7 +44,8 @@ identity, one record and one vocabulary, so that:
   session (G3-06, G3-14);
 - a person looking at a screen and an operator with `curl` reach the same
   application service and get the same record (G3-05); a model with an MCP
-  client cannot request an operation at all (ADR 0047).
+  client requests one through the same service as itself, never as the
+  operator ([MCP](#mcp), ADR 0084).
 
 The one thing the API deliberately cannot be is a generic proxy: there is no
 route that takes SQL, a table name, a bucket key, a URL, a database id or a
@@ -67,6 +68,16 @@ All six are authenticated, and all six are refused unless `OPS_API_ENABLED` is
 | `POST /api/ops/v1/projections`               | `{reason, idempotencyKey?}`                                | `202 {operationId, status}` | The request is stored. Publication is complete when `projected` is.        |
 | `POST /api/ops/v1/sessions/{source}/refresh` | `{idempotencyKey?}`                                        | `202 {operationId, status}` | The request is stored; `waiting_for_human` when a person must act.         |
 | `GET /api/ops/v1/operations/{id}`            | –                                                          | `200` operation record      | Reads the stored record; it never asks a downstream system "are you done". |
+
+An import's `runId` is checked against the bucket key's own run grammar
+(`RUN_ID` in `packages/collection/src/keys.ts`, imported by
+`services/app/src/ops-api.ts` rather than copied): an ASCII letter or digit, then up
+to 199 ASCII letters, digits, `.`, `_` or `-`. The import names the run whose
+terminal is `runs/<source>/<runId>/terminal.json`, so a run id that key cannot
+carry (a `:`, a `/`, a space, a leading separator) could never register; it is
+refused at acceptance with `400 invalid_request` and `refs: ["runId"]`, and no
+request is stored. The MCP tool `kogane.ops.import.request` validates with the
+same schema and publishes the same pattern.
 
 `status` is the stored operation status, not a promise: `accepted` or
 `waiting_for_human` on acceptance, and later `running`, `completed`, `failed`
@@ -244,8 +255,8 @@ already does:
    intended.**
 
    The routes are the only transport that reaches this resolver: `/mcp`
-   refuses an operations tool from its caller object before any grading
-   ([MCP](#mcp)).
+   never grades its caller by these lists and runs an operations tool as the
+   MCP client itself (`callDelegatedOpsTool`, [MCP](#mcp)).
 
 Reads are scoped to the principal that accepted the operation. An operation
 belonging to someone else answers `404 receipt_not_found`, exactly like one
@@ -315,6 +326,35 @@ store the same request ([ADR 0081](adr/0081-ui-parity-through-mcp.md),
 route; on `/mcp` it reads only the calling principal's own operations, so an operation the operator requested
 in the browser is followed on the HTTP read route, `execution` block included. No agent-API grant capability reads
 an operation.
+
+### Requesting a collection as an agent
+
+An agent may request collections without a count or rate limit (owner,
+2026-11-08 03:19 UTC); nothing in the App or the Processor caps them. The
+`kogane.ops.collection.request` description tells the caller to read the
+source's history first, and every item is an existing read:
+
+| Read first                                                    | Tool                                                                                                                                                                |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the source's collection quality: latest runs and stage codes  | `kogane.collection-quality.read` with `source`                                                                                                                      |
+| its schedule, next alarm, recent occurrences and held leases  | `kogane.schedules.read`                                                                                                                                             |
+| its maintenance windows and the maintenance-adjusted due time | `kogane.schedules.maintenance.read` with `source`                                                                                                                   |
+| earlier requests and how they ended                           | `kogane.audit.search` with `filters: { operation: "ops.collection.request" }`, narrowed to the source by hand; then `kogane.ops.operation.get` for the caller's own |
+
+It then does not request while the source's alarm is due, its maintenance
+window is on, a lease is held or an earlier request has not finished, and when
+the latest runs failed it finds the cause before requesting again. The
+dispatcher holds a request during maintenance and while a lease is held anyway
+([collector execution](#collector-execution-adr-0048)); reading first avoids a
+request that can only wait, expire or fail the same way. The rule is in the
+tool description, not in code.
+
+`kogane.ops.operation.get` reads only the caller's own operations
+([MCP](#mcp)), so a request someone else made is seen as an occurrence or a
+held lease in `kogane.schedules.read`, not through its record. Requests are
+accepted without a cap, but the dispatch lane starts at most one collector per
+tick (`COLLECTOR_STARTS_PER_TICK`), so several requests start one after
+another, not in parallel.
 
 ## Session refresh and human-required states
 
@@ -513,6 +553,19 @@ behind it are dispatched in the same tick (`docs/processor.md` §7). It is
 retried with no cap, and the code stays on the record after a later look
 registers it, as every retry code does.
 
+Only collections and unattended session refreshes expire (24 h,
+[collector execution](#collector-execution-adr-0048)). A replay or projection
+is dispatched or blocked on its first look. **An import has no expiry and no
+other closed end while its terminal is missing** (`terminal_not_found`), its
+registration is staged (`pending`) or `retryable`, or the tick's budget was
+spent (`registration_deferred`): it stays `accepted` / `dispatch_pending` and
+is looked at every five minutes, `dispatch.attempts` growing by one each time,
+until the registration succeeds or is blocked. Nothing cancels it, and a new
+idempotency key is a new operation. A registration that throws ends nothing
+either: it is retried five minutes later as `registration_failed`, and the
+lane carries on. This is an open limit, not a policy
+([processor §7](processor.md#7-operations-dispatch)).
+
 The collector execution services are in
 `packages/application/src/operations/collector-dispatch.ts` (writes) and
 `collector-trail.ts` (reads):
@@ -530,12 +583,15 @@ The collector execution services are in
 
 Synthetic data only.
 
-- `services/app/test/ops-api.test.ts` (28 checks over the real
+- `services/app/test/ops-api.test.ts` (35 checks over the real
   Worker, the real migrations and the real store): flag-off behaviour, the
   closed route and verb set with the flag on, `/api/meta` discovery, one
   record per request, re-send, idempotency conflict, per-principal scoping,
   schema refusals of SQL / storage keys / external URLs / unknown keys /
-  impossible dates (G3-13), error bodies that carry no rejected value — not
+  impossible dates (G3-13), an import run id outside the terminal key's
+  grammar, that the import schema accepts exactly the run ids
+  `terminalKey` accepts and that the MCP import tool publishes that grammar,
+  error bodies that carry no rejected value — not
   the unknown source or release either (G3-08), the four other routes, the
   replay plan written into the 0035 tables exactly once, `waiting_for_human`
   (G3-11), stage progress and completion, the read route's `execution` block
@@ -574,9 +630,9 @@ Synthetic data only.
   Processor tick starting one request over a named service binding).
 
 Not verified: no deployed instance, no live Access policy, no real provider or
-session, and no deployed collector has served `runOperation`; no connection is
-enabled in the committed configuration. No operations tool has run for a
-real MCP client; dated client connection evidence is in the
+session, and no deployed collector has served `runOperation`; the committed
+configuration names only `sony-bank`, and no request has run through it yet.
+No operations tool has run for a real MCP client; dated client connection evidence is in the
 [recovery runbook](mcp-recovery.md).
 
 Acceptance ids and the test that carries each:
@@ -626,8 +682,8 @@ tables are unread by the previous revision.
 
 Order: CORE `0068` is applied, the collectors (with `runOperation`) are
 uploaded, then the Processor, then the App ([rollout](rollout.md#4-deployment-order)).
-With the committed empty `OPS_COLLECTOR_DISPATCH_CONNECTIONS`, the first ticks
-only decline requests no connection serves, expire requests older than 24 hours
+With an empty `OPS_COLLECTOR_DISPATCH_CONNECTIONS` (as committed until
+2026-11-08), the first ticks only decline requests no connection serves, expire requests older than 24 hours
 and leave the rest waiting with `collector_dispatch_disabled`; no provider is
 contacted.
 
@@ -639,6 +695,12 @@ a fresh idempotency key at a time the source's alarm is not due, and read
 `GET /api/ops/v1/operations/{id}` until `execution.state` is `published`,
 `unpublished`, `failed` or `uncertain`. Rollback: remove the id; a request
 already `started` is not interrupted, and nothing started is retried.
+The owner allowed every healthy connection (2026-11-08 03:19 UTC); they are
+added one at a time, each after the previous one's first request was followed
+to `published`. The committed value names `sony-bank`. The order after it is
+`sbi-securities`, `sbi-vc-trade`, `mobile-suica`, `moneyforward-me`, `myjcb` and
+`sbi-shinsei` (connection ids); Vpass, St.George and the container collectors
+come after their open fixes.
 `SESSION_REFRESH_POLICY` must also name `sbi-vc-trade` before an unattended
 refresh of it is dispatched, and only once its unattended renewal has been
 demonstrated.

@@ -67,6 +67,29 @@ produces a successful CI run with `head_branch: main` — and its head commit
 is fetchable from this repository. A `workflow_dispatch` supplies the sha by
 hand and is held to the same test through the compare API, below.
 
+A running CI on `main` is never cancelled (owner decision, 2026-11-07 17:01
+UTC). `ci.yml` sets `cancel-in-progress` only for `pull_request`, so a newer
+push to a pull request still replaces its running CI, but a push to `main`
+waits for the running main CI instead of cancelling it. Before this, every push
+to `main` cancelled the running main CI; since a cancelled run releases
+nothing, back-to-back merges left production undeployed from 13:40 to 15:12 UTC
+on 2026-11-07. GitHub still keeps at most one _pending_ run per group, so the
+runs that are waiting replace each other and the newest commit is the one that
+runs next. If five merges land while the first one's CI is still running, they
+produce two CI runs and two releases (the first commit's and the fifth's), and
+the second release carries the three commits in between. Those three show a
+cancelled CI run on `main`; it is not a failure and they are in production.
+
+One gap remains. A re-run or a `workflow_dispatch` of CI on `main` shares the
+group, so one started while a push run is pending replaces that run, and the
+newest commit waits for the next push. A dispatched CI run never releases
+(`deploy.yml` accepts only `event: push`); a re-run keeps `event: push`.
+Re-run main CI only when no main CI is pending, and if the newest commit's push
+run was replaced anyway, re-run that run once the queue is empty. Dispatching
+Deploy with its sha instead releases a commit whose own CI never ran: the
+dispatch is checked against `main` through the compare API, not against a CI
+result.
+
 The called release job holds the concurrency group `production-deploy` with
 `cancel-in-progress: false` and `queue: max`, so one production change runs
 at a time and queued requests wait instead of interrupting a migration or
@@ -287,11 +310,11 @@ rollback of a commit older than this rule (before
 not succeeded and fails closed with "none of the newest 100 production
 deployments succeeded". Roll back only to a commit that contains it.
 
-Concurrency alone would not be enough. GitHub keeps at most one run _pending_
-per group and states that ordering is not guaranteed, so with rapid merges an
-intermediate run is cancelled and a run that started earlier can still reach
-the deploy steps after a newer one finished. The decision is therefore made
-against the ledger, by `git merge-base --is-ancestor` — and it is made **per
+Concurrency alone would not be enough. GitHub states that ordering is not
+guaranteed, a manual dispatch or re-run of an older commit can start after a
+newer release, and a pending main CI run can be replaced, so a run for an older
+commit can still reach the deploy steps after a newer one finished. The
+decision is therefore made against the ledger, by `git merge-base --is-ancestor` — and it is made **per
 Worker**, because the environment is not one thing that is at one commit:
 
 | The commit the ledger records for a Worker | What the run does with that Worker           |
@@ -396,7 +419,8 @@ because an earlier step failed shows as `skipped`; `not reached` appears only
 when the step id is absent from the job's context altogether) and carries the
 deploy Action's `deployment-targets` for the ones that uploaded. The `success`
 status is refused by the ledger script itself while any planned Worker is not
-`deployed`, on top of the workflow's own `success()` condition.
+`deployed`, and when it reads no progress record of the run at all, on top of
+the workflow's own `success()` condition.
 Each deploy step is identified as `deploy-<ledger name>` for exactly that
 reason, and a test fails if a new one omits it.
 

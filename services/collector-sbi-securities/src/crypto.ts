@@ -121,12 +121,6 @@ export function decryptPasskeyToken(encryptedToken: string, privateKeyPem: strin
   return oaepUnpad(encodedMessage).toString("utf8");
 }
 
-export function secretEquals(provided: string, expected: string): boolean {
-  const providedHash = createHash("sha256").update(provided).digest();
-  const expectedHash = createHash("sha256").update(expected).digest();
-  return timingSafeEqual(providedHash, expectedHash);
-}
-
 function oaepUnpad(encodedMessage: Buffer): Buffer {
   const labelHash = createHash("sha256").update(Buffer.alloc(0)).digest();
   const hashLength = labelHash.length;

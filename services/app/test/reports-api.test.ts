@@ -5,7 +5,8 @@
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import worker from "../src/worker";
-import { REPORT_LIST_SQL, REPORTS_PAGE_SIZE, reportsApi } from "../src/reports-api";
+import { REPORT_LIST_SQL } from "../../../packages/application/src/query/report-artifacts.ts";
+import { REPORTS_PAGE_SIZE, reportsApi } from "../src/reports-api";
 import {
   DECIMAL_POLICY_PROJECTIONS,
   decimalPolicySelection,

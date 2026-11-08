@@ -93,7 +93,8 @@ release. The comments stay until a parser release is bumped for a real reason.
 - the `unclassified-keep` and `read-candidate` sets are asserted by name, so nothing slides from
   "kept" to "may be dropped" without the diff showing it;
 - every table is `STRICT`, and the append-only `*_no_update` / `*_no_delete` guards of the
-  evidence, observation and publication tables are still there;
+  evidence, observation and publication tables are still there; no trigger with a `WHEN` clause is
+  counted as such a guard;
 - the statement splitter round-trips: replaying each split statement rebuilds the same set of
   schema objects, which is what makes the seed/backfill inventory of 06 §1 trustworthy.
 
@@ -114,7 +115,12 @@ four labels:
   them, so they are protected until somebody classifies them on purpose.
 
 A separate `appendOnly` flag per table is derived from the triggers rather than from the label, so
-the ledger reports the schema's actual mutability instead of an intention.
+the ledger reports the schema's actual mutability instead of an intention. A `*_no_update` or
+`*_no_delete` trigger counts as a guard only when it refuses every update or delete: one with a
+`WHEN` clause lets some through, whatever its name says. `decision_revisions` is therefore not
+append-only (its `superseded_by` is set once, like the supersede-only tables), and neither are the
+READ projection tables, whose guards hold only for some snapshot states: a building snapshot's
+rows can change, and a retired one's can be deleted.
 
 `infra/schema/read-ledger.md` uses two labels of its own, because every table in that database is
 rebuildable and the CORE vocabulary does not apply:

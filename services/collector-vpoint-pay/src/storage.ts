@@ -1,9 +1,4 @@
-import type { CollectionManifest, RawArtifact, StoredArtifact } from "./types";
-
-export function runPrefix(startedAt: string, runId: string): string {
-  const date = startedAt.slice(0, 10).replaceAll("-", "/");
-  return `raw/v-point-pay/${date}/${runId}`;
-}
+import type { RawArtifact, StoredArtifact } from "./types";
 
 export async function storeArtifact(options: {
   bucket: R2Bucket;
@@ -33,23 +28,6 @@ export async function storeArtifact(options: {
     sha256,
     bytes: bytes.byteLength,
   };
-}
-
-export async function storeManifest(options: {
-  bucket: R2Bucket;
-  prefix: string;
-  manifest: CollectionManifest;
-}): Promise<string> {
-  const key = `${options.prefix}/manifest.json`;
-  await options.bucket.put(key, JSON.stringify(options.manifest), {
-    httpMetadata: { contentType: "application/json" },
-    customMetadata: {
-      source: options.manifest.source,
-      status: options.manifest.status,
-      runId: options.manifest.runId,
-    },
-  });
-  return key;
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {

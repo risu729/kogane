@@ -29,10 +29,10 @@ import type { SqlWrite } from "../../storage-d1/src/core/operations.ts";
 import type { SqlExecutor } from "../src/reader.ts";
 import type { DatedStore } from "./dated-state-fixture.ts";
 
-export const PRINCIPAL = "rule:synthetic-economic-writer-v1";
-export const WRITER_RELEASE = "synthetic-economic-writer-v1";
+const PRINCIPAL = "rule:synthetic-economic-writer-v1";
+const WRITER_RELEASE = "synthetic-economic-writer-v1";
 
-export interface LegSpec {
+interface LegSpec {
   subject: string;
   unit?: string;
   /** Decimal text, or null for a value the writer does not know. */
@@ -44,7 +44,7 @@ export interface LegSpec {
   of?: number;
 }
 
-export interface ClaimSpec {
+interface ClaimSpec {
   book: Book;
   observationId: number;
   alias?: AliasClass | null;

@@ -25,13 +25,25 @@ export interface DemoSnapshot {
   responses: Record<string, DemoResponse>;
 }
 
+export interface ExportDemoOptions {
+  /**
+   * Where the disposable store's directory is created; the system temporary
+   * directory by default. Tests pass a private directory so that checking the
+   * cleanup never reads another process's exports in a shared temporary root.
+   */
+  scratchRoot?: string;
+}
+
 /** Export only committed synthetic fixtures, with an isolated disposable store. */
-export async function exportDemo(output: string): Promise<DemoSnapshot> {
-  const temporaryRoot = resolve(tmpdir());
+export async function exportDemo(
+  output: string,
+  options: ExportDemoOptions = {},
+): Promise<DemoSnapshot> {
+  const temporaryRoot = resolve(options.scratchRoot ?? tmpdir());
   const directory = mkdtempSync(join(temporaryRoot, "kogane-demo-export-"));
   let store: Store | undefined;
   try {
-    store = openStore(directory);
+    store = openStore(directory, { disposable: true });
     ingestFixtures(
       store,
       join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline"),

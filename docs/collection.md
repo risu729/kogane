@@ -324,8 +324,15 @@ Terminal fields: `producer: collector-sony-bank`; one unit `account`
 (`unitKind: account`) whose `artifactCount` counts every artifact but
 `manifest.json`, which belongs to the run and names no unit (ADR 0021; until
 then the manifest named the unit and was counted in it); ranges
-`request-window` (the requested `from`/`to`) and, when wallet statements were
-collected, `wallet-months`; one `terminal` report carrying the outcome;
+`request-window` (the requested `from`/`to`; every run, from the alarm or
+from an operations-API `collect`, neither of which carries a window, requests
+yesterday's JST date, the last finished JST day, from the first of its JST
+month, `defaultWindow`, so a run on the 1st requests the whole previous month
+and each day is requested after it ends; an open limit: the previous month's
+last day is requested only by a run on the 1st, so if that run is missed or
+fails, no later run requests that day, because a window that crosses a month
+boundary is a request shape nobody has observed, ADR 0004) and, when wallet
+statements were collected, `wallet-months`; one `terminal` report carrying the outcome;
 `requestedScope.scopeKind = date_range` over the same window;
 `coverageStatus` `complete` for a successful window, `partial` for a partial
 run, `unknown` for a failure. `manifest.json` is the collector manifest with
@@ -694,6 +701,12 @@ provider was contacted and no production bucket was read or written.
 | `history-page-NNNN.json`     | `collector_derived` | one history page each, in page order                    |
 | `vmoney-history-page-*.json` | `collector_derived` | one V Money history page each                           |
 | `collection-summary.json`    | `collector_summary` | the collector's own page/total counts                   |
+
+Both history walks stop at the page whose rows reach `results.total`. Before
+the total is reached, a page with no rows or with fewer rows than the first
+page stops the collection (`premature-end`) instead of ending the walk: an
+early end of history has not been observed. Only the first V Money page may
+answer with an empty `results`, read as an empty history.
 
 Each `collector_derived` artifact states one `reencoded` step by
 `collector-v-point` at the producer version with no input (ADR 0021): the

@@ -67,8 +67,8 @@ disagree, the document is right and this file is corrected.
 
 - `CI Check` is the required status. It passes only when `Checks` and both
   `Processor` shards succeed ([ci](docs/ci.md#jobs-and-the-required-merge-guard)).
-  The ruleset also blocks merges on CodeQL security alerts of high severity or
-  above and on CodeQL alerts of error level.
+  The ruleset also blocks a merge on every new CodeQL alert the PR introduces, of
+  any severity or level, from [codeql.yml](.github/workflows/codeql.yml).
 - CI has no path filters, retries or test selection. Do not add any.
 - Never skip, disable, quarantine, retry or loosen a test or a deadline to make CI
   pass. Fix the cause, or open a separate PR for the flaky test that explains the
@@ -199,6 +199,15 @@ shapes ([ci](docs/ci.md); examples in
 Logging in to a provider, running a collector by hand, a hosted Container
 experiment, and reading or changing a secret each need the owner's approval for
 that action. Never ask the owner for passwords, codes or HAR captures.
+
+Requesting a collection through `kogane.ops.collection.request` or the
+operations API is not running a collector by hand: agents may request
+collections without a limit, and every healthy connection may be added to
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` (owner, 2026-11-08 03:19 UTC). Before each
+request, read the source's past history (collection quality, schedule and held
+leases, maintenance windows, earlier requests) as the tool description and
+[ops API: requesting a collection as an agent](docs/ops-api.md#requesting-a-collection-as-an-agent)
+list.
 
 ## Toolchain
 

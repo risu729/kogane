@@ -46,7 +46,7 @@ export * from "./types.ts";
  * plus every input in a canonical order. Two extractions with the same digest
  * and the same release are the same extraction, which is what makes the
  * `metadata_projections` unique key meaningful. */
-export async function metadataInputDigest(
+async function metadataInputDigest(
   row: MetadataArtifact,
   extraction: MetadataExtraction,
 ): Promise<string> {

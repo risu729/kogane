@@ -103,7 +103,7 @@ export interface ActivityRow {
  * no net worth: different units are not added (INV03), and an asset subtotal
  * with unknown liability coverage is not a net worth (addendum 05 section 5).
  */
-export interface HoldingUnit {
+interface HoldingUnit {
   unitRef: string;
   coefficient: string;
   scale: number;
@@ -384,6 +384,7 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
     const gaps: { reasonCode: string; scopeRef: string | null }[] = [];
     let stale = false;
     let unresolved = false;
+    if (servable.behind) gaps.push({ reasonCode: "snapshot:behind_published_evidence", scopeRef });
     for (const pair of holdingPairs) {
       const scope = {
         ...(pair.source === undefined ? {} : { source: pair.source }),
@@ -427,7 +428,9 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
         schemaVersion: "financial-result-v1",
         contextId: opened.context.contextId,
         resolvedQuery: opened.resolvedQuery,
-        completeness: (unresolved || stale ? "partial" : "complete") satisfies CompletenessState,
+        completeness: (unresolved || stale || servable.behind
+          ? "partial"
+          : "complete") satisfies CompletenessState,
         data: {
           intent: "holdings",
           units,
@@ -440,8 +443,12 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
         quality: {
           identity,
           freshness: dimension(
-            stale ? "partial" : "verified",
-            stale ? ["scope_not_re_observed"] : ["snapshot_current"],
+            stale || servable.behind ? "partial" : "verified",
+            [
+              ...(servable.behind ? ["snapshot:behind_published_evidence"] : []),
+              ...(stale ? ["scope_not_re_observed"] : []),
+              ...(!stale && !servable.behind ? ["snapshot_current"] : []),
+            ],
             [snapshot.snapshot_id],
           ),
           // Only adopted, exactly normalised values are summed; a missing,

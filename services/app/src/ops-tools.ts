@@ -49,6 +49,7 @@ import {
   sessionRefreshSchema,
   type OpsContext,
 } from "./ops-api";
+import { mcpInputSchema } from "./mcp-input-schema";
 
 export const OPS_TOOL_NAMES = [
   "kogane.ops.collection.request",
@@ -66,8 +67,7 @@ export function isOpsToolName(value: string): value is OpsToolName {
 
 /** The published JSON Schema of one request schema, without the meta key. */
 function inputSchema(schema: z.ZodType): Record<string, unknown> {
-  const generated = z.toJSONSchema(schema) as Record<string, unknown>;
-  delete generated["$schema"];
+  const generated = mcpInputSchema(schema);
   return generated;
 }
 
@@ -91,7 +91,7 @@ export const OPS_MCP_TOOLS = [
     name: "kogane.ops.collection.request",
     title: "Request collection of a declared source",
     description:
-      "Record a request to collect a declared source over a date window. Accepted means the request is stored, not that a provider was contacted; the collector runs it later.",
+      "Record a request to collect a declared source over a date window. Accepted means the request is stored, not that a provider was contacted; the collector runs it later. Before requesting, read the source's past history: its collection quality (kogane.collection-quality.read with the source), its schedule, next alarm, recent occurrences and held execution leases (kogane.schedules.read), its maintenance windows (kogane.schedules.maintenance.read), and earlier requests (kogane.audit.search with filters.operation ops.collection.request, narrowed to the source by hand; kogane.ops.operation.get follows only your own, and a request from anyone else shows as an occurrence or held lease in kogane.schedules.read). Do not request while the source's alarm is due, its maintenance window is on, a lease is held or an earlier request has not finished, and when its latest runs failed, find the cause before requesting again.",
     inputSchema: inputSchema(collectionSchema),
     annotations: REQUEST_HINTS,
   },
@@ -190,7 +190,7 @@ export async function callOpsTool(
   }
 }
 
-export const DELEGATED_OPS_CAPABILITIES: Readonly<Record<OpsToolName, DelegationCapability>> = {
+const DELEGATED_OPS_CAPABILITIES: Readonly<Record<OpsToolName, DelegationCapability>> = {
   "kogane.ops.collection.request": "operations.collection.request",
   "kogane.ops.import.request": "operations.import.request",
   "kogane.ops.replay.request": "operations.replay.request",

@@ -37,7 +37,7 @@ import {
 import { HttpError, json } from "./http";
 import { rewardExpiryFromRead, rewardReadContext, rewardSimulationsFromRead } from "./rewards-read";
 
-export const REWARDS_PREFIX = "/api/v2/rewards";
+const REWARDS_PREFIX = "/api/v2/rewards";
 
 interface BucketDto {
   bucketRef: string;

@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import { classifyBalance } from "../../../packages/observation-shared/src/balance-semantics.ts";
 import type { BalanceRow } from "../../../packages/observation-shared/src/api-contract.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
@@ -310,4 +311,18 @@ describe.if(runnable)("balance meaning and evidence display", () => {
       await page.close();
     }
   });
+
+  test("balances and period totals pass the accessibility audit", async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    try {
+      await page.goto(origin + "/balances");
+      await page.locator('section[aria-labelledby="balance-assets"]').waitFor();
+      expect(await auditView(page)).toEqual([]);
+      await page.getByRole("link", { name: "期間実績・請求を見る", exact: true }).click();
+      await page.locator('section[aria-labelledby="balance-statements"]').waitFor();
+      expect(await auditView(page)).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
 });

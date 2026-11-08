@@ -17,6 +17,8 @@ import {
 //   G3-01  no published snapshot is `503` with a code, never an empty success;
 //   G3-03  a cursor from another read instance is `410 context_expired`, and
 //          one for another query is `400 cursor_mismatch`;
+//   G3-04  a cursor naming an older snapshot captured before a use restriction
+//          is refused `503` with the restriction code, never continued;
 //   with the reader flag off the reward routes answer exactly as they did
 //   before, and `/api/meta` says which store answered.
 //
@@ -352,6 +354,57 @@ describe("the reward routes over the READ database", () => {
     expect(after.snapshot.snapshotId).toBe(later.snapshotId);
     expect(after.snapshot.evaluatedAt).toBe("2026-12-01T00:00:00.000Z");
     expect(before.snapshot.evaluatedAt).toBe(EVALUATED_AT);
+  });
+
+  it("G3-04: a cursor naming a snapshot built before a use restriction is refused", async () => {
+    // Later than every other build here, so this snapshot is the published one.
+    const earlier = await build("2026-12-02T00:00:00.000Z");
+    expect(["complete", "unchanged"]).toContain(earlier.status);
+    const opened = (await (await call("/api/v2/rewards/expiry?limit=25")).json()) as ExpiryPage;
+    const held = opened.page.nextCursor!;
+    expect(decodeReadCursor(held)!.snapshotId).toBe(earlier.snapshotId);
+
+    // A rebuild with no restriction in between publishes a newer snapshot,
+    // but leaves the epoch and visibility revision where they were: a reader
+    // still paging the older, retained snapshot keeps its fixed list.
+    const before = await build("2026-12-03T00:00:00.000Z");
+    expect(before.status).toBe("complete");
+    expect(before.snapshotId).not.toBe(earlier.snapshotId);
+    const kept = await call(`/api/v2/rewards/expiry?limit=25&cursor=${held}`);
+    expect(kept.status).toBe(200);
+    expect(((await kept.json()) as ExpiryPage).snapshot.snapshotId).toBe(earlier.snapshotId);
+
+    const first = (await (await call("/api/v2/rewards/expiry?limit=25")).json()) as ExpiryPage;
+    const cursor = first.page.nextCursor!;
+    expect(decodeReadCursor(cursor)!.snapshotId).toBe(before.snapshotId);
+
+    // A restriction moves `visibility_revision`. The next build publishes a
+    // snapshot that accounts for it; the older one, still retained, was
+    // computed before it and has only its own capture to go by.
+    await env.DB.prepare(
+      `INSERT INTO evidence_use_restrictions(evidence_ref,restriction,since,
+        affected_manifests_json,actor,reason)
+       VALUES('balance:synthetic-reward-restricted','no-reuse','2026-09-12T00:00:00Z','[]',
+         'operator:1','Synthetic: the evidence may no longer be reused.')`,
+    ).run();
+    const after = await build("2026-12-04T00:00:00.000Z");
+    expect(after.status).toBe("complete");
+    expect(after.snapshotId).not.toBe(before.snapshotId);
+    expect((await call("/api/v2/rewards/expiry?limit=25")).status).toBe(200);
+    const retained = await env.READ.prepare(
+      "SELECT status FROM reward_expiry_snapshots WHERE snapshot_id=?",
+    )
+      .bind(before.snapshotId)
+      .first<{ status: string }>();
+    expect(retained?.status).toBe("complete");
+
+    // The old cursor is refused whole, as the published snapshot was while
+    // no rebuild accounted for the restriction, never continued as rows.
+    const continued = await call(`/api/v2/rewards/expiry?limit=25&cursor=${cursor}`);
+    expect(continued.status).toBe(503);
+    const body = (await continued.json()) as Record<string, unknown>;
+    expect(body["error"]).toBe("reward_read_model_restriction_changed");
+    expect(Object.keys(body)).not.toContain("rows");
   });
 });
 

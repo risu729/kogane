@@ -138,7 +138,7 @@ const CREDIT_MENU_GROUP_HEADINGS: readonly {
 ];
 
 /** What a credit menu position is: a statement month, or a payment schedule page. */
-export type CreditMenuGroup = "months" | "schedules";
+type CreditMenuGroup = "months" | "schedules";
 
 export interface CreditMenuPositions {
   /** Positions under 「最新のご利用明細」 and 「過去の明細」, ascending. */
@@ -608,7 +608,7 @@ export function schedulePageKind(html: string): MyJcbSchedulePageKind {
  * is not recorded here; the statement parser compares it with the total's
  * payment date.
  */
-export function statedPaymentMonths(html: string): string[] {
+function statedPaymentMonths(html: string): string[] {
   return findElements(parse(html), (element) => element.tagName === "h2").flatMap((element) => {
     const heading = readMyJcbStatementHeading(compactText(element));
     return heading ? [heading.month] : [];
@@ -694,7 +694,7 @@ function safeClassNames(element: HtmlElement): string[] {
     .slice(0, 16);
 }
 
-export function statementState(value: string): StatementState {
+function statementState(value: string): StatementState {
   const normalized = normalizeText(value);
   if (/未確定/u.test(normalized)) return "unconfirmed";
   if (/確定/u.test(normalized)) return "confirmed";
