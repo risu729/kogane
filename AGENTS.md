@@ -115,8 +115,14 @@ An agent merges its own PR when all of these hold:
    the PR.
 3. `CI Check` is green on the PR's final head commit, and CodeQL reports no
    blocking alert.
-4. The branch contains the latest `main` and `CI Check` ran on that commit. The
-   ruleset does not require an up-to-date branch, so this is the agent's check.
+4. `CI Check` ran on a commit that contains a recent `main`, and every commit
+   that reached `main` since then merges into the branch without a conflict
+   (`git merge-tree --write-tree origin/main <head>` exits 0) and the latest
+   `main` has a green `CI Check` (wait while it is pending). If a newer
+   `main` commit conflicts or its `CI Check` is red, merge `main` into the
+   branch and wait for `CI Check` again. The ruleset does not require an
+   up-to-date branch, so this is the agent's check (owner, 2026-11-08 04:21 UTC;
+   before that the branch had to contain the latest `main`).
 5. The owning docs and any ADR are updated in the same PR.
 
 Merge with squash (the only allowed method). Do not use admin bypass or merge
