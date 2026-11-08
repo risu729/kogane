@@ -22,7 +22,7 @@ const SOURCE_ACCOUNT = "sbi-securities:domestic";
 
 export const sbiDomesticTradeRecords: Parser = {
   name: "sbi-domestic-trade-records",
-  version: "0.2.0",
+  version: "0.2.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "domestic-trade-records";

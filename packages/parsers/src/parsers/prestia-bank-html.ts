@@ -573,7 +573,7 @@ function exactAmount(amount: Money, currency: string) {
 }
 export const prestiaBankBalances: Parser = {
   name: "prestia-bank-balances",
-  version: "1.0.0",
+  version: "1.0.1",
   accepts(artifact: ArtifactMeta): boolean {
     return (
       artifact.sourceId === "prestia" &&

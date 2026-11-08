@@ -524,8 +524,8 @@ function topActivity(input: Record<string, unknown>): Record<string, unknown> {
 }
 
 describe("SBI Shinsei exchange-rate board", () => {
-  test("parser version 1.0.2 accepts the stored boards' observed shape", () => {
-    expect(sbiShinseiExchangeRate.version).toBe("1.0.2");
+  test("parser version 1.0.3 accepts the stored boards' observed shape", () => {
+    expect(sbiShinseiExchangeRate.version).toBe("1.0.3");
   });
 
   const board = () => value("exchange-rate");
@@ -818,7 +818,7 @@ describe("SBI Shinsei balance summary and stage (ADR 0031)", () => {
       fixture("balance-summary-and-stage"),
       artifact("balance-summary-and-stage"),
     );
-    expect(sbiShinseiBalanceSummaryAndStage.version).toBe("0.1.0");
+    expect(sbiShinseiBalanceSummaryAndStage.version).toBe("0.1.1");
     expect(result.observations).toEqual([
       {
         kind: "valuation",
@@ -944,9 +944,9 @@ describe("SBI Shinsei activity rows record the provider-id origin (0.1.3)", () =
     ...overrides,
   });
 
-  test("the release is 0.1.3 under the same name", () => {
+  test("the release is 0.1.4 under the same name", () => {
     expect(sbiShinseiTopBalancesAndActivity.name).toBe("sbi-shinsei-top-balances-and-activity");
-    expect(sbiShinseiTopBalancesAndActivity.version).toBe("0.1.3");
+    expect(sbiShinseiTopBalancesAndActivity.version).toBe("0.1.4");
   });
 
   test("the output is 0.1.2's byte for byte, except the origin on every transaction row", () => {

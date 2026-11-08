@@ -56,7 +56,7 @@ const EMPTY_SURFACE = [
 export function createMoneyForwardMonthlyTransactions(parseHtml: MoneyForwardHtmlParser): Parser {
   return {
     name: "moneyforward-monthly-transactions",
-    version: "2.0.3",
+    version: "2.0.4",
 
     accepts(artifact: ArtifactMeta): boolean {
       return (
@@ -205,7 +205,7 @@ export function createMoneyForwardMonthlyTransactions(parseHtml: MoneyForwardHtm
 export function createMoneyForwardEvidenceOnly(parseHtml: MoneyForwardHtmlParser): Parser {
   return {
     name: "moneyforward-canonical-evidence-boundary",
-    version: "1.0.2",
+    version: "1.0.3",
 
     accepts(artifact: ArtifactMeta): boolean {
       return (

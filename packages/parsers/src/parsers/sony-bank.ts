@@ -1,6 +1,13 @@
 import type { ArtifactMeta, Observation, Parser } from "../types.ts";
 import { containerClaim } from "./coverage.ts";
-import { amountToMinorUnits, decodeUtf8, parseCsv, unitScopeAdmitted } from "./util.ts";
+import {
+  amountToMinorUnits,
+  csvWarningText,
+  decodeUtf8,
+  parseCsv,
+  unitScopeAdmitted,
+  type CsvWarning,
+} from "./util.ts";
 import {
   exactDecimal,
   exactKeys,
@@ -57,7 +64,7 @@ export const sonyBankGrossBalance: Parser = {
   name: "sony-bank-gross-balance",
   // 1.0.2 refuses an updateDttm whose clock time does not exist in the
   // zone-less form too; every time that exists reads as in 1.0.1.
-  version: "1.0.2",
+  version: "1.0.3",
   accepts: (artifact) => artifact.sourceId === "sony-bank" && artifact.dataset === "gross-balance",
   parse(bytes, artifact) {
     requireSuccessfulRun(artifact);
@@ -186,7 +193,7 @@ export const sonyBankHistoryJson: Parser = {
   name: "sony-bank-history-json",
   // 1.0.1 reads every page as 1.0.0: only its digest moved, with the
   // gross-balance time check in this module (gross balance 1.0.2).
-  version: "1.0.1",
+  version: "1.0.2",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" &&
     /^(yen-history|foreign-history-[a-z]{3})-page-\d{4}$/u.test(artifact.dataset ?? ""),
@@ -285,13 +292,16 @@ export const sonyBankHistoryCsv: Parser = {
   name: "sony-bank-history-csv",
   // 1.0.2 reads every file as 1.0.1: only its digest moved, with the
   // gross-balance time check in this module (gross balance 1.0.2).
-  version: "1.0.2",
+  version: "1.0.3",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" &&
     /^(yen-history|foreign-history-[a-z]{3})-csv$/u.test(artifact.dataset ?? ""),
   parse(bytes, artifact) {
     requireSuccessfulRun(artifact);
-    const rows = parseCsv(decodeSonyCsv(bytes, artifact.mime));
+    const csvWarnings: CsvWarning[] = [];
+    const rows = parseCsv(decodeSonyCsv(bytes, artifact.mime), csvWarnings);
+    const warnings = csvWarnings.map(csvWarningText);
+    const damagedRows = new Set(csvWarnings.map((warning) => warning.row));
     const foreign = artifact.dataset !== "yen-history-csv";
     const expectedCurrency = historyCurrency(artifact.dataset!);
     const window = historyWindow(artifact);
@@ -305,66 +315,86 @@ export const sonyBankHistoryCsv: Parser = {
     for (let index = 1; index < rows.length; index += 1) {
       const row = rows[index]!;
       if (row.length !== header.length) throw new Error("Sony history CSV cardinality drift");
-      const [date, description, reference, rawCurrency, deposit, withdrawal, after, rate] = row;
-      const currency = enumText(rawCurrency, CURRENCIES, "CSV currency");
-      if (currency !== expectedCurrency) throw new Error("Sony history dataset currency mismatch");
-      const credit = deposit !== "";
-      if (credit === (withdrawal !== ""))
-        throw new Error("Sony history CSV direction is ambiguous");
-      const money = exactUnsignedMoney(credit ? deposit : withdrawal, currency, "CSV amount");
-      const balanceMoney = exactMoney(after, currency, "CSV balance");
-      const japaneseDate = /^(\d{4})年(\d{1,2})月(\d{1,2})日$/u.exec(date ?? "");
-      const asOf = normalizedDate(
-        japaneseDate
-          ? `${japaneseDate[1]}-${japaneseDate[2]!.padStart(2, "0")}-${japaneseDate[3]!.padStart(2, "0")}`
-          : date,
-        "CSV date",
-      );
-      requireWithinWindow(asOf, window, "CSV date");
-      // Providers leave this field blank for foreign-currency movements that
-      // do not report a conversion. Preserve the blank in extra; infer no rate.
-      if (foreign && rate !== "") exactDecimal(rate, "CSV exchange rate");
-      const extra = Object.fromEntries(header.map((name, offset) => [name, row[offset]]));
-      const normalizedDescription = strictString(description, "CSV description", { max: 512 });
-      const signedMinor = credit ? money.minor : -money.minor;
-      const identity = historyIdentity(currency, asOf, signedMinor, balanceMoney.minor);
-      const occurrence = takeOccurrence(occurrences, identity);
-      observations.push({
-        kind: "transaction",
-        sourceAccount: `sony-bank:deposit:${currency}`,
-        externalId: `sony-bank-history:${identity}:${occurrence}`,
-        status: "posted",
-        amountMinor: signedMinor,
-        amountText: signedMinor < 0 ? `-${money.text}` : money.text,
-        amountScale: money.scale,
-        currency,
-        description: normalizedDescription,
-        asOf,
-        rawLocator: `csv:row=${index + 1}`,
-        extra: {
-          ...extra,
-          _kogane: {
-            reference,
-            sourceView: "official-csv",
-            direction: credit ? "credit" : "debit",
-            identityOrigin: "date+signed-amount+after-balance+currency+occurrence",
-            window,
-          },
-        },
-      });
-      observations.push(
-        balance(
-          `sony-bank:deposit:${currency}`,
-          "available_after_transaction",
-          balanceMoney,
+      try {
+        const [date, description, reference, rawCurrency, deposit, withdrawal, after, rate] = row;
+        const currency = enumText(rawCurrency, CURRENCIES, "CSV currency");
+        if (currency !== expectedCurrency)
+          throw new Error("Sony history dataset currency mismatch");
+        const credit = deposit !== "";
+        if (credit === (withdrawal !== ""))
+          throw new Error("Sony history CSV direction is ambiguous");
+        const money = exactUnsignedMoney(credit ? deposit : withdrawal, currency, "CSV amount");
+        const balanceMoney = exactMoney(after, currency, "CSV balance");
+        const japaneseDate = /^(\d{4})年(\d{1,2})月(\d{1,2})日$/u.exec(date ?? "");
+        const asOf = normalizedDate(
+          japaneseDate
+            ? `${japaneseDate[1]}-${japaneseDate[2]!.padStart(2, "0")}-${japaneseDate[3]!.padStart(2, "0")}`
+            : date,
+          "CSV date",
+        );
+        requireWithinWindow(asOf, window, "CSV date");
+        // Providers leave this field blank for foreign-currency movements that
+        // do not report a conversion. Preserve the blank in extra; infer no rate.
+        if (foreign && rate !== "") exactDecimal(rate, "CSV exchange rate");
+        const extra = Object.fromEntries(header.map((name, offset) => [name, row[offset]]));
+        const normalizedDescription = strictString(description, "CSV description", { max: 512 });
+        const signedMinor = credit ? money.minor : -money.minor;
+        const identity = historyIdentity(currency, asOf, signedMinor, balanceMoney.minor);
+        const occurrence = takeOccurrence(occurrences, identity);
+        observations.push({
+          kind: "transaction",
+          sourceAccount: `sony-bank:deposit:${currency}`,
+          externalId: `sony-bank-history:${identity}:${occurrence}`,
+          status: "posted",
+          amountMinor: signedMinor,
+          amountText: signedMinor < 0 ? `-${money.text}` : money.text,
+          amountScale: money.scale,
           currency,
-          `csv:row=${index + 1},column=差引残高`,
-          extra,
+          description: normalizedDescription,
           asOf,
-        ),
-      );
+          rawLocator: `csv:row=${index + 1}`,
+          extra: {
+            ...extra,
+            _kogane: {
+              reference,
+              sourceView: "official-csv",
+              direction: credit ? "credit" : "debit",
+              identityOrigin: "date+signed-amount+after-balance+currency+occurrence",
+              window,
+            },
+          },
+        });
+        observations.push(
+          balance(
+            `sony-bank:deposit:${currency}`,
+            "available_after_transaction",
+            balanceMoney,
+            currency,
+            `csv:row=${index + 1},column=差引残高`,
+            extra,
+            asOf,
+          ),
+        );
+      } catch (error) {
+        if (!damagedRows.has(index + 1)) throw error;
+        // A literal quote can make a date or amount unreadable. Preserve that
+        // row as evidence, without inventing economics or a deduplication id.
+        warnings.push(
+          `row ${index + 1}: malformed CSV row has unreadable values; economics and identity left empty`,
+        );
+        observations.push({
+          kind: "transaction",
+          sourceAccount: `sony-bank:deposit:${expectedCurrency}`,
+          currency: expectedCurrency,
+          rawLocator: `csv:row=${index + 1}`,
+          extra: {
+            ...Object.fromEntries(header.map((name, offset) => [name, row[offset]])),
+            _kogane: { sourceView: "official-csv", window },
+          },
+        });
+      }
     }
-    return { observations, warnings: [] };
+    return { observations, warnings };
   },
 };
 
@@ -387,7 +417,7 @@ export const sonyBankWalletHistory: Parser = {
   name: "sony-bank-wallet-history",
   // 1.0.3 reads every page as 1.0.2: only its digest moved, with the
   // gross-balance time check in this module (gross balance 1.0.2).
-  version: "1.0.3",
+  version: "1.0.4",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" && /^wallet-history-\d{6}$/u.test(artifact.dataset ?? ""),
   parse(bytes, artifact) {

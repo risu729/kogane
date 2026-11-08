@@ -61,7 +61,7 @@ interface Event {
 
 export const vPointPayNotificationEvent: Parser = {
   name: "v-point-pay-notification-event",
-  version: "1.0.0",
+  version: "1.0.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (

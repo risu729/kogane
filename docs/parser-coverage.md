@@ -1,5 +1,19 @@
 # Parser coverage contract (issues, coverage claims, snapshot policies)
 
+## Shared CSV quote diagnostics
+
+The shared reader accepts an optional `CsvWarning[]` and records
+`unclosed_quote` or `text_after_quote` with one-based logical row and column.
+PayPay and Sony history CSV publish these through `ParseResult.warnings`.
+Both remain legacy parsers; this change adds no typed coverage claim.
+An unclosed opener is literal and the opening physical line ends the row.
+Same-line text after a closing quote is concatenated as before, with a warning.
+Well-formed multiline fields keep their CSV meaning, including ambiguous bytes
+that could instead have been intended as separate malformed physical rows.
+The full recovery boundary, Sony's evidence-only fallback for unreadable
+quote-damaged rows, and all 43 patch releases are recorded in the
+[observation release note](observations.md#shared-csv-reader-recover-malformed-quotes-without-losing-following-rows).
+
 Design review findings D01 and D13 (root review `02_parser_and_coverage.md`,
 PR-07; addendum A03, SC15, AT61/AT62/AT65). Before this change the current
 snapshot of the SBI container datasets was chosen by matching the text of
