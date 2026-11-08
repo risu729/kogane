@@ -11,7 +11,8 @@ six operation-request kinds are distinct from the newer operator-only
 session-refresh request reaches a collector only through the named collector RPC
 the alarm uses, and only for a connection the Processor's
 `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names; the committed value names
-`sony-bank`, `sbi-securities`, `mobile-suica`, `moneyforward-me` and `myjcb` ([collector execution](#collector-execution-adr-0048),
+`sony-bank`, `sbi-securities`, `mobile-suica`, `moneyforward-me`, `myjcb`,
+`st-george`, `sbi-vc-trade` and `sbi-vc-keepalive` ([collector execution](#collector-execution-adr-0048),
 [ADR 0048](adr/0048-operation-collector-dispatch.md)).
 
 The things an operator asks this system to _do_ — collect a source,
@@ -445,6 +446,7 @@ another, not in parallel.
 for the sources whose session a collector may renew by itself. **Every source
 not named there needs a person**, and so does every source when the variable is
 absent, empty or malformed: the safe direction is to ask (12 §3).
+The committed App settings name only `sbi-vc-trade` as `unattended`.
 
 A human-required refresh is stored with `status: "waiting_for_human"` and
 `dispatch_state: "not_required"`. Nothing retries a login, nothing repeats a
@@ -834,8 +836,8 @@ Synthetic data only.
   Processor tick starting one request over a named service binding).
 
 The tests above use no deployed instance, live Access policy, real provider or
-session. In production, each of the five connections the committed
-configuration names (`sony-bank`, `sbi-securities`, `mobile-suica`,
+session. The recorded production checks cover five connections
+(`sony-bank`, `sbi-securities`, `mobile-suica`,
 `moneyforward-me`, `myjcb`) served `runOperation` for one MCP client collection
 request, sent one connection at a time. Each reported one run, which was
 registered with every parse-selected artifact published, and the execution
@@ -844,6 +846,8 @@ and request `status: completed`; `sony-bank`'s was published before
 `projected` tracing was deployed, so its `projected` reads
 `projection_revision_unrecorded`. Dated MCP client connection evidence is in
 the [recovery runbook](mcp-recovery.md).
+The later enablement of `st-george`, `sbi-vc-trade` and `sbi-vc-keepalive`
+has not yet been verified by a post-deployment operation request.
 
 Acceptance ids and the test that carries each:
 
@@ -910,17 +914,21 @@ came first; once its first request was followed to publication, the healthy
 connections that wait on no open fix were added together, and their first
 requests were sent one connection at a time, each after the previous one ended.
 The committed value names `sony-bank`, `sbi-securities`, `mobile-suica`,
-`moneyforward-me` and `myjcb`. `sbi-vc-trade`, `sbi-vc-keepalive` and
-`st-george` need only enabling now that
-[#1131](https://github.com/risu729/kogane/pull/1131) is merged
+`moneyforward-me`, `myjcb`, `st-george`, `sbi-vc-trade` and `sbi-vc-keepalive`.
+The last three are enabled following
+[#1131](https://github.com/risu729/kogane/pull/1131)
 ([#1140](https://github.com/risu729/kogane/issues/1140)); the remaining
 connections (`prestia-globalpass`, `sbi-shinsei`, `vpass`, `mizuho-bank`,
 `vpoint`, `prestia-bank`) come after their open fixes. `mobile-suica` and
 `myjcb` drive a browser and run far longer than `sony-bank`; the Processor tick
 waits for them; their first requests ended `published`, not `uncertain`.
-`SESSION_REFRESH_POLICY` must also name `sbi-vc-trade` before an unattended
-refresh of it is dispatched, and only once its unattended renewal has been
-demonstrated.
+The App's committed `SESSION_REFRESH_POLICY` names `sbi-vc-trade` as
+`unattended`, routing its refresh through `sbi-vc-keepalive`. The collector's
+existing limit of one forced passkey login per hour still applies. St George
+keeps its limit of one requested pause lift per 24 hours. After deployment,
+check each source's history and follow one request per new connection to a
+terminal execution state, one connection at a time; this configuration change
+does not assert those production results.
 
 ### Replay publication target
 

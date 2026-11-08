@@ -46,7 +46,7 @@ export default defineConfig({
       OPERATOR_SUBJECTS: bindings.text('["2c440753-9011-502c-a22d-bb013593c11a"]'),
       AGENT_GRANTS: bindings.text(""),
       OPS_API_ENABLED: bindings.text("true"),
-      SESSION_REFRESH_POLICY: bindings.text(""),
+      SESSION_REFRESH_POLICY: bindings.text('{"sbi-vc-trade":"unattended"}'),
       RELEASE_SHA: bindings.text(legacyConfig.vars.RELEASE_SHA),
       HEALTH_PROBE_TOKENS: bindings.text('["32f6a8d0612c6a657eb74dc066cefbcf.access"]'),
       DB: bindings.d1({
