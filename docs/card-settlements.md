@@ -444,7 +444,10 @@ the statement's whole list, 50 a page, newest first
 statements' lists can be open at once, so each list's pager, its spoken count
 and its loading state name the statement by its place in the statement list
 and its card, account and month (`請求 N 件目（カード · 口座 · 請求月）`): the
-place tells apart two statements that share card, account and month. Nothing is
+place tells apart two statements that share card, account and month. The place
+is the one the statement list's own count uses (`請求 N–M 件目`), so it follows
+the list's order by newest candidate and can change when the list is read
+again. Nothing is
 deleted or hidden for good: candidates and decisions stay append-only and every
 candidate keeps its own history and actions. Every candidate's head shows
 its billing month and when it was created (`候補の作成`), and its region is
