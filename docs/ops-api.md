@@ -10,8 +10,8 @@ six operation-request kinds are distinct from the newer operator-only
 [schedule settings API](schedules.md#settings-api). A collection or unattended
 session-refresh request reaches a collector only through the named collector RPC
 the alarm uses, and only for a connection the Processor's
-`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names; the committed value names none
-([collector execution](#collector-execution-adr-0048),
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names; the committed value names
+`sony-bank` ([collector execution](#collector-execution-adr-0048),
 [ADR 0048](adr/0048-operation-collector-dispatch.md)).
 
 The things an operator asks this system to _do_ — collect a source,
@@ -45,7 +45,8 @@ identity, one record and one vocabulary, so that:
   session (G3-06, G3-14);
 - a person looking at a screen and an operator with `curl` reach the same
   application service and get the same record (G3-05); a model with an MCP
-  client cannot request an operation at all (ADR 0047).
+  client requests one through the same service as itself, never as the
+  operator ([MCP](#mcp), ADR 0084).
 
 The one thing the API deliberately cannot be is a generic proxy: there is no
 route that takes SQL, a table name, a bucket key, a URL, a database id or a
@@ -308,8 +309,8 @@ already does:
    intended.**
 
    The routes are the only transport that reaches this resolver: `/mcp`
-   refuses an operations tool from its caller object before any grading
-   ([MCP](#mcp)).
+   never grades its caller by these lists and runs an operations tool as the
+   MCP client itself (`callDelegatedOpsTool`, [MCP](#mcp)).
 
 Reads are whole-store, like every other read since
 [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md) (owner,
@@ -396,6 +397,35 @@ a number), validated by the same schema (`operationListSchema` in
 the other tools, where the route answers `invalid_query` naming the key. No
 agent-API grant capability reads an operation.
 
+### Requesting a collection as an agent
+
+An agent may request collections without a count or rate limit (owner,
+2026-11-08 03:19 UTC); nothing in the App or the Processor caps them. The
+`kogane.ops.collection.request` description tells the caller to read the
+source's history first, and every item is an existing read:
+
+| Read first                                                    | Tool                                                                                                                                      |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| the source's collection quality: latest runs and stage codes  | `kogane.collection-quality.read` with `source`                                                                                            |
+| its schedule, next alarm, recent occurrences and held leases  | `kogane.schedules.read`                                                                                                                   |
+| its maintenance windows and the maintenance-adjusted due time | `kogane.schedules.maintenance.read` with `source`                                                                                         |
+| earlier requests and how they ended                           | `kogane.ops.operation.list` with `kind: "collection"` (each summary names its source and status), then `kogane.ops.operation.get` for one |
+
+It then does not request while the source's alarm is due, its maintenance
+window is on, a lease is held or an earlier request has not finished, and when
+the latest runs failed it finds the cause before requesting again. The
+dispatcher holds a request during maintenance and while a lease is held anyway
+([collector execution](#collector-execution-adr-0048)); reading first avoids a
+request that can only wait, expire or fail the same way. The rule is in the
+tool description, not in code.
+
+Both operations reads are whole-store ([MCP](#mcp), ADR 0086): a request
+the operator or another MCP client made is listed and read like the caller's
+own. Requests are
+accepted without a cap, but the dispatch lane starts at most one collector per
+tick (`COLLECTOR_STARTS_PER_TICK`), so several requests start one after
+another, not in parallel.
+
 ## Session refresh and human-required states
 
 `SESSION_REFRESH_POLICY` is a wrangler var holding `{"<source>": "unattended"}`
@@ -473,12 +503,9 @@ takes, releases, replaces or expires `collection_execution_leases`; the collecto
 claims it inside `runScheduled` as for the alarm, so the same source never runs
 twice at once. If another execution takes the lease between the lane's read and
 the collector's claim, the collector refuses before contacting anyone and the
-request ends `failed` with `collection_busy`. St George is the exception: its
-session coordinator already turns a refused lease into a persisted failed run
-(an existing behaviour of that collector), so there the race ends `failed` with
-`collection_failed` and that run listed, and — as after any failed St George
-run — the coordinator refuses later runs, alarm or operation, until the operator
-resumes it ([St George](sources/st-george.md)).
+request ends `failed` with `collection_busy`. St George does the same since
+2026-11-08 UTC: its session coordinator answers `busy` for a refused lease and
+records no run ([St George](sources/st-george.md)).
 
 **After a start nothing is retried.** A collector failure, an uncertain call
 and a start that never recorded an outcome are terminal; a provider login is
@@ -706,9 +733,9 @@ Synthetic data only.
   Processor tick starting one request over a named service binding).
 
 Not verified: no deployed instance, no live Access policy, no real provider or
-session, and no deployed collector has served `runOperation`; no connection is
-enabled in the committed configuration. No operations tool has run for a
-real MCP client; dated client connection evidence is in the
+session, and no deployed collector has served `runOperation`; the committed
+configuration names only `sony-bank`, and no request has run through it yet.
+No operations tool has run for a real MCP client; dated client connection evidence is in the
 [recovery runbook](mcp-recovery.md).
 
 Acceptance ids and the test that carries each:
@@ -758,8 +785,8 @@ tables are unread by the previous revision.
 
 Order: CORE `0068` is applied, the collectors (with `runOperation`) are
 uploaded, then the Processor, then the App ([rollout](rollout.md#4-deployment-order)).
-With the committed empty `OPS_COLLECTOR_DISPATCH_CONNECTIONS`, the first ticks
-only decline requests no connection serves, expire requests older than 24 hours
+With an empty `OPS_COLLECTOR_DISPATCH_CONNECTIONS` (as committed until
+2026-11-08), the first ticks only decline requests no connection serves, expire requests older than 24 hours
 and leave the rest waiting with `collector_dispatch_disabled`; no provider is
 contacted.
 
@@ -771,6 +798,12 @@ a fresh idempotency key at a time the source's alarm is not due, and read
 `GET /api/ops/v1/operations/{id}` until `execution.state` is `published`,
 `unpublished`, `failed` or `uncertain`. Rollback: remove the id; a request
 already `started` is not interrupted, and nothing started is retried.
+The owner allowed every healthy connection (2026-11-08 03:19 UTC); they are
+added one at a time, each after the previous one's first request was followed
+to `published`. The committed value names `sony-bank`. The order after it is
+`sbi-securities`, `sbi-vc-trade`, `mobile-suica`, `moneyforward-me`, `myjcb` and
+`sbi-shinsei` (connection ids); Vpass, St.George and the container collectors
+come after their open fixes.
 `SESSION_REFRESH_POLICY` must also name `sbi-vc-trade` before an unattended
 refresh of it is dispatched, and only once its unattended renewal has been
 demonstrated.

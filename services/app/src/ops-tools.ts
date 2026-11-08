@@ -94,7 +94,7 @@ export const OPS_MCP_TOOLS = [
     name: "kogane.ops.collection.request",
     title: "Request collection of a declared source",
     description:
-      "Record a request to collect a declared source over a date window. Accepted means the request is stored, not that a provider was contacted; the collector runs it later.",
+      "Record a request to collect a declared source over a date window. Accepted means the request is stored, not that a provider was contacted; the collector runs it later. Before requesting, read the source's past history: its collection quality (kogane.collection-quality.read with the source), its schedule, next alarm, recent occurrences and held execution leases (kogane.schedules.read), its maintenance windows (kogane.schedules.maintenance.read), and earlier requests (kogane.ops.operation.list with kind collection, whose summaries name the source and status, then kogane.ops.operation.get for one; both read every principal's requests). Do not request while the source's alarm is due, its maintenance window is on, a lease is held or an earlier request has not finished, and when its latest runs failed, find the cause before requesting again.",
     inputSchema: inputSchema(collectionSchema),
     annotations: REQUEST_HINTS,
   },

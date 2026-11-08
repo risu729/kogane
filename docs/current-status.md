@@ -83,9 +83,10 @@ are separate claims. Historical acceptance records are linked from the
   parse and CORE publication or a closed reason
   (`GET /api/ops/v1/operations/{id}`, shown read-only on the operator's
   依頼の経過 page, opened from the audit log, and `kogane.ops.operation.get`,
-  whole-store on both; the browser requests no operation). No connection is
-  enabled in the committed `OPS_COLLECTOR_DISPATCH_CONNECTIONS`, so requests wait and expire
-  after 24 hours; production dispatch is unverified. Collectors run their daily
+  whole-store on both; the browser requests no operation). The committed
+  `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank` only; requests for
+  any other connection wait and expire after 24 hours. Production dispatch is
+  unverified. Collectors run their daily
   scope, not a requested window; READ projection of a run is not traced; only
   SBI VC's keepalive is an unattended session refresh. An accepted operation is
   still not an executed collection.
@@ -97,10 +98,10 @@ are separate claims. Historical acceptance records are linked from the
 The committed [App config](../services/app/wrangler.jsonc) and
 [Processor config](../services/processor/wrangler.jsonc) enable their existing
 boolean feature flags, including scheduling, operations, purchase recognition,
-rewards, reports and READ projections. CORE migrations reach 0080 (no
-file uses 0054, 0067, 0073, 0074 or 0076); READ reaches 0005. The Processor's
-`OPS_COLLECTOR_DISPATCH_CONNECTIONS` is empty, so the operation dispatch lane
-calls no collector. These are repository facts, not live database/deployment readback.
+rewards, reports and READ projections. CORE migrations reach 0083 (no
+file uses 0054, 0067, 0073, 0074, 0076 or 0081); READ reaches 0005. The Processor's
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, the only collector
+the operation dispatch lane calls. These are repository facts, not live database/deployment readback.
 
 App names a human operator in `OPERATOR_SUBJECTS`. `AGENT_GRANTS` is empty.
 There is no `AGENT_API_GRANTS` or `MCP_DELEGATIONS` (both removed by
