@@ -86,7 +86,7 @@ export const CURRENT_IDENTITY_EPOCH_SQL =
  * provider-linked merge, no operation) or the human who reviewed it through
  * the change lifecycle.
  */
-export interface CardPurchaseDecisionAuthor {
+interface CardPurchaseDecisionAuthor {
   method: "rule" | "manual";
   actorId: string;
   operationId: string | null;

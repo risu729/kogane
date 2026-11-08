@@ -31,14 +31,14 @@ export interface StoredObjectLike {
   readonly httpMetadata?: { contentType?: string | undefined } | undefined;
 }
 
-export interface PutObjectOptions {
+interface PutObjectOptions {
   onlyIf?: { etagDoesNotMatch?: string };
   sha256?: ArrayBuffer | ArrayBufferView | string;
   customMetadata?: Record<string, string>;
   httpMetadata?: { contentType?: string };
 }
 
-export interface EvidenceBucketLike {
+interface EvidenceBucketLike {
   head(key: string): Promise<StoredObjectLike | null>;
   put(
     key: string,

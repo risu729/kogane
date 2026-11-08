@@ -22,7 +22,7 @@ export interface LoginSession {
   csrfToken: string;
 }
 
-export const READ_OPERATION_IDS = [
+const READ_OPERATION_IDS = [
   "common.security-connect",
   "common.validate-token",
   "top.accounts-balance-and-activity",

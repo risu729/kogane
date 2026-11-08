@@ -103,19 +103,17 @@ import {
 } from "./descriptors.ts";
 import { sealRefusalCode } from "./seal-refusal.ts";
 
-export { REGISTRATION_CONTRACT_VERSION };
-
 /**
  * Artifacts catalogued in one call before it yields (15 §2). The operation
  * budget is what bounds an invocation; this count is a second, coarser cap.
  */
-export const DEFAULT_ARTIFACT_BUDGET = 500;
+const DEFAULT_ARTIFACT_BUDGET = 500;
 /**
  * Inventory items staged per call for a run above the direct-seal size. It
  * was 50, above the contract's 30, so a run of more than 50 artifacts could
  * never stage its inventory; it is now the contract's own maximum.
  */
-export const DEFAULT_INVENTORY_CHUNK = MAX_INVENTORY_CHUNK_ITEMS;
+const DEFAULT_INVENTORY_CHUNK = MAX_INVENTORY_CHUNK_ITEMS;
 /** A run with at most this many artifacts is registered and sealed in one go (03 §4). */
 export const DIRECT_SEAL_ARTIFACTS = 50;
 
@@ -168,7 +166,7 @@ export interface RegisterTerminalInput {
 export const RETRYABLE_RETRY_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /** Where a staged registration stopped: what the next call starts with. */
-export type RegistrationPhase = "structure" | "catalogue" | "inventory" | "terminal";
+type RegistrationPhase = "structure" | "catalogue" | "inventory" | "terminal";
 
 export type RegisterTerminalOutcome =
   | {
@@ -394,7 +392,7 @@ async function refusalFor(
 }
 
 /** The reserve of one artifact step: fixed work plus its steps and relations. */
-export function artifactStepReserve(request: ArtifactRequest): number {
+function artifactStepReserve(request: ArtifactRequest): number {
   return (
     ARTIFACT_STEP_BASE +
     (request.transformSteps?.length ?? 0) +

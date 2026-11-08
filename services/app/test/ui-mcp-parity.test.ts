@@ -63,48 +63,47 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/identity/accounts": ["kogane.identity.read"],
   "/api/identity/instruments": ["kogane.identity.read"],
   "/api/identity/coverage": ["kogane.identity.read"],
+  "/api/meta": ["kogane.store.read"],
+  "/api/overview": ["kogane.store.read"],
+  "/api/filter-options": ["kogane.store.read"],
+  "/api/transactions": ["kogane.observations.list"],
+  "/api/balances": ["kogane.observations.list"],
+  "/api/positions": ["kogane.observations.list"],
+  "/api/artifacts": ["kogane.observations.list"],
+  "/api/artifacts/:id": ["kogane.observations.get"],
+  "/api/observations/:kind/:id": ["kogane.observations.get"],
+  "/api/v2/balances/latest": ["kogane.balances.read"],
+  "/api/v2/balances/history": ["kogane.balances.read"],
+  "/api/v2/rewards/holdings": ["kogane.rewards.read"],
+  "/api/v2/rewards/expiry": ["kogane.rewards.read"],
+  "/api/v2/reported-holdings-change": ["kogane.reported-holdings-change.read"],
+  "/api/v2/reports": ["kogane.reports.read"],
+  "/api/v2/reports/:id": ["kogane.reports.read"],
+  "/api/v2/reports/:id/explanation": ["kogane.reports.read"],
+  "/api/collection-quality": ["kogane.collection-quality.read"],
+  "/api/collection-quality/:source": ["kogane.collection-quality.read"],
+  "/api/evidence/v1/meta": ["kogane.evidence.read"],
+  "/api/evidence/v1/sources/:source/runs": ["kogane.evidence.read"],
+  "/api/evidence/v1/runs/:run/artifacts": ["kogane.evidence.read"],
+  "/api/evidence/v1/runs/:run/artifacts/:artifact": ["kogane.evidence.read"],
+  // The jobs and leases, the maintenance window and the re-survey section.
+  "/api/ops/v1/schedules": [
+    "kogane.schedules.read",
+    "kogane.schedules.maintenance.read",
+    "kogane.schedules.survey.read",
+  ],
+  "/api/raw/:sha256": ["kogane.evidence.raw.read"],
+  "/api/evidence/v1/runs/:run/artifacts/:artifact/raw": ["kogane.evidence.raw.read"],
 };
 
 /** UI read routes with no MCP read yet, and what the UI reads there. */
 const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
-  // Deployment and page plumbing.
-  "/api/meta":
-    "parsingHealth and globalPassEmptyMonths; kogane.capabilities carries the same store capabilities (its api field) but not these",
-  "/api/overview": "overview counts of the observation store",
-  "/api/filter-options": "filter choices of the v1 list pages",
-  // v1 observation lists and detail (the evidence browser's record side).
-  "/api/transactions": "v1 transaction list",
-  "/api/balances": "v1 balance list and history",
-  "/api/positions": "v1 positions with valuations",
-  "/api/artifacts": "fetch artifact list",
-  "/api/artifacts/:id": "one fetch artifact",
-  "/api/observations/:kind/:id":
-    "one observation; kogane.explain expands the same ref into a graph, not this detail",
-  "/api/raw/:sha256": "raw evidence download",
-  // The evidence browser.
-  "/api/evidence/v1/meta": "evidence browser",
-  "/api/evidence/v1/sources/:source/runs": "evidence browser",
-  "/api/evidence/v1/runs/:run/artifacts": "evidence browser",
-  "/api/evidence/v1/runs/:run/artifacts/:artifact": "evidence browser",
-  "/api/evidence/v1/runs/:run/artifacts/:artifact/raw": "evidence browser",
-  // Balances and rewards.
-  "/api/v2/balances/latest": "latest balances (READ projection)",
-  "/api/v2/balances/history": "balance history (READ projection)",
-  "/api/v2/rewards/holdings": "reward holdings",
-  "/api/v2/rewards/expiry": "reward expiry",
-  // Reconciliation and reported state.
+  // Card settlements grouped by statement.
   "/api/v2/reconciliation/card-settlements/statements":
     "card settlement review grouped by statement; kogane.card-settlements.read returns the same candidates ungrouped",
-  "/api/v2/reported-holdings-change": "reported holdings between two dates (ADR 0075)",
-  // Reports, quality and schedules.
-  "/api/v2/reports": "stored report list",
-  "/api/v2/reports/:id": "one stored report",
-  "/api/v2/reports/:id/explanation": "a report's explanation",
-  "/api/v2/reports/:id/export": "a report's export download",
-  "/api/collection-quality": "collection quality summary",
-  "/api/collection-quality/:source": "collection quality cells of one source",
-  "/api/ops/v1/schedules":
-    "schedule page snapshot (jobs, leases, survey proposals, maintenance); kogane.schedules.maintenance.read covers maintenance and kogane.schedules.survey.read the re-survey section only",
+  // Report export.
+  "/api/v2/reports/:id/export":
+    "a report's export download; not served over MCP (ADR 0072 amendment 2026-11-07: kogane.reports.read returns the report itself)",
 };
 
 /**
@@ -113,17 +112,15 @@ const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
  * here, so a tool that closes a gap above cannot leave the gap listed.
  */
 const TOOLS_WITHOUT_UI_ROUTE: Readonly<Record<string, string>> = {
-  "kogane.capabilities":
-    "the grant and the store capabilities; /api/meta carries more (a gap above)",
-  "kogane.explain": "an evidence graph of one ref, not the observation detail (a gap above)",
+  "kogane.capabilities": "the grant and the store capabilities; /api/meta is kogane.store.read",
+  "kogane.explain":
+    "an evidence graph of one ref; the observation detail is kogane.observations.get",
   "kogane.reconcile.propose": "an agent's relation proposal; no screen offers it",
   "kogane.economic-readiness.read": "economic row readiness; no screen reads it",
+  "kogane.events.read":
+    "GET /api/v2/activity and /api/v2/obligations, which no screen reads (ADR 0072); plan D19",
   "kogane.audit.get":
     "one audit record by id (readAuditRecordForGrant); the audit page reads pages only (readAuditPage, kogane.audit.search)",
-  "kogane.schedules.maintenance.read":
-    "the maintenance part of /api/ops/v1/schedules (a gap above)",
-  "kogane.schedules.survey.read":
-    "the re-survey part of /api/ops/v1/schedules (a gap above; ADR 0050, 2026-11-07 amendment)",
 };
 
 /** Paths the UI names that are not read routes. */

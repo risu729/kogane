@@ -49,6 +49,7 @@ import {
   sessionRefreshSchema,
   type OpsContext,
 } from "./ops-api";
+import { mcpInputSchema } from "./mcp-input-schema";
 
 export const OPS_TOOL_NAMES = [
   "kogane.ops.collection.request",
@@ -66,8 +67,7 @@ export function isOpsToolName(value: string): value is OpsToolName {
 
 /** The published JSON Schema of one request schema, without the meta key. */
 function inputSchema(schema: z.ZodType): Record<string, unknown> {
-  const generated = z.toJSONSchema(schema) as Record<string, unknown>;
-  delete generated["$schema"];
+  const generated = mcpInputSchema(schema);
   return generated;
 }
 
@@ -190,7 +190,7 @@ export async function callOpsTool(
   }
 }
 
-export const DELEGATED_OPS_CAPABILITIES: Readonly<Record<OpsToolName, DelegationCapability>> = {
+const DELEGATED_OPS_CAPABILITIES: Readonly<Record<OpsToolName, DelegationCapability>> = {
   "kogane.ops.collection.request": "operations.collection.request",
   "kogane.ops.import.request": "operations.import.request",
   "kogane.ops.replay.request": "operations.replay.request",

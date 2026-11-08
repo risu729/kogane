@@ -1,13 +1,14 @@
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { identityApi } from "../src/identity-api";
-import { observationOrganizations } from "../src/observation-organization";
+import { observationOrganizations } from "../../../packages/application/src/query/observation-organization.ts";
 import { identifyParse } from "../../processor/src/identity-store";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import { validIdentityResponse } from "../../../packages/observation-shared/src/identity-contract";
 import { validAccountConnection } from "../../../packages/observation-shared/src/account-connection-contract";
-import { organizedFilterOptions } from "../src/organized-filter-options";
+import { organizedFilterOptions } from "../../../packages/application/src/query/organized-filter-options.ts";
 
 beforeAll(async () => {
   await seedRegistry();
@@ -97,7 +98,7 @@ it("applies only eligible automatic MF connection names without altering origina
   );
   const ref = { kind: "transaction" as const, id: observation!.id };
   const get = async () =>
-    (await observationOrganizations(env.DB, [ref])).get(`transaction:${ref.id}`)!;
+    (await observationOrganizations(d1Executor(env.DB), [ref])).get(`transaction:${ref.id}`)!;
   const initial = await get();
   const filterInput = {
     sources: ["moneyforward-me"],
@@ -111,7 +112,7 @@ it("applies only eligible automatic MF connection names without altering origina
     ],
   };
   const filterName = async () =>
-    (await organizedFilterOptions(env.DB, "transactions", filterInput)).accounts[0]!;
+    (await organizedFilterOptions(d1Executor(env.DB), "transactions", filterInput)).accounts[0]!;
   expect(initial.account).toMatchObject({
     label: "三井住友銀行（MoneyForward連携）（個別口座未確定）",
     connection: { status: "unresolved" },
@@ -152,7 +153,8 @@ it("applies only eligible automatic MF connection names without altering origina
 });
 
 it("retains manual display names even when a reviewed connection name is eligible", async () => {
-  const { connectionAccountLabel } = await import("../src/account-connection-display");
+  const { connectionAccountLabel } =
+    await import("../../../packages/application/src/query/account-connections");
   expect(
     connectionAccountLabel("手動指定", "manual", "moneyforward-me", {
       label: "三井住友銀行（MoneyForward連携）",

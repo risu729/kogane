@@ -147,6 +147,8 @@ const overrides: Partial<Spec>[] = [
   { dataset: "credit-ledger" },
   { account: "myjcb::j-point:total" },
   { account: "myjcb:UPPER:j-point:total" },
+  // SQLite's LIKE ignores ASCII case; the rule's account shape does not.
+  { account: "myjcb:synthetic-a:J-POINT:TOTAL" },
   { account: "myjcb:-bad:j-point:total" },
   { account: "myjcb:a_b:j-point:total" },
   { account: "myjcb:conn:normal" },

@@ -68,6 +68,16 @@ All six are authenticated, and all six are refused unless `OPS_API_ENABLED` is
 | `POST /api/ops/v1/sessions/{source}/refresh` | `{idempotencyKey?}`                                        | `202 {operationId, status}` | The request is stored; `waiting_for_human` when a person must act.         |
 | `GET /api/ops/v1/operations/{id}`            | –                                                          | `200` operation record      | Reads the stored record; it never asks a downstream system "are you done". |
 
+An import's `runId` is checked against the bucket key's own run grammar
+(`RUN_ID` in `packages/collection/src/keys.ts`, imported by
+`services/app/src/ops-api.ts` rather than copied): an ASCII letter or digit, then up
+to 199 ASCII letters, digits, `.`, `_` or `-`. The import names the run whose
+terminal is `runs/<source>/<runId>/terminal.json`, so a run id that key cannot
+carry (a `:`, a `/`, a space, a leading separator) could never register; it is
+refused at acceptance with `400 invalid_request` and `refs: ["runId"]`, and no
+request is stored. The MCP tool `kogane.ops.import.request` validates with the
+same schema and publishes the same pattern.
+
 `status` is the stored operation status, not a promise: `accepted` or
 `waiting_for_human` on acceptance, and later `running`, `completed`, `failed`
 or `blocked`. **A 202 never means the work happened.** For a collection or
@@ -505,7 +515,26 @@ over, and — since ADR 0048 — starts a `collection` or an unattended
 `operationRequestPayload(store, operationId)` is the reader the executor uses
 to see what was accepted — the dispatch acts on the durable row, never on the
 contents of a notification. No branch of it completes an operation merely by
-handing the work over.
+handing the work over. An import whose re-registration throws (R2 or CORE
+unavailable) neither fails the lane nor holds the head of the queue: it stays
+`dispatch_pending` with `failureCode: "registration_failed"`, one more
+dispatch attempt and a retry time five minutes ahead, while the requests
+behind it are dispatched in the same tick (`docs/processor.md` §7). It is
+retried with no cap, and the code stays on the record after a later look
+registers it, as every retry code does.
+
+Only collections and unattended session refreshes expire (24 h,
+[collector execution](#collector-execution-adr-0048)). A replay or projection
+is dispatched or blocked on its first look. **An import has no expiry and no
+other closed end while its terminal is missing** (`terminal_not_found`), its
+registration is staged (`pending`) or `retryable`, or the tick's budget was
+spent (`registration_deferred`): it stays `accepted` / `dispatch_pending` and
+is looked at every five minutes, `dispatch.attempts` growing by one each time,
+until the registration succeeds or is blocked. Nothing cancels it, and a new
+idempotency key is a new operation. A registration that throws ends nothing
+either: it is retried five minutes later as `registration_failed`, and the
+lane carries on. This is an open limit, not a policy
+([processor §7](processor.md#7-operations-dispatch)).
 
 The collector execution services are in
 `packages/application/src/operations/collector-dispatch.ts` (writes) and
@@ -524,12 +553,15 @@ The collector execution services are in
 
 Synthetic data only.
 
-- `services/app/test/ops-api.test.ts` (28 checks over the real
+- `services/app/test/ops-api.test.ts` (35 checks over the real
   Worker, the real migrations and the real store): flag-off behaviour, the
   closed route and verb set with the flag on, `/api/meta` discovery, one
   record per request, re-send, idempotency conflict, per-principal scoping,
   schema refusals of SQL / storage keys / external URLs / unknown keys /
-  impossible dates (G3-13), error bodies that carry no rejected value — not
+  impossible dates (G3-13), an import run id outside the terminal key's
+  grammar, that the import schema accepts exactly the run ids
+  `terminalKey` accepts and that the MCP import tool publishes that grammar,
+  error bodies that carry no rejected value — not
   the unknown source or release either (G3-08), the four other routes, the
   replay plan written into the 0035 tables exactly once, `waiting_for_human`
   (G3-11), stage progress and completion, the read route's `execution` block

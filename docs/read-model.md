@@ -53,7 +53,7 @@ is a complete SQL fragment that states the view it reads.
 | `snapshotPolicyComparison`   | A03 shadow comparison: every container dataset under both policies, listing partitions whose current artifact differs. Identifiers only. Served by the observation-pipeline Worker.                                                                                                                                                                                                                                                            | `snapshotPolicyComparisonSql(SNAPSHOT_RELATIONS)`                                                                                                                                                        |
 | `activeStateProjection`      | The rows a "current" list shows: a published parse of a successful visible fetch run, plus snapshot membership for snapshot datasets, plus per-source multi-page contracts stated per query.                                                                                                                                                                                                                                                   | `publishedParses AND successfulFetchRuns`; the chain `parse_runs p → observation_fetch_artifacts fa → observation_fetch_runs f`.                                                                         |
 | parsing health (`/api/meta`) | A job-level notion, not a visibility rule: a failed job counts until a newer published parse of the same parser repairs it; retired versions are ignored.                                                                                                                                                                                                                                                                                      | `PARSING_HEALTH_SQL` over `observation_parse_jobs`, `published_parse_runs` and `parse_runs`.                                                                                                             |
-| Identity eligibility         | `services/app/src/identity-api.ts` reads `eligible_identity_runs` (migration 0020) joined to the publication projection; the organization read moved here (`src/organization.ts`).                                                                                                                                                                                                                                                             | The identity catalogue queries stay in the browser over `published_parse_runs` (PR-05); the organization query is `organizationSql(mode)`.                                                               |
+| Identity eligibility         | `packages/application/src/query/identity-pages.ts` reads `current_identity_observations` (projection-driven since migration 0026) joined to the publication projection; the organization read is in `packages/read-model/src/organization.ts`.                                                                                                                                                                                                 | The identity catalogue queries stay in the browser over `published_parse_runs` (PR-05); the organization query is `organizationSql(mode)`.                                                               |
 | Identity read mode           | `src/identity.ts`: `latest` joins the current mapping revisions; `as-recorded` joins the mapping rows the sealed identity run pinned. `interpretationContext` names the releases a response was computed under. See [decision-log.md](decision-log.md).                                                                                                                                                                                        | `MAPPING_RELATIONS[mode]`; the run's policy release comes from `identity_run_contexts` (migration 0029).                                                                                                 |
 
 The snapshot CTE builder takes its relations as explicit parameters
@@ -125,6 +125,26 @@ fixed one past it the exact count, unmoved by an unlisted source's runs.
 authentication gate, that the raw object is reachable through a visible
 artifact. It is independent of any list limit; the R2 read and the integrity
 checks in `src/read.ts` are unchanged.
+
+### Plans of the keyed reads
+
+`test/statement-plans.test.ts` explains the reader's keyed reads on every
+CORE migration with no table statistics, as D1 plans them: `listArtifacts`
+(walks artifact ids down from the cursor, no sort), `getArtifact` (the artifact,
+its parse runs by artifact, each run's observations by parse run),
+`getObservation` and its provenance, `getRawDownload` (by hash) and
+`parsingHealth` (unfinished jobs by status). It does the same for the events
+reader (`src/events.ts`): `activity` and `obligations` walk the live-revision
+partial indexes in key order with no sort, so a page stops at its `LIMIT`;
+legs, allocations, settlements, raw locators and reported balances are reached
+from the ids or account refs given. None reads a growing table from end to
+end. `reconciliationSignals`' leg read is not in that list: without statistics
+it starts from `economic_legs_basis (basis, role)`, every live cash-movement
+increase or decrease leg, and filters the requested subjects afterwards,
+although `economic_legs_subject` exists. The whole-set reads of the evidence
+reader (`overview`'s counts and lists, `filterOptions`, and the grouped
+`listTransactions`, `listLatestBalances`, `listPositions`) group or count first
+by design (the table above) and are not keyed.
 
 ### Card snapshot currentness and current card usage
 

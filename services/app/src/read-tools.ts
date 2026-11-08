@@ -45,6 +45,7 @@ import {
   REPORTED_STATE_DATE,
   REPORTED_STATE_SOURCE,
 } from "./reported-state-api";
+import { mcpInputSchema } from "./mcp-input-schema";
 
 /**
  * `kogane.reported-state.read` (plan D5): `GET /api/v2/reported-state` for an
@@ -152,8 +153,7 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
 };
 export const READ_MCP_TOOLS = Object.entries(schemas).map(([name, schema]) => {
-  const inputSchema = z.toJSONSchema(schema) as Record<string, unknown>;
-  delete inputSchema["$schema"];
+  const inputSchema = mcpInputSchema(schema);
   return {
     name,
     title: name.slice(7),

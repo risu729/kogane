@@ -379,7 +379,9 @@ function BalanceTable({
           </tbody>
         </table>
       </div>
-      {!group ? <Pager {...view} total={rows.length} onChange={setPage} /> : null}
+      {!group ? (
+        <Pager {...view} total={rows.length} onChange={setPage} label="履歴のページ" />
+      ) : null}
     </Panel>
   );
 }

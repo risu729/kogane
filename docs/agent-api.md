@@ -90,9 +90,9 @@ deployment is ignored, and `403 agent_api_not_configured` no longer exists.
 | `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                                                                                                                                                                              |                                                      |
 | `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates`, `accounts.candidates`, `card-settlements.unmatched`, `economic-readiness.read`, `card-settlements.read`, `card-settlements.ownership`, `reported-state.read` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                        |
 | `audit.read`             | `audit.search` and `audit.get`                                                                                                                                                                                                                                                                  |                                                      |
-| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                                                                                                                                                                                     | Raw bytes are still a different route                |
+| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`); the collection-quality and evidence pages and raw bytes up to 1 MiB (`kogane.collection-quality.read`, `kogane.evidence.read`, `kogane.evidence.raw.read`) on a whole-store scope                                                  | A separate grant; never implied by `records.read`    |
 | `interpretation.propose` | `reconcile.propose`                                                                                                                                                                                                                                                                             | Proposals only; never adoption                       |
-| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                                                                                                                                                                                       | Not a financial read; implied by no other capability |
+| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`; with whole-store `evidence.read`, the schedules page (`kogane.schedules.read`) over `"*"` schedule sources                                                                                                                           | Not a financial read; implied by no other capability |
 
 The whole-store grant holds all six, with `"*"` for `sources`, `accounts` and
 `scheduleSources`, and the published bounds (`GRANT_LIMITS`): `maxRows` 1000,
@@ -167,39 +167,49 @@ same condition and refuses every call ([below](#maintenance-windows)). The instr
 ([below](#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10));
 the other delegated MCP tools are described there too.
 
-| Tool                                  | HTTP                                            | MCP `tools/call`                      | Requires                                                                                                                                                                                                                                                                                                                                                                |
-| ------------------------------------- | ----------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kogane.capabilities`                 | `POST /api/agent/v1/capabilities`               | `kogane.capabilities`                 | any proved caller                                                                                                                                                                                                                                                                                                                                                       |
-| `kogane.context.open`                 | `POST /api/agent/v1/context.open`               | `kogane.context.open`                 | any proved caller                                                                                                                                                                                                                                                                                                                                                       |
-| `kogane.financial.query`              | `POST /api/agent/v1/financial.query`            | `kogane.financial.query`              | per intent (table below)                                                                                                                                                                                                                                                                                                                                                |
-| `kogane.explain`                      | `POST /api/agent/v1/explain`                    | `kogane.explain`                      | `summary.read`                                                                                                                                                                                                                                                                                                                                                          |
-| `kogane.reconcile.propose`            | `POST /api/agent/v1/reconcile.propose`          | `kogane.reconcile.propose`            | `interpretation.propose`                                                                                                                                                                                                                                                                                                                                                |
-| `kogane.instruments.candidates`       | `POST /api/agent/v1/instruments.candidates`     | `kogane.instruments.candidates`       | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                                                                                                                                                                                                                                          |
-| `kogane.instruments.coverage`         | `POST /api/agent/v1/instruments.coverage`       | `kogane.instruments.coverage`         | `summary.read` on `"*"` sources and accounts; listed only to such a grant ([below](#instrument-coverage))                                                                                                                                                                                                                                                               |
-| `kogane.accounts.candidates`          | `POST /api/agent/v1/accounts.candidates`        | `kogane.accounts.candidates`          | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#account-candidates))                                                                                                                                                                                                                                                                |
-| `kogane.card-settlements.unmatched`   | `POST /api/agent/v1/card-settlements.unmatched` | `kogane.card-settlements.unmatched`   | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#card-statements-without-a-candidate))                                                                                                                                                                                                                                               |
-| `kogane.economic-readiness.read`      | `POST /api/agent/v1/economic-readiness.read`    | `kogane.economic-readiness.read`      | `records.read` on `"*"` sources and accounts; listed only to such a grant ([ADR 0067](adr/0067-economic-row-readiness.md))                                                                                                                                                                                                                                              |
-| `kogane.card-settlements.read`        | `POST /api/agent/v1/card-settlements.read`      | `kogane.card-settlements.read`        | `records.read` on `"*"` sources and accounts, while `cardSettlementReconciliation` is served; `offset + 50` within `maxRows`; the `カード照合` pages' own read: a page, one statement (`statementKey`), one review (`proposalId`) or its competitors (`relatedTo`) ([card settlements](card-settlements.md#agent-reads), [ADR 0081](adr/0081-ui-parity-through-mcp.md)) |
-| `kogane.card-settlements.ownership`   | `POST /api/agent/v1/card-settlements.ownership` | `kogane.card-settlements.ownership`   | the same; the page's ownership review of one candidate                                                                                                                                                                                                                                                                                                                  |
-| `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`          | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation))                                                                                                                                                                                                                                           |
-| `kogane.reported-state.read`          | `POST /api/agent/v1/reported-state.read`        | `kogane.reported-state.read`          | `records.read` on `"*"` sources and accounts, while `reportedStateOnDate` is served ([below](#reported-state-on-a-date))                                                                                                                                                                                                                                                |
-| `kogane.reconstructed-state.read`     | `POST /api/agent/v1/reconstructed-state.read`   | `kogane.reconstructed-state.read`     | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))                                                                                                                                                                                                                                                |
-| `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                                                                                                                                                                                                                                       |
-| `kogane.schedules.maintenance.update` | none                                            | `kogane.schedules.maintenance.update` | an MCP client, as itself (ADR 0084) ([below](#maintenance-windows))                                                                                                                                                                                                                                                                                                     |
-| `kogane.schedules.lease.release`      | none                                            | `kogane.schedules.lease.release`      | nothing grants it: listed to every MCP client while `SCHEDULES_ENABLED` is on, and every call is `403 operation_not_delegable` ([below](#maintenance-windows))                                                                                                                                                                                                          |
-| `kogane.schedules.survey.read`        | none                                            | `kogane.schedules.survey.read`        | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                                                                                                                                                                                                                                       |
-| `kogane.schedules.survey.decide`      | none                                            | `kogane.schedules.survey.decide`      | an MCP client, as itself (ADR 0084), while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                                                                                                                                                                                                                    |
-| `kogane.instruments.history`          | `POST /api/agent/v1/instruments.history`        | `kogane.instruments.history`          | `records.read` on `"*"` sources and accounts                                                                                                                                                                                                                                                                                                                            |
-| `kogane.audit.search`                 | `POST /api/agent/v1/audit.search`               | `kogane.audit.search`                 | `audit.read` with `"*"` accounts                                                                                                                                                                                                                                                                                                                                        |
-| `kogane.audit.get`                    | `POST /api/agent/v1/audit.get`                  | `kogane.audit.get`                    | `audit.read` with `"*"` accounts                                                                                                                                                                                                                                                                                                                                        |
-| `kogane.identity.read`                | `POST /api/agent/v1/identity.read`              | `kogane.identity.read`                | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                                                                                                                                                                                                                                     |
+| Tool                                   | HTTP                                               | MCP `tools/call`                       | Requires                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------------------------- | -------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kogane.capabilities`                  | `POST /api/agent/v1/capabilities`                  | `kogane.capabilities`                  | any proved caller                                                                                                                                                                                                                                                                                                                                                       |
+| `kogane.context.open`                  | `POST /api/agent/v1/context.open`                  | `kogane.context.open`                  | any proved caller                                                                                                                                                                                                                                                                                                                                                       |
+| `kogane.financial.query`               | `POST /api/agent/v1/financial.query`               | `kogane.financial.query`               | per intent (table below)                                                                                                                                                                                                                                                                                                                                                |
+| `kogane.explain`                       | `POST /api/agent/v1/explain`                       | `kogane.explain`                       | `summary.read`                                                                                                                                                                                                                                                                                                                                                          |
+| `kogane.reconcile.propose`             | `POST /api/agent/v1/reconcile.propose`             | `kogane.reconcile.propose`             | `interpretation.propose`                                                                                                                                                                                                                                                                                                                                                |
+| `kogane.instruments.candidates`        | `POST /api/agent/v1/instruments.candidates`        | `kogane.instruments.candidates`        | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                                                                                                                                                                                                                                          |
+| `kogane.instruments.coverage`          | `POST /api/agent/v1/instruments.coverage`          | `kogane.instruments.coverage`          | `summary.read` on `"*"` sources and accounts; listed only to such a grant ([below](#instrument-coverage))                                                                                                                                                                                                                                                               |
+| `kogane.accounts.candidates`           | `POST /api/agent/v1/accounts.candidates`           | `kogane.accounts.candidates`           | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#account-candidates))                                                                                                                                                                                                                                                                |
+| `kogane.card-settlements.unmatched`    | `POST /api/agent/v1/card-settlements.unmatched`    | `kogane.card-settlements.unmatched`    | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#card-statements-without-a-candidate))                                                                                                                                                                                                                                               |
+| `kogane.economic-readiness.read`       | `POST /api/agent/v1/economic-readiness.read`       | `kogane.economic-readiness.read`       | `records.read` on `"*"` sources and accounts; listed only to such a grant ([ADR 0067](adr/0067-economic-row-readiness.md))                                                                                                                                                                                                                                              |
+| `kogane.card-settlements.read`         | `POST /api/agent/v1/card-settlements.read`         | `kogane.card-settlements.read`         | `records.read` on `"*"` sources and accounts, while `cardSettlementReconciliation` is served; `offset + 50` within `maxRows`; the `カード照合` pages' own read: a page, one statement (`statementKey`), one review (`proposalId`) or its competitors (`relatedTo`) ([card settlements](card-settlements.md#agent-reads), [ADR 0081](adr/0081-ui-parity-through-mcp.md)) |
+| `kogane.card-settlements.ownership`    | `POST /api/agent/v1/card-settlements.ownership`    | `kogane.card-settlements.ownership`    | the same; the page's ownership review of one candidate                                                                                                                                                                                                                                                                                                                  |
+| `kogane.purchases.explain`             | `POST /api/agent/v1/purchases.explain`             | `kogane.purchases.explain`             | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation))                                                                                                                                                                                                                                           |
+| `kogane.reported-state.read`           | `POST /api/agent/v1/reported-state.read`           | `kogane.reported-state.read`           | `records.read` on `"*"` sources and accounts, while `reportedStateOnDate` is served ([below](#reported-state-on-a-date))                                                                                                                                                                                                                                                |
+| `kogane.reconstructed-state.read`      | `POST /api/agent/v1/reconstructed-state.read`      | `kogane.reconstructed-state.read`      | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))                                                                                                                                                                                                                                                |
+| `kogane.schedules.maintenance.read`    | `POST /api/agent/v1/schedules.maintenance.read`    | `kogane.schedules.maintenance.read`    | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                                                                                                                                                                                                                                       |
+| `kogane.schedules.maintenance.update`  | none                                               | `kogane.schedules.maintenance.update`  | an MCP client, as itself (ADR 0084) ([below](#maintenance-windows))                                                                                                                                                                                                                                                                                                     |
+| `kogane.schedules.lease.release`       | none                                               | `kogane.schedules.lease.release`       | nothing grants it: listed to every MCP client while `SCHEDULES_ENABLED` is on, and every call is `403 operation_not_delegable` ([below](#maintenance-windows))                                                                                                                                                                                                          |
+| `kogane.schedules.survey.read`         | none                                               | `kogane.schedules.survey.read`         | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                                                                                                                                                                                                                                       |
+| `kogane.schedules.survey.decide`       | none                                               | `kogane.schedules.survey.decide`       | an MCP client, as itself (ADR 0084), while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                                                                                                                                                                                                                    |
+| `kogane.instruments.history`           | `POST /api/agent/v1/instruments.history`           | `kogane.instruments.history`           | `records.read` on `"*"` sources and accounts                                                                                                                                                                                                                                                                                                                            |
+| `kogane.audit.search`                  | `POST /api/agent/v1/audit.search`                  | `kogane.audit.search`                  | `audit.read` with `"*"` accounts                                                                                                                                                                                                                                                                                                                                        |
+| `kogane.audit.get`                     | `POST /api/agent/v1/audit.get`                     | `kogane.audit.get`                     | `audit.read` with `"*"` accounts                                                                                                                                                                                                                                                                                                                                        |
+| `kogane.identity.read`                 | `POST /api/agent/v1/identity.read`                 | `kogane.identity.read`                 | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                                                                                                                                                                                                                                     |
+| `kogane.store.read`                    | `POST /api/agent/v1/store.read`                    | `kogane.store.read`                    | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                                                                                                                                                                                                                                     |
+| `kogane.observations.list`             | `POST /api/agent/v1/observations.list`             | `kogane.observations.list`             | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                                                                                                                                                                                                                                     |
+| `kogane.observations.get`              | `POST /api/agent/v1/observations.get`              | `kogane.observations.get`              | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                                                                                                                                                                                                                                     |
+| `kogane.balances.read`                 | `POST /api/agent/v1/balances.read`                 | `kogane.balances.read`                 | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                                                                                                                                                                                                                                     |
+| `kogane.rewards.read`                  | `POST /api/agent/v1/rewards.read`                  | `kogane.rewards.read`                  | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                                                                                                                                                                                                                                     |
+| `kogane.reported-holdings-change.read` | `POST /api/agent/v1/reported-holdings-change.read` | `kogane.reported-holdings-change.read` | `records.read` on `"*"` sources and accounts, while `reportedStateOnDate` is served ([below](#ui-read-pages))                                                                                                                                                                                                                                                           |
+| `kogane.events.read`                   | `POST /api/agent/v1/events.read`                   | `kogane.events.read`                   | `records.read` on `"*"` sources and accounts, while `eventsV2` is served ([below](#ui-read-pages))                                                                                                                                                                                                                                                                      |
+| `kogane.reports.read`                  | `POST /api/agent/v1/reports.read`                  | `kogane.reports.read`                  | `records.read` on `"*"` sources and accounts, while `reportArtifacts` is served ([below](#ui-read-pages))                                                                                                                                                                                                                                                               |
+| `kogane.collection-quality.read`       | `POST /api/agent/v1/collection-quality.read`       | `kogane.collection-quality.read`       | `evidence.read` on `"*"` sources and accounts, while its tables exist ([below](#ui-read-pages))                                                                                                                                                                                                                                                                         |
+| `kogane.evidence.read`                 | `POST /api/agent/v1/evidence.read`                 | `kogane.evidence.read`                 | `evidence.read` on `"*"` sources and accounts ([below](#ui-read-pages))                                                                                                                                                                                                                                                                                                 |
+| `kogane.evidence.raw.read`             | `POST /api/agent/v1/evidence.raw.read`             | `kogane.evidence.raw.read`             | `evidence.read` on `"*"` sources and accounts; objects up to 1 MiB ([below](#ui-read-pages))                                                                                                                                                                                                                                                                            |
+| `kogane.schedules.read`                | `POST /api/agent/v1/schedules.read`                | `kogane.schedules.read`                | `schedules.read` with `"*"` schedule sources and `evidence.read` on `"*"` sources and accounts, while `SCHEDULES_ENABLED` is on ([below](#ui-read-pages))                                                                                                                                                                                                               |
 
-No tool lists or reads the fixed report artifacts (評価レポート): they are
-served to the operator by `GET /api/v2/reports` and
-`/api/v2/reports/{id}` only. A later agent read adds a list and a detail
-together under `records.read` on `"*"` sources and accounts and refuses a
-restricted report outright
-([ADR 0072, amendment](adr/0072-report-artifact-pages.md#amendment-the-export-link-and-no-agent-report-read-yet-2026-11-06)).
+`kogane.reports.read` lists and reads the fixed report artifacts (評価レポート)
+on the terms ADR 0072's amendment set for an agent read: list and detail
+together, a restricted or unavailable report refused outright, `/export`
+never offered ([below](#ui-read-pages)).
 
 `kogane.capabilities` reports the `ApiCapabilities` object this deployment
 _actually serves_ — the contract's defaults with the server-computed facts
@@ -273,6 +283,30 @@ is unbound or no snapshot is sealed it answers
 blocking warning — it never computes a holding from the raw observation rows
 behind the projection.
 
+The snapshot is the one the v2 balance routes would serve, checked the same
+way (`servableSnapshot` in `services/app/src/balances-v2.ts`; 05 §7). A
+published snapshot those routes refuse is answered `unavailable` with their
+closed code as the gap reason, the reason of the `freshness`, `numeric` and
+`valuation` dimensions and a blocking warning, and no unit is returned:
+
+| Situation                                                      | Reason code                      |
+| -------------------------------------------------------------- | -------------------------------- |
+| READ is unbound, or nothing is published                       | `projection_not_built`           |
+| The READ database has another contract version                 | `read_model_unavailable`         |
+| CORE was restored under a new epoch                            | `read_model_context_changed`     |
+| A use restriction changed after the snapshot was last verified | `read_model_restriction_changed` |
+
+A restriction refuses the whole snapshot until the next build re-verifies it
+at the new visibility revision; filtering rows out of it would leave every
+figure at its old value. `packages/application/test/query.test.ts` and
+`services/app/test/holdings-read.test.ts` pin each case.
+
+A valid snapshot that trails CORE's source revision remains readable as a fixed
+context. Holdings marks it `partial`, sets freshness to `partial`, and names
+`snapshot:behind_published_evidence` in both the freshness reasons and coverage
+gaps, like the v2 balance page. A later build that verifies the current revision
+clears that reason; stale measures still carry `scope_not_re_observed`.
+
 With a sealed snapshot it returns the adopted set of that snapshot as one
 figure per unit, in exact integer arithmetic, with the number of adopted
 measurements behind each one. Only `sum-disjoint` currency stocks qualify
@@ -335,8 +369,10 @@ authorized, captured refunds and authorized refunds apart and no combined
 total, the unresolved count, the provider statement totals beside them and
 `settlementAddsPurchaseExpense: false`; `coverage`, which says the list is not
 a complete transaction history, counts the current provider rows no event
-holds and splits that count per source and closed reason
-(`unrecognizedReasons`, [economic events](economic-events.md#http)); and per
+holds, splits that count per source and closed reason
+(`unrecognizedReasons`, [economic events](economic-events.md#http)) and says
+no refund is allocated to the purchase it refunds (`refundsAllocated: false`,
+as the page says beside each refund); and per
 event its state and amount (or last known amount), its provider
 rows and whether the provider still shows them, the statement it was posted to
 or the reason there is none, the settlement review of that statement with the
@@ -592,13 +628,26 @@ calling the reader those routes call, with the request the route would build
 from the same parameters. The route and the tool are two adapters over one
 function, so they cannot disagree on a row, a page bound or a refusal code.
 
-| Tool                   | UI routes                                                                                                        | Requires                                     |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `kogane.identity.read` | `GET /api/identity/connections`, `/api/identity/accounts`, `/api/identity/instruments`, `/api/identity/coverage` | `records.read` on `"*"` sources and accounts |
+| Tool                                   | UI routes                                                                                                                                                                        | Requires                                                                                        |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `kogane.identity.read`                 | `GET /api/identity/connections`, `/api/identity/accounts`, `/api/identity/instruments`, `/api/identity/coverage`                                                                 | `records.read` on `"*"` sources and accounts                                                    |
+| `kogane.store.read`                    | `GET /api/meta`, `/api/overview`, `/api/filter-options`                                                                                                                          | `records.read` on `"*"` sources and accounts                                                    |
+| `kogane.observations.list`             | `GET /api/transactions`, `/api/balances`, `/api/positions`, `/api/artifacts`                                                                                                     | `records.read` on `"*"` sources and accounts                                                    |
+| `kogane.observations.get`              | `GET /api/observations/{kind}/{id}`, `/api/artifacts/{id}`                                                                                                                       | `records.read` on `"*"` sources and accounts                                                    |
+| `kogane.balances.read`                 | `GET /api/v2/balances/latest`, `/api/v2/balances/history`                                                                                                                        | `records.read` on `"*"` sources and accounts                                                    |
+| `kogane.rewards.read`                  | `GET /api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                                                                                         | `records.read` on `"*"` sources and accounts                                                    |
+| `kogane.reported-holdings-change.read` | `GET /api/v2/reported-holdings-change`, while `reportedStateOnDate` is served                                                                                                    | `records.read` on `"*"` sources and accounts                                                    |
+| `kogane.reports.read`                  | `GET /api/v2/reports`, `/api/v2/reports/{id}`, `/api/v2/reports/{id}/explanation`, while `reportArtifacts` is served; never `/export`                                            | `records.read` on `"*"` sources and accounts                                                    |
+| `kogane.collection-quality.read`       | `GET /api/collection-quality`, `/api/collection-quality/{source}`, while the scheduling and run tables exist                                                                     | `evidence.read` on `"*"` sources and accounts                                                   |
+| `kogane.events.read`                   | `GET /api/v2/activity`, `/api/v2/obligations`, while `eventsV2` is served (no screen reads them)                                                                                 | `records.read` on `"*"` sources and accounts                                                    |
+| `kogane.evidence.read`                 | `GET /api/evidence/v1/meta`, `/api/evidence/v1/sources/{source}/runs`, `/api/evidence/v1/runs/{run}/artifacts`, `/api/evidence/v1/runs/{run}/artifacts/{artifact}`; never `/raw` | `evidence.read` on `"*"` sources and accounts                                                   |
+| `kogane.evidence.raw.read`             | `GET /api/raw/{sha256}`, `/api/evidence/v1/runs/{run}/artifacts/{artifact}/raw`, up to 1 MiB                                                                                     | `evidence.read` on `"*"` sources and accounts                                                   |
+| `kogane.schedules.read`                | `GET /api/ops/v1/schedules` without its `survey` part, while `SCHEDULES_ENABLED` is on                                                                                           | `schedules.read` with `"*"` schedule sources, and `evidence.read` on `"*"` sources and accounts |
 
 Input is a closed object. Its keys are the route's query parameters with
-their bounds, plus the field that picks the route (`collection` for
-`kogane.identity.read`). The tool sets only the parameters the caller gives,
+their bounds, plus the field that picks the route (`collection`, `page` or `kind`, or the
+`kind` and `id` of a detail route) and the route's other path segments
+(`reportId`, `source`, `runId`, `artifactId`). The tool sets only the parameters the caller gives,
 so the reader applies the route's own defaults and refusals. Output is
 `{ "schemaVersion": "kogane-page-read-v1", "data": <the route's body> }`.
 The route's answer carries provider labels, so all of it travels under
@@ -610,18 +659,107 @@ answers it, without the request id. A store read that fails is
 Authorization, in order, after the Access check and the grant lookup: the
 tool's capability, else `403 unauthorized` (`capability:<name>`); then sources
 and accounts both `"*"`, else `403 evidence_restricted` (`scope:source`,
-`scope:account`). These readers take no grant scope, so a narrower grant is
-refused, never served a filtered page. Both checks run before the argument is
+`scope:account`); `kogane.schedules.read` needs two capabilities and its
+schedule sources whole too (below). These readers take no
+grant scope, so a narrower grant is refused, never served a filtered page.
+Both checks run before the argument is
 validated. An argument outside the closed schema is `400 invalid_request` with
 the offending keys as refs, even where the route would answer another code
 for the same value (`identityRead=snapshot` is `unsupported_semantics` there,
 an unsafe `offset` `invalid_offset`). `tools/list` lists each tool only to a grant that
 passes both checks. Each call is recorded as an R0 `read` under the tool name
-without `kogane.` (`identity.read`), with the page's row count
-([audit log](audit-log.md)); the browser route records nothing, as before.
+without `kogane.` (`identity.read`, `rewards.read`, …), with the page's row
+count ([audit log](audit-log.md)); the browser route records nothing, as
+before. The grant's `budget.maxRows` does not bound these reads: each
+answers the route's own page with the route's own page bound.
+`kogane.observations.get` and `kogane.evidence.read` return an artifact's
+detail, never its bytes; the bytes are `kogane.evidence.raw.read`'s.
+`kogane.reported-holdings-change.read`, `kogane.reports.read` and
+`kogane.collection-quality.read` exist where their routes do: while the store
+lacks the reported state's views, `report_artifacts`, or the five scheduling
+and run tables, the tool is neither listed nor callable (`unknown_tool` on
+`/mcp`, `404 not_found` on its HTTP path), like `kogane.reported-state.read`.
 
-The committed owner MCP grant holds `records.read` over `"*"`, so by
-configuration `kogane.identity.read` is listed to that client.
+`kogane.reports.read` takes `{ reportId?, view?, offset?, decimalPolicy? }`:
+without `reportId` it is the list (`offset` only), with it the detail
+(`view: "body"`, the default) or the explanation (`view: "explanation"`);
+`view` or `decimalPolicy` without `reportId` is `400 invalid_request`. The
+list is the operator's list, so it names restricted reports too. The detail
+and explanation are the operator route's answer with one difference, ADR
+0072's rule for an agent read: a restricted report, or one without a complete
+run and without its body, is `403 evidence_restricted` on both views, and a
+report whose body has left R2 is `404 not_found`, the codes `/export`
+answers; the operator page re-displays the first and shows the second as
+`unavailable`. No argument reaches `/export`.
+
+`kogane.collection-quality.read` takes `{ source?, offset? }`: without
+`source` the summary (which takes no `offset`), with it that source's cells.
+Its cells carry provider fetch-unit keys (card tokens, account digests,
+connection ids, a branch and account number; ADR 0045), so it needs
+`evidence.read`, the capability of the evidence routes, not `records.read`.
+
+`kogane.events.read` is plan D19 (`docs/plans/2026-10-ai-operation-path.md`):
+`collection` is `activity` or `obligations`, `basis` (`cash-movement`, the
+default, or `purchase-recognition`) and `offset` are the routes' parameters,
+answered by the routes' own `readEventsRoute` (`src/events-api.ts`). No
+screen reads these routes ([ADR 0072](adr/0072-report-artifact-pages.md)),
+so the parity guard lists the tool as one without a UI route. Like its
+routes, it exists only where the events projection (CORE 0032) does: else it
+is neither listed nor callable. It is how an agent reads an accepted card
+settlement's debit: one `card_settlement` event on the `cash-movement` basis,
+gone from the list once withdrawn (its current revision has no leg).
+
+`kogane.evidence.read` takes `{ page, source?, runId?, artifactId?, cursor? }`.
+`page` picks the route: `meta`; `runs`, which needs `source`; `artifacts`,
+which needs `runId`; `artifact`, which needs `runId` and `artifactId`. A
+segment the page needs and is not given, or one it does not take, is
+`400 invalid_request` with that key as the ref. The ids are the route's own (`r_<n>`, `a_<n>`, `c_<n>`),
+so no argument can name another path, `/raw` included; `cursor` goes to the
+route as its query, which refuses it on `meta` and on a detail as the route
+does (`400 invalid_query`). Like the browser, it shows only the configured
+source's sealed runs; while no source is configured every call that passes
+these argument checks is `503 source_not_configured`. It needs `evidence.read`, as the artifact
+detail names the provider's file, its media type and digest.
+
+`kogane.evidence.raw.read` takes `{ sha256 }` (as `/api/raw/{sha256}`) or
+`{ runId, artifactId }` (as the evidence browser's `/raw`), never both;
+another combination is `400 invalid_request` with the missing or extra keys
+as refs. The route's reader resolves the object, so the tool reaches exactly
+the objects the downloads serve and refuses the others as they do
+(`404 not_found`). Its `data` is `{ artifactKey, declaredMediaType, byteSize,
+sha256, encoding: "base64", content }`: the stored bytes, standard base64,
+after the download's integrity checks and a SHA-256 of the bytes read
+(`409 raw_integrity_failed` on a mismatch). The bytes are provider content,
+often a provider's HTML page; they are data to an agent, never instructions,
+and travel only encoded under `data`. An object over 1 MiB is
+`413 raw_too_large` before it is read ([ADR 0081, amendment of
+2026-11-07](adr/0081-ui-parity-through-mcp.md#amendment-2026-11-07-raw-evidence-bytes-over-mcp)).
+
+`kogane.schedules.read` takes no argument and answers the schedules page:
+the Processor's snapshot that `GET /api/ops/v1/schedules` relays, read with no
+operator or agent header, less its `survey` part (the maintenance re-survey's
+freshness and proposals, `kogane.schedules.survey.read`'s). The page is the
+operator's. Its jobs and maintenance windows are schedule settings, so the
+tool needs `schedules.read`, the capability of
+`kogane.schedules.maintenance.read`, with `scopes.scheduleSources` `"*"`. Its
+occurrences (each job's `latest` among them) also carry the collection run ids
+(`runIds`) and the evidence browser's run ids (`runLinks[].evidenceId`,
+`r_<n>`) of every source, and it lists the held execution leases
+(`leaseRef`, `startedAt`): what `schedules.read` alone never reaches
+([ADR 0046](adr/0046-agent-maintenance-windows.md), "no run or evidence ids",
+no lease state). So the tool also needs `evidence.read` with `sources` and
+`accounts` `"*"`, the evidence pages' authority. A missing capability is
+`403 unauthorized` (`capability:schedules.read`, `capability:evidence.read`);
+a narrower scope `403 evidence_restricted` (`scope:scheduleSource`,
+`scope:source`, `scope:account`). A `leaseRef` read here releases nothing:
+the release stays the operator's. A
+refusal from the Processor is its status and code, as the route relays it; an
+unreachable Processor is `503 scheduling_unavailable`. While
+`SCHEDULES_ENABLED` is off the tool is neither listed nor callable.
+
+Every MCP client holds the whole-store grant
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), so each of these
+tools is listed to it.
 
 ### Reconstructed state
 
@@ -969,6 +1107,10 @@ attenuates it.
    and `sub`, and names the caller **`mcp-client:<sub>`**.
 5. The grant is the whole-store grant (ADR 0084), and the tool runs.
 
+Through the MCP Portal ([route](#which-client-connects-and-how)), the
+Portal is the client of steps 1–3; each person's own client signs in at the
+Portal's Access application and calls `https://mcp.takuk.me/mcp`.
+
 | Assertion reaching the Worker                                            | On `/mcp`                                  | On every other route                           |
 | ------------------------------------------------------------------------ | ------------------------------------------ | ---------------------------------------------- |
 | MCP application (`aud` = `ACCESS_MCP_AUDIENCE`)                          | caller `mcp-client:<sub>`, agent-only      | `401 authentication_required`                  |
@@ -996,7 +1138,8 @@ are unchanged.
 ### Endpoint and transport
 
 - URL: `https://<app-host>/mcp` (or a dedicated hostname routed to this
-  Worker, if the gaps below require one).
+  Worker, if the gaps below require one). Clients register the Portal URL
+  `https://mcp.takuk.me/mcp` instead ([route](#which-client-connects-and-how)).
 - Served by the official MCP TypeScript SDK, `@modelcontextprotocol/server`
   (pinned): the initialize-based revisions through its stateless Streamable
   HTTP transport and the stateless 2026-07-28 revision through
@@ -1041,12 +1184,20 @@ mapping, the grant shape and the local checks are the same for all of them.
 If an existing connection reports that it needs reauthentication, follow that
 runbook.
 
-| Client                                          | Flow it presents ([Claude][claude-auth], [ChatGPT][openai-auth], [Codex][codex-mcp])                                                                                                                                                                      | Owner creates in Cloudflare                                                                  | Worker mapping           | Grants                                                            | Client-side registration                                                                                       |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| claude.ai (also Claude Desktop and mobile)      | OAuth 2.0 code + PKCE `S256`; discovery from the `401`; CIMD if advertised, else DCR; redirect `https://claude.ai/api/mcp/auth_callback`; calls from `160.79.104.0/21`                                                                                    | the MCP Access application with Managed OAuth, an identity policy, that redirect URI allowed | `mcp-client:<owner-sub>` | none (ADR 0084); nothing in `AGENT_GRANTS` or `OPERATOR_SUBJECTS` | Customize → Connectors → Add custom connector → URL, sign in, OAuth client "Register automatically"            |
-| ChatGPT (developer mode app)                    | OAuth 2.1 code + PKCE `S256`; `resource` on authorize and token; CIMD, DCR or a predefined client; redirect `https://chatgpt.com/connector_platform_oauth_redirect` if the server returns `iss`, else `https://chatgpt.com/connector/oauth/{callback_id}` | the same application; both redirect forms allowed (`https://chatgpt.com/connector/oauth/*`)  | `mcp-client:<owner-sub>` | none                                                              | Settings → Apps → Advanced settings → Developer mode; create an app with the URL and OAuth                     |
-| Codex (CLI, IDE extension, ChatGPT desktop app) | OAuth via `codex mcp login`; CIMD, else DCR; local callback listener                                                                                                                                                                                      | the same application with "allow localhost/loopback clients" on                              | `mcp-client:<owner-sub>` | none                                                              | `[mcp_servers.kogane] url = "https://<app-host>/mcp"` in `~/.codex/config.toml`, then `codex mcp login kogane` |
-| Claude Code (optional)                          | OAuth with its own CIMD, else DCR; loopback redirect on any port                                                                                                                                                                                          | as Codex                                                                                     | `mcp-client:<owner-sub>` | none                                                              | `claude mcp add --transport http kogane https://<app-host>/mcp`, then `/mcp` to sign in                        |
+**Route (owner, 2026-11-07, [ADR 0047 amendment](adr/0047-mcp-client-connection.md#amendment-clients-connect-through-the-mcp-portal-2026-11-07)):**
+claude.ai, ChatGPT and Grok register the Cloudflare MCP Portal
+`https://mcp.takuk.me/mcp`, not the origin URL. Their redirect URIs are
+allowed on the Portal's Access application ("MCP Portal"); the origin
+application allows only the Portal's own callbacks. The table below describes
+each client's OAuth flow; read "the same application" as the Portal's.
+Codex and Claude Code rows need loopback on the Portal application before use.
+
+| Client                                          | Flow it presents ([Claude][claude-auth], [ChatGPT][openai-auth], [Codex][codex-mcp])                                                                                                                                                                      | Owner creates in Cloudflare                                                                 | Worker mapping           | Grants                                                            | Client-side registration                                                                                         |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| claude.ai (also Claude Desktop and mobile)      | OAuth 2.0 code + PKCE `S256`; discovery from the `401`; CIMD if advertised, else DCR; redirect `https://claude.ai/api/mcp/auth_callback`; calls from `160.79.104.0/21`                                                                                    | the Portal's Access application, that redirect URI allowed                                  | `mcp-client:<owner-sub>` | none (ADR 0084); nothing in `AGENT_GRANTS` or `OPERATOR_SUBJECTS` | Customize → Connectors → Add custom connector → URL, sign in, OAuth client "Register automatically"              |
+| ChatGPT (developer mode app)                    | OAuth 2.1 code + PKCE `S256`; `resource` on authorize and token; CIMD, DCR or a predefined client; redirect `https://chatgpt.com/connector_platform_oauth_redirect` if the server returns `iss`, else `https://chatgpt.com/connector/oauth/{callback_id}` | the same application; both redirect forms allowed (`https://chatgpt.com/connector/oauth/*`) | `mcp-client:<owner-sub>` | none                                                              | Settings → Apps → Advanced settings → Developer mode; create an app with the URL and OAuth                       |
+| Codex (CLI, IDE extension, ChatGPT desktop app) | OAuth via `codex mcp login`; CIMD, else DCR; local callback listener                                                                                                                                                                                      | the same application with "allow localhost/loopback clients" on                             | `mcp-client:<owner-sub>` | none                                                              | `[mcp_servers.kogane] url = "https://mcp.takuk.me/mcp"` in `~/.codex/config.toml`, then `codex mcp login kogane` |
+| Claude Code (optional)                          | OAuth with its own CIMD, else DCR; loopback redirect on any port                                                                                                                                                                                          | as Codex                                                                                    | `mcp-client:<owner-sub>` | none                                                              | `claude mcp add --transport http kogane https://mcp.takuk.me/mcp`, then `/mcp` to sign in                        |
 
 ### Owner hand-off, in order
 
@@ -1065,14 +1216,25 @@ values. These steps do not assert that production or any client has passed.
    browser application's audience and policies remain unchanged. Current
    [portal policy documentation][cf-mcp-portal-policy] says Device Posture
    Checks are enforced; verify the actual upstream OAuth and refresh path
-   under those requirements instead of removing them.
+   under those requirements instead of removing them. Readback 2026-11-07:
+   the one policy, "Owner access", includes only the owner email (one-time
+   PIN) with no require or exclude: its Gateway requirement was emptied at
+   07:10 UTC (audit log), and the Gateway posture rule is no longer
+   referenced, so no posture check applies.
 3. _Managed OAuth readback_ — confirm it is enabled on the MCP application
-   (API `oauth_configuration.enabled`) with approved redirect URIs for the
-   intended clients: `https://claude.ai/api/mcp/auth_callback`,
-   `https://chatgpt.com/connector_platform_oauth_redirect` and
-   `https://chatgpt.com/connector/oauth/*`; allow localhost and loopback only
-   for approved Codex/Claude Code clients. Read back the configured access
-   token and grant-session lifetimes; do not infer them from defaults.
+   (API `oauth_configuration.enabled`) with only the Portal's callbacks as
+   redirect URIs, and that the Portal's Access application allows the
+   intended clients' redirect URIs, such as
+   `https://claude.ai/api/mcp/auth_callback`; allow localhost and loopback
+   only for approved Codex/Claude Code clients. Read back the configured
+   access token and grant-session lifetimes; do not infer them from defaults.
+   Readback 2026-11-07: the origin application allows only
+   `https://mcp.takuk.me/servers-callback` and the dashboard's Kogane server
+   callback, with localhost and loopback off (16:40 UTC); the Portal
+   application allows ChatGPT's two, claude.ai's, Grok's two and Cursor's two
+   (16:36 UTC; listed in the
+   [ADR 0047 amendment](adr/0047-mcp-client-connection.md#amendment-clients-connect-through-the-mcp-portal-2026-11-07)).
+   Access token 5 minutes, grant session 24 hours.
 4. _Normal deployment and domain attachment_ — deploy the reviewed commit
    through the ordinary pipeline and verify the live App bindings agree
    with both production configs: the dedicated `ACCESS_MCP_AUDIENCE` is
@@ -1092,7 +1254,8 @@ values. These steps do not assert that production or any client has passed.
    `authorization_response_iss_parameter_supported` in authorization-server
    metadata. Discovery must belong to the dedicated MCP application.
 6. _Client registration_ — add the intended connector/app/server using the
-   table above and `https://kogane-mcp.takuk.me/mcp`, signing in as the owner.
+   table above and the Portal URL `https://mcp.takuk.me/mcp`, signing in as
+   the owner.
    Registration and an OAuth login alone do not prove a tool works.
 7. _Fresh-session calls_ — in each intended client, start a new conversation
    with only this connector enabled and perform these existing tool calls:
@@ -1163,8 +1326,13 @@ later); unset `ACCESS_MCP_AUDIENCE` or remove the grant entry and deploy
 
 - **Protected-resource `resource`.** claude.ai requires the metadata's
   `resource` to equal the URL entered, path included ([Claude][claude-auth]);
-  the Managed OAuth page does not say what Access publishes. _Question:_
-  what does step 5 show?
+  the Managed OAuth page does not say what Access publishes. Observed
+  2026-11-07: the origin's protected-resource `resource` is
+  `https://kogane-mcp.takuk.me` (no `/mcp`); on 2026-11-04 the
+  [recovery runbook](mcp-recovery.md) recorded the exact `/mcp` resource.
+  claude.ai still connected to the origin `/mcp` URL directly on 2026-11-07
+  (about 15:20 UTC, before the route below was decided). Clients now
+  register the Portal, so the Portal's metadata is the one they check.
 - **Dedicated hostname.** The approved configuration selects a dedicated
   hostname. Its attachment to the Worker and its actual discovery/resource
   metadata still require steps 4–5; the declaration alone proves neither.
@@ -1178,7 +1346,8 @@ later); unset `ACCESS_MCP_AUDIENCE` or remove the grant entry and deploy
   requires `sub` and refuses an assertion without it.
 - **Device posture.** Preserve the approved identity and posture policy.
   Current Portal documentation supports posture checks; actual upstream
-  OAuth requests and refresh under that policy remain live checks.
+  OAuth requests and refresh under that policy remain live checks. Since
+  2026-11-07 07:10 UTC the policy has no posture requirement (step 2).
 - **Plans.** ChatGPT developer mode is documented for paid plans on the web,
   with conflicting statements about write actions on personal plans; the
   configured grant here is read-only. Verify registration and actual reads
@@ -1196,6 +1365,23 @@ What another tool set (maintenance, #560; operation tracking, #544) relies on:
   `tools/call` by name; a name the dispatcher returns `null` for is
   `unknown_tool`. A tool set that is off — for the deployment, or for this
   caller — is neither listed nor dispatched.
+- **Input schema.** Generate `inputSchema` from the tool's Zod argument schema
+  with `mcpInputSchema` (`src/mcp-input-schema.ts`), never with
+  `z.toJSONSchema` directly. MCP requires `type: "object"` at the root, and the
+  SDK client rejects the whole `tools/list` when one descriptor lacks it
+  ([#1078](https://github.com/risu729/kogane/issues/1078): Cloudflare's MCP
+  Portal could load no tool). Clients that pass a tool to a model also refuse
+  a root `oneOf`/`anyOf`/`allOf`, so a discriminated union of strict objects
+  is published as one closed object: every property, the discriminator as an
+  enum, only the properties every shape requires as required, and which
+  property belongs to which shape in the descriptions. The Zod schema still
+  validates each call against its exact shape. A `pattern` must not use a
+  Unicode property escape such as `\p{Cc}`: ChatGPT refuses that tool and
+  then imports none of the server's tools (2026-11-07, through the MCP
+  Portal), so spell the ranges out; `mcpInputSchema` throws on one.
+  `test/mcp-sdk-client.test.ts`
+  lists the whole catalogue with every tool-adding flag on through the
+  official SDK client, in both negotiation modes.
 - **Identity.** The dispatcher has the `AgentCaller` the boundary proved
   (`caller`, `src/auth.ts`) and its resolved `Grant`. Pass the caller object
   on; never derive a role from `caller.principal`, and never read identity
@@ -1507,37 +1693,42 @@ owner's agreement.
    (`services/app/test/card-settlements-read-tools.test.ts`). Every other published tool that is
    not a `ui` operation is listed with its reason (`kogane.capabilities`,
    `kogane.explain`, `kogane.reconcile.propose`,
-   `kogane.economic-readiness.read`, `kogane.audit.get`,
-   `kogane.schedules.maintenance.read`), so a new read tool is mapped to its
-   route and that route leaves the gaps.
+   `kogane.economic-readiness.read`, `kogane.events.read`, `kogane.audit.get`),
+   so a new read tool is mapped to its route and that route leaves the gaps.
 
-   | UI read route                                                                                                | MCP read                                                 |
-   | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
-   | `/api/v2/query`                                                                                              | `kogane.financial.query`, `kogane.context.open`          |
-   | `/api/identity/instrument-candidates`                                                                        | `kogane.instruments.candidates`                          |
-   | `/api/identity/account-candidates`                                                                           | `kogane.accounts.candidates`                             |
-   | `/api/identity/instrument-history`                                                                           | `kogane.instruments.history`                             |
-   | `/api/identity/instrument-coverage`                                                                          | `kogane.instruments.coverage`                            |
-   | `/api/v2/card-purchases`                                                                                     | `kogane.purchases.explain`                               |
-   | `/api/v2/reported-state`                                                                                     | `kogane.reported-state.read`                             |
-   | `/api/v2/reconstructed-state`                                                                                | `kogane.reconstructed-state.read`                        |
-   | `/api/v2/audit`                                                                                              | `kogane.audit.search`                                    |
-   | `/api/v2/reconciliation/card-statements-unmatched`                                                           | `kogane.card-settlements.unmatched`                      |
-   | `/api/v2/reconciliation/card-settlements`                                                                    | `kogane.card-settlements.read`                           |
-   | `/api/v2/reconciliation/card-settlements/ownership`                                                          | `kogane.card-settlements.ownership`                      |
-   | `/api/identity/connections`, `/api/identity/accounts`, `/api/identity/instruments`, `/api/identity/coverage` | `kogane.identity.read` ([UI read pages](#ui-read-pages)) |
+   | UI read route                                                                                                 | MCP read                                                                                                                                                       |
+   | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `/api/v2/query`                                                                                               | `kogane.financial.query`, `kogane.context.open`                                                                                                                |
+   | `/api/identity/instrument-candidates`                                                                         | `kogane.instruments.candidates`                                                                                                                                |
+   | `/api/identity/account-candidates`                                                                            | `kogane.accounts.candidates`                                                                                                                                   |
+   | `/api/identity/instrument-history`                                                                            | `kogane.instruments.history`                                                                                                                                   |
+   | `/api/identity/instrument-coverage`                                                                           | `kogane.instruments.coverage`                                                                                                                                  |
+   | `/api/v2/card-purchases`                                                                                      | `kogane.purchases.explain`                                                                                                                                     |
+   | `/api/v2/reported-state`                                                                                      | `kogane.reported-state.read`                                                                                                                                   |
+   | `/api/v2/reconstructed-state`                                                                                 | `kogane.reconstructed-state.read`                                                                                                                              |
+   | `/api/v2/audit`                                                                                               | `kogane.audit.search`                                                                                                                                          |
+   | `/api/v2/reconciliation/card-statements-unmatched`                                                            | `kogane.card-settlements.unmatched`                                                                                                                            |
+   | `/api/v2/reconciliation/card-settlements`                                                                     | `kogane.card-settlements.read`                                                                                                                                 |
+   | `/api/v2/reconciliation/card-settlements/ownership`                                                           | `kogane.card-settlements.ownership`                                                                                                                            |
+   | `/api/identity/connections`, `/api/identity/accounts`, `/api/identity/instruments`, `/api/identity/coverage`  | `kogane.identity.read` ([UI read pages](#ui-read-pages))                                                                                                       |
+   | `/api/meta`, `/api/overview`, `/api/filter-options`                                                           | `kogane.store.read` ([UI read pages](#ui-read-pages))                                                                                                          |
+   | `/api/transactions`, `/api/balances`, `/api/positions`, `/api/artifacts`                                      | `kogane.observations.list` ([UI read pages](#ui-read-pages))                                                                                                   |
+   | `/api/artifacts/:id`, `/api/observations/:kind/:id`                                                           | `kogane.observations.get` ([UI read pages](#ui-read-pages))                                                                                                    |
+   | `/api/v2/balances/latest`, `/api/v2/balances/history`                                                         | `kogane.balances.read` ([UI read pages](#ui-read-pages))                                                                                                       |
+   | `/api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                          | `kogane.rewards.read` ([UI read pages](#ui-read-pages))                                                                                                        |
+   | `/api/v2/reported-holdings-change`                                                                            | `kogane.reported-holdings-change.read` ([UI read pages](#ui-read-pages))                                                                                       |
+   | `/api/v2/reports`, `/api/v2/reports/:id`, `/api/v2/reports/:id/explanation`                                   | `kogane.reports.read` ([UI read pages](#ui-read-pages))                                                                                                        |
+   | `/api/collection-quality`, `/api/collection-quality/:source`                                                  | `kogane.collection-quality.read` ([UI read pages](#ui-read-pages))                                                                                             |
+   | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact` | `kogane.evidence.read` ([UI read pages](#ui-read-pages))                                                                                                       |
+   | `/api/raw/:sha256`, `/api/evidence/v1/runs/:run/artifacts/:artifact/raw`                                      | `kogane.evidence.raw.read` ([UI read pages](#ui-read-pages))                                                                                                   |
+   | `/api/ops/v1/schedules`                                                                                       | `kogane.schedules.read` ([UI read pages](#ui-read-pages)) without the survey proposals, `kogane.schedules.maintenance.read` and `kogane.schedules.survey.read` |
 
-   The 29 gaps, by group:
+   The 2 gaps, by group:
 
-   | Group                    | Routes with no MCP read                                                                                                                                          |
-   | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | Page plumbing            | `/api/meta`, `/api/overview`, `/api/filter-options`                                                                                                              |
-   | v1 observations          | `/api/transactions`, `/api/balances`, `/api/positions`, `/api/artifacts`, `/api/artifacts/:id`, `/api/observations/:kind/:id`, `/api/raw/:sha256`                |
-   | Evidence browser         | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact`, `…/runs/:run/artifacts/:artifact/raw`             |
-   | Balances and rewards     | `/api/v2/balances/latest`, `/api/v2/balances/history`, `/api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                      |
-   | Reconciliation and state | `…/card-settlements/statements` (grouped by statement; `kogane.card-settlements.read` returns the same candidates ungrouped), `/api/v2/reported-holdings-change` |
-   | Reports and quality      | `/api/v2/reports`, `/api/v2/reports/:id`, `…/:id/explanation`, `…/:id/export`, `/api/collection-quality`, `/api/collection-quality/:source`                      |
-   | Operator pages           | `/api/ops/v1/schedules` (`kogane.schedules.maintenance.read` covers the maintenance part and `kogane.schedules.survey.read` the re-survey section)               |
+   | Group            | Routes with no MCP read                                                                                                      |
+   | ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+   | Card settlements | `…/card-settlements/statements` (grouped by statement; `kogane.card-settlements.read` returns the same candidates ungrouped) |
+   | Report export    | `/api/v2/reports/:id/export` (not served over MCP, [ADR 0072](adr/0072-report-artifact-pages.md) amendment)                  |
 
 ADR 0081 point 2 (no SQL in an MCP adapter) has its own guard,
 [`tests/mcp-tools-no-sql.test.ts`](../tests/mcp-tools-no-sql.test.ts).
