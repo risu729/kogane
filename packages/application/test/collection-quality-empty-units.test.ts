@@ -5,6 +5,9 @@ import { fullCoreSchema } from "../../read-model/test/card-usage-scale-fixture.t
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { queryCollectionQualityCells } from "../src/query/collection-quality.ts";
 import { validCollectionQualityCells } from "../../observation-shared/src/collection-quality-contract.ts";
+
+/** Every age is counted to this instant (collection-freshness-v1); after every synthetic capture. */
+const AS_OF = "2099-03-01T00:00:00.000Z";
 beforeAll(() => fullCoreSchema().close(), 60000);
 function executor(store: QualityStore): SqlExecutor {
   return {
@@ -31,6 +34,7 @@ test("new declared units with no artifacts remain visible, never current or empt
     const page = await queryCollectionQualityCells(executor(store), {
       sourceId: "vpass",
       offset: 0,
+      asOf: AS_OF,
     });
     expect(validCollectionQualityCells(page)).toBe(true);
     expect(page!.cells).toHaveLength(3);
@@ -48,6 +52,16 @@ test("new declared units with no artifacts remain visible, never current or empt
     }
     expect(page!.cells.find((cell) => cell.unitKey === "synthetic-card-auth")!.reasons).toContain(
       "user_action_required",
+    );
+    // The unit's own "a person must act" code explains its missing capture.
+    expect(
+      page!.cells.map((cell) => [cell.unitKey, cell.freshness.state, cell.freshness.ageDays]),
+    ).toEqual(
+      expect.arrayContaining([
+        ["synthetic-card-auth", "human-required", null],
+        ["synthetic-card-empty", "no-capture", null],
+        ["synthetic-card-unknown", "no-capture", null],
+      ]),
     );
     expect(
       page!.cells.find((cell) => cell.unitKey === "synthetic-card-unknown")!.reasons,
@@ -79,6 +93,7 @@ test("an artifact preserves its unknown declared unit outcome without inventing 
     const page = await queryCollectionQualityCells(executor(store), {
       sourceId: "vpass",
       offset: 0,
+      asOf: AS_OF,
     });
     expect(validCollectionQualityCells(page)).toBe(true);
     expect(page!.cells).toHaveLength(3);
@@ -118,6 +133,7 @@ test("an older parsed unit and a later failed empty attempt are both explained; 
     const before = await queryCollectionQualityCells(executor(store), {
       sourceId: "vpass",
       offset: 0,
+      asOf: AS_OF,
     });
     expect(before!.cells).toHaveLength(2);
     expect(before!.cells.find((cell) => cell.parser !== null)!.reasons).toContain(
@@ -138,6 +154,7 @@ test("an older parsed unit and a later failed empty attempt are both explained; 
     const after = await queryCollectionQualityCells(executor(store), {
       sourceId: "vpass",
       offset: 0,
+      asOf: AS_OF,
     });
     expect(after!.cells).toHaveLength(1);
     expect(after!.cells[0]!.newest.fetchRunId).toBe(recovered.run);
@@ -157,8 +174,11 @@ test("empty publication, absent identity, unresolved identity and a corrected ma
     });
     const parse = store.parse(run.artifacts[0]!, "sony-bank-history-json", { kind: "published" })!;
     const read = async () =>
-      (await queryCollectionQualityCells(executor(store), { sourceId: "sony-bank", offset: 0 }))!
-        .cells[0]!;
+      (await queryCollectionQualityCells(executor(store), {
+        sourceId: "sony-bank",
+        offset: 0,
+        asOf: AS_OF,
+      }))!.cells[0]!;
     const empty = await read();
     expect(empty.newest.observations).toBe(0);
     expect(empty.reasons).toContain("published_without_observations");

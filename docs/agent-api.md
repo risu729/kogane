@@ -324,9 +324,11 @@ registry entries. Units are never added together, the answer carries
 liabilities mean an asset subtotal is not even a lower bound (addendum 05 §5).
 
 Every row is re-checked against the grant before it is summed, and a subject
-scope reached through two scope pairs is refused with `incomplete_evidence`
-rather than counted twice (INV06). A scope larger than the projection's
-subtotal bound is refused with `budget_exceeded`, never partially summed. An
+scope counted twice in one unit (for example reached through two scope pairs)
+is refused with `incomplete_evidence` rather than counted twice (INV06). A
+subject that holds several units counts once in each unit. A scope larger
+than the projection's subtotal bound is refused with `budget_exceeded`, never
+partially summed. An
 unresolved, conflicting or stale measure inside the scope makes the answer
 `partial` and names the reason code; it never silently disappears from the
 figure.
@@ -703,6 +705,11 @@ answers; the operator page re-displays the first and shows the second as
 
 `kogane.collection-quality.read` takes `{ source?, offset? }`: without
 `source` the summary (which takes no `offset`), with it that source's cells.
+Each source and cell carries its freshness under `collection-freshness-v1`,
+counted to the answer's `freshnessAsOf`
+([evidence browser](evidence-browser.md#collection-quality-apicollection-quality)),
+and each summary source with a collector lists its provider's data types
+under `provider-data-types-v1` ([ADR 0087](adr/0087-provider-data-type-catalogue.md)).
 Its cells carry provider fetch-unit keys (card tokens, account digests,
 connection ids, a branch and account number; ADR 0045), so it needs
 `evidence.read`, the capability of the evidence routes, not `records.read`.
