@@ -866,3 +866,58 @@ test("pending runs without a terminal beyond the continuations read leave the re
   expect(second).toMatchObject({ continued: 3, continuedMissing: 3, listed: 1, registered: 1 });
   expect(sealed(harness)).toBe(1);
 });
+
+test("a pending run whose terminal now holds other bytes still spends a continuation", async () => {
+  // The open limit of ADR 0024's amendment of 2026-11-08: the new digest's
+  // row is blocked `terminal_digest_conflict` and the pending row stays
+  // pending, so it is continued, and spends a continuation, on every tick.
+  const harness = collectionHarness();
+  await persistPending(harness, "run-001");
+  harness.bucket.entries.delete(terminalKey(SOURCE, "run-001"));
+  await persistSyntheticRun(harness, {
+    run: { runId: "run-001" },
+    artifacts: [await artifact("other.json", '{"synthetic":"other"}')],
+  });
+  await persistPending(harness, "run-002");
+  walkPast(harness, "run-002");
+  const options: ScanOptions = { maxContinuations: 1 };
+  const first = await tick(harness, START_MS + HOUR_MS, options);
+  expect(first).toMatchObject({ continued: 1, continuedMissing: 0, blocked: 1, registered: 0 });
+  walkPast(harness, "run-002");
+  const second = await tick(harness, START_MS + HOUR_MS + 5 * 60 * 1000, options);
+  expect(second).toMatchObject({ continued: 1, alreadyJudged: 1, registered: 0 });
+  expect(sealed(harness)).toBe(0);
+  expect(
+    countOf(
+      harness,
+      `SELECT count(*) AS n FROM collection_runs
+        WHERE run_id = 'run-001' AND blocked_code = 'terminal_digest_conflict'`,
+    ),
+  ).toBe(1);
+});
+
+test("a pending run whose continuation throws still spends a continuation", async () => {
+  // The other open limit of the amendment of 2026-11-08: a throw records
+  // nothing either, but unlike a missing terminal it is not a one-read cost,
+  // so it still spends one and the run after it waits for the walk.
+  const harness = collectionHarness();
+  await persistPending(harness, "run-001");
+  await persistPending(harness, "run-002");
+  harness.db.exec(`CREATE TRIGGER synthetic_seal_failure BEFORE INSERT ON fetch_run_seals
+    WHEN (SELECT substr(source_run_key, 1, 7) FROM fetch_runs WHERE id = NEW.fetch_run_id)
+      = 'run-001'
+    BEGIN SELECT RAISE(ABORT, 'synthetic_unlisted_refusal'); END`);
+  const options: ScanOptions = { maxContinuations: 1 };
+  for (let i = 0; i < 2; i += 1) {
+    walkPast(harness, "run-002");
+    const summary = await tick(harness, START_MS + HOUR_MS + i * 5 * 60 * 1000, options);
+    expect(summary).toMatchObject({ continued: 1, continuedMissing: 0, failed: 1, registered: 0 });
+  }
+  expect(sealed(harness)).toBe(0);
+  // Once the cause is gone it registers, and run-002 is continued after it.
+  harness.db.exec("DROP TRIGGER synthetic_seal_failure");
+  walkPast(harness, "run-002");
+  const after = await tick(harness, START_MS + 2 * HOUR_MS, { maxContinuations: 2 });
+  expect(after).toMatchObject({ continued: 2, failed: 0, registered: 2 });
+  expect(sealed(harness)).toBe(2);
+});

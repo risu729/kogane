@@ -25,10 +25,10 @@ is still unregistered.
 
 ## 2. Two ways in, one use case
 
-| Path                         | Trigger                                                              | Boundedness                                                                                                      |
-| ---------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Queue consumer               | R2 event notification on the DATA bucket, `runs/` + `/terminal.json` | one batch of at most 10 messages, all sharing one registration budget of 500 operations (§3.3)                   |
-| `collection_scan` alarm lane | every 5 minutes                                                      | up to 5 staged registrations continued first, then one R2 list page (25 keys) and at most 5 registrations (§3.3) |
+| Path                         | Trigger                                                              | Boundedness                                                                                                                                                                                 |
+| ---------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Queue consumer               | R2 event notification on the DATA bucket, `runs/` + `/terminal.json` | one batch of at most 10 messages, all sharing one registration budget of 500 operations (§3.3)                                                                                              |
+| `collection_scan` alarm lane | every 5 minutes                                                      | up to 5 staged registrations continued first (of up to 25 pending runs read; one whose terminal is missing spends none), then one R2 list page (25 keys) and at most 5 registrations (§3.3) |
 
 Both call `registerTerminal(source, runId)`
 (`packages/application/src/collection/register-terminal.ts`). The queue only
@@ -345,7 +345,8 @@ the `registered` stage says `pending` and names the fetch run, and everything
 written so far stays in CORE, unsealed and invisible to normal readers. The
 next call reads what exists and does only what is missing. The
 `collection_scan` lane continues up to five pending runs, oldest first, before
-it lists anything, so a large run finishes over consecutive ticks instead of
+it lists anything (one whose terminal is not found spends none of the five;
+see below), so a large run finishes over consecutive ticks instead of
 waiting for the walk to come round to it. A registration that could not start
 because the invocation's budget was already spent is `deferred`: nothing was
 registered, the queue retries the message, the scan leaves its cursor, and an
@@ -374,7 +375,8 @@ continued at all; the walk still continues it when it lists its terminal, as
 before this amendment. It does not cover a pending run whose terminal key now
 holds other bytes: the new digest's row is blocked
 `terminal_digest_conflict`, the pending row stays pending, and it spends one
-of the five on every tick.
+of the five on every tick. Nor does it cover a pending run whose continuation
+throws on every tick: that records nothing either, and still spends one.
 
 The final step is never split by a yield, but an invocation can still end
 inside it. The next call then re-enters it: the run report is found under its

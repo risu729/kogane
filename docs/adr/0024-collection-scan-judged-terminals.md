@@ -496,11 +496,18 @@ say why.
   new digest) is not covered. Its continuation inserts a row for the new
   digest, which is blocked `terminal_digest_conflict` and answered from that
   row on later ticks, while the pending row stays pending and spends one of
-  the five on every tick (checked once on synthetic data, one such run over
-  three ticks, each `continued: 1` with the conflict counted in
-  `alreadyJudged`; no test pins it). A
-  terminal is written with a conditional put and never overwritten, so this
-  needs an object replaced outside the collectors.
+  the five on every tick (the first tick counts the conflict in `blocked`,
+  later ones in `alreadyJudged`). A terminal is written with a conditional
+  put and never overwritten, so this needs an object replaced outside the
+  collectors.
+- **Open limit:** a pending run whose continuation throws on every tick
+  (nothing recorded, so it stays the oldest) still spends one of the five,
+  as before this amendment, so five such runs still keep staged
+  continuation from the others, which wait for the walk; each throw is
+  counted in `failed` and logged as `collection_scan_registration_failed`.
+  A missing terminal costs exactly one R2 read, which is what makes 20 of
+  them a fixed bound; a throw can come after any number of operations, so
+  it is left bounded by the five.
 - A pending run whose terminal never comes back stays `pending` and is
   counted in the health route's `registration.pending` and oldest pending
   age for as long as it lasts; closing it needs a decision this amendment
@@ -522,5 +529,10 @@ say why.
   rest to the walk": with three runs read and one continuation, three runs
   without a terminal leave the fourth to the walk, which registers it on the
   next cycle.
+- "a pending run whose terminal now holds other bytes still spends a
+  continuation" and "a pending run whose continuation throws still spends a
+  continuation" pin the two open limits above: with one continuation, the
+  conflicting or throwing run takes it on every tick and the run after it is
+  not continued; the throwing one registers once its cause is gone.
 
 The existing collection scan suites pass unchanged.
