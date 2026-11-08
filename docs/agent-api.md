@@ -649,7 +649,7 @@ function, so they cannot disagree on a row, a page bound or a refusal code.
 | `kogane.rewards.read`                  | `GET /api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                                                                                         | `records.read` on `"*"` sources and accounts                                                    |
 | `kogane.reported-holdings-change.read` | `GET /api/v2/reported-holdings-change`, while `reportedStateOnDate` is served                                                                                                    | `records.read` on `"*"` sources and accounts                                                    |
 | `kogane.reports.read`                  | `GET /api/v2/reports`, `/api/v2/reports/{id}`, `/api/v2/reports/{id}/explanation`, while `reportArtifacts` is served; never `/export`                                            | `records.read` on `"*"` sources and accounts                                                    |
-| `kogane.collection-quality.read`       | `GET /api/collection-quality`, `/api/collection-quality/{source}`, while the scheduling and run tables exist                                                                     | `evidence.read` on `"*"` sources and accounts                                                   |
+| `kogane.collection-quality.read`       | `GET /api/collection-quality`, `/api/collection-quality/{source}`, `/api/collection-quality/{source}/accounts`, while the scheduling and run tables exist                        | `evidence.read` on `"*"` sources and accounts                                                   |
 | `kogane.events.read`                   | `GET /api/v2/activity`, `/api/v2/obligations`, while `eventsV2` is served (no screen reads them)                                                                                 | `records.read` on `"*"` sources and accounts                                                    |
 | `kogane.evidence.read`                 | `GET /api/evidence/v1/meta`, `/api/evidence/v1/sources/{source}/runs`, `/api/evidence/v1/runs/{run}/artifacts`, `/api/evidence/v1/runs/{run}/artifacts/{artifact}`; never `/raw` | `evidence.read` on `"*"` sources and accounts                                                   |
 | `kogane.evidence.raw.read`             | `GET /api/raw/{sha256}`, `/api/evidence/v1/runs/{run}/artifacts/{artifact}/raw`, up to 1 MiB                                                                                     | `evidence.read` on `"*"` sources and accounts                                                   |
@@ -724,13 +724,22 @@ report whose body has left R2 is `404 not_found`, the codes `/export`
 answers; the operator page re-displays the first and shows the second as
 `unavailable`. No argument reaches `/export`.
 
-`kogane.collection-quality.read` takes `{ source?, offset? }`: without
-`source` the summary (which takes no `offset`), with it that source's cells.
-Each source and cell carries its freshness under `collection-freshness-v1`,
-counted to the answer's `freshnessAsOf`
-([evidence browser](evidence-browser.md#collection-quality-apicollection-quality)),
-and each summary source with a collector lists its provider's data types
-under `provider-data-types-v1` ([ADR 0087](adr/0087-provider-data-type-catalogue.md)).
+`kogane.collection-quality.read` takes `{ source?, view?, offset? }`:
+without `source` the summary (which takes no `offset` and no `view`), with it
+that source's cells (`view: "cells"`, the default; `offset` pages them) or the
+same cells regrouped by the accounts their captures' observations name
+(`view: "accounts"`, `GET /api/collection-quality/{source}/accounts`, unpaged,
+so `offset` with it is `400 invalid_request`;
+[ADR 0088](adr/0088-collection-quality-per-account.md)). The account view
+carries each account's stored label, under `data` like every page read, and
+its audit record counts the cells it read, never an account.
+Each source of the summary and each cell of `view: "cells"` carries its
+freshness under `collection-freshness-v1`, counted to the answer's
+`freshnessAsOf`
+([evidence browser](evidence-browser.md#collection-quality-apicollection-quality));
+the account view carries none. Each summary source with a collector lists its
+provider's data types under `provider-data-types-v1`
+([ADR 0087](adr/0087-provider-data-type-catalogue.md)).
 Its cells carry provider fetch-unit keys (card tokens, account digests,
 connection ids, a branch and account number; ADR 0045), so it needs
 `evidence.read`, the capability of the evidence routes, not `records.read`.
@@ -772,7 +781,10 @@ and travel only encoded under `data`. An object over 1 MiB is
 `413 raw_too_large` before it is read ([ADR 0081, amendment of
 2026-11-07](adr/0081-ui-parity-through-mcp.md#amendment-2026-11-07-raw-evidence-bytes-over-mcp)).
 
-`kogane.schedules.read` takes no argument and answers the schedules page:
+`kogane.schedules.read` takes no argument and answers the schedules page
+(each job's `collectionRequest` included: the CORE source a
+`kogane.ops.collection.request` names for it and whether the Processor would
+dispatch it, [schedules](schedules.md#収集を依頼-collection-request)):
 the Processor's snapshot that `GET /api/ops/v1/schedules` relays, read with no
 operator or agent header, less its `survey` part (the maintenance re-survey's
 freshness and proposals, `kogane.schedules.survey.read`'s). The page is the
@@ -1797,7 +1809,7 @@ owner's agreement.
    | `/api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                          | `kogane.rewards.read` ([UI read pages](#ui-read-pages))                                                                                                        |
    | `/api/v2/reported-holdings-change`                                                                            | `kogane.reported-holdings-change.read` ([UI read pages](#ui-read-pages))                                                                                       |
    | `/api/v2/reports`, `/api/v2/reports/:id`, `/api/v2/reports/:id/explanation`                                   | `kogane.reports.read` ([UI read pages](#ui-read-pages))                                                                                                        |
-   | `/api/collection-quality`, `/api/collection-quality/:source`                                                  | `kogane.collection-quality.read` ([UI read pages](#ui-read-pages))                                                                                             |
+   | `/api/collection-quality`, `/api/collection-quality/:source`, `/api/collection-quality/:source/accounts`      | `kogane.collection-quality.read` ([UI read pages](#ui-read-pages))                                                                                             |
    | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact` | `kogane.evidence.read` ([UI read pages](#ui-read-pages))                                                                                                       |
    | `/api/raw/:sha256`, `/api/evidence/v1/runs/:run/artifacts/:artifact/raw`                                      | `kogane.evidence.raw.read` ([UI read pages](#ui-read-pages))                                                                                                   |
    | `/api/ops/v1/schedules`                                                                                       | `kogane.schedules.read` ([UI read pages](#ui-read-pages)) without the survey proposals, `kogane.schedules.maintenance.read` and `kogane.schedules.survey.read` |

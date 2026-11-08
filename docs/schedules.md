@@ -143,6 +143,50 @@ The trusted workflow refuses pre-alarm release/rollback targets before checkout
 and before any production mutation. Removing the ScheduleAlarm class requires a
 separate retirement migration; it is not an ordinary old-commit rollback.
 
+## 収集を依頼 (collection request)
+
+Owner decision 2026-11-08 03:19 UTC (Phase 3 plan, unit 3b): the operator can
+ask for a collection from this page. Each collection job a collector connection
+serves has a **収集を依頼** section. It sends `POST /api/ops/v1/collections`,
+the same application service as `kogane.ops.collection.request`
+([operations API](ops-api.md#collector-execution-adr-0048),
+[ADR 0048](adr/0048-operation-collector-dispatch.md)), so a request from the
+page and one from an MCP client are the same kind of stored operation.
+
+- **What the page reads first.** The snapshot gives each job a
+  `collectionRequest` field: the CORE source the request names (for example
+  job `prestia-globalpass` names `global-pass`, job `vpoint` names `v-point`)
+  and `dispatch`, the closed code the Processor's dispatch lane would act on:
+  `enabled`, `lane_disabled` (`OPS_DISPATCH_ENABLED` off) or
+  `connection_disabled` (the job is not in `OPS_COLLECTOR_DISPATCH_CONNECTIONS`).
+  The Processor computes it with the functions the lane decides with
+  (`services/processor/src/operations/collection-targets.ts`). It is `null`
+  for a job no collector serves for a request (`sbi-vc-keepalive`,
+  `processor-tick`, `smbc-direct`, `vpoint-pay`). `kogane.schedules.read`
+  returns the same field. `enabled` is not a promise of a start: a maintenance
+  window or a held lease still makes the request wait, and a missing collector
+  binding still declines it (`collector_binding_missing`).
+- **No button when it cannot run.** For `lane_disabled` and
+  `connection_disabled` the section says why and offers no button, because
+  such a request can only wait and expire after 24 hours.
+- **Confirmation.** **収集を依頼** opens a confirmation, not a request. It shows
+  the job's last run, whether an execution holds the source's lease (the
+  request then waits), the next scheduled run and the maintenance status, and
+  says that the collector runs its daily scope and that a started collection
+  cannot be taken back. **依頼を送信** sends the request; **やめる** sends
+  nothing.
+- **The request.** `{source, requestedScope: {from, to}, idempotencyKey}`:
+  the window is the date in Japan of the confirmation's first send (stored,
+  not applied: the collector runs its daily scope), and the key is
+  `ui-collect-<uuid>`, new for each confirmation. A retry after a failed or
+  lost answer reuses the key and the window, so it is the same payload and the
+  same operation even after midnight; a new confirmation is a new request. A
+  4xx answer other than 408 or 429 is shown as refused and not stored, with
+  its code. The answer shows the operation id.
+- **Following it.** The page does not read the operation yet. The request's
+  trail is `GET /api/ops/v1/operations/{id}`, and a finished run appears in
+  **取得履歴** like an alarm run.
+
 ## Official-site re-survey
 
 [ADR 0050](adr/0050-maintenance-survey-proposals.md). The Processor lane

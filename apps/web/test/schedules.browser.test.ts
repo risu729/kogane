@@ -19,7 +19,10 @@ describe.if(runnable)("operator schedule administration", () => {
   let snapshotReads = 0,
     snapshotStatus = 200,
     leaseResponse: (() => Promise<Response>) | null = null,
-    readAfterWrite: (() => Promise<void>) | null = null;
+    readAfterWrite: (() => Promise<void>) | null = null,
+    collectionResponse: (() => Promise<Response>) | null = null;
+  let collections: { body: Record<string, unknown>; origin: string | null; type: string | null }[] =
+    [];
   let writes: {
     path: string;
     body: Record<string, unknown>;
@@ -28,6 +31,8 @@ describe.if(runnable)("operator schedule administration", () => {
   }[] = [];
   beforeEach(() => {
     writes = [];
+    collections = [];
+    collectionResponse = null;
     snapshotReads = 0;
     snapshotStatus = 200;
     leaseResponse = null;
@@ -59,6 +64,14 @@ describe.if(runnable)("operator schedule administration", () => {
                 failureCode: null,
               }
             : null,
+        collectionRequest:
+          job.id === "sony-bank"
+            ? { source: "sony-bank", dispatch: "enabled" }
+            : job.id === "prestia-globalpass"
+              ? { source: "global-pass", dispatch: "connection_disabled" }
+              : job.id === "sbi-vc-keepalive"
+                ? null
+                : undefined,
       })),
       maintenance: [],
       occurrences: [],
@@ -83,6 +96,18 @@ describe.if(runnable)("operator schedule administration", () => {
           if (snapshotStatus !== 200)
             return Response.json({ error: "unavailable" }, { status: snapshotStatus });
           return Response.json(snapshot);
+        }
+        if (url.pathname === "/api/ops/v1/collections" && request.method === "POST") {
+          collections.push({
+            body: (await request.json()) as Record<string, unknown>,
+            origin: request.headers.get("origin"),
+            type: request.headers.get("content-type"),
+          });
+          if (collectionResponse) return collectionResponse();
+          return Response.json(
+            { operationId: `op_${"a".repeat(64)}`, status: "accepted" },
+            { status: 202 },
+          );
         }
         if (url.pathname.startsWith("/api/ops/v1/schedules/") && request.method === "POST") {
           const body = (await request.json()) as Record<string, unknown>;
@@ -666,6 +691,181 @@ describe.if(runnable)("operator schedule administration", () => {
     await page.close();
   }, 30000);
 
+  test("収集を依頼 shows the history first and posts one stored request only after confirmation", async () => {
+    snapshot.leases = [
+      { source: "sony-bank", leaseRef: "synthetic-lease", startedAt: "2026-10-05T00:00:00.000Z" },
+    ];
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      const confirm = card.getByRole("group", { name: "ソニー銀行の収集依頼の確認" });
+      await confirm.waitFor();
+      // What to read before sending: the last run, a running collection, the
+      // next scheduled run and the maintenance status.
+      expect(await confirm.textContent()).toContain("前回の実行");
+      expect(await confirm.textContent()).toContain("完了");
+      expect(await confirm.textContent()).toContain("終わるまで依頼は待機します");
+      expect(await confirm.textContent()).toContain("定例停止時間が見つかりません");
+      expect(collections).toEqual([]);
+      // Backing out sends nothing.
+      await confirm.getByRole("button", { name: "やめる", exact: true }).click();
+      expect(await card.getByRole("group", { name: "ソニー銀行の収集依頼の確認" }).count()).toBe(0);
+      expect(collections).toEqual([]);
+
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText(`依頼ID op_${"a".repeat(64)}`, { exact: false }).waitFor();
+      expect(collections).toHaveLength(1);
+      const sent = collections[0]!;
+      expect(sent.origin).toBe(origin);
+      expect(sent.type).toBe("application/json");
+      expect(Object.keys(sent.body).sort()).toEqual(["idempotencyKey", "requestedScope", "source"]);
+      expect(sent.body["source"]).toBe("sony-bank");
+      const scope = sent.body["requestedScope"] as { from: string; to: string };
+      expect(scope.from).toMatch(/^\d{4}-\d{2}-\d{2}$/u);
+      expect(scope.to).toBe(scope.from);
+      expect(sent.body["idempotencyKey"]).toMatch(/^ui-collect-[0-9a-f-]{36}$/u);
+      // The confirmation closes; another request needs another confirmation.
+      expect(await card.getByRole("button", { name: "依頼を送信" }).count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a retry after a failed answer is the same request; a new confirmation is a new one", async () => {
+    let fail = true;
+    collectionResponse = async () =>
+      fail
+        ? Response.json({ error: "commit_failed" }, { status: 503 })
+        : Response.json(
+            { operationId: `op_${"b".repeat(64)}`, status: "accepted" },
+            { status: 202 },
+          );
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("同じ依頼として扱われます", { exact: false }).waitFor();
+      fail = false;
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText(`依頼ID op_${"b".repeat(64)}`, { exact: false }).waitFor();
+      expect(collections).toHaveLength(2);
+      expect(collections[1]!.body["idempotencyKey"]).toBe(collections[0]!.body["idempotencyKey"]);
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await page.waitForFunction(() => document.body.textContent?.includes("依頼ID"));
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).waitFor();
+      expect(collections).toHaveLength(3);
+      expect(collections[2]!.body["idempotencyKey"]).not.toBe(
+        collections[0]!.body["idempotencyKey"],
+      );
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a retry after JST midnight re-sends the first send's window under the same key", async () => {
+    let fail = true;
+    collectionResponse = async () =>
+      fail
+        ? Response.json({ error: "commit_failed" }, { status: 503 })
+        : Response.json(
+            { operationId: `op_${"c".repeat(64)}`, status: "accepted" },
+            { status: 202 },
+          );
+    const page = await browser.newPage();
+    try {
+      // 23:59 JST on 2026-11-08.
+      await page.clock.setFixedTime(new Date("2026-11-08T14:59:00Z"));
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("同じ依頼として扱われます", { exact: false }).waitFor();
+      // 00:01 JST on 2026-11-09: the retry is still the same payload.
+      await page.clock.setFixedTime(new Date("2026-11-08T15:01:00Z"));
+      fail = false;
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText(`依頼ID op_${"c".repeat(64)}`, { exact: false }).waitFor();
+      expect(collections).toHaveLength(2);
+      expect(collections[0]!.body["requestedScope"]).toEqual({
+        from: "2026-11-08",
+        to: "2026-11-08",
+      });
+      expect(collections[1]!.body).toEqual(collections[0]!.body);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a refused request says it was not stored instead of offering a retry", async () => {
+    collectionResponse = async () =>
+      Response.json({ error: "method_not_allowed" }, { status: 405 });
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("保存されていません（method_not_allowed）", { exact: false }).waitFor();
+      expect(await card.getByText("同じ依頼として扱われます", { exact: false }).count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a request's result and pending key survive the card's new revision", async () => {
+    let fail = true;
+    collectionResponse = async () =>
+      fail
+        ? Response.json({ error: "commit_failed" }, { status: 503 })
+        : Response.json(
+            { operationId: `op_${"c".repeat(64)}`, status: "accepted" },
+            { status: 202 },
+          );
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("同じ依頼として扱われます", { exact: false }).waitFor();
+      // Saving the job's settings bumps its revision, which remounts the card.
+      await card.getByRole("button", { name: "設定を保存", exact: true }).click();
+      await card.getByText("保存しました。", { exact: true }).waitFor();
+      fail = false;
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText(`依頼ID op_${"c".repeat(64)}`, { exact: false }).waitFor();
+      expect(collections).toHaveLength(2);
+      expect(collections[1]!.body["idempotencyKey"]).toBe(collections[0]!.body["idempotencyKey"]);
+      await card.getByRole("button", { name: "設定を保存", exact: true }).click();
+      await card.getByText(`依頼ID op_${"c".repeat(64)}`, { exact: false }).waitFor();
+      expect(writes.filter((w) => w.path === "/api/ops/v1/schedules/sony-bank")).toHaveLength(2);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a connection the Processor would not start offers no request", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const disabled = page.locator(".schedule-card").filter({ hasText: "GLOBAL PASS" });
+      await disabled.getByText("24時間後に期限切れ", { exact: false }).waitFor();
+      expect(await disabled.getByRole("button", { name: "収集を依頼" }).count()).toBe(0);
+      // No target at all (absent, or null): no section.
+      const vpass = page.locator(".schedule-card").filter({ hasText: "Vpass" });
+      expect(await vpass.getByRole("heading", { name: "収集を依頼" }).count()).toBe(0);
+      expect(collections).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
   test("the schedules and the maintenance editor pass the accessibility audit", async () => {
     snapshot.leases = [];
     const page = await browser.newPage({ viewport: { width: 1280, height: 960 } });
@@ -675,6 +875,13 @@ describe.if(runnable)("operator schedule administration", () => {
     expect(await auditView(page)).toEqual([]);
     await page.getByRole("button", { name: "停止時間を追加", exact: true }).click();
     await page.locator(".maintenance-editor").waitFor();
+    expect(await auditView(page)).toEqual([]);
+    await page
+      .locator(".schedule-card")
+      .filter({ hasText: "ソニー銀行" })
+      .getByRole("button", { name: "収集を依頼", exact: true })
+      .click();
+    await page.getByRole("group", { name: "ソニー銀行の収集依頼の確認" }).waitFor();
     expect(await auditView(page)).toEqual([]);
     await page.close();
   }, 60_000);

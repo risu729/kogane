@@ -96,6 +96,7 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/reports/:id/explanation": ["kogane.reports.read"],
   "/api/collection-quality": ["kogane.collection-quality.read"],
   "/api/collection-quality/:source": ["kogane.collection-quality.read"],
+  "/api/collection-quality/:source/accounts": ["kogane.collection-quality.read"],
   "/api/evidence/v1/meta": ["kogane.evidence.read"],
   "/api/evidence/v1/sources/:source/runs": ["kogane.evidence.read"],
   "/api/evidence/v1/runs/:run/artifacts": ["kogane.evidence.read"],
@@ -141,6 +142,8 @@ const TOOLS_WITHOUT_UI_ROUTE: Readonly<Record<string, string>> = {
 const NOT_READ_ROUTES: Readonly<Record<string, string>> = {
   "/api/command/v1": "the change lifecycle's path prefix constant",
   "/api/command/v1/:operation": "POST only: the catalogue's command.* operations (guard 1)",
+  "/api/ops/v1/collections":
+    "POST only: ops.collection.request (guard 1), the schedules page's 収集を依頼",
   "/api/evidence/v1": "the evidence browser's path prefix constant",
 };
 

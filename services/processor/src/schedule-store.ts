@@ -38,6 +38,7 @@ import {
 import type { SqlWrite } from "../../../packages/storage-d1/src/core/operations.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { boundedText, INTERNAL_BODY_LIMIT } from "./bounded-body.ts";
+import { collectionRequestTarget } from "./operations/collection-targets.ts";
 export { jobs };
 export interface ScheduleRow {
   id: string;
@@ -1477,6 +1478,7 @@ export async function scheduleSnapshot(env: Env): Promise<ScheduleSnapshot> {
         verifiedAt: ref?.verified_at ?? "",
       },
       latest: latest.find((o) => o.scheduleId === row.id) ?? null,
+      collectionRequest: collectionRequestTarget(env, row.id),
     });
   }
   // The re-survey's freshness and proposals (ADR 0050); a read failure hides
