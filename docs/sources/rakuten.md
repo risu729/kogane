@@ -388,7 +388,7 @@ HTML/OIDC support C candidates, not B without stable renewable read-only session
 
 Immediately stop run/discard or encrypt-isolate cookies/sessions/artifacts on:
 
-- CAPTCHA/Akamai-denial/401-403-429/loops/locks
+- CAPTCHA/Akamai-denial/HTTP 401, 403 or 429/loops/locks
 - Password-passkey-OTP resets-registration-changes/phone re-registration/additional identity checks
 - Payment/revolving-installment/top-up/send-receive/withdraw/exchange-investment/application-entry-settings confirmations
 - Potential unknown `POST/PUT/PATCH/DELETE` or paths/schemas without read-only verification

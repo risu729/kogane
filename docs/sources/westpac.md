@@ -133,7 +133,7 @@ browser/device fingerprints. BioCatch exposes `setCustomerSessionId`, `changeCon
 credential POST alone cannot recreate session/device context.
 
 Akamai CDN alone does not establish WAF/Bot Manager. No unauthenticated CAPTCHA, but explicit BioCatch/
-fingerprints, no proof adaptive challenges/rate limits absent. Stop without bypass at challenges/403-429/
+fingerprints, no proof adaptive challenges/rate limits absent. Stop without bypass at challenges/HTTP 403 or 429/
 CAPTCHA/abnormal redirects/lock warnings.
 
 ## 5. Roles of official app / Web
@@ -302,7 +302,7 @@ end first-party RE; CDR does not change private route ratings. [Kogane PR #5](ht
 - SMS/push sending/security devices/app notification/passkey-biometric/device enrollment starts
 - Payment/transfer/PayID/new payee/card lock-PIN-limits-Digital Card/time renewal-withdrawal/loan-account-card-profile-contact settings
 - CDR consent creation/extension/scopes-account selection/revocation-withdrawal needed
-- CAPTCHA/bot challenges/403-429/rate limits/locks/abnormal redirects/terms-warnings
+- CAPTCHA/bot challenges/HTTP 403 or 429/rate limits/locks/abnormal redirects/terms-warnings
 - Non-established GET/read endpoints/private undocumented endpoints/other-brand data mixed
 - PII in reports/exports might enter Git/logs/fixtures/remote storage
 

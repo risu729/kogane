@@ -72,7 +72,8 @@ Deployed dedicated Worker/R2 on 2026-08-31. Standard Worker `fetch()` reached un
 `/vpoint/api/v2/common_settings` with statically identified app/OS/User-Agent/device headers; HTTP 200 JSON.
 Response not account data, not stored in R2.
 
-Shows Cloudflare edge IP/TLS fingerprint alone is not rejected, not authenticated API token/device binding.
+This shows requests are not rejected for the Cloudflare edge IP or TLS fingerprint alone. It does not prove
+authenticated-API token/device binding.
 After owner app bootstrap, verify refresh/balance/transactions individually.
 
 ## Supplementary notification email ledger

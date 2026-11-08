@@ -234,7 +234,7 @@ C to B candidate; Wesmo! remains C candidate until device/integrity independence
 
 Stop payment/top-up/send-receive-withdraw/points-use/ICOCA-top-up/booking-cancellation/bank-card-eKYC-profile
 settings/OTP-passkeys-recovery/outgoing-call requests/Bot challenges/pinning-attestation/unknown hosts-paths-
-redirects/POST-PUT-PATCH-DELETE (except owner bootstrap)/401-403-409-429/locks/PII failures/schema drift.
+redirects/POST-PUT-PATCH-DELETE (except owner bootstrap)/HTTP 401, 403, 409 or 429/locks/PII failures/schema drift.
 Do not disable security controls.
 
 ## 12. Facts, hypotheses, and unverified items

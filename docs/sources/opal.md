@@ -259,7 +259,7 @@ as another collector.
 Stop: top-up/auto top-up/card register-link-activate-block-transfer/fare adjustment-refund/payment-profile-security
 changes/password recovery/OTP-MFA-reCAPTCHA-locks/unregistered contactless $1 authorizations/Bot challenges/
 pinning-attestation/unknown hosts-paths-redirects/POST-PUT-PATCH-DELETE (except owner login bootstrap)/
-401-403-409-423-429/PII redaction failure/unexpected schema-app version drift. Do not disable security controls.
+HTTP 401, 403, 409, 423 or 429/PII redaction failure/unexpected schema-app version drift. Do not disable security controls.
 
 ## 12. Facts, hypotheses, and unverified items
 
