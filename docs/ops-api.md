@@ -592,8 +592,8 @@ only. A collected execution with no reported run is `unpublished`
 (`run_not_reported`); one whose runs do not settle within 48 h of collection is
 `unpublished` (`publication_not_observed`).
 
-Limits: no deployed collector has served `runOperation` and no connection is
-enabled; the requested window is not applied; one collector call is awaited
+Limits: only the connections `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names are
+started; the requested window is not applied; one collector call is awaited
 per Processor invocation, inside the tick. The web UI cannot request an
 operation, and no page lists operations: the list route
 ([ADR 0086](adr/0086-operator-operations-list.md)) is read over HTTP and MCP
@@ -834,11 +834,16 @@ Synthetic data only.
   Processor tick starting one request over a named service binding).
 
 The tests above use no deployed instance, live Access policy, real provider or
-session. In production, `sony-bank` served `runOperation` for an MCP client's
-collection request, and the run it reported was registered and every
-parse-selected artifact published; the other connections the committed
-configuration names had not run a request when they were added. Dated MCP
-client connection evidence is in the [recovery runbook](mcp-recovery.md).
+session. In production, each of the five connections the committed
+configuration names (`sony-bank`, `sbi-securities`, `mobile-suica`,
+`moneyforward-me`, `myjcb`) served `runOperation` for one MCP client collection
+request, sent one connection at a time. Each reported one run, which was
+registered with every parse-selected artifact published, and the execution
+ended `published` with no failure code. Four of them also reached `projected`
+and request `status: completed`; `sony-bank`'s was published before
+`projected` tracing was deployed, so its `projected` reads
+`projection_revision_unrecorded`. Dated MCP client connection evidence is in
+the [recovery runbook](mcp-recovery.md).
 
 Acceptance ids and the test that carries each:
 
