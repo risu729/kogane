@@ -175,11 +175,22 @@ export class ScheduleAlarm extends DurableObject<Env> {
         const attemptRef = crypto.randomUUID();
         trace.phase = "claim";
         trace.occurrenceId = retry.id;
+        // Fence settings/reservation changes made while the alarm write awaited.
+        // A lost fence consumes none of this occurrence's single retry.
         const claimed = await this.env.DB.prepare(`UPDATE collection_schedule_occurrences
           SET status='started',failure_code=NULL,finished_at=NULL,retry_claimed_at=?,attempt_ref=?
           WHERE id=? AND status='not_dispatched' AND retry_claimed_at IS NULL
-            AND dispatch_protocol=1 AND dispatched_at IS NULL`)
-          .bind(new Date(now).toISOString(), attemptRef, retry.id)
+            AND dispatch_protocol=1 AND dispatched_at IS NULL
+            AND EXISTS(SELECT 1 FROM collection_schedules s
+              WHERE s.id=? AND s.enabled=1 AND s.revision=? AND s.next_nominal_at=?)`)
+          .bind(
+            new Date(now).toISOString(),
+            attemptRef,
+            retry.id,
+            id,
+            row.revision,
+            row.next_nominal_at,
+          )
           .run();
         if (claimed.meta.changes !== 1) return null;
         logAlarm({
