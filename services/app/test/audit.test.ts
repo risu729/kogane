@@ -446,6 +446,45 @@ describe("the operations routes (ui)", () => {
   });
 });
 
+describe("another site's Origin on the command and operations routes (ADR 0078)", () => {
+  it("is recorded once as a refusal by code, and reaches neither the Processor nor the store", async () => {
+    const forwarded: Request[] = [];
+    const environment = { PIPELINE: pipeline(() => Response.json({}), forwarded) };
+    const headers = { origin: "https://elsewhere.invalid", "content-type": "text/plain" };
+    const operations = () =>
+      env.DB.prepare("SELECT count(*) AS n FROM ops_requests").first<number>("n");
+    const before = await operations();
+    for (const [path, operation, body] of [
+      ["/api/command/v1/commit", "command.commit", {}],
+      [
+        "/api/ops/v1/collections",
+        "ops.collection.request",
+        {
+          source: "sony-bank",
+          requestedScope: { from: "2026-01-01", to: "2026-01-31" },
+          idempotencyKey: "audit-cross-site",
+        },
+      ],
+    ] as const) {
+      const refused = await call(path, { body, headers, environment });
+      expect(refused.response.status, path).toBe(403);
+      expect((await recordsOf(refused.requestId)).map(brief), path).toEqual([
+        {
+          path: "ui",
+          subject: OPERATOR,
+          principal: OPERATOR,
+          principalKind: "human",
+          operation,
+          result: "refused",
+          resultCode: "origin_not_allowed",
+        },
+      ]);
+    }
+    expect(forwarded).toEqual([]);
+    expect(await operations()).toBe(before);
+  });
+});
+
 describe("the schedule settings routes (ui)", () => {
   const settings = (suffix: string, answer: () => Response, extra: Call = {}) =>
     call(`/api/ops/v1/schedules${suffix}`, {

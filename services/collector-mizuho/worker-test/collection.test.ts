@@ -55,6 +55,7 @@ function collection(partial = false): MizuhoCollection {
     partial,
     issues: partial ? ["history-pagination-unverified"] : [],
     failedUnits: [],
+    failedUnitCodes: {},
     artifacts: [
       {
         artifactKey: "account-list.html",
@@ -469,7 +470,37 @@ describe("Mizuho Worker and shared DATA integration", () => {
     const manifest = await manifestFor(response);
     expect(manifest.providerOutcome).toBe("failed");
     expect(manifest.artifacts).toEqual([]);
-    expect(manifest.units[0]?.safeErrorCode).toBe("collection-unit-failed");
+    expect(manifest.units[0]?.safeErrorCode).toBe("authentication-required");
+    expect(manifest.safeErrorCode).toBe("authentication-required");
+  });
+  it("names the closed code of a history unit that failed after the account list", async () => {
+    const partial = collection();
+    partial.partial = true;
+    partial.issues = ["read-http-error"];
+    partial.failedUnits = ["ordinary:001:7654321"];
+    partial.failedUnitCodes = { "ordinary:001:7654321": "read-http-error" };
+    const handler = createCollection({
+      login: async () => session,
+      collect: async () => partial,
+      persist: persistMizuhoRun,
+    });
+    const manifest = await manifestFor(await handler(env));
+    const failed = manifest.units.find((unit) => unit.unitKey === "ordinary:001:7654321");
+    expect(failed?.safeErrorCode).toBe("read-http-error");
+  });
+  it("keeps the generic code for a code outside the collector's closed set", async () => {
+    const partial = collection();
+    partial.partial = true;
+    partial.failedUnits = ["ordinary:001:7654321"];
+    partial.failedUnitCodes = { "ordinary:001:7654321": "Provider text" };
+    const handler = createCollection({
+      login: async () => session,
+      collect: async () => partial,
+      persist: persistMizuhoRun,
+    });
+    const manifest = await manifestFor(await handler(env));
+    const failed = manifest.units.find((unit) => unit.unitKey === "ordinary:001:7654321");
+    expect(failed?.safeErrorCode).toBe("collection-unit-failed");
   });
   it("cannot publish a terminal when sanitization or persistence fails", async () => {
     const before = await listTerminals(env.DATA, { source: "mizuho-bank" });

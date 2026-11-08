@@ -48,7 +48,11 @@ export interface OperationListQuery {
   limit: number;
 }
 
-/** One request as the list shows it: what `readOperation` shows, without stages or execution. */
+/**
+ * One request as the list shows it: what `readOperation` shows, without stages
+ * or execution, and with the stored `status` (the `projected` stage is not
+ * derived here, so READ is never read).
+ */
 export interface OperationSummary {
   operationId: string;
   kind: OperationKind;

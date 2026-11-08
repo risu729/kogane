@@ -8,6 +8,7 @@ import {
 const states = {
   "unresolved-candidates": 1,
   "resolved-by-decision": 2,
+  "resolved-by-rule": 0,
   "shared-without-decision": 0,
   "kept-separate": 0,
   "no-candidate": 3,

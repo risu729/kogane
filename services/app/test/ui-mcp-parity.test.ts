@@ -5,6 +5,11 @@
 // 2. Every API route the web UI reads has an MCP read, through the explicit
 //    route-to-tool map below, and every other published read tool is mapped
 //    or listed, so a tool that closes a route gap cannot leave it listed.
+// 3. Every change kind the lifecycle plans (the confirmation page's
+//    `command.*` operations: card settlement accept, withdraw and reject, the
+//    ownership review, identity) is one `kogane.command.plan` accepts and one
+//    `kogane.command.approve` and `.commit` decide, so guard 1's `command.*`
+//    entries cover every kind a screen can decide.
 //
 // ADR 0081 point 2 (no SQL in MCP adapters) is guarded by
 // `tests/mcp-tools-no-sql.test.ts`.
@@ -26,6 +31,15 @@ import {
   OPERATION_CATALOGUE,
   type OperationName,
 } from "../../../packages/application/src/operation-path/catalogue.ts";
+import {
+  CHANGE_KINDS,
+  ECONOMIC_EVENT_PLANNERS,
+  isCardReviewKind,
+  isEconomicEventKind,
+  REVIEW_PLANNERS,
+} from "../../../packages/application/src/index";
+import { DELEGATED_COMMAND_TOOLS } from "../src/delegated-command-tools";
+import { EXECUTABLE_DECISION_CAPABILITIES } from "../src/delegated-decision-tools";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 import { routeServes, uiApiPatterns } from "./ui-routes";
 
@@ -299,5 +313,46 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
       names.filter((name) => !tools.has(name)).map((name) => `${route} -> ${name}`),
     );
     expect(unpublished).toEqual([]);
+  });
+});
+
+describe("change kinds the lifecycle plans are decided over MCP (ADR 0081, point 1)", () => {
+  // A kind is plannable once its planner exists; the card purchase review and
+  // economic-event kinds are refused `unsupported_semantics` to every caller
+  // until theirs is registered, so they are not screen operations yet.
+  const plannable = CHANGE_KINDS.filter((kind) =>
+    isCardReviewKind(kind)
+      ? REVIEW_PLANNERS[kind] !== undefined
+      : isEconomicEventKind(kind)
+        ? ECONOMIC_EVENT_PLANNERS[kind] !== undefined
+        : true,
+  );
+
+  it("includes the card settlement decisions", () => {
+    expect(plannable).toEqual(
+      expect.arrayContaining([
+        "card-settlement.accept",
+        "card-settlement.withdraw",
+        "card-settlement.reject",
+        "relation.accept",
+        "relation.reject",
+      ]),
+    );
+  });
+
+  it("kogane.command.plan publishes every plannable kind", () => {
+    const plan = DELEGATED_COMMAND_TOOLS.find((tool) => tool.name === "kogane.command.plan")!;
+    const kind = (plan.inputSchema as { properties: { kind: { enum: string[] } } }).properties.kind;
+    expect(kind.enum).toEqual(expect.arrayContaining([...plannable]));
+  });
+
+  it("kogane.command.approve and .commit decide every plannable kind's family", () => {
+    const undecided = plannable.filter(
+      (kind) =>
+        !(EXECUTABLE_DECISION_CAPABILITIES as readonly string[]).includes(
+          `commands.decide.${kind.split(".")[0]}`,
+        ),
+    );
+    expect(undecided).toEqual([]);
   });
 });

@@ -350,7 +350,9 @@ metadata — so the boundary has its own tests:
   - _internal failures_ (G3-08): a store failure inside a tool or the tool
     list is `500 internal_error` in both eras, as on the HTTP route, with the
     exception text in neither the answer nor the log, and an exchange logs
-    only the request line;
+    only the request line (since 2026-11-08 a failing availability check,
+    which is every store read the tool list makes, is its route's
+    `503 catalogue_read_failed` instead, through the same rethrow);
   - the connection in both eras, `Origin`, the SDK's refusals, tool
     definitions against the SEP-986 names and Claude Code's load-time checks,
     `tools/list` and `tools/call` under each single capability, and the UI's

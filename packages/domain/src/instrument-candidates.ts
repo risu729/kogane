@@ -11,10 +11,11 @@
 // two instruments: each side together with every identifier that maps to its
 // instrument now, so a decision already taken binds the identifiers it
 // joined. Nothing here changes a
-// mapping: adoption is a human `identity.assign` through the change lifecycle,
-// and a candidate whose two identifiers already map to one instrument is
-// reported as adopted because of that mapping, never because of this module
-// (INV07).
+// mapping: adoption is an `identity.assign` through the change lifecycle, or
+// the one recorded automatic rule of `instrument-auto-adoption.ts` (ADR 0055
+// amendment 2026-11-08), and a candidate whose two identifiers already map to
+// one instrument is reported as adopted because of that mapping, never
+// because of this module (INV07).
 //
 // A display name is never evidence. Two identifiers whose names are equal
 // after normalisation, and that share no identifier value, are at most a
@@ -43,6 +44,12 @@ export interface InstrumentIdentifierFacts {
   instrumentId: string;
   /** How the current mapping was made. */
   mappingMethod: "rule" | "manual";
+  /**
+   * The current mapping is a rule mapping that an automatic adoption decision
+   * wrote (a `rule` assign in the decision log, `instrument-auto-v1`), not the
+   * identity rule's own provider-local mapping. Absent means false.
+   */
+  adoptedByRule?: boolean;
   /** The current target instrument's kind. */
   kind: string;
   namespace: string;
@@ -547,9 +554,12 @@ export function instrumentCandidates(
  * - `unresolved-candidates`: at least one candidate awaits a decision;
  * - `resolved-by-decision`: it shares its instrument with another identifier
  *   and a manual mapping made that so;
- * - `shared-without-decision`: it shares its instrument and no manual mapping
- *   among the sharers explains it. No rule produces this today; it is shown
- *   instead of being read as resolved;
+ * - `resolved-by-rule`: it shares its instrument, no manual mapping among the
+ *   sharers explains it, and an automatic adoption decision
+ *   (`instrument-auto-v1`, `instrument-auto-adoption.ts`) does;
+ * - `shared-without-decision`: it shares its instrument and no recorded
+ *   decision among the sharers explains it. No rule produces this today; it
+ *   is shown instead of being read as resolved;
  * - `kept-separate`: every candidate it had was rejected;
  * - `no-candidate`: nothing pairs it. It stays what its own mapping says
  *   (provider-local, for example), which is not a global identification.
@@ -557,6 +567,7 @@ export function instrumentCandidates(
 export const IDENTIFIER_RESOLUTION_STATES = [
   "unresolved-candidates",
   "resolved-by-decision",
+  "resolved-by-rule",
   "shared-without-decision",
   "kept-separate",
   "no-candidate",
@@ -598,7 +609,9 @@ export function identifierResolutions(
     else if (sharedWith.length > 0)
       state = sharers.some((other) => other.mappingMethod === "manual")
         ? "resolved-by-decision"
-        : "shared-without-decision";
+        : sharers.some((other) => other.adoptedByRule === true)
+          ? "resolved-by-rule"
+          : "shared-without-decision";
     else if (mine.some((candidate) => candidate.status === "rejected")) state = "kept-separate";
     else state = "no-candidate";
     return {

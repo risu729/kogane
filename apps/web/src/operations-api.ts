@@ -123,6 +123,10 @@ export const EXECUTION_REASON_LABELS: Readonly<Record<string, string>> = {
   parse_failed: "解析に失敗しました",
   not_adopted: "解析結果が採用されていません",
   registration_blocked: "取得記録への登録が拒否されました",
+  projection_behind: "読み取りモデルがまだこの公開を反映していません",
+  read_model_unavailable: "読み取りモデルを確認できません",
+  read_model_context_changed: "読み取りモデルと台帳の世代が一致しません",
+  projection_revision_unrecorded: "公開時の台帳の版が記録されていません",
 };
 
 export const RUN_STATE_LABELS: Readonly<Record<string, string>> = {
