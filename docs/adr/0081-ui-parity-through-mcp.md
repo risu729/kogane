@@ -105,7 +105,18 @@ What the code does today (main `02a915a`):
   An inventory of screen operations and read pages against MCP tools is the first
   slice. It goes on the roadmap's parallel track A.
 - Phase 2's card settlement accept and withdraw, and the ownership review, are
-  done only when they also work over MCP under a delegation.
+  done only when they also work over MCP under a delegation. (2026-11-07,
+  plan unit 2g.2: they do, through the catalogue's existing `command.*`
+  operations and their tools `kogane.command.plan`, `.simulate`, `.approve`
+  and `.commit`, which an MCP client uses as itself since ADR 0084. No
+  settlement-specific catalogue entry was added. Reject works the same way.
+  `services/app/test/card-settlement-decisions-parity.test.ts` runs each
+  decision on the page's path and over MCP and compares the receipts and
+  refusals. A third guard in `ui-mcp-parity.test.ts` fails when a change kind
+  becomes plannable that the MCP decision tools do not decide
+  ([agent API](../agent-api.md#change-lifecycle-decisions)). It calls the
+  App's, the Processor's and the writer's family gates, which all derive
+  from one list, `DECISION_FAMILIES`.)
 - New screens cost one more adapter each. Because both adapters call one service,
   the service's tests cover both paths. Each adapter tests only its own
   translation and authorization.
@@ -115,7 +126,8 @@ What the code does today (main `02a915a`):
 ## Verification
 
 - Today: the three tools that ran their own SQL (above) call
-  `delegatedWritesRemaining` and `ownOperationSource` in `packages/application`.
+  `delegatedWritesRemaining` and `operationSource` (named `ownOperationSource`
+  until ADR 0086 made the read whole-store) in `packages/application`.
   The helpers they shared with the screens moved too:
   the agent service's scoped parse-run window is the read model's
   `sourceParseRuns`, the proposal store is `commandProposalStore` in
@@ -160,6 +172,15 @@ What the code does today (main `02a915a`):
   on `mcp`, whose catalogue paths are now `ui` and `mcp`
   (`services/app/test/schedule-tools.test.ts`;
   [agent access](../agent-api.md#maintenance-windows)).
+- 2026-11-07: `GET /api/v2/reconciliation/card-settlements` and its
+  `/ownership` read call `readCardSettlementsForGrant` and
+  `readCardOwnershipForGrant`, the functions `kogane.card-settlements.read`
+  and `kogane.card-settlements.ownership` call, under the browser's reader
+  grant ([amendment below](#amendment-one-request-rule-and-one-budget-for-the-card-settlement-reads-2026-11-07)).
+- 2026-11-07: its `/statements` read (the list grouped by statement) calls
+  `readCardSettlementStatementsForGrant`, the function the new
+  `kogane.card-settlements.statements` calls, so the route leaves the read
+  guard's gaps ([amendment below](#amendment-the-grouped-card-settlement-list-over-mcp-2026-11-07)).
 - 2026-11-07: `schedules.survey.decide` is on `ui` and `mcp`
   (`kogane.schedules.survey.decide`, which an MCP client applies as itself under
   ADR 0084; five review reasons, and any disable, re-enable or overlap, kept
@@ -219,3 +240,140 @@ is an R0 read of one object in the audit log, which records the object's
 count, never its bytes. `services/app/test/page-read-raw.test.ts` compares
 the decoded bytes with both downloads and checks the refusals, the size
 bound and tampered bytes.
+
+## Amendment: one request rule and one budget for the card settlement reads (2026-11-07)
+
+- Status: proposed
+- Date: 2026-11-07
+
+### Context
+
+The `カード照合` page route `GET /api/v2/reconciliation/card-settlements` (and
+`/ownership`) parsed its own query string and called the queries directly,
+while `kogane.card-settlements.read` and `.ownership` called
+`readCardSettlementsForGrant` and `readCardOwnershipForGrant`, which wrap the
+same queries. The two answered one request differently, against point 2: an
+`offset` of `-1` was `400 invalid_offset` on the route and
+`400 invalid_query` over MCP, and the route read any offset up to 1,000,000
+while a tool refused `offset + 50` above the grant's `maxRows` (1000) with
+`413 budget_exceeded`.
+
+### Options considered
+
+1. **The route's rules for both.** The service would answer
+   `invalid_offset` (a new code in the closed `financial-error-v1` list that
+   `kogane.capabilities` publishes) and take no row budget from the page's
+   grant, or a grant past `GRANT_LIMITS.maxRows`, which `validGrant` refuses.
+   This widens a published agent contract and makes the operator page an
+   exception to the per-call bound ADR 0084 keeps for every caller.
+2. **Keep two rule sets, deep paging only for the operator.** The divergence
+   this amendment removes.
+3. **The service's rules for both (chosen).** The route is an adapter: it
+   turns its query into the tool's arguments and reads under the reader grant
+   a signed-in browser holds over every GET route (`readerGrant`), as the
+   unmatched statements and account candidate pages already do. The budget is
+   the grant's: the reader grant and every MCP client's full grant hold
+   `maxRows` 1000, so both page to offset 950.
+
+### Decision
+
+Option 3. On the route, a malformed list or ownership request is the
+service's `400 invalid_query` as `financial-error-v1` (was `invalid_offset` or
+`invalid_query` as `{error, requestId}`), and a list read with `offset + 50`
+above 1000 is `413 budget_exceeded` (was a page). The `/statements` grouping,
+which has no MCP read yet, keeps its own rules until it gets one.
+
+### Consequences
+
+- The page, the agent HTTP route and MCP give one status and one body for the
+  same request.
+- The page does not read the flat list; a statement's
+  candidates and a review's competitors are paged 50 at a time, 36 per
+  statement on average on the scaled store. A statement or competitor list of more than
+  1,000 candidates is readable only to offset 950, and the page's next-page
+  link past it is refused. Raising that is a change to `GRANT_LIMITS` or to
+  the read's paging, for both paths at once.
+- Other routes keep `invalid_offset` until their own adapters are reviewed.
+
+### Verification
+
+`services/app/test/card-settlements-read-tools.test.ts` sends offsets -1, 0,
+950, 951, 1,000,000, 1,000,001, 10^20, 1.5, non-numeric and empty to the
+route, the agent HTTP route and MCP and gets one status and body on all three.
+`services/app/test/card-settlements-api-differential.test.ts` runs the frozen
+route handler (`card-settlements-api-frozen.ts`) beside the adapter on a
+store of 1,101 candidates and finds every answer byte-identical except these
+two changes; the existing route tests are unchanged.
+
+## Amendment: the grouped card settlement list over MCP (2026-11-07)
+
+- Status: proposed
+- Date: 2026-11-07
+
+### Context
+
+`GET /api/v2/reconciliation/card-settlements/statements` (#1021) is what the
+`カード照合` page reads first: ten statements a page, each with its candidate
+count and its newest five candidates plus any accepted one, the one to look at
+first leading. It had no MCP read, so it was a listed gap of the read-route
+guard, and the amendment above left it on its own request rules until it got
+one. `kogane.card-settlements.read` returns the same candidates, but
+ungrouped, without the counts and without the lead the page chooses.
+
+### Options considered
+
+1. **A `view: "statements"` argument on `kogane.card-settlements.read`.**
+   One tool for the page's route family. But the grouped answer has another
+   shape (`statements`, not `items`), takes `offset` only, and pages ten
+   statements instead of 50 reviews, so the tool's published input schema
+   would have to allow combinations the service then refuses, its result would
+   be one of two shapes, and its audit row count would mean two things.
+   Elsewhere `view` selects rows within one answer shape
+   (`kogane.accounts.candidates`, and the measure view of the UI read pages on
+   main), not another page.
+2. **A sibling tool, `kogane.card-settlements.statements` (chosen).** As
+   #1031 did for `/ownership` and #1029 for the unmatched statements: in the
+   card settlement family each route has its own tool, input schema, catalogue
+   operation and audit row count, and `CARD_SETTLEMENT_TOOL_NAMES` serves them
+   on one condition. The existing tool's published schema is unchanged.
+3. **Keep the gap.** Against point 1.
+
+### Decision
+
+Option 2. `readCardSettlementStatementsForGrant` in
+`packages/application/src/query/card-settlements-read.ts` takes the request
+and the grant, grades `records.read` on a whole-store scope as the other two
+reads do, refuses any key but `offset` and any `offset` that is not an integer
+from 0 to 1,000,000 with `400 invalid_query`, and an `offset + 10` above the
+grant's `maxRows` with `413 budget_exceeded`, before it reads; it then calls
+the unchanged `queryCardSettlementStatements`. The route and the tool are
+adapters over it, as the amendment above decides for the other card settlement
+reads. The new catalogue operation `card-settlements.statements` is R0,
+`records.read`, on the agent paths, and its audit record counts the
+statements on the page.
+
+### Consequences
+
+- A malformed grouped request is `400 invalid_query` as `financial-error-v1`
+  where the route answered `invalid_offset` or `invalid_query` as
+  `{error, requestId}`, and a grouped page past offset 990 is
+  `413 budget_exceeded` where the route read on. Every page below that depth
+  is unchanged byte for byte.
+- No SQL moved or changed: the service calls the query the route called.
+- The new tool is a catalogue and MCP addition, which the owner approves
+  before it merges.
+
+### Verification
+
+`services/app/test/card-settlements-api-differential.test.ts` compares the
+route with the frozen handler (`card-settlements-api-frozen.ts`) on the
+existing requests, and `card-settlement-statements-differential.test.ts` on
+every tenth grouped offset from 0 to 1,000 over 1,002 statements, and finds
+every page below offset 990 byte-identical and every deeper one, which the
+frozen handler served, refused. `services/app/test/card-settlements-read-tools.test.ts` sends the
+grouped list's offsets 0, 990, 991, 1,000,000, malformed offsets and every
+other key to the route, the agent HTTP route and MCP and gets one status and
+body on all three, and checks the listing, the absence while the route is not
+served, and the R0 audit records. `services/app/test/ui-mcp-parity.test.ts`
+maps the route to the tool. `packages/application/test/card-settlements-read.test.ts`
+covers the service's refusals before any read.

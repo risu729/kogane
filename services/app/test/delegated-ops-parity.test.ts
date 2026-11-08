@@ -1,4 +1,4 @@
-// ADR 0081 for the six operations requests: each is served on `/mcp` to an
+// ADR 0081 for the operations requests and their reads: each is served on `/mcp` to an
 // MCP client acting as itself (ADR 0063, ADR 0084) by the same service as its HTTP route, so the
 // two transports give the same answer and store the same request for the
 // same input. Real Worker, official MCP transport; identities, configuration
@@ -49,8 +49,19 @@ beforeEach(() => {
       throw new Error("unexpected external request");
     }),
   );
+  // One clock for every call of a test: the two transports' answers carry
+  // times derived from `now` (`acceptedAt`, `updatedAt`, and the collector's
+  // `expiresAt` from `acceptedAt`), so calls a second apart would differ by
+  // when they ran, not by what they answered. The instant is the real one,
+  // because the store's own guards on a confirmation compare with SQLite's
+  // clock.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date());
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 async function send(path: string, body: unknown, vars: Record<string, unknown>) {
   const mcp = path === "/mcp";
@@ -105,10 +116,11 @@ async function route(path: string, body?: unknown) {
   return { status: response.status, body: (await response.json()) as Record<string, unknown> };
 }
 
-/** What one stored request says, without who asked and when. */
+/** What one stored request says, without who asked; under one clock, when is the same. */
 async function stored(operationId: unknown) {
   const row = await env.DB.prepare(
-    "SELECT kind,source_id,status,dispatch_state,request_json FROM ops_requests WHERE operation_id=?",
+    `SELECT kind,source_id,status,dispatch_state,request_json,created_at,updated_at,available_at_ms
+      FROM ops_requests WHERE operation_id=?`,
   )
     .bind(operationId)
     .first();
@@ -117,21 +129,11 @@ async function stored(operationId: unknown) {
 }
 
 /**
- * A receipt without the fields that name its own operation or its time. The
- * execution's `expiresAt` is counted from the moment the request was accepted,
- * so the HTTP and MCP requests, made a few calls apart, differ by a second
- * whenever they straddle one: it is compared as its lifetime after acceptance
- * (or null), which is the same on both transports.
+ * A receipt without the field that names its own operation. Its times stay:
+ * under one clock both transports must stamp and derive the same ones.
  */
 function receipt(body: Record<string, unknown>) {
-  const { operationId: _id, acceptedAt, updatedAt: _updated, ...rest } = body;
-  const execution = rest["execution"];
-  if (typeof execution === "object" && execution !== null) {
-    const { expiresAt, ...timeless } = execution as Record<string, unknown>;
-    const lifetimeMs =
-      expiresAt === null ? null : Date.parse(String(expiresAt)) - Date.parse(String(acceptedAt));
-    return { ...rest, execution: { ...timeless, lifetimeMs } };
-  }
+  const { operationId: _id, ...rest } = body;
   return rest;
 }
 
@@ -145,7 +147,7 @@ async function delegatedRecord(operation: string, idempotencyKey: string) {
 }
 
 describe("operations requests over MCP, as the MCP client (ADR 0081, ADR 0084)", () => {
-  it("publishes all six tools to every MCP client, whatever the operator list says (ADR 0084)", async () => {
+  it("publishes every operations tool to every MCP client, whatever the operator list says (ADR 0084)", async () => {
     expect((await listed(configuration())).sort()).toEqual([...OPS_TOOL_NAMES].sort());
     expect((await listed({ ...configuration(), OPERATOR_SUBJECTS: "[]" })).sort()).toEqual(
       [...OPS_TOOL_NAMES].sort(),
@@ -256,5 +258,110 @@ describe("operations requests over MCP, as the MCP client (ADR 0081, ADR 0084)",
         receipt(followedOverHttp.body),
       );
     }
+  });
+
+  it("lists and reads every principal's requests as the route does (ADR 0086, whole-store)", async () => {
+    const reason = "synthetic rebuild for list parity";
+    const overHttp = await route("/projections", { reason, idempotencyKey: "list-parity-http" });
+    expect(overHttp.status).toBe(202);
+    const overMcp = await tool("kogane.ops.projection.request", {
+      reason,
+      idempotencyKey: "list-parity-mcp",
+    });
+    expect(overMcp.isError).not.toBe(true);
+    const httpId = String(overHttp.body["operationId"]);
+    const mcpId = String(overMcp.structuredContent["operationId"]);
+
+    const httpList = await route("/operations?kind=projection&limit=50");
+    expect(httpList.status).toBe(200);
+    const mcpList = await tool("kogane.ops.operation.list", { kind: "projection", limit: 50 });
+    expect(mcpList.isError).not.toBe(true);
+    type Page = {
+      schemaVersion: string;
+      operations: Record<string, unknown>[];
+      nextCursor: unknown;
+    };
+    const httpPage = httpList.body as unknown as Page;
+    const mcpPage = mcpList.structuredContent as unknown as Page;
+    expect(mcpPage.schemaVersion).toBe(httpPage.schemaVersion);
+    const ids = (page: Page) => page.operations.map((entry) => entry["operationId"]);
+    // Reads are whole-store (owner, 2026-11-08 04:21 UTC): the operator in the
+    // browser and the MCP client are shown the same page, of both principals'
+    // requests, in the stored order.
+    const everyProjection = (
+      await env.DB.prepare(
+        "SELECT operation_id FROM ops_requests WHERE kind='projection' ORDER BY created_at DESC,operation_id DESC",
+      ).all<{ operation_id: string }>()
+    ).results.map((row) => row.operation_id);
+    const principals = (
+      await env.DB.prepare(
+        "SELECT DISTINCT principal FROM ops_requests WHERE operation_id IN (?,?) ORDER BY principal",
+      )
+        .bind(httpId, mcpId)
+        .all<{ principal: string }>()
+    ).results.map((row) => row.principal);
+    expect(principals).toEqual([DELEGATE, OWNER].sort());
+    expect(mcpPage).toEqual(httpPage);
+    expect(ids(mcpPage)).toEqual(everyProjection.slice(0, 50));
+    expect(ids(mcpPage)).toContain(mcpId);
+    expect(ids(mcpPage)).toContain(httpId);
+    // One service, one summary for the same request.
+    const summary = (page: Page, id: string) =>
+      receipt(page.operations.find((entry) => entry["operationId"] === id)!);
+    expect(summary(mcpPage, mcpId)).toEqual(summary(httpPage, httpId));
+    expect(JSON.stringify(mcpPage)).not.toContain(reason);
+    // Each transport reads the request the other principal made, and both
+    // answer the same receipt for it.
+    for (const id of [httpId, mcpId]) {
+      const overRoute = await route(`/operations/${id}`);
+      expect(overRoute.status, id).toBe(200);
+      const overTool = await tool("kogane.ops.operation.get", { operationId: id });
+      expect(overTool.isError, id).not.toBe(true);
+      expect(overTool.structuredContent, id).toEqual(overRoute.body);
+      expect(overTool.structuredContent["operationId"], id).toBe(id);
+    }
+
+    // Refusals are the service's and the schema's, never the refused value.
+    expect((await tool("kogane.ops.operation.list", { limit: 0 })).structuredContent).toEqual({
+      error: "invalid_request",
+      refs: ["limit"],
+    });
+    expect((await tool("kogane.ops.operation.list", { order: "asc" })).structuredContent).toEqual({
+      error: "invalid_request",
+      refs: ["(body)"],
+    });
+    expect(
+      (await tool("kogane.ops.operation.list", { cursor: `op_${"0".repeat(64)}` }))
+        .structuredContent,
+    ).toEqual({ error: "receipt_not_found", refs: ["cursor"] });
+
+    const recorded = await env.DB.prepare(
+      "SELECT principal_kind,path,subject,result,target_ref,diff_json FROM audit_records WHERE principal=? AND operation='ops.operation.list' AND result='read' ORDER BY recorded_at DESC,audit_id DESC LIMIT 1",
+    )
+      .bind(DELEGATE)
+      .first<Record<string, unknown>>();
+    expect(recorded).toMatchObject({
+      principal_kind: "delegated",
+      path: "mcp",
+      subject: OWNER,
+      result: "read",
+      target_ref: null,
+    });
+    expect(JSON.parse(String(recorded!["diff_json"]))).toEqual({
+      kind: "read",
+      rows: Math.min(everyProjection.length, 50),
+      truncated: everyProjection.length > 50,
+    });
+
+    // The operator's operation is a cursor of the MCP client's list like any
+    // other, and both transports answer the same next page.
+    const afterHttp = await tool("kogane.ops.operation.list", {
+      kind: "projection",
+      cursor: httpId,
+    });
+    expect(afterHttp.isError).not.toBe(true);
+    const afterHttpRoute = await route(`/operations?kind=projection&cursor=${httpId}`);
+    expect(afterHttpRoute.status).toBe(200);
+    expect(afterHttp.structuredContent).toEqual(afterHttpRoute.body);
   });
 });

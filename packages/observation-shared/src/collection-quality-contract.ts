@@ -1,5 +1,6 @@
-// The wire shape of `GET /api/collection-quality` and
-// `GET /api/collection-quality/<sourceId>` (docs/evidence-browser.md, ADR 0045).
+// The wire shape of `GET /api/collection-quality`,
+// `GET /api/collection-quality/<sourceId>` (docs/evidence-browser.md, ADR 0045)
+// and `GET /api/collection-quality/<sourceId>/accounts` (ADR 0088).
 //
 // What each collection stage of a source, and of each source × unit × dataset
 // × period, last did, in codes. Nothing here is an amount or a merchant: every
@@ -18,10 +19,17 @@
 // already pins), strict objects throughout, and the TypeScript types are
 // inferred from them, so the shape is stated once.
 import * as z from "zod/mini";
+import {
+  COLLECTION_FRESHNESS_POLICY,
+  COLLECTION_FRESHNESS_STATES,
+  collectionFreshness,
+  consistentFreshness,
+  tokyoDate,
+} from "../../domain/src/collection-freshness.ts";
 import { validInstantText } from "../../domain/src/time.ts";
 
 export const COLLECTION_QUALITY_PATH = "/api/collection-quality";
-export const COLLECTION_QUALITY_API_VERSION = 2;
+export const COLLECTION_QUALITY_API_VERSION = 4;
 /** Cells per page; the read fetches one more to report truncation. */
 export const COLLECTION_QUALITY_PAGE = 500;
 /** More schedules or sources than this in one summary is refused, never cut. */
@@ -145,6 +153,51 @@ export const CELL_REASONS = [
   "not_in_latest_run",
 ] as const;
 
+/**
+ * The data types a provider offers, in the vocabulary of the roadmap's layers
+ * 0–5 (`provider-data-types-v1`, ADR 0087). A type names what the data is,
+ * not where it is shown: `balance` (a deposit, cash, stored-value or margin
+ * balance), `cash_movement` (bank, wallet or stored-value movements),
+ * `card_usage` (card purchases and refunds), `card_statement` (statement and
+ * payment amounts), `position` (security or crypto holdings), `execution`
+ * (trades), `settlement_cash` (the cash account of a securities or crypto
+ * broker and its movements, kept apart from bank deposits because it settles
+ * trades),
+ * `asset_transfer` (security or crypto moved in or out), `income`
+ * (dividends, distributions, interest, staking or lending rewards),
+ * `valuation_history` (the provider's own valuation and its history, realized
+ * gains), `term_deposit` (term and other deposit contracts: principal,
+ * maturity, rate), `document` (statements and reports the provider delivers
+ * as files), `fx_rate` (the provider's exchange rates), and
+ * `reward_balance`, `reward_activity`, `reward_expiry` (points).
+ */
+export const PROVIDER_DATA_TYPES = [
+  "balance",
+  "cash_movement",
+  "card_usage",
+  "card_statement",
+  "position",
+  "execution",
+  "settlement_cash",
+  "asset_transfer",
+  "income",
+  "valuation_history",
+  "term_deposit",
+  "document",
+  "fx_rate",
+  "reward_balance",
+  "reward_activity",
+  "reward_expiry",
+] as const;
+/**
+ * `collected`: parsers publish it; `partial`: parsers publish part of it
+ * and the rest is tracked by an issue; `not_collected`: an issue tracks it.
+ */
+export const DATA_TYPE_STATUSES = ["collected", "partial", "not_collected"] as const;
+export const PROVIDER_DATA_TYPES_VERSION = "provider-data-types-v1";
+export type ProviderDataType = (typeof PROVIDER_DATA_TYPES)[number];
+export type DataTypeStatus = (typeof DATA_TYPE_STATUSES)[number];
+
 export type ScheduleKind = (typeof SCHEDULE_KINDS)[number];
 export type OccurrenceStatus = (typeof OCCURRENCE_STATUSES)[number];
 export type ProviderOutcome = (typeof PROVIDER_OUTCOMES)[number];
@@ -154,6 +207,10 @@ export type PeriodKind = (typeof PERIOD_KINDS)[number];
 export type CellState = (typeof CELL_STATES)[number];
 export type SourceReason = (typeof SOURCE_REASONS)[number];
 export type CellReason = (typeof CELL_REASONS)[number];
+export type {
+  CollectionFreshness,
+  CollectionFreshnessState,
+} from "../../domain/src/collection-freshness.ts";
 
 const CODE = /^[a-z][a-z0-9_]{0,63}$/u;
 const SOURCE = /^[a-z0-9][a-z0-9-]{0,99}$/u;
@@ -165,6 +222,41 @@ const text = z.string().check(z.minLength(1), z.maxLength(512));
 const count = z.int().check(z.nonnegative());
 const id = z.int().check(z.positive());
 const instant = z.string().check(z.refine(validInstantText));
+const date = z.string().check(z.regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u));
+
+/**
+ * `collection-freshness-v1` (packages/domain/src/collection-freshness.ts): the
+ * age in Asia/Tokyo civil days of the capture the data stands on, and its
+ * state. The pair is checked against the policy, never taken on trust.
+ */
+const freshness = z
+  .strictObject({
+    state: z.enum(COLLECTION_FRESHNESS_STATES),
+    ageDays: z.nullable(count),
+  })
+  .check(z.refine(consistentFreshness));
+
+/** The instant every age of one answer is counted to, and its civil date. */
+const freshnessAsOf = z
+  .strictObject({
+    policy: z.literal(COLLECTION_FRESHNESS_POLICY),
+    at: instant,
+    date,
+  })
+  .check(z.refine((value) => tokyoDate(value.at) === value.date));
+/** An age is the civil days from its capture to the answer's as-of date (clamped at 0). */
+function ageOf(
+  capturedAt: string | null | undefined,
+  asOfDate: string,
+  ageDays: number | null,
+): boolean {
+  if (capturedAt == null) return ageDays === null;
+  try {
+    return collectionFreshness(capturedAt, asOfDate, null).ageDays === ageDays;
+  } catch {
+    return false;
+  }
+}
 /** A list with no repeated entry: a reason or a code is stated once. */
 const distinct = <T extends z.ZodMiniType<string>>(entry: T, bound = 100) =>
   z.array(entry).check(
@@ -232,6 +324,35 @@ const fetchRun = z.nullable(
   }),
 );
 
+const parserName = z.string().check(z.regex(/^[a-z][a-z0-9-]{0,99}$/u));
+/** One data type of the provider-offered catalogue and whether it is collected. */
+const dataType = z
+  .strictObject({
+    type: z.enum(PROVIDER_DATA_TYPES),
+    status: z.enum(DATA_TYPE_STATUSES),
+    /** The parsers that publish it (registered parser names); none when not collected. */
+    parsers: distinct(parserName, 20),
+    /** The issue that tracks what is not collected; null when it is all collected. */
+    issue: z.nullable(id),
+  })
+  .check(
+    z.refine((value) =>
+      value.status === "collected"
+        ? value.parsers.length > 0 && value.issue === null
+        : value.status === "partial"
+          ? value.parsers.length > 0 && value.issue !== null
+          : value.parsers.length === 0 && value.issue !== null,
+    ),
+  );
+/** A catalogued source's data types, once each; null for a source the catalogue does not describe. */
+const dataTypes = z.nullable(
+  z.array(dataType).check(
+    z.minLength(1),
+    z.maxLength(PROVIDER_DATA_TYPES.length),
+    z.refine((values) => new Set(values.map((value) => value.type)).size === values.length),
+  ),
+);
+
 const unregistered = z.strictObject({
   collector: sourceId,
   blockedCode: z.nullable(code),
@@ -239,25 +360,46 @@ const unregistered = z.strictObject({
   newestSeenAt: instant,
 });
 
-const source = z.strictObject({
-  sourceId,
-  /** Collector (terminal) sources that register under this CORE source. */
-  collectors: distinct(sourceId),
-  schedules: z.array(schedule).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
-  latestFetchRun: fetchRun,
-  unregistered: z.array(unregistered).check(z.maxLength(100)),
-  reasons: distinct(z.enum(SOURCE_REASONS)),
-});
+const source = z
+  .strictObject({
+    sourceId,
+    /** Collector (terminal) sources that register under this CORE source. */
+    collectors: distinct(sourceId),
+    schedules: z.array(schedule).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
+    latestFetchRun: fetchRun,
+    unregistered: z.array(unregistered).check(z.maxLength(100)),
+    reasons: distinct(z.enum(SOURCE_REASONS)),
+    /** The age of `latestFetchRun` (whatever its outcome) and what the source waits on. */
+    freshness,
+    /** What the provider offers and whether each type is collected (`provider-data-types-v1`). */
+    dataTypes,
+  })
+  .check(
+    // An age is that of the newest fetch run's completion, and only of it.
+    z.refine(
+      (value) => (value.freshness.ageDays === null) === (value.latestFetchRun?.completedAt == null),
+    ),
+  );
 
-const summary = z.strictObject({
-  apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
-  sources: z.array(source).check(
-    z.maxLength(COLLECTION_QUALITY_BOUND),
-    z.refine((values) => new Set(values.map((value) => value.sourceId)).size === values.length),
-  ),
-  /** Jobs whose source registers under no CORE source (the Processor tick has none). */
-  otherSchedules: z.array(schedule).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
-});
+const summary = z
+  .strictObject({
+    apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
+    freshnessAsOf,
+    dataTypesVersion: z.literal(PROVIDER_DATA_TYPES_VERSION),
+    sources: z.array(source).check(
+      z.maxLength(COLLECTION_QUALITY_BOUND),
+      z.refine((values) => new Set(values.map((value) => value.sourceId)).size === values.length),
+    ),
+    /** Jobs whose source registers under no CORE source (the Processor tick has none). */
+    otherSchedules: z.array(schedule).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
+  })
+  .check(
+    z.refine((value) =>
+      value.sources.every((entry) =>
+        ageOf(entry.latestFetchRun?.completedAt, value.freshnessAsOf.date, entry.freshness.ageDays),
+      ),
+    ),
+  );
 
 const period = z
   .strictObject({
@@ -311,7 +453,7 @@ const newest = z
     /** Artifacts whose raw object is reachable (`evidenceExists`). */
     rawStored: count,
     parses,
-    /** Failure codes of the failed parses, as stored when safe codes, else `unclassified`. */
+    /** Failure codes of the failed parses, as stored (a hyphen read as `_`) when safe codes, else `unclassified`. */
     failureCodes: distinct(code),
     /** Published parses whose coverage claim is not complete. */
     incompleteCoverage: count,
@@ -335,6 +477,8 @@ const cell = z
     current: z.nullable(capture),
     state: z.enum(CELL_STATES),
     reasons: distinct(z.enum(CELL_REASONS)),
+    /** The age of `current` (none: no current capture) and what the source waits on. */
+    freshness,
   })
   .check(
     // A declared attempt with no artifacts is never a current empty capture.
@@ -357,6 +501,8 @@ const cell = z
         ? parsed === 0 && waiting === value.newest.artifacts
         : waiting === 0 && parsed === value.newest.artifacts;
     }),
+    // An age is that of the current capture, and only of it.
+    z.refine((value) => (value.freshness.ageDays === null) === (value.current === null)),
     // The state is what the two captures say, never asserted on its own.
     z.refine((value) =>
       value.current === null
@@ -366,19 +512,133 @@ const cell = z
     ),
   );
 
-const cells = z.strictObject({
-  apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
-  sourceId,
-  latestFetchRun: fetchRun,
-  cells: z.array(cell).check(z.maxLength(COLLECTION_QUALITY_PAGE)),
-  coverage: z
-    .strictObject({
-      limit: z.literal(COLLECTION_QUALITY_PAGE),
-      truncated: z.boolean(),
-      nextOffset: z.nullable(count),
-    })
-    .check(z.refine((value) => (value.nextOffset === null) === !value.truncated)),
+const cells = z
+  .strictObject({
+    apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
+    freshnessAsOf,
+    sourceId,
+    latestFetchRun: fetchRun,
+    cells: z.array(cell).check(z.maxLength(COLLECTION_QUALITY_PAGE)),
+    coverage: z
+      .strictObject({
+        limit: z.literal(COLLECTION_QUALITY_PAGE),
+        truncated: z.boolean(),
+        nextOffset: z.nullable(count),
+      })
+      .check(z.refine((value) => (value.nextOffset === null) === !value.truncated)),
+  })
+  .check(
+    z.refine((value) =>
+      value.cells.every((entry) =>
+        ageOf(entry.current?.capturedAt, value.freshnessAsOf.date, entry.freshness.ageDays),
+      ),
+    ),
+  );
+
+/** `GET /api/collection-quality/<sourceId>/accounts` (ADR 0088). */
+export const ACCOUNT_COVERAGE_API_VERSION = 1;
+export const ACCOUNT_COVERAGE_SUFFIX = "/accounts";
+/** More cells than this in one source is refused (413), never cut. */
+export const ACCOUNT_COVERAGE_CELL_BOUND = 2_000;
+/** More account period entries than this in one answer is refused (413), never cut. */
+export const ACCOUNT_COVERAGE_ENTRY_BOUND = 10_000;
+/** `account_mappings.status` (CORE 0018), the current mapping of each source account. */
+export const MAPPING_STATUSES = [
+  "identified",
+  "provider-local",
+  "aggregate",
+  "unresolved",
+] as const;
+/** `identity_observations.kind` (CORE 0018). */
+export const OBSERVATION_KINDS = ["transaction", "balance", "position", "valuation"] as const;
+/**
+ * Which of a cell's captures names the account: `current` (the current
+ * capture, which is the newest), `older-current` (the current capture, while
+ * a newer one is not current) or `newest-not-current` (only the newest
+ * capture, which is not, or not wholly, current).
+ */
+const ACCOUNT_STANDINGS = ["current", "older-current", "newest-not-current"] as const;
+export type MappingStatus = (typeof MAPPING_STATUSES)[number];
+export type ObservationKind = (typeof OBSERVATION_KINDS)[number];
+export type AccountStanding = (typeof ACCOUNT_STANDINGS)[number];
+
+/** One cell the account's observations are in, under one observation kind. */
+const accountPeriod = z
+  .strictObject({
+    unitKey: z.nullable(text),
+    period,
+    currentRule: z.enum(CURRENT_RULES),
+    cellState: z.enum(CELL_STATES),
+    standing: z.enum(ACCOUNT_STANDINGS),
+    /** The capture that names the account: the current one, else the newest. */
+    capture,
+    /** The account's observations of this kind in that capture; never zero. */
+    observations: id,
+    /** The cell's own reasons, as the cell page states them. */
+    reasons: distinct(z.enum(CELL_REASONS)),
+  })
+  .check(
+    z.refine((value) =>
+      value.standing === "newest-not-current" ? true : value.standing === value.cellState,
+    ),
+  );
+
+const accountDataType = z.strictObject({
+  dataset: z.nullable(text),
+  parser: text,
+  kind: z.enum(OBSERVATION_KINDS),
+  periods: z.array(accountPeriod).check(z.minLength(1), z.maxLength(ACCOUNT_COVERAGE_ENTRY_BOUND)),
 });
+
+const coveredAccount = z.strictObject({
+  accountId: text,
+  /** The account's own label (`accounts.label`), as the identities page shows it. */
+  label: z.string().check(z.maxLength(512)),
+  /** The current mapping statuses of the source accounts that name it here. */
+  statuses: distinct(z.enum(MAPPING_STATUSES)).check(z.minLength(1)),
+  dataTypes: z.array(accountDataType).check(z.minLength(1), z.maxLength(1_000)),
+});
+
+/** A cell neither of whose captures names an account, with the cell's own reasons. */
+const unattributed = z.strictObject({
+  dataset: z.nullable(text),
+  parser: z.nullable(text),
+  unitKey: z.nullable(text),
+  period,
+  currentRule: z.enum(CURRENT_RULES),
+  state: z.enum(CELL_STATES),
+  reasons: distinct(z.enum(CELL_REASONS)),
+});
+
+const accountCoverage = z
+  .strictObject({
+    apiVersion: z.literal(ACCOUNT_COVERAGE_API_VERSION),
+    sourceId,
+    latestFetchRun: fetchRun,
+    /** Every cell of the source was read: no page, no cut. */
+    cells: count,
+    accounts: z.array(coveredAccount).check(
+      z.maxLength(ACCOUNT_COVERAGE_ENTRY_BOUND),
+      z.refine((values) =>
+        values.every(
+          (value, index) => index === 0 || values[index - 1]!.accountId < value.accountId,
+        ),
+      ),
+    ),
+    unattributed: z.array(unattributed).check(z.maxLength(ACCOUNT_COVERAGE_CELL_BOUND)),
+  })
+  .check(
+    z.refine((value) => value.cells <= ACCOUNT_COVERAGE_CELL_BOUND),
+    z.refine((value) => value.unattributed.length <= value.cells),
+    z.refine(
+      (value) =>
+        value.accounts.reduce(
+          (sum, account) =>
+            sum + account.dataTypes.reduce((inner, type) => inner + type.periods.length, 0),
+          0,
+        ) <= ACCOUNT_COVERAGE_ENTRY_BOUND,
+    ),
+  );
 
 export type CollectionQualityTerminal = z.output<typeof terminal>;
 export type CollectionQualityOccurrence = z.output<typeof occurrence>;
@@ -410,10 +670,14 @@ export function validCollectionQualityAlarms(value: unknown): value is Collectio
 }
 export type CollectionQualityFetchRun = NonNullable<z.output<typeof fetchRun>>;
 export type CollectionQualitySource = z.output<typeof source>;
+export type ProviderDataTypeEntry = z.output<typeof dataType>;
 export type CollectionQualitySummary = z.output<typeof summary>;
 export type CollectionQualityPeriod = z.output<typeof period>;
 export type CollectionQualityCell = z.output<typeof cell>;
 export type CollectionQualityCells = z.output<typeof cells>;
+export type AccountCoveragePeriod = z.output<typeof accountPeriod>;
+export type AccountCoverageAccount = z.output<typeof coveredAccount>;
+export type AccountCoverage = z.output<typeof accountCoverage>;
 
 /** `GET /api/collection-quality`. */
 function validCollectionQualitySummary(value: unknown): value is CollectionQualitySummary {
@@ -425,9 +689,16 @@ export function validCollectionQualityCells(value: unknown): value is Collection
   return cells.safeParse(value).success;
 }
 
-/** Both routes, by path; any other path under the prefix is not this contract. */
+/** `GET /api/collection-quality/<sourceId>/accounts`. */
+export function validAccountCoverage(value: unknown): value is AccountCoverage {
+  return accountCoverage.safeParse(value).success;
+}
+
+/** The three routes, by path; any other path under the prefix is not this contract. */
 export function validCollectionQualityResponse(path: string, value: unknown): boolean {
   if (path === COLLECTION_QUALITY_PATH) return validCollectionQualitySummary(value);
+  const accounts = /^\/api\/collection-quality\/([^/]+)\/accounts$/u.exec(path);
+  if (accounts !== null) return validAccountCoverage(value) && value.sourceId === accounts[1];
   const match = /^\/api\/collection-quality\/([^/]+)$/u.exec(path);
   return match !== null && validCollectionQualityCells(value) && value.sourceId === match[1];
 }

@@ -115,7 +115,8 @@ Pages compose these instead of writing their own markup or rules:
 A review candidate (a card settlement on カード照合, a pending-to-posted link on
 カード利用) is one panel. Its `.settlement-head` holds the title, a status
 `Badge` and the identifying `.settlement-facts`. The review sits under a
-`.settlement-disclosure` that starts open only while a decision is due. The
+`.settlement-disclosure` that starts open only while a decision is due, and
+always on a card settlement's own page (`/reconciliation/<proposalId>`). The
 decision is a `.settlement-decision`: a required `.settlement-reason`, a button
 per action the candidate allows, and a footnote that planning decides nothing.
 The pending-to-posted review also states each action's effect in words.
@@ -228,11 +229,12 @@ others) shows only 表示対象の記録がありません and 接続先を確�
 even though the preview API still serves the fixtures
 ([synthetic display test](../apps/web/test/synthetic-display.browser.test.ts)).
 The preview is therefore a check of the shell and that guard, not of the
-financial pages. 収集スケジュール (`/schedules`) and 監査ログ (`/audit`) are
-drawn outside that guard, but the preview serves neither
-`/api/ops/v1/schedules` nor `/api/v2/audit`: the
-schedules page shows its load-error messages, and the audit page says that
-this source provides no audit log.
+financial pages. 収集スケジュール (`/schedules`), 監査ログ (`/audit`) and
+依頼の経過 (`/operations/op_<id>`) are drawn outside that guard, but the
+preview serves neither `/api/ops/v1/schedules`, `/api/v2/audit` nor
+`/api/ops/v1/operations/{id}`: the schedules page shows its load-error
+messages, the audit page says that this source provides no audit log, and the
+operation page says the operation is not found.
 
 `mise run //experiments/observation-pipeline-local:serve` continues to read the regular local store. Its metadata
 reports the data classification as unknown: an operator may have ingested
@@ -260,7 +262,9 @@ Agree on these before the production connection is enabled:
 - Data classification and connection capabilities (the table above). A
   successful API refresh means the UI reread its store, not that a collector
   ran or that a source is current. Display source timestamps without
-  inventing freshness thresholds.
+  inventing freshness thresholds: a freshness state is shown only where the
+  API states one under a named policy (collection quality's
+  `collection-freshness-v1`, the reported state's `dated-state-freshness-v1`).
 - Authenticated browser access and protected raw-evidence routes. No admin
   or ingestion credential is embedded in frontend code or browser storage.
 - Parser warnings, superseded observations, partial collection, and failure

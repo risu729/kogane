@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import worker, { alarmCollection } from "../src/worker";
-const token = "synthetic-admin-token-00000000000000000000";
+const token = "synthetic-relay-token-00000000000000000000";
 const context = { waitUntil() {} } as unknown as ExecutionContext;
 test("alarm retains durable refusal and persistence reasons without a second request", async () => {
   const cases = [
@@ -32,34 +32,42 @@ test("alarm retains durable refusal and persistence reasons without a second req
 });
 function bindings(): Env {
   return {
-    ADMIN_TRIGGER_TOKEN: token,
     RELAY_TOKEN: token,
     COLLECTOR_SCHEMA_VERSION: "st-george-browser-v1",
   } as Env;
 }
-test("health works without credentials; collection and resume require the admin token", async () => {
-  const env = bindings();
+test("health works without credentials; there is no public trigger or resume", async () => {
+  const fetch = vi.fn(async () => Response.json({ status: "stored" }));
+  const env = {
+    ...bindings(),
+    SESSION_STATE: { idFromName: () => "test", get: () => ({ fetch }) },
+  } as unknown as Env;
   expect(
     await (await worker.fetch(new Request("https://test/health"), env, context)).json(),
   ).toEqual({ ok: true, source: "st-george", schemaVersion: "st-george-browser-v1" });
-  for (const path of ["/trigger", "/resume"]) {
-    expect(
-      (await worker.fetch(new Request(`https://test${path}`, { method: "POST" }), env, context))
-        .status,
-    ).toBe(401);
-    expect(
-      (
-        await worker.fetch(
-          new Request(`https://test${path}?range=all`, {
-            method: "POST",
-            headers: { authorization: `Bearer ${token}` },
-          }),
-          env,
-          context,
-        )
-      ).status,
-    ).toBe(400);
-  }
+  for (const path of ["/trigger", "/resume", "/operator-trigger"])
+    for (const headers of [{}, { authorization: `Bearer ${token}` }]) {
+      const response = await worker.fetch(
+        new Request(`https://test${path}`, { method: "POST", headers }),
+        env,
+        context,
+      );
+      expect(response.status).toBe(404);
+    }
+  expect(fetch).not.toHaveBeenCalled();
+});
+test("an operations request reaches the coordinator as the operator's request; the alarm does not", async () => {
+  const urls: string[] = [];
+  const fetch = vi.fn(async (request: Request) => {
+    urls.push(request.url);
+    return Response.json({ status: "stored", runId: "synthetic-run" });
+  });
+  const env = {
+    SESSION_STATE: { idFromName: () => "test", get: () => ({ fetch }) },
+  } as unknown as Env;
+  await alarmCollection(env, "35 21 * * *", 0);
+  await alarmCollection(env, "35 21 * * *", 0, { operatorRequested: true });
+  expect(urls).toEqual(["https://state/trigger", "https://state/operator-trigger"]);
 });
 test("the Tamia relay rejects unauthenticated or arbitrary destinations before any socket opens", async () => {
   const env = bindings();
@@ -71,66 +79,6 @@ test("the Tamia relay rejects unauthenticated or arbitrary destinations before a
   expect(
     (await worker.fetch(request({ authorization: `Bearer ${token}` }), env, context)).status,
   ).toBe(403);
-});
-
-test("empty POST streams reach the coordinator; any request bytes are rejected", async () => {
-  const fetch = vi.fn(async () => Response.json({ status: "ready" }));
-  const env = {
-    ...bindings(),
-    SESSION_STATE: { idFromName: () => "test", get: () => ({ fetch }) },
-  } as unknown as Env;
-  for (const path of ["/trigger", "/resume"]) {
-    for (const body of [null, "", new Uint8Array()]) {
-      const response = await worker.fetch(
-        new Request(`https://test${path}`, {
-          method: "POST",
-          headers: { authorization: `Bearer ${token}` },
-          body,
-        }),
-        env,
-        context,
-      );
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({ status: "ready" });
-    }
-    for (const body of [" ", "{}", "credentials=synthetic"]) {
-      expect(
-        (
-          await worker.fetch(
-            new Request(`https://test${path}`, {
-              method: "POST",
-              headers: { authorization: `Bearer ${token}`, "content-length": "0" },
-              body,
-            }),
-            env,
-            context,
-          )
-        ).status,
-      ).toBe(400);
-    }
-  }
-  expect(fetch).toHaveBeenCalledTimes(6);
-});
-
-test("nonempty streamed input is cancelled before coordinator access", async () => {
-  const cancel = vi.fn();
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(new Uint8Array([1]));
-    },
-    cancel,
-  });
-  const response = await worker.fetch(
-    new Request("https://test/trigger", {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}` },
-      body,
-    }),
-    bindings(),
-    context,
-  );
-  expect(response.status).toBe(400);
-  expect(cancel).toHaveBeenCalledOnce();
 });
 
 test("daily collection disables platform retries before entering the shared coordinator", async () => {

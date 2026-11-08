@@ -474,6 +474,9 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
     "observation_sweep",
     "collection_scan",
     "identity_sweep",
+    // Unflagged (ADR 0055 amendment 2026-11-08): a gate ends the tick when
+    // no pair of the rule's shape waits.
+    "instrument_auto_adoption",
     "balance_projection",
     // Unflagged: it writes append-only prices only (ADR 0020).
     "price_promotion",
@@ -482,7 +485,16 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
     // Unflagged (ADR 0064): writes only once a capped day has ended.
     "audit_overflow",
   ]);
-  expect(lines[4]).toEqual({
+  expect(lines[3]).toEqual({
+    event: "instrument_auto_adoption",
+    pairs: 0,
+    evaluated: false,
+    eligible: 0,
+    adopted: 0,
+    conflicts: 0,
+    refused: 0,
+  });
+  expect(lines[5]).toEqual({
     event: "price_promotion",
     scanned: expect.any(Number),
     promoted: expect.any(Number),
@@ -498,7 +510,7 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
   // and do nothing: no R2 list, no CORE write, no cursor movement
   // (docs/processor.md §6).
   expect(lines[1]).toMatchObject({ event: "collection_scan", enabled: false, status: "skipped" });
-  expect(lines[5]).toMatchObject({
+  expect(lines[6]).toMatchObject({
     event: "operation_dispatch",
     enabled: false,
     status: "skipped",

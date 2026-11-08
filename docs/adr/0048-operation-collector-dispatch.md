@@ -3,6 +3,15 @@
 - Status: accepted (merged 2026-10-08 in #576; production dispatch unverified)
 - Date: 2026-10-08
 - Issue: #544
+- Amended: 2026-11-07, the `projected` stage is derived from the READ pointer
+  ([below](#amendment-2026-11-07-the-projected-stage-is-derived-from-the-read-pointer);
+  proposed)
+- Amended: 2026-11-07, the operator's 依頼の経過 page
+  ([below](#amendment-2026-11-07--the-operators-依頼の経過-page-proposed);
+  proposed)
+- Amended: 2026-11-08, a collection with more than 100 runs
+  ([below](#amendment-a-collection-with-more-than-100-runs-2026-11-08);
+  proposed)
 
 ## Context
 
@@ -127,9 +136,9 @@ sees it and nothing expires it (本人操作待ち).
   which has no stages). A collector failure → `failed` with its closed code
   and any run it still persisted (`collection_busy` included: the lease was
   taken between the lane's read and the collector's claim; St George's
-  coordinator instead persists a failed run (`container-failed`) for a refused
-  lease, its existing behaviour, answers `collection_failed`, and — as after
-  any failed St George run — refuses later runs until the operator resumes it;
+  coordinator originally persisted a failed run (`container-failed`) for a
+  refused lease and refused later runs until the operator resumed it, and since
+  2026-11-08 UTC answers `collection_busy` like the others and records no run;
   see [St George](../sources/st-george.md)). An exception, or an answer outside the closed shape →
   `uncertain` (`dispatch_uncertain`, `collector_result_invalid`). A start with
   no recorded outcome after one hour → `uncertain`. **Nothing after a start is
@@ -196,11 +205,13 @@ Open limits, written down rather than guessed:
   collector has served `runOperation`.
 - The requested window is not applied by any collector.
 - READ projection of a run is not traced; `projected` stays pending.
-- The operator UI has no operations view; the trail is read over HTTP. The
-  existing `kogane.ops.operation.get` returns the same record on this code, but
-  MCP client access (#559/#565) is designed to stop publishing operations tools
-  on `/mcp`; operation tracking over MCP is a follow-up read tool graded by an
-  agent capability, never the operator role.
+- The operator UI reads one operation's trail on its 依頼の経過 page
+  (amendment of 2026-11-07 below); no page lists operations, and the UI sends
+  no operations request. `kogane.ops.operation.get` returns the same record to
+  every MCP client
+  ([ADR 0084](0084-mcp-operator-authority-without-delegation.md)), whichever
+  principal requested the operation, the operator in the browser included
+  ([ADR 0086](0086-operator-operations-list.md), owner 2026-11-08 04:21 UTC).
 - Session refresh is unattended only for SBI VC's keepalive; every other source
   ends `session_refresh_unsupported` when its policy is unattended, and
   `waiting_for_human` otherwise.
@@ -237,3 +248,322 @@ Open limits, written down rather than guessed:
 
 Production dispatch, a real collector answering `runOperation`, and a
 production trail to publication are unverified.
+
+## Amendment 2026-11-07: the `projected` stage is derived from the READ pointer
+
+- Status: proposed
+- Date: 2026-11-07
+- Carried by: `packages/application/src/operations/projection-trace.ts`,
+  `trackCollectorPublication` (`collector-dispatch.ts`) and `readOperation`
+  (`requests.ts`); the App's `opsContext` and the MCP tools' context
+  (`services/app/src/ops-api.ts`, `ops-tools.ts`);
+  [ops-api.md](../ops-api.md#collector-execution-adr-0048)
+
+### Context
+
+The decision above left `projected` (contracts/stages.json: "READ content
+validated and published") untraced, so a collection whose runs were adopted
+stayed `status: running` for ever and the operation record could never say
+that the request had reached what a reader sees. Phase 3 of the
+[roadmap](../roadmap.md#phase-3--coverage-collection-requests-and-cross-source-identity)
+asks that a collection be followed to published observations.
+
+CORE and READ are two databases that cannot be joined
+([read-model-d1.md](../read-model-d1.md)). READ's pointer carries the
+watermark `source_revision`: the published content was verified against that
+CORE revision, and the pointer never moves back within an epoch. What CORE does
+not keep is the revision at which a given parse was published:
+`published_parse_runs` and `publication_events` have a time, and
+`core_source_revision` is one row that only counts.
+
+### Options considered
+
+1. **Compare the snapshot's `published_high_water` parse run** with the
+   request's published parse runs, at read time, writing nothing. Rejected: a
+   parse run is published after it is created, so a lower id can be published
+   after a higher one (a pending run finalised later, the activation of an
+   older candidate release); the high water is the input summary migration
+   0038 stopped trusting for exactly this reason.
+2. **Compare times** (the execution's `published_at` with the pointer's
+   `switched_at` or the snapshot's `created_at`). Rejected: both stored times
+   come after the capture whose revision they publish, and the capture time is
+   kept only in the input envelope in R2, so a capture taken before the
+   publication can carry a later time.
+3. **Compare the pointer with CORE's current revision** at read time. Sound,
+   but not stable: the stage would complete and then fall back to pending as
+   soon as any ledger write moved CORE.
+4. **A column for the required revision** (on `ops_collector_dispatches` or a
+   new table). Needs a migration; the 0040 stage row already has a reference
+   column that is free until the stage completes.
+5. **The Processor keeps watching published executions and writes
+   `projected` completed.** It would materialise `status: completed`, but
+   needs READ reads in the dispatch lane and a second watch: a `published`
+   execution is terminal and its 0068 trigger refuses any later update, so it
+   cannot be rescheduled without a migration or a scan of stage rows.
+6. **Store the required revision when publication is recorded; derive the
+   stage at read time.** Chosen. It is the decision outbox's rule
+   (`required_source_revision`, [projection input](../projection-input.md)):
+   a published snapshot at or above the revision a write reached carries it.
+
+### Decision
+
+- When `trackCollectorPublication` records an execution `published`, the same
+  D1 batch inserts its `projected` stage row as `pending`, with
+  `evidence_ref` `core-revision:<core_epoch>:<source_revision>` read from
+  `core_source_revision` inside that batch, and `attempts` 0. It is written
+  only when that batch's own update moved the execution (the `published_at`
+  it set) and never replaces an existing `projected` row. The tracker read
+  the publication before the batch ran and the revision only rises within an
+  epoch, so the stored revision is at or above the one the publication wrote.
+  No migration: `ops_request_stages` (0040) and its `pending` state exist.
+- `readOperation` — the one service behind `GET /api/ops/v1/operations/{id}`
+  and `kogane.ops.operation.get` (ADR 0081) — derives `projected` once
+  `adopted` is complete and `projected` is not, from the READ database the
+  adapter passes (`readStore`, the App's `READ` binding; both transports build
+  it in one place). Three singleton reads: READ's `read_instance` and
+  `balance_snapshot_pointer`, and CORE's `core_source_revision`. Nothing is
+  written.
+  - `completed`, with `evidenceRef` `read-snapshot:<snapshot id>`, when the
+    READ contract is this code's, the pointer, the stored revision and CORE
+    share one epoch, and the pointer's `source_revision` is at or above the
+    stored one.
+  - Otherwise `pending` with no evidence and a closed reason in
+    `failureCode`: `projection_behind` (an older watermark),
+    `read_model_unavailable` (no READ binding, nothing published, another
+    READ contract, or READ could not be read), `read_model_context_changed`
+    (epochs differ) or `projection_revision_unrecorded` (published without a
+    stored revision). Never `completed` for a reason (INV05).
+- The record's `status` reads `completed` when the stored status is `running`
+  and every stage of the kind, the derived one included, is `completed`. A
+  re-send under the same key answers from the same derivation.
+  `ops_requests.status` and the stage row are not changed.
+
+### Consequences
+
+- A collection can be followed through `projected` to `status: completed` on
+  HTTP and MCP alike. No route, schema, MCP tool, capability, flag, binding or
+  migration is added; the App already binds `READ`.
+- The stored request stays `running` and its `projected` row `pending`: the
+  completion is a reading of READ, not a record. A reader that loses READ
+  (dropped, not yet rebuilt) or a CORE restored under a new epoch reports
+  `running` again with the reason; a rebuilt READ captures a CORE at or above
+  the stored revision, so its first publication covers it again. Whatever
+  else reads `ops_requests.status` directly sees `running`.
+- Only executions recorded `published` after this change carry a revision;
+  an earlier one reads `projection_revision_unrecorded` for good. No
+  production execution was ever published (no connection is enabled), so
+  this affects none today.
+- Coverage is a revision comparison over the whole CORE input, whatever the
+  balance projection keeps from the request's parses (a transaction-only
+  collection contributes no balance row, and is still covered once the
+  snapshot was verified at or above the revision). A use restriction that
+  makes the published snapshot unservable does not reopen the stage; the v2
+  routes answer that themselves.
+- `import`, `replay` and `projection` requests never reach `adopted` through
+  an executor today, so their `projected` stays a plain `pending` as before; a
+  rebuild request (`projection`) is still not traced.
+
+### Verification
+
+- `packages/application/test/projection-trace.test.ts` (real CORE and READ
+  migrations in `bun:sqlite`, synthetic ids): the requirement is the
+  publishing batch's revision, written once and only by that batch; no READ,
+  nothing published, an unreadable READ and another contract are
+  `read_model_unavailable`; a pointer one revision behind is
+  `projection_behind`, at or above the requirement `completed` with the
+  request `completed` and the stored rows unchanged; another pointer epoch and
+  a restored CORE are `read_model_context_changed`; a publication without a
+  requirement is `projection_revision_unrecorded`; a re-send under the same
+  key answers the read's record in each of these states, and a first request
+  runs no READ statement; the write and the three reads are keyed lookups on
+  stores without statistics.
+- `services/app/test/ops-api.test.ts`: a collection accepted over HTTP and
+  one over MCP read `read_model_unavailable`, then `projection_behind`, then
+  `completed` with the same stages on both transports against a synthetic
+  READ pointer.
+- `services/processor/test/collector-dispatch.test.ts`: the real tracker
+  stores the requirement when it records `published`; a reader without READ
+  reports `read_model_unavailable`.
+
+A production trail to `projected` is unverified: no connection is enabled.
+
+## Amendment 2026-11-07 — the operator's 依頼の経過 page (proposed)
+
+Status: proposed (accepted when its pull request merges).
+
+**Context.** Phase 3 of the [roadmap](../roadmap.md#phase-3--coverage-collection-requests-and-cross-source-identity)
+asks that a collection can be requested and followed to published
+observations. The trail existed only as JSON over
+`GET /api/ops/v1/operations/{id}`, and the UI footer states that collection is
+not run from the screen.
+
+**Options considered.** (1) Keep the trail HTTP-only. (2) A page that reads
+one operation and also requests collections from the browser. (3) A read-only
+page for one operation, opened from the audit log, that sends nothing.
+
+**Decision.** Option 3. `/operations/op_<64 hex>` in the observation client
+(`apps/web/src/pages/Operation.tsx`) reads the existing route once per opening
+and again only when the operator presses 最新の状態を読み直す or the shell's
+表示を更新 (no polling, no re-read on focus or reconnect): the record's
+status, dispatch, failure code and times; every stage the kind reports with
+its evidence reference (a fetch run `r_<id>` links to its 取得記録) and
+failure code; and for a collection or session refresh the execution state,
+reason, connection, waits and times, the note that the requested window is
+stored and not applied, and each reported run's state, reason, block code,
+provider outcome, 取得記録 link and artifact counts. Closed codes are shown
+by Japanese name with the code beside them; unknown codes are shown as
+themselves. The 監査ログ page links every `op_` target to this page. No page
+lists operations (the list route of
+[ADR 0086](0086-operator-operations-list.md) has none), so the audit log is
+where an operation id is found on screen. Like the
+audit page, it reads no capability and is drawn outside the metadata
+boundary; the route's operator check is the only gate (`403` reads as
+operator-only, `404` as not found, which also covers a deployment without
+the API). Since [ADR 0086](0086-operator-operations-list.md) (owner,
+2026-11-08 04:21 UTC) the read is whole-store, so the page shows an operation
+whichever principal requested it, an MCP client's included. Option 2 is not
+taken: requesting a provider contact from the browser is a product change the
+owner has not made, and the footer's statement stays true.
+
+The browser validates the record before rendering it
+(`packages/observation-shared/src/operation-contract.ts`, through
+`validApiResponse`): exact keys, the closed vocabularies, the stages of the
+kind in order, an execution exactly for the collector kinds with the scope of
+its action, at most 100 runs, a run's state consistent with its registration
+(CORE 0039: `registeredAt` exactly when there is a fetch run) and its
+artifact counts (`published + pending + notPublished = parseSelected ≤ total`,
+`parseFailed ≤ notPublished`), and references that are identifiers, never a
+URL. A record outside it is an error, never a partial trail.
+
+**Consequences.** No route, migration, flag, MCP tool or capability changes.
+Each opening and each re-read is an audited `ops.operation.get` read, as an
+HTTP read already was. The page derives nothing itself: the `projected` stage
+and `status` it shows are the record `readOperation` answers, derived from
+READ
+([amendment above](#amendment-2026-11-07-the-projected-stage-is-derived-from-the-read-pointer)). It
+does not apply a requested window or show operations the operator cannot find
+in the audit log.
+
+The page makes this read a screen read, so
+[ADR 0081](0081-ui-parity-through-mcp.md) requires it over MCP too. What main
+does today (after #1027 and #1034): `kogane.ops.operation.get` is published
+to every MCP client Access verifies, which acts as its own principal
+`mcp-client:<sub>` ([ADR 0084](0084-mcp-operator-authority-without-delegation.md);
+`delegatedOpsTools` and `callDelegatedOpsTool` in
+`services/app/src/ops-tools.ts`). The trail itself is one function: the HTTP
+route and the tool both call `opsServices.operation`, which calls
+`readOperation` in `packages/application` and returns the same record this
+page validates. The tool's lookup of the request's source is
+`operationSource` in `packages/application` (#1027, renamed by ADR 0086), so
+the tool issues no SQL of its own.
+
+An earlier draft of this amendment listed one limit: `readOperation` read
+only an operation the same principal requested, so a request made over MCP
+was not shown on this page and the tool could not read one the operator
+made, and the read-route guard listed `/api/ops/v1/operations/:id` as a
+known gap. The owner decided on 2026-11-08 04:21 UTC that operations-request
+reads are whole-store, like every other read since ADR 0084
+([ADR 0086](0086-operator-operations-list.md)). The page and the tool now
+read the same record for any operation, and the read-route guard
+(`services/app/test/ui-mcp-parity.test.ts`) maps the route to
+`kogane.ops.operation.get` with no gap entry.
+
+**Verification.** `packages/observation-shared/test/operation-contract.test.ts`
+(the validator); `packages/application/test/operation-record-contract.test.ts`
+(the restated vocabularies equal the application's);
+`services/app/test/ops-api.test.ts` (records the real route returns over the
+real migrations pass the validator) and
+`services/processor/test/collector-dispatch.test.ts` (every record read along
+the full trail, from acceptance to publication, failure and expiry, passes it);
+`apps/web/test/operation.browser.test.ts` (the page on desktop and phone
+widths, one read per opening, an explicit re-read, refusals and a malformed
+record) and `apps/web/test/audit.browser.test.ts` (the audit link opens the
+page); `services/app/test/ui-mcp-parity.test.ts` (the page's route is mapped
+to `kogane.ops.operation.get`); `services/app/test/delegated-ops-parity.test.ts`
+(the tool and the route answer the same receipt for the operator's request and
+for the MCP client's).
+
+## Amendment: a collection with more than 100 runs (2026-11-08)
+
+- Status: proposed
+- Date: 2026-11-08
+- Carried by: `MAX_RUN_IDS`, `RUN_IDS_OVER_LIMIT`, `scheduledCompletion`,
+  `scheduledResult` and `scheduledFailure` in
+  `packages/collection/src/schedule-result.ts`; `collectorOperationResult` in
+  `packages/collection/src/operation-rpc.ts`; Vpass's `alarmCollection` in
+  `services/collector-vpass/src/worker.ts`;
+  [operations API](../ops-api.md#collector-execution-adr-0048)
+
+### Context
+
+An answer carries at most 100 run ids: `collectorOperationResult` refuses
+more, and migration 0068 stores no more on an operation. The shared result
+helpers already listed each run once and at most 100 of them. Vpass, which
+persists one run per card, built its successful answer itself: every run it
+persisted, unchecked. With more than 100 cards the Processor would refuse that
+answer and the operation would end `uncertain` (`collector_result_invalid`)
+with no run listed, although the collector knew exactly what it had written.
+The alarm path stores its answer unchecked, so the same session's schedule
+occurrence named every run; the collection-quality contract allows at most
+100 `terminals` per occurrence, so such an occurrence would have put the whole
+collection-quality summary outside its contract and the web client would have
+refused the page.
+The other collectors name at most one run per answer, through the helpers or,
+for SBI VC's blocked session, only once its terminal is persisted.
+
+### Options considered
+
+1. List the first 100 and answer `completed`. Rejected: tracking follows a
+   collected operation's listed runs to `published` or `unpublished` (every
+   listed run settled), so it would state a verdict for a collection whose
+   other runs it never read: `unpublished` while an unlisted run was adopted.
+2. Answer with every run and let the Processor refuse it (today's result).
+   Rejected: `uncertain` says the outcome cannot be known and links no run,
+   while the collector knows it and could name 100.
+3. Add a truncation marker to the answer and a state for it. Rejected for
+   now: a new contract field (every collector and the Processor) and a new
+   execution state (a migration) for a case only a Vpass session with more
+   than 100 cards reaches.
+4. Answer `failed` with the closed code `run_ids_over_limit` and the first 100
+   runs, in the order persisted. Chosen.
+
+### Decision
+
+`scheduledCompletion(runIds)` builds a finished collection's answer:
+`completed` with each run once, or, past 100 distinct runs, `failed` with
+`run_ids_over_limit` and the first 100. `scheduledResult` uses it for a
+successful value; Vpass's alarm uses it for its card runs. A failed collection
+keeps its own code (a lease abort stays `uncertain`) and lists at most its
+first 100 runs. `collectorOperationResult` checks the same `MAX_RUN_IDS`.
+
+### Consequences
+
+- No evidence is lost: every run's terminal is written and the collection scan
+  registers it like any other. Only the operation's and the schedule
+  occurrence's links stop at 100.
+- Nothing more is claimed than is known: an over-limit operation is `failed`
+  with a code that says why, and is not followed to publication.
+- Open limit: a failed answer with more than 100 runs carries no marker, so
+  its `runs` alone does not say whether the list is complete. Option 3 is the
+  fix if that matters.
+- The alarm shares the answer: a Vpass occurrence with more than 100 card runs
+  is now `failed` with `run_ids_over_limit` and 100 runs, where it was
+  `completed` with every run (the alarm stores the answer as given). The runs
+  past 100 are registered like any other; only the occurrence does not link
+  them. Its collection-quality source shows `occurrence_failed`, and the
+  summary stays within its contract. An occurrence stored before this change
+  with more than 100 runs is not rewritten.
+
+### Verification
+
+- `packages/collection/test/schedule-review.test.ts`: exactly 100 runs with
+  repeats complete; 101 are `run_ids_over_limit` with the first 100; a failure
+  keeps its code, the lease abort's included.
+- `packages/collection/test/operation-rpc.test.ts`: every answer the helpers
+  build, past the cap included, is one `collectorOperationResult` accepts.
+- `services/collector-vpass/test/alarm-run-ids.test.ts`: synthetic sessions of
+  100 and 103 cards, successful and failed, persist every terminal and answer
+  within the closed shape.
+- `packages/application/test/collection-quality-query.test.ts`: an occurrence
+  naming 100 runs keeps the collection-quality summary within its contract;
+  101 do not.

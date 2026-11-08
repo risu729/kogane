@@ -9,7 +9,7 @@ import {
   myjcbPastMonthsSnapshotCtes,
   SMBC_DIRECT_SNAPSHOT_CTES,
 } from "../src/current-captures";
-import { cell } from "../../application/src/query/collection-quality";
+import { cell, cellFreshness, freshnessAsOf } from "../../application/src/query/collection-quality";
 import { validCollectionQualityCells } from "../../observation-shared/src/collection-quality-contract";
 import { fullCoreSchema } from "./card-usage-scale-fixture";
 import { QualityStore, type ArtifactSpec } from "./collection-quality-fixture";
@@ -219,11 +219,16 @@ test("VPoint three-parser completeness refuses a missing page; a later complete 
     current_run_id: null,
     newest_run_id: second.run,
   });
+  const asOf = freshnessAsOf("2099-03-04T00:00:00.000Z");
   const answer = {
-    apiVersion: 2,
+    apiVersion: 4,
+    freshnessAsOf: asOf,
     sourceId: "v-point",
     latestFetchRun: null,
-    cells: result.map(cell),
+    cells: result.map((row) => {
+      const value = cell(row);
+      return { ...value, freshness: cellFreshness(value, asOf.date, null) };
+    }),
     coverage: { limit: 500, truncated: false, nextOffset: null },
   };
   expect(validCollectionQualityCells(answer)).toBe(true);

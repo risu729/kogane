@@ -137,6 +137,19 @@ one D1 batch. There is no second copy of what an identity command writes, and
 the ledger row (`decision_operations`) is still the precondition every later
 statement of the command is joined to.
 
+Both paths derive the decision id from the operation id alone
+(`dr` over `["command", operationId]`), and the direct route keeps no
+`operation_receipts` row, so the commit's receipt check alone cannot see a
+key the direct route used. The commit's receipt reservation therefore also
+requires that no `decision_operations` row holds the key, and refuses it with
+`idempotency_conflict` otherwise
+([change-lifecycle.md](change-lifecycle.md#idempotency-and-receipts)); before
+2026-11-07 such a commit answered an accepted receipt with no effect. A direct
+command under a key a commit used reads that commit's ledger row first and
+replays it only when the payload digest and actor match (for an identity
+commit with the same payload, the same effect), and answers
+`idempotency_conflict` otherwise.
+
 `/identity-revise` is unchanged and remains the private CLI path. The
 authenticated path is `POST /api/command/v1/*` on the evidence browser, which
 forwards to the pipeline's private `/command/v1/*` routes; the pipeline stays

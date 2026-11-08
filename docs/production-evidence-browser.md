@@ -38,6 +38,27 @@ R2, and verify the object's size and checksum metadata. Provider HTML is never
 rendered inline. Raw responses use an attachment disposition, `nosniff`, sandbox
 policy, and no-store caching.
 
+### Response headers
+
+`secureResponse` in `src/http.ts` sets these on every answer of the Worker —
+the app shell, its assets, every API answer and every refusal:
+`Cache-Control: no-store`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
+`Cross-Origin-Resource-Policy: same-origin` (another site cannot load an
+answer as an image, script or media subresource) and
+`Cross-Origin-Opener-Policy: same-origin` (a window of another origin keeps
+no handle on a page of this Worker, nor it on that window). An answer without
+its own policy gets `Content-Security-Policy: default-src 'self';
+script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src
+'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none';
+form-action 'none'`; the raw download sets its own `sandbox` policy.
+`test/api.test.ts` asserts `no-store`, `nosniff` and `frame-ancestors` on the
+shell, and both cross-origin policies on the shell, a read, a `404` and a
+`401`. The Cloudflare Access login and the Managed OAuth endpoints an MCP
+client uses are served by Access itself
+([ADR 0047](adr/0047-mcp-client-connection.md)), not by this Worker, so
+these headers are not on them.
+
 ## Authentication and operation
 
 Cloudflare Access protects every route of this Worker through its Worker-scoped
@@ -49,17 +70,25 @@ No ingest/admin token is accepted by the browser or embedded in its bundle.
 The change lifecycle adds one authenticated POST path set,
 `POST /api/command/v1/*` ([change-lifecycle.md](change-lifecycle.md)). It is
 closed unless `COMMANDS_ENABLED` is exactly `"true"`, which the committed
-configuration does not set; every other request that is not `GET` or `HEAD`
-still gets 405.
+configuration (`services/app/wrangler.jsonc`) sets. The operations routes
+(`/api/ops/v1/*`, behind `OPS_API_ENABLED`, also `"true"` there;
+[ops-api.md](ops-api.md)) and the agent paths (`/api/agent/v1/*`, `/mcp`;
+[agent-api.md](agent-api.md)) take `POST`s too. On the command paths, as on
+the operations `POST`s and every agent path, an `Origin` that is present and
+not the Worker's own is `403 origin_not_allowed` before a grant is graded or
+a body is read ([ADR 0078](adr/0078-own-origin-state-changing-routes.md)).
 
-Who may act is a separate decision from who is signed in, and it is two
-allow-lists of verified Access subjects, both **empty** in the committed
-configuration: `OPERATOR_SUBJECTS` marks the human operator, who may approve
-and commit, and `AGENT_GRANTS` marks subjects that may plan and simulate but
-never approve or commit. A subject in neither list is refused with
-`403 subject_not_granted`, so with the committed configuration nobody can
-approve or commit even with the flag on — naming the operator is a deliberate
-deployment step ([rollout.md](rollout.md)). A list that is present but
+Who may act on these routes is a separate decision from who is signed in,
+and it is two allow-lists of verified Access subjects: `OPERATOR_SUBJECTS`
+marks the human operator, who may approve and commit, and `AGENT_GRANTS`
+marks subjects that may plan and simulate but never approve or commit. The
+committed configuration names one operator and leaves `AGENT_GRANTS` empty.
+A subject in neither list is refused with `403 subject_not_granted`; naming
+the operator was a deliberate deployment step ([rollout.md](rollout.md)). An
+MCP client does not use these routes: since
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md) it applies
+operations on `/mcp` as itself, and no table grants or narrows it. A list
+that is present but
 unreadable, or the same subject in both, refuses everyone with
 `503 grants_misconfigured`; no configuration mistake widens anybody's
 capabilities.

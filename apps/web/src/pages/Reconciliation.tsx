@@ -2,7 +2,9 @@ import { useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useFeatures } from "../api.ts";
 import {
+  useCardSettlement,
   useCardSettlementStatements,
+  useRelatedCardSettlements,
   useStatementCandidates,
   type CardSettlementReview,
   type CardSettlementStatementGroup,
@@ -13,6 +15,7 @@ import {
   DateValue,
   SETTLEMENT_STATUS,
   SettlementQuantity,
+  settlementReason,
 } from "../reconciliation-display.tsx";
 import { postCommand, type ChangePlanView } from "../command-api.ts";
 import { Link, navigate } from "../router.tsx";
@@ -48,7 +51,7 @@ function ReviewActions({ review }: { review: CardSettlementReview }): ReactNode 
   if (review.status === "rejected" || review.status === "withdrawn")
     return (
       <p className="footnote">
-        この候補の判断は保存されています。対応先を訂正する場合は、別の候補を原本と照合して採用してください。
+        この候補の判断は保存されています。対応先を訂正する場合は、同じ請求・出金の他の候補を原本と照合して採用してください。
       </p>
     );
   return (
@@ -102,6 +105,11 @@ function ReviewActions({ review }: { review: CardSettlementReview }): ReactNode 
           {plan.error.message}
         </Notice>
       ) : null}
+      {review.status === "accepted" ? (
+        <p className="footnote">
+          対応が誤っている場合は、採用を解除してから、同じ請求・出金の正しい候補を採用します。解除しても、この判断と原本は履歴に残ります。
+        </p>
+      ) : null}
       <p className="footnote">
         次の画面で内容を確認し、承認してから確定します。確認画面を開くだけでは採用・却下しません。
       </p>
@@ -115,9 +123,16 @@ function statementSource(review: CardSettlementReview): string {
 
 /**
  * One candidate. The head carries what identifies it; the review itself sits
- * under a disclosure that starts open only while a decision is still due.
+ * under a disclosure that starts open only while a decision is still due, or
+ * always on the candidate's own page (`detail`).
  */
-function SettlementCard({ review }: { review: CardSettlementReview }): ReactNode {
+function SettlementCard({
+  review,
+  detail = false,
+}: {
+  review: CardSettlementReview;
+  detail?: boolean;
+}): ReactNode {
   const features = useFeatures();
   const id = `review-${review.proposalId}`;
   const { facts } = review;
@@ -159,10 +174,17 @@ function SettlementCard({ review }: { review: CardSettlementReview }): ReactNode
           </div>
         </dl>
       </div>
-      <details className="settlement-disclosure" open={review.status === "proposed"}>
+      <details className="settlement-disclosure" open={detail || review.status === "proposed"}>
         <summary>候補の詳細と判断</summary>
         <div className="panel-body">
           <CardSettlementDetails review={review} />
+          {detail ? null : (
+            <p>
+              <Link to={`/reconciliation/${review.proposalId}`}>
+                同じ請求・出金の他の候補を確認
+              </Link>
+            </p>
+          )}
           {features.cardOwnershipReview && review.status === "proposed" ? (
             <p>
               <Link to={`/reconciliation/${review.proposalId}/ownership`}>
@@ -183,14 +205,29 @@ function SettlementCard({ review }: { review: CardSettlementReview }): ReactNode
  */
 function OlderCandidates({
   group,
+  position,
   shown,
 }: {
   group: CardSettlementStatementGroup;
+  /** The statement's place in the statement list, as the list's pager counts it. */
+  position: number;
   shown: ReadonlySet<string>;
 }): ReactNode {
   const [requested, setRequested] = useState(false);
   const [offset, setOffset] = useState(0);
   const query = useStatementCandidates(group.statementKey, offset, requested);
+  // Several statements can show their whole lists at once: each pager, its
+  // spoken count and its loading state name the statement they belong to.
+  // Card, account and month do not tell statements apart (the importer-era
+  // and collector-era captures of one month are two statements,
+  // docs/card-settlements.md), so the name leads with the statement's place
+  // in the list, which no other statement on the page shares.
+  const lead = group.candidates[0];
+  const statement = `請求 ${position} 件目${
+    lead
+      ? `（${statementSource(lead)} · ${lead.facts.statement.sourceAccount} · ${lead.facts.statement.period ?? "請求月不明"}）`
+      : ""
+  }`;
   if (!requested)
     return (
       <button className="button" type="button" onClick={() => setRequested(true)}>
@@ -200,7 +237,7 @@ function OlderCandidates({
   return (
     <QueryBoundary
       query={query}
-      label="この請求の候補"
+      label={`${statement}の候補`}
       isEmpty={(data) => data.items.length === 0}
       empty="この請求の候補はほかにありません。"
     >
@@ -211,8 +248,9 @@ function OlderCandidates({
             .map((review) => (
               <SettlementCard key={review.proposalId} review={review} />
             ))}
-          <nav className="pagination" aria-label="この請求の候補のページ">
+          <nav className="pagination" aria-label={`${statement}の候補のページ`}>
             <span role="status" aria-live="polite">
+              <span className="visually-hidden">{statement}の候補：</span>
               {offset + 1}–{offset + data.items.length} 件目 / {group.candidateCount} 件
             </span>
             <button
@@ -244,7 +282,13 @@ function OlderCandidates({
  * the same statement collapsed under it. Nothing is hidden for good: every
  * candidate stays reachable and keeps its own decision history.
  */
-function StatementGroup({ group }: { group: CardSettlementStatementGroup }): ReactNode {
+function StatementGroup({
+  group,
+  position,
+}: {
+  group: CardSettlementStatementGroup;
+  position: number;
+}): ReactNode {
   const [lead, ...others] = group.candidates;
   if (!lead) return null;
   const otherCount = group.candidateCount - 1;
@@ -262,7 +306,7 @@ function StatementGroup({ group }: { group: CardSettlementStatementGroup }): Rea
             <SettlementCard key={review.proposalId} review={review} />
           ))}
           {group.candidateCount > group.candidates.length ? (
-            <OlderCandidates group={group} shown={shown} />
+            <OlderCandidates group={group} position={position} shown={shown} />
           ) : null}
         </details>
       ) : null}
@@ -297,8 +341,12 @@ export function ReconciliationPage(): ReactNode {
         >
           {(data) => (
             <>
-              {data.statements.map((group) => (
-                <StatementGroup key={group.statementKey} group={group} />
+              {data.statements.map((group, index) => (
+                <StatementGroup
+                  key={group.statementKey}
+                  group={group}
+                  position={offset + index + 1}
+                />
               ))}
               <nav className="pagination" aria-label="照合候補のページ">
                 <span role="status" aria-live="polite">
@@ -328,6 +376,146 @@ export function ReconciliationPage(): ReactNode {
         </QueryBoundary>
       )}
       {features.cardSettlementReconciliation ? <UnmatchedStatements /> : null}
+    </>
+  );
+}
+
+/**
+ * One competing candidate, compact: what it pairs and its status, linked to
+ * its own page, where it is reviewed. Nothing is decided here.
+ */
+function RelatedSettlement({ review }: { review: CardSettlementReview }): ReactNode {
+  const { facts } = review;
+  return (
+    <li>
+      <Badge tone={review.status === "accepted" ? "ok" : "neutral"}>
+        {SETTLEMENT_STATUS[review.status]}
+      </Badge>{" "}
+      <Link to={`/reconciliation/${review.proposalId}`}>
+        {statementSource(review)} {facts.statement.period ?? "請求月不明"} 請求分 ·{" "}
+        {bankSourceLabel(facts.bankDebit.sourceId)}の出金
+      </Link>
+      <br />
+      <span className="wrap-any">
+        請求総額 <SettlementQuantity value={facts.statement.amount} /> · 引落予定日{" "}
+        <DateValue value={facts.statement.paymentDate} /> / 出金額{" "}
+        <SettlementQuantity value={facts.bankDebit.amount} /> · 出金日{" "}
+        <DateValue value={facts.bankDebit.occurred} /> · {facts.bankDebit.sourceAccount}
+      </span>
+      {review.status === "proposed" && review.acceptanceBlockers.length > 0 ? (
+        <>
+          <br />
+          <span className="dim">
+            採用できない理由: {review.acceptanceBlockers.map(settlementReason).join("、")}
+          </span>
+        </>
+      ) : null}
+    </li>
+  );
+}
+
+/**
+ * The candidates `proposalId` competes with: those sharing its statement,
+ * its bank debit or its statement month. While one is accepted the others
+ * are `allocation_already_used`; correcting a wrong match is a withdrawal of
+ * the accepted one, then the right one's acceptance, each its own decision.
+ */
+function RelatedSettlements({ proposalId }: { proposalId: string }): ReactNode {
+  const [offset, setOffset] = useState(0);
+  const query = useRelatedCardSettlements(proposalId, offset);
+  return (
+    <section className="panel" aria-labelledby="related-settlements">
+      <div className="panel-head">
+        <h2 id="related-settlements">同じ請求・出金の他の候補</h2>
+      </div>
+      <div className="panel-body">
+        <p>
+          同じ請求、同じ銀行出金、または同じカードの同じ請求月を対象とする候補です。採用済みの候補があるあいだ、他の候補は採用できません。
+        </p>
+        <p className="footnote">
+          対応が誤っていた場合は、採用済みの候補で採用を解除してから、正しい候補を開いて採用します。解除と採用はそれぞれ新しい判断として追加され、以前の判断と原本は残ります。
+        </p>
+        <QueryBoundary
+          query={query}
+          label="他の候補"
+          isEmpty={(data) => data.items.length === 0 && offset === 0}
+          empty="同じ請求・出金を対象とする他の候補はありません。"
+        >
+          {(data) => (
+            <>
+              <ul className="plain-list" aria-label="他の候補">
+                {data.items.map((item) => (
+                  <RelatedSettlement key={item.proposalId} review={item} />
+                ))}
+              </ul>
+              {offset > 0 || data.nextOffset !== null ? (
+                <nav className="pagination" aria-label="他の候補のページ">
+                  <span role="status" aria-live="polite">
+                    {offset + 1}–{offset + data.items.length} 件目
+                  </span>
+                  <button
+                    className="button"
+                    type="button"
+                    disabled={offset === 0}
+                    onClick={() => setOffset(0)}
+                  >
+                    先頭に戻る
+                  </button>
+                  <button
+                    className="button"
+                    type="button"
+                    disabled={data.nextOffset === null}
+                    onClick={() =>
+                      data.nextOffset === null ? undefined : setOffset(data.nextOffset)
+                    }
+                  >
+                    次の候補
+                  </button>
+                </nav>
+              ) : null}
+            </>
+          )}
+        </QueryBoundary>
+      </div>
+    </section>
+  );
+}
+
+/** One candidate on its own page, with the candidates it competes with. */
+export function ReconciliationReviewPage({ proposalId }: { proposalId: string }): ReactNode {
+  const features = useFeatures();
+  const query = useCardSettlement(proposalId);
+  if (!features.known) return <Loading label="照合候補" />;
+  return (
+    <>
+      <div className="page-head">
+        <div className="breadcrumb">
+          <Link to="/reconciliation">照合候補の一覧に戻る</Link>
+        </div>
+        <h1>請求と引落の照合候補</h1>
+        <p className="lede">
+          この候補の原本と判断の履歴、同じ請求・出金を対象とする他の候補を確認します。候補は自動採用されません。
+        </p>
+      </div>
+      {!features.cardSettlementReconciliation ? (
+        <EmptyState>この接続先はカード決済の照合候補を提供していません。</EmptyState>
+      ) : (
+        <QueryBoundary
+          query={query}
+          label="照合候補"
+          isEmpty={(review) => review === null}
+          empty="この照合候補は見つかりません。"
+        >
+          {(review) =>
+            review === null ? null : (
+              <>
+                <SettlementCard review={review} detail />
+                <RelatedSettlements proposalId={review.proposalId} />
+              </>
+            )
+          }
+        </QueryBoundary>
+      )}
     </>
   );
 }

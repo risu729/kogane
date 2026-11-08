@@ -245,7 +245,7 @@ receipt, so a moved pin writes nothing anywhere, and a resend replays the
 receipt. Every id the batch writes is keyed by the operation (the event
 decisions' digest includes it), so a resend whose batch was built before the
 first commit landed finds its own rows and writes nothing more, and another
-operation of the same plan finds the plan committed and writes nothing. Agents cannot approve or commit it, like every other change. The
+operation of the same plan finds the plan committed and writes nothing. As for every other change, an agent on the browser's command routes cannot approve or commit it; an MCP client can, as itself, through `kogane.command.approve` and `kogane.command.commit` ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md), [agent API](agent-api.md#change-lifecycle-decisions)). The
 receipt's `result` adds `proposalId`, `proposalDecisionRevisionId`, `review`
 (`accept`, `reject` or `withdraw`) and `eventRevisions`.
 
@@ -410,6 +410,32 @@ The commit payload digest is computed server-side over
 `{ planId, approvalId, kind, payload }`. A caller may send
 `idempotencyPayloadDigest`; a mismatch is `idempotency_conflict`.
 
+The key must also be free in the decision ledger (`decision_operations`). A
+commit that writes a ledger row writes it in the same batch as its receipt, so
+a ledger row under a key with no receipt comes from a route that keeps no
+receipt: the direct identity command (`/identity-revise`, the legacy CLI path)
+or the reconciliation job's rule acceptance of a proposal (`acceptProposal` in
+`services/processor/src/reconciliation-commands.ts`). Those derive their
+decision ids from the operation id with the same key function the commit
+writers use (`dr` over `["command", id]` for identity commands and relations,
+`["proposal", id]` for proposal decisions), so before 2026-11-07 a commit
+reusing such a key found the other route's ledger row and decision as if they
+were its own: an identity commit answered an accepted receipt and wrote
+nothing, and a relation commit tried to link the identity decision, which the
+0029 `entity_relations_provenance` trigger refused with an unexplained SQL
+error; a relation commit under a key the rule acceptance used skipped its own
+ledger row and wrote its decision and relation against the rule's. The rule
+acceptance's keys are `reconciliation-<digest>`, while a review commits under
+the key its caller chose (the web client's is `op-` and part of the approval
+id), so a reviewer judging a proposal the rule accepted commits as before. The
+receipt reservation now also requires that no ledger row holds the
+key, so such a commit writes nothing and answers `idempotency_conflict` with
+its plan open and its approval unspent; the caller commits again under a fresh
+operation id. Stored ids are unchanged (nothing is re-derived). The other
+direction already held: the direct route reads the ledger first and answers
+`idempotency_conflict` for a row with another payload digest or actor
+(`decision-log.md`).
+
 The lookup is a read, so a second command can take the key between it and
 the commit batch. The batch therefore decides again: its first statement
 reserves the key only while no receipt holds it, and every later statement
@@ -472,11 +498,13 @@ internal judgements towards the read models.
 
 `packages/storage-d1/src/core/decision-outbox.ts` (the Processor keeps the
 historical import path) runs one bounded pass
-per `scheduled` invocation, as the last of the seven scheduled stages — after
-the projections a decision may have invalidated
-(`docs/observation-lanes.md`): it claims up to 20 due rows under a 60 s lease,
-runs each target's processor, and turns the operation's receipt `published`
-once no row of that operation is unprocessed.
+per `scheduled` invocation, after the projections a decision may have
+invalidated and the operation dispatch lane; only the audit log's
+`audit_overflow` lane runs after it (`runScheduled` in
+`services/processor/src/worker.ts`; `docs/observation-lanes.md`): it claims
+up to 20 due rows under a 60 s lease, runs each target's processor, and turns
+the operation's receipt `published` once no row of that operation is
+unprocessed.
 
 ### The four processor results
 
@@ -561,6 +589,11 @@ POST /api/command/v1/operation  { operationId }                     -> { receipt
 - POST only, on exactly these five paths. Everything else in the evidence
   browser stays GET-only; any other non-GET request is still `405`.
 - No query string, body bounded to 16 KiB, `no-store` on every answer.
+- An `Origin` that is present and not the Worker's own is
+  `403 origin_not_allowed` before the flag, the grant or the body is read
+  ([ADR 0078](adr/0078-own-origin-state-changing-routes.md)), so a page on
+  another site cannot drive the operator's browser session into an approval
+  or a commit. A client that sends no `Origin` is unaffected.
 - Only the upstream status and JSON body cross back to the client: no upstream
   headers, no exception text, no provider content.
 
@@ -578,8 +611,8 @@ allow-lists. The committed configuration names the human operator in
 One resolver reads them — `resolvePrincipal` in
 `packages/application/src/command/grants.ts`, through the Worker's adapter
 `services/app/src/grants.ts` — and it is the only grading on any command
-surface: the five command routes and the six `/api/ops/v1` routes call it.
-The six operations MCP tools would too, but `/mcp` refuses them from its
+surface: the five command routes and the seven `/api/ops/v1` routes call it.
+The seven operations MCP tools would too, but `/mcp` refuses them from its
 agent-only caller before they get that far
 ([ADR 0047](adr/0047-mcp-client-connection.md)); the delegated command,
 decision and operations tools (`services/app/src/delegated-command-tools.ts`,
@@ -655,7 +688,7 @@ lifecycle codes `invalid_command`, `commands_disabled`, `subject_not_granted`,
 
 Statuses: 400 invalid input, 403 refusal (`approval_required`,
 `commands_disabled`, `subject_not_granted`, `actor_not_supported`,
-`evidence_restricted`), 404 not found, 409 conflict (`stale_context`,
+`evidence_restricted`, `origin_not_allowed`), 404 not found, 409 conflict (`stale_context`,
 `idempotency_conflict`, approval/plan state), 429 `budget_exceeded`, 500
 `commit_failed`, 503 this deployment cannot serve the request at all
 (`grants_misconfigured`, `command_executor_unavailable`). No error text
@@ -750,7 +783,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
 
 ## Verified locally (synthetic data only)
 
-- `services/processor/test/change-lifecycle.test.ts` (16 tests):
+- `services/processor/test/change-lifecycle.test.ts` (34 tests):
   plan contents and server-computed impact; SC17/AT69 (approval refused with
   `stale_context` after a concurrent change, plan marked stale, re-simulation
   yields a new digest); a stale plan refused at commit with **no rows written
@@ -776,7 +809,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
   on all four tables; migration 0031 applied on a seeded 0017–0035 schema with
   no existing row touched; and an unadopted successful run kept out of the
   simulated difference until the publication gate adopts it.
-- `services/app/test/command-api.test.ts` (9 tests): 401 without
+- `services/app/test/command-api.test.ts` (21 tests): 401 without
   a JWT, 403 with the flag off or set to anything but `"true"`, POST-only and
   404 for unknown command paths, the rest of the Worker still GET-only, an
   agent refused approve/commit before forwarding, `503` when the writer binding
@@ -833,7 +866,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
   widened CHECK, the six kinds accepted and unknown ones refused,
   append-only and forward-only triggers still firing, and an interrupted
   migration rolled back whole.
-- `apps/web/test/confirm.browser.test.ts` (8 tests): read-only
+- `apps/web/test/confirm.browser.test.ts` (9 tests, one an accessibility audit): read-only
   without the capability, no action on a stale plan, accepted vs published
   shown distinctly, and a pending-to-posted review shown against the candidate
   it pins. That review can be approved and committed only while every pin, the

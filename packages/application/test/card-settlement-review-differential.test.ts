@@ -5,7 +5,10 @@
 // (`queryCardSettlements`), the ownership review's candidate
 // (`queryCardOwnership`), the settlement plan (`cardSettlementPlan`), and the
 // ownership review's plan read and commit guard (`prepareOwnershipReview`).
-// Every value is synthetic.
+// The competitor read (`queryRelatedCardSettlements`), which has no shipped
+// text, is compared with the reservation's own terms over every candidate,
+// each review shown as the shipped review read shows it. Every value is
+// synthetic.
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { randomSettlementStore } from "../../read-model/test/card-settlement-random-store.ts";
@@ -18,8 +21,10 @@ import {
 import { CARD_OWNERSHIP_CANDIDATE_SQL } from "../src/query/card-ownership.ts";
 import {
   CARD_SETTLEMENT_PAGE_SQL,
+  CARD_SETTLEMENT_RELATED_SQL,
   CARD_SETTLEMENT_REVIEW_SQL,
   queryCardSettlements,
+  queryRelatedCardSettlements,
 } from "../src/query/card-settlements.ts";
 import {
   LEGACY_CARD_OWNERSHIP_CANDIDATE_SQL,
@@ -38,6 +43,22 @@ if (!Number.isSafeInteger(SEED_COUNT) || SEED_COUNT < 1)
   throw new Error("KOGANE_CARD_SETTLEMENT_SEEDS must be a positive integer");
 const SEEDS = Array.from({ length: SEED_COUNT }, (_, index) => index + 1);
 const drawn = new Set<string>();
+
+/**
+ * The competitor read with one of its three terms dropped: each must miss a
+ * competitor on some seed, so the seeds exercise every term.
+ */
+const RELATED_MUTANTS = new Map(
+  [
+    "related.statement_key=anchor.statement_key",
+    "related.bank_key=anchor.bank_key",
+    "json_extract(related.facts_json,'$.statement.period')=json_extract(anchor.facts_json,'$.statement.period')",
+  ].map((term) => {
+    if (!CARD_SETTLEMENT_RELATED_SQL.includes(term)) throw new Error(`missing term ${term}`);
+    return [term, CARD_SETTLEMENT_RELATED_SQL.replace(term, "0")] as const;
+  }),
+);
+const killed = new Set<string>();
 
 /**
  * The columns the shipped reads had: the plan read adds `claim_available` and
@@ -143,7 +164,53 @@ describe("card settlement readiness reads on random stores", () => {
     60_000,
   );
 
-  test("the seeds drew guards that hold and fail", () => {
-    expect([...drawn].sort()).toEqual(["ownership guard 0", "ownership guard 1"]);
+  test.each(SEEDS)(
+    "seed %i: each review's competitors are the reservation's, as the shipped review read shows them",
+    async (seed) => {
+      const { db } = randomSettlementStore(seed, new Set());
+      for (const { id } of reviews(db)) {
+        // The reservation's own terms (`allocation_available` in
+        // card-settlement-readiness.ts), over every candidate.
+        const ids = (
+          db
+            .query(
+              `SELECT c.id FROM card_settlement_candidates c WHERE c.id<>?1 AND EXISTS(
+                SELECT 1 FROM card_settlement_candidates a WHERE a.id=?1
+                AND (c.statement_key=a.statement_key OR c.bank_key=a.bank_key
+                 OR (json_extract(c.facts_json,'$.statement.sourceId')=json_extract(a.facts_json,'$.statement.sourceId')
+                  AND json_extract(c.facts_json,'$.statement.accountId')=json_extract(a.facts_json,'$.statement.accountId')
+                  AND json_extract(c.facts_json,'$.statement.period')=json_extract(a.facts_json,'$.statement.period'))))
+               ORDER BY c.created_at DESC,c.id DESC`,
+            )
+            .all(id) as { id: string }[]
+        ).map((row) => row.id);
+        drawn.add(ids.length === 0 ? "no competitor" : "competitors");
+        const expected = ids.flatMap((other) =>
+          rows(db, LEGACY_CARD_SETTLEMENT_REVIEWS_SQL, [other, 51, 0]),
+        );
+        expect(rows(db, CARD_SETTLEMENT_RELATED_SQL, [id, 51, 0])).toEqual(expected);
+        expect(rows(db, CARD_SETTLEMENT_RELATED_SQL, [id, 2, 1])).toEqual(expected.slice(1, 3));
+        for (const [term, mutant] of RELATED_MUTANTS)
+          if (rows(db, mutant, [id, 51, 0]).length !== expected.length) killed.add(term);
+        const page = await queryRelatedCardSettlements(executor(db, false), id).catch(
+          (error: Error) => error.message,
+        );
+        // The random facts are not the sweep's, so the page may refuse them.
+        if (id === "cs_missing") expect(page).toBeNull();
+        else if (typeof page === "string") expect(page).toBe("card_settlement_facts_invalid");
+        else expect(page?.items.map((item) => item.proposalId)).toEqual(ids.slice(0, 50));
+      }
+    },
+    60_000,
+  );
+
+  test("the seeds drew guards that hold and fail, and reviews with and without competitors", () => {
+    expect([...drawn].sort()).toEqual([
+      "competitors",
+      "no competitor",
+      "ownership guard 0",
+      "ownership guard 1",
+    ]);
+    expect([...killed].sort()).toEqual([...RELATED_MUTANTS.keys()].sort());
   });
 });

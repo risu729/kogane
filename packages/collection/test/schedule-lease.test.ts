@@ -95,7 +95,10 @@ test("a claim whose answer is lost clears its own lease and contacts nobody", as
   ).rejects.toThrow("synthetic lost answer");
   expect(calls).toBe(0);
   expect(state.ref).toBeNull();
-  expect(logged).toEqual([]);
+  // Only the claim's own failure is logged, by error name.
+  expect(logged.map((line) => JSON.parse(line))).toEqual([
+    { event: "collection_lease_claim_failed", source: "synthetic", errorName: "Error" },
+  ]);
   // The next execution is not refused as busy.
   state.failClaimAfterCommit = false;
   await withCollectionLease({ SCHEDULE_DB: db }, "synthetic", async () => {
@@ -133,12 +136,116 @@ test("a lost claim answer whose clearing fails every attempt reports the claim's
   expect(state.ref).not.toBeNull();
   expect(state.releaseCalls).toBe(LEASE_RELEASE_ATTEMPTS);
   expect(logged.map((line) => JSON.parse(line))).toEqual([
+    { event: "collection_lease_claim_failed", source: "synthetic", errorName: "Error" },
     {
       event: "collection_lease_release_failed",
       source: "synthetic",
       attempts: LEASE_RELEASE_ATTEMPTS,
     },
   ]);
+});
+
+test("a refused claim logs who holds the lease and how long it has been silent", async () => {
+  const { db, state } = leaseStore();
+  state.ref = "other-execution";
+  const holder = {
+    lease_ref: "other-execution",
+    started_at: "2026-01-01T00:00:00.000Z",
+    heartbeat_at: "2026-01-01T00:01:00.000Z",
+    age_ms: 120_000,
+    silent_ms: 60_000,
+  };
+  const reads: string[] = [];
+  const withRead: ScheduleLeaseDatabase = {
+    prepare(sql) {
+      const statement = db.prepare(sql);
+      return {
+        bind(...values) {
+          const bound = statement.bind(...values);
+          return {
+            run: () => bound.run(),
+            async first<T>() {
+              reads.push(sql);
+              expect(values).toEqual(["synthetic"]);
+              return holder as T;
+            },
+          };
+        },
+      };
+    },
+  };
+  const info = spyOn(console, "log").mockImplementation(() => undefined);
+  let calls = 0;
+  try {
+    const error = await withCollectionLease({ SCHEDULE_DB: withRead }, "synthetic", async () => {
+      calls += 1;
+    }).then(
+      () => null,
+      (caught: unknown) => caught,
+    );
+    expect(scheduledFailure(error).failureCode).toBe("collection_busy");
+    expect(calls).toBe(0);
+    expect(reads).toHaveLength(1);
+    expect(info.mock.calls.map(([line]) => JSON.parse(String(line)))).toEqual([
+      {
+        event: "collection_lease_busy",
+        code: "collection_busy",
+        source: "synthetic",
+        holderRead: "ok",
+        holderLeaseRef: "other-execution",
+        holderStartedAt: "2026-01-01T00:00:00.000Z",
+        holderHeartbeatAt: "2026-01-01T00:01:00.000Z",
+        holderAgeMs: 120_000,
+        holderSilentMs: 60_000,
+      },
+    ]);
+  } finally {
+    info.mockRestore();
+  }
+  // The refusal never touched the holder's lease.
+  expect(state.ref).toBe("other-execution");
+});
+
+test("a refused claim whose holder read fails is still refused as busy", async () => {
+  const { db, state } = leaseStore();
+  state.ref = "other-execution";
+  const failingRead: ScheduleLeaseDatabase = {
+    prepare(sql) {
+      const statement = db.prepare(sql);
+      return {
+        bind(...values) {
+          const bound = statement.bind(...values);
+          return {
+            run: () => bound.run(),
+            async first<T>(): Promise<T | null> {
+              throw new Error("synthetic d1 failure");
+            },
+          };
+        },
+      };
+    },
+  };
+  const info = spyOn(console, "log").mockImplementation(() => undefined);
+  try {
+    const error = await withCollectionLease(
+      { SCHEDULE_DB: failingRead },
+      "synthetic",
+      async () => undefined,
+    ).then(
+      () => null,
+      (caught: unknown) => caught,
+    );
+    expect(scheduledFailure(error).failureCode).toBe("collection_busy");
+    expect(JSON.parse(String(info.mock.calls[0]?.[0]))).toMatchObject({
+      event: "collection_lease_busy",
+      source: "synthetic",
+      holderRead: "failed",
+      holderLeaseRef: null,
+    });
+  } finally {
+    info.mockRestore();
+  }
+  expect(state.ref).toBe("other-execution");
 });
 
 test("a claim that failed before writing leaves another execution's lease intact", async () => {
