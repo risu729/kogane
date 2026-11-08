@@ -288,7 +288,7 @@ Concrete C evidence for possible current PointClub same-origin GET/HTML paginati
 2. **Sanitization**: remove cookies/Authorization-CSRF-OTP/query-body values/card-member IDs/amounts-merchants-PII
    before/immediately after capture. No default HAR; synthetic field-name schemas if needed. No sharing before scanning/manual review.
 3. **App metadata**: proxy without body-secrets only if ordinary app trusts user CAs. Stop at rejection/pinning/
-   integrity-attestation, no patches-hooks. Encrypted DNS/SNI/IP/timing-only observations also valid.
+   integrity-attestation, no patches-hooks. Observing only DNS/SNI/IP/timing without decrypting traffic is also valid.
 4. **Runtime tracing**: legitimate app URL builders/serializer types/read calls allowed, no tokens/cookies/keys/
    OTPs/PII-values; no integrity-pinning modification or write triggering.
 5. **Replay gate**: one isolated idempotent read only after method/path/schema/session reproducibility established.
