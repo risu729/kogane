@@ -517,3 +517,55 @@ test("an instant clock starts on its civil date in its own zone", () => {
   );
   expect(unknown.rejected).toEqual([{ offerRef: "-", reasonCode: "clock_not_a_date" }]);
 });
+
+test("a required completion date follows the deadline rule on the credit day", () => {
+  const at = (requiredCompletionBy: TemporalValue): string => {
+    const result = findConversionPaths(
+      [offer({ processingDays: 5 })],
+      { quantity: quantity(4), clock: day("2026-04-10") },
+      "points:b",
+      { maxDepth: 1, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy },
+    );
+    return result.paths.length === 1 ? "route" : result.rejected[0]!.reasonCode;
+  };
+  const instant = (value: string, zone = "Asia/Tokyo"): TemporalValue => ({
+    kind: "instant",
+    value,
+    zone,
+    basis: "provider",
+  });
+  // The credit is expected on 2026-04-15.
+  expect(at(day("2026-04-15"))).toBe("route");
+  expect(at(day("2026-04-14"))).toBe("completion_after_required_by");
+  // A date of another zone and an unknown value establish nothing; neither is
+  // read as no requirement (INV05).
+  expect(at({ ...day("2026-04-20"), zone: "America/Los_Angeles" })).toBe("needs_rule_verification");
+  expect(at({ kind: "unknown", reasonCode: "not_stated" })).toBe("needs_rule_verification");
+  // An instant is one moment: its own zone, even one the runtime does not
+  // know, is not needed to read it on the clock's Tokyo calendar. Before, an
+  // unknown zone gave no day and the requirement was silently dropped.
+  expect(at(instant("2026-04-10T00:00:00Z", "Synthetic/Nowhere"))).toBe(
+    "completion_after_required_by",
+  );
+  // With a clock that names no zone, it is read in its own zone, and one the
+  // runtime does not know is never read as UTC.
+  const zoneless = findConversionPaths(
+    [offer({ processingDays: 5 })],
+    { quantity: quantity(4), clock: { ...day("2026-04-10"), zone: null } },
+    "points:b",
+    {
+      maxDepth: 1,
+      maxCandidates: 8,
+      maxExpansions: 100,
+      requiredCompletionBy: instant("2026-04-10T00:00:00Z", "Synthetic/Nowhere"),
+    },
+  );
+  expect(zoneless.rejected).toEqual([
+    { offerRef: "offer:a-b@v1", reasonCode: "needs_rule_verification" },
+  ]);
+  // An instant is read on the clock's calendar: 2026-04-14T15:30Z is 00:30 on
+  // the Tokyo 15th, the credit day itself, which it cannot place.
+  expect(at(instant("2026-04-14T15:30:00Z"))).toBe("needs_rule_verification");
+  expect(at(instant("2026-04-15T15:30:00Z"))).toBe("route");
+  expect(at(instant("2026-04-13T15:30:00Z"))).toBe("completion_after_required_by");
+});

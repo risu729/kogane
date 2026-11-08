@@ -239,7 +239,8 @@ function coversApplicationDay(
  * either side is compatible, as for validity. An instant is one moment, read on
  * the application day's calendar (`civilDateOfInstant`), or on its own zone's
  * when the clock names none; a zone the runtime does not know is never read as
- * UTC.
+ * UTC. The caller's `requiredCompletionBy` is judged the same way on the
+ * credit day.
  */
 function deadlinePassed(
   deadline: TemporalValue | null,
@@ -310,7 +311,6 @@ export function findConversionPaths(
   const paths: ConversionPath[] = [];
   let expansions = 0;
   const startDay = dayNumber(start.clock);
-  const requiredBy = budget.requiredCompletionBy ? dayNumber(budget.requiredCompletionBy) : null;
   if (startDay === null)
     return {
       paths,
@@ -375,7 +375,15 @@ export function findConversionPaths(
         continue;
       }
       const creditOn = appliedOn + offer.processingDays;
-      if (requiredBy !== null && creditOn > requiredBy) {
+      // The caller's completion deadline follows the application deadline's
+      // rule on the credit day; one that establishes no answer is a review
+      // reason, never read as no deadline (INV05).
+      const late = deadlinePassed(budget.requiredCompletionBy, creditOn, zone);
+      if (late === null) {
+        rejected.push({ offerRef, reasonCode: "needs_rule_verification" });
+        continue;
+      }
+      if (late) {
         rejected.push({ offerRef, reasonCode: "completion_after_required_by" });
         continue;
       }

@@ -644,5 +644,17 @@ malformed stored validity establishes no day and stays `needs_rule_verification`
 period deadlines, and synthetic day-boundary cases: a Tokyo or Los Angeles day against
 a deadline of the other zone, an instant written in UTC that falls just after
 midnight in Tokyo, a last-second instant read on both calendars, a zoneless clock, a
-zone the runtime does not know, and an instant clock. The completion rule is unchanged; a `requiredCompletionBy` with no
-day is still not checked (a limit; no caller passes one today).
+zone the runtime does not know, an instant clock, and the completion date below.
+
+A caller's `requiredCompletionBy` follows the same rule on each hop's expected credit
+day (v4): a later day is `completion_after_required_by`; a date or period of another
+zone, a day inside a period, the day holding an instant, an `unknown` or malformed
+value, and an instant whose zone the runtime does not know when the clock names none
+are `needs_rule_verification`. In v3 it was compared as a bare day, ignoring its zone
+and reading an instant by the date its offset was written in, and an `unknown`,
+malformed or period value was not checked at all. No caller passes one today
+(`/offers/simulate` passes `null`).
+
+An instant clock is reduced to its civil day: on the day holding an instant deadline
+the result is `needs_rule_verification` even when the clock's moment is before the
+deadline's. This is a limit; no caller passes an instant clock today.
