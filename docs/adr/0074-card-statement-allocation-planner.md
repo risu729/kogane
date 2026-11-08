@@ -207,6 +207,15 @@ sorted together by amount, fixed before this ADR. The independent review added t
 silently, so a statement could be `proposed` beside another possible payer)
 and the oracle's status check.
 
+The oracle property draws no refusal, so it did not see that a debit or
+statement ref id given at two revisions (both refused `debit_repeated` or
+`statement_repeated`) was listed in input order. The ref revision is now the
+last key of both lists' order (2026-11-08), so the order is total: entries
+equal on every key are equal. A second property shuffles the input three
+times on 400 seeded runs that draw every debit exclusion, statement refusal,
+pair exclusion and outcome code, with ties on every key but the revision in
+both lists, and compares the whole output.
+
 ## Amendment 2026-11-07: a read-only caller on the review page
 
 Phase 2 plan unit 2e (owner approval of the whole plan, 2026-11-07 03:58 UTC,
