@@ -72,6 +72,15 @@ export interface OpenContextRequest {
 
 export interface OpenedContext {
   context: FinancialContext;
+  /**
+   * What a cursor issued under this context is bound to: the digest of every
+   * pinned input except the clock the request was evaluated at. `contextId`
+   * includes the evaluation clock, so it differs on every request; a page
+   * reads the same rows at any clock while the pinned inputs hold, so the
+   * next page is resumed on this and refused (`stale_context`) when one of
+   * them moved (ADR 0091).
+   */
+  pagingBasisRef: string;
   interpretation: InterpretationContext;
   /** Server-resolved, never a caller paraphrase. */
   resolvedQuery: QuerySpec;
@@ -156,6 +165,18 @@ export async function openContext(
     contextId: `ctx_${await canonicalDigest(manifest)}`,
     ...manifest,
   };
+  // The clock is left out of the paging basis; a knowledge cutoff the caller
+  // stated is a pinned input and stays in it, one defaulted to the clock does not.
+  const {
+    effectiveTime: _effectiveTime,
+    evaluationClock: _evaluationClock,
+    knowledgeCutoff: _knowledgeCutoff,
+    ...pinned
+  } = manifest;
+  const pagingBasisRef = `basis_${await canonicalDigest({
+    ...pinned,
+    knowledgeCutoff: knowledgeCutoff === request.knowledgeCutoff ? knowledgeCutoff : null,
+  })}`;
 
   const query: QueryRequest = request.query ?? {
     intent: DEFAULT_INTENT,
@@ -184,6 +205,7 @@ export async function openContext(
   });
   return {
     context,
+    pagingBasisRef,
     interpretation: inputs.interpretation,
     resolvedQuery,
     unresolvedInputs: unresolved,

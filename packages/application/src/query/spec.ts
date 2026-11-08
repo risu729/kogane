@@ -168,9 +168,11 @@ export function resolveQuerySpec(input: {
 /**
  * Digest of everything that decides the input set of a page: the intent, the
  * perimeter, the bases and the filters. The page size is excluded so a client
- * may not change the answer by resizing a page; the cursor carries it.
+ * may not change the answer by resizing a page; the cursor carries it. The
+ * effective time is excluded too: it is the clock the request was evaluated
+ * at, set anew on every request, and no intent reads by it (ADR 0091).
  */
 export async function querySpecDigest(spec: QuerySpec): Promise<string> {
-  const { limit: _limit, ...pinned } = spec;
+  const { limit: _limit, effectiveTime: _effectiveTime, ...pinned } = spec;
   return canonicalDigest(pinned);
 }

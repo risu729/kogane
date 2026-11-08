@@ -1087,11 +1087,17 @@ pure. The trade is that a context has no server-side lifetime — an id whose
 inputs have moved on is simply a different id — which is acceptable because
 every pinned input is already immutable in the store.
 
-A cursor is base64url of `{contextId, queryDigest, offset}`. The digest covers
-the intent, perimeter, bases and filters but not the page size, so a client
-cannot change the answer by resizing a page. A cursor from another context or
-another query is `stale_context`; it is never quietly restarted from the
-newest rows.
+A cursor is base64url of `{basisRef, queryDigest, offset}`. `basisRef` is the
+context's paging basis: the digest of its manifest without the request's
+clock (`effectiveTime`, `evaluationClock`, and `knowledgeCutoff` unless the
+caller stated it), so the next page is read on a later request while every
+pinned input holds, although each request's `contextId` includes its own
+clock ([ADR 0091](adr/0091-query-cursor-paging-basis.md)). The digest covers
+the intent, perimeter, bases and filters but not the page size or the
+effective time, so a client cannot change the answer by resizing a page. A
+cursor from a context with other pinned inputs (a later publication, another
+perimeter) or another query is `stale_context`; it is never quietly restarted
+from the newest rows.
 
 `resultRef` is the digest of `{contextId, resolvedQuery, data}`. It, together
 with `contextId` and a proposal's `proposalId`, is what a page and an agent

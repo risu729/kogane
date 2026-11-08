@@ -406,6 +406,36 @@ describe("row intents", () => {
     if (!outcome.ok) expect(outcome.error.code).toBe("evidence_restricted");
   });
 
+  test("a source whose rows lie past the rows read is not reported as having none", async () => {
+    // 600 newer rows of fixture-a fill the first reader page of the
+    // whole-store read; fixture-b's one older row is past it.
+    const newer = Array.from({ length: 600 }, (_, index) => ({
+      id: 1000 + index,
+      source_id: "fixture-a",
+      source_account: "account-a",
+      as_of: "2026-09-20",
+      amount_minor: "100",
+      amount_text: "1.00",
+      currency: "XTS",
+      description: "synthetic line",
+      counterparty: null,
+      external_id: `ext-${String(1000 + index)}`,
+      status: null,
+      parser: "fixture-parser@1",
+    }));
+    const older = { ...newer[0]!, id: 1, source_id: "fixture-b", source_account: "account-b" };
+    const rows = reader({ transactions: [...newer, { ...older, as_of: "2026-09-01" }] });
+    const outcome = await run(grant(), request({ intent: "activity", limit: 10 }), rows);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.nextCursor).not.toBeNull();
+    expect(outcome.result.completeness).toBe("partial");
+    expect(outcome.result.coverage.gaps).not.toContainEqual({
+      reasonCode: "no_rows_in_scope",
+      scopeRef: "source:fixture-b",
+    });
+  });
+
   test("a partial page carries a cursor instead of being silently cut", async () => {
     const outcome = await run(grant(), request({ intent: "activity", limit: 2 }));
     expect(outcome.ok).toBe(true);
@@ -706,13 +736,47 @@ describe("cursors and budgets", () => {
       publicationHighWater: "published-parse-runs@99",
     });
     const foreign = encodeCursor({
-      contextId: other.context.contextId,
+      basisRef: other.pagingBasisRef,
       queryDigest: await querySpecDigest(opened.resolvedQuery),
       offset: 1,
     });
     const outcome = await run(grant(), { ...body, cursor: foreign });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.error.code).toBe("stale_context");
+  });
+
+  test("a cursor pages on a later request over the same pinned inputs", async () => {
+    // Every request opens its context at its own clock (the adapters pass the
+    // request's second), so the next page is always asked for at a later one.
+    const body = request({ intent: "activity", limit: 2 });
+    const first = await run(grant(), body);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.result.nextCursor).not.toBeNull();
+    const later = { ...CONTEXT_INPUTS, now: "2026-09-09T00:00:01Z" };
+    const next = { ...body, cursor: first.result.nextCursor };
+    const outcome = await executeQuery({
+      grant: grant(),
+      opened: await openContext(grant(), later, { query: next }),
+      request: next,
+      reader: reader(),
+      overview: OVERVIEW,
+    });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    const rows = (outcome.result.data as { rows: { observationRef: string }[] }).rows;
+    expect(rows.map((row) => row.observationRef)).toEqual(["observation:transaction:1"]);
+    expect(outcome.result.nextCursor).toBeNull();
+    // A pinned input that moved is still another context.
+    const moved = { ...later, publicationHighWater: "published-parse-runs@43" };
+    const stale = await executeQuery({
+      grant: grant(),
+      opened: await openContext(grant(), moved, { query: next }),
+      request: next,
+      reader: reader(),
+      overview: OVERVIEW,
+    });
+    expect(stale).toMatchObject({ ok: false, error: { code: "stale_context" } });
   });
 
   test("a cursor from another query on the same context is stale too", async () => {

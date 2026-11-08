@@ -1,7 +1,9 @@
 // A cursor is bound to its context and to the digest of its query spec
 // (addendum 06 section 7). Reusing one query's cursor on another account
 // condition, or on a context opened from a different published set, is
-// refused rather than silently answered from the newest data.
+// refused rather than silently answered from the newest data. The context
+// part is its paging basis: every pinned input except the evaluation clock,
+// which every request sets anew (ADR 0091).
 //
 // The value is opaque to callers: base64url of the canonical JSON of the
 // three fields below. It carries no scope, so a cursor is not a way to read
@@ -11,7 +13,8 @@ import { canonicalJson } from "../../../domain/src/context.ts";
 import { hasExactKeys, isRecord, isSafeInt, isText } from "../../../domain/src/guards.ts";
 
 export interface CursorPayload {
-  contextId: string;
+  /** `OpenedContext.pagingBasisRef` of the context that issued the cursor. */
+  basisRef: string;
   queryDigest: string;
   offset: number;
 }
@@ -47,28 +50,28 @@ export function decodeCursor(text: string): CursorPayload | null {
   }
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["contextId", "queryDigest", "offset"]) ||
-    !isText(value.contextId, 256) ||
+    !hasExactKeys(value, ["basisRef", "queryDigest", "offset"]) ||
+    !isText(value.basisRef, 256) ||
     !isText(value.queryDigest, 128) ||
     !isSafeInt(value.offset, 0, MAX_OFFSET)
   )
     return null;
-  return { contextId: value.contextId, queryDigest: value.queryDigest, offset: value.offset };
+  return { basisRef: value.basisRef, queryDigest: value.queryDigest, offset: value.offset };
 }
 
 /**
  * The offset a request resumes from, or `stale` when the cursor belongs to a
- * different context or a different query. `stale` is never downgraded to
- * "start again from the newest rows".
+ * context with other pinned inputs or a different query. `stale` is never
+ * downgraded to "start again from the newest rows".
  */
 export function resumeOffset(
   cursor: string | null,
-  contextId: string,
+  basisRef: string,
   queryDigest: string,
 ): { ok: true; offset: number } | { ok: false; reason: "stale_context" } {
   if (cursor === null) return { ok: true, offset: 0 };
   const decoded = decodeCursor(cursor);
-  if (decoded === null || decoded.contextId !== contextId || decoded.queryDigest !== queryDigest)
+  if (decoded === null || decoded.basisRef !== basisRef || decoded.queryDigest !== queryDigest)
     return { ok: false, reason: "stale_context" };
   return { ok: true, offset: decoded.offset };
 }
