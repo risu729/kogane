@@ -128,12 +128,6 @@ function requestFailure(error: unknown): string {
   return "依頼を保存できたか確認できません。もう一度送信してください（同じ依頼として扱われます）。";
 }
 /**
- * 収集を依頼 (ADR 0048): the same stored request `kogane.ops.collection.request`
- * makes. The confirmation shows what the caller should read first — the last
- * run, a held lease, the next scheduled run and the maintenance status —
- * because a request cannot be taken back once a collector starts it.
- */
-/**
  * One job's request state, held by the page: a card remounts on each new
  * revision, and a pending key or an operation id must survive that.
  */
@@ -149,6 +143,12 @@ interface RequestState {
   message: string;
 }
 const IDLE: RequestState = { pending: null, busy: false, message: "" };
+/**
+ * 収集を依頼 (ADR 0048): the same stored request `kogane.ops.collection.request`
+ * makes. The confirmation shows what the caller should read first — the last
+ * run, a held lease, the next scheduled run and the maintenance status —
+ * because a request cannot be taken back once a collector starts it.
+ */
 function CollectionRequest({
   value,
   lease,
