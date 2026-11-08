@@ -733,7 +733,8 @@ async function relayTcp(
             durationMs: Date.now() - startedAt,
             bytesUp,
             bytesDown,
-            ...(failure ? safeErrorDetails(failure.error) : {}),
+            // Error fields only on a failure: teardown reads as teardown.
+            ...(failure && outcome.endsWith("-failed") ? safeErrorDetails(failure.error) : {}),
           }),
         );
       }

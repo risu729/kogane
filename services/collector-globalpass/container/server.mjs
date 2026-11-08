@@ -1000,7 +1000,13 @@ async function collect(payload, response) {
       errorCode: failureCode(error, stage),
       ...(stage ? { stage } : {}),
       challengeAttempts: attempts,
-      ...(lastHttpError.status === null ? {} : { lastHttpStatus: lastHttpError.status }),
+      // The Worker admits 400-599 only; a status outside it (Chrome accepts
+      // up to 999) would turn this record into a contract failure.
+      ...(Number.isInteger(lastHttpError.status) &&
+      lastHttpError.status >= 400 &&
+      lastHttpError.status <= 599
+        ? { lastHttpStatus: lastHttpError.status }
+        : {}),
     });
   }
 }
@@ -1034,6 +1040,7 @@ async function collectBrowser(payload, response, diagnostics, lastHttpError, cha
   }
   const { browser, context } = launched;
   let page;
+  let primaryError;
   try {
     await context.route("**/*", async (route) => {
       const url = new URL(route.request().url());
@@ -1053,6 +1060,8 @@ async function collectBrowser(payload, response, diagnostics, lastHttpError, cha
       lastHttpError.seen += 1;
     });
     page.setDefaultTimeout(45_000);
+    // The first challenge attempt counts the login page's own HTTP errors.
+    const httpSeenAtLoginPage = lastHttpError.seen;
     await diagnostics.step("login-page", () =>
       page.goto(LOGIN_URL, { waitUntil: "domcontentloaded" }),
     );
@@ -1063,6 +1072,10 @@ async function collectBrowser(payload, response, diagnostics, lastHttpError, cha
         loginUrl: LOGIN_URL,
         attempts: CHALLENGE_ATTEMPTS,
         attemptTimeoutMs: CHALLENGE_ATTEMPT_TIMEOUT_MS,
+        httpSeenAtStart: httpSeenAtLoginPage,
+        onAttempt: (attempt) => {
+          challenge.attempts = attempt;
+        },
       }),
     );
     challenge.attempts = challengeAttempts;
@@ -1117,14 +1130,26 @@ async function collectBrowser(payload, response, diagnostics, lastHttpError, cha
       });
     }
     await diagnostics.step("logout", () => signOut(page));
-  } finally {
-    try {
-      await diagnostics.step("browser-close", () => launched.close());
-    } finally {
-      diagnostics.relaySummary(relay.stats());
-      await diagnostics.step("relay-close", () => relay.close());
-    }
+  } catch (error) {
+    primaryError = error;
   }
+  // A teardown failure is logged, but it never replaces the failure that
+  // ended the run, nor takes over its stage.
+  const blame = primaryError === undefined;
+  let teardownError;
+  try {
+    await diagnostics.step("browser-close", () => launched.close(), { blame });
+  } catch (error) {
+    teardownError ??= error;
+  }
+  diagnostics.relaySummary(relay.stats());
+  try {
+    await diagnostics.step("relay-close", () => relay.close(), { blame });
+  } catch (error) {
+    teardownError ??= error;
+  }
+  if (primaryError !== undefined) throw primaryError;
+  if (teardownError !== undefined) throw teardownError;
 }
 
 // The process-level last resort: a failure nothing else handled is logged as

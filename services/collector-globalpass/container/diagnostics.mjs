@@ -74,7 +74,11 @@ export function createBrowserDiagnostics(relayUrl) {
     } catch {}
   }
   return {
-    async step(stage, action) {
+    /**
+     * `blame: false` logs a failure without making it the run's failed stage
+     * (teardown after another failure).
+     */
+    async step(stage, action, { blame = true } = {}) {
       const previous = currentStage;
       currentStage = stage;
       const start = Date.now();
@@ -84,7 +88,7 @@ export function createBrowserDiagnostics(relayUrl) {
         emit(stage, "success", Date.now() - start);
         return result;
       } catch (error) {
-        if (failedStage === undefined && stages.has(stage)) failedStage = stage;
+        if (blame && failedStage === undefined && stages.has(stage)) failedStage = stage;
         emit(stage, "failed", Date.now() - start, error);
         throw error;
       } finally {

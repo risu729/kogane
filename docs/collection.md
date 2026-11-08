@@ -1062,7 +1062,9 @@ Processor maps it to the CORE source `global-pass`), producer
   `code` (`token`, `token-timeout`, `widget-missing`, `edge-denied`,
   `page-unreadable`), the number of Turnstile frames and the last HTTP error
   status of that attempt with its host class (`globalpass`, `turnstile`,
-  `turnstile-helper`). Observed 2026-11-05..07: one token after 25 s, two
+  `turnstile-helper`, `other`). The error record's `challengeAttempts` counts
+  every attempt started, and a teardown failure after another failure is
+  logged but never replaces that failure's code or stage. Observed 2026-11-05..07: one token after 25 s, two
   waits that ran out at 45 s.
 - Human-required: **not claimed.** `globalpass_login_rejected` may mean the
   credentials need a person, but it has not been observed, so the terminal

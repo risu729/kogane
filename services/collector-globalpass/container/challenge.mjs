@@ -22,11 +22,21 @@ async function challengeState(page) {
  */
 export async function obtainChallengeToken(
   page,
-  { diagnostics, lastHttpError, loginUrl, attempts, attemptTimeoutMs },
+  {
+    diagnostics,
+    lastHttpError,
+    loginUrl,
+    attempts,
+    attemptTimeoutMs,
+    httpSeenAtStart = lastHttpError.seen,
+    onAttempt = () => undefined,
+  },
 ) {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    onAttempt(attempt);
     const startedAt = Date.now();
-    const seenBefore = lastHttpError.seen;
+    // Attempt 1 counts from before the login page loaded, a retry from its reload.
+    const seenBefore = attempt === 1 ? httpSeenAtStart : lastHttpError.seen;
     if (attempt > 1) {
       try {
         await page.goto(loginUrl, { waitUntil: "domcontentloaded" });

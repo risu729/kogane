@@ -117,6 +117,13 @@ export function startConnectRelay({
     let established = false;
     let responseSent = false;
     let relayStream;
+    // A WebSocket error after open is also re-emitted by its stream: count it once.
+    let countedRelayError;
+    const countRelayError = (error) => {
+      if (error === countedRelayError) return;
+      countedRelayError = error;
+      countError(error);
+    };
     const rejectConnect = (status) => {
       if (responseSent || socket.destroyed) return;
       responseSent = true;
@@ -138,7 +145,8 @@ export function startConnectRelay({
     const fail = () => {
       clearTimeout(timeout);
       if (!established) {
-        if (!responseSent) counts.upstreamFailed += 1;
+        // A browser that hung up first is not an upstream failure.
+        if (!responseSent && !socket.destroyed) counts.upstreamFailed += 1;
         rejectConnect("502 Bad Gateway");
       } else if (!socket.destroyed) {
         socket.destroy();
@@ -156,7 +164,7 @@ export function startConnectRelay({
       counts.established += 1;
       relayStream = createWebSocketStream(relay);
       relayStream.on("error", (error) => {
-        countError(error);
+        countRelayError(error);
         fail();
       });
       relayStream.on("data", (chunk) => {
@@ -176,7 +184,7 @@ export function startConnectRelay({
       socket.resume();
     });
     relay.on("error", (error) => {
-      countError(error);
+      countRelayError(error);
       fail();
     });
     relay.once("close", () => {

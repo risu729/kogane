@@ -149,6 +149,31 @@ describe("GLOBAL PASS challenge attempts", () => {
     }
   });
 
+  test("attempt 1 counts the login page's HTTP errors, and each started attempt is reported", async () => {
+    const log = capture();
+    try {
+      // A 403 seen while the login page loaded, before the challenge began.
+      const lastHttpError = {
+        status: 403 as number | null,
+        host: "globalpass" as string | null,
+        seen: 1,
+      };
+      const started: number[] = [];
+      const page = fakePage(["timeout", "timeout", "timeout"]);
+      await obtainChallengeToken(page, {
+        ...options(lastHttpError),
+        httpSeenAtStart: 0,
+        onAttempt: (attempt: number) => started.push(attempt),
+      }).catch(() => undefined);
+      expect(started).toEqual([1, 2, 3]);
+      const [first, second] = log.events();
+      expect(first).toMatchObject({ attempt: 1, lastHttpStatus: 403, lastHttpHost: "globalpass" });
+      expect(second).not.toHaveProperty("lastHttpStatus");
+    } finally {
+      log.restore();
+    }
+  });
+
   test("an edge refusal is not retried", async () => {
     const log = capture();
     try {
@@ -233,6 +258,26 @@ describe("GLOBAL PASS container failure codes", () => {
         "globalpass_month_discovery_failed",
       );
       expect(failureCode(new Error("private"), undefined)).toBe("browser_collection_failed");
+    } finally {
+      log.restore();
+    }
+  });
+
+  test("a teardown failure after another failure does not take over its stage", async () => {
+    const log = capture();
+    try {
+      const diagnostics = createBrowserDiagnostics(relayUrl);
+      await diagnostics
+        .step(
+          "browser-close",
+          async () => {
+            throw new Error("private-close");
+          },
+          { blame: false },
+        )
+        .catch(() => undefined);
+      expect(diagnostics.failedStage).toBeUndefined();
+      expect(log.events().at(-1)).toMatchObject({ stage: "browser-close", outcome: "failed" });
     } finally {
       log.restore();
     }
