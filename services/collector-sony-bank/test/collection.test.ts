@@ -1,10 +1,28 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { collectSonyBank } from "../src/sony-bank";
 import { failure, SonyBankDiagnostics } from "../src/diagnostics";
+import { runSharedCollection } from "../src/worker";
+import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 
 const runId = "123e4567-e89b-42d3-a456-426614174000";
 const privateValue = "synthetic-private-financial-value";
-const csvBytes = new Uint8Array([0x82, 0xa0, 0x2c, 0x31, 0x0d, 0x0a]);
+function csvBytes(currency: string, count: number): Uint8Array<ArrayBuffer> {
+  const header =
+    "取引日,摘要,参考情報,通貨,預入額,引出額,差引残高" + (currency === "JPY" ? "" : ",為替レート");
+  return new TextEncoder().encode(
+    header +
+      "\r\n" +
+      Array.from(
+        { length: count },
+        () =>
+          '2099/01/01,"synthetic, reference\ncontinued",,' +
+          currency +
+          ",1,,1" +
+          (currency === "JPY" ? "" : ",1"),
+      ).join("\r\n") +
+      "\r\n",
+  );
+}
 
 const HISTORY_PATH = "/custom-web00/eaba/cust-web/ordinary-deposit-transaction-histories";
 const HISTORY_PAGER_PATH =
@@ -17,6 +35,8 @@ function provider(
   shape?: {
     currencyTotals?: Readonly<Record<string, number>>;
     secondPage?: "changed-total" | "short";
+    csvBody?: Uint8Array<ArrayBuffer>;
+    csvMediaType?: string;
   },
 ) {
   const csvCurrencies: string[] = [];
@@ -36,13 +56,16 @@ function provider(
     if (path.includes("ordinary-deposit-transaction-histories")) {
       const body = JSON.parse(String(init?.body));
       const currency = body.currencyCd || body.currencyCdInq;
+      const declared = shape?.currencyTotals?.[currency] ?? (currency === "JPY" ? total : 0);
       if (path.endsWith("csv/load")) {
         csvCurrencies.push(currency);
+        if (csvStatus === 0) throw new Error(privateValue);
         return csvStatus === 200
-          ? new Response(csvBytes, { headers: { "content-type": "text/csv" } })
+          ? new Response(shape?.csvBody ?? csvBytes(currency, declared), {
+              headers: { "content-type": shape?.csvMediaType ?? "text/csv" },
+            })
           : Response.json({ errors: [{ code: privateValue }] }, { status: csvStatus });
       }
-      const declared = shape?.currencyTotals?.[currency] ?? (currency === "JPY" ? total : 0);
       const start = Number(body.acquisitionStrtCnt);
       const secondPage = currency === "JPY" && start > 1 ? shape?.secondPage : undefined;
       let count = declared;
@@ -198,7 +221,7 @@ describe("Sony history CSV follows the official empty-history guard", () => {
         value.artifacts.find((artifact) => artifact.dataset === "yen-history-csv")!
           .body as ArrayBuffer,
       ),
-    ).toEqual(csvBytes);
+    ).toEqual(csvBytes("JPY", 4));
     expect(records).toContainEqual(
       expect.objectContaining({
         providerOperation: "EABA0600S1fE11",
@@ -308,7 +331,7 @@ describe("Sony history CSV follows the official empty-history guard", () => {
         value.artifacts.find((artifact) => artifact.dataset === "foreign-history-usd-csv")!
           .body as ArrayBuffer,
       ),
-    ).toEqual(csvBytes);
+    ).toEqual(csvBytes("USD", 4));
     expect(
       JSON.parse(
         String(
@@ -405,4 +428,92 @@ describe("Sony history CSV follows the official empty-history guard", () => {
       { event: "sony-bank-progress", phase: "collection", stage: "collect", outcome: "failed" },
     ]);
   });
+});
+
+describe("Sony CSV completeness reaches the shared terminal", () => {
+  for (const [name, total, csvStatus, body, code] of [
+    ["missing response body", 2, 200, new Uint8Array(), "history_csv_missing_with_transactions"],
+    ["short CSV", 2, 200, csvBytes("JPY", 1), "history_csv_count_mismatch"],
+    ["long CSV", 2, 200, csvBytes("JPY", 3), "history_csv_count_mismatch"],
+    ["HTTP failure", 2, 500, undefined, "history_csv_missing_with_transactions"],
+    ["network failure", 2, 0, undefined, "history_csv_missing_with_transactions"],
+    ["invalid CSV", 2, 200, new TextEncoder().encode("bad header\nrow"), "history_csv_invalid"],
+    ["complete CSV", 2, 200, undefined, undefined],
+    ["zero rows without CSV", 0, 200, undefined, undefined],
+  ] as const) {
+    test(name, async () => {
+      const mock = provider(
+        total,
+        csvStatus,
+        false,
+        body === undefined ? undefined : { csvBody: body },
+      );
+      const data = new FakeR2Bucket();
+      const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(
+        Object.assign(mock.fetcher, { preconnect: () => undefined }),
+      );
+      try {
+        const { value, records } = await capture(() =>
+          runSharedCollection(
+            {
+              DATA: data,
+              COLLECTOR_SCHEMA_VERSION: "sony-bank-worker-poc-v2",
+              SONY_BANK_CREDENTIAL_JSON: JSON.stringify({
+                branchNum: "123",
+                accountNum: "1234567",
+                loginPwd: privateValue,
+              }),
+            } as unknown as Env,
+            { from: "2099-01-01", to: "2099-01-02" },
+          ),
+        );
+        expect(value.status).toBe(code === undefined ? "success" : "failed");
+        const terminal = JSON.parse(
+          new TextDecoder().decode(data.entries.get(value.terminalKey)!.bytes),
+        );
+        expect(terminal.safeErrorCode).toBe(code);
+        expect(terminal.units[0].safeErrorCode).toBe(code);
+        expect(terminal.reports[0].safeErrorCode).toBe(code);
+        expect(JSON.stringify(records)).not.toContain(privateValue);
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+  }
+  test("foreign currency short CSV refuses without a JSON fallback", async () => {
+    const { value } = await capture(async () => {
+      try {
+        await collect(
+          provider(0, 200, false, { currencyTotals: { USD: 2 }, csvBody: csvBytes("USD", 1) }),
+        );
+      } catch (error) {
+        return failure("collect", error);
+      }
+      throw new Error("expected failure");
+    });
+    expect(value.diagnostics).toMatchObject({
+      currency: "USD",
+      reason: "history_csv_count_mismatch",
+    });
+  });
+});
+
+test("CSV completeness supports the observed Shift JIS export without modifying bytes", async () => {
+  const body = new Uint8Array(
+    Buffer.from(
+      "juaI+JP6LJNFl3YsjlGNbI/ulfEsksqJ3SyXYZP8inosiPiPb4p6LI23iPiOY42CCjIwMjYvMDkvMDEsk72WvJP8i+AsjYeQrINmgVuDXixKUFksMTAwMCwsMjUwMAoyMDI2LzA5LzAyLJO9lryPb4vgLI2HkKyDZoFbg14sSlBZLCw1MDAsMjAwMAo=",
+      "base64",
+    ),
+  );
+  for (const csvMediaType of ["text/csv", "text/csv; charset=Shift_JIS"]) {
+    const { value } = await capture(() =>
+      collect(provider(2, 200, false, { csvBody: body, csvMediaType })),
+    );
+    expect(
+      new Uint8Array(
+        value.artifacts.find((artifact) => artifact.dataset === "yen-history-csv")!
+          .body as ArrayBuffer,
+      ),
+    ).toEqual(body);
+  }
 });

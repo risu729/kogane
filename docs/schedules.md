@@ -91,6 +91,10 @@ reason; its next scheduled run tries again. Only a refused, challenged or unreco
 George login pauses the source, until the credential secret changes or one
 requested collection (at most once per 24 hours) allows a login; a skipped alarm
 records `st_george_paused_<reason>`.
+The ambiguous `http-denied`, `bank-request-error` and `unexpected-route`
+failures do not create a pause when a validated diagnostic records zero login
+POSTs and a stage before the login click. The next alarm may then try again. A missing diagnostic or an existing
+stored pause remains conservative; explicit refusals and challenges still pause.
 
 **停止した実行を解除** remains for the operator, for a source that should not
 wait for the tick. Only after confirming the previous execution stopped, use it.
@@ -268,9 +272,11 @@ page and one from an MCP client are the same kind of stored operation.
   same operation even after midnight; a new confirmation is a new request. A
   4xx answer other than 408 or 429 is shown as refused and not stored, with
   its code. The answer shows the operation id.
-- **Following it.** The page does not read the operation yet. The request's
-  trail is `GET /api/ops/v1/operations/{id}`, and a finished run appears in
-  **取得履歴** like an alarm run.
+- **Following it.** An accepted request links to **依頼の経過** ("request trail")
+  at `/operations/{id}`. That read-only page follows the request through
+  `GET /api/ops/v1/operations/{id}`. The link survives schedule-card refreshes;
+  opening a new confirmation clears the previous result. A finished run also
+  appears in **取得履歴** like an alarm run.
 
 ## Official-site re-survey
 
