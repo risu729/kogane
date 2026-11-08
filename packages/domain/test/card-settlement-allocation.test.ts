@@ -543,6 +543,20 @@ describe("every debit is one fact (INV06)", () => {
     ]);
     expect(codesOf(only(result))).toEqual(["no_exact_allocation", "in_window_debits_below_total"]);
   });
+
+  test("one ref id at two revisions is listed in the same order whatever the input order", () => {
+    const at = (revision: number) =>
+      debit(8, 2000, {
+        ref: { kind: "transaction", id: "transaction:8", revision: `parse_run:${revision}` },
+      });
+    const forward = run([statement(1, 2000)], [at(1), at(2)]);
+    const backward = run([statement(1, 2000)], [at(2), at(1)]);
+    expect(backward).toEqual(forward);
+    expect(forward.debitExclusions.map((entry) => entry.debitRef?.revision)).toEqual([
+      "parse_run:1",
+      "parse_run:2",
+    ]);
+  });
 });
 
 describe("statement refusals", () => {
@@ -568,6 +582,20 @@ describe("statement refusals", () => {
       ["balance:4", { status: "refused", code: "statement_already_allocated" }],
       ["balance:5", { status: "refused", code: "statement_repeated" }],
       ["balance:6", { status: "refused", code: "statement_repeated" }],
+    ]);
+  });
+
+  test("one statement ref id at two revisions is listed in the same order whatever the input order", () => {
+    const at = (revision: number) =>
+      statement(5, 3000, {
+        ref: { kind: "balance", id: "balance:5", revision: `parse_run:${revision}` },
+      });
+    const forward = run([at(1), at(2)], [debit(1, 3000)]);
+    const backward = run([at(2), at(1)], [debit(1, 3000)]);
+    expect(backward).toEqual(forward);
+    expect(forward.statements.map((s) => [s.statementRef?.revision, s.outcome])).toEqual([
+      ["parse_run:1", { status: "refused", code: "statement_repeated" }],
+      ["parse_run:2", { status: "refused", code: "statement_repeated" }],
     ]);
   });
 });

@@ -301,9 +301,9 @@ export type CardStatementAllocationRun =
   | {
       ok: true;
       manifest: CardStatementAllocationManifest;
-      /** One per input statement, ordered by statement ref id then key. */
+      /** One per input statement, ordered by statement ref id, key, refusal code, then ref revision. */
       statements: StatementAllocationResult[];
-      /** Debits that take no part in any allocation, ordered by ref id. */
+      /** Debits that take no part in any allocation, ordered by ref id, code, then ref revision. */
       debitExclusions: { debitRef: SourceFactRef | null; code: AllocationDebitExclusion }[];
     };
 
@@ -588,9 +588,13 @@ export function planCardStatementAllocations(
   }
   // By ref id: the debits of several units are not ordered by amount here.
   admitted.sort((a, b) => compareText(a.input.debit.ref.id, b.input.debit.ref.id));
+  // A ref id given at two revisions is two entries: the revision orders them,
+  // so the output does not follow the input order.
   debitExclusions.sort(
     (a, b) =>
-      compareText(a.debitRef?.id ?? "", b.debitRef?.id ?? "") || compareText(a.code, b.code),
+      compareText(a.debitRef?.id ?? "", b.debitRef?.id ?? "") ||
+      compareText(a.code, b.code) ||
+      compareText(a.debitRef?.revision ?? "", b.debitRef?.revision ?? ""),
   );
 
   // Statements: shape, repetition, value, date, reservation.
@@ -797,7 +801,8 @@ export function planCardStatementAllocations(
         compareText(
           a.outcome.status === "refused" ? a.outcome.code : "",
           b.outcome.status === "refused" ? b.outcome.code : "",
-        ),
+        ) ||
+        compareText(a.statementRef?.revision ?? "", b.statementRef?.revision ?? ""),
     );
   return {
     ok: true,
