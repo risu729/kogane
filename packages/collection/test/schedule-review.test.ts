@@ -7,7 +7,7 @@ import {
   validMaintenance,
   type MaintenanceRule,
 } from "../src/schedule-model";
-import { scheduledResult } from "../src/schedule-result";
+import { scheduledFailure, scheduledResult } from "../src/schedule-result";
 import { withCollectionLease, type ScheduleLeaseDatabase } from "../src/schedule-lease";
 const ms = (value: string) => Date.parse(value);
 function rule(pattern: MaintenanceRule["pattern"]): MaintenanceRule {
@@ -114,6 +114,36 @@ test("a run whose terminal was not written is never reported as a persisted run"
       persistence: "already_persisted",
     }).runIds,
   ).toEqual(["synthetic-resend"]);
+  // A list of run ids does not outrank the persistence verdict: a value
+  // that says its terminal was not written links no run, listed or not.
+  expect(
+    scheduledResult({
+      status: "success",
+      runIds: ["synthetic-unwritten"],
+      terminal: { persisted: false },
+    }),
+  ).toEqual({ status: "failed", runIds: [], failureCode: "collection_failed" });
+  expect(
+    scheduledResult({ status: "success", runIds: ["synthetic-unwritten"], persistence: "conflict" })
+      .runIds,
+  ).toEqual([]);
+});
+test("a reported run id is one a terminal key can carry", () => {
+  // `runs/<source>/<runId>/terminal.json` refuses `:` (keys.ts `RUN_ID`), so
+  // no persisted run can have such an id; reporting one links nothing.
+  expect(
+    scheduledResult({ runId: "synthetic:run", status: "success", persistence: "persisted" }).runIds,
+  ).toEqual([]);
+  expect(
+    scheduledResult({ status: "success", runIds: ["synthetic:run", "synthetic-run"] }).runIds,
+  ).toEqual(["synthetic-run"]);
+  expect(
+    scheduledFailure(new Error("synthetic"), [
+      "synthetic-card-001",
+      "synthetic:card",
+      "synthetic-card-001",
+    ]).runIds,
+  ).toEqual(["synthetic-card-001"]);
 });
 test("a persistent active lease blocks provider entry; no time expiry is consulted", async () => {
   let ref: string | null = "interrupted",

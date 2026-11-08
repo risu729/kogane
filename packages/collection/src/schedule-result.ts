@@ -1,3 +1,4 @@
+import { RUN_ID } from "./keys";
 import { LEASE_ABORT_CODES, type LeaseAbortCode } from "./schedule-lease";
 
 export interface ScheduledResult {
@@ -5,7 +6,20 @@ export interface ScheduledResult {
   runIds: string[];
   failureCode: string | null;
 }
-const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
+/** At most this many run references leave one result; the Processor refuses more. */
+const MAX_RUN_IDS = 100;
+
+/**
+ * The run references a result may carry: ids a terminal key can name
+ * (`runs/<source>/<runId>/terminal.json`, keys.ts `RUN_ID`), each once, at
+ * most {@link MAX_RUN_IDS}. Anything else names no persisted run.
+ */
+function persistedRunIds(values: readonly unknown[]): string[] {
+  return [
+    ...new Set(values.filter((id): id is string => typeof id === "string" && RUN_ID.test(id))),
+  ].slice(0, MAX_RUN_IDS);
+}
+
 /** Return only closed operational outcomes and exact persisted run references. */
 export function scheduledResult(value: unknown): ScheduledResult {
   const v = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
@@ -27,10 +41,9 @@ export function scheduledResult(value: unknown): ScheduledResult {
     terminal.persisted === false ||
     (typeof body.persistence === "string" &&
       !["persisted", "already_persisted", "stored"].includes(body.persistence));
-  const supplied = Array.isArray(v.runIds) ? v.runIds : unwritten ? [] : [body.runId];
-  const runIds = [
-    ...new Set(supplied.filter((id): id is string => typeof id === "string" && RUN_ID.test(id))),
-  ].slice(0, 100);
+  // The verdict comes first: a listed run id does not outrank it.
+  const supplied = unwritten ? [] : Array.isArray(v.runIds) ? v.runIds : [body.runId];
+  const runIds = persistedRunIds(supplied);
   const failed =
     !["success", "partial", "stored", "completed"].includes(String(body.status)) || unwritten;
   return {
@@ -65,7 +78,7 @@ export function scheduledFailure(error: unknown, runIds: readonly string[] = [])
   const message = error instanceof Error ? error.message : null;
   return {
     status: "failed",
-    runIds: [...runIds],
+    runIds: persistedRunIds(runIds),
     failureCode:
       message === LEASE_REFUSAL
         ? "collection_busy"
