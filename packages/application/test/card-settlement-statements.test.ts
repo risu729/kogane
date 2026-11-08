@@ -28,6 +28,10 @@ import {
   LEGACY_CARD_SETTLEMENT_STATEMENT_GROUP_SQL,
   LEGACY_CARD_SETTLEMENT_STATEMENT_GROUP_SQL_SHA256,
 } from "./card-settlement-statement-group-legacy-sql.ts";
+import {
+  LEGACY_CARD_SETTLEMENT_STATEMENT_OLDER_SQL,
+  LEGACY_CARD_SETTLEMENT_STATEMENT_OLDER_SQL_SHA256,
+} from "./card-settlement-statement-older-legacy-sql.ts";
 import type { CardSettlementReview } from "../../domain/src/card-settlement-review.ts";
 import {
   cardSettlementEligible,
@@ -209,10 +213,25 @@ function scripted(
           ),
         ) as T[];
       if (query === CARD_SETTLEMENT_STATEMENT_OLDER_SQL) {
-        const keys = JSON.parse(String(args[0])) as string[];
-        const [per, passed, limit] = args.slice(1) as [number, number, number];
-        expect(per).toBe(CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT);
+        // Each statement's cursor is the last candidate judged: the oldest of
+        // its window (`-w4`) on the first pass, else the last older one
+        // (`-o<n>`) the previous pass returned, with that one's creation time.
+        const cursors = JSON.parse(String(args[0])) as [string, string, string][];
+        const [limit] = args.slice(1) as [number];
+        expect(args).toHaveLength(2);
         expect(limit).toBe(CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS);
+        const after = cursors.map(([key, createdAt, id]) => {
+          const window = `${key}-w${String(CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT - 1)}`;
+          const passed = id === window ? 0 : Number(/^.+-o(\d+)$/u.exec(id)![1]) + 1;
+          expect(createdAt).toBe(
+            row(key, id, CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT - 1 + passed, false).created_at,
+          );
+          return { key, passed };
+        });
+        const keys = after.map((cursor) => cursor.key);
+        // The scripted statements still searching have all passed as many.
+        const passed = after[0]!.passed;
+        for (const cursor of after) expect(cursor.passed).toBe(passed);
         passes.push({ keys, passed });
         return statements
           .filter((statement) => keys.includes(statement.key))
@@ -627,6 +646,43 @@ function olderReference(
   return chosen;
 }
 
+/**
+ * The keyed search's passes over `page` with no bound on their number, as
+ * `queryCardSettlementStatements` makes them: the first continues after each
+ * statement's `per`-th newest candidate (the oldest of its window), each later
+ * one after the last candidate the previous pass returned for a statement whose
+ * pass was full. `between` runs after each pass, before the next.
+ */
+function keyedPasses(
+  db: Database,
+  all: Candidate[],
+  page: string[],
+  per: number,
+  limit: number,
+  between?: (found: unknown[]) => void,
+): { keys: string[]; found: unknown[] }[] {
+  let searching = page.flatMap((key): [string, string, string][] => {
+    const members = all.filter((candidate) => candidate.statement_key === key).sort(newest);
+    const last = members[per - 1];
+    return members.length > per && last !== undefined ? [[key, last.created_at, last.id]] : [];
+  });
+  const passes: { keys: string[]; found: unknown[] }[] = [];
+  while (searching.length > 0) {
+    const found = rows(db, CARD_SETTLEMENT_STATEMENT_OLDER_SQL, [
+      JSON.stringify(searching),
+      limit,
+    ]) as Candidate[];
+    passes.push({ keys: searching.map(([key]) => key), found });
+    between?.(found);
+    searching = searching.flatMap(([key]): [string, string, string][] => {
+      const own = found.filter((row) => row.statement_key === key);
+      const last = own.at(-1);
+      return own.length === limit && last !== undefined ? [[key, last.created_at, last.id]] : [];
+    });
+  }
+  return passes;
+}
+
 describe("the older-candidate search on random stores with synthetic history", () => {
   const drawnHere = new Set<string>();
 
@@ -654,12 +710,19 @@ describe("the older-candidate search on random stores with synthetic history", (
     expect(cardSettlementEligible(settlementFacts(true))).toBe(false);
   });
 
+  test("the frozen positional search is the text #1132 first shipped, byte for byte", () => {
+    expect(
+      createHash("sha256").update(LEGACY_CARD_SETTLEMENT_STATEMENT_OLDER_SQL).digest("hex"),
+    ).toBe(LEGACY_CARD_SETTLEMENT_STATEMENT_OLDER_SQL_SHA256);
+  });
+
   test.each(SEEDS)(
     "seed %i: the search judges the reference's candidates, and the grouped read stays the shipped one",
     (seed) => {
       const { db } = randomSettlementStore(seed, new Set());
       addHistory(db, seed, drawnHere);
-      const keys = statementsReference(candidates(db)).map((statement) => statement.statement_key);
+      const all = candidates(db);
+      const keys = statementsReference(all).map((statement) => statement.statement_key);
       for (const per of [1, 2, 5])
         for (const page of [keys, keys.slice(0, 3), keys.slice(-2)]) {
           expect(
@@ -667,6 +730,7 @@ describe("the older-candidate search on random stores with synthetic history", (
           ).toEqual(
             rows(db, LEGACY_CARD_SETTLEMENT_STATEMENT_GROUP_SQL, [JSON.stringify(page), per]),
           );
+          // The frozen positional passes judge the reference's candidates.
           for (const [passed, limit] of [
             [0, 50],
             [0, 2],
@@ -676,7 +740,7 @@ describe("the older-candidate search on random stores with synthetic history", (
           ] as const) {
             const chosen = olderReference(db, page, per, passed, limit, drawnHere);
             expect(
-              rows(db, CARD_SETTLEMENT_STATEMENT_OLDER_SQL, [
+              rows(db, LEGACY_CARD_SETTLEMENT_STATEMENT_OLDER_SQL, [
                 JSON.stringify(page),
                 per,
                 passed,
@@ -684,7 +748,93 @@ describe("the older-candidate search on random stores with synthetic history", (
               ]),
             ).toEqual(rows(db, VIEW_REVIEWS_SQL, [JSON.stringify(chosen)]));
           }
+          // The keyed passes, from the oldest of each window and then from
+          // the last candidate each pass judged, return the frozen positional
+          // passes' rows, pass for pass, when no decision lands between them.
+          for (const limit of [50, 3, 2, 1]) {
+            const keyed = keyedPasses(db, all, page, per, limit);
+            keyed.forEach(({ keys: searching, found }, index) => {
+              expect(found).toEqual(
+                rows(db, LEGACY_CARD_SETTLEMENT_STATEMENT_OLDER_SQL, [
+                  JSON.stringify(searching),
+                  per,
+                  index * limit,
+                  limit,
+                ]),
+              );
+              if (index > 0) drawnHere.add("keyed: a pass after a cursor");
+            });
+          }
         }
+    },
+    60_000,
+  );
+
+  test.each(SEEDS)(
+    "seed %i: a decision recorded between two keyed passes skips no candidate",
+    (seed) => {
+      const { db } = randomSettlementStore(seed, new Set());
+      addHistory(db, seed, drawnHere);
+      const all = candidates(db);
+      const keys = statementsReference(all).map((statement) => statement.statement_key);
+      const per = 1;
+      const limit = 2;
+      // Every candidate the passes could judge, read before any decision.
+      const before = rows(db, LEGACY_CARD_SETTLEMENT_STATEMENT_OLDER_SQL, [
+        JSON.stringify(keys),
+        per,
+        0,
+        1e6,
+      ]) as { id: string; statement_key: string }[];
+      db.run("SAVEPOINT between_passes");
+      try {
+        let decided = 0;
+        const continued = new Set<string>();
+        const keyed = keyedPasses(db, all, keys, per, limit, (found) => {
+          // After each pass, reject the first candidate it judged of a
+          // statement whose pass was full, so that statement passes again.
+          const judged = found as { id: string; statement_key: string }[];
+          const first = judged.find(
+            (row) =>
+              judged.filter((other) => other.statement_key === row.statement_key).length === limit,
+          );
+          if (first === undefined) return;
+          continued.add(first.statement_key);
+          decided += 1;
+          db.query(
+            `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+             VALUES(?,'relation',?,1,'reject','manual','synthetic-operator',NULL,'synthetic','[]',NULL,NULL,'2026-10-07')`,
+          ).run(`dr-between-${seed}-${decided}`, `card-settlement:${first.id}`);
+          db.query(
+            `INSERT INTO card_settlement_decisions(proposal_id,revision,status,decision_revision_id,event_id,obligation_id,settlement_id,created_at)
+             VALUES(?,1,'rejected',?,NULL,NULL,NULL,'2026-10-07')`,
+          ).run(first.id, `dr-between-${seed}-${decided}`);
+        });
+        // Each statement's passes, joined, are its candidates as they were
+        // before the first decision: none skipped, none judged twice.
+        for (const key of keys)
+          expect(
+            keyed.flatMap(({ found }) =>
+              (found as { id: string; statement_key: string }[])
+                .filter((row) => row.statement_key === key)
+                .map((row) => row.id),
+            ),
+          ).toEqual(before.filter((row) => row.statement_key === key).map((row) => row.id));
+        // A statement passed again after a decision on one it had judged.
+        if (
+          keyed.some(
+            ({ found }, index) =>
+              index > 0 &&
+              (found as { statement_key: string }[]).some((row) =>
+                continued.has(row.statement_key),
+              ),
+          )
+        )
+          drawnHere.add("keyed: a decision between passes");
+      } finally {
+        db.run("ROLLBACK TO between_passes");
+        db.run("RELEASE between_passes");
+      }
     },
     60_000,
   );
@@ -698,6 +848,8 @@ describe("the older-candidate search on random stores with synthetic history", (
       "history: owner differs",
       "history: owner unknown",
       "history: searchable",
+      "keyed: a decision between passes",
+      "keyed: a pass after a cursor",
       "older: a later pass",
       "older: a pass that cuts",
       "older: judged",
