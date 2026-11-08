@@ -72,7 +72,8 @@ cleared on the next run. The Worker log records each block:
 `st-george-collection-blocked` when a refused or challenged login stores one,
 `st-george-collection-skipped-blocked` for each run it skips (nothing is
 contacted), and `st-george-block-cleared` when a block of that older policy is
-lifted. Each carries the reason code and the blocking run's id (`null` when the
+lifted (`cause: "not-a-login-refusal"`) or an operator resumes
+(`cause: "operator-resume"`). Each carries the reason code and the blocking run's id (`null` when the
 stored block has none); the first two also carry `blockedSince` (`null` for a
 block stored before 2026-11-08) and `clearedBy: "operator-resume"`. A lease
 held by another execution answers `busy` and
