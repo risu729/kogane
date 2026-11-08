@@ -251,6 +251,14 @@ enable/disable are otherwise reachable only through the delegated
 `kogane.schedules.job.update` tool ([below](#s3-maintenance-execution-and-confirmation-2026-10-10)),
 and the routes above refuse every agent and every MCP-audience caller. The tools' grading is in [agent access](agent-api.md#maintenance-windows).
 
+- `kogane.schedules.read` (`schedules.read` with `scopes.scheduleSources`
+  `"*"`, and `evidence.read` over the whole store because the page's
+  occurrences carry run and evidence ids and it lists held leases; on `/mcp`
+  and `POST /api/agent/v1/schedules.read`) answers this page's
+  `GET /api/ops/v1/schedules` snapshot without its `survey` part, read from
+  the Processor with no operator or agent header
+  ([ADR 0081](adr/0081-ui-parity-through-mcp.md);
+  [UI read pages](agent-api.md#ui-read-pages)).
 - `kogane.schedules.maintenance.read` (`schedules.read`, scoped by
   `scopes.scheduleSources`; on `/mcp` and `POST /api/agent/v1/schedules.maintenance.read`,
   which answer the same object) returns, for the granted sources (or the one

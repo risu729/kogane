@@ -126,6 +126,7 @@ export function Pager({
   end,
   onChange,
   bare = false,
+  label = "表示ページ",
 }: {
   page: number;
   pages: number;
@@ -134,11 +135,13 @@ export function Pager({
   end: number;
   onChange: (page: number) => void;
   bare?: boolean;
+  /** Names the list paged, where one page holds more than one pager. */
+  label?: string;
 }): ReactNode {
   return (
     <Pagination
       bare={bare}
-      label="表示ページ"
+      label={label}
       status={
         <>
           {total}件中 {start}–{end}件

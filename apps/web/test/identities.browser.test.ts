@@ -8,6 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
 import type {
@@ -275,4 +276,16 @@ describe.if(runnable)("identity coverage page", () => {
     expect(await coverageRegion(tab).getAttribute("tabindex")).toBe("0");
     await tab.close();
   }, 30_000);
+
+  test("the coverage and both lists pass the accessibility audit", async () => {
+    const tab = await open();
+    await coverageRegion(tab).waitFor();
+    await tab.locator(".identity-card").first().waitFor();
+    expect(await auditView(tab)).toEqual([]);
+    await tab.getByRole("button", { name: "通貨・銘柄", exact: true }).click();
+    await tab.getByRole("heading", { name: "整理済みの通貨・銘柄", exact: true }).waitFor();
+    await tab.locator(".identity-card").first().waitFor();
+    expect(await auditView(tab)).toEqual([]);
+    await tab.close();
+  }, 60_000);
 });

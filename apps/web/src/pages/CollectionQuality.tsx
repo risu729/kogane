@@ -13,7 +13,7 @@ import {
   type SourceReason,
 } from "../../../../packages/observation-shared/src/collection-quality-contract.ts";
 
-export const QUALITY_REASON_LABELS: Record<CellReason | SourceReason, string> = {
+const QUALITY_REASON_LABELS: Record<CellReason | SourceReason, string> = {
   no_collector: "収集方法が登録されていません",
   no_schedule: "実行予定がありません",
   schedule_disabled: "定期実行を停止しています",
@@ -131,7 +131,7 @@ function Schedule({ value }: { value: CollectionQualitySchedule }): ReactNode {
     </article>
   );
 }
-export function QualityCell({ value }: { value: CollectionQualityCell }): ReactNode {
+function QualityCell({ value }: { value: CollectionQualityCell }): ReactNode {
   const n = value.newest;
   return (
     <Panel

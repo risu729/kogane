@@ -354,11 +354,20 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           await this.ctx.storage.put("progress", progress);
         }
         if (progress.completedChunks >= ranges.length) {
-          let logoutSucceeded = false;
-          try {
-            await diagnostic.step("logout", () => profile.logout());
-            logoutSucceeded = true;
-          } catch {
+          // A completion retried after a later step failed has already logged
+          // out: it keeps that outcome rather than logging out a second time.
+          let logoutSucceeded = progress.logoutSucceeded;
+          if (typeof logoutSucceeded !== "boolean") {
+            logoutSucceeded = false;
+            try {
+              await diagnostic.step("logout", () => profile.logout());
+              logoutSucceeded = true;
+            } catch {
+              // Recorded below.
+            }
+            progress = { ...progress, logoutSucceeded };
+          }
+          if (!logoutSucceeded && !failureCodes.includes("logout_failed")) {
             failureCodes.push("logout_failed");
           }
           const completed: BackfillProgress = {
@@ -368,14 +377,19 @@ export class SmbcBackfillSession extends DurableObject<Env> {
             nextRange: null,
             logoutSucceeded,
           };
+          // The completion's own steps name their stage: a failure here is
+          // not one of the last chunk's, and the retry log says which failed.
+          stage = "manifest-write";
           completed.manifestKey = await storeManifest(
             this.env.DATA,
             prefix,
             this.#manifest(completed, artifacts, failureCodes),
           );
+          stage = "progress-persist";
           await this.ctx.storage.put({ progress: completed, artifacts, failureCodes });
           await this.ctx.storage.delete("session");
           await this.ctx.storage.deleteAlarm();
+          stage = "terminal-write";
           await this.#finishRun(completed, artifacts, failureCodes);
           diagnostic.finish(completed.phase === "success" ? "success" : "partial");
           console.log(
@@ -416,8 +430,13 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     failureCodes: string[],
     profile?: DirectProfile,
   ): Promise<void> {
-    let logoutSucceeded = false;
-    if (profile) {
+    // A completion that logged out and then exhausted its retries keeps that
+    // logout's outcome: logging out a second time cannot succeed.
+    let logoutSucceeded = progress.logoutSucceeded === true;
+    if (typeof progress.logoutSucceeded === "boolean") {
+      if (!logoutSucceeded && !failureCodes.includes("logout_failed"))
+        failureCodes.push("logout_failed");
+    } else if (profile) {
       try {
         await profile.logout();
         logoutSucceeded = true;
