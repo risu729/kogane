@@ -750,8 +750,8 @@ it("real MCP R2 owner decision prepares, confirms through the existing writer, a
   // The second release's expected revision still holds, but nothing is left
   // to release. The tool's own re-simulation refuses the confirmation before
   // the commit batch, so no receipt is kept, its approval stays unspent and
-  // its plan open; the command layer's answer under it is `stale_context`
-  // (services/processor/test/change-lifecycle.test.ts).
+  // its plan open. The command layer's commit gives the HTTP route the same
+  // `target_missing` (services/processor/test/change-lifecycle.test.ts).
   const stale = await invoke("kogane.command.commit", {
     ...secondCommit,
     step: "confirm",

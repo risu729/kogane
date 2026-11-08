@@ -431,22 +431,28 @@ mapping revision, so a second release planned while the override stood still
 matches its expected revision once the first has ended it. Before 2026-11-08
 its commit reserved an accepted receipt, spent its approval and closed its
 plan while the identity statements wrote nothing, and the receipt named a
-decision that does not exist. It now writes nothing and answers
-`stale_context` with the plan id, its plan open and its approval unspent: a
-batch that wrote nothing for none of the earlier reasons answers
-`stale_context` when the planner's condition no longer holds, and
-`commit_failed` otherwise. Planning refuses a release whose subject has no
-protection (`target_missing` with the subject reference, read from the same
-`protected_mapping_subjects` view the ledger condition reads; `identityPlan`
-in `packages/application/src/operations/targets.ts`), so a caller told
-`stale_context` that plans again is refused rather than handed a plan that
-cannot commit. Before 2026-11-08 planning did not check it, so a release of a
+decision that does not exist. Since 2026-11-08 the identity planner refuses
+a release whose subject has no protection, with `target_missing` and the
+subject reference (`identityPlan` in
+`packages/application/src/operations/targets.ts`, reading the same
+`protected_mapping_subjects` view the ledger condition reads), and `approve`
+and `commit` re-run the planner for `identity.release-override` before
+anything else is written, as they do for the economic-event kinds. A release
+whose override has ended is refused at whichever step comes next: nothing is
+written, its plan stays open, its approval unspent, and a new plan of that
+subject is refused the same way, so no caller is handed a plan that cannot
+commit. Before then planning did not check protection, so a release of a
 subject no override ever protected (a rule mapping) planned, approved and
 committed the same empty receipt. The MCP decision tools re-simulate a plan
 at prepare and at confirm (`services/app/src/delegated-decision-tools.ts`),
-so `kogane.command.approve` and `kogane.command.commit` refuse such a plan
-with that `target_missing` before anything reaches the commit batch; the
-HTTP command route forwards to the commit, which answers `stale_context`.
+so `kogane.command.approve` and `kogane.command.commit` give the same
+`target_missing` before the Processor is called; the HTTP command routes get
+it from `approve` and `commit`. A release whose override another release ends
+between the commit's reads and its batch is refused by the reservation's
+condition instead: it writes nothing and answers `stale_context` with the
+plan id, its plan open and its approval unspent. A batch that wrote nothing
+for none of the earlier reasons answers `stale_context` when the planner's
+condition no longer holds, and `commit_failed` otherwise.
 
 `accepted` ≠ `published`. `accepted` means the judgement is durable;
 `published` means every outbox row of that operation has been processed. The
@@ -747,7 +753,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
 
 ## Verified locally (synthetic data only)
 
-- `services/processor/test/change-lifecycle.test.ts` (36 tests):
+- `services/processor/test/change-lifecycle.test.ts` (37 tests):
   plan contents and server-computed impact; SC17/AT69 (approval refused with
   `stale_context` after a concurrent change, plan marked stale, re-simulation
   yields a new digest); a stale plan refused at commit with **no rows written
@@ -763,9 +769,11 @@ already recorded is never undone by a DELETE — an undo is a new revision
   mapping, an override release no decision), and one that loses it to an
   identical commit → the stored receipt without spending a second approval
   use; an override release that another release already ended →
-  `stale_context` with nothing written and its approval unspent, and a new
-  release plan of that subject, or of one no override protects, refused
-  with `target_missing`; typed
+  `target_missing` at commit and at approve with nothing written and its
+  approval unspent, and a new release plan of that subject, or of one no
+  override protects, refused the same way; one whose override another
+  release ends between its reads and its batch → `stale_context` with
+  nothing written and its approval unspent; typed
   relations with their own decision and no derived `same_account` (SC06); an
   agent refused approval and commit; approval digest/expiry/scope binding; the
   outbox publishing once and a duplicate delivery changing nothing; an
@@ -797,6 +805,12 @@ already recorded is never undone by a DELETE — an undo is a new revision
   payloads that reject a caller-supplied impact/approval/revisions, the review
   kinds' exact keys, id shapes, closed reason codes and 1–36 portion lists,
   digest sensitivity to every input, grants, and the error table.
+- `packages/application/test/identity-release-target.test.ts`: the release
+  planner's protection read and the identity command's ledger condition
+  agree on a rule mapping, a person's assignment, its release, a manual
+  mapping no decision describes and that one's release; without table
+  statistics the read reaches every table of `protected_mapping_subjects` by
+  a keyed index search.
 - `packages/application/test/plan-renewal.test.ts`: a change planned again
   after its plan expired gets a new open plan that approves and commits, the
   expired row unchanged; one plan per lifetime across a window boundary;

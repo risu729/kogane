@@ -226,8 +226,12 @@ export async function commit(
 
   // An economic-event kind commits only while its planner accepts it, checked
   // before its writer runs: a writer slot alone never opens a kind whose
-  // planner is not registered (ADR 0054, G2), as `approve` checks too.
-  if (isEconomicEventKind(plan.kind)) {
+  // planner is not registered (ADR 0054, G2), as `approve` checks too. An
+  // override release likewise commits only while its planner finds a
+  // protection to release, as `approve` and the MCP decision tools check; a
+  // release that loses it between this read and the batch is refused by the
+  // reservation's precondition instead (`stale_context`, in `failureReason`).
+  if (isEconomicEventKind(plan.kind) || plan.kind === "identity.release-override") {
     const eligibility = await resolveAndSimulate(store, plan.kind, plan.payload);
     if (!eligibility.ok) return eligibility;
   }

@@ -85,8 +85,12 @@ export async function approve(
   // An economic-event kind is approvable only while its planner accepts it:
   // with none registered (ADR 0054, G2) a plan row of such a kind that
   // reached the table any other way is refused here, so no approval of it is
-  // ever written.
-  if (isEconomicEventKind(plan.kind)) {
+  // ever written. An override release is approvable only while its subject
+  // still has a protection to release: its expected revision does not move
+  // when another release ends the override, so only the planner can tell.
+  // The MCP decision tools re-simulate every plan first, so both paths
+  // refuse it with the planner's `target_missing`.
+  if (isEconomicEventKind(plan.kind) || plan.kind === "identity.release-override") {
     const eligibility = await resolveAndSimulate(store, plan.kind, plan.payload);
     if (!eligibility.ok) return eligibility;
   }

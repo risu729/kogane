@@ -65,7 +65,7 @@ const INSTRUMENT_SUBJECT_SQL = `SELECT
  (SELECT max(revision) FROM instrument_mappings WHERE identifier_id=?1) AS revision,
  (SELECT m.instrument_id FROM current_instrument_mappings m WHERE m.identifier_id=?1) AS current_target`;
 /** A release has something to release: the same view the commit's ledger statement reads. */
-const PROTECTED_SUBJECT_SQL = `SELECT 1 AS protected FROM protected_mapping_subjects
+export const PROTECTED_SUBJECT_SQL = `SELECT 1 AS protected FROM protected_mapping_subjects
  WHERE subject_kind=?1 AND subject_ref=?2`;
 
 // What a normal reader can already see, and nothing else. Since migration 0026

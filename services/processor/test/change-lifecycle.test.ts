@@ -798,21 +798,12 @@ test("an identity commit refuses an operation id the direct identity route alrea
   expect((await loadPlan(store, plan.planId))!.status).toBe("approved");
 });
 
-test("a release of an override another release already ended writes no receipt and spends no approval", async () => {
-  // A release keeps the mapping revision, so the plan's expected revision
-  // still holds after another release ended the override. Without the
-  // identity command's own condition on the reservation, the commit wrote an
-  // accepted receipt, spent the approval and closed the plan while its
-  // decision statement found nothing to release, and the receipt named a
-  // decision that never existed.
-  const mapping = await seedParse(295, "smbc-bank:double-release");
-  const assignPlan = await planFor(mapping.ref, await target("target-double-release"));
+/** An account mapping a person assigned, and a planner of its override releases. */
+async function protectedRelease(id: number, sourceAccount: string) {
+  const mapping = await seedParse(id, sourceAccount);
+  const assignPlan = await planFor(mapping.ref, await target(`target-${id}`));
   expect(
-    await commitWith(
-      "op-double-release-assign",
-      assignPlan,
-      (await approveFor(assignPlan)).approvalId,
-    ),
+    await commitWith(`op-${id}-assign`, assignPlan, (await approveFor(assignPlan)).approvalId),
   ).toMatchObject({ ok: true, replayed: false });
   const releasePlan = async (reason: string) => {
     const result = await createPlan(
@@ -824,9 +815,22 @@ test("a release of an override another release already ended writes no receipt a
     if (!result.ok) throw new Error(`plan failed: ${result.error}`);
     return result.plan;
   };
+  return { mapping, releasePlan };
+}
+
+test("a release of an override another release already ended is refused at approve and commit, and spends nothing", async () => {
+  // A release keeps the mapping revision, so the plan's expected revision
+  // still holds after another release ended the override. Before 2026-11-08
+  // the commit wrote an accepted receipt, spent the approval and closed the
+  // plan while its decision statement found nothing to release. Approve and
+  // commit now ask the planner, as the MCP decision tools do, and answer its
+  // `target_missing`.
+  const { mapping, releasePlan } = await protectedRelease(295, "smbc-bank:double-release");
+  const subjectRef = `account_mapping:${mapping.ref}`;
   const first = await releasePlan("synthetic first release");
   const second = await releasePlan("synthetic second release");
-  expect(second.planId).not.toBe(first.planId);
+  const late = await releasePlan("synthetic late release");
+  expect(new Set([first.planId, second.planId, late.planId]).size).toBe(3);
   const firstApproval = await approveFor(first);
   const secondApproval = await approveFor(second);
   expect(await commitWith("op-double-release-1", first, firstApproval.approvalId)).toMatchObject({
@@ -834,8 +838,21 @@ test("a release of an override another release already ended writes no receipt a
     replayed: false,
   });
   const before = await counts();
-  const result = await commitWith("op-double-release-2", second, secondApproval.approvalId);
-  expect(result).toEqual({ ok: false, error: "stale_context", refs: [second.planId] });
+  expect(await commitWith("op-double-release-2", second, secondApproval.approvalId)).toEqual({
+    ok: false,
+    error: "target_missing",
+    refs: [subjectRef],
+  });
+  expect(
+    await approve(store, {
+      planId: late.planId,
+      planDigest: late.planDigest,
+      actor: operator,
+      scope: [],
+      ttlSeconds: 600,
+      now: NOW,
+    }),
+  ).toEqual({ ok: false, error: "target_missing", refs: [subjectRef] });
   expect(await counts()).toEqual(before);
   expect(
     await db
@@ -844,8 +861,14 @@ test("a release of an override another release already ended writes no receipt a
       .first<number>("uses_remaining"),
   ).toBe(1);
   expect((await loadPlan(store, second.planId))!.status).toBe("approved");
-  // Nothing is left to release: a new plan is refused, so a caller told
-  // `stale_context` that plans again is not handed the same dead plan.
+  expect((await loadPlan(store, late.planId))!.status).toBe("planned");
+  // The completed release still replays its receipt.
+  expect(await commitWith("op-double-release-1", first, firstApproval.approvalId)).toMatchObject({
+    ok: true,
+    replayed: true,
+  });
+  // Nothing is left to release: a new plan is refused, so a caller is not
+  // handed the same dead plan.
   expect(
     await createPlan(
       "identity.release-override",
@@ -853,7 +876,47 @@ test("a release of an override another release already ended writes no receipt a
       { actor: operator, baseContextId: "identity-current-v1", now: NOW, ttlSeconds: 900 },
       store,
     ),
-  ).toEqual({ ok: false, error: "target_missing", refs: [`account_mapping:${mapping.ref}`] });
+  ).toEqual({ ok: false, error: "target_missing", refs: [subjectRef] });
+});
+
+test("a release whose override another release ends between its reads and its batch writes no receipt", async () => {
+  // The planner found a protection when the commit read the store; the other
+  // release commits before the batch. The reservation carries the identity
+  // command's ledger condition, so it writes nothing and the commit answers
+  // `stale_context` with the plan id, its plan open and its approval unspent.
+  const { releasePlan } = await protectedRelease(297, "smbc-bank:raced-release");
+  const first = await releasePlan("synthetic first release");
+  const second = await releasePlan("synthetic second release");
+  const firstApproval = await approveFor(first);
+  const secondApproval = await approveFor(second);
+  const before = await counts();
+  const raced = racedBeforeBatch(db, async () => {
+    expect(await commitWith("op-raced-release-1", first, firstApproval.approvalId)).toMatchObject({
+      ok: true,
+      replayed: false,
+    });
+  });
+  const result = await commit(d1CommandStore(raced), {
+    operationId: "op-raced-release-2",
+    principal: operator,
+    planId: second.planId,
+    approvalId: secondApproval.approvalId,
+    planners: changeMutationPlanners(raced),
+    now: NOW,
+  });
+  expect(result).toEqual({ ok: false, error: "stale_context", refs: [second.planId] });
+  const after = await counts();
+  // Only the first release's receipt, ledger row and decision exist.
+  expect(after.receipts).toBe(before.receipts + 1);
+  expect(after.operations).toBe(before.operations + 1);
+  expect(after.decisions).toBe(before.decisions + 1);
+  expect(
+    await db
+      .prepare("SELECT uses_remaining FROM approvals WHERE approval_id=?")
+      .bind(secondApproval.approvalId)
+      .first<number>("uses_remaining"),
+  ).toBe(1);
+  expect((await loadPlan(store, second.planId))!.status).toBe("approved");
 });
 
 test("a release of a subject no override protects is refused at planning", async () => {
