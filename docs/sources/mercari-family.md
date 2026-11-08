@@ -1,139 +1,208 @@
-# Mercari / Merpay / Mercoin 個人口座ソース評価・transport 再監査
+# Mercari / Merpay / Mercoin personal account source assessment and transport re-audit
 
 > Dated source research and implementation notes. Earlier runtime/schedule
 > claims may be superseded by later changes. See the [research scope](README.md),
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-調査日: 2026-08-26
+Research date: 2026-08-26
 
-## スコープと安全境界
+## Scope and safety boundaries
 
-本資料は、日本の個人向けメルカリアカウントから直接確認できる次の三系統だけを対象とする。
+This document covers only three families directly accessible from Japanese personal メルカリ (Mercari) accounts.
 
-- メルカリの出品取引、売上金、販売履歴
-- メルペイ残高、メルカリポイント、メルペイのクレジット（あと払い・メルカードを含む）の利用履歴
-- メルコインが提供する暗号資産の保有・入出金・取引履歴・取引報告書
+- Mercari sale transactions, sales proceeds, sales history
+- メルペイ (Merpay) balances, メルカリポイント (Mercari Points), Merpay credit usage history (including あと払い (deferred payment) and メルカード (Mercard))
+- メルコイン (Mercoin) cryptoasset holdings, deposits/withdrawals, trading history, transaction reports
 
-同じメルカリアカウントと公式アプリから到達できても、運営主体、資産種別、正本となる履歴、帳票を混同しない。特に、本人確認前の「売上金」と本人確認後の「メルペイ残高」、ポイント、クレジット債務、暗号資産、暗号資産取引用の日本円は別フィールドとして保持する。コインチェック連携口座で媒介される暗号資産も、メルコイン自身が扱う BTC / ETH / XRP と同じ台帳だと仮定しない。
+Even through the same Mercari account/official app, do not conflate operators, asset types, authoritative
+histories, or reports. In particular, keep pre-identity-verification `売上金` ("sales proceeds"), post-verification
+`メルペイ残高` ("Merpay balance"), points, credit liabilities, cryptoassets, and yen for cryptoasset trading
+in separate fields. Do not assume cryptoassets mediated through コインチェック (Coincheck) linked accounts
+share a ledger with Mercoin's directly handled BTC / ETH / XRP.
 
-アカウントアグリゲータは初期経路にしない。実験は残高・履歴・帳票の読み取りだけに限定し、出品、購入、支払い、チャージ、振込申請、送金、ポイント購入、あと払いの清算、暗号資産の購入・売却・入出金・つみたて、申込、設定変更を行わない。口座 ID、氏名、メール、電話番号、住所、注文・取引 ID、実残高、取引額、暗号資産数量、Cookie、トークン、パスキー、OTP、端末識別子、認証・完全性情報を、ログ、fixture、Issue、PR、コミットへ保存しない。
+Do not use account aggregators as the initial route. Limit experiments to reading balances/history/reports;
+no listing, purchases, payments, top-ups, bank transfer applications, transfers, points purchases, deferred-payment
+settlement, cryptoasset purchase/sale/deposit/withdrawal/recurring purchases, applications, or settings changes.
+Do not retain account IDs, names, email, phone numbers, addresses, order/transaction IDs, actual balances,
+transaction amounts, cryptoasset quantities, cookies, tokens, passkeys, OTPs, device identifiers, authentication/
+integrity information in logs, fixtures, issues, PRs, or commits.
 
-## 調査方法
+## Research method
 
-メルカリ、メルペイ、メルコインの現行ヘルプと公式 Google Play 掲載を一次情報として使用した。加えて、匿名で取得できる `jp.mercari.com` の現行 HTML、route manifest、JavaScript chunk を一時領域だけに取得し、Prettier で整形して host、path、request/response model、認証・token 更新処理を静的に確認した。source map は代表 chunk で 403 となり取得できなかった。公開面への実行はページと asset の通常の `GET`、WAF 確認の `HEAD` に限り、認証 endpoint、金融 API、write endpoint は呼んでいない。
+Used current Mercari, Merpay, Mercoin help and official Google Play listings as primary sources. Also obtained
+anonymously available current `jp.mercari.com` HTML, route manifests, JavaScript chunks only in temporary storage;
+formatted with Prettier and statically checked hosts, paths, request/response models, authentication/token renewal.
+Source maps for representative chunks returned 403 and could not be obtained. Public execution was limited to
+ordinary page/asset `GET` and WAF-check `HEAD`; no authentication endpoints, financial APIs, or write endpoints called.
 
-調査時点の [Mercari Web](https://jp.mercari.com/) release は `1.260824.091703-sha.f2d8bd3`、asset origin は `https://web-jp-assets-v2.mercdn.net` だった。home から参照される JavaScript 39 本を取得し、代表的な SHA-256 は common/auth chunk `36a9b0b446c68407284f35fa72c59cca0b4e91e37fc371076724267d41b403e4`、販売履歴 page chunk `39a3ae59986fe12c7fcc846ef43e080969821c0dfeff832e10423007fbc00790`、残高 page chunk `207a26a01270892dadb3d662e7579cc9688333cfb5ddd668d9a3c8e014b747dd`、ポイント page chunk `f1368dcf0d09dfe7deefc3665370caabb4c50283b3529a48c3cbb29a300a9dcc`、クレジット page chunk `317312e11be2d37a7f3d9dfbba37106dcc33d8008c9972963631bd99bd4f78cc` である。これは再現性のための公開 artifact 識別子であり、安定 API の保証ではない。
+At research time, [Mercari Web](https://jp.mercari.com/) release was `1.260824.091703-sha.f2d8bd3`, asset origin
+`https://web-jp-assets-v2.mercdn.net`. Retrieved 39 JavaScript files referenced from home; representative SHA-256s:
+common/auth chunk `36a9b0b446c68407284f35fa72c59cca0b4e91e37fc371076724267d41b403e4`, sales history page chunk
+`39a3ae59986fe12c7fcc846ef43e080969821c0dfeff832e10423007fbc00790`, balance page chunk
+`207a26a01270892dadb3d662e7579cc9688333cfb5ddd668d9a3c8e014b747dd`, points page chunk
+`f1368dcf0d09dfe7deefc3665370caabb4c50283b3529a48c3cbb29a300a9dcc`, credit page chunk
+`317312e11be2d37a7f3d9dfbba37106dcc33d8008c9972963631bd99bd4f78cc`. These identify public artifacts
+for reproducibility, not a stable API guarantee.
 
-利用者のブラウザには今回メルカリ系の既存タブがなかったため、ログインやアカウント画面への遷移は行っていない。正規 Play 導入済み Android 端末も接続されておらず、APK は取得していない。第三者実装は公開ソースを静的に読み、通信先・要求署名・実装範囲を確認した。実値取得、認証済み通信、取引・設定変更は行っていない。
+There were no existing Mercari-family tabs in the user's browser, so no login/account-page navigation was
+performed. No legitimate Play-installed Android device was connected; no APK obtained. Statically read public
+third-party sources to check destinations, request signing, and implementation scope. No actual values,
+authenticated traffic, transactions, or settings changes.
 
-以下では「公式確認事実」「公開面の直接観測」「第三者実装の証拠」「推測・未確認」を分ける。
+Below, distinguish official facts, direct public-surface observations, third-party implementation evidence,
+and hypotheses/unverified items.
 
-## 結論
+## Conclusion
 
-三系統を一括で無人収集する公開個人 API は確認できない。しかし「金融アプリ transport 不明」と一括評価する段階ではない。現行 Web artifact から、メルカリの確定販売、メルペイ残高・売上金・ポイント・クレジット請求概要について、具体的な公式 read route と共通 OIDC / PKCE / DPoP session transport を確認した。これらは認証済み live 検証前なので **C 候補 / cost 4** とし、B へは上げない。メルコインの資産・約定は Web artifact に見つからず、公式アプリ内部 route は未確認のため **D / cost 5** のままである。
+No public personal API collecting all three families unattended was found. However, it is no longer appropriate
+to lump them together as unknown financial app transport. Current Web artifacts establish concrete official
+read routes and common OIDC / PKCE / DPoP session transport for settled Mercari sales, Merpay balances/sales
+proceeds/points/credit billing summaries. Before authenticated live verification, rate these **C candidates /
+cost 4**, not B. Mercoin assets/executions were absent from Web artifacts; official internal app routes
+remain unverified, thus **D / cost 5**.
 
-自動 collector の実装順位は、(1) 明示的な page size、offset、total count と手数料・利益 field を持つメルカリ確定販売、(2) メルペイの売上金・ポイント・残高 snapshot、(3) メルペイのクレジット月次請求概要、(4) メルコインの live app route とする。一方、会計用の手動 importer は、月内取引と月末残高を含むメルコイン月間取引報告書 CSV が最初でよい。自動化優先順位と、構造化 manual export 優先順位を混同しない。
+Automated collector implementation order: (1) settled Mercari sales, with explicit page sizes, offsets, total
+counts, fee/profit fields; (2) Merpay sales proceeds/points/balance snapshots; (3) Merpay monthly credit billing
+summaries; (4) live Mercoin app routes. For a manual accounting importer, monthly Mercoin transaction report
+CSV containing monthly transactions/month-end balances can come first. Do not conflate automation priority
+with structured manual export priority.
 
-全体の無人化は引き続き **D / cost 5**。金融データの一部はアプリ中心で、パスキー・SMS・本人確認・サービス別申込があり、公開面には Cloudflare Bot Management Cookie が見える。公開第三者クライアントの匿名検索 DPoP は transport の傍証にはなるが、個人金融 authorization の証拠ではない。
+Overall unattended collection remains **D / cost 5**. Some financial data is app-centered, with passkeys, SMS,
+identity verification, and service-specific applications; public surfaces show Cloudflare Bot Management cookies.
+Anonymous search DPoP in public third-party clients supports transport evidence, not personal financial authorization.
 
-## 正本と対象範囲
+## Authoritative records and scope
 
-| 系統                 | 現在値の正本候補                   | 履歴の正本候補                                 | 確定・未確定の境界                                                                                     |
-| -------------------- | ---------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| メルカリ販売         | Web の残高（または売上）画面       | Web の販売履歴と個別取引                       | 取引中は売上未確定。通常は取引完了時に販売利益が売上金または残高へ反映される                           |
-| 売上金               | 本人確認前に表示される売上金       | 売上履歴                                       | 振込申請期限は取得日から 180 日。本人確認後は残高表示へ移行する                                        |
-| メルペイ残高         | アプリ「おさいふ＞残高」           | 残高履歴                                       | 本人確認後の残高には有効期限がない。チャージ、売上反映、支払い、返金等を残高台帳で見る                 |
-| メルカリポイント     | アプリ「おさいふ＞ポイント」       | 履歴と有効期限                                 | 購入ポイントは購入日から 365 日、無償ポイントはキャンペーン別。誤付与取消もあり得る                    |
-| メルペイのクレジット | アプリ「○月の請求」                | 月別請求内訳、毎月の利用状況                   | 店舗データ受領前は「処理中」。加盟店から売上データが届き請求が確定するまで変更され得る                 |
-| メルコイン直接取扱   | アプリ「おさいふ＞ビットコイン等」 | 資産別取引履歴、入出金履歴、月間取引報告書 CSV | BTC / ETH / XRP を直接取扱。運用額は保有数量と現在価格による時価評価であり、日本円残高や取得原価とは別 |
-| 連携口座暗号資産     | アプリ内の連携口座表示             | 連携口座の取引履歴・取引報告書                 | コインチェック社の現物取引をメルコインが媒介する別サービス。資産・報告を直接取扱分と区別する           |
+| Family                      | Candidate authoritative current values                    | Candidate authoritative history                            | Confirmed/pending boundary                                                                                                          |
+| --------------------------- | --------------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Mercari sales               | Web balance (or sales) screen                             | Web sales history/individual transactions                  | Sales unconfirmed during transactions; profit normally reflected in proceeds/balance on completion                                  |
+| Sales proceeds              | Proceeds shown before identity verification               | Sales history                                              | Bank transfer application deadline: 180 days after acquisition; balance display after verification                                  |
+| Merpay balance              | App `おさいふ＞残高` ("wallet > balance")                 | Balance history                                            | No expiry after identity verification. Ledger includes top-ups, sales credits, payments, refunds, etc.                              |
+| Mercari Points              | App `おさいふ＞ポイント` ("wallet > points")              | History/expiry                                             | Purchased points: 365 days from purchase; free points depend on campaign. Erroneous awards may be cancelled                         |
+| Merpay credit               | App `○月の請求` ("bill for month ○")                      | Monthly billing breakdown/usage status                     | `処理中` ("processing") before store data arrives; may change until merchant sales data arrives and billing is confirmed            |
+| Direct Mercoin assets       | App `おさいふ＞ビットコイン等` ("wallet > bitcoin, etc.") | Per-asset trades, deposits/withdrawals, monthly report CSV | Direct BTC / ETH / XRP. Investment value is mark-to-market from holdings/current prices, separate from yen balance/acquisition cost |
+| Linked-account cryptoassets | Linked-account display in app                             | Linked-account trades/reports                              | Separate service where Mercoin mediates Coincheck spot trading; separate assets/reports from direct holdings                        |
 
-公式根拠:
+Official evidence:
 
-- [販売利益が反映される時点](https://help.jp.mercari.com/guide/articles/95/)
-- [商品が売れた後の取引完了まで](https://help.jp.mercari.com/guide/articles/63/)
-- [売上金の 180 日の振込申請期限](https://help.jp.mercari.com/guide/articles/96/)
-- [本人確認後の売上金・残高表示](https://help.jp.mercari.com/guide/articles/560/)
-- [メルペイ残高と本人確認](https://help.jp.mercari.com/guide/articles/551/)
-- [ポイントの種類、履歴、有効期限](https://help.jp.mercari.com/guide/articles/40/)
-- [クレジット利用履歴の「処理中」](https://help.jp.mercari.com/guide/articles/1234/)
-- [暗号資産の直接取扱と連携口座](https://help.jp.mercari.com/guide/articles/1336/)
-- [取扱暗号資産一覧](https://help.jp.mercari.com/guide/articles/2036/)
-- [暗号資産の運用額・評価損益表示](https://help.jp.mercari.com/guide/articles/1352/)
+- [When sales profit is reflected](https://help.jp.mercari.com/guide/articles/95/)
+- [From sale to transaction completion](https://help.jp.mercari.com/guide/articles/63/)
+- [180-day proceeds bank transfer application deadline](https://help.jp.mercari.com/guide/articles/96/)
+- [Proceeds/balance displays after identity verification](https://help.jp.mercari.com/guide/articles/560/)
+- [Merpay balance and identity verification](https://help.jp.mercari.com/guide/articles/551/)
+- [Points types, history, expiry](https://help.jp.mercari.com/guide/articles/40/)
+- [Credit usage processing](https://help.jp.mercari.com/guide/articles/1234/)
+- [Direct cryptoassets and linked accounts](https://help.jp.mercari.com/guide/articles/1336/)
+- [Supported cryptoassets](https://help.jp.mercari.com/guide/articles/2036/)
+- [Cryptoasset investment value/valuation profit-loss displays](https://help.jp.mercari.com/guide/articles/1352/)
 
-## 履歴の粒度・期間・エクスポート
+## History granularity, periods, and exports
 
-### メルカリ販売
+### Mercari sales
 
-公式 Web の「おさいふ＞残高（または売上）＞残高履歴（または売上履歴）」には、販売した商品の取引情報一覧がある。公式ガイドは、販売履歴を iOS / Android アプリでは提供せず、CSV 出力も提供しないと明記し、保存には Web ページの印刷を案内している。PDF は専用帳票ではないが、ブラウザの印刷先を PDF にすれば画面保存できる。
+Official Web `おさいふ＞残高（または売上）＞残高履歴（または売上履歴）` ("wallet > balance (or sales) > balance
+history (or sales history)") lists transaction information for sold products. Official guidance explicitly
+says sales history is unavailable in iOS/Android apps and CSV output is unavailable, recommending Web printing
+for retention. PDF is not a dedicated report, but browser print-to-PDF can save the screen.
 
-公式ガイドは、一覧の最古日、保持年数、1 ページ件数、総件数上限、ページング仕様を公表していない。したがって「全期間取得可能」とは扱わず、live 検証で最古表示・件数・ページ境界を測る。
+The official guide does not publish earliest dates, retention years, rows per page, total row limits,
+or pagination. Do not treat all periods as retrievable; measure earliest displays, counts, and page boundaries live.
 
-- [販売履歴、Web 限定、CSV 非対応](https://help.jp.mercari.com/guide/articles/97/)
+- [Sales history, Web-only, no CSV](https://help.jp.mercari.com/guide/articles/97/)
 
-### メルペイ残高・ポイント・クレジット
+### Merpay balances, points, and credit
 
-公式アプリの支払手段別履歴は、クレジットが「○月の請求＞内訳を見る」、残高が「残高＞残高履歴」、ポイントが「ポイント＞履歴と有効期限」である。「最近の利用＞毎月のご利用状況」は、ポイント、残高、クレジットを使ったメルカリ・加盟店での買い物を一か月単位でまとめるが、チャージ、返金、売上金反映、振込申請、クレジット利用分の支払出金を含まない。統合表示を完全な台帳として使ってはならない。
+Official app histories by payment method: credit `○月の請求＞内訳を見る` ("bill for month ○ > view breakdown"),
+balance `残高＞残高履歴` ("balance > balance history"), points `ポイント＞履歴と有効期限` ("points > history and expiry").
+`最近の利用＞毎月のご利用状況` ("recent usage > monthly usage status") groups monthly Mercari/merchant purchases
+using points/balances/credit, but excludes top-ups, refunds, proceeds credits, bank transfer applications, and
+outflows paying credit usage. Do not use the integrated display as a complete ledger.
 
-紙の利用明細は発行されず、公式案内は画面保存・印刷である。個人向けの残高・ポイント・クレジット履歴について CSV、PDF 帳票、年間利用報告書を提供する一次情報は確認できなかった。保持期間、最古月、ページ件数、総件数上限も公表されていない。おさいふの最近の利用には反映遅延があり得る。
+No paper statements; official guidance recommends screen saving/printing. No primary source was found offering
+personal balance/points/credit history CSV, PDF reports, or annual usage reports. Retention, earliest month,
+page sizes, total row limits are also unpublished. Recent wallet usage may appear with delays.
 
-キャンセル時の残高・ポイント返金は通常同時に反映され、各履歴で確認する。クレジットは加盟店から後着したデータで請求・返金表示が変わる場合があるため、`processing` と `settled` を同一行の状態遷移として保存し、初見値を確定値として固定しない。
+Cancellation refunds to balances/points normally appear simultaneously; check each history. Late merchant data
+can change credit billing/refund displays. Store `processing` and `settled` as transitions of the same row;
+do not freeze first-seen values as final.
 
-- [支払手段別・月別の利用履歴と紙明細なし](https://help.jp.mercari.com/guide/articles/578/)
-- [月別利用履歴の対象外イベント](https://help.jp.mercari.com/guide/articles/746/)
-- [おさいふ画面と履歴反映の時間差](https://help.jp.mercari.com/guide/articles/2037/)
-- [残高・ポイント払いの返金履歴と時期](https://help.jp.mercari.com/guide/articles/466/)
-- [キャンセル後に加盟店データで再請求される場合](https://help.jp.mercari.com/guide/articles/2093/)
+- [Histories by payment method/month; no paper statements](https://help.jp.mercari.com/guide/articles/578/)
+- [Events excluded from monthly usage history](https://help.jp.mercari.com/guide/articles/746/)
+- [Wallet/history reflection delays](https://help.jp.mercari.com/guide/articles/2037/)
+- [Balance/points refund history and timing](https://help.jp.mercari.com/guide/articles/466/)
+- [Merchant-data rebilling after cancellation](https://help.jp.mercari.com/guide/articles/2093/)
 
-### メルコイン
+### Mercoin
 
-アプリの取引履歴は資産を選択して確認し、個別詳細には取引種別（購入、つみたて購入、売却、支払いのための売却、受取等）、日時、注文 ID 等がある。ID や実値は収集記録に残さない。別の「チャージ・移した履歴」は、暗号資産取引用日本円の入出金を日付・金額・種別で保持するため、暗号資産売買履歴と分ける。
+Select assets for app trade history; individual details contain transaction types (purchase, recurring purchase,
+sale, sale for payment, receipt, etc.), datetime, order IDs, etc. Do not retain IDs/actual values in collection
+records. Separate `チャージ・移した履歴` ("top-up/transfer history") keeps yen-for-cryptoasset-trading deposits/
+withdrawals by date/amount/type; separate it from cryptoasset trading history.
 
-法令に基づく月間取引報告書は、月内の取引履歴と月末残高を CSV で交付する。取引がない月にも交付され、前月分の作成完了後にメール通知される。アプリから対象月ごとにダウンロードする。退会月と翌月分も交付され、退会後に過去分が必要なら事務局へ依頼できる。
+Statutory monthly transaction reports provide monthly transactions/month-end balances as CSV, including
+months without transactions; email notification after previous-month report completion. Download per month
+in app. Reports also cover the termination month and following month; past reports can be requested from
+support after membership termination.
 
-公式の年間損益説明は、1 月から 12 月までの月間 CSV の値を利用者が合算する方法であり、単一の年間 CSV / PDF を示していない。CSV には取引種別、取引ペア、暗号資産数量の増減、約定金額等があり、取引単位の損益計算材料になる。画面履歴の保持期間・件数上限は公表されていないが、月次 CSV があるので表示履歴を長期正本にしない。
+Official annual profit/loss guidance asks users to aggregate January–December monthly CSV values; it does
+not show a single annual CSV/PDF. CSV includes transaction types/pairs, cryptoasset quantity changes,
+execution amounts, etc., supporting per-trade profit/loss calculations. Screen history retention/row limits
+are unpublished, but monthly CSV exists, so do not use screen history as long-term authoritative records.
 
-- [資産別取引履歴と個別詳細](https://help.jp.mercari.com/guide/articles/1368/)
-- [暗号資産取引用日本円の入出金履歴](https://help.jp.mercari.com/guide/articles/1361/)
-- [月間取引報告書 CSV、月末残高、退会後の扱い](https://help.jp.mercari.com/guide/articles/1369/)
-- [月間 CSV を使う年間損益計算](https://help.jp.mercari.com/guide/articles/1513/)
-- [手数料なし・提示価格にスプレッドを含む](https://help.jp.mercari.com/guide/articles/1473/)
+- [Per-asset trade history/individual details](https://help.jp.mercari.com/guide/articles/1368/)
+- [Yen-for-cryptoasset-trading deposit/withdrawal history](https://help.jp.mercari.com/guide/articles/1361/)
+- [Monthly report CSV, month-end balances, after termination](https://help.jp.mercari.com/guide/articles/1369/)
+- [Annual profit/loss using monthly CSV](https://help.jp.mercari.com/guide/articles/1513/)
+- [No fees; spread included in quoted prices](https://help.jp.mercari.com/guide/articles/1473/)
 
-## 認証、MFA、パスキー、Bitwarden
+## Authentication, MFA, passkeys, and Bitwarden
 
-### 公式に確認できる事実
+### Officially established facts
 
-- メルカリは 2026-05-29 以降、ログイン方法の更新を段階導入している。パスキー登録済みアカウントではメルカリサービスへのログインにパスキーを使用し、状況により Apple / Google / Facebook / LINE、メールのマジックリンクと SMS の代替経路が案内される。未登録アカウントではメールアドレスまたは電話番号とパスワード等の経路が残る。
-- Web の「パスキーでログイン」は QR コードを表示し、メルカリアプリで登録したパスキーを持つスマートフォン等で読み取る方法が案内される。登録端末交換後も、登録済みならパスキー認証が要求される。
-- SMS 認証では 6 桁の認証番号を使う。ログインやメルペイ利用時に本人確認を要求されることがある。
-- メルコイン利用開始には、メルカリアカウント、パスキー登録、本人確認、サービス申込が必要である。共通ログインは、メルコインの利用資格や台帳がメルカリ販売と同一であることを意味しない。
-- メルカリのガイドは「デジタル認証アプリ」による問題をサポート対象外としているが、これは Bitwarden の WebAuthn パスキー対応可否を直接述べたものではない。
+- Mercari has phased in login method updates since 2026-05-29. Accounts with registered passkeys use them for Mercari login; depending on conditions, alternatives include Apple / Google / Facebook / LINE or email magic links and SMS. Unregistered accounts retain email/phone and password etc. routes.
+- Web `パスキーでログイン` ("log in with passkey") shows QR codes to scan with smartphones etc. holding passkeys registered in the Mercari app. Passkey authentication is still required after device replacement if registered.
+- SMS authentication uses six-digit codes. Login or Merpay use may require identity verification.
+- Starting Mercoin requires a Mercari account, passkey registration, identity verification, service application. Common login does not equate Mercoin eligibility/ledgers with Mercari sales.
+- Mercari guidance excludes issues caused by `デジタル認証アプリ` ("digital authentication apps") from support; this does not directly establish Bitwarden WebAuthn passkey compatibility.
 
-公式根拠:
+Official evidence:
 
-- [ログイン方法アップデート](https://help.jp.mercari.com/guide/articles/1860/)
-- [パスキーありのログインと Web QR](https://help.jp.mercari.com/guide/articles/1875/)
-- [SMS 6 桁認証とパスキー推奨](https://help.jp.mercari.com/guide/articles/1043/)
-- [SMS による本人確認](https://help.jp.mercari.com/guide/articles/687/)
-- [機種変更後のパスキー](https://help.jp.mercari.com/guide/articles/243/)
-- [メルコインの利用条件](https://help.jp.mercari.com/guide/articles/1336/)
+- [Login method updates](https://help.jp.mercari.com/guide/articles/1860/)
+- [Passkey login and Web QR](https://help.jp.mercari.com/guide/articles/1875/)
+- [Six-digit SMS authentication and passkey recommendation](https://help.jp.mercari.com/guide/articles/1043/)
+- [Identity verification by SMS](https://help.jp.mercari.com/guide/articles/687/)
+- [Passkeys after changing phones](https://help.jp.mercari.com/guide/articles/243/)
+- [Mercoin eligibility](https://help.jp.mercari.com/guide/articles/1336/)
 
-### Bitwarden との関係
+### Relationship with Bitwarden
 
-Bitwarden は一般にブラウザ拡張から WebAuthn パスキーを保存・使用でき、パスワードや TOTP の自動入力もできる。これは Bitwarden の機能として確認できる事実である。
+Bitwarden generally stores/uses WebAuthn passkeys through browser extensions and autofills passwords/TOTP.
+This is established as a Bitwarden capability.
 
-- [Bitwarden のパスキー・資格情報自動入力](https://bitwarden.com/help/auto-fill-browser/)
+- [Bitwarden passkey/credential autofill](https://bitwarden.com/help/auto-fill-browser/)
 
-一方、メルカリアプリで登録したパスキーが Bitwarden を資格情報プロバイダーとして選べるか、Bitwarden 保存パスキーが公式アプリと Web QR フローの双方で受理されるか、OS・端末に束縛されるかは未確認である。よって「Bitwarden で無人ログイン可能」と推測しない。live 検証では秘密を表示・出力せず、登録済みパスキーのプロバイダー名と、Web ログイン時に選択肢が提示されるかだけを人手で確認する。
+Whether Mercari-app-registered passkeys can select Bitwarden as credential provider, whether Bitwarden-stored
+passkeys work in both official app/Web QR flows, and whether OS/device-bound are unverified. Do not infer
+unattended login through Bitwarden. Live verification manually checks only registered provider names and
+whether Web login offers them, without displaying/outputting secrets.
 
-## 公式アプリ、APK、Web の役割
+## Roles of official app, APK, and Web
 
-日本向け公式 Android アプリは Google Play の package [`com.kouzoh.mercari`](https://play.google.com/store/apps/details?id=com.kouzoh.mercari&hl=ja)、publisher `Mercari, Inc` である。2026-08-26 に公式 Play HTML から確認した current version は `5.217.0`、更新日は 2026-08-21、最低 Android は 8.0 である。同じ package 内にメルカリ、メルペイ、メルコイン機能が集約され、公式掲載は暗号資産取引もメルカリアプリ内と説明する。package が共通でも、販売、決済、暗号資産の台帳・運営主体・read model は別である。
+Official Japanese Android app: Google Play package [`com.kouzoh.mercari`](https://play.google.com/store/apps/details?id=com.kouzoh.mercari&hl=ja),
+publisher `Mercari, Inc`. Official Play HTML checked on 2026-08-26 gave current version `5.217.0`, updated
+2026-08-21, minimum Android 8.0. Mercari/Merpay/Mercoin features share a package; the official listing also
+describes cryptoasset trading inside Mercari app. Shared package does not equate sales/payment/cryptoasset
+ledgers, operators, or read models.
 
-Web は商品閲覧・取引画面に加え、販売履歴の一覧と印刷を提供する。販売履歴は逆にアプリ非対応である。Web ログインはアプリ登録済みパスキーを使う QR フローを持つため、ブラウザ単独のパスワード自動入力だけで全画面へ到達できるとは限らない。
+Web offers sales history lists/printing alongside product/transaction screens; sales history is conversely
+unavailable in app. Web login has a QR flow using app-registered passkeys; browser-only password autofill
+may not reach all screens.
 
-メルカリ配布の standalone APK は確認できず、調査環境には `adb`、`apksigner`、`bundletool`、`jadx`、`apktool`、`aapt2`、`apkanalyzer`、MobSF がなかった。APK mirror は provenance と signer を保証できないため使わない。利用者が Google Play から正規導入した非 root 端末を接続した後、split APK を一時領域へ抽出し、全 split の package、versionCode、signer が一致することを確認する。
+No Mercari-distributed standalone APK found; research environment lacked `adb`, `apksigner`, `bundletool`,
+`jadx`, `apktool`, `aapt2`, `apkanalyzer`, MobSF. Do not use APK mirrors without guaranteed provenance/signers.
+After connecting a non-root user device legitimately installed from Google Play, extract split APKs temporarily,
+checking matching packages, versionCodes, and signers across all splits.
 
 ```bash
 PKG=com.kouzoh.mercari
@@ -158,57 +227,85 @@ rg -a -n \
   "$OUT/jadx" "$OUT/apktool-base"
 ```
 
-成果物は Git に入れず、manifest の exported component / app link / network security config、host・path、Retrofit/OkHttp または gRPC/protobuf schema、session 発行・更新、keystore/biometric/device binding、certificate pinning、Play Integrity / attestation 候補だけを redacted inventory にする。必要なら local の version 固定 MobSF container で補助解析する。難読化解除・call graph・本人操作の read-only runtime tracing は対象内だが、pinning / integrity / root 検知を迂回して通信本文を復号することは対象外である。
+Keep artifacts out of Git. Produce only redacted inventories of manifest exported components/app links/network
+security config, hosts/paths, Retrofit/OkHttp or gRPC/protobuf schemas, session issuance/renewal, keystore/
+biometric/device binding, certificate pinning, Play Integrity/attestation candidates. Optionally use a local
+version-pinned MobSF container. Deobfuscation/call graphs/owner-operated read-only runtime tracing are in scope;
+bypassing pinning/integrity/root detection to decrypt communication bodies is out of scope.
 
-## 公開 Web JavaScript の common auth / session
+## Common auth / session in public Web JavaScript
 
-現行 Web common chunk は、`https://auth.mercari.com` を issuer とする Authorization Code + PKCE (`S256`) を実装する。ブラウザは `X-Platform: web` を付け、`GET /jp/v1/authorize` に `rmode=direct` と `prompt=none` を指定し、返された code を `POST /jp/v1/token` で code verifier、resource host、公開 client ID / scope と交換する。redirect URI は `https://jp.mercari.com/auth/callback` である。これらはコード上の route であり、今回 request は送っていない。
+Current Web common chunks implement Authorization Code + PKCE (`S256`) with issuer `https://auth.mercari.com`.
+Browser sends `X-Platform: web`, calls `GET /jp/v1/authorize` with `rmode=direct` and `prompt=none`, exchanges
+returned codes through `POST /jp/v1/token` with code verifier, resource host, public client ID/scope.
+Redirect URI: `https://jp.mercari.com/auth/callback`. These are code routes; no requests sent in this research.
 
-access / ID token と expiration は localStorage の `authTokenData`、sign-in marker は `signIn` に置かれる。DPoP 鍵は WebCrypto で非抽出 P-256 ECDSA 鍵として生成され、IndexedDB database `auth-sdk`、object store `keyPairs`、key `dpop` に保存される。proof は `typ=dpop+jwt`、`alg=ES256` とし、`iat`、random `jti`、`htu`、`htm`、共通 UUID を含む。各 API request に `DPoP`、認証済み request に access token の `Authorization` を付ける。
+Access/ID tokens and expiration go to localStorage `authTokenData`, sign-in marker to `signIn`. WebCrypto
+generates non-extractable P-256 ECDSA DPoP keys, stored in IndexedDB database `auth-sdk`, object store `keyPairs`,
+key `dpop`. Proofs use `typ=dpop+jwt`, `alg=ES256`, containing `iat`, random `jti`, `htu`, `htm`, shared UUID.
+Each API request includes `DPoP`; authenticated requests include access-token `Authorization`.
 
-API client は少なくとも次の三面に分かれる。
+API clients have at least three surfaces.
 
-| 面       | base / header                                                   | 確認した役割                                                   |
-| -------- | --------------------------------------------------------------- | -------------------------------------------------------------- |
-| Mercari  | `https://api.mercari.jp`、`X-Platform: web`                     | 販売履歴、mypage component、商品・取引 surface                 |
-| Merpay   | `https://api.merpay.com`、同じ DPoP / Authorization interceptor | 売上金、ポイント、残高、クレジット請求                         |
-| Accounts | `https://accounts.mercari.com`                                  | account bootstrap の別 client。金融 read client と同一視しない |
+| Surface  | Base / header                                                   | Established role                                                             |
+| -------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Mercari  | `https://api.mercari.jp`, `X-Platform: web`                     | Sales history, mypage components, product/transaction surfaces               |
+| Merpay   | `https://api.merpay.com`, same DPoP / Authorization interceptor | Proceeds, points, balances, credit billing                                   |
+| Accounts | `https://accounts.mercari.com`                                  | Separate account bootstrap client; do not equate with financial read clients |
 
-production browser では構成により `https://jp.mercari.com/api` または `/merpay-api` proxy へ書き換える処理もある。401 / 403 では、明示的な passcode / SMS / country error 等を除き、`authorize` の silent flow と token exchange を行って元 request を一度再試行する。これは session renewal の実装確認であり、token lifetime、無人更新の長期安定性、device binding、WAF 許容を live に確認したものではない。
+Production browser processing may rewrite to `https://jp.mercari.com/api` or `/merpay-api` proxies depending
+on configuration. On 401/403, except explicit passcode/SMS/country errors etc., it performs silent `authorize`
+flow/token exchange and retries the original request once. This establishes a session renewal implementation,
+not live verification of token lifetime, long-term unattended renewal stability, device binding, or WAF acceptance.
 
-## 台帳別の公式 Web read route
+## Official Web read routes by ledger
 
-匿名で page shell と page-specific chunk を取得できた `/mypage/sales_history`、`/mypage/balance_details`、`/mypage/point/history`、`/mypage/merpay/smartpayment`、`/mypage/listings/sold` を静的解析した。account response は取得していない。
+Statically analyzed anonymously retrievable page shells/page-specific chunks for `/mypage/sales_history`,
+`/mypage/balance_details`, `/mypage/point/history`, `/mypage/merpay/smartpayment`, `/mypage/listings/sold`.
+No account responses retrieved.
 
-### Mercari: 確定販売台帳
+### Mercari: settled sales ledger
 
-`GET https://api.mercari.jp/sold_histories/list` は `{year, limit, offset}` を受け、現行 UI は `limit=20`、`offset=(page-1)*20` とする。response は `sold_histories` と `total_count` を持ち、各行から `price`、`sales_fee`、`seller_shipping_fee`、`seller_additional_fee`、`tax_rate`、`sales_profit`、`transaction_finished_at`、`donation_amount` を読む。`item_id`、商品名、thumbnail も返るが、collector では PII / 商品情報として保存・出力しない。
+`GET https://api.mercari.jp/sold_histories/list` takes `{year, limit, offset}`; current UI uses `limit=20`,
+`offset=(page-1)*20`. Response contains `sold_histories`, `total_count`; rows expose `price`, `sales_fee`,
+`seller_shipping_fee`, `seller_additional_fee`, `tax_rate`, `sales_profit`, `transaction_finished_at`,
+`donation_amount`. `item_id`, product names, thumbnails also return; collectors must not save/output them as
+PII/product information.
 
-これは transaction 完了後の settled sale と利益台帳であり、出品中・取引中の pending 状態ではない。UI の `/transaction/{itemId}` link や取引操作へは進まない。明示的な pagination と fee / profit schema があるため、自動 collector の第一候補である。
+This is the settled sale/profit ledger after transaction completion, not listed/in-progress pending states.
+Do not follow UI `/transaction/{itemId}` links or transaction operations. Explicit pagination and fee/profit
+schemas make this the first automated collector candidate.
 
-別に Merpay balance 面には次の売上金 read がある。
+The Merpay balance surface separately has proceeds reads:
 
-- `GET https://api.merpay.com/balance/v1/list_sales_histories`: `histories[]` の `type`、`datetime`、`changedAmount`、`title` を表示し、販売時は `mercariExtraInfo.itemId` も含み得る。ID・title は保存しない。
-- `GET https://api.merpay.com/balance/v1/list_sales_expiry_dates`: 本人確認前の売上金 expiry を表示する。
+- `GET https://api.merpay.com/balance/v1/list_sales_histories`: displays `histories[]` `type`, `datetime`, `changedAmount`, `title`; sales may also contain `mercariExtraInfo.itemId`. Do not save IDs/titles.
+- `GET https://api.merpay.com/balance/v1/list_sales_expiry_dates`: displays pre-verification proceeds expiry.
 
-現行 Web client はこれらに pagination parameter を渡さず、server retention と暗黙 cap は未確認である。確定販売利益と、残高へ反映された売上金 change event は重複し得るため同一台帳へ二重計上しない。
+Current Web client passes no pagination parameters to these; server retention/implicit caps are unverified.
+Settled sales profit and proceeds change events reflected in balances can overlap; do not double count in one ledger.
 
-### Merpay: 残高・ポイント台帳
+### Merpay: balance/points ledgers
 
-`GET https://api.mercari.jp/v2/mypage/top/components` は page が生成する `mypageRequestId` を受け、wallet component から `balance.balance`、`hasFundsAccount`、`totalPoint`、`serviceState` を表示する。Mercari Bank 機能が有効な場合の `baasAccountBalance.availableBalance` は別台帳として分離する。この面は feature flag `BRIDGE-77_baas_mypage_web` の影響を受ける。
+`GET https://api.mercari.jp/v2/mypage/top/components` takes page-generated `mypageRequestId`; wallet components
+display `balance.balance`, `hasFundsAccount`, `totalPoint`, `serviceState`. If Mercari Bank is enabled,
+separate `baasAccountBalance.availableBalance` as another ledger. Feature flag `BRIDGE-77_baas_mypage_web`
+affects this surface.
 
-ポイント面は同じ Merpay session client から次を読む。
+Points surfaces read through the same Merpay session client:
 
-- `GET https://api.merpay.com/v1/get_balance`: current balance / point snapshot。
-- `GET /v1/list_point_histories`: `results[]` の `id`、`type`、`title`、`datetime`、`changedAmount`。collector は `id` と `title` を保存しない。
-- `GET /v1/get_point_history?id=...`: 個別詳細。初期 allowlist では呼ばない。
-- `GET /v1/list_point_expiry_dates`: `date`、`amount`、`purchased`。
+- `GET https://api.merpay.com/v1/get_balance`: current balance/points snapshot.
+- `GET /v1/list_point_histories`: `results[]` `id`, `type`, `title`, `datetime`, `changedAmount`. Collector does not save `id`/`title`.
+- `GET /v1/get_point_history?id=...`: individual details; exclude from initial allowlist.
+- `GET /v1/list_point_expiry_dates`: `date`, `amount`, `purchased`.
 
-list に現行 client-side pagination parameter はなく、保持期間・server cap は未確認である。current snapshot、獲得・利用 change event、有効期限 bucket を別 record type にする。同じ module に `/v1/create_point_recharge`、`/v1/create_funds_recharge`、各種限度額・あと払い同意更新があるため、module 単位ではなく route 単位で deny する。
+Lists have no current client-side pagination parameters; retention/server caps unverified. Use separate record
+types for current snapshots, accrual/use change events, expiry buckets. The same module contains
+`/v1/create_point_recharge`, `/v1/create_funds_recharge`, limit/deferred-payment consent updates;
+deny per route, not per module.
 
-### Merpay: 決済・クレジット請求台帳
+### Merpay: payment/credit billing ledger
 
-現行 Web page は次の read route を持つ。
+Current Web pages have these read routes.
 
 - `GET https://api.merpay.com/shared/defpay/v1/defer/get_user_status`
 - `GET /shared/defpay/v1/check_easypay_terms_updates`
@@ -216,127 +313,165 @@ list に現行 client-side pagination parameter はなく、保持期間・serve
 - `GET /defpay/v1/get_easypay_convertible_payment_list`
 - `GET /defpay/v1/get_repayment_top`
 
-`get_repayment_top` は invoice を返し、UI は `status=DRAFT` を区別し、`useMonth`、`deadlineAt`、`repaymentAmount`、`demandFee`、`lateFee`、`totalEasypayPrincipalAmount`、`totalEasypayFee`、`usingScheduledRepayment` 等を表示する。これは月次 invoice / repayment summary であり、加盟店単位の「処理中→確定→返金」全履歴ではない。公式 Help が示す `処理中` は確認済みだが、その merchant line read route と status schema は今回の Web chunk では特定できなかった。
+`get_repayment_top` returns invoices; UI distinguishes `status=DRAFT`, displays `useMonth`, `deadlineAt`,
+`repaymentAmount`, `demandFee`, `lateFee`, `totalEasypayPrincipalAmount`, `totalEasypayFee`,
+`usingScheduledRepayment`, etc. This is a monthly invoice/repayment summary, not full merchant-level
+processing → confirmed → refund history. Official Help establishes `処理中`, but these Web chunks did not
+identify merchant line read routes/status schemas.
 
-`calc_easypay_repayment_plan` と applicant condition は ledger 取得に不要なので、GET でも初期 allowlist から除外する。同じ module の `convert_monthly_clear_to_easypay`、`cancel_invoice_repayment`、`initialize_post_pay_user`、`update_easypay_repayment_setting`、`update_easypay_monthly_installments`、`create_invoice_repayment` は厳格 deny とする。
+`calc_easypay_repayment_plan` and applicant conditions are unnecessary for ledger retrieval; exclude from
+initial allowlists even as GETs. Strictly deny same-module `convert_monthly_clear_to_easypay`,
+`cancel_invoice_repayment`, `initialize_post_pay_user`, `update_easypay_repayment_setting`,
+`update_easypay_monthly_installments`, `create_invoice_repayment`.
 
-### Mercoin: 資産・注文・約定台帳
+### Mercoin: assets/orders/executions ledger
 
-現行 public route manifest と取得した Web chunk には、メルコインの資産・注文・約定・月間報告書に対応する金融 route を確認できなかった。従って app-only surface の route 名、host、schema を推測しない。
+Current public route manifests/retrieved Web chunks did not establish financial routes for Mercoin
+assets/orders/executions/monthly reports. Do not infer app-only route names/hosts/schemas.
 
-APK 取得後は、(1) symbol 別 quantity / valuation / cost basis / unrealized P&L の asset snapshot、(2) order ID / status と fill / average price / spread・fee の execution、(3) 暗号資産取引用日本円の funding change event、(4) 月間 report list / download、を別 schema として探索する。注文と約定、直接取扱 BTC / ETH / XRP とコインチェック連携、暗号資産 quantity と日本円評価を混ぜない。read-only runtime では各一覧を本人が一度表示し、method、host、path template、query key 名、status/content-type、response の key 名だけを採取する。
+After APK acquisition, search separately for (1) asset snapshots by symbol: quantity/valuation/cost basis/
+unrealized P&L; (2) executions: order ID/status, fills/average prices/spreads/fees; (3) yen-for-cryptoasset-trading
+funding change events; (4) monthly report lists/downloads. Do not conflate orders/executions, directly handled
+BTC / ETH / XRP and Coincheck linking, cryptoasset quantities/yen valuations. For read-only runtime observation,
+the owner displays each list once; collect only method, host, path template, query key names, status/content-type,
+and response key names.
 
-## 公開 API と第三者実装
+## Public APIs and third-party implementations
 
-個人の販売・残高・ポイント・クレジット・暗号資産台帳を取得する、公開・自己申込可能な公式 API は確認できなかった。メルカリShops の GraphQL API と Personal Access Token はショップ事業者用であり、本資料の個人口座ソースではない。メルペイ加盟店向け API も決済受付側の契約 API であり、消費者の個人台帳エクスポートではない。
+No public self-enrollable official API for personal sales/balances/points/credit/cryptoasset ledgers was found.
+メルカリShops (Mercari Shops) GraphQL API/Personal Access Tokens are for shop businesses, not these personal
+account sources. Merpay merchant APIs are contracted payment-acceptance APIs, not consumer ledger exports.
 
-- [メルカリShops API reference](https://api.mercari-shops.com/docs/index.html)
-- [メルペイ加盟店規約のオンライン API](https://www.merpay.com/merchant/terms/)
+- [Mercari Shops API reference](https://api.mercari-shops.com/docs/index.html)
+- [Online API in Merpay merchant terms](https://www.merpay.com/merchant/terms/)
 
-公開第三者実装 [`take-kun/mercapi`](https://github.com/take-kun/mercapi/tree/9455cf167d4a3eff5674612631a6e88e72424c7f) は、Python `httpx.AsyncClient` から次を行う。
+Public third-party [`take-kun/mercapi`](https://github.com/take-kun/mercapi/tree/9455cf167d4a3eff5674612631a6e88e72424c7f)
+uses Python `httpx.AsyncClient` to:
 
-- 起動時に P-256 鍵とランダム UUID を生成する。
-- `X-Platform: web` を付け、各 request の URL・method・UUID を ES256 の DPoP JWT に署名する。
-- `POST https://api.mercari.jp/v2/entities:search` で商品検索し、page token を扱う。
-- `GET /items/get`、`/users/get_profile`、`/items/get_items` で公開商品・出品者情報を読む。
+- Generate P-256 keys/random UUID on startup.
+- Add `X-Platform: web`, sign each request URL/method/UUID as ES256 DPoP JWTs.
+- Search products with `POST https://api.mercari.jp/v2/entities:search`, handling page tokens.
+- Read public products/sellers with `GET /items/get`, `/users/get_profile`, `/items/get_items`.
 
-[`marvinody/mercari`](https://github.com/marvinody/mercari/tree/8aa38587a7905d62cadaf4cfb35bb555eefa7d96) も `requests` と ES256 DPoP で公開検索・商品取得を実装する。[`enemy732/mercari-jp-wrapper`](https://github.com/enemy732/mercari-jp-wrapper/tree/bd87146c39c839901ac58f689a16dcba98b018cf) は `accounts.mercari.com` への事前 request で Authorization / DPoP header を得て `api.mercari.jp` の検索へ送る形を示す。
+[`marvinody/mercari`](https://github.com/marvinody/mercari/tree/8aa38587a7905d62cadaf4cfb35bb555eefa7d96)
+also implements public search/product retrieval with `requests` and ES256 DPoP.
+[`enemy732/mercari-jp-wrapper`](https://github.com/enemy732/mercari-jp-wrapper/tree/bd87146c39c839901ac58f689a16dcba98b018cf)
+shows obtaining Authorization/DPoP headers through preliminary `accounts.mercari.com` requests and sending
+them to `api.mercari.jp` search.
 
-これらは公開商品面の transport / request-signing の具体例であり、ログイン、セッション更新、個人販売履歴、メルペイ、メルコインを実装していない。第三者実装の DPoP 生成成功を、金融データへの認可や長期セッション再利用の証拠にしない。発見した内部 endpoint を片端から呼ぶ探索も行わない。
+These are concrete public product transport/request-signing examples, not implementations of login, session
+renewal, personal sales history, Merpay, or Mercoin. Successful third-party DPoP generation does not establish
+financial data authorization or long-term session reuse. Do not call discovered internal endpoints indiscriminately.
 
-## WAF・anti-bot の観測
+## WAF / anti-bot observations
 
-2026-08-26 に WSL から匿名 `HEAD` を行った範囲では、`jp.mercari.com`、`help.jp.mercari.com`、`auth.mercari.com`、`api.mercari.jp`、`accounts.mercari.com` は `server: cloudflare`、`cf-ray`、`__cf_bm` を返した。`__cf_bm` は Cloudflare Bot Management 系 Cookie である。`jp.mercari.com` と help は背後に `via: 1.1 google` も見えた。`api.mercari.jp/v2/entities:search` への method 不一致の匿名 HEAD は Cloudflare 403、auth/accounts の root または未対応 path は 404 だった。
+Anonymous WSL `HEAD` observations on 2026-08-26: `jp.mercari.com`, `help.jp.mercari.com`, `auth.mercari.com`,
+`api.mercari.jp`, `accounts.mercari.com` returned `server: cloudflare`, `cf-ray`, `__cf_bm`.
+`__cf_bm` is a Cloudflare Bot Management-family cookie. `jp.mercari.com`/help also showed `via: 1.1 google`
+behind them. Anonymous method-mismatched HEAD to `api.mercari.jp/v2/entities:search` returned Cloudflare 403;
+auth/accounts roots or unsupported paths returned 404.
 
-これは「観測した host の edge が Cloudflare であり bot 管理 Cookie を設定した」証拠である。ログイン後の金融 API が同じ policy であること、403 が bot 判定だけを理由とすること、rate limit、challenge 条件、地理制限、端末 attestation、certificate pinning は確認していない。Akamai を示す CNAME、`AkamaiGHost`、拒否マーカーは今回の応答に見つからず、現時点で Akamai 採用を肯定しない。
+This establishes Cloudflare edges/bot-management cookies for observed hosts, not shared post-login financial
+API policies, bot-only reasons for 403, rate limits, challenge conditions, geographical restrictions, device
+attestation, or certificate pinning. No Akamai CNAMEs, `AkamaiGHost`, or rejection markers were found in these
+responses; do not affirm Akamai adoption currently.
 
-反復 403 / 429、challenge、CAPTCHA、パスキー再認証、アプリのセッション失効を回避するために IP rotation、fingerprint 偽装、challenge bypass を行わない。
+Do not rotate IPs, spoof fingerprints, or bypass challenges to evade repeated 403/429, challenges, CAPTCHA,
+passkey reauthentication, or app session expiry.
 
-## read / write の隔離
+## Read / write isolation
 
-収集器は「同じ API host だから安全」ではなく、意味上の操作を allowlist する。
+Collectors allowlist semantic operations, not entire API hosts on the assumption they are safe.
 
-| 初期 read allowlist 候補                                            | 禁止                                                 |
-| ------------------------------------------------------------------- | ---------------------------------------------------- |
-| `sold_histories/list` の fixed year / limit / offset list           | 出品・価格変更・削除、商品・取引 detail              |
-| `balance/v1/list_sales_histories`、`list_sales_expiry_dates`        | チャージ、振込申請、残高移動                         |
-| `v2/mypage/top/components` の wallet component                      | 口座・本人確認・限度額・支払設定                     |
-| `v1/get_balance`、`list_point_histories`、`list_point_expiry_dates` | point / funds recharge、交換、失効回避操作           |
-| `defpay/v1/get_repayment_top` の invoice summary                    | 清算、返済作成・取消、分割変更、同意・自動引落し設定 |
-| 既存月間取引報告書の list/download（app route 確認後）              | 暗号資産注文・売買・つみたて・入出金                 |
+| Initial read allowlist candidates                                      | Prohibited                                                                                         |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Fixed year / limit / offset lists from `sold_histories/list`           | Listings/price changes/deletion, product/transaction details                                       |
+| `balance/v1/list_sales_histories`, `list_sales_expiry_dates`           | Top-ups, bank transfer applications, balance transfers                                             |
+| Wallet component from `v2/mypage/top/components`                       | Accounts/identity verification/limits/payment settings                                             |
+| `v1/get_balance`, `list_point_histories`, `list_point_expiry_dates`    | Point/funds recharge, exchanges, expiry avoidance operations                                       |
+| Invoice summary from `defpay/v1/get_repayment_top`                     | Settlement, repayment creation/cancellation, installment changes, consent/automatic debit settings |
+| Existing monthly report lists/downloads (after app route verification) | Cryptoasset orders/trades/recurring purchases/deposits/withdrawals                                 |
 
-HTTP `POST` でも検索のように read-only なものがあり、`GET` でも eligibility 計算や署名 URL 発行等の副作用があり得るため method だけで分類しない。最初は上表の route と response schema だけを許可し、path parameter を持つ detail、未知 route、未知 field、write verb を deny する。各 client は read-only な型だけを別 package にし、同じ process に write method をリンクしない。egress proxy でも host + exact path + method を許可し、redirect 先が allowlist 外なら停止する。
+HTTP `POST` can be read-only, such as search; `GET` may have side effects such as eligibility calculations or
+signed URL issuance. Do not classify by method alone. Initially allow only table routes/response schemas;
+deny parameterized details, unknown routes/fields, write verbs. Separate read-only types into packages;
+do not link write methods into the same process. Egress proxies also allowlist host + exact path + method;
+stop if redirect destinations are outside the allowlist.
 
-## 実行環境適性
+## Runtime suitability
 
-| Runtime                             | 適性                                                  | 理由                                                                                                                                                                                                                           |
-| ----------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Cloudflare Workers                  | **手動 export 取込には高、認証 bootstrap には低**     | Fetch API で通常の HTTP を送れ、CSV/PDF/HTML の受領・正規化に向く。一方、ローカル filesystem や公式 Android アプリを持たず、パスキー QR、SMS、端末状態を生成できない。Cloudflare edge からの replay は別 WAF policy を受け得る |
-| Cloudflare Containers               | **後処理は中、アプリ自動化は低**                      | 任意言語・Linux filesystem の処理はできるが、Play 導入済み端末、パスキー、SMS、端末完全性を再現しない。Worker から on-demand 起動される構成も、長期の人間向けアプリ session 保持には不向き                                     |
-| OCI VM / 固定 egress                | **read-only replay が証明された後は中**               | 暗号化 session、常駐 process、固定 egress、ブラウザを管理しやすい。だが公式アプリ境界や bot/端末拘束を解消せず、未確認 endpoint の安定性も上げない                                                                             |
-| Kubernetes                          | **多数ソース運用には中、初期単独 collector には過剰** | CronJob、secret 分離、network policy、監査に向く。Mercari 一件の手動 export 取込だけなら運用コストが上回る。write route を network / code policy で拒否できる場合に採用価値がある                                              |
-| 利用者管理の公式 Android + ブラウザ | **一次確認に最適**                                    | 既存の正規 session と対応パスキーを持つ。人が read-only 画面・既存 CSV を選び、秘密や実値を外へ出さず検証できる                                                                                                                |
+| Runtime                                    | Suitability                                                      | Reason                                                                                                                                                                                                                             |
+| ------------------------------------------ | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare Workers                         | **High for manual export import, low for auth bootstrap**        | Fetch API sends ordinary HTTP, suitable for receiving/normalizing CSV/PDF/HTML. No local filesystem/official Android app; cannot create passkey QR, SMS, device state. Replay from Cloudflare edge may face different WAF policies |
+| Cloudflare Containers                      | **Medium for post-processing, low for app automation**           | Arbitrary languages/Linux filesystem, but no reproduction of Play-installed devices/passkeys/SMS/device integrity. Worker on-demand startup also unsuitable for long-lived human app sessions                                      |
+| OCI VM / fixed egress                      | **Medium after proven read-only replay**                         | Easier encrypted sessions, resident processes, fixed egress, browser management; does not solve official app/bot/device boundaries or improve unknown endpoint stability                                                           |
+| Kubernetes                                 | **Medium for many sources, excessive for one initial collector** | Fits CronJob, secret separation, network policies, auditing. Operations outweigh benefits for a single Mercari manual export import. Useful if network/code policy can deny writes                                                 |
+| User-controlled official Android + browser | **Best for primary verification**                                | Existing legitimate sessions/compatible passkeys; user selects read-only screens/existing CSV, verifying without exporting secrets/actual values                                                                                   |
 
-Cloudflare の現行仕様根拠:
+Evidence for current Cloudflare specifications:
 
 - [Workers Fetch API](https://developers.cloudflare.com/workers/runtime-apis/fetch/)
-- [Workers security model と filesystem 非対応](https://developers.cloudflare.com/workers/reference/security-model/)
+- [Workers security model and lack of filesystem support](https://developers.cloudflare.com/workers/reference/security-model/)
 - [Cloudflare Containers overview](https://developers.cloudflare.com/containers/)
 
-## PR #5 共通 A–E / cost 評価
+## PR #5 common A–E / cost assessment
 
-共通定義は、A = 公開・文書化 API / export API で scheduled headless、B = 安定した read-only internal API と更新可能 session、C = browser/app bootstrap 後の headless replay、D = full browser/device automation、E = manual capture。cost は 1（小さな wrapper）から 5（端末拘束・対抗的自動化）である。
+Common definitions: A = public documented API/export API for scheduled headless; B = stable read-only internal
+API/renewable sessions; C = headless replay after browser/app bootstrap; D = full browser/device automation;
+E = manual capture. Cost ranges from 1 (small wrapper) to 5 (device-bound/adversarial automation).
 
-| 経路                                            | Level      |    Cost | 判断                                                                                                                                                                                  |
-| ----------------------------------------------- | ---------- | ------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| メルカリ確定販売 Web read                       | **C 候補** |   **4** | **自動 collector の第一候補**。exact GET、20 件 page、offset、total count、fee / profit schema、共通 session transport を静的確認。live session 更新・保持期間確認前なので B ではない |
-| メルペイ売上金・ポイント・残高 Web read         | **C 候補** |   **4** | exact GET と schema は確認。pagination / implicit cap、snapshot と event の整合を live 確認する                                                                                       |
-| メルペイクレジット請求概要 Web read             | **C 候補** | **4–5** | invoice summary の exact GET は確認したが merchant line の processing / settled / refund route は未特定。write 隣接面のため優先度を下げる                                             |
-| メルコイン月間 CSV の手動 download + import     | **E**      |   **1** | **manual importer の第一候補**。公式、構造化、月末残高付き。自動 app transport より先に会計正本を作れる                                                                               |
-| メルカリ販売履歴の Web 印刷 + import            | **E**      | **1–2** | CSV なし。印刷 HTML/PDF の schema drift を許容し、原本を保持する                                                                                                                      |
-| メルペイ各履歴の画面保存 + manual normalization | **E**      |   **2** | 残高・ポイント・クレジットを別 capture。統合月次画面だけでは不足                                                                                                                      |
-| メルコイン app internal read                    | **D**      |   **5** | package は特定したが APK / route / schema / session / integrity 未取得。資産・注文・約定・report を分離してから C 適性を再評価する                                                    |
-| 公式 Android UI automation                      | **D**      |   **5** | 端末、パスキー、サービス別画面、非同期帳票、誤操作防止が必要                                                                                                                          |
+| Route                                               | Level           |    Cost | Assessment                                                                                                                                                                                                   |
+| --------------------------------------------------- | --------------- | ------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Mercari settled sales Web reads                     | **C candidate** |   **4** | **First automated collector candidate**. Static verification of exact GET, 20-row pages, offsets, total count, fee/profit schema, common session transport. Not B before live renewal/retention verification |
+| Merpay proceeds/points/balance Web reads            | **C candidate** |   **4** | Exact GET/schemas established; verify pagination/implicit caps, snapshot/event consistency live                                                                                                              |
+| Merpay credit billing summary Web reads             | **C candidate** | **4–5** | Exact invoice summary GET established; merchant processing/settled/refund routes unidentified. Lower priority due to adjacent writes                                                                         |
+| Manual Mercoin monthly CSV download + import        | **E**           |   **1** | **First manual importer candidate**. Official, structured, month-end balances. Accounting authoritative records can precede automated app transport                                                          |
+| Mercari sales history Web printing + import         | **E**           | **1–2** | No CSV; tolerate printed HTML/PDF schema drift, retain originals                                                                                                                                             |
+| Merpay history screen saving + manual normalization | **E**           |   **2** | Separate balance/points/credit captures; integrated monthly screen alone insufficient                                                                                                                        |
+| Mercoin internal app reads                          | **D**           |   **5** | Package identified, but APK/routes/schemas/sessions/integrity not obtained. Reassess C after separating assets/orders/executions/reports                                                                     |
+| Official Android UI automation                      | **D**           |   **5** | Requires devices, passkeys, service-specific screens, asynchronous reports, misoperation prevention                                                                                                          |
 
-総合評価は **D / cost 5**、安全な manual 初期経路は **E / cost 1–2** である。Web read は public 商品検索 client ではなく現行公式金融 page chunk 自身を根拠に C 候補としたが、認証済み一回観測、renewal、retention、schema drift の gate を満たすまでは実装採用せず、B にしない。
+Overall **D / cost 5**; safe manual initial route **E / cost 1–2**. Web reads are C candidates based on
+current official financial page chunks themselves, not public product search clients; do not adopt implementation
+or promote to B before gates for one authenticated observation, renewal, retention, and schema drift are met.
 
-## read-only live 検証計画
+## Read-only live verification plan
 
-1. 利用者の既存公式アプリと Web session を使用し、サービス名、画面見出し、表示 field 名だけを記録する。実値、ID、通知本文、メール、QR、Cookie、token は記録しない。今回ブラウザに既存タブがなかったため、まず利用者自身が公式 URL を通常操作で開く。
-2. DevTools の sanitized logger は method、host、path template、query key 名、status、content-type、response top-level key 名だけを出力し、header、body、token、ID、金額、商品名、相手先を採取前に捨てる。HAR は保存しない。
-3. Web の確定販売を一度表示し、`sold_histories/list` の limit / offset / total count、年境界、最古年、空 page を確認する。個別 `/transaction/{itemId}` と操作 button は開かない。
-4. 売上金履歴、ポイント履歴・期限、残高 component、クレジット請求概要を各一度表示し、静的に特定した route と response key が一致するかだけ確認する。`get_point_history`、repayment calculation / applicant condition は初回に呼ばない。
-5. アプリで残高履歴、月別利用状況、クレジット請求内訳を閲覧し、Web で未特定の merchant line の `processing / settled / refund` status と route template を確認する。支払・清算導線へは進まない。
-6. メルコインで保有資産一覧、資産別取引履歴、注文 / 約定、入出金履歴、取引報告書一覧を本人が順に一度表示する。runtime 観測は host / path / schema metadata だけとし、購入・売却・チャージ画面には進まない。
-7. 既に発行済みの月間 CSV 一件だけを利用者が手動 download し、隔離した local 環境で header、encoding、行種別、月末残高行、asset symbol、訂正行の有無を確認する。実データを Git や診断ログに残さない。
-8. Web のパスキー login は、登録済み端末で通常の QR 読取を一度観察し、Bitwarden provider が選択肢に現れるかだけ確認する。再登録、削除、パスキー設定変更をしない。
-9. session replay は live metadata と明示許可を得た後、local で allowlist GET 一件だけ試す。token や DPoP proof は永続化せず、成功しても cloud へ session を移す前に silent renewal、同時 session、失効、egress / WAF、write egress deny を再審査する。
+1. Use existing official app/Web sessions, recording only service names, screen headings, displayed field names. Do not record actual values, IDs, notification bodies, email, QR, cookies, tokens. No existing tabs were present in this research; first the user opens official URLs through ordinary operation.
+2. Sanitized DevTools logger emits only method, host, path template, query key names, status, content-type, response top-level key names, discarding headers, bodies, tokens, IDs, amounts, product names, counterparties before capture. Save no HAR.
+3. Display settled Web sales once; check `sold_histories/list` limit/offset/total count, year boundaries, earliest year, empty pages. Do not open individual `/transaction/{itemId}` or operation buttons.
+4. Display proceeds history, points history/expiry, balance components, credit billing summaries once each, checking only static route/response key agreement. Do not initially call `get_point_history`, repayment calculations/applicant conditions.
+5. View app balance history, monthly usage, credit billing breakdowns; identify Web-unresolved merchant line `processing / settled / refund` statuses/route templates. Do not enter payment/settlement paths.
+6. Owner displays Mercoin assets, per-asset trades, orders/executions, deposit/withdrawal history, report lists sequentially once. Runtime observations only host/path/schema metadata; do not enter purchase/sale/top-up screens.
+7. User manually downloads one existing monthly CSV; in an isolated local environment check headers, encoding, row types, month-end balance rows, asset symbols, correction rows. Keep actual data out of Git/diagnostic logs.
+8. Observe ordinary Web passkey QR scanning once on a registered device, checking only whether Bitwarden provider is offered. No re-registration, deletion, passkey settings changes.
+9. After live metadata and explicit permission, try one local allowlisted GET for session replay. Do not persist tokens/DPoP proofs. Even after success, reassess silent renewal, concurrent sessions, expiry, egress/WAF, write egress denial before moving sessions to cloud.
 
-## 即時 stop 条件
+## Immediate stop conditions
 
-次のいずれかでその経路を停止し、再試行・回避を行わない。
+Stop that route on any of these without retry/bypass.
 
-- 出品、購入、支払い、チャージ、送金、振込、清算、暗号資産取引、つみたて、申込、同意、設定保存の確認画面へ遷移した。
-- パスキー登録・削除、SMS / OTP 入力、本人確認、口座連携、利用枠変更を要求された。
-- request が read-only allowlist 外、または response の意味が不明である。
-- 401 / 403 / 429、Cloudflare challenge、CAPTCHA、追加本人確認、異常ログイン通知、アプリ session 失効が発生した。
-- certificate pinning、device attestation、root / emulator 拒否を回避する必要が生じた。
-- Android の unmodified app で host / path metadata を観測できず、pinning / integrity bypass や秘密 header/body hook が必要になった。
-- 実値、PII、ID、秘密が URL、画面、ログ、exception、telemetry に残りそうである。
-- 利用履歴の取得が、規約で禁止される自動化・過剰負荷・security control 回避を必要とする。
+- Navigation to confirmations for listings, purchases, payments, top-ups, transfers, bank transfers, settlement, cryptoasset trades, recurring purchases, applications, consent, settings saves.
+- Passkey registration/deletion, SMS/OTP input, identity verification, account linking, limit changes requested.
+- Requests outside read-only allowlists or semantically unknown responses.
+- 401/403/429, Cloudflare challenges, CAPTCHA, extra identity verification, unusual-login notices, app session expiry.
+- Need to bypass certificate pinning, device attestation, root/emulator rejection.
+- Host/path metadata unobservable in unmodified Android app without pinning/integrity bypass or secret header/body hooks.
+- Risk of actual values, PII, IDs, secrets remaining in URLs, screens, logs, exceptions, telemetry.
+- Retrieval requires automation/excessive load/security-control bypass prohibited by terms.
 
-## 未確認事項 / acceptance gate
+## Unverified items / acceptance gates
 
-- [ ] 販売履歴、残高履歴、ポイント履歴、クレジット請求内訳の最古日・最古月、件数上限、page size。
-- [ ] 「処理中」から確定・取消・返金への状態名と、訂正時に同一 ID が更新されるか別行が追加されるか。
-- [ ] 月間取引報告書 CSV の全 header、encoding、直接取扱と連携口座の区別、訂正・再発行時の同一性。
-- [ ] 取引報告書のアプリ内保持期間。退会後の問い合わせ提供は確認済みだが、在会中に一覧から全月を取得できる保証は未確認。
-- [x] 公式 Web の確定販売、売上金、ポイント、残高 component、クレジット請求概要の route と response key（public current JS の静的確認）。
-- [x] Web の OIDC Authorization Code + PKCE、DPoP 鍵、Authorization / DPoP interceptor、silent renewal / retry（public current JS の静的確認）。
-- [ ] 認証済み Web で上記 route / schema が一致すること、pagination の server 動作、token lifetime、renewal 成功条件、WAF / egress 差。
-- [ ] Merpay merchant line の processing / settled / refund read route と状態遷移。
-- [ ] 正規 split APK の package / versionCode / signer / manifest / host / schema、mobile session issuance、device binding、certificate pinning、Play Integrity / attestation 候補。
-- [ ] メルコイン資産、注文、約定、funding、report list/download の app read route と schema。
-- [ ] Mercari app 登録パスキーを Bitwarden provider に保存・利用できるか。一般的 WebAuthn 対応から推定しない。
-- [ ] Cloudflare 403 の理由、rate limit、地域・egress 差、認証後 API host の CDN / WAF。
-- [ ] 個人口座向け read-only API / data portability route の有無。Shops・加盟店 API は代替にならない。
+- [ ] Earliest dates/months, row limits, page sizes for sales history, balance history, points history, credit billing breakdowns.
+- [ ] State names from processing to confirmed/cancelled/refunded; whether corrections update the same ID or add rows.
+- [ ] Full monthly report CSV headers, encoding, distinction between direct/linked accounts, identity on corrections/reissuance.
+- [ ] In-app report retention. Post-termination support provision established, but no guarantee all months are retrievable from lists during membership.
+- [x] Official Web settled sales, proceeds, points, balance component, credit billing summary routes/response keys (static verification of public current JS).
+- [x] Web OIDC Authorization Code + PKCE, DPoP keys, Authorization/DPoP interceptors, silent renewal/retry (static verification of public current JS).
+- [ ] Authenticated Web agreement with those routes/schemas, server pagination behavior, token lifetimes, renewal success conditions, WAF/egress differences.
+- [ ] Merpay merchant line processing/settled/refund read routes and transitions.
+- [ ] Legitimate split APK package/versionCode/signer/manifest/hosts/schemas, mobile session issuance, device binding, certificate pinning, Play Integrity/attestation candidates.
+- [ ] Mercoin app read routes/schemas for assets, orders, executions, funding, report lists/downloads.
+- [ ] Whether Mercari-app-registered passkeys can be stored/used with Bitwarden provider; do not infer from generic WebAuthn support.
+- [ ] Reasons for Cloudflare 403s, rate limits, regional/egress differences, authenticated API host CDN/WAF.
+- [ ] Personal read-only APIs/data portability routes; Shops/merchant APIs are not substitutes.

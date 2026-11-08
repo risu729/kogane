@@ -1,339 +1,323 @@
-# 三菱UFJ銀行（MUFGダイレクト／銀行アプリ）
+# 三菱UFJ銀行 (MUFG Bank): MUFG Direct / banking app
 
 > Dated source research and implementation notes. Earlier runtime/schedule
 > claims may be superseded by later changes. See the [research scope](README.md),
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-調査日: 2026-08-26
+Research date: 2026-08-26
 
-## 結論
+## Conclusion
 
-Kogane の一次データ源には、まず **三菱UFJダイレクトのブラウザ版**を使う。
-初回はユーザーが MUFGあんしんパスを登録したスマートフォンでログインを承認し、
-ログイン後はサービス指定口座の一覧・残高・明細画面と公式 CSV/PDF を保存する。
-ブラウザ版は円預金 CSV、外貨普通・貯蓄預金 CSV、Eco通帳の最大25カ月、
-取引推移表 PDF の最大10年を同じ契約から取得でき、銀行アプリより出力機能が多い。
+Initially use **browser-based 三菱UFJダイレクト (MUFG Direct)** as Kogane's primary source. The user first
+approves login on the smartphone registered with MUFGあんしんパス (MUFG Anshin Pass); after login save designated
+service accounts' lists/balances/statements and official CSV/PDF. Browser offers yen deposit CSV, foreign-currency
+ordinary/savings CSV, up to 25 months of Eco通帳 (Eco Passbook), and up to 10 years of transaction history
+report PDF under the same contract, more output features than the app.
 
-完全無人化の見込みは **中**、実装コストは **4/5** と評価する。理由は、銀行のデータ画面そのものは
-通常の Web UI として自動操作できる一方、2026年開始の MUFGあんしんパスは登録スマートフォン1台と
-生体認証を必須にし、PCなどからのログインも同端末での承認を要求するためである。ユーザーが「passkey」と
-呼んでいるものが Bitwarden 同期型 WebAuthn パスキーなのか、公式が案内する FIDO 準拠の銀行アプリ生体認証／
-MUFGあんしんパスなのかは、実画面で区別する必要がある。公式資料では Bitwarden 等へ保存できる
-WebAuthn パスキーをログイン手段として案内していない。したがって現時点では、Bitwarden はログインパスワードの
-安全な受け渡しには使えても、登録スマートフォンの承認を代替しないと扱う。
+Assess fully unattended feasibility **medium**, implementation cost **4/5**. Data screens are ordinary automatable
+Web UI, but MUFG Anshin Pass introduced in 2026 requires one registered smartphone/biometrics, including approval
+for PC logins. Live screens must distinguish whether the owner's passkey means Bitwarden-synced WebAuthn or
+official FIDO-compliant bank-app biometrics/MUFG Anshin Pass. Official material does not describe WebAuthn passkeys
+storable in Bitwarden etc. as login methods. Currently treat Bitwarden as potentially supplying login passwords
+safely, not replacing registered-phone approval.
 
-公開ログインSPAの静的解析により、現行WebはHTML formの直送ではなく、JSON BFF、CSRF cookie/header、
-画面ID、端末フィンガープリント、cookie付きセッション延長を使うことまで確認できた。従ってreverse engineeringを
-後回しにはせず、公開artifactの静的解析と、本人操作のread-only画面に限定した実通信metadata観測を並行する。
-ただし、認証後の残高・明細endpointやsession replay可能性はまだ確定しておらず、公開JSだけから推定しない。
+Static public login SPA analysis established JSON BFF, CSRF cookies/headers, screen IDs, device fingerprints,
+and cookie-based session extension rather than direct HTML form submission. Pursue public artifact static
+analysis and owner-operated read-only traffic metadata observation in parallel. Authenticated balance/statement
+endpoints and session replay remain undetermined; do not infer from public JS alone.
 
-公式の三菱UFJダイレクト API は存在するが、外部サービス会社との契約・同意を前提とする。
-個人開発者が自分の本番口座用トークンをセルフサービス発行できる入口は確認できず、Kogane の初期経路にはしない。
-Mable は終了済みで、後継 Money Canvas は Moneytree を使って金融機関明細を取得するため、
-「銀行公式サイト／公式アプリを直接データ源にする」という本調査の条件にも合わない。
+Official MUFG Direct APIs exist but require external service company contracts/consent. No self-service production
+token issuance for personal developers' own accounts found; exclude as initial route. Mable ended; successor
+Money Canvas retrieves financial institution statements through Moneytree, conflicting with this research's
+requirement to use official bank sites/apps directly.
 
-## 調査範囲と非目標
+## Scope and non-goals
 
-- 対象は個人向け三菱UFJ銀行口座、三菱UFJダイレクト、公式「三菱UFJ銀行」アプリ、旧 Mable と後継の位置付け、
-  および個人向けダイレクト API の可否だけである。
-- 三菱UFJカード、My Digital Connect、JAL/J-WEST、証券、他行、BizSTATION はデータ源として調査しない。
-- 読み取り専用で評価した。振込、振替、定期・外貨取引、口座登録、Eco通帳切替、ポイント申込、設定変更は行っていない。
-- 認証済み口座へのログインは行わず、実残高、口座番号、契約番号、氏名、秘密、Cookie、OTP は取得・記録していない。
-- 公式ページ、公開ログイン面の HTTP/DNS、Google Play 公開情報、公開 GitHub コードだけを使用した。
+- Only personal MUFG Bank accounts, MUFG Direct, official `三菱UFJ銀行` app, old Mable/successor positioning,
+  and personal Direct API feasibility.
+- Do not research 三菱UFJカード (MUFG Card), My Digital Connect, JAL/J-WEST, securities, other banks, BizSTATION as sources.
+- Read-only evaluation; no transfers/account transfers/time-deposit/foreign exchange transactions, account registration, Eco Passbook switching, points applications, settings changes.
+- No authenticated account login or retrieval/recording of actual balances, account/contract numbers, names, secrets, cookies, OTPs.
+- Only official pages, public login HTTP/DNS, public Google Play information, public GitHub code.
 
-## 公式入口
+## Official entry points
 
-| 経路                          | 入口                                                                                                                                                                                                       | 読み取り可能な主なデータ                                                                                 | 出力／自動化上の位置付け                                                                                                                                   |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 三菱UFJダイレクト（ブラウザ） | [公式トップ](https://direct.bk.mufg.jp/index.html)、[現在のPCログイン画面](https://directg.s.bk.mufg.jp/APL/LGP_P_01/PU/LG_0001/LG_0001_PC01)                                                              | 代表口座とサービス指定口座、残高、円入出金、定期預金明細、外貨預金、取引記録、直近の銀行ポイント加算実績 | **推奨**。CSV/PDF/印刷を持ち、Playwright等の通常ブラウザで観測しやすい。ログインはスマホ承認を要する可能性が高い。                                         |
-| 公式「三菱UFJ銀行」アプリ     | [Google Play (`jp.mufg.bk.applisp.app`)](https://play.google.com/store/apps/details?id=jp.mufg.bk.applisp.app&hl=ja)、[公式案内](https://direct.bk.mufg.jp/btm/banking/sp_appli.html)                      | 残高、入出金明細、定期預金、外貨預金等。スマホ版明細は最大200件                                          | 表示確認と認証発行元として重要。ただし円明細の印刷ボタンがなく、公式CSVもPCブラウザ限定。端末紐付け・root検知があり、主収集器には不向き。                  |
-| 三菱UFJダイレクト API         | [サービス説明](https://direct.bk.mufg.jp/btm/ser_naiyo/api.html)、[利用規定](https://direct.bk.mufg.jp/btm/kitei/api.html)、[開発者ポータルFAQ](https://developer.portal.bk.mufg.jp/btmu/openapitrial/faq) | 口座情報、入出金明細、定期預金明細等。アクセストークン方式                                               | 公式かつ理想的だが、対象サービス提供会社との連携が前提。体験環境から個人用本番クライアントへ進む公開セルフサービス経路は確認できない。初期コスト **5/5**。 |
-| Mable                         | [公式終了案内](https://www.bk.mufg.jp/tsukau/app/lp/mable/moneycanvas/index.html)                                                                                                                          | 旧家計管理・つかいわけ口座操作                                                                           | **2024-03-27終了**。既存ユーザーもアプリは利用不可。収集経路にしない。                                                                                     |
-| Money Canvas                  | [Mableとの差分・移行FAQ](https://faq01.bk.mufg.jp/faq/show/4980?site_domain=moneycanvas)、[更新遅延FAQ](https://faq01.bk.mufg.jp/faq/show/4979?site_domain=moneycanvas)                                    | 資産・明細・推移。Mableデータの一部を移行可能                                                            | 銀行提供サービスだが、金融機関明細は Moneytree サービスで取得する。つかいわけ口座操作・各種入出金通知も移行されない。aggregator 回避条件に反する。         |
+| Route                  | Entry                                                                                                                                                                                                 | Main readable data                                                                                                                                                        | Export/automation role                                                                                                                                                          |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MUFG Direct (browser)  | [Official home](https://direct.bk.mufg.jp/index.html), [current PC login](https://directg.s.bk.mufg.jp/APL/LGP_P_01/PU/LG_0001/LG_0001_PC01)                                                          | Primary/designated service accounts, balances, yen deposits/withdrawals, time deposit details, foreign-currency deposits, transaction records, recent bank points accrual | **Recommended**. CSV/PDF/print; easy observation in ordinary browsers such as Playwright. Login likely needs smartphone approval                                                |
+| Official MUFG Bank app | [Google Play (`jp.mufg.bk.applisp.app`)](https://play.google.com/store/apps/details?id=jp.mufg.bk.applisp.app&hl=ja), [official guidance](https://direct.bk.mufg.jp/btm/banking/sp_appli.html)        | Balances, statements, time deposits, foreign currency, etc.; smartphone statements up to 200 entries                                                                      | Important for displays/authentication issuance, but no yen statement print button; official CSV PC-browser-only. Device binding/root detection, unsuitable as primary collector |
+| MUFG Direct API        | [Service](https://direct.bk.mufg.jp/btm/ser_naiyo/api.html), [terms](https://direct.bk.mufg.jp/btm/kitei/api.html), [developer portal FAQ](https://developer.portal.bk.mufg.jp/btmu/openapitrial/faq) | Account information, statements, time deposits, etc.; access tokens                                                                                                       | Official/ideal, but linked service companies required. No public self-service from trials to personal production clients. Initial cost **5/5**                                  |
+| Mable                  | [Official termination](https://www.bk.mufg.jp/tsukau/app/lp/mable/moneycanvas/index.html)                                                                                                             | Former household accounting/separate-use account operations                                                                                                               | **Ended 2024-03-27**; unusable even for existing users, not a collection route                                                                                                  |
+| Money Canvas           | [Mable differences/migration FAQ](https://faq01.bk.mufg.jp/faq/show/4980?site_domain=moneycanvas), [refresh delay FAQ](https://faq01.bk.mufg.jp/faq/show/4979?site_domain=moneycanvas)                | Assets/statements/trends; some Mable migration                                                                                                                            | Bank-provided, but institution statements use Moneytree. Separate-use account operations/deposit-withdrawal notifications do not migrate. Violates aggregator avoidance         |
 
-## 口座列挙と残高
+## Account enumeration and balances
 
-三菱UFJダイレクトのトップは代表口座残高を表示し、ほかの残高は「口座一覧／ほかの口座残高」から確認する。
-保有口座が見えない場合は、利用口座（サービス指定口座）への登録が必要である。
-この登録自体は設定変更なので、本 PoC では自動実行しない。
+MUFG Direct home shows primary account balance; others via `口座一覧／ほかの口座残高` ("account list / other
+account balances"). Invisible held accounts may need registration as service-designated accounts.
+That registration is a settings change; do not automate in this PoC.
 
-[個人向けダイレクト API 利用規定](https://direct.bk.mufg.jp/btm/kitei/api.html) は、
-サービス指定口座について連携可能な10種類を公式に列挙している。銀行預金として本調査に関係するのは、
-普通預金、貯蓄預金、当座預金、定期預金、外貨普通預金、外貨貯蓄預金、外貨定期預金、財形預金である
-（規定には別途マイカードと投資信託も含まれる）。Web画面もサービス指定口座単位で残高・明細を表示する。
+[Personal Direct API terms](https://direct.bk.mufg.jp/btm/kitei/api.html) explicitly list 10 linkable
+designated service account types. Relevant bank deposits: ordinary, savings, current, time, foreign-currency
+ordinary, foreign-currency savings, foreign-currency time, property-formation savings (terms also include
+My Card/investment trusts). Web balances/statements likewise use designated service accounts.
 
-- **普通預金／スーパー普通預金（メインバンク プラス）**: スーパー普通預金は優遇機能付きの普通預金であり、
-  別の収集経路ではない。代表口座またはサービス指定口座として同じ口座一覧・円明細経路に載る。
-- **つかいわけ口座**: [現行規定](https://www.bk.mufg.jp/regulation/tsukaiwake.html) 上、キャッシュカードを発行しない
-  普通預金（Eco通帳）で、開設時にサービス指定口座へ自動登録され、登録削除はできない。
-  Mable終了後も普通預金として存続する。[取引推移表もダイレクト上で申込可能](https://faq01.bk.mufg.jp/faq/show/5533?site_domain=default) である。
-- **円定期預金**: サービス指定口座の口座合計残高と現在の預入明細を全件照会できる。
-  [公式ヘルプ](https://directg.s.bk.mufg.jp/refresh/ib_help/yen_teiki.html) はページ送りの存在を明記するが、
-  個人向けCSVは案内していない。夜間・休日受付は明細への反映が翌営業日8時頃になる場合がある。
-- **外貨普通／貯蓄／定期**: [外貨預金ヘルプ](https://directg.s.bk.mufg.jp/refresh/ib_help/gaika.html) で、
-  全保有外貨預金の合計円換算額と各口座残高、口座別明細を取得できる。外貨貯蓄預金では現在の引出可能額も表示される。
-  外貨定期は現在保有する全預入明細を表示する。
+- **普通預金／スーパー普通預金（メインバンク プラス） (ordinary / Super Ordinary Deposits (Main Bank Plus))**: Super Ordinary is ordinary deposits with preferential features, not another collection route; same account list/yen statements as primary/designated accounts.
+- **つかいわけ口座 (separate-use accounts)**: under [current terms](https://www.bk.mufg.jp/regulation/tsukaiwake.html), ordinary deposits (Eco Passbook) without cash cards, automatically registered as designated service accounts on opening; cannot unregister. Remain ordinary deposits after Mable ended. [Transaction history report applications available in Direct](https://faq01.bk.mufg.jp/faq/show/5533?site_domain=default).
+- **Yen time deposits**: total account balances/all current placement details. [Official help](https://directg.s.bk.mufg.jp/refresh/ib_help/yen_teiki.html) explicitly paginates; no personal CSV guidance. Night/holiday requests may appear around 08:00 next business day.
+- **Foreign-currency ordinary/savings/time**: [help](https://directg.s.bk.mufg.jp/refresh/ib_help/gaika.html) offers total reference yen equivalents, individual balances, per-account details; foreign-currency savings also current withdrawable amounts. Time deposits show all current placements.
 
-残高の過去時点系列を口座一覧から直接取得する機能は確認できない。円預金は各取引後残高を明細から再構成し、
-定期・外貨はスナップショットを継続保存する必要がある。
+No direct historical balance series from account lists established. Reconstruct yen deposit post-transaction
+balances from statements; continuously save time/foreign-currency snapshots.
 
-## 明細、期間、件数、確定状態
+## Statements, periods, counts, confirmed states
 
-### 円普通・貯蓄等の入出金
+### Yen ordinary/savings etc. deposits and withdrawals
 
-[現行ブラウザヘルプ](https://direct.bk.mufg.jp/fw/ib_help/meisai.html) による仕様は以下である。
+[Current browser help](https://direct.bk.mufg.jp/fw/ib_help/meisai.html) specifies:
 
-- 初期表示は代表口座の最近30日。
-- Eco通帳は最大25カ月。非Eco通帳は前月1日から当日まで。
-- Eco通帳の「取引推移表」は、申込により最大10年の過去明細を PDF で取得できる。
-- ブラウザのCSVは **口座単位**、PCのみ。「全取引／入金／出金」は1回200件まで、
-  「振込入金」は100件まで。件数超過時は期間を分割して取得する必要がある。
-- 画面の取引種別フィルターは全取引、入金、出金、振込入金。スマホアプリの表示上限も最大200件。
-- 印刷画面には氏名・店番・口座番号等が含まれるため、Kogane の公開ログやGitには保存しない。
-- Eco通帳の任意メモは1明細7文字、最大25カ月だが、メモ変更は書き込みなので収集器は操作しない。
+- Initial view: primary account's latest 30 days.
+- Eco Passbook: up to 25 months. Non-Eco: previous month's first day through today.
+- Eco Passbook `取引推移表` ("transaction history report"): up to 10 years' past PDF statements by application.
+- Browser CSV is **per account**, PC only. `全取引／入金／出金` ("all transactions / deposits / withdrawals") up to 200 per operation;
+  `振込入金` ("incoming transfers") up to 100. Split periods when exceeding limits.
+- Screen filters: all transactions/deposits/withdrawals/incoming transfers. App display also maximum 200.
+- Print screens include names/branch/account numbers etc.; keep out of public Kogane logs/Git.
+- Optional Eco Passbook notes: seven characters per entry/up to 25 months; note editing is a write, not a collector operation.
 
-公式は個人向けCSVの列仕様を公開ページ上で詳述していない。現在も更新される第三者の
-[Zaim CSV Converter のMUFG行モデル](https://github.com/yukihiko-shinoda/zaim-csv-converter/blob/66b93b514bc12f45c29c349e6a84cc39ad9b1f39/zaimcsvconverter/data/mufg.py)
-は、日付、摘要、摘要内容、支払額、入金額、残高、メモ、未記帳フラグ、入出金種別を読み込む。
-これは有力なCSV粒度の証拠だが、銀行の現行仕様書ではないため、実ファイルのヘッダーだけを秘密なしで再確認する。
+Official public pages do not detail personal CSV columns. The still-updated third-party
+[Zaim CSV Converter MUFG row model](https://github.com/yukihiko-shinoda/zaim-csv-converter/blob/66b93b514bc12f45c29c349e6a84cc39ad9b1f39/zaimcsvconverter/data/mufg.py)
+reads date, description, description contents, payments, deposits, balance, notes, unrecorded flag,
+deposit/withdrawal type. Strong CSV granularity evidence, not a current bank specification; recheck only
+actual file headers without secrets.
 
-### 円定期・外貨
+### Yen time deposits and foreign currency
 
-- 円定期は「履歴」ではなく、現在預け入れている明細と口座合計残高が中心である。個人向けCSVは確認できない。
-- 外貨普通・貯蓄の照会期間は口座形式で異なる。通帳式は原則40日、照合表口は40日または220日、
-  インターネット支店の無通帳式は原則60日。照会条件と同じ範囲を口座別CSVで取得できる。
-- 外貨定期／インターネット外貨定期は現在保有する全明細を表示するが、公式ヘルプは **CSV不可** と明記する。
-- 外貨の過去取引・通知物は Eco通知も調査対象になるが、文書種別・保存期間・機械可読性は実契約で未確認。
+- Yen time deposits emphasize current placements/total account balance, not history; no personal CSV found.
+- Foreign-currency ordinary/savings periods depend on account form: generally 40 days for passbooks, 40 or 220 days for statement accounts,
+  generally 60 days for paperless internet-branch accounts. Per-account CSV matches inquiry conditions.
+- Foreign-currency time/internet foreign-currency time deposits show all current holdings; help explicitly says **no CSV**.
+- Foreign-currency past transactions/notices include Eco通知 (Eco Notices) as research targets; document types/retention/machine readability unverified for the actual contract.
 
-### 保留・確定の扱い
+### Pending/confirmed treatment
 
-入出金明細／CSVは口座へ反映された記帳済み取引として扱う。カードのような「保留中明細」フィールドは
-公式ヘルプで確認できない。一方、[お取引記録](https://directg.s.bk.mufg.jp/refresh/ib_help/kiroku.html) は
-最大6カ月（照会操作は2カ月）、50件/ページで、`受付完了`、`処理中`、`取引完了`、`エラー`、処理予定日を持つ。
-`取引完了` 後でも振込先情報相違により後からエラーになる場合があると公式が明記する。
+Treat statements/CSV as posted account transactions. No card-like pending statement field found in help.
+[お取引記録 (transaction records)](https://directg.s.bk.mufg.jp/refresh/ib_help/kiroku.html) cover up to six months
+(inquiry operation two months), 50 rows/page, with `受付完了` ("request accepted"), `処理中` ("processing"),
+`取引完了` ("transaction complete"), `エラー` ("error"), scheduled processing dates. Official guidance says
+transfer destination discrepancies can cause later errors even after `取引完了`.
 
-Kogane は次の2系列を混ぜない。
+Keep two series separate:
 
-1. 入出金明細／CSV: 口座へ反映済みの ledger evidence。
-2. お取引記録: 受付・処理予定・完了・エラーの operational evidence。状態が完了するまで pending として別保存する。
+1. Statements/CSV: ledger evidence already reflected in accounts.
+2. Transaction records: operational evidence of acceptance/scheduled processing/completion/errors; store separately as pending until completion.
 
-読み取り専用のため、お取引記録を確認しても再実行・取消・振込は行わない。
+Read-only collection never re-executes/cancels/transfers even after checking transaction records.
 
-## ポイント
+## Points
 
-銀行口座側で直接確認できるのは、主にスーパー普通預金の **メインバンク プラス Pontaポイント** である。
-[公式案内](https://www.bk.mufg.jp/kouza/yugu/mb/pointservice/index.html) は、ダイレクトで見えるのは
-直近1カ月分の加算ポイントであり、ボタンから PontaWeb（外部サイト）へ移ると説明する。
-したがって銀行側だけではPonta総残高・長期履歴の完全なポイント台帳にならない。
+Bank-account-side data mainly covers **メインバンク プラス Pontaポイント (Main Bank Plus Ponta Points)** for
+Super Ordinary Deposits. [Official guidance](https://www.bk.mufg.jp/kouza/yugu/mb/pointservice/index.html)
+says Direct shows the latest month's awarded points; a button leads to external PontaWeb. Bank-only data
+therefore cannot provide a complete Ponta total/history ledger.
 
-公式銀行アプリはカードの利用状況・ポイント照会も掲げるが、
-[公式ヘルプ](https://direct.bk.mufg.jp/fw/ib_help/credit_shoukai.html) 上は、登録したカード認証情報を使って
-別の会員Web画面へログインし表示する機能である。これは銀行預金データではないため、銀行コレクターは
-グローバルポイント等を取得しない。銀行側のPonta直近実績と、別ポイント経路の残高・履歴は異なる source として分離する。
+Official app advertises card usage/points inquiries, but [help](https://direct.bk.mufg.jp/fw/ib_help/credit_shoukai.html)
+describes logging into other member Web screens using registered card credentials. This is not bank deposit
+data; bank collectors do not retrieve グローバルポイント (Global Points) etc. Separate recent bank-side Ponta
+awards from balance/history through other points routes.
 
-## 認証とセッション
+## Authentication and sessions
 
-### 確認できた事実
+### Established facts
 
-- 通常ログインは代表口座の店番・口座番号または契約番号と、8～16桁のログインパスワード。
-- [MUFGあんしんパス](https://direct.bk.mufg.jp/secure/ansnps/index.html) は2026年の公式機能で、
-  登録スマートフォン1台と指紋／顔認証を必須にする。登録端末以外のスマホやPCは、ブラウザでパスワード入力後、
-  登録スマホでの承認が必要。二次元コードは都度生成され再利用不可。機種変更・アプリ再インストール時は再登録が必要。
-- 従来の銀行アプリ生体認証も [FIDO準拠](https://direct.bk.mufg.jp/btm/banking/sp_appli/seitai.html) だが、
-  公式は一般の同期型「パスキー」と同一とは説明していない。
-- 振込等の資金移動にはアプリまたはカードのワンタイムパスワードが必要。銀行アプリのOTP登録は1契約1台で、
-  別端末登録・機種変更で再登録となる。ただし本コレクターは資金移動画面を呼ばない。
-- 普段と異なる端末／ネットワーク、本人以外の可能性を検知すると、Eメール6桁OTPやキャッシュカード暗証番号を
-  追加要求し、特に高リスクなアクセスは拒否することを
-  [公式FAQ](https://faq01.bk.mufg.jp/faq/show/63?site_domain=default) が明記する。
+- Ordinary login: primary account branch/account number or contract number, 8–16-character login password.
+- [MUFG Anshin Pass](https://direct.bk.mufg.jp/secure/ansnps/index.html), official 2026 feature, requires one registered smartphone/fingerprint-face authentication.
+  Other phones/PCs enter browser passwords then require registered-phone approval. QR codes generated per operation, not reusable; device changes/app reinstalls require re-registration.
+- Prior app biometrics are also [FIDO-compliant](https://direct.bk.mufg.jp/btm/banking/sp_appli/seitai.html), but not officially described as equivalent to general synced passkeys.
+- Transfers/other fund movements require app/card OTPs. App OTP registration: one device per contract; other-device registration/device change requires re-registration. Collector never calls fund movement screens.
+- [Official FAQ](https://faq01.bk.mufg.jp/faq/show/63?site_domain=default) explicitly describes six-digit email OTP/cash-card PIN step-up for unusual device/network or possible non-owner access, denying especially high-risk access.
 
-### 未確認
+### Unverified
 
-- ログイン済みCookieの正確な寿命、Chrome再起動後の再利用、IP・OS変更後の有効性。
-- MUFGあんしんパス承認後に同一セッションをWSL/OCI/Cloudflareへ移送できるか。
-- 閲覧だけの再ログインでも毎回スマホ承認が必要か、信頼済みブラウザ状態があるか。
-- ユーザーの Bitwarden 内の「passkey」がこの銀行ログイン画面で本当に WebAuthn credential として提示されるか。
+- Exact authenticated cookie lifetimes, reuse after Chrome restart, validity after IP/OS changes.
+- Moving Anshin-Pass-approved sessions to WSL/OCI/Cloudflare.
+- Whether read-only re-login always needs phone approval or trusted browser state exists.
+- Whether the owner's Bitwarden passkey is actually offered as WebAuthn on this bank login.
 
-秘密は Bitwarden から実行時だけ取り出し、ログ、画像、raw evidence、環境ダンプへ出さない。
-認証失敗時に高速再試行せず、手動承認または新セッション発行へ戻る。
+Retrieve secrets from Bitwarden only at runtime; keep out of logs/images/raw evidence/environment dumps.
+No rapid authentication retries; return to manual approval/new sessions.
 
-## Akamai、WAF、anti-bot
+## Akamai, WAF, anti-bot
 
-### 確認済み
+### Established
 
-2026-08-26 の公開DNS確認では `direct.bk.mufg.jp`、`directg.s.bk.mufg.jp`、`entry11.bk.mufg.jp` が
-`*.edgekey.net` を経由して `*.akamaiedge.net` へ解決した。従って **Akamai CDN/edge の利用は確定** である。
-公開トップとログインHTMLを通常の `curl` で取得したところ200で、明示的なBot Manager cookieやchallengeは観測しなかった。
-またログイン面は User-Agent Client Hints を要求し、MUFG公式FAQは端末・ネットワーク環境のリスク分析を明記する。
+Public DNS on 2026-08-26: `direct.bk.mufg.jp`, `directg.s.bk.mufg.jp`, `entry11.bk.mufg.jp` resolved through
+`*.edgekey.net` to `*.akamaiedge.net`, establishing **Akamai CDN/edge use**. Ordinary `curl` public home/login
+HTML returned 200 without explicit Bot Manager cookies/challenges. Login requests User-Agent Client Hints;
+MUFG FAQ explicitly describes device/network risk analysis.
 
-### 推測・未確認
+### Hypotheses/unverified
 
-Akamai Bot Manager/WAF が認証POSTまたはログイン後APIを保護しているかは未確認である。
-edgekey/akamaiedge のDNSだけではBot Manager採用を証明できない。資格情報を使った試験は行っておらず、
-403、Akamai参照番号、`_abck`、`bm_sz` 等も観測していない。従って設計上はanti-botを想定するが、
-Vpass等の別サービスでの挙動をMUFG銀行へ転用しない。
+Whether Akamai Bot Manager/WAF protects authentication POST/post-login APIs is unverified. DNS alone does
+not establish Bot Manager. No credentialed tests performed; no 403, Akamai reference numbers, `_abck`, `bm_sz`,
+etc. observed. Anticipate anti-bot in design without transferring Vpass/other services' behavior to MUFG Bank.
 
-## 公開Web SPA／BFFの静的解析
+## Public Web SPA / BFF static analysis
 
-2026-08-26に[現在のPCログイン画面](https://directg.s.bk.mufg.jp/APL/LGP_P_01/PU/LG_0001/LG_0001_PC01)と、
-同HTMLが参照する公開JavaScriptを資格情報なしで取得して静的に確認した。ログインHTML自身に`form`はなく、
-Angular SPAが`/APL/LGP_P_01/`をbaseとして起動する。公開configには次の接続先が含まれる。
+On 2026-08-26 retrieved [current PC login](https://directg.s.bk.mufg.jp/APL/LGP_P_01/PU/LG_0001/LG_0001_PC01)
+and public JavaScript referenced by its HTML without credentials; inspected statically. Login HTML has no
+`form`; Angular SPA starts with base `/APL/LGP_P_01/`. Public config includes:
 
-- login BFF: `https://entry11.bk.mufg.jp/ibg/dfw/APLIN/bff_lgp/v1/ib`
-- login後候補: `https://entry11.bk.mufg.jp/ib/dfw/APLAG/bff_go/v1/ib`および
+- Login BFF: `https://entry11.bk.mufg.jp/ibg/dfw/APLIN/bff_lgp/v1/ib`
+- Post-login candidates: `https://entry11.bk.mufg.jp/ib/dfw/APLAG/bff_go/v1/ib` and
   `https://entry11.bk.mufg.jp/ib/dfw/APLS`
-- session延長: `/BFF_LG_1000_01`、framework log: `/BFF_LG_1000_03`
+- Session extension: `/BFF_LG_1000_01`; framework logs: `/BFF_LG_1000_03`
 
-公開login serviceは`/BFF_LG_0001_01`～`05`を定義する。`02`は店番・口座番号・契約番号・
-ログインパスワードに加え、`devicePrint`、browser language、timezoneをJSONで送る。
-`03`は追加認証区分、カード暗証番号／EメールOTP候補、再度の`devicePrint`を持ち、`04`はQR情報取得、
-`05`はout-of-band承認状態確認である。これは**公開コード上のrequest schema候補**であり、各フィールドが
-毎回送られる、または現在の契約で必ず要求されることを意味しない。値は取得・記録していない。
+Public login services define `/BFF_LG_0001_01`–`05`. `02` sends branch/account/contract numbers, login
+password, `devicePrint`, browser language, timezone as JSON. `03` has extra authentication types,
+card PIN/email OTP candidates, `devicePrint` again; `04` retrieves QR information, `05` checks out-of-band
+approval status. These are **public-code request schema candidates**, not proof every field is always sent
+or required for the current contract. No values retrieved/recorded.
 
-共通transportは`drb-CSRF-Token` cookieを`CSRF-Token` headerへ写し、`X-Screen-ID`と
-`X-Screen-Event-ID`を付け、`withCredentials`付きPOSTを行う。`drb-ak` cookieがあれば
-`X-Trusteer-Rapport: ak=...;`も付ける。session延長BFFはCSRF/header/cookieとsequence値を使う。
-公開`encode_deviceprint()`はuser agent、OS/browser、画面、timezone/language、plugin、cookie可否、
-proxy timing、任意の位置情報等をまとめ、入力イベント収集器はfocus/blur/key/pasteの回数や長さ等のmetadataを扱う。
-symbol/header上はRSA系device-print実装と判断できるが、特定の不正検知製品名やserver側判定は未確認である。
+Common transport copies `drb-CSRF-Token` cookies into `CSRF-Token` headers, adds `X-Screen-ID`,
+`X-Screen-Event-ID`, POSTs with `withCredentials`. If `drb-ak` cookies exist, adds `X-Trusteer-Rapport: ak=...;`.
+Session extension BFF uses CSRF/headers/cookies and sequences. Public `encode_deviceprint()` combines user
+agent, OS/browser, screen, timezone/language, plugins, cookie availability, proxy timing, optional location,
+etc. Input event collectors handle focus/blur/key/paste counts/lengths and similar metadata. Symbols/headers
+indicate an RSA-family device-print implementation; specific fraud product names/server decisions unverified.
 
-この確認により、ログインBFFの存在、CSRF/session枠組み、端末risk signalは確定した。一方、認証後の
-残高・口座列挙・円／定期／外貨明細のendpoint、response schema、pagination、token/cookie寿命は未確認である。
-公開assetにはsource map参照を確認できず、認証なしでBFFを呼ぶ必要もない。次段階は本人操作のログイン時に
-DevTools/Kuebikoでmethod、origin、path template、status、content type、field **name**だけを観測する。
-request/response body、cookie、CSRF、OTP、口座識別子、実値はcapture時点で破棄する。
+This establishes login BFF existence, CSRF/session framework, device risk signals. Authenticated balance,
+account enumeration, yen/time/foreign-currency statement endpoints, response schemas, pagination,
+token/cookie lifetimes remain unverified. Public assets had no source map references; no need to call BFFs
+unauthenticated. Next observe only method, origin, path template, status, content type, field **names**
+with DevTools/Kuebiko during owner login. Discard bodies, cookies, CSRF, OTPs, account identifiers, actual values at capture.
 
-## Androidアプリ、正規split取得、静的／動的解析
+## Android app, legitimate split acquisition, static/dynamic analysis
 
-[銀行公式アプリページ](https://direct.bk.mufg.jp/btm/banking/sp_appli.html)のGoogle Playリンクは
-package `jp.mufg.bk.applisp.app`を直接指す。2026-08-26に取得した
-[Google Play公開ページ](https://play.google.com/store/apps/details?id=jp.mufg.bk.applisp.app&hl=ja&gl=JP)は、
-developer `MUFG BANK, LTD.`、version `13.11.0`、更新日2026-08-05、500万件以上ダウンロードを表示した。
-銀行公式ページからのリンク、Playのdeveloper、packageの三点をprovenanceとする。銀行サイトからの独立した
-公式APK直配布は確認できず、公式導線はGoogle Playである。Play App Bundleの場合はbase APKだけでなく、
-端末に配信されたconfiguration/feature split一式が必要になる。
+Google Play link on the [official bank app page](https://direct.bk.mufg.jp/btm/banking/sp_appli.html)
+directly targets `jp.mufg.bk.applisp.app`. [Public Play page](https://play.google.com/store/apps/details?id=jp.mufg.bk.applisp.app&hl=ja&gl=JP)
+retrieved on 2026-08-26 showed developer `MUFG BANK, LTD.`, version `13.11.0`, updated 2026-08-05,
+5 million+ downloads. Provenance: bank official link, Play developer, package. No independent official
+APK distribution from the bank site found; official route is Play. App Bundles need all delivered
+configuration/feature splits, not base alone.
 
-Playの公開説明はroot化履歴のある端末やroot化ツール導入端末で正常動作しない可能性、電話・位置情報権限、
-生体認証・OTPを明記する。位置情報は不正アクセス検知精度向上のためで任意とされる。これはintegrity/risk判定の
-候補を示すが、Play Integrity、SafetyNet、独自root検知のどれかはartifactなしでは確定しない。
+Public Play description explicitly warns of problems on devices with rooting history/tools, and lists
+phone/location permissions, biometrics, OTP. Location is optional for improved fraud detection. These
+suggest integrity/risk checks, not specific Play Integrity/SafetyNet/custom root detection without artifacts.
 
-本調査環境にはADB、Android SDK build tools、jadx/apktoolと接続済みの本人所有Android実機がなく、
-Google Play認証済み端末から正規artifactを取得できなかった。非公式mirrorはprovenanceを満たさないため使わない。
-再現可能な正規取得手順は次の通りである。
+Research environment lacked ADB, Android SDK build tools, jadx/apktool, connected owner physical Android;
+no legitimate artifact obtained from Play-authenticated devices. Do not use unofficial mirrors without
+provenance. Reproducible acquisition:
 
-1. 本人所有の非root Androidで、上記銀行公式ページからGoogle Playへ進み対象packageをインストールする。
-2. 本人の同意の下でUSB debuggingを有効化し、`adb shell dumpsys package jp.mufg.bk.applisp.app`で
-   versionName/versionCode、installer、split名を記録する。`adb shell pm path ...`でbase/splitのpathを列挙する。
-3. shellから読める場合だけ全base/splitをprivate作業領域へ`adb pull`し、SHA-256と
-   `apksigner verify --print-certs`のsignerを記録する。pull不可ならそこで停止し、root化や保護回避をしない。
-4. binary、署名以外の端末情報、アカウント情報はGitへ入れず、解析後にprivate artifactの保持要否を再確認する。
+1. On owner non-root Android, follow official bank page to Google Play and install target package.
+2. With owner consent, enable USB debugging; use `adb shell dumpsys package jp.mufg.bk.applisp.app` to record
+   versionName/versionCode, installer, split names; enumerate base/split paths with `adb shell pm path ...`.
+3. Only if shell-readable, `adb pull` all base/splits privately, record SHA-256 and
+   `apksigner verify --print-certs` signers. Stop on pull denial, no root/protection bypass.
+4. Keep binaries, non-signature device information, accounts out of Git; reassess private artifact retention after analysis.
 
-正規split一式を取得できた時点で、次を静的に確認する。
+After legitimate splits are available, statically check:
 
-- manifestのpermission、exported component、App Links/custom scheme、min/target SDK、backup/debuggable、
-  native library、Network Security Config／cleartext設定を列挙する。
-- hostname/path文字列、WebView、OkHttp/Retrofit等のtransport、JSON/protobuf等のschema候補を抽出する。
-- Android Keystore、BiometricPrompt、FIDO2、MUFGあんしんパス、Play Integrity/SafetyNet、root/debug検知、
-  certificate pinningのlibrary/config候補を探す。存在はartifactで確認できたものだけを事実に昇格する。
-- 口座一覧・円明細・定期・外貨のreadが公開Webと同じBFF/WebViewか、native専用APIかを切り分ける。
+- Manifest permissions, exported components, App Links/custom schemes, min/target SDK, backup/debuggable,
+  native libraries, Network Security Config/cleartext settings.
+- Host/path strings, WebView, OkHttp/Retrofit etc. transports, JSON/protobuf etc. schema candidates.
+- Candidate Android Keystore, BiometricPrompt, FIDO2, MUFG Anshin Pass, Play Integrity/SafetyNet, root/debug detection,
+  certificate pinning libraries/config. Promote to fact only what artifacts establish.
+- Whether account lists/yen/time/foreign-currency reads share public Web BFF/WebView or use native-only APIs.
 
-静的解析と並行して、本人操作で残高・口座一覧・各明細を開くread-only runtime tracingを調査対象にする。
-まずAndroid Studio Network Inspector（appがprofileableな場合）、標準proxy/PCAP metadata、絞り込んだlogcatを試し、
-method、origin、path template、status、content type、呼出順、schema field名だけを残す。Frida/Objection等のhookは、
-本人所有端末でappが通常動作する範囲に限り、network client methodやWebView navigationのmetadata観測に使える。
-root/debugger/integrity/pinning検知でappが停止した場合は**その時点で停止**し、証明書差替え、pinning無効化、
-attestation偽装、root隠蔽等のsecurity-control bypassは行わない。取引系endpointは呼ばず、read/write境界が不明な
-requestはreplayしない。静的解析だけで端末鍵、生体認証、セッショントークンを再現できるとは扱わない。
+In parallel, research read-only runtime tracing while the owner opens balances/account lists/statements.
+First try Android Studio Network Inspector (if profileable), standard proxy/PCAP metadata, filtered logcat;
+retain only methods/origins/path templates/status/content types/call order/schema field names. Frida/Objection
+hooks may observe network client method/WebView navigation metadata only while the app works normally on
+owner devices. **Stop immediately** if root/debugger/integrity/pinning detection terminates the app; no certificate
+replacement, pinning disablement, attestation spoofing, root hiding, or other bypass. Call no transaction
+endpoints/replay no unknown read-write requests. Static analysis alone does not reproduce device keys,
+biometrics, session tokens.
 
-### アプリとWebのread coverage差
+### App/Web read coverage differences
 
-公式説明上、両者は残高、入出金明細、円定期、外貨預金を表示できる。Webは円／対象外貨のCSV、印刷、
-Eco通帳最大25カ月、取引推移表PDF最大10年を持つ一方、アプリ明細は最大200件で、円CSV・印刷はPC Web限定である。
-現在の公開情報から、銀行台帳の履歴・粒度についてアプリだけが持つ優位は確認できない。ただしアプリには
-OTP、通知、カード等の別機能が同居するため、runtime観測では銀行口座readだけをallowlistし、カードや取引開始画面を
-別source／write境界として除外する。
+Officially both show balances, statements, yen time/foreign-currency deposits. Web offers yen/eligible foreign
+currency CSV, printing, 25-month Eco Passbook, 10-year report PDFs; app statements maximum 200, yen CSV/printing
+PC Web only. No current public evidence of app-only bank history/granularity advantages. App also hosts OTP,
+notifications, cards, etc.; runtime allowlists cover only bank reads, excluding cards/transaction starts as
+separate source/write boundaries.
 
-## 公開クライアントの調査
+## Public client research
 
-現行・旧実装をコードで確認した結果、公開例は **ブラウザDOM操作または公式CSV** が中心で、
-現行の認証済みinternal JSON APIを直接呼ぶ保守中クライアントは見つからなかった。銀行の公開ログインJSから
-JSON BFF transport自体は確認できたが、これは第三者clientでも認証後read endpointでもない。
+Code inspection of current/old implementations found mostly **browser DOM operations or official CSV**;
+no maintained client directly calling current authenticated internal JSON APIs. Public bank login JS establishes
+JSON BFF transport itself, not a third-party client or authenticated read endpoints.
 
-| 実装                                                                                                                                                        | 最終確認                        | 方式                                                                                                                                                              | 評価                                                                                               |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| [4noha/openmoney `plugins/mufg/scraper.py`](https://github.com/4noha/openmoney/blob/7fa001a411549f3b55ec766701dd4c07b45c8c98/plugins/mufg/scraper.py)       | 対象ファイルのcommit 2026-05-09 | Playwrightで現行ログインURLを開き、契約番号・パスワードを入力。MUFGあんしんパスのQRをユーザーへ送り、承認待ち後に円明細画面を月別・最大25カ月、100件単位でDOM解析 | 現行方式の強い参考。完全無人ではなくスマホ承認を明示。残高・外貨・定期・CSV raw evidenceは未充足。 |
-| [nakaomote/financial `ufj_download.py`](https://github.com/nakaomote/financial/blob/1565e12aab81c4ac08687e405869f5681ede20ca/ufj_download.py)               | 対象ファイルのcommit 2025-04-20 | headless Seleniumでログインし、円明細CSVをダウンロード                                                                                                            | あんしんパス導入前で、旧画面セレクタを含む。現在動作は未確認。                                     |
-| [yusuke1225math2/my-finance `ufj_driver.py`](https://github.com/yusuke1225math2/my-finance/blob/ea552e35974d6c6efbf9936e88800eaf80c9a5ab/ufj/ufj_driver.py) | 対象ファイルのcommit 2024-05-30 | headless Selenium、過去30日CSV                                                                                                                                    | 認証と画面変更に弱い旧例。                                                                         |
-| [shinichy/get_statement `get_statement.py`](https://github.com/shinichy/get_statement/blob/6f9730162d72eb9d14fa950767fdbcc8836676c1/get_statement.py)       | 2018-12-01                      | Seleniumで旧画像ボタンを操作しCSV                                                                                                                                 | 歴史資料のみ。                                                                                     |
-| [Finance::Bank::JP::MUFG](https://github.com/gitpan/Finance-Bank-JP-MUFG/blob/7a19f150108c58153167eda612ff44f54bee04e0/lib/Finance/Bank/JP/MUFG.pm)         | 2012-10-21                      | `WWW::Mechanize`でHTMLフォーム`_TRANID`を直接POSTし、口座・取引・CSVを解析                                                                                        | ブラウザ不要HTTP clientの先例だが、現行認証・Angular UIよりはるかに古く再利用不可。                |
-| [Zaim CSV Converter](https://github.com/yukihiko-shinoda/zaim-csv-converter)                                                                                | repo更新 2026-08-20             | ユーザーが公式Webから落としたCSVをローカル変換                                                                                                                    | CSV parser設計の参考。ログインもinternal APIも扱わない。                                           |
+| Implementation                                                                                                                                              | Last checked            | Method                                                                                                                                                              | Assessment                                                                                                                                  |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| [4noha/openmoney `plugins/mufg/scraper.py`](https://github.com/4noha/openmoney/blob/7fa001a411549f3b55ec766701dd4c07b45c8c98/plugins/mufg/scraper.py)       | File commit 2026-05-09  | Playwright current login, contract/password entry, sends Anshin Pass QR to user, waits approval, parses monthly yen statements up to 25 months in 100-row DOM units | Strong current reference; explicitly phone-approved, not fully unattended. Balances/foreign currency/time deposits/CSV raw evidence missing |
+| [nakaomote/financial `ufj_download.py`](https://github.com/nakaomote/financial/blob/1565e12aab81c4ac08687e405869f5681ede20ca/ufj_download.py)               | File commit 2025-04-20  | Headless Selenium login/yen CSV download                                                                                                                            | Before Anshin Pass, old selectors; current operation unverified                                                                             |
+| [yusuke1225math2/my-finance `ufj_driver.py`](https://github.com/yusuke1225math2/my-finance/blob/ea552e35974d6c6efbf9936e88800eaf80c9a5ab/ufj/ufj_driver.py) | File commit 2024-05-30  | Headless Selenium/latest 30-day CSV                                                                                                                                 | Old example vulnerable to auth/UI changes                                                                                                   |
+| [shinichy/get_statement `get_statement.py`](https://github.com/shinichy/get_statement/blob/6f9730162d72eb9d14fa950767fdbcc8836676c1/get_statement.py)       | 2018-12-01              | Selenium old image buttons/CSV                                                                                                                                      | Historical only                                                                                                                             |
+| [Finance::Bank::JP::MUFG](https://github.com/gitpan/Finance-Bank-JP-MUFG/blob/7a19f150108c58153167eda612ff44f54bee04e0/lib/Finance/Bank/JP/MUFG.pm)         | 2012-10-21              | `WWW::Mechanize` direct HTML `_TRANID` POST, parses accounts/transactions/CSV                                                                                       | Browserless precedent, far older than current auth/Angular UI, unusable                                                                     |
+| [Zaim CSV Converter](https://github.com/yukihiko-shinoda/zaim-csv-converter)                                                                                | Repo updated 2026-08-20 | Local conversion of owner-downloaded official Web CSV                                                                                                               | Parser reference, no login/internal APIs                                                                                                    |
 
-`openmoney` の実例は、MUFG銀行において「ログイン後のWeb画面取得」は現実的だが、あんしんパス承認を
-人間ループから外せないことを示す。ログインBFFのrequest shapeは公開JSから一部確定した一方、認証後read BFFと
-session replay可否は確定しないため、Kuebikoで本人操作の実通信metadataを受動観測するのが次の最小検証である。
+`openmoney` shows post-login Web retrieval is realistic but does not remove Anshin Pass approval from the
+human loop. Public JS establishes part of login BFF request shapes, not authenticated reads/session replay.
+Passive owner-operated traffic metadata observation in Kuebiko is the next minimal verification.
 
-## 実行基盤の適性
+## Runtime suitability
 
-| 基盤                         | 適性       | 理由                                                                                                                                                                                  |
-| ---------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cloudflare Worker（isolate） | 低         | フルChromeもAndroidアプリも動かせない。認証後の単純HTTP APIが特定・再生可能になった場合のcoordinator／ingestには適する。                                                              |
-| Cloudflare Container         | 中         | Linux Playwrightは動かせるが、短命コンテナ単体では登録スマホの生体承認を完結できない。まず承認済みセッションのimport/replayが通るかを試す。セッションが再生できる場合のみ収集器候補。 |
-| OCI VM／Kubernetes           | 中〜高     | 永続Chrome profile、固定実行環境、長い承認待ちを保ちやすい。完全無人化は保証しないが、スマホ承認を含むbrowser issuerにはContainerより扱いやすい。                                     |
-| ローカルの可視Chrome         | 高（初期） | ユーザーが登録スマホで承認しやすく、Bitwardenから秘密を安全に入力でき、Kuebikoで全通信を観測できる。最初のissuer／fallbackにする。                                                    |
+| Platform                    | Suitability      | Reason                                                                                                                                                                                            |
+| --------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare Worker (isolate) | Low              | No full Chrome/Android; useful for coordination/ingest if authenticated simple HTTP APIs become identified/replayable                                                                             |
+| Cloudflare Container        | Medium           | Linux Playwright possible, but short-lived container alone cannot complete registered-phone biometric approval. First test approved session import/replay; collector candidate only if successful |
+| OCI VM / Kubernetes         | Medium-high      | Easier persistent Chrome profiles, fixed environment, long approval waits. No unattended guarantee, but easier browser issuer with phone approval than Container                                  |
+| Local visible Chrome        | High (initially) | Easy registered-phone approval/safe Bitwarden input/Kuebiko traffic observation; first issuer/fallback                                                                                            |
 
-推奨分割は、可視Chromeを **session issuer**、短命Linux実行環境を **read-only consumer** とする構成である。
-ただしsession replayが通らなければ、OCI等の永続ブラウザでユーザー承認付き半自動収集を採用し、
-Cloudflareはraw evidence受信・保存だけに限定する。
+Recommended split: visible Chrome **session issuer**, short-lived Linux **read-only consumer**. Without session
+replay, use persistent OCI etc. browsers for user-approved semi-automatic collection; Cloudflare only receives/stores raw evidence.
 
-## 実装コストと推奨順
+## Implementation cost and recommended order
 
-| 経路                                                      | コスト (1-5) | 自動化見込み                   | 採否                                                                               |
-| --------------------------------------------------------- | -----------: | ------------------------------ | ---------------------------------------------------------------------------------- |
-| 手動ブラウザ + 公式CSV/PDF + Kuebiko                      |            2 | 定期操作は手動、取得後処理は高 | **今すぐ採用**。最も正確でraw evidenceを失わない。                                 |
-| 可視Playwright + ユーザーのあんしんパス承認 + DOM/CSV     |            4 | 半自動は高、完全無人は低〜中   | **第一PoC**。既存の2026年実装例あり。                                              |
-| 承認済みWebセッションのinternal API replay                |  3（発見後） | 成功すれば高                   | **最優先の技術検証**。login BFFは判明、認証後read endpointは未確認。               |
-| 公式ダイレクトAPI                                         |            5 | 契約できれば非常に高           | 外部サービス会社としての本番接続条件が重く、当面見送る。                           |
-| 正規Android splitの静的解析＋本人操作runtime metadata観測 |            5 | 低〜中                         | **並行調査**。実機／artifactが揃い次第実施し、security controlが妨げた時点で停止。 |
-| Money Canvas/Moneytree                                    |            2 | 高                             | aggregator回避条件に反するため不採用。                                             |
+| Route                                                             |          Cost (1-5) | Automation feasibility                            | Decision                                                                                  |
+| ----------------------------------------------------------------- | ------------------: | ------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Manual browser + official CSV/PDF + Kuebiko                       |                   2 | Manual recurring operations, high post-processing | **Adopt now**; most accurate, preserves raw evidence                                      |
+| Visible Playwright + owner Anshin Pass approval + DOM/CSV         |                   4 | High semi-automatic, low-medium fully unattended  | **First PoC**; existing 2026 implementation                                               |
+| Approved Web session internal API replay                          | 3 (after discovery) | High if successful                                | **Highest technical verification priority**; login BFF known, authenticated reads unknown |
+| Official Direct API                                               |                   5 | Very high if contracted                           | Production external-service-company connection requirements too heavy; defer              |
+| Legitimate Android split static analysis + owner runtime metadata |                   5 | Low-medium                                        | **Parallel research** once device/artifacts available; stop at security barriers          |
+| Money Canvas/Moneytree                                            |                   2 | High                                              | Reject: violates aggregator avoidance                                                     |
 
-## 次の検証手順
+## Next verification steps
 
-1. 可視Chromeで現在のログイン画面を開き、公開JSで確認した`BFF_LG_0001_01`～`05`の呼出順を
-   DevTools/Kuebikoで照合する。ユーザーのいう「passkey」が WebAuthn/Bitwarden なのか、MUFGあんしんパスの
-   登録スマホ承認なのかをUIとWebAuthnイベントだけで確認し、body、秘密値、cookieは記録しない。
-2. ユーザー承認で一度だけログインし、Kuebikoを受動captureにして、代表口座とサービス指定口座の種類だけを列挙する。
-   口座番号・名義・残高はマスクし、普通／スーパー普通／つかいわけ／円定期／外貨普通・貯蓄・定期が
-   どの画面に出るかだけを記録する。
-3. 円明細を短い期間で表示し、公式CSVのヘッダー、文字コード、件数超過時の挙動、ページング、
-   画面上のcurrent/pending表現を確認する。実明細ファイルはprivate capture領域にのみ置き、Gitへ入れない。
-4. 円定期、外貨普通・貯蓄・定期、Eco通知、取引推移表PDFの各read-only画面を1回ずつ開き、
-   response content type、内部API、ページング、更新時刻をcaptureする。取引開始ボタンは押さない。
-5. 認証後read BFFのmethod、origin、path template、status、content type、request/responseのfield名、
-   paginationだけを記録し、取引／設定と同じendpointまたはside effect不明のrequestはreplay対象から除外する。
-6. 収集用に明示承認された場合だけ、ログイン直後のcookie jarを暗号化・source scoped envelopeにし、
-   同一マシンの新規profile、WSL、OCIの順で残高トップだけを再生する。401/403/ログインredirect/スマホ再承認要求で
-   止め、CSRF/Trusteer/端末printを偽造せず、パスワード再試行もしない。
-7. replayが成功した場合のみ、Cloudflare Containerで同じread-only GET/内部APIを1回試す。
-   失敗した場合はOCIの永続Chrome issuerへ戻し、anti-bot原因と断定しない。
-8. 並行して、本人所有の非root実機へ公式導線からappをインストールし、`dumpsys package`、`pm path`、全splitの
-   signer/hashを採る。取得できれば上記静的解析を行い、binaryはGitへ入れない。取得不能ならpermission/errorだけを
-   記録して停止し、rootや第三者mirrorへ進まない。
-9. 本人操作でappの残高・口座一覧・円／定期／外貨明細を各1回だけ開き、read-only runtime metadataを観測する。
-   write画面遷移、秘密／PII保存、request body保存、pinning/integrity回避は禁止する。
-10. 認証後read APIが見つからない、またはCSVより情報量が少ない場合は、公式CSV/PDFを定期保存する半自動経路を
-    正式ルートとする。アプリ解析結果はcoverage差と将来のtransport実装判断に残す。
+1. Open current login in visible Chrome; compare public `BFF_LG_0001_01`–`05` call order in DevTools/Kuebiko.
+   Distinguish owner-described passkeys as WebAuthn/Bitwarden versus registered-phone Anshin Pass using UI/WebAuthn events only; save no bodies/secrets/cookies.
+2. Login once with user approval, passively capture in Kuebiko, enumerate only primary/designated account types.
+   Mask numbers/names/balances; record only where ordinary/Super Ordinary/separate-use/yen time/foreign-currency ordinary-savings-time appear.
+3. Display short-period yen statements; check official CSV headers/encoding, limit-exceeding behavior, pagination,
+   current/pending screen representations. Actual files only in private capture storage, never Git.
+4. Open each read-only yen time/foreign-currency ordinary-savings-time/Eco Notice/report PDF screen once;
+   capture content types/internal APIs/pagination/update times. Press no transaction start buttons.
+5. Record only authenticated read BFF methods/origins/path templates/status/content types/request-response field names/
+   pagination. Exclude shared transaction/settings endpoints or unknown side effects from replay.
+6. Only with explicit collection approval, encrypt immediate post-login cookies in source-scoped envelopes;
+   replay balance home in order: new same-machine profile, WSL, OCI. Stop on 401/403/login redirects/phone reapproval;
+   no CSRF/Trusteer/device print forgery or password retry.
+7. Only after success, try the same read-only GET/internal API once in Cloudflare Container.
+   On failure return to persistent OCI Chrome issuer, without declaring anti-bot the cause.
+8. In parallel install app via official links on owner's non-root device; record `dumpsys package`, `pm path`,
+   all split signers/hashes. Analyze statically if obtained, no Git binaries. Otherwise record permissions/errors and stop, no root/mirrors.
+9. Owner opens app balances/accounts/yen-time-foreign-currency statements once each; observe read-only runtime metadata.
+   Prohibit write navigation, secrets/PII/request body retention, pinning/integrity bypass.
+10. If authenticated read APIs remain unknown or offer less than CSV, adopt periodic official CSV/PDF semi-automatic
+    collection as formal route. Retain app findings for coverage differences/future transport decisions.
 
-## 未確認事項
+## Unverified items
 
-- 実契約で保有する全口座がサービス指定口座に登録済みか。特に古い円定期・外貨口座。
-- 現行個人CSVの正確なヘッダー、文字コード、メモ／未記帳フラグ、1ファイルの改行・ファイル名。
-- 円定期・外貨定期の画面フィールド（預入日、満期日、利率、満期取扱、円換算評価等）の完全な一覧。
-- 外貨Eco通知の文書種別、PDF/HTML、保存期間、過去明細の欠落有無。
-- 入出金CSVとお取引記録の間で、予約取引がいつledgerへ移るか、安定した取引IDがあるか。
-- 認証後read BFFのpath、response schema、pagination、rate limit、cookie/token期限。login BFFのCSRF/session枠組みは確認済み。
-- MUFGあんしんパスの承認済みセッションを別OS/IPへ安全に再生できるか。
-- 認証POSTでAkamai Bot Manager/WAFが作動するか。公開DNSだけでは未確定。
-- 正規Android splitのversionCode、signer、manifest、hostname、native/WebView境界、network config、schema。
-- Android側の端末鍵／FIDO／あんしんパス、integrity/root/debug検知、certificate pinningの具体的実装。
-- 三菱UFJダイレクト API の本番接続契約をKoganeが現実的に取得できるか。
+- Whether all actual accounts are designated service accounts, especially old yen time/foreign-currency accounts.
+- Exact current personal CSV headers/encoding/notes/unrecorded flags/line endings/filenames.
+- Complete yen/foreign-currency time fields: placement/maturity dates, rates, maturity handling, yen valuations, etc.
+- Foreign-currency Eco Notice document types, PDF/HTML, retention, historical gaps.
+- When reserved transactions enter ledger between CSV/operational records, stable transaction IDs.
+- Authenticated read BFF paths/schemas/pagination/rate limits/cookie-token expiry; login CSRF/session framework established.
+- Safe cross-OS/IP replay of Anshin-Pass-approved sessions.
+- Akamai Bot Manager/WAF on authentication POSTs; public DNS alone insufficient.
+- Legitimate Android split versionCodes/signers/manifests/hosts/native-WebView boundaries/network config/schemas.
+- Android device keys/FIDO/Anshin Pass/integrity-root-debug detection/certificate pinning implementations.
+- Practical availability of MUFG Direct production API contracts for Kogane.

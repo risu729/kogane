@@ -1,11 +1,11 @@
-# みずほ銀行: みずほダイレクト / みずほダイレクトアプリ
+# みずほ銀行 (Mizuho Bank): みずほダイレクト (Mizuho Direct) / みずほダイレクトアプリ (Mizuho Direct app)
 
 > Dated source research and implementation notes. Earlier runtime/schedule
 > claims may be superseded by later changes. See the [research scope](README.md),
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-調査日: 2026-08-26
+Research date: 2026-08-26
 
 ## 2026-09-13 direct-collector feasibility check
 
@@ -38,7 +38,7 @@ The historical research below predates this follow-up.
   reused the resulting session without implementing password submission.
 - Unchecked notices were passed without changing notification preferences.
   Account enumeration returned an ordinary-deposit account, and its account
-  card opened the `入出金明細` page. Kuebiko saved the corresponding HTML and
+  card opened the `入出金明細` ("deposit/withdrawal statements") page. Kuebiko saved the corresponding HTML and
   requests. These observed reads use authenticated HTML form POSTs; no JSON API
   is needed for these two surfaces.
 - Account-list navigation uses `/servlet/MENSRV0100002B.do`, returning form
@@ -97,495 +97,459 @@ authenticated bank access; that is established by the daily scheduled runs,
 which have registered in production since 2026-09-24. Pagination still requires its
 own observed-transition validation.
 
-The bank app was renamed to みずほ銀行アプリ on 2026-09-03; historical app names
+The bank app was renamed to みずほ銀行アプリ (Mizuho Bank app) on 2026-09-03; historical app names
 below describe the original research. The
 [current service page](https://www.mizuhobank.co.jp/direct/about/service/balance.html)
 and [login guidance](https://www.mizuhobank.co.jp/retail/products/direct/goriyo/loginout/n00000.html)
 are the current starting references.
 
-## 結論
+## Conclusion
 
-- **推奨する正本は、公式Webの「みずほダイレクト」**。残高・口座列挙は
-  ログイン後HTML、普通・貯蓄・外貨普通の明細は直近3カ月のHTML/PDF/CSVと、
-  申込済みなら最大10年の「みずほダイレクト通帳」PDF/CSVを組み合わせる。
-- みずほグローバル口座、通常の円/外貨定期、積立定期は普通預金の入出金表と
-  同じモデルではない。公式Webの各残高照会画面から、通貨・預入明細・満期・
-  金利等を**預入ロット**として取得し、解約・継続履歴は過去1年、受付結果は
-  別画面から取得する。
-- 公式アプリは継続利用すると端末内に3カ月より前の明細も蓄積し、取引ごとの
-  残高も表示する。ただし端末ローカル保存、機種変更時の引継ぎ、生体認証、
-  root/改造端末制限がある。クラウド収集の主経路ではなく、**公式Webの認証・
-  画面確認と、みずほポイントモールへの入口**として扱う。
-- みずほポイントは現行サービスである。公式アプリの `P` マークから銀行の
-  「みずほマイレージクラブ専用ページ」へ遷移し、残高、獲得履歴、利用履歴、
-  有効期限を確認できる。ただし履歴の保存期間、ページング、機械可読な項目は
-  公開資料だけでは分からない。
-- 公開ログイン画面は現在もShift_JISのHTMLフォームで、`JSESSIONID`、POST token、
-  cookie/JavaScript、クライアント環境値を使う。Akamai edgeと端末fingerprint用
-  scriptは確認できた。公開JSから、動的`webX` hostへのform POST、画面eventごとの
-  action切替、`POSTKEY`付きDojo XHRまで確認したが、未認証画面に残高・明細JSON APIは
-  見つからなかった。現在動作する第三者クライアントは見つからず、2011～2021
-  年の実装はいずれも旧HTMLフォーム/OFXに依存するため、設計参考に限る。
-- ユーザーから「passkeyを使用しBitwardenに保存済み」との情報があるが、みずほ
-  銀行の公開仕様と2026-08-26の公開ログイン画面では、ブラウザログインは
-  お客さま番号とログインパスワード、必要時の第1暗証番号と案内されている。
-  このpasskeyがみずほダイレクト用か、Bitwardenの通常資格情報を指すかは未確認。
-  live検証までは、みずほダイレクトがWebAuthn/passkey対応だと仮定しない。
+- **Recommended authoritative source: official Web Mizuho Direct**. Account enumeration/balances use authenticated HTML;
+  ordinary/savings/foreign-currency ordinary statements combine recent three-month HTML/PDF/CSV with up to 10 years
+  of `みずほダイレクト通帳` (Mizuho Direct Passbook) PDF/CSV if already enrolled.
+- みずほグローバル口座 (Mizuho Global Account), ordinary yen/foreign-currency time deposits, installment time deposits
+  are not ordinary-deposit transaction tables. Retrieve currencies, placement details, maturities, rates, etc. as
+  **deposit lots** from official balance screens; cancellation/renewal history for the past year, receipt results separately.
+- Continued app use accumulates statements older than three months locally and shows per-transaction balances.
+  Device-local storage, migration handoff, biometrics, root/modified-device restrictions apply. Use for **official Web
+  authentication/display verification and the Mizuho Point Mall entry**, not primary cloud collection.
+- みずほポイント (Mizuho Points) is current. The app `P` mark leads to the bank's `みずほマイレージクラブ専用ページ`
+  ("Mizuho Mileage Club exclusive page") for balances, accrual/use history, expiry. Retention/pagination/machine-readable
+  fields are not established by public material alone.
+- Public login remains Shift_JIS HTML forms using `JSESSIONID`, POST tokens, cookies/JavaScript, client environment
+  values. Akamai edge/device fingerprint scripts established. Public JS shows dynamic `webX` host form POST,
+  screen-event action switching, Dojo XHR with `POSTKEY`; no balance/statement JSON APIs on unauthenticated screens.
+  No current working third-party client found; 2011–2021 implementations depend on old HTML forms/OFX, design references only.
+- Owner reports using a Bitwarden-stored passkey, but public bank specifications/login on 2026-08-26 describe customer
+  number/login password and conditional first PIN. Whether this passkey is for Mizuho Direct or means ordinary
+  Bitwarden credentials is unverified. Do not assume Mizuho Direct WebAuthn/passkeys before live verification.
 
-総合評価は、**普通・貯蓄預金MVP 3/5、定期・外貨・グローバル口座・ポイントを
-含む完全版 4/5、完全無人ログインの見込み 2/5、既存の公式ブラウザsessionを
-使った定期収集 4/5**である。
+Overall: **ordinary/savings MVP 3/5; full version including time/foreign currency/Global Accounts/points 4/5;
+fully unattended login feasibility 2/5; scheduled collection using existing official browser sessions 4/5**.
 
-## スコープと非目標
+## Scope and non-goals
 
-対象は本人名義のみずほ銀行口座を、銀行の公式Webまたは公式アプリから直接、
-読み取り専用で取得する経路に限る。
+Only read-only direct routes from official bank Web/app for owner-held Mizuho accounts.
 
-- 対象: みずほダイレクト、みずほダイレクトアプリ、みずほダイレクト通帳、
-  みずほグローバル口座画面、銀行公式のみずほポイントモール
-- 取得候補: 口座一覧、現在残高、普通/貯蓄/外貨普通の入出金明細、円/外貨定期・
-  積立定期・グローバル口座の預入明細と読み取り可能な履歴、みずほポイント
-- 非目標: J-Coin Pay、みずほWallet、Smart Debit、みずほJCBデビット、MyJCB、
-  カード会社ポイント、他行、証券、マネーフォワード等のaggregator
-- 安全境界: 振込、振替、外貨売買、定期預入・解約、ポイント交換、口座/利用口座
-  の追加削除、みずほe-口座/ダイレクト通帳の申込、認証設定変更を行わない
+- Scope: Mizuho Direct, Mizuho Direct app, Mizuho Direct Passbook,
+  Mizuho Global Account screens, official bank みずほポイントモール (Mizuho Point Mall)
+- Candidates: account lists/current balances, ordinary/savings/foreign-currency ordinary statements,
+  yen/foreign-currency time/installment/Global Account placements and readable history, Mizuho Points
+- Non-goals: J-Coin Pay, みずほWallet (Mizuho Wallet), Smart Debit, みずほJCBデビット (Mizuho JCB Debit), MyJCB,
+  card company points, other banks, securities, マネーフォワード (Money Forward) and other aggregators
+- Safety: no transfers/account transfers/foreign exchange/time placements-cancellations/points exchanges/account additions-deletions,
+  みずほe-口座 (Mizuho e-account)/Direct Passbook applications, authentication settings changes
 
-この調査では認証済み口座へログインせず、公開ページ・公開ログイン入口・公開
-コードだけを確認した。Bitwarden vaultは開いておらず、秘密、個人識別子、実残高、
-認証cookieを保存していない。
+This research did not log in to authenticated accounts; checked only public pages/login/code. Did not open
+Bitwarden vaults or store secrets, personal identifiers, actual balances, authentication cookies.
 
-## 調査方法
+## Research method
 
-1. みずほ銀行の現行サービスページ、FAQ、規定、操作ガイド、Google Playの公式
-   掲載を調べた。
-2. 2026-08-26に公開入口だけを未認証で取得し、DNS、HTTP header、ログインHTMLの
-   form、cookie属性、配信scriptを通常ブラウザでも確認した。公開JSのform transportと
-   client環境処理を静的に調べた。認証要求や架空のお客さま番号入力は行っていない。
-3. GitHub Code Searchで現行/旧クライアントを探索し、Ruby、Go、Perlの実装を
-   commit単位で読み、browser、CSV/OFX、内部HTTP formのどれを使うかを確認した。
-4. 公式情報で確認できない項目は、第三者コードから現行仕様へ外挿せず、次のlive
-   検証項目とした。
+1. Researched current official service pages, FAQs, terms, guides, Google Play listings.
+2. On 2026-08-26, retrieved only public entry points unauthenticated; checked DNS, HTTP headers, login forms,
+   cookie attributes, delivered scripts in ordinary browser too. Statically examined JS form transport/client
+   environment handling. No authentication requests/fictitious customer number inputs.
+3. Searched GitHub Code Search for current/old clients, reading Ruby/Go/Perl by commit to distinguish browser,
+   CSV/OFX, internal HTTP form use.
+4. Kept unestablished official facts as future live checks, without extrapolating current specifications from third-party code.
 
-## 公式入口と取得できるデータ
+## Official entry points and available data
 
-| 公式経路               | 入口                                                                                                                                                  | 読み取りデータ                                                                                                             | 自動化上の位置付け                                                                                          |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| みずほダイレクト Web   | [公式案内](https://www.mizuhobank.co.jp/direct/index.html)、[正規ログインURL案内](https://www.mizuhobank.co.jp/crime/info110520.html)                 | 利用口座、現在残高、普通/貯蓄/外貨普通/カードローン明細、定期・積立・外貨定期・グローバル口座の残高/預入明細、各種取引結果 | 主経路。desktopでCSV、PDFも取得できる                                                                       |
-| みずほダイレクト通帳   | [公式サービス](https://www.mizuhobank.co.jp/direct/about/service/directpassbook/index.html)                                                           | 申込後に保存された普通・貯蓄・外貨普通の古い明細を最大10年                                                                 | 構造化backfillの主経路。ただし利用中かどうかだけを確認し、申込はしない                                      |
-| みずほダイレクトアプリ | [公式機能](https://www.mizuhobank.co.jp/direct/app/index.html)、[Google Play](https://play.google.com/store/apps/details?id=jp.co.mizuhobank.banking) | 現在残高、入出金明細、取引ごとの残高、端末内履歴、収支レポート、ポイント入口                                               | 手動確認/認証補助。端末保存と生体認証のためcloud workerには不向き                                           |
-| グローバル口座専用画面 | [公式商品ページ](https://www.mizuhobank.co.jp/direct/about/service/global/index.html)                                                                 | 円定期、6通貨の外貨定期、預入明細、参考円換算、取引結果                                                                    | 通常口座一覧だけでなく専用画面を別収集する                                                                  |
-| みずほポイントモール   | [公式案内](https://www.mizuhobank.co.jp/mmc/mizuhopointmall/index.html)、[操作ガイド](https://www.mizuhobank.co.jp/mmc/mizuhopointmall/ebook/)        | みずほポイント残高、獲得/利用履歴、有効期限、みずほギフト残高/履歴                                                         | 銀行公式だがアプリの`P`マーク起点の別Web surface。第二段階                                                  |
-| 個人向け銀行API        | [銀行のAPI方針](https://www.mizuhobank.co.jp/company/activity/api/policy/index.html)                                                                  | REST/JSON/OAuth 2.0で残高・明細APIは整備済み                                                                               | 契約した電子決済等代行業者向け。自己口座用の公開developer tokenは確認できず、aggregator回避方針により不採用 |
+| Official route         | Entry                                                                                                                                                          | Readable data                                                                                                                                                                      | Automation role                                                                                                                   |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Mizuho Direct Web      | [Official guidance](https://www.mizuhobank.co.jp/direct/index.html), [legitimate login URL guidance](https://www.mizuhobank.co.jp/crime/info110520.html)       | Registered accounts/current balances, ordinary-savings-foreign ordinary-card loan statements, time/installment/foreign time/Global balances-placement details, transaction results | Primary route, desktop CSV/PDF                                                                                                    |
+| Mizuho Direct Passbook | [Official service](https://www.mizuhobank.co.jp/direct/about/service/directpassbook/index.html)                                                                | Older ordinary/savings/foreign ordinary statements saved after enrollment, up to 10 years                                                                                          | Primary structured backfill; check existing use only, do not enroll                                                               |
+| Mizuho Direct app      | [Official features](https://www.mizuhobank.co.jp/direct/app/index.html), [Google Play](https://play.google.com/store/apps/details?id=jp.co.mizuhobank.banking) | Current balances/statements/per-transaction balances/local history/income-expense reports/points entry                                                                             | Manual checks/auth help; device storage/biometrics unsuitable for cloud workers                                                   |
+| Global Account screens | [Official product](https://www.mizuhobank.co.jp/direct/about/service/global/index.html)                                                                        | Yen time/six-currency foreign time deposits, placements/reference yen equivalents/results                                                                                          | Collect dedicated screens separately from ordinary account lists                                                                  |
+| Mizuho Point Mall      | [Official guidance](https://www.mizuhobank.co.jp/mmc/mizuhopointmall/index.html), [guide](https://www.mizuhobank.co.jp/mmc/mizuhopointmall/ebook/)             | Mizuho Points balance/accrual-use/expiry, みずほギフト (Mizuho Gift) balance/history                                                                                               | Bank-owned separate Web surface via app `P`; second stage                                                                         |
+| Personal bank API      | [Bank API policy](https://www.mizuhobank.co.jp/company/activity/api/policy/index.html)                                                                         | REST/JSON/OAuth 2.0 balance/statement APIs established                                                                                                                             | Contracted electronic payment service providers; no public own-account developer token found, rejected under aggregator avoidance |
 
-公開ログイン入口の正規URLは
-`https://web.ib.mizuhobank.co.jp/servlet/LOGBNK0000000B.do` である。ログイン後は
-負荷に応じて `webX.ib.mizuhobank.co.jp` に遷移することが公式にも明記されている。
-hostを1つに固定せず、銀行が返すoriginとcookie domainを尊重する必要がある。
+Legitimate public login URL: `https://web.ib.mizuhobank.co.jp/servlet/LOGBNK0000000B.do`. Official guidance
+says post-login host changes to `webX.ib.mizuhobank.co.jp` according to load. Respect bank-returned origins/
+cookie domains instead of pinning one host.
 
-## 口座列挙と残高粒度
+## Account enumeration and balance granularity
 
-公式の[残高・入出金明細照会](https://www.mizuhobank.co.jp/direct/about/service/balance.html)
-と[利用口座登録FAQ](https://www.faq.mizuhobank.co.jp/faq/show/246?site_domain=default)
-から、残高照会・利用口座の対象は次の通りである。
+Official [balance/statements](https://www.mizuhobank.co.jp/direct/about/service/balance.html) and
+[account registration FAQ](https://www.faq.mizuhobank.co.jp/faq/show/246?site_domain=default) give:
 
-| 口座科目                           | 列挙/残高の単位                                                            | 明細の扱い                                                                                         |
-| ---------------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| 普通預金（総合口座普通を含む）     | 店・口座単位の現在残高。代表利用口座と追加利用口座                         | 入出金明細、直近download、ダイレクト通帳の対象                                                     |
-| 貯蓄預金                           | 店・口座単位の現在残高                                                     | 普通預金と同じ入出金/ダイレクト通帳対象                                                            |
-| 定期預金（総合口座定期を含む）     | 口座合計と預入明細単位                                                     | 現在の預入明細と、解約/継続済み明細を過去1年。取引型ledgerではなくlotとして扱う                    |
-| 積立定期預金（総合口座積立を含む） | 契約/口座と預入明細単位                                                    | 残高・預入明細、取引結果。普通預金CSVだけでは列挙できない                                          |
-| 外貨普通預金                       | 口座・通貨単位。USD/EUR/GBP/CHF/AUD/NZDをWebで確認可能                     | 入出金明細、ダイレクト通帳対象                                                                     |
-| 外貨定期預金                       | 口座・通貨・預入明細単位。Web明細はUSD/EUR/GBP/CHF                         | AUD/NZDの外貨定期明細はWeb非対応。現在/過去1年の解約・継続明細は対応通貨をlive確認                 |
-| みずほグローバル口座               | 1つのマルチカレンシー口座内の円定期と6通貨の外貨定期を、通貨・預入明細単位 | 専用残高・結果画面。通常の外貨普通口座とは別商品                                                   |
-| 当座預金                           | 利用口座登録は可能                                                         | 個人Webでは振込/振替の引出口座としてのみと案内。残高列挙対象には含まれないためread supportは未確認 |
-| カードローン                       | 契約/口座単位                                                              | 残高・入出金明細対象だが本MVPでは除外可能                                                          |
+| Account type                                                             | Enumeration/balance units                                                            | Statement treatment                                                                                                                      |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Ordinary deposits (including comprehensive-account ordinary)             | Current balance by branch/account; primary/additional registered accounts            | Statements, recent downloads, Direct Passbook                                                                                            |
+| Savings deposits                                                         | Current balance by branch/account                                                    | Same statements/Direct Passbook as ordinary                                                                                              |
+| Time deposits (including comprehensive-account time)                     | Account totals/placement details                                                     | Current lots plus past-year cancellations/renewals; lots, not transaction ledger                                                         |
+| Installment time deposits (including comprehensive-account installments) | Contracts/accounts/placements                                                        | Balances/placements/results; cannot enumerate through ordinary CSV alone                                                                 |
+| Foreign-currency ordinary                                                | Account/currency; USD/EUR/GBP/CHF/AUD/NZD on Web                                     | Statements/Direct Passbook                                                                                                               |
+| Foreign-currency time                                                    | Account/currency/placements; USD/EUR/GBP/CHF Web details                             | AUD/NZD time details unsupported on Web; verify eligible currencies for current/past-year cancelled-renewed lots live                    |
+| Mizuho Global Account                                                    | Yen time/six-currency foreign time within one multicurrency account, by currency/lot | Dedicated balances/results; separate from ordinary foreign-currency accounts                                                             |
+| Current accounts                                                         | Registrable                                                                          | Personal Web only describes as transfer/account-transfer withdrawal accounts, excluded from balance enumeration; read support unverified |
+| Card loans                                                               | Contract/account                                                                     | Balances/statements; may exclude from MVP                                                                                                |
 
-みずほグローバル口座は開設時に自動で利用口座登録される。通常の利用口座追加
-画面から追加する対象ではない。また、本人が複数のお客さま番号を持つ場合、公式
-アプリは番号を追加して切り替えられる。1回の口座一覧だけを全口座とみなさず、
-ユーザーが利用するお客さま番号数をlive検証時に確認する。
+Global Accounts automatically become registered accounts on opening, not ordinary add-account screen targets.
+Users with multiple customer numbers can add/switch them in official app. Do not assume one list is all accounts;
+check the number of customer numbers used live.
 
-グローバル口座は円定期と6通貨の外貨定期を持つ。画面には銀行公示仲値による
-参考円換算額が表示されるため、native amount/currencyと参考円換算を分けて保存し、
-後者を簿価や約定レートとして扱わない。
+Global Accounts hold yen time and six-currency foreign time deposits; screens show reference yen equivalents
+using bank-published mid-rates. Store native amounts/currencies separately; do not treat reference equivalents
+as book values or execution rates.
 
-## 明細、download、保持期間
+## Statements, downloads, retention
 
-### 普通・貯蓄・外貨普通
+### Ordinary, savings, foreign-currency ordinary
 
-- 通常のみずほダイレクト入出金明細は、照会日の2カ月前の1日から当日まで
-  （実質、当月・前月・前々月）。紙通帳口座では、それより前でも通帳未記帳分を
-  表示できる場合がある。
-- みずほe-口座で「みずほダイレクト通帳」を申込済みなら、申込月の2カ月前1日
-  から照会日の3カ月前月末までを最大10年保存する。申込前の古い期間は遡及しない。
-- 直近3カ月とダイレクト通帳は、WebからPDFでdownloadできる。PCブラウザではCSV
-  もdownloadできる。アプリ単独のCSVではなく、Web画面を開く経路である。
-- ダイレクト通帳の古い明細には取引ごとの残高がない。アプリ/直近明細は取引ごとの
-  残高を表示するが、アプリで取得していない古い期間は「残高表示期間外」になる。
-- アプリは起動時に前々月1日から現在までの明細を取得して端末へ保存する。毎月継続
-  利用すれば4カ月以上前も残るが、3カ月以上起動しない期間には欠落が生じ得る。
-  アンインストールや機種変更時に引継ぎをしなければ端末保存分は失われる。
-- 公式FAQは表示/downloadの最大件数を公開していない。高頻度口座でのページング、
-  1回のPDF/CSV期間上限、CSV文字コード・header・列数はlive fixtureが必要である。
+- Ordinary Direct statements: first day two months before inquiry through today (current/previous/second preceding months).
+  Paper passbook accounts may show older unrecorded entries too.
+- If already enrolled in Direct Passbook with e-account, retain from first day two months before enrollment month
+  through end of month three months before inquiry, up to 10 years. No retroactive older pre-enrollment coverage.
+- Recent three months/Direct Passbook downloadable as Web PDF; PC browsers also CSV.
+  Opens Web screens, not standalone app CSV.
+- Older Direct Passbook statements lack per-transaction balances. App/recent statements show them, but older periods
+  not retrieved in app show `残高表示期間外` ("outside balance display period").
+- App fetches first day of second preceding month through now on startup, saving locally. Monthly use retains
+  four-plus months; gaps possible when unused three-plus months. Uninstall/device change without handoff loses local history.
+- Official FAQs do not publish display/download row limits. High-frequency pagination, PDF/CSV period limits,
+  encoding/headers/column counts require live fixtures.
 
-公開HTMLと公式の摘要例から、最低限期待できる表示粒度は取引日、出金/入金、摘要、
-直近期間の取引後残高である。前日勘定取引等では同一日内の表示順が前後し得るため、
-画面順だけをstable transaction IDにしない。現在のCSVの列仕様は公開資料から確認
-できず、第三者の実データsampleもGitへ持ち込まない。
+Public HTML/official description examples suggest at least dates, outflow/inflow, descriptions, recent
+post-transaction balances. Prior-day-accounting transactions etc. may reorder same-day rows; do not use screen
+order alone as stable IDs. Current CSV columns unestablished publicly; do not import third-party actual data samples into Git.
 
-### 定期・積立・外貨・グローバル口座
+### Time, installments, foreign currency, Global Accounts
 
-- 定期/積立/外貨定期は「残高照会」から、現在の口座と預入明細を読む。
-- 定期・外貨定期の解約/継続済み明細は原則過去1年。ただしインターネット支店、
-  みずほe-口座、リーフ口の解約時利率・利息等は約3カ月になる場合がある。
-- 通常の「各種取引の履歴・明細」は、円定期、積立定期、外貨普通が直近18カ月・
-  5件、外貨定期は直近5件。これは口座入出金ledgerではなく受付結果である。
-- グローバル口座は、口座開設/預入結果を直近18カ月・10件、その他の取引種別を
-  各5件確認できる。
-- 夜間/休日の外貨普通・外貨定期取引は翌営業日午前まで `受付済` のことがある。
-  外貨定期の平日15時以降の口座開設・預入は、残高/明細反映も翌営業日以降になる。
+- Read current accounts/placements through `残高照会` ("balance inquiry") for time/installment/foreign time.
+- Cancelled/renewed time/foreign-time details generally past year, but internet branch/e-account/leaf-type cancellation
+  rates/interest etc. may be about three months.
+- Ordinary `各種取引の履歴・明細` ("transaction history/details") offers latest 18 months/five entries for yen time,
+  installment, foreign ordinary; latest five for foreign time. Receipt results, not deposit/withdrawal ledger.
+- Global Accounts: opening/placement results latest 18 months/10 entries; other transaction types five each.
+- Night/holiday foreign ordinary/time transactions may remain `受付済` ("accepted") until next business morning.
+  Foreign-time openings/placements after 15:00 weekdays may affect balances/statements next business day or later.
 
-したがって `posted_at` が付いた預金ledgerと、`受付済`/`取引成立` 等の
-operation statusを同じ表へ無理に統合しない。普通預金入出金明細に公開上の
-pending authorization列はなく、反映済みledgerとみなす。未確定状態が必要なのは、
-利用者自身がみずほダイレクトで開始した定期/外貨/グローバル口座取引の結果確認で
-ある。Koganeは読み取り専用なので、その状態は既存取引の観測だけに使う。
+Keep deposit ledgers with `posted_at` separate from operational statuses such as `受付済`/`取引成立` ("transaction
+concluded"). Public ordinary statements have no pending authorization column; treat as posted ledgers.
+Pending is relevant for results of user-initiated Direct time/foreign/Global transactions; read-only Kogane
+observes existing transactions only.
 
-### 公式artifactの比較
+### Official artifact comparison
 
-| artifact                     | 期間/対象                   | 粒度                                        | 推奨用途                                         |
-| ---------------------------- | --------------------------- | ------------------------------------------- | ------------------------------------------------ |
-| 直近明細HTML                 | 約3カ月、普通/貯蓄/外貨普通 | 日付、摘要、入出金、取引後残高              | 増分収集と最新残高                               |
-| 直近明細PDF                  | 約3カ月                     | 公式表示の保存版。正確な列はlive確認        | audit、CSVとの差分検査                           |
-| 直近明細CSV（PC）            | 約3カ月                     | 構造化可能。encoding/header/残高列は未確認  | MVPのprimary transaction artifact                |
-| ダイレクト通帳PDF/CSV        | 申込後の古い期間、最大10年  | 取引ごとの残高なし                          | backfill、長期audit                              |
-| 定期/外貨/グローバル残高HTML | 現在の預入明細              | 通貨、元金、満期等のlot。exact fields未確認 | current positions                                |
-| 定期/外貨/グローバル結果HTML | 3～18カ月または5/10件       | 受付状況を含むoperation history             | lot lifecycleの補完                              |
-| アプリ端末内履歴             | 起動のたび約3カ月を追加保存 | 取引後残高、収支カテゴリ等                  | gap検出/manual fallback。raw DB抽出をMVPにしない |
+| Artifact                         | Period/scope                                          | Granularity                                               | Recommended use                                         |
+| -------------------------------- | ----------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------- |
+| Recent statement HTML            | About three months, ordinary/savings/foreign ordinary | Dates/descriptions/inflows-outflows/post-balances         | Incremental collection/latest balances                  |
+| Recent statement PDF             | About three months                                    | Saved official display; exact columns need live check     | Audit/CSV comparison                                    |
+| Recent statement CSV (PC)        | About three months                                    | Structured; encoding/headers/balance columns unverified   | Primary MVP transaction artifact                        |
+| Direct Passbook PDF/CSV          | Older post-enrollment, up to 10 years                 | No per-transaction balances                               | Backfill/long-term audit                                |
+| Time/foreign/Global balance HTML | Current placements                                    | Currency/principal/maturity lots; exact fields unverified | Current positions                                       |
+| Time/foreign/Global result HTML  | 3–18 months or 5/10 entries                           | Operational history including acceptance                  | Supplement lot lifecycle                                |
+| App local history                | Adds about three months each startup                  | Post-balances/income-expense categories etc.              | Gap detection/manual fallback; no raw DB extraction MVP |
 
-## みずほポイント
+## Mizuho Points
 
-みずほポイントモールは現行の銀行公式サービスで、みずほマイレージクラブ会員が
-みずほダイレクトアプリを利用し、利用開始手続きを行うことが条件である。
+Mizuho Point Mall is a current official bank service requiring Mizuho Mileage Club membership, Direct app
+use, and service activation.
 
-- アプリhome上部の `P` マークからみずほポイントモールへ遷移する。
-- みずほマイレージクラブ専用ページで、みずほポイント残高、獲得履歴、利用履歴
-  （みずほギフトへのチャージ時期/数）、みずほギフト残高を確認できる。
-- 操作ガイドはポイントの獲得・利用履歴と有効期限内訳、みずほギフトの獲得・利用・
-  失効履歴を表示できるとしている。
-- みずほポイントの有効期限は付与月の24カ月後の月末23:59まで。規定上は獲得月を
-  含む25カ月間で、みずほギフトへチャージしても引き継ぐ。
-- みずほダイレクトのブラウザhomeだけから到達できるとは公開資料にない。アプリ起点
-  のbank-owned web surfaceとして、残高/銀行明細collectorと別moduleにする。
-- 履歴の保存期間、1行の項目、ページング、CSV/PDF export、失効予定のbucket粒度は
-  未確認。live画面でDOM/JSONを観測するまで残高だけをMVP候補とする。
+- App home `P` mark leads to Point Mall.
+- Mileage Club exclusive page shows points balances/accrual/use (Gift top-up timing/counts), Gift balances.
+- Guide describes points accrual/use/expiry breakdowns and Gift accrual/use/expiry history.
+- Points expire at 23:59 month-end 24 months after award month: 25 months including award month under terms,
+  carried over when topped up to Gift.
+- No public description of access solely from browser Direct home. Separate module from bank balance/statements
+  as app-started bank-owned Web surface.
+- Retention, row fields, pagination, CSV/PDF exports, scheduled expiry bucket granularity unverified.
+  Only balance is an MVP candidate until live DOM/JSON observation.
 
-公開資料で確認できる遷移は「アプリhomeの`P`マーク」から銀行のポイント専用pageへ進むことまでである。
-native API、WebView、外部browserのどれか、銀行app sessionをcookie／one-time codeで引き継ぐかは未確認である。
-正規Android splitの静的解析ではpoint関連deep link／hostname／WebView routeを列挙し、本人操作のread-only観測では
-遷移前後のorigin、method、path template、statusだけを記録する。query、cookie、authorization、SSO code、
-ポイント実値は保存せず、交換／チャージendpointは呼ばない。
+Public evidence establishes only app home `P` → bank points page. Native API/WebView/external browser and
+bank app session handoff by cookies/one-time codes unverified. In legitimate split static analysis enumerate
+points deep links/hosts/WebView routes; owner-operated read-only observations retain only before/after origins,
+methods/path templates/statuses. No queries/cookies/authorization/SSO codes/actual points; call no exchange/top-up endpoints.
 
-この範囲ではJ-Coin、MyJCB、カード会社ポイントへ遷移しない。
+Do not navigate to J-Coin, MyJCB, or card company points in this scope.
 
-## 認証とsession
+## Authentication and sessions
 
 ### Web
 
-公式仕様では通常のブラウザログインは次の構成である。
+Official ordinary browser login:
 
-1. 数字8桁または10桁のお客さま番号。
-2. 半角英数字6～32桁のログインパスワード。
-3. 通常と異なる環境など、銀行が追加確認を必要と判断した場合は4桁の第1暗証番号。
+1. Eight- or ten-digit customer number.
+2. 6–32 half-width alphanumeric login password.
+3. Four-digit first PIN if bank requires extra checks, such as unusual environments.
 
-第2暗証番号、専用ワンタイムパスワード、SMS 5桁、メール方式ワンタイムパスワード
-は主に初期登録、アプリ版利用カードの設定、振込等の取引実行に使われる。残高・
-明細の通常ログインで毎回必要とは公式FAQに書かれていない。Koganeはwrite画面へ
-進まないため、第2暗証番号/OTPをcollectorへ渡さない。
+Second PINs, dedicated OTPs, five-digit SMS, email OTPs are mainly initial registration, app-version usage-card
+setup, transactions such as transfers. FAQs do not say they are always required for ordinary balance/statement
+login. Kogane does not enter writes; give collectors no second PINs/OTPs.
 
-2026-08-26の未認証観測では、ログイン入口は次の性質だった。
+Unauthenticated observations on 2026-08-26:
 
-- Shift_JIS HTML formから、お客さま番号を別の`webX` hostへPOSTする。
-- `JSESSIONID`は`.ib.mizuhobank.co.jp` domain、`Secure`、`HttpOnly`で発行される。
-- formはPOST token、form ID、client environment fieldを持ち、cookieなしでは画面間の
-  情報引継ぎができない。
-- 銀行は自動timeoutを明記するが、idle/absolute lifetimeの分数、並行session、cookie
-  再利用、ログアウト時の全session失効は公開していない。
+- Shift_JIS HTML forms POST customer numbers to another `webX` host.
+- `JSESSIONID`: domain `.ib.mizuhobank.co.jp`, `Secure`, `HttpOnly`.
+- Forms contain POST tokens/form IDs/client environment fields; cookies required for screen handoff.
+- Bank specifies automatic timeouts but does not publish idle/absolute minutes, concurrent sessions,
+  cookie reuse, all-session invalidation on logout.
 
-### 公開Web JSとlogin transport
+### Public Web JS and login transport
 
-[正規ログイン入口](https://web.ib.mizuhobank.co.jp/servlet/LOGBNK0000000B.do)を通常ブラウザで開くと、
-初回GETだけで`JSESSIONID`が発行され、HTMLの`base`とform actionは負荷分散された`webX.ib.mizuhobank.co.jp`
-を指した。form名は`LOGBNK_00000B`、methodはPOST、次画面は`/servlet/LOGBNK0000001B.do`である。
-入力値を除く公開schemaとして次のfield名を確認した。
+Opening [legitimate login](https://web.ib.mizuhobank.co.jp/servlet/LOGBNK0000000B.do) in ordinary browser issues
+`JSESSIONID` on initial GET; HTML `base`/form actions point to load-balanced `webX.ib.mizuhobank.co.jp`.
+Form `LOGBNK_00000B`, method POST, next `/servlet/LOGBNK0000001B.do`. Public field names excluding input values:
 
-- session/page引継ぎ候補: `_FRAMEID`、`_TARGETID`、`_LUID`、`_TOKEN`、`_FORMID`、`_SUBINDEX`
-- request/client候補: `POSTKEY`、`CLIENT_ENV`
-- 最初の本人入力: `txbCustNo`（お客さま番号）
+- Session/page handoff candidates: `_FRAMEID`, `_TARGETID`, `_LUID`, `_TOKEN`, `_FORMID`, `_SUBINDEX`
+- Request/client candidates: `POSTKEY`, `CLIENT_ENV`
+- First owner input: `txbCustNo` (customer number)
 
-共通JS `EmfJScript.js`、`MizuhoJScript.js`、`common.js`とinline scriptを静的に確認した。
-`doTransaction`はevent IDから`/servlet/<ID>.do`を組み立て、frame/target/subindexを更新して同じformをPOSTする。
-`getClientEnv`はbrowser language類を`CLIENT_ENV`へ設定する。`EmfJScript.js`には`POSTKEY`を付ける
-Dojo `xhrPost`もあるが、公開コード上で確認できた用途は不正input/script検査等であり、残高・明細JSON transportではない。
-このlogin pageが読む`rsa.js`は`post_deviceprint()`がtrueを返すstubであり、このfile名だけからRSA暗号化を推定しない。
+Statically examined common `EmfJScript.js`, `MizuhoJScript.js`, `common.js`, inline scripts. `doTransaction`
+builds `/servlet/<ID>.do` from event IDs, updates frame/target/subindex, POSTs same form. `getClientEnv`
+sets browser language etc. in `CLIENT_ENV`. `EmfJScript.js` also has Dojo `xhrPost` with `POSTKEY`, but established
+public uses are invalid input/script checks etc., not balance/statement JSON transport. Login `rsa.js` is a
+stub with `post_deviceprint()` returning true; its filename alone does not imply RSA encryption.
 
-別originの`directinfo.ib.mizuhobank.co.jp/fp/tags.js`は、公開pageごとの一時session/page parameterを伴って
-読み込まれる。銀行の公式説明と合わせてdevice/browser risk signal候補と扱うが、vendor、収集field、score、
-appのdevice bindingとの共有は未確認である。session識別子自体は記録していない。
+Separate-origin `directinfo.ib.mizuhobank.co.jp/fp/tags.js` loads with temporary per-page session/page parameters.
+Together with official explanations, candidate device/browser risk signals; vendor, collected fields, scores,
+shared app device binding unverified. Session identifiers themselves not recorded.
 
-従って現時点のtransport分類は、**未認証loginはcookie付きShift_JIS form POST**、一部補助処理はDojo XHRである。
-password入力後のpage、認証後read画面がHTML formだけかJSON/XHRを併用するか、JSESSIONID以外のsession要素、
-sessionとdevice fingerprintのbindingは、本人操作のread-only runtime metadata観測なしには確定できない。
+Current classification: **unauthenticated login uses cookie-based Shift_JIS form POST**, some helpers Dojo XHR.
+Post-password pages, whether authenticated reads use only forms or also JSON/XHR, sessions beyond JSESSIONID,
+and fingerprint binding need owner-operated read-only runtime metadata observation.
 
-ユーザー申告のBitwarden内資格情報は、live検証時もextension/ユーザー操作で入力し、
-値をKogane、ログ、capture、Git、PR、container環境変数へ出さない。公開ログイン画面
-にpasskey/WebAuthnの選択肢は見つからなかったため、最初のbounded検証でBitwardenが
-通常passwordをfillするのか、WebAuthn promptを出すのかだけを確認する。
+During live checks, enter owner-reported Bitwarden credentials through extension/user operation; emit no
+values to Kogane, logs, captures, Git, PRs, container environment variables. No passkey/WebAuthn options found
+on public login; first bounded check only whether Bitwarden fills passwords or presents WebAuthn prompts.
 
-### アプリ
+### App
 
-- 初回登録は代表利用口座の店番号/口座番号と第1暗証番号を用い、本人情報、SMS認証、
-  login設定、6桁のアプリパスワードまたは生体認証を設定する。
-- 起動時はアプリパスワードまたは生体認証。Androidは公式FAQ上、顔ではなく指紋認証。
-- ご利用カード（アプリ版）は生体/アプリパスワードの後に、取引ごとに変わる第2
-  暗証番号を表示する。状況によりSMS追加認証が起こり得るが、read collectionには
-  要求しない。
-- `キャッシュカード認証（残高照会のみ）` という別modeもあるが、普通/貯蓄だけで
-  定期残高を表示できず、一定期間使わないと再登録が必要になる。完全列挙には不適切。
+- Initial registration uses primary account branch/account number/first PIN, personal information, SMS,
+  login settings, six-digit app password or biometrics.
+- Startup uses app password/biometrics; Android FAQ specifies fingerprints, not face.
+- ご利用カード（アプリ版） (usage card, app version) shows transaction-varying second PINs after biometrics/app
+  password; extra SMS may occur, not requested for read collection.
+- Separate `キャッシュカード認証（残高照会のみ）` ("cash card authentication (balance inquiry only)") mode
+  covers ordinary/savings, excludes time balances, requires re-registration after non-use. Unsuitable for complete enumeration.
 
-## CDN、WAF、anti-automation
+## CDN, WAF, anti-automation
 
-### 確認できた事実
+### Established facts
 
-- `www.mizuhobank.co.jp`、`web.ib.mizuhobank.co.jp`、
-  `web1.ib.mizuhobank.co.jp` はAkamaiへ解決される。login hostのCNAMEは
-  `edgekey.net`、responseには `Akamai-GRN` があった。
-- generic command-line requestでは公式`www` pageが `Server: AkamaiGHost` の403を
-  返した一方、正規login入口は200を返した。host/pathごとにedge policyが異なる。
-- login pageは `directinfo.ib.mizuhobank.co.jp/fp/tags.js` をsession/page ID付きで読み、
-  `CLIENT_ENV`を送る。公式案内も「ログイン環境の分析」と、異常環境での第1暗証番号
-  step-upを明記している。
-- login/application responsesはno-cacheで、HTML form、cookie、JavaScriptが必須である。
+- `www.mizuhobank.co.jp`, `web.ib.mizuhobank.co.jp`, `web1.ib.mizuhobank.co.jp` resolve to Akamai;
+  login CNAME `edgekey.net`, response `Akamai-GRN`.
+- Generic command-line requests received `Server: AkamaiGHost` 403 on official `www`, but 200 on legitimate login;
+  edge policies differ per host/path.
+- Login loads `directinfo.ib.mizuhobank.co.jp/fp/tags.js` with session/page IDs, sends `CLIENT_ENV`.
+  Official guidance describes login environment analysis/first-PIN step-up in unusual environments.
+- Login/application responses no-cache, requiring HTML forms/cookies/JavaScript.
 
-### 推測・未確認
+### Hypotheses/unverified
 
-- Akamai Bot Managerまたは同等のbot scoreが認証後画面に適用されている可能性は高い
-  が、製品名、rule、headless検知条件、datacenter IP判定は確認していない。
-- `fp/tags.js`はdevice/browser fingerprintingのためと考えられるが、収集項目、vendor、
-  scoreへの使い方は未確認である。
-- HTTP clientが正しいtoken/cookie/fieldを再現すれば通るか、実ブラウザのJavaScript
-  実行が必須かは未確認。古いscraperがHTTP-onlyだったことは現行の成功根拠にならない。
+- Akamai Bot Manager/equivalent bot scores likely affect authenticated screens, but products/rules/headless
+  detection/datacenter IP checks unverified.
+- `fp/tags.js` likely device/browser fingerprinting; fields/vendor/scoring unverified.
+- Correct tokens/cookies/fields in HTTP clients may suffice or actual browser JS may be required; unverified.
+  Old HTTP-only scrapers do not establish current success.
 
-このため、最初からCloudflare Workersの素の`fetch`でloginを再現するより、通常の
-Chromeと銀行が発行したsessionを使い、read endpoint/artifactを段階的に絞る。
+Start with ordinary Chrome/bank-issued sessions and narrow read endpoints/artifacts incrementally rather
+than immediately recreating login with bare Workers `fetch`.
 
-## Android app、正規split取得、静的／動的解析
+## Android app, legitimate split acquisition, static/dynamic analysis
 
-銀行の[公式アプリページ](https://www.mizuhobank.co.jp/direct/app/index.html)にある
-[Android配布導線](https://www.mizuhobank.co.jp/special/directapp/dl_android.html)はGoogle Playの
-[`jp.co.mizuhobank.banking`](https://play.google.com/store/apps/details?id=jp.co.mizuhobank.banking&hl=ja&gl=JP)
-へ転送される。2026-08-26のPlay公開pageはdeveloper `MIZUHO BANK, LTD.`、version `5.30.0`、
-更新日2026-07-22、100万+ downloadを表示した。銀行公式導線、Play developer、packageの三点をprovenanceとする。
-銀行サイトから直接配布する公式APKは見つからず、第三者APK mirrorは来歴を保証できないため使わない。
+[Official app page](https://www.mizuhobank.co.jp/direct/app/index.html)'s
+[Android distribution link](https://www.mizuhobank.co.jp/special/directapp/dl_android.html) redirects to Play
+[`jp.co.mizuhobank.banking`](https://play.google.com/store/apps/details?id=jp.co.mizuhobank.banking&hl=ja&gl=JP).
+Public Play on 2026-08-26: developer `MIZUHO BANK, LTD.`, version `5.30.0`, updated 2026-07-22, 1 million+
+downloads. Provenance: bank link, Play developer, package. No direct official APK found; no third-party mirrors
+without guaranteed provenance.
 
-Play掲載と公式FAQで次を確認できる。
+Play listing/official FAQs establish:
 
-- appは残高・明細・収支report・取引機能を持ち、JavaScriptとcookieを必要とする。
-- 不正改造端末では正常起動しない可能性がある。
-- Android appは明細screenのscreenshotを禁止する。
-- 2026-01-31時点の公式対応環境はAndroid 15/16。対応外端末/tabletは保証外。
+- App balances/statements/income-expense reports/transactions; JavaScript/cookies required.
+- Illegally modified devices may not start normally.
+- Android app prohibits statement screenshots.
+- Official support as of 2026-01-31: Android 15/16; unsupported devices/tablets not guaranteed.
 
-reverse engineering、deobfuscation、static analysisと本人操作のruntime tracingを**今の並行調査対象**にする。
-ただし本調査環境にはADB、Android SDK build tools、jadx/apktool、接続済み本人所有Android実機がなく、
-Google Play認証済み端末から正規artifactを取得できなかった。再現可能な取得手順は次の通りである。
+Reverse engineering/deobfuscation/static analysis/owner runtime tracing are **current parallel research**.
+Research environment lacked ADB, Android SDK tools, jadx/apktool, connected owner Android; no legitimate
+Play-authenticated artifacts obtained. Reproducible procedure:
 
-1. 本人所有の対応・非root Androidで銀行公式導線からPlay版をインストールする。登録済みappがある場合、
-   server側のdevice登録を変えないため再install／data消去はしない。
-2. 本人の同意下でUSB debuggingを使い、`adb shell dumpsys package jp.co.mizuhobank.banking`で
-   versionName/versionCode、installer、split名を記録する。`adb shell pm path ...`でbase/split pathを列挙する。
-3. shellから読める場合だけbaseと全configuration/feature splitをprivate領域へ`adb pull`する。
-   SHA-256と`apksigner verify --print-certs`のsignerを記録し、binaryはGitへ入れない。
-4. pull不可、app停止、端末再登録要求になった時点で停止する。root化、第三者mirror、再署名、保護回避へ進まない。
+1. On compatible owner non-root Android, install via official Play route. Existing registered apps:
+   no reinstall/data clearing to avoid changing server device registration.
+2. With owner consent, use USB debugging and `adb shell dumpsys package jp.co.mizuhobank.banking` to record
+   versionName/versionCode, installer, splits; `adb shell pm path ...` for base/split paths.
+3. Only if shell-readable, `adb pull` base/all configuration-feature splits privately;
+   record SHA-256/`apksigner verify --print-certs` signers, no Git binaries.
+4. Stop on pull denial/app termination/device re-registration. No root, third-party mirrors, re-signing, bypass.
 
-正規artifactを取得できたら、次を事実／候補に分けて静的に確認する。
+After acquisition, statically distinguish facts/candidates:
 
-- manifest: permission、exported component、App Links/custom scheme、min/target SDK、backup/debuggable/profileable、
-  native library、Network Security Config、cleartext policy。
-- transport/schema: hostname/path、WebView、OkHttp/Retrofit等、JSON/protobuf、API/model class、download処理。
-- local long-history: Room/SQLite/SQLCipher、SharedPreferences/DataStore、DB file/schema/migration/index、
-  customer/account namespace、last-sync cursor、transaction balance／category field、暗号化・key管理候補。
-  schemaだけを対象にし、本人の明細recordやDB実値は抽出・保存しない。
-- point route: `P`導線のdeep link、point hostname、WebView／external browser境界、SSO/session handoff候補。
-- auth/device: Android Keystore、BiometricPrompt、app password、端末登録identifier、session issuance／renewal、
-  FIDO/WebAuthn候補。WebのBitwarden/passkey申告とは別物として確認する。
-- integrity: Play Integrity/SafetyNet、root/debug/emulator検知、certificate pinning library/config候補。
-  文字列やlibrary存在だけで「有効」と断定せず、通常動作時の観測と照合する。
+- Manifest: permissions/exported components/App Links/custom schemes/min-target SDK/backup-debuggable-profileable/
+  native libraries/Network Security Config/cleartext policy.
+- Transport/schema: hosts/paths/WebView/OkHttp-Retrofit/JSON-protobuf/API-model classes/downloads.
+- Local long history: Room/SQLite/SQLCipher, SharedPreferences/DataStore, DB files/schemas/migrations/indexes,
+  customer/account namespaces, last-sync cursors, transaction balances/categories, encryption/key candidates.
+  Schemas only, no owner records/actual DB extraction-retention.
+- Points: `P` deep links/hosts/WebView-external-browser/SSO-session handoff candidates.
+- Auth/device: Android Keystore/BiometricPrompt/app passwords/device registration identifiers/session issuance-renewal/
+  FIDO-WebAuthn candidates. Separate from owner Web Bitwarden/passkey claims.
+- Integrity: Play Integrity/SafetyNet/root-debug-emulator detection/certificate pinning candidates.
+  Strings/library presence alone does not establish active use; compare normal observations.
 
-本人操作のread-only runtime tracingでは、残高・口座一覧・直近明細・端末内の古い明細・定期／外貨／
-グローバル口座・`P`導線を各1回だけ開く。method、origin、path template、status、content type、呼出順、
-schema field **name**、local DB/file **name**だけを記録し、body、cookie/token、端末identifier、口座番号、実値は
-capture時点で破棄する。Android Studio Network Inspector（profileableの場合）、標準proxy/PCAP metadata、
-絞り込んだlogcatを先に試す。Frida/Objection等のhookも、本人所有端末で公式appが無改変のまま通常動作する範囲に限り、
-network method／WebView navigation／DB openのmetadata観測へ使える。root/debug/integrity/pinningで停止する場合は
-そこで終了し、root隠蔽、attestation偽装、pinning無効化、証明書差替え、repack/re-sign等のsecurity-control bypassをしない。
+Owner-operated read-only traces open balances/accounts/recent statements/older local statements/time-foreign-Global/
+`P` once each. Record only methods/origins/path templates/status/content types/call order/schema field **names**/
+local DB-file **names**; discard bodies/cookies-tokens/device identifiers/account numbers/values at capture.
+First try Network Inspector if profileable, normal proxy/PCAP metadata, filtered logcat. Frida/Objection hooks
+may observe network/WebView/DB-open metadata only while official app works normally unmodified on owner devices.
+Stop at root/debug/integrity/pinning termination; no root hiding/attestation spoofing/pinning disablement/
+certificate replacement/repack/re-sign or other bypass.
 
-### appとWebのread coverage差
+### App/Web read coverage differences
 
-| read surface                     | Web                                     | app                                                    | 自動化上の結論                                                |
-| -------------------------------- | --------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------- |
-| 普通・貯蓄・外貨普通             | 残高、直近約3カ月HTML/PDF/CSV           | 残高、明細、取引後残高、端末内履歴                     | Web artifactを正本、app localをgap検出候補にする              |
-| 長期明細                         | 申込済みダイレクト通帳PDF/CSV、最大10年 | 継続起動で3カ月超を端末へ蓄積。未起動gap／移行lossあり | app DBは独自価値があるが、完全なbackfillとは扱わない          |
-| 定期・積立・外貨定期・グローバル | 専用残高／lot／結果画面を公式説明で確認 | native表示かWeb遷移か未確認                            | static/runtimeでroute差を確定する                             |
-| export                           | PC WebのPDF/CSV                         | app単独CSVは確認できない                               | 自動取込はWeb優位                                             |
-| みずほポイント                   | desktop Web homeからの入口は未確認      | `P`から公式ポイントpageへ遷移                          | app固有の重要read route。銀行明細とはsession/sourceを分離する |
+| Read surface                         | Web                                                    | App                                                         | Automation conclusion                                              |
+| ------------------------------------ | ------------------------------------------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------ |
+| Ordinary/savings/foreign ordinary    | Balances/recent ~3-month HTML/PDF/CSV                  | Balances/statements/post-balances/local history             | Web artifacts authoritative; local app gap detection candidate     |
+| Long-term statements                 | Enrolled Direct Passbook PDF/CSV up to 10 years        | Accumulates >3 months with use; non-use gaps/migration loss | Local DB valuable, not complete backfill                           |
+| Time/installment/foreign time/Global | Dedicated balances/lots/results officially established | Native or Web navigation unverified                         | Resolve routes statically/dynamically                              |
+| Exports                              | PC Web PDF/CSV                                         | Standalone app CSV unestablished                            | Web advantage for ingestion                                        |
+| Mizuho Points                        | Desktop home entry unverified                          | `P` to official points page                                 | Important app read route; separate bank statement sessions/sources |
 
-appはlong-history local schemaとpoint routeの解明価値がある一方、公式exportと再現可能な長期backfillはWebが優位である。
-従って主収集器はWebのままにし、app解析を延期せずcoverage補完とtransport特定へ使う。
+App long-history schemas/points routes merit research; official exports/reproducible long-term backfill favor
+Web. Keep Web primary, using app research now for coverage/transport discovery.
 
-## 第三者クライアント
+## Third-party clients
 
-現行の公式画面に対応すると確認できたbank-only clientは見つからなかった。
+No bank-only client established as supporting current official screens found.
 
-| 実装                                                                                            | 最終的な機能更新                                               | 方式                                                                                           | 現在の扱い                                                                                           |
-| ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| [`kimoto/mizuho_bank`](https://github.com/kimoto/mizuho_bank)                                   | 2012、MIT                                                      | Ruby Mechanize。お客さま番号、password、合言葉で旧HTML formへloginし、残高/明細HTMLをparse     | endpoint/UIとも旧式。設計参考のみ                                                                    |
-| [`binzume/gobanking/mizuho`](https://github.com/binzume/gobanking/blob/master/mizuho/mizuho.go) | login/historyの実質更新は2018～2021、repoは2024に依存更新、MIT | Go `net/http`、cookie jar、Shift_JIS、POSTKEY/form ID。残高・日付・摘要・入出金をHTMLからparse | 現行loginに似たform architectureの参考。ただし現在動作する証拠なし。write methodは絶対に再利用しない |
-| [`Finance::Bank::JP::Mizuho`](https://github.com/gitpan/Finance-Bank-JP-Mizuho)                 | 2011                                                           | Perl LWP/cookie。旧口座一覧をparseし、銀行のOFX download endpointを取得                        | 現行公式はPDF/CSVのみを案内。OFX routeは廃止済みとみなしliveで期待しない                             |
+| Implementation                                                                                  | Last functional update                                                | Method                                                                                                     | Current treatment                                                                    |
+| ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [`kimoto/mizuho_bank`](https://github.com/kimoto/mizuho_bank)                                   | 2012, MIT                                                             | Ruby Mechanize old forms/customer number/password/secret phrase; parses balance/history HTML               | Old endpoints/UI; design only                                                        |
+| [`binzume/gobanking/mizuho`](https://github.com/binzume/gobanking/blob/master/mizuho/mizuho.go) | Login/history effectively 2018–2021, repo dependency update 2024, MIT | Go `net/http`, cookies, Shift_JIS, POSTKEY/form IDs; HTML balances/dates/descriptions/deposits-withdrawals | Similar form architecture reference, no current working evidence; never reuse writes |
+| [`Finance::Bank::JP::Mizuho`](https://github.com/gitpan/Finance-Bank-JP-Mizuho)                 | 2011                                                                  | Perl LWP/cookies, old account lists/bank OFX download                                                      | Current official guidance only PDF/CSV; regard OFX retired, do not expect live       |
 
-共通してbrowser automationではなく、HTML formとcookieを直接送る方式だった。これは
-HTTP collectorが理論上可能であることを示すが、旧合言葉、旧page ID、旧OFXを含む。
-現行form schemaを新規に観測し、read allowlistから実装し直す必要がある。
+All directly send HTML forms/cookies instead of browser automation. This shows theoretical HTTP collection,
+but includes old phrases/page IDs/OFX. Newly observe current forms, reimplement from read allowlists.
 
-## 実行基盤の適性
+## Runtime suitability
 
-| 基盤                                      | 適性                                        | 理由                                                                                                                                                   |
-| ----------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Kuebiko/通常Chrome + persistent profile   | **最適**                                    | Bitwarden/ユーザー操作、step-up、第1暗証番号、download、Akamai/device fingerprintを正規browserで扱える。認証後readだけ自動化しやすい                   |
-| Cloudflare Workers                        | login collector **低**、orchestrator **高** | cookie付きHTTPとscheduleは可能だが、通常Chrome profile、extension、desktop download、生体操作がない。Akamai/datacenter edgeとの相性も未確認            |
-| Cloudflare Containers / Browser Rendering | **中**                                      | Playwrightとpersistent storageを用意できるが、headless/datacenter fingerprint、session persistence、download暗号化が課題。MVPの第1候補ではない         |
-| OCI VM/Containers                         | **中～高**                                  | 通常Chrome/Playwright、固定disk、secrets brokerを構成しやすい。bank loginは日本国内利用を前提とするため、region/egressと実利用条件を確認する必要がある |
-| OCI Kubernetes                            | **中**                                      | 定期jobと隔離は容易だが、browser profileをpodに安定保持し、同時loginを避ける設計が必要。1口座MVPには運用過剰                                           |
+| Platform                                     | Suitability                                    | Reason                                                                                                                                             |
+| -------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kuebiko/ordinary Chrome + persistent profile | **Best**                                       | Official browser handles Bitwarden/user input/step-up/first PIN/downloads/Akamai-fingerprints; easier post-auth read automation                    |
+| Cloudflare Workers                           | Login collector **low**, orchestrator **high** | Cookie HTTP/schedules possible, no ordinary Chrome/extensions/desktop downloads/biometrics; Akamai/datacenter compatibility unverified             |
+| Cloudflare Containers / Browser Rendering    | **Medium**                                     | Playwright/persistent storage possible, headless-datacenter fingerprints/session persistence/encrypted downloads challenging; not first MVP choice |
+| OCI VM/Containers                            | **Medium-high**                                | Easier ordinary Chrome/Playwright/fixed disks/secret brokers; domestic-Japan bank use assumption requires region/egress/use conditions checks      |
+| OCI Kubernetes                               | **Medium**                                     | Scheduling/isolation easy, need stable browser profiles/no concurrent login; excessive for one-account MVP                                         |
 
-銀行の[利用環境](https://www.mizuhobank.co.jp/direct/goriyo/notice/index.html)は、日本国内
-利用を前提とすると明記する。海外・不定region・毎回変わるIPからの完全無人loginは
-成功率だけでなく、追加認証/利用停止riskの面でも推奨しない。Cloudflare/OCIは
-session取得を行う主体ではなく、local/管理下Chrome collectorのschedule、暗号化保存、
-通知、normalized data APIに使う方がよい。
+Bank [supported environment](https://www.mizuhobank.co.jp/direct/goriyo/notice/index.html) explicitly assumes
+use in Japan. Overseas/unfixed-region/changing-IP unattended login is not recommended for extra authentication/
+suspension risks as well as success rates. Prefer Cloudflare/OCI for local/controlled Chrome scheduling,
+encrypted storage, notifications, normalized APIs, not session issuance.
 
-## 推奨アーキテクチャ
+## Recommended architecture
 
-1. ユーザー管理下の通常Chrome profileで正規ログイン入口を開く。Bitwardenを使う
-   場合はユーザー操作/extensionに委ね、資格情報をautomationへ渡さない。
-2. 既存sessionが有効なら再利用し、失効時だけ人に再認証を求める。session cookieは
-   OS-backed vaultで暗号化し、ログ・D1/KV・Gitへ出さない。
-3. read-only allowlistを作る。最初はhome/口座一覧、普通/貯蓄/外貨普通の残高・明細、
-   CSV/PDF downloadだけに限定する。
-4. CSVをprimary、HTMLをbalance/discovery、PDFをauditとする。CSVにstable IDがなければ、
-   source、口座pseudonym、取引日、金額、摘要、同日ordinalから暫定dedupe keyを作り、
-   raw artifact hashも保存する。
-5. 定期・積立・外貨定期・グローバルは別position collectorで預入lotを取得する。
-   write controlのform/actionは呼び出さない。
-6. みずほポイントは銀行明細collectorと別session/surfaceとして、`P`マークからの
-   正規遷移を観測してから残高・履歴collectorを追加する。
-7. Cloudflare/OCI側はschedule、lock、暗号化artifact受領、正規化、監視だけを担当し、
-   同一profileの並行実行を禁止する。
+1. Open legitimate login in user-controlled ordinary Chrome profile. Bitwarden stays user/extension-operated,
+   no credentials to automation.
+2. Reuse valid sessions, ask human reauthentication only on expiry. Encrypt cookies in OS-backed vaults,
+   exclude from logs/D1-KV/Git.
+3. Initial read allowlists only home/accounts, ordinary/savings/foreign ordinary balances/statements,
+   CSV/PDF downloads.
+4. CSV primary, HTML balances/discovery, PDF audit. Without stable IDs, provisional deduplication key from
+   source/account pseudonym/date/amount/description/same-day ordinal, retaining raw artifact hashes.
+5. Separate position collectors for time/installment/foreign time/Global lots;
+   call no write controls/forms/actions.
+6. Mizuho Points separate sessions/surfaces; observe legitimate `P` transition before balance/history collectors.
+7. Cloudflare/OCI only schedules/locks/encrypted artifact receipt/normalization/monitoring;
+   prohibit concurrent use of one profile.
 
-## 次のbounded検証
+## Next bounded verification
 
-すべて本人名義口座・読み取り専用で行い、値はredactし、field名とshapeだけを記録する。
+All owner-held accounts/read-only; redact values, retain only field names/shapes.
 
-1. 既存Chrome tab/profileを確認し、正規URLから未認証/認証済み状態を判定する。
-2. 公開仕様との呼称差を解消するため、Bitwardenがみずほ画面でpassword fillかpasskey
-   promptのどちらを提供するかだけ確認する。secret値は取得しない。
-3. ユーザーによるlogin後、session idle/absolute lifetime、再起動後cookie再利用、別IP
-   risk step-up、第1暗証番号要求条件を1回ずつ測る。失敗時に繰り返しloginしない。
-4. homeの口座rowについて、科目、通貨、masked account identifier、残高、available額、
-   複数お客さま番号の有無をsanitized schemaとして記録する。
-5. 普通/貯蓄/外貨普通の直近明細を、同じ短い期間でHTML、PDF、CSV各1件downloadし、
-   encoding、header、列、順序、件数上限、pagination、取引後残高、pending fieldを比較する。
-6. みずほダイレクト通帳を**既に利用中なら**、1カ月だけPDF/CSVを比較する。未申込なら
-   設定変更になるため申し込まず、未確認のままとする。
-7. 定期、積立、外貨普通/定期、グローバル口座について、存在する科目だけを開き、
-   現在lot fieldと履歴/結果画面のfield名・保持範囲を記録する。預入/解約ボタンは押さない。
-8. appの`P`マークから公式ポイントページへ入り、origin、session境界、残高、獲得/利用/
-   失効予定のrow field、paginationを記録する。チャージ/交換には進まない。
-9. public loginでは、確認済みform field名と`LOGBNK...do`遷移だけをDevToolsで照合する。認証後read requestは
-   method、origin、path template、status、content type、field名だけを受動観測し、HTML form／JSON/XHRを分類する。
-   body、token、cookie、device fingerprint値は保存しない。
-10. 本人所有の対応非root実機から、上記手順で正規base/splitとsigner/hashを取得する。取得できればmanifest、host、
-    transport/model、local history schema、point route、session/device/integrity/pinning候補を静的解析する。
-11. 既存の登録済みappを本人が操作し、read-only画面のnetwork/local metadataを1回だけ観測する。
-    write遷移、app再登録、request replay、秘密／PII保存をせず、pinning/integrity/anti-debugで止まれば回避しない。
-12. Webとappの同じ短期間について、件数、取引後残高、カテゴリ、古いlocal明細、欠落を比較する。
-    app local履歴のrecord自体はexportせず、field名と集計差だけを残す。
-13. 7日間、同じbrowser profileで1日1回、口座一覧と短い明細だけ取得し、Akamai block、
-    session expiry、duplicate、欠落、rate limitを評価してMVP方式を確定する。
+1. Check existing Chrome tabs/profiles, determine unauthenticated/authenticated status from legitimate URLs.
+2. Resolve terminology: check only whether Bitwarden offers password filling/passkey prompts on Mizuho;
+   no secret values.
+3. After user login, measure idle/absolute lifetimes, restart cookie reuse, different-IP risk step-up,
+   first-PIN conditions once each. No repeated login on failure.
+4. Record home account types/currencies/masked identifiers/balances/available amounts/multiple-customer-number
+   presence as sanitized schemas.
+5. For ordinary/savings/foreign ordinary, download one HTML/PDF/CSV each over the same short period;
+   compare encoding/headers/columns/order/count limits/pagination/post-balances/pending fields.
+6. **If already using** Direct Passbook, compare one month PDF/CSV. Otherwise enrollment is a settings change;
+   leave unverified without applying.
+7. Open only held time/installment/foreign ordinary-time/Global types; record current lot fields/history-result
+   field names/retention. No placement/cancellation buttons.
+8. Follow app `P` to official points page; record origins/session boundaries/balances/accrual-use-expiry
+   row fields/pagination. No top-ups/exchanges.
+9. Compare only established public login field names/`LOGBNK...do` transitions in DevTools. Passively observe
+   authenticated read methods/origins/path templates/status/content types/field names, classifying forms/JSON-XHR.
+   Save no bodies/tokens/cookies/fingerprint values.
+10. Obtain legitimate base/splits/signers/hashes from owner compatible non-root devices as above; statically analyze
+    manifests/hosts/transports-models/local history/points/session-device-integrity-pinning candidates if obtained.
+11. Owner operates existing registered app; observe read-screen network/local metadata once.
+    No writes/app re-registration/request replay/secrets-PII retention; no bypass on pinning/integrity/anti-debug stops.
+12. Compare Web/app same short period: counts/post-balances/categories/older local entries/gaps.
+    Export no local records themselves, retain field names/aggregate differences only.
+13. For seven days, once daily on same browser profile, retrieve only accounts/short statements, assessing Akamai
+    blocks/session expiry/duplicates/gaps/rate limits to decide MVP method.
 
-成功判定は、手動login後に書き込み画面へ入らず、全対象口座のstableなpseudonymous ID、
-現在残高、増分明細、公式artifact hashを再現できること。中止条件は、認証設定変更、
-OTP/第2暗証番号をreadのために常時要求、root/pinning bypass、繰り返しlock、bank利用停止
-の兆候、本人名義外の情報が必要になることである。
+Success: after manual login, reproduce stable pseudonymous IDs/current balances/incremental statements/official
+artifact hashes for all targets without entering writes. Stop for authentication setting changes, constant
+read OTP/second-PIN requirements, root/pinning bypass, repeated locks, signs of bank suspension, or need
+for non-owner information.
 
-## 確認済み、推測、未確認
+## Established facts, hypotheses, unverified items
 
-### 確認済み
+### Established
 
-- Web残高対象は普通、貯蓄、定期、積立定期、外貨普通、外貨定期、グローバル口座、
-  カードローン。入出金対象は普通、貯蓄、外貨普通、カードローン。
-- 直近明細は前々月1日以降、ダイレクト通帳は申込後最大10年。PDFとPC用CSVがある。
-- 定期/外貨定期の解約・継続履歴は原則1年、グローバル取引結果は18カ月・10/5件。
-- appは明細を端末保存し、継続利用で3カ月超を表示するが、gap/機種変更lossがある。
-- みずほポイントは現行で、銀行専用pageに残高・獲得/利用履歴・期限がある。
-- browser loginはお客さま番号+login password、risk判定時に第1暗証番号。Akamai edge、
-  cookie、JavaScript、client environment/fingerprint scriptがある。
-- 銀行公式Android導線はPlay package`jp.co.mizuhobank.banking`へ転送され、調査時点のversionは`5.30.0`。
-- 未認証Webは`JSESSIONID`を先に発行し、`webX`へのShift_JIS form POSTとpage/session field、
-  `POSTKEY`、`CLIENT_ENV`、fingerprint tagを使う。公開login面に残高・明細JSON APIは確認できない。
+- Web balance types: ordinary/savings/time/installment/foreign ordinary-time/Global/card loans;
+  statements: ordinary/savings/foreign ordinary/card loans.
+- Recent statements from first day of second preceding month; enrolled Direct Passbook up to 10 years.
+  PDF/PC CSV available.
+- Time/foreign-time cancellation-renewal history generally one year; Global results 18 months/10 or five entries.
+- App stores locally, displaying >3 months with continued use, with gaps/device migration loss.
+- Mizuho Points current, bank page offers balances/accrual-use/expiry.
+- Browser login customer number/password, risk-based first PIN; Akamai edge/cookies/JS/
+  client environment/fingerprint scripts.
+- Official Android route redirects to Play `jp.co.mizuhobank.banking`, research-time version `5.30.0`.
+- Unauthenticated Web issues `JSESSIONID` first, uses Shift_JIS POST to `webX`, page/session fields,
+  `POSTKEY`, `CLIENT_ENV`, fingerprint tags; no balance/statement JSON API on public login.
 
-### 推測
+### Hypotheses
 
-- 実ブラウザsessionを取得できれば、残高/CSV/PDF downloadは安定して自動化できる
-  可能性が高い。
-- appはnative storageとWeb screenを混在させ、定期/外貨/pointはWebViewまたは外部
-  browserに依存する可能性が高い。
-- datacenter/headless trafficはAkamai/銀行risk analysisで追加認証やblockを受けやすい。
+- Once actual browser sessions obtained, balances/CSV/PDF likely automatable stably.
+- App likely mixes native storage/Web screens; time/foreign/points likely WebView/external browser.
+- Datacenter/headless traffic likely gets extra checks/blocks from Akamai/bank risk analysis.
 
-### 未確認
+### Unverified
 
-- ユーザー申告のpasskeyがみずほダイレクト用か、現在のWebAuthn supportがあるか。
-- sessionのidle/absolute lifetime、session portability、並行login、logout invalidation。
-- password page以降と認証後endpointがHTMLのみか、JSON/XHRを併用するか。current read form/page IDs。
-- 現行CSV/PDFの列、encoding、1回の期間/件数、pagination、stable transaction ID。
-- 全口座科目の画面上のstable identifier、available balance、外貨/定期lotのexact fields。
-- 普通預金の未確定明細の有無。公開仕様ではposted ledgerしか確認できない。
-- みずほポイント履歴の保存期間、row fields、export、expiry bucket、session境界。
-- 正規Android splitのversionCode、signer、manifest、hostname、native/WebView境界、API/model schema。
-- app local historyのDB schema/migration/encryption/key管理、pointのorigin/session handoff、device binding/session issuance。
-- Bot Manager製品名、certificate pinning、Play Integrity/root/debug検知の具体的実装。
+- Whether owner-reported passkey is for Direct, current WebAuthn support.
+- Idle/absolute lifetimes, portability, concurrent login, logout invalidation.
+- Post-password/authenticated endpoints HTML-only or JSON/XHR too; current read forms/page IDs.
+- Current CSV/PDF columns/encoding/per-operation periods-counts/pagination/stable transaction IDs.
+- Stable identifiers/available balances/exact foreign-time lot fields for all types.
+- Ordinary deposit pending statements; public specifications establish posted ledger only.
+- Points history retention/row fields/exports/expiry buckets/session boundaries.
+- Legitimate Android split versionCodes/signers/manifests/hosts/native-WebView/API-model schemas.
+- Local DB schemas/migrations/encryption-keys, points origins/session handoff, device binding/session issuance.
+- Bot Manager products, certificate pinning, Play Integrity/root/debug implementations.
 
-## 主な根拠URL
+## Main evidence URLs
 
-- [みずほダイレクト](https://www.mizuhobank.co.jp/direct/index.html)
-- [残高・入出金明細照会](https://www.mizuhobank.co.jp/direct/about/service/balance.html)
-- [入出金明細の照会期間](https://www.faq.mizuhobank.co.jp/faq/show/276?site_domain=default)
-- [みずほe-口座・みずほダイレクト通帳](https://www.mizuhobank.co.jp/direct/about/service/directpassbook/index.html)
-- [ダイレクト通帳のPDF/CSV download](https://www.faq.mizuhobank.co.jp/faq/show/10039?site_domain=default)
-- [アプリの端末内明細保存](https://www.faq.mizuhobank.co.jp/faq/show/7271?site_domain=default)
-- [アプリ機種変更時の履歴](https://www.faq.mizuhobank.co.jp/faq/show/12914?site_domain=default)
-- [定期預金の解約済み明細](https://www.faq.mizuhobank.co.jp/faq/show/11523?site_domain=default)
-- [各種取引結果の期間/件数](https://www.faq.mizuhobank.co.jp/faq/show/10064?site_domain=default)
-- [外貨預金](https://www.mizuhobank.co.jp/direct/about/service/gaika.html)
-- [外貨普通/定期のWeb対応通貨](https://www.faq.mizuhobank.co.jp/faq/show/5888?site_domain=default)
-- [みずほグローバル口座](https://www.mizuhobank.co.jp/direct/about/service/global/index.html)
-- [利用口座の登録対象](https://www.faq.mizuhobank.co.jp/faq/show/246?site_domain=default)
-- [ブラウザログインの認証要素](https://www.faq.mizuhobank.co.jp/faq/show/10035?site_domain=default)
-- [各種暗証番号](https://www.faq.mizuhobank.co.jp/faq/show/10085?site_domain=default)
-- [利用環境、cookie、JavaScript](https://www.mizuhobank.co.jp/direct/goriyo/notice/index.html)
-- [正規ログインURL](https://www.mizuhobank.co.jp/crime/info110520.html)
-- [みずほダイレクトアプリ](https://www.mizuhobank.co.jp/direct/app/index.html)
-- [Google Play公式掲載](https://play.google.com/store/apps/details?id=jp.co.mizuhobank.banking)
-- [みずほポイントモール](https://www.mizuhobank.co.jp/mmc/mizuhopointmall/index.html)
-- [みずほポイント規定](https://www.mizuhobank.co.jp/mmc/regulation/index.html)
-- [みずほポイントモール操作ガイド](https://www.mizuhobank.co.jp/mmc/mizuhopointmall/ebook/)
-- [個人向け銀行APIの提供範囲](https://www.mizuhobank.co.jp/company/activity/api/policy/index.html)
-- [電子決済等代行業者との契約一覧](https://www.mizuhobank.co.jp/company/activity/api/index.html)
+- [Mizuho Direct](https://www.mizuhobank.co.jp/direct/index.html)
+- [Balance/statements](https://www.mizuhobank.co.jp/direct/about/service/balance.html)
+- [Statement inquiry periods](https://www.faq.mizuhobank.co.jp/faq/show/276?site_domain=default)
+- [Mizuho e-account/Direct Passbook](https://www.mizuhobank.co.jp/direct/about/service/directpassbook/index.html)
+- [Direct Passbook PDF/CSV downloads](https://www.faq.mizuhobank.co.jp/faq/show/10039?site_domain=default)
+- [App local statement storage](https://www.faq.mizuhobank.co.jp/faq/show/7271?site_domain=default)
+- [History after device changes](https://www.faq.mizuhobank.co.jp/faq/show/12914?site_domain=default)
+- [Cancelled time deposit details](https://www.faq.mizuhobank.co.jp/faq/show/11523?site_domain=default)
+- [Transaction result periods/counts](https://www.faq.mizuhobank.co.jp/faq/show/10064?site_domain=default)
+- [Foreign-currency deposits](https://www.mizuhobank.co.jp/direct/about/service/gaika.html)
+- [Web currencies for foreign ordinary/time](https://www.faq.mizuhobank.co.jp/faq/show/5888?site_domain=default)
+- [Mizuho Global Accounts](https://www.mizuhobank.co.jp/direct/about/service/global/index.html)
+- [Registrable accounts](https://www.faq.mizuhobank.co.jp/faq/show/246?site_domain=default)
+- [Browser login authentication](https://www.faq.mizuhobank.co.jp/faq/show/10035?site_domain=default)
+- [PIN types](https://www.faq.mizuhobank.co.jp/faq/show/10085?site_domain=default)
+- [Supported environment, cookies, JavaScript](https://www.mizuhobank.co.jp/direct/goriyo/notice/index.html)
+- [Legitimate login URL](https://www.mizuhobank.co.jp/crime/info110520.html)
+- [Mizuho Direct app](https://www.mizuhobank.co.jp/direct/app/index.html)
+- [Official Google Play listing](https://play.google.com/store/apps/details?id=jp.co.mizuhobank.banking)
+- [Mizuho Point Mall](https://www.mizuhobank.co.jp/mmc/mizuhopointmall/index.html)
+- [Mizuho Points terms](https://www.mizuhobank.co.jp/mmc/regulation/index.html)
+- [Point Mall guide](https://www.mizuhobank.co.jp/mmc/mizuhopointmall/ebook/)
+- [Personal bank API scope](https://www.mizuhobank.co.jp/company/activity/api/policy/index.html)
+- [Contracted electronic payment service providers](https://www.mizuhobank.co.jp/company/activity/api/index.html)

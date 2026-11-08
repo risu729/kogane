@@ -5,186 +5,193 @@
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-調査日: 2026-08-26
+Research date: 2026-08-26
 
-## 1. Scopeと境界
+## 1. Scope and boundaries
 
-本sourceは同じJMB会員関係にある次のread-only ledgerを分離する。
+Separate the following read-only ledgers under the same JMB membership.
 
-- **JAL Pay**: チャージ残高、JAL Payポイント、決済、チャージ、取消・返金、利用明細
-- **JAL Mileage Bank (JMB)**: マイル残高、積算・利用実績、lot別期限、Life Status関連表示
-- **JALファミリークラブ / JALカード家族プログラム**: 家族マイル合算制度と個人口座の関係
-- **予約・航空券・JALカード請求・JAL Global WALLET外貨/ATM**: 別source/別ledger
+- **JAL Pay**: top-up balance, JAL Payポイント (JAL Pay points), payments, top-ups, cancellations/refunds, usage statements
+- **JAL Mileage Bank (JMB)**: mileage balance, accrual/redemption records, lot expiry, Life Status displays
+- **JALファミリークラブ (JAL Family Club) / JALカード家族プログラム (JAL Card Family Program)**: relationship between family mileage pooling schemes and personal accounts
+- **Reservations/flight tickets/JALカード (JAL Card) billing/JAL Global WALLET foreign currency/ATM**: separate sources/ledgers
 
-支払、チャージ、マイル→JAL Payポイント、特典交換、予約/取消、family登録、profile/認証設定変更を
-行わない。JMB番号、wallet/card/device ID、氏名、予約、token、cookie、OTP、passkey material、実残高・
-実額を保存せず、security controlを回避しない。
+Do not make payments, top-ups, miles → JAL Pay points conversions, award redemptions, reservations/cancellations,
+family registrations, or profile/authentication settings changes. Do not store JMB numbers, wallet/card/device
+IDs, names, reservations, tokens, cookies, OTPs, passkey material, or actual balances/amounts; do not bypass security controls.
 
-## 2. 調査方法と公式URL
+## 2. Research method and official URLs
 
-- JAL公式Web/FAQ、JAL Pay/JMB app listing、family制度を一次sourceとして確認。
-- 認証不要で公開page/headerを観測。account login、app起動、実データ取得なし。
-- GitHubをpackage ID、Global WALLET host、JAL Pay/JMB用語で検索。公開consumer transport実装を調査。
-- APK/JS decompileと本人操作中のruntime観測は次実験として具体化。
+- Checked official JAL Web/FAQ, JAL Pay/JMB app listings, and family schemes as primary sources.
+- Observed unauthenticated public pages/headers; no account login, app launch, or actual data retrieval.
+- Searched GitHub by package ID, Global WALLET host, and JAL Pay/JMB terms for public consumer transport implementations.
+- Specified APK/JS decompilation and runtime observation during owner operation as next experiments.
 
-主要公式URL:
+Main official URLs:
 
 - [JAL Pay](https://www.jal.co.jp/jp/ja/jmb/jalpay/)
-- [残高確認](https://www.jal.co.jp/jp/ja/jmb/jalpay/pay/usage/balance-inquiry/)
-- [チャージ](https://www.jal.co.jp/jp/ja/jmb/jalpay/pay/usage/charge/)
-- [利用履歴FAQ](https://faq-jp.jal.co.jp/ja/s/article/jdsp000000R0000000030482jmb)
-- [チャージ残高期限FAQ](https://faq-jp.jal.co.jp/ja/s/article/jdsp000000R0000000030211jmb)
-- [JAL Payポイント期限FAQ](https://faq-jp.jal.co.jp/ja/s/article/jdsp000000R0000000030245jmb)
-- [JMB利用案内](https://www.jal.co.jp/jp/ja/jmb/index08.html)
+- [Balance inquiry](https://www.jal.co.jp/jp/ja/jmb/jalpay/pay/usage/balance-inquiry/)
+- [Top-ups](https://www.jal.co.jp/jp/ja/jmb/jalpay/pay/usage/charge/)
+- [Usage history FAQ](https://faq-jp.jal.co.jp/ja/s/article/jdsp000000R0000000030482jmb)
+- [Top-up balance expiry FAQ](https://faq-jp.jal.co.jp/ja/s/article/jdsp000000R0000000030211jmb)
+- [JAL Pay points expiry FAQ](https://faq-jp.jal.co.jp/ja/s/article/jdsp000000R0000000030245jmb)
+- [JMB usage guide](https://www.jal.co.jp/jp/ja/jmb/index08.html)
 - [JMB passkey](https://www.jal.co.jp/jp/ja/jmb/jmb-login/passkey/)
 - [JMB one-time password](https://www.jal.co.jp/jp/ja/jmb/jmb-login/otp/)
-- [JALファミリークラブ](https://www.jal.co.jp/jp/ja/jalmile/jfc/)
-- [JALカード家族プログラム](https://www.jal.co.jp/jp/ja/jalcard/function/jfp.html)
+- [JAL Family Club](https://www.jal.co.jp/jp/ja/jalmile/jfc/)
+- [JAL Card Family Program](https://www.jal.co.jp/jp/ja/jalcard/function/jfp.html)
 - [JMB/JAL Pay Android app](https://play.google.com/store/apps/details?id=com.jalglobalwallet.jgw&hl=ja)
-- [JAL予約app](https://play.google.com/store/apps/details?id=jp.co.jal.dom&hl=ja)
+- [JAL reservation app](https://play.google.com/store/apps/details?id=jp.co.jal.dom&hl=ja)
 
-## 3. 公式経路とデータ範囲
+## 3. Official routes and data scope
 
-| 経路                              | read範囲                                              | 粒度/state                                         | 期間/件数/export                                  | tradeoff                                    |
-| --------------------------------- | ----------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------- | ------------------------------------------- |
-| JMB app / JAL Pay card面          | charge残高、JAL Payポイント、利用明細、積算マイル     | wallet event。決済/charge/返金/pointを区別する必要 | 公式固定期間・件数は公開確認できず。CSV/PDF未確認 | JAL Payのprimary route、device-bound        |
-| JAL Pay「利用明細」               | payment/charge等のdetail                              | JMB app card面から表示。pending/settled名称未確認  | app内。pagination/filter/export未確認             | 正本だがwrite導線隣接                       |
-| JMB Web                           | マイルtotal、積算/利用実績、期限別マイル、Life Status | lot/event単位                                      | filter/row上限/CSV/PDFはlive未確認                | browser bootstrap/replay候補                |
-| JMB app                           | マイルtotal/期限、会員証、JAL Pay                     | mobile summary/detail                              | export未確認                                      | walletとmileageを同一appで表示、ledgerは別  |
-| Family Club / Card Family Program | 特典時に利用可能なfamily pool                         | 個人口座の所有・期限を維持する関係                 | family全履歴exportではない                        | 国内居住/海外居住・card条件を混同しない     |
-| Global WALLET member Web          | legacy/関連wallet管理画面                             | JAL Payとの現行範囲は未確認                        | login pageあり                                    | primaryにせず境界をlive確認                 |
-| JAL予約app/Web                    | 予約・搭乗・航空券                                    | booking ledger                                     | 別source                                          | マイル積算根拠にはなるがJMB明細正本ではない |
-| JALカードmember site              | card未確定/確定明細・請求                             | issuer ledger                                      | 発行会社source                                    | JAL Pay/JMBへ混ぜない                       |
+| Route                                   | Read scope                                                             | Granularity/state                                                           | Period/count/export                                                        | Tradeoff                                                               |
+| --------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| JMB app / JAL Pay card surface          | Top-up balance, JAL Pay points, usage statements, accrued miles        | Wallet events; distinguish payments/top-ups/refunds/points                  | Official fixed periods/counts not established publicly; CSV/PDF unverified | Primary JAL Pay route, device-bound                                    |
+| JAL Pay `利用明細` ("usage statements") | Payment/top-up and other details                                       | Displayed from JMB app card surface; pending/settled terminology unverified | In-app; pagination/filters/exports unverified                              | Authoritative, but adjacent writes                                     |
+| JMB Web                                 | Mileage total, accrual/redemption records, expiry buckets, Life Status | Lots/events                                                                 | Filters/row limits/CSV/PDF not verified live                               | Browser bootstrap/replay candidate                                     |
+| JMB app                                 | Mileage total/expiry, membership card, JAL Pay                         | Mobile summary/detail                                                       | Export unverified                                                          | Wallet/mileage in same app, separate ledgers                           |
+| Family Club / Card Family Program       | Family pool usable for awards                                          | Relationship retaining personal account ownership/expiry                    | Not a full family history export                                           | Do not conflate domestic/overseas residence/card conditions            |
+| Global WALLET member Web                | Legacy/related wallet management screens                               | Current relationship to JAL Pay unverified                                  | Login page exists                                                          | Do not make primary; verify boundary live                              |
+| JAL reservation app/Web                 | Reservations, boarding, tickets                                        | Booking ledger                                                              | Separate source                                                            | May support mileage accrual evidence, not authoritative JMB statements |
+| JAL Card member site                    | Pending/confirmed card statements/billing                              | Issuer ledger                                                               | Issuer source                                                              | Keep separate from JAL Pay/JMB                                         |
 
 ### JAL Pay
 
-公式FAQはJMB app topのJAL Pay card面にある「利用明細」から履歴を確認すると案内する。公開情報では
-履歴保持期間、最大件数、pagination、CSV/PDF/printを確認できないため、現行appでschemaとして検証する。
+Official FAQ directs history checks through `利用明細` on the JAL Pay card surface at JMB app home.
+Public information does not establish history retention, maximum rows, pagination, or CSV/PDF/printing;
+verify as schemas in the current app.
 
-JAL Payには通常のチャージ残高と、マイル交換/campaign等で追加されるJAL Payポイントがあり、期限が異なる。
-charge残高は最後に増減した日から5年。マイルcharge由来pointは起算月を含め13か月後月末、campaign等は
-付与条件ごとの期限となる。totalだけでなくbucket、増減日、expiry、sourceを分ける。
+JAL Pay has ordinary top-up balances and JAL Pay points added through mileage exchange/campaigns etc., with
+different expiry. Top-up balances expire five years from the last increase/decrease. Mileage-top-up-derived
+points expire at the end of the month 13 months later, counting the starting month; campaigns etc. use expiry
+under each award's conditions. Separate buckets, change dates, expiry, and sources in addition to totals.
 
-決済authorization、売上確定、取消、返金、charge成功/失敗の公式state名・timestampは未確認。利用明細と
-残高差だけでpending/settledを推測しない。JAL Payから外部wallet等へのchargeは支払/送金相当のwriteであり、
-検証のために実行しない。
+Official state names/timestamps for payment authorization, sales confirmation, cancellation, refund, and
+top-up success/failure are unverified. Do not infer pending/settled from usage statements and balance changes
+alone. Top-ups from JAL Pay to external wallets etc. are payment/transfer-equivalent writes; do not execute them for verification.
 
 ### JMB / family
 
-JMB通常マイルは搭乗/利用日の36か月後月末が原則だが、JMB elite/elite plus期間中の積算は60か月等の
-例外がある。会員属性から一律期限を算出せず、Web/appが示すlot別expiryを正本とする。積算日、利用日、
-service/type、増減、残高、expiry、statusを必要schemaとする。
+Ordinary JMB miles generally expire at month-end 36 months after boarding/use; exceptions include 60 months
+for accrual during JMB elite/elite plus periods. Do not calculate uniform expiry from member attributes;
+use lot expiry displayed on Web/app as authoritative. Required schemas: accrual date, use date, service/type,
+change, balance, expiry, status.
 
-JALファミリークラブとJALカード家族プログラムは対象者・居住/カード条件が異なる。いずれも家族の搭乗分を
-一人の個人口座へ恒久移転するものではなく、対象特典の利用時に個人口座を合算する制度。各memberの履歴・
-期限・所有を維持し、pool membershipとredemption配分を別relationshipにする。
+JAL Family Club and JAL Card Family Program differ in eligibility/residence/card conditions. Neither permanently
+transfers family members' flight miles into one personal account; they pool personal accounts at eligible award
+use. Retain each member's history/expiry/ownership; model pool membership and redemption allocation as separate relationships.
 
-## 4. 認証、MFA、passkey、Bitwarden
+## 4. Authentication, MFA, passkeys, and Bitwarden
 
-JMBはpassword loginに加え、公式にpasskeyとone-time passwordを提供する。OTP通知先はemail/SMS設定が
-関係し、JAL Pay初期設定にもSMS認証がある。exact RP ID、WebAuthn extensions、allowed credential、OTP
-trigger、trusted device、app biometric/PIN、session/token寿命はlive未確認。
+JMB officially offers passkeys and one-time passwords alongside password login. OTP destinations depend on
+email/SMS settings; JAL Pay initial setup also has SMS authentication. Exact RP IDs, WebAuthn extensions,
+allowed credentials, OTP triggers, trusted devices, app biometrics/PINs, and session/token lifetimes are not verified live.
 
-BitwardenはWebAuthn passkeyを保持し得るが、当該JMB credentialがBitwardenに存在すること、JALのlive RP IDと
-一致すること、app/device loginへ利用できることは未確認。vault/password/passkey private key/OTP/device IDを
-cloudへ置かない。本人browser/deviceでbootstrapし、source-scoped read sessionだけを暗号化してreplayする。
-passkey/OTP/recovery/account lockが出たら自動処理を停止する。認証設定や新passkey登録はしない。
+Bitwarden may store WebAuthn passkeys, but whether this JMB credential exists there, matches JAL's live RP ID,
+or works for app/device login is unverified. Keep vaults/passwords/passkey private keys/OTPs/device IDs out of cloud.
+Bootstrap in the owner's browser/device; encrypt only source-scoped read sessions for replay. Stop automation
+on passkeys/OTP/recovery/account locks. Do not change authentication settings or register new passkeys.
 
 ## 5. WAF / JS / APK / deobfuscation
 
-2026-08-26のWSL観測で`www.jal.co.jp`のJAL Pay/passkey公開pageはHTTP 403、`Server: AkamaiGHost`。
-JAL FAQはSalesforce Experience/Lightningの公開appで、Global WALLET member WebはF5 BIG-IP cookieを設定して
-loginへredirectした。これは各公開pathのedge事実であり、JAL Pay app APIのvendor/policyを証明しない。
+WSL observations on 2026-08-26: public JAL Pay/passkey pages on `www.jal.co.jp` returned HTTP 403,
+`Server: AkamaiGHost`. JAL FAQ is a public Salesforce Experience/Lightning app; Global WALLET member Web
+set F5 BIG-IP cookies and redirected to login. These are edge facts for each public path, not proof of
+JAL Pay app API vendor/policy.
 
-認証不要JSはJAL public bundleとSalesforce Aura/Lightningまで確認できる。route/config/XHR/fetch/GraphQL、
-source mapを静的解析しても、Bot cookie/fingerprint/challengeを模倣・回避しない。FAQのAura actionをprivate
-consumer APIと誤認しない。
+Unauthenticated JS was established only as JAL public bundles and Salesforce Aura/Lightning. Even during static
+analysis of routes/config/XHR/fetch/GraphQL/source maps, do not imitate/bypass Bot cookies/fingerprints/challenges.
+Do not mistake FAQ Aura actions for private consumer APIs.
 
-JMB/JAL Pay Android packageは`com.jalglobalwallet.jgw`、予約appは`jp.co.jal.dom`。所有端末/正規Playから
-base/split APKを取得し、署名/version/hash後にaapt2/apkanalyzer、JADX/apktool、native strings/readelfで
-manifest、host/path、JSON/protobuf、token storage、WebView、pinning/attestationを調査する。R8難読化は
-resources、Retrofit/OkHttp annotation、call graph、runtime metadataで対応し、mappingを捏造しない。
+JMB/JAL Pay Android package: `com.jalglobalwallet.jgw`; reservation app: `jp.co.jal.dom`. Obtain base/split
+APKs from owned devices/legitimate Play; verify signatures/versions/hashes, then use aapt2/apkanalyzer,
+JADX/apktool, native strings/readelf to examine manifests, hosts/paths, JSON/protobuf, token storage,
+WebView, pinning/attestation. Correlate R8 obfuscation through resources, Retrofit/OkHttp annotations,
+call graphs, and runtime metadata without fabricated mappings.
 
-本人が既存残高/履歴を開く1回だけhost/path/method/status/header名とredacted schemaを観測する。payment、
-charge、point conversion、award、booking、family/profile endpointは名前だけdeny分類。pinning/attestationで
-見えなければ解除・hookせず観測障壁として記録する。
+Observe hosts/paths/methods/statuses, header names, and redacted schemas once while the owner opens existing
+balances/history. Classify payment/top-up/point conversion/award/booking/family/profile endpoints as denied
+by name only. If pinning/attestation hides them, do not remove it or hook around it; record the observation barrier.
 
-## 6. third-party transport/auth
+## 6. Third-party transport/auth
 
-GitHubでpackage ID、JAL Pay/API、Global WALLET member hostを検索したが、consumer残高/履歴を取得する公開client、
-SDK wrapper、session/login実装は確認できなかった。package ID結果はapp inventory等でtransport evidenceに
-ならない。これは検索時点のnegative evidenceであり、非存在の証明ではない。
+GitHub searches by package ID, JAL Pay/API, and Global WALLET member host found no public consumer balance/history
+client, SDK wrapper, or session/login implementation. Package ID results were app inventories etc., not
+transport evidence. This is negative evidence at search time, not proof of nonexistence.
 
-JAL flight/award search、旅行予約、法人/partner API、card明細clientは別data familyで、JMB個人口座やJAL Pay
-consumer APIとして転用しない。具体的transport/authは公式APK静的解析と本人操作のredacted observationで
-確定する。公開実装がないため、推測host/pathをprobeしない。
+JAL flight/award search, travel reservations, corporate/partner APIs, and card statement clients are separate
+data families; do not repurpose them as personal JMB/JAL Pay consumer APIs. Establish concrete transport/auth
+through official APK static analysis and redacted owner-operated observations. Without public implementations,
+do not probe guessed hosts/paths.
 
-## 7. read/write隔離
+## 7. Read/write isolation
 
-- allowlistは観測済みbalance、history list/detail、mileage balance/accrual/redemption readだけ。
-- JAL Payのpay/charge/withdraw/point conversion、payment source、card/Google Pay登録をdeny。
-- JMB award exchange、booking、cancel、family enrollment、profile/passkey/OTP設定をdeny。
-- login bootstrap POSTは本人操作の別境界。collectorに汎用POST/任意URL/write scope tokenを持たせない。
-- host/path/query/content-type/schemaを固定。unknown redirect/deep link/intentで停止。
-- raw response/token/JMB番号/merchant/booking/実額をlog、trace、crash dump、CIへ出さない。
-- 401/403/409/429、Akamai challenge、OTP、schema/version drift、device/integrity要求で停止。
+- Allowlist only observed balance, history list/detail, mileage balance/accrual/redemption reads.
+- Deny JAL Pay pay/top-up/withdraw/point conversion, payment sources, card/Google Pay registration.
+- Deny JMB award exchange, booking, cancellation, family enrollment, profile/passkey/OTP settings.
+- Login bootstrap POST is a separate owner-operated boundary. Give collectors no generic POST/arbitrary URLs/write-scope tokens.
+- Fix hosts/paths/queries/content-types/schemas. Stop on unknown redirects/deep links/intents.
+- Do not emit raw responses/tokens/JMB numbers/merchants/bookings/actual amounts to logs, traces, crash dumps, or CI.
+- Stop on 401/403/409/429, Akamai challenges, OTP, schema/version drift, device/integrity requirements.
 
-## 8. Runtime適性
+## 8. Runtime suitability
 
-| runtime               | 適性              | 判断                                                                 |
-| --------------------- | ----------------- | -------------------------------------------------------------------- |
-| owner browser/device  | 最適              | passkey/OTP/SMS bootstrap、公式表示、redacted observation            |
-| Local WSL             | 適                | APK/JS/DOM parser、sanitized artifact処理                            |
-| Cloudflare Workers    | 低〜条件付き      | proven GET/token replayなら可能。Akamai/passkey/device bindingが課題 |
-| Cloudflare Containers | 条件付き          | full browser/parserを隔離可能。mobile trustはない                    |
-| OCI container         | 条件付き          | digest固定、secret store、read-only FS、egress allowlistでreplay試験 |
-| Kubernetes            | 過剰              | CronJob/Secret/NetworkPolicyは可能だが単一会員にcost過大             |
-| Android実機           | JAL Pay調査に必須 | 正規app/device state。定常UI automationは更新・write UIで脆い        |
+| Runtime                 | Suitability                    | Assessment                                                                         |
+| ----------------------- | ------------------------------ | ---------------------------------------------------------------------------------- |
+| Owner browser/device    | Best                           | Passkey/OTP/SMS bootstrap, official displays, redacted observation                 |
+| Local WSL               | Suitable                       | APK/JS/DOM parsers, sanitized artifact processing                                  |
+| Cloudflare Workers      | Low to conditional             | Possible for proven GET/token replay; Akamai/passkey/device binding challenges     |
+| Cloudflare Containers   | Conditional                    | Can isolate full browser/parser, no mobile trust                                   |
+| OCI container           | Conditional                    | Replay tests with digest pinning, secret store, read-only FS, egress allowlist     |
+| Kubernetes              | Excessive                      | CronJob/Secret/NetworkPolicy possible, but excessive cost for one member           |
+| Physical Android device | Essential for JAL Pay research | Legitimate app/device state; routine UI automation fragile due to updates/write UI |
 
-## 9. PR #5共通 A-E / cost
+## 9. PR #5 common A-E / cost
 
 - A: direct documented/export API suitable for scheduled headless use
 - B: stable read-only internal API with renewable/reusable session
 - C: browser/app bootstrap + headless replay plausible
 - D: full browser/device automation probably required
 - E: manual capture remains safe default
-- Cost: 1 = small wrapper、5 = device-bound/adversarial
+- Cost: 1 = small wrapper, 5 = device-bound/adversarial
 
-| route                                    |     Level | Cost | 判定                                       |
-| ---------------------------------------- | --------: | ---: | ------------------------------------------ |
-| JMB Web/appを人手確認・sanitized capture |         E |  1-2 | 安全。公式export/期間は未確認              |
-| JAL Pay app manual capture               |         E |    2 | 残高bucket/履歴を読めるがapp外export未確認 |
-| JMB browser bootstrap + read replay      |     C候補 |    4 | passkey/OTP/Akamai/session未確認           |
-| JAL Pay app bootstrap + API replay       |     C候補 |    5 | transport/token/device binding未確認       |
-| full app UI automation                   |         D |    5 | device/SMS/生体、更新、write UI            |
-| documented consumer API                  | A該当なし |    5 | 公開公式APIなし                            |
+| Route                                       |       Level | Cost | Assessment                                                      |
+| ------------------------------------------- | ----------: | ---: | --------------------------------------------------------------- |
+| Manual JMB Web/app checks/sanitized capture |           E |  1-2 | Safe; official export/periods unverified                        |
+| JAL Pay app manual capture                  |           E |    2 | Can read balance buckets/history; outside-app export unverified |
+| JMB browser bootstrap + read replay         | C candidate |    4 | Passkeys/OTP/Akamai/sessions unverified                         |
+| JAL Pay app bootstrap + API replay          | C candidate |    5 | Transport/token/device binding unverified                       |
+| Full app UI automation                      |           D |    5 | Devices/SMS/biometrics, updates, write UI                       |
+| Documented consumer API                     |  No A route |    5 | No public official API                                          |
 
-総合は **D/cost 5**、安全な既定は **E/cost 1-2**。read APIとrenewable scoped sessionが実証されれば
-JAL PayをCへ、安定性まで確認できればB候補へ更新する。
+Overall **D/cost 5**; safe default **E/cost 1-2**. Update JAL Pay to C if read APIs and renewable scoped
+sessions are demonstrated; to a B candidate if stability is also established.
 
-## 10. read-only live検証 / stop条件
+## 10. Read-only live verification / stop conditions
 
-1. 公式domain/package/version/signer、login/passkey/OTP/SMS triggerだけ確認。秘密は本人入力。
-2. JAL Payでcharge残高/point bucket/expiry、history type/status、最古日、件数、pagination、detail、exportを確認。
-3. 既存取消/返金/失敗があればstatus名のみ記録。新規決済/charge/交換を作らない。
-4. JMB Webでtotal、期限lot、積算/利用列、期間filter、pagination、row上限、CSV/PDF controlを確認。
-5. Family Club/Card Family Programはmember count、pool表示、個人口座との関係のみ。登録/特典へ進まない。
-6. 正規split APKと公開JSを静的解析し、read/write host/path/tokenを別表化。
-7. 本人が既存履歴を開く1回だけredacted network metadataを観測。unknown/write候補で停止。
-8. replay候補は同一device→local host→OCI各1回。device/integrity bindingならcloud化を中止しmanual routeへ戻す。
+1. Check only official domains/packages/versions/signers and login/passkey/OTP/SMS triggers. Owner enters secrets.
+2. In JAL Pay, check top-up balance/point buckets/expiry, history types/statuses, earliest date, counts, pagination, details, exports.
+3. If existing cancellations/refunds/failures exist, record only status names. Do not create payments/top-ups/exchanges.
+4. On JMB Web, check totals, expiry lots, accrual/redemption columns, period filters, pagination, row limits, CSV/PDF controls.
+5. For Family Club/Card Family Program, check only member counts, pool displays, relationship to personal accounts. Do not enter registration/awards.
+6. Statically analyze legitimate split APKs/public JS, separately tabulating read/write hosts/paths/tokens.
+7. Observe redacted network metadata once while the owner opens existing history. Stop on unknown/write candidates.
+8. Try replay candidates once each: same device → local host → OCI. If device/integrity-bound, abandon cloud use and return to manual routes.
 
-stop: 支払/charge/point conversion/award/booking/cancel/family/profile操作、OTP/recovery、PIN/生体、Bot challenge、
-pinning/attestation、未知host/path、POST/PUT/PATCH/DELETE（本人login以外）、401/403/409/429、account lock、
-PII redaction失敗、schema drift。security controlを無効化しない。
+Stop: payment/top-up/point conversion/award/booking/cancellation/family/profile operations, OTP/recovery,
+PIN/biometrics, Bot challenges, pinning/attestation, unknown hosts/paths, POST/PUT/PATCH/DELETE (except owner
+login), 401/403/409/429, account locks, PII redaction failure, schema drift. Do not disable security controls.
 
-## 11. 事実・推測・未確認
+## 11. Facts, hypotheses, and unverified items
 
-**確認事実:** JMB app内のJAL Pay利用明細、charge残高5年、マイル由来point13か月後月末、通常JMB36か月と
-elite等60か月例外、family合算制度、JMB passkey/OTP・JAL Pay SMS、Akamai/Salesforce/F5公開経路、公開client不在。
+**Established facts:** JAL Pay usage statements within JMB app; five-year top-up balance expiry; mileage-derived
+points expire at month-end 13 months later; ordinary JMB 36 months and elite etc. 60-month exceptions;
+family pooling schemes; JMB passkeys/OTP/JAL Pay SMS; public Akamai/Salesforce/F5 routes; no public client found.
 
-**推測:** app内部にはbalance/history read transportとpaginationがあるがhost/path/schema/tokenは未確認。
-Family poolは各member eventを二重計上せずrelationshipとして表現すべき。
+**Hypotheses:** Internal app balance/history read transport and pagination exist, but hosts/paths/schemas/tokens
+are unverified. Model family pools as relationships without double counting individual member events.
 
-**未確認:** JAL Pay履歴期間/件数/export、pending/settled全state、API/token renewal/device binding/pinning/
-attestation、JMB明細期間/件数/official export、Bitwarden credential適合、family redemption配分、Global WALLET
-member Webと現行JAL Payの範囲、Web/app schema一致。
+**Unverified:** JAL Pay history periods/counts/exports, all pending/settled states, API/token renewal/device binding/
+pinning/attestation, JMB statement periods/counts/official exports, Bitwarden credential compatibility,
+family redemption allocation, Global WALLET member Web/current JAL Pay scope, Web/app schema consistency.
