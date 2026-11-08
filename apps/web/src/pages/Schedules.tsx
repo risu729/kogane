@@ -104,6 +104,11 @@ function Occurrence({ value }: { value: ScheduleOccurrence }): ReactNode {
     </div>
   );
 }
+/** A card's last save result and the revision it describes. */
+interface CardMessage {
+  revision: number;
+  text: string;
+}
 function ScheduleCard({
   value,
   refresh,
@@ -113,8 +118,8 @@ function ScheduleCard({
   value: ScheduleView;
   refresh: () => Promise<unknown>;
   /** Held by the page: the card remounts on each new revision, its result must not. */
-  message: string;
-  setMessage: (message: string) => void;
+  message: CardMessage | undefined;
+  setMessage: (message: CardMessage) => void;
 }): ReactNode {
   const [enabled, setEnabled] = useState(value.enabled),
     [timezone, setTimezone] = useState(value.timezone),
@@ -123,7 +128,7 @@ function ScheduleCard({
   async function save(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
-    setMessage("");
+    setMessage({ revision: value.revision, text: "" });
     try {
       const result = await request<{ reservation: string }>(`/${value.id}`, {
         revision: value.revision,
@@ -131,14 +136,19 @@ function ScheduleCard({
         timezone,
         pattern,
       });
-      setMessage(
-        result.reservation === "pending"
-          ? "保存済み。実行予約の反映を待っています。"
-          : "保存しました。",
-      );
+      // The version check admits a save only at the revision shown, so the
+      // save stored exactly the next revision: the message is about that one,
+      // never about a later change read back from elsewhere.
+      setMessage({
+        revision: value.revision + 1,
+        text:
+          result.reservation === "pending"
+            ? "保存済み。実行予約の反映を待っています。"
+            : "保存しました。",
+      });
       await refresh();
     } catch (error) {
-      setMessage(failure(error));
+      setMessage({ revision: value.revision, text: failure(error) });
     } finally {
       setBusy(false);
     }
@@ -233,7 +243,7 @@ function ScheduleCard({
           >
             {busy ? "保存中…" : "設定を保存"}
           </button>
-          <p role="status">{message}</p>
+          <p role="status">{message?.revision === value.revision ? message.text : ""}</p>
         </form>
       )}
       <dl>
@@ -684,7 +694,7 @@ export function SchedulesPage(): ReactNode {
   const [editor, setEditor] = useState<MaintenanceRule | null | undefined>(),
     [filter, setFilter] = useState("collection"),
     [leaseMessage, setLeaseMessage] = useState(""),
-    [cardMessages, setCardMessages] = useState<Record<string, string>>({}),
+    [cardMessages, setCardMessages] = useState<Record<string, CardMessage>>({}),
     [releasingSources, setReleasingSources] = useState<string[]>([]);
   const leaseRequests = useRef(new Set<string>());
   const refresh = () => client.invalidateQueries({ queryKey: ["schedules"] });
@@ -757,7 +767,7 @@ export function SchedulesPage(): ReactNode {
                 key={`${s.id}:${s.revision}`}
                 value={s}
                 refresh={refresh}
-                message={cardMessages[s.id] ?? ""}
+                message={cardMessages[s.id]}
                 setMessage={(message) =>
                   setCardMessages((messages) => ({ ...messages, [s.id]: message }))
                 }

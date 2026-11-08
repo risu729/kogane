@@ -492,6 +492,36 @@ describe.if(runnable)("operator schedule administration", () => {
       await page.close();
     }
   }, 30000);
+  test("a save's result message is not shown over a later change read back from elsewhere", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page
+        .locator(".schedule-card")
+        .filter({ has: page.getByRole("heading", { name: "ソニー銀行", exact: true }) });
+      const time = card.getByLabel("ソニー銀行の実行時刻");
+      await time.fill("06:40");
+      await card.getByRole("button", { name: "設定を保存", exact: true }).click();
+      await card.getByRole("status").getByText("保存しました。", { exact: true }).waitFor();
+      // Another tab then stores revision 3 with its own time, and this page
+      // reads it back: the card shows values this save never wrote.
+      const row = snapshot.schedules.find((schedule) => schedule.id === "sony-bank")!;
+      expect(row.revision).toBe(2);
+      Object.assign(row, {
+        revision: 3,
+        pattern: { ...row.pattern, time: "07:15" },
+      });
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await page.waitForFunction(
+        () =>
+          (document.querySelector('input[aria-label="ソニー銀行の実行時刻"]') as HTMLInputElement)
+            ?.value === "07:15",
+      );
+      expect(await card.getByRole("status").innerText()).toBe("");
+    } finally {
+      await page.close();
+    }
+  }, 30000);
   test("reopening a maintenance rule after it changed edits the stored revision, not the earlier form", async () => {
     // Synthetic rule and page; no provider page is read.
     const rule = {
