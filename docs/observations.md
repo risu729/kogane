@@ -17,6 +17,37 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## V Point Pay: refuse negative notification amounts (notification-event 1.0.2)
+
+2026-11-08. Owner decision, 2026-11-08 13:29 UTC: a notification amount
+whose meaning is unknown fails the artifact
+([issue 1181](https://github.com/risu729/kogane/issues/1181),
+[ADR 0004](adr/0004-payment-type-shapes-from-evidence.md)).
+
+The Layer A extractor keeps a leading `-` in `amountYen`.
+`v-point-pay-notification-event@1.0.2` refuses a negative amount for `usage`,
+`charge` or `balance-addition` with the closed reason
+`v_point_pay_negative_notification_amount_unsupported`, before emitting any
+transaction or balance. Both supported normalized-event schemas use the same
+rule. No negative notification amount has been observed, and no document
+establishes whether one would be a reversal, a correction or a display
+variant. The parser does not infer any of those meanings.
+
+`declined` remains an attempt without posted cashflow amount fields. Its
+optional attempted amount remains only in `extra.amountYen`, including a
+negative value; it does not establish a cashflow. Zero and positive amounts
+on the other event types keep their earlier reading.
+
+This is a new release from 1.0.1; only this parser's digest changes. Complete
+outputs of all four existing synthetic fixtures were frozen from 1.0.1 in
+`v-point-pay-parser-boundaries/expected-1.0.1.json` and compare unchanged.
+Existing fixture bytes and earlier frozen expectations are untouched. No
+migration or production read was needed. The processor registers the release
+and its existing repair lane handles new parses; old evidence and observations
+remain append-only. Tests: `packages/parsers/test/v-point-pay-refusals.test.ts`,
+`packages/parsers/test/parser-digests.test.ts` and
+`experiments/observation-pipeline-local/test/v-point-pay-parser.test.ts`.
+
 ## Shared CSV reader: recover malformed quotes without losing following rows
 
 2026-11-08. Owner decision, 2026-11-08 13:26 UTC: tolerate malformed
@@ -3231,18 +3262,6 @@ Phase 3 is done when:
   transactions; a window whose CSV is missing or whose row count differs
   from the JSON `countCnt` is an error, never filled from the JSON; the work
   is [#1182](https://github.com/risu729/kogane/issues/1182).
-- **A V Point Pay notification amount with a minus sign.** The Layer A
-  extractor keeps a leading `-` in `amountYen`, and
-  `v-point-pay-notification-event` 1.0.0 accepts a signed integer there,
-  takes its magnitude and signs it by event type: `usage` becomes an
-  outflow, `charge` and `balance-addition` an inflow, with no warning.
-  A negative `charge` would therefore read as an inflow and a negative
-  `usage` as an outflow; only `extra.amountYen` keeps the stated sign.
-  No observation or document records what a negative notification
-  amount means (a reversal, a correction or a display variant). Owner
-  decision (2026-11-08): since the meaning is unknown, such an event fails
-  the artifact; the work, a release of this parser, is
-  [#1181](https://github.com/risu729/kogane/issues/1181).
 - **Reward units.** Point grants are recorded today as JPY transactions,
   contradicting `docs/design.md`. The fix direction is clear; the shape of
   `reward_observations` is not, because the payloads that would settle it
