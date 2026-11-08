@@ -177,8 +177,9 @@ read of the grouped list (ADR 0081) show the same lead.
   and only `leadSearch` differs (`truncated`); every statement's lead and
   code are checked against its full list; the search's plan reads nothing
   whole without table statistics, finds the candidates by
-  `card_settlement_candidates_statement`, and no index of the table starts
-  with `(statement_key, created_at)`.
+  `card_settlement_candidates_statement` and sorts what the cursor keeps
+  (`USE TEMP B-TREE FOR ORDER BY`), and no index of the table starts with
+  `(statement_key, created_at)`.
 - `packages/application/test/card-settlement-statements.test.ts`: on random
   stores with synthetic history (owners and accounts drawn otherwise,
   rejected candidates, tied creation times) the positional search chooses

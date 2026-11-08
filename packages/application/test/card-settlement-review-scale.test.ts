@@ -841,6 +841,13 @@ describe("card settlement readiness reads on a scaled store without statistics",
       "SEARCH c USING INDEX card_settlement_candidates_statement (statement_key=?)",
     );
     expect(older.filter((step) => /\bcreated_at\b/u.test(step))).toEqual([]);
+    // The pass's own steps, before the readiness CTEs: it sorts what it keeps.
+    expect(older.indexOf("MATERIALIZE ready_candidates")).toBeGreaterThan(0);
+    const pass = older.slice(0, older.indexOf("MATERIALIZE ready_candidates"));
+    expect(pass).toContain(
+      "SEARCH c USING INDEX card_settlement_candidates_statement (statement_key=?)",
+    );
+    expect(pass).toContain("USE TEMP B-TREE FOR ORDER BY");
     const indexes = (
       db.query("PRAGMA index_list(card_settlement_candidates)").all() as { name: string }[]
     ).map(({ name }) => [

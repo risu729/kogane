@@ -464,8 +464,9 @@ later one after the last candidate the previous pass judged, in the list's
 `created_at DESC, id DESC` order. A decision recorded between two passes on a
 candidate an earlier pass judged therefore moves no later candidate past the
 next pass, and a new candidate with the newest creation time sorts before
-every cursor and is not judged in that load. A decision recorded between two passes on a candidate not yet
-judged takes it out of the search, as it would have been on a later load.
+every cursor and is not judged in that load. A decision recorded between two
+passes on a candidate not yet judged takes it out of the search, as it would
+have been on a later load.
 
 The other judged candidates follow, newest first, collapsed under the lead
 (`この請求のほかの候補（N 件）`, N the statement's other candidates). `candidateCount` counts every candidate of the
@@ -940,13 +941,13 @@ whose five newest hold no acceptance and none ready, and which has older
 candidates, adds the search for an older ready one (ADR 0089): one read a pass
 (`CARD_SETTLEMENT_STATEMENT_OLDER_SQL`) for every statement still searching,
 which reaches those statements' candidates by the same index, keeps those
-older than the statement's cursor (the last candidate judged), reads each
-kept one's latest decision by key and its facts, ranks the rest and judges at
-most 50 of them per statement. No index holds
+older than the statement's cursor (the last candidate judged), reads by key
+whether any decision names each kept one and its facts, ranks the rest and
+judges at most 50 of them per statement. No index holds
 `(statement_key, created_at, id)`: `card_settlement_candidates_statement`
 holds `statement_key` alone, so the cursor filters the rows the key finds
 rather than starting an index range, and the pass sorts what it keeps
-(`USE TEMP B-TREE`); the plan check pins this. A pass is one
+(`USE TEMP B-TREE FOR ORDER BY`); the plan check pins both. A pass is one
 read for all the statements of the page still searching, not one per
 statement. The search stops after four passes (200 judged per statement) and
 says `truncated`. A page of ten statements therefore makes at most eight
@@ -965,8 +966,8 @@ statement its newest candidates decide, which on the scaled store is every
 statement, so the two grouped rows above are unchanged there (not measured
 again).
 `card-settlement-review-scale.test.ts` checks its plan without statistics
-(the key by `card_settlement_candidates_statement`, no whole read, and no index
-on the cursor's columns);
+(the key by `card_settlement_candidates_statement`, the pass's sort, no whole
+read, and no index on the cursor's columns);
 the frozen text of the grouped read before it
 (`card-settlement-statement-group-legacy-sql.ts`, digest-pinned) returns the
 same rows as the current read on the random and scaled stores; the frozen
