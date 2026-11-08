@@ -111,7 +111,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/util.ts":
       "15ecd270250b82e4009b0b0b05469f5030849a555a9b671f7062941c90cf49dd",
     "poc/observation-pipeline/src/parsers/v-point-pay.ts":
-      "232d0277fce37175d0e334daae90340b3b15e1631d5dd004251a1a8170dfa3a3",
+      "d16279ba46c167366bb29a62811517623c518bcaa0c0a8e9fa9a1b7fb60aeb51",
     "poc/observation-pipeline/src/parsers/v-point.ts":
       "67e8b851360f2da7046967231407dfe2e0c01ee87e58a670d7a1f355efe2bb7d",
     "poc/observation-pipeline/src/parsers/vpass.ts":
@@ -712,8 +712,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "v-point-pay-notification-event": {
-      version: "1.0.1",
-      codeDigest: "53512dd8114834f681229e7280ce77d80b9ca6ca1a9bd03704fc827595ae0d90",
+      version: "1.0.2",
+      codeDigest: "a1296deb79ac04b581bd32396bab0fd6b9eba4258ddc4a4328e9c5cc7d4e8293",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
