@@ -78,3 +78,37 @@ risk class R2). For every other caller â€” every agent without that delegation â
 the decision above is unchanged: the two fields are stripped and the answer
 says `decisions: "operator-only"`. The whole-store grant requirement is
 unchanged.
+
+## Amendment: no next page the grant cannot read (2026-11-08)
+
+Status: proposed.
+
+**Context.** The decision above lets the grant's `maxRows` bound paging:
+`offset + 50` above it is `413 budget_exceeded`. The answer still carried
+the operator page's `data.nextOffset`, so a page could name a next offset
+the same caller is refused (with `maxRows` 100, the page at offset 50 named
+offset 100). The candidate reviews of `packages/application`
+(`reviewInstrumentCandidates`, `reviewAccountCandidates`) already offer no
+next page past `maxRows`.
+
+**Options considered.** (1) Keep the offset and let the request fail:
+rejected, an answer should not advertise a request it refuses. (2) Null the
+offset silently, as the candidate reviews do: rejected for this read alone,
+because a null offset then means two things (the last page, or the bound).
+(3) Null the offset and say why in a closed code: chosen.
+
+**Decision.** `kogane.purchases.explain` answers `nextPage`: `offered`
+(`data.nextOffset` names the next page), `none` (no event follows, or one
+`eventId` was read) or `budget_exceeded` (events follow, but the next
+page's offset plus 50 would exceed the grant's `maxRows`; `data.nextOffset`
+is then `null`). Everything else in `data` is the operator page's.
+
+**Consequences.** With the whole-store grant every MCP client holds
+(`maxRows` 1000) the deepest page offered starts at 950; a deeper filter is
+read by statement `period`. The operator route is unchanged. The card
+settlement reads and the unmatched statements still offer a page past
+`maxRows`, an open limit recorded in the [agent API](../agent-api.md#card-purchase-explanation).
+
+**Verification.** `packages/application/test/purchases-explain.test.ts`
+("a next page the same grant would be refused is not offered, and says why"),
+on 101 synthetic events.

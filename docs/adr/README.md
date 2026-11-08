@@ -23,13 +23,13 @@ for current behavior.
 - [ADR 0010: Bound terminal registration by a per-invocation operation budget](0010-terminal-registration-budget.md)
 - [ADR 0011: Resolve settlement ownership through keyed CTEs, keep the 0044 views as the contract](0011-keyed-ownership-ctes.md)
 - [ADR 0012: Map Mizuho ordinary deposits under identity policy version 2](0012-mizuho-identity-policy-v2.md)
-- [ADR 0013: Give agents card purchases through a separate read-only tool](0013-agent-card-purchase-read.md) — accepted; amended by ADR 0063
+- [ADR 0013: Give agents card purchases through a separate read-only tool](0013-agent-card-purchase-read.md) — accepted; amended by ADR 0063; next-page amendment 2026-11-08 proposed
 - [ADR 0014: A shared-R2 collector's producer is `collector-<collector id>`](0014-collector-producer-ids.md)
 - [ADR 0015: Source authority v2 names CORE source ids](0015-source-authority-v2.md)
 - [ADR 0016: Key MyJCB pending statements by payment month, current while their position shows them](0016-myjcb-pending-statement-slots.md)
 - [ADR 0017: Add card purchase review command kinds with one rebuild, not relation markers](0017-card-purchase-review-commands.md)
 - [ADR 0018: SBI Shinsei as the second bank debit adapter of card settlement review](0018-sbi-shinsei-bank-debit-adapter.md)
-- [ADR 0019: Reported state on a date from the latest complete capture before it](0019-dated-reported-state.md) — accepted; agent read `kogane.reported-state.read` (amendment 2026-11-06, #953)
+- [ADR 0019: Reported state on a date from the latest complete capture before it](0019-dated-reported-state.md) — accepted; agent read `kogane.reported-state.read` (amendment 2026-11-06, #953); request rules amendment 2026-11-08 proposed
 - [ADR 0020: Prices are provider observations promoted by a closed rule list](0020-price-promotion-by-rule.md)
 - [ADR 0021: Collectors state the registration contract; the Processor's refusals stay](0021-collector-registration-contract.md)
 - [ADR 0022: Give registered shared-R2 artifacts their parser dataset](0022-registration-artifact-datasets.md)

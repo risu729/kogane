@@ -17,6 +17,7 @@ is [reconstructed state](reconstructed-state.md) (served by `GET /api/v2/reconst
 | Policies            | `packages/domain/src/reported-state.ts` (cutoff, freshness, payable status, perimeter)                                      |
 | Query               | `queryDatedState` in `packages/application/src/query/dated-state.ts`                                                        |
 | HTTP                | `GET /api/v2/reported-state?date=YYYY-MM-DD` (`services/app/src/reported-state-api.ts`)                                     |
+| Request rules       | `readReportedStateRequest` in `packages/application/src/query/reported-state-read.ts`, for the route and the tool           |
 | Agent tool          | `kogane.reported-state.read` (`services/app/src/read-tools.ts`), the route's `readReportedState`                            |
 | Contract            | `validReportedState` in `packages/observation-shared/src/reported-state-contract.ts`                                        |
 | Page                | 基準日の保有状況 at `/state` (`apps/web/src/pages/ReportedState.tsx`), capability `reportedStateOnDate`                     |
@@ -127,9 +128,10 @@ the wire contract refuses one.
 
 `GET /api/v2/reported-state?date=YYYY-MM-DD[&source=…][&account=…]`, GET and
 HEAD only, served to every signed-in reader (the reader authority the other
-GET routes have; it carries no review action). `400 invalid_date` for a
-missing or impossible date, `400 date_in_future` after today in Tokyo,
-`400 invalid_query` for any other or repeated parameter, `413
+GET routes have; it carries no review action). `400 invalid_query` for any
+other, repeated or empty parameter or a malformed `source` or `account`,
+`400 invalid_date` for a missing, malformed or impossible date,
+`400 date_in_future` after today in Tokyo, `413
 result_limit_exceeded` past 5,000 rows in one read (refused, never cut), and
 `404` where the store lacks `dataset_snapshot_policies`, `card_statement_facts`
 or `card_settlement_reviews`; `/api/meta` advertises `reportedStateOnDate` on

@@ -341,28 +341,56 @@ describe("the agent tool", () => {
     expect(await listed(granted, false)).not.toContain(REPORTED_STATE_TOOL_NAME);
   });
 
-  it("refuses with the route's codes and the same status on both agent paths", async () => {
-    const cases: [unknown, number, Record<string, unknown>][] = [
-      [{ date: "2026-02-30" }, 400, { error: "invalid_date" }],
-      [{ date: "2999-01-01" }, 400, { error: "date_in_future" }],
-      [{ date: "20260910" }, 400, { error: "invalid_request" }],
-      [{}, 400, { error: "invalid_request" }],
-      [{ date: today, source: "SMBC" }, 400, { error: "invalid_request" }],
-      [{ date: today, account: " x" }, 400, { error: "invalid_request" }],
-      [{ date: today, offset: 0 }, 400, { error: "invalid_request" }],
+  it("refuses with the route's codes and the same status on the route and both agent paths", async () => {
+    // Each body beside the query string the route gets for the same request
+    // (ADR 0081 point 2): one service decides both, so one status and code.
+    const cases: [Record<string, unknown>, string, number, string][] = [
+      [{ date: "2026-02-30" }, "date=2026-02-30", 400, "invalid_date"],
+      [{ date: "2999-01-01" }, "date=2999-01-01", 400, "date_in_future"],
+      [{ date: "20260910" }, "date=20260910", 400, "invalid_date"],
+      [{ date: "2026-9-1" }, "date=2026-9-1", 400, "invalid_date"],
+      [{}, "", 400, "invalid_date"],
+      [{ date: "" }, "date=", 400, "invalid_query"],
+      [{ date: today, source: "SMBC" }, `date=${today}&source=SMBC`, 400, "invalid_query"],
+      [{ date: today, account: " x" }, `date=${today}&account=%20x`, 400, "invalid_query"],
+      [{ date: today, offset: 0 }, `date=${today}&offset=0`, 400, "invalid_query"],
     ];
-    for (const [args, status, expected] of cases) {
+    for (const [args, query, status, code] of cases) {
+      const label = JSON.stringify(args);
+      const route = await call(`${PATH}?${query}`);
+      expect(route.status, label).toBe(status);
+      expect(((await route.json()) as { error: string }).error, label).toBe(code);
       const http = await call(TOOL_PATH, {
         subject: "agent-principal",
         body: args,
         environment: granted,
       });
-      expect(http.status, JSON.stringify(args)).toBe(status);
-      expect(await http.json(), JSON.stringify(args)).toEqual(expected);
+      expect(http.status, label).toBe(status);
+      expect(await http.json(), label).toEqual({ error: code });
       const viaMcp = await mcpCall(args);
-      expect(viaMcp.result?.isError, JSON.stringify(args)).toBe(true);
-      expect(viaMcp.result?.structuredContent, JSON.stringify(args)).toEqual(expected);
+      expect(viaMcp.result?.isError, label).toBe(true);
+      expect(viaMcp.result?.structuredContent, label).toEqual({ error: code });
     }
+    // A body the query string cannot spell: a value of the wrong type is
+    // malformed, with the code of the key it is given for.
+    for (const [args, code] of [
+      [{ date: 20260910 }, "invalid_date"],
+      [{ date: today, source: 1 }, "invalid_query"],
+      [{ date: today, account: ["x"] }, "invalid_query"],
+    ] as const) {
+      const http = await call(TOOL_PATH, {
+        subject: "agent-principal",
+        body: args,
+        environment: granted,
+      });
+      expect([JSON.stringify(args), http.status]).toEqual([JSON.stringify(args), 400]);
+      expect(await http.json()).toEqual({ error: code });
+      expect((await mcpCall(args)).result?.structuredContent).toEqual({ error: code });
+    }
+    // A repeated parameter exists only on the route.
+    const repeated = await call(`${PATH}?date=${today}&date=${today}`);
+    expect(repeated.status).toBe(400);
+    expect(((await repeated.json()) as { error: string }).error).toBe("invalid_query");
     // Past the row bound: refused, never cut.
     const full = await call(TOOL_PATH, {
       subject: "agent-principal",
