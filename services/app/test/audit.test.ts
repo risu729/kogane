@@ -1084,7 +1084,7 @@ describe("the operator's read and the never-recorded list", () => {
     for (const args of [
       '{"filters":{"__proto__":"x"}}',
       '{"filters":{"a":"b","__proto__":{"c":"d"}}}',
-      String.raw`{"__proto__":"x"}`,
+      String.raw`{"\u005f_proto__":"x"}`,
       '{"cursor":null,"cursor":"a"}',
       '{"__proto__":"x","__proto__":{"cursor":"y"}}',
       String.raw`{"cursor":"A\ud800"}`,
@@ -1106,6 +1106,50 @@ describe("the operator's read and the never-recorded list", () => {
         isError: agent.response.status >= 400,
         body: await agent.response.json(),
       });
+    }
+  });
+
+  it("answers a top-level `__proto__` argument as any unknown key on every listed tool", async () => {
+    // Every tool this environment lists on /mcp, so a tool added later is
+    // covered without naming it here.
+    const listing = await call("/mcp", {
+      via: "mcp",
+      headers: MCP_HEADERS,
+      body: { jsonrpc: "2.0", id: 1, method: "tools/list" },
+    });
+    const names = (
+      (await listing.response.json()) as { result: { tools: { name: string }[] } }
+    ).result.tools.map((tool) => tool.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "kogane.audit.search",
+        "kogane.accounts.history",
+        "kogane.card-settlements.statements",
+        "kogane.ops.collection.request",
+      ]),
+    );
+    const answer = async (name: string, args: string) => {
+      const tool = await call("/mcp", {
+        via: "mcp",
+        headers: MCP_HEADERS,
+        rawBody: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":${JSON.stringify(name)},"arguments":${args}}}`,
+      });
+      const message = (await tool.response.json()) as {
+        result?: { isError?: boolean; structuredContent: unknown };
+        error?: unknown;
+      };
+      return {
+        status: tool.response.status,
+        message,
+        records: (await recordsOf(tool.requestId)).map(brief),
+      };
+    };
+    for (const name of names) {
+      const unknown = await answer(name, '{"zz_unknown":"x"}');
+      expect({ name, isError: unknown.message.result?.isError }).toEqual({ name, isError: true });
+      // A refusal that names the key names the key sent.
+      const expected = JSON.parse(JSON.stringify(unknown).replaceAll("zz_unknown", "__proto__"));
+      expect({ name, ...(await answer(name, '{"__proto__":"x"}')) }).toEqual({ name, ...expected });
     }
   });
 
