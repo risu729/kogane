@@ -8,7 +8,8 @@
   (`withCollectionLease`, `LEASE_TIMING`), CORE migration
   `0082_collection_lease_heartbeat.sql`,
   `services/processor/src/schedule-store.ts` (`expireStaleLeases`, called by
-  `bootstrapSchedules` on every `processor-tick`),
+  the `processor-tick` branch of `ScheduleAlarm` in
+  `services/processor/src/schedule-alarm.ts`; see the amendment below),
   `packages/application/src/audit/automatic.ts` (`leaseExpiryWrite`),
   `packages/application/src/operation-path/catalogue.ts`
   (`alarm.lease.expire`),
@@ -204,3 +205,27 @@ runs and its heartbeat is written.
 - `services/processor/test/schedule-alarm-review.test.ts` and
   `test/collector-dispatch.test.ts`: both codes end `uncertain` and are not
   dispatched again.
+
+## Amendment: only the `processor-tick` alarm frees a lease (2026-11-07)
+
+Status: proposed (accepted when the PR that carries it merges).
+
+As merged, `expireStaleLeases` ran inside `bootstrapSchedules`, which the
+release workflow's `POST /internal/schedules/bootstrap` also calls. A deployment
+therefore freed stale leases too, and recorded each release with principal
+`alarm:processor-tick` on the `alarm` path although no alarm acted: the audit
+record named the wrong principal. The sweep now runs only in the
+`processor-tick` branch of `ScheduleAlarm`, after the Pipeline tick and before
+the reservation repair (as it ran inside that repair before, so a failing
+reconcile still cannot keep a silent lease held). The deployment's bootstrap
+frees no lease; the next tick, at most 5 minutes later, does. Open limit:
+while the `processor-tick` job is disabled, or its Pipeline tick throws before
+the sweep, no lease is freed (between the merge of this ADR and this amendment a
+deployment's bootstrap still would have); the operator's release remains.
+Nothing else in this ADR changes.
+
+Verification: `services/processor/test/schedule-bootstrap-identity.test.ts`
+(the deployment's bootstrap leaves a silent lease held and writes no
+`alarm.lease.expire` record) and
+`services/processor/test/schedule-alarm-audit.test.ts` (the `processor-tick`
+alarm frees it and records `alarm:processor-tick`).

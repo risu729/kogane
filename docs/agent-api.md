@@ -890,16 +890,20 @@ See [the writer contract](schedules.md#the-writers-contract-for-delegated-execut
 `schedules.lease.release`, R3; [ADR 0081](adr/0081-ui-parity-through-mcp.md)
 point 3). The schedules page's 停止した実行を解除 has this tool so that the
 screen operation exists on MCP, but the release stays the operator's: it
-asserts that the execution holding the lease stopped, which the server cannot
-verify ([ADR 0063](adr/0063-delegated-ai-operation-path.md) item 5), and no
+asserts that the execution holding the lease stopped before the server can
+tell from ten minutes of heartbeat silence
+([ADR 0063](adr/0063-delegated-ai-operation-path.md) item 5,
+[ADR 0085](adr/0085-collection-lease-heartbeat.md)), and no
 delegation capability names it. While `SCHEDULES_ENABLED` is on the tool is
 listed to every MCP client, with the arguments the page's route takes
 (`source`, `leaseRef`, `confirmedStopped: true`), and every call answers `403 operation_not_delegable`,
 whatever its arguments, grant or delegation. The call reads no store and is
 not relayed to the Processor; it is recorded once as `refused` on `mcp` at R3.
 It has no `/api/agent/v1` route, and a browser session on `/mcp` is not offered
-it. A lease that will not clear is released by the operator on the schedules
-page ([schedules](schedules.md#settings-api)).
+it. A lease whose holder went silent is freed by the Processor's
+`processor-tick` alarm once its heartbeat is ten minutes old; one that should
+not wait for that is released by the operator on the schedules page
+([schedules](schedules.md#settings-api)).
 
 **Re-survey proposals** (`kogane.schedules.survey.read`, operation
 `schedules.survey.read`, R0; `kogane.schedules.survey.decide`, operation
