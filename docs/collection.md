@@ -902,6 +902,13 @@ the parser refuses is still stored, sanitized and `partial`, under the
 `unparsed` key above; no parser accepts that key, so it is evidence only.
 Additional authentication stops the run, and scheduled retries are disabled.
 
+The `mizuho-weekly` maintenance rule defers the Sunday run until 08:15 JST
+(Saturday 22:00 to Sunday 08:15). The official window ends at 08:00
+(`config/maintenance-research.json`); revision 2 of the rule (2026-11-08,
+owner-instructed) adds 15 minutes because the run deferred to 08:00:01 JST that
+morning failed at login with `login-unrecognized-page`. A re-survey proposal
+that reads 08:00 as the official end is no reason to move it back.
+
 Sanitizer: `sanitizeMizuhoPage` (`packages/parsers/src/parsers/mizuho-html.ts`)
 reduces each page to its account/history DOM before anything is planned, and
 `mizuhoRunPlan` refuses an artifact that is not already its own sanitizer's
