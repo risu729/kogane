@@ -17,7 +17,7 @@ import { runPrefix, storeBytes, storeJson } from "../src/storage";
 import { monthRanges } from "../src/dates";
 import type { BackfillManifest, StoredArtifact } from "../src/types";
 
-const STARTED = "2099-01-01T00:00:00.000Z";
+const STARTED = "2099-05-01T00:00:00.000Z";
 async function month(prefix: string, number: number): Promise<StoredArtifact[]> {
   const mm = String(number).padStart(2, "0");
   const range = monthRanges(
@@ -56,7 +56,7 @@ function manifest(
     source: "smbc-direct",
     runId,
     startedAt: STARTED,
-    completedAt: "2099-01-01T00:0" + completed + ":00.000Z",
+    completedAt: "2099-05-01T00:0" + completed + ":00.000Z",
     status: success ? "success" : "partial",
     requestedRange: { start: "2099-01-01", end: "2099-04-28" },
     completedChunks: completed,
@@ -204,7 +204,7 @@ describe("SMBC resumed publication", () => {
     await persistBackfillRun(bucket, await input(manifest(run, first, 1)));
     const failed: BackfillManifest = {
       ...manifest(run, first, 1),
-      completedAt: "2099-01-01T00:02:00.000Z",
+      completedAt: "2099-05-01T00:02:00.000Z",
       failureCodes: ["transactions_http_500"],
     };
     const saved = await input(failed, "synthetic-later-session");

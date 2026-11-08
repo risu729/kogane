@@ -35,6 +35,8 @@ describe("isResumable", () => {
   test("resumes a partial run and its waiting-for-new-approval state", () => {
     expect(isResumable(progress("partial"))).toBeTrue();
     expect(isResumable(progress("waiting_for_approval"))).toBeTrue();
+    // An uncompleted approval returns to idle but still owns the stopped run.
+    expect(isResumable(progress("idle"))).toBeTrue();
   });
 
   test("does not resume a completed or identity-free run", () => {

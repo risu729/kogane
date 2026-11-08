@@ -19,7 +19,7 @@ import { runPrefix, sha256Hex, storeBytes, storeJson } from "../src/storage";
 import type { BackfillManifest, StoredArtifact } from "../src/types";
 
 const RUN_ID = "44444444-4444-4444-8444-444444444444";
-const STARTED_AT = "2026-09-01T00:00:00.000Z";
+const STARTED_AT = "2099-02-01T00:00:00.000Z";
 const PREFIX = runPrefix(STARTED_AT, RUN_ID);
 const RANGE = { start: "2099-01-01", end: "2099-01-31" };
 
@@ -48,7 +48,7 @@ describe("SMBC Direct shared DATA bucket", () => {
       source: "smbc-direct",
       runId: RUN_ID,
       startedAt: STARTED_AT,
-      completedAt: "2026-09-01T00:10:00.000Z",
+      completedAt: "2099-02-01T00:10:00.000Z",
       status: "success",
       requestedRange: RANGE,
       completedChunks: 1,

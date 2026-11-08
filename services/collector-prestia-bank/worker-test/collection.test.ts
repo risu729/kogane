@@ -28,6 +28,30 @@ function collection() {
   };
 }
 describe("PRESTIA bank Worker shared DATA acquisition", () => {
+  it("persists a failed signoff flag while publishing parseable successful balance evidence", async () => {
+    const response = await createCollection({
+      collect: async () => ({ ...collection(), signoffFailed: true }),
+    })(env);
+    expect(response.httpStatus).toBe(200);
+    expect(response.body).toMatchObject({ status: "success", signoffFailed: true });
+    const terminal = await readTerminal(env.DATA, "prestia-bank", response.body.runId!);
+    if (terminal.outcome !== "found") throw Error("missing-terminal");
+    expect(terminal.manifest.providerOutcome).toBe("success");
+    expect(terminal.manifest.coverageStatus).toBe("complete");
+    expect(terminal.manifest.units[0]?.coverageStatus).toBe("complete");
+    expect(terminal.manifest.reports).toContainEqual({
+      reportRef: "logout",
+      reportKind: "logout",
+      scope: "run",
+      outcome: "failed",
+      safeErrorCode: "logout_failed",
+    });
+    expect((await verifyReferencedObjects(env.DATA, terminal.manifest)).outcome).toBe("ok");
+    const stored = await env.DATA.get(terminal.manifest.artifacts[0]!.storageRef.key);
+    expect(parsePrestiaBankBalancePage(await stored!.text())).toEqual(
+      parsePrestiaBankBalancePage(collection().body),
+    );
+  });
   it("rejects retired triggers before bank access", async () => {
     const collect = vi.fn(async () => collection()),
       handler = createHandler({ collect });

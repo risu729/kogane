@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { compactDate, japanToday, monthRanges, validateDate } from "../src/dates";
+import {
+  compactDate,
+  japanToday,
+  lastFinishedJapanDay,
+  monthRanges,
+  nextJapanMidnight,
+  validateDate,
+} from "../src/dates";
 
 describe("monthRanges", () => {
   test("splits an inclusive range at calendar month boundaries", () => {
@@ -19,6 +26,15 @@ describe("monthRanges", () => {
 describe("date helpers", () => {
   test("uses the Japan calendar date", () => {
     expect(japanToday(new Date("2026-08-31T21:15:00Z"))).toBe("2026-09-01");
+  });
+
+  test("closes a day exactly at JST midnight, including leap and year boundaries", () => {
+    expect(lastFinishedJapanDay(new Date("2024-02-29T14:59:59.999Z"))).toBe("2024-02-28");
+    expect(lastFinishedJapanDay(new Date("2024-02-29T15:00:00.000Z"))).toBe("2024-02-29");
+    expect(lastFinishedJapanDay(new Date("2026-01-01T01:00:00.000Z"))).toBe("2025-12-31");
+    expect(nextJapanMidnight(new Date("2026-01-01T01:00:00.000Z"))).toBe(
+      Date.parse("2026-01-01T15:00:00.000Z"),
+    );
   });
 
   test("validates and compacts dates", () => {

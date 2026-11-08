@@ -301,7 +301,7 @@ test("st-george: the DOM projection and the run manifest register and seal", asy
 });
 
 test("smbc-direct: responses, their extractions and the run manifest register and seal", async () => {
-  const prefix = `raw/smbc-direct/2099/01/01/${RUN_ID}`;
+  const prefix = `raw/smbc-direct/2026/09/01/${RUN_ID}`;
   const bytesByKey = new Map<string, Uint8Array>();
   const stored = async (
     dataset: SmbcStoredArtifact["dataset"],
@@ -322,7 +322,9 @@ test("smbc-direct: responses, their extractions and the run manifest register an
       ...(range ? { range } : {}),
     };
   };
-  const range = { start: "2099-01-01", end: "2099-01-31" };
+  // Before STARTED_AT: only days finished in JST before acquisition are
+  // complete coverage (issue 1178).
+  const range = { start: "2026-08-01", end: "2026-08-31" };
   const manifest: BackfillManifest = {
     schemaVersion: "smbc-direct-backfill-worker-poc-v1",
     source: "smbc-direct",
@@ -344,14 +346,14 @@ test("smbc-direct: responses, their extractions and the run manifest register an
       ),
       await stored(
         "transactions-raw",
-        "transactions/20990101-20990131.raw.json.sjis",
+        "transactions/20260801-20260831.raw.json.sjis",
         '{"rows":[]}',
         "application/json",
         range,
       ),
       await stored(
         "transactions-normalized",
-        "transactions/20990101-20990131.normalized.json",
+        "transactions/20260801-20260831.normalized.json",
         '{"transactions":[]}',
         "application/json",
         range,
@@ -543,7 +545,7 @@ test("prestia-globalpass: a run with a sanitizer code and an unwalked page regis
   expect(registered.unitFailureCodes).toEqual(["globalpass_html_shape_unreviewed"]);
 });
 
-test("prestia-globalpass: a walked two-page month and an empty month register success and parse-eligible pages", async () => {
+test("prestia-globalpass: complete months and a failed logout register success and parse-eligible pages", async () => {
   // Every selected month proven whole (ADR 0026's amendment of 2026-10-04):
   // the first month's two pages, page 2 under its page-qualified key, and an
   // empty second month. The account unit is complete, so the run registers
@@ -577,6 +579,7 @@ test("prestia-globalpass: a walked two-page month and an empty month register su
       sha256: "a".repeat(64),
     })),
     failures: [],
+    logoutFailed: true,
   };
   const plan = await globalPassRunPlan({
     manifest,

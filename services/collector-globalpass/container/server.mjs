@@ -1,5 +1,6 @@
 import { createBrowserDiagnostics } from "./diagnostics.mjs";
 import { obtainChallengeToken } from "./challenge.mjs";
+import { signOut } from "./logout.mjs";
 import { CollectorFailure, failureCode } from "./failure.mjs";
 import http from "node:http";
 import net from "node:net";
@@ -416,18 +417,6 @@ async function walkActivityPages(page, response, month) {
       pageCount,
       html,
     });
-  }
-}
-
-async function signOut(page) {
-  const candidates = page.getByRole("link", { name: /ログアウト/u });
-  const count = await candidates.count().catch(() => 0);
-  for (let index = 0; index < count; index += 1) {
-    const candidate = candidates.nth(index);
-    if (!(await candidate.isVisible().catch(() => false))) continue;
-    await candidate.click().catch(() => undefined);
-    await page.waitForLoadState("domcontentloaded").catch(() => undefined);
-    return;
   }
 }
 
@@ -1131,7 +1120,7 @@ async function collectBrowser(payload, response, diagnostics, lastHttpError, cha
         await walkActivityPages(page, response, month);
       });
     }
-    await diagnostics.step("logout", () => signOut(page));
+    await writeLine(response, await signOut(page, diagnostics));
   } catch (error) {
     failed = true;
     primaryError = error;
