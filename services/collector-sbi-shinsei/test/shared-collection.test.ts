@@ -210,6 +210,20 @@ describe("G1-01/G1-02 persisting a run", () => {
     expect(await bucket.head(summary.terminalKey)).toBeNull();
   });
 
+  test("a capture that is not JSON is refused before anything is written", async () => {
+    const bucket = new FakeR2Bucket();
+    await expect(
+      persistSharedRun(bucket, {
+        ...input,
+        artifacts: [{ ...input.artifacts[0]!, body: "not-json" }],
+      }),
+    ).rejects.toThrow("shared_artifact_json_invalid");
+    // The plan fails while the manifest entries are still being written, so
+    // no object, no collector manifest and no terminal reach DATA.
+    expect(bucket.putKeys).toEqual([]);
+    expect(await bucket.head(terminalKey("sbi-shinsei", RUN_ID))).toBeNull();
+  });
+
   test("a failed run with nothing collected still writes a failed terminal", async () => {
     const bucket = new FakeR2Bucket();
     const summary = await persistSharedRun(bucket, {
