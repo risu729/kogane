@@ -1,6 +1,7 @@
 import iconv from "iconv-lite";
 import { parse, type DefaultTreeAdapterMap } from "parse5";
 import {
+  MizuhoParseError,
   parseAccountPage,
   parseHistoryPage,
   sanitizeMizuhoPage,
@@ -68,7 +69,10 @@ export interface MizuhoCollection {
 export interface MizuhoArtifact {
   artifactKey: string;
   unitKey: string;
-  dataset: "mizuho-account-list-html" | "mizuho-ordinary-history-html";
+  dataset:
+    | "mizuho-account-list-html"
+    | "mizuho-ordinary-history-html"
+    | "mizuho-ordinary-history-unparsed-html";
   body: string;
   mediaType: "text/html";
   partial: boolean;
@@ -116,11 +120,55 @@ export class MizuhoClientError extends Error {
     this.name = "MizuhoClientError";
   }
 }
+/**
+ * Every code `parseAccountPage`, `parseHistoryPage` and `sanitizeMizuhoPage`
+ * throw (packages/parsers/src/parsers/mizuho-html.ts). Kept here, not in the
+ * parser, so the parser's code digest and version stay unchanged; a code the
+ * parser gains later reads `read-parse-error` until it is listed.
+ */
+const MIZUHO_HTML_ERROR_CODES = [
+  "account-mismatch",
+  "authentication-required",
+  "conflicting-responsive-balances",
+  "duplicate-account",
+  "duplicate-row-index",
+  "inconsistent-row-count",
+  "invalid-account-context",
+  "invalid-account-identifier",
+  "invalid-count",
+  "invalid-displayed-range",
+  "invalid-html-size",
+  "invalid-row-index",
+  "invalid-text",
+  "invalid-transaction-date",
+  "invalid-yen-amount",
+  "missing-or-duplicate-balance",
+  "missing-or-duplicate-field",
+  "unrecognized-empty-state",
+  "unrecognized-page",
+  "unsupported-account-kind",
+  "unsupported-transaction-currency",
+] as const;
+/**
+ * A page check the shared Mizuho HTML parser refused, as `parse-<its code>`:
+ * the parser's own closed code, so a refused page names the check instead of
+ * one `read-parse-error` for all of them.
+ */
+export const MIZUHO_PARSE_ERROR_CODES = MIZUHO_HTML_ERROR_CODES.map(
+  (code) => `parse-${code}` as const,
+);
 export function safeMizuhoErrorCode(error: unknown): string {
-  return error instanceof MizuhoClientError &&
+  if (
+    error instanceof MizuhoClientError &&
     (MIZUHO_CLIENT_ERROR_CODES as readonly string[]).includes(error.code)
-    ? error.code
-    : "read-parse-error";
+  )
+    return error.code;
+  if (
+    error instanceof MizuhoParseError &&
+    (MIZUHO_HTML_ERROR_CODES as readonly string[]).includes(error.code)
+  )
+    return `parse-${error.code}`;
+  return "read-parse-error";
 }
 function fail(code: string): never {
   throw new MizuhoClientError(code);
@@ -601,12 +649,29 @@ export async function collectMizuho(options: {
       const readIndex = readIndexes.get(account.sourceIndex);
       if (readIndex === undefined) fail("invalid-account-read-event");
       const html = sanitizeMizuhoPage(await request(HISTORY_ROUTE, readIndex));
-      const history = parseHistoryPage(html, account);
+      const prefix = `ordinary/${account.branchCode}-${account.accountNumber}`;
+      let history: History;
+      try {
+        history = parseHistoryPage(html, account);
+      } catch (error) {
+        // Keep the sanitized page the collector could not read (raw first):
+        // no parser accepts this key, so nothing is published from it, but the
+        // stored capture shows which page came back and a fixed parser can be
+        // replayed over it. The account's history unit still fails below.
+        artifacts.push({
+          artifactKey: `${prefix}/history/unparsed.html`,
+          unitKey: `${unit(account)}:page:unparsed`,
+          dataset: "mizuho-ordinary-history-unparsed-html",
+          body: html,
+          mediaType: "text/html",
+          partial: true,
+        });
+        throw error;
+      }
       histories.push(history);
       const partialPage = history.hasMore || history.displayedRange.from !== 1;
       if (partialPage) issues.push("history-pagination-unverified");
       const { from, to } = history.displayedRange;
-      const prefix = `ordinary/${account.branchCode}-${account.accountNumber}`;
       artifacts.push({
         artifactKey: `${prefix}/history/${from}-${to}.html`,
         unitKey: `ordinary:${account.branchCode}:${account.accountNumber}:page:${from}:${to}`,

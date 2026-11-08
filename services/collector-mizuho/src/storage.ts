@@ -6,7 +6,7 @@ import {
   type TerminalUnit,
 } from "../../../packages/collection/src/index";
 import { sanitizeMizuhoPage } from "../../../packages/parsers/src/parsers/mizuho-html";
-import { MIZUHO_CLIENT_ERROR_CODES, type MizuhoArtifact } from "./client";
+import { MIZUHO_CLIENT_ERROR_CODES, MIZUHO_PARSE_ERROR_CODES, type MizuhoArtifact } from "./client";
 
 /** The terminal's source (the collector id) and its producer, `collector-<collector id>` (ADR 0014). */
 export const MIZUHO_SOURCE = "mizuho-bank";
@@ -28,7 +28,11 @@ export interface MizuhoRun {
   failed: boolean;
 }
 
-const CLOSED_CODES = new Set<string>([...MIZUHO_CLIENT_ERROR_CODES, "account-limit"]);
+const CLOSED_CODES = new Set<string>([
+  ...MIZUHO_CLIENT_ERROR_CODES,
+  ...MIZUHO_PARSE_ERROR_CODES,
+  "account-limit",
+]);
 
 /**
  * A code the terminal may carry: one of the collector's closed codes, else the
