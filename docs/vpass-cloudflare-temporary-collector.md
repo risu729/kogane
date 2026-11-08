@@ -19,7 +19,9 @@ All disposable resources use the same prefix:
 - R2 binding: `DATA` → `kogane-raw-evidence`, shared by every collector (the
   per-source bucket `kogane-vpass-collector-poc` was deleted on 2026-09-13;
   see [legacy-retirement.md](legacy-retirement.md))
-- Cron: `0 21 * * *` (daily at 21:00 UTC / 06:00 JST)
+- Schedule: the Processor alarm job `vpass` (`config/alarm-jobs.json`,
+  `0 21 * * *` UTC / 06:00 JST); the Worker has no Cron Trigger
+  (`triggers.crons` is empty in `wrangler.jsonc`)
 - Worker secrets: `VPASS_ID`, `VPASS_PASSWORD`, `VPASS_DEVICE_ID`,
   `VPASS_AUTH_PUBLIC_KEY_B64`, and `VPASS_CONFIG_PUBLIC_KEY_B64`
 
@@ -54,8 +56,12 @@ failure surface without providing useful isolation. See Cloudflare's current
 [Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
 and [Cron Trigger documentation](https://developers.cloudflare.com/workers/configuration/cron-triggers/).
 
-Cloudflare Cron Trigger is the only periodic scheduler. Do not add a scheduled
-GitHub Actions workflow for this collector.
+The daily Cron Trigger described above was the scheduler until #430. Today the
+Processor's `ScheduleAlarm` is the only periodic scheduler: it calls
+`ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`), which runs
+the same all-card sequence in one invocation and returns a `failed` result when
+any card failed ([schedules.md](schedules.md)). Do not add a scheduled GitHub
+Actions workflow for this collector.
 
 ## Deploy and inspect
 
@@ -111,7 +117,8 @@ would break the currently deployed Free-plan version.
 npx wrangler delete --name kogane-vpass-collector-poc
 ```
 
-The Worker deletion removes its Cron Trigger and secrets with the Worker. Do
+The Worker deletion removes its secrets with the Worker. It does not touch the
+`vpass` alarm job, which is disabled on `/schedules` ([schedules.md](schedules.md)). Do
 not delete the shared `DATA` bucket: every collector and the Processor use it.
 If the legacy Free-plan Queue still exists, remove it separately with
 `npx wrangler queues delete kogane-vpass-collector-poc`.
