@@ -10,15 +10,15 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `13826bb5bfba82b725beef7e1fac5c64294fecf117ac4c0bacd83ccb2128086a`
+Schema digest: `b13743e508eb97020636e606ba09a08eac3415ae1eaa63b784de683406e745e4`
 
 ## Summary
 
-- Migrations applied: 78
+- Migrations applied: 79
 - Tables: 141 (all `STRICT`: yes)
 - Views: 44
-- Triggers: 525
-- Explicit indexes: 146
+- Triggers: 526
+- Explicit indexes: 147
 - `WITHOUT ROWID` tables: artifact_relations, artifact_transform_steps, fetch_run_annotations, ingest_client_producers, ingest_client_routes, origin_template_policies, producer_sources, run_inventory_items, source_external_ids
 
 | classification | count | tables |
@@ -72,7 +72,7 @@ active_releases, allocations, approvals, audit_overflow_counters, calculation_ru
 | `collection_run_stages` | core-keep | acquisition and fetch history | yes | no | yes | collection_run_stages_no_update | collection_run_stages_no_delete | 7 | 1 | 2 | 2 |
 | `collection_runs` | core-keep | acquisition and fetch history | yes | no | no | — | collection_runs_no_delete | 14 | 2 | 3 | 3 |
 | `collection_scan_state` | operational-mutable | parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out) | yes | no | no | — | — | 8 | 0 | 0 | 0 |
-| `collection_schedule_occurrences` | operational-mutable | claimed scheduling receipts; no financial evidence | yes | no | no | — | — | 8 | 1 | 2 | 1 |
+| `collection_schedule_occurrences` | operational-mutable | claimed scheduling receipts; no financial evidence | yes | no | no | — | — | 12 | 1 | 3 | 2 |
 | `collection_schedule_revisions` | core-keep | append-only schedule configuration audit | yes | no | yes | schedule_revisions_no_update | schedule_revisions_no_delete | 8 | 1 | 0 | 2 |
 | `collection_schedules` | operational-mutable | alarm configuration and reservations | yes | no | no | — | — | 12 | 0 | 0 | 0 |
 | `conversion_offers` | core-keep | reward reference claims | yes | no | yes | conversion_offers_no_update | conversion_offers_no_delete | 32 | 0 | 1 | 5 |
@@ -281,5 +281,6 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0070_economic_commit_guard.sql` | 53 | economic_identity_epochs |
 | `0071_economic_event_command_kinds.sql` | 34 | approvals_expanded, change_plans_expanded, decision_outbox_expanded, operation_receipts_expanded |
 | `0080_jpoint_program.sql` | 2 | dataset_snapshot_policies, reward_programs |
+| `0085_schedule_dispatch_marker.sql` | 9 | collection_schedule_occurrences_v2 |
 
 Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql, 0052_sbi_shinsei_bank_debits.sql, 0055_vpass_collector_card_binding.sql, 0056_sbi_shinsei_exchange_rate_policy_version.sql, 0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql, 0060_card_debit_account_statements.sql, 0061_scheduled_payment_observations.sql, 0068_ops_collector_dispatches.sql, 0069_maintenance_survey.sql, 0072_own_transfer_proposals.sql, 0075_audit_records.sql, 0077_reward_bucket_claims_v2.sql, 0078_maintenance_change_provenance.sql, 0079_instrument_temporal_journal.sql, 0082_collection_lease_heartbeat.sql, 0083_parse_runs_pending_index.sql, 0084_csv_reader_release_snapshot_policies.sql

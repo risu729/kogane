@@ -46,6 +46,7 @@ const STATUS = {
   completed: "完了",
   failed: "失敗",
   uncertain: "結果を確認できません",
+  not_dispatched: "収集の呼び出し前に停止",
   partial: "一部のみ取得",
 };
 const REF = {
@@ -103,6 +104,9 @@ function Occurrence({ value }: { value: ScheduleOccurrence }): ReactNode {
           </span>
         ),
       )}
+      {value.status === "not_dispatched" ? (
+        <p>収集先は呼び出されていません。自動再実行は一度までです。</p>
+      ) : null}
       {value.status === "uncertain" ? (
         <p>同じ予定の自動再実行は行いません。取得履歴を確認してください。</p>
       ) : null}

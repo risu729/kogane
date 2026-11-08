@@ -854,3 +854,24 @@ describe("freshness (collection-freshness-v1)", () => {
     ).toBe(false);
   });
 });
+
+test("a proven pre-RPC stop has a distinct reason in the shared UI and MCP wire contract", async () => {
+  const store = new QualityStore();
+  try {
+    store.db
+      .run(`INSERT INTO collection_schedule_occurrences(id,schedule_id,nominal_at,started_at,status,failure_code,dispatch_protocol,attempt_ref)
+      VALUES('synthetic-not-dispatched','vpass','2099-01-03T21:00:00.000Z','2099-01-03T21:00:01.000Z','not_dispatched','not_dispatched',1,'synthetic-attempt')`);
+    const summary = await queryCollectionQualitySummary(executor(store), { asOf: AS_OF });
+    expect(validApiResponse("/api/collection-quality", summary)).toBe(true);
+    const source = summary.sources.find((row) => row.sourceId === "vpass")!;
+    expect(source.reasons).toContain("occurrence_not_dispatched");
+    expect(source.reasons).not.toContain("occurrence_uncertain");
+    expect(source.schedules[0]?.latest).toMatchObject({
+      status: "not_dispatched",
+      failureCode: "not_dispatched",
+      terminals: [],
+    });
+  } finally {
+    store.db.close();
+  }
+});

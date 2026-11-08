@@ -136,14 +136,27 @@ export async function initializeSchedule(env: Env, id: string): Promise<Schedule
   }
   return readSchedule(env.DB, id);
 }
-/** Classify abandoned bookkeeping only; this never releases leases or replays collection. */
+/** Classify stopped attempts; only a new protocol claim proves absence of an RPC. */
 export async function markAbandonedOccurrences(db: D1Database, before: string): Promise<void> {
   await db
     .prepare(
-      "UPDATE collection_schedule_occurrences SET status='uncertain',failure_code='dispatch_uncertain' WHERE status='started' AND started_at<?",
+      `UPDATE collection_schedule_occurrences SET
+        status=CASE WHEN dispatch_protocol=1 AND dispatched_at IS NULL THEN 'not_dispatched' ELSE 'uncertain' END,
+        failure_code=CASE WHEN dispatch_protocol=1 AND dispatched_at IS NULL THEN 'not_dispatched' ELSE 'dispatch_uncertain' END
+        WHERE status='started' AND COALESCE(retry_claimed_at,started_at)<?`,
     )
     .bind(before)
     .run();
+}
+/** Only a collection occurrence's first proven pre-RPC stop is eligible. */
+export async function retryableOccurrence(db: D1Database, scheduleId: string) {
+  return db
+    .prepare(`SELECT id,nominal_at FROM collection_schedule_occurrences
+    WHERE schedule_id=? AND status='not_dispatched' AND retry_claimed_at IS NULL
+      AND dispatch_protocol=1 AND dispatched_at IS NULL
+    ORDER BY nominal_at LIMIT 1`)
+    .bind(scheduleId)
+    .first<{ id: string; nominal_at: string }>();
 }
 /**
  * How long a held lease may go without a heartbeat before its execution is
