@@ -71,6 +71,25 @@ const ERROR_TYPES = new Set([
   "HistoryBoundaryError",
   "GlobalPassSanitizerError",
 ]);
+/**
+ * GLOBAL PASS container failure codes and the category each one is. A code
+ * here never reads `unknown`: the code itself says which step failed.
+ */
+const GLOBALPASS_STEP_CATEGORIES = new Map<string, SafeErrorDetails["category"]>([
+  ["globalpass_relay_start_failed", "runtime"],
+  ["globalpass_browser_launch_failed", "runtime"],
+  ["globalpass_login_page_failed", "network"],
+  ["globalpass_challenge_failed", "runtime"],
+  ["globalpass_challenge_timeout", "challenge"],
+  ["globalpass_challenge_denied", "challenge"],
+  ["globalpass_login_submit_failed", "response"],
+  ["globalpass_login_denied", "authentication"],
+  ["globalpass_login_rejected", "authentication"],
+  ["globalpass_activity_open_failed", "response"],
+  ["globalpass_month_discovery_failed", "response"],
+  ["globalpass_statement_read_failed", "response"],
+  ["globalpass_browser_close_failed", "runtime"],
+]);
 const SAFE_CODES = new Set([
   // St.George's closed refusal vocabulary; no provider error text is admitted.
   "human-required",
@@ -150,6 +169,8 @@ const SAFE_CODES = new Set([
   "globalpass_html_redaction_failed",
   "globalpass_html_shape_unreviewed",
   "globalpass_html_utf8_invalid",
+  // GLOBAL PASS: which container step failed (`container/failure.mjs`).
+  ...GLOBALPASS_STEP_CATEGORIES.keys(),
 ]);
 
 // The closed strings a failure's `shape` may carry (GLOBAL PASS: which
@@ -329,6 +350,10 @@ export interface SafeErrorDetails {
     | "configuration"
     | "authentication"
     | "response"
+    /** A bot check (GLOBAL PASS Turnstile) that did not pass. */
+    | "challenge"
+    /** The collector's own runtime: browser, local relay, container. */
+    | "runtime"
     | "unknown";
   errorType: string;
   httpStatus?: number;
@@ -345,6 +370,9 @@ export function safeErrorDetails(error: unknown): SafeErrorDetails {
 
 function inspectError(error: unknown): SafeErrorDetails {
   const name = error instanceof Error ? error.name : "UnknownError";
+  const stepCode = error instanceof Error ? Reflect.get(error, "code") : undefined;
+  const stepCategory =
+    typeof stepCode === "string" ? GLOBALPASS_STEP_CATEGORIES.get(stepCode) : undefined;
   const details: SafeErrorDetails = {
     category: "unknown",
     errorType: ERROR_TYPES.has(name) ? name : "UnknownError",
@@ -356,7 +384,9 @@ function inspectError(error: unknown): SafeErrorDetails {
   const knownStatus = /^(?:collector_http_|history_http_)([1-5][0-9]{2})$/u.exec(message)?.[1];
   const numericStatus =
     typeof status === "number" ? status : knownStatus ? Number(knownStatus) : undefined;
-  if (
+  if (stepCategory !== undefined) {
+    details.category = stepCategory;
+  } else if (
     numericStatus !== undefined &&
     Number.isInteger(numericStatus) &&
     numericStatus >= 100 &&
@@ -410,7 +440,9 @@ export function createDiagnostics(source: string, runId: string) {
       stage: stage === "terminal" || STAGES.has(stage) ? stage : "unknown",
       outcome,
       durationMs: Math.max(0, durationMs),
-      ...(outcome === "failed" ? safeErrorDetails(error) : {}),
+      // `terminal` reports the run's status, not an error: a failed run's
+      // terminal line carries no error fields (they would read UnknownError).
+      ...(outcome === "failed" && stage !== "terminal" ? safeErrorDetails(error) : {}),
       ...(kept ? { shape: kept } : {}),
     };
     // Observability must not change the result of a provider or storage operation.

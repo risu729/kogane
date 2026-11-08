@@ -252,7 +252,16 @@ function refusal(failureCode: string): ScheduledResult {
 export async function runCollectorOperation(
   value: unknown,
   workspace: string,
-  runScheduled: (cron: string, scheduledTime: number) => Promise<ScheduledResult>,
+  runScheduled: (
+    cron: string,
+    scheduledTime: number,
+    /**
+     * The accepted request itself. A collector may treat it as the operator's
+     * explicit decision where its alarm would wait for one (St George's
+     * login block, SBI VC's login cooldown); the alarm never passes it.
+     */
+    request: CollectorOperationRequest,
+  ) => Promise<ScheduledResult>,
 ): Promise<ScheduledResult> {
   const parsed = parseCollectorOperationRequest(value);
   if (!parsed.ok) return refusal(parsed.code);
@@ -265,7 +274,7 @@ export async function runCollectorOperation(
   )
     return refusal("connection_mismatch");
   if (connection.action !== request.action) return refusal("action_unsupported");
-  return runScheduled(connection.cron, request.requestedAtMs);
+  return runScheduled(connection.cron, request.requestedAtMs, request);
 }
 
 const SAFE_CODE = /^[a-z0-9_]{1,64}$/u;

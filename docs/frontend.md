@@ -260,7 +260,9 @@ Agree on these before the production connection is enabled:
 - Data classification and connection capabilities (the table above). A
   successful API refresh means the UI reread its store, not that a collector
   ran or that a source is current. Display source timestamps without
-  inventing freshness thresholds.
+  inventing freshness thresholds: a freshness state is shown only where the
+  API states one under a named policy (collection quality's
+  `collection-freshness-v1`, the reported state's `dated-state-freshness-v1`).
 - Authenticated browser access and protected raw-evidence routes. No admin
   or ingestion credential is embedded in frontend code or browser storage.
 - Parser warnings, superseded observations, partial collection, and failure

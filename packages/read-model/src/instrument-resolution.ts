@@ -15,6 +15,9 @@
 //   provider row with no currency), makes the use's currency unconfirmed,
 //   never dropped and never replaced by the other unit. A use in another
 //   role states none.
+//   The current mapping is also marked when a `rule` assign decision made it
+//   (`ruleAdopted`): the identity writer records no decision for its own
+//   mappings, so only an automatic adoption has one.
 // - `LISTED_AS_SQL`: the current `listed_as` relation per (instrument,
 //   identifier): its newest decision, ordered as the change lifecycle orders
 //   a relation's history, or its newest proposal when it has no decision.
@@ -43,7 +46,10 @@ export const LISTED_AS_ROW_BOUND = 10_000;
 export const INSTRUMENT_HISTORY_BOUND = 100;
 
 export const INSTRUMENT_FACTS_SQL = `WITH eligible AS MATERIALIZED (
- SELECT m.identifier_id,m.instrument_id,m.method,m.status,m.revision,m.label,i.kind
+ SELECT m.identifier_id,m.instrument_id,m.method,m.status,m.revision,m.label,i.kind,
+  CASE WHEN m.method='rule' AND EXISTS(SELECT 1 FROM decision_revisions d
+   WHERE d.subject_kind='instrument_mapping' AND d.subject_ref=m.identifier_id
+    AND d.revision=m.revision AND d.decision_kind='assign' AND d.method='rule') THEN 1 ELSE 0 END AS rule_adopted
  FROM current_instrument_mappings m JOIN instruments i ON i.id=m.instrument_id
  WHERE i.kind IN ('security','crypto','product')
 ), used AS MATERIALIZED (
@@ -69,7 +75,7 @@ export const INSTRUMENT_FACTS_SQL = `WITH eligible AS MATERIALIZED (
  FROM denominated y LEFT JOIN instrument_identifiers c ON c.id=y.unit_id
 )
 SELECT e.identifier_id AS identifierId,e.instrument_id AS instrumentId,e.method,e.status,
- e.revision,e.kind,e.label,d.namespace,d.scope,d.value,d.details_json AS details,
+ e.revision,e.kind,e.label,e.rule_adopted AS ruleAdopted,d.namespace,d.scope,d.value,d.details_json AS details,
  s.source_id AS sourceId,s.currency,s.unconfirmed AS currencyUnconfirmed
 FROM stated s JOIN eligible e ON e.identifier_id=s.identifier_id
 JOIN instrument_identifiers d ON d.id=s.identifier_id
@@ -102,6 +108,12 @@ export interface InstrumentFactsRow {
   revision: number;
   kind: string;
   label: string;
+  /**
+   * 1 when the current mapping is a `rule` mapping with a `rule` assign
+   * decision at its revision: an automatic adoption (`instrument-auto-v1`),
+   * not the identity rule's own mapping, which has no decision.
+   */
+  ruleAdopted: 0 | 1;
   namespace: string;
   scope: string;
   value: string;

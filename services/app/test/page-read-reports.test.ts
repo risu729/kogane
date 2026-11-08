@@ -4,7 +4,7 @@
 // is refused outright when its explanation and export are (ADR 0072,
 // amendment of 2026-11-06). Every value is invented.
 import { env } from "cloudflare:test";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import { canonicalJson, type ReportBody } from "../../../packages/domain/src/index";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import {
@@ -220,6 +220,19 @@ describe("report page reads", () => {
       expect(overHttp.body).toMatchObject({ error: "invalid_request" });
       expect((await page.mcp(REPORTS, args)).body).toEqual(overHttp.body);
     }
+    // The list takes neither a view nor a policy: each one given is a ref.
+    for (const [args, refs] of [
+      [{ view: "body" }, ["view"]],
+      [{ decimalPolicy: "decimal-v1" }, ["decimalPolicy"]],
+      [{ view: "explanation", decimalPolicy: "decimal-v1" }, ["view", "decimalPolicy"]],
+    ] as [Record<string, unknown>, string[]][]) {
+      const overHttp = await page.http(REPORTS, args);
+      expect(overHttp, JSON.stringify(args)).toEqual({
+        status: 400,
+        body: { error: "invalid_request", refs },
+      });
+      expect((await page.mcp(REPORTS, args)).body).toEqual(overHttp.body);
+    }
   });
 });
 
@@ -239,6 +252,13 @@ describe("collection quality page reads", () => {
   });
 
   it("answer the summary and a source's cells exactly as the routes do", async () => {
+    // One clock for every call: each answer counts its ages to `now`
+    // (`freshnessAsOf`, collection-freshness-v1).
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date());
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const before = await tableCounts();
     for (const [query, args] of [
       ["/api/collection-quality", {}],

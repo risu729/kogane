@@ -162,6 +162,7 @@ export {
   SNAPSHOT_REFUSALS,
   type SnapshotRefusal,
   type SubtotalRow,
+  subtotalCountKey,
   createCoreProjectionSource,
 } from "./balance-projection-reader";
 export {

@@ -24,6 +24,7 @@
 // be read or written is logged as `lane_audit_record_failed` with a safe code,
 // and the tick goes on.
 import { CARD_PURCHASE_ACTOR } from "../../../packages/domain/src/card-purchase.ts";
+import { INSTRUMENT_AUTO_ADOPTION_ACTOR } from "../../../packages/domain/src/instrument-auto-adoption.ts";
 import {
   auditInsertWrite,
   auditInstant,
@@ -116,6 +117,9 @@ export interface LaneAuditSpec {
 export const LANE_AUDIT: Readonly<Record<string, LaneAuditSpec>> = {
   // Stage A proposals, and the automatic acceptance of a provider-linked pair.
   reconciliation_sweep: { decisionActor: RECONCILIATION_RULE_ACTOR, proposals: ["reconciliation"] },
+  // Rule `instrument-auto-v1`'s adoptions, each an identity command with a
+  // `rule` assign decision (ADR 0055 amendment 2026-11-08); no proposals.
+  instrument_auto_adoption: { decisionActor: INSTRUMENT_AUTO_ADOPTION_ACTOR, proposals: [] },
   // Settlement candidates; acceptance is the operator's command.
   card_settlement_sweep: { proposals: ["card-settlement"] },
   // Rule decisions, each with its commit row (ADR 0054), and the

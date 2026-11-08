@@ -315,7 +315,8 @@ const SETTLED: readonly RunTrailState[] = ["blocked", "published", "unpublished"
  * The stage ladder a set of runs supports. `completed` is written only from
  * the rows above (contracts/stages.json): registration is complete when every
  * run is registered, parsing when no selected artifact is still pending, and
- * adoption when a parse is published. `projected` (READ) is not traced here.
+ * adoption when a parse is published. `projected` (READ) is not decided here:
+ * the operation record derives it from the READ pointer (`projection-trace.ts`).
  */
 export function trailOutcome(runs: readonly CollectorRunTrail[]): TrailOutcome {
   if (runs.length === 0)

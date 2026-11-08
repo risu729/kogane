@@ -111,3 +111,26 @@ test("operational failure stays generic and cannot be retried as a prewrite refu
   expect(response.status).toBe(503);
   expect((await response.json()) as { error: string }).toEqual({ error: "scheduling_unavailable" });
 });
+test("the deployment's bootstrap frees no lease and records nothing in the tick's name (ADR 0085)", async () => {
+  // A lease whose heartbeat went silent long ago. Only the `processor-tick`
+  // alarm frees it, and its record names that alarm as the principal; the
+  // release workflow's bootstrap is not that alarm and leaves it to the tick.
+  const ref = "4e1a2b3c-0000-4000-8000-0000000000b1";
+  await env.DB.prepare(
+    "INSERT OR REPLACE INTO collection_execution_leases(source,lease_ref,started_at,heartbeat_at) VALUES('vpass',?,strftime('%Y-%m-%dT%H:%M:%fZ','now','-30 minutes'),strftime('%Y-%m-%dT%H:%M:%fZ','now','-20 minutes'))",
+  )
+    .bind(ref)
+    .run();
+  const response = await post(sha);
+  expect(response.status).toBe(200);
+  expect(
+    await env.DB.prepare(
+      "SELECT lease_ref FROM collection_execution_leases WHERE source='vpass'",
+    ).first<string | null>("lease_ref"),
+  ).toBe(ref);
+  expect(
+    await env.DB.prepare(
+      "SELECT count(*) AS n FROM audit_records WHERE operation='alarm.lease.expire'",
+    ).first<number>("n"),
+  ).toBe(0);
+});
