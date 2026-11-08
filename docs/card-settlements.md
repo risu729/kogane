@@ -440,7 +440,11 @@ The other judged candidates follow, newest first, collapsed under the lead
 (`この請求のほかの候補（N 件）`, N the statement's other candidates). `candidateCount` counts every candidate of the
 statement; when it exceeds the judged ones, `この請求の候補をすべて表示` reads
 the statement's whole list, 50 a page, newest first
-(`GET /api/v2/reconciliation/card-settlements?statementKey=…`). Nothing is
+(`GET /api/v2/reconciliation/card-settlements?statementKey=…`). Several
+statements' lists can be open at once, so each list's pager, its spoken count
+and its loading state name the statement by its place in the statement list
+and its card, account and month (`請求 N 件目（カード · 口座 · 請求月）`): the
+place tells apart two statements that share card, account and month. Nothing is
 deleted or hidden for good: candidates and decisions stay append-only and every
 candidate keeps its own history and actions. Every candidate's head shows
 its billing month and when it was created (`候補の作成`), and its region is

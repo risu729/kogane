@@ -630,11 +630,11 @@ describe.if(runnable)("card settlement review", () => {
     await page.getByRole("button", { name: "この請求の候補をすべて表示（3 件）" }).click();
     // The pager names its statement, and so does its spoken count.
     const pager = page.getByRole("navigation", {
-      name: "MyJCB · synthetic-card · 2026-09 の請求の候補のページ",
+      name: "請求 1 件目（MyJCB · synthetic-card · 2026-09）の候補のページ",
       exact: true,
     });
     expect(await pager.getByRole("status").textContent()).toBe(
-      "MyJCB · synthetic-card · 2026-09 の請求の候補：1–3 件目 / 3 件",
+      "請求 1 件目（MyJCB · synthetic-card · 2026-09）の候補：1–3 件目 / 3 件",
     );
     // The full list adds the one the group did not carry, and repeats none.
     expect(await page.locator(".settlement-older section.panel").count()).toBe(2);
@@ -654,18 +654,16 @@ describe.if(runnable)("card settlement review", () => {
       acceptanceBlockers: ["statement_changed"],
     });
     older = [stale(2), stale(1)];
-    // Another statement of the same card, a month later; every value invented.
-    const october = (n: number) => {
-      const base = settlementReview();
-      return {
-        ...base,
-        proposalId: `card-settlement-october-${n}`,
-        createdAt: `2026-10-1${n}T00:00:00Z`,
-        acceptanceBlockers: n === 3 ? [] : ["statement_changed"],
-        facts: { ...base.facts, statement: { ...base.facts.statement, period: "2026-10" } },
-      };
-    };
-    second = [october(3), october(2), october(1)];
+    // Another statement of the same card, account and month: the importer-era
+    // and collector-era captures of one month are two statements
+    // (docs/card-settlements.md). Every value is invented.
+    const recaptured = (n: number) => ({
+      ...settlementReview(),
+      proposalId: `card-settlement-recaptured-${n}`,
+      createdAt: `2026-09-2${n}T00:00:00Z`,
+      acceptanceBlockers: n === 3 ? [] : ["statement_changed"],
+    });
+    second = [recaptured(3), recaptured(2), recaptured(1)];
     const page = await open();
     for (const summary of await page.locator(".settlement-older > summary").all())
       await summary.click();
@@ -678,9 +676,12 @@ describe.if(runnable)("card settlement review", () => {
     const pagers = await page
       .locator(".settlement-older nav")
       .evaluateAll((navs) => navs.map((nav) => nav.getAttribute("aria-label")));
-    // Each statement's pager says which statement it pages.
-    expect(pagers).toHaveLength(2);
-    expect(new Set(pagers).size).toBe(2);
+    // Each statement's pager says which statement it pages, by its place in
+    // the list where card, account and month are the same.
+    expect(pagers).toEqual([
+      "請求 1 件目（MyJCB · synthetic-card · 2026-09）の候補のページ",
+      "請求 2 件目（MyJCB · synthetic-card · 2026-09）の候補のページ",
+    ]);
     expect(await auditView(page)).toEqual([]);
     await page.close();
   }, 60_000);
