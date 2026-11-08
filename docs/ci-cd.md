@@ -67,6 +67,29 @@ produces a successful CI run with `head_branch: main` — and its head commit
 is fetchable from this repository. A `workflow_dispatch` supplies the sha by
 hand and is held to the same test through the compare API, below.
 
+A running CI on `main` is never cancelled (owner decision, 2026-11-07 17:01
+UTC). `ci.yml` sets `cancel-in-progress` only for `pull_request`, so a newer
+push to a pull request still replaces its running CI, but a push to `main`
+waits for the running main CI instead of cancelling it. Before this, every push
+to `main` cancelled the running main CI; since a cancelled run releases
+nothing, back-to-back merges left production undeployed from 13:40 to 15:12 UTC
+on 2026-11-07. GitHub still keeps at most one _pending_ run per group, so the
+runs that are waiting replace each other and the newest commit is the one that
+runs next. If five merges land while the first one's CI is still running, they
+produce two CI runs and two releases (the first commit's and the fifth's), and
+the second release carries the three commits in between. Those three show a
+cancelled CI run on `main`; it is not a failure and they are in production.
+
+One gap remains. A re-run or a `workflow_dispatch` of CI on `main` shares the
+group, so one started while a push run is pending replaces that run, and the
+newest commit waits for the next push. A dispatched CI run never releases
+(`deploy.yml` accepts only `event: push`); a re-run keeps `event: push`.
+Re-run main CI only when no main CI is pending, and if the newest commit's push
+run was replaced anyway, re-run that run once the queue is empty. Dispatching
+Deploy with its sha instead releases a commit whose own CI never ran: the
+dispatch is checked against `main` through the compare API, not against a CI
+result.
+
 The called release job holds the concurrency group `production-deploy` with
 `cancel-in-progress: false` and `queue: max`, so one production change runs
 at a time and queued requests wait instead of interrupting a migration or
@@ -127,8 +150,9 @@ existing self-Worker/class namespaces, with no native exports or migrations.
 Canonical migration histories remain unchanged. A build guard checks their
 actual artifacts; before publication the live migration tag must match the
 latest canonical tag, and after publication all active namespace IDs must
-match the captured baseline. Pending DO lifecycle work requires a separate
-Wrangler rollout. Processor and PRESTIA opt into trigger synchronization on the
+match the captured baseline. A refused check prints only its closed `cf_do_…`
+code, and an unexpected error prints `cf_do_internal_error`. Pending DO
+lifecycle work requires a separate Wrangler rollout. Processor and PRESTIA opt into trigger synchronization on the
 versions strategy: Processor preserves its Queue consumer settings; PRESTIA
 applies its checked-in workersDev:true/previewUrls:false after version upload.
 The three Container full-deploy steps also explicitly consent to synchronization.
@@ -258,7 +282,10 @@ is introduced.
     something failed: that is the run that most needs an account of itself.
 15. **Postchecks** the health routes of what it deployed.
 16. **Records** the deployment as `success`, or as `failure` and stops, with the
-    progress summary in the status description either way.
+    progress summary in the status description either way. A progress file
+    that exists but cannot be read as a record (cut short, say) does not stop
+    the `failure` status: its description carries `release_progress_unreadable`
+    in place of the summary. `success` is refused for the same file.
 
 ### The release ledger, and why a late run is harmless (G5-12)
 
@@ -287,11 +314,11 @@ rollback of a commit older than this rule (before
 not succeeded and fails closed with "none of the newest 100 production
 deployments succeeded". Roll back only to a commit that contains it.
 
-Concurrency alone would not be enough. GitHub keeps at most one run _pending_
-per group and states that ordering is not guaranteed, so with rapid merges an
-intermediate run is cancelled and a run that started earlier can still reach
-the deploy steps after a newer one finished. The decision is therefore made
-against the ledger, by `git merge-base --is-ancestor` — and it is made **per
+Concurrency alone would not be enough. GitHub states that ordering is not
+guaranteed, a manual dispatch or re-run of an older commit can start after a
+newer release, and a pending main CI run can be replaced, so a run for an older
+commit can still reach the deploy steps after a newer one finished. The
+decision is therefore made against the ledger, by `git merge-base --is-ancestor` — and it is made **per
 Worker**, because the environment is not one thing that is at one commit:
 
 | The commit the ledger records for a Worker | What the run does with that Worker           |
@@ -396,7 +423,8 @@ because an earlier step failed shows as `skipped`; `not reached` appears only
 when the step id is absent from the job's context altogether) and carries the
 deploy Action's `deployment-targets` for the ones that uploaded. The `success`
 status is refused by the ledger script itself while any planned Worker is not
-`deployed`, on top of the workflow's own `success()` condition.
+`deployed`, and when it reads no progress record of the run at all, on top of
+the workflow's own `success()` condition.
 Each deploy step is identified as `deploy-<ledger name>` for exactly that
 reason, and a test fails if a new one omits it.
 
@@ -507,7 +535,7 @@ rather than pretending to check something.
 requested over its `workers.dev` hostname, unauthenticated, and must answer
 200 **with** the identity field the ledger names (`schemaVersion` for most,
 `service` for Vpass). SBI VC Trade uses `/healthz`, a static liveness answer;
-its existing `/health` remains protected by the collector admin token. 200 alone is not a
+it has no other public route (its admin routes were retired on 2026-11-08). 200 alone is not a
 pass: an edge error page and an empty body are both 200-shaped.
 
 **The authenticated half.** The App authenticates every request through
@@ -558,7 +586,9 @@ variable when building. The stamp runs **before** every bundle and the manifest
 are computed, so the manifest
 digests the configuration that is actually uploaded and the re-verification
 before the first upload still holds. A configuration that already carries a
-sha is an error, not a second rewrite.
+sha is an error, not a second rewrite, and a declaration whose value is
+neither empty nor a full lowercase sha (uppercase, non-hex, not a string) is
+refused as `release_sha_invalid_declaration` rather than skipped as undeclared.
 
 **When the service token is missing** the step fails with a message naming the
 two secrets and this page's setup section. That is deliberate: skipping the

@@ -4,6 +4,8 @@ import {
   CollectionError,
   createRuntimeDiagnostics,
   publicFailure,
+  redactNotice,
+  redactNotices,
   runBrowserCollection,
 } from "./browser.mjs";
 
@@ -30,8 +32,8 @@ test("runtime failure emits once with fixed stage/type and no exception details"
         return assert.fail(`diagnostics must not inspect ${key}`);
       },
     });
-  diagnostic.failure(error);
-  diagnostic.failure(new Error(secret));
+  const summary = diagnostic.failure(error);
+  assert.equal(diagnostic.failure(new Error(secret)), undefined);
   assert.deepEqual(events, [
     {
       event: "st-george-runtime-failure",
@@ -40,8 +42,17 @@ test("runtime failure emits once with fixed stage/type and no exception details"
       refusal: "unknown",
       loginPostCount: 0,
       durationMs: 25,
+      noticeCount: 0,
     },
   ]);
+  assert.deepEqual(summary, {
+    stage: "login-result-state",
+    errorType: "TimeoutError",
+    refusal: "unknown",
+    loginPostCount: 0,
+    durationMs: 25,
+    notices: [],
+  });
   assert.equal(JSON.stringify(events).includes(secret), false);
   assert.deepEqual(publicFailure(error), { status: "failed", reason: "runtime-failed" });
 });
@@ -102,8 +113,34 @@ test("logging failure never replaces collection ownership", () => {
     },
   });
   const error = new Error(secret);
-  assert.doesNotThrow(() => diagnostic.failure(error));
+  diagnostic.notices(["Request error"]);
+  let summary;
+  assert.doesNotThrow(() => (summary = diagnostic.failure(error)));
+  assert.deepEqual(summary.notices, ["Request error"]);
   assert.deepEqual(publicFailure(error), { status: "failed", reason: "runtime-failed" });
+  assert.deepEqual(publicFailure(error, summary), {
+    status: "failed",
+    reason: "runtime-failed",
+    diagnostic: summary,
+  });
+});
+
+test("bank notices keep words and lose numbers, addresses and control characters", () => {
+  assert.equal(
+    redactNotice("Access number 1234 5678 or 0412-345-678 locked\u0000 since 08/11/2026."),
+    "Access number # or # locked since #.",
+  );
+  assert.equal(redactNotice("Write to a.b@example.invalid now"), "Write to [email] now");
+  assert.equal(redactNotice("Step 2"), "Step #");
+  assert.equal(redactNotice("\u202eReversed\u200b text"), "Reversed text");
+  assert.equal(redactNotice("y".repeat(500)).length, 160);
+  for (const value of [null, undefined, 7, {}, ["x"]]) assert.equal(redactNotice(value), "");
+  assert.deepEqual(redactNotices("not a list"), []);
+  assert.deepEqual(redactNotices(["", " ", "A", "A", "B", "C", "D", "E"]), ["A", "B", "C", "D"]);
+  const { diagnostic } = capture();
+  diagnostic.notices([secret.replace(/\d+/gu, "123"), 5]);
+  const summary = diagnostic.failure(new Error(secret));
+  assert.deepEqual(summary.notices, ["SYNTHETIC_PRIVATE_CREDENTIAL_#"]);
 });
 
 test("login POST observation is bounded and independent of failure stage", () => {
@@ -122,16 +159,19 @@ test("runtime wrapper logs validation failure once and keeps its public result",
   const original = console.error;
   console.error = (value) => events.push(JSON.parse(value));
   try {
-    assert.deepEqual(await runBrowserCollection({ credential: secret }), {
-      status: "failed",
-      reason: "invalid-request",
-    });
+    const result = await runBrowserCollection({ credential: secret });
+    assert.deepEqual(Object.keys(result).sort(), ["diagnostic", "reason", "status"]);
+    assert.equal(result.reason, "invalid-request");
+    assert.equal(result.diagnostic.stage, "request-validation");
+    assert.deepEqual(result.diagnostic.notices, []);
+    assert.equal(JSON.stringify(result).includes(secret), false);
     assert.equal(events.length, 1);
     assert.deepEqual(Object.keys(events[0]).sort(), [
       "durationMs",
       "errorType",
       "event",
       "loginPostCount",
+      "noticeCount",
       "refusal",
       "stage",
     ]);
@@ -144,10 +184,9 @@ test("runtime wrapper logs validation failure once and keeps its public result",
     console.error = () => {
       throw new Error(secret);
     };
-    assert.deepEqual(await runBrowserCollection({ credential: secret }), {
-      status: "failed",
-      reason: "invalid-request",
-    });
+    const unlogged = await runBrowserCollection({ credential: secret });
+    assert.equal(unlogged.status, "failed");
+    assert.equal(unlogged.reason, "invalid-request");
   } finally {
     console.error = original;
   }

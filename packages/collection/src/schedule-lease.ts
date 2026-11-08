@@ -25,7 +25,11 @@
 // execution holds.
 export interface ScheduleLeaseDatabase {
   prepare(sql: string): {
-    bind(...values: unknown[]): { run(): Promise<{ meta: { changes: number } }> };
+    bind(...values: unknown[]): {
+      run(): Promise<{ meta: { changes: number } }>;
+      /** D1's single-row read; used only to describe a refusal in the log. */
+      first?<T = Record<string, unknown>>(): Promise<T | null>;
+    };
   };
 }
 
@@ -94,6 +98,58 @@ async function releaseOwnLease(
   return false;
 }
 
+interface LeaseHolderRow {
+  lease_ref: string | null;
+  started_at: string | null;
+  heartbeat_at: string | null;
+  age_ms: number | null;
+  silent_ms: number | null;
+}
+/**
+ * Says who holds the lease a claim was refused on: its reference (the one the
+ * operator's release names), when it was claimed and when it last proved
+ * itself alive, with both ages measured against D1's `now` (`started_at` was
+ * written on the claiming isolate's clock, `heartbeat_at` on D1's). A failed read still logs the
+ * refusal; the refusal itself never depends on this read.
+ */
+async function logLeaseBusy(db: ScheduleLeaseDatabase, source: string): Promise<void> {
+  let holder: LeaseHolderRow | null = null;
+  let read: "ok" | "unavailable" | "failed" = "unavailable";
+  try {
+    const statement = db
+      .prepare(
+        `SELECT lease_ref,started_at,heartbeat_at,
+          CAST((julianday('now')-julianday(started_at))*86400000 AS INTEGER) AS age_ms,
+          CAST((julianday('now')-julianday(heartbeat_at))*86400000 AS INTEGER) AS silent_ms
+         FROM collection_execution_leases WHERE source=?`,
+      )
+      .bind(source);
+    if (statement.first) {
+      holder = await statement.first<LeaseHolderRow>();
+      read = "ok";
+    }
+  } catch {
+    read = "failed";
+  }
+  try {
+    console.log(
+      JSON.stringify({
+        event: "collection_lease_busy",
+        code: "collection_busy",
+        source,
+        holderRead: read,
+        holderLeaseRef: holder?.lease_ref ?? null,
+        holderStartedAt: holder?.started_at ?? null,
+        holderHeartbeatAt: holder?.heartbeat_at ?? null,
+        holderAgeMs: holder?.age_ms ?? null,
+        holderSilentMs: holder?.silent_ms ?? null,
+      }),
+    );
+  } catch {
+    /* Logging never replaces the refusal. */
+  }
+}
+
 export interface CollectionLeaseOptions {
   /**
    * Ends the execution by force when its aborted action has not settled
@@ -140,10 +196,24 @@ export async function withCollectionLease<T>(
     // The claim may have committed even though its answer was lost. Nothing
     // has contacted a provider yet, so clear this call's own reference (if it
     // was written) and report the claim's failure.
+    try {
+      console.error(
+        JSON.stringify({
+          event: "collection_lease_claim_failed",
+          source,
+          errorName: error instanceof Error ? error.name : typeof error,
+        }),
+      );
+    } catch {
+      /* Logging never skips the release below. */
+    }
     await releaseOwnLease(db, source, ref);
     throw error;
   }
-  if (claim.meta.changes !== 1) throw new Error("collection_busy_or_uncertain");
+  if (claim.meta.changes !== 1) {
+    await logLeaseBusy(db, source);
+    throw new Error("collection_busy_or_uncertain");
+  }
 
   const controller = new AbortController();
   const timers: ReturnType<typeof setTimeout>[] = [];
@@ -222,7 +292,11 @@ export async function withCollectionLease<T>(
     await releaseOwnLease(db, source, ref);
   });
   try {
-    return await Promise.race([running, forcedStop]);
+    const result = await Promise.race([running, forcedStop]);
+    // A stopped holder cannot become successful by resolving during the grace
+    // period. Its stop remains uncertain even when the action swallows it.
+    controller.signal.throwIfAborted();
+    return result;
   } catch (error) {
     // An action that failed because its holder stopped reports why it stopped.
     const reason: unknown = controller.signal.reason;

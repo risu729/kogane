@@ -244,26 +244,56 @@ describe("authenticated release readiness keeps exact target and health checks",
     }
   });
   test("real response body stall is bounded by request timer and retries are capped", async () => {
-    let reads = 0;
     await withServer(
       (_request: any, response: any) => {
-        reads++;
         response.writeHead(200, { "content-type": "application/json" });
         response.write('{"status":');
       },
       async (url: string) => {
-        const started = performance.now();
-        await expect(
-          pollReleaseHealth({
-            ...input,
-            url,
-            policy: { totalMs: 1000, requestMs: 40, delayMs: 1, maxAttempts: 2 },
-          }),
-        ).rejects.toThrow("health_transport_unavailable");
-        expect(performance.now() - started).toBeLessThan(800);
+        // Each attempt is handed a real response whose headers have already
+        // arrived and whose body never ends, so the 40 ms request timer always
+        // fires while the body is being read. Fetching inside the attempt let
+        // the timer fire before a loaded server had answered, so the stall
+        // was not the body's and the server could miss the second request.
+        const stalled: { response: Response; controller: AbortController }[] = [];
+        for (let index = 0; index < 3; index += 1) {
+          const controller = new AbortController();
+          stalled.push({ response: await fetch(url, { signal: controller.signal }), controller });
+        }
+        let attempts = 0;
+        // The clock never reaches the total deadline, so only the request
+        // timer can end a stalled read; the timers armed show it is set to
+        // requestMs for each attempt, with the 1 ms delay between them.
+        const armed: unknown[] = [];
+        const realSetTimeout = globalThis.setTimeout;
+        globalThis.setTimeout = ((callback: () => void, ms?: number) => {
+          armed.push(ms);
+          return realSetTimeout(callback, ms);
+        }) as typeof setTimeout;
+        try {
+          await expect(
+            pollReleaseHealth({
+              ...input,
+              url,
+              now: () => 0,
+              policy: { totalMs: 1000, requestMs: 40, delayMs: 1, maxAttempts: 2 },
+              fetchImpl: async (_url: string, init: RequestInit) => {
+                const next = stalled[attempts++]!;
+                init.signal!.addEventListener("abort", () => next.controller.abort(), {
+                  once: true,
+                });
+                return next.response;
+              },
+            }),
+          ).rejects.toThrow("health_transport_unavailable");
+        } finally {
+          globalThis.setTimeout = realSetTimeout;
+          for (const { controller } of stalled) controller.abort();
+        }
+        expect(attempts).toBe(2);
+        expect(armed).toEqual([40, 1, 40]);
       },
     );
-    expect(reads).toBe(2);
   });
   test("real total deadline includes stalled headers/body and sleep, with no later acceptance", async () => {
     for (const headers of [true, false]) {

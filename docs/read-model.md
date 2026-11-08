@@ -53,7 +53,7 @@ is a complete SQL fragment that states the view it reads.
 | `snapshotPolicyComparison`   | A03 shadow comparison: every container dataset under both policies, listing partitions whose current artifact differs. Identifiers only. Served by the observation-pipeline Worker.                                                                                                                                                                                                                                                            | `snapshotPolicyComparisonSql(SNAPSHOT_RELATIONS)`                                                                                                                                                        |
 | `activeStateProjection`      | The rows a "current" list shows: a published parse of a successful visible fetch run, plus snapshot membership for snapshot datasets, plus per-source multi-page contracts stated per query.                                                                                                                                                                                                                                                   | `publishedParses AND successfulFetchRuns`; the chain `parse_runs p → observation_fetch_artifacts fa → observation_fetch_runs f`.                                                                         |
 | parsing health (`/api/meta`) | A job-level notion, not a visibility rule: a failed job counts until a newer published parse of the same parser repairs it; retired versions are ignored.                                                                                                                                                                                                                                                                                      | `PARSING_HEALTH_SQL` over `observation_parse_jobs`, `published_parse_runs` and `parse_runs`.                                                                                                             |
-| Identity eligibility         | `services/app/src/identity-api.ts` reads `eligible_identity_runs` (migration 0020) joined to the publication projection; the organization read moved here (`src/organization.ts`).                                                                                                                                                                                                                                                             | The identity catalogue queries stay in the browser over `published_parse_runs` (PR-05); the organization query is `organizationSql(mode)`.                                                               |
+| Identity eligibility         | `packages/application/src/query/identity-pages.ts` reads `current_identity_observations` (projection-driven since migration 0026) joined to the publication projection; the organization read is in `packages/read-model/src/organization.ts`.                                                                                                                                                                                                 | The identity catalogue queries stay in the browser over `published_parse_runs` (PR-05); the organization query is `organizationSql(mode)`.                                                               |
 | Identity read mode           | `src/identity.ts`: `latest` joins the current mapping revisions; `as-recorded` joins the mapping rows the sealed identity run pinned. `interpretationContext` names the releases a response was computed under. See [decision-log.md](decision-log.md).                                                                                                                                                                                        | `MAPPING_RELATIONS[mode]`; the run's policy release comes from `identity_run_contexts` (migration 0029).                                                                                                 |
 
 The snapshot CTE builder takes its relations as explicit parameters
@@ -125,6 +125,26 @@ fixed one past it the exact count, unmoved by an unlisted source's runs.
 authentication gate, that the raw object is reachable through a visible
 artifact. It is independent of any list limit; the R2 read and the integrity
 checks in `src/read.ts` are unchanged.
+
+### Plans of the keyed reads
+
+`test/statement-plans.test.ts` explains the reader's keyed reads on every
+CORE migration with no table statistics, as D1 plans them: `listArtifacts`
+(walks artifact ids down from the cursor, no sort), `getArtifact` (the artifact,
+its parse runs by artifact, each run's observations by parse run),
+`getObservation` and its provenance, `getRawDownload` (by hash) and
+`parsingHealth` (unfinished jobs by status). It does the same for the events
+reader (`src/events.ts`): `activity` and `obligations` walk the live-revision
+partial indexes in key order with no sort, so a page stops at its `LIMIT`;
+legs, allocations, settlements, raw locators and reported balances are reached
+from the ids or account refs given. None reads a growing table from end to
+end. `reconciliationSignals`' leg read is not in that list: without statistics
+it starts from `economic_legs_basis (basis, role)`, every live cash-movement
+increase or decrease leg, and filters the requested subjects afterwards,
+although `economic_legs_subject` exists. The whole-set reads of the evidence
+reader (`overview`'s counts and lists, `filterOptions`, and the grouped
+`listTransactions`, `listLatestBalances`, `listPositions`) group or count first
+by design (the table above) and are not keyed.
 
 ### Card snapshot currentness and current card usage
 
@@ -342,19 +362,24 @@ the compatibility adapter uses. See
 ## Collection quality
 
 `src/collection-quality.ts` ([ADR 0045](adr/0045-collection-quality-read.md))
-holds the SQL behind `GET /api/collection-quality` and
-`GET /api/collection-quality/<sourceId>`; `packages/application/src/query/collection-quality.ts`
+holds the SQL behind `GET /api/collection-quality`,
+`GET /api/collection-quality/<sourceId>` and
+`GET /api/collection-quality/<sourceId>/accounts`
+([ADR 0088](adr/0088-collection-quality-per-account.md));
+`packages/application/src/query/collection-quality.ts`
 maps its rows to the contract and the closed reason codes. It is not an
 `ObservationReader` method: like the dated reads it is composed by an
 application query over an executor.
 
-| Text                       | Reads                                                                                                                                                        | Bound                                                    |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
-| `SCHEDULE_QUALITY_SQL`     | every `collection_schedules` row, its newest receipt by `nominal_at` (the unique index) and its held lease                                                   | 201 rows; more is refused                                |
-| `TERMINAL_QUALITY_SQL`     | the `collection_runs` rows of exactly the (collector, run id) pairs a receipt names, with the newest `registered` stage and the visible fetch run            | the pairs given                                          |
-| `UNREGISTERED_QUALITY_SQL` | never-registered terminals of the given collectors, once per run by its newest row, grouped by code                                                          | every row of those sources, by index; grows with history |
-| `SOURCE_QUALITY_SQL`       | every visible source and its newest visible fetch run, read by id                                                                                            | 201 rows; more is refused                                |
-| `CELL_QUALITY_SQL`         | one source's visible artifacts named by a dataset, a job or a recorded parse; their jobs, parses, publications, claims and unit outcomes; current membership | 501 cells from an offset                                 |
+| Text                       | Reads                                                                                                                                                        | Bound                                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| `SCHEDULE_QUALITY_SQL`     | every `collection_schedules` row, its newest receipt by `nominal_at` (the unique index) and its held lease                                                   | 201 rows; more is refused                                               |
+| `SOURCE_JOBS_SQL`          | the `collection_schedules` rows of the given job sources (one CORE source's jobs) and the failure code of each one's newest receipt                          | scans the configured jobs by primary key; one row per job of the source |
+| `TERMINAL_QUALITY_SQL`     | the `collection_runs` rows of exactly the (collector, run id) pairs a receipt names, with the newest `registered` stage and the visible fetch run            | the pairs given                                                         |
+| `UNREGISTERED_QUALITY_SQL` | never-registered terminals of the given collectors, once per run by its newest row, grouped by code                                                          | every row of those sources, by index; grows with history                |
+| `SOURCE_QUALITY_SQL`       | every visible source and its newest visible fetch run, read by id                                                                                            | 201 rows; more is refused                                               |
+| `CELL_QUALITY_SQL`         | one source's visible artifacts named by a dataset, a job or a recorded parse; their jobs, parses, publications, claims and unit outcomes; current membership | 501 cells from an offset                                                |
+| `ACCOUNT_COVERAGE_SQL`     | the cell read's CTEs unchanged, plus the accounts the newest and current captures' sealed identity observations map to                                       | 2,001 cells, unpaged; more is refused                                   |
 
 A cell is (dataset, parser, fetch unit, period, MyJCB statement state,
 currentness rule). Its newest capture is its newest fetch run by capture time;
@@ -386,6 +411,14 @@ transactions a snapshot parser also emits
 (`sbi-shinsei-top-balances-and-activity`) stay listed from a capture this read
 calls not current.
 
+**Freshness** (`collection-freshness-v1`, `packages/domain/src/collection-freshness.ts`)
+is computed by the application query, not in SQL: every summary and cells
+answer counts ages to one instant, `freshnessAsOf` (the route's request time), in Asia/Tokyo civil
+days. A cell's age is its current capture's; a source's is its newest visible
+fetch run's, whatever that run's outcome. The cells read the source's own jobs
+(`SOURCE_JOBS_SQL`) to tell what the source waits on. The account view
+(`ACCOUNT_COVERAGE_SQL`) carries no freshness.
+
 ### Cost
 
 D1 has no table statistics. `test/collection-quality.test.ts` checks every plan
@@ -411,6 +444,25 @@ took roughly 10 to 50 ms on `bun:sqlite`. The amendment's fixture also exercises
 SMBC, MoneyForward, V Point and MyJCB past-month captures and checks the same
 indexed plan boundaries; timings are indicative, not asserted. Not measured
 on remote D1; no production scope/completeness proof is claimed.
+
+`ACCOUNT_COVERAGE_SQL` ([ADR 0088](adr/0088-collection-quality-per-account.md))
+selects from the cell read's CTEs (`CELL_RESULT_CTES`, everything up to
+`cq_result`); `CELL_QUALITY_SQL` is that text with its page `SELECT`, byte
+for byte the text that shipped before the split, which
+`test/collection-quality-cells-legacy-sql.ts` freezes with its SHA-256. The
+current page and the account read's cells equal the frozen page row for row
+on the scaled store for every source and offset
+(`test/collection-quality.test.ts`) and on 24 seeded random stores with
+identity rows (`test/collection-quality-differential.test.ts`). The account
+read adds, per capture artifact, the published parse, the newest sealed
+eligible identity run, its identity observations, their current account
+mappings and accounts, each by key; it reads no observation table. The
+current capture's members and the per-cell account lists are joined through
+automatic indexes over its own CTEs, built once; the plan check asserts all
+of this without table statistics. On the scaled store it took roughly 2 to
+110 ms per source on `bun:sqlite`, about what the cell page took (printed,
+not asserted); that store has no identity rows, so the added cost grows with
+the identity observations of the captures it reads, which is not measured.
 
 ## Knowledge selector
 

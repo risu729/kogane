@@ -14,6 +14,7 @@
 // `live_consumption_claims` and the registry's alias classes, computed apart.
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { createHash } from "node:crypto";
+import { withProposalRule } from "./card-settlement-ownership-legacy-sql";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { aliasClassText } from "../../domain/src/economic-contract";
 import { declaredAliasClass } from "../../domain/src/row-identity";
@@ -337,11 +338,15 @@ describe("claim_available on random stores (ADR 0054, G1b)", () => {
       LEGACY_CARD_SETTLEMENT_READINESS_CTES_SHA256,
     );
     expect(LEGACY_CARD_SETTLEMENT_READINESS_CTES).not.toContain("claim_available");
-    // The current text is the frozen text with one column added at its end.
+    // The current text is the frozen text with one column added at its end,
+    // and the embedded ownership CTEs' one change of ADR 0017's amendment of
+    // 2026-11-06 (proved in card-settlement-ownership.test.ts).
     const current = cardSettlementReadinessCtes();
-    const head = LEGACY_CARD_SETTLEMENT_READINESS_CTES.slice(
-      0,
-      LEGACY_CARD_SETTLEMENT_READINESS_CTES.lastIndexOf(" AS allocation_available"),
+    const head = withProposalRule(
+      LEGACY_CARD_SETTLEMENT_READINESS_CTES.slice(
+        0,
+        LEGACY_CARD_SETTLEMENT_READINESS_CTES.lastIndexOf(" AS allocation_available"),
+      ),
     );
     expect(current.startsWith(`${head} AS allocation_available,\n`)).toBe(true);
     expect(current.endsWith(" AS claim_available\nFROM ready_candidates ready_candidate)")).toBe(

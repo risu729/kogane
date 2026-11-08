@@ -44,6 +44,27 @@ test("interval history cannot hide a daily source's latest execution", async () 
     "synthetic-daily",
   );
 });
+test("each collection job says what a collection request names and whether it would be dispatched", async () => {
+  const off = await scheduleSnapshot(env);
+  expect(off.schedules.find((s) => s.id === "sony-bank")?.collectionRequest).toEqual({
+    source: "sony-bank",
+    dispatch: "lane_disabled",
+  });
+  expect(off.schedules.find((s) => s.id === "sbi-vc-keepalive")?.collectionRequest).toBeNull();
+  expect(off.schedules.find((s) => s.id === "processor-tick")?.collectionRequest).toBeNull();
+  const on = await scheduleSnapshot({
+    ...env,
+    OPS_DISPATCH_ENABLED: "true",
+    OPS_COLLECTOR_DISPATCH_CONNECTIONS: JSON.stringify(["sony-bank"]),
+  } as Env);
+  expect(on.schedules.find((s) => s.id === "sony-bank")?.collectionRequest?.dispatch).toBe(
+    "enabled",
+  );
+  expect(on.schedules.find((s) => s.id === "prestia-globalpass")?.collectionRequest).toEqual({
+    source: "global-pass",
+    dispatch: "connection_disabled",
+  });
+});
 test("abandoned started receipts become uncertain without replay or invented finish time", async () => {
   await occurrence("synthetic-abandoned", "vpass", "2026-02-01T09:00:00.000Z", "started");
   await occurrence("synthetic-current", "vpass", "2026-02-01T10:05:00.000Z", "started");

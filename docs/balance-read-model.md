@@ -188,9 +188,12 @@ sign and no overlap group are summable; capacities, aggregates, statement
 amounts, period totals, reward units and balances restated after a
 transaction are excluded by their registry entries. The sum is exact integer
 arithmetic outside SQL, over the whole filter scope rather than the page, and
-a subject that appears twice makes the subtotal unavailable instead of double
-counting it. Above 5,000 adopted rows the subtotal is `null` with
-`scope_exceeds_subtotal_bound`.
+a subject that appears twice in the same unit makes the subtotal unavailable
+(`subject_reported_twice`) instead of double counting it. A subject that holds
+several units (an exchange account's cash per asset, a broker's foreign cash
+per currency) counts once in each unit's figure: the subtotal is per unit, so
+that is not a second count of anything. Above 5,000 adopted rows the subtotal
+is `null` with `scope_exceeds_subtotal_bound`.
 
 ### Cursor contract
 
@@ -251,8 +254,16 @@ adopted rows for the granted scope, sums them per unit in exact integer
 arithmetic, and reports `liabilitiesCoverage: "unknown"` with no `netWorth`
 field. Without the READ binding or a sealed snapshot it answers
 `unavailable` / `projection_not_built` instead of computing a figure from the
-observation rows behind the projection. See
-[Agent API](agent-api.md#intents) for the intent's contract.
+observation rows behind the projection. It never picks the snapshot itself:
+the App hands it the published snapshot through `servableSnapshot`
+(`services/app/src/balances-v2.ts`), the same contract, CORE-epoch and
+visibility-revision checks the v2 routes apply, so a snapshot those routes
+refuse is `unavailable` with their code — `read_model_unavailable` (a READ
+database of another contract), `read_model_context_changed` (CORE restored
+under a new epoch) or `read_model_restriction_changed` (a use restriction
+changed after the snapshot was last verified) — rather than a sum of rows that
+no longer describe the context ([READ database](read-model-d1.md#reading)).
+See [Agent API](agent-api.md#intents) for the intent's contract.
 
 ## Dated reported state
 

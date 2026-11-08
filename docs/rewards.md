@@ -24,7 +24,7 @@ routeもない。返すのは保有の内訳、観測された期限、規約か
 | ExpiryRule           | `expiry_rules`                                                  | 計算方式のfamilyと、根拠・確認状態・適用範囲               |
 | ConversionOffer      | `conversion_offers`                                             | 倍率は整数比。キャンペーン・会員別は別offer                |
 
-計算は `packages/domain/src/rewards.ts` の純関数で行う。DB・時計・HTTPへ依存しない。
+計算は `packages/domain/src/rewards.ts` と、換算・経路探索を分けた `reward-conversion.ts` の純関数で行う。DB・時計・HTTPへ依存しない。
 
 - `summarizeHolding(holding, qualifications)` — 消費できるbucketだけをプログラム自身の単位で合計し、
   `pending-award` と `qualification` は理由コードつきで除外する。単位違い・未解析があれば合計は
@@ -43,6 +43,38 @@ routeもない。返すのは保有の内訳、観測された期限、規約か
   不明値にし、動かなかったもの（0）としては扱わない（INV05）。着金と返却は数量によらず
   移動中を0に戻す。
 - `findConversionPaths(offers, start, goal, budget)` — 深さと候補数を明示的に制限した探索。
+
+### Standing offers: no end date and no deadline
+
+Owner decision (2026-11-07 12:51 UTC): an offer whose end date is not announced is
+common, and it is a standing offer, not an offer of unknown period. Kogane stores
+"no end" and "no deadline" as values, so the offer stays usable instead of falling
+into `needs-rule-verification`.
+
+| Field                                               | Standing offer                                                   | Bounded offer (unchanged)             |
+| --------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------- |
+| `validTime` / `valid_time_json`                     | `{"kind":"open-ended","start":"2026-04-01","zone":"Asia/Tokyo"}` | a `local-date`, `period` or `instant` |
+| `applicationDeadline` / `application_deadline_json` | `null` (the JSON text `null`; the column stays `NOT NULL`)       | a `local-date`, `period` or `instant` |
+
+- `start` is the first day the offer is known to apply. When the provider states no
+  start, it is the date of the evidence that shows the offer. A day before `start` is
+  `offer_not_valid_at_clock`; `start` and every later day are inside. An instant
+  counts by its own calendar date. The zone follows the same compatibility rule as
+  `compareTemporal` (`null` is compatible with any zone; a different zone is not
+  comparable).
+- `open-ended` is accepted only where a field says so (an offer's `validTime`); it is
+  not a `TemporalValue`, so no other time field accepts it.
+- `{"kind":"unknown"}` keeps its meaning: the period was not established (including
+  stored text that does not parse). It is never read as a standing offer, and the
+  reader never turns damaged text into `open-ended` or `null`.
+- `availableForOffer` checks neither an `unknown` deadline nor an `unknown` validity
+  and adds no code for them, nor for a clock inside a `period` deadline (a limit;
+  `/offers/simulate` calls it without a clock, so it checks neither field there).
+  Route search rejects an `unknown` validity or deadline as
+  `needs_rule_verification` (see "Search eligibility at each hop"), which is why a
+  standing offer stores `open-ended` and `null` instead of `unknown`.
+- No migration: both columns already hold JSON text, and nothing writes offer rows
+  today (§3).
 
 ## 2. 期限の状態
 
@@ -80,7 +112,7 @@ routeもない。返すのは保有の内訳、観測された期限、規約か
   - `rule`: rule参照・版・family・確認状態・版の適用期間 `validPeriod`・規約の根拠
     （`evidenceRefs`、`docs/sources` の記録）・対象活動policy参照・期限calendar。
   - `activity`: inactivity ruleが消費した履歴窓・完全性・最古観測日・起算活動（参照と日付）。
-  - `membership`: tier条件つきruleが消費した必要tierと、この保有の該当claim。
+  - `membership`: tier条件つきruleが消費した必要tierと、この保有の該当claim。claimはtierのコードポイント順（`MEMBERSHIP_SQL` の `ORDER BY tier` と同じ順）、同じtierの中はclaimの正規JSON順に並べ、渡された順に依存しない。
   - `uncertaintyCodes`: 算定を妨げないが限定する条件（タイムゾーン仮置き、古い側の履歴欠落、
     自己申告のtier）。
 - `agreement` — `agree` / `disagree` / `not-comparable`。比べられるのは暦日どうしだけで、
@@ -101,6 +133,7 @@ routeもない。返すのは保有の内訳、観測された期限、規約か
 | `rule_out_of_force`                  | 評価日がこの版の適用期間外（読めない期間は「常に有効」と扱わない）                                 |
 | `rule_transition_unconfirmed`        | 起算日か期限が版の適用期間外で、版の切替時の扱いが記録されていない                                 |
 | `rule_bucket_kind_not_covered`       | この版はこのkindを対象にしていない                                                                 |
+| `bucket_kind_unclassified`           | providerの数量は保持しているが、bucketの種類が確認されていない                                     |
 | `fixed_deadline_not_derivable`       | 期限はロットごとに決まり、providerの表示以外に根拠がない                                           |
 | `qualifying_activity_policy_missing` | inactivity ruleの対象活動定義が解決できない                                                        |
 | `membership_out_of_scope`            | tier条件つきruleで、この保有に必要tierのclaimがない                                                |
@@ -263,6 +296,9 @@ route を広告することはない。未知の reward path は 404 であり�
 `offerCoverage`, refusing with `offer_set_too_large` beyond it (§4).
 `offset` はbucket行を歩く。読み取りは公開済みparse runに結び付いたclaimだけを見るため、
 publication pointerの巻き戻しはreward側の表示からも同時に消える。
+The holdings and expiry pages are also the MCP page read `kogane.rewards.read`,
+answered by the routes' own reader `readRewardRoute`
+([agent API](agent-api.md#ui-read-pages)); no agent tool runs `/offers/simulate`.
 
 ## 9. UI
 
@@ -335,7 +371,7 @@ CORE側の `reward_programs` / `expiry_rules` / `conversion_offers`（版管理�
 ### 固定する入力
 
 processorの `reward_read_projection` lane（`reward_claims_sweep` の後、`report_job` の前、
-`decision_outbox` は最後のまま）が、05 §3の楽観的captureを行う。
+その後に `decision_outbox`、最後に `audit_overflow`）が、05 §3の楽観的captureを行う。
 
 ```text
 revision r0 を読む
@@ -431,6 +467,14 @@ fieldそのものがない応答（このfieldより前のApp）は受け付け�
 U11と同じ `{snapshotId, readInstanceId, filterDigest, position}` で、別queryのcursorは400
 `cursor_mismatch`、別instance・退役snapshotのcursorは410 `context_expired`。異なるcursorをoffsetとして読み替えることはない。
 
+Retained snapshots: a cursor that still names an older, retained snapshot is refused with the same
+503 code as the published one when the CORE epoch or visibility revision that snapshot was captured
+under has moved since (a use restriction invalidates the rows computed before it); it is never
+continued. A rebuild that moves neither keeps such a cursor readable. The check uses the snapshot's
+own capture, so a snapshot that a later build only re-verified at the new revision (status
+`unchanged`) is still refused once a newer snapshot replaces it; a request without the cursor
+reads the published one. `/api/v2/balances/*` cursors behave the same way.
+
 capability `rewardsV2ReadModel`（`none` / `read-d1`）を `/api/meta` が広告する。`core-d1` は無い。
 COREはreward snapshotを公開したことがなく、都度算定の答えはsnapshotではないからである。
 
@@ -462,7 +506,7 @@ COREのclaim・rule・offer、保存済み入力と原本は維持する。
 
 - `packages/domain/test/reward-expiry-basis.test.ts` — 表示期限と算定期限の一致・不一致、
   読めない表示、期限固定ロット、確認済みの無期限、tier claimの記録、同日の起算活動の決定性、
-  12個の理由コードそれぞれ（日付も0も「期限切れ」も出ないこと、cases が閉じた一覧と一致すること）、
+  13個の理由コードそれぞれ（日付も0も「期限切れ」も出ないこと、cases が閉じた一覧と一致すること）、
   適用期間の境界をまたぐ2つのrule版（v1最終日・v2初日、v2開始前の起算日、v1終了後の期限、
   読めない期間）、rule×履歴×kind×数量×表示の全組み合わせで全bucketが残り数量が変わらず
   `deadline_passed` が根拠のある暦日にだけ付くこと、validatorの拒否。
@@ -524,3 +568,59 @@ flag停止、未適用migration、promoterがskipし続ける候補、未完のp
 J-POINT's observed total is one unclassified holding in points:j-point. Its provider-expiring portion is a non-additive display section attached to the exact total source fact, carried inside the same fixed READ snapshot. The portion is not another bucket and does not enter by-kind/consumable totals, conversion or a computed expiry rule. The total's expiry stays unattached; no remainder is computed.
 
 Not-displayed and unknown sections are stored even with zero display rows, and the UI calls the expiry unconfirmed. They never become zero or no expiry. READ 0005 adds provider display sections/checkpoints and immutable snapshot section counts. projection-input-v3 / projection-v4 fixed inputs and output digests include the bounded provider stream; publication waits for verification of every stream. Existing rule-derived estimates retain their rule-reference guards and pagination. Provider sections in the expiry response are a complete bounded companion set from the same resolved sealed snapshot.
+
+## Conversion module boundary
+
+`packages/domain/src/reward-conversion.ts` owns pure conversion amount simulation
+and bounded route traversal. `rewards.ts` re-exports its existing public API;
+reward contracts, bucket eligibility, expiry and redemption remain in that file.
+The extraction preserves derivation releases and returned values. The finite-domain
+tests cover conversion amounts and all directed offer graphs on three units.
+
+## Search eligibility at each hop
+
+The route search checks an offer's validity and membership at its applied calendar
+day, including after an earlier hop's processing delay. `conversion-search-v2`
+requires a local date or containing civil period in a compatible zone. An instant,
+unknown time or zone mismatch cannot establish a whole application day and yields
+`needs_rule_verification`; a known day outside the offer's period yields
+`offer_not_valid_at_clock`. A standing offer (`open-ended` validity, §1) covers its
+first day and every later day, so it stays a route instead of becoming
+`needs_rule_verification`; a `null` deadline is never passed.
+
+The application deadline is checked at the same day (`conversion-search-v3`). A
+local-date or instant deadline is its own calendar day, and a later day is
+`application_deadline_passed` (`reuse_before_credit` after an earlier hop). A period
+deadline is passed only after the period ends; a day inside the period establishes
+nothing and yields `needs_rule_verification`. An `unknown` or malformed deadline also
+yields `needs_rule_verification`: only `null` means no deadline (INV05). Before v3 an
+unknown, malformed or period deadline was never checked, so such an offer was a route
+on any day.
+
+The `/offers/simulate` goal search starts from today's UTC date as a `local-date`
+with zone `null` (`services/app/src/rewards-api.ts`). A `null` zone is compatible with
+any offer zone, so an `Asia/Tokyo` offer is checked against the UTC date: between
+00:00 and 09:00 JST that is the previous JST day, and an offer's first or last day can
+be judged one day off at the boundary.
+
+For a tier-limited offer, a provider membership claim must name the source program,
+an admitted tier and a validity date/period covering that same day. Missing,
+self-reported, another program's or out-of-period claims remain
+`needs_rule_verification`, rather than proving entitlement. These rejection rows
+describe an unestablished condition, not proof that a future application is impossible.
+No provider terms, quota, fee or acceptance policy is inferred. The `/offers/simulate`
+route passes no membership claims, so every tier-limited offer is
+`needs_rule_verification` there until membership is supplied.
+
+`CONVERSION_SEARCH_RELEASE` is part of the reward projection's build digest
+(`packages/read-model/src/reward-projection.ts`), so each bump (`conversion-search-v2`, then `-v3`)
+builds a new projection snapshot once; stored snapshots are not rewritten and no
+migration is needed.
+
+The exhaustive eligibility test covers all 960 combinations of ten validity shapes
+(including three standing-offer shapes), eight membership scenarios,
+restricted/unrestricted tiers, three application days and direct/two-hop routes. A
+malformed stored validity establishes no day and stays `needs_rule_verification`.
+`packages/domain/test/reward-conversion.test.ts` also pins unknown, malformed and
+period deadlines. The completion rule is unchanged; a `requiredCompletionBy` with no
+day is still not checked (a limit; no caller passes one today).

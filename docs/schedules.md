@@ -1,8 +1,9 @@
 # Schedule administration
 
 Open `/schedules` from **取得履歴** or **収集スケジュール**. Only the configured
-Access operator can open this page; maintenance windows alone can also be read
-by a granted agent ([below](#agent-maintenance-tools)). The page
+Access operator can open this page; an MCP client can read the same snapshot
+without its re-survey section, and maintenance windows and the re-survey
+section through their own reads ([below](#agent-maintenance-tools)). The page
 shows the original next occurrence, maintenance-adjusted due time, actual alarm
 reservation and the latest scheduling receipt separately. All displayed timestamps use Japan time;
 daily configuration defaults to Japan time and can use Sydney or UTC explicitly.
@@ -42,10 +43,14 @@ A running execution proves it is alive
 ([ADR 0085](adr/0085-collection-lease-heartbeat.md)): it writes the lease's
 `heartbeat_at` on D1's clock with its claim and every minute while it runs. If
 a process dies during collection, its heartbeat stops, and the Processor's
-5-minute tick frees the lease once the heartbeat is 10 minutes old (a lease
-claimed by a build without heartbeats, which has none or only one older than
-its claim: once it is 60 minutes old). Each such
-release is recorded (`alarm.lease.expire`, principal `alarm:processor-tick`).
+5-minute `processor-tick` alarm frees the lease once the heartbeat is 10
+minutes old (a lease claimed by a build without heartbeats, which has none or
+only one older than its claim: once it is 60 minutes old). Each such release
+is recorded (`alarm.lease.expire`, principal `alarm:processor-tick`). Only that
+alarm frees leases: the release workflow's `/bootstrap`, which runs the same
+reservation repair, frees none. While the `processor-tick` job is disabled, or
+its Pipeline tick throws (a failing lane alone does not), no lease is freed;
+the operator can still release one on this page.
 Freeing a lease starts and replays nothing: the next nominal occurrence, or a
 new operations request, simply finds the source free.
 
@@ -59,8 +64,10 @@ write for 10 minutes while the Processor can is the open limit in the ADR.)
 Such a run is recorded `uncertain` (`collection_deadline_exceeded` or
 `collection_lease_lost`), since the provider may have been contacted, and is
 never replayed. St George instead records a failed run with the stop as its
-reason and blocks until the operator resumes it, as after any failed St George
-run.
+reason; its next scheduled run tries again. Only a refused, challenged or unrecognised St
+George login pauses the source, until the credential secret changes or one
+requested collection (at most once per 24 hours) allows a login; a skipped alarm
+records `st_george_paused_<reason>`.
 
 **停止した実行を解除** remains for the operator, for a source that should not
 wait for the tick. Only after confirming the previous execution stopped, use it.
@@ -99,6 +106,22 @@ claim and release; the records do not say which. With the owner's go-ahead
 exact-reference UPDATE on CORE D1, not through the page. These two releases
 therefore have no audit record.
 
+The next Vpass occurrence, 2026-11-07 21:00 UTC, also ended `uncertain`
+(`dispatch_uncertain`, no `finished_at`). Read from Workers Logs on
+2026-11-08: the Vpass alarm object claimed the occurrence at 21:00:00.609 UTC,
+but neither the Processor nor the Vpass Worker has an invocation record of
+that attempt. One more alarm invocation of the same object, at 21:01:39 UTC,
+ended `canceled` after 32 ms with no log line. The claim had already moved the
+schedule to the next occurrence, so a retried alarm could only re-arm for it.
+A Vpass lease was nevertheless held: the processor tick triggered at 21:10:05
+freed it at 21:15:01 UTC (`alarm.lease.expire`) under the ten-minute heartbeat
+rule, so its last heartbeat was written before about 21:05. The collector had
+therefore most likely been called and had claimed its lease before both
+executions stopped without a record. No deploy ran in that window, the logs
+show no exception or limit, the other alarms of 21:00 finished normally, and
+the reservation for the next occurrence stayed armed. The alarm and lease log
+lines below were added so the next such stop shows where it happened.
+
 An accepted operations-API collection or session refresh runs through the same
 named collector RPC and the same lease
 ([ADR 0048](adr/0048-operation-collector-dispatch.md),
@@ -106,10 +129,11 @@ named collector RPC and the same lease
 held the request waits (`collection_lease_held`) instead of starting. The
 Processor's dispatch only reads the lease and never releases or replaces it;
 the collector acquires and releases it exactly as for an alarm run, and a
-stopped execution's lease is still released only by the operator. A collector that finds its lease held reports `collection_busy` (alarm
-receipts included) rather than `collection_failed`; St George, whose session
-coordinator records a refused lease as a failed run, still reports
-`collection_failed` and then refuses later runs until the operator resumes it.
+stopped execution's lease is freed by the `processor-tick` alarm or the
+operator, as above. A collector that finds its lease held reports `collection_busy` (alarm
+receipts included) rather than `collection_failed`. St George does the same
+since 2026-11-08 UTC; before that its session coordinator recorded a refused
+lease as a failed run and refused later runs until the operator resumed it.
 
 Deployment applies CORE 0065 and uploads named collector entrypoints before the
 Processor and App. It removes the fourteen configured Cron jobs and reconciles
@@ -131,9 +155,99 @@ the same bookkeeping wakeup. The outcome stays in the occurrence row. The
 `processor-tick` and `sbi-vc-keepalive` occurrences record nothing
 ([audit log](audit-log.md#the-processors-own-records-alarm-and-lane)).
 
+### Alarm and lease log lines
+
+Each alarm writes structured lines to Workers Logs for
+`kogane-observation-pipeline` (`services/processor/src/schedule-alarm.ts`).
+They hold job and occurrence ids, instants, closed codes and counts only:
+
+- `schedule_alarm` with `outcome`: `claimed` (with `nominalAt`, `lagMs`,
+  `claimMs` and the next reservation `nextDueAt`), `deferred` (with the
+  nominal, the stored run time and the maintenance-adjusted `dueAt`), `early`,
+  `disabled`, `no_job`, or `claim_conflict` (the claim inserted no occurrence
+  row; a `started` row already there for that occurrence is marked
+  `uncertain`/`dispatch_uncertain`, and nothing is dispatched).
+- `schedule_dispatch_start`, written just before the collector call, with the
+  target workspace.
+- `schedule_dispatch_result` with `status`, `failureCode`, `runCount` and
+  `durationMs`; when the call threw, also the error's `errorName` and a closed
+  `errorKind` (`network_lost`, `object_reset`, `timeout`, `limit_exceeded`,
+  `overloaded`, `d1`, `other`). The error message itself is never logged,
+  because a collector's error may carry provider text.
+- `schedule_bookkeeping_retry` now also names the `jobId`, the
+  `occurrenceId` once claimed, the `phase` that threw (`load`, `plan`,
+  `claim`, `dispatch`, `record`), `errorName` and `errorKind`.
+
+So an occurrence that ends `uncertain` with no `finished_at` (the hourly
+abandonment rule above) can be placed: a `claimed` line with no
+`schedule_dispatch_start` stopped between the claim and the call, a start
+with no result stopped while the call was open, and a result with no later
+line lost the receipt update.
+
+The tick's `collection_lease_expired` line names the freed lease reference,
+its `startedAt` and its `lastHeartbeatAt`, so the gap between them shows how
+long the silent holder lived after its claim.
+
+A collector whose lease claim is refused logs `collection_lease_busy`
+(`packages/collection/src/schedule-lease.ts`) with the holder's lease
+reference (the one the operator's release names), its `started_at` and
+`heartbeat_at`, and both ages measured against D1's `now` (`holderAgeMs`,
+`holderSilentMs`; `started_at` is written on the claiming isolate's clock,
+`heartbeat_at` on D1's).
+The read that describes the holder is best-effort; the refusal never depends
+on it. A claim statement that throws logs `collection_lease_claim_failed` with
+the error's name. Vpass also logs the answer it returns to the Processor as
+`vpass-scheduled-result` (`nominalAt`, `status`, `failureCode`, `runCount`,
+`durationMs`).
+Workers Logs keep seven days.
+
 The trusted workflow refuses pre-alarm release/rollback targets before checkout
 and before any production mutation. Removing the ScheduleAlarm class requires a
 separate retirement migration; it is not an ordinary old-commit rollback.
+
+## 収集を依頼 (collection request)
+
+Owner decision 2026-11-08 03:19 UTC (Phase 3 plan, unit 3b): the operator can
+ask for a collection from this page. Each collection job a collector connection
+serves has a **収集を依頼** section. It sends `POST /api/ops/v1/collections`,
+the same application service as `kogane.ops.collection.request`
+([operations API](ops-api.md#collector-execution-adr-0048),
+[ADR 0048](adr/0048-operation-collector-dispatch.md)), so a request from the
+page and one from an MCP client are the same kind of stored operation.
+
+- **What the page reads first.** The snapshot gives each job a
+  `collectionRequest` field: the CORE source the request names (for example
+  job `prestia-globalpass` names `global-pass`, job `vpoint` names `v-point`)
+  and `dispatch`, the closed code the Processor's dispatch lane would act on:
+  `enabled`, `lane_disabled` (`OPS_DISPATCH_ENABLED` off) or
+  `connection_disabled` (the job is not in `OPS_COLLECTOR_DISPATCH_CONNECTIONS`).
+  The Processor computes it with the functions the lane decides with
+  (`services/processor/src/operations/collection-targets.ts`). It is `null`
+  for a job no collector serves for a request (`sbi-vc-keepalive`,
+  `processor-tick`, `smbc-direct`, `vpoint-pay`). `kogane.schedules.read`
+  returns the same field. `enabled` is not a promise of a start: a maintenance
+  window or a held lease still makes the request wait, and a missing collector
+  binding still declines it (`collector_binding_missing`).
+- **No button when it cannot run.** For `lane_disabled` and
+  `connection_disabled` the section says why and offers no button, because
+  such a request can only wait and expire after 24 hours.
+- **Confirmation.** **収集を依頼** opens a confirmation, not a request. It shows
+  the job's last run, whether an execution holds the source's lease (the
+  request then waits), the next scheduled run and the maintenance status, and
+  says that the collector runs its daily scope and that a started collection
+  cannot be taken back. **依頼を送信** sends the request; **やめる** sends
+  nothing.
+- **The request.** `{source, requestedScope: {from, to}, idempotencyKey}`:
+  the window is the date in Japan of the confirmation's first send (stored,
+  not applied: the collector runs its daily scope), and the key is
+  `ui-collect-<uuid>`, new for each confirmation. A retry after a failed or
+  lost answer reuses the key and the window, so it is the same payload and the
+  same operation even after midnight; a new confirmation is a new request. A
+  4xx answer other than 408 or 429 is shown as refused and not stored, with
+  its code. The answer shows the operation id.
+- **Following it.** The page does not read the operation yet. The request's
+  trail is `GET /api/ops/v1/operations/{id}`, and a finished run appears in
+  **取得履歴** like an alarm run.
 
 ## Official-site re-survey
 
@@ -251,6 +365,14 @@ enable/disable are otherwise reachable only through the delegated
 `kogane.schedules.job.update` tool ([below](#s3-maintenance-execution-and-confirmation-2026-10-10)),
 and the routes above refuse every agent and every MCP-audience caller. The tools' grading is in [agent access](agent-api.md#maintenance-windows).
 
+- `kogane.schedules.read` (`schedules.read` with `scopes.scheduleSources`
+  `"*"`, and `evidence.read` over the whole store because the page's
+  occurrences carry run and evidence ids and it lists held leases; on `/mcp`
+  and `POST /api/agent/v1/schedules.read`) answers this page's
+  `GET /api/ops/v1/schedules` snapshot without its `survey` part, read from
+  the Processor with no operator or agent header
+  ([ADR 0081](adr/0081-ui-parity-through-mcp.md);
+  [UI read pages](agent-api.md#ui-read-pages)).
 - `kogane.schedules.maintenance.read` (`schedules.read`, scoped by
   `scopes.scheduleSources`; on `/mcp` and `POST /api/agent/v1/schedules.maintenance.read`,
   which answer the same object) returns, for the granted sources (or the one
@@ -359,8 +481,9 @@ The preparation checks the current source/rule/host/bounds and reports the
 smaller remaining budget, without saving a maintenance revision. Confirm runs
 the validations again and consumes the preparation only with the effect.
 
-The checked-in delegation table is empty, and the MCP financial-reader grant
-has no schedule authority. Production migration application and real-client
+There is no delegation table: every MCP client the MCP Access application
+admits is the delegated principal and holds `schedules.read` over every
+schedule source (ADR 0084). Production migration application and real-client
 maintenance writes were not verified by these local synthetic tests.
 
 ## S3 maintenance execution and confirmation (2026-10-10)
@@ -413,8 +536,11 @@ The tests use synthetic local D1 data and synthetic Access keys. They cover
 signed MCP entry, revocation and scope-before-replay, both hard bounds,
 prepare/effect linkage, shared daily budget, rollback, exact retries,
 concurrent joined windows and losing-provenance writes. Production migration
-state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
-the committed MCP financial-reader grant receives no schedule authority.
+state and real-client use were not checked. `MCP_DELEGATIONS` stayed empty
+then, and the committed MCP financial-reader grant received no schedule
+authority; [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+(2026-11-07) removed both, and every MCP client now reads and revises
+maintenance windows over every schedule source, as itself.
 S6 survey acceptance remained unavailable pending the separate owner decision
 (delegated survey decisions since 2026-11-07: [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07));
 no survey grammar, grants, Access, authentication or deployment is changed.

@@ -58,6 +58,7 @@ const STATUS: Readonly<Record<string, { label: string; tone: Tone }>> = {
 export const IDENTIFIER_STATE_LABELS: Readonly<Record<string, string>> = {
   "unresolved-candidates": "未判断の候補あり",
   "resolved-by-decision": "判断により同じ銘柄",
+  "resolved-by-rule": "自動規則により同じ銘柄",
   "shared-without-decision": "判断の記録なしで同じ銘柄（要確認）",
   "kept-separate": "別の銘柄と判断済み",
   "no-candidate": "候補なし",

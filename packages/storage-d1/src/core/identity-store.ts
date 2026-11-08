@@ -27,12 +27,7 @@ import {
 } from "./identity-policies/index.ts";
 
 export type IdentityResolver = (input: IdentityInput) => IdentityPlan;
-export {
-  BASE_IDENTITY_POLICY_VERSION,
-  IDENTITY_POLICY_VERSION,
-  identityKey,
-  requiredIdentityPolicySql,
-};
+export { BASE_IDENTITY_POLICY_VERSION, IDENTITY_POLICY_VERSION, identityKey };
 const kinds = ["transaction", "balance", "position", "valuation"] as const;
 
 /** Automatic policy yields to the latest effective decision (migration 0029):
@@ -54,7 +49,7 @@ async function mappingIdBindings(prefix: "am" | "im", ref: string, version: numb
  * card first (ADR 0023). A v2 token (ADR 0029) is anchored to the same
  * producer name, so it too names one entity whichever producer reads it.
  */
-export const VPASS_TOKEN_ENTITY_PRODUCER = "collector-r2-importer";
+const VPASS_TOKEN_ENTITY_PRODUCER = "collector-r2-importer";
 
 /**
  * The producer whose source-account reference names the account entity of a
@@ -62,7 +57,7 @@ export const VPASS_TOKEN_ENTITY_PRODUCER = "collector-r2-importer";
  * every MoneyForward account before the collector (ADR 0027). A v2 identity
  * (ADR 0029) is anchored to the same producer name.
  */
-export const MONEYFORWARD_IDENTITY_ENTITY_PRODUCER = "collector-r2-importer";
+const MONEYFORWARD_IDENTITY_ENTITY_PRODUCER = "collector-r2-importer";
 const MONEYFORWARD_ACCOUNT_REFERENCE = /^moneyforward-me:moneyforward-account-v[12]-[0-9a-f]{64}$/u;
 
 /**
@@ -208,6 +203,14 @@ async function accountMapping(
   return { ref, mapping: mapping.id };
 }
 
+/**
+ * The identifier, its own instrument and, unless something else maps it, the
+ * rule's mapping onto that instrument. A rule mapping onto another instrument
+ * is an automatic adoption (`instrument-auto-v1`, ADR 0055 amendment
+ * 2026-11-08); a later policy version does not revert it, as it does not
+ * revert a protected manual mapping. The identity rule itself only ever maps
+ * an identifier onto its own instrument.
+ */
 async function instrumentMapping(db: D1Like, instrument: InstrumentIdentity, version: number) {
   const ref = await identityKey("ii", [instrument.namespace, instrument.scope, instrument.value]);
   const entity = await identityKey("instrument", [ref]);
@@ -233,7 +236,8 @@ async function instrumentMapping(db: D1Like, instrument: InstrumentIdentity, ver
       .prepare(`INSERT INTO instrument_mappings SELECT ${MAPPING_ID_SQL},?,next.revision,?,'rule',?,?,?,?,?
       FROM (SELECT coalesce((SELECT max(revision) FROM instrument_mappings WHERE identifier_id=?),0)+1 AS revision) next
       WHERE NOT ${PROTECTED_SQL("instrument_mapping")}
-      AND NOT EXISTS(SELECT 1 FROM current_instrument_mappings current WHERE current.identifier_id=? AND current.method='rule' AND current.policy_version>=?)`)
+      AND NOT EXISTS(SELECT 1 FROM current_instrument_mappings current WHERE current.identifier_id=?
+        AND current.method='rule' AND (current.policy_version>=? OR current.instrument_id<>?))`)
       .bind(
         ...(await mappingIdBindings("im", ref, version)),
         ref,
@@ -247,6 +251,7 @@ async function instrumentMapping(db: D1Like, instrument: InstrumentIdentity, ver
         ref,
         ref,
         version,
+        entity,
       ),
   ]);
   const mapping = await db

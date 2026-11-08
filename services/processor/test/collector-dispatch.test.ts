@@ -14,6 +14,7 @@ import {
   d1CommandStore,
   readOperation,
   requestCollection,
+  requestImport,
   requestSessionRefresh,
   type CommandStore,
   type OperationReceipt,
@@ -286,8 +287,10 @@ test("success: accepted, started, collected and published are distinct, timestam
       },
     ],
   });
-  // READ projection of the run is not traced: `projected` stays pending and
-  // the request is not reported complete (ADR 0048, limits).
+  // `projected` is derived from READ when the record is read (ADR 0048,
+  // amended). Publication stored the CORE revision it needs; this reader
+  // passes no READ database, so it stays pending with that closed reason and
+  // the request is not reported complete.
   expect(stages(published)).toEqual([
     "persisted:completed",
     "registered:completed",
@@ -295,10 +298,63 @@ test("success: accepted, started, collected and published are distinct, timestam
     "adopted:completed",
     "projected:pending",
   ]);
+  expect(published.stages[4]).toMatchObject({
+    evidenceRef: null,
+    failureCode: "read_model_unavailable",
+  });
   expect(published.status).toBe("running");
+  const [requirement] = rows<{ evidence_ref: string; state: string }>(
+    w.db,
+    "SELECT evidence_ref,state FROM ops_request_stages WHERE operation_id=? AND stage='projected'",
+    operationId,
+  );
+  const revision = rows<{ source_revision: number; core_epoch: string }>(
+    w.db,
+    "SELECT source_revision,core_epoch FROM core_source_revision WHERE id=1",
+  )[0]!;
+  expect(requirement).toEqual({
+    state: "pending",
+    evidence_ref: `core-revision:${revision.core_epoch}:${revision.source_revision}`,
+  });
 
   // Nothing further happens: no second call, nothing left to track.
   expect(await w.tick(publishedAt + HOUR)).toMatchObject({ claimed: 0, started: 0, tracked: 0 });
+  expect(w.calls).toHaveLength(1);
+});
+
+test("a throwing import leaves collected publication tracking able to finish", async () => {
+  const w = world();
+  const operationId = await collect(w);
+  await w.tick(T0 + MINUTE);
+  expect(await registerCollectionRun(w.env, { source: SOURCE, runId: "op-run-001" })).toMatchObject(
+    { outcome: "registered" },
+  );
+  publishArtifact(w, "balance.json");
+  workItemProcessed(w);
+
+  const imported = await requestImport({
+    store: w.store,
+    principal: PRINCIPAL,
+    now: ACCEPTED_AT,
+    request: { source: SOURCE, runId: "run-broken" },
+  });
+  if (!imported.ok) throw new Error("acceptance failed");
+  const get = w.bucket.get.bind(w.bucket);
+  w.bucket.get = async (key) => {
+    if (key === `runs/${SOURCE}/run-broken/terminal.json`) throw new Error("synthetic R2 outage");
+    return get(key);
+  };
+
+  expect(await w.tick(T0 + 10 * MINUTE)).toMatchObject({
+    claimed: 1,
+    retried: 0,
+    failed: 1,
+    tracked: 1,
+    published: 1,
+    started: 0,
+  });
+  expect((await read(w, operationId)).execution?.state).toBe("published");
+  expect((await read(w, imported.receipt.operationId)).dispatch.state).toBe("dispatch_pending");
   expect(w.calls).toHaveLength(1);
 });
 

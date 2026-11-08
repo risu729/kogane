@@ -307,7 +307,14 @@ described in [identity](identity.md#cross-identifier-instrument-candidates).
   order-independent and refuses more than 5,000 pairs or 1,000 hints.
 - `identifierResolutions` gives each identifier one of
   `IDENTIFIER_RESOLUTION_STATES`; an instrument shared without a manual
-  mapping is `shared-without-decision`, never resolved.
+  mapping is `resolved-by-rule` when an `instrument-auto-v1` decision made
+  a sharer's current mapping (`adoptedByRule`), else
+  `shared-without-decision`, never resolved.
+- `instrument-auto-adoption.ts`: `instrumentAutoAdoptions(facts, set,
+  listedAs)` picks the candidates rule `instrument-auto-v1` adopts (SBI's bare
+  domestic code onto its Japanese listing of the same code, nobody's decision
+  on either side, ADR 0055 amendment 2026-11-08). Pure; the Processor lane
+  writes.
 
 ## `lots.ts` — lots and disposal allocation over a provisional input
 

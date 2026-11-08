@@ -52,7 +52,7 @@ import {
 import type { SqlExecutor } from "./reader.ts";
 
 /** The 0070 objects the selector reads; without every one of them it is unavailable. */
-export const ECONOMIC_SELECTOR_OBJECTS = [
+const ECONOMIC_SELECTOR_OBJECTS = [
   ["table", "economic_commit_log"],
   ["table", "economic_revision_seals"],
   ["table", "economic_event_times"],
@@ -305,7 +305,7 @@ function bounded<T>(rows: T[], name: keyof typeof SELECTOR_BOUNDS, already = 0):
 }
 
 /** Every leg subject that names one of these accounts: both stored forms. */
-export function scopeSubjects(accounts: readonly string[]): string[] {
+function scopeSubjects(accounts: readonly string[]): string[] {
   return [...new Set(accounts.flatMap((account) => [account, `account:${account}`]))].sort();
 }
 

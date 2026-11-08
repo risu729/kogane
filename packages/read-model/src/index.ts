@@ -152,12 +152,17 @@ export {
   projectionPageSql,
   projectionSubtotalSql,
 } from "./balance-projection-sql";
+export { snapshotIsBehind } from "./snapshot-freshness";
 export {
   type ActivePointerRow,
   type BalanceProjectionReader,
   type BalanceSnapshotRow,
   type ProjectionCoverageRow,
+  type ServableSnapshot,
+  SNAPSHOT_REFUSALS,
+  type SnapshotRefusal,
   type SubtotalRow,
+  subtotalCountKey,
   createCoreProjectionSource,
 } from "./balance-projection-reader";
 export {

@@ -7,6 +7,7 @@ import {
   collectFromPage,
   createRuntimeDiagnostics,
   publicFailure,
+  readNotices,
   validateRequest,
 } from "./browser.mjs";
 import { createServer } from "./server.mjs";
@@ -547,3 +548,35 @@ for (const [outcome, expected] of [
       await context.close();
     }
   });
+
+test("notices are read in a real page: alerts first, visible only, login page after a submit", async () => {
+  const context = await offlineContext();
+  const notices = `<h1>Log on</h1><h2 style="display:none">Hidden ${secret}</h2>
+    <div class="banner"><h2>Internet Banking</h2></div>
+    <div role="alert">The details you entered don't match our records.</div>
+    <p class="error">${"e".repeat(500)}</p>`;
+  await routeFixture(context, (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: notices }),
+  );
+  const page = await context.newPage();
+  try {
+    await page.goto("https://ibanking.stgeorge.com.au/ibank/loginPage.action");
+    const expected = [
+      "The details you entered don't match our records.",
+      "e".repeat(400),
+      "Log on",
+      "Internet Banking",
+    ];
+    assert.deepEqual(await page.evaluate(readNotices, true), expected);
+    assert.deepEqual(await page.evaluate(readNotices, false), expected);
+    // Any other page of the bank is read only before a login was submitted.
+    await page.goto("https://ibanking.stgeorge.com.au/ibank/viewAccountPortfolio.html");
+    assert.deepEqual(await page.evaluate(readNotices, true), []);
+    assert.deepEqual(await page.evaluate(readNotices, undefined), []);
+    assert.equal((await page.evaluate(readNotices, false)).length, 4);
+    await page.goto("about:blank");
+    assert.deepEqual(await page.evaluate(readNotices, false), []);
+  } finally {
+    await context.close();
+  }
+});

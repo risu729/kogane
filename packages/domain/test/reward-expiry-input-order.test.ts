@@ -202,3 +202,85 @@ describe("a stored basis refuses a repeated reference", () => {
     for (const copy of copies) expect(validBucketExpiryBasis(copy)).toBe(false);
   });
 });
+
+describe("membership claims follow no input order", () => {
+  test("two tiers' claims in either order give one basis", () => {
+    const tiered: ExpiryRule = {
+      ...inactivity,
+      ruleId: "rule:program-a:two-tiers",
+      applicability: { ...inactivity.applicability, tiers: ["gold", "elite"] },
+    };
+    const claim = (tier: string, source: MembershipState["source"]): MembershipState => ({
+      programId: "program:a",
+      holdingRef: "holding:member-1",
+      tier,
+      valid: period("2026-01-01", "2026-12-31"),
+      source,
+      evidenceRefs: [`evidence:tier:${tier}`],
+    });
+    const claims = [claim("gold", "self-reported"), claim("elite", "provider")];
+    const activities = history([
+      { activityRef: "act:earn-1", kind: "earn", postedDate: day("2026-03-01"), usedDate: null },
+    ]);
+    const bases = bothOrders(claims).map(
+      (order) =>
+        estimateExpiry(tiered, holding, activities, order, day("2026-09-09")).expiringBuckets[0]!
+          .expiryBasis,
+    );
+    expect(bases[0]!.computed.membership?.claims.map((entry) => entry.tier)).toEqual([
+      "elite",
+      "gold",
+    ]);
+    expect(bases[1]).toEqual(bases[0]!);
+  });
+  const twoClaims = (tiers: string[], claims: MembershipState[]): BucketExpiryBasis[] => {
+    const tiered: ExpiryRule = {
+      ...inactivity,
+      ruleId: "rule:program-a:listed-tiers",
+      applicability: { ...inactivity.applicability, tiers },
+    };
+    const activities = history([
+      { activityRef: "act:earn-1", kind: "earn", postedDate: day("2026-03-01"), usedDate: null },
+    ]);
+    return bothOrders(claims).map(
+      (order) =>
+        estimateExpiry(tiered, holding, activities, order, day("2026-09-09")).expiringBuckets[0]!
+          .expiryBasis,
+    );
+  };
+  const tierClaim = (tier: string, evidenceRefs: string[]): MembershipState => ({
+    programId: "program:a",
+    holdingRef: "holding:member-1",
+    tier,
+    valid: period("2026-01-01", "2026-12-31"),
+    source: "provider",
+    evidenceRefs,
+  });
+
+  test("two claims of one tier that differ only in their refs' order give one basis", () => {
+    const bases = twoClaims(
+      ["gold"],
+      [
+        tierClaim("gold", ["evidence:tier:b", "evidence:tier:a"]),
+        tierClaim("gold", ["evidence:tier:a", "evidence:tier:b"]),
+      ],
+    );
+    expect(bases[1]).toEqual(bases[0]!);
+  });
+
+  test("tiers are listed in code point order, as SQLite orders MEMBERSHIP_SQL's rows", () => {
+    // U+FF21 sorts before U+1F600 by code point (and by UTF-8 bytes), but
+    // after it by UTF-16 code unit, where U+1F600 starts with 0xD83D.
+    const fullWidth = "\uFF21";
+    const astral = "\u{1F600}";
+    const bases = twoClaims(
+      [astral, fullWidth],
+      [tierClaim(astral, ["evidence:tier:2"]), tierClaim(fullWidth, ["evidence:tier:1"])],
+    );
+    expect(bases[0]!.computed.membership?.claims.map((entry) => entry.tier)).toEqual([
+      fullWidth,
+      astral,
+    ]);
+    expect(bases[1]).toEqual(bases[0]!);
+  });
+});

@@ -16,15 +16,26 @@
 // configuration that already carries a sha is an error rather than a second
 // rewrite. The repository's own files are never stamped outside a release
 // (`scripts/release-sha.test.ts` asserts they are committed empty).
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The variable a Worker reads its build identity from. */
 export const RELEASE_SHA_VAR = "RELEASE_SHA";
 
-/** `"RELEASE_SHA": "<anything>"` as it appears in a Wrangler JSONC file. */
+/** `"RELEASE_SHA": "<lowercase hex>"` as it appears in a Wrangler JSONC file. */
 const DECLARATION = /"RELEASE_SHA"(\s*):(\s*)"([0-9a-f]*)"/gu;
+
+/** Every declaration of the variable, whatever its value. */
+const KEY = /"RELEASE_SHA"\s*:/gu;
+
+/**
+ * The closed code for a declaration that holds something other than empty or
+ * a full lowercase sha (an uppercase or non-hex string, a non-string value).
+ * It is a declaration all the same, so it is refused, never skipped as absent,
+ * and the value is not echoed.
+ */
+export const INVALID_DECLARATION = "release_sha_invalid_declaration";
 
 /**
  * One configuration's text with the sha stamped in.
@@ -34,11 +45,14 @@ const DECLARATION = /"RELEASE_SHA"(\s*):(\s*)"([0-9a-f]*)"/gu;
  * @returns {{text: string, stamped: boolean}}
  */
 export function stampConfig(text, sha) {
+  const declared = [...text.matchAll(KEY)].length;
   const matches = [...text.matchAll(DECLARATION)];
-  if (matches.length === 0) return { text, stamped: false };
-  if (matches.length > 1) throw new Error(`${RELEASE_SHA_VAR} is declared more than once`);
+  if (declared === 0) return { text, stamped: false };
+  if (declared > 1) throw new Error(`${RELEASE_SHA_VAR} is declared more than once`);
   const [match] = matches;
+  if (match === undefined) throw new Error(INVALID_DECLARATION);
   const current = match[3] ?? "";
+  if (current !== "" && !/^[0-9a-f]{40}$/u.test(current)) throw new Error(INVALID_DECLARATION);
   if (current !== "") {
     if (current === sha) return { text, stamped: true };
     throw new Error(`${RELEASE_SHA_VAR} already holds ${current}`);
@@ -118,10 +132,24 @@ export function main(argv, env) {
   return 0;
 }
 
-// Not `import.meta.main`: that is only defined from node 24.2, and the
-// runner's preinstalled interpreter must not be able to turn a guard into a
-// silent no-op.
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
+/**
+ * Whether node was started with this module, compared by real path: node
+ * resolves the main module through symlinks but leaves `argv[1]` as given, and
+ * a raw comparison would skip the command and exit 0 through a symlinked path.
+ * Not `import.meta.main`: that is only defined from node 24.2, and the runner's
+ * preinstalled interpreter must not be able to turn a guard into a silent no-op.
+ */
+function invokedDirectly() {
+  try {
+    return (
+      process.argv[1] !== undefined &&
+      realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+    );
+  } catch {
+    return false;
+  }
+}
+if (invokedDirectly()) {
   try {
     process.exitCode = main(process.argv.slice(2), process.env);
   } catch (error) {

@@ -5,6 +5,14 @@
 // 2. Every API route the web UI reads has an MCP read, through the explicit
 //    route-to-tool map below, and every other published read tool is mapped
 //    or listed, so a tool that closes a route gap cannot leave it listed.
+// 3. Every change kind the lifecycle plans (the confirmation page's
+//    `command.*` operations: card settlement accept, withdraw and reject, the
+//    ownership review, identity) is one `kogane.command.plan` accepts and one
+//    `kogane.command.approve` and `.commit` decide, so guard 1's `command.*`
+//    entries cover every kind a screen can decide. It runs the gates
+//    themselves (the App's decision capability, the delegated envelope, the
+//    Processor's command route and the writer's family check), never a list
+//    beside them, so a family one gate accepts and another refuses fails.
 //
 // ADR 0081 point 2 (no SQL in MCP adapters) is guarded by
 // `tests/mcp-tools-no-sql.test.ts`.
@@ -26,6 +34,27 @@ import {
   OPERATION_CATALOGUE,
   type OperationName,
 } from "../../../packages/application/src/operation-path/catalogue.ts";
+import {
+  CHANGE_KINDS,
+  delegatedCan,
+  delegatedCommandFamilyAllowed,
+  ECONOMIC_EVENT_PLANNERS,
+  executionFor,
+  isCardReviewKind,
+  isEconomicEventKind,
+  processorCall,
+  resolveDelegation,
+  REVIEW_PLANNERS,
+} from "../../../packages/application/src/index";
+import {
+  delegatedDecisionAllowed,
+  delegatedPlanAllowed,
+} from "../../processor/src/change-commands";
+import { DELEGATED_COMMAND_TOOLS } from "../src/delegated-command-tools";
+import {
+  decisionCapabilityFor,
+  EXECUTABLE_DECISION_CAPABILITIES,
+} from "../src/delegated-decision-tools";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 import { routeServes, uiApiPatterns } from "./ui-routes";
 
@@ -63,48 +92,48 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/identity/accounts": ["kogane.identity.read"],
   "/api/identity/instruments": ["kogane.identity.read"],
   "/api/identity/coverage": ["kogane.identity.read"],
+  "/api/meta": ["kogane.store.read"],
+  "/api/overview": ["kogane.store.read"],
+  "/api/filter-options": ["kogane.store.read"],
+  "/api/transactions": ["kogane.observations.list"],
+  "/api/balances": ["kogane.observations.list"],
+  "/api/positions": ["kogane.observations.list"],
+  "/api/artifacts": ["kogane.observations.list"],
+  "/api/artifacts/:id": ["kogane.observations.get"],
+  "/api/observations/:kind/:id": ["kogane.observations.get"],
+  "/api/v2/balances/latest": ["kogane.balances.read"],
+  "/api/v2/balances/history": ["kogane.balances.read"],
+  "/api/v2/rewards/holdings": ["kogane.rewards.read"],
+  "/api/v2/rewards/expiry": ["kogane.rewards.read"],
+  "/api/v2/reported-holdings-change": ["kogane.reported-holdings-change.read"],
+  "/api/v2/reports": ["kogane.reports.read"],
+  "/api/v2/reports/:id": ["kogane.reports.read"],
+  "/api/v2/reports/:id/explanation": ["kogane.reports.read"],
+  "/api/collection-quality": ["kogane.collection-quality.read"],
+  "/api/collection-quality/:source": ["kogane.collection-quality.read"],
+  "/api/collection-quality/:source/accounts": ["kogane.collection-quality.read"],
+  "/api/evidence/v1/meta": ["kogane.evidence.read"],
+  "/api/evidence/v1/sources/:source/runs": ["kogane.evidence.read"],
+  "/api/evidence/v1/runs/:run/artifacts": ["kogane.evidence.read"],
+  "/api/evidence/v1/runs/:run/artifacts/:artifact": ["kogane.evidence.read"],
+  // The jobs and leases, the maintenance window and the re-survey section.
+  "/api/ops/v1/schedules": [
+    "kogane.schedules.read",
+    "kogane.schedules.maintenance.read",
+    "kogane.schedules.survey.read",
+  ],
+  "/api/raw/:sha256": ["kogane.evidence.raw.read"],
+  "/api/evidence/v1/runs/:run/artifacts/:artifact/raw": ["kogane.evidence.raw.read"],
 };
 
 /** UI read routes with no MCP read yet, and what the UI reads there. */
 const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
-  // Deployment and page plumbing.
-  "/api/meta":
-    "parsingHealth and globalPassEmptyMonths; kogane.capabilities carries the same store capabilities (its api field) but not these",
-  "/api/overview": "overview counts of the observation store",
-  "/api/filter-options": "filter choices of the v1 list pages",
-  // v1 observation lists and detail (the evidence browser's record side).
-  "/api/transactions": "v1 transaction list",
-  "/api/balances": "v1 balance list and history",
-  "/api/positions": "v1 positions with valuations",
-  "/api/artifacts": "fetch artifact list",
-  "/api/artifacts/:id": "one fetch artifact",
-  "/api/observations/:kind/:id":
-    "one observation; kogane.explain expands the same ref into a graph, not this detail",
-  "/api/raw/:sha256": "raw evidence download",
-  // The evidence browser.
-  "/api/evidence/v1/meta": "evidence browser",
-  "/api/evidence/v1/sources/:source/runs": "evidence browser",
-  "/api/evidence/v1/runs/:run/artifacts": "evidence browser",
-  "/api/evidence/v1/runs/:run/artifacts/:artifact": "evidence browser",
-  "/api/evidence/v1/runs/:run/artifacts/:artifact/raw": "evidence browser",
-  // Balances and rewards.
-  "/api/v2/balances/latest": "latest balances (READ projection)",
-  "/api/v2/balances/history": "balance history (READ projection)",
-  "/api/v2/rewards/holdings": "reward holdings",
-  "/api/v2/rewards/expiry": "reward expiry",
-  // Reconciliation and reported state.
+  // Card settlements grouped by statement.
   "/api/v2/reconciliation/card-settlements/statements":
     "card settlement review grouped by statement; kogane.card-settlements.read returns the same candidates ungrouped",
-  "/api/v2/reported-holdings-change": "reported holdings between two dates (ADR 0075)",
-  // Reports, quality and schedules.
-  "/api/v2/reports": "stored report list",
-  "/api/v2/reports/:id": "one stored report",
-  "/api/v2/reports/:id/explanation": "a report's explanation",
-  "/api/v2/reports/:id/export": "a report's export download",
-  "/api/collection-quality": "collection quality summary",
-  "/api/collection-quality/:source": "collection quality cells of one source",
-  "/api/ops/v1/schedules":
-    "schedule page snapshot (jobs, leases, survey proposals, maintenance); kogane.schedules.maintenance.read covers maintenance and kogane.schedules.survey.read the re-survey section only",
+  // Report export.
+  "/api/v2/reports/:id/export":
+    "a report's export download; not served over MCP (ADR 0072 amendment 2026-11-07: kogane.reports.read returns the report itself)",
 };
 
 /**
@@ -113,23 +142,23 @@ const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
  * here, so a tool that closes a gap above cannot leave the gap listed.
  */
 const TOOLS_WITHOUT_UI_ROUTE: Readonly<Record<string, string>> = {
-  "kogane.capabilities":
-    "the grant and the store capabilities; /api/meta carries more (a gap above)",
-  "kogane.explain": "an evidence graph of one ref, not the observation detail (a gap above)",
+  "kogane.capabilities": "the grant and the store capabilities; /api/meta is kogane.store.read",
+  "kogane.explain":
+    "an evidence graph of one ref; the observation detail is kogane.observations.get",
   "kogane.reconcile.propose": "an agent's relation proposal; no screen offers it",
   "kogane.economic-readiness.read": "economic row readiness; no screen reads it",
+  "kogane.events.read":
+    "GET /api/v2/activity and /api/v2/obligations, which no screen reads (ADR 0072); plan D19",
   "kogane.audit.get":
     "one audit record by id (readAuditRecordForGrant); the audit page reads pages only (readAuditPage, kogane.audit.search)",
-  "kogane.schedules.maintenance.read":
-    "the maintenance part of /api/ops/v1/schedules (a gap above)",
-  "kogane.schedules.survey.read":
-    "the re-survey part of /api/ops/v1/schedules (a gap above; ADR 0050, 2026-11-07 amendment)",
 };
 
 /** Paths the UI names that are not read routes. */
 const NOT_READ_ROUTES: Readonly<Record<string, string>> = {
   "/api/command/v1": "the change lifecycle's path prefix constant",
   "/api/command/v1/:operation": "POST only: the catalogue's command.* operations (guard 1)",
+  "/api/ops/v1/collections":
+    "POST only: ops.collection.request (guard 1), the schedules page's 収集を依頼",
   "/api/evidence/v1": "the evidence browser's path prefix constant",
 };
 
@@ -299,5 +328,92 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
       names.filter((name) => !tools.has(name)).map((name) => `${route} -> ${name}`),
     );
     expect(unpublished).toEqual([]);
+  });
+});
+
+describe("change kinds the lifecycle plans are decided over MCP (ADR 0081, point 1)", () => {
+  // A kind is plannable once its planner exists; the card purchase review and
+  // economic-event kinds are refused `unsupported_semantics` to every caller
+  // until theirs is registered, so they are not screen operations yet.
+  const plannable = CHANGE_KINDS.filter((kind) =>
+    isCardReviewKind(kind)
+      ? REVIEW_PLANNERS[kind] !== undefined
+      : isEconomicEventKind(kind)
+        ? ECONOMIC_EVENT_PLANNERS[kind] !== undefined
+        : true,
+  );
+
+  it("includes the card settlement decisions", () => {
+    expect(plannable).toEqual(
+      expect.arrayContaining([
+        "card-settlement.accept",
+        "card-settlement.withdraw",
+        "card-settlement.reject",
+        "relation.accept",
+        "relation.reject",
+      ]),
+    );
+  });
+
+  it("kogane.command.plan publishes every plannable kind and the Processor plans it", () => {
+    const plan = DELEGATED_COMMAND_TOOLS.find((tool) => tool.name === "kogane.command.plan")!;
+    const kind = (plan.inputSchema as { properties: { kind: { enum: string[] } } }).properties.kind;
+    expect(kind.enum).toEqual(expect.arrayContaining([...plannable]));
+    // The command route refuses a delegated plan of a kind outside the
+    // decidable families `unsupported_semantics`.
+    expect(plannable.filter((k) => !delegatedPlanAllowed(k))).toEqual([]);
+  });
+
+  it("kogane.command.approve and .commit decide every plannable kind, at every gate", async () => {
+    const resolution = await resolveDelegation({
+      caller: { kind: "mcp-client", principal: "mcp-client:parity-guard" },
+      now: new Date().toISOString(),
+    });
+    if (!resolution.ok) throw new Error(resolution.code);
+    const principal = resolution.principal;
+    const execution = executionFor(principal);
+    const refused: string[] = [];
+    for (const kind of plannable)
+      for (const tool of ["approve", "commit"] as const) {
+        const at = (gate: string) => refused.push(`${tool} ${kind}: ${gate}`);
+        // App: the tool requires this capability of the plan's kind
+        // (`operation_not_delegable` otherwise), the MCP authority must
+        // hold it, and the tools are listed only to a holder of one of
+        // EXECUTABLE_DECISION_CAPABILITIES.
+        let capability: string | null = null;
+        try {
+          const required = decisionCapabilityFor(kind);
+          delegatedCan(principal, required);
+          capability = required;
+        } catch {
+          at("app capability");
+        }
+        if (
+          capability !== null &&
+          !(EXECUTABLE_DECISION_CAPABILITIES as readonly string[]).includes(capability)
+        )
+          at("app tool listing");
+        // Processor: the command route's family check on the envelope the App sends.
+        if (!delegatedDecisionAllowed(kind, execution.commandFamilies)) at("processor route");
+        // Writer: approve()/commit()'s family attenuation on the confirmed call.
+        const call = processorCall(
+          {
+            path: "mcp",
+            correlationId: crypto.randomUUID(),
+            delegatedExecution: {
+              ...execution,
+              idempotencyKey: "parity-guard",
+              payloadDigest: "0".repeat(64),
+              confirmsAuditId: `aud_${crypto.randomUUID()}`,
+              confirmationDigest: `cfm_${"0".repeat(64)}`,
+            },
+          },
+          `command.${tool}`,
+          principal.id,
+          "delegated",
+        );
+        if (!delegatedCommandFamilyAllowed(call, kind)) at("writer family");
+      }
+    expect(refused).toEqual([]);
   });
 });

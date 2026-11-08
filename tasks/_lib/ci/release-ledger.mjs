@@ -25,12 +25,15 @@
 // the previous record and an ancestry predicate, so the ordering rules are
 // unit-tested against a real git history instead of a live deployment.
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
 import { clientFromEnv, request } from "./github-api.mjs";
 import { fileURLToPath } from "node:url";
 
 /** The GitHub Environment this repository releases into. There is no other. */
 export const ENVIRONMENT = "production";
+
+/** The status description's closed code for a progress file that is there but unreadable. */
+export const PROGRESS_UNREADABLE = "release_progress_unreadable";
 
 /**
  * Whether `candidate` is an ancestor of (or identical to) `descendant`.
@@ -803,12 +806,39 @@ export async function main(argv, env) {
     // actually did goes into the status description (and, in full, into the
     // uploaded progress artefact).
     const progressFile = options["progress"] ?? "";
-    const progress =
-      progressFile === "" || !existsSync(progressFile)
-        ? null
-        : JSON.parse(readFileSync(progressFile, "utf8"));
+    // A file that is there but cannot be read as an object — cut short because
+    // the step writing it was itself what failed, say — must not stop a
+    // failure from being posted: the status then says so with a closed code
+    // in place of the summary. Success refuses it below like any other
+    // missing record.
+    let progress = null;
+    let progressUnreadable = false;
+    if (progressFile !== "" && existsSync(progressFile)) {
+      try {
+        progress = JSON.parse(readFileSync(progressFile, "utf8"));
+      } catch {
+        progress = null;
+      }
+      if (progress === null || typeof progress !== "object" || Array.isArray(progress)) {
+        progress = null;
+        progressUnreadable = true;
+      }
+    }
     const state = options["state"] ?? "failure";
-    if (state === "success" && progress !== null) {
+    if (state === "success") {
+      // Fail closed: without this run's own progress record nothing shows that
+      // every planned Worker uploaded, so a missing, unnamed or shapeless one
+      // refuses success instead of skipping the check.
+      if (
+        progress === null ||
+        typeof progress !== "object" ||
+        progress["progressVersion"] !== "release-progress-v1" ||
+        !Array.isArray(progress["workers"])
+      ) {
+        throw new Error(
+          `refusing to record deployment ${String(id)} as success: no release progress record was read`,
+        );
+      }
       const undeployed = undeployedWorkers(progress);
       if (undeployed.length > 0) {
         throw new Error(
@@ -816,7 +846,7 @@ export async function main(argv, env) {
         );
       }
     }
-    const summary = String(progress?.["summary"] ?? "");
+    const summary = progressUnreadable ? PROGRESS_UNREADABLE : String(progress?.["summary"] ?? "");
     const description = [options["description"] ?? "", summary]
       .filter((part) => part !== "")
       .join(" — ");
@@ -832,10 +862,24 @@ export async function main(argv, env) {
   throw new Error(`Unknown command ${String(command)}`);
 }
 
-// Not `import.meta.main`: that is only defined from node 24.2, and the
-// runner's preinstalled interpreter must not be able to turn a guard into a
-// silent no-op.
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
+/**
+ * Whether node was started with this module, compared by real path: node
+ * resolves the main module through symlinks but leaves `argv[1]` as given, and
+ * a raw comparison would skip the command and exit 0 through a symlinked path.
+ * Not `import.meta.main`: that is only defined from node 24.2, and the runner's
+ * preinstalled interpreter must not be able to turn a guard into a silent no-op.
+ */
+function invokedDirectly() {
+  try {
+    return (
+      process.argv[1] !== undefined &&
+      realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+    );
+  } catch {
+    return false;
+  }
+}
+if (invokedDirectly()) {
   try {
     process.exitCode = await main(process.argv.slice(2), process.env);
   } catch (error) {

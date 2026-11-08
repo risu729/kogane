@@ -137,14 +137,16 @@ function SettlementCard({
   const id = `review-${review.proposalId}`;
   const { facts } = review;
   return (
-    <section className="panel" aria-labelledby={id}>
+    // Candidates of one statement share their heading; the month and the
+    // candidate's creation time tell their regions apart.
+    <section className="panel" aria-labelledby={`${id} ${id}-period ${id}-created`}>
       <div className="panel-head settlement-head">
         <h2 id={id}>{statementSource(review)} の請求と銀行引落</h2>
         <Badge tone={review.status === "accepted" ? "ok" : "neutral"}>
           {SETTLEMENT_STATUS[review.status]}
         </Badge>
         <dl className="settlement-facts">
-          <div>
+          <div id={`${id}-period`}>
             <dt>請求月 </dt>
             <dd>{facts.statement.period ?? "不明"}</dd>
           </div>
@@ -165,6 +167,10 @@ function SettlementCard({
             <dd>
               {bankSourceLabel(facts.bankDebit.sourceId)} · {facts.bankDebit.sourceAccount}
             </dd>
+          </div>
+          <div id={`${id}-created`}>
+            <dt>候補の作成 </dt>
+            <dd>{review.createdAt}</dd>
           </div>
         </dl>
       </div>

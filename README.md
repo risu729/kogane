@@ -36,18 +36,20 @@ basis, P&L and tax outputs are incomplete.
 The operator HTTP API can edit schedules and maintenance. Research is not
 automatically refreshed. MCP query/explanation/proposal tools,
 maintenance-window, instrument-history and audit reads, and delegated
-operations exist; the committed configuration grants one MCP reader summary
-and record reads and no schedule capability; as the operator's own MCP
-principal it may also plan, decide and request operations over MCP
-([ADR 0084](docs/adr/0084-mcp-operator-authority-without-delegation.md)), but
-writes no schedule. Accepted collection and session-refresh
+operations exist; no table grants them: every MCP client the MCP Access
+application admits reads the whole store and plans, decides, requests
+operations and revises job and maintenance settings as itself, never as the
+operator ([ADR 0084](docs/adr/0084-mcp-operator-authority-without-delegation.md)).
+Accepted collection and session-refresh
 requests run through the alarm's private named collector RPC
 ([ADR 0048](docs/adr/0048-operation-collector-dispatch.md)), but no connection
 is enabled for that dispatch.
 
-The next milestone is **card usage → statement → bank debit**, with an
-explainable trail and no double expense. Dated holdings/liabilities, valuation,
-lots/P&L and tax follow; rewards can progress in parallel. See
+Card usage → statement → bank debit, with an explainable trail and no double
+expense, works for the representative cases (done 2026-11-08). The next
+milestone is **coverage, collection requests and cross-source identity**.
+Dated holdings/liabilities, valuation, lots/P&L and tax follow; rewards can
+progress in parallel. See
 [current status](docs/current-status.md) for the bounded implementation assessment
 and [roadmap](docs/roadmap.md) for the delivery order and acceptance criteria.
 

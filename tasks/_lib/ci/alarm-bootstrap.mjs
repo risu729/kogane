@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { readFileSync, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { verifyAlarmCronRemoval } from "./alarm-cron-readback.mjs";
 
 export const BOOTSTRAP_POLICY = Object.freeze({ totalMs: 120000, maxAttempts: 6, delayMs: 5000 });
@@ -257,15 +257,36 @@ export async function main(env = process.env) {
   if (performance.now() >= result.deadline) fail("schedule_bootstrap_deadline_exceeded");
   console.log(line);
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/**
+ * The closed code the command line prints for a failure. The Cron readback's
+ * HTTP refusals carry their status number (`schedule_cron_readback_http_403`),
+ * so digits belong to the closed alphabet; any other message is never echoed.
+ */
+export function bootstrapFailureCode(error) {
+  return typeof error?.message === "string" && /^schedule_[a-z0-9_]+$/u.test(error.message)
+    ? error.message
+    : "schedule_bootstrap_internal_error";
+}
+/**
+ * Whether node was started with this module, compared by real path: node
+ * resolves the main module through symlinks but leaves `argv[1]` as given, and
+ * a raw comparison would skip the command and exit 0 through a symlinked path.
+ */
+function invokedDirectly() {
+  try {
+    return (
+      process.argv[1] !== undefined &&
+      realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+    );
+  } catch {
+    return false;
+  }
+}
+if (invokedDirectly()) {
   try {
     await main();
   } catch (error) {
-    console.error(
-      typeof error?.message === "string" && /^schedule_[a-z_]+$/u.test(error.message)
-        ? error.message
-        : "schedule_bootstrap_internal_error",
-    );
+    console.error(bootstrapFailureCode(error));
     process.exitCode = 1;
   }
 }

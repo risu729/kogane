@@ -45,6 +45,7 @@ import {
   REPORTED_STATE_DATE,
   REPORTED_STATE_SOURCE,
 } from "./reported-state-api";
+import { mcpInputSchema } from "./mcp-input-schema";
 
 /**
  * `kogane.reported-state.read` (plan D5): `GET /api/v2/reported-state` for an
@@ -54,20 +55,22 @@ import {
 export const REPORTED_STATE_TOOL_NAME = "kogane.reported-state.read";
 /**
  * The カード照合 reads: served exactly while
- * `GET /api/v2/reconciliation/card-settlements` is (its views exist); otherwise
- * the path is 404 and the MCP name `unknown_tool`.
+ * `GET /api/v2/reconciliation/card-settlements` and
+ * `GET /api/v2/reconciliation/card-statements-unmatched` are (both need the
+ * settlement views, `cardSettlementsAvailable`); otherwise the path is 404 and
+ * the MCP name `unknown_tool`.
  */
 export const CARD_SETTLEMENT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "kogane.card-settlements.read",
   "kogane.card-settlements.ownership",
+  "kogane.card-settlements.unmatched",
 ]);
 
 const schemas = {
   "kogane.instruments.history": z.strictObject({
     identifierId: z.string().regex(INSTRUMENT_IDENTIFIER_ID),
   }),
-  // The page route's query parameters, as a body: the published shape of the
-  // service's request rules (`readCardSettlementsForGrant`), which decide.
+  // The route's query parameters, as a body; the patterns are the route's own.
   "kogane.reported-state.read": z.strictObject({
     date: z.string().regex(REPORTED_STATE_DATE),
     source: z.string().regex(REPORTED_STATE_SOURCE).optional(),
@@ -141,7 +144,7 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
   "kogane.accounts.candidates":
     "One page of the ADR 0077 account correspondence candidates: which direct provider source accounts a reviewed aggregator connection contains, on which evidence, with closed status, hold and same-account reasons, under records.read and a whole-store read grant. Read-only; never proposes same_account. A candidate names the relation.accept or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there.",
   "kogane.card-settlements.unmatched":
-    "One page of the card statement totals no settlement candidate cites, the same answer as the operator's カード照合 page: each statement's closed reason (statement_total_refund_or_zero, statement_not_comparable, no_debit_in_window, no_equal_amount_debit, equal_amount_debit_awaiting_sweep) and, for no_equal_amount_debit, the ADR 0074 planner's read-only answer (window three days either side of the due date, at most three debits) with closed codes. Under records.read and a whole-store read grant. Read-only; no allocation listed is acceptable, since the acceptance writer claims one debit.",
+    "One page of the card statement totals no settlement candidate cites, the same answer as the operator's カード照合 page: each statement's closed reason (statement_total_refund_or_zero, statement_not_comparable, no_debit_in_window, no_equal_amount_debit, equal_amount_debit_awaiting_sweep) and, for no_equal_amount_debit, the ADR 0074 planner's read-only answer (window three days either side of the due date, at most three debits) with closed codes, listing at most the first 50 exact allocations per statement with allocationCount and allocationsTruncated. Under records.read and a whole-store read grant. Read-only; no allocation listed is acceptable, since the acceptance writer claims one debit.",
   "kogane.economic-readiness.read":
     "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled.",
   "kogane.card-settlements.read":
@@ -154,8 +157,7 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
 };
 export const READ_MCP_TOOLS = Object.entries(schemas).map(([name, schema]) => {
-  const inputSchema = z.toJSONSchema(schema) as Record<string, unknown>;
-  delete inputSchema["$schema"];
+  const inputSchema = mcpInputSchema(schema);
   return {
     name,
     title: name.slice(7),
@@ -186,11 +188,11 @@ export function readMcpTools(
       case "kogane.instruments.coverage":
         return grantAllows(grant, "summary.read") && wholeStore(grant);
       case "kogane.accounts.candidates":
-      case "kogane.card-settlements.unmatched":
       case "kogane.economic-readiness.read":
         return grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.card-settlements.read":
       case "kogane.card-settlements.ownership":
+      case "kogane.card-settlements.unmatched":
         return served.cardSettlements && grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.audit.search":
       case "kogane.audit.get":

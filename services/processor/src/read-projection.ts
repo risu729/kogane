@@ -76,7 +76,7 @@ const WRITER_LEASE_MS = 60_000;
  * the flag on without binding a database is a configuration error, and the job
  * returns `read_binding_missing` instead of writing anywhere else.
  */
-export function readDatabase(env: Env): D1Like | null {
+function readDatabase(env: Env): D1Like | null {
   const bound = (env as unknown as { READ?: D1Like }).READ;
   return bound ?? null;
 }
@@ -113,7 +113,7 @@ const halted = (
  * Decisions are the ones the fixed input carried; the releases and the
  * restriction revision come from the same input, never from CORE's present.
  */
-export async function snapshotInputRefs(input: FixedProjectionInput): Promise<SnapshotInputRef[]> {
+async function snapshotInputRefs(input: FixedProjectionInput): Promise<SnapshotInputRef[]> {
   const refs: SnapshotInputRef[] = [];
   const decisions = new Map<string, string>();
   for (const relation of input.content.relations) {

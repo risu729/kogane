@@ -95,7 +95,10 @@ test("a claim whose answer is lost clears its own lease and contacts nobody", as
   ).rejects.toThrow("synthetic lost answer");
   expect(calls).toBe(0);
   expect(state.ref).toBeNull();
-  expect(logged).toEqual([]);
+  // Only the claim's own failure is logged, by error name.
+  expect(logged.map((line) => JSON.parse(line))).toEqual([
+    { event: "collection_lease_claim_failed", source: "synthetic", errorName: "Error" },
+  ]);
   // The next execution is not refused as busy.
   state.failClaimAfterCommit = false;
   await withCollectionLease({ SCHEDULE_DB: db }, "synthetic", async () => {
@@ -133,12 +136,116 @@ test("a lost claim answer whose clearing fails every attempt reports the claim's
   expect(state.ref).not.toBeNull();
   expect(state.releaseCalls).toBe(LEASE_RELEASE_ATTEMPTS);
   expect(logged.map((line) => JSON.parse(line))).toEqual([
+    { event: "collection_lease_claim_failed", source: "synthetic", errorName: "Error" },
     {
       event: "collection_lease_release_failed",
       source: "synthetic",
       attempts: LEASE_RELEASE_ATTEMPTS,
     },
   ]);
+});
+
+test("a refused claim logs who holds the lease and how long it has been silent", async () => {
+  const { db, state } = leaseStore();
+  state.ref = "other-execution";
+  const holder = {
+    lease_ref: "other-execution",
+    started_at: "2026-01-01T00:00:00.000Z",
+    heartbeat_at: "2026-01-01T00:01:00.000Z",
+    age_ms: 120_000,
+    silent_ms: 60_000,
+  };
+  const reads: string[] = [];
+  const withRead: ScheduleLeaseDatabase = {
+    prepare(sql) {
+      const statement = db.prepare(sql);
+      return {
+        bind(...values) {
+          const bound = statement.bind(...values);
+          return {
+            run: () => bound.run(),
+            async first<T>() {
+              reads.push(sql);
+              expect(values).toEqual(["synthetic"]);
+              return holder as T;
+            },
+          };
+        },
+      };
+    },
+  };
+  const info = spyOn(console, "log").mockImplementation(() => undefined);
+  let calls = 0;
+  try {
+    const error = await withCollectionLease({ SCHEDULE_DB: withRead }, "synthetic", async () => {
+      calls += 1;
+    }).then(
+      () => null,
+      (caught: unknown) => caught,
+    );
+    expect(scheduledFailure(error).failureCode).toBe("collection_busy");
+    expect(calls).toBe(0);
+    expect(reads).toHaveLength(1);
+    expect(info.mock.calls.map(([line]) => JSON.parse(String(line)))).toEqual([
+      {
+        event: "collection_lease_busy",
+        code: "collection_busy",
+        source: "synthetic",
+        holderRead: "ok",
+        holderLeaseRef: "other-execution",
+        holderStartedAt: "2026-01-01T00:00:00.000Z",
+        holderHeartbeatAt: "2026-01-01T00:01:00.000Z",
+        holderAgeMs: 120_000,
+        holderSilentMs: 60_000,
+      },
+    ]);
+  } finally {
+    info.mockRestore();
+  }
+  // The refusal never touched the holder's lease.
+  expect(state.ref).toBe("other-execution");
+});
+
+test("a refused claim whose holder read fails is still refused as busy", async () => {
+  const { db, state } = leaseStore();
+  state.ref = "other-execution";
+  const failingRead: ScheduleLeaseDatabase = {
+    prepare(sql) {
+      const statement = db.prepare(sql);
+      return {
+        bind(...values) {
+          const bound = statement.bind(...values);
+          return {
+            run: () => bound.run(),
+            async first<T>(): Promise<T | null> {
+              throw new Error("synthetic d1 failure");
+            },
+          };
+        },
+      };
+    },
+  };
+  const info = spyOn(console, "log").mockImplementation(() => undefined);
+  try {
+    const error = await withCollectionLease(
+      { SCHEDULE_DB: failingRead },
+      "synthetic",
+      async () => undefined,
+    ).then(
+      () => null,
+      (caught: unknown) => caught,
+    );
+    expect(scheduledFailure(error).failureCode).toBe("collection_busy");
+    expect(JSON.parse(String(info.mock.calls[0]?.[0]))).toMatchObject({
+      event: "collection_lease_busy",
+      source: "synthetic",
+      holderRead: "failed",
+      holderLeaseRef: null,
+    });
+  } finally {
+    info.mockRestore();
+  }
+  expect(state.ref).toBe("other-execution");
 });
 
 test("a claim that failed before writing leaves another execution's lease intact", async () => {
@@ -372,3 +479,71 @@ test("a heartbeat whose answer never comes still counts as missing", async () =>
   expect(state.heartbeatSql.length).toBeGreaterThanOrEqual(3);
   expect(state.ref).toBeNull();
 });
+
+/** Every action settlement is covered both before a stop and after either stop code. */
+for (const stop of ["none", "deadline", "lost"] as const) {
+  for (const outcome of ["fulfilled", "rejected"] as const) {
+    test(`a ${outcome} action preserves the ${stop} lease outcome`, async () => {
+      const { db, state } = leaseStore();
+      const actionError = new Error("synthetic action failure");
+      let stopReason: unknown;
+      let forced = 0;
+      const result = await withCollectionLease(
+        { SCHEDULE_DB: db },
+        "synthetic",
+        (signal) => {
+          const settle = () => {
+            if (outcome === "rejected") throw actionError;
+            return "synthetic action value";
+          };
+          if (stop === "none") return Promise.resolve().then(settle);
+          if (stop === "lost") state.ref = "newer-execution";
+          return new Promise<string>((resolve, reject) => {
+            signal.addEventListener(
+              "abort",
+              () => {
+                stopReason = signal.reason;
+                // Both resolving and wrapping the stop must preserve its code.
+                if (outcome === "fulfilled") resolve("synthetic action value");
+                else reject(actionError);
+              },
+              { once: true },
+            );
+          });
+        },
+        {
+          timing: {
+            heartbeatMs: stop === "lost" ? 1 : 60_000,
+            heartbeatLossMs: 120_000,
+            deadlineMs: stop === "deadline" ? 1 : 60_000,
+            graceMs: 60_000,
+          },
+          forceStop: () => {
+            forced += 1;
+          },
+        },
+      ).then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (error: unknown) => ({ status: "rejected" as const, error }),
+      );
+      if (stop === "none") {
+        expect(result).toEqual(
+          outcome === "fulfilled"
+            ? { status: "fulfilled", value: "synthetic action value" }
+            : { status: "rejected", error: actionError },
+        );
+        expect(stopReason).toBeUndefined();
+      } else {
+        expect(result.status).toBe("rejected");
+        if (result.status !== "rejected") throw new Error("expected lease stop");
+        expect(result.error).toBe(stopReason);
+        expect(result.error).toBeInstanceOf(CollectionLeaseAbort);
+        expect(scheduledFailure(result.error).failureCode).toBe(
+          stop === "deadline" ? "collection_deadline_exceeded" : "collection_lease_lost",
+        );
+      }
+      expect(state.ref).toBe(stop === "lost" ? "newer-execution" : null);
+      expect(forced).toBe(0);
+    });
+  }
+}

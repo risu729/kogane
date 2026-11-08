@@ -8,6 +8,7 @@ import {
   observedExpiry,
   promoteRewardClaims,
   rewardClaimsEnabled,
+  rewardPromotionPending,
   REWARD_PROMOTION_RELEASE,
 } from "../src/reward-claims-job.ts";
 import {
@@ -356,6 +357,7 @@ test("the scheduled lane never runs while the flag is off", async () => {
     "observation_sweep",
     "collection_scan",
     "identity_sweep",
+    "instrument_auto_adoption",
     "balance_projection",
     // Unflagged (ADR 0020).
     "price_promotion",
@@ -375,6 +377,7 @@ test("the scheduled lane never runs while the flag is off", async () => {
     "observation_sweep",
     "collection_scan",
     "identity_sweep",
+    "instrument_auto_adoption",
     "balance_projection",
     "reward_claims_sweep",
     "price_promotion",
@@ -383,7 +386,7 @@ test("the scheduled lane never runs while the flag is off", async () => {
     "audit_overflow",
   ]);
   // Counts and identifiers only: no amount, account label or provider text.
-  expect(Object.keys(lines[4]!).sort()).toEqual([
+  expect(Object.keys(lines[5]!).sort()).toEqual([
     "cursor",
     "enabled",
     "event",
@@ -583,6 +586,42 @@ test("an ineligible page cannot starve later reward claims and each batch stays 
     scanned: 0,
     promoted: 0,
   });
+});
+
+test("a J-POINT account of another letter case neither stalls promotion nor holds the READ capture", async () => {
+  const parse = await seedParse(954, "myjcb", "myjcb-jpoint-balance", "jpoint-balance");
+  // The rule's account shape is lowercase (`matches`). A case variant of its
+  // suffix is no J-POINT total, and the candidate read must agree: a row it
+  // selects but the rule skips is never claimed, so it would head every page
+  // and keep `rewardPromotionPending` true for good.
+  await seedBalance(
+    parse,
+    "myjcb:synthetic:J-POINT:TOTAL",
+    "displayed_jpoint_total",
+    1,
+    "J_POINT",
+    {},
+  );
+  const total = await seedBalance(
+    parse,
+    "myjcb:synthetic:j-point:total",
+    "displayed_jpoint_total",
+    2,
+    "J_POINT",
+    {},
+  );
+  await publishParse(env.DB, parse);
+  expect(await promoteRewardClaims(env.DB, { limit: 1 })).toMatchObject({
+    scanned: 1,
+    promoted: 1,
+    skipped: 0,
+    cursor: total,
+  });
+  expect(await promoteRewardClaims(env.DB, { limit: 1 })).toMatchObject({
+    scanned: 0,
+    promoted: 0,
+  });
+  expect(await rewardPromotionPending(env.DB)).toBe(false);
 });
 
 test("a lower-id observation published later is promoted without replaying completed claims", async () => {

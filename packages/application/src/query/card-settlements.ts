@@ -5,18 +5,20 @@ import {
   validCardSettlementFacts,
   type CardSettlementStatus,
 } from "../../../domain/src/card-settlement.ts";
-import type {
-  CardSettlementDebitAccountReview,
-  CardSettlementReview,
-  CardSettlementReviewPage,
-  CardSettlementStatementGroup,
-  CardSettlementStatementPage,
+import {
+  CARD_DEBIT_ACCOUNT_STATEMENT_REFUSALS,
+  type CardSettlementDebitAccountReview,
+  type CardSettlementReview,
+  type CardSettlementReviewPage,
+  type CardSettlementStatementGroup,
+  type CardSettlementStatementPage,
 } from "../../../domain/src/card-settlement-review.ts";
 import {
   CARD_DEBIT_ACCOUNT_POLICY,
   CARD_DEBIT_ACCOUNT_REASONS,
   type CardDebitAccountReason,
 } from "../../../domain/src/card-debit-account.ts";
+import { CARD_INFORMATION_READER_VERSION } from "../../../domain/src/myjcb-card-information.ts";
 import { cardSettlementReadinessCtes } from "../../../read-model/src/card-settlement-readiness.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 
@@ -56,39 +58,93 @@ interface HistoryRow {
   created_at: string;
 }
 
+/**
+ * One chosen candidate's evidence row (all its columns NULL when it has none)
+ * and the refusal code of its own statement page's reading (NULL when the
+ * page has no refused reading under the current reader version).
+ */
 interface DebitAccountRow {
   candidate_id: string;
-  statement_id: number;
-  reader_version: string;
-  outcome: string;
+  statement_id: number | null;
+  reader_version: string | null;
+  outcome: string | null;
   reason: string | null;
   proposal_json: string | null;
-  created_at: string;
+  created_at: string | null;
+  refusal_code: string | null;
 }
 
 /**
- * The latest provider-stated debit-account evidence row of each chosen
- * candidate under the current policy (`?1` a JSON array of candidate ids,
- * `?2` the policy), with the reader version of the statement it cites. Found
- * through `card_settlement_debit_account_evidence_candidate`
- * (candidate_id, statement_id, policy, id) and the statement's key; a list
- * page holds at most 50 candidates and a grouped page its ten statements'
- * five newest and accepted ones, each with a row per changed outcome.
+ * What the card provider's statement of its debit account says about each
+ * chosen candidate (`?1` a JSON array of candidate ids), under policy `?2` and
+ * reader version `?3`:
+ *
+ * - the newest `card_settlement_debit_account_evidence` row under the policy
+ *   whose cited `card_debit_account_statement` reading was made under the
+ *   reader version. The version is a condition of the choice, so a later row
+ *   citing an earlier reader's reading neither wins nor hides an earlier row
+ *   citing a current one. Found through
+ *   `card_settlement_debit_account_evidence_candidate`
+ *   (candidate_id, statement_id, policy, id) and the reading's key;
+ * - the refusal code of the reading of the candidate's own statement page
+ *   (the raw object its statement parse run read, its card) under the reader
+ *   version, found through the parse run's and artifact's keys and the
+ *   reading's unique `(raw_sha256, card_source_account, reader_version)` key.
+ *   The sweep cites only `read` readings, so a refused page has no evidence
+ *   row of its own.
+ *
+ * One row per chosen candidate. A list page holds at most 50 candidates and a
+ * grouped page its ten statements' five newest and accepted ones, each with a
+ * row per changed outcome.
  */
-export const CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL = `SELECT candidate_id,statement_id,reader_version,outcome,reason,proposal_json,created_at FROM (
- SELECT e.candidate_id,e.statement_id,s.reader_version,e.outcome,e.reason,e.proposal_json,e.created_at,
-  ROW_NUMBER() OVER (PARTITION BY e.candidate_id ORDER BY e.id DESC) AS ordinal
- FROM json_each(?1) selected
- JOIN card_settlement_debit_account_evidence e ON e.candidate_id=selected.value AND e.policy=?2
- JOIN card_debit_account_statement s ON s.id=e.statement_id
-) WHERE ordinal=1`;
+export const CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL = `WITH chosen AS MATERIALIZED (
+ SELECT c.id,c.statement_parse_run_id,json_extract(c.facts_json,'$.statement.sourceAccount') AS card_source_account,
+  (SELECT e.id FROM card_settlement_debit_account_evidence e
+   JOIN card_debit_account_statement cited ON cited.id=e.statement_id AND cited.reader_version=?3
+   WHERE e.candidate_id=c.id AND e.policy=?2 ORDER BY e.id DESC LIMIT 1) AS evidence_id
+ FROM json_each(?1) selected JOIN card_settlement_candidates c ON c.id=selected.value
+)
+SELECT chosen.id AS candidate_id,e.statement_id,s.reader_version,e.outcome,e.reason,e.proposal_json,e.created_at,
+ (SELECT r.refusal_code FROM parse_runs p JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+  JOIN card_debit_account_statement r ON r.raw_sha256=a.sha256
+   AND r.card_source_account=chosen.card_source_account AND r.reader_version=?3
+  WHERE p.id=chosen.statement_parse_run_id AND r.outcome='refused') AS refusal_code
+FROM chosen LEFT JOIN card_settlement_debit_account_evidence e ON e.id=chosen.evidence_id
+LEFT JOIN card_debit_account_statement s ON s.id=e.statement_id`;
 
 const reasonCode = (value: unknown): value is CardDebitAccountReason =>
   (CARD_DEBIT_ACCOUNT_REASONS as readonly unknown[]).includes(value);
 
-/** A malformed evidence row is an unavailable answer, never a missing one. */
-function debitAccountReview(row: DebitAccountRow): CardSettlementDebitAccountReview {
+const refusalCode = (
+  value: unknown,
+): value is (typeof CARD_DEBIT_ACCOUNT_STATEMENT_REFUSALS)[number] =>
+  (CARD_DEBIT_ACCOUNT_STATEMENT_REFUSALS as readonly unknown[]).includes(value);
+
+/**
+ * The candidate's evidence row if it has one; else, when the lane refused its
+ * statement page under the current reader version, `absent` with the lane's
+ * refusal code; else null (the caller's `absentDebitAccount` stands). A
+ * malformed row or an unknown refusal code is an unavailable answer, never a
+ * missing one.
+ */
+function debitAccountReview(row: DebitAccountRow): CardSettlementDebitAccountReview | null {
   const invalid = () => new Error("card_settlement_debit_account_evidence_invalid");
+  if (row.outcome === null) {
+    if (row.refusal_code === null) return null;
+    if (!refusalCode(row.refusal_code)) throw invalid();
+    return {
+      outcome: "absent",
+      reason: row.refusal_code,
+      policy: CARD_DEBIT_ACCOUNT_POLICY,
+      statementRef: null,
+      bankSourceId: null,
+      bankSourceAccount: null,
+      visibleDigitCount: null,
+      recordedAt: null,
+    };
+  }
+  if (row.statement_id === null || row.reader_version === null || row.created_at === null)
+    throw invalid();
   const statementRef = {
     kind: "typed-claim" as const,
     id: `card_debit_account_statement:${row.statement_id}`,
@@ -132,7 +188,10 @@ function debitAccountReview(row: DebitAccountRow): CardSettlementDebitAccountRev
   };
 }
 
-/** No evidence row: only MyJCB has a debit-account statement (ADR 0032). */
+/**
+ * No evidence row and no refused page: only MyJCB has a debit-account
+ * statement (ADR 0032).
+ */
 function absentDebitAccount(sourceId: string): CardSettlementDebitAccountReview {
   return {
     outcome: "absent",
@@ -311,10 +370,12 @@ async function withHistory(sql: SqlExecutor, items: CardSettlementReview[]): Pro
   const evidence = await sql.all<DebitAccountRow>(CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL, [
     JSON.stringify(items.map((item) => item.proposalId)),
     CARD_DEBIT_ACCOUNT_POLICY,
+    CARD_INFORMATION_READER_VERSION,
   ]);
   for (const item of items) {
     const row = evidence.find((entry) => entry.candidate_id === item.proposalId);
-    if (row) item.debitAccount = debitAccountReview(row);
+    const found = row === undefined ? null : debitAccountReview(row);
+    if (found !== null) item.debitAccount = found;
   }
 }
 
