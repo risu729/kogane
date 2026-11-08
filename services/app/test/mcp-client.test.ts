@@ -71,6 +71,7 @@ const PUBLISHED = [
   "kogane.card-settlements.unmatched",
   "kogane.economic-readiness.read",
   "kogane.card-settlements.read",
+  "kogane.card-settlements.statements",
   "kogane.card-settlements.ownership",
   "kogane.audit.search",
   "kogane.audit.get",

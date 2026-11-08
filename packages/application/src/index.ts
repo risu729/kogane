@@ -498,6 +498,7 @@ export {
 
 export {
   readCardSettlementsForGrant,
+  readCardSettlementStatementsForGrant,
   readCardOwnershipForGrant,
   CARD_SETTLEMENT_PROPOSAL_ID,
   CARD_SETTLEMENTS_MAX_OFFSET,

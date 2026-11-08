@@ -87,6 +87,7 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/reconciliation/card-statements-unmatched": ["kogane.card-settlements.unmatched"],
   "/api/v2/reconciliation/card-settlements": ["kogane.card-settlements.read"],
   "/api/v2/reconciliation/card-settlements/ownership": ["kogane.card-settlements.ownership"],
+  "/api/v2/reconciliation/card-settlements/statements": ["kogane.card-settlements.statements"],
   // UI read pages (src/page-read-tools.ts): each the route's own reader.
   "/api/identity/connections": ["kogane.identity.read"],
   "/api/identity/accounts": ["kogane.identity.read"],
@@ -131,9 +132,6 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
 
 /** UI read routes with no MCP read yet, and what the UI reads there. */
 const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
-  // Card settlements grouped by statement.
-  "/api/v2/reconciliation/card-settlements/statements":
-    "card settlement review grouped by statement; kogane.card-settlements.read returns the same candidates ungrouped",
   // Report export.
   "/api/v2/reports/:id/export":
     "a report's export download; not served over MCP (ADR 0072 amendment 2026-11-07: kogane.reports.read returns the report itself)",

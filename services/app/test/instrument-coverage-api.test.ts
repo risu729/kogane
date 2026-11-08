@@ -281,7 +281,11 @@ describe("kogane.instruments.coverage", () => {
                 ? ["kogane.economic-readiness.read"]
                 : []),
               ...(cardSettlements && capabilities.includes("records.read") && whole
-                ? ["kogane.card-settlements.read", "kogane.card-settlements.ownership"]
+                ? [
+                    "kogane.card-settlements.read",
+                    "kogane.card-settlements.statements",
+                    "kogane.card-settlements.ownership",
+                  ]
                 : []),
               ...(capabilities.includes("audit.read") && accounts === "*"
                 ? ["kogane.audit.search", "kogane.audit.get"]
