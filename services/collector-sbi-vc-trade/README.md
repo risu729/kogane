@@ -1,34 +1,40 @@
 # SBI VC Trade collector Worker PoC
 
-Cloudflare Workerだけで既存Bitwarden passkeyからVCTRADEへloginし、sessionをrolling更新してread-only dataをR2へ保存する一時PoC。外部Bun process、Container、Chromeは使わない。
+A temporary PoC that logs into VCTRADE using an existing Bitwarden passkey entirely in a Cloudflare Worker, refreshes the session on a rolling basis and saves read-only data to R2. It uses no external Bun process, Container or Chrome.
 
-## Secretと永続化
+<a id="secretと永続化"></a>
 
-- `SESSION_SEED`: 8個の観測済みsession Cookieと`secureKey`のJSON。`wrangler secret put`だけで投入する。
-- `SESSION_ENCRYPTION_KEY`: 32 byteのrandom keyをbase64化した値。Durable Objectに保存する可変sessionをAES-256-GCMで暗号化する。
-- `PASSKEY_CREDENTIAL`: Bitwarden CLIからtmpfsを介して抽出した既存FIDO2 credentialの必要fieldだけ。Gitへ保存しない。
-- Durable Objectには暗号化sessionと、status・Cookie更新数・最終成功時刻だけを保存する。
-- `__cf_bm`は保存しない。金融responseは共有DATA bucket（`kogane-raw-evidence`）へ保存するが、`meta.secureKey`は保存前に除去する。
+## Secrets and persistence
 
-Bitwarden内の既存passkeyをWorkers Web Cryptoで使い、`initiateLoginWithPasskey`と`loginWithPasskey`から新しい8 Cookieと`secureKey`を再構成する。通常は15分keepaliveだけを実行し、HTTP 401/403、gateway拒否、seed欠落時だけ6時間cooldown付きで再認証する。規約同意が必要な場合は`setAgreement`を送らず停止する。
+- `SESSION_SEED`: JSON containing 8 observed session cookies and `secureKey`, supplied only through `wrangler secret put`.
+- `SESSION_ENCRYPTION_KEY`: a base64-encoded random 32-byte key; AES-256-GCM encrypts the mutable session stored in the Durable Object.
+- `PASSKEY_CREDENTIAL`: only the required fields of the existing FIDO2 credential extracted through tmpfs with Bitwarden CLI. Never save it in Git.
+- The Durable Object stores only the encrypted session, status, cookie-update count and last-success time.
+- `__cf_bm` is not stored. Financial responses go to the shared DATA bucket (`kogane-raw-evidence`), with `meta.secureKey` removed before storage.
 
-## 収集
+Workers Web Crypto uses the existing Bitwarden passkey; `initiateLoginWithPasskey` and `loginWithPasskey` reconstruct 8 fresh cookies and `secureKey`. Normally only the 15-minute keepalive runs. Reauthentication occurs only for HTTP 401/403, gateway refusal or a missing seed, with a 6-hour cooldown. Required terms agreement stops execution without sending `setAgreement`.
+
+<a id="収集"></a>
+
+## Collection
 
 The Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`). The Processor's
 `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for two
 jobs in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), passing each job's cron shape:
 
-- `sbi-vc-keepalive` (`*/15 * * * *`, every 15 minutes): `informationTitle`だけを送りsessionを維持する。
-- `sbi-vc-trade` (`5 21 * * *`, 毎日06:05 JST): 固定read allowlistを取得する。
+- `sbi-vc-keepalive` (`*/15 * * * *`, every 15 minutes): sends only `informationTitle` to maintain the session.
+- `sbi-vc-trade` (`5 21 * * *`, daily at 06:05 JST): captures the fixed read allowlist.
 - Manual operations go through the operations API, which reaches this Worker only over the private `ScheduledCollection.runOperation` binding: a `collection` request (source `sbi-vc-trade`) runs the daily collection, and a `session-refresh` request runs the keepalive and, when it fails, a passkey login without the 6-hour cooldown. The former bearer routes `/run`, `/reauth`, `/collect`, `/health` and their `ADMIN_TOKEN` were removed on 2026-11-08 ([ADR 0069 amendment](../../docs/adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08)); session health is in the keepalive alarm history (`kogane.schedules.read`) and the Worker logs (`sbi_vc_keepalive`, `sbi_vc_reauth`). The only public route is `GET /healthz` (CD liveness: status and schema version, no session or provider call); every other path is 404 (`src/worker.ts`).
-- 保存先: 共有DATA bucketのcontent-addressed object（`objects/<2 hex>/<sha256>`）と、最後に書くterminal manifest（`runs/sbi-vc-trade/<run-id>/terminal.json`）。
-- 保存対象: 残高、口座詳細、position summary、約定recent page 0、約定historical全page、JPY入出金historical全page、manifest。
-- page sizeは公式Web clientと同じ30、上限100 page。write eventを指定できるgeneric senderは公開しない。
-- 各response直後にrotation後sessionを暗号化保存する。`meta.secureKey`除去済みのartifactはterminalを書くまでmemoryに保持し、staging用のR2 objectは書かない。
-- objectと最後のterminalは`packages/collection`が`etagDoesNotMatch: "*"`とR2 native SHA-256付きで書く。terminalはすべてのobjectの後に書くため、terminalのないrunは保存完了として扱わない。
-- 中央importer、そのService Binding、`POST /backfill-raw-evidence`は2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。data artifactが12件以上のrunもdeferせず、その場でterminalまで書く。ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。
+- Destination: content-addressed objects in shared DATA (`objects/<2 hex>/<sha256>`), with the terminal manifest (`runs/sbi-vc-trade/<run-id>/terminal.json`) written last.
+- Contents: balances, account details, position summary, recent executions page 0, every historical execution page, every historical JPY deposit/withdrawal page, and manifest.
+- Page size is 30, as in the official Web client, with at most 100 pages. No generic sender can select write events.
+- After each response, the rotated session is encrypted and saved immediately. Artifacts with `meta.secureKey` removed remain in memory until the terminal is written; no staging R2 objects are written.
+- `packages/collection` writes objects and the final terminal with `etagDoesNotMatch: "*"` and R2-native SHA-256. The terminal follows every object, so a run without a terminal is not considered completely stored.
+- The central importer, its Service Binding and `POST /backfill-raw-evidence` were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)). Even runs with 12 or more data artifacts write through the terminal immediately, without deferral. The Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)).
 
-## 検証
+<a id="検証"></a>
+
+## Verification
 
 ```sh
 mise run install                                  # from the repository root
@@ -37,21 +43,23 @@ mise run //services/collector-sbi-vc-trade:ci
 mise run //services/collector-sbi-vc-trade:dry-run
 ```
 
-deployはProcessorを先、collectorを後にする（[rollout.md](../../docs/rollout.md#4-deployment-order)）。旧private R2 bucketのobjectは中央DATAへコピー・検証した後に削除済みであり、再送するoutboxはない（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
+Deploy the Processor before the collector ([rollout.md](../../docs/rollout.md#4-deployment-order)). Objects in the old private R2 bucket were copied to central DATA, verified and deleted; no outbox remains to resend ([legacy-retirement.md](../../docs/legacy-retirement.md)).
 
-## 一時Cloudflare resourceとcleanup
+<a id="一時cloudflare-resourceとcleanup"></a>
+
+## Temporary Cloudflare resources and cleanup
 
 - Worker: `kogane-sbi-vc-session-poc`
 - Durable Object class: `SbiVcSessionState`
-- R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。このWorker専用のbucketはない）
+- R2 binding: `DATA` → `kogane-raw-evidence` (shared by all collectors; no dedicated bucket for this Worker)
 - Schedule: Processor alarm jobs `sbi-vc-keepalive` (`*/15 * * * *`) and `sbi-vc-trade` (`5 21 * * *`); no Cron Trigger
 - D1 binding: `SCHEDULE_DB` → `kogane-raw-evidence` (the execution lease)
 - Worker Secrets: `SESSION_SEED`, `SESSION_ENCRYPTION_KEY`, `PASSKEY_CREDENTIAL`
 
-検証終了後は次でまとめて削除する。
+After verification, remove the resources together with:
 
 ```sh
 npx wrangler delete --name kogane-sbi-vc-session-poc
 ```
 
-上記は共有DATA bucketのdataを削除しない。旧source専用bucket `kogane-sbi-vc-trade-poc`は2026-09-13に削除済み（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
+This does not delete data in shared DATA. The old dedicated source bucket `kogane-sbi-vc-trade-poc` was deleted on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)).
