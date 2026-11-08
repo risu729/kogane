@@ -5,7 +5,10 @@ import { preferredInstrumentNames } from "../../../packages/application/src/quer
 import { publishParse, seedRegistry, seedRun, supersedeParse } from "./fixtures";
 import { identifyParse } from "../../processor/src/identity-store";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
-import { observationOrganizations, organizeRows } from "../src/observation-organization";
+import {
+  observationOrganizations,
+  organizeRows,
+} from "../../../packages/application/src/query/observation-organization.ts";
 
 beforeAll(async () => {
   await seedRegistry();
@@ -38,41 +41,40 @@ async function seed(
     .bind(artifactId, reparse?.version ?? "1")
     .first<{ id: number }>();
   await publishParse(parse!.id);
-  for (const name of names) {
-    if (name.kind === "transaction") {
-      await env.DB.prepare(`INSERT INTO transaction_observations
+  // One batch, in input order: the same rows and ids as one insert per name,
+  // without a database round trip per name (501 of them in the scale test,
+  // over a third of its time).
+  const inserts = names.map((name) => {
+    if (name.kind === "transaction")
+      return env.DB.prepare(`INSERT INTO transaction_observations
         (parse_run_id,source_account,currency,raw_locator,extra_json)
-        VALUES (?,'sbi-securities:domestic','JPY','synthetic',?)`)
-        .bind(
-          parse!.id,
-          JSON.stringify({
-            issueCode: name.code,
-            issueName: name.label,
-            marketLabel: name.market ?? "TKY",
-            accountLabel: "一般",
-          }),
-        )
-        .run();
-      continue;
-    }
-    if (name.kind === "valuation") {
-      await env.DB.prepare(`INSERT INTO valuation_observations
+        VALUES (?,'sbi-securities:domestic','JPY','synthetic',?)`).bind(
+        parse!.id,
+        JSON.stringify({
+          issueCode: name.code,
+          issueName: name.label,
+          marketLabel: name.market ?? "TKY",
+          accountLabel: "一般",
+        }),
+      );
+    if (name.kind === "valuation")
+      return env.DB.prepare(`INSERT INTO valuation_observations
         (parse_run_id,source_account,subject,metric,currency,raw_locator,extra_json)
-        VALUES (?,'sbi-securities:domestic',?,'evaluation_amount','JPY','synthetic',?)`)
-        .bind(
-          parse!.id,
-          name.code,
-          JSON.stringify({ issueName: name.label, _kogane: { marketCode: name.market ?? "TKY" } }),
-        )
-        .run();
-      continue;
-    }
-    await env.DB.prepare(`INSERT INTO position_observations
+        VALUES (?,'sbi-securities:domestic',?,'evaluation_amount','JPY','synthetic',?)`).bind(
+        parse!.id,
+        name.code,
+        JSON.stringify({ issueName: name.label, _kogane: { marketCode: name.market ?? "TKY" } }),
+      );
+    return env.DB.prepare(`INSERT INTO position_observations
       (parse_run_id,source_account,security_code,security_name,market,currency,quantity_text,quantity_scale,raw_locator,extra_json)
-      VALUES (?,'sbi-securities:domestic',?,?,?,'JPY','1',0,'synthetic','{}')`)
-      .bind(parse!.id, name.code, name.label, name.market ?? "TKY")
-      .run();
-  }
+      VALUES (?,'sbi-securities:domestic',?,?,?,'JPY','1',0,'synthetic','{}')`).bind(
+      parse!.id,
+      name.code,
+      name.label,
+      name.market ?? "TKY",
+    );
+  });
+  if (inserts.length) await env.DB.batch(inserts);
   const verified =
     await env.DB.prepare(`SELECT p.id,a.id artifact_id,a.source_id,r.producer_id,a.fetch_run_id
     FROM parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
@@ -225,7 +227,7 @@ it("observation organization shares preferred names and evidence while retaining
   )
     .bind(data.parseId)
     .all<{ id: number; security_name: string; security_code: string }>();
-  const rows = await organizeRows(env.DB, "position", positions.results);
+  const rows = await organizeRows(d1Executor(env.DB), "position", positions.results);
   expect(rows[0]).toMatchObject({
     security_name: "Original English",
     security_code: "INTEGRATED",
@@ -245,7 +247,7 @@ it("observation organization shares preferred names and evidence while retaining
     FROM current_instrument_mappings WHERE identifier_id=?`)
     .bind(reference)
     .run();
-  const manual = await observationOrganizations(env.DB, [
+  const manual = await observationOrganizations(d1Executor(env.DB), [
     { kind: "position", id: positions.results[0]!.id },
   ]);
   expect(
@@ -269,7 +271,7 @@ it("organizes more than 500 distinct instruments without exceeding the name look
     .bind(data.parseId)
     .all<{ id: number }>();
   const result = await observationOrganizations(
-    env.DB,
+    d1Executor(env.DB),
     positions.results.map(({ id }) => ({ kind: "position", id })),
   );
   expect(result.size).toBe(501);

@@ -7,28 +7,31 @@ import {
   type InstrumentIdentity,
 } from "./types.ts";
 
-const MARKETS: Record<string, string> = {
-  TKY: "XTKS",
-  NGY: "XNGO",
-  FKO: "XFKA",
-  SPR: "XSAP",
-  東証: "XTKS",
-  名証: "XNGO",
-  福証: "XFKA",
-  札証: "XSAP",
-};
-const MICS = new Set(Object.values(MARKETS));
-const CUSTODY_LABELS: Record<string, string> = {
-  "0": "特定預り",
-  "1": "一般預り",
-  "-": "一般預り",
-  H: "成長投資枠",
-  "4": "NISA預り",
-  "5": "ジュニアNISA預り",
-  "6": "ジュニアNISA預り",
-  "7": "ジュニアNISA預り",
-  J: "ジュニアNISA預り",
-};
+// Maps, not object literals: the keys looked up are provider text (the trade
+// table's market wording is carried verbatim), and an object literal would
+// also answer for inherited names such as `constructor`.
+const MARKETS: ReadonlyMap<string, string> = new Map([
+  ["TKY", "XTKS"],
+  ["NGY", "XNGO"],
+  ["FKO", "XFKA"],
+  ["SPR", "XSAP"],
+  ["東証", "XTKS"],
+  ["名証", "XNGO"],
+  ["福証", "XFKA"],
+  ["札証", "XSAP"],
+]);
+const MICS = new Set(MARKETS.values());
+const CUSTODY_LABELS: ReadonlyMap<string, string> = new Map([
+  ["0", "特定預り"],
+  ["1", "一般預り"],
+  ["-", "一般預り"],
+  ["H", "成長投資枠"],
+  ["4", "NISA預り"],
+  ["5", "ジュニアNISA預り"],
+  ["6", "ジュニアNISA預り"],
+  ["7", "ジュニアNISA預り"],
+  ["J", "ジュニアNISA預り"],
+]);
 
 /** Provider references are evidence of identity, not an external security-master match. */
 export function sbiIdentity(input: IdentityInput): IdentityPlan {
@@ -100,7 +103,7 @@ export function sbiIdentity(input: IdentityInput): IdentityPlan {
       rawMarket !== null && domestic
         ? MICS.has(rawMarket)
           ? rawMarket
-          : (MARKETS[rawMarket] ?? null)
+          : (MARKETS.get(rawMarket) ?? null)
         : null;
     const details: Record<string, string> = {};
     if (code !== null) details.securityCode = code;
@@ -147,7 +150,7 @@ export function sbiIdentity(input: IdentityInput): IdentityPlan {
     const deposit = input.sourceAccount.split(":deposit-type=")[1];
     label =
       deposit !== undefined
-        ? `SBI証券 国内株式 ${CUSTODY_LABELS[deposit] ?? "預り区分未確定"}（区分コード: ${deposit}）`
+        ? `SBI証券 国内株式 ${CUSTODY_LABELS.get(deposit) ?? "預り区分未確定"}（区分コード: ${deposit}）`
         : `SBI証券 国内株式（預り区分: ${string(extra.accountLabel) ?? "未確定"}）`;
   }
   return {

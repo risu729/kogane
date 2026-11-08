@@ -12,6 +12,7 @@ import {
   Badge,
   EmptyState,
   LineageBadge,
+  Loading,
   Nullable,
   Panel,
   QueryBoundary,
@@ -125,17 +126,33 @@ function HandOff({ shared }: { shared: SharedQueryResponse<CoverageSummaryData> 
   );
 }
 
-function OverviewBody({ data }: { data: Overview }): ReactNode {
-  const [page, setPage] = useState(0);
+/**
+ * Where the shared service is advertised, its answer is the only source of the
+ * figures: while it loads or after it fails the page says so, and never falls
+ * back to counting the overview's own lists (the run list is the newest
+ * window, not the whole history).
+ */
+function Counts({ data }: { data: Overview }): ReactNode {
   const features = useFeatures();
   const shared = useCoverageSummary();
+  if (!features.known) return <Loading label="件数の集計" />;
+  if (!features.sharedQuery) return <SummaryCounts data={data} shared={undefined} />;
+  return (
+    <QueryBoundary query={shared} label="件数の集計">
+      {(value) => <SummaryCounts data={data} shared={value} />}
+    </QueryBoundary>
+  );
+}
+
+function OverviewBody({ data }: { data: Overview }): ReactNode {
+  const [page, setPage] = useState(0);
   const view = pageWindow(
     [...data.fetchRuns].sort((a, b) => b.id - a.id),
     page,
   );
   return (
     <>
-      <SummaryCounts data={data} shared={features.sharedQuery ? shared.data : undefined} />
+      <Counts data={data} />
       <Panel
         id="sources"
         title="取得元"
@@ -185,7 +202,7 @@ function OverviewBody({ data }: { data: Overview }): ReactNode {
         count={`${data.fetchRuns.length}件`}
         note="登録の新しい順に、実行ごとの結果と日時を表示しています。"
       >
-        <div className="table-scroll" role="region" aria-label="最近の収集履歴" tabIndex={0}>
+        <div className="table-scroll" role="region" aria-label="最近の収集履歴の表" tabIndex={0}>
           <table className="fetch-run-table">
             <caption>
               日時は記録された表記のままです。結果は収集の実行についてのもので、取得元の全履歴が揃っていることは意味しません。
@@ -232,7 +249,12 @@ function OverviewBody({ data }: { data: Overview }): ReactNode {
             </tbody>
           </table>
         </div>
-        <Pager {...view} total={data.fetchRuns.length} onChange={setPage} />
+        <Pager
+          {...view}
+          total={data.fetchRuns.length}
+          onChange={setPage}
+          label="収集履歴のページ"
+        />
       </Panel>
       <details className="detail-disclosure">
         <summary>保存件数・解析の詳細</summary>
@@ -264,7 +286,7 @@ function ParseHistory({ data }: { data: Overview }): ReactNode {
   );
   return (
     <Panel id="parse-runs" title="解析の履歴" count={`${data.parseRuns.length}件`}>
-      <div className="table-scroll" role="region" aria-label="解析の履歴" tabIndex={0}>
+      <div className="table-scroll" role="region" aria-label="解析の履歴の表" tabIndex={0}>
         <table className="parse-run-table">
           <caption>
             旧解析の記録も残しています。置き換えられた行は色と「旧解析」の表示で区別します。
@@ -308,7 +330,7 @@ function ParseHistory({ data }: { data: Overview }): ReactNode {
           </tbody>
         </table>
       </div>
-      <Pager {...view} total={data.parseRuns.length} onChange={setPage} />
+      <Pager {...view} total={data.parseRuns.length} onChange={setPage} label="解析履歴のページ" />
     </Panel>
   );
 }

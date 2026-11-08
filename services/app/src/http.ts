@@ -84,7 +84,7 @@ export async function boundedRead(
   return { text: text + decoder.decode(), bytes: size };
 }
 
-export function cursor(url: URL): number {
+export function cursor(url: Pick<URL, "searchParams">): number {
   if (
     [...url.searchParams.keys()].some((key) => key !== "cursor") ||
     url.searchParams.getAll("cursor").length > 1

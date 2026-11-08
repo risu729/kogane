@@ -6,12 +6,6 @@
 // Extracted from `services/raw-evidence/src/store.ts` by U05; SQL unchanged.
 import type { D1Like, Row } from "../d1.ts";
 
-export interface RawObjectRow {
-  sha256: string;
-  byte_size: number;
-  blob_key: string;
-}
-
 /**
  * Records the object once. Conditional on its own absence, so two concurrent
  * uploads of the same bytes leave one row and the caller compares it with what

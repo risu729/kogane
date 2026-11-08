@@ -10,7 +10,7 @@ import type {
 } from "./index.ts";
 
 export const VPASS_POLICY_FAMILY = "vpass-card-binding";
-export const VPASS_POLICY_VERSION = 2;
+const VPASS_POLICY_VERSION = 2;
 
 export interface VpassBinding {
   financial_unit_id: number;

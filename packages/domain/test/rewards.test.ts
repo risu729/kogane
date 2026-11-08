@@ -178,6 +178,19 @@ describe("contracts validate", () => {
     expect(validExpiryRule(inactivityRule)).toBe(true);
     expect(validConversionOffer(offer())).toBe(true);
     expect(
+      validConversionOffer(
+        offer({ validTime: { kind: "open-ended", start: "2026-04-01", zone: TOKYO } }),
+      ),
+    ).toBe(true);
+    expect(validConversionOffer(offer({ applicationDeadline: null }))).toBe(true);
+    expect(
+      validConversionOffer(
+        offer({
+          validTime: { kind: "open-ended", start: "2026-04-01", zone: TOKYO, end: null } as never,
+        }),
+      ),
+    ).toBe(false);
+    expect(
       validMembershipState({
         programId: "program:a",
         holdingRef: "holding:member-1",
@@ -614,6 +627,23 @@ describe("SC13 / AT41 / AT49 — eligibility and the application-credit distinct
     expect(eligibility.excluded).toEqual([
       { bucketRef: "bucket:restricted", reasonCode: "bucket_kind_not_eligible" },
     ]);
+  });
+
+  test("a standing offer with no announced end is available on and after its first day", () => {
+    const standing = {
+      ...transitOffer,
+      validTime: { kind: "open-ended", start: "2026-04-01", zone: TOKYO } as const,
+      applicationDeadline: null,
+    };
+    for (const clock of ["2026-04-01", "2026-09-09", "2099-12-31"])
+      expect(availableForOffer(buckets, standing, [], day(clock))).toMatchObject({
+        state: "available",
+        uncertaintyCodes: [],
+      });
+    expect(availableForOffer(buckets, standing, [], day("2026-03-31"))).toMatchObject({
+      state: "not-eligible",
+      uncertaintyCodes: ["offer_not_valid_at_clock"],
+    });
   });
 
   test("an unverified offer is needs-rule-verification, not a refusal and not an approval", () => {
@@ -1089,18 +1119,24 @@ describe("SC14 / AT49-AT54 — conversion simulation and bounded search", () => 
       "needs-rule-verification",
     );
     expect(availableForOffer(buckets, standard, [gold], day("2026-09-09")).state).toBe("available");
-    // Three offers between the same pair are three candidates, not one rate.
+    // The missing platinum claim stays uncertain; it cannot become a feasible path.
     const result = findConversionPaths(
       [standard, campaign, memberOnly],
-      { quantity: q("points:a", "2500"), clock: day("2026-09-09") },
+      { quantity: q("points:a", "2500"), clock: day("2026-09-09"), membership: [gold] },
       "points:b",
       budget,
     );
     expect(result.paths.map((path) => path.hops[0]!.offerRef).sort()).toEqual([
-      "offer:a-to-b:member@v1",
       "offer:a-to-b:standard@v1",
     ]);
-    expect(result.rejected.map((r) => r.reasonCode)).toContain("application_deadline_passed");
+    expect(result.rejected).toContainEqual({
+      offerRef: "offer:a-to-b:campaign@v1",
+      reasonCode: "application_deadline_passed",
+    });
+    expect(result.rejected).toContainEqual({
+      offerRef: "offer:a-to-b:member@v1",
+      reasonCode: "needs_rule_verification",
+    });
   });
 
   test("an unverified offer becomes a separate candidate to check, never a proven impossibility", () => {

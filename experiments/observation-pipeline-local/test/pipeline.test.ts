@@ -18,13 +18,13 @@ import {
   insertObservation,
   insertParseRun,
   listArtifacts,
-  openStore,
   publishParseRun,
   putRawObject,
   upsertSource,
   type Store,
 } from "../src/store.ts";
 import type { Parser } from "../../../packages/parsers/src/types.ts";
+import { freshTestStore, openTestStore } from "./test-store.ts";
 
 /** Insert a successful parse run and publish it, as parse.ts does for every
  * success: a bare `ok` row is an unadopted result and no current view shows it. */
@@ -47,7 +47,7 @@ const SBI_RUN = join(FIXTURES, "sbi-securities", "2026-08-20", "run-20260820-210
 const SBI_VC_RUN = join(FIXTURES, "sbi-vc-trade", "2026-09-07", "run-20260907-synthetic01");
 
 function tempStore(): Store {
-  return openStore(mkdtempSync(join(tmpdir(), "kogane-poc-")));
+  return freshTestStore("kogane-poc-");
 }
 
 function count(store: Store, table: string): number {
@@ -55,8 +55,8 @@ function count(store: Store, table: string): number {
 }
 
 describe("ingestion", () => {
-  // Three on-disk stores, each applying the whole schema: ~0.2-0.5s locally
-  // and an order of magnitude more on a loaded CI runner.
+  // Three disposable on-disk stores (test-store.ts), each applying the whole
+  // schema, which takes longer on a loaded CI runner.
   test("collector manifests must declare an exact terminal status", () => {
     for (const status of [undefined, "human-required", "SUCCESS"]) {
       const store = tempStore();
@@ -103,7 +103,7 @@ describe("ingestion", () => {
       PRAGMA user_version = 2;
     `);
     db.close();
-    const store = openStore(directory);
+    const store = openTestStore(directory);
     const row = store.db
       .query("SELECT status, failure_count, window_start, window_end FROM fetch_runs")
       .get() as {
@@ -172,7 +172,7 @@ describe("ingestion", () => {
       PRAGMA user_version = 3;
     `);
     db.close();
-    const store = openStore(directory);
+    const store = openTestStore(directory);
     const row = store.db
       .query("SELECT artifact_key, statement_state, period FROM fetch_artifacts")
       .get() as { artifact_key: null; statement_state: null; period: null };
@@ -239,7 +239,7 @@ describe("ingestion", () => {
       PRAGMA user_version = 4;
     `);
     db.close();
-    const store = openStore(directory);
+    const store = openTestStore(directory);
     expect(store.db.query("SELECT window_start, window_end FROM fetch_runs").get()).toEqual({
       window_start: null,
       window_end: null,
@@ -284,7 +284,7 @@ describe("ingestion", () => {
       PRAGMA user_version = 5;
     `);
     db.close();
-    const store = openStore(directory);
+    const store = openTestStore(directory);
     const columns = store.db.query("PRAGMA table_info(fetch_artifacts)").all() as {
       name: string;
     }[];

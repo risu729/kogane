@@ -78,6 +78,13 @@ describe("card purchase HTTP contract", () => {
     const unknownShape = clone(purchasePage()) as unknown as { coverage: Record<string, unknown> };
     unknownShape.coverage.unsupportedShapes = ["guessed_installment"];
     expect(validCardPurchasePage(unknownShape)).toBe(false);
+    // A refund is never said to be allocated to a purchase, nor left unsaid.
+    const allocated = clone(purchasePage()) as unknown as { coverage: Record<string, unknown> };
+    allocated.coverage.refundsAllocated = true;
+    expect(validCardPurchasePage(allocated)).toBe(false);
+    const unsaid = clone(purchasePage()) as unknown as { coverage: Record<string, unknown> };
+    delete unsaid.coverage.refundsAllocated;
+    expect(validCardPurchasePage(unsaid)).toBe(false);
   });
 
   test("unrecognised reasons are closed, add up to the total, and say when partial", () => {

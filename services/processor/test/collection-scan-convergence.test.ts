@@ -691,6 +691,61 @@ test("a seal error that is not a listed trigger refusal still throws and records
   expect(sealed(harness)).toBe(1);
 });
 
+test("a page holding five or more terminals that always throw still finishes, and they stay open", async () => {
+  // The first six terminals throw on every attempt (a seal error that is not
+  // a classified refusal: the open limit of the 2026-09-26 amendment), and
+  // there are more than five of them on the page. Before the amendment of
+  // 2026-11-06 each throw spent one of the tick's five, so every tick spent
+  // all five on them and the cursor never left the page.
+  const harness = collectionHarness();
+  for (let n = 1; n <= 30; n += 1) await persistSyntheticRun(harness, { run: { runId: runId(n) } });
+  const throwing = [1, 2, 3, 4, 5, 6].map((n) => `'${runId(n)}'`).join(",");
+  harness.db.exec(`CREATE TRIGGER synthetic_seal_failure BEFORE INSERT ON fetch_run_seals
+    WHEN (SELECT substr(source_run_key, 1, 7) FROM fetch_runs WHERE id = NEW.fetch_run_id)
+      IN (${throwing})
+    BEGIN SELECT RAISE(ABORT, 'synthetic_unlisted_refusal'); END`);
+
+  let at = START_MS;
+  const ticks: ScanSummary[] = [];
+  while (!ticks.at(-1)?.cycleComplete && ticks.length < 20) {
+    ticks.push(await tick(harness, at));
+    at += 5 * 60 * 1000;
+  }
+  // The walk completes, and every other terminal, on both pages, registers.
+  // What still holds a tick is the invocation's operation budget (ADR 0010):
+  // each throw re-verifies its run, so only a few registrations fit beside
+  // the six, and the page takes several ticks rather than one.
+  expect(ticks.at(-1)?.cycleComplete).toBe(true);
+  expect(ticks.length).toBeLessThan(20);
+  for (const held of ticks.filter((t) => t.budgetExhausted)) {
+    expect(held.failed).toBe(6);
+    expect(held.deferred + held.pending).toBeGreaterThan(0);
+  }
+  expect(sealed(harness)).toBe(24);
+  expect(scanState(harness)).toMatchObject({ cursor: null, cycles_completed: 1 });
+  // A throw is never a verdict: nothing judged the six, so the next walk
+  // attempts them again, and they still spend none of the five.
+  expect(
+    countOf(
+      harness,
+      `SELECT count(*) AS n FROM collection_runs
+        WHERE blocked_code IS NOT NULL OR registered_at IS NOT NULL`,
+    ),
+  ).toBe(24);
+  const again = await tick(harness, at);
+  expect(again).toMatchObject({ failed: 6, alreadyRegistered: 19, budgetExhausted: false });
+  expect(scanState(harness).cursor).not.toBeNull();
+
+  // Nothing was dropped: once the cause is gone, the next walk registers them.
+  harness.db.exec("DROP TRIGGER synthetic_seal_failure");
+  at += 5 * 60 * 1000;
+  for (let i = 0; i < 10 && sealed(harness) < 30; i += 1) {
+    await tick(harness, at);
+    at += 5 * 60 * 1000;
+  }
+  expect(sealed(harness)).toBe(30);
+});
+
 test("a normal registration spends exactly what it spent before seal refusals were classified", async () => {
   const harness = collectionHarness();
   await persistSyntheticRun(harness, { run: { runId: "run-001" } });

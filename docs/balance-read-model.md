@@ -251,8 +251,16 @@ adopted rows for the granted scope, sums them per unit in exact integer
 arithmetic, and reports `liabilitiesCoverage: "unknown"` with no `netWorth`
 field. Without the READ binding or a sealed snapshot it answers
 `unavailable` / `projection_not_built` instead of computing a figure from the
-observation rows behind the projection. See
-[Agent API](agent-api.md#intents) for the intent's contract.
+observation rows behind the projection. It never picks the snapshot itself:
+the App hands it the published snapshot through `servableSnapshot`
+(`services/app/src/balances-v2.ts`), the same contract, CORE-epoch and
+visibility-revision checks the v2 routes apply, so a snapshot those routes
+refuse is `unavailable` with their code — `read_model_unavailable` (a READ
+database of another contract), `read_model_context_changed` (CORE restored
+under a new epoch) or `read_model_restriction_changed` (a use restriction
+changed after the snapshot was last verified) — rather than a sum of rows that
+no longer describe the context ([READ database](read-model-d1.md#reading)).
+See [Agent API](agent-api.md#intents) for the intent's contract.
 
 ## Dated reported state
 

@@ -21,6 +21,7 @@ import {
   CURRENT_SQL,
   queryCardPurchases,
 } from "../src/query/card-purchases.ts";
+import { LEGACY_CURRENT_SQL } from "./card-purchase-current-legacy-sql.ts";
 
 let db: Database;
 
@@ -50,17 +51,6 @@ function executor(legacy: boolean, seen: string[] = []): SqlExecutor {
     },
   };
 }
-
-/** The pass over current usage as shipped before #547 counted reasons (frozen). */
-const LEGACY_CURRENT_SQL = `WITH usage AS MATERIALIZED (
-  SELECT recognition_key FROM (${CURRENT_CARD_USAGE_SQL})
- )
- SELECT recognition_key AS current_key,NULL AS unrecognized FROM usage
-  WHERE recognition_key IN (SELECT value FROM json_each(?3))
- UNION ALL
- SELECT NULL,count(*) FROM usage u
-  WHERE u.recognition_key IS NULL
-   OR NOT EXISTS(SELECT 1 FROM current_card_purchase_keys k WHERE k.recognition_key=u.recognition_key)`;
 
 describe("card purchases on a scaled store without statistics", () => {
   test("the pass over current usage keeps the shipped current keys and count", () => {

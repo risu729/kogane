@@ -28,7 +28,7 @@ import { FIXTURES_ROOT } from "./fixture-root.ts";
 
 const FIXTURES = FIXTURES_ROOT;
 
-export interface ContractCase {
+interface ContractCase {
   name: string;
   artifact: ArtifactMeta;
   bytes: Uint8Array;
@@ -106,7 +106,7 @@ const MTS_EMPTY = `${" ".repeat(24)}0000000000${" ".repeat(660)}`;
 
 const accountAssets = fixtureJson("sbi-parser-boundaries", "account-assets-current.json");
 
-export const SBI_SECURITIES: ContractParser[] = [
+const SBI_SECURITIES: ContractParser[] = [
   cases(sbiForeignCashBalances, meta("sbi-securities", "foreign-cash-balances"), {
     "complete-empty": foreignBalances([]),
     "complete-rows": foreignBalances([usdRow({ keepCash: "100.25", buyPossibleAmount: "50" })]),
@@ -198,7 +198,7 @@ const vcBody = (name: string) =>
   fixtureJson(...VC_RUN, `${name}.json`)["body"] as Record<string, unknown>;
 const margin = vcBody("account-margin");
 
-export const SBI_VC: ContractParser[] = [
+const SBI_VC: ContractParser[] = [
   cases(sbiVcPositionSummary, meta("sbi-vc-trade", "position-summary"), {
     "complete-empty": envelope({}),
     "complete-rows": fixture(...VC_RUN, "position-summary.json"),
@@ -268,7 +268,7 @@ const shinseiBoard = (rates: unknown, extra: Record<string, unknown> = {}) =>
 const boardRow = { currency: "USD", buyRate: "145.00", sellRate: "147.00", midRate: "146.00" };
 const shinseiYenParam = shinseiYen["responseParam"] as Record<string, unknown>;
 
-export const SBI_SHINSEI: ContractParser[] = [
+const SBI_SHINSEI: ContractParser[] = [
   cases(
     sbiShinseiTopBalancesAndActivity,
     meta("sbi-shinsei-bank", "top-accounts-balance-and-activity"),
@@ -368,7 +368,7 @@ const stGeorgeSnapshot = {
   ],
 };
 
-export const BANKS: ContractParser[] = [
+const BANKS: ContractParser[] = [
   cases(
     prestiaBankBalances,
     meta("prestia", "prestia-bank-balance-html", {

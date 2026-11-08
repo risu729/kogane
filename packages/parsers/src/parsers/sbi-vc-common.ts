@@ -307,13 +307,34 @@ export function jsonPathProperty(name: string): string {
   return `[${JSON.stringify(name)}]`;
 }
 
+/**
+ * The provider's instant, or undefined when the value does not name a real
+ * one. Two shapes are read: an ISO 8601 date-time with seconds and an
+ * explicit offset, kept verbatim, and the audited slash form, which states no
+ * zone and is read as JST. Either is refused, never repaired, when its
+ * calendar date, clock time or offset does not exist (`2026-02-30T25:61:61Z`,
+ * `2026-13-01T00:00:00+09:00`, `2026/02/30 00:00:00`, an offset of `+24:00`).
+ */
 export function providerTimestamp(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u.test(value)) {
-    return value;
+  const iso =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/u.exec(
+      value,
+    );
+  if (iso) {
+    if (Number(iso[7] ?? "0") > 23 || Number(iso[8] ?? "0") > 59) return undefined;
+    return existingDateTime(iso) ? value : undefined;
   }
   const match = /^(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2}):(\d{2})(\.\d+)?$/u.exec(value);
-  if (!match) return undefined;
+  if (!match || !existingDateTime(match)) return undefined;
+  return `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}${match[7] ?? ""}+09:00`;
+}
+
+/**
+ * Whether captured year, month, day, hour, minute and second (groups 1 to 6)
+ * name a calendar date and a clock time that exist, read without any zone.
+ */
+function existingDateTime(match: RegExpExecArray): boolean {
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
@@ -321,17 +342,14 @@ export function providerTimestamp(value: unknown): string | undefined {
   const minute = Number(match[5]);
   const second = Number(match[6]);
   const checked = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
-  if (
-    checked.getUTCFullYear() !== year ||
-    checked.getUTCMonth() + 1 !== month ||
-    checked.getUTCDate() !== day ||
-    checked.getUTCHours() !== hour ||
-    checked.getUTCMinutes() !== minute ||
-    checked.getUTCSeconds() !== second
-  ) {
-    return undefined;
-  }
-  return `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}${match[7] ?? ""}+09:00`;
+  return (
+    checked.getUTCFullYear() === year &&
+    checked.getUTCMonth() + 1 === month &&
+    checked.getUTCDate() === day &&
+    checked.getUTCHours() === hour &&
+    checked.getUTCMinutes() === minute &&
+    checked.getUTCSeconds() === second
+  );
 }
 
 export function collisionFreeTuple(first: string, second: string): string {

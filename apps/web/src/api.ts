@@ -31,13 +31,8 @@ import type {
   ApiMetadata,
 } from "../../../packages/observation-shared/src/api-contract.ts";
 export type {
-  BalanceAdoption,
   BalanceAdoptionState,
-  BalanceEvidenceMember,
-  BalanceHistoryItem,
-  BalanceHistoryPage,
   CoverageSummaryData,
-  KnownAssetsSubtotals,
   LatestBalanceItem,
   LatestBalancePage,
   SharedQueryResponse,
@@ -47,11 +42,8 @@ export type {
   TransactionRow,
   BalanceRow,
   BalanceHistoryRow,
-  PositionRow,
-  ValuationRow,
   PositionWithValuations,
   ArtifactRow,
-  ObservationRef,
   ParseRunDetail,
   ArtifactDetail,
   Provenance,
@@ -210,7 +202,7 @@ export function useMetadata(): UseQueryResult<ApiMetadata, Error> {
 }
 
 /** Loading and known capabilities are distinct; nothing guesses while loading. */
-export function useCapabilities(): CapabilityState {
+function useCapabilities(): CapabilityState {
   return capabilityState(useMetadata().data);
 }
 
@@ -297,7 +289,11 @@ export function useLatestBalances(
   });
 }
 
-/** The v2 balance history page: the same fixed context, its own budget. */
+/**
+ * The v2 balance history page: the same fixed context, its own budget.
+ * @public No page calls it yet. An open pull request's UI/MCP parity scan of
+ * `apps/web/src` reads its route literal (docs/unused-report.md).
+ */
 export function useBalanceHistory(
   view?: MeasureView,
   cursor?: string | null,

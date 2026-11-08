@@ -15,6 +15,8 @@ import {
   outboxWrite,
 } from "../src/atomic/decision-commit.ts";
 export const TIME = "2099-01-01T00:00:00.000Z";
+/** The digest every fixture commit records; its receipt guard requires it. */
+export const PAYLOAD_DIGEST = "a".repeat(64);
 export const request: InstrumentTemporalRequest = {
   identifierIds: ["identifier:synthetic"],
   knowledge: { mode: "current" },
@@ -91,6 +93,7 @@ export async function prepare(
     request,
     operationId: `op-${key}`,
     principal: "operator",
+    payloadDigest: PAYLOAD_DIGEST,
     decisionRevisionId: `d-${key}`,
     now,
     maxRows: 15000,
@@ -101,13 +104,14 @@ export type Prepared = Extract<Awaited<ReturnType<typeof prepare>>, { ok: true }
 export function commitWrites(key: string, prepared: Prepared): SqlWrite[] {
   const op = `op-${key}`,
     decision = `d-${key}`;
-  const guard = receiptExistsGuard(op, "operator");
+  const receipt = { operationId: op, principal: "operator", payloadDigest: PAYLOAD_DIGEST };
+  const guard = receiptExistsGuard(receipt);
   return [
     receiptReservationWrite({
       operationId: op,
       principal: "operator",
       operationKind: "identity.assign",
-      payloadDigest: "a".repeat(64),
+      payloadDigest: PAYLOAD_DIGEST,
       planId: key.padEnd(64, "0"),
       receiptJson: "{}",
       now: TIME,
@@ -117,16 +121,16 @@ export function commitWrites(key: string, prepared: Prepared): SqlWrite[] {
     }),
     {
       sql: `INSERT INTO decision_operations(operation_id,actor_id,actor_verification,action,payload_digest,result_json,created_at) SELECT ?,'operator','server','synthetic-storage-test',?,'{}',? WHERE ${guard.sql} AND NOT EXISTS(SELECT 1 FROM decision_operations WHERE operation_id=?)`,
-      binds: [op, "a".repeat(64), TIME, ...guard.binds, op],
+      binds: [op, PAYLOAD_DIGEST, TIME, ...guard.binds, op],
     },
     {
       sql: `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,created_at) SELECT ?,'relation',?,1,'accept','manual','operator',?,'synthetic','[]',? WHERE ${guard.sql} AND NOT EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)`,
       binds: [decision, `temporal:${op}`, op, TIME, ...guard.binds, decision],
     },
     ...prepared.writes,
-    approvalConsumptionWrite(`ap-${key}`, op, "operator"),
-    planCommittedWrite(key.padEnd(64, "0"), op, "operator"),
-    outboxWrite(decision, "operator", op, "identity-projection", TIME),
+    approvalConsumptionWrite(`ap-${key}`, receipt),
+    planCommittedWrite(key.padEnd(64, "0"), receipt),
+    outboxWrite(decision, receipt, "identity-projection", TIME),
   ];
 }
 export async function state(store: CommandStore) {

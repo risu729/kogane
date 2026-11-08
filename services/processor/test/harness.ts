@@ -326,3 +326,26 @@ export async function setUnitScope(
     .bind(row.sourceId, row.dataset, row.parserName, row.scope, row.snapshotSelection ?? 1)
     .run();
 }
+
+/**
+ * `db`, except that its first `batch` first runs `racer` to completion: a
+ * command that commits between this command's reads and its batch, the race a
+ * plain `Promise.all` only sometimes produces. Later batches are not raced.
+ */
+export function racedBeforeBatch(db: D1Database, racer: () => Promise<unknown>): D1Database {
+  let raced = false;
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "batch" && !raced)
+        return async (statements: D1PreparedStatement[]) => {
+          raced = true;
+          await racer();
+          return target.batch(statements);
+        };
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function"
+        ? (value as (...args: unknown[]) => unknown).bind(target)
+        : value;
+    },
+  });
+}

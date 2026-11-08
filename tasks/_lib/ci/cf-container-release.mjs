@@ -10,6 +10,7 @@ import {
   fstatSync,
   closeSync,
   constants,
+  realpathSync,
 } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseJsonc } from "../../../scripts/jsonc.ts";
@@ -1090,7 +1091,22 @@ async function main() {
   console.log(`Container guard ${command}: ${targets.length} targets.`);
 }
 
-if (fileURLToPath(import.meta.url) === resolve(process.argv[1] ?? "")) {
+/**
+ * Whether node was started with this module, compared by real path: node
+ * resolves the main module through symlinks but leaves `argv[1]` as given, and
+ * a raw comparison would skip the command and exit 0 through a symlinked path.
+ */
+function invokedDirectly() {
+  try {
+    return (
+      process.argv[1] !== undefined &&
+      realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+    );
+  } catch {
+    return false;
+  }
+}
+if (invokedDirectly()) {
   try {
     await main();
   } catch (error) {

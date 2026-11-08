@@ -4,9 +4,9 @@ const VPOINT_PAY_SENDER = "info@prepaid.smbc-card.com";
 const MAX_RFC822_DEPTH = 2;
 const EVENT_SCHEMA_V2 = "vpoint-pay-email-event-v2";
 
-export type VPointPayEmailEventType = "usage" | "charge" | "balance-addition" | "declined";
+type VPointPayEmailEventType = "usage" | "charge" | "balance-addition" | "declined";
 
-export interface VPointPayEmailEvent {
+interface VPointPayEmailEvent {
   schemaVersion: "vpoint-pay-email-event-v1" | typeof EVENT_SCHEMA_V2;
   id: string;
   sourceMessageId: string | null;
@@ -21,7 +21,7 @@ export interface VPointPayEmailEvent {
   sourceProvenance?: VPointPayEmailSourceProvenance;
 }
 
-export interface VPointPayEmailSourceProvenance {
+interface VPointPayEmailSourceProvenance {
   schemaVersion: "vpoint-pay-email-source-provenance-v1";
   delivery: "direct" | "forwarded-rfc822";
   storedMessageScope: "smtp-message" | "forwarded-rfc822-part";

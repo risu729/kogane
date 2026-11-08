@@ -6,6 +6,18 @@ import { publishParse, seedRegistry, seedRun, supersedeParse } from "./fixtures"
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import { boundedCollections } from "../src/observation-api";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema";
+import { classifyAgentPath, MCP_PATH } from "../src/agent-api";
+import {
+  AGENT_TOOL_NAMES,
+  isAgentToolName,
+  PURCHASES_TOOL_NAME,
+  RECONSTRUCTED_STATE_TOOL_NAME,
+} from "../src/agent-service";
+import { HEALTH_PATH } from "../src/health";
+import { classifyOpsPath, OPS_PREFIX, opsOperation } from "../src/ops-api";
+import { READ_MCP_TOOLS } from "../src/read-tools";
+import { SCHEDULE_READ_TOOL, SCHEDULE_UPDATE_TOOL } from "../src/schedule-tools";
+import { SCHEDULES_PATH } from "../src/schedules-api";
 
 const prefix = "/api/evidence/v1";
 describe("production observation API", () => {
@@ -752,6 +764,88 @@ describe("authenticated read-only evidence", () => {
       throw new Error("private logger failure");
     });
     expect((await call(`${prefix}/meta`)).status).toBe(200);
+  });
+  it("labels agent and operations paths with closed route codes, never the caller's path text", async () => {
+    const logs = vi.spyOn(console, "log").mockImplementation(() => {});
+    for (const [path, method] of [
+      ["/api/agent/v1/privatesecret123", "POST"],
+      ["/api/agent/v1/financial.query", "POST"],
+      ["/api/ops/v1/privatesecret", "GET"],
+      ["/api/ops/v1/operations/op_privatesecret", "GET"],
+    ] as const)
+      await call(path, { method });
+    const routes = logs.mock.calls
+      .map(([value]) => JSON.parse(String(value)) as { event: string; route?: string })
+      .filter((value) => value.event === "evidence_request")
+      .map((value) => value.route);
+    expect(routes).toEqual([
+      "agent_unknown",
+      "agent_financial_query",
+      "ops_unknown",
+      "ops_operations",
+    ]);
+    expect(JSON.stringify(logs.mock.calls)).not.toMatch(/privatesecret/);
+  });
+  it("labels a request with the class of the route that answered it at prefix boundaries", async () => {
+    const logs = vi.spyOn(console, "log").mockImplementation(() => {});
+    for (const path of ["/api", "/api/v2/rewardsx", "/"]) {
+      const response = await call(path);
+      expect(response.status, path).toBe(path === "/" ? 200 : 404);
+      if (path !== "/") expect(await response.json(), path).toMatchObject({ error: "not_found" });
+    }
+    expect(
+      logs.mock.calls
+        .map(([value]) => JSON.parse(String(value)) as { event: string; route?: string })
+        .filter((value) => value.event === "evidence_request")
+        .map((value) => value.route),
+    ).toEqual(["unknown_api", "unknown_api", "assets"]);
+  });
+  it("keeps the label of every served agent tool and operations route, and closes the rest", () => {
+    // The labels before the closed lists: a served path must keep its label.
+    const previousAgent = (path: string) =>
+      `agent_${path.slice("/api/agent/v1/".length).replace(/\W/gu, "_")}`;
+    const previousOps = (path: string) => {
+      const head = path.slice(OPS_PREFIX.length).replace(/^\//u, "").split("/")[0] ?? "";
+      return `ops_${/^[a-z]{1,32}$/u.test(head) ? head : "unknown"}`;
+    };
+    const tools = [
+      ...AGENT_TOOL_NAMES,
+      PURCHASES_TOOL_NAME,
+      RECONSTRUCTED_STATE_TOOL_NAME,
+      ...READ_MCP_TOOLS.map((tool) => tool.name),
+    ];
+    for (const tool of tools) expect(isAgentToolName(tool), tool).toBe(true);
+    for (const tool of [...tools, SCHEDULE_READ_TOOL]) {
+      const path = `/api/agent/v1/${tool.slice("kogane.".length)}`;
+      expect(classifyAgentPath(path), path).toBe(previousAgent(path));
+      expect(classifyAgentPath(path), path).not.toBe("agent_unknown");
+    }
+    expect(classifyAgentPath(MCP_PATH)).toBe("mcp");
+    // The revision is served on `/mcp` only, so its HTTP path is unknown.
+    for (const tool of [SCHEDULE_UPDATE_TOOL, "kogane.privatesecret", ""])
+      expect(classifyAgentPath(`/api/agent/v1/${tool.replace(/^kogane\./u, "")}`)).toBe(
+        "agent_unknown",
+      );
+    const served: [string, string][] = [
+      ["POST", `${OPS_PREFIX}/collections`],
+      ["POST", `${OPS_PREFIX}/imports`],
+      ["POST", `${OPS_PREFIX}/replays`],
+      ["POST", `${OPS_PREFIX}/projections`],
+      ["POST", `${OPS_PREFIX}/sessions/source-a/refresh`],
+      ["GET", `${OPS_PREFIX}/operations/op-a`],
+    ];
+    for (const [method, path] of served) expect(opsOperation(method, path), path).not.toBeNull();
+    for (const path of [
+      ...served.map(([, path]) => path),
+      HEALTH_PATH,
+      SCHEDULES_PATH,
+      `${SCHEDULES_PATH}/bootstrap`,
+    ]) {
+      expect(classifyOpsPath(path), path).toBe(previousOps(path));
+      expect(classifyOpsPath(path), path).not.toBe("ops_unknown");
+    }
+    for (const path of [OPS_PREFIX, `${OPS_PREFIX}/`, `${OPS_PREFIX}/privatesecret`])
+      expect(classifyOpsPath(path), path).toBe("ops_unknown");
   });
   it("distinguishes catalogue and object transport failures without leaking error contents", async () => {
     const run = await seedRun({ count: 1 });

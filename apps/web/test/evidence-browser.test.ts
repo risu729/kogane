@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import type {
   EvidenceArtifactDetail,
   EvidenceArtifactList,
@@ -185,6 +186,8 @@ describe.if(runnable)("production evidence navigation", () => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(origin, { waitUntil: "networkidle" });
+    // `networkidle` does not guarantee the records request has rendered.
+    await page.locator("tbody").getByText("一部取得", { exact: true }).waitFor();
     expect(await page.getByRole("heading", { level: 1 }).innerText()).toBe("取得履歴と原本");
     expect(await page.locator("body").innerText()).toContain("解析結果はまだ提供していません");
     expect(await page.locator("tbody").innerText()).toContain("一部取得");
@@ -238,6 +241,9 @@ describe.if(runnable)("production evidence navigation", () => {
     runStatus = metadataStatus = 200;
     const page = await browser.newPage();
     await page.goto(origin, { waitUntil: "networkidle" });
+    // Records must be cached before the refresh fails, or this tests a first
+    // load instead; `networkidle` does not guarantee they have rendered.
+    await page.locator("tbody").getByText("一部取得", { exact: true }).waitFor();
     runStatus = 401;
     await page.getByRole("button", { name: "表示を更新", exact: true }).click();
     await page.getByRole("alert").waitFor();
@@ -263,7 +269,7 @@ describe.if(runnable)("production evidence navigation", () => {
     runStatus = metadataStatus = 200;
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
     await page.goto(origin, { waitUntil: "networkidle" });
-    expect(await page.locator("tbody").innerText()).toContain("一部取得");
+    await page.locator("tbody").getByText("一部取得", { exact: true }).waitFor();
     runStatus = 302;
     await page.getByRole("button", { name: "表示を更新", exact: true }).click();
     await page.getByRole("alert").waitFor();
@@ -273,10 +279,11 @@ describe.if(runnable)("production evidence navigation", () => {
     expect(new URL(page.url()).pathname).toBe("/");
     runStatus = 200;
     await page.goto(`${origin}/runs/r_2/artifacts/a_1`, { waitUntil: "networkidle" });
+    // The link renders with the loaded detail, which an idle network does not imply.
+    await page
+      .getByRole("link", { name: "保存ファイルをダウンロード", exact: true })
+      .waitFor({ state: "visible" });
     await screenshot(page, "evidence-mobile-detail");
-    expect(
-      await page.getByRole("link", { name: "保存ファイルをダウンロード", exact: true }).isVisible(),
-    ).toBe(true);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
@@ -305,6 +312,29 @@ describe.if(runnable)("production evidence navigation", () => {
     await page.getByRole("button", { name: "再試行", exact: true }).click();
     await page.getByRole("alert").waitFor({ state: "detached" });
     expect(await page.locator("tbody").innerText()).toContain("一部取得");
+    await page.close();
+  }, 60_000);
+
+  test("history, run and file views pass the accessibility audit", async () => {
+    runStatus = metadataStatus = 200;
+    const page = await browser.newPage();
+    await page.goto(origin, { waitUntil: "networkidle" });
+    await page.getByRole("heading", { name: "取得履歴と原本", exact: true }).waitFor();
+    await page.locator("tbody tr").first().waitFor();
+    expect(await auditView(page)).toEqual([]);
+    await page
+      .getByRole("link", { name: /保存ファイルを見る/u })
+      .first()
+      .click();
+    await page.getByRole("heading", { name: "保存ファイル", exact: true }).waitFor();
+    await page.locator("tbody tr").first().waitFor();
+    expect(await auditView(page)).toEqual([]);
+    await page
+      .getByRole("link", { name: /ファイルの詳細/u })
+      .first()
+      .click();
+    await page.getByRole("link", { name: "保存ファイルをダウンロード", exact: true }).waitFor();
+    expect(await auditView(page)).toEqual([]);
     await page.close();
   }, 60_000);
 });

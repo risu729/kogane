@@ -1,6 +1,6 @@
 export const RUN_ID = "123e4567-e89b-42d3-a456-426614174000";
 export const PREFIX = `raw/myjcb/2026/09/05/${RUN_ID}/`;
-export const MANIFEST_KEY = `${PREFIX}manifest.json`;
+const MANIFEST_KEY = `${PREFIX}manifest.json`;
 
 export interface StoredObject {
   body: Uint8Array;
@@ -94,7 +94,7 @@ export function readManifest(bucket: FakeBucket): {
   return JSON.parse(new TextDecoder().decode(bucket.objects.get(MANIFEST_KEY)!.body));
 }
 
-export async function stored(
+async function stored(
   body: Uint8Array,
   contentType: string,
   customMetadata: Record<string, string>,
@@ -124,20 +124,20 @@ export function ledger(
   });
 }
 
-export function encode(value: string): Uint8Array {
+function encode(value: string): Uint8Array {
   return new TextEncoder().encode(value);
 }
 
-export async function sha256Hex(bytes: Uint8Array): Promise<string> {
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", ownedArrayBuffer(bytes));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export function hexBytes(value: string): Uint8Array {
+function hexBytes(value: string): Uint8Array {
   return Uint8Array.from(value.match(/.{2}/gu) ?? [], (part) => Number.parseInt(part, 16));
 }
 
-export function ownedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+function ownedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   return copy.buffer;
