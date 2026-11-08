@@ -11,7 +11,7 @@ six operation-request kinds are distinct from the newer operator-only
 session-refresh request reaches a collector only through the named collector RPC
 the alarm uses, and only for a connection the Processor's
 `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names; the committed value names
-`sony-bank` ([collector execution](#collector-execution-adr-0048),
+`sony-bank`, `sbi-securities`, `mobile-suica`, `moneyforward-me` and `myjcb` ([collector execution](#collector-execution-adr-0048),
 [ADR 0048](adr/0048-operation-collector-dispatch.md)).
 
 The six things an operator asks this system to _do_ — collect a source,
@@ -626,11 +626,12 @@ Synthetic data only.
   `services/processor/test/schedule-native-runtime.test.ts` (a real workerd
   Processor tick starting one request over a named service binding).
 
-Not verified: no deployed instance, no live Access policy, no real provider or
-session, and no deployed collector has served `runOperation`; the committed
-configuration names only `sony-bank`, and no request has run through it yet.
-No operations tool has run for a real MCP client; dated client connection evidence is in the
-[recovery runbook](mcp-recovery.md).
+The tests above use no deployed instance, live Access policy, real provider or
+session. In production, `sony-bank` served `runOperation` for an MCP client's
+collection request, and the run it reported was registered and every
+parse-selected artifact published; the other connections the committed
+configuration names had not run a request when they were added. Dated MCP
+client connection evidence is in the [recovery runbook](mcp-recovery.md).
 
 Acceptance ids and the test that carries each:
 
@@ -692,12 +693,15 @@ a fresh idempotency key at a time the source's alarm is not due, and read
 `GET /api/ops/v1/operations/{id}` until `execution.state` is `published`,
 `unpublished`, `failed` or `uncertain`. Rollback: remove the id; a request
 already `started` is not interrupted, and nothing started is retried.
-The owner allowed every healthy connection (2026-11-08 03:19 UTC); they are
-added one at a time, each after the previous one's first request was followed
-to `published`. The committed value names `sony-bank`. The order after it is
-`sbi-securities`, `sbi-vc-trade`, `mobile-suica`, `moneyforward-me`, `myjcb` and
-`sbi-shinsei` (connection ids); Vpass, St.George and the container collectors
-come after their open fixes.
+The owner allowed every healthy connection (2026-11-08 03:19 UTC). `sony-bank`
+came first; once its first request was followed to publication, the other
+healthy non-container connections were added together, and their first
+requests are sent one connection at a time, each after the previous one ends.
+The committed value names `sony-bank`, `sbi-securities`, `mobile-suica`, `moneyforward-me` and `myjcb`. `sbi-vc-trade`,
+`sbi-vc-keepalive` and `st-george` follow
+[#1131](https://github.com/risu729/kogane/pull/1131)
+([#1140](https://github.com/risu729/kogane/issues/1140)); the other
+connections (among them the container collectors) come after their open fixes.
 `SESSION_REFRESH_POLICY` must also name `sbi-vc-trade` before an unattended
 refresh of it is dispatched, and only once its unattended renewal has been
 demonstrated.

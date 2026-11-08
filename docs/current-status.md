@@ -82,9 +82,9 @@ are separate claims. Historical acceptance records are linked from the
   and a trail from the request id to the reported runs, their registration,
   parse and CORE publication or a closed reason
   (`GET /api/ops/v1/operations/{id}`). The committed
-  `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank` only; requests for
-  any other connection wait and expire after 24 hours. Production dispatch is
-  unverified. Collectors run their daily
+  `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, `sbi-securities`, `mobile-suica`, `moneyforward-me` and `myjcb`; requests for
+  any other connection wait and expire after 24 hours. In production one
+  `sony-bank` request was followed to publication; the others are unverified. Collectors run their daily
   scope, not a requested window; READ projection of a run is not traced; only
   SBI VC's keepalive is an unattended session refresh. An accepted operation is
   still not an executed collection.
@@ -98,7 +98,7 @@ The committed [App config](../services/app/wrangler.jsonc) and
 boolean feature flags, including scheduling, operations, purchase recognition,
 rewards, reports and READ projections. CORE migrations reach 0083 (no
 file uses 0054, 0067, 0073, 0074, 0076 or 0081); READ reaches 0005. The Processor's
-`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, the only collector
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, `sbi-securities`, `mobile-suica`, `moneyforward-me` and `myjcb`, the collectors
 the operation dispatch lane calls. These are repository facts, not live database/deployment readback.
 
 App names a human operator in `OPERATOR_SUBJECTS`. `AGENT_GRANTS` is empty.
