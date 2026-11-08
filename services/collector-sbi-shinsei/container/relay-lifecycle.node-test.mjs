@@ -571,3 +571,196 @@ test("throwing close/terminate callbacks cannot escape cleanup and genuine error
   await lifecycle.abort();
   assert.deepEqual(records, [{ outcome: "failed", closeCode: 1006 }]);
 });
+
+function captureLogs(t) {
+  const records = [];
+  const previousLog = console.log;
+  const previousWarn = console.warn;
+  console.log = console.warn = (value) => records.push(JSON.parse(String(value)));
+  t.after(() => {
+    console.log = previousLog;
+    console.warn = previousWarn;
+  });
+  return records;
+}
+
+function trapUncaught(t) {
+  const uncaught = [];
+  const onUncaught = (error) => uncaught.push(error?.code ?? "unknown");
+  process.on("uncaughtException", onUncaught);
+  t.after(() => process.off("uncaughtException", onUncaught));
+  return uncaught;
+}
+
+async function readResponseHead(client) {
+  let buffered = Buffer.alloc(0);
+  while (!buffered.includes("\r\n\r\n")) {
+    const [chunk] = await once(client, "data");
+    buffered = Buffer.concat([buffered, chunk]);
+  }
+  return buffered.toString("latin1");
+}
+
+test("Chrome resetting a refused CONNECT does not crash the container", async (t) => {
+  // Before this, the refused socket had no `error` listener once the HTTP
+  // server handed it over, and Chrome's reset was an unhandled
+  // `read ECONNRESET` that ended the Node process.
+  const records = captureLogs(t);
+  const uncaught = trapUncaught(t);
+  const proxy = await startConnectRelay({
+    relayUrl: "ws://127.0.0.1:1",
+    relayToken: "synthetic-only",
+    allowedHosts: new Set(["allowed.invalid"]),
+  });
+  t.after(() => proxy.close());
+  for (let index = 0; index < 3; index++) {
+    const client = net.connect(proxy.port, "127.0.0.1");
+    await once(client, "connect");
+    client.write("CONNECT denied.invalid:443 HTTP/1.1\r\nHost: denied.invalid:443\r\n\r\n");
+    assert.match(await readResponseHead(client), /^HTTP\/1\.1 403 /u);
+    client.resetAndDestroy();
+  }
+  await delay(100);
+  assert.deepEqual(uncaught, []);
+  await proxy.close();
+  const summary = records.find((record) => record.event === "sbi-shinsei-container-relay-summary");
+  assert.equal(summary.connects, 3);
+  assert.equal(summary.refused, 3);
+  assert.equal(summary.established, 0);
+  assert.equal(
+    Object.keys(summary.socketErrors).every(
+      (code) => code === "ECONNRESET" || code === "unclassified",
+    ),
+    true,
+  );
+});
+
+test("Chrome resetting a CONNECT refused for its port does not crash the container", async (t) => {
+  captureLogs(t);
+  const uncaught = trapUncaught(t);
+  const proxy = await startConnectRelay({
+    relayUrl: "ws://127.0.0.1:1",
+    relayToken: "synthetic-only",
+    allowedHosts: new Set(["allowed.invalid"]),
+  });
+  t.after(() => proxy.close());
+  const client = net.connect(proxy.port, "127.0.0.1");
+  await once(client, "connect");
+  client.write("CONNECT allowed.invalid:80 HTTP/1.1\r\nHost: allowed.invalid:80\r\n\r\n");
+  assert.match(await readResponseHead(client), /^HTTP\/1\.1 403 /u);
+  client.resetAndDestroy();
+  await delay(100);
+  assert.deepEqual(uncaught, []);
+  await proxy.close();
+});
+
+test("Chrome resetting a CONNECT whose upstream failed does not crash the container", async (t) => {
+  const records = captureLogs(t);
+  const uncaught = trapUncaught(t);
+  const proxy = await startConnectRelay({
+    relayUrl: "ws://127.0.0.1:1",
+    relayToken: "synthetic-only",
+    allowedHosts: new Set(["allowed.invalid"]),
+    closeTimeoutMs: 50,
+  });
+  t.after(() => proxy.close());
+  const client = net.connect(proxy.port, "127.0.0.1");
+  await once(client, "connect");
+  client.write("CONNECT allowed.invalid:443 HTTP/1.1\r\nHost: allowed.invalid:443\r\n\r\n");
+  assert.match(await readResponseHead(client), /^HTTP\/1\.1 502 /u);
+  client.resetAndDestroy();
+  await delay(100);
+  assert.deepEqual(uncaught, []);
+  await proxy.close();
+  const summary = records.find((record) => record.event === "sbi-shinsei-container-relay-summary");
+  assert.equal(summary.connects, 1);
+  assert.equal(summary.upstreamFailed, 1);
+  assert.equal(summary.established, 0);
+});
+
+test("the relay summary counts CONNECT requests by outcome and carries no host", async (t) => {
+  const records = captureLogs(t);
+  const { server, url } = await upstream(t);
+  server.on("connection", (peer) =>
+    peer.on("message", (bytes, binary) => {
+      if (bytes.length) peer.send(bytes, { binary });
+    }),
+  );
+  const proxy = await startConnectRelay({
+    relayUrl: `${url}/tcp?runId=11111111-1111-4111-8111-111111111111`,
+    relayToken: "synthetic-only",
+    allowedHosts: new Set(["allowed.invalid"]),
+    closeTimeoutMs: 500,
+  });
+  t.after(() => proxy.close());
+  const refused = net.connect(proxy.port, "127.0.0.1");
+  await once(refused, "connect");
+  refused.write("CONNECT denied.invalid:443 HTTP/1.1\r\nHost: denied.invalid:443\r\n\r\n");
+  assert.match(await readResponseHead(refused), /^HTTP\/1\.1 403 /u);
+  refused.end();
+  const client = net.connect(proxy.port, "127.0.0.1");
+  t.after(() => client.destroy());
+  await once(client, "connect");
+  client.write("CONNECT allowed.invalid:443 HTTP/1.1\r\nHost: allowed.invalid:443\r\n\r\n");
+  assert.match(await readResponseHead(client), /^HTTP\/1\.1 200 /u);
+  client.write("synthetic-payload");
+  await once(client, "data");
+  await proxy.close();
+  const summaries = records.filter(
+    (record) => record.event === "sbi-shinsei-container-relay-summary",
+  );
+  assert.deepEqual(summaries, [
+    {
+      event: "sbi-shinsei-container-relay-summary",
+      runId: "11111111-1111-4111-8111-111111111111",
+      connects: 2,
+      refused: 1,
+      refusedWhileClosing: 0,
+      established: 1,
+      upstreamFailed: 0,
+      upstreamTimeout: 0,
+      abandoned: 0,
+      serverErrors: 0,
+      socketErrors: {},
+    },
+  ]);
+  assert.doesNotMatch(JSON.stringify(summaries), /invalid|synthetic-only|synthetic-payload/u);
+});
+
+test("a CONNECT Chrome resets before any answer is counted as abandoned", async (t) => {
+  const records = captureLogs(t);
+  const sockets = new Set();
+  const stalled = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on("data", () => {});
+    socket.on("close", () => sockets.delete(socket));
+  });
+  stalled.listen(0, "127.0.0.1");
+  await once(stalled, "listening");
+  t.after(async () => {
+    for (const socket of sockets) socket.destroy();
+    await new Promise((resolve) => stalled.close(resolve));
+  });
+  const proxy = await startConnectRelay({
+    relayUrl: `ws://127.0.0.1:${stalled.address().port}`,
+    relayToken: "synthetic-only",
+    allowedHosts: new Set(["allowed.invalid"]),
+    connectTimeoutMs: 5_000,
+    closeTimeoutMs: 30,
+  });
+  t.after(() => proxy.close());
+  const client = net.connect(proxy.port, "127.0.0.1");
+  await once(client, "connect");
+  client.write("CONNECT allowed.invalid:443 HTTP/1.1\r\nHost: allowed.invalid:443\r\n\r\n");
+  await once(stalled, "connection");
+  // A paused socket only notices a reset; a graceful close is seen when the
+  // upstream answer or the connect deadline arrives.
+  client.resetAndDestroy();
+  await delay(50);
+  await proxy.close();
+  const summary = records.find((record) => record.event === "sbi-shinsei-container-relay-summary");
+  assert.equal(summary.connects, 1);
+  assert.equal(summary.abandoned, 1);
+  assert.equal(summary.upstreamTimeout, 0);
+  assert.equal(summary.upstreamFailed, 0);
+});
