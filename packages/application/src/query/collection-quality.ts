@@ -99,11 +99,15 @@ const SAFE_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
 /**
  * A stored failure code as the contract carries it. Codes are written as safe
  * codes; anything else (an older free-text error) is never passed through and
- * reads `unclassified`.
+ * reads `unclassified`. Collector terminals spell their unit and run codes
+ * with hyphens (`collection-unit-failed`, the manifest's own grammar), so a
+ * hyphen reads as `_`: the code keeps its meaning instead of becoming
+ * `unclassified`.
  */
 export function safeCode(value: string | null): string | null {
   if (value === null) return null;
-  return SAFE_CODE.test(value) ? value : "unclassified";
+  const code = value.replaceAll("-", "_");
+  return SAFE_CODE.test(code) ? code : "unclassified";
 }
 
 /**

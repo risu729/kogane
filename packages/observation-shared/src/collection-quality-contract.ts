@@ -375,7 +375,7 @@ const newest = z
     /** Artifacts whose raw object is reachable (`evidenceExists`). */
     rawStored: count,
     parses,
-    /** Failure codes of the failed parses, as stored when safe codes, else `unclassified`. */
+    /** Failure codes of the failed parses, as stored (a hyphen read as `_`) when safe codes, else `unclassified`. */
     failureCodes: distinct(code),
     /** Published parses whose coverage claim is not complete. */
     incompleteCoverage: count,
