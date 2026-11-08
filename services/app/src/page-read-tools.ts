@@ -250,11 +250,16 @@ const TOOLS = {
     routes: ["/api/v2/reports", "/api/v2/reports/:id", "/api/v2/reports/:id/explanation"],
     needs: "reportArtifacts",
     read: (env, { reportId, view, ...params }) => {
-      // A view or a policy names one report; the list takes neither.
-      if (reportId === undefined && (view !== undefined || params.decimalPolicy !== undefined))
-        throw new HttpError(400, "invalid_request", [
-          view === undefined ? "decimalPolicy" : "view",
-        ]);
+      // A view or a policy names one report; the list takes neither, and each
+      // one given is a ref.
+      const wrong =
+        reportId === undefined
+          ? [
+              ...(view === undefined ? [] : ["view"]),
+              ...(params.decimalPolicy === undefined ? [] : ["decimalPolicy"]),
+            ]
+          : [];
+      if (wrong.length > 0) throw new HttpError(400, "invalid_request", wrong);
       return readReportRoute(
         env,
         {

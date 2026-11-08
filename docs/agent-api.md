@@ -696,7 +696,8 @@ where their routes answer `503 catalogue_read_failed`.
 `kogane.reports.read` takes `{ reportId?, view?, offset?, decimalPolicy? }`:
 without `reportId` it is the list (`offset` only), with it the detail
 (`view: "body"`, the default) or the explanation (`view: "explanation"`);
-`view` or `decimalPolicy` without `reportId` is `400 invalid_request`. The
+`view` or `decimalPolicy` without `reportId` is `400 invalid_request`, with
+each one given as a ref. The
 list is the operator's list, so it names restricted reports too. The detail
 and explanation are the operator route's answer with one difference, ADR
 0072's rule for an agent read: a restricted report, or one without a complete
