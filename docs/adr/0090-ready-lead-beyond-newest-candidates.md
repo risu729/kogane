@@ -1,4 +1,4 @@
-# ADR 0089: A statement's ready candidate leads the grouped card settlement list however old it is
+# ADR 0090: A statement's ready candidate leads the grouped card settlement list however old it is
 
 - Status: proposed
 - Date: 2026-11-08

@@ -451,7 +451,7 @@ its five newest candidates and any accepted one, however old, and leads with:
 
 When none of the five newest is accepted or ready and the statement has older
 candidates, the list searches those for rule 2
-([ADR 0089](adr/0089-ready-lead-beyond-newest-candidates.md)): newest first,
+([ADR 0090](adr/0090-ready-lead-beyond-newest-candidates.md)): newest first,
 50 a pass, it judges the older ones no decision names whose facts claim the
 same established owner and both accounts (`cardSettlementEligible` requires
 each of those, so a candidate without them is never ready), and stops at the
@@ -1076,7 +1076,7 @@ newest and its accepted ones (the two grouped rows of the table above,
 measured 2026-11-07 before the debit-account evidence read was added to every
 list; the flat list's first page measured 104 ms in the same run). A statement
 whose five newest hold no acceptance and none ready, and which has older
-candidates, adds the search for an older ready one (ADR 0089): one read a pass
+candidates, adds the search for an older ready one (ADR 0090): one read a pass
 (`CARD_SETTLEMENT_STATEMENT_OLDER_SQL`) for every statement still searching,
 which reaches those statements' candidates by the same index, ranks every one
 of them (as the window read does), reads each older one's latest decision by

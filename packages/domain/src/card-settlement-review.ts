@@ -102,14 +102,14 @@ export interface CardSettlementReviewPage {
 
 /**
  * How far the grouped list looked for a statement's lead beyond its judged
- * newest candidates (ADR 0089), a closed set:
+ * newest candidates (ADR 0090), a closed set:
  *
  * - `not_searched`: the judged candidates hold an acceptance or a ready one,
  *   or the statement has no older candidate, so nothing older was read;
  * - `found`: an older ready candidate was found and leads;
  * - `none_ready`: every older candidate that could be ready was judged and
  *   none is, so the newest leads (the passes are separate reads: a decision
- *   recorded between two of them can make one skip a candidate, ADR 0089);
+ *   recorded between two of them can make one skip a candidate, ADR 0090);
  * - `truncated`: the search judged `olderCandidatesSearched` older candidates
  *   without finding a ready one and stopped there. Older ones past them were
  *   not judged, so whether the statement has a ready candidate is unknown,
@@ -127,7 +127,7 @@ export type CardSettlementLeadSearch = (typeof CARD_SETTLEMENT_LEAD_SEARCHES)[nu
 /**
  * One statement's candidates (`statement_key`): the lead first (its accepted
  * candidate, else the newest one ready to accept of all its candidates the
- * search judged, else the newest; ADR 0089), then the other judged ones
+ * search judged, else the newest; ADR 0090), then the other judged ones
  * newest first. `candidateCount` counts every candidate of the statement, so
  * `candidateCount > candidates.length` says it has candidates the group does
  * not carry. `leadSearch` says how far the lead was looked for.
@@ -155,7 +155,7 @@ export interface CardSettlementStatementPage {
     candidatesPerStatement: number;
     /**
      * The most older candidates per statement the search for a ready lead
-     * judges on one read; past them a group says `truncated` (ADR 0089).
+     * judges on one read; past them a group says `truncated` (ADR 0090).
      */
     olderCandidatesSearched: number;
   };

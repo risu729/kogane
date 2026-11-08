@@ -1,7 +1,7 @@
 // `CARD_SETTLEMENT_STATEMENT_GROUP_SQL` of src/query/card-settlements.ts
 // exactly as #1021 shipped it and origin/main held it at c96e80e6, before the
 // grouped list searched a statement's older candidates for a ready lead
-// (ADR 0089), frozen as text with the readiness CTEs it embedded, so the
+// (ADR 0090), frozen as text with the readiness CTEs it embedded, so the
 // differential tests can prove the grouped read still judges the same window
 // and returns the same rows, and that the grouped list changes only where that
 // window decides no lead. The digest below pins the text: never edit it by

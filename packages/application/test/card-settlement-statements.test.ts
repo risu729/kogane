@@ -429,7 +429,7 @@ describe("statement-grouped reads on random stores", () => {
           const chosen = chosenReference(all, page, per);
           const found = rows(db, CARD_SETTLEMENT_STATEMENT_GROUP_SQL, [JSON.stringify(page), per]);
           expect(found).toEqual(rows(db, VIEW_REVIEWS_SQL, [JSON.stringify(chosen)]));
-          // The window it judges is the shipped one (ADR 0089 adds a search, not a change to it).
+          // The window it judges is the shipped one (ADR 0090 adds a search, not a change to it).
           expect(found).toEqual(
             rows(db, LEGACY_CARD_SETTLEMENT_STATEMENT_GROUP_SQL, [JSON.stringify(page), per]),
           );

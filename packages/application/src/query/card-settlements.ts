@@ -30,12 +30,12 @@ export const CARD_SETTLEMENT_STATEMENT_PAGE_SIZE = 10;
 export const CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT = 5;
 /**
  * The older candidates of a statement one pass of the grouped list's search
- * for a ready lead judges (ADR 0089).
+ * for a ready lead judges (ADR 0090).
  */
 export const CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS = 50;
 /**
  * The most older candidates of a statement the search judges on one read of
- * the grouped list, a whole number of passes (ADR 0089). A statement the
+ * the grouped list, a whole number of passes (ADR 0090). A statement the
  * search leaves unfinished says so (`leadSearch: "truncated"`), so a page
  * load reads at most four more times however long the statements' histories
  * grow.
@@ -110,7 +110,7 @@ interface DebitAccountRow {
  *
  * One row per chosen candidate. A list page holds at most 50 candidates and a
  * grouped page its ten statements' five newest and accepted ones and at most
- * one older ready one each (ADR 0089), each with a row per changed outcome.
+ * one older ready one each (ADR 0090), each with a row per changed outcome.
  */
 export const CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL = `WITH chosen AS MATERIALIZED (
  SELECT c.id,c.statement_parse_run_id,json_extract(c.facts_json,'$.statement.sourceAccount') AS card_source_account,
@@ -354,7 +354,7 @@ export const CARD_SETTLEMENT_STATEMENT_GROUP_SQL = reviewsSql(
 /**
  * The older candidates the grouped list judges, at most `?4` per statement and
  * pass, for a statement whose newest candidates hold no acceptance and none
- * ready to accept (ADR 0089): of each statement `?1` (a JSON array of statement
+ * ready to accept (ADR 0090): of each statement `?1` (a JSON array of statement
  * keys), the candidates after its `?2` newest that no decision names and whose
  * facts claim the same established owner and both accounts, newest first,
  * after the `?3` such ones earlier passes judged. A candidate any decision
@@ -582,7 +582,7 @@ async function olderReadyCandidates(
  * when none of those is accepted or ready to accept and the statement has
  * older candidates, it also searches at most
  * `CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED` of those for the newest ready
- * one and says how far it looked (`leadSearch`, ADR 0089). It leads with
+ * one and says how far it looked (`leadSearch`, ADR 0090). It leads with
  * the one `leadFirst` picks and says how many candidates the statement has;
  * the rest are one
  * `queryCardSettlements({ statementKey })` away. No candidate is hidden or

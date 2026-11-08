@@ -282,7 +282,7 @@ function OlderCandidates({
  * the same statement collapsed under it. Nothing is hidden for good: every
  * candidate stays reachable and keeps its own decision history. A lead search
  * the server stopped at its limit is said, never shown as "none ready"
- * (ADR 0089).
+ * (ADR 0090).
  */
 function StatementGroup({
   group,
