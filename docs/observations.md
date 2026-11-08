@@ -3169,10 +3169,10 @@ Phase 3 is done when:
   A negative `charge` would therefore read as an inflow and a negative
   `usage` as an outflow; only `extra.amountYen` keeps the stated sign.
   No observation or document records what a negative notification
-  amount means (a reversal, a correction or a display variant). Whether
-  such an event keeps no amount, as `paypay-csv` 0.2.2 does for a signed
-  cell (ADR 0004), or fails the artifact is open; either is a release of
-  this parser.
+  amount means (a reversal, a correction or a display variant). Owner
+  decision (2026-11-08): since the meaning is unknown, such an event fails
+  the artifact; the work, a release of this parser, is
+  [#1181](https://github.com/risu729/kogane/issues/1181).
 - **Reward units.** Point grants are recorded today as JPY transactions,
   contradicting `docs/design.md`. The fix direction is clear; the shape of
   `reward_observations` is not, because the payloads that would settle it
