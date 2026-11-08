@@ -15,7 +15,14 @@ import {
   AUDIT_INSTANT,
 } from "../audit/vocabulary.ts";
 import { type OperationName } from "../operation-path/catalogue.ts";
-import type { DelegatedPrincipal, DelegationCapability } from "./contract.ts";
+import {
+  DECISION_FAMILIES,
+  decisionCapability,
+  decisionFamilyOf,
+  type DecisionFamily,
+  type DelegatedPrincipal,
+  type DelegationCapability,
+} from "./contract.ts";
 
 export type DelegatedErrorCode =
   | "capability_not_delegated"
@@ -53,7 +60,7 @@ export interface DelegatedExecution {
     operation: "schedules.job.update" | "schedules.maintenance.update" | "schedules.survey.decide";
     source: string | null;
   };
-  commandFamilies: readonly ("plan" | "card-settlement" | "relation" | "identity")[];
+  commandFamilies: readonly ("plan" | DecisionFamily)[];
 }
 
 export function validDelegatedExecution(value: unknown): value is DelegatedExecution {
@@ -116,11 +123,9 @@ export function validDelegatedExecution(value: unknown): value is DelegatedExecu
           (typeof (v.schedule as Record<string, unknown>).source === "string" &&
             /^[a-z0-9-]{1,100}$/u.test((v.schedule as { source: string }).source))))) &&
     Array.isArray(v.commandFamilies) &&
-    v.commandFamilies.length <= 4 &&
+    v.commandFamilies.length <= 1 + DECISION_FAMILIES.length &&
     new Set(v.commandFamilies).size === v.commandFamilies.length &&
-    v.commandFamilies.every((f) =>
-      ["plan", "card-settlement", "relation", "identity"].includes(String(f)),
-    )
+    v.commandFamilies.every((f) => ["plan", ...DECISION_FAMILIES].includes(String(f)))
   );
 }
 
@@ -159,11 +164,9 @@ export function executionFor(
     notAfter: new Date(principal.notAfter).toISOString(),
     commandFamilies: [
       ...(principal.capabilities.includes("commands.plan") ? ["plan" as const] : []),
-      ...(principal.capabilities.includes("commands.decide.card-settlement")
-        ? ["card-settlement" as const]
-        : []),
-      ...(principal.capabilities.includes("commands.decide.relation") ? ["relation" as const] : []),
-      ...(principal.capabilities.includes("commands.decide.identity") ? ["identity" as const] : []),
+      ...DECISION_FAMILIES.filter((family) =>
+        principal.capabilities.includes(decisionCapability(family)),
+      ),
     ],
   };
 }
@@ -492,12 +495,12 @@ export function delegatedCommandFamilyAllowed(
   call: OperationCall | undefined,
   kind: string,
 ): boolean {
-  const family = kind.split(".")[0];
+  const family = decisionFamilyOf(kind);
   return (
     call?.actor.principalKind === "delegated" &&
     call.step === "confirm" &&
     !!call.delegatedExecution?.confirmsAuditId &&
-    (family === "identity" || family === "relation" || family === "card-settlement") &&
+    family !== null &&
     call.delegatedExecution.commandFamilies.includes(family)
   );
 }

@@ -345,6 +345,46 @@ describe("v2 balance read model", () => {
     expect(body.dataCoverage.reasons).toContain("stale:no_new_observation");
   });
 
+  it("subtotals one account holding several units once in each unit", async () => {
+    // An exchange account reports its cash per asset under one subject scope.
+    // The subtotal is a figure per unit, so that account is not "reported
+    // twice"; the same subject twice in one unit still is (INV06, covered by
+    // packages/application/test/query.test.ts).
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO producer_sources (producer_id,source_id) VALUES ('evidence-test','sbi-vc-trade')",
+      ),
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO ingest_client_routes (ingest_client_id,producer_id,source_id) VALUES ('evidence-test','evidence-test','sbi-vc-trade')",
+      ),
+    ]);
+    const run = await seedRun({ count: 1, source: "sbi-vc-trade", dataset: "cash-balances" });
+    const parse = await parseRun(run.artifacts[0].id, "sbi-vc-cash-balances");
+    await env.DB.prepare(
+      `INSERT INTO balance_observations
+         (parse_run_id,source_account,metric,instrument,amount_minor,amount_text,as_of,raw_locator,extra_json)
+       VALUES (?1,'sbi-vc-trade:main','cash_balance','JPY','1200','1200','2026-09-07','json:$[0]','{}'),
+              (?1,'sbi-vc-trade:main','cash_balance','BTC',NULL,'0.5','2026-09-07','json:$[1]','{}')`,
+    )
+      .bind(parse)
+      .run();
+    expect((await build()).status).toBe("complete");
+    const body = (await (
+      await call("/api/v2/balances/latest?account=sbi-vc-trade:main")
+    ).json()) as LatestPage & {
+      subtotals: { reasonCode: string | null; knownAssetsSubtotal: unknown };
+    };
+    expect(body.items.map((item) => [item.metric.metricId, item.adoption.state])).toEqual([
+      ["exchange.cash-balance", "adopted"],
+      ["exchange.cash-balance", "adopted"],
+    ]);
+    expect(body.subtotals.reasonCode).toBeNull();
+    expect(body.subtotals.knownAssetsSubtotal).toEqual([
+      { unitRef: "BTC", coefficient: "5", scale: 1, adoptedCount: 1 },
+      { unitRef: "JPY", coefficient: "1200", scale: 0, adoptedCount: 1 },
+    ]);
+  });
+
   it("serves the v1 list from the projection with exactly the rows it serves today", async () => {
     const run = await seedRun({ count: 1, source: "other-test", dataset: "parity-fixture" });
     const parse = await parseRun(run.artifacts[0].id, "v2-parity-fixture");

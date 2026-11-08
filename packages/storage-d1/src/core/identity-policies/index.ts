@@ -6,6 +6,7 @@ import type { D1Like } from "../../d1.ts";
 import { canonicalDigest } from "../../../../domain/src/context.ts";
 import { DEFAULT_POLICY_FAMILY, defaultSelection } from "./default.ts";
 import { mizuhoPolicy } from "./mizuho.ts";
+import { myJcbPolicy } from "./myjcb.ts";
 import { sbiShinseiPolicy } from "./sbi-shinsei.ts";
 import { vpassPolicy, type VpassBinding } from "./vpass.ts";
 
@@ -48,6 +49,8 @@ export interface IdentityPolicySelection {
 /** Everything a policy module may consult. Modules read only their own field. */
 export interface AvailableIdentityEvidence {
   vpassBindings: readonly VpassBinding[];
+  /** MyJCB: the parse's artifact is a J-POINT capture (`jpoint-balance`). Absent reads as false. */
+  myJcbJPointArtifact?: boolean;
 }
 export const NO_EVIDENCE: AvailableIdentityEvidence = { vpassBindings: [] };
 
@@ -71,6 +74,7 @@ const SOURCE_POLICIES: readonly IdentityPolicyModule[] = [
   vpassPolicy,
   mizuhoPolicy,
   sbiShinseiPolicy,
+  myJcbPolicy,
 ];
 
 function policyModuleFor(sourceId: string): IdentityPolicyModule | undefined {
@@ -152,5 +156,6 @@ export async function dependencyDigest(set: readonly IdentityDependency[]): Prom
 
 export { DEFAULT_POLICY_FAMILY };
 export { MIZUHO_POLICY_VERSION } from "./mizuho.ts";
+export { MYJCB_POLICY_VERSION } from "./myjcb.ts";
 export { SBI_SHINSEI_POLICY_VERSION } from "./sbi-shinsei.ts";
 export { trustedVpassBinding, VPASS_POLICY_FAMILY, type VpassBinding } from "./vpass.ts";

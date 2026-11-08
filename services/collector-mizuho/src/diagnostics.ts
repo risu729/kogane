@@ -1,8 +1,13 @@
-import { MIZUHO_CLIENT_ERROR_CODES, type MizuhoCollection } from "./client";
+import {
+  MIZUHO_CLIENT_ERROR_CODES,
+  MIZUHO_PARSE_ERROR_CODES,
+  type MizuhoCollection,
+} from "./client";
 
 export type MizuhoPhase = "configuration" | "login" | "collection" | "persistence";
 const ISSUE_CODES = new Set<string>([
   ...MIZUHO_CLIENT_ERROR_CODES,
+  ...MIZUHO_PARSE_ERROR_CODES,
   "account-limit",
   "history-pagination-unverified",
 ]);

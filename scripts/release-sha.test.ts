@@ -54,6 +54,20 @@ describe("the release sha is stamped into one variable and nothing else", () => 
     expect(() => stampConfig(CONFIG("b".repeat(40)), SHA)).toThrow("already holds");
   });
 
+  test("a declaration holding anything but empty or a full lowercase sha is refused", () => {
+    // Such a value is still a declaration: reading it as "not declared" would
+    // skip the Worker, and the postcheck would then compare a value nobody
+    // stamped. The refusal is a closed code and never echoes the value.
+    for (const value of ["A".repeat(40), `${"0".repeat(39)}F`, "abc", "g".repeat(40)])
+      expect(() => stampConfig(CONFIG(value), SHA)).toThrow(/^release_sha_invalid_declaration$/u);
+    for (const text of [
+      `{ "vars": { "${RELEASE_SHA_VAR}": null } }`,
+      `{ "vars": { "${RELEASE_SHA_VAR}": 1 } }`,
+      `{ "vars": { "${RELEASE_SHA_VAR}": "a\\"b" } }`,
+    ])
+      expect(() => stampConfig(text, SHA)).toThrow(/^release_sha_invalid_declaration$/u);
+  });
+
   test("two declarations are an error rather than a guess", () => {
     const text = `{\n  "vars": { "${RELEASE_SHA_VAR}": "" },\n  "env": { "a": { "vars": { "${RELEASE_SHA_VAR}": "" } } }\n}\n`;
     expect(() => stampConfig(text, SHA)).toThrow("more than once");
@@ -99,6 +113,20 @@ describe("stamping a checkout follows the deployment ledger", () => {
     });
     expect(readFileSync(join(root, "services/app/wrangler.jsonc"), "utf8")).toBe(CONFIG(SHA));
     expect(readFileSync(join(root, "services/app/wrangler.test.jsonc"), "utf8")).toBe(CONFIG(""));
+  });
+
+  test("an invalid declaration in a deployed configuration stops the stamp", () => {
+    const root = fixture(
+      {
+        "services/app/wrangler.jsonc": CONFIG(""),
+        "services/raw-evidence/wrangler.jsonc": CONFIG("A".repeat(40)),
+        "services/app/wrangler.test.jsonc": CONFIG(""),
+      },
+      workers,
+    );
+    expect(() => stampReleaseSha({ root, sha: SHA, write: false })).toThrow(
+      "services/raw-evidence/wrangler.jsonc: release_sha_invalid_declaration",
+    );
   });
 
   test("a ledger where nothing declares the variable is an error", () => {

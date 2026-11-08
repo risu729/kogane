@@ -40,11 +40,22 @@ pending rows, custom date ranges and unattended cloud authentication. AUD is an
 explicit source configuration, not an observed DOM currency label.
 
 The Durable Object serializes attempts and records uncertainty before bank I/O.
-Authentication/network failures require an explicit operator resume, and so
-does a collection its lease holder stopped
-([ADR 0085](../adr/0085-collection-lease-heartbeat.md)): its failed run keeps
-the reason `deadline-exceeded` (the 13-minute deadline) or
-`collection-interrupted` (the lease was lost). Pending
+Only a refused, challenged or unrecognised login (`login-rejected`,
+`authentication-challenge`, `human-required`, and `http-denied`,
+`bank-request-error` and `unexpected-route`, any of which may be how the bank
+answers a wrong password) pauses later logins (2026-11-08 UTC; before that every
+failure blocked until an operator resume). The pause ends by itself when the
+credential secret changes, or for one login on an operations-API collection
+request, at most once per 24 hours; there is no resume step
+([ADR 0069](../adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08)). What the
+bank showed when a run failed (stage, exception type, route refusal, login POST
+count and its redacted visible notices) is kept in that failed run's manifest
+([collector README](../../services/collector-st-george/README.md)). Every other failure is a
+failed run and the next run tries again, including a collection its lease
+holder stopped ([ADR 0085](../adr/0085-collection-lease-heartbeat.md)): its
+failed run keeps the reason `deadline-exceeded` (the 13-minute deadline) or
+`collection-interrupted` (the lease was lost). A refused lease answers `busy`
+and records no run. Pending
 validated evidence is retained in bounded chunks until the shared terminal is
 verified, so storage retries do not repeat authentication. Credentials, cookies,
 hidden form state and raw capture bodies never enter this state or Git.

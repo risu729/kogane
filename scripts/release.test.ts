@@ -1038,4 +1038,67 @@ describe("what a run actually did (finding 2)", () => {
       await server.stop(true);
     }
   });
+
+  test("an unreadable progress file still records the failure, with a closed code", async () => {
+    // The failure status is the last word a failed run leaves in the ledger.
+    // A progress file that exists but was cut short (the step that writes it
+    // can itself be the one that failed) must not stop that word from being
+    // posted, and the status says the account is missing instead of guessing.
+    const posted: { state: string; description: string }[] = [];
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        posted.push((await request.json()) as { state: string; description: string });
+        return Response.json({ id: 1 }, { status: 201 });
+      },
+    });
+    const directory = temporaryDirectory("kogane-status-unreadable-");
+    const env = {
+      GITHUB_TOKEN: "synthetic",
+      GITHUB_REPOSITORY: "owner/repo",
+      GITHUB_API_URL: `http://127.0.0.1:${String(server.port)}`,
+    };
+    const status = (progress: string, state: string) =>
+      ledgerMain(
+        [
+          "status",
+          "--deployment",
+          "9",
+          "--state",
+          state,
+          "--description",
+          "kogane release synthetic failed",
+          "--progress",
+          progress,
+        ],
+        env,
+      );
+    const truncated = join(directory, "truncated.json");
+    writeFileSync(truncated, '{"progressVersion":"release-progress-v1","summary":"1/2 dep');
+    const scalar = join(directory, "scalar.json");
+    writeFileSync(scalar, '"1/1 deployed"\n');
+    try {
+      expect(await status(truncated, "failure")).toBe(0);
+      expect(await status(scalar, "failure")).toBe(0);
+      expect(posted).toEqual([
+        {
+          state: "failure",
+          description: "kogane release synthetic failed — release_progress_unreadable",
+        },
+        {
+          state: "failure",
+          description: "kogane release synthetic failed — release_progress_unreadable",
+        },
+      ]);
+      // Success still refuses the same file, with the refusal it gives every
+      // other unreadable record rather than a parser message.
+      await expect(status(truncated, "success")).rejects.toThrow(
+        "refusing to record deployment 9 as success: no release progress record was read",
+      );
+      expect(posted).toHaveLength(2);
+    } finally {
+      await server.stop(true);
+    }
+  });
 });

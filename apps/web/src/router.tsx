@@ -114,6 +114,8 @@ export type Route =
   | { name: "collectionQuality" }
   /** The operator's read-only audit log (ADR 0064). Filters are query parameters. */
   | { name: "audit" }
+  /** One accepted operations request and its trail, by its `op_` id (docs/ops-api.md). */
+  | { name: "operation"; operationId: string }
   | { name: "transactions" }
   | { name: "balances" }
   | { name: "summaries" }
@@ -129,6 +131,8 @@ export type Route =
   | { name: "accountCandidates" }
   | { name: "rewards" }
   | { name: "reconciliation" }
+  /** One statement/bank-debit candidate and the candidates it competes with. */
+  | { name: "reconciliationReview"; proposalId: string }
   | { name: "cardOwnership"; proposalId: string }
   | { name: "purchases" }
   /** One recognised card purchase or refund, by its event id. */
@@ -173,8 +177,12 @@ export function matchRoute(path: string): Route {
   const trimmed = trimTrailingSlash(path);
   const ownership = /^\/reconciliation\/([A-Za-z0-9_-]{1,128})\/ownership$/u.exec(trimmed);
   if (ownership) return { name: "cardOwnership", proposalId: ownership[1]! };
+  const review = /^\/reconciliation\/([A-Za-z0-9_-]{1,128})$/u.exec(trimmed);
+  if (review) return { name: "reconciliationReview", proposalId: review[1]! };
   const purchase = /^\/purchases\/((?:purchase|refund)_[0-9a-f]{64})$/u.exec(trimmed);
   if (purchase) return { name: "purchase", eventId: purchase[1]! };
+  const operation = /^\/operations\/(op_[0-9a-f]{64})$/u.exec(trimmed);
+  if (operation) return { name: "operation", operationId: operation[1]! };
   const segments = path.split("/").filter((segment) => segment !== "");
   const [first, second, third] = segments;
 

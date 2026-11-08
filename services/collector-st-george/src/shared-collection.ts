@@ -11,6 +11,7 @@ import {
   type StGeorgeSnapshot,
 } from "../../../packages/parsers/src/st-george-contract";
 import { safeFailureCode, type FailureCode } from "./result";
+import { parseRunDiagnostic, type RunDiagnostic } from "./run-diagnostic";
 
 /** The terminal's source (the collector id) and its producer, `collector-<collector id>` (ADR 0014). */
 export const ST_GEORGE_SOURCE = "st-george";
@@ -23,6 +24,8 @@ export interface SharedRunInput {
   completedAt: string;
   snapshot?: StGeorgeSnapshot;
   reason?: FailureCode;
+  /** A failed browser run's labels and redacted bank notices; never with a snapshot. */
+  diagnostic?: RunDiagnostic;
 }
 
 const encoder = new TextEncoder();
@@ -47,6 +50,8 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
   if ((input.snapshot === undefined) === (input.reason === undefined)) {
     throw new Error("invalid_collection_result");
   }
+  // Re-checked here too: a pending run may have been stored by an older version.
+  const diagnostic = input.reason === undefined ? undefined : parseRunDiagnostic(input.diagnostic);
   const artifacts: PersistArtifact[] = [];
   if (input.snapshot !== undefined) {
     artifacts.push(
@@ -76,7 +81,10 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
           sha256: artifact.sha256,
           bytes: artifact.byteSize,
         })),
-        failures: reason === undefined ? [] : [{ operation: "collect", message: reason }],
+        failures:
+          reason === undefined
+            ? []
+            : [{ operation: "collect", message: reason, ...(diagnostic ? { diagnostic } : {}) }],
       },
       "collector_manifest",
     ),

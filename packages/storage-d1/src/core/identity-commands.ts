@@ -1,7 +1,8 @@
 // Identity commands (review 04 section 3, addendum A06). A manual decision is
 // a durable, corrigible record: every command carries an operation id for
 // idempotent resend, a server-verified actor, and the revision it expects.
-// `assign` appends a manual mapping revision and its decision; `release-override`
+// `assign` appends a manual mapping revision and its decision (or, for the
+// automatic instrument adoption rule only, a `rule` revision and decision); `release-override`
 // appends a decision that lets automatic policy apply again from the current
 // revision on. Neither deletes or updates a mapping row. All writes of one
 // command form one D1 batch (one transaction) whose statements are guarded on
@@ -169,6 +170,32 @@ export interface IdentityCommandGuard {
   binds: readonly unknown[];
 }
 
+/**
+ * How an `assign` is recorded. `manual` (the default) is a person's or an
+ * agent's command: a protected manual revision. `rule` is an automatic
+ * adoption (`instrument-auto-v1`, ADR 0055 amendment 2026-11-08): a `rule`
+ * mapping revision with a `rule` assign decision, which protects nothing, so
+ * a person's later command or release-override is never blocked by it.
+ * `evidenceRefs` are added to the decision after its own mapping reference.
+ */
+export interface IdentityAssignRecording {
+  method?: "manual" | "rule";
+  evidenceRefs?: readonly string[];
+}
+
+const EVIDENCE_REF = /^[a-z][a-z_-]{0,63}:[^\u0000-\u001f]{1,512}$/u;
+
+function validRecording(command: IdentityCommand, recording: IdentityAssignRecording): boolean {
+  const method = recording.method ?? "manual";
+  if (method !== "manual" && method !== "rule") return false;
+  if (method === "rule" && (command.action !== "assign" || !command.actorId.startsWith("rule:")))
+    return false;
+  const refs = recording.evidenceRefs ?? [];
+  return (
+    refs.length <= 16 && refs.every((ref) => typeof ref === "string" && EVIDENCE_REF.test(ref))
+  );
+}
+
 export interface PreparedIdentityCommand {
   receipt: IdentityCommandReceipt;
   digest: string;
@@ -186,10 +213,16 @@ export async function prepareIdentityCommand(
   db: D1Like,
   command: IdentityCommand,
   policyVersion: number,
-  options: { guard?: IdentityCommandGuard; now?: string } = {},
+  options: { guard?: IdentityCommandGuard; now?: string } & IdentityAssignRecording = {},
 ): Promise<PreparedIdentityCommand | { error: IdentityCommandError }> {
-  if (!validIdentityCommand(command) || !Number.isSafeInteger(policyVersion) || policyVersion < 1)
+  if (
+    !validIdentityCommand(command) ||
+    !Number.isSafeInteger(policyVersion) ||
+    policyVersion < 1 ||
+    !validRecording(command, options)
+  )
     return { error: "invalid_command" };
+  const method = options.method ?? "manual";
   const digest = await identityCommandDigest(command);
   const { table, reference, target, entities, subjectKind } = tables(command.kind);
   const assign = command.action === "assign";
@@ -247,13 +280,14 @@ export async function prepareIdentityCommand(
   if (assign && metadata)
     writes.push({
       sql: `INSERT INTO ${table}(id,${reference},revision,${target},method,reason,policy_version,created_at,label,status)
-        SELECT ?,?,?,?,'manual',?,?,?,?,? FROM decision_operations op WHERE ${ownLedger}
+        SELECT ?,?,?,?,?,?,?,?,?,? FROM decision_operations op WHERE ${ownLedger}
         AND NOT EXISTS(SELECT 1 FROM ${table} WHERE id=?) AND ${revisionGuard}`,
       binds: [
         mappingId,
         command.referenceId,
         command.expectedRevision + 1,
         command.targetId,
+        method,
         command.reason,
         policyVersion,
         now,
@@ -269,7 +303,7 @@ export async function prepareIdentityCommand(
     assign
       ? {
           sql: `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
-          SELECT ?,?,?,?,'assign','manual',?,?,?,json_array(?),?,NULL,? FROM decision_operations op
+          SELECT ?,?,?,?,'assign',?,?,?,?,?,?,NULL,? FROM decision_operations op
           WHERE ${ownLedger} AND NOT EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)
           AND EXISTS(SELECT 1 FROM ${table} WHERE id=?)`,
           binds: [
@@ -277,10 +311,11 @@ export async function prepareIdentityCommand(
             subjectKind,
             command.referenceId,
             command.expectedRevision + 1,
+            method,
             command.actorId,
             command.operationId,
             command.reason,
-            `${subjectKind}:${mappingId}`,
+            JSON.stringify([`${subjectKind}:${mappingId}`, ...(options.evidenceRefs ?? [])]),
             command.expectedRevision,
             now,
             ...ownLedgerBinds,
@@ -345,8 +380,14 @@ export async function executeIdentityCommand(
   db: D1Like,
   command: IdentityCommand,
   policyVersion: number,
+  recording: IdentityAssignRecording & { guard?: IdentityCommandGuard } = {},
 ): Promise<IdentityCommandResult> {
-  if (!validIdentityCommand(command) || !Number.isSafeInteger(policyVersion) || policyVersion < 1)
+  if (
+    !validIdentityCommand(command) ||
+    !Number.isSafeInteger(policyVersion) ||
+    policyVersion < 1 ||
+    !validRecording(command, recording)
+  )
     return { ok: false, error: "invalid_command" };
   const digest = await identityCommandDigest(command);
   const readOperation = () =>
@@ -358,7 +399,7 @@ export async function executeIdentityCommand(
       .first<OperationRow>();
   const stored = await readOperation();
   if (stored) return replayOrConflict(command, digest, stored);
-  const prepared = await prepareIdentityCommand(db, command, policyVersion);
+  const prepared = await prepareIdentityCommand(db, command, policyVersion, recording);
   if ("error" in prepared) return { ok: false, error: prepared.error };
   const { table, reference } = tables(command.kind);
   const assign = command.action === "assign";

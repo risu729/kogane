@@ -536,13 +536,23 @@ contract in `packages/collection/src/stages.ts`, before this table is reached.
 `runScheduled` in `src/worker.ts`, in order:
 
 ```text
-observation_sweep → collection_scan → identity_sweep → balance_projection
-  → reconciliation_sweep → card_debit_account_sweep → card_settlement_sweep
+observation_sweep → collection_scan → identity_sweep → instrument_auto_adoption
+  → balance_projection → reconciliation_sweep → card_debit_account_sweep → card_settlement_sweep
   → purchase_recognition
   → reward_claims_sweep → reward_read_projection → price_promotion
   → report_job → maintenance_survey → operation_dispatch → decision_outbox
   → audit_overflow
 ```
+
+`instrument_auto_adoption` has no flag. It adopts SBI Securities' bare
+domestic code onto SBI's Japanese listing of the same code by rule
+`instrument-auto-v1` ([identity](identity.md#automatic-adoption-rule-instrument-auto-v1),
+[ADR 0055 amendment 2026-11-08](adr/0055-instrument-candidates.md#amendment-2026-11-08-adopt-sbis-bare-domestic-code-onto-its-listing-by-rule)).
+A gate over `instrument_identifiers` and the current mappings ends the tick
+when no pair of the shape is on two instruments; otherwise the full candidate
+read runs at most once an hour (its own tick row with `evaluated: true`
+decides), refuses past 500,000 current identity observations, and at most 50
+adoptions are written a tick.
 
 `audit_overflow` has no flag. It turns each `audit_overflow_counters` row of a
 UTC day that has ended into one `overflow` audit record and deletes the row in
@@ -644,6 +654,7 @@ each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 | Lane                       | Counts recorded                                                                                                                                                                                                                     |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `identity_sweep`           | `processedRuns`, `identifiedRuns`, `identifiedObservations`                                                                                                                                                                         |
+| `instrument_auto_adoption` | `pairs`, `evaluated`, `eligible`, `adopted`, `conflicts`, `refused`                                                                                                                                                                 |
 | `reconciliation_sweep`     | `slices`, `scanned`, `groups`, `groupsSkipped`, `groupsDeferred`, `proposed`, `known`, `written`, `failed`, `autoAccepted`                                                                                                          |
 | `card_debit_account_sweep` | `scanned`, `read`, `refused`, `written`                                                                                                                                                                                             |
 | `card_settlement_sweep`    | `scanned`, `proposed`, `written`, `debitAccountEvidence`, `unmatched` (statements with no candidate, per closed code; [card-settlements.md](card-settlements.md#unmatched-statements))                                              |
@@ -691,9 +702,9 @@ the lane did. `GET /status` (`mise run //services/processor:ops status`) and
 
 ### 6.2 Lane audit records
 
-Four lanes write rule decisions, economic commits or proposals:
-`reconciliation_sweep`, `card_settlement_sweep`, `purchase_recognition` and
-`maintenance_survey`. Each tick of one of them that wrote any also appends one
+Five lanes write rule decisions, economic commits or proposals:
+`instrument_auto_adoption`, `reconciliation_sweep`, `card_settlement_sweep`,
+`purchase_recognition` and `maintenance_survey`. Each tick of one of them that wrote any also appends one
 `lane` record to the common audit log (`src/lane-audit.ts`,
 [audit log](audit-log.md#the-processors-own-records-alarm-and-lane),
 [ADR 0064](adr/0064-common-audit-log.md#amendment-the-alarm-and-lane-writers-slice-s7-2026-11-06)):
@@ -745,7 +756,8 @@ The start is one guarded batch (one per operation); the collector's answer is
 recorded as `collected`/`refreshed`, `failed` or `uncertain` and never retried.
 Each tick then marks starts older than an hour `uncertain` and reads the trail
 of up to five collected executions until they are `published` or
-`unpublished` with a closed reason. The collector call is awaited inside the
+`unpublished` with a closed reason; the `published` batch also stores the CORE
+revision the `projected` stage needs. The collector call is awaited inside the
 tick, as the alarm awaits its own.
 
 A failed dispatch never deletes the request. How each kind ends:
@@ -774,8 +786,8 @@ applies to collector starts only; an import expiry would be a new decision.
 expiry") pins this.
 
 An import whose stored payload names no source or run, or a source or run id
-the bucket key grammar refuses (the App's run grammar also admits `:`, which
-no terminal key can carry), fails at once with `operation_payload_invalid`
+the bucket key grammar refuses (the App refuses such a run id at acceptance,
+so this catches a payload stored before it did), fails at once with `operation_payload_invalid`
 and writes no stage row; it is not looked at again.
 
 An import whose registration **throws** — R2 or CORE unavailable, or a
@@ -950,8 +962,12 @@ not turn the answer into a 503, and before migration 0049 the list is empty.
   and a new alarm job also needs its `OPERATION_CONNECTIONS` entry
   (`packages/collection/test/operation-rpc.test.ts` compares the two) and its
   collector's `runOperation` (`tests/collector-operation-rpc.test.ts`), ADR 0048.
-- **U11** (READ projection): the `projected` stage of `collection_runs` and of
-  `ops_request_stages` is unwritten; the projection publisher completes it.
+- **U11** (READ projection): the `projected` stage of `collection_runs` is
+  unwritten. For an operation, the collector tracker stores `projected` as
+  `pending` with the CORE revision READ has to reach when it records an
+  execution `published`, and the operation record derives its completion from
+  the READ pointer when it is read
+  ([ops-api.md](ops-api.md#projected-read)); nothing writes it `completed`.
 - **U15** completed the legacy resource and source retirement; historical
   originals remain recoverable through the central archive mapping.
 

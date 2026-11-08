@@ -71,6 +71,7 @@ const PUBLISHED = [
   "kogane.card-settlements.unmatched",
   "kogane.economic-readiness.read",
   "kogane.card-settlements.read",
+  "kogane.card-settlements.statements",
   "kogane.card-settlements.ownership",
   "kogane.audit.search",
   "kogane.audit.get",
@@ -597,6 +598,7 @@ describe("the same person: operator in the browser, agent-only through MCP (matr
     "kogane.ops.projection.request",
     "kogane.ops.session.refresh",
     "kogane.ops.operation.get",
+    "kogane.ops.operation.list",
   ];
   it("offers the operations tools to every MCP client, whatever the command lists say", async () => {
     for (const environment of [
@@ -716,6 +718,7 @@ describe("a token minted for MCP reaches no other route, and /mcp takes no other
       ["GET", "/api/v2/reported-state", undefined],
       ["GET", "/api/v2/reported-holdings-change?from=2026-03-01&to=2026-03-31", undefined],
       ["GET", "/api/collection-quality", undefined],
+      ["GET", "/api/collection-quality/sony-bank/accounts", undefined],
       ["POST", "/api/ops/v1/collections", COLLECTION],
       ["GET", "/api/ops/v1/operations/op_synthetic", undefined],
       ["GET", "/api/ops/v1/health", undefined],
@@ -1009,7 +1012,9 @@ describe("an internal failure leaves only a closed code (G3-08)", () => {
         "2026-07-28 tools/call",
         await modern("tools/call", { name: "kogane.context.open", arguments: {} }, { environment }),
       ],
-      // The tool list asks the store whether purchases are served.
+      // The tool list's store reads are the availability checks (the
+      // reported state, card settlements, the page reads, card purchases),
+      // each one its route makes too: the route's 503 catalogue_read_failed.
       ["2025-11-25 tools/list", await rpc("tools/list", {}, { environment })],
       ["2026-07-28 tools/list", await modern("tools/list", {}, { environment })],
       [
@@ -1025,11 +1030,12 @@ describe("an internal failure leaves only a closed code (G3-08)", () => {
       ],
     ];
     for (const [label, response] of answers) {
-      expect(response.status, label).toBe(500);
+      const probe = label.endsWith("tools/list");
+      expect(response.status, label).toBe(probe ? 503 : 500);
       const text = await response.text();
       expect(text, label).not.toContain(DETAIL);
       expect(JSON.parse(text), label).toEqual({
-        error: "internal_error",
+        error: probe ? "catalogue_read_failed" : "internal_error",
         requestId: expect.any(String),
       });
     }
@@ -1037,8 +1043,8 @@ describe("an internal failure leaves only a closed code (G3-08)", () => {
     expect(lines.map((line) => [line["route"], line["status"], line["errorCode"]])).toEqual([
       ["mcp", 500, "internal_error"],
       ["mcp", 500, "internal_error"],
-      ["mcp", 500, "internal_error"],
-      ["mcp", 500, "internal_error"],
+      ["mcp", 503, "catalogue_read_failed"],
+      ["mcp", 503, "catalogue_read_failed"],
       ["agent_context_open", 500, "internal_error"],
     ]);
     expect(JSON.stringify(log.mock.calls)).not.toContain(DETAIL);

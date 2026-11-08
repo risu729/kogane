@@ -282,13 +282,23 @@ Collection logs include a generated run ID, bounded stage name, outcome and dura
 The Worker distinguishes container startup/request, browser collection, artifact storage,
 manifest storage and container teardown. Browser logs identify challenge/login, activity
 navigation, month discovery and statement reads; HTTP failures contain status only.
-Relay errors include the same vetted run ID, a relay ID and whether its peer had closed,
-so disconnects can be compared with the teardown boundary without treating each log as a failed run.
+Each Worker relay tunnel logs one `globalpass-relay-closed` line: run ID, relay ID, host class,
+network, `outcome` (`peer-closed`, `upstream-closed`, `upstream-connect-failed`,
+`upstream-read-failed`, `upstream-write-failed`), duration and bytes each way. An error after the
+container closed its end is teardown (`peer-closed`, level `log`), not a fault. The container's
+local relay logs `globalpass-container-relay-summary` at close: CONNECT requests by outcome, bytes each way
+and socket errors by closed code (`ECONNRESET`, `EPIPE`, …). Every socket and stream the local
+relay owns keeps an `error` listener, so a browser that resets a tunnel ends that tunnel and never
+the process (before `timezone-collector-v8` a reset on a refused CONNECT crashed the container with
+`read ECONNRESET`, 2026-11-07). A failure nothing handled is logged as `globalpass-container-crash`
+(error type and socket code only) before the process exits.
+Each challenge attempt logs its number, duration, a closed code and the attempt's last HTTP error
+status; a failed run's container `error` record names the failed step as a closed code
+([docs/collection.md](../../docs/collection.md#prestia-globalpass-kogane-globalpass-collector-poc)).
 New diagnostic logs omit exception text, stack traces, request URLs, credentials and statement bodies.
 A page the sanitizer refuses logs its closed code and a `shape` object on the `artifact-write`
 line: which expectation failed, and counts and booleans describing the page's markup (tags,
 reviewed hidden inputs, landmarks, forbidden-token occurrences, lengths as digit counts), never
 its text, attribute values, URLs or numbers read from it
 ([ADR 0026 amendment of 2026-09-28](../../docs/adr/0026-collector-unit-coverage.md#amendment-2026-09-28-global-pass-sanitizer-refusals-log-a-counts-only-shape)).
-The `terminal` line of a failed run reads `errorType: UnknownError` because it is emitted
-without an error; it is not a second failure.
+The `terminal` line reports the run's status only and carries no error fields.
