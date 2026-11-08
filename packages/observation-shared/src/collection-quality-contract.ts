@@ -159,7 +159,9 @@ export const CELL_REASONS = [
  * balance), `cash_movement` (bank, wallet or stored-value movements),
  * `card_usage` (card purchases and refunds), `card_statement` (statement and
  * payment amounts), `position` (security or crypto holdings), `execution`
- * (trades), `settlement_cash` (a broker's cash and its movements),
+ * (trades), `settlement_cash` (the cash account of a securities or crypto
+ * broker and its movements, kept apart from bank deposits because it settles
+ * trades),
  * `asset_transfer` (security or crypto moved in or out), `income`
  * (dividends, distributions, interest, staking or lending rewards),
  * `valuation_history` (the provider's own valuation and its history, realized

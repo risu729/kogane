@@ -885,8 +885,8 @@ data types its provider offers for the account kinds it collects (`balance`,
 `term_deposit`, `document`, `fx_rate`, `reward_balance`, `reward_activity`,
 `reward_expiry`), each `collected` (with the parsers that publish it),
 `partial` (with its parsers and the issue that tracks the rest) or
-`not_collected` (with the issue). A source with no collector has
-`dataTypes: null`. The list is checked in
+`not_collected` (with the issue). A source the catalogue does not describe
+(one with no collector, and `kogane-synthetic`) has `dataTypes: null`. The list is checked in
 (`packages/application/src/collection/provider-data-types.ts`), built from the
 source research and the per-source issues; it describes the provider, not the
 owner's holdings, and it is not checked against production. The page lists

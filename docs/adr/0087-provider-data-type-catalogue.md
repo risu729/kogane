@@ -49,30 +49,35 @@ kinds the source collects, in one closed vocabulary
 - `not_collected` with the issue that tracks it.
 
 Example (SBI証券): `position` partial (domestic and US positions; funds and
-bonds #446), `execution` collected, `settlement_cash` collected, `income`
+bonds #446), `execution` collected, `settlement_cash` partial (the yen
+history's first page only; #446), `income`
 not collected (#446), `valuation_history` partial (the current My資産
 valuation only; #446), `document` not collected (#446).
 
 Only what the research or the issue documents is listed: a provider semantic
-nobody has observed is not added (ADR 0004). A source with no collector is not
-catalogued (`dataTypes: null`); its absence is already the `no_collector`
-reason. SBI Shinsei's issue #447 was closed on 2026-10-10 with no comment while
+nobody has observed is not added (ADR 0004). A source the catalogue does not
+describe (one with no collector, and `kogane-synthetic`) has
+`dataTypes: null`; for a source with no collector the `no_collector` reason
+already says so. `settlement_cash` is the cash account of a securities or
+crypto broker (SBI証券, SBI VCトレード), kept apart from bank `balance` and
+`cash_movement` because it settles trades. SBI Shinsei's issue #447 was closed on 2026-10-10 with no comment while
 its dated history, monthly reports and product details are still not
-collected (docs/collection.md), so its entries point to the backlog #440.
+collected (docs/sources/sbi-shinsei-bank.md and #447's body), so its entries
+point to the backlog #440.
 
 The collection-quality summary carries `dataTypesVersion` and, per source,
 `dataTypes` (`apiVersion` 4); `kogane.collection-quality.read` answers the same
 and its description names the catalogue. The page lists the entries per
 source under 取得元が提供するデータ種別, with each issue linked, and the
-source list counts the types not wholly collected. The account view of
-ADR 0088 can show its source's entries once it is merged.
+source list counts the types not wholly collected.
 
 A test checks the catalogue against the parser registry: every name is a
-registered parser, each parser belongs to one source, and every registered
+registered parser, no parser is named under two sources, and every registered
 parser is named unless it publishes no observation (the two evidence-boundary
 parsers) or no collector feeds it (`paypay-csv`). A collector that gains a
 parser therefore fails the test until the catalogue says what the parser
-publishes.
+publishes. Which source and type a parser is listed under is the table's
+word, checked by review, not by the test.
 
 ## Consequences
 

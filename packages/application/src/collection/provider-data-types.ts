@@ -7,9 +7,10 @@
 //
 // `collected` names the registered parsers that publish it; `partial` names
 // them and the issue that tracks the rest; `not_collected` names the issue.
-// `test/provider-data-types.test.ts` checks every parser name against the
-// registry and every collector's parser against this table, so a parser that
-// publishes something cannot be missing from it. A provider semantic nobody
+// `test/provider-data-types.test.ts` checks that every name is a registered
+// parser, that every registered parser that publishes something is named, and
+// that no parser is named under two sources; which source a parser belongs to
+// is this table's word, checked by review. A provider semantic nobody
 // has observed is not listed (ADR 0004); a correction is a pull request that
 // changes this table and, for a new type or status, the version.
 import {
@@ -39,7 +40,7 @@ const missing = (type: ProviderDataTypeEntry["type"], issue: number): ProviderDa
  * The backlog issue for a source whose own issue was closed without the work
  * (SBI Shinsei's #447, closed 2026-10-10 with no comment while period
  * history, the electronic reports and product details are still not
- * collected; docs/collection.md "sbi-shinsei").
+ * collected; docs/sources/sbi-shinsei-bank.md and #447's body).
  */
 const BACKLOG = 440;
 
@@ -51,12 +52,13 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // (docs/sources/prestia.md "GLOBAL PASS activity").
   "global-pass": [collected("card_usage", ["global-pass-activity"])],
   // みずほダイレクト: accounts and balances; ordinary-account history beyond the
-  // first page, term/foreign/global-account contracts and みずほポイント are
-  // not collected (docs/sources/mizuho-bank.md, #441).
+  // first page, term/foreign/global-account contracts, statement files and
+  // みずほポイント are not collected (docs/sources/mizuho-bank.md, #441).
   "mizuho-bank": [
     collected("balance", ["mizuho-account-list"]),
     partial("cash_movement", ["mizuho-ordinary-history"], 441),
     missing("term_deposit", 441),
+    missing("document", 441),
     missing("reward_balance", 441),
     missing("reward_activity", 441),
     missing("reward_expiry", 441),
@@ -76,34 +78,42 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     missing("position", 452),
   ],
   // MyJCB: credit statements and their ledger, J-POINT balance with its
-  // nearest expiry; debit statements, J-POINT history and expiry buckets are
-  // not collected (docs/sources/myjcb.md, #444).
+  // nearest expiry; the bonus-payment schedule (stored, not parsed), debit
+  // statements, the PDF/CSV/OFX statement exports, J-POINT history and expiry
+  // buckets are not collected (docs/sources/myjcb.md, #444).
   myjcb: [
     partial("card_usage", ["myjcb-credit-ledger"], 444),
-    collected("card_statement", [
-      "myjcb-credit-statement-total",
-      "myjcb-credit-past-month-balances",
-      "myjcb-skip-payment-schedule",
-    ]),
+    partial(
+      "card_statement",
+      [
+        "myjcb-credit-statement-total",
+        "myjcb-credit-past-month-balances",
+        "myjcb-skip-payment-schedule",
+      ],
+      444,
+    ),
+    missing("document", 444),
     collected("reward_balance", ["myjcb-jpoint-balance"]),
     missing("reward_activity", 444),
     partial("reward_expiry", ["myjcb-jpoint-balance"], 444),
   ],
   // PRESTIA bank: account summary (native balances, term principal); deposit
-  // activity and product details are not collected (docs/sources/prestia.md,
-  // #454).
+  // activity, product details and the statement PDFs are not collected
+  // (docs/sources/prestia.md, #454).
   prestia: [
     collected("balance", ["prestia-bank-balances"]),
     missing("cash_movement", 454),
     partial("term_deposit", ["prestia-bank-balances"], 454),
+    missing("document", 454),
   ],
-  // SBI証券: domestic and US positions and trades, cash and the My資産 current
-  // valuation; dividends, asset history, fund/bond detail and delivered
-  // documents are not collected (docs/sources/sbi-securities.md, #446).
+  // SBI証券: domestic and US positions and trades, cash (the yen history's
+  // first page only) and the My資産 current valuation; dividends, asset
+  // history, fund/bond detail and delivered documents are not collected
+  // (docs/sources/sbi-securities.md, #446).
   "sbi-securities": [
     partial("position", ["sbi-domestic-cash-positions", "sbi-foreign-cash-positions"], 446),
     collected("execution", ["sbi-domestic-trade-records", "sbi-foreign-trade-records"]),
-    collected("settlement_cash", ["sbi-foreign-cash-balances", "sbi-yen-detail-history"]),
+    partial("settlement_cash", ["sbi-foreign-cash-balances", "sbi-yen-detail-history"], 446),
     missing("income", 446),
     partial("valuation_history", ["sbi-account-assets-current"], 446),
     missing("document", 446),
@@ -123,38 +133,51 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     missing("document", BACKLOG),
     collected("fx_rate", ["sbi-shinsei-exchange-rate"]),
   ],
-  // SBI VCトレード: yen and margin balances, positions, executions under one
-  // filter and yen deposits/withdrawals; crypto transfers and staking or
-  // lending rewards are not collected (docs/sources/sbi-vc-trade.md, #448).
+  // SBI VCトレード (a broker): crypto holdings and leverage positions,
+  // executions under one filter, and the yen account (balances, margin,
+  // deposits and withdrawals); crypto transfers, staking or lending rewards,
+  // the balance history and annual P&L report, and the PDF reports are not
+  // collected (docs/sources/sbi-vc-trade.md, #448).
   "sbi-vc-trade": [
-    collected("balance", ["sbi-vc-cash-balances", "sbi-vc-account-margin"]),
-    collected("cash_movement", ["sbi-vc-cashflows"]),
-    collected("position", ["sbi-vc-position-summary"]),
+    collected("position", ["sbi-vc-cash-balances", "sbi-vc-position-summary"]),
     partial("execution", ["sbi-vc-executions"], 448),
+    collected("settlement_cash", [
+      "sbi-vc-cash-balances",
+      "sbi-vc-account-margin",
+      "sbi-vc-cashflows",
+    ]),
     missing("asset_transfer", 448),
     missing("income", 448),
+    missing("valuation_history", 448),
+    missing("document", 448),
   ],
-  // SMBC Direct: the yen ordinary account; foreign-currency deposits are not
-  // collected (docs/sources/smbc-bank.md, #442).
+  // SMBC Direct: the yen ordinary account; foreign-currency deposits and term
+  // or installment deposits are not collected (docs/sources/smbc-bank.md,
+  // #442).
   "smbc-bank": [
     partial("balance", ["smbc-direct-balance"], 442),
     partial("cash_movement", ["smbc-direct-transactions"], 442),
+    missing("term_deposit", 442),
   ],
   // ソニー銀行: total balance, yen and ten foreign-currency histories and WALLET
-  // statements; term deposit contracts and backfill beyond the daily window are
-  // not collected (docs/sources/sony-bank.md, #449).
+  // statements; the realized FX P&L, term deposit contracts, the delivered
+  // documents and backfill beyond the daily window are not collected
+  // (docs/sources/sony-bank.md, #449).
   "sony-bank": [
     collected("balance", ["sony-bank-gross-balance"]),
     partial("cash_movement", ["sony-bank-history-json", "sony-bank-history-csv"], 449),
     collected("card_usage", ["sony-bank-wallet-history"]),
+    missing("valuation_history", 449),
     missing("term_deposit", 449),
+    missing("document", 449),
   ],
   // St.George: account balances and the first page of each account's history;
-  // dated history, eStatements and other account kinds are not collected
-  // (docs/sources/st-george.md, #450).
+  // dated history, term deposits, eStatements and other account kinds are not
+  // collected (docs/sources/st-george.md, #450).
   "st-george": [
     collected("balance", ["st-george-balances"]),
     partial("cash_movement", ["st-george-transactions"], 450),
+    missing("term_deposit", 450),
     missing("document", 450),
   ],
   // V Point: balances by kind with expiry, and history pages
@@ -164,10 +187,11 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     collected("reward_activity", ["v-point-history-page"]),
     collected("reward_expiry", ["v-point-balance-info"]),
   ],
-  // V Point Pay: usage notification e-mails only; the wallet balance, charges
-  // and full history are not collected (docs/sources/v-point-pay.md, #453).
+  // V Point Pay: usage notification e-mails only, with the balance after an
+  // event when the e-mail states one; the wallet balance page, charges and the
+  // full history are not collected (docs/sources/v-point-pay.md, #453).
   "v-point-pay": [
-    missing("balance", 453),
+    partial("balance", ["v-point-pay-notification-event"], 453),
     partial("cash_movement", ["v-point-pay-notification-event"], 453),
   ],
   // Vpass: card statement pages (purchases and statement amounts)
