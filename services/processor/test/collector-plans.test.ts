@@ -322,7 +322,9 @@ test("smbc-direct: responses, their extractions and the run manifest register an
       ...(range ? { range } : {}),
     };
   };
-  const range = { start: "2099-01-01", end: "2099-01-31" };
+  // Before STARTED_AT: only days finished in JST before acquisition are
+  // complete coverage (issue 1178).
+  const range = { start: "2026-08-01", end: "2026-08-31" };
   const manifest: BackfillManifest = {
     schemaVersion: "smbc-direct-backfill-worker-poc-v1",
     source: "smbc-direct",
@@ -344,14 +346,14 @@ test("smbc-direct: responses, their extractions and the run manifest register an
       ),
       await stored(
         "transactions-raw",
-        "transactions/20990101-20990131.raw.json.sjis",
+        "transactions/20260801-20260831.raw.json.sjis",
         '{"rows":[]}',
         "application/json",
         range,
       ),
       await stored(
         "transactions-normalized",
-        "transactions/20990101-20990131.normalized.json",
+        "transactions/20260801-20260831.normalized.json",
         '{"transactions":[]}',
         "application/json",
         range,
