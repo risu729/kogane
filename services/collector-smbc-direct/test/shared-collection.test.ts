@@ -26,7 +26,7 @@ import { runPrefix, sha256Hex, storeManifest } from "../src/storage";
 import type { BackfillManifest, BackfillProgress, StoredArtifact } from "../src/types";
 
 const RUN_ID = "00000000-0000-4000-8000-000000000000";
-const STARTED_AT = "2026-09-01T00:00:00.000Z";
+const STARTED_AT = "2099-02-01T00:00:00.000Z";
 const PREFIX = runPrefix(STARTED_AT, RUN_ID);
 const SESSION_REF = "session-11111111-1111-4111-8111-111111111111";
 const IDENTITY = { attemptId: "attempt-0000", acquisitionSessionRef: SESSION_REF };
@@ -91,7 +91,7 @@ async function manifestOf(overrides: Partial<BackfillManifest> = {}): Promise<Ba
     source: "smbc-direct",
     runId: RUN_ID,
     startedAt: STARTED_AT,
-    completedAt: "2026-09-01T00:10:00.000Z",
+    completedAt: "2099-02-01T00:10:00.000Z",
     status: "success",
     requestedRange: { start: "2099-01-01", end: "2099-01-31" },
     completedChunks: 1,
@@ -155,6 +155,31 @@ describe("terminal field derivation", () => {
 describe("G1-08/G1-09/G3-10/G3-11 run outcome", () => {
   test("a completed backfill covers the range it was asked for", async () => {
     expect(sharedOutcome(await manifestOf())).toEqual({
+      providerOutcome: "success",
+      coverageStatus: "complete",
+    });
+  });
+
+  test("a day must close before acquisition, even if completion crosses midnight", async () => {
+    const manifest = await manifestOf({
+      startedAt: "2099-01-31T01:00:00.000Z",
+      completedAt: "2099-01-31T15:00:00.000Z",
+    });
+    // No timestamp on an old artifact cannot prove its last day was closed.
+    expect(sharedOutcome(manifest)).toMatchObject({
+      coverageStatus: "partial",
+      safeErrorCode: "coverage_day_not_finished",
+    });
+    expect(waitingForHuman(manifest)).toBeTrue();
+    const captured = (collectedAt: string) => ({
+      ...manifest,
+      artifacts: manifest.artifacts.map((artifact) => ({ ...artifact, collectedAt })),
+    });
+    expect(sharedOutcome(captured("2099-01-31T14:59:59.999Z"))).toMatchObject({
+      coverageStatus: "partial",
+      safeErrorCode: "coverage_day_not_finished",
+    });
+    expect(sharedOutcome(captured("2099-01-31T15:00:00.000Z"))).toEqual({
       providerOutcome: "success",
       coverageStatus: "complete",
     });

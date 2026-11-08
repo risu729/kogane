@@ -90,6 +90,8 @@ stored is cleanup metadata, never a coverage gap. Complete SMBC backfills remain
 successful and their account units remain eligible for parsing. The existing
 `logoutSucceeded` state is retained across publication retries; the failure
 cleanup path before completion keeps its existing outcome and failure codes.
+Independent coverage refusals still apply: a legacy open-day success retains
+`coverage_day_not_finished` even when the same terminal flags a failed logout.
 
 The uniform collector policy and complete collector audit live in
 [collection](../collection.md#logout-audit-2026-11-08). Reuse the existing
@@ -113,3 +115,29 @@ pipeline tests establish that successful flagged SMBC, PRESTIA bank and GLOBAL
 PASS evidence still registers and publishes parsed observations. The GLOBAL
 PASS plan test also preserves successful registration and dataset eligibility
 for every page of its complete account unit.
+
+## Amendment 2026-11-08: closed JST days and frozen resume windows
+
+Status: proposed
+Owner decision: 2026-11-08 13:26 UTC, [issue 1178](https://github.com/risu729/kogane/issues/1178).
+
+Fresh backfills end on the last finished JST day at approval. Resumes keep the
+stored window and completed chunks regardless of the new approval date or the
+current default start. Extending the window in place could change the final
+month chunk's range and invalidate already published normalized evidence; the
+next fresh backfill advances the end instead.
+
+Pre-change progress is resumed without rewriting its window. If the last chunk
+still ends on an open day, its alarm waits for JST midnight before requesting
+that chunk. Request-start timestamps on transaction artifacts establish that
+their declared days had closed before acquisition. Legacy artifacts use the
+run start as a conservative lower bound. An old success that read an open day
+publishes partial coverage with `coverage_day_not_finished`; waiting longer or
+retrying publication cannot upgrade that acquisition. Existing terminals and
+provider bytes remain immutable. A fresh complete backfill recovers coverage.
+
+Fixed-clock tests cover 10:00 JST approval, the next day's fresh window, later
+approval of modern and legacy stopped runs, midnight deferral, and publication
+of old open-day successes. The unchanged R2 continuation tests continue to
+verify immutable history and parser eligibility using chronologically valid
+synthetic acquisition times.
