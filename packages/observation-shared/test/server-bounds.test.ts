@@ -8,6 +8,7 @@ import { purchasePage } from "../../application/test/card-purchase-view-fixture.
 import { CARD_PURCHASE_SUMMARY_LIMIT } from "../../application/src/query/card-purchases.ts";
 import {
   CARD_STATEMENT_ALLOCATION_DEBITS_MAX,
+  CARD_STATEMENT_ALLOCATION_LISTED_MAX,
   CARD_STATEMENT_ALLOCATION_SIZE_MAX,
   planCardStatementAllocations,
   type AllocationDebitInput,
@@ -60,8 +61,9 @@ describe("card purchase statement totals", () => {
 
 describe("unmatched statement planner allocations", () => {
   // The display policy plans up to three debits per allocation over at most
-  // 32 debits a run, and lists every exact allocation it finds: 32 debits of
-  // a third of the statement total give C(32, 3) of them.
+  // 32 debits a run, and counts every exact allocation it finds: 32 debits of
+  // a third of the statement total give C(32, 3) of them. It lists the first
+  // `CARD_STATEMENT_ALLOCATION_LISTED_MAX` (ADR 0074, amendment 2026-11-07).
   const debits: AllocationDebitInput[] = Array.from(
     { length: CARD_STATEMENT_ALLOCATION_DEBITS_MAX },
     (_, index) => ({
@@ -139,13 +141,15 @@ describe("unmatched statement planner allocations", () => {
             ownership: allocation.ownership,
             rejectionConditions: [...allocation.rejectionConditions],
           })),
+          allocationCount: outcome.allocationCount,
+          allocationsTruncated: outcome.allocationsTruncated,
         },
       },
     ],
     nextOffset: null,
   });
 
-  test("the bound is every allocation one run can list", () => {
+  test("the count's bound is every allocation one run can find", () => {
     const choose = (n: number, k: number): number => (k === 0 ? 1 : (choose(n - 1, k - 1) * n) / k);
     let expected = 0;
     for (let size = 1; size <= CARD_STATEMENT_ALLOCATION_SIZE_MAX; size++)
@@ -153,19 +157,32 @@ describe("unmatched statement planner allocations", () => {
     expect(UNMATCHED_ALLOCATIONS_LIMIT).toBe(expected);
   });
 
-  test("accepts the planner's answer of more than a thousand allocations", () => {
+  test("accepts the planner's answer counting more than a thousand allocations", () => {
     const outcome = plannerAnswer();
     expect(outcome.status).toBe("needs_review");
-    expect(outcome.allocations.length).toBe(4_960);
+    expect(outcome.allocationCount).toBe(4_960);
+    expect(outcome.allocations.length).toBe(CARD_STATEMENT_ALLOCATION_LISTED_MAX);
     expect(validUnmatchedCardStatementsReview(review(outcome))).toBe(true);
   });
 
-  test("refuses more allocations than one run can list", () => {
+  test("refuses more allocations listed than the server lists", () => {
     const outcome = plannerAnswer();
     const body = review(outcome);
     const planner = body.items[0]!.planner;
     const first = planner.allocations[0]!;
-    planner.allocations = Array.from({ length: UNMATCHED_ALLOCATIONS_LIMIT + 1 }, () => first);
+    planner.allocations = Array.from(
+      { length: CARD_STATEMENT_ALLOCATION_LISTED_MAX + 1 },
+      () => first,
+    );
+    expect(validUnmatchedCardStatementsReview(body)).toBe(false);
+  });
+
+  test("refuses a count above what one run can find", () => {
+    const outcome = plannerAnswer();
+    const body = review(outcome);
+    body.items[0]!.planner.allocationCount = UNMATCHED_ALLOCATIONS_LIMIT;
+    expect(validUnmatchedCardStatementsReview(body)).toBe(true);
+    body.items[0]!.planner.allocationCount = UNMATCHED_ALLOCATIONS_LIMIT + 1;
     expect(validUnmatchedCardStatementsReview(body)).toBe(false);
   });
 });

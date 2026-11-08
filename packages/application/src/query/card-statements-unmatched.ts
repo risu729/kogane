@@ -20,14 +20,18 @@
 // - Bounded. A page is at most `UNMATCHED_PAGE_SIZE` statements; each due
 //   date is read once with the sweep's own bank read (at most 1,000 rows);
 //   a planner run is at most 16 statements and 32 debits, and a run past
-//   them is answered `input_bound_exceeded`, never cut. The grant's
-//   `maxRows` bounds how deep a caller pages (`budget_exceeded`).
+//   them is answered `input_bound_exceeded`, never cut; each statement lists
+//   at most `CARD_STATEMENT_ALLOCATION_LISTED_MAX` (50) allocations, with
+//   their count and `allocationsTruncated` (ADR 0074, amendment 2026-11-07,
+//   "a bounded list of allocations"). The grant's `maxRows` bounds how deep
+//   a caller pages (`budget_exceeded`).
 import {
   cardSettlementCandidate,
   type CardBankDebitFact,
 } from "../../../domain/src/card-settlement.ts";
 import {
   CARD_STATEMENT_ALLOCATION_DEBITS_MAX,
+  CARD_STATEMENT_ALLOCATION_LISTED_MAX,
   CARD_STATEMENT_ALLOCATION_RELEASE,
   CARD_STATEMENT_ALLOCATION_STATEMENTS_MAX,
   planCardStatementAllocations,
@@ -108,7 +112,12 @@ export type UnmatchedPlannerAnswer =
   | {
       status: "proposed" | "needs_review" | "unsupported";
       codes: AllocationOutcomeCode[];
+      /** The first `CARD_STATEMENT_ALLOCATION_LISTED_MAX`, fewest debits first, then by member ref ids. */
       allocations: UnmatchedAllocation[];
+      /** Every exact allocation the planner found, listed or not. */
+      allocationCount: number;
+      /** True exactly when `allocationCount` is above the allocations listed. */
+      allocationsTruncated: boolean;
     };
 
 export interface UnmatchedCardStatement {
@@ -141,7 +150,8 @@ export interface UnmatchedCardStatementsReview {
       policy: typeof CARD_STATEMENT_UNMATCHED_ALLOCATION_POLICY;
       /** Statements of this page whose windows share a day are planned together. */
       partition: "page-overlapping-windows";
-      bounds: { statements: number; debits: number };
+      /** Allocations: the most one statement's answer lists. */
+      bounds: { statements: number; debits: number; allocations: number };
     };
     pageSize: number;
     /** No allocation listed is acceptable: the acceptance writer claims one debit. */
@@ -412,6 +422,8 @@ async function planGroup(
               ownership: allocation.ownership,
               rejectionConditions: [...allocation.rejectionConditions],
             })),
+            allocationCount: outcome.allocationCount,
+            allocationsTruncated: outcome.allocationsTruncated,
           },
     );
   }
@@ -532,6 +544,7 @@ export async function reviewUnmatchedCardStatements(input: {
           bounds: {
             statements: CARD_STATEMENT_ALLOCATION_STATEMENTS_MAX,
             debits: CARD_STATEMENT_ALLOCATION_DEBITS_MAX,
+            allocations: CARD_STATEMENT_ALLOCATION_LISTED_MAX,
           },
         },
         pageSize: UNMATCHED_PAGE_SIZE,

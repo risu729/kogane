@@ -2,7 +2,8 @@
 // (packages/application/src/query/card-statements-unmatched.ts,
 // docs/card-settlements.md, Statements without a candidate) on the complete
 // CORE schema: each closed code, the ADR 0074 planner's read-only answer, the
-// grouping of overlapping windows, that a swept statement leaves the list,
+// grouping of overlapping windows, the bounded list of a window of 32 equal
+// debits (ADR 0074, amendment 2026-11-07), that a swept statement leaves the list,
 // that the read writes nothing, and that its own lookups are keyed without
 // table statistics. Every value is synthetic.
 import { afterAll, beforeAll, expect, test } from "bun:test";
@@ -62,6 +63,7 @@ const STATEMENTS: [string, string, string | null][] = [
   ["2098-07", "3000", "2098-06-14"],
   ["2098-08", "2000", null], // no due date
   ["2098-09", "3000", "2098-09-28"], // two debits sum to it, beside a third whose date is no civil date
+  ["2098-10", "3000", "2098-10-20"], // 32 equal debits: any three of them sum to it
 ];
 /** SMBC debits: [provider id, magnitude, debit date]. */
 const DEBITS: [string, string, string][] = [
@@ -76,6 +78,13 @@ const DEBITS: [string, string, string][] = [
   // Not a civil date, yet inside the window's text comparison: the sweep never
   // compares it, and the planner must see it, not lose it.
   ["d-9c", "1000", "2098-09-31"],
+  // The planner's own bound of 32 debits, each a third of the total: 4,960
+  // exact three-debit sums, of which the answer lists the first 50.
+  ...Array.from<unknown, [string, string, string]>({ length: 32 }, (_, index) => [
+    `d-10-${String(index).padStart(2, "0")}`,
+    "1000",
+    "2098-10-20",
+  ]),
 ];
 
 async function seed() {
@@ -208,9 +217,15 @@ test("each statement without a candidate carries its closed code and, where aske
     "2098-07": "no_equal_amount_debit",
     "2098-08": "statement_not_comparable",
     "2098-09": "no_equal_amount_debit",
+    "2098-10": "no_equal_amount_debit",
   });
   // Two whole debits pay the first statement exactly: listed, never acceptable.
-  expect(items.get("2098-01")?.planner).toMatchObject({ status: "proposed", codes: [] });
+  expect(items.get("2098-01")?.planner).toMatchObject({
+    status: "proposed",
+    codes: [],
+    allocationCount: 1,
+    allocationsTruncated: false,
+  });
   expect(memberIds(items.get("2098-01"))).toEqual([
     [await debitId("d-1a"), await debitId("d-1b")].sort(),
   ]);
@@ -223,6 +238,8 @@ test("each statement without a candidate carries its closed code and, where aske
     status: "unsupported",
     codes: ["no_exact_allocation", "in_window_debits_below_total"],
     allocations: [],
+    allocationCount: 0,
+    allocationsTruncated: false,
   });
   // Overlapping windows are planned together, so the shared pair is contested.
   for (const period of ["2098-06", "2098-07"])
@@ -237,6 +254,30 @@ test("each statement without a candidate carries its closed code and, where aske
   expect((items.get("2098-09")!.planner as { codes: string[] }).codes).toContain(
     "excluded_debit_competes",
   );
+  // The worst window is counted whole and listed first-50, fewest debits first
+  // then by member ref ids, and says it stops short (ADR 0074, 2026-11-07).
+  const worst = items.get("2098-10")!;
+  expect(worst.debitsInWindow).toBe(32);
+  expect(worst.planner).toMatchObject({
+    status: "needs_review",
+    codes: ["candidate_not_unique"],
+    allocationCount: 4960,
+    allocationsTruncated: true,
+  });
+  const listed = memberIds(worst)!;
+  expect(listed).toHaveLength(50);
+  const worstIds = (
+    await Promise.all(
+      Array.from({ length: 32 }, (_, index) => debitId(`d-10-${String(index).padStart(2, "0")}`)),
+    )
+  ).sort();
+  const firstTriples: string[][] = [];
+  for (let a = 0; a < 32 && firstTriples.length < 50; a++)
+    for (let b = a + 1; b < 32 && firstTriples.length < 50; b++)
+      for (let c = b + 1; c < 32 && firstTriples.length < 50; c++)
+        firstTriples.push([worstIds[a]!, worstIds[b]!, worstIds[c]!]);
+  expect(listed).toEqual(firstTriples);
+  expect(page.manifest.planner.bounds).toEqual({ statements: 16, debits: 32, allocations: 50 });
   // The planner is asked only about no_equal_amount_debit.
   for (const period of ["2098-03", "2098-04", "2098-05", "2098-08"])
     expect(items.get(period)?.planner).toBeNull();
@@ -247,7 +288,7 @@ test("each statement without a candidate carries its closed code and, where aske
   expect(page.manifest).toMatchObject({
     acceptance: "single-debit-candidates-only",
     planner: {
-      release: "card-statement-allocation-v1",
+      release: "card-statement-allocation-v2",
       partition: "page-overlapping-windows",
       policy: {
         policyVersion: "card-statement-unmatched-display-v1",
@@ -268,7 +309,7 @@ test("a statement the sweep pairs leaves the list, and the sweep counts the refu
       statement_total_refund_or_zero: 1,
       statement_not_comparable: 1,
       no_debit_in_window: 1,
-      no_equal_amount_debit: 5,
+      no_equal_amount_debit: 6,
     },
   });
   const page = await review();
