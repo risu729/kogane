@@ -14,7 +14,7 @@ SBI証券の保存済みパスキーから毎回新しいsessionを作り、国�
 - メインサイト: My資産の現在評価、円貨入出金明細、国内株の90日以下の履歴。円貨明細はproviderの全page metadataと全fieldをpage bundleに保持し、全件性を検証してからartifact化する
 - 外国株式アプリ: 米国株現物、USD外貨預り金、90日以下の取引履歴
 - 実行: the Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the `sbi-securities` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), daily at 06:00 JST (21:00 UTC), and an accepted operations request calls `runOperation` (ADR 0048). Either one collects 国内・外国 serially in one invocation (`scope=all`). The Worker has no Cron Trigger and no public trigger route.
-- 保存: `packages/collection`で共有DATA bucketへ直接書き、ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。collectorが使うD1は`SCHEDULE_DB`（`kogane-raw-evidence`）の実行lease（`withCollectionLease`）だけである
+- 保存: `packages/collection`で共有DATA bucketへ直接書き、ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。The only D1 the collector uses is the execution lease (`withCollectionLease`) in `SCHEDULE_DB` (`kogane-raw-evidence`).
 
 注文、訂正、取消、取引パスワード、端末登録は実装にも設定にも含めない。通信が`POST`でも、許可するhost、path、MTS TR code、GraphQL operationを読み取り用途へ固定している。
 
@@ -73,7 +73,7 @@ Free planの実測では、個別の`scope=foreign`と`scope=domestic`は成功�
 
 2026-08-27にWorkers Paidへ移行したため、定期起動はWorker自身のCloudflare Cron Triggerへ統一した。毎日21:00 UTCの`scheduled()`が`scope=all`を直接実行し、国内と外国を同じinvocation内で直列収集した。日次Cronは1時間以上の間隔なので、当時のCloudflare制限では最大15分のCPU timeと15分のwall timeが使えた。このcollectorの実測（外国約7秒、国内約15秒）には十分である。Since #430 the Cron Trigger is gone (`triggers.crons` is empty): the Processor alarm calls `runScheduled` instead, which still runs `scope=all` in one invocation (`alarmCollection`, `src/worker.ts`).
 
-Queue、dispatcher、GitHub Actions scheduleは使わない。D1は実行lease（`SCHEDULE_DB`）だけに使う。Queueは再試行やscope単位の障害隔離が実際に必要になった場合だけ追加し、Paid化そのものを理由には導入しない。公開手動・バックフィル入口は廃止し、通常収集のprivate RPCを維持する。
+Queue、dispatcher、GitHub Actions scheduleは使わない。D1 is used only for the execution lease (`SCHEDULE_DB`). Queueは再試行やscope単位の障害隔離が実際に必要になった場合だけ追加し、Paid化そのものを理由には導入しない。公開手動・バックフィル入口は廃止し、通常収集のprivate RPCを維持する。
 
 ## 出典
 

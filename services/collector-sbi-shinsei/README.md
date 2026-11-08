@@ -103,7 +103,7 @@ bun src/local/cli.ts --dry-run
 bun src/local/check-jsc.ts
 ```
 
-`dry-run` と `cf-build` は dry-run だけで、deploy しません。
+`dry-run` and `cf-build` only build and validate; neither deploys.
 
 実収集は、専用Kuebiko Chromeを公式login画面に置いた状態で次の形です。stdin JSONは画面やshell historyへ出さないproducerからpipeします。
 
@@ -134,7 +134,7 @@ catalog entry を production で有効にするには、同じ commit/PR で以�
 PoCを廃止するときは、次をまとめて削除します。現在はlive検証結果を保持するためactiveのままです。
 
 - deployed Worker (its schedule is the Processor's `sbi-shinsei` alarm job; the Worker has no Cron Trigger);
-- Cloudflare secrets 2件（`SBI_SHINSEI_CREDENTIAL_JSON`、`RELAY_TOKEN`; the admin trigger secret is no longer read）;
+- the two Cloudflare secrets `SBI_SHINSEI_CREDENTIAL_JSON` and `RELAY_TOKEN` (the admin trigger secret is no longer read);
 - （旧source専用R2 bucketは2026-09-13に削除済み。保存先の共有DATA bucketは他のcollectorとProcessorも使うため削除しない）;
 - Container applicationとimage revisions;
 - TAMIAの`tunnel_id`を直接指定するVPC binding設定;

@@ -118,7 +118,8 @@ npx wrangler delete --name kogane-vpass-collector-poc
 ```
 
 The Worker deletion removes its secrets with the Worker. It does not touch the
-`vpass` alarm job, which is disabled on `/schedules` ([schedules.md](schedules.md)). Do
+`vpass` alarm job, which stays enabled until it is disabled on `/schedules`
+([schedules.md](schedules.md)); disable it there as well. Do
 not delete the shared `DATA` bucket: every collector and the Processor use it.
 If the legacy Free-plan Queue still exists, remove it separately with
 `npx wrangler queues delete kogane-vpass-collector-poc`.

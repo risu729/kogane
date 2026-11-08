@@ -96,7 +96,7 @@ Production deployment is the release workflow's, in the order of
 - R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。このWorker専用のbucketはない）
 - Schedule: Processor alarm job `sony-bank` (`config/alarm-jobs.json`, `0 21 * * *` UTC); no Cron Trigger
 - D1 binding: `SCHEDULE_DB` → `kogane-raw-evidence` (the execution lease)
-- Worker secret: 上記1件（`SONY_BANK_CREDENTIAL_JSON`）
+- Worker secret: `SONY_BANK_CREDENTIAL_JSON` (the one above)
 
 PoCを廃棄するときはWorkerだけを削除する。共有DATA bucketは他のcollectorとProcessorも使うため削除しない。旧source専用bucket `kogane-sony-bank-collector-poc`は2026-09-13に削除済み。
 

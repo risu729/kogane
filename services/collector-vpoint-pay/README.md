@@ -52,8 +52,9 @@ Keystoreやhardware attestationを使わないため、Workerで再現できる�
 
 各runはまずrefresh token grantを行う。応答のrotated refresh tokenは単一SQLite
 Durable Objectへ即時保存し、以後それを使う。token、UUID、access tokenはR2、manifest、
-log、HTTP応答へ出さない。secretを更新した場合は、管理token付き
-`POST /reset-credentials`でDurable Objectを再seedしていた。That route now answers 410 (`src/worker.ts`), so there is no reseed path while the app collector is stopped.
+log、HTTP応答へ出さない。
+After a secret update, the Durable Object used to be reseeded through the
+admin-token `POST /reset-credentials`. That route now answers 410 (`src/worker.ts`), so there is no reseed path while the app collector is stopped.
 
 静的解析ではOkHttp `CertificatePinner`を確認できず、network security configは
 cleartextを禁止するだけだった。これは標準Workers `fetch()`で動く可能性を強く示すが、
