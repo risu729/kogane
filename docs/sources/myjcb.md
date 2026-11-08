@@ -296,6 +296,10 @@ A は公開 API がないため不適、B は非公式 HTML と動的 login prot
 
 ## Worker PoC（2026-08-31）
 
+Status as of 2026-08-31. The Worker (`kogane-myjcb-collector-poc`) has since
+been deployed; production runs are recorded in the later sections (for example
+[amendment (h)](#同じ-page-を示す複数の-position-と月として読まれたスキップ払い-page2026-09-29adr-0005-の-amendment-h)).
+
 `services/collector-myjcb`に、`mnie`やOkuraのsourceをreuseしない独立Cloudflare Workers PoCを追加した。Worker自体は**未deploy・未auth test**であり、実credentialを投入していない。一方、利用者のKuebiko sessionでは第一IDへの実passkey loginとread/exportを観測しており、そのroute、field名、DOM shape、formatだけを実装へ反映した。raw credential、WebAuthn assertion、cookie、明細値、取得file、hashはcommitしていない。
 
 構成は次の二段階である。
@@ -335,6 +339,13 @@ Workers内でdownloadした任意JavaScriptを`eval`せず、保護scriptを手�
 
 R2は`raw/myjcb/YYYY/MM/DD/<run-id>/<connection-id>/...`へsanitized provider capture、normalized ledger、manifestをappend-only保存する。login/mypage/protection source、credential、protected POST body、cookie値は保存しない。HTMLはactive/embedded要素、event/data/navigation/form属性、全value/textarea、token/session類似属性、16桁card番号を除去・置換してから保存し、runtime errorはtyped codeと固定public messageに正規化する。discoveryにはcookie名を残さずcountだけを置く。
 
+The `raw/myjcb/YYYY/MM/DD/<run-id>/<connection-id>/...` layout was the
+private bucket's, retired on 2026-09-13. Runs are now written to the shared
+`DATA` bucket as content-addressed `objects/<2hex>/<sha256>` objects with the
+`terminal-v1` manifest last at `runs/myjcb/<runId>/terminal.json`; the
+importer described next was retired with it
+([U09 below](#共通-data-r2-への切替-u09), [legacy retirement](../legacy-retirement.md)).
+
 Layer Aの中央取込は`services/collector-r2-importer`に実装した。source R2を変更せず、manifest/prefix/metadata/checksumとHTML・past-month JSON・ledger・discoveryのmeaningを中央state作成前に検証する。既存HTMLは追加の`myjcb-central-sanitized-v2`変換を行い、active surfaceとtoken/navigation属性を中央へ複製しない。manifestもfailure/blocker自由文を固定codeへ置換した中央専用bytesを作り、source manifestの自由文をそのまま複製しない。最大16 connectionsのterminal reportを残すため、完全inventoryを固定して5 artifactずつstaged transferし、HMAC付きcontinuationから再開する。専用credential、route、source alias、storage policyはmigration `0011`で分離する。2026-09-05時点のprivate R2監査では22 manifests / 142 objectsを確認したが、本文・値・key・個別hashは公開記録へ出していない。最終validatorでは22 manifests全件が通り、72 HTML全件が中央用bytesへ変換された。実例が存在したdatasetはcredit menu、past-month JSON、credit detail、parsed ledger、discoveryだけであり、CSV/PDF/OFX/debitはartifactもR2 failure宣言も受理しない。実例のsafe structureを監査して契約・negative testを追加するまでfail closedを維持する。
 
 同一manifestのbackfill retryは中央で冪等だが、collectorが別run IDで重複収集した場合は別runとして保存する。実R2の6 success runはpayload fingerprintが互いに異なり、content deduplicationで収集runを統合する根拠はない。既知のCron/manual overlapはcollector側lockの課題であり、raw-evidence取込でscheduled実行を追加・変更しない。
@@ -353,7 +364,19 @@ Layer Aの中央取込は`services/collector-r2-importer`に実装した。sourc
 
 checked-in canaryはsource R2をread-onlyで184 objects / 24 manifests監査した。statusはsuccess 8 / failed 16、全manifestがLayer A strict contractを通り、success artifactは全件がLayer B registryでexactly one routeを選択してparse成功した。集計はtransaction 181、statement metric 16で、nonempty ledgerとdisplayed past monthを確認した一方、multiple connectionsは未観測だった。object key、hash、body、connection/account identifier、加盟店、日付、金融値、secretは出力・保存・commitせず、R2 write/deleteも行っていない。
 
-日次実行は`0 21 * * *`のCloudflare CronからWorker `scheduled()`を直接呼び、GitHub Actions cronを使わない。公開HTTPからの収集開始は廃止され、`POST /trigger`を含むhealth以外のrequestは404を返す。既存のprivate RPC、scheduled実行、alarm実行は維持する（[ADR 0069](../adr/0069-collector-admin-retirement.md)）。PoC時点ではCron/manual overlap lockが未実装で、同一IDの同時login/readを防ぐDurable Object lockまたはQueue直列化をdeploy/merge前要件としていた。
+Daily collection is the Processor's alarm job `myjcb` (06:00 JST, `0 21 * * *`
+in `config/alarm-jobs.json`), which calls the Worker's private
+`ScheduledCollection` entrypoint; since
+[#430](https://github.com/risu729/kogane/pull/430) (2026-10-05) the Worker has
+no Cron trigger, and GitHub Actions cron is not used. Starting a collection over
+public HTTP is retired: every request other than health, `POST /trigger`
+included, answers 404, and the private RPC remains
+([ADR 0069](../adr/0069-collector-admin-retirement.md)). At the PoC stage there
+was no lock against overlapping scheduled and manual runs, and a Durable Object
+lock or Queue serialization was a requirement before deploy and merge. Today
+every run, alarm or operations request, holds the source's execution lease in
+`SCHEDULE_DB` (`withCollectionLease`, `services/collector-myjcb/src/worker.ts`),
+so two runs of `myjcb` do not overlap ([schedules](../schedules.md)).
 
 実装、stop条件、R2 layout、cleanup前提、synthetic test、未確認事項は`services/collector-myjcb/README.md`に集約した。公開AGPL prior artの観測は、PR #24調査時点のOkura commit `afc6057fba78b5bfd6364654548fbfd91c76692a`とPoC照合時点の`bbf11e032aba4a380009508e91954361a3f9d658`を区別し、protocol確認だけに使った。
 

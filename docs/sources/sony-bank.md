@@ -420,6 +420,13 @@ run数は11のままで、seal済みrunのexact replayは冪等だった。旧v1
 source R2はdurable outboxとして残し、削除しない。後続のreconcilerはmanifest eventと定期repair
 scanを入口にし、同じ冪等contractを自動実行する。
 
+Historical record: the backfill script, the importer, the outbox reconciler
+Queue and the source bucket `kogane-sony-bank-collector-poc` were retired on
+2026-09-13, after the bucket's objects were copied to `DATA` and verified
+([legacy retirement](../legacy-retirement.md)). The collector writes each run once, into `DATA`
+([U09 below](#共通-data-r2-への切替-u09)), and its daily run is the Processor's
+alarm job `sony-bank` (06:00 JST, `0 21 * * *` in `config/alarm-jobs.json`).
+
 ## 公式 APK / app と Web の役割
 
 ### 公式配布物

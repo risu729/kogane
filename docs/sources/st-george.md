@@ -70,10 +70,19 @@ had yet been registered.
 
 The first authenticated administrative POST returned `no-parameters-accepted`
 before any bank request: an empty incoming POST can still expose a body stream.
-The request guard now checks for actual bytes and cancels nonempty input instead
-of treating a non-null stream as a supplied parameter. Regression tests cover
-empty streams, nonempty bodies and cancellation. Cron remains disabled until an
-authenticated cloud collection and downstream publication are verified.
+The request guard was then changed to check for actual bytes. That route and its
+guard were removed on 2026-11-08
+([#1131](https://github.com/risu729/kogane/pull/1131),
+[ADR 0069 amendment](../adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08)):
+public HTTP now offers `GET /health` and the authenticated `/tcp` relay, and
+every other request answers 404.
+
+The Worker has no Cron trigger. Since
+[#430](https://github.com/risu729/kogane/pull/430) (2026-10-05) the Processor's
+alarm job `st-george` (06:35 JST, `35 21 * * *` in `config/alarm-jobs.json`,
+enabled) calls its private `ScheduledCollection` entrypoint
+([schedules](../schedules.md)). Whether an authenticated cloud collection and
+downstream publication have succeeded is not recorded here.
 
 ## Automation PoC (2026-09-13)
 

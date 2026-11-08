@@ -78,15 +78,23 @@ The historical research below predates this follow-up.
 
 `services/collector-mizuho` integrates password login, the direct read client,
 sanitized evidence persistence, shared parsers, and existing projections.
-It runs daily at 06:25 JST (`25 21 * * *` UTC); an authenticated `POST /trigger`
-with `{}` follows the same login and collection path. An explicit browser-session
-request remains supported. Customer number and login password are provisioned
-as Worker secrets out of band; neither enters CI/CD, evidence or response logs.
+It runs daily at 06:25 JST: the Worker has no Cron trigger, and the
+Processor's alarm job `mizuho-bank` (`25 21 * * *` UTC in
+`config/alarm-jobs.json`) calls its private `ScheduledCollection` entrypoint.
+Its `runOperation` method would run the same path under the same lease, but the
+Processor's `OPS_COLLECTOR_DISPATCH_CONNECTIONS` does not name `mizuho-bank`,
+so an operations-API request for it waits and expires after 24 hours
+([current status](../current-status.md)).
+Public HTTP offers only `GET /health`: `POST /trigger` and the explicit
+browser-session request were retired with the collector admin routes and answer
+404 ([ADR 0069](../adr/0069-collector-admin-retirement.md)). Customer number and
+login password are provisioned as Worker secrets out of band; neither enters
+CI/CD, evidence or response logs.
 Each invocation attempts login once and stops on additional authentication;
 scheduled retries are disabled. The normal production release includes the
 Worker and health postcheck. A successful health check alone does not establish
-authenticated bank access; that is established by the daily cron runs, which
-have registered in production since 2026-09-24. Pagination still requires its
+authenticated bank access; that is established by the daily scheduled runs,
+which have registered in production since 2026-09-24. Pagination still requires its
 own observed-transition validation.
 
 The bank app was renamed to みずほ銀行アプリ on 2026-09-03; historical app names

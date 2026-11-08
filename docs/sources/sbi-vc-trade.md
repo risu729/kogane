@@ -16,6 +16,12 @@ SBI VCトレードには、暗号資産・日本円の資産状況、残高履�
 
 総合評価は、手動エクスポート + ローカル解析が **E / コスト1**、無人passkey再認証を含むWeb collectorが **B / コスト3** である。標準Bun/Workers `fetch`によるread-only collectorとWorkers Web Cryptoによるpasskey loginは実データで成功し、Cloudflare IP、browser TLS fingerprint、Chrome、Turnstileはpasskey経路の必須条件ではなかった。固定read allowlistの日次収集とprivate R2保存までWorkerへ統合済みで、完全ブラウザーまたはアプリ自動化は不要になった。残るのはabsolute expiry時fallbackと仕様変更の長期観測、PoCから本設計への統合である。
 
+Since 2026-09-13 the daily run is stored in the shared `DATA` bucket rather
+than a private one, and since 2026-10-05 the Processor's alarms, not Cron
+triggers, start the keepalive and the daily collection
+([§15](#15-cloudflare-workers-sessionpasskey-poc),
+[shared DATA bucket](#shared-data-bucket-u09-2026-09-11)).
+
 ## 1. 口座・商品と列挙できる情報
 
 ### 公式に確認できた事実
@@ -517,17 +523,40 @@ login responseの属性では、`vct_bff_sid`と`__cf_bm`の`Expires`が約30分
 
 ## 15. Cloudflare Workers session・passkey PoC
 
-[`services/collector-sbi-vc-trade`](../../services/collector-sbi-vc-trade/)へ、一時Worker `kogane-sbi-vc-session-poc`を追加した。Cloudflareの有料plan上でDurable Objectと15分Cronを使う。GitHub Actionsはtriggerに使わない。
+[`services/collector-sbi-vc-trade`](../../services/collector-sbi-vc-trade/)へ、一時Worker `kogane-sbi-vc-session-poc`を追加した。GitHub Actionsはtriggerに使わない。
+
+The Worker uses a Durable Object on the paid Cloudflare plan. Since
+[#430](https://github.com/risu729/kogane/pull/430) (2026-10-05) it has no Cron
+trigger: the Processor's `ScheduleAlarm` calls its private
+`ScheduledCollection` entrypoint for the alarm jobs `sbi-vc-keepalive` (every
+15 minutes) and `sbi-vc-trade` (06:05 JST), whose `cron` values `*/15 * * * *`
+and `5 21 * * *` in `config/alarm-jobs.json` are the only ones
+`runScheduled` accepts ([schedules](../schedules.md)).
 
 ### 構成
 
 - `SESSION_SEED` Worker Secretに、実測で必要だった8 Cookieと`secureKey`を初期投入する。
 - `SESSION_ENCRYPTION_KEY` Worker SecretをAES-256-GCM keyとし、rotation後のsessionをDurable Objectへ暗号化保存する。
 - `PASSKEY_CREDENTIAL` Worker Secretには、既存Bitwarden credentialのcredential ID、PKCS#8 P-256 private key、RP ID、user handle、counter、algorithm/curveだけを投入する。master passwordとBitwarden session keyは投入しない。
-- Cron `*/15 * * * *`は、公式UI自身が10分ごとに使う軽いread-only event `informationTitle`を1回だけ送る。
-- Cron `5 21 * * *`は毎日06:05 JSTに残高、口座詳細、position summary、約定recent/historical、JPY入出金historicalを取得する。
-- private R2 bucket `kogane-sbi-vc-trade-poc`へ、`raw/sbi-vc-trade/YYYY/MM/DD/<run-id>/`単位でartifactとmanifestを保存する。
-- responseの`meta.secureKey`はsession更新へ使った後に削除し、R2へ保存しない。各artifactは取得直後にR2へ書き、全履歴をmemoryへ保持しない。
+- Each keepalive run (`*/15 * * * *`) sends the light read-only event
+  `informationTitle` once; the official UI itself sends it every 10 minutes.
+- The daily job (`5 21 * * *`, 06:05 JST) reads cash balances, account margin,
+  the position summary, recent and historical executions, and historical JPY
+  cashflows.
+- Artifacts and the collector manifest are written to the shared `DATA`
+  bucket (`kogane-raw-evidence`) as content-addressed
+  `objects/<2hex>/<sha256>` objects, and the `terminal-v1` manifest last at
+  `runs/sbi-vc-trade/<runId>/terminal.json`
+  ([below](#shared-data-bucket-u09-2026-09-11)). Until 2026-09-13 they went to
+  the private bucket `kogane-sbi-vc-trade-poc` under
+  `raw/sbi-vc-trade/YYYY/MM/DD/<run-id>/`; that bucket was emptied and deleted
+  ([legacy retirement](../legacy-retirement.md)).
+- responseの`meta.secureKey`はsession更新へ使った後に削除し、R2へ保存しない。
+- The sanitized artifacts of a run are held in the Durable Object's memory
+  until the terminal is written, and nothing is staged
+  (`services/collector-sbi-vc-trade/src/worker.ts`, `#performCollection`).
+  Writing each artifact to R2 as soon as it was read was the behaviour of the
+  retired private-bucket path.
 - responseは64 KiB上限でJSON envelopeと`meta.status === "OK"`だけを確認し、bodyを保存しない。
 - `Set-Cookie`は8 Cookieだけを追従し、`__cf_bm`は無視する。`meta.secureKey`が変化した場合も暗号化状態へ反映する。
 - 平文healthはlast attempt/success、HTTP status、gateway statusの閉じた区分（`OK`か`rejected`。gatewayが返した`OK`以外の文字列は保存もlogもしない）、Cookie更新数、連続失敗数、固定error codeだけで、残高・履歴・Cookie値・response bodyを含まない。
@@ -575,6 +604,13 @@ synthetic fixtureとnegative testで固定し、実観測済みとは表現し�
 
 ### 中央raw-evidence転送
 
+Historical record: the private outbox bucket, the importer
+(`kogane-collector-r2-importer`), its Service Binding and
+`scripts/backfill-raw-evidence.sh` described in this section and the next were
+retired on 2026-09-13 ([legacy retirement](../legacy-retirement.md)). The
+collector now writes each run once, into `DATA`
+([below](#shared-data-bucket-u09-2026-09-11)).
+
 private R2を削除しないdurable outboxとして維持したまま、`kogane-collector-r2-importer`への内部Service Bindingを追加した。collectorは最後にmanifestを保存してrun境界を確定し、そのkeyだけをimporterへ渡す。
 
 各artifactとmanifestのR2 putは`etagDoesNotMatch: "*"`で同一keyへの上書きを拒否し、R2 native SHA-256を指定する。UUIDのrun prefixとmanifest-lastを将来のR2 notificationでもcommit markerとして使えるため、別の`commit.json`は追加しない。既存outboxはnative SHA-256が未設定でも、manifest値・custom metadata・再計算SHA-256の一致でbackfill可能なままにする。
@@ -607,11 +643,19 @@ runがcurrent observation 0になるend-to-end regressionで固定している�
 
 - Worker: `kogane-sbi-vc-session-poc`
 - Durable Object class: `SbiVcSessionState`
-- R2 bucket: `kogane-sbi-vc-trade-poc`
-- Cron: `*/15 * * * *`, `5 21 * * *`
+- Alarm jobs (Processor, `config/alarm-jobs.json`): `sbi-vc-keepalive`, `sbi-vc-trade`
 - Secrets: `SESSION_SEED`, `SESSION_ENCRYPTION_KEY`, `PASSKEY_CREDENTIAL` (`ADMIN_TOKEN` was retired on 2026-11-08 with its routes, [ADR 0069 amendment](../adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08))
 
-検証終了時は`services/collector-sbi-vc-trade`から`npx wrangler delete --name kogane-sbi-vc-session-poc`でWorker、DO binding、Cron、Secretsを削除する。R2 dataが不要になったことを別途確認した後だけ、objectsとbucket `kogane-sbi-vc-trade-poc`を削除する。現時点では日次収集の継続検証のためすべて残す。
+The Worker has no Cron trigger and holds no bucket of its own: the private
+bucket `kogane-sbi-vc-trade-poc` was emptied and deleted on 2026-09-13 after
+its objects were copied to `DATA` ([legacy retirement](../legacy-retirement.md)),
+and the 15-minute and daily runs are Processor alarm jobs since
+[#430](https://github.com/risu729/kogane/pull/430). Tearing the collector down
+means deleting the Worker (`npx wrangler delete --name kogane-sbi-vc-session-poc`
+from `services/collector-sbi-vc-trade`), its Durable Object binding and
+secrets, and disabling or removing the two alarm jobs; the shared `DATA` bucket,
+which every collector and the Processor use, is not deleted. All of it stays
+in place for daily collection.
 
 ## Shared DATA bucket (U09, 2026-09-11)
 
@@ -619,8 +663,10 @@ The collector does not read `COLLECTION_TARGET`. It persists the run only
 through the `DATA` binding to the central `kogane-raw-evidence` bucket. The
 session Durable Object writes the sanitized gateway envelopes and the collector
 manifest with `packages/collection`, then the `terminal-v1` manifest last. The
-upload to `kogane-collector-r2-importer` is not part of this path. Both crons
-(`*/15 * * * *` keep-alive, `5 21 * * *` collection) are unchanged. The run is
+upload to `kogane-collector-r2-importer` is not part of this path. The
+keep-alive (`*/15 * * * *`) and the collection (`5 21 * * *`) were unchanged
+by this switch; since [#430](https://github.com/risu729/kogane/pull/430) they
+run as Processor alarm jobs rather than Cron triggers (§15). The run is
 stored once, in `DATA`.
 
 The Durable Object now also keeps a **session generation id** (`sessionRef`),
