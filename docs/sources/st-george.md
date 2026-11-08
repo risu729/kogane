@@ -40,9 +40,10 @@ pending rows, custom date ranges and unattended cloud authentication. AUD is an
 explicit source configuration, not an observed DOM currency label.
 
 The Durable Object serializes attempts and records uncertainty before bank I/O.
-Only a refused or challenged login (`login-rejected`,
-`authentication-challenge`, `human-required`) requires an explicit operator
-resume (2026-11-08 UTC; before that every failure did). Every other failure is a
+Only a refused, challenged or unrecognised login (`login-rejected`,
+`authentication-challenge`, `human-required`, and `http-denied`,
+`bank-request-error` and `unexpected-route`, any of which may be how the bank
+answers a wrong password) requires an explicit operator resume (2026-11-08 UTC; before that every failure did). Every other failure is a
 failed run and the next run tries again, including a collection its lease
 holder stopped ([ADR 0085](../adr/0085-collection-lease-heartbeat.md)): its
 failed run keeps the reason `deadline-exceeded` (the 13-minute deadline) or

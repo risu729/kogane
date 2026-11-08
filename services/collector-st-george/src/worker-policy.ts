@@ -197,15 +197,20 @@ function snapshotRun(pending: PendingState, chunks: Uint8Array[]): SharedRunInpu
 /**
  * Failures after which another unattended login could make things worse: the
  * bank refused the credentials, or it asked for a person (challenge, OTP,
- * locked account). Only these stop later runs until an operator asks for a
- * collection again. Every other failure (a container or browser crash, a
- * network error, a changed page, a deadline) is recorded as a failed run and
- * the next scheduled run tries again.
+ * locked account). An HTTP 401/403/429 from the bank, its "Request error" page
+ * and an unknown page also block: none has been observed yet, and each may be
+ * how the bank answers a wrong password, so retrying daily could lock the
+ * account. These stop later runs until an operator asks for a collection
+ * again. Every other failure (a container or browser crash, a network error, a
+ * deadline) is recorded as a failed run and the next scheduled run tries again.
  */
 const LOGIN_BLOCKING_CODES: ReadonlySet<FailureCode> = new Set([
   "login-rejected",
   "authentication-challenge",
   "human-required",
+  "http-denied",
+  "bank-request-error",
+  "unexpected-route",
 ]);
 export function blocksLaterLogins(reason: FailureCode): boolean {
   return LOGIN_BLOCKING_CODES.has(reason);

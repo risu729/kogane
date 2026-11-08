@@ -100,7 +100,7 @@ stopped, because the server has no way to know that it stopped.
    `collection-interrupted`), so its occurrence ends `failed` with
    `st_george_deadline_exceeded` or `st_george_collection_interrupted`. The
    next scheduled run tries again (amended 2026-11-08: such a run no longer
-   blocks the source; only a refused or challenged login does, see the
+   blocks the source; only a refused, challenged or unrecognised login does, see the
    [St George README](../../services/collector-st-george/README.md#configuration-and-operations)).
 4. **The Processor frees a silent lease.** On every `processor-tick` (every
    5 minutes), next to the abandon sweep, `expireStaleLeases` frees each held

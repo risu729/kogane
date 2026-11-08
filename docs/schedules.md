@@ -59,7 +59,7 @@ write for 10 minutes while the Processor can is the open limit in the ADR.)
 Such a run is recorded `uncertain` (`collection_deadline_exceeded` or
 `collection_lease_lost`), since the provider may have been contacted, and is
 never replayed. St George instead records a failed run with the stop as its
-reason; its next scheduled run tries again. Only a refused or challenged St
+reason; its next scheduled run tries again. Only a refused, challenged or unrecognised St
 George login blocks the source until the operator resumes it.
 
 **停止した実行を解除** remains for the operator, for a source that should not

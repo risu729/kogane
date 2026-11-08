@@ -84,11 +84,14 @@ describe("durable collection policy", () => {
     expect(reads).toBe(1);
     expect(state.values.size).toBe(0);
   });
-  test("a refused or challenged login stays blocked until an explicit resume", async () => {
+  test("a refused, challenged or unrecognised login stays blocked until an explicit resume", async () => {
     for (const reason of [
       "login-rejected",
       "authentication-challenge",
       "human-required",
+      "http-denied",
+      "bank-request-error",
+      "unexpected-route",
     ] as const) {
       const state = new Storage();
       const bucket = new FakeR2Bucket();
@@ -168,12 +171,9 @@ describe("durable collection policy", () => {
   test("any other failure is a failed run and the next trigger tries again", async () => {
     for (const reason of [
       "runtime-failed",
-      "bank-request-error",
       "network-error",
       "container-failed",
-      "unexpected-route",
       "login-layout-unknown",
-      "http-denied",
       "session-expired",
       "invalid-credentials",
     ] as const) {
