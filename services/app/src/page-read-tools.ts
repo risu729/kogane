@@ -271,7 +271,7 @@ const TOOLS = {
   "kogane.collection-quality.read": tool({
     title: "Collection quality per job, source and dataset",
     description:
-      "What each collection stage last did, in closed codes: without `source`, the summary per configured job and per source (schedules, the actual alarm where known, latest runs and stage outcomes); with `source`, that source's cells per unit, dataset and period (`offset` pages them). Identifiers, capture times, counts and codes only, no amount. The same answer as GET /api/collection-quality and /api/collection-quality/{source}, under evidence.read and a whole-store read grant, as on the route. Served while the store has the scheduling tables. Read-only.",
+      "What each collection stage last did, in closed codes: without `source`, the summary per configured job and per source (schedules, the actual alarm where known, latest runs and stage outcomes); with `source`, that source's cells per unit, dataset and period (`offset` pages them). Each source and cell carries its freshness under `collection-freshness-v1`, counted to the answer's `freshnessAsOf` (Asia/Tokyo civil days): `same-day`, `recent` (1-3 days), `stale`, or for data that is not fresh `human-required` (collection waits on the owner) or `disabled` (no collecting job enabled), and `no-capture`. Identifiers, capture times, counts and codes only, no amount. The same answer as GET /api/collection-quality and /api/collection-quality/{source}, under evidence.read and a whole-store read grant, as on the route. Served while the store has the scheduling tables. Read-only.",
     schema: z.strictObject({
       source: z
         .string()

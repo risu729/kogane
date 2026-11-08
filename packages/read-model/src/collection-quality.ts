@@ -113,6 +113,26 @@ export const SCHEDULE_QUALITY_SQL = `SELECT s.id, s.source, s.kind, s.enabled, s
  ORDER BY s.id
  LIMIT ${COLLECTION_QUALITY_ROW_BOUND + 1}`;
 
+export interface SourceJobRow {
+  kind: string;
+  enabled: number;
+  occurrence_failure_code: string | null;
+}
+
+/**
+ * The jobs whose source (the job vocabulary of `config/alarm-jobs.json`) is in
+ * `?1`, a JSON array, with the failure code of each one's newest receipt: what
+ * one source's cells need to say what the source waits on
+ * (`collection-freshness-v1`), without reading, or bounding, every job.
+ */
+export const SOURCE_JOBS_SQL = `SELECT s.kind, s.enabled,
+       (SELECT newest.failure_code FROM collection_schedule_occurrences newest
+         WHERE newest.schedule_id = s.id
+         ORDER BY newest.nominal_at DESC LIMIT 1) AS occurrence_failure_code
+  FROM collection_schedules s
+ WHERE s.source IN (SELECT wanted.value FROM json_each(?1) wanted)
+ ORDER BY s.id`;
+
 // ── acquisition ───────────────────────────────────────────────────────────
 
 export interface TerminalQualityRow {

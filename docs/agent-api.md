@@ -694,6 +694,9 @@ answers; the operator page re-displays the first and shows the second as
 
 `kogane.collection-quality.read` takes `{ source?, offset? }`: without
 `source` the summary (which takes no `offset`), with it that source's cells.
+Each source and cell carries its freshness under `collection-freshness-v1`,
+counted to the answer's `freshnessAsOf`
+([evidence browser](evidence-browser.md#collection-quality-apicollection-quality)).
 Its cells carry provider fetch-unit keys (card tokens, account digests,
 connection ids, a branch and account number; ADR 0045), so it needs
 `evidence.read`, the capability of the evidence routes, not `records.read`.

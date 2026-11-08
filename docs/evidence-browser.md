@@ -854,8 +854,27 @@ tables. Every answer is checked by `validApiResponse` against
   `coverage.nextOffset`; an unknown or invisible source is 404.
 
 A missing stage is a reason, never a zero or an empty success: a source with
-no capture has no cells and `latestFetchRun: null` with `no_registered_run`. A
-capture time is shown as stored; nothing judges an age against a threshold.
+no capture has no cells and `latestFetchRun: null` with `no_registered_run`.
+
+**Freshness** (`collection-freshness-v1`,
+[ADR 0045's amendment of 2026-11-08](adr/0045-collection-quality-read.md#amendment-2026-11-08-freshness-per-source-and-cell)).
+Each answer names `freshnessAsOf` (`policy`, the instant `at` and its
+Asia/Tokyo `date`), and each source and cell carries
+`freshness: { state, ageDays }`. The age is in Asia/Tokyo civil days from the
+capture's date to that date: for a cell its current capture, for a source its
+newest visible fetch run whatever its outcome. The state is `same-day` (0),
+`recent` (1 to 3 days) or `stale` (more), the thresholds of
+`dated-state-freshness-v1`. Data that is stale or has no capture is explained
+by what its source waits on, when the stored jobs say so: `human-required`
+when a job collects only by hand (`kind: "manual"`, SMBC Direct) or its newest
+attempt (or, for a cell, its unit) stopped on a "a person must act" code
+(`human_required*`, `manual_agreement_required`), else `disabled` when the
+source has collecting jobs (`collection`, `manual`, `email`) and none is
+enabled. Otherwise it is `stale`, or `no-capture` with no age. A fresh capture
+is `same-day` or `recent` whatever the source waits on. A capture dated after
+the as-of date (a collector clock ahead) is age 0. The page shows the state
+and age per source in the source list and per cell (当日の取得, N日前の取得,
+古い, 本人操作待ち, 定期実行の停止中, 取得なし).
 
 Open `/collection-quality` and choose a source. It shows source reasons and
 last attempts alongside the source/unit/dataset/period cells. Actual Alarm
@@ -871,6 +890,7 @@ No rows never prove zero transactions. Missing sealed identity runs and
 unresolved current account mappings have separate reasons. Provider retention
 caps stay `retention_not_assessed`; page/coverage failures keep their stored
 closed causes. Older-current and not-in-latest states identify newer acquisition
-gaps without an invented stale threshold. Continuation and empty page messages
+gaps; freshness counts the age of the current capture under the versioned
+policy above. Continuation and empty page messages
 never claim full history. Production scope verification remains separate
 ([checklist](plans/2026-10-collection-quality-completion.md)).

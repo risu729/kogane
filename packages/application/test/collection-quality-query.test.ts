@@ -16,14 +16,20 @@ import { QualityStore } from "../../read-model/test/collection-quality-fixture.t
 import { COLLECTOR_SOURCE_IDS } from "../src/collection/descriptors.ts";
 import {
   cell,
+  cellFreshness,
   CollectionQualityLimitError,
+  freshnessAsOf,
   queryCollectionQualityCells,
   queryCollectionQualitySummary,
   safeCode,
   SCHEDULE_COLLECTOR_SOURCES,
   scheduleCollectors,
   sourceCollectors,
+  sourceJobSources,
 } from "../src/query/collection-quality.ts";
+
+/** Every age is counted to this instant (collection-freshness-v1); after every synthetic capture. */
+const AS_OF = "2099-03-01T00:00:00.000Z";
 
 const JOBS = JSON.parse(
   readFileSync(join(import.meta.dir, "../../../config/alarm-jobs.json"), "utf8"),
@@ -88,6 +94,22 @@ describe("which collectors a job runs, from configuration", () => {
     expect(sourceCollectors("paypay")).toEqual([]);
   });
 
+  test("a CORE source's jobs are exactly the configured jobs whose collectors register under it", () => {
+    for (const source of new Set(Object.values(COLLECTOR_SOURCE_IDS))) {
+      const own = sourceCollectors(source);
+      const expected = JOBS.filter((job) =>
+        scheduleCollectors(job.source).some((collector) => own.includes(collector)),
+      ).map((job) => job.source!);
+      const named = sourceJobSources(source);
+      for (const job of expected) expect(named, source).toContain(job);
+      // Any other name is one of the source's own collectors, which no job uses yet.
+      for (const job of named)
+        expect(expected.includes(job) || own.includes(job), source).toBe(true);
+    }
+    expect(sourceJobSources("v-point")).toEqual(["v-point", "vpoint"]);
+    expect(sourceJobSources("smbc-bank")).toEqual(["smbc-direct"]);
+  });
+
   test("only safe codes pass through", () => {
     expect(safeCode("parser_rejected")).toBe("parser_rejected");
     expect(safeCode("Some provider text")).toBe("unclassified");
@@ -146,7 +168,7 @@ describe("the summary", () => {
   });
 
   test("names every job and source, and is the wire contract", async () => {
-    const summary = await queryCollectionQualitySummary(executor(store));
+    const summary = await queryCollectionQualitySummary(executor(store), { asOf: AS_OF });
     expect(validApiResponse("/api/collection-quality", summary)).toBe(true);
     const placed = [
       ...summary.sources.flatMap((source) => source.schedules.map((job) => job.id)),
@@ -159,7 +181,7 @@ describe("the summary", () => {
   });
 
   test("a failed receipt, its runs where CORE has them and the lease; no dataset is withheld since ADR 0083", async () => {
-    const summary = await queryCollectionQualitySummary(executor(store));
+    const summary = await queryCollectionQualitySummary(executor(store), { asOf: AS_OF });
     const vpass = summary.sources.find((source) => source.sourceId === "vpass")!;
     expect(vpass.collectors).toEqual(["vpass"]);
     expect(vpass.schedules).toHaveLength(1);
@@ -218,7 +240,7 @@ describe("the summary", () => {
   });
 
   test("a job whose source differs from its collector still reaches its runs", async () => {
-    const summary = await queryCollectionQualitySummary(executor(store));
+    const summary = await queryCollectionQualitySummary(executor(store), { asOf: AS_OF });
     const vpoint = summary.sources.find((source) => source.sourceId === "v-point")!;
     expect(vpoint.schedules.map((job) => job.id)).toEqual(["vpoint"]);
     expect(vpoint.schedules[0]!.latest!.terminals).toEqual([
@@ -239,7 +261,7 @@ describe("the summary", () => {
   });
 
   test("stopped, unsupported, never-run and collector-less sources each say so", async () => {
-    const summary = await queryCollectionQualitySummary(executor(store));
+    const summary = await queryCollectionQualitySummary(executor(store), { asOf: AS_OF });
     const reasons = (id: string) =>
       summary.sources.find((source) => source.sourceId === id)!.reasons;
     expect(reasons("smbc-bank")).toEqual(["schedule_unsupported", "no_registered_run"]);
@@ -267,9 +289,9 @@ describe("the summary", () => {
          VALUES(?,NULL,'processor',0,1,'UTC','{"kind":"interval","minutes":60}','2099-01-01T00:00:00.000Z','synthetic')`,
         [`synthetic-${index}`],
       );
-    await expect(queryCollectionQualitySummary(executor(crowded))).rejects.toBeInstanceOf(
-      CollectionQualityLimitError,
-    );
+    await expect(
+      queryCollectionQualitySummary(executor(crowded), { asOf: AS_OF }),
+    ).rejects.toBeInstanceOf(CollectionQualityLimitError);
   });
 
   test("more visible sources than the bound are refused, never cut", async () => {
@@ -284,9 +306,9 @@ describe("the summary", () => {
     expect(crowded.all<{ n: number }>("SELECT count(*) AS n FROM observation_sources")[0]!.n).toBe(
       201,
     );
-    await expect(queryCollectionQualitySummary(executor(crowded))).rejects.toBeInstanceOf(
-      CollectionQualityLimitError,
-    );
+    await expect(
+      queryCollectionQualitySummary(executor(crowded), { asOf: AS_OF }),
+    ).rejects.toBeInstanceOf(CollectionQualityLimitError);
   });
 });
 
@@ -318,6 +340,7 @@ describe("the cells of a source", () => {
     const page = await queryCollectionQualityCells(executor(s), {
       sourceId: "global-pass",
       offset: 0,
+      asOf: AS_OF,
     });
     expect(validApiResponse("/api/collection-quality/global-pass", page)).toBe(true);
     // The answer belongs to the path's source only.
@@ -370,12 +393,24 @@ describe("the cells of a source", () => {
   test("an unknown or invisible source has no cells; a long source is paged", async () => {
     const s = new QualityStore();
     expect(
-      await queryCollectionQualityCells(executor(s), { sourceId: "no-such-source", offset: 0 }),
+      await queryCollectionQualityCells(executor(s), {
+        sourceId: "no-such-source",
+        offset: 0,
+        asOf: AS_OF,
+      }),
     ).toBeNull();
     expect(
-      await queryCollectionQualityCells(executor(s), { sourceId: "kogane-synthetic", offset: 0 }),
+      await queryCollectionQualityCells(executor(s), {
+        sourceId: "kogane-synthetic",
+        offset: 0,
+        asOf: AS_OF,
+      }),
     ).toBeNull();
-    const empty = await queryCollectionQualityCells(executor(s), { sourceId: "vpass", offset: 0 });
+    const empty = await queryCollectionQualityCells(executor(s), {
+      sourceId: "vpass",
+      offset: 0,
+      asOf: AS_OF,
+    });
     // No capture at all: no cells and no run, never an empty success.
     expect(empty).toMatchObject({ cells: [], latestFetchRun: null });
     expect(validCollectionQualityCells(empty)).toBe(true);
@@ -390,6 +425,7 @@ describe("the cells of a source", () => {
     const first = await queryCollectionQualityCells(executor(s), {
       sourceId: "sony-bank",
       offset: 0,
+      asOf: AS_OF,
     });
     expect(first!.cells).toHaveLength(500);
     expect(first!.coverage).toEqual({ limit: 500, truncated: true, nextOffset: 500 });
@@ -403,6 +439,7 @@ describe("the cells of a source", () => {
     const rest = await queryCollectionQualityCells(executor(s), {
       sourceId: "sony-bank",
       offset: 500,
+      asOf: AS_OF,
     });
     expect(rest!.cells).toHaveLength(1);
     expect(rest!.coverage).toEqual({ limit: 500, truncated: false, nextOffset: null });
@@ -450,10 +487,11 @@ function row(overrides: Partial<CellQualityRow> = {}): CellQualityRow {
 describe("one reason per stored state", () => {
   const valid = (entry: ReturnType<typeof cell>) =>
     validCollectionQualityCells({
-      apiVersion: 2,
+      apiVersion: 3,
+      freshnessAsOf: freshnessAsOf(AS_OF),
       sourceId: "vpass",
       latestFetchRun: null,
-      cells: [entry],
+      cells: [{ ...entry, freshness: cellFreshness(entry, freshnessAsOf(AS_OF).date, null) }],
       coverage: { limit: 500, truncated: false, nextOffset: null },
     });
 
@@ -546,5 +584,173 @@ describe("one reason per stored state", () => {
     ).toBe(false);
     expect(valid({ ...entry, total: 0 } as never)).toBe(false);
     expect(valid({ ...entry, reasons: ["no_current_capture", "no_current_capture"] })).toBe(false);
+  });
+});
+
+describe("freshness (collection-freshness-v1)", () => {
+  const month = (value: string) => ({
+    key: `activity-${value}.html`,
+    dataset: "globalpass-activity",
+  });
+  function store(): QualityStore {
+    const s = new QualityStore();
+    const first = s.run({
+      source: "global-pass",
+      at: "2099-02-01T00:00:00Z",
+      artifacts: [month("2099-01"), month("2098-12")],
+    });
+    for (const artifact of first.artifacts)
+      s.parse(artifact, "global-pass-activity", { kind: "published" });
+    const second = s.run({
+      source: "global-pass",
+      at: "2099-02-02T00:00:00Z",
+      artifacts: [month("2099-01"), month("2098-12"), month("2098-11")],
+    });
+    s.parse(second.artifacts[0]!, "global-pass-activity", { kind: "published" });
+    s.parse(second.artifacts[1]!, "global-pass-activity", { kind: "pending" });
+    s.parse(second.artifacts[2]!, "global-pass-activity", {
+      kind: "failed",
+      code: "parser_rejected",
+    });
+    return s;
+  }
+  const freshness = async (s: QualityStore, asOf: string) => {
+    const page = await queryCollectionQualityCells(executor(s), {
+      sourceId: "global-pass",
+      offset: 0,
+      asOf,
+    });
+    expect(validApiResponse("/api/collection-quality/global-pass", page)).toBe(true);
+    return {
+      asOf: page!.freshnessAsOf,
+      cells: page!.cells.map((entry) => [entry.period.value, entry.freshness]),
+    };
+  };
+
+  test("a cell's age is its current capture's, in Asia/Tokyo civil days, to the answer's one instant", async () => {
+    const s = store();
+    // 2099-02-02T00:00Z is 09:00 on 2099-02-02 in Tokyo; 2099-02-02T15:00Z is 00:00 on 02-03.
+    expect(await freshness(s, "2099-02-02T14:59:59.999Z")).toEqual({
+      asOf: {
+        policy: "collection-freshness-v1",
+        at: "2099-02-02T14:59:59.999Z",
+        date: "2099-02-02",
+      },
+      cells: [
+        ["2099-01", { state: "same-day", ageDays: 0 }],
+        ["2098-12", { state: "recent", ageDays: 1 }],
+        ["2098-11", { state: "no-capture", ageDays: null }],
+      ],
+    });
+    expect((await freshness(s, "2099-02-02T15:00:00.000Z")).cells).toEqual([
+      ["2099-01", { state: "recent", ageDays: 1 }],
+      ["2098-12", { state: "recent", ageDays: 2 }],
+      ["2098-11", { state: "no-capture", ageDays: null }],
+    ]);
+    expect((await freshness(s, "2099-02-05T00:00:00.000Z")).cells).toEqual([
+      ["2099-01", { state: "recent", ageDays: 3 }],
+      ["2098-12", { state: "stale", ageDays: 4 }],
+      ["2098-11", { state: "no-capture", ageDays: null }],
+    ]);
+    // A collector clock ahead of the reader's is age 0, never negative.
+    expect((await freshness(s, "2099-01-31T00:00:00.000Z")).cells[0]).toEqual([
+      "2099-01",
+      { state: "same-day", ageDays: 0 },
+    ]);
+  });
+
+  test("what the source waits on explains a stale or missing capture, never a fresh one", async () => {
+    const s = store();
+    s.occurrence("prestia-globalpass", {
+      nominalAt: "2099-02-03T18:17:00.000Z",
+      status: "failed",
+      failureCode: "human_required_reauth",
+    });
+    expect((await freshness(s, "2099-02-05T00:00:00.000Z")).cells).toEqual([
+      ["2099-01", { state: "recent", ageDays: 3 }],
+      ["2098-12", { state: "human-required", ageDays: 4 }],
+      ["2098-11", { state: "human-required", ageDays: null }],
+    ]);
+    // A stopped job is `disabled`; a person's wait comes first.
+    s.db.run("UPDATE collection_schedules SET enabled = 0 WHERE id = 'prestia-globalpass'");
+    expect((await freshness(s, "2099-02-05T00:00:00.000Z")).cells[1]![1]).toEqual({
+      state: "human-required",
+      ageDays: 4,
+    });
+    s.occurrence("prestia-globalpass", {
+      nominalAt: "2099-02-04T18:17:00.000Z",
+      status: "completed",
+    });
+    expect((await freshness(s, "2099-02-05T00:00:00.000Z")).cells).toEqual([
+      ["2099-01", { state: "recent", ageDays: 3 }],
+      ["2098-12", { state: "disabled", ageDays: 4 }],
+      ["2098-11", { state: "disabled", ageDays: null }],
+    ]);
+  });
+
+  test("a source's age is its newest fetch run's, whatever its outcome, with what it waits on", async () => {
+    const s = store();
+    s.run({ source: "vpass", at: "2099-02-04T00:00:00Z", outcome: "partial", artifacts: [] });
+    s.occurrence("sbi-vc-keepalive", {
+      nominalAt: "2099-02-04T21:15:00.000Z",
+      status: "failed",
+      failureCode: "manual_agreement_required",
+    });
+    const summary = await queryCollectionQualitySummary(executor(s), {
+      asOf: "2099-02-06T00:00:00.000Z",
+    });
+    expect(validApiResponse("/api/collection-quality", summary)).toBe(true);
+    expect(summary.freshnessAsOf).toEqual({
+      policy: "collection-freshness-v1",
+      at: "2099-02-06T00:00:00.000Z",
+      date: "2099-02-06",
+    });
+    const of = (id: string) => summary.sources.find((source) => source.sourceId === id)!.freshness;
+    expect(of("global-pass")).toEqual({ state: "stale", ageDays: 4 });
+    expect(of("vpass")).toEqual({ state: "recent", ageDays: 2 });
+    // Collection by hand only (SMBC Direct), a stopped job (PRESTIA bank), a
+    // pending terms agreement (SBI VC), none ever captured, no collector.
+    expect(of("smbc-bank")).toEqual({ state: "human-required", ageDays: null });
+    expect(of("prestia")).toEqual({ state: "disabled", ageDays: null });
+    expect(of("sbi-vc-trade")).toEqual({ state: "human-required", ageDays: null });
+    expect(of("sony-bank")).toEqual({ state: "no-capture", ageDays: null });
+    expect(of("paypay")).toEqual({ state: "no-capture", ageDays: null });
+    // The V Point Pay app job is unsupported and off; its e-mail path has no job.
+    expect(of("v-point-pay")).toEqual({ state: "disabled", ageDays: null });
+  });
+
+  test("the contract checks each age against the policy and the capture it is of", async () => {
+    const s = store();
+    const page = (await queryCollectionQualityCells(executor(s), {
+      sourceId: "global-pass",
+      offset: 0,
+      asOf: "2099-02-05T00:00:00.000Z",
+    }))!;
+    expect(validCollectionQualityCells(page)).toBe(true);
+    const [fresh, older, missing] = page.cells as [
+      (typeof page.cells)[number],
+      (typeof page.cells)[number],
+      (typeof page.cells)[number],
+    ];
+    const withCell = (index: number, value: (typeof page.cells)[number]) => ({
+      ...page,
+      cells: page.cells.map((entry, at) => (at === index ? value : entry)),
+    });
+    for (const [index, value] of [
+      [0, { ...fresh, freshness: { state: "stale", ageDays: 3 } }],
+      [0, { ...fresh, freshness: { state: "same-day", ageDays: 3 } }],
+      [0, { ...fresh, freshness: { state: "recent", ageDays: null } }],
+      [1, { ...older, freshness: { state: "no-capture", ageDays: 4 } }],
+      [1, { ...older, freshness: { state: "human-required", ageDays: 2 } }],
+      [2, { ...missing, freshness: { state: "stale", ageDays: null } }],
+      [2, { ...missing, freshness: { state: "disabled", ageDays: 9 } }],
+    ] as const)
+      expect(validCollectionQualityCells(withCell(index, value as never))).toBe(false);
+    expect(
+      validCollectionQualityCells({
+        ...page,
+        freshnessAsOf: { ...page.freshnessAsOf, date: "2099-02-04" },
+      }),
+    ).toBe(false);
   });
 });
