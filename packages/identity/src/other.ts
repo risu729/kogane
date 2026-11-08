@@ -138,6 +138,14 @@ export function otherIdentity(input: IdentityInput): IdentityPlan {
           "connection-root-without-subcard-identity",
           "aggregate",
         );
+      // The J-POINT parser's one reference: the displayed programme total of
+      // the connection's login (`myjcb-jpoint-balance`), one holding in
+      // `points:j-point` (docs/rewards.md). Not a card and not the statement
+      // account, so it takes neither the root's role nor its label.
+      else if (/^myjcb:[a-z0-9][a-z0-9-]{0,63}:j-point:total$/u.test(a)) {
+        account("reward-account", "provider-connection-jpoint-total");
+        plan.account.label = "MyJCB J-POINT";
+      }
       break;
     case "smbc-bank":
       if (a === "smbc-bank:ordinary-yen") account("deposit", "audited-ordinary-yen-scope");
