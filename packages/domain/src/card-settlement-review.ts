@@ -102,9 +102,11 @@ export interface CardSettlementReviewPage {
 
 /**
  * One statement's candidates (`statement_key`): the lead first (its accepted
- * candidate, else the newest one ready to accept, else the newest), then the
- * other judged ones newest first. `candidateCount` counts every candidate of
- * the statement, so `candidateCount > candidates.length` says older ones exist.
+ * candidate, else the newest one ready to accept of all its candidates, else
+ * the newest; ADR 0089), then the other judged ones newest first.
+ * `candidateCount` counts every candidate of the statement, so
+ * `candidateCount > candidates.length` says it has candidates the group does
+ * not carry.
  */
 export interface CardSettlementStatementGroup {
   statementKey: string;
@@ -121,7 +123,10 @@ export interface CardSettlementStatementPage {
     netAssets: "unknown";
     /** Statements per page. */
     limit: number;
-    /** The newest candidates judged per statement, besides an accepted one. */
+    /**
+     * The newest candidates judged per statement, besides an accepted one and,
+     * when none of those decides the lead, the newest older ready one.
+     */
     candidatesPerStatement: number;
   };
 }

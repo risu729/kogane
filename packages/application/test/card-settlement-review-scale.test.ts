@@ -35,13 +35,20 @@ import {
   CARD_SETTLEMENT_PAGE_SQL,
   CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT,
   CARD_SETTLEMENT_REVIEW_SQL,
+  CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS,
   CARD_SETTLEMENT_STATEMENT_GROUP_SQL,
+  CARD_SETTLEMENT_STATEMENT_OLDER_SQL,
   CARD_SETTLEMENT_STATEMENT_PAGE_SIZE,
   CARD_SETTLEMENT_STATEMENT_PAGE_SQL,
   CARD_SETTLEMENT_STATEMENT_REVIEWS_SQL,
   queryCardSettlementStatements,
   queryCardSettlements,
 } from "../src/query/card-settlements.ts";
+import type {
+  CardSettlementReview,
+  CardSettlementStatementPage,
+} from "../../domain/src/card-settlement-review.ts";
+import { LEGACY_CARD_SETTLEMENT_STATEMENT_GROUP_SQL } from "./card-settlement-statement-group-legacy-sql.ts";
 import {
   LEGACY_CARD_OWNERSHIP_CANDIDATE_SQL,
   LEGACY_CARD_SETTLEMENT_PLAN_SQL,
@@ -65,15 +72,25 @@ function rows(sql: string, args: readonly unknown[]): unknown[] {
   return db.query(sql).all(...(args as SQLQueryBindings[]));
 }
 
-/** The shipped text in place of the keyed list reads, or every statement as given. */
+/**
+ * The shipped text in place of the keyed list reads and the grouped read, or
+ * every statement as given. The shipped grouped list never searched a
+ * statement's older candidates, so the search finds none.
+ */
 function executor(legacy: boolean): SqlExecutor {
   const text = (query: string): string =>
-    legacy && (query === CARD_SETTLEMENT_PAGE_SQL || query === CARD_SETTLEMENT_REVIEW_SQL)
-      ? LEGACY_CARD_SETTLEMENT_REVIEWS_SQL
-      : query;
+    !legacy
+      ? query
+      : query === CARD_SETTLEMENT_PAGE_SQL || query === CARD_SETTLEMENT_REVIEW_SQL
+        ? LEGACY_CARD_SETTLEMENT_REVIEWS_SQL
+        : query === CARD_SETTLEMENT_STATEMENT_GROUP_SQL
+          ? LEGACY_CARD_SETTLEMENT_STATEMENT_GROUP_SQL
+          : query;
   return {
     all: async <T>(query: string, args: readonly unknown[]): Promise<T[]> =>
-      rows(text(query), args) as T[],
+      legacy && query === CARD_SETTLEMENT_STATEMENT_OLDER_SQL
+        ? []
+        : (rows(text(query), args) as T[]),
     first: async <T>(query: string, args: readonly unknown[]): Promise<T | null> =>
       (db.query(text(query)).get(...(args as SQLQueryBindings[])) as T | null) ?? null,
   };
@@ -122,6 +139,86 @@ function shippedColumns(found: unknown[]): unknown[] {
       ),
     ),
   );
+}
+
+/** Every page of the grouped list (at most `pages`), as one page. */
+async function everyPage(sql: SqlExecutor, pages = Number.POSITIVE_INFINITY) {
+  const statements: CardSettlementStatementPage["statements"] = [];
+  let offset: number | null = 0;
+  for (let read = 0; offset !== null && read < pages; read += 1) {
+    const page: CardSettlementStatementPage = await queryCardSettlementStatements(sql, { offset });
+    statements.push(...page.statements);
+    offset = page.nextOffset;
+  }
+  return { statements };
+}
+
+const decidableReview = (item: CardSettlementReview): boolean =>
+  item.status === "accepted" ||
+  (item.status === "proposed" && item.acceptanceBlockers.length === 0);
+
+function lead(page: { statements: CardSettlementStatementPage["statements"] }, key: string) {
+  return page.statements.find((entry) => entry.statementKey === key)!.candidates[0]!;
+}
+
+/**
+ * The intended change and nothing else: every statement as the shipped list
+ * showed it, except that `key`, whose judged newest candidates hold no
+ * acceptance and none ready, now leads with `ready` ahead of them.
+ */
+function expectOnlyLead(
+  fresh: { statements: CardSettlementStatementPage["statements"] },
+  legacy: { statements: CardSettlementStatementPage["statements"] },
+  key: string,
+  ready: CardSettlementReview,
+): void {
+  expect(fresh.statements.map((entry) => entry.statementKey)).toEqual(
+    legacy.statements.map((entry) => entry.statementKey),
+  );
+  fresh.statements.forEach((entry, index) => {
+    const shipped = legacy.statements[index]!;
+    if (entry.statementKey !== key) {
+      expect(entry).toEqual(shipped);
+      return;
+    }
+    expect(shipped.candidates.some(decidableReview)).toBe(false);
+    expect(entry.candidateCount).toBe(shipped.candidateCount);
+    expect(entry.candidates[0]!.proposalId).toBe(ready.proposalId);
+    expect(entry.candidates[0]!.status).toBe("proposed");
+    expect(entry.candidates[0]!.acceptanceBlockers).toEqual([]);
+    expect(entry.candidates.slice(1)).toEqual(shipped.candidates);
+  });
+}
+
+/**
+ * Each statement's lead against its whole list, judged candidate by candidate
+ * through `queryCardSettlements({ statementKey })`: its accepted candidate,
+ * else the newest ready one (the same review the statement's list returns),
+ * else the newest.
+ */
+async function expectLeads(page: {
+  statements: CardSettlementStatementPage["statements"];
+}): Promise<void> {
+  for (const group of page.statements) {
+    const all: CardSettlementReview[] = [];
+    let offset: number | null = 0;
+    while (offset !== null) {
+      const found: Awaited<ReturnType<typeof queryCardSettlements>> = await queryCardSettlements(
+        executor(false),
+        { statementKey: group.statementKey, offset },
+      );
+      all.push(...found.items);
+      offset = found.nextOffset;
+    }
+    expect(all).toHaveLength(group.candidateCount);
+    const ready = all.find(
+      (item) => item.status === "proposed" && item.acceptanceBlockers.length === 0,
+    );
+    const [first] = group.candidates;
+    if (all.some((item) => item.status === "accepted")) expect(first!.status).toBe("accepted");
+    else if (ready !== undefined) expect(first).toEqual(ready);
+    else expect(first).toEqual(all[0]);
+  }
 }
 
 describe("card settlement readiness reads on a scaled store without statistics", () => {
@@ -269,6 +366,163 @@ describe("card settlement readiness reads on a scaled store without statistics",
   );
 
   test(
+    "every page of the grouped list equals the shipped one where its newest candidates decide the lead",
+    async () => {
+      // The grouped read itself is the shipped text's rows, statement for statement.
+      const keys = (
+        db
+          .query("SELECT DISTINCT statement_key FROM card_settlement_candidates ORDER BY 1")
+          .values() as string[][]
+      ).map(([key]) => key!);
+      for (const page of [keys, keys.slice(0, 3)])
+        expect(
+          rows(CARD_SETTLEMENT_STATEMENT_GROUP_SQL, [
+            JSON.stringify(page),
+            CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT,
+          ]),
+        ).toEqual(
+          rows(LEGACY_CARD_SETTLEMENT_STATEMENT_GROUP_SQL, [
+            JSON.stringify(page),
+            CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT,
+          ]),
+        );
+      // On this store every statement's newest candidates hold its
+      // acceptance or a ready one, so no page changes.
+      const fresh = await everyPage(executor(false), FULL ? 1 : Number.POSITIVE_INFINITY);
+      expect(fresh).toEqual(await everyPage(executor(true), FULL ? 1 : Number.POSITIVE_INFINITY));
+      await expectLeads(fresh);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "a ready candidate older than the five newest of its statement leads it, and only that changes",
+    async () => {
+      db.run("SAVEPOINT older_ready");
+      try {
+        const before = await queryCardSettlementStatements(executor(false));
+        // A statement no acceptance reserves, whose newest candidate is ready.
+        const group = before.statements.find(
+          (entry) =>
+            entry.candidates[0]!.status === "proposed" &&
+            entry.candidates[0]!.acceptanceBlockers.length === 0 &&
+            entry.candidates.every((item) => item.status !== "accepted"),
+        )!;
+        const ready = group.candidates[0]!;
+        // Newer candidates that cite captures no longer current, as the
+        // sweep's candidates for another debit of the same amount do once it
+        // is recaptured: synthetic copies of the statement's stale ones.
+        const stale = db
+          .query(
+            `SELECT * FROM card_settlement_candidates WHERE statement_key=?1 AND id<>?2
+             ORDER BY created_at DESC,id DESC LIMIT 5`,
+          )
+          .all(group.statementKey, ready.proposalId) as Record<string, SQLQueryBindings>[];
+        expect(stale).toHaveLength(5);
+        let copies = 0;
+        const copy = (count: number): string[] =>
+          Array.from({ length: count }, () => {
+            const index = (copies += 1);
+            const row = stale[index % stale.length]!;
+            const id = `cs_synthetic_newer_${String(index).padStart(3, "0")}`;
+            db.query(
+              `INSERT INTO card_settlement_candidates(id,statement_key,bank_key,statement_observation_id,statement_parse_run_id,
+                bank_observation_id,bank_parse_run_id,policy_release,facts_json,proposal_digest,created_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+            ).run(
+              id,
+              row["statement_key"]!,
+              row["bank_key"]!,
+              row["statement_observation_id"]!,
+              row["statement_parse_run_id"]!,
+              row["bank_observation_id"]!,
+              row["bank_parse_run_id"]!,
+              row["policy_release"]!,
+              row["facts_json"]!,
+              String(index).padStart(64, "e"),
+              new Date(Date.parse("2026-12-01T00:00:00Z") + index * 60_000).toISOString(),
+            );
+            return id;
+          }).reverse();
+        const passes = (): { executor: SqlExecutor; count: () => number } => {
+          let count = 0;
+          const plain = executor(false);
+          return {
+            executor: {
+              ...plain,
+              all: async <T>(query: string, args: readonly unknown[]): Promise<T[]> => {
+                if (query === CARD_SETTLEMENT_STATEMENT_OLDER_SQL) count += 1;
+                return plain.all<T>(query, args);
+              },
+            },
+            count: () => count,
+          };
+        };
+
+        // Five newer: the shipped list led with the newest of them.
+        const newer = copy(5);
+        let read = passes();
+        let fresh = await everyPage(read.executor);
+        let legacy = await everyPage(executor(true));
+        expectOnlyLead(fresh, legacy, group.statementKey, ready);
+        expect(lead(legacy, group.statementKey).proposalId).toBe(newer[0]!);
+        let moved = fresh.statements.find((entry) => entry.statementKey === group.statementKey)!;
+        expect(moved.candidateCount).toBe(group.candidateCount + 5);
+        // The five newer ones follow it, newest first, each with its blockers.
+        expect(moved.candidates.slice(1).map((item) => item.proposalId)).toEqual(newer);
+        for (const item of moved.candidates.slice(1))
+          expect(item.acceptanceBlockers).not.toEqual([]);
+        expect(read.count()).toBe(1);
+        await expectLeads(fresh);
+
+        // Sixty more: the search reaches it on its second pass.
+        copy(60);
+        read = passes();
+        fresh = await everyPage(read.executor);
+        legacy = await everyPage(executor(true));
+        expectOnlyLead(fresh, legacy, group.statementKey, ready);
+        expect(read.count()).toBe(2);
+        expect(65 - CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT).toBeGreaterThan(
+          CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS,
+        );
+        await expectLeads(fresh);
+
+        // Rejected: no candidate of the statement is ready, the newest leads
+        // as before, and the search ends once a pass is short.
+        db.query(
+          `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+           VALUES('dr_synthetic_reject','relation',?,1,'reject','manual','synthetic-operator',NULL,'synthetic','[]',NULL,NULL,'2026-12-02T00:00:00Z')`,
+        ).run(`card-settlement:${ready.proposalId}`);
+        db.query(
+          `INSERT INTO card_settlement_decisions(proposal_id,revision,status,decision_revision_id,event_id,obligation_id,settlement_id,created_at)
+           VALUES(?,1,'rejected','dr_synthetic_reject',NULL,NULL,NULL,'2026-12-02T00:00:00Z')`,
+        ).run(ready.proposalId);
+        read = passes();
+        fresh = await everyPage(read.executor);
+        expect(fresh).toEqual(await everyPage(executor(true)));
+        moved = fresh.statements.find((entry) => entry.statementKey === group.statementKey)!;
+        expect(moved.candidates.some(decidableReview)).toBe(false);
+        const eligibleOlder = (
+          rows(`SELECT count(*) AS n FROM (${CARD_SETTLEMENT_STATEMENT_OLDER_SQL})`, [
+            JSON.stringify([group.statementKey]),
+            CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT,
+            0,
+            1e6,
+          ]) as { n: number }[]
+        )[0]!.n;
+        expect(read.count()).toBe(
+          Math.floor(eligibleOlder / CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS) + 1,
+        );
+        await expectLeads(fresh);
+      } finally {
+        db.run("ROLLBACK TO older_ready");
+        db.run("RELEASE older_ready");
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "the grouped and per-statement lists read debit-account evidence once, for the reviews they return, as one review's read does",
     async () => {
       // The scaled store records no evidence, so the read answers with a
@@ -360,6 +614,11 @@ describe("card settlement readiness reads on a scaled store without statistics",
     for (const [sql, args, allowed] of [
       [CARD_SETTLEMENT_STATEMENT_PAGE_SQL, [11, 0], ["statement_page"]],
       [CARD_SETTLEMENT_STATEMENT_GROUP_SQL, [JSON.stringify([key]), 5], []],
+      [
+        CARD_SETTLEMENT_STATEMENT_OLDER_SQL,
+        [JSON.stringify([key]), 5, 0, CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS],
+        [],
+      ],
       [CARD_SETTLEMENT_STATEMENT_REVIEWS_SQL, [key, 51, 0], []],
     ] as const)
       expect(statementPlanProblems(explain(db, sql, args), [...allowed])).toEqual([]);

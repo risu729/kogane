@@ -431,12 +431,21 @@ candidate's stored `statement_key` (source, producer, acquisition namespace,
 card account and period, as `card_statement_facts` keys it), so the
 importer-era and collector-era captures of one month are separate statements.
 Statements are ordered by their newest candidate, ten to a page. Each judges
-its five newest candidates and any accepted one, however old, and leads with
-one of them:
+its five newest candidates and any accepted one, however old, and leads with:
 
 1. its accepted candidate, if any (an acceptance reserves the statement);
-2. otherwise the newest proposed candidate with no acceptance blocker;
+2. otherwise the newest proposed candidate with no acceptance blocker, of all
+   its candidates;
 3. otherwise the newest candidate.
+
+When none of the five newest is accepted or ready and the statement has older
+candidates, the list searches those for rule 2
+([ADR 0089](adr/0089-ready-lead-beyond-newest-candidates.md)): newest first,
+50 a pass, it judges the older ones no decision names whose facts claim the
+same established owner and both accounts (`cardSettlementEligible` requires
+each of those, so a candidate without them is never ready), and stops at the
+first ready one or once a pass is short. A ready one found leads, ahead of the
+five newest; none found leaves the newest leading, as rule 3 says.
 
 The other judged candidates follow, newest first, collapsed under the lead
 (`この請求のほかの候補（N 件）`, N the statement's other candidates). `candidateCount` counts every candidate of the
@@ -449,14 +458,6 @@ its billing month and when it was created (`候補の作成`), and its region is
 named by the heading, the month and that time, so the candidates of one
 statement are told apart by ear as well as by eye. The flat list
 (`?offset=`) and one review (`?proposalId=`) are unchanged.
-
-A limit: a ready candidate older than the five newest of its statement is never
-the lead. When none of those five is a proposed candidate without blockers, the
-newest leads, with its blockers, and the older ready one is only in the
-statement's full list. The sweep proposes after each capture, so the newest
-candidates cite the newest facts; this happens only when the five newer ones
-are all blocked or decided (for example they cite another debit of the same
-amount that is no longer current, or the operator rejected them).
 
 Acceptance also requires explicit ownership evidence: the card account's
 `liable_party` and bank account's `beneficial_owner` must identify the same
@@ -914,7 +915,25 @@ ten statements (`statement_page`), then reaches each statement's candidates
 through `card_settlement_candidates_statement` and judges at most its five
 newest and its accepted ones (the two grouped rows of the table above,
 measured 2026-11-07 before the debit-account evidence read was added to every
-list; the flat list's first page measured 104 ms in the same run).
+list; the flat list's first page measured 104 ms in the same run). A statement
+whose five newest hold no acceptance and none ready, and which has older
+candidates, adds the search for an older ready one (ADR 0089): one read a pass
+(`CARD_SETTLEMENT_STATEMENT_OLDER_SQL`), which reaches the statement's
+candidates by the same index, reads each one's latest decision by key and its
+facts, and judges at most 50 of them per statement. That grows with the
+statement's undecided older candidates whose facts could be eligible, a pass
+per 50, when none of them is ready; it does not run for a statement its newest
+candidates decide, which on the scaled store is every statement, so the two
+grouped rows above are unchanged there (not measured again).
+`card-settlement-review-scale.test.ts` checks its plan without statistics;
+the frozen text of the grouped read before it
+(`card-settlement-statement-group-legacy-sql.ts`, digest-pinned) returns the
+same rows as the current read on the random and scaled stores, every page of
+the grouped list equals the shipped one where no statement's lead changes, and
+with synthetic newer stale candidates added, only the one statement's lead
+changes, to the newest ready candidate its full list holds, found on the first
+or the second pass. `card-settlement-statements.test.ts` compares the search's
+choice with a reference on random stores with synthetic history.
 Not changed here, and not measured: the ownership review's account mapping
 reads (`queryCardOwnership`'s mappings, `prepareOwnershipReview`'s mapping read
 and the two mapping terms of its commit guard) still read
