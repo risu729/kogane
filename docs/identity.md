@@ -179,7 +179,11 @@ adoption, and a keep-apart rejection whose evidence names the two identifiers,
 also pin `listed_as` in both orientations, so a decision recorded under any
 reference of the pair between plan and commit makes the plan stale
 ([change lifecycle: pair pins](change-lifecycle.md#pair-pins)). The pins are
-checked at approval and atomically in the commit batch.
+checked at approval and atomically in the commit batch. A `listed_as`
+decision whose evidence does not name exactly two identifiers names no pair
+and pins only its own triple: the read applies it to every identifier mapped
+to its instrument when the read runs, a set that follows later mappings, and
+its plan shows only the triple.
 A direct manual assignment carries no candidate provenance and cannot use
 an `instrument-candidate:` base context without that bundle.
 
@@ -265,7 +269,11 @@ Shinsei only. `reviewAccountCandidates`
 - **never `same_account`**: every candidate says why
   (`aggregator-account-connection-scoped`, and `several-direct-accounts` when
   one connection pins several direct accounts) and reports a `same_account`
-  relation already stored between its two sides, in either orientation;
+  relation already stored between its two sides, in either orientation, each
+  with its own status. No status of the pair is derived from them, and the
+  balance projection reads each orientation as a triple of its own, so a
+  `same_account` plan pins only its own triple (nothing else changes what it
+  showed or writes) and a rejection withdraws only its own orientation;
 - **connections**: every current review with its state (`confirmed`,
   `unresolved`, `evidence-ineligible`) and its aggregator source accounts of
   any producer; **unreviewed**: aggregator source accounts no current review

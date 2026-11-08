@@ -1167,9 +1167,21 @@ both orientations: `listed_as` from the target (anchor's) instrument to the
 subject and from the subject's current instrument to the anchor. Every one of
 them is a function of the two pinned mappings, so the set cannot change while
 the plan is fresh. A decision under any of them between plan and commit makes
-the plan stale (`stale_context`). A `listed_as` decision whose evidence does
-not name the pair still pins only its own triple. No migration and no new
-subject kind.
+the plan stale (`stale_context`). No migration and no new subject kind.
+
+A `listed_as` decision whose evidence does not name exactly two identifiers
+(none, only the subject, or three or more) names no pair and pins only its own
+triple, and that is all it needs. Its triple names one instrument and one
+identifier. The candidate read applies it to the pair of that identifier and
+each identifier mapped to the instrument when the read runs, so the pairs it
+keeps apart are a set that follows mappings recorded after the commit, not a
+pair the plan could pin. The plan shows only the triple, and only a decision
+under that triple changes it. Pinning every identifier mapped to the
+instrument, with each one's reverse orientation, was considered and rejected:
+it would refuse the plan over pairs it never showed, and could not bound a
+decision whose reach is read afresh on every candidate read. Evidence of
+three or more identifiers names no single other identifier, so it names no
+pair either.
 
 ### Consequences
 
@@ -1183,6 +1195,8 @@ subject kind.
 
 `packages/application/test/pair-pins.test.ts` (both plans pin the same four
 references; a reverse-orientation rejection makes the adoption stale; an
-adoption makes the keep-apart stale, and neither commit writes) and
+adoption makes the keep-apart stale, and neither commit writes; a `listed_as`
+plan whose evidence names none, one or three identifiers pins its own triple
+only and commits after a rejection in the reverse orientation) and
 `packages/application/test/instrument-candidate-anchor.test.ts` (the adoption
 plan's pins).

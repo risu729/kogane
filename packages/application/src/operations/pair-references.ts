@@ -33,6 +33,12 @@
 //   are pinned, so the set cannot grow while the plan is fresh.
 //
 // Anything else names no pair, and its plan pins its own subject as before.
+// That includes `same_account` (every reader takes a triple's status from its
+// own rows, each orientation apart) and a `listed_as` decision whose evidence
+// does not name exactly two identifiers (the candidate read applies it to
+// whichever identifiers map to its instrument when the read runs, a set, not
+// a pair). Nothing outside their own triple changes what such a plan showed
+// or what its commit writes.
 import type {
   ChangeKind,
   ChangePayload,

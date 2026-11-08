@@ -320,6 +320,24 @@ or an adoption between plan and commit did not make the other plan stale.
   only itself.
 - An instrument pair (ADR 0055's amendment of the same day) pins both
   identifiers' mappings and `listed_as` in both orientations.
+- A `same_account` decision names no pair and pins only its own triple, and
+  that is all it needs. Its references are `source_account:` ids, which no
+  migration rewrites (0063 rewrote `reference_json`, never an id); its other
+  triples are the reverse orientation and, for an aggregator account several
+  producers list, the same decision under another producer's source account
+  id. No reader combines any of them: the balance projection reads each as a
+  triple of its own (`projectionRelationsSql`; the
+  [ADR 0001 amendment of 2026-11-06](0001-domain-axes.md#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision)
+  rule is per exact triple), and decision 5 reports each stored triple with
+  its own status and derives no status of the pair. The plan shows the one
+  triple. A decision under any other triple between plan and commit
+  therefore changes neither what the plan showed nor what the commit writes. Pinning the reverse orientation was considered and rejected: it
+  would refuse a plan for a change it neither showed nor depends on, while
+  the reverse orientation stored before planning, which the plan does not
+  show either, would still be accepted. What stays open is a meaning, not a
+  stale plan: a rejection withdraws only its own orientation, so an
+  acceptance stored in the other orientation stays in force in the
+  projection.
 - Approval and commit also re-read the pair's references. A reference the plan
   does not pin (another producer's first review of the identity value after
   planning, or a plan made before this amendment) makes the plan stale and
@@ -364,7 +382,12 @@ Synthetic data only.
   plan commits; the instrument adoption and keep-apart plans pin the same four
   references, a reverse-orientation rejection makes the adoption stale and an
   adoption makes the keep-apart stale; the pair read reaches the relations by
-  primary key only on the whole CORE schema without statistics.
+  primary key only on the whole CORE schema without statistics; a
+  `same_account` plan pins its own triple only, commits after an acceptance
+  recorded in the reverse orientation, and the candidate read reports the two
+  orientations apart (`services/processor/test/balance-projection.test.ts`
+  "a later decision on a relation triple supersedes an earlier one in the
+  projection input" shows the projection reading the two orientations apart).
 - `services/app/test/pair-pins-mcp.test.ts` on workerd: over real MCP, a plan
   approved and prepared for commit, then a rejection committed under the other
   producer's reference, is refused with `stale_context` at confirm and at a
