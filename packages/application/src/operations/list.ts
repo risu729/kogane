@@ -13,10 +13,13 @@
 // thirty pairs with no filter), each limited to the page, and merges the
 // ranges newest first (ADR 0086, "Decision").
 //
-// What a page reads: per arm, the rows it can return plus one, and the rows
-// that share the cursor's `created_at` ahead of it. No row is read only to be
-// dropped, so a page costs at most arms x (page + 1) rows plus ties, whatever
-// the store's size (ADR 0086, "Consequences").
+// What a page reads: per arm, only rows of its own pair after the cursor, at
+// most the page plus one, and the rows that share a boundary `created_at`
+// (the index holds no `operation_id`, so those are sorted, and the ones at or
+// ahead of the cursor are skipped). No arm filters on a column the index does
+// not hold, and the rows the merge does not return are the other arms'
+// candidates, so a page reads at most arms x (page + 1) rows plus ties,
+// whatever the store's size (ADR 0086, "Consequences").
 //
 // A summary carries identifiers, closed codes, counts and timestamps only. The
 // stored request (`request_json`) is never read here: a rebuild's `reason` is
