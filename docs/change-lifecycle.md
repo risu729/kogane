@@ -421,6 +421,22 @@ against an identical commit (a relation, a settlement rejection and a
 settlement acceptance), through a D1 wrapper that commits the winner between
 the loser's reads and its batch.
 
+The reservation also carries the planner's own condition on the stored
+subject (`precondition` of the planner's writes). The identity planner's is
+the identity command's ledger condition (`precondition` of
+`prepareIdentityCommand` in `packages/storage-d1/src/core/identity-commands.ts`):
+the mapping is still at the expected revision, and an assignment's target
+exists or a release still has a protection to release. A release keeps the
+mapping revision, so a second release planned while the override stood still
+matches its expected revision once the first has ended it. Before 2026-11-08
+its commit reserved an accepted receipt, spent its approval and closed its
+plan while the identity statements wrote nothing, and the receipt named a
+decision that does not exist. It now writes nothing and answers
+`stale_context` with the plan id, its plan open and its approval unspent: a
+batch that wrote nothing for none of the earlier reasons answers
+`stale_context` when the planner's condition no longer holds, and
+`commit_failed` otherwise.
+
 `accepted` ≠ `published`. `accepted` means the judgement is durable;
 `published` means every outbox row of that operation has been processed. The
 confirmation screen shows them as different states, and neither the UI nor an
@@ -720,7 +736,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
 
 ## Verified locally (synthetic data only)
 
-- `services/processor/test/change-lifecycle.test.ts` (34 tests):
+- `services/processor/test/change-lifecycle.test.ts` (35 tests):
   plan contents and server-computed impact; SC17/AT69 (approval refused with
   `stale_context` after a concurrent change, plan marked stale, re-simulation
   yields a new digest); a stale plan refused at commit with **no rows written
@@ -735,7 +751,8 @@ already recorded is never undone by a DELETE — an undo is a new revision
   nothing written (an identity assignment losing to a relation writes no
   mapping, an override release no decision), and one that loses it to an
   identical commit → the stored receipt without spending a second approval
-  use; typed
+  use; an override release that another release already ended →
+  `stale_context` with nothing written and its approval unspent; typed
   relations with their own decision and no derived `same_account` (SC06); an
   agent refused approval and commit; approval digest/expiry/scope binding; the
   outbox publishing once and a duplicate delivery changing nothing; an

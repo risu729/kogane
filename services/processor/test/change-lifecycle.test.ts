@@ -798,6 +798,54 @@ test("an identity commit refuses an operation id the direct identity route alrea
   expect((await loadPlan(store, plan.planId))!.status).toBe("approved");
 });
 
+test("a release of an override another release already ended writes no receipt and spends no approval", async () => {
+  // A release keeps the mapping revision, so the plan's expected revision
+  // still holds after another release ended the override. Without the
+  // identity command's own condition on the reservation, the commit wrote an
+  // accepted receipt, spent the approval and closed the plan while its
+  // decision statement found nothing to release, and the receipt named a
+  // decision that never existed.
+  const mapping = await seedParse(295, "smbc-bank:double-release");
+  const assignPlan = await planFor(mapping.ref, await target("target-double-release"));
+  expect(
+    await commitWith(
+      "op-double-release-assign",
+      assignPlan,
+      (await approveFor(assignPlan)).approvalId,
+    ),
+  ).toMatchObject({ ok: true, replayed: false });
+  const releasePlan = async (reason: string) => {
+    const result = await createPlan(
+      "identity.release-override",
+      { subject: "account", referenceId: mapping.ref, reason },
+      { actor: operator, baseContextId: "identity-current-v1", now: NOW, ttlSeconds: 900 },
+      store,
+    );
+    if (!result.ok) throw new Error(`plan failed: ${result.error}`);
+    return result.plan;
+  };
+  const first = await releasePlan("synthetic first release");
+  const second = await releasePlan("synthetic second release");
+  expect(second.planId).not.toBe(first.planId);
+  const firstApproval = await approveFor(first);
+  const secondApproval = await approveFor(second);
+  expect(await commitWith("op-double-release-1", first, firstApproval.approvalId)).toMatchObject({
+    ok: true,
+    replayed: false,
+  });
+  const before = await counts();
+  const result = await commitWith("op-double-release-2", second, secondApproval.approvalId);
+  expect(result).toEqual({ ok: false, error: "stale_context", refs: [second.planId] });
+  expect(await counts()).toEqual(before);
+  expect(
+    await db
+      .prepare("SELECT uses_remaining FROM approvals WHERE approval_id=?")
+      .bind(secondApproval.approvalId)
+      .first<number>("uses_remaining"),
+  ).toBe(1);
+  expect((await loadPlan(store, second.planId))!.status).toBe("approved");
+});
+
 test("a relation commit refuses an operation id the reconciliation rule acceptance already used", async () => {
   // The rule acceptance keeps a ledger row and no receipt. Without the
   // refusal the commit skipped its own ledger insert and wrote its decision

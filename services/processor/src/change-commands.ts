@@ -88,6 +88,10 @@ function identityMutation(db: D1Database) {
     );
     if ("error" in prepared) return null;
     return {
+      // The reservation carries the identity command's own condition, so a
+      // release whose override another release already ended (its mapping
+      // revision unchanged) reserves no receipt for a decision it never wrote.
+      precondition: prepared.precondition,
       // The identity command joins only its ledger row (statement 1) to the
       // guard; its mapping, decision and supersession statements require a
       // ledger row under the operation id, which a command of another kind

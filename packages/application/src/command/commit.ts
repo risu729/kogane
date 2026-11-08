@@ -381,6 +381,7 @@ export async function commit(
     operationId,
     payloadDigest,
     input.now,
+    mutation.precondition,
   );
   // A raced exact receipt is still a replay; a changed original effect is stale.
   if (
@@ -401,6 +402,7 @@ async function failureReason(
   operationId: string,
   payloadDigest: string,
   now: string,
+  precondition?: CommitGuard,
 ): Promise<CommandResult<CommitOutput>> {
   const concurrent = await store.first<ReceiptRow>(RECEIPT_SQL, [principal, operationId]);
   if (concurrent)
@@ -459,5 +461,13 @@ async function failureReason(
     [operationId],
   );
   if (ledger) return commandError("idempotency_conflict", [operationId]);
+  // The planner's own condition on the reservation no longer holds: the
+  // subject moved in a way the expected revisions do not count (an override
+  // release that another release already ended keeps its mapping revision).
+  if (
+    precondition &&
+    !(await store.first("SELECT 1 AS valid WHERE " + precondition.sql, precondition.binds))
+  )
+    return commandError("stale_context", [plan.planId]);
   return commandError("commit_failed", [plan.planId]);
 }
