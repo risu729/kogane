@@ -32,6 +32,7 @@ const QUALITY_REASON_LABELS: Record<CellReason | SourceReason, string> = {
   occurrence_running: "実行中・結果待ちです",
   occurrence_failed: "最終試行が失敗しました",
   occurrence_uncertain: "最終試行の結果を確認できません",
+  occurrence_not_dispatched: "収集の呼び出し前に停止しました",
   user_action_required: "本人による認証・操作が必要です",
   lease_held: "実行中または実行の終了を確認できません",
   terminal_unrecorded: "取得結果がまだ届いていません",

@@ -1,0 +1,248 @@
+{
+  "parser": "v-point-pay-notification-event",
+  "version": "1.0.1",
+  "results": {
+    "usage": {
+      "observations": [
+        {
+          "kind": "transaction",
+          "sourceAccount": "v-point-pay:notification-events",
+          "externalId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "status": "notified",
+          "amountMinor": -1200,
+          "amountText": "-1200",
+          "amountScale": 0,
+          "currency": "JPY",
+          "description": "匿名加盟店A",
+          "counterparty": "匿名加盟店A",
+          "asOf": "2026-08-01T01:02:03.000Z",
+          "observedAt": "2026-08-01T01:02:03.000Z",
+          "rawLocator": "json:$",
+          "extra": {
+            "eventType": "usage",
+            "subject": "V Point Pay ご利用のお知らせ",
+            "merchant": "匿名加盟店A",
+            "detail": "支払い",
+            "amountYen": 1200,
+            "usedPoints": 200,
+            "balanceYen": 3800,
+            "_kogane": {
+              "canonicalDataset": "notification-event",
+              "derivedFromDataset": "notification-mail",
+              "direction": "outflow-notified",
+              "amountDisposition": "notification-amount-not-settled",
+              "amountSignSource": "eventType",
+              "settlementDisposition": "not-established-by-notification",
+              "fundingSplitDisposition": "not-inferred-from-total-and-used-points",
+              "identityOrigin": "normalized-event-id",
+              "usedPointsDisposition": "extra-only"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "v-point-pay:prepaid-yen",
+          "metric": "prepaid_balance_after_event",
+          "amountMinor": 3800,
+          "amountText": "3800",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-08-01T01:02:03.000Z",
+          "observedAt": "2026-08-01T01:02:03.000Z",
+          "rawLocator": "json:$.balanceYen",
+          "extra": {
+            "eventType": "usage",
+            "balanceYen": 3800,
+            "_kogane": {
+              "canonicalDataset": "notification-event",
+              "derivedFromDataset": "notification-mail",
+              "balanceScope": "v-point-pay-prepaid-yen",
+              "sourceEventId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "charge": {
+      "observations": [
+        {
+          "kind": "transaction",
+          "sourceAccount": "v-point-pay:notification-events",
+          "externalId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "status": "notified",
+          "amountMinor": 5000,
+          "amountText": "5000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "description": "匿名チャージ方法",
+          "asOf": "2026-08-02T01:02:03.000Z",
+          "observedAt": "2026-08-02T01:02:03.000Z",
+          "rawLocator": "json:$",
+          "extra": {
+            "eventType": "charge",
+            "subject": "V Point Pay チャージ受付のお知らせ",
+            "merchant": null,
+            "detail": "匿名チャージ方法",
+            "amountYen": 5000,
+            "usedPoints": null,
+            "balanceYen": 8800,
+            "_kogane": {
+              "canonicalDataset": "notification-event",
+              "derivedFromDataset": "notification-mail",
+              "direction": "inflow-notified",
+              "amountDisposition": "notification-amount-not-settled",
+              "amountSignSource": "eventType",
+              "settlementDisposition": "not-established-by-notification",
+              "fundingSplitDisposition": "not-inferred-from-total-and-used-points",
+              "identityOrigin": "normalized-event-id",
+              "usedPointsDisposition": "extra-only"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "v-point-pay:prepaid-yen",
+          "metric": "prepaid_balance_after_event",
+          "amountMinor": 8800,
+          "amountText": "8800",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-08-02T01:02:03.000Z",
+          "observedAt": "2026-08-02T01:02:03.000Z",
+          "rawLocator": "json:$.balanceYen",
+          "extra": {
+            "eventType": "charge",
+            "balanceYen": 8800,
+            "_kogane": {
+              "canonicalDataset": "notification-event",
+              "derivedFromDataset": "notification-mail",
+              "balanceScope": "v-point-pay-prepaid-yen",
+              "sourceEventId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "balance-addition": {
+      "observations": [
+        {
+          "kind": "transaction",
+          "sourceAccount": "v-point-pay:notification-events",
+          "externalId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "status": "notified",
+          "amountMinor": 700,
+          "amountText": "700",
+          "amountScale": 0,
+          "currency": "JPY",
+          "description": "匿名加算方法",
+          "asOf": "2026-08-03T01:02:03.000Z",
+          "observedAt": "2026-08-03T01:02:03.000Z",
+          "rawLocator": "json:$",
+          "extra": {
+            "eventType": "balance-addition",
+            "subject": "V Point Pay プリペイド残高加算のお知らせ",
+            "merchant": null,
+            "detail": "匿名加算方法",
+            "amountYen": 700,
+            "usedPoints": 700,
+            "balanceYen": 9500,
+            "_kogane": {
+              "canonicalDataset": "notification-event",
+              "derivedFromDataset": "notification-mail",
+              "direction": "inflow-notified",
+              "amountDisposition": "notification-amount-not-settled",
+              "amountSignSource": "eventType",
+              "settlementDisposition": "not-established-by-notification",
+              "fundingSplitDisposition": "not-inferred-from-total-and-used-points",
+              "identityOrigin": "normalized-event-id",
+              "usedPointsDisposition": "extra-only"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "v-point-pay:prepaid-yen",
+          "metric": "prepaid_balance_after_event",
+          "amountMinor": 9500,
+          "amountText": "9500",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-08-03T01:02:03.000Z",
+          "observedAt": "2026-08-03T01:02:03.000Z",
+          "rawLocator": "json:$.balanceYen",
+          "extra": {
+            "eventType": "balance-addition",
+            "balanceYen": 9500,
+            "_kogane": {
+              "canonicalDataset": "notification-event",
+              "derivedFromDataset": "notification-mail",
+              "balanceScope": "v-point-pay-prepaid-yen",
+              "sourceEventId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "declined": {
+      "observations": [
+        {
+          "kind": "transaction",
+          "sourceAccount": "v-point-pay:notification-events",
+          "externalId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "status": "declined",
+          "description": "匿名加盟店B",
+          "counterparty": "匿名加盟店B",
+          "asOf": "2026-08-04T01:02:03.000Z",
+          "observedAt": "2026-08-04T01:02:03.000Z",
+          "rawLocator": "json:$",
+          "extra": {
+            "eventType": "declined",
+            "subject": "V Point Pay ご利用不可のお知らせ",
+            "merchant": "匿名加盟店B",
+            "detail": "利用不可",
+            "amountYen": 3000,
+            "usedPoints": null,
+            "balanceYen": 9500,
+            "_kogane": {
+              "canonicalDataset": "notification-event",
+              "derivedFromDataset": "notification-mail",
+              "direction": "no-posted-cashflow",
+              "amountDisposition": "attempted-not-posted",
+              "amountSignSource": "eventType",
+              "settlementDisposition": "declined-by-provider",
+              "fundingSplitDisposition": "not-inferred-from-total-and-used-points",
+              "identityOrigin": "normalized-event-id",
+              "usedPointsDisposition": "extra-only"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "v-point-pay:prepaid-yen",
+          "metric": "prepaid_balance_after_event",
+          "amountMinor": 9500,
+          "amountText": "9500",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-08-04T01:02:03.000Z",
+          "observedAt": "2026-08-04T01:02:03.000Z",
+          "rawLocator": "json:$.balanceYen",
+          "extra": {
+            "eventType": "declined",
+            "balanceYen": 9500,
+            "_kogane": {
+              "canonicalDataset": "notification-event",
+              "derivedFromDataset": "notification-mail",
+              "balanceScope": "v-point-pay-prepaid-yen",
+              "sourceEventId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    }
+  }
+}

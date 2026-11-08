@@ -289,6 +289,7 @@ function sourceReasons(
     if (latest.status === "started") reasons.add("occurrence_running");
     if (latest.status === "failed") reasons.add("occurrence_failed");
     if (latest.status === "uncertain") reasons.add("occurrence_uncertain");
+    if (latest.status === "not_dispatched") reasons.add("occurrence_not_dispatched");
     if (userActionRequired(latest.failureCode)) reasons.add("user_action_required");
     for (const run of latest.terminals) {
       if (run.registration === "unrecorded") reasons.add("terminal_unrecorded");

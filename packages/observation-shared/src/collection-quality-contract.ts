@@ -38,7 +38,13 @@ export const COLLECTION_QUALITY_BOUND = 200;
 /** `collection_schedules.kind` (CORE 0065). */
 const SCHEDULE_KINDS = ["collection", "keepalive", "processor", "manual", "email"] as const;
 /** `collection_schedule_occurrences.status` (CORE 0065). */
-const OCCURRENCE_STATUSES = ["started", "completed", "failed", "uncertain"] as const;
+const OCCURRENCE_STATUSES = [
+  "started",
+  "completed",
+  "failed",
+  "uncertain",
+  "not_dispatched",
+] as const;
 /** `collection_runs.provider_outcome`, the terminal's own claim (CORE 0039). */
 const PROVIDER_OUTCOMES = ["success", "partial", "failed"] as const;
 /** `collection_runs.coverage_status` (CORE 0039). */
@@ -111,6 +117,7 @@ export const SOURCE_REASONS = [
   "occurrence_running",
   "occurrence_failed",
   "occurrence_uncertain",
+  "occurrence_not_dispatched",
   "user_action_required",
   "lease_held",
   "terminal_unrecorded",

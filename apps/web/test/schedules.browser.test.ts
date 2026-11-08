@@ -938,6 +938,44 @@ describe.if(runnable)("operator schedule administration", () => {
     }
   }, 30000);
 
+  test("a proven pre-call stop and an uncertain call explain their different replay policies", async () => {
+    const sony = snapshot.schedules.find((job) => job.id === "sony-bank")!;
+    sony.latest = {
+      ...sony.latest!,
+      status: "not_dispatched",
+      finishedAt: null,
+      runIds: [],
+      runLinks: [],
+      failureCode: "not_dispatched",
+    };
+    snapshot.schedules.find((job) => job.id === "vpass")!.latest = {
+      ...sony.latest,
+      id: "synthetic-uncertain",
+      scheduleId: "vpass",
+      status: "uncertain",
+      failureCode: "dispatch_uncertain",
+    };
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const preCall = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await preCall
+        .getByText("収集先は呼び出されていません。自動再実行は一度までです。", { exact: true })
+        .waitFor();
+      expect(await preCall.getByText("収集の呼び出し前に停止", { exact: false }).count()).toBe(1);
+      const uncertain = page.locator(".schedule-card").filter({ hasText: "Vpass" });
+      await uncertain
+        .getByText("同じ予定の自動再実行は行いません。取得履歴を確認してください。", {
+          exact: true,
+        })
+        .waitFor();
+      expect(writes).toEqual([]);
+      expect(collections).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
   test("the schedules and the maintenance editor pass the accessibility audit", async () => {
     snapshot.leases = [];
     const page = await browser.newPage({ viewport: { width: 1280, height: 960 } });

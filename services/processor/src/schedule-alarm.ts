@@ -13,6 +13,7 @@ import {
   maintenanceForSchedule,
   bootstrapSchedules,
   expireStaleLeases,
+  retryableOccurrence,
 } from "./schedule-store";
 interface DispatchResult {
   status: "completed" | "failed";
@@ -93,16 +94,18 @@ export class ScheduleAlarm extends DurableObject<Env> {
         await maintenanceForSchedule(this.env.DB, row),
       );
       // Don't move an overdue reservation backward across a currently active maintenance.
+      const retry = row.kind === "collection" ? await retryableOccurrence(this.env.DB, id) : null;
       const actual = afterMaintenance(
-        Math.max(due, Date.now()),
+        retry ? Date.now() : Math.max(due, Date.now()),
         await maintenanceForSchedule(this.env.DB, row),
       );
       await this.ctx.storage.setAlarm(actual);
-      await this.env.DB.prepare(
-        "UPDATE collection_schedules SET next_run_at=? WHERE id=? AND revision=? AND next_nominal_at=?",
-      )
-        .bind(new Date(actual).toISOString(), id, row.revision, row.next_nominal_at)
-        .run();
+      if (!retry)
+        await this.env.DB.prepare(
+          "UPDATE collection_schedules SET next_run_at=? WHERE id=? AND revision=? AND next_nominal_at=?",
+        )
+          .bind(new Date(actual).toISOString(), id, row.revision, row.next_nominal_at)
+          .run();
       return new Date(actual).toISOString();
     });
   }
@@ -163,6 +166,35 @@ export class ScheduleAlarm extends DurableObject<Env> {
         Math.max(Date.parse(row.next_run_at ?? row.next_nominal_at), now),
         rules,
       );
+      const retry = row.kind === "collection" ? await retryableOccurrence(this.env.DB, id) : null;
+      if (retry) {
+        const retryDue = afterMaintenance(now, rules);
+        // Retain the next normal alarm even if this retry stops at any await.
+        await this.ctx.storage.setAlarm(retryDue > now ? Math.min(due, retryDue) : due);
+        if (retryDue > now) return null;
+        const attemptRef = crypto.randomUUID();
+        trace.phase = "claim";
+        trace.occurrenceId = retry.id;
+        const claimed = await this.env.DB.prepare(`UPDATE collection_schedule_occurrences
+          SET status='started',failure_code=NULL,finished_at=NULL,retry_claimed_at=?,attempt_ref=?
+          WHERE id=? AND status='not_dispatched' AND retry_claimed_at IS NULL
+            AND dispatch_protocol=1 AND dispatched_at IS NULL`)
+          .bind(new Date(now).toISOString(), attemptRef, retry.id)
+          .run();
+        if (claimed.meta.changes !== 1) return null;
+        logAlarm({
+          event: "schedule_alarm",
+          jobId: id,
+          occurrenceId: retry.id,
+          outcome: "retry_claimed",
+        });
+        return {
+          job: jobFor(id),
+          nominal: Date.parse(retry.nominal_at),
+          occurrenceId: retry.id,
+          attemptRef,
+        };
+      }
       if (due > now) {
         await this.ctx.storage.setAlarm(due);
         await this.env.DB.prepare(
@@ -200,6 +232,7 @@ export class ScheduleAlarm extends DurableObject<Env> {
       trace.phase = "claim";
       const job = jobFor(id);
       const claimedAt = new Date(now).toISOString();
+      const attemptRef = crypto.randomUUID();
       // A collection occurrence's claim carries its audit record as the last
       // statement of the claim batch, joined to the occurrence row it wrote
       // (ADR 0064, plan slice S7). The processor tick and keepalive record none.
@@ -217,10 +250,11 @@ export class ScheduleAlarm extends DurableObject<Env> {
             )
           : null;
       const results = await this.env.DB.batch([
-        this.env.DB.prepare(`INSERT OR IGNORE INTO collection_schedule_occurrences(id,schedule_id,nominal_at,started_at,status)
-          SELECT ?,id,next_nominal_at,?,'started' FROM collection_schedules WHERE id=? AND revision=? AND enabled=1 AND next_nominal_at=?`).bind(
+        this.env.DB.prepare(`INSERT OR IGNORE INTO collection_schedule_occurrences(id,schedule_id,nominal_at,started_at,status,dispatch_protocol,attempt_ref)
+          SELECT ?,id,next_nominal_at,?,'started',1,? FROM collection_schedules WHERE id=? AND revision=? AND enabled=1 AND next_nominal_at=?`).bind(
           occurrenceId,
           claimedAt,
+          attemptRef,
           id,
           row.revision,
           row.next_nominal_at,
@@ -237,11 +271,6 @@ export class ScheduleAlarm extends DurableObject<Env> {
         ...(audit ? [this.env.DB.prepare(audit.sql).bind(...audit.binds)] : []),
       ]);
       if (results[0]?.meta.changes !== 1) {
-        await this.env.DB.prepare(
-          "UPDATE collection_schedule_occurrences SET status='uncertain',failure_code='dispatch_uncertain',finished_at=? WHERE id=? AND status='started'",
-        )
-          .bind(new Date(now).toISOString(), occurrenceId)
-          .run();
         logAlarm({
           event: "schedule_alarm",
           jobId: id,
@@ -261,10 +290,20 @@ export class ScheduleAlarm extends DurableObject<Env> {
         claimMs: Date.now() - now,
         nextDueAt: new Date(nextDue).toISOString(),
       });
-      return { job: jobFor(id), nominal, occurrenceId };
+      return { job: jobFor(id), nominal, occurrenceId, attemptRef };
     });
     if (!pending) return;
     trace.phase = "dispatch";
+    // This durable compare-and-set must COMPLETE before any collector RPC.
+    // A delayed original attempt loses to abandonment/retry ownership, and a
+    // duplicate handler loses to the first marker. A lost D1 answer is safe:
+    // no RPC starts, and a present marker conservatively remains uncertain.
+    const marked = await this.env.DB.prepare(`UPDATE collection_schedule_occurrences
+      SET dispatched_at=? WHERE id=? AND status='started' AND dispatch_protocol=1
+        AND attempt_ref=? AND dispatched_at IS NULL`)
+      .bind(new Date().toISOString(), pending.occurrenceId, pending.attemptRef)
+      .run();
+    if (marked.meta.changes !== 1) return;
     const dispatchStarted = Date.now();
     // Written before the call, so a log that has this line and no result
     // below shows the alarm stopped while the collector call was open.
@@ -314,7 +353,7 @@ export class ScheduleAlarm extends DurableObject<Env> {
     trace.phase = "record";
     // Never throw a provider uncertainty back into an automatic login retry.
     await this.env.DB.prepare(
-      "UPDATE collection_schedule_occurrences SET status=?,run_ids_json=?,failure_code=?,finished_at=? WHERE id=? AND status='started'",
+      "UPDATE collection_schedule_occurrences SET status=?,run_ids_json=?,failure_code=?,finished_at=? WHERE id=? AND status='started' AND attempt_ref=?",
     )
       .bind(
         // A lost dispatch answer, or a holder that stopped itself after it may
@@ -326,6 +365,7 @@ export class ScheduleAlarm extends DurableObject<Env> {
         result.failureCode,
         new Date().toISOString(),
         pending.occurrenceId,
+        pending.attemptRef,
       )
       .run();
   }
