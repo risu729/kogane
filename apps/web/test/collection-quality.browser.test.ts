@@ -348,11 +348,9 @@ describe.if(runnable)("collection quality browser", () => {
       // The account answer owns the catalogue: gaps remain visible even
       // when no observation names an account, without relying on summary data.
       await page.goto(`${origin}/collection-quality?source=sony-bank&view=accounts`);
-      const catalogue = page
-        .locator("section.panel")
-        .filter({
-          has: page.getByRole("heading", { name: "口座表示の提供元データ種別", exact: true }),
-        });
+      const catalogue = page.locator("section.panel").filter({
+        has: page.getByRole("heading", { name: "口座表示の提供元データ種別", exact: true }),
+      });
       await catalogue.waitFor();
       expect(await catalogue.getByText("入出金明細", { exact: false }).count()).toBe(1);
       expect(await catalogue.getByText("一部のみ", { exact: false }).count()).toBeGreaterThan(0);

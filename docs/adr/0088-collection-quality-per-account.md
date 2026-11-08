@@ -283,7 +283,7 @@ statement about current data. This follows the literal acceptance contract of
   period's `user_action_required` reason has the same precedence as on cells.
 - Each parser group and account carries the freshness of its newest named
   capture, selected by instant across its periods (and, for an account,
-  across all groups). Equal instants retain the reader's stable cell order;
+  across all groups). Equal instants retain the response's stable group/period order;
   the strict contract accepts either tied newest period's value. A wait on
   an older period does not replace the newest period's wait state.
 - `ACCOUNT_COVERAGE_API_VERSION` is 3. The answer owns `dataTypesVersion`

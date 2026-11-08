@@ -589,9 +589,9 @@ const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * A group uses its newest named capture's freshness, independently of standing.
- * Equal capture instants retain the cell read's stable order.
+ * Equal capture instants retain the response's stable group/period order.
  */
-function freshestFreshness(periods: readonly AccountCoveragePeriod[]): CollectionFreshness {
+function newestCaptureFreshness(periods: readonly AccountCoveragePeriod[]): CollectionFreshness {
   let freshest = periods[0]!;
   for (const entry of periods)
     if (Date.parse(entry.capture.capturedAt) > Date.parse(freshest.capture.capturedAt))
@@ -733,7 +733,7 @@ export async function queryAccountCoverage(
                 .filter((entry) => entry.parsers.includes(parser))
                 .map((entry) => entry.type),
               periods,
-              freshness: freshestFreshness(periods),
+              freshness: newestCaptureFreshness(periods),
             };
           })
           .sort(
@@ -747,7 +747,7 @@ export async function queryAccountCoverage(
           label: bucket.label,
           statuses: MAPPING_STATUSES.filter((status) => bucket.statuses.has(status)),
           dataTypes,
-          freshness: freshestFreshness(dataTypes.flatMap((type) => type.periods)),
+          freshness: newestCaptureFreshness(dataTypes.flatMap((type) => type.periods)),
         };
       }),
     unattributed,

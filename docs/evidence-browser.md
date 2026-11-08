@@ -876,7 +876,7 @@ are answered by one reader, `readCollectionQuality`
   kind), each with its periods, the cell's state and reasons, the capture
   that names the account, its observation count, a standing (`current`,
   `older-current`, `newest-not-current`) and its freshness; each data type
-  and account also carries the freshness of its freshest period (see
+  and account also carries the freshness of its newest named capture (see
   Freshness below). Cells no capture's observation
   attributes to an account are listed as `unattributed` with their reasons.
   More than 2,000 cells or 10,000 account periods is
