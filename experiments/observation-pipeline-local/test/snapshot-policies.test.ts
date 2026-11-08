@@ -37,6 +37,7 @@ test("reopening upgrades the local exact-version policies and preserves an opera
     ["sbi-foreign-cash-positions", "0.3.0", "0.3.1"],
     ["sbi-shinsei-exchange-rate", "1.0.2", "1.0.3"],
     ["prestia-bank-balances", "1.0.0", "1.0.1"],
+    ["st-george-balances", "1.0.0", "1.0.1"],
   ] as const;
   for (const [parser, old] of versions)
     store.db

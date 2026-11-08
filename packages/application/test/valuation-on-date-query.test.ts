@@ -1,3 +1,4 @@
+import { FOREIGN_POSITION_SNAPSHOT_VERSION } from "../../parsers/src/snapshot-query.ts";
 // `queryValuationOnDate` (src/query/valuation-on-date.ts) end to end over the
 // migrated CORE schema: synthetic container snapshots with identities
 // (packages/read-model/test/dated-state-fixture.ts), prices claimed from those
@@ -55,7 +56,7 @@ const FOREIGN = {
   source: "sbi-securities",
   dataset: "foreign-cash-positions",
   parser: "sbi-foreign-cash-positions",
-  version: "0.3.0",
+  version: FOREIGN_POSITION_SNAPSHOT_VERSION,
 } as const;
 
 const EQUITY: PriceSelectionPolicy = {

@@ -38,7 +38,7 @@ const ST_GEORGE = {
   source: "st-george",
   dataset: "account-snapshot",
   parser: "st-george-balances",
-  version: "1.0.0",
+  version: "1.0.1",
 } as const;
 const MIZUHO = {
   source: "mizuho-bank",

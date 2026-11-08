@@ -107,7 +107,7 @@ unrecognised form, the two-digit suffix 1.0.1 assumed included, still fails); an
 artifact. Its policy row sets `replaces_previous_on_complete_empty = 0` and
 pins `required_parser_version`, which the selection matches exactly, so each
 release of this parser moves the row in a migration (0056: 1.0.1; 0059:
-1.0.2). Its frozen
+1.0.2; 0084: 1.0.3, with the shared CSV reader release). Its frozen
 expectations live in `coverage-contract/sbi-shinsei-exchange-rate-expected.json`
 and, for the observed shapes of 2026-09-27,
 `coverage-contract/sbi-shinsei-observed-shapes-expected.json`, beside the

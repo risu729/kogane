@@ -4,6 +4,7 @@ export function isResumable(progress: BackfillProgress): boolean {
   return (
     (progress.phase === "partial" ||
       progress.phase === "failed" ||
+      progress.phase === "idle" ||
       progress.phase === "waiting_for_approval") &&
     Boolean(progress.runId) &&
     Boolean(progress.startedAt) &&

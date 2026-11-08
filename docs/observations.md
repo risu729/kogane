@@ -102,8 +102,9 @@ Header and row cardinality drift still refuse Sony CSV.
 The shared helper is in every parser's digest closure, so all 43 releases
 receive a patch version, even though only PayPay and Sony history CSV call
 `parseCsv`. Other parser outputs remain unchanged. Migration 0084 advances the
-three exact-version snapshot policies: foreign positions to 0.3.1, the SBI
-Shinsei exchange-rate board to 1.0.3, and PRESTIA balances to 1.0.1. It changes
+four exact-version snapshot policies: foreign positions to 0.3.1, the SBI
+Shinsei exchange-rate board to 1.0.3, PRESTIA balances to 1.0.1, and St.George
+balances to 1.0.1. It changes
 only rows still pinned to their previous releases, preserving an operator's
 alternative choice. The local experiment applies the same conditional policy
 updates when its store opens. The new pins select the new published parses; the repair
