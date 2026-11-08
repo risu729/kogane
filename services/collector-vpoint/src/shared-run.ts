@@ -51,9 +51,9 @@ const FALLBACK_ERROR_CODE = "collector_failed";
 /** The manifest's own machine-code charset; a code that fails it is replaced. */
 const SAFE_CODE = /^[a-z0-9][a-z0-9_-]{0,99}$/u;
 
-export type CollectionStatus = "success" | "partial" | "failed";
+type CollectionStatus = "success" | "partial" | "failed";
 
-export interface SharedRunIdentity {
+interface SharedRunIdentity {
   /** Distinguishes retries of the same run; carried into the terminal. */
   readonly attemptId: string;
   /** The App operation this run answers, when it was requested rather than scheduled. */

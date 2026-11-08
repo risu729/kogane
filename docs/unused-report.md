@@ -9,7 +9,7 @@ deletion decision (acceptance G4-13 and G0-12).
 mise run root:knip
 ```
 
-The configuration is `knip.jsonc`. Knip 6.35.1 has a native
+The configuration is `knip.jsonc`. Knip 6.44.1 has a native
 [mise plugin](https://knip.dev/reference/plugins/mise), so each workspace's
 inline `mise.toml` tasks supply script entry points and local tool dependencies.
 The old assumption that Knip only understands package scripts no longer applies.
@@ -28,35 +28,58 @@ fixture; neither is an npm dependency. `cloudflare:workers` and
 `cloudflare:test` are platform modules.
 
 The root dependency-cruiser binary is launched programmatically by
-`tasks/_lib/depcruise.ts`; its narrow dependency ignore records that use.
-There is no repository-wide ignore for Wrangler or Vitest: the mise plugin can
-now see their actual workspace invocations.
+`tasks/_lib/depcruise.ts`; its narrow dependency ignore records that use. The
+root `cf` and `vitest` pins are ignored the same way: no root file imports
+them, and they stay so that `node_modules/.bin` exists at the root (#177,
+#433); removing them is a tooling decision. `services/collector-sbi-shinsei`
+ignores `ws` because its `test` task runs the container's `*.node-test.mjs`
+from the workspace directory, independently of the container's own `npm ci`.
+`services/collector-vpass` lists `cloudflare.config.ts` and
+`wrangler.config.ts` as entries because its own entry list replaces the
+`services/*` one.
 
-## Findings after the monorepo migration
+Files named `test/*legacy*.ts` are frozen shipped text that a rewrite is proven
+equal to; `ignoreIssues` keeps their exports out of the report rather than
+editing them. An export tagged `@public` in its JSDoc is one a document names
+and no module imports (for example the card review subject refs and
+invalidations in `packages/domain/src/card-purchase-review.ts`); Knip does not
+report it.
 
-Checked on 2026-09-13 against the working tree based on `49d5d65e`. This replaces
-the 2026-09-11 report, whose retired `poc/` and importer paths are no longer the
-current analysis scope. The command above is authoritative as the tree changes.
+## Findings
 
-No unresolved imports or undeclared package dependencies were found. Remaining
-unused-file candidates were:
+Checked on 2026-11-07 against `de86e9d2`. The command above is authoritative as
+the tree changes.
 
-- `services/collector-moneyforward/src/storage.ts`
-- `services/collector-myjcb/src/storage.ts`
-- `services/collector-smbc-direct/src/raw-evidence-types.ts`
-- `services/collector-vpoint/src/vpoint-pay-raw-evidence.ts`
-- `services/collector-vpoint/src/vpoint-pay-reconcile.ts`
+No unresolved imports, undeclared dependencies, unused files or unused
+dependencies are reported. The 2026-11-07 cleanup removed the files nothing
+imported (the legacy `storage.ts` of the Money Forward and MyJCB collectors,
+the retired GLOBAL PASS `browser-probe.ts`, and V Point's
+`vpoint-pay-reconcile.ts`), the dependencies only those used or nothing used
+(`@cloudflare/puppeteer` in GLOBAL PASS, `wrangler` in `packages/collection`,
+`ws` in St.George, `@types/set-cookie-parser` in V Point), and made module-private
+or deleted the unused exports outside files that open pull requests were
+changing at the time.
 
-Two of these, `services/collector-smbc-direct/src/raw-evidence-types.ts` and
-`services/collector-vpoint/src/vpoint-pay-raw-evidence.ts`, were leftovers of
-the retired importer and were removed on 2026-09-24.
+Unused exports and types remain in files those pull requests change, and in
+these, kept on purpose:
 
-The report also flags root `vitest`, `wrangler` in `packages/collection`, and
-`ws` in `services/collector-sbi-shinsei` as unused development dependencies.
-These are review candidates, not verified removals. Numerous exported functions
-and types remain advisory, including domain contracts and public vocabulary;
-this tooling change does not remove them or claim that their corresponding
-product features are complete.
+- `packages/parsers/src/` and the `packages/domain/src/` modules a parser
+  imports. Their bytes are code-digested (`src/parsers/digests.ts`), and
+  registering a parser name and version with a different digest is refused
+  ([release adoption](release-adoption.md)), so even removing an `export`
+  keyword needs a parser version bump.
+- `collectInBankPage` in `services/collector-sbi-shinsei/src/browser-page.ts`
+  has no caller, but ADR 0029 and the next-milestone plan cite the file as the
+  in-page collection logic; removing it needs those documents revised.
+- `SCHEDULES_PATH` in `services/app/src/schedules-api.ts`, which an open pull
+  request imports.
+- `useBalanceHistory` in `apps/web/src/api.ts`. No page calls it, but it holds
+  the only `/api/v2/balances/history` literal in `apps/web/src`, and an open
+  pull request's UI/MCP parity test scans those literals and lists that route
+  as one the UI names; it is tagged `@public` until that is settled.
+
+An unused finding alone is still not a deletion decision; the review below
+applies to every removal.
 
 ## Reviewing a removal
 

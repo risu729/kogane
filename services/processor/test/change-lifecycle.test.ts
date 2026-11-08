@@ -42,6 +42,7 @@ import {
 } from "../src/change-commands.ts";
 import { dispatchDecisionOutbox } from "../src/decision-outbox.ts";
 import { executeIdentityCommand } from "../src/identity-commands.ts";
+import { acceptProposal } from "../src/reconciliation-commands.ts";
 import {
   IDENTITY_POLICY_VERSION,
   identifyParse,
@@ -52,6 +53,7 @@ import {
   layerBMigrations,
   migrationDir,
   publishParse,
+  racedBeforeBatch,
   seedArtifact,
   splitSql,
   startPipeline,
@@ -467,6 +469,381 @@ test("a resent identical commit races itself and still yields one receipt and on
   expect(after.receipts).toBe(before.receipts + 1);
   expect(after.mappings).toBe(before.mappings + 1);
   expect(after.outbox).toBe(before.outbox + 2);
+});
+
+/** A relation.accept plan for `toRef`, approved by the operator. */
+async function approvedRelation(toRef: string) {
+  const planned = await createPlan(
+    "relation.accept",
+    {
+      relationKind: "connection_contains" as const,
+      fromRef: "connection:collector-r2-importer/synthetic-race",
+      toRef,
+      validFrom: null,
+      validTo: null,
+      evidenceRefs: ["synthetic-race-proof"],
+      reason: "synthetic race",
+    },
+    { actor: operator, baseContextId: "identity-current-v1", now: NOW, ttlSeconds: 900 },
+    store,
+  );
+  if (!planned.ok) throw new Error(`plan failed: ${planned.error}`);
+  return { plan: planned.plan, approval: await approveFor(planned.plan) };
+}
+
+/** What a commit may change of its own plan, approval and relation. */
+async function commitState(planId: string, approvalId: string, toRef: string) {
+  return db
+    .prepare(`SELECT
+      (SELECT status FROM change_plans WHERE plan_id=?1) AS plan,
+      (SELECT uses_remaining FROM approvals WHERE approval_id=?2) AS uses,
+      (SELECT count(*) FROM entity_relations WHERE to_ref=?3) AS relations`)
+    .bind(planId, approvalId, toRef)
+    .first<{ plan: string; uses: number; relations: number }>();
+}
+
+test("a commit that loses its key to another payload between its reads and its batch writes nothing", async () => {
+  // Two relation plans of one kind, approved by one principal, committed under
+  // one key. The winner commits after the loser has read that the key is free
+  // and before the loser's batch runs.
+  const winnerRef = `source_account:${(await seedParse(260, "smbc-bank:race-winner")).ref}`;
+  const loserRef = `source_account:${(await seedParse(261, "smbc-bank:race-loser")).ref}`;
+  const winner = await approvedRelation(winnerRef);
+  const loser = await approvedRelation(loserRef);
+  const before = await counts();
+  const loserBefore = await commitState(loser.plan.planId, loser.approval.approvalId, loserRef);
+  expect(loserBefore).toEqual({ plan: "approved", uses: 1, relations: 0 });
+
+  const raced = racedBeforeBatch(db, async () => {
+    expect(
+      await commitWith("op-race-same-kind", winner.plan, winner.approval.approvalId),
+    ).toMatchObject({ ok: true, replayed: false });
+  });
+  const result = await commit(d1CommandStore(raced), {
+    operationId: "op-race-same-kind",
+    principal: operator,
+    planId: loser.plan.planId,
+    approvalId: loser.approval.approvalId,
+    planners: changeMutationPlanners(raced),
+    now: NOW,
+  });
+  expect(result).toEqual({
+    ok: false,
+    error: "idempotency_conflict",
+    refs: ["op-race-same-kind"],
+  });
+  // The loser's plan stays open, its approval unspent, its relation unwritten:
+  // only the winner's receipt, decision, relation and outbox rows exist.
+  expect(await commitState(loser.plan.planId, loser.approval.approvalId, loserRef)).toEqual(
+    loserBefore,
+  );
+  expect(await commitState(winner.plan.planId, winner.approval.approvalId, winnerRef)).toEqual({
+    plan: "committed",
+    uses: 0,
+    relations: 1,
+  });
+  const after = await counts();
+  expect(after.receipts).toBe(before.receipts + 1);
+  expect(after.decisions).toBe(before.decisions + 1);
+  expect(after.relations).toBe(before.relations + 1);
+  expect(after.operations).toBe(before.operations + 1);
+  expect(after.outbox - before.outbox).toBe(winner.plan.simulation.outboxTargets?.length ?? 1);
+});
+
+test("an identity assignment that loses its key to a relation writes no mapping", async () => {
+  // The identity statements after its ledger row require a ledger row under
+  // the key; the relation that took the key wrote one. The receipt guard on
+  // each of them keeps the loser from adding a manual mapping no decision
+  // describes.
+  const winnerRef = `source_account:${(await seedParse(264, "smbc-bank:race-relation")).ref}`;
+  const winner = await approvedRelation(winnerRef);
+  const mapping = await seedParse(265, "smbc-bank:race-identity");
+  const loserPlan = await planFor(mapping.ref, await target("target-race-identity"));
+  const loserApproval = await approveFor(loserPlan);
+  const before = await counts();
+  const raced = racedBeforeBatch(db, async () => {
+    expect(
+      await commitWith("op-race-identity", winner.plan, winner.approval.approvalId),
+    ).toMatchObject({ ok: true, replayed: false });
+  });
+  const result = await commit(d1CommandStore(raced), {
+    operationId: "op-race-identity",
+    principal: operator,
+    planId: loserPlan.planId,
+    approvalId: loserApproval.approvalId,
+    planners: changeMutationPlanners(raced),
+    now: NOW,
+  });
+  expect(result).toEqual({
+    ok: false,
+    error: "idempotency_conflict",
+    refs: ["op-race-identity"],
+  });
+  const after = await counts();
+  expect(after.mappings).toBe(before.mappings);
+  expect(after.receipts).toBe(before.receipts + 1);
+  expect(after.decisions).toBe(before.decisions + 1);
+  expect(after.relations).toBe(before.relations + 1);
+  const loser = await db
+    .prepare(
+      `SELECT (SELECT status FROM change_plans WHERE plan_id=?1) AS plan,
+        (SELECT uses_remaining FROM approvals WHERE approval_id=?2) AS uses`,
+    )
+    .bind(loserPlan.planId, loserApproval.approvalId)
+    .first<{ plan: string; uses: number }>();
+  expect(loser).toEqual({ plan: "approved", uses: 1 });
+});
+
+test("an override release that loses its key to a relation writes no decision and supersedes nothing", async () => {
+  // The release's decision and supersession statements require a ledger row
+  // under the key, not its own; without the receipt guard on each, they ran
+  // on the relation's row and the decision log's append-only trigger refused
+  // the loser's batch with an SQL error instead of the conflict.
+  const winnerRef = `source_account:${(await seedParse(266, "smbc-bank:race-relation-2")).ref}`;
+  const winner = await approvedRelation(winnerRef);
+  const mapping = await seedParse(267, "smbc-bank:race-release");
+  const assignPlan = await planFor(mapping.ref, await target("target-race-release"));
+  expect(
+    await commitWith(
+      "op-race-release-assign",
+      assignPlan,
+      (await approveFor(assignPlan)).approvalId,
+    ),
+  ).toMatchObject({ ok: true, replayed: false });
+  const released = await createPlan(
+    "identity.release-override",
+    { subject: "account", referenceId: mapping.ref, reason: "synthetic raced release" },
+    { actor: operator, baseContextId: "identity-current-v1", now: NOW, ttlSeconds: 900 },
+    store,
+  );
+  if (!released.ok) throw new Error(`plan failed: ${released.error}`);
+  const releaseApproval = await approveFor(released.plan);
+  const activeOverrides = () =>
+    db
+      .prepare(
+        "SELECT count(*) AS n FROM decision_revisions WHERE subject_ref=? AND decision_kind='assign' AND superseded_by IS NULL",
+      )
+      .bind(mapping.ref)
+      .first<{ n: number }>();
+  expect(await activeOverrides()).toEqual({ n: 1 });
+  const before = await counts();
+  const raced = racedBeforeBatch(db, async () => {
+    expect(
+      await commitWith("op-race-release", winner.plan, winner.approval.approvalId),
+    ).toMatchObject({ ok: true, replayed: false });
+  });
+  const result = await commit(d1CommandStore(raced), {
+    operationId: "op-race-release",
+    principal: operator,
+    planId: released.plan.planId,
+    approvalId: releaseApproval.approvalId,
+    planners: changeMutationPlanners(raced),
+    now: NOW,
+  });
+  expect(result).toEqual({ ok: false, error: "idempotency_conflict", refs: ["op-race-release"] });
+  const after = await counts();
+  expect(after.decisions).toBe(before.decisions + 1);
+  expect(after.relations).toBe(before.relations + 1);
+  expect(await activeOverrides()).toEqual({ n: 1 });
+});
+
+test("an identical commit that loses the same race returns the stored receipt and writes nothing", async () => {
+  const ref = `source_account:${(await seedParse(262, "smbc-bank:race-replay")).ref}`;
+  const { plan, approval } = await approvedRelation(ref);
+  let first: Awaited<ReturnType<typeof commit>> | undefined;
+  const raced = racedBeforeBatch(db, async () => {
+    first = await commitWith("op-race-replay", plan, approval.approvalId);
+  });
+  const before = await counts();
+  const replay = await commit(d1CommandStore(raced), {
+    operationId: "op-race-replay",
+    principal: operator,
+    planId: plan.planId,
+    approvalId: approval.approvalId,
+    planners: changeMutationPlanners(raced),
+    now: NOW,
+  });
+  expect(first).toMatchObject({ ok: true, replayed: false });
+  expect(replay).toMatchObject({ ok: true, replayed: true });
+  if (!first?.ok || !replay.ok) throw new Error("unreachable");
+  expect(replay.receipt).toEqual(first.receipt);
+  const after = await counts();
+  expect(after.receipts).toBe(before.receipts + 1);
+  expect(after.decisions).toBe(before.decisions + 1);
+  expect(after.relations).toBe(before.relations + 1);
+  expect(await commitState(plan.planId, approval.approvalId, ref)).toEqual({
+    plan: "committed",
+    uses: 0,
+    relations: 1,
+  });
+});
+
+test("an identical commit that loses the race spends no second use of a multi-use approval", async () => {
+  const ref = `source_account:${(await seedParse(263, "smbc-bank:race-uses")).ref}`;
+  const { plan } = await approvedRelation(ref);
+  const approved = await approve(store, {
+    planId: plan.planId,
+    planDigest: plan.planDigest,
+    actor: operator,
+    scope: [],
+    ttlSeconds: 600,
+    now: NOW,
+    uses: 3,
+  });
+  if (!approved.ok) throw new Error(`approve failed: ${approved.error}`);
+  const approvalId = approved.approval.approvalId;
+  const raced = racedBeforeBatch(db, async () => {
+    expect(await commitWith("op-race-uses", plan, approvalId)).toMatchObject({
+      ok: true,
+      replayed: false,
+    });
+  });
+  expect(
+    await commit(d1CommandStore(raced), {
+      operationId: "op-race-uses",
+      principal: operator,
+      planId: plan.planId,
+      approvalId,
+      planners: changeMutationPlanners(raced),
+      now: NOW,
+    }),
+  ).toMatchObject({ ok: true, replayed: true });
+  // One commit, one use: the replay found the plan already committed.
+  expect(await commitState(plan.planId, approvalId, ref)).toEqual({
+    plan: "committed",
+    uses: 2,
+    relations: 1,
+  });
+});
+
+/** An identity assignment written by the direct `/identity-revise` route, which keeps no receipt. */
+async function directAssign(operationId: string, ref: string, targetId: string) {
+  const direct = await executeIdentityCommand(
+    db,
+    {
+      operationId,
+      actorId: operator.id,
+      actorVerification: "server",
+      action: "assign",
+      kind: "account",
+      referenceId: ref,
+      expectedRevision: 1,
+      targetId,
+      reason: "synthetic direct correction",
+    },
+    IDENTITY_POLICY_VERSION,
+  );
+  if (!direct.ok) throw new Error(`direct assign failed: ${direct.error}`);
+  return direct.receipt;
+}
+
+test("a relation commit refuses an operation id the direct identity route already used", async () => {
+  // Both routes derive the decision id from the operation id alone. The
+  // direct route writes a decision ledger row but no receipt, so the
+  // receipt guard alone let the relation commit find the identity decision
+  // under its own decision id and try to link it, which the 0029
+  // provenance trigger refused with an uncaught SQL error.
+  const direct = await seedParse(290, "smbc-bank:collide-direct");
+  const identity = await directAssign(
+    "op-collide-relation",
+    direct.ref,
+    await target("target-collide-relation"),
+  );
+  const ref = `source_account:${(await seedParse(291, "smbc-bank:collide-relation")).ref}`;
+  const { plan, approval } = await approvedRelation(ref);
+  const before = await counts();
+  expect(await commitWith("op-collide-relation", plan, approval.approvalId)).toEqual({
+    ok: false,
+    error: "idempotency_conflict",
+    refs: ["op-collide-relation"],
+  });
+  expect(await counts()).toEqual(before);
+  expect(await commitState(plan.planId, approval.approvalId, ref)).toEqual({
+    plan: "approved",
+    uses: 1,
+    relations: 0,
+  });
+  expect(
+    await db
+      .prepare("SELECT count(*) AS n FROM entity_relations WHERE decision_revision_id=?")
+      .bind(identity.decisionRevisionId)
+      .first<{ n: number }>(),
+  ).toEqual({ n: 0 });
+  // A fresh operation id commits the same plan.
+  expect(await commitWith("op-collide-relation-fresh", plan, approval.approvalId)).toMatchObject({
+    ok: true,
+    replayed: false,
+  });
+});
+
+test("an identity commit refuses an operation id the direct identity route already used", async () => {
+  // Without the refusal the commit found the direct route's ledger row,
+  // wrote no mapping and still returned an accepted receipt.
+  const direct = await seedParse(292, "smbc-bank:collide-direct-identity");
+  await directAssign(
+    "op-collide-identity",
+    direct.ref,
+    await target("target-collide-identity-direct"),
+  );
+  const mapping = await seedParse(293, "smbc-bank:collide-identity");
+  const plan = await planFor(mapping.ref, await target("target-collide-identity"));
+  const approval = await approveFor(plan);
+  const before = await counts();
+  expect(await commitWith("op-collide-identity", plan, approval.approvalId)).toEqual({
+    ok: false,
+    error: "idempotency_conflict",
+    refs: ["op-collide-identity"],
+  });
+  expect(await counts()).toEqual(before);
+  expect((await loadPlan(store, plan.planId))!.status).toBe("approved");
+});
+
+test("a relation commit refuses an operation id the reconciliation rule acceptance already used", async () => {
+  // The rule acceptance keeps a ledger row and no receipt. Without the
+  // refusal the commit skipped its own ledger insert and wrote its decision
+  // and relation against the rule's ledger row, an operation it is not.
+  await db
+    .prepare(
+      `INSERT INTO reconciliation_proposals(id,kind,stage,target_refs_json,method,policy_release,
+      rationale_codes_json,rejection_conditions_json,evidence_refs_json,status,decision_revision_id,proposal_digest,created_at)
+     VALUES('rp_collide','pending_to_posted','B',?,'rule','synthetic-policy','[]','[]','[]','proposed',NULL,?,?)`,
+    )
+    .bind(
+      JSON.stringify([
+        { kind: "transaction", id: "transaction:collide-a", revision: "1" },
+        { kind: "transaction", id: "transaction:collide-b", revision: "1" },
+      ]),
+      "e".repeat(64),
+      NOW,
+    )
+    .run();
+  const accepted = await acceptProposal(db, {
+    operationId: "reconciliation-collide",
+    actorId: "rule:reconciliation-v1",
+    actorVerification: "server",
+    proposalId: "rp_collide",
+    expectedStatus: "proposed",
+    method: "rule",
+    reason: "synthetic provider link evidence",
+  });
+  expect(accepted).toMatchObject({ ok: true, replayed: false });
+  const ref = `source_account:${(await seedParse(294, "smbc-bank:collide-rule")).ref}`;
+  const { plan, approval } = await approvedRelation(ref);
+  const before = await counts();
+  expect(await commitWith("reconciliation-collide", plan, approval.approvalId)).toEqual({
+    ok: false,
+    error: "idempotency_conflict",
+    refs: ["reconciliation-collide"],
+  });
+  expect(await counts()).toEqual(before);
+  expect(await commitState(plan.planId, approval.approvalId, ref)).toEqual({
+    plan: "approved",
+    uses: 1,
+    relations: 0,
+  });
+  expect(await commitWith("reconciliation-collide-fresh", plan, approval.approvalId)).toMatchObject(
+    { ok: true, replayed: false },
+  );
 });
 
 test("relations are accepted as typed claims with their own decision; rejecting appends a new revision", async () => {

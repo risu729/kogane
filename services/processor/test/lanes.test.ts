@@ -45,10 +45,10 @@ const job = (id: number) =>
     .bind(id)
     .first<{ lane: string; status: string; replay_plan_id: number | null }>();
 
-test("harness applies every Layer B migration in order through 0082", () => {
+test("harness applies every Layer B migration in order through 0083", () => {
   const names = layerBMigrations();
   expect(names[0]).toBe("0017_observation_pipeline.sql");
-  expect(names.at(-1)).toBe("0082_collection_lease_heartbeat.sql");
+  expect(names.at(-1)).toBe("0083_parse_runs_pending_index.sql");
   expect(names).toEqual([
     "0017_observation_pipeline.sql",
     "0018_identity.sql",
@@ -109,6 +109,7 @@ test("harness applies every Layer B migration in order through 0082", () => {
     "0079_instrument_temporal_journal.sql",
     "0080_jpoint_program.sql",
     "0082_collection_lease_heartbeat.sql",
+    "0083_parse_runs_pending_index.sql",
   ]);
   expect([...names].sort()).toEqual(names);
 });
@@ -473,6 +474,9 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
     "observation_sweep",
     "collection_scan",
     "identity_sweep",
+    // Unflagged (ADR 0055 amendment 2026-11-08): a gate ends the tick when
+    // no pair of the rule's shape waits.
+    "instrument_auto_adoption",
     "balance_projection",
     // Unflagged: it writes append-only prices only (ADR 0020).
     "price_promotion",
@@ -481,7 +485,16 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
     // Unflagged (ADR 0064): writes only once a capped day has ended.
     "audit_overflow",
   ]);
-  expect(lines[4]).toEqual({
+  expect(lines[3]).toEqual({
+    event: "instrument_auto_adoption",
+    pairs: 0,
+    evaluated: false,
+    eligible: 0,
+    adopted: 0,
+    conflicts: 0,
+    refused: 0,
+  });
+  expect(lines[5]).toEqual({
     event: "price_promotion",
     scanned: expect.any(Number),
     promoted: expect.any(Number),
@@ -497,7 +510,7 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
   // and do nothing: no R2 list, no CORE write, no cursor movement
   // (docs/processor.md §6).
   expect(lines[1]).toMatchObject({ event: "collection_scan", enabled: false, status: "skipped" });
-  expect(lines[5]).toMatchObject({
+  expect(lines[6]).toMatchObject({
     event: "operation_dispatch",
     enabled: false,
     status: "skipped",

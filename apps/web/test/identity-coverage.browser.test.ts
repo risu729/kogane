@@ -123,6 +123,7 @@ describe.if(runnable)("instrument counts on the identity page", () => {
         "識別子",
         "未判断の候補あり",
         "判断により同じ銘柄",
+        "自動規則により同じ銘柄",
         "判断の記録なしで同じ銘柄（要確認）",
         "別の銘柄と判断済み",
         "候補なし",
@@ -133,8 +134,8 @@ describe.if(runnable)("instrument counts on the identity page", () => {
           trs.map((tr) => [...tr.querySelectorAll("td")].map((td) => td.textContent)),
         );
       expect(rows).toEqual([
-        ["sbi-securities", "8", "4", "0", "0", "0", "4"],
-        [BROKER_B, "3", "1", "0", "0", "0", "2"],
+        ["sbi-securities", "8", "4", "0", "0", "0", "0", "4"],
+        [BROKER_B, "3", "1", "0", "0", "0", "0", "2"],
       ]);
       // Counts only: no total across sources, no rate.
       const table = await region.locator("table").innerText();

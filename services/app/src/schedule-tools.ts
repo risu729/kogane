@@ -7,6 +7,7 @@ import {
   grantAllowsScheduleSource,
 } from "../../../packages/application/src/index";
 import type { ToolResult } from "./agent-service";
+import { mcpInputSchema } from "./mcp-input-schema";
 
 /** On `/mcp` and, as `schedules.maintenance.read`, on `/api/agent/v1/*`. */
 export const SCHEDULE_READ_TOOL = "kogane.schedules.maintenance.read";
@@ -25,8 +26,7 @@ const scheduleReadSchema = z.strictObject({ source: sourceId.optional() });
 
 /** The published JSON Schema of one argument schema, without the meta key. */
 function inputSchema(schema: z.ZodType): Record<string, unknown> {
-  const generated = z.toJSONSchema(schema) as Record<string, unknown>;
-  delete generated["$schema"];
+  const generated = mcpInputSchema(schema);
   return generated;
 }
 
@@ -116,8 +116,9 @@ export async function readScheduleTool(
 /**
  * `kogane.schedules.lease.release` on `/mcp` (ADR 0081 point 3): the schedules
  * page's 停止した実行を解除 button exists as a tool, and refuses every call. Releasing a
- * lease asserts that its execution stopped, which the server cannot verify, so
- * the release stays R3, the operator's in the UI (ADR 0063 item 5). The tool
+ * lease asserts that its execution stopped before the server can tell from ten
+ * minutes of heartbeat silence (ADR 0085), so the release stays R3, the
+ * operator's in the UI (ADR 0063 item 5). The tool
  * reads no argument, relays nothing to the Processor and touches no store; the
  * call is recorded as refused under `schedules.lease.release` on `mcp`.
  */
@@ -137,7 +138,7 @@ export const LEASE_RELEASE_MCP_TOOLS = [
     name: LEASE_RELEASE_TOOL,
     title: "Release a stopped collection's lease (operator only)",
     description:
-      "Refuses every call with operation_not_delegable. Releasing a collection lease asserts that the execution holding it stopped, which the server cannot verify, so only the operator releases it on the schedules page (risk class R3). The call is recorded; nothing is released and the Processor is not contacted.",
+      "Refuses every call with operation_not_delegable. Releasing a collection lease asserts that the execution holding it stopped before the server can tell, so only the operator releases it early on the schedules page (risk class R3). The Processor frees a lease itself once its heartbeat has been silent for ten minutes. The call is recorded; nothing is released and the Processor is not contacted.",
     inputSchema: inputSchema(leaseReleaseSchema),
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   },

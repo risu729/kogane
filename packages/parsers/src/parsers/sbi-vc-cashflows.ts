@@ -29,7 +29,10 @@ const ITEM_FIELDS = [
 
 export const sbiVcCashflows: Parser = {
   name: "sbi-vc-cashflows",
-  version: "0.2.0",
+  // 0.2.1: an ISO provider timestamp whose date, clock or offset does not
+  // exist is refused like the slash form (sbi-vc-common providerTimestamp);
+  // every timestamp that exists reads exactly as in 0.2.0.
+  version: "0.2.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return acceptsSbiVcDataset(artifact, DATASET);

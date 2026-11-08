@@ -49,6 +49,11 @@ import {
   type BalanceProjectionReader,
   type BalanceSnapshotRow,
   type ProjectionPageRow,
+  snapshotIsBehind,
+  subtotalCountKey,
+  type CoreRevisionRow,
+  type ServableSnapshot,
+  type SnapshotRefusal,
 } from "../../../packages/read-model/src/index";
 import {
   checkReadCursor,
@@ -59,9 +64,12 @@ import {
   type PointerRow,
   type ReadProjectionReader,
 } from "../../../packages/storage-d1/src/read/index.ts";
-import { HttpError, json } from "./http";
-import { decimalRows } from "./normalized-decimals";
-import { organizationContext, organizeRows } from "./observation-organization";
+import { HttpError } from "./http";
+import { decimalRows } from "../../../packages/application/src/query/normalized-decimals.ts";
+import {
+  organizationContext,
+  organizeRows,
+} from "../../../packages/application/src/query/observation-organization.ts";
 
 export const V2_LATEST_PATH = "/api/v2/balances/latest";
 export const V2_HISTORY_PATH = "/api/v2/balances/history";
@@ -103,7 +111,10 @@ export interface ReadTarget {
 }
 
 export async function readTarget(env: Env): Promise<ReadTarget> {
-  const reader = balanceProjectionReader(env);
+  return await targetOf(balanceProjectionReader(env));
+}
+
+async function targetOf(reader: BalanceProjectionReader): Promise<ReadTarget> {
   const read = reader as ReadProjectionReader;
   const [instance, pointer] = await Promise.all([read.readInstance(), read.readPointer()]);
   // A READ database nobody has built into yet has no identity and no
@@ -133,8 +144,9 @@ export async function readTarget(env: Env): Promise<ReadTarget> {
 async function snapshotRefusal(
   target: ReadTarget,
   snapshot: BalanceSnapshotRow,
-): Promise<string | null> {
-  const revision = await target.reader.coreRevision();
+  currentRevision?: CoreRevisionRow,
+): Promise<SnapshotRefusal | null> {
+  const revision = currentRevision ?? (await target.reader.coreRevision());
   // The published snapshot is vouched for by the pointer: a build whose
   // content did not change still re-captured it at the current revision and
   // moved the watermark, so the pointer is what says "this was verified under
@@ -151,6 +163,26 @@ async function snapshotRefusal(
   return null;
 }
 
+/**
+ * The published snapshot under the routes' own rules, for a reader that is
+ * not a route: another READ contract, another CORE epoch and a changed use
+ * restriction are each refused with the code the routes answer 503 with, and
+ * no published snapshot is `null`. The agent query's `holdings` takes its
+ * snapshot from here, never from `currentSnapshot()` directly, so it cannot
+ * sum a snapshot the routes refuse (05 §7).
+ */
+export async function servableSnapshot(reader: BalanceProjectionReader): Promise<ServableSnapshot> {
+  const target = await targetOf(reader);
+  if (target.contractMismatch) return { refusal: "read_model_unavailable" };
+  const snapshot = await reader.currentSnapshot();
+  if (!snapshot) return null;
+  const revision = await reader.coreRevision();
+  const refusal = await snapshotRefusal(target, snapshot, revision);
+  return refusal === null
+    ? { snapshot, behind: snapshotIsBehind(target.pointer, snapshot.snapshot_id, revision) }
+    : { refusal };
+}
+
 /** The scope the routes accept; the same allow-listed keys the v1 list uses. */
 export interface V2Scope {
   source?: string;
@@ -160,7 +192,7 @@ export interface V2Scope {
   measureView?: "balances" | "summaries";
 }
 
-function scopeOf(url: URL): V2Scope {
+function scopeOf(url: Pick<URL, "searchParams">): V2Scope {
   const view = url.searchParams.get("view");
   return {
     ...(url.searchParams.get("source") ? { source: url.searchParams.get("source")! } : {}),
@@ -173,7 +205,7 @@ function scopeOf(url: URL): V2Scope {
   };
 }
 
-function pageLimit(url: URL): number {
+function pageLimit(url: Pick<URL, "searchParams">): number {
   const text = url.searchParams.get("limit");
   if (text === null) return DEFAULT_PROJECTION_PAGE_LIMIT;
   // One of the offered sizes as written: `Number` alone would also read
@@ -370,12 +402,7 @@ async function snapshotBehind(
   snapshot: BalanceSnapshotRow,
 ): Promise<boolean> {
   const [pointer, revision] = await Promise.all([reader.activePointer(), reader.coreRevision()]);
-  return (
-    pointer === null ||
-    pointer.snapshot_id !== snapshot.snapshot_id ||
-    pointer.source_revision !== revision.source_revision ||
-    pointer.core_epoch !== revision.core_epoch
-  );
+  return snapshotIsBehind(pointer, snapshot.snapshot_id, revision);
 }
 
 async function dataCoverage(
@@ -406,10 +433,13 @@ async function dataCoverage(
 /**
  * Assets the adopted set accounts for, per unit, over the whole filter scope
  * rather than the page. Exact integer arithmetic only; a unit is summed only
- * across distinct subject scopes, so a subject reported twice makes the
- * subtotal unavailable instead of double counting it (INV06). There is
- * deliberately no net worth: unfetched liabilities mean this is not even a
- * lower bound (addendum 05 section 5).
+ * across distinct subject scopes, so a subject reported twice in one unit
+ * makes the subtotal unavailable instead of double counting it (INV06). One
+ * subject may hold several units (an exchange account's cash per asset, a
+ * broker's foreign cash per currency): each unit is its own figure, so that
+ * is not a subject reported twice. There is deliberately no net worth:
+ * unfetched liabilities mean this is not even a lower bound (addendum 05
+ * section 5).
  */
 async function knownAssetSubtotals(
   reader: BalanceProjectionReader,
@@ -426,14 +456,15 @@ async function knownAssetSubtotals(
     };
   const subjects = new Set<string>();
   for (const row of rows) {
-    if (subjects.has(row.subject_scope_key))
+    const key = subtotalCountKey(row);
+    if (subjects.has(key))
       return {
         policyRelease: KNOWN_ASSETS_POLICY,
         knownAssetsSubtotal: null,
         liabilitiesCoverage: "unknown",
         reasonCode: "subject_reported_twice",
       };
-    subjects.add(row.subject_scope_key);
+    subjects.add(key);
   }
   const totals = new Map<string, { coefficient: string; scale: number; adoptedCount: number }>();
   for (const row of rows) {
@@ -473,7 +504,7 @@ interface Continuation {
  */
 async function continuation(
   target: ReadTarget,
-  url: URL,
+  url: Pick<URL, "searchParams">,
   digest: string,
 ): Promise<Continuation | null> {
   if (target.contractMismatch) throw new HttpError(503, "read_model_unavailable");
@@ -528,8 +559,8 @@ export async function legacyLatestFromProjection(
   if (!snapshot || (await snapshotBehind(reader, snapshot))) return null;
   if ((await snapshotRefusal(target, snapshot)) !== null) return null;
   const rows = await reader.legacyLatestPage(snapshot.snapshot_id, scope, latestOffset, 501);
-  const organized = await organizeRows(env.DB, "balance", rows.map(balanceRowOf), mode);
-  const withDecimals = await decimalRows(env.DB, "balance", organized);
+  const organized = await organizeRows(d1Executor(env.DB), "balance", rows.map(balanceRowOf), mode);
+  const withDecimals = await decimalRows(d1Executor(env.DB), "balance", organized);
   return rows.map((row, index) => ({
     ...withDecimals[index]!,
     interpretation: interpretationOf(row, evidenceOf(row)),
@@ -544,9 +575,9 @@ export async function legacyLatestFromProjection(
  */
 export async function latestBalancePage(
   env: Env,
-  url: URL,
+  url: Pick<URL, "searchParams">,
   mode: IdentityReadMode,
-): Promise<Response> {
+): Promise<LatestBalancePage> {
   const target = await readTarget(env);
   const reader = target.reader;
   const scope = scopeOf(url);
@@ -566,8 +597,8 @@ export async function latestBalancePage(
   );
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
-  const organized = await organizeRows(env.DB, "balance", page.map(balanceRowOf), mode);
-  const withDecimals = await decimalRows(env.DB, "balance", organized);
+  const organized = await organizeRows(d1Executor(env.DB), "balance", page.map(balanceRowOf), mode);
+  const withDecimals = await decimalRows(d1Executor(env.DB), "balance", organized);
   const items: LatestBalanceItem[] = page.map((row, index) => {
     const evidence = evidenceOf(row);
     const temporal: unknown = JSON.parse(row.temporal_json);
@@ -621,7 +652,7 @@ export async function latestBalancePage(
       organized.map((row) => row.organization),
     ),
   };
-  return json(body);
+  return body;
 }
 
 /**
@@ -631,9 +662,9 @@ export async function latestBalancePage(
  */
 export async function balanceHistoryPage(
   env: Env,
-  url: URL,
+  url: Pick<URL, "searchParams">,
   mode: IdentityReadMode,
-): Promise<Response> {
+): Promise<BalanceHistoryPage> {
   const target = await readTarget(env);
   const reader = target.reader;
   const scope = scopeOf(url);
@@ -653,8 +684,8 @@ export async function balanceHistoryPage(
   );
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
-  const organized = await organizeRows(env.DB, "balance", page, mode);
-  const withDecimals = await decimalRows(env.DB, "balance", organized);
+  const organized = await organizeRows(d1Executor(env.DB), "balance", page, mode);
+  const withDecimals = await decimalRows(d1Executor(env.DB), "balance", organized);
   const items: BalanceHistoryItem[] = page.map((row, index) => {
     const evidence: BalanceEvidenceMember[] = [
       { ref: `balance:${String(row.id)}`, observationId: row.id, metric: row.metric },
@@ -728,5 +759,5 @@ export async function balanceHistoryPage(
       organized.map((row) => row.organization),
     ),
   };
-  return json(body);
+  return body;
 }

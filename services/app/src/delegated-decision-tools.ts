@@ -15,6 +15,9 @@ import {
   getReceipt,
   statusForCommandError,
   replayDelegatedConfirmation,
+  DECISION_CAPABILITIES,
+  decisionCapability,
+  decisionFamilyOf,
   type DelegationCapability,
   type DelegationResolution,
   type OperationCall,
@@ -24,6 +27,7 @@ import { HttpError } from "./http";
 import { parseRequest } from "./ops-api";
 import { commandsEnabled } from "./command-api";
 import { upstreamOutcome, UpstreamLost } from "./audit";
+import { mcpInputSchema } from "./mcp-input-schema";
 
 const ID = z.string().regex(/^[0-9a-f]{64}$/u);
 const KEY = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
@@ -46,17 +50,13 @@ const schemas = {
   }),
 };
 export type DelegatedDecisionTool = keyof typeof schemas;
-export const EXECUTABLE_DECISION_CAPABILITIES = [
-  "commands.decide.card-settlement",
-  "commands.decide.relation",
-  "commands.decide.identity",
-] as const satisfies readonly DelegationCapability[];
+/** Derived from `DECISION_FAMILIES`, the list every decision gate reads. */
+export const EXECUTABLE_DECISION_CAPABILITIES = DECISION_CAPABILITIES;
 export function isDelegatedDecisionTool(name: string): name is DelegatedDecisionTool {
   return Object.hasOwn(schemas, name);
 }
 const descriptors = Object.entries(schemas).map(([name, schema]) => {
-  const inputSchema = z.toJSONSchema(schema) as Record<string, unknown>;
-  delete inputSchema["$schema"];
+  const inputSchema = mcpInputSchema(schema);
   return {
     name,
     title: name.slice(7),
@@ -74,10 +74,10 @@ export function delegatedDecisionTools(env: Env, resolution: DelegationResolutio
     ? descriptors
     : [];
 }
-function capability(kind: string): DelegationCapability {
-  const family = kind.split(".")[0];
-  if (family === "identity" || family === "relation" || family === "card-settlement")
-    return `commands.decide.${family}`;
+/** The capability deciding a plan of `kind` needs; refused for a family outside `DECISION_FAMILIES`. */
+export function decisionCapabilityFor(kind: string): DelegationCapability {
+  const family = decisionFamilyOf(kind);
+  if (family !== null) return decisionCapability(family);
   throw new DelegatedOperationError("operation_not_delegable");
 }
 export async function callDelegatedDecisionTool(
@@ -107,7 +107,7 @@ export async function callDelegatedDecisionTool(
     const store = d1CommandStore(env.DB);
     const plan = await loadPlan(store, parsed.planId);
     if (!plan) throw new HttpError(404, "plan_not_found");
-    const cap = capability(plan.kind);
+    const cap = decisionCapabilityFor(plan.kind);
     delegatedCan(principal, cap);
     const { step, confirmationDigest, ...payload } = parsed;
     const key = "operationId" in payload ? payload.operationId : payload.idempotencyKey;

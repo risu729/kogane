@@ -50,6 +50,17 @@ const SOCKET_ERROR_CODES = new Set([
   "ERR_STREAM_PREMATURE_CLOSE",
 ]);
 
+/** A closed code for a socket error: one of SOCKET_ERROR_CODES or `unclassified`. */
+function socketErrorCode(error) {
+  let code;
+  try {
+    code = error?.code;
+  } catch {
+    /* An accessor failure remains unclassified. */
+  }
+  return typeof code === "string" && SOCKET_ERROR_CODES.has(code) ? code : "unclassified";
+}
+
 // Counts describe data messages queued/received at ws's public API, not wire
 // delivery acknowledgements. Only lengths and fixed labels enter these records.
 export function relayDiagnostics(relayId, runId, hostname) {
@@ -125,16 +136,7 @@ export function relayDiagnostics(relayId, runId, hostname) {
         )
           entry.receivedCode = details.receivedCode;
         const error = details.error;
-        if (error) {
-          let code;
-          try {
-            code = error.code;
-          } catch {
-            /* An accessor failure remains unclassified. */
-          }
-          entry.errorCode =
-            typeof code === "string" && SOCKET_ERROR_CODES.has(code) ? code : "unclassified";
-        }
+        if (error) entry.errorCode = socketErrorCode(error);
         closeTimeline.push(entry);
         console.log(
           JSON.stringify({
@@ -270,7 +272,7 @@ export function trackRelayClosure(
   };
 }
 
-export function parseConnectAuthority(authority) {
+function parseConnectAuthority(authority) {
   try {
     const target = new URL(`http://${authority}`);
     if (
@@ -292,6 +294,20 @@ export function parseConnectAuthority(authority) {
   }
 }
 
+/**
+ * A local HTTP CONNECT proxy for Chrome that carries each allowed tunnel over
+ * an authenticated WebSocket to the Worker's `/tcp` relay.
+ *
+ * Every local socket keeps an `error` listener for its whole life. The HTTP
+ * server removes its own listener when it hands a CONNECT socket over, so a
+ * refused CONNECT (Chrome's background hosts outside the allowlist) answered
+ * with `end(403)` and left paused had none: Chrome resetting it was an
+ * unhandled `read ECONNRESET` that ended the container process (seen in the
+ * GLOBAL PASS copy of this relay on 2026-11-07 18:17 UTC).
+ *
+ * `close()` logs one `sbi-shinsei-container-relay-summary` line: CONNECT requests by
+ * outcome and local socket errors by closed code. No host, URL or payload.
+ */
 export function startConnectRelay({
   relayToken,
   relayUrl,
@@ -301,6 +317,25 @@ export function startConnectRelay({
 }) {
   const sockets = new Set();
   const relays = new Set();
+  const counts = {
+    connects: 0,
+    refused: 0,
+    refusedWhileClosing: 0,
+    established: 0,
+    upstreamFailed: 0,
+    upstreamTimeout: 0,
+    abandoned: 0,
+    serverErrors: 0,
+  };
+  const socketErrors = {};
+  const countSocketError = (error) => {
+    try {
+      const code = socketErrorCode(error);
+      socketErrors[code] = (socketErrors[code] ?? 0) + 1;
+    } catch {
+      /* Counting cannot alter transport behavior. */
+    }
+  };
   let closing;
   let runId;
   try {
@@ -324,14 +359,24 @@ export function startConnectRelay({
   });
 
   server.on("connect", (request, socket, head) => {
+    // The HTTP server stops listening for this socket's errors once it hands
+    // the socket over. This listener stays for the socket's whole life, so a
+    // reset can end a tunnel but never the process.
+    socket.on("error", countSocketError);
     socket.pause();
+    counts.connects++;
     if (closing) {
+      counts.refusedWhileClosing++;
       socket.destroy();
       return;
     }
     const address = parseConnectAuthority(request.url ?? "");
     if (!address || address.port !== 443 || !allowedHosts.has(address.hostname)) {
+      counts.refused++;
       socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+      // Read and drop whatever Chrome still sends, so its close is seen and
+      // the socket is released instead of lingering paused.
+      socket.resume();
       return;
     }
 
@@ -372,14 +417,21 @@ export function startConnectRelay({
       if (responseSent || socket.destroyed) return;
       responseSent = true;
       socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+      socket.resume();
     };
     const timeout = setTimeout(() => {
       diagnostic.mark("connect-timeout", relay);
+      if (!established && !responseSent && !socket.destroyed) counts.upstreamTimeout++;
       if (!established) rejectConnect("504 Gateway Timeout");
       void lifecycle.abort();
     }, connectTimeoutMs);
 
     const closeRelay = () => {
+      // Chrome dropped the socket before it got any answer (e.g. a preconnect).
+      if (!responseSent) {
+        responseSent = true;
+        counts.abandoned++;
+      }
       diagnostic.mark("local-tcp-close", relay);
       clearTimeout(timeout);
       void lifecycle.close();
@@ -391,6 +443,7 @@ export function startConnectRelay({
     };
     const fail = () => {
       clearTimeout(timeout);
+      if (!established && !responseSent && !socket.destroyed) counts.upstreamFailed++;
       if (!established) rejectConnect("502 Bad Gateway");
       else if (!socket.destroyed) socket.destroy();
     };
@@ -424,8 +477,9 @@ export function startConnectRelay({
             clearTimeout(timeout);
             established = true;
             responseSent = true;
+            counts.established++;
             relayStream = createWebSocketStream(relay);
-            relayStream.once("error", (error) => {
+            relayStream.on("error", (error) => {
               diagnostic.mark("websocket-stream-error", relay, { error });
               fail();
             });
@@ -444,7 +498,7 @@ export function startConnectRelay({
         initialFailure(error);
       }
     });
-    relay.once("error", (error) => {
+    relay.on("error", (error) => {
       diagnostic.mark("websocket-error", relay, { error });
       fail();
     });
@@ -469,6 +523,24 @@ export function startConnectRelay({
         reject(new Error("CONNECT relay did not expose a TCP port"));
         return;
       }
+      server.off("error", reject);
+      server.on("error", () => {
+        counts.serverErrors++;
+      });
+      const logSummary = () => {
+        try {
+          console.log(
+            JSON.stringify({
+              event: "sbi-shinsei-container-relay-summary",
+              ...(runId ? { runId } : {}),
+              ...counts,
+              socketErrors,
+            }),
+          );
+        } catch {
+          /* Logging must not prevent shutdown. */
+        }
+      };
       resolve({
         port: address.port,
         close: () => {
@@ -479,6 +551,7 @@ export function startConnectRelay({
             const relayClosures = [...relays].map((lifecycle) => lifecycle.shutdown());
             for (const socket of sockets) socket.destroy();
             server.close((error) => {
+              logSummary();
               if (error) closeReject(error);
               else Promise.all(relayClosures).then(done, closeReject);
             });

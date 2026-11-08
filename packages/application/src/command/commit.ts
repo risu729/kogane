@@ -253,7 +253,11 @@ export async function commit(
   }
 
   const expectedJson = expectedRevisionsJson(plan.expectedRevisions);
-  const guard: CommitGuard = receiptExistsGuard(operationId, principal.id);
+  // This command's own receipt: the same key with another payload's receipt
+  // (a command that took the key since the lookup above) admits none of the
+  // batch's statements.
+  const receiptKey = { operationId, principal: principal.id, payloadDigest };
+  const guard: CommitGuard = receiptExistsGuard(receiptKey);
   const mutation = await planner({
     store,
     plan,
@@ -313,10 +317,10 @@ export async function commit(
       ...(precondition ? { precondition } : {}),
     }),
     ...mutation.writes,
-    approvalConsumptionWrite(approval.approval_id, operationId, principal.id),
-    planCommittedWrite(plan.planId, operationId, principal.id),
+    approvalConsumptionWrite(approval.approval_id, receiptKey),
+    planCommittedWrite(plan.planId, receiptKey),
     ...outboxTargets.map((target) =>
-      outboxWrite(mutation.decisionRevisionId, principal.id, operationId, target, input.now),
+      outboxWrite(mutation.decisionRevisionId, receiptKey, target, input.now),
     ),
   ];
   if (input.audit)
@@ -349,9 +353,17 @@ export async function commit(
   try {
     results = await store.batch(writes);
   } catch (error) {
-    // A CORE 0070 trigger refused the batch and D1 rolled it back whole. Its
-    // closed code is the answer; the message itself never leaves here. Any
-    // other error is not this commit's to explain.
+    // D1 rolled the batch back whole. An identical command that committed
+    // since the lookup above left this command's own receipt, and a writer
+    // whose statements are not idempotent on their own rows (the settlement
+    // writer's ledger row, an economic claim) fails on what that command
+    // wrote: the answer is its receipt, as for any replay.
+    const raced = await store.first<ReceiptRow>(RECEIPT_SQL, [principal.id, operationId]);
+    if (raced?.payload_digest === payloadDigest)
+      return { ok: true, replayed: true, receipt: receiptFromRow(raced) };
+    // A CORE 0070 trigger refused the batch. Its closed code is the answer;
+    // the message itself never leaves here. Any other error is not this
+    // commit's to explain.
     const code = economicGuardCode(error instanceof Error ? error.message : String(error));
     if (code === null) throw error;
     return commandError(GUARD_CONFLICTS.has(code) ? "stale_context" : "commit_failed", [
@@ -438,5 +450,14 @@ async function failureReason(
     [operationId],
   );
   if (taken) return commandError("idempotency_conflict", [operationId]);
+  // The operation id is taken in the decision ledger by a route that keeps
+  // no receipt (the direct identity command or the rule acceptance of a
+  // reconciliation proposal): its decision ids derive from the same key, so
+  // the reservation refuses it.
+  const ledger = await store.first<{ operation_id: string }>(
+    "SELECT operation_id FROM decision_operations WHERE operation_id=?1",
+    [operationId],
+  );
+  if (ledger) return commandError("idempotency_conflict", [operationId]);
   return commandError("commit_failed", [plan.planId]);
 }

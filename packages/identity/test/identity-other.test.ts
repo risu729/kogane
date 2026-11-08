@@ -240,6 +240,45 @@ describe("non-SBI account identification", () => {
       expect(result.account.key).toContain("fetch-run");
     }
   });
+  test("the MyJCB J-POINT total is the connection's reward account, apart from its statements", () => {
+    const account = "myjcb:synthetic-connection:j-point:total";
+    const plan = otherIdentity(
+      input("myjcb", account, { kind: "balance", currency: null, instrument: "J_POINT" }),
+    );
+    expect(plan.account).toEqual({
+      key: [account],
+      label: "MyJCB J-POINT",
+      role: "reward-account",
+      status: "provider-local",
+      reason: "provider-connection-jpoint-total",
+    });
+    expect(plan.issues).toEqual([]);
+    // The same reference in another run is the same account.
+    expect(
+      otherIdentity(input("myjcb", account, { kind: "balance", fetchRunId: 99 })).account.key,
+    ).toEqual(plan.account.key);
+    // Another connection's total is another account, and the statement root
+    // of the same connection keeps its own role and label.
+    expect(
+      otherIdentity(input("myjcb", "myjcb:other-connection:j-point:total")).account.key,
+    ).not.toEqual(plan.account.key);
+    expect(otherIdentity(input("myjcb", "myjcb:synthetic-connection:root")).account).toMatchObject({
+      label: "MyJCB請求口座",
+      role: "card-statement-aggregate",
+    });
+    for (const unexpected of [
+      "myjcb:synthetic-connection:j-point",
+      "myjcb:synthetic-connection:j-point:bucket-0",
+      "myjcb:synthetic-connection:j-point:total:extra",
+      "myjcb:Synthetic:j-point:total",
+      "myjcb::j-point:total",
+    ])
+      expect(otherIdentity(input("myjcb", unexpected)).account).toMatchObject({
+        status: "unresolved",
+        reason: "unrecognized-source-account",
+      });
+  });
+
   test.each([
     ["global-pass", "global-pass:card", "debit-card-activity", "provider-local"],
     ["myjcb", "myjcb:synthetic-connection:root", "card-statement-aggregate", "aggregate"],
@@ -311,6 +350,37 @@ describe("non-SBI account identification", () => {
     ["unknown", "paypay"],
   ])("%s rejects unaudited account %s", (source, account) => {
     expect(otherIdentity(input(source, account)).account.status).toBe("unresolved");
+  });
+
+  test("the source label table answers only for its own entries, each unchanged", () => {
+    // The table as it shipped before it became a Map.
+    const shipped: [string, string][] = [
+      ["vpass", "Vpassカード明細"],
+      ["global-pass", "GLOBAL PASSデビット明細"],
+      ["prestia", "SMBC信託銀行 PRESTIA"],
+      ["myjcb", "MyJCB請求口座"],
+      ["smbc-bank", "三井住友銀行 円普通預金"],
+      ["mizuho-bank", "みずほ銀行 普通預金"],
+      ["st-george", "St.George"],
+      ["sony-bank", "ソニー銀行"],
+      ["sbi-shinsei-bank", "SBI新生銀行 預金口座"],
+      ["sbi-vc-trade", "SBI VCトレード口座"],
+      ["v-point", "Vポイント"],
+      ["v-point-pay", "VポイントPay"],
+      ["mobile-suica", "モバイルSuica SF"],
+      ["moneyforward-me", "MoneyForward連携口座"],
+      ["paypay", "PayPay利用履歴"],
+    ];
+    for (const [source, label] of shipped)
+      expect(otherIdentity(input(source, `${source}:synthetic-unaudited`)).account.label).toBe(
+        label,
+      );
+    // An inherited name is not an entry: it gets the unidentified-source label,
+    // never a function or Object.prototype.
+    for (const source of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"])
+      expect(otherIdentity(input(source, `${source}:synthetic`)).account.label).toBe(
+        "未識別の取得元口座",
+      );
   });
 
   test("MF identity survives ordinal changes but never aliases by name", () => {

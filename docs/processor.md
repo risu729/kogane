@@ -72,21 +72,22 @@ remembered position inside a page could.
 
 **What spends one of the five** ([ADR 0024](adr/0024-collection-scan-judged-terminals.md)).
 Only new work does: a registration, a pending run the listing reaches, a
-first verdict, a retry that is due, a missing terminal, a registration that
-threw. The continuations that run before the listing have their own bound of
+first verdict, a retry that is due, a missing terminal. A registration that
+threw spends none (amendment of 2026-11-06, below). The continuations that run before the listing have their own bound of
 five and spend none of these. A terminal
 CORE has already judged under the current registration contract and the same
 terminal digest is answered from its `collection_runs` row and spends
 nothing:
 
-| Listed terminal                                                  | Attempted?                                   | Spends one of the five | Holds the page |
-| ---------------------------------------------------------------- | -------------------------------------------- | ---------------------- | -------------- |
-| no `collection_runs` row yet                                     | always                                       | yes                    | if over budget |
-| registered                                                       | no (`already_registered`)                    | no                     | no             |
-| blocked                                                          | never again under this contract version      | no                     | no             |
-| newest `registered` stage `retryable`, recorded under 24 h ago   | no; its recorded code is counted             | no                     | no             |
-| newest `registered` stage `retryable`, recorded 24 h ago or more | yes, once; a repeat refusal appends a row    | yes                    | if over budget |
-| `pending`                                                        | yes (continued first, and again when listed) | yes, when listed       | if over budget |
+| Listed terminal                                                  | Attempted?                                   | Spends one of the five | Holds the page                |
+| ---------------------------------------------------------------- | -------------------------------------------- | ---------------------- | ----------------------------- |
+| no `collection_runs` row yet                                     | always                                       | yes                    | if over budget                |
+| registered                                                       | no (`already_registered`)                    | no                     | no                            |
+| blocked                                                          | never again under this contract version      | no                     | no                            |
+| newest `registered` stage `retryable`, recorded under 24 h ago   | no; its recorded code is counted             | no                     | no                            |
+| newest `registered` stage `retryable`, recorded 24 h ago or more | yes, once; a repeat refusal appends a row    | yes                    | if over budget                |
+| `pending`                                                        | yes (continued first, and again when listed) | yes, when listed       | if over budget                |
+| its registration throws (nothing recorded)                       | yes, on every walk                           | no                     | if the 500 operations run out |
 
 Such an answer costs three operations of the invocation's budget (the
 terminal read, the conditional insert and the row read) for a registered or
@@ -114,9 +115,23 @@ cursor is null, also counted a cycle.
 
 A registration that **throws** — R2 or CORE unavailable, or a refusal CORE
 made that the derivation did not foresee — is counted in the lane's `failed`
-and logged by its error class only; nothing is recorded for that run, the
-page still advances and the next cycle tries it again. One failing run never
-stops the page and never pins the cursor (G1-13). A seal CORE's completeness
+and logged by its error class only, one
+`{"event":"collection_scan_registration_failed","code":…}` line per throw
+(`collectionScanStage` in `src/worker.ts`; the code is one of the finite
+built-in class labels of §7, never the error's writable name or message).
+Nothing is recorded for that run, the page still advances and the next walk
+tries it again. It spends none of the
+five, so failing runs never stop the page by themselves (G1-13; ADR 0024,
+amendment of 2026-11-06). Before that amendment each throw spent one, and a
+page with five or more terminals that throw on every attempt held the cursor
+for good. **Open limit:** a throw still costs the operations it spent, and
+the invocation's 500 (ADR 0010) still bound the tick. A throw late in a
+registration is expensive — a seal refusal re-verifies the run on every
+attempt, and one that yields at the budget first stays `pending` and is
+continued, and throws, on every tick — so a page whose throwing terminals
+spend the whole operation budget on every tick still holds the cursor:
+measured on the test's synthetic page, eight two-artifact runs refused at the
+seal finish their page and nine hold it. A seal CORE's completeness
 trigger refuses (`run_inventory_incomplete`) is not in this class: it is a
 verdict about the terminal and blocks the run (§3; ADR 0024, amendment of
 2026-09-26).
@@ -521,13 +536,23 @@ contract in `packages/collection/src/stages.ts`, before this table is reached.
 `runScheduled` in `src/worker.ts`, in order:
 
 ```text
-observation_sweep → collection_scan → identity_sweep → balance_projection
-  → reconciliation_sweep → card_debit_account_sweep → card_settlement_sweep
+observation_sweep → collection_scan → identity_sweep → instrument_auto_adoption
+  → balance_projection → reconciliation_sweep → card_debit_account_sweep → card_settlement_sweep
   → purchase_recognition
   → reward_claims_sweep → reward_read_projection → price_promotion
   → report_job → maintenance_survey → operation_dispatch → decision_outbox
   → audit_overflow
 ```
+
+`instrument_auto_adoption` has no flag. It adopts SBI Securities' bare
+domestic code onto SBI's Japanese listing of the same code by rule
+`instrument-auto-v1` ([identity](identity.md#automatic-adoption-rule-instrument-auto-v1),
+[ADR 0055 amendment 2026-11-08](adr/0055-instrument-candidates.md#amendment-2026-11-08-adopt-sbis-bare-domestic-code-onto-its-listing-by-rule)).
+A gate over `instrument_identifiers` and the current mappings ends the tick
+when no pair of the shape is on two instruments; otherwise the full candidate
+read runs at most once an hour (its own tick row with `evaluated: true`
+decides), refuses past 500,000 current identity observations, and at most 50
+adoptions are written a tick.
 
 `audit_overflow` has no flag. It turns each `audit_overflow_counters` row of a
 UTC day that has ended into one `overflow` audit record and deletes the row in
@@ -629,6 +654,7 @@ each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 | Lane                       | Counts recorded                                                                                                                                                                                                                     |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `identity_sweep`           | `processedRuns`, `identifiedRuns`, `identifiedObservations`                                                                                                                                                                         |
+| `instrument_auto_adoption` | `pairs`, `evaluated`, `eligible`, `adopted`, `conflicts`, `refused`                                                                                                                                                                 |
 | `reconciliation_sweep`     | `slices`, `scanned`, `groups`, `groupsSkipped`, `groupsDeferred`, `proposed`, `known`, `written`, `failed`, `autoAccepted`                                                                                                          |
 | `card_debit_account_sweep` | `scanned`, `read`, `refused`, `written`                                                                                                                                                                                             |
 | `card_settlement_sweep`    | `scanned`, `proposed`, `written`, `debitAccountEvidence`, `unmatched` (statements with no candidate, per closed code; [card-settlements.md](card-settlements.md#unmatched-statements))                                              |
@@ -636,7 +662,7 @@ each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 | `reward_claims_sweep`      | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                                                               |
 | `price_promotion`          | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending`, `written` (ADR 0020, ADR 0031); its scan position is `price_promotion_cursor`, which the tick does not copy |
 | `maintenance_survey`       | `targets`, `due`, `extracted`, `failed`, `windows`, `unchanged`, `proposed`, `reviewPending`, `known`, `failures` (closed failure codes, ADR 0050)                                                                                  |
-| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`, `started`, `declined`, `tracked`, `published`, `unpublished`, `abandoned`                                                                                                 |
+| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed` (including imports whose registration threw, §7), `awaiting`, `started`, `declined`, `tracked`, `published`, `unpublished`, `abandoned`                                                |
 | `decision_outbox`          | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                                                             |
 | `audit_overflow`           | `counters`, `written`                                                                                                                                                                                                               |
 
@@ -676,9 +702,9 @@ the lane did. `GET /status` (`mise run //services/processor:ops status`) and
 
 ### 6.2 Lane audit records
 
-Four lanes write rule decisions, economic commits or proposals:
-`reconciliation_sweep`, `card_settlement_sweep`, `purchase_recognition` and
-`maintenance_survey`. Each tick of one of them that wrote any also appends one
+Five lanes write rule decisions, economic commits or proposals:
+`instrument_auto_adoption`, `reconciliation_sweep`, `card_settlement_sweep`,
+`purchase_recognition` and `maintenance_survey`. Each tick of one of them that wrote any also appends one
 `lane` record to the common audit log (`src/lane-audit.ts`,
 [audit log](audit-log.md#the-processors-own-records-alarm-and-lane),
 [ADR 0064](adr/0064-common-audit-log.md#amendment-the-alarm-and-lane-writers-slice-s7-2026-11-06)):
@@ -686,21 +712,26 @@ principal `lane:<lane>` (hyphens for underscores), operation `lane.tick`,
 `applied`, or `failed` when the stage threw after writing. Before such a lane
 runs, `runScheduled` reads one high-water mark of the tables it may write;
 after it, the lane's own rows above the mark, by its decision actor, commit
-principal or proposal method. The record's references are inclusive ranges of
-those rows (`decision-revisions:<a>-<b>`, `commit-seq:<epoch>:<a>-<b>`,
-`proposals:<kind>:<a>-<b>`) and its diff the number of the lane's own rows in
-each; it copies none of the tick row's counts. An idle tick, a lane whose flag
-is off and every other lane write no record. The mark and the record are read
-and written outside the lane's metered scope, and a failure to read or write
-them is logged as `{"event":"lane_audit_record_failed","lane":…,"code":…}` and
-changes nothing the lane did.
+principal or proposal method, each read a range on the table's key without
+table statistics ([audit log: cost](audit-log.md#cost)). The record's
+references are inclusive ranges of those rows (`decision-revisions:<a>-<b>`,
+`commit-seq:<epoch>:<a>-<b>`, `proposals:<kind>:<a>-<b>`) and its diff the
+number of the lane's own rows in each; it copies none of the tick row's
+counts. An idle tick, a lane whose flag is off and every other lane write no
+record. The mark and the record are read and written outside the lane's
+metered scope, and a failure to read or write them is logged as
+`{"event":"lane_audit_record_failed","lane":…,"code":…}` and changes nothing
+the lane did.
 
 ## 7. Operations dispatch
 
 The App accepts an operations-API request, stores it and answers 202;
 notifying the executor is a separate step that may be lost, so the request
 stays `dispatch_pending` until someone takes it (02 §5,
-[ops-api.md](ops-api.md)). `operation_dispatch` is that someone.
+[ops-api.md](ops-api.md)). `operation_dispatch` is that someone. An import's
+run id is checked at acceptance against the bucket key's run grammar, so the
+App stores no import whose terminal key cannot be formed
+([ops-api.md](ops-api.md#routes)).
 
 | Kind                                       | What the Processor does                                                                                               | What it completes                                                                         |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
@@ -725,11 +756,65 @@ The start is one guarded batch (one per operation); the collector's answer is
 recorded as `collected`/`refreshed`, `failed` or `uncertain` and never retried.
 Each tick then marks starts older than an hour `uncertain` and reads the trail
 of up to five collected executions until they are `published` or
-`unpublished` with a closed reason. The collector call is awaited inside the
+`unpublished` with a closed reason; the `published` batch also stores the CORE
+revision the `projected` stage needs. The collector call is awaited inside the
 tick, as the alarm awaits its own.
 
-A failed dispatch never deletes the request. An import whose terminal is not
-in the bucket is retried, not failed: the collector may still be running.
+A failed dispatch never deletes the request. How each kind ends:
+
+| Kind                                       | Closed ends                                                                                                                    | Looked at again                                                                                                                                                                                            |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `import`                                   | `dispatched` once CORE holds the registration; `blocked` with `operation_payload_invalid` or the registration's own block code | every 5 min, **with no expiry**: `terminal_not_found`, a `pending` (staged) registration, a `retryable` refusal, `registration_deferred` (budget spent), or `registration_failed` (the registration threw) |
+| `replay`                                   | `dispatched` (`plan:<id>`) on the first look, or `blocked` with `replay_plan_missing`                                          | never                                                                                                                                                                                                      |
+| `projection`                               | `dispatched` on the first look                                                                                                 | never                                                                                                                                                                                                      |
+| `collection`, unattended `session-refresh` | the closed execution states of [ADR 0048](adr/0048-operation-collector-dispatch.md), including `expired` 24 h after acceptance | per the gates above, never past the expiry                                                                                                                                                                 |
+
+An import whose terminal is not in the bucket is retried, not failed: the
+collector may still be running, and a terminal that lands late registers at
+the next look. That is also an open limit: **nothing expires an import**. One
+whose terminal never appears, or whose registration stays `retryable`, stays
+`accepted` / `dispatch_pending` with its `failure_code` and is looked at every
+five minutes for as long as the lane runs; each look adds one to
+`dispatch_attempts` (about 288 a day), spends one of the tick's five
+dispatches when it is due and a few operations of the invocation's shared
+registration budget; a `terminal_not_found` look updates only the request
+row, and a repeated `retryable` refusal appends at most one CORE stage row a
+day (ADR 0024). There is no cancel route, and a request under a new idempotency key is
+a separate operation that does not close the old one. The ADR 0048 expiry
+applies to collector starts only; an import expiry would be a new decision.
+`services/processor/test/operation-dispatch.test.ts` ("an import has no
+expiry") pins this.
+
+An import whose stored payload names no source or run, or a source or run id
+the bucket key grammar refuses (the App refuses such a run id at acceptance,
+so this catches a payload stored before it did), fails at once with `operation_payload_invalid`
+and writes no stage row; it is not looked at again.
+
+An import whose registration **throws** — R2 or CORE unavailable, or a
+refusal CORE made that the derivation did not foresee — is treated as the
+collection scan treats one (§2): it is not a verdict about the terminal, so no
+stage row is written for it. It is counted in the tick's `failed` and logged
+as `{"event":"operation_dispatch_registration_failed","code":…}` with the
+error's class only, never its message. Collection and dispatch diagnostic callbacks
+share `safeFailureCode`, which uses built-in type checks and never reads the
+exception's writable name, constructor or message. Its finite labels are
+`AggregateError`, `EvalError`, `RangeError`, `ReferenceError`, `SyntaxError`,
+`TypeError`, `URIError` and `Error`; a custom Error is generic `Error`, and
+unclassifiable or non-error throws become `unknown`. The request stays `dispatch_pending`
+and `accepted`: its `dispatch_attempts` goes up by one, its `failure_code` is
+`registration_failed` and its `available_at_ms` moves five minutes ahead.
+The queue is ordered by `available_at_ms`, so the request moves behind every
+request already due; the requests after it in the same tick are still
+dispatched, the collector executions are still tracked, and the lane tick is
+`ran`. It is registered on a later look once the cause is gone; the
+`registration_failed` code stays on the request after that, as every retry
+code does, because a dispatch that names no code keeps the last one. **Open
+limit:** there is no cap. A throw that never goes away (a refusal no code
+classifies) is retried every five minutes for as long as the lane runs, one
+more `dispatch_attempts` and one more `failed` each time, and nothing closes
+the request. If recording the attempt also fails
+(CORE itself unavailable), that error fails the lane tick as any other D1
+error in the lane does.
 
 ## 8. Retired legacy import
 
@@ -819,7 +904,10 @@ runs, failed and mapped-source terminals, per-unit runs sharing one
 acquisition session, the lane order with flags off and on, the metered
 bindings against Miniflare and (in `services/collector-st-george`'s
 worker test) real workerd D1 and R2, the append-only triggers, the
-bootstrap SQL applied twice to a fresh CORE, and `wrangler deploy --dry-run`.
+bootstrap SQL applied twice to a fresh CORE, an import dispatch whose
+registration throws (R2 failing on its first read: the lane completes, the
+request behind it is dispatched in the same tick, and the one that threw is
+registered on a later look), and `wrangler deploy --dry-run`.
 
 Production deployment, resource identity and migration verification are recorded
 in [legacy-retirement.md](legacy-retirement.md). These checks do not establish
@@ -874,8 +962,12 @@ not turn the answer into a 503, and before migration 0049 the list is empty.
   and a new alarm job also needs its `OPERATION_CONNECTIONS` entry
   (`packages/collection/test/operation-rpc.test.ts` compares the two) and its
   collector's `runOperation` (`tests/collector-operation-rpc.test.ts`), ADR 0048.
-- **U11** (READ projection): the `projected` stage of `collection_runs` and of
-  `ops_request_stages` is unwritten; the projection publisher completes it.
+- **U11** (READ projection): the `projected` stage of `collection_runs` is
+  unwritten. For an operation, the collector tracker stores `projected` as
+  `pending` with the CORE revision READ has to reach when it records an
+  execution `published`, and the operation record derives its completion from
+  the READ pointer when it is read
+  ([ops-api.md](ops-api.md#projected-read)); nothing writes it `completed`.
 - **U15** completed the legacy resource and source retirement; historical
   originals remain recoverable through the central archive mapping.
 

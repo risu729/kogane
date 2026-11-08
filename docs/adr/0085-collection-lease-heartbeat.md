@@ -8,7 +8,8 @@
   (`withCollectionLease`, `LEASE_TIMING`), CORE migration
   `0082_collection_lease_heartbeat.sql`,
   `services/processor/src/schedule-store.ts` (`expireStaleLeases`, called by
-  `bootstrapSchedules` on every `processor-tick`),
+  the `processor-tick` branch of `ScheduleAlarm` in
+  `services/processor/src/schedule-alarm.ts`; see the amendment below),
   `packages/application/src/audit/automatic.ts` (`leaseExpiryWrite`),
   `packages/application/src/operation-path/catalogue.ts`
   (`alarm.lease.expire`),
@@ -74,6 +75,10 @@ stopped, because the server has no way to know that it stopped.
      counts as missing. A new heartbeat is sent every minute even while an
      earlier one is unanswered.
 
+   Once the signal is aborted, both a fulfilled and a rejected action report
+   that stop code. An action that settles during the grace period cannot turn
+   a stopped collection into a successful occurrence.
+
    If the aborted action has not settled 30 s later, the call fails with that
    code and `forceStop` (given the code) ends the execution: the SBI VC session
    Durable Object resets itself with `ctx.abort(code)`, which fails its
@@ -91,11 +96,13 @@ stopped, because the server has no way to know that it stopped.
    been contacted. The alarm records the occurrence `uncertain` with that code,
    and an operations-API execution ends `uncertain` with it, exactly like a lost
    dispatch answer. Nothing replays it. St George is the exception: its
-   coordinator turns every error of a collection into a failed run that blocks
-   the source until the operator resumes it, and keeps the stop as that run's
-   reason (`deadline-exceeded`, `collection-interrupted`), so its occurrence
-   ends `failed` with `st_george_deadline_exceeded` or
-   `st_george_collection_interrupted` and nothing runs again on its own.
+   coordinator turns every error of a collection into a failed run and keeps
+   the stop as that run's reason (`deadline-exceeded`,
+   `collection-interrupted`), so its occurrence ends `failed` with
+   `st_george_deadline_exceeded` or `st_george_collection_interrupted`. The
+   next scheduled run tries again (amended 2026-11-08: such a run no longer
+   blocks the source; only a refused, challenged or unrecognised login does, see the
+   [St George README](../../services/collector-st-george/README.md#configuration-and-operations)).
 4. **The Processor frees a silent lease.** On every `processor-tick` (every
    5 minutes), next to the abandon sweep, `expireStaleLeases` frees each held
    lease whose `heartbeat_at` is older than 10 minutes. A lease claimed by a
@@ -171,7 +178,9 @@ runs and its heartbeat is written.
 
 - `packages/collection/test/schedule-lease.test.ts`: the heartbeat on D1's clock
   while the action runs and its end with the action; the deadline abort and its
-  code; an action that ignores the abort is stopped by force and keeps its lease
+  code, including the finite matrix of fulfilled and rejected actions before a
+  stop and after either stop code; an action that ignores the abort is stopped
+  by force and keeps its lease
   and heartbeat until it settles; a lost lease and a failing heartbeat abort
   with `collection_lease_lost` before the deadline, also when a heartbeat's
   answer never comes; `forceStop` receives the code; a heartbeat answered after
@@ -184,8 +193,8 @@ runs and its heartbeat is written.
   so `changes()` in the record's statement is the release's own; a claim by an
   older build under a heartbeat left behind is judged by its age; a live
   holder's heartbeat is written and cleared on real D1.
-- `services/collector-st-george/test/worker-policy.test.ts`: a stop blocks with
-  its own reason.
+- `services/collector-st-george/test/worker-policy.test.ts`: a stop fails with
+  its own reason and does not block the next run.
 - That a Durable Object reset by `ctx.abort(code)` fails its in-flight call
   with `code` as the error message, and leaves the lease held with its
   heartbeat stopped, was checked on workerd during review with a throwaway
@@ -196,3 +205,27 @@ runs and its heartbeat is written.
 - `services/processor/test/schedule-alarm-review.test.ts` and
   `test/collector-dispatch.test.ts`: both codes end `uncertain` and are not
   dispatched again.
+
+## Amendment: only the `processor-tick` alarm frees a lease (2026-11-07)
+
+Status: proposed (accepted when the PR that carries it merges).
+
+As merged, `expireStaleLeases` ran inside `bootstrapSchedules`, which the
+release workflow's `POST /internal/schedules/bootstrap` also calls. A deployment
+therefore freed stale leases too, and recorded each release with principal
+`alarm:processor-tick` on the `alarm` path although no alarm acted: the audit
+record named the wrong principal. The sweep now runs only in the
+`processor-tick` branch of `ScheduleAlarm`, after the Pipeline tick and before
+the reservation repair (as it ran inside that repair before, so a failing
+reconcile still cannot keep a silent lease held). The deployment's bootstrap
+frees no lease; the next tick, at most 5 minutes later, does. Open limit:
+while the `processor-tick` job is disabled, or its Pipeline tick throws before
+the sweep, no lease is freed (between the merge of this ADR and this amendment a
+deployment's bootstrap still would have); the operator's release remains.
+Nothing else in this ADR changes.
+
+Verification: `services/processor/test/schedule-bootstrap-identity.test.ts`
+(the deployment's bootstrap leaves a silent lease held and writes no
+`alarm.lease.expire` record) and
+`services/processor/test/schedule-alarm-audit.test.ts` (the `processor-tick`
+alarm frees it and records `alarm:processor-tick`).

@@ -2,17 +2,24 @@
 // hand-built stores with the complete CORE schema, the configuration it
 // enumerates, and its plans on a scaled store without table statistics
 // (D1 runs no `ANALYZE`; docs/read-model.md, Cost). Everything is synthetic.
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { explain, type PlanStep } from "./card-usage-plan";
 import { fullCoreSchema } from "./card-usage-scale-fixture";
+import {
+  LEGACY_CELL_QUALITY_SQL,
+  LEGACY_CELL_QUALITY_SQL_SHA256,
+} from "./collection-quality-cells-legacy-sql";
 import { QualityStore } from "./collection-quality-fixture";
 import {
+  ACCOUNT_COVERAGE_SQL,
   CELL_QUALITY_SQL,
   COLLECTION_QUALITY_ROW_BOUND,
   ONE_SOURCE_QUALITY_SQL,
   SCHEDULE_QUALITY_SQL,
+  SOURCE_JOBS_SQL,
   SOURCE_QUALITY_SQL,
   TERMINAL_QUALITY_SQL,
   UNCOMPOSED_QUERY_RULE_PARSERS,
@@ -904,9 +911,82 @@ describe("collection quality on the complete CORE schema without statistics", ()
     expect(keyed).toEqual([]);
   });
 
+  test("the account coverage read adds keyed identity lookups and scans only its own relations", () => {
+    const steps = explain(scaled.db, ACCOUNT_COVERAGE_SQL, ["vpass"]);
+    // Its own CTE of named accounts and the cell result are scanned once
+    // each; the current capture's members and the per-cell accounts are
+    // joined through an automatic index over a CTE, built once.
+    const own = new Set(["ca_named", "cell_result"]);
+    const ownIndexes = new Set(["m", "named"]);
+    expect(
+      unboundedScans(steps).filter((detail) => {
+        const name = detail.split(" ")[1]!;
+        if (detail.startsWith("SCAN ")) return !(own.has(name) && !detail.includes(" USING "));
+        return !ownIndexes.has(name);
+      }),
+    ).toEqual([]);
+    // Every publication, identity run, seal, identity, mapping and account row by key.
+    for (const pattern of [
+      /^SEARCH pub USING INDEX sqlite_autoindex_published_parse_runs_1 \(fetch_artifact_id=\? AND parser_name=\?\)$/u,
+      /^SEARCH r USING INDEX sqlite_autoindex_identity_runs_2 \(parse_run_id=\? AND policy_version=\?\)$/u,
+      /^SEARCH seal USING COVERING INDEX sqlite_autoindex_identity_run_seals_1 \(identity_run_id=\?\)$/u,
+      /^SEARCH o USING INDEX sqlite_autoindex_identity_observations_2 \(identity_run_id=\?\)$/u,
+      /^SEARCH m USING INDEX sqlite_autoindex_account_mappings_2 \(source_account_id=\?\)$/u,
+      /^SEARCH account USING INDEX sqlite_autoindex_accounts_1 \(id=\?\)$/u,
+    ])
+      expect(steps.some((step) => pattern.test(step.detail))).toBe(true);
+    // The observation tables themselves are not read: identity rows name them.
+    expect(
+      steps.filter((step) =>
+        /\b(?:transaction|balance|position|valuation)_observations\b/u.test(step.detail),
+      ),
+    ).toEqual([]);
+  });
+
+  test("the cell page's text is unchanged by sharing its CTEs with the account read", () => {
+    // The frozen text of CELL_QUALITY_SQL before ADR 0088 split out its CTEs.
+    expect(createHash("sha256").update(CELL_QUALITY_SQL).digest("hex")).toBe(
+      LEGACY_CELL_QUALITY_SQL_SHA256,
+    );
+    expect(CELL_QUALITY_SQL).toBe(LEGACY_CELL_QUALITY_SQL);
+    const shared = CELL_QUALITY_SQL.split("\nSELECT * FROM cq_result")[0]!;
+    expect(ACCOUNT_COVERAGE_SQL.startsWith(shared)).toBe(true);
+  });
+
+  test("on the scaled store, the account read's cells are the shipped cell page's, row for row", () => {
+    // The random stores' differential is collection-quality-differential.test.ts.
+    for (const source of [
+      "global-pass",
+      "vpass",
+      "sony-bank",
+      "st-george",
+      "smbc-bank",
+      "moneyforward-me",
+      "myjcb",
+      "v-point",
+    ]) {
+      const legacy: CellQualityRow[] = [];
+      for (let offset = 0; ; offset += 500) {
+        const page = scaled.all<CellQualityRow>(LEGACY_CELL_QUALITY_SQL, [source, offset]);
+        expect(cells(scaled, source, offset)).toEqual(page);
+        legacy.push(...page.slice(0, 500));
+        if (page.length <= 500) break;
+      }
+      expect(legacy.length).toBeGreaterThan(0);
+      const accounts = scaled.all<CellQualityRow & { accounts_json: string }>(
+        ACCOUNT_COVERAGE_SQL,
+        [source],
+      );
+      expect(accounts.map(({ accounts_json: _accounts, ...cell }) => cell)).toEqual(legacy);
+      // The scaled store writes no identity rows: no cell names an account.
+      expect(accounts.every((row) => row.accounts_json === "[]")).toBe(true);
+    }
+  });
+
   test("the summary reads are keyed by job, run and source", () => {
     for (const [sql, args] of [
       [SCHEDULE_QUALITY_SQL, []],
+      [SOURCE_JOBS_SQL, [JSON.stringify(["vpoint", "v-point"])]],
       [SOURCE_QUALITY_SQL, []],
       [ONE_SOURCE_QUALITY_SQL, ["vpass"]],
       [TERMINAL_QUALITY_SQL, [JSON.stringify([["vpass", "run-a"]])]],
@@ -943,6 +1023,11 @@ describe("collection quality on the complete CORE schema without statistics", ()
       cells(scaled, source);
       console.log(
         `collection quality cells ${source}: ${(performance.now() - started).toFixed(1)} ms`,
+      );
+      const accountsStarted = performance.now();
+      scaled.all(ACCOUNT_COVERAGE_SQL, [source]);
+      console.log(
+        `account coverage ${source}: ${(performance.now() - accountsStarted).toFixed(1)} ms`,
       );
     }
   });

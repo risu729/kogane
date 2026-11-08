@@ -51,6 +51,115 @@ test("alarm retries the login while an agreement is pending and keeps the reason
   });
 });
 
+test("an operator's session refresh logs in again without the cooldown, after any failed keepalive", async () => {
+  const stub = env.SESSION_STATE.getByName("singleton");
+  // A failure the alarm would not log in for (not a 401/403/gateway refusal).
+  const unavailable: HealthState = {
+    ...health,
+    lastHttpStatus: 500,
+    lastErrorCode: "http_rejected",
+    lastReauthErrorCode: null,
+  };
+  const renewed: HealthState = {
+    ...unavailable,
+    lastHttpStatus: 200,
+    lastErrorCode: null,
+    consecutiveFailures: 0,
+    lastReauthSuccessAt: "2026-11-08T03:00:00.000Z",
+  };
+  await runInDurableObject(stub, async (instance) => {
+    vi.spyOn(instance, "runKeepAlive")
+      .mockResolvedValueOnce(unavailable)
+      .mockResolvedValueOnce(unavailable)
+      .mockResolvedValueOnce(renewed);
+    vi.spyOn(instance, "runReauthenticate").mockResolvedValue(renewed);
+  });
+  // The alarm keeps its own policy: no login for this failure.
+  expect(await alarmCollection(env, "*/15 * * * *", 0)).toMatchObject({ status: "failed" });
+  expect(await alarmCollection(env, "*/15 * * * *", 0, { forceReauth: true })).toEqual({
+    status: "completed",
+    runIds: [],
+    failureCode: null,
+  });
+  await runInDurableObject(stub, async (instance) => {
+    expect(instance.runReauthenticate).toHaveBeenCalledOnce();
+    expect(instance.runReauthenticate).toHaveBeenCalledWith(true);
+  });
+});
+
+test("a second requested refresh within an hour keeps the alarm's login policy", async () => {
+  const stub = env.SESSION_STATE.getByName("singleton");
+  const unavailable: HealthState = {
+    ...health,
+    lastHttpStatus: 500,
+    lastErrorCode: "http_rejected",
+    lastReauthErrorCode: null,
+    lastReauthAttemptAt: null,
+  };
+  const forcedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  await runInDurableObject(stub, async (instance, state) => {
+    await state.storage.put("forcedReauthAt", forcedAt);
+    await state.storage.put("health", unavailable);
+    vi.spyOn(instance, "runKeepAlive").mockResolvedValue(unavailable);
+  });
+  expect(await alarmCollection(env, "*/15 * * * *", 0, { forceReauth: true })).toMatchObject({
+    status: "failed",
+  });
+  await runInDurableObject(stub, async (_instance, state) => {
+    // A 500 is not a refused session, so the alarm's policy does not log in:
+    // no attempt is recorded and the hour is not taken again.
+    expect(await state.storage.get("forcedReauthAt")).toBe(forcedAt);
+    expect((await state.storage.get<HealthState>("health"))?.lastReauthAttemptAt).toBeNull();
+  });
+});
+
+test("a requested login takes the hour; the next request inside it gets the alarm's policy", async () => {
+  const stub = env.SESSION_STATE.getByName("forced-spacing");
+  const unavailable: HealthState = {
+    ...health,
+    lastHttpStatus: 500,
+    lastErrorCode: "http_rejected",
+    lastReauthErrorCode: null,
+    lastReauthAttemptAt: null,
+  };
+  await runInDurableObject(stub, async (instance, state) => {
+    await state.storage.put("health", unavailable);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // No passkey is bound here, so the forced login fails as a revoked one would.
+    const first = await instance.runReauthenticate(true);
+    expect(first.lastReauthAttemptAt).not.toBeNull();
+    expect(first.lastReauthErrorCode).not.toBeNull();
+    const takenAt = await state.storage.get<string>("forcedReauthAt");
+    expect(takenAt).toBe(first.lastReauthAttemptAt);
+    // A 500 is not a refused session and the failed login is inside its
+    // cooldown, so a second request inside the hour logs in no more.
+    const second = await instance.runReauthenticate(true);
+    expect(second).toEqual(first);
+    expect(await state.storage.get<string>("forcedReauthAt")).toBe(takenAt);
+  });
+});
+
+test("an operator's session refresh does not log in while the session is healthy", async () => {
+  const stub = env.SESSION_STATE.getByName("singleton");
+  const healthy: HealthState = {
+    ...health,
+    lastHttpStatus: 200,
+    lastErrorCode: null,
+    consecutiveFailures: 0,
+    lastReauthErrorCode: null,
+  };
+  await runInDurableObject(stub, async (instance) => {
+    vi.spyOn(instance, "runKeepAlive").mockResolvedValue(healthy);
+    vi.spyOn(instance, "runReauthenticate");
+  });
+  expect(await alarmCollection(env, "*/15 * * * *", 0, { forceReauth: true })).toMatchObject({
+    status: "completed",
+  });
+  await runInDurableObject(stub, async (instance) => {
+    expect(instance.runReauthenticate).not.toHaveBeenCalled();
+  });
+});
+
 test("once the owner has agreed, the next retry resumes the collection on its own", async () => {
   const stub = env.SESSION_STATE.getByName("singleton");
   const recovered: HealthState = {

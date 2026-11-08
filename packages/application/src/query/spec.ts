@@ -65,7 +65,7 @@ export interface QueryRequest {
   limit: number | null;
 }
 
-export interface SpecRejection {
+interface SpecRejection {
   ok: false;
   code: FinancialErrorCode;
   refs: string[];

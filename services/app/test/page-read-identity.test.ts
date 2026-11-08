@@ -5,7 +5,7 @@ import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { AGENT_CAPABILITIES, type Grant } from "../../../packages/application/src/grants.ts";
 import { validIdentityResponse } from "../../../packages/observation-shared/src/identity-contract";
-import { pageReadMcpTools, PAGE_READ_ROUTES } from "../src/page-read-tools";
+import { pageReadMcpTools, pageReadStore, PAGE_READ_ROUTES } from "../src/page-read-tools";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { pageReadHarness, RECORDS_GRANT, tableCounts } from "./page-read-harness";
 
@@ -94,7 +94,9 @@ describe("kogane.identity.read", () => {
         for (const accounts of ["*", ["ref"]] as const) {
           const grant = { ...RECORDS_GRANT, capabilities, scopes: { sources, accounts } } as Grant;
           expect(
-            pageReadMcpTools(grant).some((tool) => tool.name === TOOL),
+            (await pageReadMcpTools(grant, pageReadStore(env as Env))).some(
+              (tool) => tool.name === TOOL,
+            ),
             JSON.stringify(grant),
           ).toBe(capabilities.includes("records.read") && sources === "*" && accounts === "*");
         }

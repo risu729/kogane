@@ -307,6 +307,7 @@ export function purchasePage(
           { sourceId: "myjcb", reasonCode: "recognition_pending", rows: 1 },
         ],
       },
+      refundsAllocated: false,
       limit: 50,
     },
   };

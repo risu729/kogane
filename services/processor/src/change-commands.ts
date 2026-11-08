@@ -35,6 +35,8 @@ import {
   parseAuditEnvelope,
   processorCall,
   delegatedBatchFailure,
+  decisionFamilyOf,
+  type DecisionFamily,
 } from "../../../packages/application/src/index.ts";
 import { IDENTITY_POLICY_VERSION } from "./identity-store.ts";
 import { identitySubjectRef } from "../../../packages/application/src/operations/sql.ts";
@@ -86,7 +88,18 @@ function identityMutation(db: D1Database) {
     );
     if ("error" in prepared) return null;
     return {
-      writes: prepared.writes.map((write) => ({ sql: write.sql, binds: write.binds })),
+      // The identity command joins only its ledger row (statement 1) to the
+      // guard; its mapping, decision and supersession statements require a
+      // ledger row under the operation id, which a command of another kind
+      // that took the key since the commit's reads (a relation, say) also
+      // writes. Each later statement therefore also requires this command's
+      // own receipt, so such a loser writes no mapping. Every statement ends
+      // in its WHERE condition.
+      writes: prepared.writes.map((write, index) =>
+        index === 0
+          ? { sql: write.sql, binds: write.binds }
+          : { sql: `${write.sql} AND ${guard.sql}`, binds: [...write.binds, ...guard.binds] },
+      ),
       decisionRevisionId: prepared.receipt.decisionRevisionId,
       result: {
         action: prepared.receipt.action,
@@ -162,6 +175,24 @@ async function body(request: Request): Promise<CommandBody | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * A delegated MCP client may plan only a kind whose family it could then
+ * decide: `DECISION_FAMILIES`, the list the App's decision tools and the
+ * delegated envelope read (ADR 0063, ADR 0081).
+ */
+export function delegatedPlanAllowed(kind: unknown): boolean {
+  return typeof kind === "string" && decisionFamilyOf(kind) !== null;
+}
+
+/** A delegated approve or commit of a plan of `kind`, under the envelope's attenuated families. */
+export function delegatedDecisionAllowed(
+  kind: string,
+  commandFamilies: readonly ("plan" | DecisionFamily)[],
+): boolean {
+  const family = decisionFamilyOf(kind);
+  return family !== null && commandFamilies.includes(family);
 }
 
 /**
@@ -264,20 +295,12 @@ export async function changeCommandRoute(
       const plan = await loadPlan(d1CommandStore(env.DB), input.planId);
       if (!plan) return fail("plan_not_found");
       if (auth.revertsAuditId !== input.revertsAuditId) return fail("invalid_command");
-      const family = plan.kind.split(".")[0];
-      if (
-        (family !== "identity" && family !== "relation" && family !== "card-settlement") ||
-        !auth.commandFamilies.includes(family)
-      )
+      if (!delegatedDecisionAllowed(plan.kind, auth.commandFamilies))
         return Response.json({ error: "capability_not_delegated" }, { status: 403 });
     } else if (!auth.commandFamilies.includes("plan"))
       return Response.json({ error: "capability_not_delegated" }, { status: 403 });
     if (match[1] === "plan" || decision) {
-      if (
-        match[1] === "plan" &&
-        (typeof input.kind !== "string" ||
-          !["identity", "relation", "card-settlement"].includes(input.kind.split(".")[0]!))
-      )
+      if (match[1] === "plan" && !delegatedPlanAllowed(input.kind))
         return fail("unsupported_semantics");
       if (
         auth.idempotencyKey !==

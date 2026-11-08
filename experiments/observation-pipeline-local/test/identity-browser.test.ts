@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
+import { auditView } from "../../../apps/web/test/a11y-audit.ts";
 import { createApi } from "../src/api.ts";
 import { buildFixture } from "./fixture.ts";
 import type {
@@ -67,6 +68,7 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
                 states: {
                   "unresolved-candidates": 1,
                   "resolved-by-decision": 1,
+                  "resolved-by-rule": 0,
                   "shared-without-decision": 1,
                   "kept-separate": 1,
                   "no-candidate": 1,
@@ -268,10 +270,27 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
       }
     }, 60_000);
 
+  test("the identity page passes the accessibility audit", async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    try {
+      await page.goto(`${origin}/identities`, { waitUntil: "networkidle" });
+      await page
+        .locator("article")
+        .filter({ hasText: `${freshLabel}-0` })
+        .waitFor();
+      expect(await auditView(page)).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
+
   test("source filtering, two page lists, origin/back and shared shell preserve private state", async () => {
     const page = await browser.newPage();
     try {
       await page.goto(`${origin}/transactions`, { waitUntil: "networkidle" });
+      // Capture the shell only once the view has rendered its records: an idle
+      // network can precede the metadata the shell depends on.
+      await page.locator("#transactions").waitFor({ timeout: 10_000 });
       const shell = await page.locator(".app-shell").elementHandle();
       await page
         .getByRole("navigation", { name: "メインナビゲーション" })

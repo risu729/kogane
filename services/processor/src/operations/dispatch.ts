@@ -17,7 +17,6 @@
 import {
   abandonStartedCollectorDispatches,
   claimCollectorStart,
-  type CollectorAction,
   collectorActionForKind,
   type CollectorBinding,
   collectedDispatchesDue,
@@ -34,10 +33,7 @@ import {
   type CommandStore,
   type OperationReceipt,
 } from "../../../../packages/application/src/index.ts";
-import {
-  coreSourceId,
-  type RegistrationBudget,
-} from "../../../../packages/application/src/collection/index.ts";
+import { type RegistrationBudget } from "../../../../packages/application/src/collection/index.ts";
 import {
   COLLECTOR_OPERATION_VERSION,
   collectorOperationResult,
@@ -45,12 +41,20 @@ import {
   type CollectorOperationRequest,
   type OperationConnection,
 } from "../../../../packages/collection/src/operation-rpc.ts";
+import {
+  collectorDispatchConnections,
+  connectionFor,
+  opsDispatchEnabled,
+} from "./collection-targets.ts";
+import { CollectionKeyError, terminalKey } from "../../../../packages/collection/src/keys.ts";
 import { afterMaintenance } from "../../../../packages/collection/src/schedule-model.ts";
 import { isLeaseAbortCode } from "../../../../packages/collection/src/schedule-result.ts";
 import { d1CommandStore } from "../../../../packages/storage-d1/src/core/command-store.ts";
 import type { D1Like } from "../../../../packages/storage-d1/src/d1.ts";
-import { registerCollectionRun, type CollectionEnv } from "../collection/index.ts";
+import { registerCollectionRun, safeFailureCode, type CollectionEnv } from "../collection/index.ts";
 import { maintenanceForSchedule } from "../schedule-store.ts";
+
+export { collectorDispatchConnections, connectionFor, opsDispatchEnabled };
 
 /** Requests taken per tick. */
 export const DEFAULT_DISPATCH_LIMIT = 5;
@@ -81,23 +85,6 @@ export interface DispatchEnv extends CollectionEnv {
    * provider is contacted (ADR 0048).
    */
   OPS_COLLECTOR_DISPATCH_CONNECTIONS?: string | undefined;
-}
-
-export function opsDispatchEnabled(value: string | undefined): boolean {
-  return value === "1" || value === "true";
-}
-
-/** The enabled connections; anything but a JSON array of strings enables none. */
-export function collectorDispatchConnections(value: string | undefined): ReadonlySet<string> {
-  if (!value) return new Set();
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string"))
-      return new Set(parsed);
-  } catch {
-    /* A malformed list enables nothing; the safe direction is "do not call". */
-  }
-  return new Set();
 }
 
 /** The named RPC a collector's `ScheduledCollection` entrypoint serves (ADR 0048). */
@@ -143,6 +130,12 @@ export interface DispatchOptions {
   collectors?: (connection: OperationConnection) => CollectorRpc | null;
   /** The connection table; the closed mirror of config/alarm-jobs.json unless a test names its own. */
   connections?: readonly OperationConnection[];
+  /**
+   * Told the safe code (the error's class, never its message) of each
+   * `import` registration that threw. The throw is counted in `failed` and
+   * the request looked at again later; it never fails the lane.
+   */
+  onFailure?: (code: string) => void;
 }
 
 /**
@@ -201,7 +194,7 @@ export async function dispatchOperations(
     now,
   };
   for (const receipt of pending) {
-    const outcome = await dispatchOne(env, store, receipt, now, options.budget, collectors);
+    const outcome = await dispatchOne(env, store, receipt, now, options, collectors);
     if (outcome === "dispatched") summary.dispatched += 1;
     else if (outcome === "failed") summary.failed += 1;
     else if (outcome === "awaiting") summary.awaiting += 1;
@@ -230,13 +223,13 @@ async function dispatchOne(
   store: CommandStore,
   receipt: OperationReceipt,
   now: () => Date,
-  budget: RegistrationBudget | undefined,
+  options: Pick<DispatchOptions, "budget" | "onFailure">,
   collectors: CollectorContext,
 ): Promise<OneOutcome> {
   const at = now();
   switch (receipt.kind) {
     case "import":
-      return dispatchImport(env, store, receipt, at, budget);
+      return dispatchImport(env, store, receipt, at, options.budget, options.onFailure);
     case "replay":
       return dispatchReplay(env, store, receipt, at);
     case "collection":
@@ -266,18 +259,41 @@ async function dispatchImport(
   receipt: OperationReceipt,
   at: Date,
   budget: RegistrationBudget | undefined,
+  onFailure: ((code: string) => void) | undefined,
 ): Promise<OneOutcome> {
   const payload = await operationRequestPayload(store, receipt.operationId);
   const source = typeof payload?.source === "string" ? payload.source : null;
   const runId = typeof payload?.runId === "string" ? payload.runId : null;
-  if (!source || !runId) return fail(store, receipt, "operation_payload_invalid", at);
+  if (!source || !runId || !terminalAddressable(source, runId))
+    return fail(store, receipt, "operation_payload_invalid", at);
 
-  const result = await registerCollectionRun(
-    env,
-    { source, runId },
-    budget === undefined ? {} : { budget },
-  );
   const iso = at.toISOString();
+  let result: Awaited<ReturnType<typeof registerCollectionRun>>;
+  try {
+    result = await registerCollectionRun(
+      env,
+      { source, runId },
+      budget === undefined ? {} : { budget },
+    );
+  } catch (error) {
+    // Not a verdict about the terminal — R2 or CORE unavailable, or a refusal
+    // CORE made that the derivation did not foresee — so no stage is
+    // recorded, as the collection scan records nothing for a run that threw.
+    // The request is kept, counted as attempted and moved behind the queue
+    // with a closed code, so it neither fails the lane nor holds the head of
+    // the queue while the cause lasts. The class is reported, never the
+    // message, which may quote a key.
+    onFailure?.(safeFailureCode(error));
+    await recordDispatch({
+      store,
+      operationId: receipt.operationId,
+      outcome: "retry",
+      now: iso,
+      retryAtMs: at.valueOf() + RETRY_MS,
+      failureCode: "registration_failed",
+    });
+    return "failed";
+  }
   switch (result.outcome) {
     case "registered":
     case "already_registered": {
@@ -366,6 +382,23 @@ async function dispatchImport(
   }
 }
 
+/**
+ * Whether a run names a terminal key at all. The App now accepts only the
+ * bucket key grammar, but a payload stored before it did can still carry a
+ * character (`:`) the key builder throws on; such a request can never
+ * register, so it ends with the closed `operation_payload_invalid` instead of
+ * an unclassified throw that failed the whole lane on every tick.
+ */
+function terminalAddressable(source: string, runId: string): boolean {
+  try {
+    terminalKey(source, runId);
+    return true;
+  } catch (error) {
+    if (error instanceof CollectionKeyError) return false;
+    throw error;
+  }
+}
+
 /** Starts the replay plan the acceptance created. Starting is not parsing. */
 async function dispatchReplay(
   env: DispatchEnv,
@@ -398,23 +431,6 @@ async function dispatchReplay(
 }
 
 // ── the collector branch (ADR 0048) ─────────────────────────────────────
-
-/**
- * The one connection that serves a CORE source for an action: the named
- * collector job whose terminals register under that source. None, or an
- * ambiguous table, is no connection — never a guess.
- */
-export function connectionFor(
-  connections: readonly OperationConnection[],
-  coreSource: string | null,
-  action: CollectorAction,
-): OperationConnection | null {
-  if (coreSource === null) return null;
-  const matches = connections.filter(
-    (entry) => entry.action === action && coreSourceId(entry.terminalSource) === coreSource,
-  );
-  return matches.length === 1 ? matches[0]! : null;
-}
 
 const LEASE_HELD = `SELECT 1 AS held FROM collection_execution_leases
  WHERE source=?1 AND lease_ref IS NOT NULL`;

@@ -142,3 +142,26 @@ would serve it. Agents still cannot see reports; that is a written limit in
 the encoded href for a replayable and an artifact-preserved report, absent
 with its reason for a restricted and an unavailable one, and that following
 it downloads `/export` for an id that must be encoded.
+
+## Amendment: the agent report read (2026-11-07)
+
+- Status: accepted (risu's decision of 2026-11-07, recorded as
+  [ADR 0081](0081-ui-parity-through-mcp.md): every UI read has an MCP read
+  over the same reader)
+
+ADR 0081 is the later decision the amendment above anticipated. Its
+`kogane.reports.read` follows the constraints written there: the list and
+the detail ship together, with the explanation, under `records.read` on
+`"*"` sources and accounts; the tool is published only while
+`report_artifacts` exists; `/export` is not reachable from any argument; HTTP
+and MCP answer alike and each call is an R0 read in the audit log. The
+detail is the operator reader called with `refuseRestricted`, so it is not a
+bare call of that reader: a report whose explanation is refused (restricted,
+or without a complete run and without its body) is `403 evidence_restricted`
+on every view, and a report whose body has left R2 behind a complete run is
+`404 not_found`, the codes `/export` answers for the same reports. The list
+is the operator's list, so it still names restricted reports; opening one is
+refused. `services/app/test/page-read-reports.test.ts` checks the parity, both
+refusals while the operator page still answers (also for a body that leaves
+R2 while it is read), the closed schema, the audit rows, and that the tool is
+neither listed nor served without the table.

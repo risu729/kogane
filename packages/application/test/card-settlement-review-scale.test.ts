@@ -28,6 +28,7 @@ import {
 } from "../src/operations/ownership-review.ts";
 import { CARD_OWNERSHIP_CANDIDATE_SQL } from "../src/query/card-ownership.ts";
 import { CARD_DEBIT_ACCOUNT_POLICY } from "../../domain/src/card-debit-account.ts";
+import { CARD_INFORMATION_READER_VERSION } from "../../domain/src/myjcb-card-information.ts";
 import {
   CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL,
   CARD_SETTLEMENT_PAGE_SIZE,
@@ -327,6 +328,7 @@ describe("card settlement readiness reads on a scaled store without statistics",
               reason: "ambiguous_accounts",
               proposal_json: null,
               created_at: "2026-09-11T00:00:00Z",
+              refusal_code: null,
             })) as T[];
         },
       };
@@ -427,7 +429,7 @@ describe("card settlement readiness reads on a scaled store without statistics",
     }
   });
 
-  test("the debit-account evidence read probes only the page's candidates", () => {
+  test("the debit-account evidence read probes only the page's candidates, their cited readings and their own pages", () => {
     const ids = JSON.stringify(
       (
         db
@@ -437,9 +439,16 @@ describe("card settlement readiness reads on a scaled store without statistics",
           .values() as string[][]
       ).map(([id]) => id!),
     );
-    const plan = explain(db, CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL, [ids, CARD_DEBIT_ACCOUNT_POLICY]);
+    const plan = explain(db, CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL, [
+      ids,
+      CARD_DEBIT_ACCOUNT_POLICY,
+      CARD_INFORMATION_READER_VERSION,
+    ]);
     expect(statementPlanProblems(plan)).toEqual([]);
-    expect(JSON.stringify(plan)).toContain("card_settlement_debit_account_evidence_candidate");
+    const text = JSON.stringify(plan);
+    expect(text).toContain("card_settlement_debit_account_evidence_candidate");
+    // The page's reading is found by its unique (raw_sha256, card, version) key.
+    expect(text).toContain("card_debit_account_statement_object");
   });
 
   test.if(FULL)(

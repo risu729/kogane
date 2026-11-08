@@ -19,7 +19,7 @@ import {
   type RevisionRow,
 } from "../operations/sql.ts";
 import { resolveAndSimulate } from "../operations/targets.ts";
-import { planDigestOf } from "./plan.ts";
+import { planDigestOf, storedRenewal } from "./plan.ts";
 import { instrumentCandidatePlanIsPinned } from "../operations/instrument-candidate-context.ts";
 import { instrumentTemporalContextRequested } from "../../../domain/src/instrument-temporal.ts";
 
@@ -57,16 +57,35 @@ export async function simulate(
   const resolution = await resolveAndSimulate(store, plan.kind, plan.payload);
   if (!resolution.ok) return resolution;
   const { expectedRevisions, simulation, targets } = resolution.resolved;
-  const resimulatedPlanId = await planDigestOf({
+  const content = {
     kind: plan.kind,
     payload: plan.payload,
-    expectedRevisions,
     baseContextId: plan.baseContextId,
+  };
+  // A renewed plan (ADR 0080) is re-derived with the renewal its own stored
+  // lifetime names; a first plan with none. A row whose id is neither
+  // derivation of its content compares unequal either way, so it is stale.
+  const renewal =
+    (await planDigestOf({ ...content, expectedRevisions: plan.expectedRevisions })) === plan.planId
+      ? null
+      : storedRenewal(plan);
+  const rederived = await planDigestOf({
+    ...content,
+    expectedRevisions,
+    ...(renewal ? { renewal } : {}),
   });
   const current = await currentRevisions(store, plan.expectedRevisions);
   const stale =
-    resimulatedPlanId !== plan.planId ||
+    rederived !== plan.planId ||
     Object.entries(plan.expectedRevisions).some(([ref, revision]) => current[ref] !== revision);
+  // What a plan of the same change over the current data would be: this one
+  // while it is fresh, else the first plan of the moved data.
+  const resimulatedPlanId =
+    rederived === plan.planId
+      ? plan.planId
+      : renewal
+        ? await planDigestOf({ ...content, expectedRevisions })
+        : rederived;
   return {
     ok: true,
     report: {
