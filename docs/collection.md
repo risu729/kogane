@@ -1189,7 +1189,8 @@ keep-alive and the daily collection — both unchanged. Terminal source id
   envelope, and `key` is the content-addressed object
   (`objects/<2 hex>/<sha256>`) the terminal's `storageRef` names for those
   bytes. The Worker takes the entry from `describeArtifact` and replaces its
-  run-prefix key, which only the legacy staging put (`storeArtifact`) writes.
+  run-prefix key, which nothing writes: the staging put (`storeArtifact`) that
+  wrote it is called by no Worker path and is kept only for the parity tests.
   Until 2026-11-08 `key` was that run-prefix key
   (`raw/sbi-vc-trade/<date>/<runId>/<dataset>.json`), which shared mode never
   writes; the digest and size were already those of the stored bytes.
