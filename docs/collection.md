@@ -1037,12 +1037,37 @@ Processor maps it to the CORE source `global-pass`), producer
   it has no artifact key.
 - `acquisitionSessionRef`: none. The container logs in once per run and keeps no
   session across runs (12 §4).
-- Human-required: **not distinguishable today.** The container reports every
-  login failure as the generic `browser_collection_failed`, so the terminal does
-  not claim a person must act. The collector still makes exactly one login
-  attempt per run — the cron is the only re-attempt — and nothing was added to
-  retry one. Classifying a Turnstile or credential rejection would need a
-  container change, which U09 does not make.
+- Container failures carry a closed code (`container/failure.mjs`; the Worker
+  admits only `GLOBALPASS_CONTAINER_FAILURE_CODES` in `src/model.ts`), so a
+  failed run's `safeErrorCode` names the step: `globalpass_relay_start_failed`,
+  `globalpass_browser_launch_failed`, `globalpass_login_page_failed`,
+  `globalpass_challenge_timeout` (no attempt got a Turnstile token),
+  `globalpass_challenge_denied` (Access Denied on the login page),
+  `globalpass_challenge_failed` (the wait ended other than by a timeout),
+  `globalpass_login_submit_failed`, `globalpass_login_denied` (Access Denied
+  on the credential POST), `globalpass_login_rejected` (the POST returned to
+  the credential form), `globalpass_activity_open_failed`,
+  `globalpass_month_discovery_failed`, `globalpass_statement_read_failed`,
+  `globalpass_browser_close_failed`, and `browser_collection_failed` for a
+  failure in no known step (and from images before `timezone-collector-v8`).
+  The failure entry also carries `stage`, `challengeAttempts` and
+  `lastHttpStatus` (400-599) when the container sent them; any other value
+  is `container_contract_invalid`. Being in the manifest, they outlive the
+  seven days Workers Logs keep.
+- **The challenge.** The container waits up to 45 s for the Turnstile token
+  and, when none comes, loads the login page afresh, at most three attempts
+  (`CHALLENGE_ATTEMPTS`). No credential is sent before a token exists, so a
+  retried challenge is not a retried login. An edge refusal or a closed page
+  ends the wait at once. Each attempt logs `attempt`, `elapsedMs`, a closed
+  `code` (`token`, `token-timeout`, `widget-missing`, `edge-denied`,
+  `page-unreadable`), the number of Turnstile frames and the last HTTP error
+  status of that attempt with its host class (`globalpass`, `turnstile`,
+  `turnstile-helper`). Observed 2026-11-05..07: one token after 25 s, two
+  waits that ran out at 45 s.
+- Human-required: **not claimed.** `globalpass_login_rejected` may mean the
+  credentials need a person, but it has not been observed, so the terminal
+  does not yet say a person must act. The collector still makes exactly one
+  credential POST per run; the cron is the only re-attempt.
 - The shared persist is reported under the existing `central-import`
   diagnostics stage; the `globalpass-collection-stored` log line carries
   `collectionTarget` (always `shared`), `sharedOutcome`, `terminalKey` and
