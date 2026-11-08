@@ -1,7 +1,7 @@
 // The Processor frees a collection execution lease whose holder went silent
 // (ADR 0085), on D1's clock, and records each release on the `alarm` path.
 // Every value is synthetic.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, spyOn, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
 import { expireStaleLeases } from "../src/schedule-store.ts";
@@ -172,3 +172,27 @@ test("a claim by a build without heartbeats under a heartbeat left behind is jud
   expect((await lease("moneyforward-me"))?.lease_ref).toBe("4e1a2b3c-0000-4000-8000-0000000000d1");
   expect((await lease("vpoint"))?.lease_ref).toBeNull();
 }, 60_000);
+
+test("an expired lease logs when its holder claimed and when it last proved itself alive", async () => {
+  await hold(
+    "globalpass",
+    "4e1a2b3c-0000-4000-8000-0000000000b1",
+    "'2026-01-01T00:00:00.000Z'",
+    "'2026-01-01T00:01:00.000Z'",
+  );
+  const info = spyOn(console, "log").mockImplementation(() => undefined);
+  try {
+    expect(await expireStaleLeases(env.DB)).toBe(1);
+    expect(info.mock.calls.map(([line]) => JSON.parse(String(line)))).toEqual([
+      {
+        event: "collection_lease_expired",
+        source: "globalpass",
+        leaseRef: "4e1a2b3c-0000-4000-8000-0000000000b1",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        lastHeartbeatAt: "2026-01-01T00:01:00.000Z",
+      },
+    ]);
+  } finally {
+    info.mockRestore();
+  }
+});

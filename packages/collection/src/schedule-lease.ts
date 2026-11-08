@@ -108,7 +108,8 @@ interface LeaseHolderRow {
 /**
  * Says who holds the lease a claim was refused on: its reference (the one the
  * operator's release names), when it was claimed and when it last proved
- * itself alive, with both ages on D1's clock. A failed read still logs the
+ * itself alive, with both ages measured against D1's `now` (`started_at` was
+ * written on the claiming isolate's clock, `heartbeat_at` on D1's). A failed read still logs the
  * refusal; the refusal itself never depends on this read.
  */
 async function logLeaseBusy(db: ScheduleLeaseDatabase, source: string): Promise<void> {
@@ -130,19 +131,23 @@ async function logLeaseBusy(db: ScheduleLeaseDatabase, source: string): Promise<
   } catch {
     read = "failed";
   }
-  console.log(
-    JSON.stringify({
-      event: "collection_lease_busy",
-      code: "collection_busy",
-      source,
-      holderRead: read,
-      holderLeaseRef: holder?.lease_ref ?? null,
-      holderStartedAt: holder?.started_at ?? null,
-      holderHeartbeatAt: holder?.heartbeat_at ?? null,
-      holderAgeMs: holder?.age_ms ?? null,
-      holderSilentMs: holder?.silent_ms ?? null,
-    }),
-  );
+  try {
+    console.log(
+      JSON.stringify({
+        event: "collection_lease_busy",
+        code: "collection_busy",
+        source,
+        holderRead: read,
+        holderLeaseRef: holder?.lease_ref ?? null,
+        holderStartedAt: holder?.started_at ?? null,
+        holderHeartbeatAt: holder?.heartbeat_at ?? null,
+        holderAgeMs: holder?.age_ms ?? null,
+        holderSilentMs: holder?.silent_ms ?? null,
+      }),
+    );
+  } catch {
+    /* Logging never replaces the refusal. */
+  }
 }
 
 export interface CollectionLeaseOptions {
@@ -191,13 +196,17 @@ export async function withCollectionLease<T>(
     // The claim may have committed even though its answer was lost. Nothing
     // has contacted a provider yet, so clear this call's own reference (if it
     // was written) and report the claim's failure.
-    console.error(
-      JSON.stringify({
-        event: "collection_lease_claim_failed",
-        source,
-        errorName: error instanceof Error ? error.name : typeof error,
-      }),
-    );
+    try {
+      console.error(
+        JSON.stringify({
+          event: "collection_lease_claim_failed",
+          source,
+          errorName: error instanceof Error ? error.name : typeof error,
+        }),
+      );
+    } catch {
+      /* Logging never skips the release below. */
+    }
     await releaseOwnLease(db, source, ref);
     throw error;
   }

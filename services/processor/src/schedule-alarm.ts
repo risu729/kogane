@@ -26,7 +26,13 @@ type AlarmErrorKind =
   | "d1"
   | "other";
 export function alarmErrorKind(error: unknown): AlarmErrorKind {
-  const message = error instanceof Error ? error.message : String(error);
+  let message: string;
+  try {
+    message = error instanceof Error ? String(error.message) : String(error);
+  } catch {
+    // A value that cannot be turned into text (no prototype, a throwing getter).
+    return "other";
+  }
   if (/network connection lost/iu.test(message)) return "network_lost";
   if (
     /blockConcurrencyWhile|durable object (?:was )?reset|code was updated|object.*broken/iu.test(
@@ -41,8 +47,12 @@ export function alarmErrorKind(error: unknown): AlarmErrorKind {
   return "other";
 }
 function errorName(error: unknown): string {
-  const name = error instanceof Error ? error.name : typeof error;
-  return /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(name) ? name : "other";
+  try {
+    const name: unknown = error instanceof Error ? error.name : typeof error;
+    return typeof name === "string" && /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(name) ? name : "other";
+  } catch {
+    return "other";
+  }
 }
 /**
  * One structured line per alarm decision (ADR 0085 follow-up): which job,
@@ -100,17 +110,22 @@ export class ScheduleAlarm extends DurableObject<Env> {
       await this.performAlarm(trace);
     } catch (error) {
       // Logged first: a reset object can refuse the re-arm below as well.
-      console.error(
-        JSON.stringify({
-          event: "schedule_bookkeeping_retry",
-          code: "scheduling_unavailable",
-          jobId: trace.jobId,
-          occurrenceId: trace.occurrenceId,
-          phase: trace.phase,
-          errorName: errorName(error),
-          errorKind: alarmErrorKind(error),
-        }),
-      );
+      // The log never stands between the failure and the re-arm.
+      try {
+        console.error(
+          JSON.stringify({
+            event: "schedule_bookkeeping_retry",
+            code: "scheduling_unavailable",
+            jobId: trace.jobId,
+            occurrenceId: trace.occurrenceId,
+            phase: trace.phase,
+            errorName: errorName(error),
+            errorKind: alarmErrorKind(error),
+          }),
+        );
+      } catch {
+        /* Logging never changes the alarm's outcome. */
+      }
       // D1 or dispatch bookkeeping can be unavailable longer than native
       // alarm retries. Re-arm recovery explicitly; the persisted occurrence
       // claim and next nominal prevent a repeated provider submission.
