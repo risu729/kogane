@@ -333,12 +333,12 @@ An agent may request collections without a count or rate limit (owner,
 `kogane.ops.collection.request` description tells the caller to read the
 source's history first, and every item is an existing read:
 
-| Read first                                                    | Tool                                                                                            |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| the source's collection quality: latest runs and stage codes  | `kogane.collection-quality.read` with `source`                                                  |
-| its schedule, next alarm, recent occurrences and held leases  | `kogane.schedules.read`                                                                         |
-| its maintenance windows and the maintenance-adjusted due time | `kogane.schedules.maintenance.read` with `source`                                               |
-| earlier requests and how they ended                           | `kogane.audit.search` with `operation: ops.collection.request`, then `kogane.ops.operation.get` |
+| Read first                                                    | Tool                                                                                                                                                                |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the source's collection quality: latest runs and stage codes  | `kogane.collection-quality.read` with `source`                                                                                                                      |
+| its schedule, next alarm, recent occurrences and held leases  | `kogane.schedules.read`                                                                                                                                             |
+| its maintenance windows and the maintenance-adjusted due time | `kogane.schedules.maintenance.read` with `source`                                                                                                                   |
+| earlier requests and how they ended                           | `kogane.audit.search` with `filters: { operation: "ops.collection.request" }`, narrowed to the source by hand; then `kogane.ops.operation.get` for the caller's own |
 
 It then does not request while the source's alarm is due, its maintenance
 window is on, a lease is held or an earlier request has not finished, and when
@@ -347,6 +347,13 @@ dispatcher holds a request during maintenance and while a lease is held anyway
 ([collector execution](#collector-execution-adr-0048)); reading first avoids a
 request that can only wait, expire or fail the same way. The rule is in the
 tool description, not in code.
+
+`kogane.ops.operation.get` reads only the caller's own operations
+([MCP](#mcp)), so a request someone else made is seen as an occurrence or a
+held lease in `kogane.schedules.read`, not through its record. Requests are
+accepted without a cap, but the dispatch lane starts at most one collector per
+tick (`COLLECTOR_STARTS_PER_TICK`), so several requests start one after
+another, not in parallel.
 
 ## Session refresh and human-required states
 
@@ -674,8 +681,8 @@ tables are unread by the previous revision.
 
 Order: CORE `0068` is applied, the collectors (with `runOperation`) are
 uploaded, then the Processor, then the App ([rollout](rollout.md#4-deployment-order)).
-With the committed empty `OPS_COLLECTOR_DISPATCH_CONNECTIONS`, the first ticks
-only decline requests no connection serves, expire requests older than 24 hours
+With an empty `OPS_COLLECTOR_DISPATCH_CONNECTIONS` (as committed until
+2026-11-08), the first ticks only decline requests no connection serves, expire requests older than 24 hours
 and leave the rest waiting with `collector_dispatch_disabled`; no provider is
 contacted.
 
