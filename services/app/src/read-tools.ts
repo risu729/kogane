@@ -353,7 +353,11 @@ export async function callReadTool(
       }
       case "kogane.audit.search": {
         const input = parseRequest(schemas[name], body ?? {});
-        const filters = auditPageFilters(input.filters ?? {});
+        // The keys as sent: a zod record drops a `__proto__` key without an
+        // issue, so the closed vocabulary judges the argument's own filters,
+        // as `GET /api/v2/audit` judges its query string.
+        const sent = (body as { filters?: Record<string, string> } | undefined)?.filters;
+        const filters = auditPageFilters(sent ?? {});
         if (!filters) throw new HttpError(400, "invalid_query");
         const outcome = await readAuditForGrant({
           store: d1CommandStore(env.DB),
