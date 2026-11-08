@@ -1026,9 +1026,12 @@ before they write (`approvalPrecheck`; `commitPrecheck`, then `reversalCheck`
 for a `revertsAuditId`), then the simulation the preview carries. A `prepare`
 runs it, writes no approval and no decision, and returns a `cfm_` digest and
 the simulation report; for an operation id the caller already completed it
-answers with that receipt as a replay, as `commit` does. A `confirm` with the
-digest within ten minutes checks the confirmation, runs the pre-check and
-forwards to the Processor, whose `approve` or `commit` applies it and answers
+answers with that receipt as a replay, as `commit` does, issues no
+confirmation and is recorded `replayed` with `operation:<id>`. A `confirm`
+with the digest within ten minutes checks the confirmation first (an invalid,
+used or expired one is refused with its own code before any lifecycle
+refusal, since the Processor runs `approve` or `commit` only for a verified
+confirmation), then runs the pre-check and forwards to the Processor, whose `approve` or `commit` applies it and answers
 every refusal the lifecycle gives itself; a repeated confirm replays the
 result. So a refusal is the same code with the same `refs`, in the same
 order, on both paths, at `prepare` and at `confirm`: an ended override

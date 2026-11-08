@@ -386,7 +386,14 @@ The R2 step keeps two differences, both written down in
   approval); another principal's approval is `approval_required`; an
   invalid reversal is `stale_context` with the plan id and `revert_invalid`,
   as `commit` answers it (was `revert_invalid`); `approval_scope_mismatch` is
-  `409`, the lifecycle's status (was `403`).
+  `409`, the lifecycle's status (was `403`); a `confirm` checks its
+  confirmation before the pre-check, since the Processor's delegated route
+  runs `approve` or `commit` only for a verified confirmation, so an invalid,
+  used or expired confirmation is answered with its own code even where the
+  lifecycle would refuse the plan too (was the lifecycle's code first).
+- A `prepare` that answers a completed operation's receipt issues no
+  confirmation and is recorded `replayed` (step `call`, refs
+  `operation:<id>`), which no write budget or audit cap counts.
 - A new lifecycle check is one edit in `approve.ts` or `commit.ts`, and both
   paths have it.
 
@@ -401,4 +408,5 @@ moved plan with an expired plan or an expired approval; a wrong digest on an
 expired plan; another plan's approval on an ended release; another
 principal's approval; and a completed operation. Every answer has the same
 code and refs, with each path's own plan and approval ids named. Before the
-change all 14 cases failed.
+change all 14 cases failed. A fifteenth case pins the `confirm` order: an
+expired confirmation on an expired plan is `confirmation_expired`.

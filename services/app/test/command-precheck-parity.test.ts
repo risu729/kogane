@@ -428,6 +428,21 @@ describe("approve: one pre-check on the page's path and over MCP (ADR 0081)", ()
     expect(got).toEqual({ page: expected, prepare: expected, confirm: expected });
   });
 
+  it("a confirm checks its confirmation before the pre-check: an expired one on an expired plan is `confirmation_expired`", async () => {
+    const s = await subject();
+    const lanes = await approveLanes(s.release);
+    // The confirmation was prepared at minute 9 and lasts ten minutes; the
+    // plan expired at minute 15.
+    at(20);
+    const confirmed = await mcp("kogane.command.approve", {
+      ...lanes.confirm.args,
+      step: "confirm",
+      confirmationDigest: lanes.confirm.digest,
+    });
+    expect(confirmed).toEqual({ failed: true, body: { error: "confirmation_expired" } });
+    expect(await planStatus(lanes.confirm.plan.planId)).toBe("planned");
+  });
+
   it("a digest that is not the plan's on an expired plan is `stale_context` before `plan_expired`", async () => {
     const s = await subject();
     const page = await planOverHttp(s.release("synthetic page approve"));
