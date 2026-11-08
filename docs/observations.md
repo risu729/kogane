@@ -17,6 +17,27 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## Sony Bank: only CSV history transactions are current
+
+2026-11-08. Owner decision, 2026-11-08 13:29 UTC, with the completeness
+addition on 2026-11-08 ([issue 1182](https://github.com/risu729/kogane/issues/1182),
+[ADR 0092](adr/0092-sony-history-csv-only.md)). Current transaction reads
+exclude every release of `sony-bank-history-json`, even without a CSV.
+The CSV's whole-window occurrence count keeps identical rows on separate
+JSON pages distinct. No parser release or repair is needed; raw JSON and its
+recorded observations stay available as evidence, and JSON after-transaction
+balances keep their existing semantics.
+
+For each nonempty currency/window, the collector requires the CSV's logical
+data-row count to equal JSON `countCnt`; missing or unequal CSV is a failed
+run, never filled from JSON. The terminal carries a closed reason documented
+in [collection.md](collection.md#sony-bank-servicescollector-sony-bank-kogane-sony-bank-collector-poc).
+A zero-count currency still succeeds without CSV. JSON exchange
+counter-currency codes remain stored; CSV's reference-information column
+remains separate evidence. Synthetic read-model tests freeze shipped SQL and
+verify the intended delta on scaled/random CORE stores and plans; collector
+tests verify the actual failed and successful terminal paths.
+
 ## V Point Pay: refuse negative notification amounts (notification-event 1.0.2)
 
 2026-11-08. Owner decision, 2026-11-08 13:29 UTC: a notification amount
@@ -3241,27 +3262,6 @@ Phase 3 is done when:
   being wrong about it — header-label matching, warned positional
   fallback, undocumented columns reported — but one real export settles
   it.
-- **Sony history pages and identical rows.** `sony-bank-history-json`
-  and `sony-bank-history-csv` give a row the id
-  `sony-bank-history:<fingerprint of currency, date, signed amount and
-  balance after>:<occurrence>`, so the two views of one row share an id
-  and the current-transactions read collapses them, preferring the CSV.
-  The occurrence counts identical rows within one artifact only. The
-  provider returns three rows per JSON page, so two rows with one
-  fingerprint on different pages (a deposit, a withdrawal of the same
-  amount, then the same deposit again on one day) both get occurrence
-  `0` and one id, while the CSV gives them `0` and `1`. With the CSV of
-  that window present each CSV row wins its own id; without it, the
-  current-transactions read keeps one of the two JSON rows. Qualifying
-  later pages' ids with their page, as Vpass and GLOBAL PASS do, would
-  stop JSON page rows from matching their CSV rows, so with the CSV
-  present every JSON row past page 1 would be listed beside its CSV row,
-  and a row would change id whenever another fetch window put it on
-  another page. Owner decision (2026-11-08): the CSV, which is skipped only
-  for a currency with no transactions, is the only source of history
-  transactions; a window whose CSV is missing or whose row count differs
-  from the JSON `countCnt` is an error, never filled from the JSON; the work
-  is [#1182](https://github.com/risu729/kogane/issues/1182).
 - **Reward units.** Point grants are recorded today as JPY transactions,
   contradicting `docs/design.md`. The fix direction is clear; the shape of
   `reward_observations` is not, because the payloads that would settle it

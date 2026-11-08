@@ -45,6 +45,9 @@ const REASONS = new Set([
   "network_error",
   "provider_business_error",
   "response_invalid",
+  "history_csv_missing_with_transactions",
+  "history_csv_count_mismatch",
+  "history_csv_invalid",
   "unexpected_error",
 ]);
 
