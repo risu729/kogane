@@ -109,6 +109,22 @@ function Occurrence({ value }: { value: ScheduleOccurrence }): ReactNode {
     </div>
   );
 }
+/**
+ * A card's last save result: the revision the save was made from and the
+ * revision it describes (the one it wrote; the same one when it wrote none).
+ */
+interface CardMessage {
+  from: number;
+  revision: number;
+  text: string;
+}
+/**
+ * Whether a card showing `revision` shows the message: at the revision the
+ * save wrote, and at the one it was made from until that one is read back
+ * (or while the read back fails), never at a later revision written elsewhere.
+ */
+const describes = (message: CardMessage | undefined, revision: number): message is CardMessage =>
+  message !== undefined && (message.revision === revision || message.from === revision);
 const DISPATCH_OFF = {
   lane_disabled: "依頼の処理が停止しているため、送った依頼は実行されません。",
   connection_disabled:
@@ -255,8 +271,8 @@ function ScheduleCard({
   collection: Omit<Parameters<typeof CollectionRequest>[0], "value" | "lease">;
   refresh: () => Promise<unknown>;
   /** Held by the page: the card remounts on each new revision, its result must not. */
-  message: string;
-  setMessage: (message: string) => void;
+  message: CardMessage | undefined;
+  setMessage: (message: CardMessage) => void;
 }): ReactNode {
   const [enabled, setEnabled] = useState(value.enabled),
     [timezone, setTimezone] = useState(value.timezone),
@@ -265,7 +281,7 @@ function ScheduleCard({
   async function save(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
-    setMessage("");
+    setMessage({ from: value.revision, revision: value.revision, text: "" });
     try {
       const result = await request<{ reservation: string }>(`/${value.id}`, {
         revision: value.revision,
@@ -273,14 +289,20 @@ function ScheduleCard({
         timezone,
         pattern,
       });
-      setMessage(
-        result.reservation === "pending"
-          ? "保存済み。実行予約の反映を待っています。"
-          : "保存しました。",
-      );
+      // The version check admits a save only at the revision shown, so the
+      // save stored exactly the next revision: the message is about that one,
+      // never about a later change read back from elsewhere.
+      setMessage({
+        from: value.revision,
+        revision: value.revision + 1,
+        text:
+          result.reservation === "pending"
+            ? "保存済み。実行予約の反映を待っています。"
+            : "保存しました。",
+      });
       await refresh();
     } catch (error) {
-      setMessage(failure(error));
+      setMessage({ from: value.revision, revision: value.revision, text: failure(error) });
     } finally {
       setBusy(false);
     }
@@ -375,7 +397,7 @@ function ScheduleCard({
           >
             {busy ? "保存中…" : "設定を保存"}
           </button>
-          <p role="status">{message}</p>
+          <p role="status">{describes(message, value.revision) ? message.text : ""}</p>
         </form>
       )}
       <dl>
@@ -827,7 +849,7 @@ export function SchedulesPage(): ReactNode {
   const [editor, setEditor] = useState<MaintenanceRule | null | undefined>(),
     [filter, setFilter] = useState("collection"),
     [leaseMessage, setLeaseMessage] = useState(""),
-    [cardMessages, setCardMessages] = useState<Record<string, string>>({}),
+    [cardMessages, setCardMessages] = useState<Record<string, CardMessage>>({}),
     [requestStates, setRequestStates] = useState<Record<string, RequestState>>({}),
     [releasingSources, setReleasingSources] = useState<string[]>([]);
   const leaseRequests = useRef(new Set<string>());
@@ -912,7 +934,7 @@ export function SchedulesPage(): ReactNode {
                   sending: collectionSends.current,
                 }}
                 refresh={refresh}
-                message={cardMessages[s.id] ?? ""}
+                message={cardMessages[s.id]}
                 setMessage={(message) =>
                   setCardMessages((messages) => ({ ...messages, [s.id]: message }))
                 }

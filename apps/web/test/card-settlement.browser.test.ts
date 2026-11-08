@@ -157,6 +157,8 @@ describe.if(runnable)("card settlement review", () => {
   let planRevision = 0;
   let action = "accept";
   let older: ReturnType<typeof settlementReview>[] = [];
+  /** A second statement's candidates, newest first; empty serves one statement. */
+  let second: ReturnType<typeof settlementReview>[] = [];
   /** The candidates a `relatedTo` read returns, and the reads of them. */
   let related: CardSettlementReview[] = [];
   const relatedReads: URLSearchParams[] = [];
@@ -169,6 +171,7 @@ describe.if(runnable)("card settlement review", () => {
     planRevision = 0;
     action = "accept";
     older = [];
+    second = [];
     related = [];
     relatedReads.length = 0;
     unmatchedPage = unmatched;
@@ -198,6 +201,15 @@ describe.if(runnable)("card settlement review", () => {
                 candidateCount: older.length + 1,
                 candidates: [review, ...older.slice(0, 1)],
               },
+              ...(second.length
+                ? [
+                    {
+                      statementKey: "statement-synthetic-2",
+                      candidateCount: second.length,
+                      candidates: second.slice(0, 2),
+                    },
+                  ]
+                : []),
             ],
             nextOffset: null,
             coverage: {
@@ -213,7 +225,10 @@ describe.if(runnable)("card settlement review", () => {
           url.searchParams.has("statementKey")
         )
           return Response.json({
-            items: [review, ...older],
+            items:
+              url.searchParams.get("statementKey") === "statement-synthetic-2"
+                ? second
+                : [review, ...older],
             nextOffset: null,
             coverage: {
               scope: "card-statement-bank-debit-candidates",
@@ -773,7 +788,14 @@ describe.if(runnable)("card settlement review", () => {
     await summary.click();
     expect(await page.locator(".settlement-older > section").count()).toBe(1);
     await page.getByRole("button", { name: "この請求の候補をすべて表示（3 件）" }).click();
-    await page.getByText("1–3 件目 / 3 件", { exact: true }).waitFor();
+    // The pager names its statement, and so does its spoken count.
+    const pager = page.getByRole("navigation", {
+      name: "請求 1 件目（MyJCB · synthetic-card · 2026-09）の候補のページ",
+      exact: true,
+    });
+    expect(await pager.getByRole("status").textContent()).toBe(
+      "請求 1 件目（MyJCB · synthetic-card · 2026-09）の候補：1–3 件目 / 3 件",
+    );
     // The full list adds the one the group did not carry, and repeats none.
     expect(await page.locator(".settlement-older section.panel").count()).toBe(2);
     expect(await page.getByRole("button", { name: "採用内容を確認" }).count()).toBe(3);
@@ -784,4 +806,43 @@ describe.if(runnable)("card settlement review", () => {
     ).toBe(true);
     await page.close();
   });
+  test("two statements' full candidate lists are paged under their own names", async () => {
+    const stale = (n: number) => ({
+      ...settlementReview(),
+      proposalId: `card-settlement-stale-${n}`,
+      createdAt: `2026-09-0${n}T00:00:00Z`,
+      acceptanceBlockers: ["statement_changed"],
+    });
+    older = [stale(2), stale(1)];
+    // Another statement of the same card, account and month: the importer-era
+    // and collector-era captures of one month are two statements
+    // (docs/card-settlements.md). Every value is invented.
+    const recaptured = (n: number) => ({
+      ...settlementReview(),
+      proposalId: `card-settlement-recaptured-${n}`,
+      createdAt: `2026-09-2${n}T00:00:00Z`,
+      acceptanceBlockers: n === 3 ? [] : ["statement_changed"],
+    });
+    second = [recaptured(3), recaptured(2), recaptured(1)];
+    const page = await open();
+    for (const summary of await page.locator(".settlement-older > summary").all())
+      await summary.click();
+    // Each click replaces its button with the list, so take the first twice.
+    const show = page.getByRole("button", { name: "この請求の候補をすべて表示（3 件）" });
+    await show.first().click();
+    await page.locator(".settlement-older nav").first().waitFor();
+    await show.first().click();
+    await page.locator(".settlement-older nav").nth(1).waitFor();
+    const pagers = await page
+      .locator(".settlement-older nav")
+      .evaluateAll((navs) => navs.map((nav) => nav.getAttribute("aria-label")));
+    // Each statement's pager says which statement it pages, by its place in
+    // the list where card, account and month are the same.
+    expect(pagers).toEqual([
+      "請求 1 件目（MyJCB · synthetic-card · 2026-09）の候補のページ",
+      "請求 2 件目（MyJCB · synthetic-card · 2026-09）の候補のページ",
+    ]);
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
 });
