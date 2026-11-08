@@ -544,6 +544,50 @@ current Mizuho account mappings read `provider-local` at policy 2. No reimport
 or B reparse is needed. Rolling back the code leaves the policy-2 runs current:
 an older build cannot replace a newer sealed decision.
 
+## Policy 2: MyJCB J-POINT total
+
+The resolver had no rule for the J-POINT parser's reference
+`myjcb:{connection}:j-point:total` (`myjcb-jpoint-balance`), so every policy-1
+run mapped it as `unresolved` / `unrecognized-source-account` under the
+statement account's label `MyJCB請求口座`. The rule now accepts that exact
+shape (the connection segment is the parser's `[a-z0-9][a-z0-9-]{0,63}`) as a
+provider-local `reward-account` (`provider-connection-jpoint-total`, label
+`MyJCB J-POINT`): the displayed programme total of the connection's login, one
+holding in `points:j-point` ([rewards](rewards.md)). It is not a card and not
+the statement account, so it takes neither the root's role nor its label. Any
+other `j-point` shape stays unresolved. Reward units themselves have no
+resolution state; this classifies the source account only, and the total
+stays outside every asset subtotal (reward units are not summable).
+
+The `myjcb` policy module (`identity-policies/myjcb.ts`) requires version 2
+only for J-POINT captures (artifact dataset `jpoint-balance`), with family
+`identity-default`, release `identity-default-v2` and an empty dependency set
+([ADR 0089](adr/0089-myjcb-jpoint-identity.md)). Every other MyJCB parse falls
+back to the base policy (`not-a-jpoint-capture`), as a Vpass parse without a
+trusted binding does, so statement parses are never re-identified: the
+statement root keeps its current mapping revision and id, which card-settlement
+ownership evidence (`account_mapping:<id>`) cites and readiness compares by id.
+The rule does not read the run's version (a new shape, not a changed one), so
+an explicit policy-1 run maps the total too. The bounded sweep treats the
+sealed policy-1 J-POINT parses as candidates again and appends a policy-2 run
+and a policy-2 mapping revision of the total's source account; the current
+views select the newer sealed run. The key is unchanged, so each observation
+keeps its source account. The account entity keeps the role it was first
+written with (`source-account`, shown as the role in the identity browser);
+the classification is on the policy-2 mapping revision. Policy-1 runs, their
+rows and revisions and Layer A/B stay as recorded, and a manual decision on a
+MyJCB reference is not replaced.
+
+Nothing is configured to enable it. After deployment the five-minute pipeline
+sweep picks the parses up on its own; each J-POINT parse is re-identified once.
+To finish sooner run `node scripts/identity-ops.ts catchup 100 myjcb` and
+continue only if the bounded run reports more candidates. Then run the read-only
+[identity audit](identity-audit.md): `pending_parses` for `myjcb` reads zero,
+and `kogane.identity.read` (`accounts`, source `myjcb`) lists the J-POINT total
+as `provider-local` with no `unresolved` reference left. No reimport or B
+reparse is needed. Rolling back the code leaves the policy-2 runs current: an
+older build cannot replace a newer sealed decision.
+
 ## Policy 2: SBI Shinsei non-account references
 
 Policy 1 mapped every `sbi-shinsei:` reference as a provider-local `deposit`,

@@ -126,7 +126,7 @@ ALTER TABLE fetch_artifacts ADD COLUMN format_version TEXT;`);
   }
   await db.batch([
     db.prepare(
-      "INSERT INTO sources VALUES('smbc-bank','synthetic'),('v-point','synthetic'),('mizuho-bank','synthetic'),('sbi-shinsei-bank','synthetic')",
+      "INSERT INTO sources VALUES('smbc-bank','synthetic'),('v-point','synthetic'),('mizuho-bank','synthetic'),('sbi-shinsei-bank','synthetic'),('myjcb','synthetic')",
     ),
     db.prepare("INSERT INTO producers VALUES('synthetic-producer'),('other-producer')"),
   ]);
@@ -396,6 +396,7 @@ async function seed(
   source = "smbc-bank",
   success = true,
   rows: (id: number) => D1PreparedStatement[] = () => [],
+  dataset = "synthetic",
 ) {
   await db.batch([
     db
@@ -409,10 +410,8 @@ async function seed(
     db.prepare("INSERT INTO fetch_run_seals VALUES(?)").bind(id),
     db.prepare("INSERT INTO fetch_run_reports VALUES(?,'terminal','success',0,0)").bind(id),
     db
-      .prepare(
-        "INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset) VALUES(?,?,?,'synthetic')",
-      )
-      .bind(id, id, source),
+      .prepare("INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset) VALUES(?,?,?,?)")
+      .bind(id, id, source, dataset),
     db
       .prepare(
         "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,'synthetic','1','2026-01-01','pending','[]')",
@@ -430,8 +429,10 @@ async function seed(
             ? "mizuho-bank:ordinary:001:1234567"
             : source === "sbi-shinsei-bank"
               ? "sbi-shinsei:synthetic-account"
-              : "smbc-bank:ordinary-yen",
-        source === "v-point" ? "V_POINT" : "JPY",
+              : source === "myjcb"
+                ? "myjcb:synthetic-connection:j-point:total"
+                : "smbc-bank:ordinary-yen",
+        source === "v-point" ? "V_POINT" : source === "myjcb" ? "J_POINT" : "JPY",
         JSON.stringify(Array.from({ length: count }, (_, i) => i)),
       ),
     ...rows(id),
@@ -841,6 +842,91 @@ test("SBI Shinsei parses sealed under policy 1 are re-identified append-only at 
         .all()
     ).results,
   ).toEqual([{ role: "deposit", status: "provider-local" }]);
+});
+
+test("MyJCB J-POINT parses are re-identified at policy 2; statement parses stay at policy 1", async () => {
+  // A J-POINT capture with the total, and a statement capture with the root.
+  await seed(140, 1, "myjcb", true, () => [], "jpoint-balance");
+  await seed(141, 0, "myjcb", true, (id) => [
+    db
+      .prepare(
+        "INSERT INTO balance_observations(parse_run_id,source_account,metric,instrument,raw_locator,extra_json) VALUES(?,'myjcb:synthetic-connection:root','synthetic_statement','JPY','synthetic:root','{}')",
+      )
+      .bind(id),
+  ]);
+  // What the policy-1 build recorded: no J-POINT rule in the resolver.
+  const unrecognized: IdentityResolver = (input) => {
+    const plan = providerIdentity(input);
+    if (input.sourceAccount.endsWith(":j-point:total"))
+      Object.assign(plan.account, {
+        label: "MyJCB請求口座",
+        role: "source-account",
+        status: "unresolved",
+        reason: "unrecognized-source-account",
+      });
+    return plan;
+  };
+  expect(await identifyParse(db, parse(140, "myjcb"), unrecognized, 1)).toBe(1);
+  // A statement parse identified under the standard request is sealed at the
+  // base policy, as before this module existed.
+  expect(await identifyParse(db, parse(141, "myjcb"), providerIdentity)).toBe(1);
+  const mappings = () =>
+    db
+      .prepare(
+        `SELECT json_extract(a.reference_json,'$[0]') reference,m.id,m.revision,m.label,m.status,m.reason,m.policy_version
+         FROM account_mappings m JOIN source_accounts a ON a.id=m.source_account_id
+         WHERE a.source_id='myjcb' ORDER BY reference,m.revision`,
+      )
+      .all<{ reference: string; revision: number; [column: string]: unknown }>();
+  const recorded = (await mappings()).results;
+  expect(recorded.map((m) => [m.reference, m.revision])).toEqual([
+    ["myjcb:synthetic-connection:j-point:total", 1],
+    ["myjcb:synthetic-connection:root", 1],
+  ]);
+  // Only the J-POINT parse is a candidate again.
+  expect(await identitySweep(db, providerIdentity, 8, "myjcb")).toEqual({
+    processedRuns: 1,
+    identifiedRuns: 1,
+    identifiedObservations: 1,
+  });
+  expect(await identitySweep(db, providerIdentity, 8, "myjcb")).toEqual({
+    processedRuns: 0,
+    identifiedRuns: 0,
+    identifiedObservations: 0,
+  });
+  const after = (await mappings()).results;
+  // Policy-1 revisions stay as recorded. The statement root gains no revision,
+  // so its mapping id, which card-settlement ownership evidence cites, is the
+  // same; only the J-POINT total gains a policy-2 revision.
+  expect(after.filter((m) => m.revision === 1)).toEqual(recorded);
+  expect(after.filter((m) => m.revision === 2).map(({ id: _id, ...mapping }) => mapping)).toEqual([
+    {
+      reference: "myjcb:synthetic-connection:j-point:total",
+      revision: 2,
+      label: "MyJCB J-POINT",
+      status: "provider-local",
+      reason: "provider-connection-jpoint-total",
+      policy_version: 2,
+    },
+  ]);
+  // No second subject: the two references are still the only source accounts.
+  expect(
+    await db
+      .prepare("SELECT count(*) n FROM source_accounts WHERE source_id='myjcb'")
+      .first<number>("n"),
+  ).toBe(2);
+  expect(
+    (
+      await db
+        .prepare(
+          "SELECT parse_run_id,min(policy_version) v FROM current_identity_observations WHERE parse_run_id IN (140,141) GROUP BY parse_run_id ORDER BY parse_run_id",
+        )
+        .all()
+    ).results,
+  ).toEqual([
+    { parse_run_id: 140, v: 2 },
+    { parse_run_id: 141, v: 1 },
+  ]);
 });
 
 test("all four observation kinds preserve their instrument roles and provenance", async () => {
