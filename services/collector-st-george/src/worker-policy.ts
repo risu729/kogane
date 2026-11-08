@@ -76,7 +76,7 @@ export interface StateStorage {
 }
 type StoredState =
   | { kind: "running" }
-  | { kind: "blocked"; reason: FailureCode; runId?: string }
+  | { kind: "blocked"; reason: FailureCode; runId?: string; since?: string }
   | { kind: "pending"; run: Omit<SharedRunInput, "snapshot">; snapshotChunks: number };
 export interface PublicRunResult {
   status: "stored" | "blocked" | "busy" | "failed" | "ready";
@@ -353,18 +353,33 @@ export class CollectionCoordinator {
       if (state?.kind === "running") {
         // The object was reset during an attempt. Its lease outlived it, so no
         // other attempt can still be running once this one holds the lease.
-        logInterruptedAttempt();
+        logBlockEvent({ event: "st-george-interrupted-attempt-cleared" });
         state = undefined;
       }
       if (state?.kind === "blocked") {
-        if (blocksLaterLogins(state.reason))
+        if (blocksLaterLogins(state.reason)) {
+          // Nothing is contacted. Say which run blocked, since when, and what lifts it.
+          logBlockEvent({
+            event: "st-george-collection-skipped-blocked",
+            reason: state.reason,
+            blockedRunId: state.runId ?? null,
+            blockedSince: state.since ?? null,
+            clearedBy: "operator-resume",
+          });
           return {
             status: "blocked",
             reason: state.reason,
             ...(state.runId ? { runId: state.runId } : {}),
           };
+        }
         // A block that needs no person, left by the older any-failure policy,
         // no longer stops the run.
+        logBlockEvent({
+          event: "st-george-block-cleared",
+          reason: state.reason,
+          blockedRunId: state.runId ?? null,
+          cause: "not-a-login-refusal",
+        });
         state = undefined;
       }
       let run: SharedRunInput;
@@ -416,8 +431,18 @@ export class CollectionCoordinator {
         const blocked = blocksLaterLogins(run.reason);
         await this.finishPending(
           pending,
-          blocked ? { kind: "blocked", reason: run.reason, runId: run.runId } : undefined,
+          blocked
+            ? { kind: "blocked", reason: run.reason, runId: run.runId, since: run.completedAt }
+            : undefined,
         );
+        if (blocked)
+          logBlockEvent({
+            event: "st-george-collection-blocked",
+            reason: run.reason,
+            blockedRunId: run.runId,
+            blockedSince: run.completedAt,
+            clearedBy: "operator-resume",
+          });
         return {
           status: blocked ? "blocked" : "failed",
           reason: run.reason,
@@ -501,9 +526,10 @@ export class CollectionCoordinator {
   }
 }
 
-function logInterruptedAttempt(): void {
+/** Fixed event names, closed codes, run UUIDs and timestamps only. */
+function logBlockEvent(fields: Record<string, string | null>): void {
   try {
-    console.warn(JSON.stringify({ event: "st-george-interrupted-attempt-cleared" }));
+    console.warn(JSON.stringify(fields));
   } catch {
     /* A diagnostic must not change the run. */
   }

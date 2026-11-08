@@ -113,6 +113,58 @@ describe("durable collection policy", () => {
       expect(reads).toBe(2);
     }
   });
+  test("a block and every skipped run log which run blocked, since when and what lifts it", async () => {
+    const state = new Storage();
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const coordinator = new CollectionCoordinator(
+        state,
+        async () => ({ status: "failed", reason: "login-rejected" }),
+        (run) => persistSharedRun(new FakeR2Bucket(), run),
+      );
+      const first = await coordinator.trigger();
+      await coordinator.trigger();
+      const events = warn.mock.calls.map(([line]) => JSON.parse(line as string));
+      expect(events).toEqual([
+        {
+          event: "st-george-collection-blocked",
+          reason: "login-rejected",
+          blockedRunId: first.runId,
+          blockedSince: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/u),
+          clearedBy: "operator-resume",
+        },
+        {
+          event: "st-george-collection-skipped-blocked",
+          reason: "login-rejected",
+          blockedRunId: first.runId,
+          blockedSince: events[0].blockedSince,
+          clearedBy: "operator-resume",
+        },
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+  test("clearing a block of the older policy is logged with its reason", async () => {
+    const state = new Storage();
+    await state.put("state", { kind: "blocked", reason: "runtime-failed" });
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await new CollectionCoordinator(
+        state,
+        async () => ({ status: "success", snapshot: snapshot() }),
+        (run) => persistSharedRun(new FakeR2Bucket(), run),
+      ).trigger();
+      expect(JSON.parse(warn.mock.calls[0]![0] as string)).toEqual({
+        event: "st-george-block-cleared",
+        reason: "runtime-failed",
+        blockedRunId: null,
+        cause: "not-a-login-refusal",
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
   test("any other failure is a failed run and the next trigger tries again", async () => {
     for (const reason of [
       "runtime-failed",
