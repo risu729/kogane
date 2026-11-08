@@ -91,6 +91,9 @@ describe("which collectors a job runs, from configuration", () => {
   test("only safe codes pass through", () => {
     expect(safeCode("parser_rejected")).toBe("parser_rejected");
     expect(safeCode("Some provider text")).toBe("unclassified");
+    expect(safeCode("collection-unit-failed")).toBe("collection_unit_failed");
+    expect(safeCode("human-required")).toBe("human_required");
+    expect(safeCode("-leading-hyphen")).toBe("unclassified");
     expect(safeCode(null)).toBeNull();
   });
 });
@@ -532,6 +535,19 @@ describe("one reason per stored state", () => {
     );
     expect(entry.newest.failureCodes).toEqual(["unclassified"]);
     expect(entry.newest.unitFailureCode).toBe("unclassified");
+    expect(valid(entry)).toBe(true);
+  });
+
+  test("a collector's hyphenated unit code keeps its meaning", () => {
+    const entry = cell(
+      row({
+        unit_failed: 1,
+        unit_failure_code: "read-http-error",
+      }),
+    );
+    expect(entry.newest.unitFailureCode).toBe("read_http_error");
+    expect(entry.reasons).toContain("unit_failed");
+    expect(entry.reasons).not.toContain("user_action_required");
     expect(valid(entry)).toBe(true);
   });
 
