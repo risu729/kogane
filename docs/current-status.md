@@ -88,8 +88,8 @@ are separate claims. Historical acceptance records are linked from the
   scope, not a requested window; READ projection of a run is not traced; only
   SBI VC's keepalive is an unattended session refresh. An accepted operation is
   still not an executed collection. The schedules page's **収集を依頼** sends the
-  same request after a confirmation and offers no button for a connection the
-  lane would not start, which today is every connection
+  same request after a confirmation, and only for the connections the lane
+  would start (the five above); the others show why there is no button
   ([schedules](schedules.md#収集を依頼-collection-request)).
 - SMBC Direct unattended login and V Point Pay automatic app login remain
   unsupported. V Point email collection is a separate supported path.
