@@ -15,29 +15,28 @@ calculation job, no collection request, no export, and no external money action
 in _this_ API. Those capabilities are not disabled by a flag; they have no name
 in the grant type.
 
-The operations API ([ops-api.md](ops-api.md)) is not served over `/mcp`:
-`/mcp` has only agent-only callers
-([ADR 0047](adr/0047-mcp-client-connection.md)), and an operation needs the
-change lifecycle's operator capability, which no capability in the table
-below reaches.
+The operations API's HTTP routes ([ops-api.md](ops-api.md)) are not served
+over `/mcp`, whose callers are all agent-only
+([ADR 0047](adr/0047-mcp-client-connection.md)); its six operations are the
+`kogane.ops.*` tools there, which every MCP client applies as itself
+(`src/ops-tools.ts`, [ops-api](ops-api.md#mcp), ADR 0084).
 
-**No table grants an MCP client
-([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).** Every
-`mcp-client:<sub>` the MCP Access application admits holds the whole-store
-grant ([Grants](#grants)): every capability below, including proposals, raw
-evidence and maintenance windows, over every source, account and schedule
-source, within the published per-call bounds. It also applies the operations
-of ADR 0063 this deployment installs, over the whole store, as itself and never
-as the operator, whether
-or not its subject is in `OPERATOR_SUBJECTS`. The MCP audience is
+**Every MCP client holds the whole-store grant.**
+There is no grant table (`AGENT_GRANTS` is empty and unread): every client the
+MCP Access application admits holds `fullGrant` (`packages/application/src/grants.ts`),
+that is all six capabilities, including `evidence.read`, `audit.read`,
+`interpretation.propose` and `schedules.read`, with `"*"` for `sources`,
+`accounts` and `scheduleSources`, bounded only by the fixed per-call limits
+(at most 1000 rows per read, including cursor offset and pagination lookahead)
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)). Each
+client applies the operations of ADR 0063 as itself. The MCP audience is
 separate from the browser audience. The dedicated `kogane-mcp.takuk.me`
 hostname must be attached to the App Worker independently, because the
 current version deployment does not synchronize App triggers. Configuration
 and deployment are not evidence that a client connected; the ordered live
 checks in [Connecting an MCP client](#connecting-an-mcp-client) still apply.
-Maintenance windows can be read under their own capability (`schedules.read`);
-revising one, like a job setting, is an operation any MCP client the MCP
-Access application admits applies as itself, over every schedule
+Maintenance windows are read under `schedules.read`; revising one, like a job
+setting, is an operation any MCP client applies as itself, over every schedule
 ([below](#maintenance-windows)). Lease release stays operator-only
 ([schedules](schedules.md#settings-api)): its MCP tool exists and refuses
 every call ([below](#maintenance-windows)).
@@ -213,8 +212,12 @@ never offered ([below](#ui-read-pages)).
 `kogane.capabilities` reports the `ApiCapabilities` object this deployment
 _actually serves_ — the contract's defaults with the server-computed facts
 folded in, which is the same object `/api/meta` returns (today that is
-`commands` and `opsApi`, both deployment flags, and `eventsV2`, which depends
-on the A10 projection being present). An agent is
+`commands` and `opsApi`, both deployment flags; `eventsV2`,
+`cardSettlementReconciliation`, `cardOwnershipReview`,
+`cardPurchaseRecognition`, `reportedStateOnDate`, `reconstructedStateOnDate`
+and `reportArtifacts`, which depend on the tables and views this store has;
+and the reward and balance read models, which depend on a served snapshot;
+`src/capabilities.ts`). An agent is
 never told about a route this store cannot serve, and a page and an agent read
 one description of the deployment.
 
@@ -506,7 +509,9 @@ It reads and never writes, and never proposes `same_account`. A candidate's
 `connection_contains` that would decide it; deciding is a plan of that
 payload, with a reason, through the change lifecycle, where an agent named in
 `AGENT_GRANTS` (empty in the committed configuration) can plan and cannot
-approve or commit, and an MCP client reaches no command route. No candidate provenance is checked on the
+approve or commit, and an MCP client plans, approves and commits as itself
+through `kogane.command.plan`, `kogane.command.approve` and
+`kogane.command.commit` (ADR 0084). No candidate provenance is checked on the
 server: read the candidate again right before planning, as the page does.
 
 ### Card statements without a candidate
@@ -1101,8 +1106,9 @@ This section is the connection design of
 [ADR 0047](adr/0047-mcp-client-connection.md). The Worker code is in this
 repository and tested with synthetic keys, audiences and principals.
 **Configuration, deployment, domain attachment, OAuth registration and
-successful tool calls are separate evidence.** The approved production
-configuration names one MCP reader; its deployment and a real client
+successful tool calls are separate evidence.** The production configuration
+names no MCP grant: every client the MCP Access application admits holds the
+whole-store grant (ADR 0084); its deployment and a real client
 connection still require the live checks below. Placeholders:
 `<app-host>` is the dedicated MCP hostname `kogane-mcp.takuk.me`, `<mcp-aud>` the AUD tag of the MCP
 Access application, `<owner-sub>` the owner's Access user id (the UUID
@@ -1126,6 +1132,10 @@ attenuates it.
 4. `mcpCaller` (`src/auth.ts`) verifies issuer, signature, `type`, `aud`
    and `sub`, and names the caller **`mcp-client:<sub>`**.
 5. The grant is the whole-store grant (ADR 0084), and the tool runs.
+
+Through the MCP Portal ([route](#which-client-connects-and-how)), the
+Portal is the client of steps 1–3; each person's own client signs in at the
+Portal's Access application and calls `https://mcp.takuk.me/mcp`.
 
 | Assertion reaching the Worker                                            | On `/mcp`                                  | On every other route                           |
 | ------------------------------------------------------------------------ | ------------------------------------------ | ---------------------------------------------- |
@@ -1154,7 +1164,8 @@ are unchanged.
 ### Endpoint and transport
 
 - URL: `https://<app-host>/mcp` (or a dedicated hostname routed to this
-  Worker, if the gaps below require one).
+  Worker, if the gaps below require one). Clients register the Portal URL
+  `https://mcp.takuk.me/mcp` instead ([route](#which-client-connects-and-how)).
 - Served by the official MCP TypeScript SDK, `@modelcontextprotocol/server`
   (pinned): the initialize-based revisions through its stateless Streamable
   HTTP transport and the stateless 2026-07-28 revision through
@@ -1170,24 +1181,24 @@ are unchanged.
 
 ### Refusals a client sees
 
-| Failure                                                                                                                                                           | Answered by                                 | HTTP / result                                                                                                             |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| no token, expired token, person not in the MCP application's policy                                                                                               | Cloudflare Access                           | Access's own `401` (Managed OAuth) — not this Worker                                                                      |
-| assertion missing, forged, expired, from another issuer, not for the MCP application (the browser's, both, another), without `sub`, or with an agent-only subject | Worker                                      | `401 authentication_required`                                                                                             |
-| Access keys unreachable; `ACCESS_MCP_AUDIENCE` misconfigured                                                                                                      | Worker                                      | `503 identity_keys_unavailable` / `503 auth_not_configured`                                                               |
-| an unexpected failure inside a tool (the store outside a page read, a bug) or the tool list (a bug)                                                               | Worker                                      | `500 internal_error`; the exception text never reaches the client or the log                                              |
-| a store failure while a tool or the tool list checks that a read's tables or views exist (the page reads, card purchases, card settlements, the reported state)   | Worker                                      | `503 catalogue_read_failed`, as its route answers; the exception text never reaches the client or the log                 |
-| a store failure inside a page read's own read                                                                                                                     | tool                                        | `isError: true`, `{"error":"catalogue_read_failed"}`, as its route answers                                                |
-| `Origin` of another site                                                                                                                                          | Worker                                      | `403 origin_not_allowed`                                                                                                  |
-| `GET` / `DELETE`; a query string                                                                                                                                  | Worker                                      | `405 method_not_allowed` / `400 invalid_query`                                                                            |
-| media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                                         | `415` / `406` / `400` / `400` / `413`                                                                                     |
-| unknown method; unknown or unpublished tool                                                                                                                       | SDK / dispatcher                            | JSON-RPC `-32601`; `-32602 unknown_tool`                                                                                  |
-| an operations tool whose principal does not resolve (a malformed subject, a bad clock)                                                                            | `callDelegatedOpsTool`, from the resolution | `isError: true`, `{"error":"delegation_not_mcp_client"}` (or the resolution's other closed code); only the refusal record |
-| capability not granted                                                                                                                                            | tool                                        | `isError: true`, `code: unauthorized`, `refs: ["capability:<name>"]`                                                      |
-| source, account or row outside the scope                                                                                                                          | tool                                        | `isError: true`, `code: evidence_restricted` (proposal targets: `incomplete_evidence`)                                    |
-| raw evidence without `evidence.read`                                                                                                                              | tool                                        | not an error: `explain` has no raw-locator node, `restricted: ["evidence.read"]`                                          |
-| page or proposal beyond the budget                                                                                                                                | tool                                        | `isError: true`, `code: budget_exceeded`, `refs: ["budget:…"]`                                                            |
-| approve, commit                                                                                                                                                   | —                                           | no such tool; every command route is `401` for an MCP token                                                               |
+| Failure                                                                                                                                                           | Answered by                                 | HTTP / result                                                                                                                                     |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| no token, expired token, person not in the MCP application's policy                                                                                               | Cloudflare Access                           | Access's own `401` (Managed OAuth) — not this Worker                                                                                              |
+| assertion missing, forged, expired, from another issuer, not for the MCP application (the browser's, both, another), without `sub`, or with an agent-only subject | Worker                                      | `401 authentication_required`                                                                                                                     |
+| Access keys unreachable; `ACCESS_MCP_AUDIENCE` misconfigured                                                                                                      | Worker                                      | `503 identity_keys_unavailable` / `503 auth_not_configured`                                                                                       |
+| an unexpected failure inside a tool (the store outside a page read, a bug) or the tool list (a bug)                                                               | Worker                                      | `500 internal_error`; the exception text never reaches the client or the log                                                                      |
+| a store failure while a tool or the tool list checks that a read's tables or views exist (the page reads, card purchases, card settlements, the reported state)   | Worker                                      | `503 catalogue_read_failed`, as its route answers; the exception text never reaches the client or the log                                         |
+| a store failure inside a page read's own read                                                                                                                     | tool                                        | `isError: true`, `{"error":"catalogue_read_failed"}`, as its route answers                                                                        |
+| `Origin` of another site                                                                                                                                          | Worker                                      | `403 origin_not_allowed`                                                                                                                          |
+| `GET` / `DELETE`; a query string                                                                                                                                  | Worker                                      | `405 method_not_allowed` / `400 invalid_query`                                                                                                    |
+| media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                                         | `415` / `406` / `400` / `400` / `413`                                                                                                             |
+| unknown method; unknown or unpublished tool                                                                                                                       | SDK / dispatcher                            | JSON-RPC `-32601`; `-32602 unknown_tool`                                                                                                          |
+| an operations tool whose principal does not resolve (a malformed subject, a bad clock)                                                                            | `callDelegatedOpsTool`, from the resolution | `isError: true`, `{"error":"delegation_not_mcp_client"}` (or the resolution's other closed code); only the refusal record                         |
+| capability not granted                                                                                                                                            | tool                                        | `isError: true`, `code: unauthorized`, `refs: ["capability:<name>"]`                                                                              |
+| source, account or row outside the scope                                                                                                                          | tool                                        | `isError: true`, `code: evidence_restricted` (proposal targets: `incomplete_evidence`)                                                            |
+| raw evidence without `evidence.read`                                                                                                                              | tool                                        | not an error: `explain` has no raw-locator node, `restricted: ["evidence.read"]`                                                                  |
+| page or proposal beyond the budget                                                                                                                                | tool                                        | `isError: true`, `code: budget_exceeded`, `refs: ["budget:…"]`                                                                                    |
+| an HTTP command route (`/api/command/v1/*`)                                                                                                                       | Worker                                      | `401 authentication_required` for an MCP token; approval and commit are the tools `kogane.command.approve` and `kogane.command.commit` (ADR 0084) |
 
 A tool's refusal is the same financial error object its HTTP route answers,
 in `structuredContent`; `content[0].text` is that object serialised.
@@ -1201,12 +1212,20 @@ mapping, the grant shape and the local checks are the same for all of them.
 If an existing connection reports that it needs reauthentication, follow that
 runbook.
 
-| Client                                          | Flow it presents ([Claude][claude-auth], [ChatGPT][openai-auth], [Codex][codex-mcp])                                                                                                                                                                      | Owner creates in Cloudflare                                                                  | Worker mapping           | Grants                                                            | Client-side registration                                                                                       |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| claude.ai (also Claude Desktop and mobile)      | OAuth 2.0 code + PKCE `S256`; discovery from the `401`; CIMD if advertised, else DCR; redirect `https://claude.ai/api/mcp/auth_callback`; calls from `160.79.104.0/21`                                                                                    | the MCP Access application with Managed OAuth, an identity policy, that redirect URI allowed | `mcp-client:<owner-sub>` | none (ADR 0084); nothing in `AGENT_GRANTS` or `OPERATOR_SUBJECTS` | Customize → Connectors → Add custom connector → URL, sign in, OAuth client "Register automatically"            |
-| ChatGPT (developer mode app)                    | OAuth 2.1 code + PKCE `S256`; `resource` on authorize and token; CIMD, DCR or a predefined client; redirect `https://chatgpt.com/connector_platform_oauth_redirect` if the server returns `iss`, else `https://chatgpt.com/connector/oauth/{callback_id}` | the same application; both redirect forms allowed (`https://chatgpt.com/connector/oauth/*`)  | `mcp-client:<owner-sub>` | none                                                              | Settings → Apps → Advanced settings → Developer mode; create an app with the URL and OAuth                     |
-| Codex (CLI, IDE extension, ChatGPT desktop app) | OAuth via `codex mcp login`; CIMD, else DCR; local callback listener                                                                                                                                                                                      | the same application with "allow localhost/loopback clients" on                              | `mcp-client:<owner-sub>` | none                                                              | `[mcp_servers.kogane] url = "https://<app-host>/mcp"` in `~/.codex/config.toml`, then `codex mcp login kogane` |
-| Claude Code (optional)                          | OAuth with its own CIMD, else DCR; loopback redirect on any port                                                                                                                                                                                          | as Codex                                                                                     | `mcp-client:<owner-sub>` | none                                                              | `claude mcp add --transport http kogane https://<app-host>/mcp`, then `/mcp` to sign in                        |
+**Route (owner, 2026-11-07, [ADR 0047 amendment](adr/0047-mcp-client-connection.md#amendment-clients-connect-through-the-mcp-portal-2026-11-07)):**
+claude.ai, ChatGPT and Grok register the Cloudflare MCP Portal
+`https://mcp.takuk.me/mcp`, not the origin URL. Their redirect URIs are
+allowed on the Portal's Access application ("MCP Portal"); the origin
+application allows only the Portal's own callbacks. The table below describes
+each client's OAuth flow; read "the same application" as the Portal's.
+Codex and Claude Code rows need loopback on the Portal application before use.
+
+| Client                                          | Flow it presents ([Claude][claude-auth], [ChatGPT][openai-auth], [Codex][codex-mcp])                                                                                                                                                                      | Owner creates in Cloudflare                                                                 | Worker mapping           | Grants                                                            | Client-side registration                                                                                         |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| claude.ai (also Claude Desktop and mobile)      | OAuth 2.0 code + PKCE `S256`; discovery from the `401`; CIMD if advertised, else DCR; redirect `https://claude.ai/api/mcp/auth_callback`; calls from `160.79.104.0/21`                                                                                    | the Portal's Access application, that redirect URI allowed                                  | `mcp-client:<owner-sub>` | none (ADR 0084); nothing in `AGENT_GRANTS` or `OPERATOR_SUBJECTS` | Customize → Connectors → Add custom connector → URL, sign in, OAuth client "Register automatically"              |
+| ChatGPT (developer mode app)                    | OAuth 2.1 code + PKCE `S256`; `resource` on authorize and token; CIMD, DCR or a predefined client; redirect `https://chatgpt.com/connector_platform_oauth_redirect` if the server returns `iss`, else `https://chatgpt.com/connector/oauth/{callback_id}` | the same application; both redirect forms allowed (`https://chatgpt.com/connector/oauth/*`) | `mcp-client:<owner-sub>` | none                                                              | Settings → Apps → Advanced settings → Developer mode; create an app with the URL and OAuth                       |
+| Codex (CLI, IDE extension, ChatGPT desktop app) | OAuth via `codex mcp login`; CIMD, else DCR; local callback listener                                                                                                                                                                                      | the same application with "allow localhost/loopback clients" on                             | `mcp-client:<owner-sub>` | none                                                              | `[mcp_servers.kogane] url = "https://mcp.takuk.me/mcp"` in `~/.codex/config.toml`, then `codex mcp login kogane` |
+| Claude Code (optional)                          | OAuth with its own CIMD, else DCR; loopback redirect on any port                                                                                                                                                                                          | as Codex                                                                                    | `mcp-client:<owner-sub>` | none                                                              | `claude mcp add --transport http kogane https://mcp.takuk.me/mcp`, then `/mcp` to sign in                        |
 
 ### Owner hand-off, in order
 
@@ -1226,14 +1245,25 @@ values. These steps do not assert that production or any client has passed.
    browser application's audience and policies remain unchanged. Current
    [portal policy documentation][cf-mcp-portal-policy] says Device Posture
    Checks are enforced; verify the actual upstream OAuth and refresh path
-   under those requirements instead of removing them.
+   under those requirements instead of removing them. Readback 2026-11-07:
+   the one policy, "Owner access", includes only the owner email (one-time
+   PIN) with no require or exclude: its Gateway requirement was emptied at
+   07:10 UTC (audit log), and the Gateway posture rule is no longer
+   referenced, so no posture check applies.
 3. _Managed OAuth readback_ — confirm it is enabled on the MCP application
-   (API `oauth_configuration.enabled`) with approved redirect URIs for the
-   intended clients: `https://claude.ai/api/mcp/auth_callback`,
-   `https://chatgpt.com/connector_platform_oauth_redirect` and
-   `https://chatgpt.com/connector/oauth/*`; allow localhost and loopback only
-   for approved Codex/Claude Code clients. Read back the configured access
-   token and grant-session lifetimes; do not infer them from defaults.
+   (API `oauth_configuration.enabled`) with only the Portal's callbacks as
+   redirect URIs, and that the Portal's Access application allows the
+   intended clients' redirect URIs, such as
+   `https://claude.ai/api/mcp/auth_callback`; allow localhost and loopback
+   only for approved Codex/Claude Code clients. Read back the configured
+   access token and grant-session lifetimes; do not infer them from defaults.
+   Readback 2026-11-07: the origin application allows only
+   `https://mcp.takuk.me/servers-callback` and the dashboard's Kogane server
+   callback, with localhost and loopback off (16:40 UTC); the Portal
+   application allows ChatGPT's two, claude.ai's, Grok's two and Cursor's two
+   (16:36 UTC; listed in the
+   [ADR 0047 amendment](adr/0047-mcp-client-connection.md#amendment-clients-connect-through-the-mcp-portal-2026-11-07)).
+   Access token 5 minutes, grant session 24 hours.
 4. _Normal deployment and domain attachment_ — deploy the reviewed commit
    through the ordinary pipeline and verify the live App bindings agree
    with both production configs: the dedicated `ACCESS_MCP_AUDIENCE` is
@@ -1253,7 +1283,8 @@ values. These steps do not assert that production or any client has passed.
    `authorization_response_iss_parameter_supported` in authorization-server
    metadata. Discovery must belong to the dedicated MCP application.
 6. _Client registration_ — add the intended connector/app/server using the
-   table above and `https://kogane-mcp.takuk.me/mcp`, signing in as the owner.
+   table above and the Portal URL `https://mcp.takuk.me/mcp`, signing in as
+   the owner.
    Registration and an OAuth login alone do not prove a tool works.
 7. _Fresh-session calls_ — in each intended client, start a new conversation
    with only this connector enabled and perform these existing tool calls:
@@ -1306,8 +1337,13 @@ disconnect the client.
 
 - **Protected-resource `resource`.** claude.ai requires the metadata's
   `resource` to equal the URL entered, path included ([Claude][claude-auth]);
-  the Managed OAuth page does not say what Access publishes. _Question:_
-  what does step 5 show?
+  the Managed OAuth page does not say what Access publishes. Observed
+  2026-11-07: the origin's protected-resource `resource` is
+  `https://kogane-mcp.takuk.me` (no `/mcp`); on 2026-11-04 the
+  [recovery runbook](mcp-recovery.md) recorded the exact `/mcp` resource.
+  claude.ai still connected to the origin `/mcp` URL directly on 2026-11-07
+  (about 15:20 UTC, before the route below was decided). Clients now
+  register the Portal, so the Portal's metadata is the one they check.
 - **Dedicated hostname.** The approved configuration selects a dedicated
   hostname. Its attachment to the Worker and its actual discovery/resource
   metadata still require steps 4–5; the declaration alone proves neither.
@@ -1321,7 +1357,8 @@ disconnect the client.
   requires `sub` and refuses an assertion without it.
 - **Device posture.** Preserve the approved identity and posture policy.
   Current Portal documentation supports posture checks; actual upstream
-  OAuth requests and refresh under that policy remain live checks.
+  OAuth requests and refresh under that policy remain live checks. Since
+  2026-11-07 07:10 UTC the policy has no posture requirement (step 2).
 - **Plans.** ChatGPT developer mode is documented for paid plans on the web,
   with conflicting statements about write actions on personal plans; an MCP
   client here also writes (proposals and the operations of ADR 0063, ADR
@@ -1369,8 +1406,10 @@ What another tool set (maintenance, #560; operation tracking, #544) relies on:
   `callOpsTool` does, and is not published to one.
 - **Result.** Return a `ToolResult` (`status`, `body`): a 4xx status with a
   closed code reaches the client as `isError: true` with the same object the
-  HTTP route answers. No tool approves or commits for an agent-only
-  principal; a tool that writes appends a proposal.
+  HTTP route answers. A tool graded by the agent API approves and commits
+  nothing and writes only a proposal; the operation tools of ADR 0063
+  (commands, operations requests, job, maintenance and survey settings)
+  write as the MCP client itself through the delegated adapters (ADR 0084).
 
 ### Local checks before any production change
 
@@ -1392,9 +1431,9 @@ principals and store; nothing reaches Access, D1 or a client.
 
 ## What was verified locally, and what was not
 
-Verified with synthetic data only, in `packages/application/test/**` (41
-assertions of the pure service) and `services/app/test/agent-api.test.ts`
-(26 checks over the real Worker, real D1 migrations and the real read model):
+Verified with synthetic data only, in `packages/application/test/**` (the
+pure service) and `services/app/test/agent-api.test.ts`
+(28 tests over the real Worker, real D1 migrations and the real read model):
 default-off, the grant denial matrix, scope isolation and non-leakage, the
 cursor and budget rules, proposal validation and non-adoption, the MCP tool
 list and schemas, the untrusted-content rule, and UI/agent agreement.
