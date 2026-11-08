@@ -811,6 +811,16 @@ already recorded is never undone by a DELETE — an undo is a new revision
   mapping no decision describes and that one's release; without table
   statistics the read reaches every table of `protected_mapping_subjects` by
   a keyed index search.
+- `services/app/test/identity-release-parity.test.ts`: over the real App
+  Worker and the Processor's command route, a release whose override has
+  ended is refused `target_missing` on the page's path and over MCP at
+  approve, at commit (a confirmation prepared while the override stood
+  included) and at planning, with no approval, receipt or decision written
+  and each plan and approval as it was; one whose override another release
+  ends between the commit's reads and its batch answers `stale_context` with
+  the plan id on both paths. The MCP tool's own check answers with the code
+  alone (no `refs`), as [agent API](agent-api.md#change-lifecycle-decisions)
+  records.
 - `packages/application/test/plan-renewal.test.ts`: a change planned again
   after its plan expired gets a new open plan that approves and commits, the
   expired row unchanged; one plan per lifetime across a window boundary;

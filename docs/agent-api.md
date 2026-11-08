@@ -1022,6 +1022,17 @@ and returns a `cfm_` digest; it writes no approval and no decision. A
 `confirm` with that digest within ten minutes applies it, and a repeated
 confirm replays the result. A refusal from the lifecycle is the same code on
 both paths (`stale_context` with the candidate's ref, `plan_not_found`, …).
+An override release whose subject has nothing left to release is refused
+`target_missing` at approve and at commit on both paths, and one whose
+override another release ends between the commit's reads and its batch
+`stale_context`
+([`services/app/test/identity-release-parity.test.ts`](../services/app/test/identity-release-parity.test.ts)).
+Two limits remain. A refusal from the tool's own check before the Processor
+is called (plan, simulation, approval) carries the code without `refs`. And
+when one input has several refusals, the tool checks the plan's simulation
+before the approval while `commit` checks the approval first, so a release
+with nothing to release and an expired approval is `target_missing` over MCP
+and `approval_expired` on the page's path.
 
 This is how the カード照合 decisions work over MCP (Phase 2 unit 2g.2,
 [ADR 0081](adr/0081-ui-parity-through-mcp.md)): `card-settlement.accept`,
