@@ -950,6 +950,27 @@ source `sbi-shinsei-bank`).
 and the Processor refused every run on it (`artifact_lineage_unstated`); it is
 the collector's own record, so it is `collector_manifest` now.
 
+- **What the manifest's `artifacts` entries describe.** One entry per stored
+  artifact, in collection order, written by `buildSharedRunPlan` from the bytes
+  it plans for `DATA`: `sha256` and `bytes` are the digest and size of the
+  token-stripped capture (or of `normalized.json` as derived), and `key` is the
+  content-addressed object (`objects/<2 hex>/<sha256>`) those bytes are
+  written at, the same object the terminal's `storageRef` names. This matches
+  Sony Bank's manifest. The terminal's `artifacts[]` stays authoritative.
+  Until 2026-11-08 the entries were the Worker's admission records
+  (`describeArtifact`): the digest and size of each capture _before_ the token
+  was stripped, under a staging-prefix key (`raw/sbi-shinsei/<date>/<runId>/…`)
+  that shared mode never writes, so for `raw-top-accounts-balance-and-activity.json`
+  (the capture that carries `header.newToken`) the entry described bytes that
+  were never stored. Manifests written before then keep those entries
+  (append-only; corrections are new runs). No reader depends on them: the
+  Processor's collector-manifest metadata extractors exist only for Sony Bank
+  and MyJCB (both match entries to stored objects by digest and size), and
+  neither the App nor the web evidence browser reads a collector manifest's
+  entries. `test/shared-collection.test.ts` ("the collector
+  manifest describes the bytes DATA holds") checks every entry against the
+  object at its digest in a fake `DATA` bucket.
+
 - `requestedScope`: `full_snapshot` — this source is a current snapshot and the
   trigger accepts no date range. No units, ranges or reports.
 - `transformations`: one `redacted` step per provider capture
@@ -967,8 +988,9 @@ the collector's own record, so it is `collector_manifest` now.
 - Staging: **none**. The four provider responses and the normalized snapshot
   are held in memory until the terminal is written; the `r2:<dataset>` failure
   operation means "not admitted to the run" (validation), not a staging put.
-  `test/storage.test.ts` proves the described manifest entry equals the one the
-  legacy put returns.
+  The Worker admits each artifact with `describeArtifact` (dataset, filename and
+  media-type checks); `test/storage.test.ts` proves that record equals the one
+  the legacy staging put returns. The stored manifest does not copy it (above).
 - Sanitization: `test/shared-collection.test.ts` asserts the rotating token
   never reaches a stored artifact and the stored manifest keeps only
   allowlisted failure codes. The importer-side digest comparison was removed
@@ -1248,6 +1270,42 @@ format change is needed for that step.
   `waitingForHuman`, and a run that lost its session carries
   `human_required_approval` (G3-10, G3-11). `/api/status` reports
   `waitingForHuman` while the person still has to act.
+- **Open limits (owner decision pending; the code is as described).**
+  - _A failed logout makes a finished backfill partial and unrecoverable._ In
+    the completion branch of `SmbcBackfillSession.alarm()`
+    (`src/session.ts`, `progress.completedChunks >= ranges.length`), a
+    `profile.logout()` that throws adds `logout_failed` to `failureCodes`, so a
+    run whose every chunk was collected and stored ends `partial`, and its
+    terminal says `providerOutcome: partial`, `coverageStatus: partial`,
+    `safeErrorCode: logout_failed`. Under ADR 0044 a partial SMBC account unit
+    is never parsed. The run cannot be resumed: `isResumable`
+    (`src/progress.ts`) requires `completedChunks < totalChunks`, which no
+    longer holds, so the next approval in `finishAndStart` starts a fresh full
+    backfill from `DEFAULT_BACKFILL_FROM`, and that backfill's success is the
+    only way the months are parsed. The publication retry action
+    (`publishStoredRun`) republishes the same partial snapshot. The Prestia bank collector treats a failed
+    sign-off differently: `collectPrestiaBank`
+    (`services/collector-prestia-bank/src/client.ts`) catches it and returns
+    `signoffFailed: true`, the run stays `success`, and `signoffFailed` is
+    reported only in the body the run returns, not in its terminal. Whether a
+    failed logout should cost the run its coverage is not decided.
+    `test/retry-diagnostics.test.ts` ("a completion whose logout fails ends
+    partial with logout_failed and cannot be resumed") pins today's behaviour.
+  - _A successful backfill claims a day still in progress._ `finishAndStart`
+    sets the window's end to `japanToday()` (`src/dates.ts`), the current JST
+    date at approval, so the last month chunk ends on that day, its
+    `declared_coverage` range includes it, and a `success` terminal declares
+    `coverageStatus: complete` over it although the provider can still post
+    transactions on it after the chunk was read. The next backfill requests that
+    day again, because every backfill starts from `DEFAULT_BACKFILL_FROM`.
+    Sony Bank requests only through the last finished JST day
+    (`defaultWindow`, above), so each of its days is requested after it ends. Changing SMBC's end day also
+    changes its resume rule: a stopped run resumes only when `current.to === to`
+    for the `to` computed at the new approval, so today a run resumes only if
+    the person approves on the JST day it started, and after such a change a
+    stopped run stored with the old end day would no longer match and would
+    start a fresh backfill. Both the end day and the resume comparison are
+    undecided.
 - Verified with synthetic data only: `test/shared-collection.test.ts` and
   `worker-test/shared-data-bucket.test.ts` and `worker-test/continuation.test.ts`,
   which stage initial and resumed runs into a real

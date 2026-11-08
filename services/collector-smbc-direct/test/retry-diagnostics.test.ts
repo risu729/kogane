@@ -1,6 +1,8 @@
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { encryptJson } from "../src/crypto";
+import { isResumable } from "../src/progress";
 import { DirectProfile } from "../src/smbc";
+import type { BackfillProgress } from "../src/types";
 
 mock.module("cloudflare:workers", () => ({
   DurableObject: class {
@@ -282,6 +284,78 @@ test("a retried completion does not log out again and keeps a whole backfill who
     logoutSucceeded: true,
   });
   expect(values.get("failureCodes")).toEqual([]);
+});
+
+// Pins an open limit (docs/collection.md, smbc-direct): the behaviour is
+// written down as it is today and awaits an owner decision; this test does not
+// endorse it.
+test("a completion whose logout fails ends partial with logout_failed and cannot be resumed", async () => {
+  const key = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
+  const runId = "00000000-0000-4000-8000-000000000006";
+  const values = new Map<string, unknown>([
+    [
+      "progress",
+      {
+        phase: "running",
+        from: "2026-08-01",
+        to: "2026-08-31",
+        startedAt: "2026-09-01T00:00:00.000Z",
+        runId,
+        completedChunks: 1,
+        totalChunks: 1,
+        transactionCount: 0,
+        artifactCount: 0,
+        retryCount: 0,
+        lastErrorCode: null,
+        logoutSucceeded: null,
+      },
+    ],
+    ["artifacts", []],
+    ["failureCodes", []],
+    ["session", await encryptJson({}, key)],
+  ]);
+  const state = {
+    storage: {
+      get: async (name: string) => values.get(name),
+      put: async (name: string | Record<string, unknown>, value?: unknown) => {
+        if (typeof name === "string") values.set(name, value);
+        else for (const [field, item] of Object.entries(name)) values.set(field, item);
+      },
+      delete: async (name: string) => {
+        values.delete(name);
+      },
+      setAlarm: async () => undefined,
+      deleteAlarm: async () => undefined,
+    },
+  } as unknown as DurableObjectState;
+  const bucket = { put: async () => ({}) } as unknown as R2Bucket;
+  const profile = spyOn(DirectProfile, "import").mockReturnValue({
+    export: () => ({}),
+    logout: async () => {
+      throw new Error("logout_unavailable");
+    },
+  } as unknown as DirectProfile);
+  restores.push(() => profile.mockRestore());
+  const session = new SmbcBackfillSession(state, {
+    SESSION_ENCRYPTION_KEY: key,
+    SMBC_CREDENTIAL_JSON: JSON.stringify({ user: "1234567-12345", password: "synthetic-only" }),
+    COLLECTOR_SCHEMA_VERSION: "smbc-direct-backfill-worker-poc-v1",
+    DATA: bucket,
+  } as unknown as Env);
+
+  await session.alarm();
+  const progress = values.get("progress") as BackfillProgress;
+  // Every chunk was collected, yet the run is partial on the logout alone.
+  expect(progress).toMatchObject({
+    phase: "partial",
+    completedChunks: 1,
+    totalChunks: 1,
+    logoutSucceeded: false,
+  });
+  expect(values.get("failureCodes")).toEqual(["logout_failed"]);
+  // No chunk remains, so the run is not resumable: only a fresh backfill
+  // follows it.
+  expect(isResumable(progress)).toBeFalse();
 });
 
 test("a completion that exhausts its retries after logging out keeps that logout", async () => {

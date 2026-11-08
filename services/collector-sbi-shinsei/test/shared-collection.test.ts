@@ -7,6 +7,7 @@
 import { describe, expect, mock, spyOn, test } from "bun:test";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import {
+  objectKey,
   parseTerminalKey,
   readTerminal,
   terminalKey,
@@ -389,6 +390,42 @@ describe("G1-15 the collector writes the run where COLLECTION_TARGET says", () =
     expect(everything).not.toContain("synthetic-next-csrf-token");
     expect(everything).not.toContain("newToken");
     expect(everything).not.toContain("synthetic-secret");
+  });
+
+  test("the collector manifest describes the bytes DATA holds, not the bytes before sanitization", async () => {
+    const { result, data } = await trigger("shared");
+    expect(result.status).toBe("success");
+    const read = await readTerminal(data, "sbi-shinsei", result.runId);
+    if (read.outcome !== "found") throw new Error("terminal missing");
+    const manifestRef = read.manifest.artifacts.find(
+      (entry) => entry.artifactKey === "manifest.json",
+    )!.storageRef.key;
+    const manifest = JSON.parse(new TextDecoder().decode(data.entries.get(manifestRef)!.bytes)) as {
+      artifacts: { dataset: string; key: string; sha256: string; bytes: number }[];
+    };
+    const planned = read.manifest.artifacts.filter(
+      (entry) => entry.artifactKey !== "manifest.json",
+    );
+    expect(manifest.artifacts).toHaveLength(planned.length);
+    for (const entry of manifest.artifacts) {
+      // The digest and size are those of bytes DATA holds: the object at that
+      // digest exists and has that size. Before the fix the token-stripped
+      // capture was described by the digest of the bytes before stripping,
+      // which were never stored.
+      const stored = data.entries.get(objectKey(entry.sha256));
+      expect(stored).toBeDefined();
+      expect(stored!.bytes.byteLength).toBe(entry.bytes);
+      // The entry names that content-addressed object, as the terminal does.
+      expect(entry.key).toBe(objectKey(entry.sha256));
+      const terminalEntry = planned.find((candidate) => candidate.sha256 === entry.sha256);
+      expect(terminalEntry?.storageRef.key).toBe(entry.key);
+      expect(terminalEntry?.byteSize).toBe(entry.bytes);
+    }
+    // The capture whose token was stripped is the one whose bytes changed.
+    const top = manifest.artifacts.find(
+      (entry) => entry.dataset === "top-accounts-balance-and-activity",
+    )!;
+    expect(new TextDecoder().decode(data.entries.get(top.key)!.bytes)).not.toContain("newToken");
   });
 
   test("ADR 0029 amendment 2: DATA keeps the names as sent, the manifest no name count, logs no name", async () => {
