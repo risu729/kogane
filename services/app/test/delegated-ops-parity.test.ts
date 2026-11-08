@@ -49,8 +49,19 @@ beforeEach(() => {
       throw new Error("unexpected external request");
     }),
   );
+  // One clock for every call of a test: the two transports' answers carry
+  // times derived from `now` (`acceptedAt`, `updatedAt`, and the collector's
+  // `expiresAt` from `acceptedAt`), so calls a second apart would differ by
+  // when they ran, not by what they answered. The instant is the real one,
+  // because the store's own guards on a confirmation compare with SQLite's
+  // clock.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date());
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 async function send(path: string, body: unknown, vars: Record<string, unknown>) {
   const mcp = path === "/mcp";
@@ -105,10 +116,11 @@ async function route(path: string, body?: unknown) {
   return { status: response.status, body: (await response.json()) as Record<string, unknown> };
 }
 
-/** What one stored request says, without who asked and when. */
+/** What one stored request says, without who asked; under one clock, when is the same. */
 async function stored(operationId: unknown) {
   const row = await env.DB.prepare(
-    "SELECT kind,source_id,status,dispatch_state,request_json FROM ops_requests WHERE operation_id=?",
+    `SELECT kind,source_id,status,dispatch_state,request_json,created_at,updated_at,available_at_ms
+      FROM ops_requests WHERE operation_id=?`,
   )
     .bind(operationId)
     .first();
@@ -116,9 +128,12 @@ async function stored(operationId: unknown) {
   return row;
 }
 
-/** A receipt without the fields that name its own operation or its time. */
+/**
+ * A receipt without the field that names its own operation. Its times stay:
+ * under one clock both transports must stamp and derive the same ones.
+ */
 function receipt(body: Record<string, unknown>) {
-  const { operationId: _id, acceptedAt: _at, updatedAt: _updated, ...rest } = body;
+  const { operationId: _id, ...rest } = body;
   return rest;
 }
 

@@ -14,7 +14,7 @@ export const REPORTED_STATE_SCHEMA = "reported-state-v1";
 export const DATED_STATE_FRESHNESS_POLICY = "dated-state-freshness-v1";
 /** Which containers and rows a reported state lists (ADR 0019, decision 2). */
 export const DATED_STATE_PERIMETER_POLICY = "dated-state-perimeter-v1";
-export const RECENT_DAYS = 3;
+const RECENT_DAYS = 3;
 /** The civil zone of the date the owner asks about; capture times are UTC instants. */
 export const REPORTED_STATE_ZONE = "Asia/Tokyo";
 const ZONE_OFFSET_MS = 9 * 3_600_000;
@@ -24,7 +24,7 @@ const ZONE_OFFSET_MS = 9 * 3_600_000;
  * `UNDATED_STATEMENT_WINDOW_DAYS` before the cutoff. An older bill is not
  * listed; the coverage says so.
  */
-export const PAYABLE_WINDOW_DAYS = 31;
+const PAYABLE_WINDOW_DAYS = 31;
 export const UNDATED_STATEMENT_WINDOW_DAYS = 45;
 
 export const FRESHNESS_STATES = ["same-day", "recent", "stale"] as const;
@@ -61,7 +61,7 @@ export const LIABILITY_GAPS = [
   "loan_balances",
   "statements_before_window",
 ] as const;
-export type LiabilityGap = (typeof LIABILITY_GAPS)[number];
+type LiabilityGap = (typeof LIABILITY_GAPS)[number];
 
 export interface ReportedSnapshot {
   /** `artifact:<id>` of the newest artifact of the snapshot. */
@@ -80,7 +80,7 @@ export interface ReportedInstrument {
   instrumentId: string | null;
   status: IdentityStatus;
 }
-export interface ReportedMetric {
+interface ReportedMetric {
   metricId: string;
   measurementKind: MeasurementKind;
   subjectKind: SubjectKind;
@@ -89,7 +89,7 @@ export interface ReportedMetric {
   overlapGroup: string | null;
   definitionRelease: string;
 }
-export interface ReportedValuation {
+interface ReportedValuation {
   ref: string;
   metric: string;
   /** The provider's figure in the provider's currency; never converted. */
@@ -148,7 +148,7 @@ export interface ReportedPayable {
   status: PayableStatus;
   settlement: ReportedSettlement | null;
 }
-export interface ReportedStateCoverage {
+interface ReportedStateCoverage {
   containersWithoutSnapshot: {
     sourceId: string;
     parserName: string;
@@ -164,7 +164,7 @@ export interface ReportedStateCoverage {
   /** Nothing is totalled: a reported state is never a net-asset figure. */
   netAssets: "not-computed";
 }
-export interface ReportedStateManifest {
+interface ReportedStateManifest {
   schemaVersion: typeof REPORTED_STATE_SCHEMA;
   date: string;
   cutoff: string;

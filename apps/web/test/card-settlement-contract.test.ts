@@ -87,6 +87,20 @@ describe("card settlement HTTP contract", () => {
     expect(
       withEvidence({ ...notProposed, outcome: "absent", reason: "evidence_not_recorded" }),
     ).toBe(false);
+    // A refused page is absent with the lane's closed refusal code, never a
+    // rule reason or an invented code.
+    const refused = {
+      ...notProposed,
+      outcome: "absent",
+      reason: "card_information_table_invalid",
+      statementRef: null,
+      recordedAt: null,
+    };
+    expect(withEvidence(refused)).toBe(true);
+    expect(withEvidence({ ...refused, reason: "raw_object_unreadable" })).toBe(true);
+    expect(withEvidence({ ...refused, reason: "no_matching_account" })).toBe(false);
+    expect(withEvidence({ ...refused, reason: "card_information_invented" })).toBe(false);
+    expect(withEvidence({ ...notProposed, reason: "card_information_table_invalid" })).toBe(false);
   });
   test("the grouped list needs a judged candidate per statement and a count that covers it", () => {
     const grouped = "/api/v2/reconciliation/card-settlements/statements";

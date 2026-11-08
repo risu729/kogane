@@ -6,14 +6,8 @@
 export {
   ACTOR_PATTERN,
   REPAIR_LIMIT_DEFAULT,
-  REPAIR_LIMIT_MAX,
   publicationConsistency,
-  publicationStatements,
   publishBatch,
   repairPublication,
-  type PublicationConsistency,
-  type PublicationMismatch,
   type PublishInput,
-  type RepairRequest,
-  type RepairResult,
 } from "../../../packages/storage-d1/src/atomic/publication.ts";

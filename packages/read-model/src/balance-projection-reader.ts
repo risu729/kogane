@@ -78,9 +78,10 @@ export type SnapshotRefusal = (typeof SNAPSHOT_REFUSALS)[number];
  * is published yet. Only a deployment that can check the snapshot against
  * CORE's epoch, its visibility revision and its contract builds one; a reader
  * of a published figure takes this instead of calling `currentSnapshot()`.
+ * `behind` says whether the fixed context trails CORE; it is still servable.
  */
 export type ServableSnapshot =
-  | { snapshot: BalanceSnapshotRow }
+  | { snapshot: BalanceSnapshotRow; behind: boolean }
   | { refusal: SnapshotRefusal }
   | null;
 

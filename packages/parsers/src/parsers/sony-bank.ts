@@ -55,7 +55,9 @@ const CUSTOMER_DISPLAY_ORDER = "customerDispOrdr";
 
 export const sonyBankGrossBalance: Parser = {
   name: "sony-bank-gross-balance",
-  version: "1.0.1",
+  // 1.0.2 refuses an updateDttm whose clock time does not exist in the
+  // zone-less form too; every time that exists reads as in 1.0.1.
+  version: "1.0.2",
   accepts: (artifact) => artifact.sourceId === "sony-bank" && artifact.dataset === "gross-balance",
   parse(bytes, artifact) {
     requireSuccessfulRun(artifact);
@@ -182,7 +184,9 @@ export const sonyBankGrossBalance: Parser = {
 
 export const sonyBankHistoryJson: Parser = {
   name: "sony-bank-history-json",
-  version: "1.0.0",
+  // 1.0.1 reads every page as 1.0.0: only its digest moved, with the
+  // gross-balance time check in this module (gross balance 1.0.2).
+  version: "1.0.1",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" &&
     /^(yen-history|foreign-history-[a-z]{3})-page-\d{4}$/u.test(artifact.dataset ?? ""),
@@ -279,7 +283,9 @@ export const sonyBankHistoryJson: Parser = {
 
 export const sonyBankHistoryCsv: Parser = {
   name: "sony-bank-history-csv",
-  version: "1.0.1",
+  // 1.0.2 reads every file as 1.0.1: only its digest moved, with the
+  // gross-balance time check in this module (gross balance 1.0.2).
+  version: "1.0.2",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" &&
     /^(yen-history|foreign-history-[a-z]{3})-csv$/u.test(artifact.dataset ?? ""),
@@ -379,7 +385,9 @@ const WALLET_HEADERS = [
 
 export const sonyBankWalletHistory: Parser = {
   name: "sony-bank-wallet-history",
-  version: "1.0.2",
+  // 1.0.3 reads every page as 1.0.2: only its digest moved, with the
+  // gross-balance time check in this module (gross balance 1.0.2).
+  version: "1.0.3",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" && /^wallet-history-\d{6}$/u.test(artifact.dataset ?? ""),
   parse(bytes, artifact) {
@@ -734,18 +742,20 @@ function takeOccurrence(occurrences: Map<string, number>, identity: string): num
   occurrences.set(identity, occurrence + 1);
   return occurrence;
 }
+/**
+ * The provider's update time. The ISO form with `+09:00` is kept verbatim; the
+ * zone-less slash or space form is kept as a zone-less local date-time, as
+ * before. Either is refused, never repaired, when its calendar date or its
+ * clock time does not exist (1.0.2: 1.0.1 checked the clock of the ISO form
+ * only, so `2026/09/01 24:61:99` became an `asOf`).
+ */
 function providerInstant(value: unknown, label: string): string {
   if (
     typeof value === "string" &&
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+09:00$/u.test(value)
   ) {
     normalizedDate(value.slice(0, 10), label);
-    if (
-      Number(value.slice(11, 13)) > 23 ||
-      Number(value.slice(14, 16)) > 59 ||
-      Number(value.slice(17, 19)) > 59 ||
-      !Number.isFinite(Date.parse(value))
-    )
+    if (!existingClockTime(value.slice(11, 19)) || !Number.isFinite(Date.parse(value)))
       throw new Error(`${label} is invalid`);
     return value;
   }
@@ -755,7 +765,17 @@ function providerInstant(value: unknown, label: string): string {
   });
   const normalized = text.replaceAll("/", "-").replace(" ", "T");
   normalizedDate(normalized.slice(0, 10), label);
+  if (!existingClockTime(normalized.slice(11, 19))) throw new Error(`${label} is invalid`);
   return normalized;
+}
+
+/** Whether `hh:mm:ss` names a clock time that exists (no leap second, no 24:00). */
+function existingClockTime(time: string): boolean {
+  return (
+    Number(time.slice(0, 2)) <= 23 &&
+    Number(time.slice(3, 5)) <= 59 &&
+    Number(time.slice(6, 8)) <= 59
+  );
 }
 
 function attribute(attributes: string, name: string): string | null {

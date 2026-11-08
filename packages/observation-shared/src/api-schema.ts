@@ -68,7 +68,7 @@ export function validInterpretationContext(value: unknown): value is Interpretat
  * is incomplete" (review 06, D10).
  */
 export const PAGINATION_VERSIONS = ["none", "offset-v1", "keyset-v2"] as const;
-export type PaginationVersion = (typeof PAGINATION_VERSIONS)[number];
+type PaginationVersion = (typeof PAGINATION_VERSIONS)[number];
 
 /**
  * Which store the v2 balance routes read (unified plan 04 §1, U11).

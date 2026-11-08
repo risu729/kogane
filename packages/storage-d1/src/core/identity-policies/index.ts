@@ -73,7 +73,7 @@ const SOURCE_POLICIES: readonly IdentityPolicyModule[] = [
   sbiShinseiPolicy,
 ];
 
-export function policyModuleFor(sourceId: string): IdentityPolicyModule | undefined {
+function policyModuleFor(sourceId: string): IdentityPolicyModule | undefined {
   return SOURCE_POLICIES.find((module) => module.sourceId === sourceId);
 }
 

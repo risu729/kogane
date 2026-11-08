@@ -41,7 +41,7 @@ const FALLBACK_ERROR_CODE = "collector_failed";
 /** The manifest's own machine-code charset; a code that fails it is replaced. */
 const SAFE_CODE = /^[a-z0-9][a-z0-9_-]{0,99}$/u;
 
-export type UnitScope = "domestic" | "foreign";
+type UnitScope = "domestic" | "foreign";
 
 /** One failure, reduced to what a terminal may state. */
 export interface SharedFailure {
@@ -67,11 +67,11 @@ export interface SbiSharedRun {
 }
 
 /** The same split the central importer uses to attribute an artifact. */
-export function datasetScope(dataset: string): UnitScope {
+function datasetScope(dataset: string): UnitScope {
   return dataset.startsWith("foreign-") ? "foreign" : "domestic";
 }
 
-export function scopesFor(scope: CollectionScope): UnitScope[] {
+function scopesFor(scope: CollectionScope): UnitScope[] {
   return scope === "all" ? ["domestic", "foreign"] : [scope];
 }
 
