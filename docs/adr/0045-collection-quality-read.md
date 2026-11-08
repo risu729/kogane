@@ -96,7 +96,9 @@ stored stage codes (receipt failure, terminal block, unit failure, parse
 failure and coverage cause codes) are passed on as stored when they have the
 safe-code shape, with no list of their own applied here; any other stored
 text reads `unclassified`. Freshness is the capture time of the current
-capture as stored; the read computes no age and judges nothing stale.
+capture as stored; the read computes no age and judges nothing stale
+(superseded by the amendment of 2026-11-08 below: ages are counted under
+`collection-freshness-v1`).
 
 **Unit keys are shown.** The cells route is a new API aggregation entry that
 returns each cell's raw fetch unit key. Unit keys are provider-local opaque
@@ -234,7 +236,8 @@ stored causes. Publication and membership alone never prove full provider
 history, missing pages, retention completeness or resolved account identity.
 `UNCOMPOSED_QUERY_RULE_PARSERS` is empty today but remains pinned against every
 parser-specific guard of the shipped lists, so a new rule must be composed or
-explicitly withheld. No age, stale threshold or retention cap is invented.
+explicitly withheld. No age, stale threshold or retention cap is invented
+(ages: superseded by the amendment of 2026-11-08).
 
 ### Consequences and verification
 
@@ -276,8 +279,8 @@ paging use the URL. Query errors, no captures and no observations have distinct
 messages. Refresh only re-reads stored state. UTC instants are displayed as
 stored, including actual attempt start separately from its nominal schedule.
 
-The expanded strict wire shape has `apiVersion: 2`; version-1 replies are not
-rendered by this page. The quality version is separate from metadata's version.
+The expanded strict wire shape has `apiVersion: 2` (3 since the amendment of
+2026-11-08); version-1 replies are not rendered by this page. The quality version is separate from metadata's version.
 
 The summary adds stored future nominal/due times and `alarm` with `observed`
 or `unavailable` plus a nullable actual time. The App reads a bounded internal
@@ -315,7 +318,8 @@ reached. Unit outcome absence/unknown is explicitly `unit_outcome_unknown`.
 The page now distinguishes stopped, unsupported, authentication-waiting,
 missing-file, pending/refused/unpublished parse, empty publication, unresolved
 identity, unavailable Alarm read and older-current states. No stale or retention
-threshold is invented. The indexed full-CORE plan guard includes new bounded
+threshold is invented (a stale threshold: superseded by the amendment of
+2026-11-08). The indexed full-CORE plan guard includes new bounded
 per-source CTEs while retaining base-table negative controls and frozen
 financial-query digests. Synthetic tests cover missing units, recovery, empty
 publication, identity policy revisions, restricted authority before enumeration,
@@ -340,3 +344,105 @@ Every MCP client holds the whole-store grant, `evidence.read` included
 ([ADR 0084](0084-mcp-operator-authority-without-delegation.md)), so it is
 listed to every client the MCP Access application admits. The answer travels under `data`, as untrusted provider
 content, and each call is an R0 read in the audit log.
+
+## Amendment 2026-11-08: freshness per source and cell
+
+- Status: accepted (merged in #1127). The owner accepted these states, provisionally, on
+  2026-11-08 at 03:19 UTC, answering the Phase 3 plan's question "Freshness
+  states: `same-day` / `recent` (1–3 days) / `stale`, plus `human_required`,
+  `disabled` and `no_capture`?" in [the Phase 3 plan](../plans/2026-11-phase3-coverage-identity.md)
+  (3d, recorded under its decisions; spelled with
+  hyphens here, like `dated-state-freshness-v1`'s states)
+- Issue: #542 (Phase 3, layers 0–5: "coverage is visible per account and data
+  type")
+
+### Context and options
+
+The read stated each capture time and judged no age, so a source whose
+newest capture is a month old (SMBC Direct is collected only by hand) read
+the same as one collected this morning, and a person had to do the date
+arithmetic for every cell. The reported state already classifies a snapshot's
+age under `dated-state-freshness-v1` (`same-day`, `recent` up to 3 days,
+`stale`), for the daily collectors these sources are.
+
+1. **Keep showing times only.** Leaves the judgement to every reader, and an
+   agent reading over MCP has to restate a threshold of its own.
+2. **A threshold per source from its schedule.** Every collector with a
+   schedule is daily today, so it would give the same answer as one
+   threshold, with a second configuration to keep in step.
+3. **One versioned policy, computed per request in the application query
+   (chosen).** It reuses the reported state's thresholds, adds the states
+   that explain why data is not fresh from what is already stored. It leaves
+   the existing SQL texts unchanged and adds one small read of a source's own
+   jobs for the cells route.
+
+### Decision
+
+`collection-freshness-v1` (`packages/domain/src/collection-freshness.ts`).
+Each answer names `freshnessAsOf: { policy, at, date }`: the one instant every
+age is counted to (the route's request time; tests pass a fixed one) and its
+Asia/Tokyo civil date. Each source and each cell carries
+`freshness: { state, ageDays }`:
+
+- The age is in Asia/Tokyo civil days from the capture's date to that date. A
+  cell's is its current capture's (none with no current capture); a source's
+  is its newest visible fetch run's (`latestFetchRun.completedAt`), whatever
+  that run's outcome: the cells say per data type whether a current capture is
+  that new. A capture dated after the as-of date (a collector clock ahead of
+  the reader's) is age 0, never negative.
+- `same-day` (0), `recent` (1–3) and `stale` (more) are
+  `dated-state-freshness-v1`'s thresholds.
+- What the source waits on explains data that is `stale` or has no capture,
+  and replaces that state: `human-required` when one of its jobs collects only
+  by hand (`kind: "manual"`) or a job's newest attempt stopped on a "a person
+  must act" code (`human_required*`, `manual_agreement_required`, the codes
+  that already give `user_action_required`), or, for a cell, its unit's own
+  failure code is one; otherwise `disabled` when the source has supported
+  collecting jobs (`collection`, `manual`, `email`; not a keepalive) and none
+  is enabled. An unsupported job can never be enabled (CORE 0065's CHECK), so
+  it does not say collection was switched off: V Point Pay's only job is the
+  unsupported app job while its e-mail path, which has no job, still
+  delivers, so V Point Pay reads `stale` or `no-capture`, not `disabled`.
+  A fresh capture stays `same-day` or `recent` whatever the source waits on.
+- Otherwise data with no capture is `no-capture`, with no age.
+
+The contract checks each pair against the policy (`consistentFreshness`), each
+age against the capture it is of and the answer's as-of date, and the as-of
+date against its instant.
+`apiVersion` is 3. The cells route reads the source's own jobs and their newest
+receipts (`SOURCE_JOBS_SQL`, keyed by the job sources of the source's
+collectors and their aliases), so one source's cells are still served when the
+store has more jobs than the summary's bound. `kogane.collection-quality.read`
+answers the same and its description names the policy.
+
+With production as read through `kogane.collection-quality.read` on
+2026-11-08 at about 03:25 UTC, SMBC Direct
+reads `human-required` with its age, a source with only a disabled job and no
+capture (PRESTIA bank) `disabled` with no age, St.George `stale` (its blocked
+coordinator has no stored "a person must act" code; its fix is #450), and
+V Point's `reauthentication_pending` attempt is not a wait (its e-mail
+triggered run completes).
+
+### Consequences and verification
+
+- A source's age is that of its newest fetch run, successful or not, so a
+  failing source whose last partial run was yesterday reads `recent`; its
+  reasons (`latest_run_not_successful`, `acquisition_failed`) and its cells say
+  what that capture holds.
+- A blocked coordinator or a lapsed session without a stored code is not
+  `human-required`; adding such a code to a collector moves it there with no
+  change here.
+- No migration, table, writer, grant or tool is added; the policy is code and
+  a new version is a new name.
+- Synthetic tests: `packages/domain/test/collection-freshness.test.ts`
+  (Tokyo dates across midnight and offsets, every threshold, waits, refusals,
+  and that the contract's check accepts exactly the policy's answers);
+  `packages/application/test/collection-quality-query.test.ts` (cell ages at
+  and across a Tokyo midnight, a clock ahead, a person's wait before a stopped
+  job, source ages and waits for manual, disabled, terms-agreement, never
+  captured and collector-less sources, a configured job's source map, and
+  contract refusals); a unit's own code in
+  `collection-quality-empty-units.test.ts`; the plan of `SOURCE_JOBS_SQL` in
+  `packages/read-model/test/collection-quality.test.ts`; route and tool parity
+  under one clock in `services/app/test/page-read-reports.test.ts`; the page's
+  labels in `apps/web/test/collection-quality.browser.test.ts`.

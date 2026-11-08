@@ -6,18 +6,17 @@ Cloudflare Workerだけで既存Bitwarden passkeyからVCTRADEへloginし、sess
 
 - `SESSION_SEED`: 8個の観測済みsession Cookieと`secureKey`のJSON。`wrangler secret put`だけで投入する。
 - `SESSION_ENCRYPTION_KEY`: 32 byteのrandom keyをbase64化した値。Durable Objectに保存する可変sessionをAES-256-GCMで暗号化する。
-- `ADMIN_TOKEN`: `/run`と`/health`を保護するrandom bearer token。
 - `PASSKEY_CREDENTIAL`: Bitwarden CLIからtmpfsを介して抽出した既存FIDO2 credentialの必要fieldだけ。Gitへ保存しない。
 - Durable Objectには暗号化sessionと、status・Cookie更新数・最終成功時刻だけを保存する。
 - `__cf_bm`は保存しない。金融responseは共有DATA bucket（`kogane-raw-evidence`）へ保存するが、`meta.secureKey`は保存前に除去する。
 
-Bitwarden内の既存passkeyをWorkers Web Cryptoで使い、`initiateLoginWithPasskey`と`loginWithPasskey`から新しい8 Cookieと`secureKey`を再構成する。通常は15分keepaliveだけを実行し、HTTP 401/403、gateway拒否、seed欠落時だけ6時間cooldown付きで再認証する。`/reauth`はadmin bearerを持つ手動検証用で、規約同意が必要な場合は`setAgreement`を送らず停止する。
+Bitwarden内の既存passkeyをWorkers Web Cryptoで使い、`initiateLoginWithPasskey`と`loginWithPasskey`から新しい8 Cookieと`secureKey`を再構成する。通常は15分keepaliveだけを実行し、HTTP 401/403、gateway拒否、seed欠落時だけ6時間cooldown付きで再認証する。規約同意が必要な場合は`setAgreement`を送らず停止する。
 
 ## 収集
 
 - `*/15 * * * *`: `informationTitle`だけを送りsessionを維持する。
 - `5 21 * * *`: 毎日06:05 JSTに固定read allowlistを取得する。
-- 手動検証: admin bearer付き`POST /collect`。
+- Manual operations go through the operations API, which reaches this Worker only over the private `ScheduledCollection.runOperation` binding: a `collection` request (source `sbi-vc-trade`) runs the daily collection, and a `session-refresh` request runs the keepalive and, when it fails, a passkey login without the 6-hour cooldown. The former bearer routes `/run`, `/reauth`, `/collect`, `/health` and their `ADMIN_TOKEN` were removed on 2026-11-08 ([ADR 0069 amendment](../../docs/adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08)); session health is in the keepalive alarm history (`kogane.schedules.read`) and the Worker logs (`sbi_vc_keepalive`, `sbi_vc_reauth`).
 - 保存先: 共有DATA bucketのcontent-addressed object（`objects/<2 hex>/<sha256>`）と、最後に書くterminal manifest（`runs/sbi-vc-trade/<run-id>/terminal.json`）。
 - 保存対象: 残高、口座詳細、position summary、約定recent page 0、約定historical全page、JPY入出金historical全page、manifest。
 - page sizeは公式Web clientと同じ30、上限100 page。write eventを指定できるgeneric senderは公開しない。
@@ -42,7 +41,7 @@ deployはProcessorを先、collectorを後にする（[rollout.md](../../docs/ro
 - Durable Object class: `SbiVcSessionState`
 - R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。このWorker専用のbucketはない）
 - Cron: `*/15 * * * *`, `5 21 * * *`
-- Worker Secrets: `SESSION_SEED`, `SESSION_ENCRYPTION_KEY`, `ADMIN_TOKEN`, `PASSKEY_CREDENTIAL`
+- Worker Secrets: `SESSION_SEED`, `SESSION_ENCRYPTION_KEY`, `PASSKEY_CREDENTIAL`
 
 検証終了後は次でまとめて削除する。
 

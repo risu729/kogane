@@ -105,7 +105,16 @@ What the code does today (main `02a915a`):
   An inventory of screen operations and read pages against MCP tools is the first
   slice. It goes on the roadmap's parallel track A.
 - Phase 2's card settlement accept and withdraw, and the ownership review, are
-  done only when they also work over MCP under a delegation.
+  done only when they also work over MCP under a delegation. (2026-11-07,
+  plan unit 2g.2: they do, through the catalogue's existing `command.*`
+  operations and their tools `kogane.command.plan`, `.simulate`, `.approve`
+  and `.commit`, which an MCP client uses as itself since ADR 0084. No
+  settlement-specific catalogue entry was added. Reject works the same way.
+  `services/app/test/card-settlement-decisions-parity.test.ts` runs each
+  decision on the page's path and over MCP and compares the receipts and
+  refusals. A third guard in `ui-mcp-parity.test.ts` fails when a change kind
+  becomes plannable that the MCP decision tools do not decide
+  ([agent API](../agent-api.md#change-lifecycle-decisions)).)
 - New screens cost one more adapter each. Because both adapters call one service,
   the service's tests cover both paths. Each adapter tests only its own
   translation and authorization.

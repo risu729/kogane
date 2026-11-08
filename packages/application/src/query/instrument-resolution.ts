@@ -18,6 +18,10 @@ import {
   type SeparatedPair,
 } from "../../../domain/src/instrument-candidates.ts";
 import type { StoredRelationStatus } from "../../../domain/src/decisions.ts";
+import {
+  instrumentAutoAdoptions,
+  type InstrumentAutoAdoption,
+} from "../../../domain/src/instrument-auto-adoption.ts";
 import { record, string } from "../../../identity/src/types.ts";
 import {
   INSTRUMENT_FACTS_ROW_BOUND,
@@ -115,6 +119,7 @@ function identifierFacts(rows: readonly InstrumentFactsRow[]): {
     identifierId: row.identifierId,
     instrumentId: row.instrumentId,
     mappingMethod: row.method,
+    adoptedByRule: row.ruleAdopted === 1,
     kind: row.kind,
     namespace: row.namespace,
     scope: row.scope,
@@ -178,7 +183,8 @@ function commandsFor(
   };
 }
 
-export async function queryInstrumentResolution(sql: SqlExecutor): Promise<InstrumentResolution> {
+/** The stored facts, the current `listed_as` statuses and the candidate set computed from them. */
+async function loadResolution(sql: SqlExecutor) {
   const [factRows, relationRows] = await Promise.all([readInstrumentFacts(sql), readListedAs(sql)]);
   if (factRows.length > INSTRUMENT_FACTS_ROW_BOUND || relationRows.length > LISTED_AS_ROW_BOUND)
     throw new InstrumentResolutionLimitError();
@@ -205,8 +211,13 @@ export async function queryInstrumentResolution(sql: SqlExecutor): Promise<Instr
 
   const result = instrumentCandidates(facts, listedAs);
   if (!result.ok) throw new InstrumentResolutionLimitError();
+  return { built, facts, byId, listedAs, set: result.set };
+}
+
+export async function queryInstrumentResolution(sql: SqlExecutor): Promise<InstrumentResolution> {
+  const { built, facts, byId, set } = await loadResolution(sql);
   const resolutions = new Map(
-    identifierResolutions(facts, result.set).map((item) => [item.identifierId, item]),
+    identifierResolutions(facts, set).map((item) => [item.identifierId, item]),
   );
   const identifiers = built.map(({ facts: item, row, providerMarket }) => {
     const resolution = resolutions.get(item.identifierId)!;
@@ -231,28 +242,53 @@ export async function queryInstrumentResolution(sql: SqlExecutor): Promise<Instr
     };
   });
   const revisions = new Map(built.map(({ row }) => [row.identifierId, row.revision]));
-  const candidates = result.set.candidates.map((candidate) => ({
+  const candidates = set.candidates.map((candidate) => ({
     ...candidate,
     commands: commandsFor(candidate, byId, revisions),
   }));
   const count = (status: InstrumentCandidate["status"]) =>
     candidates.filter((candidate) => candidate.status === status).length;
   return {
-    policy: result.set.policy,
+    policy: set.policy,
     identifiers,
     candidates,
-    separated: result.set.separated,
-    hints: result.set.hints,
+    separated: set.separated,
+    hints: set.hints,
     summary: {
       identifiers: identifiers.length,
       unresolved: identifiers.filter((item) => item.state === "unresolved-candidates").length,
       proposed: count("proposed"),
       adopted: count("adopted"),
       rejected: count("rejected"),
-      separated: result.set.separated.length,
-      hints: result.set.hints.length,
+      separated: set.separated.length,
+      hints: set.hints.length,
     },
   };
+}
+
+/** One adoption of rule `instrument-auto-v1`, with the subject's revision it was computed on. */
+export interface PlannedInstrumentAutoAdoption extends InstrumentAutoAdoption {
+  /** The subject's current mapping revision when read; the adoption expects it. */
+  subjectMappingRevision: number;
+  /** The anchor's current mapping revision when read; the adoption expects it unchanged. */
+  anchorMappingRevision: number;
+}
+
+/**
+ * What rule `instrument-auto-v1` would adopt now (ADR 0055 amendment
+ * 2026-11-08): the same bounded read as `queryInstrumentResolution`, then
+ * `instrumentAutoAdoptions`. A read only; the Processor lane writes.
+ */
+export async function queryInstrumentAutoAdoptions(
+  sql: SqlExecutor,
+): Promise<PlannedInstrumentAutoAdoption[]> {
+  const { built, facts, listedAs, set } = await loadResolution(sql);
+  const revisions = new Map(built.map(({ row }) => [row.identifierId, row.revision]));
+  return instrumentAutoAdoptions(facts, set, listedAs).map((adoption) => ({
+    ...adoption,
+    subjectMappingRevision: revisions.get(adoption.subjectIdentifierId)!,
+    anchorMappingRevision: revisions.get(adoption.anchorIdentifierId)!,
+  }));
 }
 
 export interface HistoryEntry {

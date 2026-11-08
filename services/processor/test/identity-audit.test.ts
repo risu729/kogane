@@ -15,7 +15,7 @@ function fixture() {
   const db = new Database(":memory:");
   db.exec(`CREATE TABLE sources(id TEXT PRIMARY KEY); CREATE TABLE producers(id TEXT PRIMARY KEY);
     CREATE TABLE fetch_runs(id INTEGER PRIMARY KEY,producer_id TEXT,status TEXT,failure_count INTEGER,sealed INTEGER);
-    CREATE TABLE fetch_artifacts(id INTEGER PRIMARY KEY,source_id TEXT,fetch_run_id INTEGER);
+    CREATE TABLE fetch_artifacts(id INTEGER PRIMARY KEY,source_id TEXT,fetch_run_id INTEGER,dataset TEXT NOT NULL DEFAULT 'synthetic');
     CREATE TABLE parse_runs(id INTEGER PRIMARY KEY,fetch_artifact_id INTEGER,status TEXT,superseded_by_parse_run_id INTEGER);
     CREATE TABLE published_parse_runs(fetch_artifact_id INTEGER,parser_name TEXT,parse_run_id INTEGER UNIQUE,PRIMARY KEY(fetch_artifact_id,parser_name));
     CREATE VIEW observation_sources AS SELECT * FROM sources;
@@ -38,7 +38,7 @@ function fixture() {
   );
   db.exec(`INSERT INTO sources VALUES ('synthetic'),('empty-source'); INSERT INTO producers VALUES ('synthetic');
     INSERT INTO fetch_runs VALUES (1,'synthetic','success',0,1),(2,'synthetic','success',0,0),(3,'synthetic','partial',1,1);
-    INSERT INTO fetch_artifacts VALUES (1,'synthetic',1),(2,'synthetic',2),(3,'synthetic',3);
+    INSERT INTO fetch_artifacts(id,source_id,fetch_run_id) VALUES (1,'synthetic',1),(2,'synthetic',2),(3,'synthetic',3);
     INSERT INTO parse_runs VALUES (1,1,'ok',NULL),(2,1,'ok',1),(3,1,'error',NULL),(4,2,'ok',NULL),(5,3,'ok',NULL),(6,1,'ok',NULL);
     INSERT INTO published_parse_runs SELECT fetch_artifact_id,'parser-'||id,id FROM parse_runs WHERE status='ok' AND superseded_by_parse_run_id IS NULL;
     INSERT INTO transaction_observations VALUES (1,1),(2,2),(3,3),(4,4),(5,5),(6,6);
@@ -145,7 +145,7 @@ test("pending policy matches projection: only trusted Vpass bindings require pol
   const db = fixture();
   try {
     db.exec(`INSERT INTO sources VALUES ('vpass');
-      INSERT INTO fetch_artifacts VALUES (7,'vpass',1),(8,'vpass',1);
+      INSERT INTO fetch_artifacts(id,source_id,fetch_run_id) VALUES (7,'vpass',1),(8,'vpass',1);
       INSERT INTO parse_runs VALUES (7,7,'ok',NULL),(8,8,'ok',NULL);
       INSERT INTO published_parse_runs VALUES (7,'parser-7',7),(8,'parser-8',8);
       INSERT INTO trusted_vpass_card_bindings VALUES (7,7,17,'PRIVATE_CARD');
@@ -188,7 +188,7 @@ test("SBI Shinsei policy-1 runs count as pending until policy 2 reclassifies the
     // One published parse with an account balance and a board valuation,
     // mapped by a sealed policy-1 run exactly as policy 1 recorded them.
     db.exec(`INSERT INTO sources VALUES ('sbi-shinsei-bank');
-      INSERT INTO fetch_artifacts VALUES (9,'sbi-shinsei-bank',1);
+      INSERT INTO fetch_artifacts(id,source_id,fetch_run_id) VALUES (9,'sbi-shinsei-bank',1);
       INSERT INTO parse_runs VALUES (9,9,'ok',NULL);
       INSERT INTO published_parse_runs VALUES (9,'parser-9',9);
       INSERT INTO balance_observations VALUES (9,9); INSERT INTO valuation_observations VALUES (9,9);
@@ -232,6 +232,26 @@ test("SBI Shinsei policy-1 runs count as pending until policy 2 reclassifies the
         ),
     ).toBe(true);
     expect(JSON.stringify(report)).not.toContain("PRIVATE_");
+  } finally {
+    db.close();
+  }
+});
+test("only MyJCB J-POINT captures sealed at policy 1 count as pending (ADR 0089)", () => {
+  const db = fixture();
+  try {
+    db.exec(`INSERT INTO sources VALUES ('myjcb');
+      INSERT INTO fetch_artifacts(id,source_id,fetch_run_id,dataset) VALUES (10,'myjcb',1,'jpoint-balance'),(11,'myjcb',1,'statement-history');
+      INSERT INTO parse_runs VALUES (10,10,'ok',NULL),(11,11,'ok',NULL);
+      INSERT INTO published_parse_runs VALUES (10,'parser-10',10),(11,'parser-11',11);
+      INSERT INTO identity_runs VALUES ('mj10',10,1,'2099'),('mj11',11,1,'2099');
+      INSERT INTO identity_run_seals VALUES ('mj10',0,'2099'),('mj11',0,'2099');`);
+    const query = IDENTITY_AUDIT_QUERIES.find((q) => q.name === "pending_parses")!;
+    expect(db.query(query.sql).all()).toContainEqual({
+      source: "myjcb",
+      lineage: "current",
+      eligible_parses: 2,
+      pending_parses: 1,
+    });
   } finally {
     db.close();
   }
@@ -313,7 +333,7 @@ test("Vpass audit separates revoked retained evidence from invalid current expos
     db.query(IDENTITY_AUDIT_QUERIES.find((q) => q.name === name)!.sql).all();
   try {
     db.exec(`INSERT INTO sources VALUES ('vpass');
-      INSERT INTO fetch_artifacts VALUES (7,'vpass',1),(8,'vpass',1);
+      INSERT INTO fetch_artifacts(id,source_id,fetch_run_id) VALUES (7,'vpass',1),(8,'vpass',1);
       INSERT INTO parse_runs VALUES (7,7,'ok',NULL),(8,8,'ok',7);
       INSERT INTO published_parse_runs VALUES (7,'parser-7',7);
       INSERT INTO transaction_observations VALUES (7,7),(8,8);

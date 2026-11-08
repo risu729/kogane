@@ -87,14 +87,24 @@ export function objectKey(sha256: string): string {
   return `${OBJECT_PREFIX}${digest.slice(0, 2)}/${digest}`;
 }
 
-/** `runs/<source>/<runId>/terminal.json`. */
+/**
+ * `runs/<source>/<runId>/terminal.json`. Both parts are checked here rather
+ * than left to {@link runPrefix}, whose shorter forms omit them: an untyped
+ * caller that loses one gets a refusal, never `runs/terminal.json`.
+ */
 export function terminalKey(source: string, runId: string): string {
-  return `${runPrefix(source, runId)}${TERMINAL_OBJECT_NAME}`;
+  return `${RUN_PREFIX}${assertSource(source)}/${assertRunId(runId)}/${TERMINAL_OBJECT_NAME}`;
 }
 
-/** `runs/`, `runs/<source>/` or `runs/<source>/<runId>/`, for bounded scans. */
+/**
+ * `runs/`, `runs/<source>/` or `runs/<source>/<runId>/`, for bounded scans.
+ * A run id without a source is refused, not widened to the whole `runs/` prefix.
+ */
 export function runPrefix(source?: string, runId?: string): string {
-  if (source === undefined) return RUN_PREFIX;
+  if (source === undefined) {
+    if (runId !== undefined) throw new CollectionKeyError("invalid_source");
+    return RUN_PREFIX;
+  }
   const prefix = `${RUN_PREFIX}${assertSource(source)}/`;
   return runId === undefined ? prefix : `${prefix}${assertRunId(runId)}/`;
 }

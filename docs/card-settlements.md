@@ -105,7 +105,9 @@ combine, 1 to 3; no defaults), it answers per statement:
   `debit_in_other_statement_allocation` when a debit could pay two
   statements, and `excluded_debit_competes` when a debit refused as an
   unresolved duplicate or for a missing date could complete an exact sum):
-  every candidate listed, none chosen;
+  every candidate counted (`allocationCount`), the first 50 listed (fewest
+  debits first, then by member ref ids) with `allocationsTruncated: true`
+  when more exist, none chosen;
 - `unsupported`: `no_debit_in_window`, or `no_exact_allocation`, joined by
   `in_window_debits_below_total` when the window's debits sum below the total
   (a shortfall) and `debit_above_total` when one debit exceeds it (an excess);
@@ -332,7 +334,7 @@ Every code is present, zero included. The sweep decides the code from the
 rows it has already read and compared, so no query is added and the
 candidates, digests and other counts are what they were. The map reaches the
 log line, the tick row and `laneTicks` in `/status` and `/internal/health`;
-only these three codes and their integer counts are kept, never an amount,
+only these four codes and their integer counts are kept, never an amount,
 date, key or provider text.
 
 Limits:
@@ -361,7 +363,8 @@ reason; an agent reads the same page with `kogane.card-settlements.unmatched`
 (`packages/application/src/query/card-statements-unmatched.ts`) and nothing
 else. The route is `GET /api/v2/reconciliation/card-statements-unmatched`
 (operator-only, like the candidate list; `offset` only); the agent tool needs
-`records.read` over the whole store. Both read only.
+`records.read` over the whole store. Both read only, and both exist only where
+the settlement views do (otherwise `404`, and `unknown_tool` over MCP).
 
 A statement is listed when no candidate cites its observation and parse run
 (found through the candidates' `statement_key` index). Its `code` is the one
@@ -384,7 +387,10 @@ owner, 2026-11-07 03:58 UTC):
   sum is the total (shown as `複数の出金の合計が一致`);
 - `needs_review` (`candidate_not_unique`, and
   `debit_in_other_statement_allocation` or `excluded_debit_competes`): every
-  combination listed, none chosen;
+  combination counted, at most the first 50 listed, none chosen. Each answer
+  carries `allocationCount` and `allocationsTruncated`; above a truncated list
+  the page says `一致する組み合わせ N件のうち、出金の件数が少ない順に先頭の50件を表示しています。`
+  ([amendment 2026-11-07, a bounded list](adr/0074-card-statement-allocation-planner.md#amendment-2026-11-07-a-bounded-list-of-allocations));
 - `unsupported` (`no_exact_allocation`, joined by
   `in_window_debits_below_total` and/or `debit_above_total` when they apply):
   no remainder is computed, and the page says it does not judge whether that
@@ -406,7 +412,10 @@ Limits:
   statement stays listed with that code until the sweep's cursor reaches it
   (normally within one pass of five-minute ticks).
 - The page is by statement id, 50 per page, and the grant's `maxRows` bounds
-  how deep a caller pages (`budget_exceeded`).
+  how deep a caller pages (`budget_exceeded`). `offset` counts the statements
+  without a candidate when each page is read: a statement that gains a
+  candidate leaves the list and the later ones move back one place, so paging
+  on can pass over one of them until the list is read again from the start.
 - A debit without a resolved account has no alias class, so the planner
   excludes it (`identity_not_admitted`).
 - A window row the sweep never compares (no exact amount, or a debit date
@@ -464,6 +473,13 @@ statement's full list. The sweep proposes after each capture, so the newest
 candidates cite the newest facts; this happens only when the five newer ones
 are all blocked or decided (for example they cite another debit of the same
 amount that is no longer current, or the operator rejected them).
+
+Another limit: the pages are offsets into that order, taken when each page is
+read. A new candidate moves its statement to the head of the list and the
+statements that were before it down one place, so a reader paging on can see
+the last statement of the previous page again, and does not meet the moved
+one later (it is now on the first page). The flat list only gains rows at its
+head, so paging on repeats a row and never passes over one.
 
 Acceptance also requires explicit ownership evidence: the card account's
 `liable_party` and bank account's `beneficial_owner` must identify the same
@@ -550,8 +566,26 @@ joint ownership is not inferred. A correction appends a rejection or a new
 explicit claim and retains prior evidence. Saving ownership does **not** accept
 a settlement: the next scheduled reconciliation pass (normally every five
 minutes) creates a fresh immutable candidate with the new evidence. Refreshing
-the page only reads that state. The resulting settlement candidate is reviewed
-and approved separately, by the operator or by an MCP client.
+the page only reads that state. The resulting settlement candidate is approved
+separately, by the operator on the confirmation page or by an MCP client.
+A rule, a heuristic or the HTTP agent route never approves it.
+
+Over MCP the same decisions go through the change lifecycle's own tools
+(Phase 2 unit 2g.2, [ADR 0081](adr/0081-ui-parity-through-mcp.md)). There is no
+settlement-specific tool or catalogue entry: `card-settlement.accept`,
+`card-settlement.withdraw` and `card-settlement.reject`, and the ownership
+review's `relation.accept` and `relation.reject`, are planned with
+`kogane.command.plan` and read back with `kogane.command.simulate`. They are
+decided with `kogane.command.approve` and `kogane.command.commit`, each R2:
+prepared, then confirmed with the prepared digest within ten minutes
+([agent API](agent-api.md#change-lifecycle-decisions)). The page posts the same
+operations to `/api/command/v1/*`. Both adapters forward to the Processor's one
+command route, which runs the `packages/application` plan, simulate, approve
+and commit services and the same writers, so the receipts and the refusal
+codes agree. A preparation writes no approval and no decision. The receipt
+names the MCP client (`mcp-client:<sub>`), never the operator, and the audit
+record is on path `mcp` (ADR 0084). Reading the ownership review
+first is `kogane.card-settlements.ownership` ([agent reads](#agent-reads)).
 
 The commit rechecks the source publication/currentness, ownership, allocation
 availability, claim availability and expected candidate revision in the same
@@ -993,7 +1027,11 @@ planner on synthetic inputs: today's matcher on a two-debit and a partial case,
 every refusal, exclusion and outcome code, refused debits competing, and 300
 seeded random runs compared with a brute-force subset oracle (exact sums,
 whole and distinct members, no held or dateless debit, each status and code,
-no debit proposed for two statements, order independence).
+the count and truncation marker, no debit proposed for two statements, order
+independence); the bounded list (a window of 32 equal debits, a run at both
+bounds, exactly 50 and 51) and 200 seeded runs of up to 32 debits compared
+with the planner as shipped before the bound
+(`packages/domain/test/card-settlement-allocation-legacy.ts`).
 `packages/domain/test/card-debit-account.test.ts` covers the provider-stated
 debit-account rule on synthetic inputs: bank names resolve only through the
 table, a unique account starting with the leading digits is proposed, an
@@ -1029,6 +1067,15 @@ debit, a missing total, a missing due date, a zero total and a total with no
 valid unit, and an exact match whose candidate and digest are pinned to what the
 sweep wrote before the codes existed; its tick row holds the closed codes and
 integers only.
+`services/app/test/card-settlement-decisions-parity.test.ts` drives the
+decisions through the real App Worker, the Processor's command route, the
+identity projection and the sweep on one synthetic store. It records one
+ownership side on the page's path and the other over MCP. It then accepts and
+withdraws on each path, and rejects on each path. For each pair it checks that
+the receipts agree apart from the caller, the ids and the time. It also checks
+that a competing acceptance and the re-acceptance of a withdrawn candidate get
+the same refusal on both paths and write nothing, and that each commit is
+audited under its own path and principal.
 Archived production samples were inspected read-only to verify provider field
 shapes; private values are not test fixtures and no live financial decision is
 accepted by those checks.

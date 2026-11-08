@@ -11,7 +11,7 @@ six operation-request kinds are distinct from the newer operator-only
 session-refresh request reaches a collector only through the named collector RPC
 the alarm uses, and only for a connection the Processor's
 `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names; the committed value names
-`sony-bank` ([collector execution](#collector-execution-adr-0048),
+`sony-bank`, `sbi-securities`, `mobile-suica`, `moneyforward-me` and `myjcb` ([collector execution](#collector-execution-adr-0048),
 [ADR 0048](adr/0048-operation-collector-dispatch.md)).
 
 The six things an operator asks this system to _do_ — collect a source,
@@ -190,10 +190,12 @@ the four reasons that are never completion (`queued`, `building`, `flag_off`,
 | `session-refresh` | none: its progress is its status                      |
 
 A stage nobody has reported is `pending`. Silence is never progress, and an
-operation turns `completed` only when every stage of its kind has a
-`completed` row written by the executor that held the evidence. Nothing writes
-`projected` yet, so a published collection keeps `status: running`
-([limits](#collector-execution-adr-0048)).
+operation's stored `status` turns `completed` only when every stage of its
+kind has a `completed` row written by the executor that held the evidence.
+One stage is read rather than stored: once `adopted` is complete, `projected`
+is derived from the READ database each time the record is read, and the
+record's `status` reads `completed` when that makes every stage complete
+([projected](#projected-read)).
 
 ## Idempotency
 
@@ -230,7 +232,12 @@ any write that would re-point a bound target, even a direct one.
 ## Authorization
 
 Two gates in order, after the Access check that every route of this Worker
-already does:
+already does. Between them, on a `POST`, sits the own-origin rule: an
+`Origin` that is present and not the Worker's own is
+`403 origin_not_allowed` before a grant, a schema or the store is touched
+([ADR 0078](adr/0078-own-origin-state-changing-routes.md)). With the flag
+off the route answers as it did before (a `POST` is `405`), whatever its
+`Origin`. An operator's `curl` sends no `Origin` and is unaffected.
 
 1. the deployment flag `OPS_API_ENABLED`;
 2. the change lifecycle's principal grading (`OPERATOR_SUBJECTS` +
@@ -279,6 +286,7 @@ carries the route label, the status and the code, never a ref.
 | `approval_required`    | 403  | An agent asked for work only an operator may request            |
 | `subject_not_granted`  | 403  | The verified subject is in neither grant list                   |
 | `actor_not_supported`  | 403  | The verified subject is not a shape the decision log can record |
+| `origin_not_allowed`   | 403  | A `POST` carried another site's `Origin` (ADR 0078)             |
 | `not_found`            | 404  | No such operations route                                        |
 | `receipt_not_found`    | 404  | No such operation for this principal                            |
 | `idempotency_conflict` | 409  | The same key was reused for a different payload                 |
@@ -373,7 +381,11 @@ expiry: nothing dispatches it, so nothing expires it.
 An unattended refresh is executed like a collection (below) through a
 `refresh-session` connection. The only one is SBI VC's keepalive job
 (`sbi-vc-keepalive`); for every other source an unattended refresh ends
-`unsupported` with `session_refresh_unsupported` and contacts nobody.
+`unsupported` with `session_refresh_unsupported` and contacts nobody. SBI VC
+runs its keepalive and, if that fails, one passkey login without its 6-hour
+cooldown. It makes at most one such forced login per hour whoever asks; a
+request inside that hour runs the keepalive under the alarm's own login policy
+(ADR 0069, 2026-11-08).
 
 ## Collector execution (ADR 0048)
 
@@ -412,6 +424,15 @@ applied** (`execution.scope: "collector_default"`).
 | `expired`           | not started within 24 h of acceptance                                                         | `blocked`               |
 | `unsupported`       | no connection (or no binding) serves the source and action                                    | `blocked`               |
 
+The closed shape a collector answers is `status` (`completed` or `failed`), a
+`failureCode` exactly when it failed (lower-case letters, digits and `_`, at
+most 64; the pattern is checked, not a fixed list), and at most 100 run ids, each one
+a terminal key can carry (`RUN_ID` in `packages/collection/src/keys.ts`, so
+never a `:`): `collectorOperationResult` in
+`packages/collection/src/operation-rpc.ts`. The collector's own result helpers
+(`scheduledResult`, `scheduledFailure`) report only such ids, and none for a
+run whose terminal was not written, even when the run is listed.
+
 `startedAt`, `collectedAt`, `publishedAt` and `finishedAt` are set when the
 state is reached; `expiresAt` is acceptance + 24 h.
 
@@ -433,16 +454,16 @@ takes, releases, replaces or expires `collection_execution_leases`; the collecto
 claims it inside `runScheduled` as for the alarm, so the same source never runs
 twice at once. If another execution takes the lease between the lane's read and
 the collector's claim, the collector refuses before contacting anyone and the
-request ends `failed` with `collection_busy`. St George is the exception: its
-session coordinator already turns a refused lease into a persisted failed run
-(an existing behaviour of that collector), so there the race ends `failed` with
-`collection_failed` and that run listed, and — as after any failed St George
-run — the coordinator refuses later runs, alarm or operation, until the operator
-resumes it ([St George](sources/st-george.md)).
+request ends `failed` with `collection_busy`. St George does the same since
+2026-11-08 UTC: its session coordinator answers `busy` for a refused lease and
+records no run ([St George](sources/st-george.md)).
 
 **After a start nothing is retried.** A collector failure, an uncertain call
 and a start that never recorded an outcome are terminal; a provider login is
-never repeated by this path (G3-11, ADR 0039). Re-sending the same key returns
+never repeated by this path (G3-11, ADR 0039). A St George collection request
+is the one way to lift a login pause without changing the credential: it allows
+one login, at most once per 24 hours whoever sends it, and a request inside that
+spacing ends `failed` with `st_george_paused_<reason>` (ADR 0069). Re-sending the same key returns
 the same operation; a new key is a new request.
 
 **The trail.** For a `collected` execution, each tick reads (at most five
@@ -465,9 +486,39 @@ only. A collected execution with no reported run is `unpublished`
 `unpublished` (`publication_not_observed`).
 
 Limits: no deployed collector has served `runOperation` and no connection is
-enabled; `projected` (READ) is not traced, so a published collection stays
-`running`; the requested window is not applied; one collector call is awaited
+enabled; the requested window is not applied; one collector call is awaited
 per Processor invocation, inside the tick; the web UI has no operations view.
+
+### Projected (READ)
+
+When the Processor records an execution `published`, the same batch stores
+the `projected` stage as `pending` with the CORE revision READ has to reach
+(`core-revision:<core_epoch>:<source_revision>`, read from
+`core_source_revision` in that batch; ADR 0048, amended 2026-11-07). The
+operation record — `readOperation`, behind both the HTTP route and
+`kogane.ops.operation.get` — then compares it with READ's published pointer
+whenever it is read, and writes nothing:
+
+| `projected`                                                | When                                                                                                   |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `completed`, `evidenceRef: "read-snapshot:<snapshot id>"`  | the pointer, the stored revision and CORE share one epoch, and the pointer was verified at or above it |
+| `pending`, `failureCode: "projection_behind"`              | the published snapshot was verified at an older revision                                               |
+| `pending`, `failureCode: "read_model_unavailable"`         | no `READ` binding, nothing published, another READ contract, or READ could not be read                 |
+| `pending`, `failureCode: "read_model_context_changed"`     | the epochs differ (CORE restored, or READ built under another epoch)                                   |
+| `pending`, `failureCode: "projection_revision_unrecorded"` | the execution was recorded published before the revision was stored with it                            |
+| `pending`, no `failureCode`                                | `adopted` is not complete                                                                              |
+
+The record's `status` reads `completed` when the stored status is `running`
+and every stage, this one included, is `completed`; a re-send of the request
+answers with that same status. The stored request stays
+`running` and its `projected` row `pending`, so the answer follows READ: it
+falls back to `running` with the reason if READ is lost or CORE is restored
+under a new epoch. Coverage compares revisions over the whole CORE input, so
+a collection whose parses add no balance row is covered once the published
+snapshot was verified at or above its revision. A use restriction that makes
+the snapshot unservable does not reopen the stage. Requests of the other
+kinds never reach `adopted` through an executor, so their `projected` stays a
+plain `pending`; a rebuild request is still not traced.
 
 ## Storage
 
@@ -579,11 +630,15 @@ The collector execution services are in
 | `collectedDispatchesDue` / `trackCollectorPublication`       | the trail of a collected execution, until published or a reason       |
 | `collectorExecution` / `collectorRunTrails` / `trailOutcome` | the `execution` block and the stage ladder it supports                |
 
+`projection-trace.ts` holds the `projected` requirement the published batch
+stores (`projectionRequirementWrite`) and the read-time comparison with the
+READ pointer (`projectionCoverage`); see [projected](#projected-read).
+
 ## What was verified locally, and what was not
 
 Synthetic data only.
 
-- `services/app/test/ops-api.test.ts` (35 checks over the real
+- `services/app/test/ops-api.test.ts` (36 checks over the real
   Worker, the real migrations and the real store): flag-off behaviour, the
   closed route and verb set with the flag on, `/api/meta` discovery, one
   record per request, re-send, idempotency conflict, per-principal scoping,
@@ -598,7 +653,8 @@ Synthetic data only.
   for an accepted and for a collected request, and that `/mcp` publishes the
   operations to every MCP client, which applies them as itself and never sees
   the operator's browser receipt, while HTTP still grades the operator lists
-  (G3-05, ADR 0047, ADR 0084).
+  (G3-05, ADR 0047, ADR 0084), and a published collection followed to
+  `projected` alike on HTTP and MCP against a synthetic READ pointer.
 - `packages/application/test/operations.test.ts` (10 checks; the SQL half
   runs against the real migrations in `bun:sqlite`): request identity,
   principal binding, the stage table per kind, the session policy's safe
@@ -611,15 +667,19 @@ Synthetic data only.
   `services/app/test/conformance.test.ts` pin the new `opsApi`
   capability off in the shared contract.
 - Collector execution (ADR 0048), synthetic source and collector:
-  `services/processor/test/collector-dispatch.test.ts` (19 checks over the
+  `services/processor/test/collector-dispatch.test.ts` (21 checks over the
   real CORE schema and the real registration: success through `published`
   with distinct timestamps, failure, uncertain, an unfinished start, re-send
   with the same key before and after the run, a raced claim, a held lease and
   a lease taken by the collector, unsupported and human-required and supported
   refresh, expiry, maintenance (including windows that never close), one start
-  per tick, the 48-hour horizon, no parser selected, the stored columns);
+  per tick, the 48-hour horizon, no parser selected, the stored columns, the
+  `projected` requirement stored with publication);
   `packages/application/test/collector-trail.test.ts` (the 0068 guards, the
   trail's outcomes and its keyed query plans without table statistics);
+  `packages/application/test/projection-trace.test.ts` (`projected` pending,
+  behind, completed and each closed reason against real CORE and READ
+  migrations, and its keyed statements without table statistics);
   `packages/collection/test/operation-rpc.test.ts` (the connection table
   against `config/alarm-jobs.json`, request refusals before any run, the
   closed answer, the lease refusal mapped to `collection_busy`);
@@ -629,11 +689,12 @@ Synthetic data only.
   `services/processor/test/schedule-native-runtime.test.ts` (a real workerd
   Processor tick starting one request over a named service binding).
 
-Not verified: no deployed instance, no live Access policy, no real provider or
-session, and no deployed collector has served `runOperation`; the committed
-configuration names only `sony-bank`, and no request has run through it yet.
-No operations tool has run for a real MCP client; dated client connection evidence is in the
-[recovery runbook](mcp-recovery.md).
+The tests above use no deployed instance, live Access policy, real provider or
+session. In production, `sony-bank` served `runOperation` for an MCP client's
+collection request, and the run it reported was registered and every
+parse-selected artifact published; the other connections the committed
+configuration names had not run a request when they were added. Dated MCP
+client connection evidence is in the [recovery runbook](mcp-recovery.md).
 
 Acceptance ids and the test that carries each:
 
@@ -695,12 +756,18 @@ a fresh idempotency key at a time the source's alarm is not due, and read
 `GET /api/ops/v1/operations/{id}` until `execution.state` is `published`,
 `unpublished`, `failed` or `uncertain`. Rollback: remove the id; a request
 already `started` is not interrupted, and nothing started is retried.
-The owner allowed every healthy connection (2026-11-08 03:19 UTC); they are
-added one at a time, each after the previous one's first request was followed
-to `published`. The committed value names `sony-bank`. The order after it is
-`sbi-securities`, `sbi-vc-trade`, `mobile-suica`, `moneyforward-me`, `myjcb` and
-`sbi-shinsei` (connection ids); Vpass, St.George and the container collectors
-come after their open fixes.
+The owner allowed every healthy connection (2026-11-08 03:19 UTC). `sony-bank`
+came first; once its first request was followed to publication, the healthy
+connections that wait on no open fix were added together, and their first
+requests are sent one connection at a time, each after the previous one ends.
+The committed value names `sony-bank`, `sbi-securities`, `mobile-suica`,
+`moneyforward-me` and `myjcb`. `sbi-vc-trade`, `sbi-vc-keepalive` and
+`st-george` follow [#1131](https://github.com/risu729/kogane/pull/1131)
+([#1140](https://github.com/risu729/kogane/issues/1140)); the remaining
+connections (`prestia-globalpass`, `sbi-shinsei`, `vpass`, `mizuho-bank`,
+`vpoint`, `prestia-bank`) come after their open fixes. `mobile-suica` and
+`myjcb` drive a browser and run far longer than `sony-bank`; the Processor tick
+waits for them, so their first requests are watched for `uncertain`.
 `SESSION_REFRESH_POLICY` must also name `sbi-vc-trade` before an unattended
 refresh of it is dispatched, and only once its unattended renewal has been
 demonstrated.

@@ -11,9 +11,11 @@ The page reads configured collector jobs, their actual reservation read state,
 attempts, terminal registration and per-source/unit/dataset/period capture,
 parse and publication states. It preserves missing and unknown reasons and
 shows exact stored times. The read does not prove undeclared accounts, periods
-or provider histories, judge an age threshold, infer retention-cap failures,
+or provider histories, infer retention-cap failures,
 resolve an identity or repair a collector. Missing R2 bytes are detected by the
-existing download route, rather than by the CORE reference count.
+existing download route, rather than by the CORE reference count. (Since
+2026-11-08 the read counts ages under `collection-freshness-v1`,
+[ADR 0045's amendment](../adr/0045-collection-quality-read.md#amendment-2026-11-08-freshness-per-source-and-cell).)
 
 ## Review and integration gates
 

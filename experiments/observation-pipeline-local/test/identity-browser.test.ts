@@ -68,6 +68,7 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
                 states: {
                   "unresolved-candidates": 1,
                   "resolved-by-decision": 1,
+                  "resolved-by-rule": 0,
                   "shared-without-decision": 1,
                   "kept-separate": 1,
                   "no-candidate": 1,
