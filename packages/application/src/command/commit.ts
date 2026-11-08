@@ -227,8 +227,12 @@ export async function commit(
 
   // An economic-event kind commits only while its planner accepts it, checked
   // before its writer runs: a writer slot alone never opens a kind whose
-  // planner is not registered (ADR 0054, G2), as `approve` checks too.
-  if (isEconomicEventKind(plan.kind)) {
+  // planner is not registered (ADR 0054, G2), as `approve` checks too. An
+  // override release likewise commits only while its planner finds a
+  // protection to release, as `approve` and the MCP decision tools check; a
+  // release that loses it between this read and the batch is refused by the
+  // reservation's precondition instead (`stale_context`, in `failureReason`).
+  if (isEconomicEventKind(plan.kind) || plan.kind === "identity.release-override") {
     const eligibility = await resolveAndSimulate(store, plan.kind, plan.payload);
     if (!eligibility.ok) return eligibility;
   }
@@ -390,6 +394,7 @@ export async function commit(
     operationId,
     payloadDigest,
     input.now,
+    mutation.precondition,
   );
   // A raced exact receipt is still a replay; a changed original effect is stale.
   if (
@@ -410,6 +415,7 @@ async function failureReason(
   operationId: string,
   payloadDigest: string,
   now: string,
+  precondition?: CommitGuard,
 ): Promise<CommandResult<CommitOutput>> {
   const concurrent = await store.first<ReceiptRow>(RECEIPT_SQL, [principal, operationId]);
   if (concurrent)
@@ -473,5 +479,13 @@ async function failureReason(
     [operationId],
   );
   if (ledger) return commandError("idempotency_conflict", [operationId]);
+  // The planner's own condition on the reservation no longer holds: the
+  // subject moved in a way the expected revisions do not count (an override
+  // release that another release already ended keeps its mapping revision).
+  if (
+    precondition &&
+    !(await store.first("SELECT 1 AS valid WHERE " + precondition.sql, precondition.binds))
+  )
+    return commandError("stale_context", [plan.planId]);
   return commandError("commit_failed", [plan.planId]);
 }

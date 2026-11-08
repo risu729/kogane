@@ -7,6 +7,7 @@ import type { ChangeKind, ChangePayload } from "../src/command/contract.ts";
 import { sqliteCommandStore } from "./sqlite-store.ts";
 import {
   AGENT,
+  decide,
   OPERATOR,
   world,
   ids,
@@ -90,6 +91,23 @@ test("persisted temporal provenance refuses simulate, approve and fresh commit w
   const w = await world();
   const id = ids(w);
   const store = sqliteCommandStore(w.db);
+  // A person's assignment first, so the release has a protection to release.
+  const current = w.db
+    .query("SELECT instrument_id FROM current_instrument_mappings WHERE identifier_id=?")
+    .get(id.broker9001) as { instrument_id: string };
+  const assigned = await decide(
+    w,
+    OPERATOR,
+    "identity.assign",
+    {
+      subject: "instrument",
+      referenceId: id.broker9001,
+      targetId: current.instrument_id,
+      reason: "synthetic manual confirmation",
+    },
+    "op-temporal-assign",
+  );
+  expect(assigned.result).toMatchObject({ ok: true, replayed: false });
   const planned = await createPlan(
     "identity.release-override",
     {

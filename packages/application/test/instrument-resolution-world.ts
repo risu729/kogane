@@ -84,6 +84,7 @@ function identityMutation(db: Database) {
     );
     if ("error" in prepared) return null;
     return {
+      precondition: prepared.precondition,
       writes: prepared.writes.map((write) => ({ sql: write.sql, binds: write.binds })),
       decisionRevisionId: prepared.receipt.decisionRevisionId,
       result: { referenceId: prepared.receipt.referenceId, revision: prepared.receipt.revision },
