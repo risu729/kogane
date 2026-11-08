@@ -420,3 +420,100 @@ test("a period deadline passes after the period and is unestablished inside it",
     { offerRef: "offer:a-b@v1", reasonCode: "application_deadline_passed" },
   ]);
 });
+
+test("a deadline is judged on the application day's calendar, never an assumed zone", () => {
+  const budget = { maxDepth: 1, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null };
+  // A standing validity with no zone, so only the deadline decides.
+  const validTime: OfferValidity = { kind: "open-ended", start: "2026-01-01", zone: null };
+  const instant = (value: string, zone = "Asia/Tokyo"): TemporalValue => ({
+    kind: "instant",
+    value,
+    zone,
+    basis: "provider",
+  });
+  const at = (applicationDeadline: TemporalValue, clock: LocalDateValue): string => {
+    const result = findConversionPaths(
+      [offer({ validTime, applicationDeadline })],
+      { quantity: quantity(4), clock },
+      "points:b",
+      budget,
+    );
+    return result.paths.length === 1 ? "route" : result.rejected[0]!.reasonCode;
+  };
+  const tokyo = (value: string): LocalDateValue => day(value);
+  const losAngeles = (value: string): LocalDateValue => ({
+    ...day(value),
+    zone: "America/Los_Angeles",
+  });
+  const zoneless = (value: string): LocalDateValue => ({ ...day(value), zone: null });
+
+  // Dates of two zones are not compared (`zone_mismatch`, as for validity).
+  // The end of 2026-04-15 in Los Angeles is 16:00 on 2026-04-16 in Tokyo, so
+  // read as one calendar a Tokyo 16th would be refused although most of it is
+  // before the deadline; the end of the Tokyo 15th is 08:00 on the Los Angeles
+  // 15th, which would be read as a route.
+  for (const clock of ["2026-04-15", "2026-04-16"])
+    expect(at({ ...losAngeles("2026-04-15"), basis: "provider" }, tokyo(clock))).toBe(
+      "needs_rule_verification",
+    );
+  for (const clock of ["2026-04-14", "2026-04-15", "2026-04-16"])
+    expect(at(tokyo("2026-04-15"), losAngeles(clock))).toBe("needs_rule_verification");
+  // The same zone, and a clock whose zone was not stated, compare as days.
+  expect(at(tokyo("2026-04-15"), tokyo("2026-04-15"))).toBe("route");
+  expect(at(tokyo("2026-04-15"), tokyo("2026-04-16"))).toBe("application_deadline_passed");
+  expect(at(tokyo("2026-04-15"), zoneless("2026-04-15"))).toBe("route");
+  expect(at(tokyo("2026-04-15"), zoneless("2026-04-16"))).toBe("application_deadline_passed");
+
+  // 2026-04-15T15:30Z is 00:30 on 2026-04-16 in Tokyo. Read by its written
+  // offset it would fall on the 15th and refuse the whole 16th.
+  const justAfterMidnight = instant("2026-04-15T15:30:00Z");
+  expect(at(justAfterMidnight, tokyo("2026-04-15"))).toBe("route");
+  expect(at(justAfterMidnight, tokyo("2026-04-16"))).toBe("needs_rule_verification");
+  expect(at(justAfterMidnight, tokyo("2026-04-17"))).toBe("application_deadline_passed");
+  // A day that holds the deadline instant is not established at either edge.
+  const lastSecond = instant("2026-04-15T23:59:59+09:00");
+  expect(at(lastSecond, tokyo("2026-04-14"))).toBe("route");
+  expect(at(lastSecond, tokyo("2026-04-15"))).toBe("needs_rule_verification");
+  expect(at(lastSecond, tokyo("2026-04-16"))).toBe("application_deadline_passed");
+  // A Los Angeles day reads the same instant on its own calendar (07:59:59 on
+  // 2026-04-15 there).
+  expect(at(lastSecond, losAngeles("2026-04-14"))).toBe("route");
+  expect(at(lastSecond, losAngeles("2026-04-15"))).toBe("needs_rule_verification");
+  expect(at(lastSecond, losAngeles("2026-04-16"))).toBe("application_deadline_passed");
+  // A clock with no zone reads the instant in the deadline's own zone.
+  expect(at(justAfterMidnight, zoneless("2026-04-15"))).toBe("route");
+  expect(at(justAfterMidnight, zoneless("2026-04-16"))).toBe("needs_rule_verification");
+  // A zone the runtime does not know is not read as UTC.
+  const unknownZone = instant("2026-04-15T12:00:00Z", "Synthetic/Nowhere");
+  for (const clock of ["2026-04-01", "2026-04-15", "2026-04-30"])
+    expect(at(unknownZone, zoneless(clock))).toBe("needs_rule_verification");
+});
+
+test("an instant clock starts on its civil date in its own zone", () => {
+  const budget = { maxDepth: 1, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null };
+  // 2026-04-15T15:30Z is 00:30 on 2026-04-16 in Tokyo, the day after the deadline.
+  const clock: TemporalValue = {
+    kind: "instant",
+    value: "2026-04-15T15:30:00Z",
+    zone: "Asia/Tokyo",
+    basis: "collector",
+  };
+  const result = findConversionPaths(
+    [offer({ applicationDeadline: day("2026-04-15") })],
+    { quantity: quantity(4), clock },
+    "points:b",
+    budget,
+  );
+  expect(result.paths).toEqual([]);
+  expect(result.rejected).toEqual([
+    { offerRef: "offer:a-b@v1", reasonCode: "application_deadline_passed" },
+  ]);
+  // A clock zone the runtime does not know establishes no day.
+  const unknown = findConversionPaths(
+    [offer()],
+    { quantity: quantity(4), clock: { ...clock, zone: "Synthetic/Nowhere" } },
+    "points:b",
+    budget,
+  );
+  expect(unknown.rejected).toEqual([{ offerRef: "-", reasonCode: "clock_not_a_date" }]);
+});
