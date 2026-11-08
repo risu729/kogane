@@ -6,7 +6,10 @@ The internal `queryEconomicRowReadiness` query diagnoses 1–64 explicit
 transaction/parse pairs for bank movements or securities executions. It reads
 publication, current restrictions, mapping/ownership evidence and same-book
 live key/alias holders in one SQL snapshot, returning closed reasons and
-digested pins only. It writes nothing and has no HTTP/MCP/UI connection.
+digested pins only. It writes nothing. Agents read it through
+`kogane.economic-readiness.read` (`/mcp`) or
+`POST /api/agent/v1/economic-readiness.read` (`services/app/src/read-tools.ts`,
+[agent API](agent-api.md#tools)); no page shows it.
 Provider-ID identity may be admitted; overall readiness remains blocked by
 the unresolved principal-to-owner contract. Proposal/writer flags stay false
 and history coverage stays unknown. See [ADR 0067](adr/0067-economic-row-readiness.md)
@@ -37,18 +40,18 @@ produce the complete economic event or its balance effect.
 
 ## What is automatic and what is proposal-only
 
-| Step                                                      | Who does it                                                                                       |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Producing stage A candidates from published observations  | The rule job, whenever `RECONCILIATION_ENABLED` is on                                             |
-| Accepting a candidate                                     | A decision in the decision log, through a guarded command                                         |
-| Accepting a candidate the provider itself linked          | The rule, **still** as a recorded `accept` decision                                               |
-| Recognising an adopted card usage row as a purchase       | The rule job, **still** as a recorded `rule` decision                                             |
-| Pairing a recognised pending event with posted events     | The purchase lane's candidate pass: proposals only                                                |
-| Merging a pending and a posted event into one purchase    | A reviewed `relation.accept` (change lifecycle)                                                   |
-| Merging a pair the provider itself linked                 | The purchase lane, **still** as recorded `rule` decisions                                         |
-| Anything from amount + date closeness, a heuristic, or AI | Proposal only. Never accepted without a decision (INV07)                                          |
-| Pairing an own-account debit and credit (own transfer)    | Proposal only ([below](#own-transfer-proposals-migration-0072)); nothing adopts one today         |
-| Allocating several bank debits to one card statement      | A pure planner only ([ADR 0074](adr/0074-card-statement-allocation-planner.md)); nothing calls it |
+| Step                                                      | Who does it                                                                                     |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Producing stage A candidates from published observations  | The rule job, whenever `RECONCILIATION_ENABLED` is on                                           |
+| Accepting a candidate                                     | A decision in the decision log, through a guarded command                                       |
+| Accepting a candidate the provider itself linked          | The rule, **still** as a recorded `accept` decision                                             |
+| Recognising an adopted card usage row as a purchase       | The rule job, **still** as a recorded `rule` decision                                           |
+| Pairing a recognised pending event with posted events     | The purchase lane's candidate pass: proposals only                                              |
+| Merging a pending and a posted event into one purchase    | A reviewed `relation.accept` (change lifecycle)                                                 |
+| Merging a pair the provider itself linked                 | The purchase lane, **still** as recorded `rule` decisions                                       |
+| Anything from amount + date closeness, a heuristic, or AI | Proposal only. Never accepted without a decision (INV07)                                        |
+| Pairing an own-account debit and credit (own transfer)    | Proposal only ([below](#own-transfer-proposals-migration-0072)); nothing adopts one today       |
+| Allocating several bank debits to one card statement      | A pure planner ([ADR 0074](adr/0074-card-statement-allocation-planner.md)); one review reads it |
 
 [Card purchase recognition](#card-purchase-recognition) runs only while
 `PURCHASE_RECOGNITION_ENABLED` is on, and only for single-payment rows with an
@@ -516,7 +519,9 @@ released`). The DB CHECK is unchanged.
   explicit policy, the set of whole debits whose exact sum is a statement
   total, `needs_review` when not unique, and `unsupported` with
   `in_window_debits_below_total` / `debit_above_total` when no set sums
-  exactly. It computes no remainder and nothing calls it.
+  exactly. It computes no remainder; its only caller is the read-only review of
+  statements without a candidate
+  (`packages/application/src/query/card-statements-unmatched.ts`).
 - `src/reconcile.ts` — the stage A/B/C candidate matcher. It returns proposals
   with rationale codes only, always `status: "proposed"`, and
   `autoAcceptable: true` only when the provider itself linked the pair inside
@@ -1287,7 +1292,10 @@ revisions written before G1b, or by an older build without a commit, are
 `knowledge_unlogged`, reported and never applied, until a logged revision
 supersedes them (directly or at the end of a pre-log chain). Its only consumer is the
 reconstructed-state query (`packages/application/src/query/reconstructed-state.ts`),
-which no route calls yet. `reconciliationSignals` above is unchanged.
+which `GET /api/v2/reconstructed-state` and the agent tool
+`kogane.reconstructed-state.read` reach through `readReconstructedState`
+([reconstructed state](reconstructed-state.md#http-agent-tool-and-page)).
+`reconciliationSignals` above is unchanged.
 
 ### HTTP
 
@@ -1647,11 +1655,12 @@ candidate decisions pin published source revisions, ownership evidence and
 exclusive payment allocation, with an approved withdrawal path. Acceptance
 records the observed cash effect and keeps principal/fee decomposition unknown;
 a statement total is not turned into an invented obligation principal.
-A card provider's own statement of the debit account is designed as the
-candidate's primary evidence, proposal-only
+A card provider's own statement of the debit account is recorded beside each
+MyJCB candidate as evidence only, proposal-only: the `card_debit_account_sweep`
+lane reads it from the stored MyJCB pages and the settlement sweep attaches
+what it says to the candidate, which the review shows
 ([provider-stated debit accounts](card-settlements.md#provider-stated-debit-accounts),
-[ADR 0032](adr/0032-provider-stated-debit-accounts.md)); only the domain rule
-exists, and no reader produces that evidence yet.
+[ADR 0032](adr/0032-provider-stated-debit-accounts.md)). Vpass has no reader.
 
 The confirmation flow uses `card-settlement.accept`, `card-settlement.reject`
 and `card-settlement.withdraw`. The last withdraws a judgement, not funds.
@@ -1672,6 +1681,7 @@ debits pay together, or one debit pays in part, gets no candidate and no
 reason from the sweep. The pure planner of
 [ADR 0074](adr/0074-card-statement-allocation-planner.md)
 ([card settlements](card-settlements.md#multiple-debits-and-partial-payments-adr-0074))
-states those cases in closed codes, but no lane, table, page or writer uses
-it, so a multi-debit statement still cannot be accepted, and partial
-payments and refunds against a statement have no model.
+states those cases in closed codes. Only the read-only review of statements
+without a candidate shows its answer; no lane, table or writer uses it, so a
+multi-debit statement still cannot be accepted, and partial payments and
+refunds against a statement have no model.

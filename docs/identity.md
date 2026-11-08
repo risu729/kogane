@@ -15,7 +15,7 @@ balances, calculate holdings, or invent an instrument's ISIN/network.
 
 ## Contract and scope
 
-`src/identity` in the observation PoC contains deterministic, independently
+`packages/identity` contains deterministic, independently
 tested source rules. The production pipeline persists their interpretation in
 migration `0018`. All four observation shapes and every merged parser source
 are covered; the manual PayPay CSV path is also handled. Provider specifics are
@@ -136,7 +136,10 @@ decision, which a proposal recorded after it does not replace
 names those two commands (assign the subject identifier to the anchor's
 instrument; reject `listed_as` from the anchor's instrument to the subject),
 to be planned with a reason through the [change lifecycle](change-lifecycle.md);
-under today's grant lists an agent can plan them and cannot approve or commit. A manually mapped
+an agent on the browser's command routes can plan them and cannot approve or
+commit, while an MCP client approves and commits as itself through
+`kogane.command.approve` and `kogane.command.commit`
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)). A manually mapped
 identifier, or one sharing its instrument, is always the anchor over one that
 is not; when both identifiers are settled that way the candidate names no
 adopt command and a `hold` code (`subject-decided-elsewhere`,
@@ -217,7 +220,9 @@ stored mapping/decision/relation history for one identifier under
 `records.read` and whole-store scope. The page opens it on request. The
 service counts by index before loading entries and refuses past `maxRows`;
 it never truncates the history. This is recorded history, not effective-date
-mapping. The agent/MCP adapter remains pending the shared audit integration.
+mapping. An agent reads the same history through `kogane.instruments.history`
+or `POST /api/agent/v1/instruments.history` (`services/app/src/read-tools.ts`,
+[agent API](agent-api.md#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10)).
 
 Limits today: only SBI
 Securities and SBI VC Trade store security, crypto or product identifiers, so

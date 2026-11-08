@@ -409,11 +409,13 @@ internal judgements towards the read models.
 
 `packages/storage-d1/src/core/decision-outbox.ts` (the Processor keeps the
 historical import path) runs one bounded pass
-per `scheduled` invocation, as the last of the seven scheduled stages — after
-the projections a decision may have invalidated
-(`docs/observation-lanes.md`): it claims up to 20 due rows under a 60 s lease,
-runs each target's processor, and turns the operation's receipt `published`
-once no row of that operation is unprocessed.
+per `scheduled` invocation, after the projections a decision may have
+invalidated and the operation dispatch lane; only the audit log's
+`audit_overflow` lane runs after it (`runScheduled` in
+`services/processor/src/worker.ts`; `docs/observation-lanes.md`): it claims
+up to 20 due rows under a 60 s lease, runs each target's processor, and turns
+the operation's receipt `published` once no row of that operation is
+unprocessed.
 
 ### The four processor results
 
@@ -692,7 +694,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
 
 ## Verified locally (synthetic data only)
 
-- `services/processor/test/change-lifecycle.test.ts` (16 tests):
+- `services/processor/test/change-lifecycle.test.ts` (31 tests):
   plan contents and server-computed impact; SC17/AT69 (approval refused with
   `stale_context` after a concurrent change, plan marked stale, re-simulation
   yields a new digest); a stale plan refused at commit with **no rows written
@@ -718,7 +720,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
   on all four tables; migration 0031 applied on a seeded 0017–0035 schema with
   no existing row touched; and an unadopted successful run kept out of the
   simulated difference until the publication gate adopts it.
-- `services/app/test/command-api.test.ts` (9 tests): 401 without
+- `services/app/test/command-api.test.ts` (21 tests): 401 without
   a JWT, 403 with the flag off or set to anything but `"true"`, POST-only and
   404 for unknown command paths, the rest of the Worker still GET-only, an
   agent refused approve/commit before forwarding, `503` when the writer binding

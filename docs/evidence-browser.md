@@ -103,11 +103,11 @@ The boundary is written as rules, not intentions:
 
 ## The read model
 
-The pages below are implemented and covered by the 25 tests in
-`test/api.test.ts` and the 5 real-browser tests in `test/browser.test.ts`,
-of the PoC's 73 passing tests. Against the demo store that `bun src/demo.ts`
-builds — 2 sources, 4 artifacts, 4 parse runs, 28 observations — they
-render the whole dataset.
+The pages below are implemented and covered by the 42 tests in
+`test/api.test.ts` and the real-browser tests in `test/browser.test.ts`,
+beside the rest of the PoC's suite. Against the demo store that
+`bun src/demo.ts` builds — 3 sources, 11 artifacts, 11 parse runs, 49
+observations — they render the whole dataset.
 
 Every page reads exactly one endpoint and holds nothing that response did
 not carry. The endpoints mirror the page URLs under `/api`, with `/`
@@ -160,7 +160,10 @@ running server advertises. Verified locally with synthetic fixtures only.
 
 ### Overview — `/`
 
-Row counts for all nine tables the schema defines, the source registry
+Row counts for nine of the twelve tables `schema.sql` defines (`COUNTED_TABLES`
+in `src/queries.ts`: sources, fetch runs, raw objects, artifacts, parse runs
+and the four observation tables; the store also applies four tables from
+shared CORE migrations, which are not counted), the source registry
 with artifact counts, every fetch run, and every parse run with its parser
 and version, status, warning count, and whether it is current or
 superseded. Answers: what is in here, where did it come from, and which
@@ -347,10 +350,10 @@ fine either way; the trees were not.
 
 The pieces:
 
-- `src/queries.ts` — every read query. The "current" predicate,
-  `p.superseded_by_parse_run_id IS NULL AND p.status = 'ok'`, is a single
-  constant applied by each current-state view rather than a phrase
-  repeated per route. The SQL was carried over verbatim from the module it
+- `src/queries.ts` — every read query. The "current" predicate
+  (`CURRENT`: membership in `published_parse_runs` and the dataset's
+  eligibility scope) is a single constant applied by each current-state
+  view rather than a phrase repeated per route. The SQL was carried over verbatim from the module it
   replaced, including the source-qualified keys described below.
 - `packages/parsers/src/money.ts` — the minor-unit table, `formatAmount` and
   `amountSign`. It imports no runtime API, so the same module runs on Bun, on
@@ -366,9 +369,10 @@ The pieces:
 - `apps/web` — a React client built by Vite: a hand-written pushState router
   (`apps/web/src/router.tsx`, so there is no routing dependency), a typed fetch
   layer (`apps/web/src/api.ts`), shared presentational components
-  (`apps/web/src/ui.tsx`), one page per route under `apps/web/src/pages/`, and one
-  plain stylesheet whose colours are custom properties, with light and
-  dark through `prefers-color-scheme`.
+  (`apps/web/src/ui.tsx`), one page per route under `apps/web/src/pages/`, and
+  plain stylesheets whose colours are custom properties in
+  `apps/web/src/styles/tokens.css`, which declares a light colour scheme only
+  ([frontend](frontend.md#design-tokens-and-stylesheet-layout)).
 
 Hono is the choice because the same app object runs on Bun now and on
 Cloudflare Workers later, which is where the rest of Kogane already lives
@@ -448,9 +452,10 @@ Three properties hold on that path set:
   (`OPERATOR_SUBJECTS`) holds every command; an agent (`AGENT_GRANTS`) may
   plan and simulate, and its `approve`/`commit` is `403 approval_required`; a
   subject in **neither** list holds nothing and gets `403 subject_not_granted`.
-  Both lists are empty in the committed configuration, so nothing can be
-  approved or committed until a deployment names its operator — that is
-  intended, and while either list is present but unreadable every command
+  With both lists empty nothing can be approved or committed until a
+  deployment names its operator; the committed configuration names one in
+  `OPERATOR_SUBJECTS` and leaves `AGENT_GRANTS` empty
+  (`services/app/wrangler.jsonc`). While either list is present but unreadable every command
   answers `503 grants_misconfigured` rather than falling back to a default
   role ([change-lifecycle.md](change-lifecycle.md), "Grants").
 - **This Worker still writes nothing.** It forwards the verified actor to the
@@ -702,8 +707,9 @@ deployment facts are:
 
 - `POST /api/agent/v1/{capabilities,context.open,financial.query,explain,reconcile.propose}`,
   `POST /api/agent/v1/purchases.explain` while card purchase recognition is
-  served, and `POST /mcp` are one of the browser's two non-GET allow-lists (the other
-  is the change lifecycle's `/api/command/v1/*`). Both are registered
+  served, and `POST /mcp` are one of the Worker's non-GET allow-lists (the
+  others are the change lifecycle's `/api/command/v1/*` and the
+  `/api/ops/v1/*` operations and schedules routes). Each is registered
   explicitly in `src/worker.ts` before the GET-only check, behind the same
   `auth.ts` gate as every read route, with bounded bodies, `no-store` and the
   same closed 401/403 answers. Everything outside them is refused with 405.
@@ -775,11 +781,11 @@ should ever depend on it.
   calling `openStore()`. Either would make read-only a property of the
   process rather than only of the handler.
 - Server-side pagination and filtering. Every endpoint returns everything, and no
-  query in `src/queries.ts` carries a `LIMIT`. The demo store is 28
-  observations and a real store is not: both live collectors run daily on
-  a Cloudflare Cron trigger (`services/collector-sbi-securities`,
-  `services/collector-vpass`), and the SBI collector's README records an initial
-  backfill over 2024-08-28 to 2026-05-29 in windows of at most 90 days.
+  query in `src/queries.ts` carries a `LIMIT`. The demo store is 49
+  observations and a real store is not: the live collectors
+  (`services/collector-sbi-securities`, `services/collector-vpass` and the
+  others) run on their configured collection schedules through Durable Object
+  alarms ([schedules](schedules.md)); their own `crons` lists are empty.
   The transaction list sorts and filters in the browser now, which helps a
   reader and bounds nothing: the whole result set is still serialized,
   sent, and held in memory. The bound belongs in SQL, with a
