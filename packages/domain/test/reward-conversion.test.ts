@@ -362,3 +362,61 @@ test("a malformed stored validity establishes no day, rather than refusing one",
     ]);
   }
 });
+
+test("an unknown or malformed deadline is a review reason, never no deadline (INV05)", () => {
+  const budget = { maxDepth: 1, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null };
+  const unestablished = [
+    { kind: "unknown", reasonCode: "stored_offer_time_invalid" },
+    { ...day("2026-02-30") },
+    {
+      kind: "period",
+      start: "2026-05-01",
+      end: "2026-04-01",
+      endExclusive: false,
+      zone: "Asia/Tokyo",
+      granularity: "day",
+    },
+  ] as unknown as TemporalValue[];
+  for (const applicationDeadline of unestablished) {
+    const result = findConversionPaths(
+      [offer({ applicationDeadline })],
+      { quantity: quantity(4), clock: day("2026-04-15") },
+      "points:b",
+      budget,
+    );
+    expect(result.paths).toEqual([]);
+    expect(result.rejected).toEqual([
+      { offerRef: "offer:a-b@v1", reasonCode: "needs_rule_verification" },
+    ]);
+  }
+});
+
+test("a period deadline passes after the period and is unestablished inside it", () => {
+  const budget = { maxDepth: 1, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null };
+  const applicationDeadline: TemporalValue = {
+    kind: "period",
+    start: "2026-09",
+    end: "2026-09",
+    endExclusive: false,
+    zone: "Asia/Tokyo",
+    granularity: "month",
+  };
+  const at = (clock: string) =>
+    findConversionPaths(
+      [offer({ applicationDeadline })],
+      { quantity: quantity(4), clock: day(clock) },
+      "points:b",
+      budget,
+    );
+  expect(at("2026-08-31").paths).toHaveLength(1);
+  for (const clock of ["2026-09-01", "2026-09-30"]) {
+    expect(at(clock).paths).toEqual([]);
+    expect(at(clock).rejected).toEqual([
+      { offerRef: "offer:a-b@v1", reasonCode: "needs_rule_verification" },
+    ]);
+  }
+  expect(at("2026-10-01").paths).toEqual([]);
+  expect(at("2026-10-01").rejected).toEqual([
+    { offerRef: "offer:a-b@v1", reasonCode: "application_deadline_passed" },
+  ]);
+});

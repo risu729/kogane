@@ -99,16 +99,52 @@ export class CommandError extends Error {
     this.status = status;
     this.code = code;
   }
+
+  /**
+   * Whether the same request would be refused again, so offering a retry would
+   * only repeat the refusal: a client error other than an expired sign-in, a
+   * timeout or a rate limit, and the store-wide `budget_exceeded` bound.
+   */
+  get final(): boolean {
+    return refusalIsFinal(this.status, this.code);
+  }
 }
 
-/** Fixed messages per error code; a server message is never shown verbatim. */
+function refusalIsFinal(status: number, code: string): boolean {
+  return (
+    code === "budget_exceeded" ||
+    (status >= 400 && status < 500 && status !== 401 && status !== 408 && status !== 429)
+  );
+}
+
+/**
+ * Fixed messages per error code; a server message is never shown verbatim.
+ * Every closed code of the change lifecycle (`COMMAND_ERROR_CODES`) has its
+ * own entry, so a refusal that retrying cannot change never reads as "try
+ * again later" (test/command-api.test.ts).
+ */
 const MESSAGES: Record<string, string> = {
   incomplete_evidence:
     "選択した原本や口座の根拠が不足しています。原本と現在の対応を確認してください。",
   needs_scope_resolution:
     "口座や保有者の対応が未解決です。照合候補と口座の整理を確認してください。",
+  unsupported_semantics:
+    "この変更は、まだ対応していない内容を含むため受け付けられません。再試行しても結果は変わりません。",
+  needs_rule_verification:
+    "適用するルールの確認が済んでいないため受け付けられません。ルールを確認してから計画し直してください。",
+  // Every command-path source is a store-wide instrument-resolution bound
+  // (identity observations, fact rows, listed_as rows, candidate count;
+  // instrument-candidate-context.ts), which no narrower plan avoids.
+  budget_exceeded:
+    "処理できる件数の上限を超えているため、この変更は受け付けられません。再試行しても結果は変わりません。",
+  evidence_restricted: "この根拠を使う権限がないため、この操作は受け付けられません。",
   invalid_payload: "入力した識別名、理由、根拠を確認してください。",
+  invalid_command:
+    "送信した内容の形式を受け付けられませんでした。表示を更新して、内容を確認し直してください。",
   commands_disabled: "この接続先では確認操作が有効になっていません。",
+  subject_not_granted: "このアカウントには確認操作の権限が付与されていません。",
+  grants_misconfigured:
+    "接続先の権限設定を読み取れないため、確認操作を受け付けていません。管理者に設定の確認を依頼してください。",
   approval_required: "承認は人による認証経路が必要です。この権限では実行できません。",
   stale_context: "対象が変更されました。再試算した新しい計画で確認し直してください。",
   idempotency_conflict: "同じ操作IDで別の内容は送れません。新しい操作IDで実行してください。",
@@ -120,6 +156,9 @@ const MESSAGES: Record<string, string> = {
   approval_scope_mismatch: "承認の範囲がこの対象を含んでいません。",
   approval_not_found: "承認が見つかりません。もう一度承認してください。",
   receipt_not_found: "この操作の記録は見つかりません。",
+  target_missing: "対象の記録が見つかりません。表示を更新して、対象を選び直してください。",
+  target_ambiguous: "対象を一つに特定できません。表示を更新して、対象を選び直してください。",
+  commit_failed: "変更は保存されませんでした。表示を更新して、対象と計画を確認し直してください。",
   command_executor_unavailable: "確定を実行する経路に接続できません。",
 };
 
@@ -130,7 +169,9 @@ function messageFor(status: number, code: string): string {
       ? "認証が必要です。ログイン状態を確認して、再読み込みしてください。"
       : status === 403
         ? "この操作を行う権限がありません。"
-        : "操作を完了できませんでした。時間をおいて再試行してください。")
+        : refusalIsFinal(status, code)
+          ? "操作を受け付けられませんでした。再試行しても結果は変わりません。表示を更新して、内容を確認し直してください。"
+          : "操作を完了できませんでした。時間をおいて再試行してください。")
   );
 }
 

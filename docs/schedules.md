@@ -1,8 +1,9 @@
 # Schedule administration
 
 Open `/schedules` from **取得履歴** or **収集スケジュール**. Only the configured
-Access operator can open this page; maintenance windows alone can also be read
-by a granted agent ([below](#agent-maintenance-tools)). The page
+Access operator can open this page; an MCP client can read the same snapshot
+without its re-survey section, and maintenance windows and the re-survey
+section through their own reads ([below](#agent-maintenance-tools)). The page
 shows the original next occurrence, maintenance-adjusted due time, actual alarm
 reservation and the latest scheduling receipt separately. All displayed timestamps use Japan time;
 daily configuration defaults to Japan time and can use Sydney or UTC explicitly.
@@ -367,8 +368,9 @@ The preparation checks the current source/rule/host/bounds and reports the
 smaller remaining budget, without saving a maintenance revision. Confirm runs
 the validations again and consumes the preparation only with the effect.
 
-The checked-in delegation table is empty, and the MCP financial-reader grant
-has no schedule authority. Production migration application and real-client
+There is no delegation table: every MCP client the MCP Access application
+admits is the delegated principal and holds `schedules.read` over every
+schedule source (ADR 0084). Production migration application and real-client
 maintenance writes were not verified by these local synthetic tests.
 
 ## S3 maintenance execution and confirmation (2026-10-10)
