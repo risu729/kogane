@@ -1071,10 +1071,18 @@ decision below is in the audit log under principal `mcp-client:169b1b83…`.
 6. **Cash movement.** `kogane.economic-readiness.read` (`bank-movement`) on the
    three debits returns `economic_claim_held` for the two accepted ones and
    not for the withdrawn one, so the withdrawal released its claim.
-   `/api/v2/activity?basis=cash-movement` itself has no MCP read (it is not a
-   screen route, so the [parity guard](agent-api.md#ui-and-mcp-parity-guards-adr-0081-2026-11-07)
-   does not list it); it was not read in this run, so the roadmap's "the
-   cash-movement view counts the case once" is not yet shown.
+   The cash-movement view itself was read on 2026-11-08 at 01:45 UTC through
+   the Portal with `kogane.events.read` (`collection: activity`,
+   `basis: cash-movement`, added by #1094). It lists exactly two
+   `card_settlement` events in state `debited`, one per accepted candidate:
+   `cs_be06321d` as `event_ae848343…` (2026-09-10, JPY 3,410) and
+   `cs_6c1a79c8` as `event_b8560480…` (2026-09-28, JPY 498,802). Each has
+   one exact cash-movement `decrease` leg on the SMBC ordinary account, the
+   unvalued obligation-change leg (`statement_principal_and_fees_unknown`) and
+   one settlement allocation from its bank debit. The withdrawn
+   `cs_93bffe03` (`event_501722b7…`) is not listed, and `nextCursor` is
+   null. So the cash-movement view counts each accepted case once and the
+   withdrawn one not at all.
 
 ## Automation prerequisites (ADR 0034)
 
