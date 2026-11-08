@@ -106,9 +106,10 @@ combine, 1 to 3; no defaults), it answers per statement:
   statements, and `excluded_debit_competes` when a debit refused as an
   unresolved duplicate or for a missing date could complete an exact sum):
   every candidate listed, none chosen;
-- `unsupported`: `no_debit_in_window`, or `no_exact_allocation` with
-  `in_window_debits_below_total` (a shortfall) and/or `debit_above_total`
-  (an excess). No remainder is computed and no debit is called a partial
+- `unsupported`: `no_debit_in_window`, or `no_exact_allocation`, joined by
+  `in_window_debits_below_total` when the window's debits sum below the total
+  (a shortfall) and `debit_above_total` when one debit exceeds it (an excess);
+  with neither, the debits reach the total but no combination equals it. No remainder is computed and no debit is called a partial
   payment: how a provider represents a partial payment, an overpayment or a
   debit paying several statements has not been observed;
 - `refused` for a statement that is malformed, repeated, not exact, not
@@ -384,9 +385,10 @@ owner, 2026-11-07 03:58 UTC):
 - `needs_review` (`candidate_not_unique`, and
   `debit_in_other_statement_allocation` or `excluded_debit_competes`): every
   combination listed, none chosen;
-- `unsupported` (`no_exact_allocation` with `in_window_debits_below_total`
-  and/or `debit_above_total`): no remainder is computed, and the page says it
-  does not judge whether that is a partial payment or an overpayment;
+- `unsupported` (`no_exact_allocation`, joined by
+  `in_window_debits_below_total` and/or `debit_above_total` when they apply):
+  no remainder is computed, and the page says it does not judge whether that
+  is a partial payment or an overpayment;
 - `refused` with the planner's statement code, or `run_refused` with
   `input_bound_exceeded` for a group past 16 statements or 32 debits, or whose
   window read reached its bound.
@@ -1071,12 +1073,17 @@ decision below is in the audit log under principal `mcp-client:169b1b83…`.
 6. **Cash movement.** `kogane.economic-readiness.read` (`bank-movement`) on the
    three debits returns `economic_claim_held` for the two accepted ones and
    not for the withdrawn one, so the withdrawal released its claim.
-   `/api/v2/activity?basis=cash-movement` itself had no MCP read then (it is not a
-   screen route, so the [parity guard](agent-api.md#ui-and-mcp-parity-guards-adr-0081-2026-11-07)
-   does not list it as a gap); it was not read in this run, so the roadmap's
-   "the cash-movement view counts the case once" is not yet shown.
-   `kogane.events.read` ([agent API](agent-api.md)), merged after this run,
-   now reads it.
+   The cash-movement view itself was read on 2026-11-08 at 01:45 UTC through
+   the Portal with `kogane.events.read` (`collection: activity`,
+   `basis: cash-movement`, added by #1094). It lists exactly two
+   `card_settlement` events in state `debited`, one per accepted candidate:
+   `cs_be06321d` as `event_ae848343…` and `cs_6c1a79c8` as
+   `event_b8560480…`. Each has one exact cash-movement `decrease` leg on the
+   paying bank account, the unvalued obligation-change leg (`statement_principal_and_fees_unknown`) and
+   one settlement allocation from its bank debit. The withdrawn
+   `cs_93bffe03` (`event_501722b7…`) is not listed, and `nextCursor` is
+   null. So the cash-movement view counts each accepted case once and the
+   withdrawn one not at all.
 
 ## Automation prerequisites (ADR 0034)
 
