@@ -198,10 +198,15 @@ change lifecycle unchanged.
   being newer, decides the pair. This ADR states the mechanism; it does not
   assert a production count.
 - Rejecting an accepted pair appends a later `rejected` row, and the
-  candidate reads `rejected`. The balance projection reads every `accepted`
-  relation row, not the newest of a pair, so the earlier acceptance stays
-  among its declared inputs; it moves no balance today (a `connection:` scope
-  has no measurement), and changing that projection is not decided here.
+  candidate reads `rejected`. When this ADR merged the balance projection
+  read every `accepted` relation row, so the earlier acceptance stayed among
+  its declared inputs. Since
+  [ADR 0001's amendment of 2026-11-06](0001-domain-axes.md#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision)
+  it reads each triple's current row, so a rejection under the reference the
+  acceptance was recorded under withdraws it; an acceptance recorded under
+  another of the pair's references (another producer's, or a pre-rewrite key)
+  is another triple and stays among its declared relations. Either way it
+  moves no balance today (a `connection:` scope has no measurement).
 - Reviews are producer-scoped: a collector-era MoneyForward source account is
   listed with a reviewed connection only when its identity value equals the
   review's key; a value no review names is `unreviewed`.
@@ -262,3 +267,79 @@ Synthetic data only, no production access.
   foreign payload; the page plans exactly the named payload with the reason,
   offers only keeping apart on a held candidate, and plans nothing when the
   candidate changed.
+
+## Amendment 2026-11-08: a later proposal never replaces a pair's decision
+
+- Status: proposed until the PR that carries it merges, then accepted
+- Date: 2026-11-08
+- Carried by: `ACCOUNT_RELATIONS_SQL` in
+  `packages/read-model/src/account-candidates.ts`, [identity](../identity.md#aggregator-to-direct-account-candidates)
+
+### Context
+
+Decision 3 reads, per relation triple (kind, `from_ref`, `to_ref`), the
+newest row of any status by `created_at` and then `id`. Relations are
+append-only (migration 0029), and `reconcile.propose` appends a `proposed`
+row of any kind between two `source_account:` references, `same_account`
+included. A `same_account` proposal recorded after a person's acceptance or
+rejection of the same pair therefore replaced that decision in the
+candidate's `sameAccount.recorded`, which showed `proposed`, while the change
+lifecycle's relation target and the balance projection kept the decision
+([ADR 0001's amendment of 2026-11-06](0001-domain-axes.md#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision),
+[ADR 0017's](0017-card-purchase-review-commands.md#amendment-2026-11-06-a-later-proposal-never-replaces-a-relation-decision)).
+That amendment moved every other reader that picks one row per relation onto
+the rule; this read, merged the same day, was not in its list. The
+`connection_contains` rows it reads start at a `connection:` reference, which
+no proposal writer produces today, so only `same_account` was reachable.
+
+### Options considered
+
+1. **Leave the read.** Rejected: the review would contradict the lifecycle
+   and the projection on the same pair, and a proposal would change what a
+   person sees as decided (INV07).
+2. **The rule of ADR 0001's amendment, in this read's own order.** Chosen.
+
+### Decision
+
+- A triple's current row is its newest decision (`accepted`, `rejected` or
+  `released`) by `created_at` and then `id`; only a triple with no decision
+  reads its newest proposal. `ACCOUNT_RELATIONS_SQL` ranks with
+  `r.status<>'proposed' DESC` before its order, as `projectionRelationsSql`
+  and `LISTED_AS_SQL` do.
+- The domain's choice across a pair's references (decision 3, "the newest
+  across references wins") is unchanged and compares the current row of each
+  reference. A reference whose only rows are proposals would still win over
+  an older decision under another reference; no writer records a
+  `connection_contains` proposal from a `connection:` reference today.
+
+### Consequences
+
+- On every store where no proposal follows a decision of the same triple the
+  read returns exactly what it returned before; elsewhere only that triple's
+  status (and its `createdAt` and `id`) changes, from the proposal to the
+  decision. The bound still counts current triples, one row past it read.
+- Cost: unchanged plan, one keyed range of a `(kind, ref)` index per kind and
+  one sort of the rows found, now with one more term.
+- No migration, no stored plan changes, nothing adopts.
+- The consequence above that the balance projection reads every `accepted`
+  row had been stale since ADR 0001's amendment of 2026-11-06; it now states
+  what the projection reads.
+
+### Verification
+
+Synthetic data only.
+
+- `packages/application/test/account-candidates.test.ts`: a person accepts a
+  `same_account` pair through the change lifecycle, a later proposal of the
+  same pair is appended, and the candidate still reports `accepted`; the
+  shipped text read `proposed` (fails on it).
+- `packages/application/test/account-relations-current.test.ts`, against the
+  shipped text frozen with its digest
+  (`account-relations-legacy-sql.ts`): on 300 random stores (every status,
+  `created_at` ties, ids unrelated to time, kinds and references outside the
+  read) the current read equals a model written without SQL, the shipped read
+  equals the old rule's model, and the two differ only on triples where a
+  proposal follows a decision; on a scaled store past the 10,000-row bound
+  with no such triple both return the same 10,001 rows in the same order;
+  without table statistics the plan equals the shipped plan, two keyed index
+  ranges and no scan.
