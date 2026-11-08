@@ -92,12 +92,12 @@ Two findings outside MoneyForward:
   account reporting cash per asset refused the whole-store subtotal as
   `subject_reported_twice`. It now counts a subject once per unit
   ([#1120](https://github.com/risu729/kogane/pull/1120)).
-- Across sources, disjointness needs both scopes `identified`
-  (`distinct-identified-accounts-v1`), and no account identity rule assigns
-  `identified` yet (only instruments reach it). So deposit balances from two banks stay `unresolved` /
-  `overlap_unknown` against each other and there is no cross-bank JPY
-  subtotal. This is the documented INV06 behaviour, not a double count;
-  changing it is a design decision left open
+- Cross-source disjointness previously required both scopes `identified`,
+  which no account identity rule assigns. The owner-approved allow-list in
+  [ADR 0093](adr/0093-direct-bank-deposit-disjointness.md) now makes direct
+  `deposit.balance` readings at different listed banks disjoint, excluding
+  aggregate and unresolved scopes. MoneyForward and other unlisted routes
+  retain the existing overlap behavior. The policy changes no identity mapping
   ([#1150](https://github.com/risu729/kogane/issues/1150)).
 
 ## Display preference and completion boundary

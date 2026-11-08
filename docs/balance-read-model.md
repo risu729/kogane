@@ -76,12 +76,16 @@ writer fencing and captured CORE references; the contract is in
    later acceptance overrides an earlier rejection, and a later proposal
    changes nothing. The validity window (`valid_from`, `valid_to`) is not
    read.
-5. **Disjointness policy** (`distinct-identified-accounts-v1`). Within one
+5. **Disjointness policy** (`distinct-identified-accounts-v2`). Within one
    source, two distinct non-aggregate scopes are disjoint, because the
-   provider listed them as separate accounts. Across sources, only scopes the
-   identity layer resolved to identified accounts are disjoint. Aggregates,
-   aggregator lines and provider-local labels seen through a second route are
-   deliberately absent, so their overlap stays unknown (INV06).
+   provider listed them as separate accounts. Across sources, identified
+   accounts are disjoint. Also, rank-zero readings resolved by the metric
+   registry to `deposit.balance` at different listed institutions (SBI Shinsei,
+   SMBC and Mizuho) are disjoint when neither scope is aggregate or unresolved.
+   Unknown sources and lower-authority routes do not qualify. The list is
+   based on each bank's own deposit readings, not legacy balance labels;
+   Sony transaction balances and Prestia term-deposit principals are other
+   metrics. No identity mapping is changed ([ADR 0093](adr/0093-direct-bank-deposit-disjointness.md)).
 6. **Authority.** `packages/read-model/src/authority.ts`
    (`source-authority-v3`, [ADR 0042](adr/0042-prestia-bank-worker.md); v2 origin in [ADR 0015](adr/0015-source-authority-v2.md))
    supplies the caller policy `selectAdoptedSet` takes. It names sources by
