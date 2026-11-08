@@ -64,6 +64,9 @@ const INSTRUMENT_SUBJECT_SQL = `SELECT
  (SELECT count(*) FROM instruments WHERE id=?2) AS target_count,
  (SELECT max(revision) FROM instrument_mappings WHERE identifier_id=?1) AS revision,
  (SELECT m.instrument_id FROM current_instrument_mappings m WHERE m.identifier_id=?1) AS current_target`;
+/** A release has something to release: the same view the commit's ledger statement reads. */
+const PROTECTED_SUBJECT_SQL = `SELECT 1 AS protected FROM protected_mapping_subjects
+ WHERE subject_kind=?1 AND subject_ref=?2`;
 
 // What a normal reader can already see, and nothing else. Since migration 0026
 // "current" is membership in `published_parse_runs`, so every impact query
@@ -201,6 +204,16 @@ async function identityPlan(
   // protection that is not there would record a decision about nothing. The
   // commit's own in-batch guards refuse both cases too.
   if (subject.revision === null) return commandError("target_missing", [subjectRef]);
+  // A release keeps the mapping revision, so the expected revision alone
+  // cannot tell a protected subject from one with nothing to release.
+  if (
+    !assign &&
+    !(await store.first<{ protected: number }>(PROTECTED_SUBJECT_SQL, [
+      account ? "account_mapping" : "instrument_mapping",
+      base.referenceId,
+    ]))
+  )
+    return commandError("target_missing", [subjectRef]);
   const expectedRevisions: ExpectedRevisions = { [subjectRef]: subject.revision };
   const candidate = assign ? assignPayload(payload).candidate : undefined;
   if (candidate !== undefined) {

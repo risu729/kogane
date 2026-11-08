@@ -844,6 +844,33 @@ test("a release of an override another release already ended writes no receipt a
       .first<number>("uses_remaining"),
   ).toBe(1);
   expect((await loadPlan(store, second.planId))!.status).toBe("approved");
+  // Nothing is left to release: a new plan is refused, so a caller told
+  // `stale_context` that plans again is not handed the same dead plan.
+  expect(
+    await createPlan(
+      "identity.release-override",
+      { subject: "account", referenceId: mapping.ref, reason: "synthetic third release" },
+      { actor: operator, baseContextId: "identity-current-v1", now: NOW, ttlSeconds: 900 },
+      store,
+    ),
+  ).toEqual({ ok: false, error: "target_missing", refs: [`account_mapping:${mapping.ref}`] });
+});
+
+test("a release of a subject no override protects is refused at planning", async () => {
+  // A rule mapping protects nothing, and its revision is the one a release
+  // would keep. Planning it answered a plan that approval accepted and the
+  // commit could only refuse.
+  const mapping = await seedParse(296, "smbc-bank:release-unprotected");
+  const before = await counts();
+  expect(
+    await createPlan(
+      "identity.release-override",
+      { subject: "account", referenceId: mapping.ref, reason: "synthetic unprotected release" },
+      { actor: operator, baseContextId: "identity-current-v1", now: NOW, ttlSeconds: 900 },
+      store,
+    ),
+  ).toEqual({ ok: false, error: "target_missing", refs: [`account_mapping:${mapping.ref}`] });
+  expect(await counts()).toEqual(before);
 });
 
 test("a relation commit refuses an operation id the reconciliation rule acceptance already used", async () => {

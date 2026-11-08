@@ -435,7 +435,18 @@ decision that does not exist. It now writes nothing and answers
 `stale_context` with the plan id, its plan open and its approval unspent: a
 batch that wrote nothing for none of the earlier reasons answers
 `stale_context` when the planner's condition no longer holds, and
-`commit_failed` otherwise.
+`commit_failed` otherwise. Planning refuses a release whose subject has no
+protection (`target_missing` with the subject reference, read from the same
+`protected_mapping_subjects` view the ledger condition reads; `identityPlan`
+in `packages/application/src/operations/targets.ts`), so a caller told
+`stale_context` that plans again is refused rather than handed a plan that
+cannot commit. Before 2026-11-08 planning did not check it, so a release of a
+subject no override ever protected (a rule mapping) planned, approved and
+committed the same empty receipt. The MCP decision tools re-simulate a plan
+at prepare and at confirm (`services/app/src/delegated-decision-tools.ts`),
+so `kogane.command.approve` and `kogane.command.commit` refuse such a plan
+with that `target_missing` before anything reaches the commit batch; the
+HTTP command route forwards to the commit, which answers `stale_context`.
 
 `accepted` ≠ `published`. `accepted` means the judgement is durable;
 `published` means every outbox row of that operation has been processed. The
@@ -736,7 +747,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
 
 ## Verified locally (synthetic data only)
 
-- `services/processor/test/change-lifecycle.test.ts` (35 tests):
+- `services/processor/test/change-lifecycle.test.ts` (36 tests):
   plan contents and server-computed impact; SC17/AT69 (approval refused with
   `stale_context` after a concurrent change, plan marked stale, re-simulation
   yields a new digest); a stale plan refused at commit with **no rows written
@@ -752,7 +763,9 @@ already recorded is never undone by a DELETE — an undo is a new revision
   mapping, an override release no decision), and one that loses it to an
   identical commit → the stored receipt without spending a second approval
   use; an override release that another release already ended →
-  `stale_context` with nothing written and its approval unspent; typed
+  `stale_context` with nothing written and its approval unspent, and a new
+  release plan of that subject, or of one no override protects, refused
+  with `target_missing`; typed
   relations with their own decision and no derived `same_account` (SC06); an
   agent refused approval and commit; approval digest/expiry/scope binding; the
   outbox publishing once and a duplicate delivery changing nothing; an
