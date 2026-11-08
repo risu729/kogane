@@ -68,6 +68,8 @@ export interface StoredArtifact {
   bytes: number;
   sha256: string;
   range?: DateRange;
+  /** Request start, so crossing midnight during a response cannot close its day. */
+  collectedAt?: string;
   transactionCount?: number;
 }
 

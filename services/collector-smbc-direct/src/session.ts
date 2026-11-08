@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import { decryptJson, encryptJson, parseCredentials } from "./crypto";
-import { japanToday, monthRanges, validateDate } from "./dates";
+import { lastFinishedJapanDay, monthRanges, nextJapanMidnight, validateDate } from "./dates";
 import { isResumable } from "./progress";
 import {
   dataBucket,
@@ -121,8 +121,11 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     return this.#exclusive(async () => {
       const current = await this.getStatus();
       if (current.phase === "running") return { phase: current.phase, progress: current };
-      const from = validateDate(this.env.DEFAULT_BACKFILL_FROM, "from");
-      const to = japanToday();
+      // A run keeps its original window across approvals, including legacy
+      // windows ending on their approval day. Only a fresh run advances it.
+      const resume = isResumable(current);
+      const from = validateDate(resume ? current.from! : this.env.DEFAULT_BACKFILL_FROM, "from");
+      const to = resume ? validateDate(current.to!, "to") : lastFinishedJapanDay();
       const ranges = monthRanges(from, to);
       const challenge = await this.#loadChallenge();
       if (!challenge) throw new Error("challenge_missing");
@@ -148,13 +151,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         }
         throw error;
       }
-      if (
-        isResumable(current) &&
-        current.from === from &&
-        current.to === to &&
-        current.runId &&
-        current.startedAt
-      ) {
+      if (resume) {
         const artifacts = (await this.ctx.storage.get<StoredArtifact[]>("artifacts")) ?? [];
         const resumed: BackfillProgress = {
           ...current,
@@ -291,7 +288,14 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         for (let index = 0; index < CHUNKS_PER_ALARM; index += 1) {
           const range = ranges[progress.completedChunks];
           if (!range) break;
+          // Legacy progress may end on the current JST day. Keep that window
+          // and its evidence, but fetch the last chunk only once its day ends.
+          if (range.end > lastFinishedJapanDay()) {
+            await this.ctx.storage.setAlarm(nextJapanMidnight());
+            return;
+          }
           stage = "transactions-collection";
+          const collectedAt = new Date().toISOString();
           const result = await diagnostic.step(stage, () => profile.getTransactions(range));
           const rangeName = `${range.start.replaceAll("-", "")}-${range.end.replaceAll("-", "")}`;
           stage = "artifact-write";
@@ -303,6 +307,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
             artifact: {
               dataset: "transactions-raw",
               range,
+              collectedAt,
               transactionCount: result.transactions.length,
             },
           });
@@ -326,6 +331,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
             artifact: {
               dataset: "transactions-normalized",
               range,
+              collectedAt,
               transactionCount: result.transactions.length,
             },
           });

@@ -1275,10 +1275,30 @@ format change is needed for that step.
   (the retired importer forwarded this source's provider bytes verbatim after
   a Shift_JIS round-trip check), and that the `manifest.json` object equals the
   bytes `storeManifest` stages.
-- `requestedScope`: `date_range` over `DEFAULT_BACKFILL_FROM`…today,
+- `requestedScope`: `date_range` over `DEFAULT_BACKFILL_FROM` through the last
+  finished JST day at approval (inclusive),
   `unitKeys: ["account"]`; one `account` unit of kind `collection`. `ranges`:
   the requested range plus one `declared_coverage` range per collected month
   (the raw and normalized artifacts of a month share it).
+- **Closed days and resumable windows** (owner decision, 2026-11-08 13:26 UTC;
+  [issue 1178](https://github.com/risu729/kogane/issues/1178)). Fresh runs exclude
+  the current JST day entirely. A stopped run retains its stored `from`, `to`,
+  run identity, completed chunks and artifacts across later approvals, including
+  a changed `DEFAULT_BACKFILL_FROM`; it finishes that frozen window. The next
+  fresh backfill advances the end to the last finished JST day at its approval.
+  Legacy runs whose stored end was their approval day also resume. An alarm
+  defers an unfinished last chunk to the next JST midnight while its end day is
+  still open, rather than replacing the run or shrinking its recorded range.
+  The session can expire while waiting; recovery still needs a fresh approval.
+  Transaction artifacts record their request-start `collectedAt`. Publication
+  declares complete coverage only when every artifact's end day had already
+  finished at acquisition and the requested end had finished at completion.
+  Legacy artifacts without that timestamp use the run start as a conservative
+  lower bound. An old saved success that captured an open day keeps its bytes
+  and provider outcome but publishes `coverageStatus: partial` with
+  `coverage_day_not_finished`, even if publication is retried after midnight;
+  a fresh backfill is needed for complete coverage. Existing immutable terminals
+  are never rewritten. See [ADR 0044](adr/0044-smbc-resume-publication.md).
 - Media types lose their `charset` parameter in the terminal (`application/json`);
   the Shift_JIS bytes themselves are stored unchanged.
 - `transformations`: one `extracted` step per normalized artifact
@@ -1318,21 +1338,6 @@ format change is needed for that step.
     failed logout should cost the run its coverage is not decided.
     `test/retry-diagnostics.test.ts` ("a completion whose logout fails ends
     partial with logout_failed and cannot be resumed") pins today's behaviour.
-  - _A successful backfill claims a day still in progress._ `finishAndStart`
-    sets the window's end to `japanToday()` (`src/dates.ts`), the current JST
-    date at approval, so the last month chunk ends on that day, its
-    `declared_coverage` range includes it, and a `success` terminal declares
-    `coverageStatus: complete` over it although the provider can still post
-    transactions on it after the chunk was read. The next backfill requests that
-    day again, because every backfill starts from `DEFAULT_BACKFILL_FROM`.
-    Sony Bank requests only through the last finished JST day
-    (`defaultWindow`, above), so each of its days is requested after it ends. Changing SMBC's end day also
-    changes its resume rule: a stopped run resumes only when `current.to === to`
-    for the `to` computed at the new approval, so today a run resumes only if
-    the person approves on the JST day it started, and after such a change a
-    stopped run stored with the old end day would no longer match and would
-    start a fresh backfill. Both the end day and the resume comparison are
-    undecided.
 - Verified with synthetic data only: `test/shared-collection.test.ts` and
   `worker-test/shared-data-bucket.test.ts` and `worker-test/continuation.test.ts`,
   which stage initial and resumed runs into a real

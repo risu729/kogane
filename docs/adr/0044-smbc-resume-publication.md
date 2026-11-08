@@ -79,3 +79,29 @@ ineligible, without introducing a policy exception. A processor integration test
 uses migrated CORE/READ databases and R2 to register the partial and full runs,
 parse both earlier and later months plus balance with account context, and prove
 that publication and registration retries create no duplicate parses or rows.
+
+## Amendment 2026-11-08: closed JST days and frozen resume windows
+
+Status: proposed
+Owner decision: 2026-11-08 13:26 UTC, [issue 1178](https://github.com/risu729/kogane/issues/1178).
+
+Fresh backfills end on the last finished JST day at approval. Resumes keep the
+stored window and completed chunks regardless of the new approval date or the
+current default start. Extending the window in place could change the final
+month chunk's range and invalidate already published normalized evidence; the
+next fresh backfill advances the end instead.
+
+Pre-change progress is resumed without rewriting its window. If the last chunk
+still ends on an open day, its alarm waits for JST midnight before requesting
+that chunk. Request-start timestamps on transaction artifacts establish that
+their declared days had closed before acquisition. Legacy artifacts use the
+run start as a conservative lower bound. An old success that read an open day
+publishes partial coverage with `coverage_day_not_finished`; waiting longer or
+retrying publication cannot upgrade that acquisition. Existing terminals and
+provider bytes remain immutable. A fresh complete backfill recovers coverage.
+
+Fixed-clock tests cover 10:00 JST approval, the next day's fresh window, later
+approval of modern and legacy stopped runs, midnight deferral, and publication
+of old open-day successes. The unchanged R2 continuation tests continue to
+verify immutable history and parser eligibility using chronologically valid
+synthetic acquisition times.
