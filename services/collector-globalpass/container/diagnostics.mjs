@@ -121,7 +121,7 @@ export function createBrowserDiagnostics(relayUrl) {
       } catch {}
     },
     /**
-     * The container relay's counts at close: CONNECTs by outcome, bytes each
+     * The container relay's counts at close: CONNECT requests by outcome, bytes each
      * way and socket errors by closed code (`RELAY_SOCKET_ERROR_CODES`).
      */
     relaySummary(stats) {

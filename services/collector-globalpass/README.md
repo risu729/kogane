@@ -286,7 +286,7 @@ Each Worker relay tunnel logs one `globalpass-relay-closed` line: run ID, relay 
 network, `outcome` (`peer-closed`, `upstream-closed`, `upstream-connect-failed`,
 `upstream-read-failed`, `upstream-write-failed`), duration and bytes each way. An error after the
 container closed its end is teardown (`peer-closed`, level `log`), not a fault. The container's
-local relay logs `globalpass-container-relay-summary` at close: CONNECTs by outcome, bytes each way
+local relay logs `globalpass-container-relay-summary` at close: CONNECT requests by outcome, bytes each way
 and socket errors by closed code (`ECONNRESET`, `EPIPE`, …). Every socket and stream the local
 relay owns keeps an `error` listener, so a browser that resets a tunnel ends that tunnel and never
 the process (before `timezone-collector-v8` a reset on a refused CONNECT crashed the container with

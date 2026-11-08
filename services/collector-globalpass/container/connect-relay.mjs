@@ -55,7 +55,7 @@ function errorCode(error) {
  * socket was an unhandled `read ECONNRESET` that crashed the container
  * (observed 2026-11-07 18:17 UTC).
  *
- * `stats()` returns counts only: CONNECTs by outcome, socket errors by closed
+ * `stats()` returns counts only: CONNECT requests by outcome, socket errors by closed
  * code and bytes each way. No host, URL or payload.
  */
 export function startConnectRelay({
