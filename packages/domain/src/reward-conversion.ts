@@ -367,10 +367,14 @@ export function findConversionPaths(
         continue;
       }
       if (passed) {
+        // The wait for an earlier hop's credit passed the deadline only when
+        // the deadline is established as open on the clock's day; one already
+        // passed there, or unestablished there, is the deadline itself. The
+        // first hop is applied on the clock's day, so it is never a reuse.
+        const openAtClock = deadlinePassed(offer.applicationDeadline, startDay, zone) === false;
         rejected.push({
           offerRef,
-          reasonCode:
-            state.hops.length === 0 ? "application_deadline_passed" : "reuse_before_credit",
+          reasonCode: openAtClock ? "reuse_before_credit" : "application_deadline_passed",
         });
         continue;
       }
@@ -389,7 +393,10 @@ export function findConversionPaths(
       }
       const plan = simulateConversion(offer, state.quantity, offer.fixedFees);
       if (!plan.feasible) {
-        rejected.push({ offerRef, reasonCode: plan.reasonCodes[0] ?? "not_feasible" });
+        // An infeasible plan lists its adjustments (`capped_by_maximum`,
+        // `rounded_down_to_increment`) before the refusal, which is last; only
+        // verified offers reach this point.
+        rejected.push({ offerRef, reasonCode: plan.reasonCodes.at(-1) ?? "not_feasible" });
         continue;
       }
       const hop: ConversionHop = {
