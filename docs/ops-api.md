@@ -694,14 +694,17 @@ a fresh idempotency key at a time the source's alarm is not due, and read
 `unpublished`, `failed` or `uncertain`. Rollback: remove the id; a request
 already `started` is not interrupted, and nothing started is retried.
 The owner allowed every healthy connection (2026-11-08 03:19 UTC). `sony-bank`
-came first; once its first request was followed to publication, the other
-healthy non-container connections were added together, and their first
+came first; once its first request was followed to publication, the healthy
+connections that wait on no open fix were added together, and their first
 requests are sent one connection at a time, each after the previous one ends.
-The committed value names `sony-bank`, `sbi-securities`, `mobile-suica`, `moneyforward-me` and `myjcb`. `sbi-vc-trade`,
-`sbi-vc-keepalive` and `st-george` follow
-[#1131](https://github.com/risu729/kogane/pull/1131)
-([#1140](https://github.com/risu729/kogane/issues/1140)); the other
-connections (among them the container collectors) come after their open fixes.
+The committed value names `sony-bank`, `sbi-securities`, `mobile-suica`,
+`moneyforward-me` and `myjcb`. `sbi-vc-trade`, `sbi-vc-keepalive` and
+`st-george` follow [#1131](https://github.com/risu729/kogane/pull/1131)
+([#1140](https://github.com/risu729/kogane/issues/1140)); the remaining
+connections (`prestia-globalpass`, `sbi-shinsei`, `vpass`, `mizuho-bank`,
+`vpoint`, `prestia-bank`) come after their open fixes. `mobile-suica` and
+`myjcb` drive a browser and run far longer than `sony-bank`; the Processor tick
+waits for them, so their first requests are watched for `uncertain`.
 `SESSION_REFRESH_POLICY` must also name `sbi-vc-trade` before an unattended
 refresh of it is dispatched, and only once its unattended renewal has been
 demonstrated.
