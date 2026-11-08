@@ -676,7 +676,7 @@ test("Chrome resetting a CONNECT whose upstream failed does not crash the contai
   assert.equal(summary.established, 0);
 });
 
-test("the relay summary counts CONNECTs by outcome and carries no host", async (t) => {
+test("the relay summary counts CONNECT requests by outcome and carries no host", async (t) => {
   const records = captureLogs(t);
   const { server, url } = await upstream(t);
   server.on("connection", (peer) =>

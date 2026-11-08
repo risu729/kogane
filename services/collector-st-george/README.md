@@ -24,7 +24,7 @@ It is not a general proxy. A refused CONNECT is answered 403 and drained, and
 every local CONNECT socket keeps an `error` listener, so Chrome resetting a
 tunnel never ends the Container process (before 2026-11-08 a reset on a refused
 CONNECT was an unhandled `read ECONNRESET`). On shutdown the proxy logs one
-`st-george-container-relay-summary` line with CONNECTs by outcome (`refused`,
+`st-george-container-relay-summary` line with CONNECT requests by outcome (`refused`,
 `established`, `upstreamFailed`, `upstreamTimeout`, …) and `socketErrors` by
 closed code, never a host. There is no automatic network switch or second login
 attempt after a rejection. The shared Tamia tunnel and the user's WARP settings

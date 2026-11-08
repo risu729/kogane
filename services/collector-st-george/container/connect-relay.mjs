@@ -306,7 +306,7 @@ function parseConnectAuthority(authority) {
  * unhandled `read ECONNRESET` that ended the container process (seen in the
  * GLOBAL PASS copy of this relay on 2026-11-07 18:17 UTC).
  *
- * `close()` logs one `st-george-container-relay-summary` line: CONNECTs by
+ * `close()` logs one `st-george-container-relay-summary` line: CONNECT requests by
  * outcome and local socket errors by closed code. No host, URL or payload.
  */
 export function startConnectRelay({
