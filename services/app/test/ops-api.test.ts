@@ -1033,7 +1033,15 @@ describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)
         THROUGH_MCP,
       );
       expect(viaMcp.result.isError).not.toBe(true);
-      return [(await http.json()) as Record<string, any>, viaMcp.result.structuredContent];
+      const receipts = [
+        (await http.json()) as Record<string, any>,
+        viaMcp.result.structuredContent,
+      ];
+      // Every derived `projected` state is a record the 依頼の経過 page accepts.
+      receipts.forEach((receipt, index) =>
+        expect(validOperationRecord(receipt, ids[index])).toBe(true),
+      );
+      return receipts;
     };
     const projected = (receipt: Record<string, any>) => ({
       status: receipt.status,
