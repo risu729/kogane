@@ -51,8 +51,8 @@ establish successful bank access.
   and on the failed unit, instead of one `read-parse-error`. A refused history
   page is still stored, sanitized, as `ordinary/<branch>-<account>/history/unparsed.html`
   (unit `…:page:unparsed`, partial). No parser accepts that key, so nothing is
-  published from it; it shows which page came back, and a fixed parser can be
-  replayed over it. From 2026-11-01 to 11-06 every daily run's history page
+  published from it; it is kept for inspection and as a fixture for a
+  parser fix. A page that does not sanitize to itself again is not kept. From 2026-11-01 to 11-06 every daily run's history page
   was refused this way (`read-parse-error` in the Worker log).
 
 The configured Processor route is `mizuho-bank` / `collector-mizuho-bank` in

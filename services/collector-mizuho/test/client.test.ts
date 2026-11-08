@@ -7,7 +7,9 @@ import {
   safeMizuhoErrorCode,
   type MizuhoSession,
 } from "../src/client";
+import { readFileSync } from "node:fs";
 import { MizuhoParseError } from "../../../packages/parsers/src/parsers/mizuho-html";
+import { MIZUHO_HTML_ERROR_CODES } from "../src/client";
 
 // Synthetic values and markup only. These tests never contact a bank.
 const ORIGIN = "https://web1.ib.mizuhobank.co.jp";
@@ -352,6 +354,19 @@ describe("private session boundary", () => {
       "parse-unrecognized-empty-state",
     );
     expect(safeMizuhoErrorCode(new MizuhoParseError("private-secret"))).toBe("read-parse-error");
+  });
+  test("lists every code the shared Mizuho HTML parser throws", () => {
+    const source = readFileSync(
+      new URL("../../../packages/parsers/src/parsers/mizuho-html.ts", import.meta.url),
+      "utf8",
+    );
+    const thrown = new Set(
+      [
+        ...source.matchAll(/fail\("([a-z-]+)"\)/gu),
+        ...source.matchAll(/,\s*"([a-z]+(?:-[a-z]+)+)",?\s*\)/gu),
+      ].map((m) => m[1]!),
+    );
+    expect([...thrown].sort()).toEqual([...MIZUHO_HTML_ERROR_CODES].sort());
   });
   test("keeps a history page the parser refuses and names the parser's check", async () => {
     const empty = form(

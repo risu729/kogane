@@ -126,7 +126,7 @@ export class MizuhoClientError extends Error {
  * parser, so the parser's code digest and version stay unchanged; a code the
  * parser gains later reads `read-parse-error` until it is listed.
  */
-const MIZUHO_HTML_ERROR_CODES = [
+export const MIZUHO_HTML_ERROR_CODES = [
   "account-mismatch",
   "authentication-required",
   "conflicting-responsive-balances",
@@ -135,11 +135,13 @@ const MIZUHO_HTML_ERROR_CODES = [
   "inconsistent-row-count",
   "invalid-account-context",
   "invalid-account-identifier",
+  "invalid-amount-column",
   "invalid-count",
   "invalid-displayed-range",
   "invalid-html-size",
   "invalid-row-index",
   "invalid-text",
+  "invalid-transaction-currency",
   "invalid-transaction-date",
   "invalid-yen-amount",
   "missing-or-duplicate-balance",
@@ -655,17 +657,20 @@ export async function collectMizuho(options: {
         history = parseHistoryPage(html, account);
       } catch (error) {
         // Keep the sanitized page the collector could not read (raw first):
-        // no parser accepts this key, so nothing is published from it, but the
-        // stored capture shows which page came back and a fixed parser can be
-        // replayed over it. The account's history unit still fails below.
-        artifacts.push({
-          artifactKey: `${prefix}/history/unparsed.html`,
-          unitKey: `${unit(account)}:page:unparsed`,
-          dataset: "mizuho-ordinary-history-unparsed-html",
-          body: html,
-          mediaType: "text/html",
-          partial: true,
-        });
+        // no parser accepts this key, so nothing is published from it; it is
+        // kept for inspection and as a fixture for a parser fix. The account's history unit
+        // still fails below. A page that does not sanitize to itself again
+        // (misnested forms) is not kept: the run plan refuses such an
+        // artifact, which would lose the whole partial run.
+        if (sanitizeMizuhoPage(html) === html)
+          artifacts.push({
+            artifactKey: `${prefix}/history/unparsed.html`,
+            unitKey: `${unit(account)}:page:unparsed`,
+            dataset: "mizuho-ordinary-history-unparsed-html",
+            body: html,
+            mediaType: "text/html",
+            partial: true,
+          });
         throw error;
       }
       histories.push(history);
