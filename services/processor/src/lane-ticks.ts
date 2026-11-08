@@ -32,6 +32,7 @@ import {
   type CardSettlementSweepResult,
 } from "./card-settlement-job.ts";
 import type { DispatchSummary } from "./operations/dispatch.ts";
+import type { InstrumentAutoAdoptionResult } from "./instrument-auto-adoption.ts";
 import type { MaintenanceSurveyResult } from "./maintenance-survey/lane.ts";
 import type { AuditOverflowResult } from "./audit-overflow.ts";
 import type { PricePromotionResult } from "./price-promotion-job.ts";
@@ -85,6 +86,14 @@ export const LANE_TICK_COUNTS = {
     "processedRuns",
     "identifiedRuns",
     "identifiedObservations",
+  ]),
+  instrument_auto_adoption: countsOf<InstrumentAutoAdoptionResult>([
+    "pairs",
+    "evaluated",
+    "eligible",
+    "adopted",
+    "conflicts",
+    "refused",
   ]),
   reconciliation_sweep: countsOf<ReconciliationSweepResult>([
     "slices",

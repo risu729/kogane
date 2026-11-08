@@ -11,6 +11,7 @@ The planning snapshot in `data/account-inventory.csv` cannot prove a product is 
 | Vpass        | `vpass:card-NNN`                                   | Verified importer sidecar HMAC gives provider-local card identity; absent/ambiguous evidence stays run-scoped                |
 | GLOBAL PASS  | `global-pass:card`                                 | Debit activity, separate from PRESTIA bank deposits                                                                          |
 | MyJCB        | `myjcb:{connection}:root`                          | Statement aggregate without physical/subcard assignment                                                                      |
+| MyJCB        | `myjcb:{connection}:j-point:total`                 | Displayed J-POINT total of the connection's login: `reward-account`, provider-local, label `MyJCB J-POINT` (policy 2)        |
 | SMBC         | `smbc-bank:ordinary-yen`                           | Audited ordinary JPY deposit only; not Olive credit liability or AUD deposit                                                 |
 | Mizuho       | `mizuho-bank:ordinary:{branch 3}:{account 7}`      | Provider branch and account number of an ordinary JPY deposit; balance and history rows share it (policy 2)                  |
 | Sony         | `sony-bank:deposit:{currency}`                     | Currency-specific deposit scope                                                                                              |

@@ -221,6 +221,19 @@ describe("report page reads", () => {
       expect(overHttp.body).toMatchObject({ error: "invalid_request" });
       expect((await page.mcp(REPORTS, args)).body).toEqual(overHttp.body);
     }
+    // The list takes neither a view nor a policy: each one given is a ref.
+    for (const [args, refs] of [
+      [{ view: "body" }, ["view"]],
+      [{ decimalPolicy: "decimal-v1" }, ["decimalPolicy"]],
+      [{ view: "explanation", decimalPolicy: "decimal-v1" }, ["view", "decimalPolicy"]],
+    ] as [Record<string, unknown>, string[]][]) {
+      const overHttp = await page.http(REPORTS, args);
+      expect(overHttp, JSON.stringify(args)).toEqual({
+        status: 400,
+        body: { error: "invalid_request", refs },
+      });
+      expect((await page.mcp(REPORTS, args)).body).toEqual(overHttp.body);
+    }
   });
 });
 

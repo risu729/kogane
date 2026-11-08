@@ -70,11 +70,11 @@ test("result logging contains no provider response, labels or exception text", (
       failureCode: "collection_failed",
       runCount: 1,
     });
-    logStGeorgeResult({ status: "ready" });
+    logStGeorgeResult({ status: "paused", reason: "login-rejected", runId: "synthetic-run" });
     expect(JSON.parse(log.mock.calls[1]![0] as string)).toEqual({
       event: "st-george-collection-result",
-      status: "ready",
-      failureCode: null,
+      status: "failed",
+      failureCode: "st_george_paused_login_rejected",
       runCount: 0,
     });
     log.mockImplementation(() => {
@@ -84,4 +84,22 @@ test("result logging contains no provider response, labels or exception text", (
   } finally {
     log.mockRestore();
   }
+});
+
+test("a run skipped during a login pause has its own code; the refused attempt keeps its reason", () => {
+  expect(
+    stGeorgeScheduledResult({
+      status: "paused",
+      reason: "authentication-challenge",
+      runId: "synthetic-run",
+    }),
+  ).toEqual({
+    status: "failed",
+    runIds: [],
+    failureCode: "st_george_paused_authentication_challenge",
+  });
+  expect(
+    stGeorgeScheduledResult({ status: "blocked", reason: "login-rejected", runId: "synthetic-run" })
+      .failureCode,
+  ).toBe("st_george_login_rejected");
 });
