@@ -9,9 +9,10 @@ calls (`mcp`) — and the Processor's own two: claimed collection alarm
 occurrences (`alarm`) and lane ticks that wrote decisions or proposals
 (`lane`, plan S7, [below](#the-processors-own-records-alarm-and-lane)).
 S3 execution integration adds delegated calls for installed
-adapters and common preparation/confirmation primitives; actual schedule
-adapters remain incomplete. The checked-in delegation configuration is still
-empty. Agent HTTP and MCP can read scoped records under `audit.read`, and
+adapters (commands, operations requests, job, maintenance and survey
+settings) and common preparation/confirmation primitives. There is no
+delegation configuration: every MCP client is the delegated principal
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)). Agent HTTP and MCP can read scoped records under `audit.read`, and
 the operator reads the whole log on the web UI's `監査ログ` page (slice S8).
 The limits are listed at the end.
 
@@ -74,13 +75,13 @@ authorization and service unchanged and records the outcome:
   before any batch, and the App records it once as `refused` under the
   command's operation.
 
-| Path         | Route or tool                                                                                                                                                                                               | Operation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Effect record written by                                                                               |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `ui`         | `POST /api/command/v1/{plan,simulate,approve,commit,operation}`                                                                                                                                             | `command.plan`, `command.simulate`, `command.approve`, `command.commit`, `command.operation.get`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | the Processor: `createPlan`, `approve` and `commit` batches                                            |
-| `ui`         | `POST /api/ops/v1/{collections,imports,replays,projections}`, `…/sessions/{source}/refresh`, `GET …/operations/{id}`                                                                                        | `ops.collection.request`, `ops.import.request`, `ops.replay.request`, `ops.projection.request`, `ops.session.refresh`, `ops.operation.get`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | the App: the acceptance batch of `packages/application/src/operations/requests.ts`                     |
-| `ui`         | `POST /api/ops/v1/schedules/{job}`, `/maintenance`, `/proposals/{id}`, `/leases/{source}`                                                                                                                   | `schedules.job.update`, `schedules.maintenance.update`, `schedules.survey.decide`, `schedules.lease.release`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | the Processor: `updateSchedule`, `updateMaintenance`, `decideSurveyProposal`, `releaseCollectionLease` |
-| `agent-http` | `POST /api/agent/v1/<tool>`                                                                                                                                                                                 | the tool name without `kogane.` (`capabilities`, `context.open`, `financial.query`, `explain`, `purchases.explain`, `instruments.candidates`, `accounts.candidates`, `card-settlements.unmatched`, `economic-readiness.read`, `card-settlements.read`, `card-settlements.ownership`, `instruments.coverage`, `instruments.history`, `accounts.history`, `reported-state.read`, `reconstructed-state.read`, `identity.read`, `store.read`, `observations.list`, `observations.get`, `balances.read`, `rewards.read`, `reported-holdings-change.read`, `events.read`, `reports.read`, `collection-quality.read`, `evidence.read`, `evidence.raw.read`, `schedules.read`, `audit.search`, `audit.get`, `reconcile.propose`, `schedules.maintenance.read`) | the App: the proposal batch of `packages/application/src/propose-store.ts`                             |
-| `mcp`        | `tools/call` on `/mcp` by an MCP client (`mcp-client:<sub>`, ADR 0047): the agent tools; the operations tools, without a delegation, are refused (`delegation_not_configured`) and that refusal is recorded | the same names; `schedules.maintenance.update` and `schedules.survey.decide`, delegated operations (below); `schedules.survey.read`; `schedules.lease.release`, whose tool refuses every call (`operation_not_delegable`, R3); a refusal before any tool is named is `mcp.request`                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | as above                                                                                               |
+| Path         | Route or tool                                                                                                                                                              | Operation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Effect record written by                                                                               |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `ui`         | `POST /api/command/v1/{plan,simulate,approve,commit,operation}`                                                                                                            | `command.plan`, `command.simulate`, `command.approve`, `command.commit`, `command.operation.get`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | the Processor: `createPlan`, `approve` and `commit` batches                                            |
+| `ui`         | `POST /api/ops/v1/{collections,imports,replays,projections}`, `…/sessions/{source}/refresh`, `GET …/operations/{id}`, `GET …/operations`                                   | `ops.collection.request`, `ops.import.request`, `ops.replay.request`, `ops.projection.request`, `ops.session.refresh`, `ops.operation.get`, `ops.operation.list`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | the App: the acceptance batch of `packages/application/src/operations/requests.ts`                     |
+| `ui`         | `POST /api/ops/v1/schedules/{job}`, `/maintenance`, `/proposals/{id}`, `/leases/{source}`                                                                                  | `schedules.job.update`, `schedules.maintenance.update`, `schedules.survey.decide`, `schedules.lease.release`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | the Processor: `updateSchedule`, `updateMaintenance`, `decideSurveyProposal`, `releaseCollectionLease` |
+| `agent-http` | `POST /api/agent/v1/<tool>`                                                                                                                                                | the tool name without `kogane.` (`capabilities`, `context.open`, `financial.query`, `explain`, `purchases.explain`, `instruments.candidates`, `accounts.candidates`, `card-settlements.unmatched`, `economic-readiness.read`, `card-settlements.read`, `card-settlements.statements`, `card-settlements.ownership`, `instruments.coverage`, `instruments.history`, `accounts.history`, `reported-state.read`, `reconstructed-state.read`, `identity.read`, `store.read`, `observations.list`, `observations.get`, `balances.read`, `rewards.read`, `reported-holdings-change.read`, `events.read`, `reports.read`, `collection-quality.read`, `evidence.read`, `evidence.raw.read`, `schedules.read`, `audit.search`, `audit.get`, `reconcile.propose`, `schedules.maintenance.read`) | the App: the proposal batch of `packages/application/src/propose-store.ts`                             |
+| `mcp`        | `tools/call` on `/mcp` by an MCP client (`mcp-client:<sub>`, ADR 0047): the agent tools; the operations tools, which the MCP client applies and reads as itself (ADR 0084) | the same names; `schedules.maintenance.update` and `schedules.survey.decide`, delegated operations (below); `schedules.survey.read`; `schedules.lease.release`, whose tool refuses every call (`operation_not_delegable`, R3); a refusal before any tool is named is `mcp.request`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | as above                                                                                               |
 
 The three schedule writers that were not one batch before are one now:
 a maintenance revision, its provenance update and its record (all through the
@@ -101,7 +102,7 @@ namespace (`403 actor_not_supported`, before any tool) is recorded on
 `agent-http` under that subject. A read records its row count
 (`financial.query`: the result's rows and whether more exist; `explain`:
 nodes; `purchases.explain`: purchases; `instruments.candidates` and
-`accounts.candidates`: items on the page, truncated when the total is larger; `card-settlements.unmatched`: statements on the page, truncated when a next page follows; `instruments.coverage`: source rows, never truncated; `economic-readiness.read`: the manifest's rows, never truncated; `card-settlements.read`: reviews on the page, truncated when another page follows; `card-settlements.ownership`: one candidate, never truncated; `reconstructed-state.read`: one
+`accounts.candidates`: items on the page, truncated when the total is larger; `card-settlements.unmatched`: statements on the page, truncated when a next page follows; `instruments.coverage`: source rows, never truncated; `economic-readiness.read`: the manifest's rows, never truncated; `card-settlements.read`: reviews on the page, truncated when another page follows; `card-settlements.statements`: statements on the grouped page (never their candidates), truncated when another page follows; `card-settlements.ownership`: one candidate, never truncated; `reconstructed-state.read`: one
 when the answer carries a reconstruction, else none; `reported-state.read`:
 the answer's accounts plus payables, never truncated; `instruments.history`
 and `accounts.history`: entries; `audit.search`: records on the page, truncated when a cursor
@@ -111,7 +112,9 @@ follows; `audit.get`: one when a record is shown; `identity.read`,
 `evidence.read` and `schedules.read` (its jobs): the page's `items` or `rows`,
 else its first list (connections, transactions, …; one for `meta`, which has none),
 truncated when the page says more follow (`coverage.truncated`,
-`page.hasMore` or a `nextCursor`); `reports.read`: the list's items,
+`page.hasMore` or a `nextCursor`), except that `collection-quality.read`'s
+account view counts the cells it read (its `cells`), never an account, and is
+never truncated; `reports.read`: the list's items,
 truncated when a cursor follows, and one for a report or its explanation;
 `observations.get` and `evidence.raw.read`: one, never the bytes; the others one).
 Whole-store and multi-source reads carry no scope. A replay names the earlier
@@ -122,8 +125,8 @@ carries its closed reason as `reason_code`: `operator-edit` for the operator's
 edit, `maintenance-survey-proposal-accepted` for an accepted proposal.
 `schedules.maintenance.read` (R0) is one `read` record on whichever agent path
 served it. `schedules.maintenance.update` exists on `mcp` as well as on `ui`;
-there it is graded by the caller's resolved MCP authority (the operator's own
-MCP principal, [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), not its grant. A caller that does not
+there it is graded by the caller's resolved MCP authority (any MCP client,
+as itself, [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), not its grant. A caller that does not
 resolve one gets one `refused` record (`failed` for
 `503 delegation_misconfigured`) with the delegation's or the schema's code,
 `principal_kind` `agent` and no `delegation_ref`, and nothing is relayed to
@@ -162,11 +165,11 @@ These records have no subject; the principal is the Processor's own, kind
 `automatic`, and the builder admits only `applied`, `accepted` and `failed`
 on these paths, so none of them is capped.
 
-| Path    | Written when                                                                                                         | Operation, class                                                                               | Principal                              | What it names                                                                                                                                                                                                                 |
-| ------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `alarm` | `ScheduleAlarm` claims an occurrence of a `collection`-kind job (`src/schedule-alarm.ts`)                            | `alarm.occurrence.claim`, R2, `accepted`                                                       | `alarm:<job id>`                       | target `schedule:<job id>`, scope the job's schedule source, refs `occurrence:<occurrence id>` and `schedule:<job id>@<revision>`, diff `none`; the dispatch outcome stays in the occurrence row                              |
-| `alarm` | the `processor-tick` alarm frees a collection lease whose holder went silent (`expireStaleLeases`, ADR 0085)         | `alarm.lease.expire`, R2, `applied`                                                            | `alarm:processor-tick`                 | target `collection-lease:<source>`, scope that source, diff `{"kind":"release","released":true}`; written only when the release changed the row (`changes()=1`) and the source is unlocked                                    |
-| `lane`  | a tick of `reconciliation_sweep`, `card_settlement_sweep`, `purchase_recognition` or `maintenance_survey` wrote rows | `lane.tick`, R2 with a rule decision or commit, R1 with proposals only; `applied`, or `failed` | `lane:<lane>`, hyphens for underscores | refs `decision-revisions:<a>-<b>`, `commit-seq:<epoch>:<a>-<b>`, `proposals:<kind>:<a>-<b>` per closed kind; diff `{"kind":"lane","decisionRevisions":…,"commits":…,"proposals":[{"kind":…,"count":…}]}`; no target, no scope |
+| Path    | Written when                                                                                                                                     | Operation, class                                                                               | Principal                              | What it names                                                                                                                                                                                                                 |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `alarm` | `ScheduleAlarm` claims an occurrence of a `collection`-kind job (`src/schedule-alarm.ts`)                                                        | `alarm.occurrence.claim`, R2, `accepted`                                                       | `alarm:<job id>`                       | target `schedule:<job id>`, scope the job's schedule source, refs `occurrence:<occurrence id>` and `schedule:<job id>@<revision>`, diff `none`; the dispatch outcome stays in the occurrence row                              |
+| `alarm` | the `processor-tick` alarm frees a collection lease whose holder went silent (`expireStaleLeases`, ADR 0085)                                     | `alarm.lease.expire`, R2, `applied`                                                            | `alarm:processor-tick`                 | target `collection-lease:<source>`, scope that source, diff `{"kind":"release","released":true}`; written only when the release changed the row (`changes()=1`) and the source is unlocked                                    |
+| `lane`  | a tick of `instrument_auto_adoption`, `reconciliation_sweep`, `card_settlement_sweep`, `purchase_recognition` or `maintenance_survey` wrote rows | `lane.tick`, R2 with a rule decision or commit, R1 with proposals only; `applied`, or `failed` | `lane:<lane>`, hyphens for underscores | refs `decision-revisions:<a>-<b>`, `commit-seq:<epoch>:<a>-<b>`, `proposals:<kind>:<a>-<b>` per closed kind; diff `{"kind":"lane","decisionRevisions":…,"commits":…,"proposals":[{"kind":…,"count":…}]}`; no target, no scope |
 
 **The alarm record** is the last statement of the claim's own batch, joined
 to the occurrence row that batch inserted (id, `started_at`, `started`) and
@@ -186,12 +189,13 @@ epoch), `reconciliation_proposals`, `card_settlement_candidates` and
 each part a seek on the table's key — and, after it, the lane's own rows above
 the mark:
 
-| Lane                    | Its own rows                                                                                                                                                                    |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reconciliation_sweep`  | rule decisions of `rule:reconciliation-v1` (the automatic acceptance of a provider-linked pair); `reconciliation_proposals` of method `rule`                                    |
-| `card_settlement_sweep` | `card_settlement_candidates`                                                                                                                                                    |
-| `purchase_recognition`  | rule decisions of `rule:card-purchase-recognition-v1`, the commit rows of that principal (ADR 0054); `reconciliation_proposals` of method `rule` (pending-to-posted candidates) |
-| `maintenance_survey`    | `maintenance_survey_proposals`                                                                                                                                                  |
+| Lane                       | Its own rows                                                                                                                                                                                                                |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `instrument_auto_adoption` | rule decisions of `rule:instrument-auto-v1` (an SBI bare domestic code adopted onto its listing, [ADR 0055](adr/0055-instrument-candidates.md#amendment-2026-11-08-adopt-sbis-bare-domestic-code-onto-its-listing-by-rule)) |
+| `reconciliation_sweep`     | rule decisions of `rule:reconciliation-v1` (the automatic acceptance of a provider-linked pair); `reconciliation_proposals` of method `rule`                                                                                |
+| `card_settlement_sweep`    | `card_settlement_candidates`                                                                                                                                                                                                |
+| `purchase_recognition`     | rule decisions of `rule:card-purchase-recognition-v1`, the commit rows of that principal (ADR 0054); `reconciliation_proposals` of method `rule` (pending-to-posted candidates)                                             |
+| `maintenance_survey`       | `maintenance_survey_proposals`                                                                                                                                                                                              |
 
 Each reference is an inclusive range of positions — the rowid of the
 TEXT-keyed tables, the commit sequence, the survey proposal's integer key —
@@ -300,10 +304,17 @@ provider text or body.
   is shown to the operator only, and no record is shown; a deployment
   without the route (`404`) says the log is not provided.
 
+A record whose target is an operations request (`op_<id>`) links to that
+request's read-only 依頼の経過 page (`/operations/op_<id>`,
+[operations API](ops-api.md#collector-execution-adr-0048)). No page lists
+operations (the list route of
+[ADR 0086](adr/0086-operator-operations-list.md) has none), so this log is
+where the operator finds an operation id on screen.
+
 The page reads no capability from `/api/meta`: like the schedule settings
 page it is always listed, and the server's operator check is the only gate.
-It does not show which delegations are in force: no route serves them to the
-browser yet.
+There is no delegation to show: ADR 0084 removed the delegation table and
+its status route.
 
 ## Cost
 
@@ -365,8 +376,9 @@ occurrence of that job.
   without its rowid renumbers it, and earlier lane references would name
   other rows or none. A migration that rebuilds one of them copies the rowid.
 - Page loads and reads of the operator's GET routes (the schedules page, the
-  read pages, `/api/v2/query`, this log), except `GET /api/ops/v1/operations/{id}`,
-  which is an operations read and is recorded.
+  read pages, `/api/v2/query`, this log), except `GET /api/ops/v1/operations/{id}`
+  and the list `GET /api/ops/v1/operations`, which are operations reads and are
+  recorded.
 - A request refused before authentication (401), the deployment's
   service-token bootstrap (no subject), a path or tool this deployment does
   not serve (`404 not_found`, MCP `unknown_tool`), and the MCP protocol's own
@@ -406,8 +418,9 @@ occurrence of that job.
   references are checked against their original native effect. Maintenance
   uses its prepared/effect references and does not accept a caller-supplied
   reversal reference. S6 survey acceptance was unavailable then (since 2026-11-07:
-  [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)). Empty checked-in
-  delegations enable no production delegated effects.
+  [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)). Since
+  ADR 0084 every MCP client the MCP Access application admits writes these
+  delegated effects as itself.
 
 Tests: `packages/storage-d1/test/audit-records-migration.test.ts` (the table's
 guards), `packages/application/test/audit.test.ts` (builder, effect statement,
@@ -485,8 +498,11 @@ The tests use synthetic local D1 data and synthetic Access keys. They cover
 signed MCP entry, revocation and scope-before-replay, both hard bounds,
 prepare/effect linkage, shared daily budget, rollback, exact retries,
 concurrent joined windows and losing-provenance writes. Production migration
-state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
-the committed MCP financial-reader grant receives no schedule authority.
+state and real-client use were not checked. `MCP_DELEGATIONS` stayed empty
+then, and the committed MCP financial-reader grant received no schedule
+authority; [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+(2026-11-07) removed both, and every MCP client now reads and revises
+maintenance windows over every schedule source, as itself.
 S6 survey acceptance remained unavailable pending the separate owner decision
 (delegated survey decisions since 2026-11-07: [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07));
 no survey grammar, grants, Access, authentication or deployment is changed.

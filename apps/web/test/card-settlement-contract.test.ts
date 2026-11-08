@@ -147,8 +147,19 @@ describe("card settlement HTTP contract", () => {
     delete old.cardSettlementReconciliation;
     expect(validApiCapabilities(old)).toBe(true);
   });
-  test("only the named UI route opens the candidate review", () => {
+  test("only the named UI routes open the candidate review", () => {
     expect(matchRoute("/reconciliation")).toEqual({ name: "reconciliation" });
-    expect(matchRoute("/reconciliation/arbitrary")).toMatchObject({ name: "notFound" });
+    // One candidate's page takes an id in the API's own `proposalId` rule, nothing else.
+    expect(matchRoute("/reconciliation/cs_synthetic-1")).toEqual({
+      name: "reconciliationReview",
+      proposalId: "cs_synthetic-1",
+    });
+    for (const path of [
+      "/reconciliation/a.b",
+      "/reconciliation/a%2Fb",
+      `/reconciliation/${"a".repeat(129)}`,
+      "/reconciliation/a/b",
+    ])
+      expect(matchRoute(path)).toMatchObject({ name: "notFound" });
   });
 });

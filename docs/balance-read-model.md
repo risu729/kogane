@@ -97,10 +97,11 @@ writer fencing and captured CORE references; the contract is in
    only decides which side of an unproven overlap stays adopted, and equal
    ranks leave both sides unresolved. A test refuses a policy id that the
    CORE migrations do not seed and a collector source that ranks
-   `unreviewed`. MoneyForward's balance rows resolve to no registered metric
-   today, so they are targeted on their own and never compete with a direct
-   source for one target; its rank takes effect only once a MoneyForward
-   metric shares a target with one.
+   `unreviewed`. MoneyForward has no balance parser today (its parsers emit
+   monthly transactions and evidence-only captures), so it is never a
+   candidate and never competes with a direct source for one target; its rank
+   takes effect only once a MoneyForward balance metric shares a target with
+   one ([audit](account-connections.md#double-counting-audit-2026-11-08)).
 
 ### States and reason codes
 
@@ -188,9 +189,12 @@ sign and no overlap group are summable; capacities, aggregates, statement
 amounts, period totals, reward units and balances restated after a
 transaction are excluded by their registry entries. The sum is exact integer
 arithmetic outside SQL, over the whole filter scope rather than the page, and
-a subject that appears twice makes the subtotal unavailable instead of double
-counting it. Above 5,000 adopted rows the subtotal is `null` with
-`scope_exceeds_subtotal_bound`.
+a subject that appears twice in the same unit makes the subtotal unavailable
+(`subject_reported_twice`) instead of double counting it. A subject that holds
+several units (an exchange account's cash per asset, a broker's foreign cash
+per currency) counts once in each unit's figure: the subtotal is per unit, so
+that is not a second count of anything. Above 5,000 adopted rows the subtotal
+is `null` with `scope_exceeds_subtotal_bound`.
 
 ### Cursor contract
 

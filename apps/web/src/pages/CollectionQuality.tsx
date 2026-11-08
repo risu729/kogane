@@ -5,11 +5,21 @@ import { Link, useLocation } from "../router.tsx";
 import { EmptyState, Kv, KvRow, Panel, QueryBoundary } from "../ui.tsx";
 import {
   COLLECTION_QUALITY_PATH,
+  type AccountCoverage,
+  type AccountCoveragePeriod,
+  type AccountStanding,
+  type CollectionQualityPeriod,
+  type MappingStatus,
+  type ObservationKind,
   type CollectionQualityCell,
   type CollectionQualityCells,
   type CollectionQualitySchedule,
   type CollectionQualitySummary,
   type CellReason,
+  type CollectionFreshness,
+  type DataTypeStatus,
+  type ProviderDataType,
+  type ProviderDataTypeEntry,
   type SourceReason,
 } from "../../../../packages/observation-shared/src/collection-quality-contract.ts";
 
@@ -60,6 +70,92 @@ const QUALITY_REASON_LABELS: Record<CellReason | SourceReason, string> = {
   not_in_latest_run: "より新しい実行に、このデータがありません",
 };
 const instant = (value: string | null): string => (value === null ? "記録なし・未確認" : value);
+/** `collection-freshness-v1`: the age of the capture the data stands on, and why it is not fresh. */
+export function freshnessText(value: CollectionFreshness): string {
+  const age =
+    value.ageDays === null
+      ? "取得なし"
+      : value.ageDays === 0
+        ? "当日の取得"
+        : `${value.ageDays}日前の取得`;
+  switch (value.state) {
+    case "same-day":
+    case "recent":
+      return age;
+    case "stale":
+      return `古い（${age}）`;
+    case "human-required":
+      return `本人操作待ち（${age}）`;
+    case "disabled":
+      return `定期実行の停止中（${age}）`;
+    case "no-capture":
+      return "取得なし";
+  }
+}
+const DATA_TYPE_LABELS: Record<ProviderDataType, string> = {
+  balance: "残高",
+  cash_movement: "入出金明細",
+  card_usage: "カード利用明細",
+  card_statement: "カードの請求・支払額",
+  position: "保有銘柄・数量",
+  execution: "約定・取引履歴",
+  settlement_cash: "証券口座の預り金と入出金",
+  asset_transfer: "証券・暗号資産の入出庫",
+  income: "配当・分配金・利息・報酬",
+  valuation_history: "評価額・資産推移・実現損益",
+  term_deposit: "定期預金等の契約明細",
+  document: "取引報告書・電子交付書面",
+  fx_rate: "為替レート",
+  reward_balance: "ポイント残高",
+  reward_activity: "ポイント履歴",
+  reward_expiry: "ポイントの有効期限",
+};
+const DATA_TYPE_STATUS_LABELS: Record<DataTypeStatus, string> = {
+  collected: "収集・解析済み",
+  partial: "一部のみ収集",
+  not_collected: "未収集",
+};
+function DataTypes({ entries }: { entries: readonly ProviderDataTypeEntry[] | null }): ReactNode {
+  if (entries === null)
+    return (
+      <p className="panel-body">この取得元のデータ種別一覧はありません（収集方法が未登録）。</p>
+    );
+  return (
+    <ul className="panel-body">
+      {entries.map((entry) => (
+        <li key={entry.type} data-status={entry.status}>
+          {DATA_TYPE_LABELS[entry.type]}: {DATA_TYPE_STATUS_LABELS[entry.status]}{" "}
+          <code>{entry.type}</code>
+          {entry.parsers.length ? (
+            <>
+              {" "}
+              · 解析:{" "}
+              {entry.parsers.map((parser) => (
+                <code key={parser}>{parser} </code>
+              ))}
+            </>
+          ) : null}
+          {entry.issue !== null ? (
+            <>
+              {" "}
+              ·{" "}
+              <a href={`https://github.com/risu729/kogane/issues/${entry.issue}`}>
+                残りの対応 #{entry.issue}
+              </a>
+            </>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+function Freshness({ value }: { value: CollectionFreshness }): ReactNode {
+  return (
+    <span className="freshness" data-state={value.state}>
+      {freshnessText(value)}
+    </span>
+  );
+}
 function Reasons({ codes }: { codes: readonly (CellReason | SourceReason)[] }): ReactNode {
   return (
     <ul className="warning-list">
@@ -144,6 +240,9 @@ function QualityCell({ value }: { value: CollectionQualityCell }): ReactNode {
           {value.period.state ?? ""} · 解析: {value.parser ?? "解析の指定なし"}
         </p>
         <Kv>
+          <KvRow label="新しさ">
+            <Freshness value={value.freshness} />
+          </KvRow>
           <KvRow label={n.artifacts === 0 ? "原本がない試行の時刻" : "最新の取得時刻"}>
             {n.capturedAt} · <Link to={`/runs/r_${n.fetchRunId}`}>取得記録</Link>
           </KvRow>
@@ -222,7 +321,9 @@ function SourceCells({ sourceId, offset }: { sourceId: string; offset: number })
           <h2>口座・カード × データ種別 × 期間</h2>
           <p>
             このページは {offset + 1}{" "}
-            件目からの保存記録です。対象外・未宣言の口座や期間は列挙できません。新しさは保存時刻を表示し、一律の「古い」判定は行いません。
+            件目からの保存記録です。対象外・未宣言の口座や期間は列挙できません。新しさは現在の表示に採用された取得の日付から{" "}
+            {data.freshnessAsOf.date}
+            （日本時間）までの日数です。4日以上前の取得は「古い」と表示し、本人の操作待ちや定期実行の停止が理由のときはそれぞれ「本人操作待ち」「定期実行の停止中」と表示します。
           </p>
           {query.dataUpdatedAt ? (
             <p>表示を読んだ時刻: {new Date(query.dataUpdatedAt).toISOString()}</p>
@@ -271,9 +372,132 @@ function SourceCells({ sourceId, offset }: { sourceId: string; offset: number })
     </QueryBoundary>
   );
 }
+const KIND_LABELS: Record<ObservationKind, string> = {
+  transaction: "取引",
+  balance: "残高",
+  position: "保有",
+  valuation: "評価額",
+};
+const MAPPING_STATUS_LABELS: Record<MappingStatus, string> = {
+  identified: "口座を特定済み",
+  "provider-local": "取得元の中だけで区別した口座",
+  aggregate: "集計された区分",
+  unresolved: "口座の対応が未確定",
+};
+const STANDING_LABELS: Record<AccountStanding, string> = {
+  current: "最新の取得が現在の表示対象",
+  "older-current": "過去の取得が現在の表示対象（新しい取得は採用されていません）",
+  "newest-not-current": "最新の取得にのみあり、現在の表示対象ではありません",
+};
+function periodLabel(period: CollectionQualityPeriod): string {
+  if (period.kind === "latest") return "期間の区分なし";
+  return `${period.value ?? "期間未確定"}${period.state ? ` ${period.state}` : ""}`;
+}
+function AccountPeriod({ value }: { value: AccountCoveragePeriod }): ReactNode {
+  return (
+    <li>
+      <p>
+        期間: {periodLabel(value.period)} · 取得単位: {value.unitKey ?? "区分なし"} ·{" "}
+        {STANDING_LABELS[value.standing]}
+      </p>
+      <p>
+        取得時刻 {value.capture.capturedAt} ·{" "}
+        <Link to={`/runs/r_${value.capture.fetchRunId}`}>取得記録</Link> · この口座の観測{" "}
+        {value.observations} 件
+      </p>
+      <Reasons codes={value.reasons} />
+    </li>
+  );
+}
+function SourceAccounts({ sourceId }: { sourceId: string }): ReactNode {
+  const query = useQuery({
+    queryKey: ["collection-quality", sourceId, "accounts"],
+    queryFn: ({ signal }) =>
+      getJson<AccountCoverage>(
+        // A literal suffix (ACCOUNT_COVERAGE_SUFFIX), so the UI/MCP parity scan sees the route.
+        `${COLLECTION_QUALITY_PATH}/${encodeURIComponent(sourceId)}/accounts`,
+        signal,
+      ),
+  });
+  return (
+    <QueryBoundary query={query} label="口座ごとの取得状況">
+      {(data) => (
+        <>
+          <h2>口座 × データ種別 × 期間</h2>
+          <p>
+            この取得元の保存記録 {data.cells}{" "}
+            件を、観測が対応付けられた口座ごとに並べます。保存記録のない期間は列挙できず、欠落とも取得済みとも判定しません。別の取得元にある同じ口座は、その取得元で表示します。
+          </p>
+          {data.accounts.length === 0 ? (
+            <EmptyState>
+              口座に対応付けられた観測がありません。取得や取引がないことの証明ではありません。
+            </EmptyState>
+          ) : (
+            data.accounts.map((account) => (
+              <Panel
+                key={account.accountId}
+                // A stored label may be empty; the heading still names the panel.
+                title={account.label.trim() === "" ? "ラベルのない口座" : account.label}
+              >
+                <div className="panel-body">
+                  <p>
+                    口座 <code>{account.accountId}</code> ·{" "}
+                    {account.statuses.map((status) => MAPPING_STATUS_LABELS[status]).join(" / ")}
+                  </p>
+                  {account.dataTypes.map((type) => (
+                    <section key={`${type.dataset}/${type.parser}/${type.kind}`}>
+                      <h3>
+                        {KIND_LABELS[type.kind]} · {type.dataset ?? "データ種別不明"}
+                      </h3>
+                      <p>解析: {type.parser}</p>
+                      <ul>
+                        {type.periods.map((value) => (
+                          <AccountPeriod
+                            key={JSON.stringify([value.unitKey, value.period, value.currentRule])}
+                            value={value}
+                          />
+                        ))}
+                      </ul>
+                    </section>
+                  ))}
+                </div>
+              </Panel>
+            ))
+          )}
+          <Panel title="口座に対応付けられない保存記録">
+            {data.unattributed.length === 0 ? (
+              <p className="panel-body">なし</p>
+            ) : (
+              <ul className="panel-body">
+                {data.unattributed.map((value) => (
+                  <li
+                    key={JSON.stringify([
+                      value.dataset,
+                      value.parser,
+                      value.unitKey,
+                      value.period,
+                      value.currentRule,
+                    ])}
+                  >
+                    <p>
+                      {value.dataset ?? "データ種別不明"} · 取得単位: {value.unitKey ?? "区分なし"}{" "}
+                      · 期間: {periodLabel(value.period)}
+                    </p>
+                    <Reasons codes={value.reasons} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+        </>
+      )}
+    </QueryBoundary>
+  );
+}
 export function CollectionQualityPage(): ReactNode {
   const params = new URLSearchParams(useLocation().split("?", 2)[1] ?? "");
   const sourceId = params.get("source");
+  const byAccount = params.get("view") === "accounts";
   const offsetText = params.get("offset") ?? "0";
   const validOffset = /^(?:0|[1-9][0-9]{0,6})$/u.test(offsetText);
   const query = useQuery({
@@ -306,7 +530,10 @@ export function CollectionQualityPage(): ReactNode {
                       >
                         {source.sourceId}
                       </Link>{" "}
-                      ·{" "}
+                      · <Freshness value={source.freshness} /> ·{" "}
+                      {source.dataTypes?.some((entry) => entry.status !== "collected")
+                        ? `未収集・一部のみのデータ種別 ${source.dataTypes.filter((entry) => entry.status !== "collected").length} 件 · `
+                        : null}
                       {source.reasons.length
                         ? `${source.reasons.length} 個の未完了・未確認理由`
                         : "実行の記録あり（網羅性は個別確認）"}
@@ -324,7 +551,15 @@ export function CollectionQualityPage(): ReactNode {
                 <>
                   <h2>{selected.sourceId}</h2>
                   <p>登録された収集方法: {selected.collectors.join(" / ") || "なし"}</p>
+                  <p>
+                    最新の取得記録の新しさ: <Freshness value={selected.freshness} />（
+                    {data.freshnessAsOf.date}{" "}
+                    日本時間基準。成否を問わず最新の取得記録の日付。データ種別ごとの新しさは下の一覧）
+                  </p>
                   <Reasons codes={selected.reasons} />
+                  <Panel title="取得元が提供するデータ種別">
+                    <DataTypes entries={selected.dataTypes} />
+                  </Panel>
                   <Panel title="最後の試行と取得結果">
                     {selected.schedules.length ? (
                       selected.schedules.map((schedule) => (
@@ -340,7 +575,24 @@ export function CollectionQualityPage(): ReactNode {
                       {item.blockedCode ?? "登録待ち"}
                     </p>
                   ))}
-                  {validOffset ? (
+                  <nav aria-label="収集品質の表示単位">
+                    <Link
+                      to={`/collection-quality?source=${encodeURIComponent(sourceId)}`}
+                      current={!byAccount}
+                    >
+                      取得単位ごと
+                    </Link>{" "}
+                    ·{" "}
+                    <Link
+                      to={`/collection-quality?source=${encodeURIComponent(sourceId)}&view=accounts`}
+                      current={byAccount}
+                    >
+                      口座ごと
+                    </Link>
+                  </nav>
+                  {byAccount ? (
+                    <SourceAccounts key={sourceId} sourceId={sourceId} />
+                  ) : validOffset ? (
                     <SourceCells key={sourceId} sourceId={sourceId} offset={Number(offsetText)} />
                   ) : (
                     <EmptyState>

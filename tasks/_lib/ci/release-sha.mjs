@@ -23,8 +23,19 @@ import { fileURLToPath } from "node:url";
 /** The variable a Worker reads its build identity from. */
 export const RELEASE_SHA_VAR = "RELEASE_SHA";
 
-/** `"RELEASE_SHA": "<anything>"` as it appears in a Wrangler JSONC file. */
+/** `"RELEASE_SHA": "<lowercase hex>"` as it appears in a Wrangler JSONC file. */
 const DECLARATION = /"RELEASE_SHA"(\s*):(\s*)"([0-9a-f]*)"/gu;
+
+/** Every declaration of the variable, whatever its value. */
+const KEY = /"RELEASE_SHA"\s*:/gu;
+
+/**
+ * The closed code for a declaration that holds something other than empty or
+ * a full lowercase sha (an uppercase or non-hex string, a non-string value).
+ * It is a declaration all the same, so it is refused, never skipped as absent,
+ * and the value is not echoed.
+ */
+export const INVALID_DECLARATION = "release_sha_invalid_declaration";
 
 /**
  * One configuration's text with the sha stamped in.
@@ -34,11 +45,14 @@ const DECLARATION = /"RELEASE_SHA"(\s*):(\s*)"([0-9a-f]*)"/gu;
  * @returns {{text: string, stamped: boolean}}
  */
 export function stampConfig(text, sha) {
+  const declared = [...text.matchAll(KEY)].length;
   const matches = [...text.matchAll(DECLARATION)];
-  if (matches.length === 0) return { text, stamped: false };
-  if (matches.length > 1) throw new Error(`${RELEASE_SHA_VAR} is declared more than once`);
+  if (declared === 0) return { text, stamped: false };
+  if (declared > 1) throw new Error(`${RELEASE_SHA_VAR} is declared more than once`);
   const [match] = matches;
+  if (match === undefined) throw new Error(INVALID_DECLARATION);
   const current = match[3] ?? "";
+  if (current !== "" && !/^[0-9a-f]{40}$/u.test(current)) throw new Error(INVALID_DECLARATION);
   if (current !== "") {
     if (current === sha) return { text, stamped: true };
     throw new Error(`${RELEASE_SHA_VAR} already holds ${current}`);

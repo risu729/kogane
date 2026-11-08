@@ -42,6 +42,11 @@ import { validReportedState } from "./reported-state-contract.ts";
 import { validReportResponse } from "./report-artifact-contract.ts";
 import { validCollectionQualityResponse } from "./collection-quality-contract.ts";
 import {
+  OPERATION_RECORD_PATH_PREFIX,
+  operationIdOfPath,
+  validOperationRecord,
+} from "./operation-contract.ts";
+import {
   validCardSettlementReviewPage,
   validCardSettlementStatementPage,
 } from "./card-settlement-contract.ts";
@@ -806,6 +811,11 @@ export function validApiResponse(path: string, value: unknown): boolean {
   if (path === INSTRUMENT_HISTORY_PATH) return validInstrumentHistoryRead(value);
   if (path === ACCOUNT_HISTORY_PATH) return validAccountHistoryRead(value);
   if (path === INSTRUMENT_COVERAGE_PATH) return validInstrumentCoverage(value);
+  if (path.startsWith(OPERATION_RECORD_PATH_PREFIX)) {
+    // The record of exactly the operation the path names, or nothing.
+    const operationId = operationIdOfPath(path);
+    return operationId !== null && validOperationRecord(value, operationId);
+  }
   if (path.startsWith("/api/identity/")) return validIdentityResponse(path, value);
   if (path === "/api/v2/query") return validSharedQueryResponse(value);
   if (path === "/api/filter-options") {

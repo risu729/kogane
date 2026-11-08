@@ -223,6 +223,50 @@ describe("the command boundary", () => {
     expect(response.status).toBe(400);
   });
 
+  // A page on another site must not drive the operator's Access session into
+  // an approval or a commit (ADR 0078). The rule is the agent paths' own: an
+  // Origin that is present and not this Worker's is refused before the grant
+  // is graded or a body is read; a client that sends none is unaffected.
+  it("refuses a request from another origin before it is graded or forwarded", async () => {
+    const forwarded: string[] = [];
+    const PIPELINE = {
+      fetch: async (request: Request) => {
+        forwarded.push(new URL(request.url).pathname);
+        return Response.json({ ok: true });
+      },
+    };
+    const send = async (command: string, origin?: string) =>
+      worker.fetch(
+        new Request(`https://fixture.test/api/command/v1/${command}`, {
+          method: "POST",
+          headers: {
+            "cf-access-jwt-assertion": await token(),
+            ...(origin === undefined ? {} : { origin }),
+            // What a cross-site form can send: a simple content type, no preflight.
+            "content-type": "text/plain",
+          },
+          body: "{}",
+        }),
+        {
+          ...env,
+          ACCESS_ISSUER: issuer,
+          ACCESS_AUDIENCE: "synthetic-test-audience",
+          ...enabled,
+          PIPELINE,
+        } as unknown as Env,
+      );
+    for (const command of COMMANDS)
+      for (const origin of ["https://elsewhere.invalid", "null", "https://fixture.test.invalid"]) {
+        const response = await send(command, origin);
+        expect(response.status, `${command} ${origin}`).toBe(403);
+        expect(await response.json()).toMatchObject({ error: "origin_not_allowed" });
+      }
+    expect(forwarded).toEqual([]);
+    expect((await send("approve", "https://fixture.test")).status).toBe(200);
+    expect((await send("commit")).status).toBe(200);
+    expect(forwarded).toEqual(["/command/v1/approve", "/command/v1/commit"]);
+  });
+
   it("keeps command answers uncacheable and free of credentials", async () => {
     const response = await call("/api/command/v1/plan", { body: {}, environment: enabled });
     expect(response.headers.get("cache-control")).toBe("no-store");

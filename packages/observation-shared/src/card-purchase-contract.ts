@@ -37,6 +37,13 @@ import { validQuantity } from "../../domain/src/values.ts";
 const CARD_PURCHASE_PAGE_LIMIT = 50;
 const CARD_PURCHASE_HISTORY_LIMIT = 20;
 const CARD_PURCHASE_CANDIDATE_LIMIT = 10;
+/**
+ * Statements the summary may list. The server lists one per (account, source,
+ * period) of the filter's posted events, uncapped, and refuses a filter past
+ * `CARD_PURCHASE_SUMMARY_LIMIT` live events (`packages/application`, which
+ * this package may not import): each listed statement rests on one of them.
+ */
+export const CARD_PURCHASE_STATEMENT_TOTALS_LIMIT = 10_000;
 const EVENT_ID = /^(?:purchase|refund)_[0-9a-f]{64}$/u;
 const PERIOD = /^[0-9]{4}-(?:0[1-9]|1[0-2])$/u;
 const UNIT_KEYS = ["unitRef", "captured", "authorized", "capturedRefunds", "authorizedRefunds"];
@@ -389,7 +396,7 @@ function validPage(value: unknown, candidate: (value: unknown) => boolean): bool
     ) &&
     count(summary.unresolved) &&
     count(summary.events) &&
-    list(summary.statementTotals, 1000) &&
+    list(summary.statementTotals, CARD_PURCHASE_STATEMENT_TOTALS_LIMIT) &&
     summary.statementTotals.every(
       (entry) =>
         record(entry) &&

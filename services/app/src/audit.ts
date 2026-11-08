@@ -202,6 +202,13 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       rows: Array.isArray(value["items"]) ? value["items"].length : 0,
       truncated: value["nextOffset"] !== null && value["nextOffset"] !== undefined,
     };
+  // Statements on the grouped page, never their candidates; truncated when
+  // another page follows.
+  if (operation === "card-settlements.statements")
+    return {
+      rows: Array.isArray(value["statements"]) ? value["statements"].length : 0,
+      truncated: value["nextOffset"] !== null && value["nextOffset"] !== undefined,
+    };
   if (operation === "card-settlements.ownership") return { rows: 1, truncated: false };
   if (operation === "economic-readiness.read") {
     const manifest = value["manifest"] as { rows?: unknown } | undefined;
@@ -227,6 +234,12 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     return {
       rows: Array.isArray(value["nodes"]) ? value["nodes"].length : 0,
       truncated: value["truncated"] === true,
+    };
+  // One page of operations summaries; a next cursor means more remain.
+  if (operation === "ops.operation.list")
+    return {
+      rows: Array.isArray(value["operations"]) ? value["operations"].length : 0,
+      truncated: typeof value["nextCursor"] === "string",
     };
   if (operation === "purchases.explain") return { rows: countOf(value["data"]), truncated: false };
   // One account's reconstructed state, when there is one to show.
@@ -255,6 +268,14 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     if (data && Array.isArray(data["items"]))
       return { rows: data["items"].length, truncated: typeof data["nextCursor"] === "string" };
     return { rows: data ? 1 : 0, truncated: false };
+  }
+  // The collection quality account view (ADR 0088) counts the cells it read
+  // (its `cells`, a number), never an account; it is never cut. The summary
+  // and the cell page fall through to the page rule below.
+  if (operation === "collection-quality.read") {
+    const data = (value["data"] ?? {}) as Record<string, unknown>;
+    if (typeof data["cells"] === "number" && Array.isArray(data["accounts"]))
+      return { rows: data["cells"], truncated: false };
   }
   if (
     operation === "identity.read" ||

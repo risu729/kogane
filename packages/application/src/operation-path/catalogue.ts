@@ -124,6 +124,15 @@ export const OPERATION_CATALOGUE = {
     capability: "interpretation.accept",
     paths: OPS,
   },
+  // The whole-store list of requests (ADR 0086): the list route and
+  // `kogane.ops.operation.list`, over one service.
+  "ops.operation.list": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "interpretation.accept",
+    paths: OPS,
+  },
   // ── schedule settings (W1–W6) ──────────────────────────────────────────
   "schedules.job.update": {
     risk: ["R2"],
@@ -269,9 +278,18 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
-  // The カード照合 page's reads (ADR 0081): its review list or one review, and
-  // one candidate's ownership review, through the page's own services.
+  // The カード照合 pages' reads (ADR 0081): the review list, one statement's
+  // candidates, one review or the candidates it competes with, the list
+  // grouped by statement, and one candidate's ownership review, through the
+  // pages' own services.
   "card-settlements.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  "card-settlements.statements": {
     risk: ["R0"],
     effect: null,
     quiet: "read",

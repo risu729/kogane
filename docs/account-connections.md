@@ -71,6 +71,35 @@ ADR 0077) proposes one `connection_contains` relation per current confirmed
 review and pinned direct reference, for a person to accept or reject through
 the change lifecycle; it never proposes leaf-account equivalence.
 
+## Double-counting audit, 2026-11-08
+
+Phase 3 unit 3f
+([plan](plans/2026-11-phase3-coverage-identity.md#3f-account-identity-audit-then-code-where-evidence-allows))
+read every place that sums or lists across sources, in code and in production
+over MCP, to find MoneyForward lines counted next to the direct account they
+mirror. None is:
+
+| Read                                                             | MoneyForward rows                                                                                                                                                                                                                                                                                |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Balance projection, known-assets subtotal, `holdings`            | None: no MoneyForward parser emits a balance ([balance read model](balance-read-model.md#how-a-row-gets-its-state)).                                                                                                                                                                             |
+| Dated reported state, reports, card settlements, economic events | None: MoneyForward is excluded from reported state, and card settlements read only card statements and bank debits. Its transactions sit in family `bank-movement` with no writer, and every human-adopted writer (own-transfer proposals included) refuses them as `identity_fingerprint_only`. |
+| `/transactions`, `kogane.financial.query` intent `activity`      | Listed next to direct rows with their own source and provenance, never totalled. The page labels an MF account with its mirror label or its connection label and the 取得経路の対応 disclosure; `activity` rows carry only `sourceRef`, `accountRef` and `parser`, with no aggregator marker.    |
+| Accepted `connection_contains` relations                         | Inert in the balance projection: the superset is a `connection:` scope no candidate has, so the subset claim moves no row ([identity](identity.md#aggregator-to-direct-account-candidates)).                                                                                                     |
+
+Two findings outside MoneyForward:
+
+- The subtotal guard keyed one subject once across all units, so an exchange
+  account reporting cash per asset refused the whole-store subtotal as
+  `subject_reported_twice`. It now counts a subject once per unit
+  ([#1120](https://github.com/risu729/kogane/pull/1120)).
+- Across sources, disjointness needs both scopes `identified`
+  (`distinct-identified-accounts-v1`), and no account identity rule assigns
+  `identified` yet (only instruments reach it). So deposit balances from two banks stay `unresolved` /
+  `overlap_unknown` against each other and there is no cross-bank JPY
+  subtotal. This is the documented INV06 behaviour, not a double count;
+  changing it is a design decision left open
+  ([#1150](https://github.com/risu729/kogane/issues/1150)).
+
 ## Display preference and completion boundary
 
 For a verified individual account and the same period, item, currency and

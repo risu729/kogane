@@ -105,10 +105,13 @@ combine, 1 to 3; no defaults), it answers per statement:
   `debit_in_other_statement_allocation` when a debit could pay two
   statements, and `excluded_debit_competes` when a debit refused as an
   unresolved duplicate or for a missing date could complete an exact sum):
-  every candidate listed, none chosen;
-- `unsupported`: `no_debit_in_window`, or `no_exact_allocation` with
-  `in_window_debits_below_total` (a shortfall) and/or `debit_above_total`
-  (an excess). No remainder is computed and no debit is called a partial
+  every candidate counted (`allocationCount`), the first 50 listed (fewest
+  debits first, then by member ref ids) with `allocationsTruncated: true`
+  when more exist, none chosen;
+- `unsupported`: `no_debit_in_window`, or `no_exact_allocation`, joined by
+  `in_window_debits_below_total` when the window's debits sum below the total
+  (a shortfall) and `debit_above_total` when one debit exceeds it (an excess);
+  with neither, the debits reach the total but no combination equals it. No remainder is computed and no debit is called a partial
   payment: how a provider represents a partial payment, an overpayment or a
   debit paying several statements has not been observed;
 - `refused` for a statement that is malformed, repeated, not exact, not
@@ -331,7 +334,7 @@ Every code is present, zero included. The sweep decides the code from the
 rows it has already read and compared, so no query is added and the
 candidates, digests and other counts are what they were. The map reaches the
 log line, the tick row and `laneTicks` in `/status` and `/internal/health`;
-only these three codes and their integer counts are kept, never an amount,
+only these four codes and their integer counts are kept, never an amount,
 date, key or provider text.
 
 Limits:
@@ -360,7 +363,8 @@ reason; an agent reads the same page with `kogane.card-settlements.unmatched`
 (`packages/application/src/query/card-statements-unmatched.ts`) and nothing
 else. The route is `GET /api/v2/reconciliation/card-statements-unmatched`
 (operator-only, like the candidate list; `offset` only); the agent tool needs
-`records.read` over the whole store. Both read only.
+`records.read` over the whole store. Both read only, and both exist only where
+the settlement views do (otherwise `404`, and `unknown_tool` over MCP).
 
 A statement is listed when no candidate cites its observation and parse run
 (found through the candidates' `statement_key` index). Its `code` is the one
@@ -383,10 +387,14 @@ owner, 2026-11-07 03:58 UTC):
   sum is the total (shown as `複数の出金の合計が一致`);
 - `needs_review` (`candidate_not_unique`, and
   `debit_in_other_statement_allocation` or `excluded_debit_competes`): every
-  combination listed, none chosen;
-- `unsupported` (`no_exact_allocation` with `in_window_debits_below_total`
-  and/or `debit_above_total`): no remainder is computed, and the page says it
-  does not judge whether that is a partial payment or an overpayment;
+  combination counted, at most the first 50 listed, none chosen. Each answer
+  carries `allocationCount` and `allocationsTruncated`; above a truncated list
+  the page says `一致する組み合わせ N件のうち、出金の件数が少ない順に先頭の50件を表示しています。`
+  ([amendment 2026-11-07, a bounded list](adr/0074-card-statement-allocation-planner.md#amendment-2026-11-07-a-bounded-list-of-allocations));
+- `unsupported` (`no_exact_allocation`, joined by
+  `in_window_debits_below_total` and/or `debit_above_total` when they apply):
+  no remainder is computed, and the page says it does not judge whether that
+  is a partial payment or an overpayment;
 - `refused` with the planner's statement code, or `run_refused` with
   `input_bound_exceeded` for a group past 16 statements or 32 debits, or whose
   window read reached its bound.
@@ -404,7 +412,10 @@ Limits:
   statement stays listed with that code until the sweep's cursor reaches it
   (normally within one pass of five-minute ticks).
 - The page is by statement id, 50 per page, and the grant's `maxRows` bounds
-  how deep a caller pages (`budget_exceeded`).
+  how deep a caller pages (`budget_exceeded`). `offset` counts the statements
+  without a candidate when each page is read: a statement that gains a
+  candidate leaves the list and the later ones move back one place, so paging
+  on can pass over one of them until the list is read again from the start.
 - A debit without a resolved account has no alias class, so the planner
   excludes it (`identity_not_admitted`).
 - A window row the sweep never compares (no exact amount, or a debit date
@@ -420,8 +431,10 @@ approves and commits the pinned plan. An MCP client does the same through the
 ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
 
 The page lists statements, not candidates
-(`GET /api/v2/reconciliation/card-settlements/statements`,
-`queryCardSettlementStatements`). The sweep proposes a new candidate whenever a
+(`GET /api/v2/reconciliation/card-settlements/statements`, through
+`readCardSettlementStatementsForGrant` over `queryCardSettlementStatements`;
+agents read the same page with `kogane.card-settlements.statements`,
+[agent reads](#agent-reads)). The sweep proposes a new candidate whenever a
 fact in its digest changes (a recapture of the statement or the debit, a
 re-parse, an ownership record), so one statement accrues many candidates and
 only the ones citing its newest facts can be accepted. A statement is a
@@ -440,7 +453,14 @@ The other judged candidates follow, newest first, collapsed under the lead
 (`この請求のほかの候補（N 件）`, N the statement's other candidates). `candidateCount` counts every candidate of the
 statement; when it exceeds the judged ones, `この請求の候補をすべて表示` reads
 the statement's whole list, 50 a page, newest first
-(`GET /api/v2/reconciliation/card-settlements?statementKey=…`). Nothing is
+(`GET /api/v2/reconciliation/card-settlements?statementKey=…`). Several
+statements' lists can be open at once, so each list's pager, its spoken count
+and its loading state name the statement by its place in the statement list
+and its card, account and month (`請求 N 件目（カード · 口座 · 請求月）`): the
+place tells apart two statements that share card, account and month. The place
+is the one the statement list's own count uses (`請求 N–M 件目`), so it follows
+the list's order by newest candidate and can change when the list is read
+again. Nothing is
 deleted or hidden for good: candidates and decisions stay append-only and every
 candidate keeps its own history and actions. Every candidate's head shows
 its billing month and when it was created (`候補の作成`), and its region is
@@ -455,6 +475,13 @@ statement's full list. The sweep proposes after each capture, so the newest
 candidates cite the newest facts; this happens only when the five newer ones
 are all blocked or decided (for example they cite another debit of the same
 amount that is no longer current, or the operator rejected them).
+
+Another limit: the pages are offsets into that order, taken when each page is
+read. A new candidate moves its statement to the head of the list and the
+statements that were before it down one place, so a reader paging on can see
+the last statement of the previous page again, and does not meet the moved
+one later (it is now on the first page). The flat list only gains rows at its
+head, so paging on repeats a row and never passes over one.
 
 Acceptance also requires explicit ownership evidence: the card account's
 `liable_party` and bank account's `beneficial_owner` must identify the same
@@ -541,8 +568,26 @@ joint ownership is not inferred. A correction appends a rejection or a new
 explicit claim and retains prior evidence. Saving ownership does **not** accept
 a settlement: the next scheduled reconciliation pass (normally every five
 minutes) creates a fresh immutable candidate with the new evidence. Refreshing
-the page only reads that state. The resulting settlement candidate is reviewed
-and approved separately, by the operator or by an MCP client.
+the page only reads that state. The resulting settlement candidate is approved
+separately, by the operator on the confirmation page or by an MCP client.
+A rule, a heuristic or the HTTP agent route never approves it.
+
+Over MCP the same decisions go through the change lifecycle's own tools
+(Phase 2 unit 2g.2, [ADR 0081](adr/0081-ui-parity-through-mcp.md)). There is no
+settlement-specific tool or catalogue entry: `card-settlement.accept`,
+`card-settlement.withdraw` and `card-settlement.reject`, and the ownership
+review's `relation.accept` and `relation.reject`, are planned with
+`kogane.command.plan` and read back with `kogane.command.simulate`. They are
+decided with `kogane.command.approve` and `kogane.command.commit`, each R2:
+prepared, then confirmed with the prepared digest within ten minutes
+([agent API](agent-api.md#change-lifecycle-decisions)). The page posts the same
+operations to `/api/command/v1/*`. Both adapters forward to the Processor's one
+command route, which runs the `packages/application` plan, simulate, approve
+and commit services and the same writers, so the receipts and the refusal
+codes agree. A preparation writes no approval and no decision. The receipt
+names the MCP client (`mcp-client:<sub>`), never the operator, and the audit
+record is on path `mcp` (ADR 0084). Reading the ownership review
+first is `kogane.card-settlements.ownership` ([agent reads](#agent-reads)).
 
 The commit rechecks the source publication/currentness, ownership, allocation
 availability, claim availability and expected candidate revision in the same
@@ -606,31 +651,114 @@ is reviewed as a different candidate. Historical citations keep resolving.
 
 ### Agent reads
 
-An agent holding `records.read` on a whole-store grant reads the same two
-answers as the page, over MCP or the agent HTTP route
+An agent holding `records.read` on a whole-store grant reads the same three
+answers as the pages, over MCP or the agent HTTP route
 ([agent API](agent-api.md)): `kogane.card-settlements.read` (`{}` or
-`{"offset": n}` for a page, `{"proposalId": id}` for one review) is
-`GET /api/v2/reconciliation/card-settlements`, and
+`{"offset": n}` for a page, `{"statementKey": key}` with an optional
+`offset` for one statement's candidates, `{"proposalId": id}` alone for one
+review, `{"relatedTo": id}` with an optional `offset` for the candidates a
+review competes with, [correcting a match](#correcting-a-match)) is
+`GET /api/v2/reconciliation/card-settlements` with the same parameters,
+`kogane.card-settlements.statements` (`{}` or `{"offset": n}`) is its
+`/statements` read, the list grouped by statement, and
 `kogane.card-settlements.ownership` (`{"proposalId": id}`) is its
-`/ownership` read. Both call the page's services
-(`packages/application/src/query/card-settlements-read.ts`), answer exactly
-the route's body and write only the R0 audit record of the call. They exist
+`/ownership` read. The route and the three tools are adapters over the same
+three functions, `readCardSettlementsForGrant`,
+`readCardSettlementStatementsForGrant` and `readCardOwnershipForGrant`
+(`packages/application/src/query/card-settlements-read.ts`), so the request
+rules, the refusals and their codes are the service's on every path
+([ADR 0081](adr/0081-ui-parity-through-mcp.md) point 2). The route turns its
+query string into the tool's arguments (a plain decimal `offset` becomes a
+number, any other `offset` text stays text, a repeated key becomes a list)
+and reads under the browser's reader grant; a tool reads under the caller's
+grant. The tools answer exactly the route's body and write only the R0 audit
+record of the call. They exist
 exactly while the route does: where its views are absent they are not listed,
 the HTTP path is `404` and the MCP name `unknown_tool`. They are refused
 `unauthorized` without `records.read` and `evidence_restricted` on a narrowed
 source or account scope, before the request is validated: a review joins a
 card account to a bank account, so a narrowed grant could see an account
 outside it. A list read deeper than the grant's `maxRows` (`offset + 50`
-above it) is `413 budget_exceeded` (`budget:maxRows=<n>`); a page's
-`nextOffset` is the route's, so the next page may be refused. A malformed
-request is `400 invalid_query`, and a `proposalId` that names no candidate is
-`404 not_found`. None of these refusals reads a store row; the only statement
-before them is the `sqlite_master` check the route also runs. Deciding a review or recording ownership stays a plan through the change
+above it, for a page, a statement's or a review's competitors; `offset + 10`
+above it for the grouped list, whose `offset` counts statements, ten to a
+page) is `413 budget_exceeded` (`budget:maxRows=<n>`), before the anchor of a
+`relatedTo` read is looked up. The page's reader grant and every MCP client's
+grant ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md))
+hold the same `maxRows`, 1000 (`GRANT_LIMITS.maxRows`), so the route and the
+tools page equally deep: offset 950 is the last page either reads, and 990
+the last grouped page (statements 991 to 1,000). A page's
+`nextOffset` does not look at the budget, so the page after offset 950 (990
+grouped) is named and then refused. A malformed request (an `offset` that is
+not an integer from 0 to 1,000,000, a key outside the four, or on the grouped
+list any key but `offset`, an empty or repeated value), or more than one of
+`proposalId`, `statementKey` and `relatedTo`, is `400 invalid_query`
+(`financial-error-v1`, `refs: ["request"]`, or `["proposalId"]` on
+`/ownership`); a `proposalId` or `relatedTo` that names
+no candidate is `404 not_found`, and a `statementKey` with no candidate is an
+empty page. None of these refusals reads a store row; the only statement
+before them is the `sqlite_master` check every path runs.
+
+Until 2026-11-07 the route parsed its own query and called the queries
+directly. It answered a malformed `offset` with `400 invalid_offset` and its
+other malformed requests with `400 invalid_query` as `{error, requestId}`,
+and it read any `offset` up to 1,000,000, so it served pages past offset 950
+that the tools refused. Now both are the service's answers above. The page
+itself does not read the flat list: it reads statements
+(below), and pages a statement's candidates and a review's competitors 50 at a
+time (36 candidates per statement on average on the scaled store of
+[Cost](#cost)). A statement or a competitor list of more than 1,000
+candidates would be readable only to offset 950. The grouped list
+(`/statements`) kept these rules of its own (`offset` only, `400 invalid_offset`
+for a malformed one and `400 invalid_query` as `{error, requestId}` for any
+other key, any `offset` up to 1,000,000 read) until it got its MCP read, also
+on 2026-11-07; it now gives the service's answers above, so more than 1,000
+statements would be readable only to offset 990. Deciding a review or recording ownership stays a plan through the change
 lifecycle, graded there; on MCP any client the MCP Access application admits
 plans and decides as itself
 ([ADR 0063](adr/0063-delegated-ai-operation-path.md),
 [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)). This is the read half of the owner's UI-parity
 decision of 2026-11-07 ([ADR 0081](adr/0081-ui-parity-through-mcp.md)).
+
+### Correcting a match
+
+Each candidate has its own page, `/reconciliation/<proposalId>`: its review
+(open, with the actions its status allows and its decision history) and, under
+`同じ請求・出金の他の候補`, the candidates it competes with. Those are the other
+candidates that share its `statement_key`, its `bank_key`, or its statement's
+(source, resolved account, period) in the facts: the three terms by which an
+accepted review makes every other one `allocation_already_used`. Every status
+is listed, newest first, 50 to a page, each with its statement and debit
+facts, its status, the blockers of a proposed one, and a link to its own page.
+The list decides nothing and offers no action.
+
+A wrong acceptance is corrected in two approved plans through the lifecycle
+above: the accepted candidate's withdrawal on its page, then the right
+candidate's acceptance on its own page, which its competitor list links. Each
+is a new decision; the withdrawn acceptance, its receipt and the evidence stay
+in history. Until the withdrawal commits, the right candidate shows
+`allocation_already_used` and its acceptance cannot be planned.
+
+The pages read `GET /api/v2/reconciliation/card-settlements?relatedTo=<proposalId>`
+(operator-only like the list, with an optional `offset` within the reader
+grant's budget; not combined with
+`proposalId` or `statementKey`, nor on the `/ownership` or `/statements`
+routes; `404` when the candidate does not exist), which returns the list's
+DTO, debit-account evidence and history included
+(`queryRelatedCardSettlements`). Agents read the same answer through
+`kogane.card-settlements.read` with `{"relatedTo": id}`
+([agent reads](#agent-reads)); the HTTP route and the tool call the same
+service. The `カード照合` list links each
+candidate to its page; the purchase chain's 引落 step links to the statement's
+settlement review, the confirmation screen and the ownership review back to
+the candidate's page.
+
+Limits:
+
+- A candidate that shares only the debit's alias class (the same provider row
+  under another producer or namespace, so another `bank_key`) is not listed;
+  the commit's claim guard still refuses its acceptance.
+- The list shows no `claim_available`, as on the `カード照合` list, so a
+  competitor shown without a blocker can still be refused at plan time.
 
 ## Financial meaning and limits
 
@@ -689,6 +817,9 @@ recognised card purchase: 利用 → 請求 → 引落. An agent with a whole-st
   the new acceptance. While it is accepted, the page shows its
   `card_settlement` event, its `settlement` allocation and the bank debit its
   facts cite; a proposed, rejected or withdrawn review is named without a debit.
+  The step links to that review's own page
+  ([correcting a match](#correcting-a-match)); with no review, to the
+  `カード照合` list.
 - A statement that cannot be shown is a reason, never a zero: `not_posted` for a
   pending row, `statement_not_collected`, or `period_unrecognized` when the
   provider period is in no recognised shape. A MyJCB confirmed capture stored
@@ -881,6 +1012,18 @@ container was shared with other jobs, so treat these as orders of magnitude):
 | settlement acceptance commit guard         | 120 ms    | 31 ms  |
 | ownership review guard, candidate term     | 113 ms    | 33 ms  |
 
+The competitor read of [correcting a match](#correcting-a-match)
+(`CARD_SETTLEMENT_RELATED_SQL`) chooses its candidates the same way: a union
+of three branches, each finding the asked candidate by its key and its
+competitors through one index (`card_settlement_candidates_statement`,
+`card_settlement_candidates_bank`, `card_settlement_candidates_statement_period`),
+then judges only that page. It has no shipped text to equal. At
+`STATEMENT_SCALE` on `bun:sqlite` only (`competitors` in the full-scale
+timings, one sampled candidate, a shared container) its first page took
+62 ms; it has not been measured on workerd. A statement's competitors grow
+with its recaptures (one candidate per recapture once its debit is in), so
+the list pages.
+
 The shipped guards were cheaper than the plan reads because SQLite evaluated
 the view's flags for the one row the guard names. The reads by id joined the
 view and evaluated them for every candidate. A rejection or withdrawal guard reads no flag.
@@ -956,6 +1099,42 @@ Synthetic tests cover authoritative totals, missing/ambiguous dates and totals,
 refunds, unconfirmed pages, ownership blockers, stale plans, idempotent decisions,
 allocation conflicts and withdrawal history. Browser tests exercise the explicit
 review/approval flow and refuse a detail revision that changed after planning.
+They also open a candidate's own page from the list, read its competitors
+(`relatedTo`), plan the withdrawal of a wrong acceptance there and link to the
+competing candidate; the confirmation links back to the candidate's page.
+The competitor read is compared on the random stores
+(`card-settlement-review-differential.test.ts`) with the reservation's three
+terms over every candidate, each review as the shipped review read shows it;
+dropping any one term fails that comparison. On the scaled store
+(`card-settlement-review-scale.test.ts`) its pages equal each competitor's own
+review read, its debit-account evidence is read once for the page, and its
+plan scans no candidate table. The App route
+(`services/app/test/card-settlements-api.test.ts`) lists competitors by each
+term, never the candidate itself or an unrelated one, pages them, answers
+`404` for a missing candidate and refuses mixed or repeated filters and
+non-operators. Over MCP and the agent HTTP route
+(`services/app/test/card-settlements-read-tools.test.ts`),
+`kogane.card-settlements.read` with `relatedTo` or `statementKey` answers the
+route's body, `not_found` for a missing anchor, and refuses
+mixed filters and pages past `maxRows`; the service's own refusals precede
+every read (`packages/application/test/card-settlements-read.test.ts`).
+`card-settlements-read-tools.test.ts` also sends offsets -1, 0, 950, 951,
+1,000,000, 1,000,001, 10^20, 1.5, non-numeric and empty to the route, the
+agent HTTP route and MCP, each under its own grant, and gets one status and
+one body on all three. The route's adapter is compared with the handler it replaced
+(`services/app/test/card-settlements-api-frozen.ts`) on a store of 1,101
+candidates, over every offset alone and beside each filter plus a fixed
+sample of 600 combinations of offsets, filters, unknown and repeated keys, on
+the list, `/ownership` and `/statements`, and on every tenth grouped
+offset from 0 to 1,000 over 1,002 statements: every answer is byte-identical
+except the two changes recorded under [Agent reads](#agent-reads), and
+methods and non-operators answer as before
+(`services/app/test/card-settlements-api-differential.test.ts`,
+`card-settlement-statements-differential.test.ts`). The grouped
+list's offsets 0, 990, 991, 1,000,000 and malformed ones give one status and
+one body on the route, the agent HTTP route and MCP, and its tool returns the
+page's grouped answer and writes one R0 audit record counting the statements
+on the page (`card-settlements-read-tools.test.ts`).
 The pending-to-posted review is tested the same way. Its plans carry the
 candidate's own relation, and its confirmation refuses a pin, action or
 candidate that changed after planning.
@@ -984,7 +1163,11 @@ planner on synthetic inputs: today's matcher on a two-debit and a partial case,
 every refusal, exclusion and outcome code, refused debits competing, and 300
 seeded random runs compared with a brute-force subset oracle (exact sums,
 whole and distinct members, no held or dateless debit, each status and code,
-no debit proposed for two statements, order independence).
+the count and truncation marker, no debit proposed for two statements, order
+independence); the bounded list (a window of 32 equal debits, a run at both
+bounds, exactly 50 and 51) and 200 seeded runs of up to 32 debits compared
+with the planner as shipped before the bound
+(`packages/domain/test/card-settlement-allocation-legacy.ts`).
 `packages/domain/test/card-debit-account.test.ts` covers the provider-stated
 debit-account rule on synthetic inputs: bank names resolve only through the
 table, a unique account starting with the leading digits is proposed, an
@@ -1020,6 +1203,15 @@ debit, a missing total, a missing due date, a zero total and a total with no
 valid unit, and an exact match whose candidate and digest are pinned to what the
 sweep wrote before the codes existed; its tick row holds the closed codes and
 integers only.
+`services/app/test/card-settlement-decisions-parity.test.ts` drives the
+decisions through the real App Worker, the Processor's command route, the
+identity projection and the sweep on one synthetic store. It records one
+ownership side on the page's path and the other over MCP. It then accepts and
+withdraws on each path, and rejects on each path. For each pair it checks that
+the receipts agree apart from the caller, the ids and the time. It also checks
+that a competing acceptance and the re-acceptance of a withdrawn candidate get
+the same refusal on both paths and write nothing, and that each commit is
+audited under its own path and principal.
 Archived production samples were inspected read-only to verify provider field
 shapes; private values are not test fixtures and no live financial decision is
 accepted by those checks.
@@ -1071,10 +1263,17 @@ decision below is in the audit log under principal `mcp-client:169b1b83…`.
 6. **Cash movement.** `kogane.economic-readiness.read` (`bank-movement`) on the
    three debits returns `economic_claim_held` for the two accepted ones and
    not for the withdrawn one, so the withdrawal released its claim.
-   `/api/v2/activity?basis=cash-movement` itself has no MCP read (it is not a
-   screen route, so the [parity guard](agent-api.md#ui-and-mcp-parity-guards-adr-0081-2026-11-07)
-   does not list it); it was not read in this run, so the roadmap's "the
-   cash-movement view counts the case once" is not yet shown.
+   The cash-movement view itself was read on 2026-11-08 at 01:45 UTC through
+   the Portal with `kogane.events.read` (`collection: activity`,
+   `basis: cash-movement`, added by #1094). It lists exactly two
+   `card_settlement` events in state `debited`, one per accepted candidate:
+   `cs_be06321d` as `event_ae848343…` and `cs_6c1a79c8` as
+   `event_b8560480…`. Each has one exact cash-movement `decrease` leg on the
+   paying bank account, the unvalued obligation-change leg (`statement_principal_and_fees_unknown`) and
+   one settlement allocation from its bank debit. The withdrawn
+   `cs_93bffe03` (`event_501722b7…`) is not listed, and `nextCursor` is
+   null. So the cash-movement view counts each accepted case once and the
+   withdrawn one not at all.
 
 ## Automation prerequisites (ADR 0034)
 

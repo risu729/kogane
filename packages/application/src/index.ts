@@ -158,10 +158,10 @@ export {
   type OperationReceipt,
   operationRequestPayload,
   type OperationRequest,
+  operationSource,
   type OperationStage,
   type OperationStageReport,
   type OperationStatus,
-  ownOperationSource,
   pendingDispatches,
   type ProjectionRequest,
   readOperation,
@@ -183,6 +183,16 @@ export {
   type StageReport,
   type StageState,
 } from "./operations/requests.ts";
+export {
+  listOperations,
+  OPERATION_LIST_DEFAULT_LIMIT,
+  OPERATION_LIST_MAX_LIMIT,
+  operationListArms,
+  operationListSql,
+  type OperationListPage,
+  type OperationListQuery,
+  type OperationSummary,
+} from "./operations/list.ts";
 
 // ── collector execution of operations (issue #544, ADR 0048) ─────────
 export {
@@ -222,6 +232,12 @@ export {
   trackCollectorPublication,
   type TrackingResult,
 } from "./operations/collector-dispatch.ts";
+export {
+  PROJECTION_PENDING_REASONS,
+  type ProjectionPendingReason,
+  projectionRequirement,
+  projectionRequirementWrite,
+} from "./operations/projection-trace.ts";
 
 // ── query services (A08) ─────────────────────────────────────────────
 export {
@@ -482,8 +498,10 @@ export {
 
 export {
   readCardSettlementsForGrant,
+  readCardSettlementStatementsForGrant,
   readCardOwnershipForGrant,
   CARD_SETTLEMENT_PROPOSAL_ID,
   CARD_SETTLEMENTS_MAX_OFFSET,
+  CARD_SETTLEMENT_STATEMENT_KEY_MAX,
   type CardSettlementsReadOutcome,
 } from "./query/card-settlements-read.ts";

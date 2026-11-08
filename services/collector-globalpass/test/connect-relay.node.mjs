@@ -172,3 +172,75 @@ test("HTTP CONNECT reports an upstream WebSocket failure", async () => {
     await relay.close();
   }
 });
+
+test("a browser that resets a refused CONNECT does not crash the relay", async () => {
+  const relay = await startConnectRelay({
+    relayToken: "relay-token-for-test",
+    relayUrl: "ws://127.0.0.1:1/tcp",
+    allowedHosts: new Set(["allowed.example"]),
+    connectTimeoutMs: 200,
+  });
+  const uncaught = [];
+  const onUncaught = (error) => uncaught.push(error);
+  process.on("uncaughtException", onUncaught);
+  try {
+    // Before the fix this reset was an unhandled `read ECONNRESET` on the
+    // relay's socket, which ended the container process (2026-11-07).
+    for (let index = 0; index < 3; index += 1) {
+      const client = net.connect(relay.port, "127.0.0.1");
+      await once(client, "connect");
+      client.write("CONNECT denied.example:443 HTTP/1.1\r\nHost: denied.example:443\r\n\r\n");
+      const response = await readThrough(client, Buffer.from("\r\n\r\n"));
+      assert.match(response.header.toString("ascii"), /^HTTP\/1\.1 403 /u);
+      client.resetAndDestroy();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(uncaught, []);
+    const stats = relay.stats();
+    assert.equal(stats.connects, 3);
+    assert.equal(stats.denied, 3);
+    assert.equal(stats.established, 0);
+  } finally {
+    process.off("uncaughtException", onUncaught);
+    await relay.close();
+  }
+});
+
+test("a browser that resets an established tunnel does not crash the relay", async () => {
+  const upstream = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await once(upstream, "listening");
+  const upstreamAddress = upstream.address();
+  assert.ok(upstreamAddress && typeof upstreamAddress !== "string");
+  upstream.on("connection", (socket) => {
+    socket.on("message", (data, isBinary) => socket.send(data, { binary: isBinary }));
+  });
+  const relay = await startConnectRelay({
+    relayToken: "relay-token-for-test",
+    relayUrl: `ws://127.0.0.1:${upstreamAddress.port}/tcp`,
+    allowedHosts: new Set(["allowed.example"]),
+    connectTimeoutMs: 2_000,
+  });
+  const uncaught = [];
+  const onUncaught = (error) => uncaught.push(error);
+  process.on("uncaughtException", onUncaught);
+  try {
+    const client = net.connect(relay.port, "127.0.0.1");
+    await once(client, "connect");
+    client.write("CONNECT allowed.example:443 HTTP/1.1\r\nHost: allowed.example:443\r\n\r\n");
+    const response = await readThrough(client, Buffer.from("\r\n\r\n"));
+    assert.match(response.header.toString("ascii"), /^HTTP\/1\.1 200 /u);
+    client.write(Buffer.from([1, 2, 3]));
+    await readBytes(client, 3, response.remainder);
+    client.resetAndDestroy();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(uncaught, []);
+    const stats = relay.stats();
+    assert.equal(stats.established, 1);
+    assert.equal(stats.bytesUp, 3);
+    assert.equal(stats.bytesDown, 3);
+  } finally {
+    process.off("uncaughtException", onUncaught);
+    await relay.close();
+    await new Promise((resolve) => upstream.close(resolve));
+  }
+});

@@ -13,6 +13,20 @@ export class HttpError extends Error {
   }
 }
 
+/**
+ * This Worker's own-origin rule (ADR 0047 for the agent paths, ADR 0078 for
+ * the command and operations routes): an `Origin` that is present and is not
+ * this Worker's own origin is `403 origin_not_allowed`. A browser attaches
+ * `Origin` to every POST — `null` when the page hides its own — so a page on
+ * another site cannot drive a signed-in browser's Access session into a
+ * state-changing call. A non-browser client (an MCP client, an operator's
+ * `curl`) sends no `Origin` and is unaffected.
+ */
+export function assertOwnOrigin(request: Request, url: URL): void {
+  const origin = request.headers.get("origin");
+  if (origin !== null && origin !== url.origin) throw new HttpError(403, "origin_not_allowed");
+}
+
 export function json(value: unknown, status = 200): Response {
   return Response.json(value, { status });
 }
@@ -87,6 +101,11 @@ export function secureResponse(response: Response, request: Request, requestId: 
   headers.set("x-content-type-options", "nosniff");
   headers.set("referrer-policy", "no-referrer");
   headers.set("x-frame-options", "DENY");
+  // Every answer is authenticated financial data or the shell that reads it:
+  // another site may not load it as a no-cors subresource, and no window
+  // across origins keeps a handle on this one.
+  headers.set("cross-origin-resource-policy", "same-origin");
+  headers.set("cross-origin-opener-policy", "same-origin");
   headers.set("x-request-id", requestId);
   if (!headers.has("content-security-policy")) {
     headers.set(
