@@ -1,41 +1,50 @@
 # SMBC Direct backfill Worker PoC
 
-SMBC DirectのQR認証を人が承認し、その認証済みsessionで円普通預金明細を2019年から月単位でbackfillするCloudflare Worker PoCです。画面とAPIはCloudflare Zero Trust Accessで保護し、公式raw responseと正規化結果をprivate R2へ保存します。
+A Cloudflare Worker PoC in which a person approves SMBC Direct QR authentication, then the authenticated session backfills yen ordinary-deposit details month by month from 2019. Cloudflare Zero Trust Access protects the screen/API; official raw responses and normalized results are stored in private R2.
 
-## 操作
+<a id="操作"></a>
 
-1. Worker URLを開き、Cloudflare Accessで本人認証する。
-2. 「QRを生成」を押す。期間指定は受け付けず、Web通帳で取得可能な最古の2019-01-01から実行当日までを常に対象にする。
-3. SMBCアプリでQRを読み、Safety Passを承認する。
-4. 「承認済み・backfill開始」を押す。
-5. 画面は3秒ごとに進捗を更新する。実処理はDurable Object alarmで継続するため、画面を閉じてもよい。
+## Operation
 
-QRを早く確定すると `approval_not_completed_generate_new_qr` になる。その場合は新しいQRを生成し、アプリ側の承認完了後にbackfill開始を押す。
-SMBC sessionが全期間の途中で切れた場合も、再度QRを生成・承認すると同じRunの未取得月から再開する。有効期限内の「QRを生成」は同じQRを返すため、期限切れ後に生成する。
-共有保存では既存のpartial terminalを保持する。途中の追加取得はcontinuation terminalへ保存し、最終successは全取得データを含む別の完了terminalとして保存する。partialのaccountは中央の解析対象にならないため、過去のpartial分も完了記録へ含める。既に成功・解析対象になったartifactは重複させない。
-画面は「取得完了」と「共有保存」を別々に表示する。共有保存が失敗・未確認なら「保存済み明細の取り込みを再試行」でstagingから再公開できる。銀行への再ログインや再取得は行わない。共有保存完了後も中央での登録・解析完了は別途確認する。
+1. Open the Worker URL and authenticate through Cloudflare Access.
+2. Press `QRを生成` ("generate QR"). No period selection is accepted: the scope is always the Web bankbook's earliest available date, 2019-01-01, through the execution day.
+3. Scan the QR in the SMBC app and approve Safety Pass.
+4. Press `承認済み・backfill開始` ("approved; start backfill").
+5. The screen refreshes progress every 3 seconds. Work continues through Durable Object alarms, so the screen may be closed.
 
-## 保存内容
+Confirming the QR too early yields `approval_not_completed_generate_new_qr`. Generate a new QR, finish app-side approval, then start backfill. If the SMBC session expires mid-period, generating/approving a new QR resumes the same Run from its uncaptured month. `QRを生成` returns the same QR while valid, so generate after expiry.
 
-- 現在の円普通預金残高: official raw Shift_JIS JSONとnormalized JSON
-- 各月の入出金明細: official raw Shift_JIS JSONとnormalized JSON
-- normalized明細: 銀行側明細ID、日付、入出金額、摘要、取引後残高、方向
-- 各runのmanifest: 期間、chunk進捗、件数、artifact size、SHA-256、failure code、logout結果
+Shared storage retains existing partial terminals. Additional captures go to continuation terminals; final success is another completion terminal containing every captured artifact. Partial accounts are ineligible for central parsing, so earlier partial data is included in the completion record. Artifacts already successful/eligible for parsing are not duplicated.
 
-月chunkは共有DATA bucket（`kogane-raw-evidence`）の `raw/smbc-direct/YYYY/MM/DD/<run-id>/...` へstagingし、run完了時にmanifestと照合して `objects/<2 hex>/<sha256>` へ書き、最後にterminal `runs/smbc-direct/<run-id>/terminal.json` を書く。口座番号や利用者名をkeyとmanifestへ入れない。
+The screen shows `取得完了` ("capture complete") and `共有保存` ("shared storage") separately. If shared storage failed or is unconfirmed, `保存済み明細の取り込みを再試行` ("retry importing saved details") republishes from staging without logging into the bank or capturing again. After shared storage completes, central registration/parsing completion is checked separately.
 
-## セッション設計
+<a id="保存内容"></a>
 
-- QR challengeと認証済みcookie/top pageはAES-256-GCMで暗号化してDurable Object storageへ保存する。
-- SMBC passwordはDurable Objectへ保存せず、Worker secretから各処理時に読む。
-- 1 Access identityにつき1 Durable Objectを使う。identityはSHA-256化して名前にする。
-- 月単位chunkを1 alarmあたり3件処理し、chunkごとにsessionとmanifestを永続化する。
-- 完了時は公式logoutを行い、暗号化sessionを削除する。
-- raw明細をUI/APIへ返さない。画面に出すのはrun ID、期間進捗、件数、error code、manifest keyだけである。
+## Stored contents
 
-## Secret同期
+- Current yen ordinary-deposit balance: official raw Shift_JIS JSON and normalized JSON.
+- Monthly deposit/withdrawal details: official raw Shift_JIS JSON and normalized JSON.
+- Normalized details: bank detail ID, date, deposit/withdrawal amount, description, post-transaction balance and direction.
+- Manifest per run: period, chunk progress, counts, artifact size, SHA-256, failure code and logout result.
 
-Bitwarden item IDだけをローカルmetadataへ保存する。passwordやitem JSONの中間fileは作らない。
+Monthly chunks are staged under `raw/smbc-direct/YYYY/MM/DD/<run-id>/...` in shared DATA (`kogane-raw-evidence`). On run completion they are checked against the manifest, written to `objects/<2 hex>/<sha256>`, then followed by terminal `runs/smbc-direct/<run-id>/terminal.json` last. Neither keys nor manifests contain account numbers or user names.
+
+<a id="セッション設計"></a>
+
+## Session design
+
+- The QR challenge and authenticated cookie/top page are encrypted with AES-256-GCM in Durable Object storage.
+- The SMBC password is not stored in the Durable Object; each operation reads it from a Worker secret.
+- 1 Durable Object is used per 1 Access identity, with the identity hashed using SHA-256 for its name.
+- Each 1 alarm processes 3 monthly chunks, persisting the session/manifest after each chunk.
+- Completion performs official logout and deletes the encrypted session.
+- Raw details are not returned to UI/API. The screen shows only run ID, period progress, counts, error code and manifest key.
+
+<a id="secret同期"></a>
+
+## Secret synchronization
+
+Only the Bitwarden item ID is kept in local metadata. No intermediate password or item-JSON file is made.
 
 ```bash
 cd services/collector-smbc-direct
@@ -44,51 +53,56 @@ printf '%s\n' '<item-id>' > /home/risu/.local/state/kogane/smbc-direct-bitwarden
 ./scripts/sync-local-secrets.sh
 ```
 
-`SESSION_ENCRYPTION_KEY` は初回同期時に32 byteで生成し、ローカルの `smbc-direct-session-encryption-key` とWorker secretへ保存する。
-未使用の管理token生成・同期は廃止した。既存のAccess認証、同一origin/action-header検証、session暗号鍵を維持する。認証値は標準出力へ出さない。
+`SESSION_ENCRYPTION_KEY` is generated as 32 bytes on first synchronization and saved in local `smbc-direct-session-encryption-key` and the Worker secret. Generation/synchronization of an unused admin token is retired. Existing Access authentication, same-origin/action-header validation and the session encryption key remain. Authentication values are not printed to stdout.
 
-## 中央raw-evidenceへの保存
+<a id="中央raw-evidenceへの保存"></a>
 
-runは`packages/collection`で共有DATA bucketへ直接書き、ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。stagingのre-readとその上限は[collection.md](../../docs/collection.md#smbc-direct-kogane-smbc-direct-backfill-poc)を参照。`RAW_EVIDENCE_IMPORTER` Service Binding、`POST /backfill-raw-evidence`、`scripts/backfill-raw-evidence.sh`、source専用bucketは2026-09-13に廃止した。旧bucketのstaging objectは同じkeyのまま中央DATAへ保存済みで、Durable Objectの進捗はDATAから再開できる（[legacy-retirement.md](../../docs/legacy-retirement.md)）。GitHub Actions cron、Queue、追加scheduled triggerは使わない。
+## Central raw-evidence storage
+
+`packages/collection` writes runs directly to shared DATA, and the Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). See [collection.md](../../docs/collection.md#smbc-direct-kogane-smbc-direct-backfill-poc) for staging rereads and their bounds. `RAW_EVIDENCE_IMPORTER` Service Binding, `POST /backfill-raw-evidence`, `scripts/backfill-raw-evidence.sh` and the dedicated source bucket were retired on 2026-09-13. Old staging objects are already in central DATA under the same keys, and Durable Object progress can resume from DATA ([legacy-retirement.md](../../docs/legacy-retirement.md)). No GitHub Actions cron, Queue or extra scheduled trigger is used.
 
 ## Cloudflare resources
 
 - Worker: `kogane-smbc-direct-backfill-poc`
 - Durable Object: `SmbcBackfillSession`
-- R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。旧source専用bucketは2026-09-13に削除済み）
+- R2 binding: `DATA` → `kogane-raw-evidence` (shared by all collectors; the old dedicated source bucket was deleted on 2026-09-13)
 - Worker secrets: `SMBC_CREDENTIAL_JSON`, `SESSION_ENCRYPTION_KEY`
-- Worker-level Cloudflare Access: productionとpreviewを保護（preview自体は無効）
+- Worker-level Cloudflare Access: protects production and preview (preview itself is disabled)
 
-Access未認証requestはWorker側でも403にする。POSTは同一originとcustom action headerを要求する。
+The Worker also returns 403 to requests without Access authentication. POST requires the same origin and a custom action header.
 
-## 実証状態
+<a id="実証状態"></a>
 
-- ローカルSMBC Direct: Safety Pass承認後、円残高と2026年8月明細14件、入出金合計、logoutまで成功済み。
-- Worker QR challenge: 通常のWorkers egressではSMBCの`ERRINFO`、既存TAMIA VPC binding経由では生成成功を確認済み。
-- WorkerからSMBC Directへのログイン・backfill: TAMIA経由でSafety Pass QR承認、2019-01-01から2026-09-01まで93か月、1,069明細、188 artifact、failure 0、logout成功をprivate R2のmanifestでも確認済み。
-- 1回目の認証sessionは48/93か月で`TPALTOP`を失い、3回再試行後にpartialとなった。新しいQRを承認すると同じRun IDと98個の既存artifactを保ったまま49か月目から再開し、最終的にsuccessとなることを確認した。
-- Zero Trust Access: WARP/Gatewayと許可メールドメインを要求する既存`default` policyで設定済み。
+## Verified state
 
-通常のWorkers egressとTAMIAの差は同一code・同一credentialsでA/Bした。前者はHTTP 200のSMBC `ERRINFO` form、後者は`BCATBCA` Safety Pass formを返したため、このPoCでは2つのSMBC hostだけを`TAMIA.fetch()`へ渡す。設定値はexact origin allowlistで固定し、client指定の任意destinationは受け付けない。
+- Local SMBC Direct: after Safety Pass approval, yen balance, 14 details for 2026/8, deposit/withdrawal totals and logout succeeded.
+- Worker QR challenge: ordinary Workers egress returned SMBC `ERRINFO`; the existing TAMIA VPC binding successfully generated it.
+- Worker login/backfill to SMBC Direct: Safety Pass QR approval through TAMIA, 93 months from 2019-01-01 through 2026-09-01, 1,069 detail rows, 188 artifacts, failure 0 and successful logout were also confirmed in the private R2 manifest.
+- The 1st authenticated session lost `TPALTOP` at 48/93 months and became partial after 3 retries. Approving a new QR resumed the same Run ID from month 49 while retaining 98 existing artifacts, eventually reaching success.
+- Zero Trust Access: configured with the existing `default` policy requiring WARP/Gateway and an allowed email domain.
 
-## 埋められるMoney Forward gap
+Ordinary Workers egress and TAMIA were A/B tested with identical code/credentials. The former returned an HTTP 200 SMBC `ERRINFO` form, the latter a `BCATBCA` Safety Pass form. This PoC therefore sends only the 2 SMBC hosts through `TAMIA.fetch()`. Configuration is fixed to an exact-origin allowlist; arbitrary client-specified destinations are refused.
 
-- 各明細の取引後残高
-- SMBC内部JSONの `meisaiId`
-- 銀行が返す元の摘要とraw response
-- MF無料版の表示期間・連携数・更新頻度に依存しないbackfill
-- chunk別の取得成否と取得時刻
+<a id="埋められるmoney-forward-gap"></a>
 
-カード利用状態、請求月・支払日、分割/リボ、加盟店詳細、返金link、VポイントはSMBC Directでは埋められない。
+## Money Forward gaps this can fill
+
+- Post-transaction balance for each detail row.
+- SMBC internal JSON `meisaiId`.
+- Original bank descriptions and raw responses.
+- Backfill independent of MF free-tier display period, connection count and refresh frequency.
+- Success/failure and capture time per chunk.
+
+SMBC Direct cannot fill card-usage status, billing months/payment dates, installments/revolving payments, merchant details, refund links or `Vポイント` (V Point).
 
 ## Cleanup
 
-検証終了時にまとめて削除する対象:
+Remove these together after verification:
 
-- Worker `kogane-smbc-direct-backfill-poc`
-- Durable Object instances/storage
-- Worker secretsとAccess application
-- `/home/risu/.local/state/kogane/smbc-direct-bitwarden-item-id`
-- `/home/risu/.local/state/kogane/smbc-direct-session-encryption-key`
+- Worker `kogane-smbc-direct-backfill-poc`.
+- Durable Object instances/storage.
+- Worker secrets and Access application.
+- `/home/risu/.local/state/kogane/smbc-direct-bitwarden-item-id`.
+- `/home/risu/.local/state/kogane/smbc-direct-session-encryption-key`.
 
-共有TAMIA Tunnel `6b0ccf30-68b2-494e-baa8-f4f9f3e46b33`、個人WARP設定、既存`default` Access policyは他用途と共有するため削除対象外。D1、Queue、Cron trigger、Container、Container imageはこのPoCでは作成していない。詳細は[`RESOURCE_INVENTORY.md`](RESOURCE_INVENTORY.md)を参照する。
+Shared TAMIA Tunnel `6b0ccf30-68b2-494e-baa8-f4f9f3e46b33`, personal WARP configuration and the existing `default` Access policy serve other uses and are excluded from cleanup. This PoC created no D1, Queue, Cron trigger, Container or Container image. See [`RESOURCE_INVENTORY.md`](RESOURCE_INVENTORY.md).
