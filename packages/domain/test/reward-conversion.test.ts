@@ -2,7 +2,13 @@ import { expect, test } from "bun:test";
 import { findConversionPaths, simulateConversion } from "../src/reward-conversion.ts";
 import type { ConversionOffer, MembershipState, OfferValidity } from "../src/rewards.ts";
 import type { LocalDateValue, TemporalValue } from "../src/time.ts";
-import { decimalLiteral, decimalToString, exactQuantity, ROUNDING_MODES } from "../src/values.ts";
+import {
+  absentQuantity,
+  decimalLiteral,
+  decimalToString,
+  exactQuantity,
+  ROUNDING_MODES,
+} from "../src/values.ts";
 
 const day = (value: string): LocalDateValue => ({
   kind: "local-date",
@@ -655,4 +661,22 @@ test("a refused amount names its refusal, not an adjustment made before it", () 
   expect(
     reasons({ maximumPerRequest: decimalLiteral("500"), minimum: decimalLiteral("1000") }, 4000),
   ).toEqual(["below_minimum"]);
+  // Every other refusal of the amount, after an adjustment where one can come first.
+  expect(
+    reasons({ maximumPerRequest: decimalLiteral("500"), increment: decimalLiteral("0") }, 4000),
+  ).toEqual(["division_by_zero"]);
+  expect(
+    reasons(
+      { increment: decimalLiteral("1000"), ratio: { numerator: "1", denominator: "0" } },
+      1500,
+    ),
+  ).toEqual(["invalid_ratio"]);
+  expect(
+    findConversionPaths(
+      [offer()],
+      { quantity: absentQuantity("points:a", "missing", "synthetic"), clock: day("2026-04-10") },
+      "points:b",
+      budget,
+    ).rejected.map((r) => r.reasonCode),
+  ).toEqual(["quantity_not_exact"]);
 });

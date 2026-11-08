@@ -26,14 +26,26 @@ import {
   type Quantity,
 } from "./values.ts";
 
+/** A plan with the code that refused it, which the route search reports. */
+interface PlannedConversion {
+  plan: ConversionPlan;
+  /** The refusal; `null` for a computed plan, feasible or not verified. */
+  refusal: string | null;
+}
+
+/**
+ * An infeasible plan lists the adjustments made on the way (`capped_by_maximum`,
+ * `rounded_down_to_increment`, `offer_not_verified`), then the refusal.
+ */
 function infeasible(
   offer: ConversionOffer,
   eligible: Quantity,
   fees: readonly Quantity[],
-  reasonCodes: string[],
-): ConversionPlan {
+  adjustments: readonly string[],
+  refusal: string,
+): PlannedConversion {
   const zero = exactQuantity(offer.fromUnitRef, integerDecimal(0));
-  return {
+  const plan: ConversionPlan = {
     offerRef: `${offer.offerId}@${offer.version}`,
     offerVersion: offer.version,
     use: zero,
@@ -41,11 +53,12 @@ function infeasible(
     remainder: eligible.value.status === "exact" ? eligible : zero,
     fees: [...fees],
     feasible: false,
-    reasonCodes,
+    reasonCodes: [...adjustments, refusal],
     basis: "policy-estimated",
     conditionRefs: conditionRefs(offer),
     release: REWARD_POLICY_RELEASE,
   };
+  return { plan, refusal };
 }
 
 function conditionRefs(offer: ConversionOffer): string[] {
@@ -70,10 +83,18 @@ export function simulateConversion(
   eligibleQuantity: Quantity,
   fees: readonly Quantity[] = offer.fixedFees,
 ): ConversionPlan {
+  return planConversion(offer, eligibleQuantity, fees).plan;
+}
+
+function planConversion(
+  offer: ConversionOffer,
+  eligibleQuantity: Quantity,
+  fees: readonly Quantity[],
+): PlannedConversion {
   if (eligibleQuantity.unitRef !== offer.fromUnitRef)
-    return infeasible(offer, eligibleQuantity, fees, ["unit_mismatch"]);
+    return infeasible(offer, eligibleQuantity, fees, [], "unit_mismatch");
   if (eligibleQuantity.value.status !== "exact")
-    return infeasible(offer, eligibleQuantity, fees, ["quantity_not_exact"]);
+    return infeasible(offer, eligibleQuantity, fees, [], "quantity_not_exact");
   const reasonCodes: string[] = [];
   if (offer.verification !== "verified") reasonCodes.push("offer_not_verified");
   const balance = eligibleQuantity.value.value;
@@ -85,19 +106,17 @@ export function simulateConversion(
   // Whole increments only: `down` truncates towards zero, so a partial step is
   // never rounded up into a quantity the member does not hold.
   const steps = divideDecimals(capped, offer.increment, { scale: 0, mode: "down" });
-  if (!steps.ok)
-    return infeasible(offer, eligibleQuantity, fees, [...reasonCodes, steps.error.code]);
+  if (!steps.ok) return infeasible(offer, eligibleQuantity, fees, reasonCodes, steps.error.code);
   const use = multiplyDecimals(steps.value, offer.increment);
   if (compareDecimals(use, capped) < 0) reasonCodes.push("rounded_down_to_increment");
   if (compareDecimals(use, offer.minimum) < 0)
-    return infeasible(offer, eligibleQuantity, fees, [...reasonCodes, "below_minimum"]);
+    return infeasible(offer, eligibleQuantity, fees, reasonCodes, "below_minimum");
   const received = multiplyByRatio(use, offer.ratio, offer.rounding);
-  if (!received.ok)
-    return infeasible(offer, eligibleQuantity, fees, [...reasonCodes, "invalid_ratio"]);
+  if (!received.ok) return infeasible(offer, eligibleQuantity, fees, reasonCodes, "invalid_ratio");
   // An application is not a credit: the destination quantity is what the plan
   // predicts, and only a later observation makes it a holding.
   reasonCodes.push("credit_is_not_the_application");
-  return {
+  const plan: ConversionPlan = {
     offerRef: `${offer.offerId}@${offer.version}`,
     offerVersion: offer.version,
     use: exactQuantity(offer.fromUnitRef, use),
@@ -110,6 +129,7 @@ export function simulateConversion(
     conditionRefs: conditionRefs(offer),
     release: REWARD_POLICY_RELEASE,
   };
+  return { plan, refusal: null };
 }
 
 /**
@@ -391,12 +411,12 @@ export function findConversionPaths(
         rejected.push({ offerRef, reasonCode: "completion_after_required_by" });
         continue;
       }
-      const plan = simulateConversion(offer, state.quantity, offer.fixedFees);
+      const { plan, refusal } = planConversion(offer, state.quantity, offer.fixedFees);
       if (!plan.feasible) {
-        // An infeasible plan lists its adjustments (`capped_by_maximum`,
-        // `rounded_down_to_increment`) before the refusal, which is last; only
-        // verified offers reach this point.
-        rejected.push({ offerRef, reasonCode: plan.reasonCodes.at(-1) ?? "not_feasible" });
+        // The refusal itself, never an adjustment made on the way to it
+        // (`capped_by_maximum`, `rounded_down_to_increment`). Only verified
+        // offers reach this point, so a computed plan is feasible.
+        rejected.push({ offerRef, reasonCode: refusal ?? "not_feasible" });
         continue;
       }
       const hop: ConversionHop = {
