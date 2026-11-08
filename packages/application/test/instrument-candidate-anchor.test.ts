@@ -127,9 +127,19 @@ describe("candidate assignment provenance and server pins", () => {
     expect(planned.ok).toBe(true);
     if (!planned.ok) return;
     expect(planned.plan.payload).toEqual(f.payload);
+    // Both mappings, and the pair's `listed_as` in both orientations (pair pins).
+    const subjectInstrument = (
+      f.w.db
+        .query(
+          "SELECT instrument_id FROM instrument_mappings WHERE identifier_id=? ORDER BY revision DESC LIMIT 1",
+        )
+        .get(f.candidate.subjectIdentifierId) as { instrument_id: string }
+    ).instrument_id;
     expect(planned.plan.expectedRevisions).toEqual({
       [`instrument_mapping:${f.candidate.subjectIdentifierId}`]: 1,
       [`instrument_mapping:${f.candidate.anchorIdentifierId}`]: 1,
+      [`relation:listed_as|instrument:${f.payload.targetId}|identifier:${f.candidate.subjectIdentifierId}`]: 0,
+      [`relation:listed_as|instrument:${subjectInstrument}|identifier:${f.candidate.anchorIdentifierId}`]: 0,
     });
     const { candidate: _candidate, ...manual } = f.payload;
     const direct = await createPlan(
