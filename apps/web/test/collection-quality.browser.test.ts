@@ -143,6 +143,14 @@ describe.if(runnable)("collection quality browser", () => {
           .locator('.freshness[data-state="recent"]')
           .textContent(),
       ).toBe("2日前の取得");
+      const listed = (sourceId: string) =>
+        page
+          .locator("nav li")
+          .filter({ has: page.getByRole("link", { name: sourceId, exact: true }) })
+          .locator(".freshness")
+          .textContent();
+      expect(await listed("vpass")).toBe("2日前の取得");
+      expect(await listed("global-pass")).toBe("1日前の取得");
       expect(
         await page.locator('.freshness[data-state="human-required"]').first().textContent(),
       ).toBe("本人操作待ち（取得なし）");
