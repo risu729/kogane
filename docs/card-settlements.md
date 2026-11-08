@@ -559,8 +559,26 @@ joint ownership is not inferred. A correction appends a rejection or a new
 explicit claim and retains prior evidence. Saving ownership does **not** accept
 a settlement: the next scheduled reconciliation pass (normally every five
 minutes) creates a fresh immutable candidate with the new evidence. Refreshing
-the page only reads that state. The resulting settlement candidate is reviewed
-and approved separately, by the operator or by an MCP client.
+the page only reads that state. The resulting settlement candidate is approved
+separately, by the operator on the confirmation page or by an MCP client.
+A rule, a heuristic or the HTTP agent route never approves it.
+
+Over MCP the same decisions go through the change lifecycle's own tools
+(Phase 2 unit 2g.2, [ADR 0081](adr/0081-ui-parity-through-mcp.md)). There is no
+settlement-specific tool or catalogue entry: `card-settlement.accept`,
+`card-settlement.withdraw` and `card-settlement.reject`, and the ownership
+review's `relation.accept` and `relation.reject`, are planned with
+`kogane.command.plan` and read back with `kogane.command.simulate`. They are
+decided with `kogane.command.approve` and `kogane.command.commit`, each R2:
+prepared, then confirmed with the prepared digest within ten minutes
+([agent API](agent-api.md#change-lifecycle-decisions)). The page posts the same
+operations to `/api/command/v1/*`. Both adapters forward to the Processor's one
+command route, which runs the `packages/application` plan, simulate, approve
+and commit services and the same writers, so the receipts and the refusal
+codes agree. A preparation writes no approval and no decision. The receipt
+names the MCP client (`mcp-client:<sub>`), never the operator, and the audit
+record is on path `mcp` (ADR 0084). Reading the ownership review
+first is `kogane.card-settlements.ownership` ([agent reads](#agent-reads)).
 
 The commit rechecks the source publication/currentness, ownership, allocation
 availability, claim availability and expected candidate revision in the same
@@ -1042,6 +1060,15 @@ debit, a missing total, a missing due date, a zero total and a total with no
 valid unit, and an exact match whose candidate and digest are pinned to what the
 sweep wrote before the codes existed; its tick row holds the closed codes and
 integers only.
+`services/app/test/card-settlement-decisions-parity.test.ts` drives the
+decisions through the real App Worker, the Processor's command route, the
+identity projection and the sweep on one synthetic store. It records one
+ownership side on the page's path and the other over MCP. It then accepts and
+withdraws on each path, and rejects on each path. For each pair it checks that
+the receipts agree apart from the caller, the ids and the time. It also checks
+that a competing acceptance and the re-acceptance of a withdrawn candidate get
+the same refusal on both paths and write nothing, and that each commit is
+audited under its own path and principal.
 Archived production samples were inspected read-only to verify provider field
 shapes; private values are not test fixtures and no live financial decision is
 accepted by those checks.
