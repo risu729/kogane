@@ -443,13 +443,12 @@ function ReadExpiry({ row }: { row: RewardReadExpiryRow }): ReactNode {
   return (
     <Panel
       id={domId("reward-read-expiry", row.holdingRef, row.ruleRef, row.bucketRef)}
-      // Named by its bucket too: a programme can hold several buckets of one kind.
-      title={`${row.programId} ／ ${BUCKET_LABELS[row.bucketKind] ?? row.bucketKind}（${row.bucketRef}）`}
-      note={
-        <>
-          判定: {STATE_LABELS[row.state] ?? row.state} ／ 規約: {row.ruleRef}
-        </>
-      }
+      // Named by its bucket and rule too: a programme can hold several buckets
+      // of one kind, and the snapshot holds one row per bucket for every rule
+      // version of the programme. The holding is not needed: a bucket
+      // reference already names the provider account it came from.
+      title={`${row.programId} ／ ${BUCKET_LABELS[row.bucketKind] ?? row.bucketKind}（${row.bucketRef} ／ 規約 ${row.ruleRef}）`}
+      note={<>判定: {STATE_LABELS[row.state] ?? row.state}</>}
     >
       <div className="panel-body">
         <Kv>
@@ -475,8 +474,10 @@ function ReadExpiry({ row }: { row: RewardReadExpiryRow }): ReactNode {
 function ProviderExpirySection({ section }: { section: RewardProviderExpirySection }): ReactNode {
   return (
     <Panel
-      id={domId("reward-provider-expiry", section.holdingRef)}
-      title={`${section.programId === "program:j-point" ? "J-POINT" : section.programId} ／ 取得元の失効予定表示`}
+      id={domId("reward-provider-expiry", section.holdingRef, section.parentBucketRef)}
+      // One section per provider bucket: two accounts of one programme are two
+      // sections, told apart by the bucket they describe.
+      title={`${section.programId === "program:j-point" ? "J-POINT" : section.programId} ／ 取得元の失効予定表示（${section.parentBucketRef}）`}
       note="保有ポイントのうち、取得元が失効予定として表示した分です。合計残高へは加算しません。"
     >
       <div className="panel-body">

@@ -21,6 +21,7 @@ import type {
   RewardReadExpiryPage,
   RewardReadExpiryRow,
 } from "../../../packages/observation-shared/src/reward-contract.ts";
+import type { RewardProviderExpirySection } from "../../../packages/domain/src/reward-expiry-observations.ts";
 import { auditView } from "./a11y-audit.ts";
 
 const client = join(import.meta.dir, "../dist-production");
@@ -69,12 +70,16 @@ const legacyExpiry = (id: string): RewardExpiryRow => ({
   sourceExpiryRefs: [],
 });
 /** Two time-limited buckets of one programme: the kind alone does not tell them apart. */
-const readExpiry = (bucketRef: string, expiresOn: string): RewardReadExpiryRow => ({
+const readExpiry = (
+  bucketRef: string,
+  expiresOn: string,
+  ruleRef = "rule:synthetic@v1",
+): RewardReadExpiryRow => ({
   holdingRef: "holding:a",
   programId: "program:a",
   bucketRef,
   bucketKind: "time-limited",
-  ruleRef: "rule:synthetic@v1",
+  ruleRef,
   state: "computed",
   basis: "provider-observed",
   expiresOn,
@@ -85,8 +90,28 @@ const readExpiry = (bucketRef: string, expiresOn: string): RewardReadExpiryRow =
   uncertaintyCodes: [],
   basisRefs: [],
 });
+/** The provider's own expiry display for one account's bucket. */
+const providerSection = (account: string): RewardProviderExpirySection => ({
+  programId: "program:j-point",
+  holdingRef: `holding:${account}`,
+  parentBucketRef: `bucket:${account}`,
+  unitRef: "points:synthetic",
+  observedAt: { kind: "unknown", reasonCode: "synthetic_time" },
+  sourceFactRefs: [`balance:${account}`],
+  coverage: "unknown",
+  reasonCode: "provider_expiry_unavailable",
+  displays: [],
+});
 const readPage: RewardReadExpiryPage = {
-  rows: [readExpiry("bucket:first", "2026-12-31"), readExpiry("bucket:second", "2027-03-31")],
+  // Two accounts of one programme, each with the provider's own display.
+  providerDisplaySections: [providerSection("first"), providerSection("second")],
+  rows: [
+    readExpiry("bucket:first", "2026-12-31"),
+    readExpiry("bucket:second", "2027-03-31"),
+    // The snapshot holds one row per bucket for every rule version of the
+    // programme, so one bucket can appear under two rules.
+    readExpiry("bucket:first", "2026-12-31", "rule:synthetic@v2"),
+  ],
   page: { limit: 50, hasMore: false, nextCursor: null },
   snapshot: {
     snapshotId: "a".repeat(64),
@@ -165,24 +190,40 @@ describe.if(runnable)("the rewards page", () => {
     }
   }, 30_000);
 
-  test("a page at the server's bound states the bound and offers no link back to itself", async () => {
-    holdings = page([holding("a")], true);
-    expiry = page([]);
-    expect(validApiResponse("/api/v2/rewards/holdings", holdings)).toBe(true);
-    const tab = await browser.newPage();
-    try {
-      await tab.goto(`${origin}/rewards`);
-      await tab.getByText("表示は先頭 200 件です。残りは取得していません。").waitFor();
-      // The page reads only the first page; a "next 500" link would reopen it.
-      expect(await tab.getByRole("link", { name: /次の500件/u }).count()).toBe(0);
-      expect(await tab.getByText("最大500件").count()).toBe(0);
-      expect(reads.filter((read) => read.startsWith("/api/v2/rewards/holdings"))).toEqual([
-        "/api/v2/rewards/holdings?offset=0",
-      ]);
-    } finally {
-      await tab.close();
-    }
-  }, 30_000);
+  for (const [name, response, bounds] of [
+    ["legacy expiry", page([legacyExpiry("a")], true), ["200", "200"]],
+    [
+      "published snapshot",
+      { ...readPage, page: { ...readPage.page, hasMore: true } },
+      ["200", "50"],
+    ],
+  ] as const)
+    test(`each block at the server's bound states its bound and offers no link back to itself (${name})`, async () => {
+      holdings = page([holding("a")], true);
+      expiry = response;
+      expect(validApiResponse("/api/v2/rewards/holdings", holdings)).toBe(true);
+      expect(validApiResponse("/api/v2/rewards/expiry", expiry)).toBe(true);
+      const tab = await browser.newPage();
+      try {
+        await tab.goto(`${origin}/rewards`);
+        await tab.getByText("期限が確認できない残高も一覧から外さず").waitFor();
+        // Holdings first, then expiry: each block says where it stopped (INV05).
+        expect(
+          await tab
+            .getByText(/^表示は先頭 \d+ 件です。残りは取得していません。$/u)
+            .allTextContents(),
+        ).toEqual(bounds.map((bound) => `表示は先頭 ${bound} 件です。残りは取得していません。`));
+        // The page reads only the first page; a "next 500" link would reopen it.
+        expect(await tab.getByRole("link", { name: /次の500件/u }).count()).toBe(0);
+        expect(await tab.getByText("最大500件").count()).toBe(0);
+        expect([...reads].sort()).toEqual([
+          "/api/v2/rewards/expiry?offset=0",
+          "/api/v2/rewards/holdings?offset=0",
+        ]);
+      } finally {
+        await tab.close();
+      }
+    }, 30_000);
 
   for (const [name, response] of [
     ["published snapshot", readPage],
