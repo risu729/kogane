@@ -7,6 +7,7 @@ import { sharedRunPersisted, type SharedRunInput } from "./shared-collection";
 import type { PersistRunResult } from "../../../packages/collection/src/index";
 
 import { safeFailureCode, thrownFailureCode, type FailureCode } from "./result";
+import { parseRunDiagnostic, type RunDiagnostic } from "./run-diagnostic";
 
 export function authorized(request: Request, expected: string | undefined): boolean {
   if (!expected || expected.length < 32) return false;
@@ -53,12 +54,19 @@ export function parseCredential(value: string | undefined): Credential {
 
 export type CollectionOutput =
   | { status: "success"; snapshot: StGeorgeSnapshot }
-  | { status: "failed"; reason: FailureCode };
+  | { status: "failed"; reason: FailureCode; diagnostic?: RunDiagnostic };
 export function parseCollectionOutput(value: unknown): CollectionOutput {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     throw new Error("invalid-snapshot");
   const input = value as Record<string, unknown>;
-  if (input.status === "failed") return { status: "failed", reason: safeFailureCode(input.reason) };
+  if (input.status === "failed") {
+    const diagnostic = parseRunDiagnostic(input.diagnostic);
+    return {
+      status: "failed",
+      reason: safeFailureCode(input.reason),
+      ...(diagnostic ? { diagnostic } : {}),
+    };
+  }
   if (input.status !== "success" || Object.keys(input).sort().join(",") !== "snapshot,status")
     throw new Error("invalid-snapshot");
   const snapshot = parseStGeorgeSnapshot(input.snapshot);
@@ -240,7 +248,10 @@ export class CollectionCoordinator {
           completedAt: new Date(this.now()).toISOString(),
           ...(output.status === "success"
             ? { snapshot: output.snapshot }
-            : { reason: output.reason }),
+            : {
+                reason: output.reason,
+                ...(output.diagnostic ? { diagnostic: output.diagnostic } : {}),
+              }),
         };
         // The digest is taken in the trigger that sent the credential, so a
         // secret changed before a late persist cannot be mistaken for it.

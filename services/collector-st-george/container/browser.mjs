@@ -45,14 +45,42 @@ export class CollectionError extends Error {
 const fail = (code) => {
   throw new CollectionError(code);
 };
-export function publicFailure(error) {
+export function publicFailure(error, diagnostic) {
   return {
     status: "failed",
     reason:
       error instanceof CollectionError && FAILURE_CODES.has(error.message)
         ? error.message
         : "runtime-failed",
+    ...(diagnostic ? { diagnostic } : {}),
   };
+}
+export const MAX_NOTICES = 4;
+export const MAX_NOTICE_CHARS = 160;
+// The bank's own visible notice, as a person would read it on screen, kept so a
+// failed run can say what the bank showed. Digit runs (account, card, customer
+// or phone numbers) and anything shaped like an email address are replaced, and
+// each notice is bounded. The Worker applies the same rule again.
+export function redactNotice(text) {
+  if (typeof text !== "string") return "";
+  return text
+    .replace(/[\p{Cc}\p{Cf}]+/gu, " ")
+    .replace(/\S*@\S*/gu, "[email]")
+    .replace(/\p{N}(?:[\s./-]*\p{N})+/gu, "#")
+    .replace(/\p{N}/gu, "#")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, MAX_NOTICE_CHARS);
+}
+export function redactNotices(values) {
+  if (!Array.isArray(values)) return [];
+  const notices = [];
+  for (const value of values) {
+    const notice = redactNotice(value);
+    if (notice && !notices.includes(notice)) notices.push(notice);
+    if (notices.length === MAX_NOTICES) break;
+  }
+  return notices;
 }
 const RUNTIME_STAGES = new Set([
   "request-validation",
@@ -105,7 +133,9 @@ const RUNTIME_ERROR_TYPES = new Set([
   "DOMException",
 ]);
 // Mirror collector-diagnostics' closed-label policy in this standalone Node
-// container. No exception message, stack, URL, credential or DOM value is read.
+// container. No exception message, stack, URL or credential is read. The only
+// page text kept is the bank's visible notice on a failed run (readNotices),
+// redacted by redactNotice.
 export function createRuntimeDiagnostics({
   emit = (value) => console.error(value),
   now = Date.now,
@@ -115,6 +145,7 @@ export function createRuntimeDiagnostics({
   let emitted = false;
   let loginPostCount = 0;
   let refusal = "unknown";
+  let notices = [];
   return {
     stage(value) {
       stage = RUNTIME_STAGES.has(value) ? value : "unknown";
@@ -122,13 +153,22 @@ export function createRuntimeDiagnostics({
     refusal(value) {
       refusal = RUNTIME_REFUSALS.has(value) ? value : "unknown";
     },
+    notices(values) {
+      try {
+        notices = redactNotices(values);
+      } catch {
+        notices = [];
+      }
+    },
     loginPost() {
       // Two represents two or more browser-issued login requests. Observing a
       // request does not establish that the bank received or accepted it.
       loginPostCount = Math.min(2, loginPostCount + 1);
     },
+    // Returns the closed labels and redacted notices for the failed run's
+    // manifest; the log line keeps only the labels and the notice count.
     failure(error) {
-      if (emitted) return;
+      if (emitted) return undefined;
       emitted = true;
       try {
         let errorType = "unknown";
@@ -142,18 +182,30 @@ export function createRuntimeDiagnostics({
           /* Throwing accessors and proxies remain unknown. */
         }
         const elapsed = now() - startedAt;
-        emit(
-          JSON.stringify({
-            event: "st-george-runtime-failure",
-            stage,
-            errorType,
-            refusal,
-            loginPostCount,
-            durationMs: Number.isSafeInteger(elapsed) && elapsed >= 0 ? elapsed : 0,
-          }),
-        );
+        const summary = {
+          stage,
+          errorType,
+          refusal,
+          loginPostCount,
+          durationMs: Number.isSafeInteger(elapsed) && elapsed >= 0 ? elapsed : 0,
+          notices,
+        };
+        try {
+          const { notices: shown, ...labels } = summary;
+          emit(
+            JSON.stringify({
+              event: "st-george-runtime-failure",
+              ...labels,
+              noticeCount: shown.length,
+            }),
+          );
+        } catch {
+          /* A failed log line still leaves the summary for the run. */
+        }
+        return summary;
       } catch {
         /* Diagnostics never replace the collection result or prevent cleanup. */
+        return undefined;
       }
     },
   };
@@ -263,6 +315,26 @@ export function readState() {
   };
 }
 
+// Runs in the page on a failed run only: the visible text of alerts, then
+// headings, bounded before it leaves the page; redactNotices applies outside.
+// The page itself is checked here, so a navigation between the caller's URL
+// check and this read cannot hand over another page. Only the login page is
+// read once a login was submitted: any later page may greet the customer by
+// name. Before a submit nobody is logged in, so any page of the bank is read.
+export function readNotices(loginSubmitted) {
+  if (location.origin !== "https://ibanking.stgeorge.com.au") return [];
+  if (loginSubmitted !== false && location.pathname !== "/ibank/loginPage.action") return [];
+  const visible = (node) => node.getClientRects().length > 0;
+  const nodes = [
+    ...document.querySelectorAll("[role=alert],.error"),
+    ...document.querySelectorAll("h1,h2"),
+  ];
+  return nodes
+    .filter((node, index) => nodes.indexOf(node) === index && visible(node))
+    .slice(0, 8)
+    .map((node) => (node.textContent ?? "").slice(0, 400));
+}
+
 // Check the observed form destination and control ownership before filling any
 // credential. A familiar-looking input on a different form is not sufficient.
 export function hasExpectedLoginForm() {
@@ -328,8 +400,10 @@ export async function collectFromPage(
   stage = () => {},
   onLoginPost = () => {},
   onRefusal = () => {},
+  onNotices = () => {},
 ) {
   let stopReason = null;
+  let loginSubmitted = false;
   const rejectRoute = (refusal) => {
     try {
       onRefusal(refusal);
@@ -339,8 +413,10 @@ export async function collectFromPage(
     fail("unexpected-route");
   };
   const request = (event) => {
-    if (event.method() === "POST" && event.url() === ORIGIN + "/ibank/logonActionSimple.action")
+    if (event.method() === "POST" && event.url() === ORIGIN + "/ibank/logonActionSimple.action") {
+      loginSubmitted = true;
       onLoginPost();
+    }
   };
   const response = (event) => {
     try {
@@ -476,10 +552,35 @@ export async function collectFromPage(
     };
     if (Buffer.byteLength(JSON.stringify(snapshot)) > MAX_SNAPSHOT_BYTES) fail("snapshot-limit");
     return { status: "success", snapshot };
+  } catch (error) {
+    await keepNotices(page, onNotices, loginSubmitted);
+    throw error;
   } finally {
     page.off("response", response);
     page.off("download", download);
     page.off("request", request);
+  }
+}
+
+// Only on the bank's origin; after a submitted login only on the login page
+// (readNotices checks the page itself again).
+async function keepNotices(page, onNotices, loginSubmitted) {
+  let timer;
+  try {
+    const url = new URL(page.url());
+    if (url.origin !== ORIGIN) return;
+    if (loginSubmitted && url.pathname !== "/ibank/loginPage.action") return;
+    const values = await Promise.race([
+      page.evaluate(readNotices, loginSubmitted),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve([]), 2_000);
+      }),
+    ]);
+    onNotices(values);
+  } catch {
+    /* Notices are best effort and never replace the failure. */
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -584,12 +685,15 @@ export async function runBrowserCollection(input) {
       diagnostic.stage,
       diagnostic.loginPost,
       diagnostic.refusal,
+      diagnostic.notices,
     );
     if (expired) fail("deadline-exceeded");
     return result;
   } catch (error) {
-    diagnostic.failure(error);
-    return expired ? publicFailure(new CollectionError("deadline-exceeded")) : publicFailure(error);
+    const summary = diagnostic.failure(error);
+    return expired
+      ? publicFailure(new CollectionError("deadline-exceeded"), summary)
+      : publicFailure(error, summary);
   } finally {
     clearTimeout(timer);
     await browser?.close().catch(() => {});
