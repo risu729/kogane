@@ -279,7 +279,9 @@ Shinsei only. `reviewAccountCandidates`
   to `source_account:<id>`, with evidence `connection-review-confirmed` and
   the review's artifact refs. Status comes from the newest stored relation of
   the pair (`accepted`, `rejected`, else `proposed`) under any reference it
-  may have been recorded under, listed as `recordedContainment`: the
+  may have been recorded under, where each reference's relation is its newest
+  decision and a later proposal never replaces one (ADR 0077's amendment of
+  2026-11-08), listed as `recordedContainment`: the
   candidate's own (`this-connection`), another producer's current review of
   the same identity value (`same-identity-value`), or a reference migration
   0029 backfilled under a key the identity-value rewrite (migration 0063)
@@ -296,7 +298,9 @@ Shinsei only. `reviewAccountCandidates`
 - **never `same_account`**: every candidate says why
   (`aggregator-account-connection-scoped`, and `several-direct-accounts` when
   one connection pins several direct accounts) and reports a `same_account`
-  relation already stored between its two sides, in either orientation;
+  relation already stored between its two sides, in either orientation, by the
+  same rule: an agent's later `same_account` proposal does not hide a
+  person's acceptance or rejection;
 - **connections**: every current review with its state (`confirmed`,
   `unresolved`, `evidence-ineligible`) and its aggregator source accounts of
   any producer; **unreviewed**: aggregator source accounts no current review
