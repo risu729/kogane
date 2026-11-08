@@ -322,7 +322,8 @@ test("smbc-direct: responses, their extractions and the run manifest register an
       ...(range ? { range } : {}),
     };
   };
-  // A completed legacy collection starts after its requested JST days ended.
+  // Before STARTED_AT: only days finished in JST before acquisition are
+  // complete coverage (issue 1178).
   const range = { start: "2026-08-01", end: "2026-08-31" };
   const manifest: BackfillManifest = {
     schemaVersion: "smbc-direct-backfill-worker-poc-v1",

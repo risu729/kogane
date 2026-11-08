@@ -96,8 +96,9 @@ still ends on an open day, its alarm waits for JST midnight before requesting
 that chunk. Request-start timestamps on transaction artifacts establish that
 their declared days had closed before acquisition. Legacy artifacts use the
 run start as a conservative lower bound. An old success that read an open day
-publishes partial coverage with `coverage_day_not_finished`; waiting longer or
-retrying publication cannot upgrade that acquisition. Existing terminals and
+publishes partial coverage with `coverage_day_not_finished` on its account
+unit, not on the run, which the terminal contract refuses on a success; waiting
+longer or retrying publication cannot upgrade that acquisition. Existing terminals and
 provider bytes remain immutable. A fresh complete backfill recovers coverage.
 
 Fixed-clock tests cover 10:00 JST approval, the next day's fresh window, later
