@@ -823,14 +823,20 @@ rules, the budgets and the rollback.
 
 ## Collection quality (`/api/collection-quality`)
 
-`GET /api/collection-quality` and `GET /api/collection-quality/<sourceId>`
-state, in closed codes, what each collection stage last did
+`GET /api/collection-quality`, `GET /api/collection-quality/<sourceId>` and
+`GET /api/collection-quality/<sourceId>/accounts` state, in closed codes, what
+each collection stage last did
 ([ADR 0045](adr/0045-collection-quality-read.md),
+[ADR 0088](adr/0088-collection-quality-per-account.md),
 [read model](read-model.md#collection-quality)). They are read-only, GET-only,
 behind the same Access gate and reader authority as the other evidence routes,
 write nothing, and answer 404 where the store has no CORE 0065 scheduling
 tables. Every answer is checked by `validApiResponse` against
-`packages/observation-shared/src/collection-quality-contract.ts`.
+`packages/observation-shared/src/collection-quality-contract.ts`. All three
+are answered by one reader, `readCollectionQuality`
+(`services/app/src/collection-quality-api.ts`), which
+`kogane.collection-quality.read` also calls
+([agent API](agent-api.md#ui-read-pages)).
 
 - **Summary** (`/api/collection-quality`, no parameters): every configured job
   (`collection_schedules`) under the CORE sources its collectors register
@@ -852,6 +858,20 @@ tables. Every answer is checked by `validApiResponse` against
   `coverage_incomplete`, `newer_capture_not_current`, `period_unplaced`,
   `query_rule_not_composed`, `not_in_latest_run`, ...). 500 cells a page with
   `coverage.nextOffset`; an unknown or invisible source is 404.
+- **Accounts** (`/api/collection-quality/<sourceId>/accounts`, no query at
+  all; [ADR 0088](adr/0088-collection-quality-per-account.md)): every cell of
+  the source, unpaged, regrouped by the accounts the observations of its
+  newest or current capture name (through the newest sealed identity runs and
+  the current account mappings, never through a unit key): per account its
+  stored label, mapping statuses and data types (dataset, parser, observation
+  kind), each with its periods, the cell's state and reasons, the capture
+  that names the account, its observation count and a standing (`current`,
+  `older-current`, `newest-not-current`). Cells no capture's observation
+  attributes to an account are listed as `unattributed` with their reasons.
+  More than 2,000 cells or 10,000 account periods is
+  `413 result_limit_exceeded`, never cut. A period no capture has is not
+  listed, so nothing here claims a gap or a complete run of periods; an
+  account two sources name is listed under each.
 
 A missing stage is a reason, never a zero or an empty success: a source with
 no capture has no cells and `latestFetchRun: null` with `no_registered_run`. A
@@ -865,6 +885,12 @@ maintenance-adjusted due times are shown separately from the actual reservation
 and the last attempt's actual start. Reservation reads never reconcile settings.
 A unit with no original file still appears with `unit_without_artifacts`; the
 absence of a stored unit/period is not inferred as complete acquisition.
+Beside a chosen source's cells, `取得単位ごと` / `口座ごと` switches to the
+account view (`?view=accounts`, `口座 × データ種別 × 期間`): one panel per
+account (label, id and mapping status in words) with its data types and
+periods, and a panel `口座に対応付けられない保存記録` with the records no
+account is named in, each with its reasons. The default view never requests
+the account route.
 
 Published observation counts distinguish no rows from a missing acquisition.
 No rows never prove zero transactions. Missing sealed identity runs and

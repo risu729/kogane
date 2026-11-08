@@ -2,17 +2,21 @@
 // per configured job, per source and per source × unit × dataset × period,
 // what each collection stage last did, in closed codes
 // (packages/application/src/query/collection-quality.ts, ADR 0045,
-// docs/evidence-browser.md). Read-only, GET-only, and served under the reader
+// docs/evidence-browser.md); and `GET /api/collection-quality/<sourceId>/accounts`,
+// the same source's cells regrouped by the accounts their captures'
+// observations name (ADR 0088). Read-only, GET-only, and served under the reader
 // authority every signed-in subject already has over the evidence routes: it
 // shows identifiers, capture times, counts and codes the evidence pages and
 // the schedule page already hold, and no amount. A store without the
 // scheduling tables (CORE 0065) does not serve it.
 import {
   CollectionQualityLimitError,
+  queryAccountCoverage,
   queryCollectionQualityCells,
   queryCollectionQualitySummary,
 } from "../../../packages/application/src/query/collection-quality.ts";
 import {
+  ACCOUNT_COVERAGE_SUFFIX,
   COLLECTION_QUALITY_PATH,
   validCollectionQualityAlarms,
   type CollectionQualitySummary,
@@ -48,16 +52,18 @@ export async function collectionQualityApi(
   if (grant.scopes.sources !== "*" || grant.scopes.accounts !== "*")
     throw new HttpError(403, "scope_restricted");
   if (!(await collectionQualityAvailable(env))) throw new HttpError(404, "not_found");
-  // The summary takes no query at all, not even an empty one (`?`).
-  if (path === COLLECTION_QUALITY_PATH && url.search) throw new HttpError(400, "invalid_query");
+  // The summary and the account view take no query at all, not even an empty one (`?`).
+  if ((path === COLLECTION_QUALITY_PATH || path.endsWith(ACCOUNT_COVERAGE_SUFFIX)) && url.search)
+    throw new HttpError(400, "invalid_query");
   return json(await readCollectionQuality(env, url));
 }
 
 /**
- * The collection quality summary or one source's cells for this path and
- * query: the answer of the route and of `kogane.collection-quality.read`
- * (ADR 0081), once the caller's authority and the store's tables are known.
- * Its refusals are `HttpError`s with the route's closed codes.
+ * The collection quality summary, one source's cells or that source's cells
+ * per account (ADR 0088) for this path and query: the answer of the route and
+ * of `kogane.collection-quality.read` (ADR 0081), once the caller's authority
+ * and the store's tables are known. Its refusals are `HttpError`s with the
+ * route's closed codes.
  */
 export async function readCollectionQuality(
   env: Env,
@@ -71,7 +77,16 @@ export async function readCollectionQuality(
       await readAlarms(env, summary);
       return summary;
     }
-    const sourceId = path.slice(COLLECTION_QUALITY_PATH.length + 1);
+    const rest = path.slice(COLLECTION_QUALITY_PATH.length + 1);
+    if (rest.endsWith(ACCOUNT_COVERAGE_SUFFIX)) {
+      const sourceId = rest.slice(0, -ACCOUNT_COVERAGE_SUFFIX.length);
+      if (!SOURCE.test(sourceId)) throw new HttpError(404, "not_found");
+      if ([...url.searchParams.keys()].length > 0) throw new HttpError(400, "invalid_query");
+      const coverage = await queryAccountCoverage(d1Executor(env.DB), { sourceId });
+      if (coverage === null) throw new HttpError(404, "not_found");
+      return coverage;
+    }
+    const sourceId = rest;
     if (!SOURCE.test(sourceId)) throw new HttpError(404, "not_found");
     for (const [key, value] of url.searchParams)
       if (key !== "offset" || url.searchParams.getAll(key).length !== 1 || !value)
@@ -85,7 +100,8 @@ export async function readCollectionQuality(
     if (cells === null) throw new HttpError(404, "not_found");
     return cells;
   } catch (error) {
-    // More jobs or sources than the bound are refused, never cut into a partial answer.
+    // More jobs, sources, cells or account periods than the bound are refused,
+    // never cut into a partial answer.
     if (error instanceof CollectionQualityLimitError)
       throw new HttpError(413, "result_limit_exceeded");
     throw error;

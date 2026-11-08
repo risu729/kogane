@@ -340,3 +340,7 @@ Every MCP client holds the whole-store grant, `evidence.read` included
 ([ADR 0084](0084-mcp-operator-authority-without-delegation.md)), so it is
 listed to every client the MCP Access application admits. The answer travels under `data`, as untrusted provider
 content, and each call is an R0 read in the audit log.
+
+[ADR 0088](0088-collection-quality-per-account.md) adds the per-account view
+of one source's cells to this tool as `view: "accounts"`, over the same
+reader, capability and store feature.
