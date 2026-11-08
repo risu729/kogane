@@ -59,7 +59,7 @@ or make small transactions for verification.
 | COIN+ balance                     | Shared COIN+ balance                   | Current balance; changes from top-ups/payments/transfers/receipts/withdrawals                    | Linked bank deposit balances                                         |
 | Registered financial institutions | Owner's accounts registered with COIN+ | Selection of top-up sources/withdrawal destinations; routes for moving between multiple accounts | Bank statements or complete bank account balances/attributes         |
 | COIN+ QR payments                 | COIN+ payment ledger                   | Payment destinations and amounts in history                                                      | AirPAY merchant sales ledger                                         |
-| AirWallet Visa                    | Prepaid Visa card                      | Visa payment destinations/amounts, card screen, payment management                               | An assumption that authorization/cancellation schemas match COIN+ QR |
+| AirWallet Visa                    | Prepaid Visa card                      | Visa payment destinations/amounts, card screen, `支払い管理` ("payment management")              | An assumption that authorization/cancellation schemas match COIN+ QR |
 | Recruit ID                        | ID linking/campaign boundary           | Linking to a COIN+ account as a condition of some campaigns                                      | COIN+ login ID or points balances                                    |
 | Rewards                           | Often credited as COIN+ balance        | Candidate incoming entries in balance/history                                                    | Recruit Points/Ponta Points                                          |
 | Quick Loan                        | Separate GeNiE loan                    | Borrowed funds may enter the COIN+ balance                                                       | Automation of ordinary COIN+ history                                 |
@@ -84,7 +84,7 @@ balances, expiry dates, or history. Read points from separate sources.
 | COIN+ balance      | Current value       | Displayed at the top in official store images/explanations                                                                                                                                          | Available/held breakdown; update timestamp                                             |
 | Usage history      | Event rows          | MUFG Bank's [official campaign FAQ](https://www.bk.mufg.jp/tsukau/lp/coin_202606_2/index.html) also directs users to check bank-specific top-up records in AirWallet's `利用履歴` ("usage history") | Row fields, status, pagination, earliest date                                          |
 | Transaction report | Totals by type      | Official Google Play images display counts and totals for top-ups/withdrawals/payments, plus individual rows                                                                                        | Aggregation period selection; treatment of transfers/receipts/Visa                     |
-| Payment management | Monthly totals      | The Google Play 2026-07-29 update description lists this month's payments, a budget usage graph, and past months' payment results                                                                   | Number of past months; QR/Visa distinction; whether budget is on-device or server-side |
+| `支払い管理`       | Monthly totals      | The Google Play 2026-07-29 update description lists this month's payments, a budget usage graph, and past months' payment results                                                                   | Number of past months; QR/Visa distinction; whether budget is on-device or server-side |
 | Visa history       | Payment rows        | The official Visa page states that all payment destinations and amounts remain in history                                                                                                           | Authorization/sales/cancellation/refund; original transaction links; foreign currency  |
 | Withdrawal result  | Completion screen   | The [official instant withdrawal explanation](https://coinplus.jp/realtime-withdraw/) says to check the applied conditions on the withdrawal completion screen                                      | Pending/processing/failed codes; time reflected in history                             |
 
@@ -115,7 +115,7 @@ differences until pending/settled correspondence is demonstrated.
 
 Official public material establishes only that past months' payment results can be viewed. It did not establish:
 
-- Earliest dates, retention years, or selectable months for usage history/transaction reports/payment management
+- Earliest dates, retention years, or selectable months for usage history/transaction reports/`支払い管理`
 - Rows per screen/request, infinite scroll/page/cursor, or maximum retrieval count
 - Availability of filters or search by date/type/amount
 - Personal CSV, PDF, JSON, email statements, or data portability exports
@@ -194,7 +194,7 @@ The next stage targets the same version legitimately installed from Google Play 
    restoration of R8 names; assign provisional names from control flow, types, and strings. Deobfuscation
    is read-only work for understanding, not work to disable security controls.
 4. Dynamically observe only one owner-operated session opening balances, history, transaction reports,
-   and payment management. Through ordinary Android profiler/logcat, OS-permitted proxy/Network Inspector,
+   and `支払い管理`. Through ordinary Android profiler/logcat, OS-permitted proxy/Network Inspector,
    or runtime hooks on read methods, emit only origin, method, path template, status, and field **names**
    to a sanitized allowlist. Drop arguments/bodies, headers, tokens, device IDs, PII, and actual values
    at the hook/trace stage.
@@ -226,7 +226,7 @@ API hosts, REST/GraphQL/gRPC, request signing, cookies/bearer tokens, refresh, C
 ### allowlist
 
 - Existing session status checks and ordinary login (excluding password reset, account creation, and device unlinking)
-- Display of current COIN+ balance, anonymized existing registered banks, usage history/transaction reports/payment management
+- Display of current COIN+ balance, anonymized existing registered banks, usage history/transaction reports/`支払い管理`
 - Display of existing COIN+ QR/Visa payment history and existing top-up/transfer/receipt/withdrawal history
 - Download through an existing official export control if found (no generation/sending/sharing)
 
@@ -288,7 +288,7 @@ and session renewal have not been observed. Public store CSV is not personal dat
 1. Check only the legitimate Play/App Store version, version number, COIN+ Light/Standard class, and whether the device is already registered.
 2. Record **field names only**: whether COIN+ balance and Visa card balance are separate on the home screen,
    and what registered banks display. Do not copy actual values even if bank deposit balances are not visible.
-3. Open usage history, transaction reports, payment management, and Visa history. Do not press payment/transfer/top-up/withdrawal buttons.
+3. Open usage history, transaction reports, `支払い管理`, and Visa history. Do not press payment/transfer/top-up/withdrawal buttons.
 
 ### Phase 1: History schemas/periods/exports
 
@@ -299,7 +299,7 @@ and session renewal have not been observed. Public store CSV is not personal dat
 3. Check display schemas for cancellation/refund/failed/pending only if naturally present in existing history.
    Record original transaction links, transaction IDs, timestamps/timezones without values.
 4. Check the presence, formats, and scope of filter/search and CSV/PDF/share/export controls in the UI. Do not press share/send.
-5. Check payment management's month coverage, QR/Visa inclusion, and overlap rules with transaction reports.
+5. Check `支払い管理`'s month coverage, QR/Visa inclusion, and overlap rules with transaction reports.
 
 ### Phase 2: Static/dynamic transport
 
