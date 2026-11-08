@@ -76,7 +76,7 @@ publication have been verified.
 
 `GET /health` reports service configuration without contacting the bank.
 Authenticated `POST /trigger` starts or resumes a collection/storage attempt.
-Authenticated `POST /resume` clears a stopped authentication/network attempt;
+Authenticated `POST /resume` clears a refused or challenged login block;
 it does not start collection or discard a snapshot awaiting storage. Call `/trigger`
 after clearing the blocker. Treat resume as an explicit operator
 decision after resolving the blocker. Neither route accepts account details or

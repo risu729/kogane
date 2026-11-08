@@ -283,7 +283,9 @@ const savedMetadata = {
   startedAt: "2026-01-01T00:00:00.000Z",
   completedAt: "2026-01-01T00:01:00.000Z",
 };
-function savedState(reason?: "login-rejected" | "authentication-challenge"): Storage {
+function savedState(
+  reason?: "login-rejected" | "authentication-challenge" | "runtime-failed",
+): Storage {
   const storage = new Storage();
   const bytes = reason ? new Uint8Array() : new TextEncoder().encode(JSON.stringify(snapshot()));
   const count = Math.ceil(bytes.length / (64 * 1024));
@@ -389,6 +391,17 @@ describe("internal saved-only retry", () => {
       expect(await onlyRetry(coordinator)).toEqual({ status: "refused", reason: "not-pending" });
       expect(collect).not.toHaveBeenCalled();
     }
+  });
+  test("a retried terminal of any other failure is failed and leaves no block", async () => {
+    const storage = savedState("runtime-failed");
+    const { coordinator, collect } = retryHarness(storage);
+    expect(await onlyRetry(coordinator)).toMatchObject({
+      status: "failed",
+      runId: savedRunId,
+      reason: "runtime-failed",
+    });
+    expect(storage.values.size).toBe(0);
+    expect(collect).not.toHaveBeenCalled();
   });
 
   test("exact input refuses wrong shape, excess fields, symbols, access errors and invalid UUID", async () => {

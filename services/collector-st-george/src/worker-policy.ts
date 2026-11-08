@@ -99,7 +99,7 @@ type RetryPendingResult =
     }
   | { status: "failed"; reason: "state-unavailable" | "persistence-incomplete" }
   | { status: "stored"; runId: string; terminalKey: string }
-  | { status: "blocked"; reason: FailureCode; runId: string; terminalKey: string };
+  | { status: "blocked" | "failed"; reason: FailureCode; runId: string; terminalKey: string };
 
 const RUN_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -214,7 +214,12 @@ export function blocksLaterLogins(reason: FailureCode): boolean {
 /** What `withCollectionLease` throws when another execution holds the source. */
 const LEASE_REFUSAL = "collection_busy_or_uncertain";
 
-/** A durable attempt marker prevents a restart from replaying an uncertain login. */
+/**
+ * Serializes attempts in one object. The durable attempt marker is written
+ * before any provider request; one left by a reset object is logged and
+ * cleared, because the collection lease, not the marker, keeps a second login
+ * from overlapping the interrupted one.
+ */
 export class CollectionCoordinator {
   private active = false;
   constructor(
@@ -283,7 +288,8 @@ export class CollectionCoordinator {
         )
           return false;
         const run = selected.pending.run;
-        if (run.reason === undefined) await storage.delete("state");
+        if (run.reason === undefined || !blocksLaterLogins(run.reason))
+          await storage.delete("state");
         else await storage.put("state", { kind: "blocked", reason: run.reason, runId: run.runId });
         for (let index = 0; index < current.snapshotChunks; index++)
           await storage.delete(this.chunkKey(run.runId, index));
@@ -294,7 +300,7 @@ export class CollectionCoordinator {
       return run.reason === undefined
         ? { status: "stored", runId: run.runId, terminalKey: result.terminalKey }
         : {
-            status: "blocked",
+            status: blocksLaterLogins(run.reason) ? "blocked" : "failed",
             reason: run.reason,
             runId: run.runId,
             terminalKey: result.terminalKey,

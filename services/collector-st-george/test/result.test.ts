@@ -27,6 +27,21 @@ test("the alarm keeps each known refusal distinct, without passing arbitrary tex
   });
 });
 
+test("a failed run with a written terminal reports its run id and its own code", () => {
+  expect(
+    stGeorgeScheduledResult({
+      status: "failed",
+      reason: "runtime-failed",
+      runId: "00000000-0000-4000-8000-000000000000",
+      terminalKey: "runs/st-george/synthetic.json",
+    }),
+  ).toEqual({
+    status: "failed",
+    runIds: ["00000000-0000-4000-8000-000000000000"],
+    failureCode: "st_george_runtime_failed",
+  });
+});
+
 test("a run the coordinator could not persist is not reported as a persisted run", () => {
   // The coordinator's own answer when the terminal write failed: the run is
   // kept pending under its id and has no terminal yet.
