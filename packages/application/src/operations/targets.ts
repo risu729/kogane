@@ -85,9 +85,19 @@ const INSTRUMENT_SCOPE_SQL = `SELECT DISTINCT sa.source_id AS scope
  FROM identity_instrument_uses u JOIN current_identity_observations o ON o.id=u.identity_observation_id
  JOIN source_accounts sa ON sa.id=o.source_account_id
  WHERE u.identifier_id=?1 AND ${PUBLISHED} ORDER BY 1 LIMIT ${SCOPE_LIMIT}`;
-const RELATION_SQL = `SELECT count(*) AS revision,
+/**
+ * A relation triple's pin (its row count: every judgement appends a row) and
+ * its current status, shown as the target's current value. The current row is
+ * the triple's newest decision (`accepted`, `rejected` or `released`) by
+ * `created_at` and then `id`; only a triple with no decision shows its newest
+ * proposal. A proposal appended after a decision (an agent's
+ * `reconcile.propose`) changes nothing (INV07), so it must not make an
+ * accepted relation read as merely proposed (ADR 0017's amendment of
+ * 2026-11-06).
+ */
+export const RELATION_SQL = `SELECT count(*) AS revision,
  (SELECT r.status FROM entity_relations r WHERE r.kind=?1 AND r.from_ref=?2 AND r.to_ref=?3
-   ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS current_status
+   ORDER BY r.status<>'proposed' DESC,r.created_at DESC,r.id DESC LIMIT 1) AS current_status
  FROM entity_relations WHERE kind=?1 AND from_ref=?2 AND to_ref=?3`;
 
 /** Typed reference prefixes the store can resolve; anything else is opaque. */

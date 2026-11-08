@@ -28,7 +28,7 @@ import {
   replayDelegatedConfirmation,
   previewProviderOperation,
   operationIdFor,
-  ownOperationSource,
+  operationSource,
   SESSION_REFRESH_MODES,
   statusForCommandError,
 } from "../../../packages/application/src/index";
@@ -51,6 +51,7 @@ import {
   sessionRefreshSchema,
   type OpsContext,
 } from "./ops-api";
+import { mcpInputSchema } from "./mcp-input-schema";
 
 export const OPS_TOOL_NAMES = [
   "kogane.ops.collection.request",
@@ -69,8 +70,7 @@ export function isOpsToolName(value: string): value is OpsToolName {
 
 /** The published JSON Schema of one request schema, without the meta key. */
 function inputSchema(schema: z.ZodType): Record<string, unknown> {
-  const generated = z.toJSONSchema(schema) as Record<string, unknown>;
-  delete generated["$schema"];
+  const generated = mcpInputSchema(schema);
   return generated;
 }
 
@@ -134,15 +134,15 @@ export const OPS_MCP_TOOLS = [
     name: "kogane.ops.operation.get",
     title: "Read the progress of one accepted operation",
     description:
-      "Report the stored stage progress and failure code of one operation this principal accepted. Stages nobody has reported are pending: enqueued work is never reported as done.",
+      "Report the stored stage progress and failure code of one accepted operation, whichever principal requested it (the operator in the browser or any MCP client). Stages nobody has reported are pending: enqueued work is never reported as done.",
     inputSchema: inputSchema(operationIdSchema),
     annotations: READ_HINTS,
   },
   {
     name: "kogane.ops.operation.list",
-    title: "List this principal's accepted operations",
+    title: "List accepted operations",
     description:
-      "List one page of the operations this principal accepted, newest first, as summaries without stages or execution (ADR 0086). Filter by kind or status; pass nextCursor as cursor for the next page. Follow one with kogane.ops.operation.get.",
+      "List one page of every accepted operation, whichever principal requested it (the operator in the browser or any MCP client), newest first, as summaries without stages or execution (ADR 0086). Filter by kind or status; pass nextCursor as cursor for the next page. Follow one with kogane.ops.operation.get.",
     inputSchema: inputSchema(operationListSchema),
     annotations: READ_HINTS,
   },
@@ -206,7 +206,7 @@ export async function callOpsTool(
   }
 }
 
-export const DELEGATED_OPS_CAPABILITIES: Readonly<Record<OpsToolName, DelegationCapability>> = {
+const DELEGATED_OPS_CAPABILITIES: Readonly<Record<OpsToolName, DelegationCapability>> = {
   "kogane.ops.collection.request": "operations.collection.request",
   "kogane.ops.import.request": "operations.import.request",
   "kogane.ops.replay.request": "operations.replay.request",
@@ -426,20 +426,23 @@ export async function callDelegatedOpsTool(
     }
     if (name === "kogane.ops.operation.get") {
       const input = parseRequest(operationIdSchema, body ?? {});
-      // Resolve the caller's own row before reading progress; denied and absent are identical.
-      const own = await ownOperationSource(context.store, input.operationId, principal.id);
+      // Reads are whole-store (ADR 0086, owner 2026-11-08 04:21 UTC): the row
+      // may be any principal's. Its source is resolved first so that a
+      // principal scoped to fewer sources is refused one outside its scope;
+      // denied and absent are identical.
+      const target = await operationSource(context.store, input.operationId);
       if (
-        !own ||
-        (own.sourceId === null
+        !target ||
+        (target.sourceId === null
           ? principal.scopes.sources !== "*" || principal.scopes.accounts !== "*"
-          : !sourceAllowed(principal, own.sourceId))
+          : !sourceAllowed(principal, target.sourceId))
       )
         throw new HttpError(400, "target_missing");
       return await opsServices.operation(context, input.operationId);
     }
     if (name === "kogane.ops.operation.list") {
       const input = parseRequest(operationListSchema, body ?? {});
-      // The page is the caller's own requests, of any source; a principal
+      // The page is every principal's requests, of any source; a principal
       // scoped to fewer sources or accounts would be shown rows outside its
       // scope, so it is refused like a read it may not make (ADR 0086).
       if (principal.scopes.sources !== "*" || principal.scopes.accounts !== "*")

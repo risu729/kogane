@@ -42,11 +42,14 @@ import {
   readCollectionScanState,
   readPendingRegistrations,
 } from "../../../../packages/storage-d1/src/core/collection-runs.ts";
+import { safeFailureCode } from "./failure-code.ts";
 import {
   parseTerminalNotification,
   CollectionNotificationError,
   type TerminalNotification,
 } from "./notifications.ts";
+
+export { safeFailureCode } from "./failure-code.ts";
 
 /** Terminals listed in one cron tick. */
 export const DEFAULT_SCAN_PAGE = 25;
@@ -167,11 +170,6 @@ export interface ScanOptions {
   onFailure?: (code: string) => void;
 }
 
-/** A class or error name only: never the message, which may quote a key. */
-function safeFailureCode(error: unknown): string {
-  return error instanceof Error ? error.name || error.constructor.name : "unknown";
-}
-
 /** Adds one registration's outcome to the tick's counts. */
 function count(summary: ScanSummary, result: RegisterTerminalOutcome): void {
   const outcome = result.outcome;
@@ -204,12 +202,15 @@ function count(summary: ScanSummary, result: RegisterTerminalOutcome): void {
  *
  * Only new work spends one of the tick's `maxRegistrations`: a registration,
  * a pending run reached by the listing, a first verdict, a retry that was
- * due, a missing terminal or a failure. The continuations before the listing
+ * due or a missing terminal. The continuations before the listing
  * are bounded by `maxContinuations` instead. A terminal already registered, already blocked, or refused
  * `retryable` less than `retryAfterMs` ago is answered from its CORE row and
  * spends none, so a page whose terminals are all judged is finished in one
  * tick and the cursor moves on even when nothing registered (ADR 0024). A
- * terminal with no row yet is always attempted.
+ * terminal with no row yet is always attempted. A registration that threw
+ * spends none either: it records nothing, so it would otherwise spend one
+ * on every tick and enough of them would hold the page for good (ADR 0024,
+ * amendment of 2026-11-06); only the invocation's operation budget bounds it.
  */
 export async function collectionScan(
   env: CollectionEnv,
@@ -259,7 +260,9 @@ export async function collectionScan(
       // A failure that is not a verdict — R2 or CORE unavailable, or a
       // refusal CORE made that the derivation did not foresee. Counted, not
       // recorded, and never allowed to stop the page or pin the cursor on
-      // this run forever (G1-13). The code is logged, never the message.
+      // this run forever (G1-13). Only `onFailure` hears the class name, never
+      // the message; the deployed cron's stage logs it as
+      // `collection_scan_registration_failed`.
       options.onFailure?.(safeFailureCode(error));
       summary.failed += 1;
       return true;
@@ -298,15 +301,21 @@ export async function collectionScan(
         budgetExhausted = true;
         break;
       }
-      const before = summary.alreadyRegistered + summary.alreadyJudged;
+      const before = summary.alreadyRegistered + summary.alreadyJudged + summary.failed;
       if (!(await attempt(terminal))) {
         budgetExhausted = true;
         break;
       }
       // A run that was already registered or already judged cost a few
       // queries, not a registration, so it does not consume the tick's count
-      // (ADR 0024).
-      if (summary.alreadyRegistered + summary.alreadyJudged === before) worked += 1;
+      // (ADR 0024). Nor does a registration that threw: it is no verdict and
+      // records nothing, so if it spent one of the five, a page with that
+      // many runs that always throw would hold the cursor on every tick
+      // (ADR 0024, amendment of 2026-11-06). The operation budget still
+      // bounds it, and the next walk attempts it again.
+      if (summary.alreadyRegistered + summary.alreadyJudged + summary.failed === before) {
+        worked += 1;
+      }
     }
     if (!budgetExhausted) {
       cursor = page.cursor;

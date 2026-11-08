@@ -53,6 +53,29 @@ export const CARD_OWNERSHIP_CANDIDATE_SQL = `WITH chosen AS (SELECT ?1 AS id), $
 SELECT c.id,c.facts_json,c.revision,c.status,r.statement_current,r.bank_current
 FROM chosen JOIN card_settlement_reviews c ON c.id=chosen.id JOIN readiness r ON r.id=c.id`;
 
+/**
+ * ?1 the role, ?2 the account, ?3 the last relation rowid the pin counted: per
+ * owner (through either alias of the account), its current claim, up to 51
+ * newest first. The current claim is the newest decision (`accepted`,
+ * `rejected` or `released`) in insertion order, or the newest proposal when
+ * the owner has no decision; a claim whose decision was superseded shows
+ * nothing for its owner. The first check hides a row behind a later decision
+ * (or behind any later row, for a proposal), the second hides a proposal
+ * behind any decision of its owner; each is a keyed lookup, the first a
+ * rowid range as the shipped text's. A proposal recorded after a decision changes nothing
+ * (INV07), so the review still shows, and offers to reject, the accepted owner
+ * the readers adopt (`card-settlement-ownership.ts`; ADR 0017's amendment of
+ * 2026-11-06).
+ */
+export const CARD_OWNERSHIP_CLAIMS_SQL = `SELECT r.id,r.to_ref,r.status,r.valid_from,r.valid_to,r.evidence_refs_json,r.decision_revision_id
+      FROM entity_relations r JOIN decision_revisions d ON d.id=r.decision_revision_id AND d.superseded_by IS NULL
+      WHERE r.kind=?1 AND r.from_ref IN(?2,'account:'||?2) AND r.rowid<=?3
+       AND NOT EXISTS(SELECT 1 FROM entity_relations n WHERE n.kind=r.kind AND n.from_ref IN(?2,'account:'||?2)
+        AND n.to_ref=r.to_ref AND n.rowid>r.rowid AND n.rowid<=?3 AND (n.status<>'proposed' OR r.status='proposed'))
+       AND (r.status<>'proposed' OR NOT EXISTS(SELECT 1 FROM entity_relations n WHERE n.kind=r.kind
+        AND n.from_ref IN(?2,'account:'||?2) AND n.to_ref=r.to_ref AND n.rowid<=?3 AND n.status<>'proposed'))
+      ORDER BY r.rowid DESC LIMIT 51`;
+
 /** Operator review only: known mappings and recorded claims, never an inferred party. */
 export async function queryCardOwnership(
   sql: SqlExecutor,
@@ -95,15 +118,11 @@ export async function queryCardOwnership(
       blockers.push("account_context_changed");
     if (!mapping) blockers.push("account_mapping_unresolved");
     const claims = mapping
-      ? await sql.all<Claim>(
-          `SELECT r.id,r.to_ref,r.status,r.valid_from,r.valid_to,r.evidence_refs_json,r.decision_revision_id
-      FROM entity_relations r JOIN decision_revisions d ON d.id=r.decision_revision_id AND d.superseded_by IS NULL
-      WHERE r.kind=?1 AND r.from_ref IN(?2,'account:'||?2) AND r.rowid<=?3
-       AND NOT EXISTS(SELECT 1 FROM entity_relations n WHERE n.kind=r.kind AND n.from_ref IN(?2,'account:'||?2)
-        AND n.to_ref=r.to_ref AND n.rowid>r.rowid AND n.rowid<=?3)
-      ORDER BY r.rowid DESC LIMIT 51`,
-          [role, mapping.account_id, mapping.last_row],
-        )
+      ? await sql.all<Claim>(CARD_OWNERSHIP_CLAIMS_SQL, [
+          role,
+          mapping.account_id,
+          mapping.last_row,
+        ])
       : [];
     const evidenceRefs = mapping ? ownershipReviewEvidenceRefs(row.id, fact.ref, mapping.id) : [];
     const context = (scope: OwnershipDeclarationScope) =>

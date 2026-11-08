@@ -382,7 +382,7 @@ function Refusal({ error }: { error: ApiError }): ReactNode {
     );
   return (
     <EmptyState>
-      この依頼は見つかりません。別の操作者が受け付けた依頼や、運用APIを提供していない接続先でも、同じ表示になります。
+      この依頼は見つかりません。運用APIを提供していない接続先でも、同じ表示になります。
     </EmptyState>
   );
 }

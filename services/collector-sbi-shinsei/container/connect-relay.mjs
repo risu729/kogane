@@ -270,7 +270,7 @@ export function trackRelayClosure(
   };
 }
 
-export function parseConnectAuthority(authority) {
+function parseConnectAuthority(authority) {
   try {
     const target = new URL(`http://${authority}`);
     if (

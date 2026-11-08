@@ -124,7 +124,7 @@ export const OPERATION_CATALOGUE = {
     capability: "interpretation.accept",
     paths: OPS,
   },
-  // A principal's list of its own requests (ADR 0086): the list route and
+  // The whole-store list of requests (ADR 0086): the list route and
   // `kogane.ops.operation.list`, over one service.
   "ops.operation.list": {
     risk: ["R0"],
@@ -330,6 +330,62 @@ export const OPERATION_CATALOGUE = {
     effect: null,
     quiet: "read",
     capability: "records.read",
+    paths: AGENT,
+  },
+  "rewards.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  "reported-holdings-change.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  "events.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  "reports.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  "collection-quality.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "evidence.read",
+    paths: AGENT,
+  },
+  "evidence.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "evidence.read",
+    paths: AGENT,
+  },
+  "evidence.raw.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "evidence.read",
+    paths: AGENT,
+  },
+  "schedules.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "schedules.read",
     paths: AGENT,
   },
   "economic-readiness.read": {

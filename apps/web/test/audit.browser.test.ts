@@ -9,6 +9,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { auditView } from "./a11y-audit.ts";
 import { auditFixture, FILLER_READS, type AuditFixture } from "./audit-fixture.ts";
 
 const client = join(import.meta.dir, "../dist-production");
@@ -105,7 +106,8 @@ describe.if(runnable)("the operator's audit log page", () => {
         expect(reads).toHaveLength(1);
         expect([...reads[0]!.keys()]).toEqual([]);
         await page.getByText("1ページ目 · このページ50件", { exact: true }).waitFor();
-        await page.getByText("続きがあります", { exact: true }).waitFor();
+        // The pager's status speaks its label before the state.
+        await page.getByText("監査ログのページ：続きがあります", { exact: true }).waitFor();
         // Closed codes appear with their Japanese names; no total is ever shown.
         const text = (await page.locator("main").innerText()).replace(/\s+/gu, " ");
         for (const expected of [
@@ -153,7 +155,7 @@ describe.if(runnable)("the operator's audit log page", () => {
           .waitFor();
         expect(await rows(page).count()).toBe(FILLER_READS + 13 - 50);
         expect(reads.at(-1)!.get("cursor")).toMatch(/^[A-Za-z0-9_-]+$/u);
-        await page.getByText("最後のページです", { exact: true }).waitFor();
+        await page.getByText("監査ログのページ：最後のページです", { exact: true }).waitFor();
         expect(
           await page.getByRole("button", { name: "次のページ", exact: true }).isDisabled(),
         ).toBe(true);
@@ -315,6 +317,21 @@ describe.if(runnable)("the operator's audit log page", () => {
       expect(await rows(page).count()).toBe(0);
       await page.getByRole("button", { name: "最新の記録から読み直す" }).click();
       await page.getByText("1ページ目 · このページ50件", { exact: true }).waitFor();
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
+
+  test("the log and the non-operator notice pass the accessibility audit", async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    try {
+      await page.goto(`${origin}/audit`);
+      await rows(page).first().waitFor();
+      expect(await auditView(page)).toEqual([]);
+      operator = false;
+      await page.goto(`${origin}/audit`);
+      await page.getByText("監査ログは管理者だけが表示できます", { exact: true }).waitFor();
+      expect(await auditView(page)).toEqual([]);
     } finally {
       await page.close();
     }

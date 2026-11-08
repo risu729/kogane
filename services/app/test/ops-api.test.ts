@@ -29,7 +29,9 @@ import { seedRegistry } from "./fixtures";
 import { validOperationRecord } from "../../../packages/observation-shared/src/operation-contract";
 import { PURCHASES_TOOL_NAME } from "../src/agent-service";
 import { MCP_TOOLS, RECONSTRUCTED_STATE_MCP_TOOLS } from "../src/mcp";
-import { OPS_TOOL_NAMES } from "../src/ops-tools";
+import { OPS_MCP_TOOLS, OPS_TOOL_NAMES } from "../src/ops-tools";
+import { importSchema } from "../src/ops-api";
+import { CollectionKeyError, RUN_ID, terminalKey } from "../../../packages/collection/src/keys";
 import {
   claimCollectorStart,
   d1CommandStore,
@@ -347,7 +349,7 @@ describe("collection requests are accepted, not executed (G3-06, G3-14)", () => 
     expect(JSON.stringify(conflict.json)).not.toContain("2026-02-01");
   });
 
-  it("keeps one operation per principal: another subject's request is its own", async () => {
+  it("keeps one operation per principal, and either principal reads the other's (ADR 0086)", async () => {
     const mine = await ops("/collections", { ...COLLECTION, idempotencyKey: "shared-key" });
     const theirs = await call(`${OPS}/collections`, {
       body: { ...COLLECTION, idempotencyKey: "shared-key" },
@@ -356,10 +358,21 @@ describe("collection requests are accepted, not executed (G3-06, G3-14)", () => 
     });
     const other = (await theirs.json()) as Record<string, any>;
     expect(other.operationId).not.toBe(mine.json.operationId);
-    // And neither principal can read the other's operation.
+    // Reads are whole-store (owner, 2026-11-08 04:21 UTC): each principal
+    // reads the other's operation exactly as its own principal does.
     const read = await call(`${OPS}/operations/${other.operationId}`, { environment: ENABLED });
-    expect(read.status).toBe(404);
-    expect((await read.json()).error).toBe("receipt_not_found");
+    expect(read.status).toBe(200);
+    const byOwner = await call(`${OPS}/operations/${other.operationId}`, {
+      subject: SECOND_OPERATOR,
+      environment: ENABLED,
+    });
+    expect(await read.json()).toEqual(await byOwner.json());
+    const back = await call(`${OPS}/operations/${mine.json.operationId}`, {
+      subject: SECOND_OPERATOR,
+      environment: ENABLED,
+    });
+    expect(back.status).toBe(200);
+    expect((await back.json()).operationId).toBe(mine.json.operationId);
   });
 });
 
@@ -421,6 +434,73 @@ describe("the schema is the boundary (G3-08, G3-13)", () => {
     });
     expect(outcome.json).toMatchObject({ error: "target_missing", refs: ["parserRelease"] });
     expect(JSON.stringify(outcome.json)).not.toContain("never-registered");
+  });
+
+  // An import names a run by the segment its terminal key carries
+  // (`runs/<source>/<runId>/terminal.json`). A run id that grammar refuses can
+  // never register, so accepting it would answer 202 for work that cannot
+  // happen: it is refused here, with the same closed code as any other bad
+  // field, and nothing is stored.
+  it("refuses an import run id the bucket key grammar cannot address", async () => {
+    const imports = () =>
+      env.DB.prepare("SELECT count(*) AS n FROM ops_requests WHERE kind='import'").first<number>(
+        "n",
+      );
+    const before = await imports();
+    for (const runId of ["synthetic:run", "synthetic-run:2", "a/b", "run id", "-lead"]) {
+      const outcome = await ops("/imports", { source: "sony-bank", runId });
+      expect(outcome.status, runId).toBe(400);
+      expect(outcome.json, runId).toMatchObject({ error: "invalid_request", refs: ["runId"] });
+      expect(JSON.stringify(outcome.json)).not.toContain(runId);
+    }
+    expect(await imports()).toBe(before);
+  });
+
+  it("accepts exactly the run ids the terminal key accepts", () => {
+    const samples = [
+      "a",
+      "A",
+      "0",
+      "run-1",
+      "run.2026_01-a",
+      "synthetic:run",
+      "a:b",
+      "a/b",
+      ".",
+      "..",
+      ".hidden",
+      "-lead",
+      "_lead",
+      "run id",
+      "run\u0000",
+      "ラン",
+      "",
+      "a".repeat(128),
+      "a".repeat(129),
+      "a".repeat(200),
+      "a".repeat(201),
+    ];
+    for (const runId of samples) {
+      let keyAccepts = true;
+      try {
+        terminalKey("sony-bank", runId);
+      } catch (error) {
+        expect(error).toBeInstanceOf(CollectionKeyError);
+        keyAccepts = false;
+      }
+      expect(importSchema.safeParse({ source: "sony-bank", runId }).success, runId).toBe(
+        keyAccepts,
+      );
+    }
+  });
+
+  // The MCP tool publishes the same grammar it validates with, so a client
+  // that honours the listed pattern never sends a run id the App refuses.
+  it("publishes the terminal key's run grammar on the MCP import tool", () => {
+    const tool = OPS_MCP_TOOLS.find(({ name }) => name === "kogane.ops.import.request");
+    expect(tool?.inputSchema).toMatchObject({
+      properties: { runId: { type: "string", pattern: RUN_ID.source } },
+    });
   });
 
   it("refuses a body larger than the bound before it reaches a schema", async () => {
@@ -839,7 +919,7 @@ describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)
     expect((await overHttp.json()).error).toBe("grants_misconfigured");
   });
 
-  it("never shows the operator's browser receipt to its MCP principal", async () => {
+  it("shows the operator's browser receipt to its MCP principal as the route does (ADR 0086)", async () => {
     const accepted = await ops("/imports", {
       source: "sony-bank",
       runId: "run-read-through-http",
@@ -861,15 +941,15 @@ describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)
         THROUGH_MCP,
       );
     const read = await get(accepted.json.operationId);
+    expect(read.result.isError).not.toBe(true);
+    expect(read.result.structuredContent).toEqual(receipt);
     const missing = await get(`op_${"0".repeat(64)}`);
-    expect(read.result.isError).toBe(true);
-    expect(read.result.structuredContent).toEqual(missing.result.structuredContent);
-    expect(read.result.structuredContent).not.toEqual(receipt);
+    expect(missing.result.isError).toBe(true);
   });
 });
 
-describe("the operator lists its own operations (ADR 0086)", () => {
-  /** Operators of their own, so no other test's requests reach these lists. */
+describe("the operator lists every principal's operations (ADR 0086)", () => {
+  /** Two operators, so the list is shown to be no one principal's. */
   const LISTER = "ops-list-operator";
   const LISTER_PEER = "ops-list-peer";
   const LISTING = {
@@ -905,21 +985,29 @@ describe("the operator lists its own operations (ADR 0086)", () => {
   const idsOf = (page: Record<string, any>): string[] =>
     page["operations"].map((entry: { operationId: string }) => entry.operationId);
 
-  it("answers the caller's own requests newest first, as summaries without payload text", async () => {
-    const ids = await seed();
-    const own = await list();
-    expect(own.status).toBe(200);
-    expect(own.json["schemaVersion"]).toBe("kogane-operation-list-v1");
-    expect(own.json["nextCursor"]).toBeNull();
-    const stored = (
+  /** Every stored request of the shape, of every principal, in the list's order. */
+  async function storedIds(where = "1", ...binds: unknown[]): Promise<string[]> {
+    return (
       await env.DB.prepare(
-        "SELECT operation_id FROM ops_requests WHERE principal=? ORDER BY created_at DESC,operation_id DESC",
+        `SELECT operation_id FROM ops_requests WHERE ${where} ORDER BY created_at DESC,operation_id DESC`,
       )
-        .bind(LISTER)
+        .bind(...binds)
         .all<{ operation_id: string }>()
     ).results.map((entry) => entry.operation_id);
-    expect(idsOf(own.json)).toEqual(stored);
-    expect(new Set(stored)).toEqual(new Set([ids.collection, ids.imported, ids.projection]));
+  }
+
+  it("answers every principal's requests newest first, as summaries without payload text", async () => {
+    const ids = await seed();
+    const own = await list("?limit=50");
+    expect(own.status).toBe(200);
+    expect(own.json["schemaVersion"]).toBe("kogane-operation-list-v1");
+    const stored = await storedIds();
+    expect(idsOf(own.json)).toEqual(stored.slice(0, 50));
+    expect(own.json["nextCursor"]).toBe(stored.length > 50 ? stored[49] : null);
+    // The peer's request is listed with the caller's: reads are whole-store
+    // (owner, 2026-11-08 04:21 UTC).
+    for (const id of [ids.collection, ids.imported, ids.projection, ids.peer])
+      expect(idsOf(own.json)).toContain(id);
     const projection = own.json["operations"].find(
       (entry: { operationId: string }) => entry.operationId === ids.projection,
     );
@@ -936,33 +1024,30 @@ describe("the operator lists its own operations (ADR 0086)", () => {
     expect(projection).toMatchObject({ kind: "projection", status: "accepted", source: null });
     // The stored request is not read: a rebuild's reason is the operator's text.
     expect(JSON.stringify(own.json)).not.toContain(REASON);
-    // The peer holds its own list, and neither sees the other's request.
-    expect(idsOf((await list("", LISTER_PEER)).json)).toEqual([ids.peer]);
+    // The peer is shown the same page.
+    expect((await list("?limit=50", LISTER_PEER)).json).toEqual(own.json);
   });
 
   it("pages by cursor and filters by kind and status, each a closed value", async () => {
     await seed();
-    const all = idsOf((await list()).json);
-    expect(all).toHaveLength(3);
+    const all = await storedIds();
+    expect(all.length).toBeGreaterThanOrEqual(4);
     const first = await list("?limit=2");
     expect(idsOf(first.json)).toEqual(all.slice(0, 2));
     expect(first.json["nextCursor"]).toBe(all[1]);
-    const second = await list(`?limit=2&cursor=${first.json["nextCursor"]}`);
-    expect(idsOf(second.json)).toEqual(all.slice(2));
-    expect(second.json["nextCursor"]).toBeNull();
-    const imports = await list("?kind=import");
-    expect(imports.json["operations"].map((entry: { kind: string }) => entry.kind)).toEqual([
-      "import",
-    ]);
-    const projections = await list("?status=accepted&kind=projection");
-    expect(projections.json["operations"].map((entry: { kind: string }) => entry.kind)).toEqual([
-      "projection",
-    ]);
-    expect((await list("?status=completed")).json).toEqual({
-      schemaVersion: "kogane-operation-list-v1",
-      operations: [],
-      nextCursor: null,
-    });
+    // The next page is the same whichever operator asks for it.
+    const second = await list(`?limit=2&cursor=${first.json["nextCursor"]}`, LISTER_PEER);
+    expect(idsOf(second.json)).toEqual(all.slice(2, 4));
+    expect(second.json["nextCursor"]).toBe(all.length > 4 ? all[3] : null);
+    const imports = await list("?kind=import&limit=50");
+    expect(idsOf(imports.json)).toEqual((await storedIds("kind='import'")).slice(0, 50));
+    expect(idsOf(imports.json).length).toBeGreaterThan(0);
+    const projections = await list("?status=accepted&kind=projection&limit=50");
+    expect(idsOf(projections.json)).toEqual(
+      (await storedIds("status='accepted' AND kind='projection'")).slice(0, 50),
+    );
+    const completed = await list("?status=completed&limit=50");
+    expect(idsOf(completed.json)).toEqual((await storedIds("status='completed'")).slice(0, 50));
   });
 
   it("refuses a query outside its closed keys and values, naming the key and never the value", async () => {
@@ -984,16 +1069,15 @@ describe("the operator lists its own operations (ADR 0086)", () => {
       expect(refused.json["refs"], query).toEqual(refs);
       expect(JSON.stringify(refused.json), query).not.toMatch(/purge|DROP|done|not-an-operation/u);
     }
-    // A cursor of another principal answers like one that does not exist.
+    // A cursor of another principal pages on; one of no operation is refused.
     const peer = await request("/projections", { reason: REASON }, LISTER_PEER);
-    for (const cursor of [peer, `op_${"0".repeat(64)}`]) {
-      const refused = await list(`?cursor=${cursor}`);
-      expect(refused.status).toBe(404);
-      expect(refused.json).toMatchObject({ error: "receipt_not_found", refs: ["cursor"] });
-    }
+    expect((await list(`?cursor=${peer}`)).status).toBe(200);
+    const refused = await list(`?cursor=op_${"0".repeat(64)}`);
+    expect(refused.status).toBe(404);
+    expect(refused.json).toMatchObject({ error: "receipt_not_found", refs: ["cursor"] });
   });
 
-  it("is the operator's alone, and absent while the flag is off", async () => {
+  it("refuses an agent and a stranger on the route, and is absent while the flag is off", async () => {
     const agent = await list("", AGENT, { AGENT_GRANTS: JSON.stringify([AGENT]) });
     expect(agent.status).toBe(403);
     expect(agent.json["error"]).toBe("approval_required");
@@ -1033,7 +1117,7 @@ describe("the operator lists its own operations (ADR 0086)", () => {
     });
   });
 
-  it("reads ops_requests through an index of 0040 without table statistics", async () => {
+  it("reads ops_requests through ops_requests_open without table statistics", async () => {
     expect(
       await env.DB.prepare(
         "SELECT count(*) AS n FROM sqlite_master WHERE name='sqlite_stat1'",
@@ -1048,24 +1132,21 @@ describe("the operator lists its own operations (ADR 0086)", () => {
     for (const shape of shapes)
       for (const after of [false, true]) {
         const arms = operationListArms(shape);
-        const binds: unknown[] = [LISTER, 21];
-        for (const [status, kind] of arms ?? []) binds.push(status, kind);
+        const binds: unknown[] = [21];
+        for (const [status, kind] of arms) binds.push(status, kind);
         if (after) binds.push("2026-09-11T00:00:00Z", `op_${"0".repeat(64)}`);
         const plan = (
-          await env.DB.prepare(
-            `EXPLAIN QUERY PLAN ${operationListSql(arms?.length ?? null, after)}`,
-          )
+          await env.DB.prepare(`EXPLAIN QUERY PLAN ${operationListSql(arms.length, after)}`)
             .bind(...binds)
             .all<{ detail: string }>()
         ).results.map((entry) => entry.detail);
         const reads = plan.filter((line) => /\bops_requests\b/u.test(line));
-        expect(reads).toHaveLength(arms?.length ?? 1);
+        // No filter is all thirty (status, kind) pairs: D1 accepts the nested compound.
+        expect(reads).toHaveLength(arms.length);
         const range = after ? " AND created_at<?)" : ")";
         for (const line of reads)
           expect(line).toBe(
-            arms === null
-              ? `SEARCH ops_requests USING INDEX ops_requests_principal (principal=?${range}`
-              : `SEARCH ops_requests USING INDEX ops_requests_open (status=? AND kind=?${range}`,
+            `SEARCH ops_requests USING INDEX ops_requests_open (status=? AND kind=?${range}`,
           );
       }
   });

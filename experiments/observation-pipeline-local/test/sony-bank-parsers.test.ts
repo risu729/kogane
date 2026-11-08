@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import {
@@ -16,11 +15,11 @@ import {
   insertFetchRun,
   insertObservation,
   insertParseRun,
-  openStore,
   publishParseRun,
   putRawObject,
   upsertSource,
 } from "../src/store.ts";
+import { freshTestStore } from "./test-store.ts";
 
 const FIXTURES = join(
   import.meta.dir,
@@ -336,7 +335,7 @@ describe("Sony Bank fail-closed boundaries", () => {
 
 describe("Sony Bank current source views", () => {
   test("prefers official CSV over the overlapping provider JSON transactions", () => {
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-sony-current-")));
+    const store = freshTestStore("kogane-sony-current-");
     upsertSource(store, { id: "sony-bank", provider: "Sony Bank", ingestion: "collector-r2" });
     const fetchRunId = insertFetchRun(store, {
       sourceId: "sony-bank",
@@ -389,7 +388,7 @@ describe("Sony Bank current source views", () => {
   });
 
   test("keeps a reused WALLET approval number distinct across statement months", () => {
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-sony-wallet-identity-")));
+    const store = freshTestStore("kogane-sony-wallet-identity-");
     upsertSource(store, { id: "sony-bank", provider: "Sony Bank", ingestion: "collector-r2" });
     const september = bytes("wallet-history-2026-09.html");
     const august = walletBytes(

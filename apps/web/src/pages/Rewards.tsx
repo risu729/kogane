@@ -174,7 +174,8 @@ function Codes({ codes }: { codes: string[] }): ReactNode {
 }
 
 function Holding({ holding }: { holding: RewardHoldingRow }): ReactNode {
-  const caption = "保有内訳";
+  // Named by its holding: a page lists several, and each region is a landmark.
+  const caption = `${holding.programRef}（${holding.holdingRef}）の保有内訳`;
   return (
     <Panel
       id={domId("reward-holding", holding.programId, holding.holdingRef)}
@@ -274,7 +275,8 @@ function Holding({ holding }: { holding: RewardHoldingRow }): ReactNode {
 }
 
 function Expiry({ row }: { row: RewardExpiryRow }): ReactNode {
-  const caption = "期限の内訳";
+  // One table per holding and rule; the rule alone can repeat across holdings.
+  const caption = `${row.holdingRef} ／ ${row.ruleRef} の期限の内訳`;
   return (
     <Panel
       id={domId("reward-expiry", row.holdingRef, row.ruleRef)}

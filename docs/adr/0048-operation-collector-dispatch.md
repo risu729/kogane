@@ -270,8 +270,10 @@ lists operations (the list route of
 where an operation id is found on screen. Like the
 audit page, it reads no capability and is drawn outside the metadata
 boundary; the route's operator check is the only gate (`403` reads as
-operator-only, `404` as not found, which also covers another principal's
-operation and a deployment without the API). Option 2 is not taken: requesting
+operator-only, `404` as not found, which also covers a deployment without
+the API). Since [ADR 0086](0086-operator-operations-list.md) (owner,
+2026-11-08 04:21 UTC) the read is whole-store, so the page shows an operation
+whichever principal requested it, an MCP client's included. Option 2 is not taken: requesting
 a provider contact from the browser is a product change the owner has not
 made, and the footer's statement stays true.
 
@@ -294,27 +296,26 @@ log.
 The page makes this read a screen read, so
 [ADR 0081](0081-ui-parity-through-mcp.md) requires it over MCP too. What main
 does today (after #1027 and #1034): `kogane.ops.operation.get` is published
-to every MCP client Access verifies, which reads as its own principal
+to every MCP client Access verifies, which acts as its own principal
 `mcp-client:<sub>` ([ADR 0084](0084-mcp-operator-authority-without-delegation.md);
 `delegatedOpsTools` and `callDelegatedOpsTool` in
 `services/app/src/ops-tools.ts`). The trail itself is one function: the HTTP
 route and the tool both call `opsServices.operation`, which calls
 `readOperation` in `packages/application` and returns the same record this
-page validates. The tool's lookup of its own request is `ownOperationSource`
-in `packages/application` (#1027), so the tool issues no SQL of its own. One
-limit remains, so the page is not parity-complete:
+page validates. The tool's lookup of the request's source is
+`operationSource` in `packages/application` (#1027, renamed by ADR 0086), so
+the tool issues no SQL of its own.
 
-- **Different operations are readable.** `readOperation` reads only an
-  operation the same principal requested. The browser reads as the operator
-  `<sub>`; the tool reads as `mcp-client:<sub>`, never as the operator. An
-  operation requested from the UI or the HTTP routes is therefore not
-  readable over MCP, and one requested over MCP is not shown on this page.
-
-So the read-route guard (`services/app/test/ui-mcp-parity.test.ts`) lists
-`/api/ops/v1/operations/:id` as a known gap rather than mapping it to the
-tool. A new gap entry is a regression of ADR 0081 point 4 and needs the
-owner's agreement. Closing it needs a decision on which operations an MCP
-client may read beyond its own, which this amendment does not make.
+An earlier draft of this amendment listed one limit: `readOperation` read
+only an operation the same principal requested, so a request made over MCP
+was not shown on this page and the tool could not read one the operator
+made, and the read-route guard listed `/api/ops/v1/operations/:id` as a
+known gap. The owner decided on 2026-11-08 04:21 UTC that operations-request
+reads are whole-store, like every other read since ADR 0084
+([ADR 0086](0086-operator-operations-list.md)). The page and the tool now
+read the same record for any operation, and the read-route guard
+(`services/app/test/ui-mcp-parity.test.ts`) maps the route to
+`kogane.ops.operation.get` with no gap entry.
 
 **Verification.** `packages/observation-shared/test/operation-contract.test.ts`
 (the validator); `packages/application/test/operation-record-contract.test.ts`
@@ -326,5 +327,7 @@ the full trail, from acceptance to publication, failure and expiry, passes it);
 `apps/web/test/operation.browser.test.ts` (the page on desktop and phone
 widths, one read per opening, an explicit re-read, refusals and a malformed
 record) and `apps/web/test/audit.browser.test.ts` (the audit link opens the
-page); `services/app/test/ui-mcp-parity.test.ts` (the page's route is a
-listed gap of the read-route guard).
+page); `services/app/test/ui-mcp-parity.test.ts` (the page's route is mapped
+to `kogane.ops.operation.get`); `services/app/test/delegated-ops-parity.test.ts`
+(the tool and the route answer the same receipt for the operator's request and
+for the MCP client's).

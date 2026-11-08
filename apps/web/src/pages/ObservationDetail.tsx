@@ -184,7 +184,7 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
         </Panel>
       ) : null}
       <Panel id="stored-row" title="記録の内容">
-        <div className="table-scroll" role="region" aria-label="記録の内容" tabIndex={0}>
+        <div className="table-scroll" role="region" aria-label="記録の内容の表" tabIndex={0}>
           <table className="stored-row-table">
             <caption>保存された列と値をそのまま並べています。</caption>
             <thead>

@@ -4,7 +4,8 @@
 // Access check and before the Worker's GET-only boundary, so its five POST
 // paths are the third — and last — explicitly enumerated non-GET surface of
 // this Worker. Everything outside them still answers 405. Its two GET paths
-// read one operation and list the caller's own (ADR 0086).
+// read one operation and list them all, whichever principal requested them
+// (ADR 0086; reads are whole-store, owner 2026-11-08 04:21 UTC).
 //
 // What this module is allowed to be: a transport. It parses a bounded JSON
 // body with a closed Zod schema, hands the validated request to the
@@ -55,6 +56,7 @@ import {
   type OperationCall,
   type OperationName,
 } from "../../../packages/application/src/index";
+import { RUN_ID as TERMINAL_RUN_ID } from "../../../packages/collection/src/keys";
 import { auditContext, auditedRoute } from "./audit";
 import { principalFor } from "./grants";
 import { boundedText, HttpError, json } from "./http";
@@ -77,12 +79,27 @@ export function isOpsPath(path: string): boolean {
   return path === OPS_PREFIX || path.startsWith(`${OPS_PREFIX}/`);
 }
 
-/** Route label for the request log; identifiers never reach it. */
+/** The first path segments this prefix serves: the six routes, health and schedules. */
+const OPS_ROUTE_HEADS: readonly string[] = [
+  "collections",
+  "imports",
+  "replays",
+  "projections",
+  "sessions",
+  "operations",
+  "health",
+  "schedules",
+];
+
+/**
+ * Route label for the request log: a closed code. Neither identifiers nor any
+ * other path text the caller sent reach it; an unserved segment is `unknown`.
+ */
 export function classifyOpsPath(path: string): string | null {
   if (!isOpsPath(path)) return null;
   const rest = path.slice(OPS_PREFIX.length).replace(/^\//u, "");
   const head = rest.split("/")[0] ?? "";
-  return `ops_${/^[a-z]{1,32}$/u.test(head) ? head : "unknown"}`;
+  return `ops_${OPS_ROUTE_HEADS.includes(head) ? head : "unknown"}`;
 }
 
 // ── request schemas ─────────────────────────────────────────────────────
@@ -106,8 +123,14 @@ const IDEMPOTENCY_KEY = z
   .string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u)
   .optional();
-/** A run as the terminal contract names it: one path segment, never a key. */
-const RUN_ID = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
+/**
+ * A run as the terminal contract names it: one path segment, never a key.
+ * The grammar is the bucket key's own (`RUN_ID` in `packages/collection`), not
+ * a copy of it: an import names the run whose terminal is
+ * `runs/<source>/<runId>/terminal.json`, so a run id that key refuses could
+ * never register and is refused here, at acceptance, rather than answered 202.
+ */
+const RUN_ID = z.string().regex(TERMINAL_RUN_ID);
 /** A registered parser release id (0028), never a version string a caller invents. */
 const PARSER_RELEASE = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$/u);
 
@@ -131,13 +154,15 @@ export const replaySchema = z.strictObject({
   idempotencyKey: IDEMPOTENCY_KEY,
 });
 export const projectionSchema = z.strictObject({
-  // Why a rebuild was asked for. Bounded, single-line, no control characters;
+  // Why a rebuild was asked for. Bounded, single-line, no control characters
+  // (Unicode category Cc, spelled as ranges: the published JSON Schema
+  // `pattern` must not use `\p{…}`, which ChatGPT's validator refuses);
   // it is stored with the request and never interpolated anywhere.
   reason: z
     .string()
     .min(1)
     .max(500)
-    .regex(/^[^\p{Cc}]+$/u),
+    .regex(/^[^\u0000-\u001f\u007f-\u009f]+$/u),
   idempotencyKey: IDEMPOTENCY_KEY,
 });
 export const sessionRefreshSchema = z.strictObject({
@@ -319,16 +344,15 @@ export const opsServices = {
   },
   async operation(context: OpsContext, operationId: string) {
     const outcome = await readOperation({ ...context, operationId });
-    // An operation another principal accepted answers exactly like one that
-    // does not exist: the API never confirms that an id it cannot show exists.
+    // Whole-store (ADR 0086): any principal's operation is read; only an id
+    // that does not exist is `receipt_not_found`.
     if (!outcome.ok)
       throw new HttpError(statusForCommandError(outcome.error), outcome.error, outcome.refs ?? []);
     return { status: 200, body: outcome.receipt };
   },
   async list(context: OpsContext, query: OperationListQuery) {
     const outcome = await listOperations({ ...context, query });
-    // A cursor naming no operation of this principal is `receipt_not_found`,
-    // like one that does not exist.
+    // A cursor naming no operation is `receipt_not_found`.
     if (!outcome.ok)
       throw new HttpError(statusForCommandError(outcome.error), outcome.error, outcome.refs ?? []);
     return { status: 200, body: outcome.page };

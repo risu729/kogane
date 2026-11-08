@@ -1,17 +1,19 @@
-// The operator's list of its own operations requests (ADR 0086), against the
-// real CORE migrations on `bun:sqlite`. Synthetic only: the rows are made-up
+// The whole-store list of operations requests (ADR 0086), against the real
+// CORE migrations on `bun:sqlite`. Synthetic only: the rows are made-up
 // operation ids, principals and timestamps, with no source, payload text,
 // amount or provider value.
 //
 // Three properties are pinned here:
-//   * paging every filter shape to its end returns exactly the principal's
-//     rows of that shape, newest first by (created_at, operation_id), each
-//     once — checked against a plain in-memory reference on a random store
-//     with many timestamp ties and a second principal;
-//   * a cursor of another principal, or of no operation, is
-//     `receipt_not_found`, the answer of one that does not exist;
-//   * without table statistics, every shape reads `ops_requests` through an
-//     index of migration 0040 (no table scan), each arm limited to the page.
+//   * paging every filter shape to its end returns exactly the store's rows of
+//     that shape, of every principal, newest first by (created_at,
+//     operation_id), each once, and the same pages whichever principal asks:
+//     checked against a plain in-memory reference on a random store with many
+//     timestamp ties and two principals;
+//   * a cursor of another principal's operation pages on; one of no operation
+//     is `receipt_not_found`;
+//   * without table statistics, every shape reads `ops_requests` through
+//     `ops_requests_open` of migration 0040 (no table scan), each arm limited
+//     to the page.
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import type { Principal } from "../src/command/contract.ts";
@@ -37,7 +39,7 @@ const OPERATOR: Principal = {
   verification: "server",
   capabilities: ["interpretation.propose", "interpretation.accept"],
 };
-const OTHER = "list-other-operator";
+const OTHER: Principal = { ...OPERATOR, id: "mcp-client:list-other" };
 
 interface Row {
   operationId: string;
@@ -88,7 +90,7 @@ function randomStore(seed: number, size: number): { db: Database; rows: Row[] } 
     ids.add(id);
     const row: Row = {
       operationId: `op_${hex64(id)}`,
-      principal: random() < 0.75 ? OPERATOR.id : OTHER,
+      principal: random() < 0.75 ? OPERATOR.id : OTHER.id,
       kind: pick(OPERATION_KINDS),
       status: pick(OPERATION_STATUSES),
       createdAt: `2026-09-${String(10 + Math.floor(random() * 3)).padStart(2, "0")}T00:00:0${Math.floor(random() * 4)}Z`,
@@ -103,7 +105,6 @@ function expected(rows: readonly Row[], query: Pick<OperationListQuery, "kind" |
   return rows
     .filter(
       (row) =>
-        row.principal === OPERATOR.id &&
         (query.kind === null || row.kind === query.kind) &&
         (query.status === null || row.status === query.status),
     )
@@ -118,17 +119,14 @@ function expected(rows: readonly Row[], query: Pick<OperationListQuery, "kind" |
 async function pageThrough(
   db: Database,
   query: Omit<OperationListQuery, "cursor">,
+  principal: Principal = OPERATOR,
 ): Promise<{ ids: string[]; pages: number }> {
   const store = sqliteCommandStore(db);
   const ids: string[] = [];
   let cursor: string | null = null;
   let pages = 0;
   for (;;) {
-    const outcome = await listOperations({
-      store,
-      principal: OPERATOR,
-      query: { ...query, cursor },
-    });
+    const outcome = await listOperations({ store, principal, query: { ...query, cursor } });
     if (!outcome.ok) throw new Error(outcome.error);
     pages++;
     expect(outcome.page.operations.length).toBeLessThanOrEqual(query.limit);
@@ -148,13 +146,17 @@ const SHAPES: Pick<OperationListQuery, "kind" | "status">[] = [
 ];
 
 describe("listOperations", () => {
-  test("pages every filter shape to exactly the principal's rows, newest first, each once", async () => {
+  test("pages every filter shape to exactly the store's rows of every principal, newest first, each once", async () => {
     for (const seed of [1, 2, 3]) {
       const { db, rows } = randomStore(seed, 160);
+      // Both principals hold rows, so the list is not one principal's.
+      expect(new Set(rows.map((row) => row.principal))).toEqual(new Set([OPERATOR.id, OTHER.id]));
       for (const shape of SHAPES)
         for (const limit of [1, 7, 50]) {
           const { ids } = await pageThrough(db, { ...shape, limit });
           expect(ids).toEqual(expected(rows, shape));
+          // Whoever asks is shown the same pages (owner, 2026-11-08 04:21 UTC).
+          expect((await pageThrough(db, { ...shape, limit }, OTHER)).ids).toEqual(ids);
         }
       db.close();
     }
@@ -216,31 +218,49 @@ describe("listOperations", () => {
     db.close();
   });
 
-  test("a cursor of another principal answers like one that does not exist", async () => {
+  test("a cursor of another principal pages on; one of no operation is receipt_not_found", async () => {
     const db = migratedDatabase();
     const foreign = `op_${hex64(5)}`;
+    const older = `op_${hex64(4)}`;
     insert(db, {
       operationId: foreign,
-      principal: OTHER,
+      principal: OTHER.id,
       kind: "collection",
       status: "accepted",
       createdAt: "2026-09-11T00:00:00Z",
     });
+    insert(db, {
+      operationId: older,
+      principal: OPERATOR.id,
+      kind: "projection",
+      status: "completed",
+      createdAt: "2026-09-10T00:00:00Z",
+    });
     const store = sqliteCommandStore(db);
-    for (const cursor of [foreign, `op_${hex64(6)}`])
-      expect(
-        await listOperations({
-          store,
-          principal: OPERATOR,
-          query: { kind: null, status: null, cursor, limit: 20 },
-        }),
-      ).toEqual({ ok: false, error: "receipt_not_found", refs: ["cursor"] });
+    const page = (cursor: string | null) =>
+      listOperations({
+        store,
+        principal: OPERATOR,
+        query: { kind: null, status: null, cursor, limit: 1 },
+      });
+    const first = await page(null);
+    if (!first.ok) throw new Error(first.error);
+    expect(first.page.operations.map((row) => row.operationId)).toEqual([foreign]);
+    expect(first.page.nextCursor).toBe(foreign);
+    const second = await page(foreign);
+    if (!second.ok) throw new Error(second.error);
+    expect(second.page).toMatchObject({ operations: [{ operationId: older }], nextCursor: null });
+    expect(await page(`op_${hex64(6)}`)).toEqual({
+      ok: false,
+      error: "receipt_not_found",
+      refs: ["cursor"],
+    });
     db.close();
   });
 });
 
 describe("the list's query plans, without table statistics", () => {
-  test("every shape reads ops_requests through an index of 0040, one arm per pair", () => {
+  test("every shape reads ops_requests through ops_requests_open, one arm per pair", () => {
     const db = migratedDatabase();
     expect(
       db.query("SELECT count(*) AS n FROM sqlite_master WHERE name='sqlite_stat1'").get(),
@@ -248,27 +268,28 @@ describe("the list's query plans, without table statistics", () => {
     for (const shape of SHAPES)
       for (const after of [false, true]) {
         const arms = operationListArms(shape);
-        const binds: unknown[] = ["p", 21];
-        for (const [status, kind] of arms ?? []) binds.push(status, kind);
+        expect(arms.length).toBe(
+          (shape.kind === null ? OPERATION_KINDS.length : 1) *
+            (shape.status === null ? OPERATION_STATUSES.length : 1),
+        );
+        const binds: unknown[] = [21];
+        for (const [status, kind] of arms) binds.push(status, kind);
         if (after) binds.push("2026-09-11T00:00:00Z", `op_${hex64(1)}`);
         const plan = (
           db
-            .query(`EXPLAIN QUERY PLAN ${operationListSql(arms?.length ?? null, after)}`)
+            .query(`EXPLAIN QUERY PLAN ${operationListSql(arms.length, after)}`)
             .all(...(binds as never[])) as { detail: string }[]
         ).map((row) => row.detail);
         const reads = plan.filter((line) => /\bops_requests\b/u.test(line));
-        expect(reads.length).toBe(arms?.length ?? 1);
+        expect(reads.length).toBe(arms.length);
         const range = after ? " AND created_at<?" : "";
         for (const line of reads)
           expect(line).toBe(
-            arms === null
-              ? `SEARCH ops_requests USING INDEX ops_requests_principal (principal=?${range})`
-              : `SEARCH ops_requests USING INDEX ops_requests_open (status=? AND kind=?${range})`,
+            `SEARCH ops_requests USING INDEX ops_requests_open (status=? AND kind=?${range})`,
           );
         // Only ties on the last order key are sorted where the index is read;
         // the merge sorts arms that are each limited to the page.
         expect(plan.join("\n")).not.toMatch(/^SCAN ops_requests/mu);
-        if (arms === null) expect(plan.join("\n")).not.toContain("TEMP B-TREE FOR ORDER BY");
       }
     db.close();
   });

@@ -129,7 +129,7 @@ export function economicClaimWrite(entry: EconomicEntry, claim: EconomicClaimRec
 }
 
 /** One `economic_event_times` row. */
-export function eventTimeWrite(entry: EconomicEntry, time: EventTimeRecord): SqlWrite {
+function eventTimeWrite(entry: EconomicEntry, time: EventTimeRecord): SqlWrite {
   if (!validEventTimeRecord(time)) throw new RangeError("event time is not the contract");
   return {
     sql: `INSERT INTO economic_event_times(event_id,revision,role,temporal_json)
@@ -149,7 +149,7 @@ export function eventTimeWrite(entry: EconomicEntry, time: EventTimeRecord): Sql
 }
 
 /** One `economic_leg_effects` row. */
-export function legEffectWrite(entry: EconomicEntry, effect: LegEffectRecord): SqlWrite {
+function legEffectWrite(entry: EconomicEntry, effect: LegEffectRecord): SqlWrite {
   if (!validLegEffectRecord(effect)) throw new RangeError("leg effect is not the contract");
   return {
     sql: `INSERT INTO economic_leg_effects(event_id,revision,leg_index,effect,of_leg_index)
@@ -239,7 +239,7 @@ export interface CommitInput {
 }
 
 /** The `economic_commit_log` row: statement N of N. */
-export function commitLogWrite(entry: EconomicEntry, commit: CommitInput): SqlWrite {
+function commitLogWrite(entry: EconomicEntry, commit: CommitInput): SqlWrite {
   checkCommit(commit);
   return {
     sql: `INSERT INTO economic_commit_log(core_epoch,commit_seq,decision_revision_id,operation_id,principal,payload_digest,kind,members_json,claims_json,released_json,known_at)

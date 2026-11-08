@@ -5,17 +5,6 @@ import type { ApiCapabilities } from "./api-schema.ts";
 export type { ApiCapabilities } from "./api-schema.ts";
 export type ObservationKind = "transaction" | "balance" | "position" | "valuation";
 
-/** Production list responses add this coverage record; local fixture APIs may omit it. */
-export interface ApiCoverage {
-  limit: number;
-  truncated: boolean;
-  /** Artifact pages use a descending, immutable artifact-id cursor. */
-  nextCursor?: string | null;
-  /** Derived observation pages use deterministic ordering; reset on scope changes. */
-  nextOffset?: number | null;
-  latestNextOffset?: number | null;
-}
-
 export interface FilterOptions {
   sources: string[];
   accounts: {
@@ -29,7 +18,7 @@ export interface FilterOptions {
 }
 
 /** Connection names the UI has labels for. Any other name is shown generically. */
-export type SourceKind = "local-store" | "central-store";
+type SourceKind = "local-store" | "central-store";
 
 /**
  * A GLOBAL PASS month whose current activity snapshot is an `ok` parse with no
