@@ -9,19 +9,19 @@ Research date: 2026-08-26
 
 ## Conclusion
 
-Kogane uses the bank’s own website and official Android app as data sources without an aggregator. The most realistic first implementation is **operating the official website with Playwright to retrieve balance pages and official CSVs**. Among public third-party implementations, [`hirano00o/acctf`](https://github.com/hirano00o/acctf/tree/b79008d1b4ceed8eece5a24f61481a2e72216998/acctf/bank/sbi)
+Kogane uses the bank's own website and official Android app as data sources without an aggregator. The most realistic first implementation is **operating the official website with Playwright to retrieve balance pages and official CSVs**. Among public third-party implementations, [`hirano00o/acctf`](https://github.com/hirano00o/acctf/tree/b79008d1b4ceed8eece5a24f61481a2e72216998/acctf/bank/sbi)
 is closest to current screens and retrieves primary-account, purpose-specific-account, and SBIハイブリッド預金 (SBI Hybrid Deposit) balances and history through Playwright. However, it deletes official CSVs after retrieval, so Kogane must not adopt it unchanged. Kogane retains CSVs and responses as raw evidence.
 
 Initial assessment:
 
-| Target                                                         | Cost (1-5) | Automation feasibility | Main reason                                                                                  |
-| -------------------------------------------------------------- | ---------: | ---------------------- | -------------------------------------------------------------------------------------------- |
-| Current primary/purpose-specific/hybrid/yen-foreign balances   |          2 | High after login       | Existing single-page DOM implementation                                                      |
-| Ordinary/SBI Hybrid deposit statements                         |          3 | High after login       | Official CSV since January 1 seven years ago, 999 per retrieval; repeat per account/currency |
-| Yen/foreign time/structured deposits contract/history          |          4 | Medium                 | Product-specific screens/retention; yen-foreign time history 15 months                       |
-| スマプロポイント (Smart Program Points) / dポイント (d POINTs) |          4 | Medium                 | Split bank/d POINT CLUB information/retention/granularity                                    |
-| Recurring runs with human input                                |          3 | Medium-high            | Easier stability with manual スマート認証NEO (Smart Authentication NEO) approval             |
-| Fully unattended cloud                                         |          5 | Low-medium             | Binding/FIDO/approval/lifetimes/Akamai unverified                                            |
+| Target                                                        | Cost (1-5) | Automation feasibility | Main reason                                                                                  |
+| ------------------------------------------------------------- | ---------: | ---------------------- | -------------------------------------------------------------------------------------------- |
+| Current primary/purpose-specific/hybrid/yen-foreign balances  |          2 | High after login       | Existing single-page DOM implementation                                                      |
+| Ordinary/SBI Hybrid deposit statements                        |          3 | High after login       | Official CSV since January 1 seven years ago, 999 per retrieval; repeat per account/currency |
+| Yen/foreign time/structured deposits contract/history         |          4 | Medium                 | Product-specific screens/retention; yen-foreign time history 15 months                       |
+| スマプロポイント (Smart Program Points) / dポイント (d POINT) |          4 | Medium                 | Split bank/d POINT CLUB information/retention/granularity                                    |
+| Recurring runs with human input                               |          3 | Medium-high            | Easier stability with manual スマート認証NEO (Smart Authentication NEO) approval             |
+| Fully unattended cloud                                        |          5 | Low-medium             | Binding/FIDO/approval/lifetimes/Akamai unverified                                            |
 
 Implementation looks feasible, but **safe session reuse is the main risk, rather than balance/history retrieval**.
 Do not target direct internal APIs/fully unattended cloud first.
@@ -43,7 +43,7 @@ No personal values copied here.
 ## Current name
 
 On August 3, 2026, the company name changed to **株式会社ドコモSMTBネット銀行 (DOCOMO SMTB Net Bank, Inc.)**.
-The personal-service brand is **ドコモの銀行 (DOCOMO’s bank)**. Sumishin SBI Net Bank is the former company name; old screen and app labels may remain during the transition.
+The personal-service brand is **ドコモの銀行 (DOCOMO's bank)**. Sumishin SBI Net Bank is the former company name; old screen and app labels may remain during the transition.
 
 Evidence:
 
@@ -51,7 +51,7 @@ Evidence:
 - [Company profile](https://tneobank.netbk.co.jp/contents/company/about/organization/)
 - [New service brand announcement](https://www.netbk.co.jp/contents/company/press/2026/0709_006011.html)
 
-Use the new company name as the canonical name in implementations, screens, and schemas, retaining the old name as an alias. The filename `sumishin-sbi-bank.md` follows the existing research task’s specification.
+Use the new company name as the canonical name in implementations, screens, and schemas, retaining the old name as an alias. The filename `sumishin-sbi-bank.md` follows the existing research task's specification.
 
 ## Official entry points
 
@@ -71,11 +71,11 @@ Since 2016, the bank has offered balance and deposit/withdrawal statement read A
 
 ### Balances/account structure
 
-The official website’s balance inquiry shows balances for each primary and purpose-specific account. Official app guidance also explicitly lists balances and statements for ordinary yen deposits, purpose-specific accounts, ordinary foreign-currency deposits, and SBI Hybrid Deposit as major features.
+The official website's balance inquiry shows balances for each primary and purpose-specific account. Official app guidance also explicitly lists balances and statements for ordinary yen deposits, purpose-specific accounts, ordinary foreign-currency deposits, and SBI Hybrid Deposit as major features.
 
 Purpose-specific accounts are deposit-only categories separate from the primary account, with up to 10 in simultaneous use. They can hold ordinary yen deposits, yen time deposits, ordinary foreign-currency deposits, and foreign-currency time deposits. They have no account number for external transfers and cannot be used for direct ATM or bank-transfer deposits/withdrawals. Account names may be personal information, so encrypt them in raw evidence and exclude them from logs.
 
-SBI Hybrid Deposit is a yen deposit reflected in SBI Securities buying power, but its balances and deposit/withdrawal statements are available from the bank’s official website. This research does not use SBI Securities screens or APIs.
+SBI Hybrid Deposit is a yen deposit reflected in SBI Securities buying power, but its balances and deposit/withdrawal statements are available from the bank's official website. This research does not use SBI Securities screens or APIs.
 
 Evidence:
 
@@ -109,7 +109,7 @@ Evidence:
 
 ### Yen/foreign time/structured deposits
 
-Ordinary-deposit statements alone cannot reconstruct contract-level information. Treat each product’s balances and transaction history as a separate collector.
+Ordinary-deposit statements alone cannot reconstruct contract-level information. Treat each product's balances and transaction history as a separate collector.
 
 | Target               | Granularity                                                                                  | Period/count                                       | Assessment                                     |
 | -------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------- |
@@ -128,7 +128,7 @@ Evidence:
 
 ## Multiple points routes/tradeoffs
 
-dアカウント (d ACCOUNT) linking launched on August 20, 2026. Linking is optional; after linking, Smart Program rewards and similar benefits are awarded as d POINTs. Existing Smart Program Points exchanged for d POINTs cannot be converted back. However, **d ACCOUNT linking itself can be revoked and linked again**. The existing sheet’s phrase `連携は不可逆` ("linking is irreversible") is more accurately read as "exchanging Smart Program Points for d POINTs is irreversible". Never change linking status for Kogane research or collection.
+dアカウント (d ACCOUNT) linking launched on August 20, 2026. Linking is optional; after linking, Smart Program rewards and similar benefits are awarded as d POINT. Existing Smart Program Points exchanged for d POINT cannot be converted back. However, **d ACCOUNT linking itself can be revoked and linked again**. The existing sheet's phrase `連携は不可逆` ("linking is irreversible") is more accurately read as "exchanging Smart Program Points for d POINT is irreversible". Never change linking status for Kogane research or collection.
 
 | Route                          | Available                                          | History/expiry                                                                                                                                 | Automation tradeoff                                                       |
 | ------------------------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
@@ -136,7 +136,7 @@ dアカウント (d ACCOUNT) linking launched on August 20, 2026. Linking is opt
 | d-linked bank screen           | d balances/bank-derived points                     | Bank retention unknown                                                                                                                         | Snapshots, may omit other origins                                         |
 | dポイントクラブ (d POINT CLUB) | All d accrual/use                                  | Up to 13 months including current; reflection/use dates/per-transaction expiry                                                                 | Most granular, separate login/mixed origins; description-ID deduplication |
 
-When d ACCOUNT is linked, save bank-screen evidence of bank-origin point status separately from d POINT CLUB’s final ledger for the shared points account. Do not sum the same award twice. Candidate reconciliation keys are `provider`, `source_description`, `use_date`, `reflected_at`, `expires_at`, `amount`, `limited`.
+When d ACCOUNT is linked, save bank-screen evidence of bank-origin point status separately from d POINT CLUB's final ledger for the shared points account. Do not sum the same award twice. Candidate reconciliation keys are `provider`, `source_description`, `use_date`, `reflected_at`, `expires_at`, `amount`, `limited`.
 Check on the actual screen whether an official unique ID is provided.
 
 Evidence:
@@ -153,7 +153,7 @@ Evidence:
 
 - Same username/Web login password for Web/app.
 - Smart Authentication NEO registers one smartphone, FIDO-compliant.
-- Registration requires bank/phone numbers match, SMS/phone verification.
+- Registration requires the phone number registered with the bank to match the device's phone number, and SMS or phone-call verification.
 - Biometrics/six-digit PIN for app login/approval.
 - Enabling PC/browser login approval requires registered-phone approval.
 - Final approval for PC transfers and similar transactions moves from the authentication-number table to app approval. Read collectors do not navigate to transaction screens.
@@ -171,8 +171,8 @@ Evidence:
 ### Unverified
 
 - Server authenticated JSESSIONID lifetimes/idle timeout/reuse conditions.
-- State after profile restart.
-- Approval required every collector invocation with enabled login approval.
+- Whether the login state survives a browser profile restart.
+- Whether every collector start needs an approval on the held account with login approval turned on.
 - Extra authentication for bank points when d-linked.
 
 Anonymous `AWSALB`/`AWSALBCORS` (seven days), `JSESSIONID` (no persistent expiry) do not establish
@@ -205,7 +205,7 @@ Static analysis useful for:
 - Shared Web APIs versus app-specific balances/statements.
 - App-only points/foreign screens/endpoints/retention.
 
-The public Web bundle already establishes internal APIs, and balance/CSV implementation references exist. APK analysis is therefore phase 2. Obtain split APKs from the user’s device or legitimate Play distribution and record signing certificates and hashes. Do not use third-party APK mirrors as trusted sources. Do not clone device bindings or bypass authentication.
+The public Web bundle already establishes internal APIs, and balance/CSV implementation references exist. APK analysis is therefore phase 2. Obtain split APKs from the user's device or legitimate Play distribution and record signing certificates and hashes. Do not use third-party APK mirrors as trusted sources. Do not clone device bindings or bypass authentication.
 
 ## Third-party client code review
 
@@ -261,7 +261,7 @@ Cloudflare Browser Run supports CDP/Playwright with a session keep-alive of 60�
 - [Wrangler sessions](https://developers.cloudflare.com/browser-run/reference/wrangler-commands/)
 - [Containers](https://developers.cloudflare.com/containers/)
 
-The recommended order is local visible browser → OCI/k8s short-lived consumer → Cloudflare Container/Browser Run comparison. As in Kogane’s existing authenticated-collector design, session issuers and read-only consumers could be separated, but adoption is not decided until session replay is confirmed for this bank.
+The recommended order is local visible browser → OCI/k8s short-lived consumer → Cloudflare Container/Browser Run comparison. As in Kogane's existing authenticated-collector design, session issuers and read-only consumers could be separated, but adoption is not decided until session replay is confirmed for this bank.
 
 ## Next verification steps
 
