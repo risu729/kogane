@@ -74,6 +74,20 @@ intent or filter, or a stated knowledge cutoff that differs.
   from the same pinned inputs.
 - A cursor issued before this change has the old shape and is refused
   `stale_context`; it could not have been used a second after it was issued.
+- The clock filters no row: `executeQuery` reads neither `effectiveTime`,
+  `evaluationClock` nor `knowledgeCutoff` (a stated cutoff is reported in the
+  context, not applied to the reads), so two pages under different clocks
+  read the same rows while the basis holds.
+- Limit: the basis is only as strict as the publication marker it pins.
+  `publicationHighWater` is the highest visible parse run id of the grant's
+  sources (`contextInputs` in `services/app/src/agent-service.ts`), so a
+  publication change that does not move it keeps the same basis: a release
+  activation onto candidate runs older than the newest visible run, or a
+  rollback to an earlier run ([release adoption](../release-adoption.md)).
+  A page read after such a change can repeat or skip rows of the page before
+  it. The old binding did not detect this either; it only made every later
+  page `stale_context`. `contextId` pins the same marker. A marker that moves
+  with every publication event is not built.
 - `executeQuery` names a source `no_rows_in_scope` only when every scope pair
   that could hold its rows was read to its end. A whole-store read stops once
   it has the page and its lookahead row, so a source whose rows all lie past
@@ -88,7 +102,11 @@ intent or filter, or a stated knowledge cutoff that differs.
   further cursor; the same cursor after the publication high-water moved is
   `stale_context`; a cursor from another context's basis is still refused;
   with 600 newer rows of one source, a page of the whole-store read does not
-  name the other source's older row as `no_rows_in_scope`.
+  name the other source's older row as `no_rows_in_scope`; a source read to
+  its end without a row is still named, on the whole-store read and on a
+  listed grant whose other source stopped at the page; a stated knowledge
+  cutoff keeps the basis across clocks and a different one changes it; a
+  cursor of the old `{contextId, queryDigest, offset}` shape is refused.
 - `services/app/test/agent-api.test.ts`: over the real Worker, the page after
   `{"intent":"activity","limit":1}`, asked two seconds later, is `200` with
   the next row and its own `contextId`.

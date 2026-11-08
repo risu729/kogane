@@ -84,6 +84,22 @@ function projectionStub(options: {
   };
 }
 
+/** One synthetic fixture-a activity line; tests vary its id and external id. */
+const TRANSACTION_SHAPE = {
+  id: 1000,
+  source_id: "fixture-a",
+  source_account: "account-a",
+  as_of: "2026-09-20",
+  amount_minor: "100",
+  amount_text: "1.00",
+  currency: "XTS",
+  description: "synthetic line",
+  counterparty: null,
+  external_id: "ext-1000",
+  status: null,
+  parser: "fixture-parser@1",
+};
+
 function adopted(overrides: Partial<SubtotalRow> = {}): SubtotalRow {
   return {
     unit_ref: "JPY",
@@ -436,6 +452,38 @@ describe("row intents", () => {
     });
   });
 
+  test("a source read to its end with no rows is still named no_rows_in_scope", async () => {
+    // The whole-store read runs out of rows, so fixture-empty has none in scope.
+    const whole = await run(grant(), request({ intent: "activity" }));
+    expect(whole.ok).toBe(true);
+    if (!whole.ok) return;
+    expect(whole.result.nextCursor).toBeNull();
+    expect(whole.result.coverage.gaps).toEqual([
+      { reasonCode: "no_rows_in_scope", scopeRef: "source:fixture-empty" },
+    ]);
+    expect(whole.result.completeness).toBe("partial");
+    // Under a listed grant each source is its own read: one that stopped at
+    // the page names no gap, while one read to its end without a row does.
+    const newer = Array.from({ length: 600 }, (_, index) => ({
+      ...TRANSACTION_SHAPE,
+      id: 1000 + index,
+      external_id: `ext-${String(1000 + index)}`,
+    }));
+    const listed = grant({ scopes: { sources: ["fixture-a", "fixture-empty"], accounts: "*" } });
+    const outcome = await run(
+      listed,
+      request({ intent: "activity", limit: 10 }),
+      reader({ transactions: newer }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.nextCursor).not.toBeNull();
+    expect(outcome.result.completeness).toBe("partial");
+    expect(outcome.result.coverage.gaps).toEqual([
+      { reasonCode: "no_rows_in_scope", scopeRef: "source:fixture-empty" },
+    ]);
+  });
+
   test("a partial page carries a cursor instead of being silently cut", async () => {
     const outcome = await run(grant(), request({ intent: "activity", limit: 2 }));
     expect(outcome.ok).toBe(true);
@@ -777,6 +825,34 @@ describe("cursors and budgets", () => {
       overview: OVERVIEW,
     });
     expect(stale).toMatchObject({ ok: false, error: { code: "stale_context" } });
+  });
+
+  test("a stated knowledge cutoff stays in the paging basis; a defaulted one does not", async () => {
+    const later = { ...CONTEXT_INPUTS, now: "2026-09-09T00:00:05Z" };
+    const basis = async (inputs: typeof CONTEXT_INPUTS, knowledgeCutoff?: string) =>
+      (await openContext(grant(), inputs, knowledgeCutoff === undefined ? {} : { knowledgeCutoff }))
+        .pagingBasisRef;
+    expect(await basis(later)).toBe(await basis(CONTEXT_INPUTS));
+    const stated = "2026-09-01T00:00:00Z";
+    expect(await basis(later, stated)).toBe(await basis(CONTEXT_INPUTS, stated));
+    expect(await basis(CONTEXT_INPUTS, stated)).not.toBe(await basis(CONTEXT_INPUTS));
+    expect(await basis(CONTEXT_INPUTS, stated)).not.toBe(
+      await basis(CONTEXT_INPUTS, "2026-09-02T00:00:00Z"),
+    );
+  });
+
+  test("a cursor of the shape before ADR 0091 is refused as stale_context", async () => {
+    const body = request({ intent: "activity", limit: 1 });
+    const opened = await openContext(grant(), CONTEXT_INPUTS, { query: body });
+    const legacy = Buffer.from(
+      JSON.stringify({
+        contextId: opened.context.contextId,
+        offset: 1,
+        queryDigest: await querySpecDigest(opened.resolvedQuery),
+      }),
+    ).toString("base64url");
+    const outcome = await run(grant(), { ...body, cursor: legacy });
+    expect(outcome).toMatchObject({ ok: false, error: { code: "stale_context" } });
   });
 
   test("a cursor from another query on the same context is stale too", async () => {

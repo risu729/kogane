@@ -1097,7 +1097,10 @@ the intent, perimeter, bases and filters but not the page size or the
 effective time, so a client cannot change the answer by resizing a page. A
 cursor from a context with other pinned inputs (a later publication, another
 perimeter) or another query is `stale_context`; it is never quietly restarted
-from the newest rows.
+from the newest rows. Limit: the publication high-water is the highest visible
+parse run id, so a release activation onto older candidate runs or a rollback
+need not move it, and a cursor resumed across one can repeat or skip rows
+([ADR 0091: consequences](adr/0091-query-cursor-paging-basis.md#consequences)).
 
 `resultRef` is the digest of `{contextId, resolvedQuery, data}`. It, together
 with `contextId` and a proposal's `proposalId`, is what a page and an agent
