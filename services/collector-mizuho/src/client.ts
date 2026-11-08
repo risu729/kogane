@@ -113,9 +113,33 @@ export const MIZUHO_CLIENT_ERROR_CODES = [
   "account-list-changed",
   "invalid-account-read-event",
   "read-parse-error",
+  "internal-error",
 ] as const;
+export const MIZUHO_LOGIN_CHECKS = [
+  "form-count",
+  "field-value",
+  "missing-token",
+  "credential-controls",
+  "entry-base",
+  "post-login-form",
+] as const;
+export const MIZUHO_LOGIN_FORMS = [
+  "LOGBNK_00000B",
+  "LOGBNK_00005B",
+  "LOGCNF_02400B",
+  "MENTOP_02000B",
+] as const;
+export const MIZUHO_HTTP_STATUS_CLASSES = ["2xx", "3xx", "4xx", "5xx"] as const;
+export interface MizuhoLoginDiagnostic {
+  loginCheck: (typeof MIZUHO_LOGIN_CHECKS)[number];
+  httpStatusClass: (typeof MIZUHO_HTTP_STATUS_CLASSES)[number];
+  expectedForm: (typeof MIZUHO_LOGIN_FORMS)[number];
+}
 export class MizuhoClientError extends Error {
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    readonly loginDiagnostic?: MizuhoLoginDiagnostic,
+  ) {
     super(code);
     this.name = "MizuhoClientError";
   }
@@ -124,7 +148,7 @@ export class MizuhoClientError extends Error {
  * Every code `parseAccountPage`, `parseHistoryPage` and `sanitizeMizuhoPage`
  * throw (packages/parsers/src/parsers/mizuho-html.ts). Kept here, not in the
  * parser, so the parser's code digest and version stay unchanged; a code the
- * parser gains later reads `read-parse-error` until it is listed.
+ * parser gains later reads `internal-error` until it is listed.
  */
 export const MIZUHO_HTML_ERROR_CODES = [
   "account-mismatch",
@@ -170,7 +194,7 @@ export function safeMizuhoErrorCode(error: unknown): string {
     (MIZUHO_HTML_ERROR_CODES as readonly string[]).includes(error.code)
   )
     return `parse-${error.code}`;
-  return "read-parse-error";
+  return "internal-error";
 }
 function fail(code: string): never {
   throw new MizuhoClientError(code);
@@ -457,6 +481,7 @@ export async function collectMizuho(options: {
   fetcher?: Fetcher;
   timeoutMs?: number;
   maxAccounts?: number;
+  onPhase?: (phase: "account-list" | "history") => void;
 }): Promise<MizuhoCollection> {
   const timeoutMs = options.timeoutMs ?? 60_000;
   const maxAccounts = options.maxAccounts ?? 10;
@@ -620,6 +645,7 @@ export async function collectMizuho(options: {
     session: snapshot(),
   });
   async function run(): Promise<MizuhoCollection> {
+    options.onPhase?.("account-list");
     const accountRawHtml = await request(ACCOUNT_ROUTE);
     const accountHtml = sanitizeMizuhoPage(accountRawHtml);
     accounts.push(...parseAccountPage(accountHtml).accounts);
@@ -638,6 +664,7 @@ export async function collectMizuho(options: {
     }
     for (const account of accounts.slice(0, maxAccounts)) {
       if (histories.length) {
+        options.onPhase?.("account-list");
         const currentHtml = await request(ACCOUNT_ROUTE);
         const current = parseAccountPage(currentHtml).accounts;
         readIndexes = accountReadIndexes(currentHtml);
@@ -650,6 +677,7 @@ export async function collectMizuho(options: {
       }
       const readIndex = readIndexes.get(account.sourceIndex);
       if (readIndex === undefined) fail("invalid-account-read-event");
+      options.onPhase?.("history");
       const html = sanitizeMizuhoPage(await request(HISTORY_ROUTE, readIndex));
       const prefix = `ordinary/${account.branchCode}-${account.accountNumber}`;
       let history: History;
