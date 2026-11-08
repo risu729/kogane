@@ -347,7 +347,7 @@ content, and each call is an R0 read in the audit log.
 
 ## Amendment 2026-11-08: freshness per source and cell
 
-- Status: proposed. The owner accepted these states, provisionally, on
+- Status: accepted (merged in #1127). The owner accepted these states, provisionally, on
   2026-11-08 at 03:19 UTC, answering the Phase 3 plan's question "Freshness
   states: `same-day` / `recent` (1–3 days) / `stale`, plus `human_required`,
   `disabled` and `no_capture`?" in [the Phase 3 plan](../plans/2026-11-phase3-coverage-identity.md)
