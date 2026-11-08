@@ -133,9 +133,9 @@ in production on 2026-11-07, 16:48 to 17:07 UTC: an MCP client recorded the owne
 ten accounts the candidates name and accepted one MyJCB and one Vpass settlement (both SMBC
 debits), withdrawing one Vpass acceptance on the way; purchase totals did not change and only
 the accepted debits hold a cash-movement claim
-([verification](card-settlements.md#first-production-decisions-2026-11-07)). The done-when is
-not met yet: `/api/v2/activity?basis=cash-movement` has no MCP read, so the cash-movement view
-was not read.
+([verification](card-settlements.md#first-production-decisions-2026-11-07)). On 2026-11-08
+the cash-movement view itself was read through `kogane.events.read` (#1094): it lists each
+accepted settlement's debit once and the withdrawn one not at all.
 
 ### Phase 3 — Coverage, collection requests and cross-source identity
 
