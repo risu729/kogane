@@ -3,15 +3,15 @@ import { z } from "zod";
 import { AUDIT_ID } from "../../../packages/application/src/audit/vocabulary";
 import {
   confirmDelegatedOperation,
-  assertDelegatedReversal,
   prepareDelegatedOperation,
   delegatedCan,
   DelegatedOperationError,
   d1CommandStore,
   executionFor,
   loadPlan,
+  previewApproval,
+  previewCommit,
   readOwnApproval,
-  simulate,
   getReceipt,
   statusForCommandError,
   replayDelegatedConfirmation,
@@ -19,6 +19,7 @@ import {
   decisionCapability,
   decisionFamilyOf,
   type DelegationCapability,
+  type DecisionRefusal,
   type DelegationResolution,
   type OperationCall,
 } from "../../../packages/application/src/index";
@@ -80,6 +81,14 @@ export function decisionCapabilityFor(kind: string): DelegationCapability {
   if (family !== null) return decisionCapability(family);
   throw new DelegatedOperationError("operation_not_delegable");
 }
+/** A lifecycle refusal as the Processor's route answers it: its status, its code, its refs. */
+function refusal(check: DecisionRefusal): ToolResult {
+  return {
+    status: statusForCommandError(check.error),
+    body: check.refs ? { error: check.error, refs: check.refs } : { error: check.error },
+  };
+}
+
 export async function callDelegatedDecisionTool(
   name: DelegatedDecisionTool,
   body: unknown,
@@ -162,32 +171,39 @@ export async function callDelegatedDecisionTool(
         };
       }
     }
-    if (revertsAuditId)
-      await assertDelegatedReversal(store, principal.delegator, principal.id, plan, revertsAuditId);
-    if (plan.expiresAt <= new Date().toISOString()) throw new HttpError(409, "plan_expired");
-    if (plan.status !== "planned" && plan.status !== "approved")
-      throw new HttpError(409, "plan_not_open");
-    if ("planDigest" in payload && payload.planDigest !== plan.planDigest)
-      throw new HttpError(409, "stale_context");
-    const simulation = await simulate(plan, store);
-    if (!simulation.ok)
-      throw new HttpError(statusForCommandError(simulation.error), simulation.error);
-    if (simulation.report.stale) throw new HttpError(409, "stale_context");
-    if ("approvalId" in payload) {
-      const approval = await readOwnApproval(store, principal.id, payload.approvalId);
-      if (!approval) throw new HttpError(404, "approval_not_found");
-      if (approval.planId !== plan.planId || approval.planDigest !== plan.planDigest)
-        throw new HttpError(409, "stale_context");
-      if (approval.expiresAt <= new Date().toISOString())
-        throw new HttpError(409, "approval_expired");
-      if (approval.usesRemaining < 1) throw new HttpError(409, "approval_exhausted");
-      if (
-        approval.scope.length > 0 &&
-        !Object.keys(plan.expectedRevisions).every((ref) => approval.scope.includes(ref))
-      )
-        throw new HttpError(403, "approval_scope_mismatch");
-    }
+    // A confirm's confirmation is checked first, as the Processor's
+    // delegated route requires it before `approve` or `commit` runs.
+    if (step === "confirm")
+      await confirmDelegatedOperation(store, audit, principal, cap, intent, confirmationDigest!);
+    // The pre-check is `approve`'s or `commit`'s own, in packages/application
+    // (ADR 0081): the same code, refs and order as the page's path. Then the
+    // confirmation page's simulation gate, whose report is the preview.
+    const now = new Date().toISOString();
+    const check =
+      "approvalId" in payload
+        ? await previewCommit(store, plan, {
+            operationId: payload.operationId,
+            principal: principal.id,
+            approvalId: payload.approvalId,
+            now,
+            ...(revertsAuditId
+              ? { reversal: { subject: principal.delegator, revertsAuditId } }
+              : {}),
+          })
+        : await previewApproval(store, plan, { planDigest: payload.planDigest, now });
     if (step === "prepare") {
+      if (!check.ok) return refusal(check);
+      // A completed operation answers with its receipt, as `commit` does.
+      if (check.replay)
+        return {
+          status: 200,
+          body: { receipt: check.replay, replayed: true },
+          auditOutcome: {
+            result: "replayed",
+            targetRef: `plan:${plan.planId}`,
+            refs: [`operation:${check.replay.operationId}`],
+          },
+        };
       const prepared = await prepareDelegatedOperation(
         store,
         audit,
@@ -198,10 +214,13 @@ export async function callDelegatedDecisionTool(
       );
       return {
         status: 200,
-        body: { ...prepared, preview: { ...prepared.preview, report: simulation.report } },
+        body: { ...prepared, preview: { ...prepared.preview, report: check.report } },
       };
     }
-    await confirmDelegatedOperation(store, audit, principal, cap, intent, confirmationDigest!);
+    // A refusal `approve` or `commit` gives itself is left to them, so the
+    // answer, and what they record (a moved plan marked stale), is the
+    // Processor's. Only the simulation gate's own refusal is answered here.
+    if (!check.ok && check.source === "simulation") return refusal(check);
     let response: Response, text: string;
     try {
       response = await env.PIPELINE.fetch(

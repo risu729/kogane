@@ -443,11 +443,14 @@ written, its plan stays open, its approval unspent, and a new plan of that
 subject is refused the same way, so no caller is handed a plan that cannot
 commit. Before then planning did not check protection, so a release of a
 subject no override ever protected (a rule mapping) planned, approved and
-committed the same empty receipt. The MCP decision tools re-simulate a plan
-at prepare and at confirm (`services/app/src/delegated-decision-tools.ts`),
-so `kogane.command.approve` and `kogane.command.commit` give the same
-`target_missing` before the Processor is called; the HTTP command routes get
-it from `approve` and `commit`. A release whose override another release ends
+committed the same empty receipt. The MCP decision tools run `approve`'s and
+`commit`'s own pre-check (`approvalPrecheck`, `commitPrecheck`) at prepare
+and at confirm (`previewApproval`, `previewCommit` in
+`packages/application/src/command/decision-preview.ts`), so
+`kogane.command.approve` and `kogane.command.commit` give the same
+`target_missing` with the subject reference, and the same answer whichever
+of an input's refusals comes first, as the HTTP command routes
+([agent API](agent-api.md#change-lifecycle-decisions)). A release whose override another release ends
 between the commit's reads and its batch is refused by the reservation's
 condition instead: it writes nothing and answers `stale_context` with the
 plan id, its plan open and its approval unspent. A batch that wrote nothing
@@ -818,9 +821,16 @@ already recorded is never undone by a DELETE — an undo is a new revision
   included) and at planning, with no approval, receipt or decision written
   and each plan and approval as it was; one whose override another release
   ends between the commit's reads and its batch answers `stale_context` with
-  the plan id on both paths. The MCP tool's own check answers with the code
-  alone (no `refs`), as [agent API](agent-api.md#change-lifecycle-decisions)
-  records.
+  the plan id on both paths, with the same refs on both.
+- `services/app/test/command-precheck-parity.test.ts`: over the real App
+  Worker and the Processor's command route, the page's `approve` or
+  `commit`, the MCP tool's `prepare` and its `confirm` give the same code and
+  refs for inputs with several refusals (an ended release with an expired
+  plan, an expired or a spent approval; a moved plan with an expired plan or
+  approval; a wrong digest on an expired plan; another plan's or another
+  principal's approval) and the same replay for a completed operation; a
+  moved plan is marked `stale` by `approve`, by `commit` and by a `confirm`,
+  and left as it was by a `prepare`.
 - `packages/application/test/plan-renewal.test.ts`: a change planned again
   after its plan expired gets a new open plan that approves and commits, the
   expired row unchanged; one plan per lifetime across a window boundary;

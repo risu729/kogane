@@ -120,6 +120,12 @@ export {
   type SimulationReport,
 } from "./command/simulate.ts";
 export { commit, type CommitInput, type CommitOutput, getReceipt } from "./command/commit.ts";
+export {
+  previewApproval,
+  previewCommit,
+  type DecisionPreview,
+  type DecisionRefusal,
+} from "./command/decision-preview.ts";
 export { relationMutation } from "./operations/relation-writes.ts";
 export { d1CommandStore, type D1Like } from "./operations/store.ts";
 export {
