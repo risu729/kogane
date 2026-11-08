@@ -193,8 +193,9 @@ then drained so its close is seen. Before 2026-11-08 a reset on such a socket
 was an unhandled `read ECONNRESET` (the crash seen in the GLOBAL PASS copy of
 this relay). On shutdown the proxy logs one `sbi-shinsei-container-relay-summary`
 line: `connects`, `refused`, `refusedWhileClosing`, `established`,
-`upstreamFailed` (502), `upstreamTimeout` (504) and `socketErrors` by closed
-code, with the run id and no host.
+`upstreamFailed` (502), `upstreamTimeout` (504), `abandoned` (Chrome reset it
+before any answer), `serverErrors` and `socketErrors` by closed code, with the
+run id and no host. The outcome counts add up to `connects`.
 Run `node --test container/relay-lifecycle.node-test.mjs container/child-lifecycle.node-test.mjs` for loopback WebSocket tests of normal closure, delayed
 handshakes, shutdown, and timeout fallback; these require only the root dev dependency.
 

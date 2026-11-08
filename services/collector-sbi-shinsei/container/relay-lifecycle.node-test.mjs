@@ -719,8 +719,48 @@ test("the relay summary counts CONNECTs by outcome and carries no host", async (
       established: 1,
       upstreamFailed: 0,
       upstreamTimeout: 0,
+      abandoned: 0,
+      serverErrors: 0,
       socketErrors: {},
     },
   ]);
   assert.doesNotMatch(JSON.stringify(summaries), /invalid|synthetic-only|synthetic-payload/u);
+});
+
+test("a CONNECT Chrome resets before any answer is counted as abandoned", async (t) => {
+  const records = captureLogs(t);
+  const sockets = new Set();
+  const stalled = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on("data", () => {});
+    socket.on("close", () => sockets.delete(socket));
+  });
+  stalled.listen(0, "127.0.0.1");
+  await once(stalled, "listening");
+  t.after(async () => {
+    for (const socket of sockets) socket.destroy();
+    await new Promise((resolve) => stalled.close(resolve));
+  });
+  const proxy = await startConnectRelay({
+    relayUrl: `ws://127.0.0.1:${stalled.address().port}`,
+    relayToken: "synthetic-only",
+    allowedHosts: new Set(["allowed.invalid"]),
+    connectTimeoutMs: 5_000,
+    closeTimeoutMs: 30,
+  });
+  t.after(() => proxy.close());
+  const client = net.connect(proxy.port, "127.0.0.1");
+  await once(client, "connect");
+  client.write("CONNECT allowed.invalid:443 HTTP/1.1\r\nHost: allowed.invalid:443\r\n\r\n");
+  await once(stalled, "connection");
+  // A paused socket only notices a reset; a graceful close is seen when the
+  // upstream answer or the connect deadline arrives.
+  client.resetAndDestroy();
+  await delay(50);
+  await proxy.close();
+  const summary = records.find((record) => record.event === "sbi-shinsei-container-relay-summary");
+  assert.equal(summary.connects, 1);
+  assert.equal(summary.abandoned, 1);
+  assert.equal(summary.upstreamTimeout, 0);
+  assert.equal(summary.upstreamFailed, 0);
 });

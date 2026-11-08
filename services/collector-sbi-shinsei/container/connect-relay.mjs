@@ -324,6 +324,8 @@ export function startConnectRelay({
     established: 0,
     upstreamFailed: 0,
     upstreamTimeout: 0,
+    abandoned: 0,
+    serverErrors: 0,
   };
   const socketErrors = {};
   const countSocketError = (error) => {
@@ -425,6 +427,11 @@ export function startConnectRelay({
     }, connectTimeoutMs);
 
     const closeRelay = () => {
+      // Chrome dropped the socket before it got any answer (e.g. a preconnect).
+      if (!responseSent) {
+        responseSent = true;
+        counts.abandoned++;
+      }
       diagnostic.mark("local-tcp-close", relay);
       clearTimeout(timeout);
       void lifecycle.close();
@@ -517,7 +524,9 @@ export function startConnectRelay({
         return;
       }
       server.off("error", reject);
-      server.on("error", countSocketError);
+      server.on("error", () => {
+        counts.serverErrors++;
+      });
       const logSummary = () => {
         try {
           console.log(
