@@ -317,9 +317,11 @@ registry entries. Units are never added together, the answer carries
 liabilities mean an asset subtotal is not even a lower bound (addendum 05 §5).
 
 Every row is re-checked against the grant before it is summed, and a subject
-scope reached through two scope pairs is refused with `incomplete_evidence`
-rather than counted twice (INV06). A scope larger than the projection's
-subtotal bound is refused with `budget_exceeded`, never partially summed. An
+scope counted twice in one unit (for example reached through two scope pairs)
+is refused with `incomplete_evidence` rather than counted twice (INV06). A
+subject that holds several units counts once in each unit. A scope larger
+than the projection's subtotal bound is refused with `budget_exceeded`, never
+partially summed. An
 unresolved, conflicting or stale measure inside the scope makes the answer
 `partial` and names the reason code; it never silently disappears from the
 figure.
