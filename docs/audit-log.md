@@ -9,9 +9,10 @@ calls (`mcp`) — and the Processor's own two: claimed collection alarm
 occurrences (`alarm`) and lane ticks that wrote decisions or proposals
 (`lane`, plan S7, [below](#the-processors-own-records-alarm-and-lane)).
 S3 execution integration adds delegated calls for installed
-adapters and common preparation/confirmation primitives; actual schedule
-adapters remain incomplete. The checked-in delegation configuration is still
-empty. Agent HTTP and MCP can read scoped records under `audit.read`, and
+adapters (commands, operations requests, job, maintenance and survey
+settings) and common preparation/confirmation primitives. There is no
+delegation configuration: every MCP client is the delegated principal
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)). Agent HTTP and MCP can read scoped records under `audit.read`, and
 the operator reads the whole log on the web UI's `監査ログ` page (slice S8).
 The limits are listed at the end.
 
@@ -302,8 +303,8 @@ provider text or body.
 
 The page reads no capability from `/api/meta`: like the schedule settings
 page it is always listed, and the server's operator check is the only gate.
-It does not show which delegations are in force: no route serves them to the
-browser yet.
+There is no delegation to show: ADR 0084 removed the delegation table and
+its status route.
 
 ## Cost
 
@@ -406,8 +407,9 @@ occurrence of that job.
   references are checked against their original native effect. Maintenance
   uses its prepared/effect references and does not accept a caller-supplied
   reversal reference. S6 survey acceptance was unavailable then (since 2026-11-07:
-  [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)). Empty checked-in
-  delegations enable no production delegated effects.
+  [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)). Since
+  ADR 0084 every MCP client the MCP Access application admits writes these
+  delegated effects as itself.
 
 Tests: `packages/storage-d1/test/audit-records-migration.test.ts` (the table's
 guards), `packages/application/test/audit.test.ts` (builder, effect statement,
