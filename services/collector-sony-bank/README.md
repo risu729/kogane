@@ -31,7 +31,7 @@ Sony銀行の現行Web BFFへ毎回新規ログインし、総残高、円・外
 - `collection-summary.json`: 期間、page数、件数、Cookie名だけを持つ非機密summary
 - `manifest.json`: artifactごとのR2 key、SHA-256、bytes、成功/失敗
 
-日次Cronは21:00 UTC（日本時間06:00）に当月1日から実行日までを収集する。通常収集は既存の固定action private RPC／schedule経路を使う。公開 `/trigger` と任意期間指定は廃止（404）し、同等のoverride経路は追加しない。
+The Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`). The Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the `sony-bank` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), daily at 06:00 JST (21:00 UTC). Each run collects from the first day of the JST month that contains yesterday through yesterday (JST): the run on the 1st requests the whole previous month (`defaultWindow`, `src/worker.ts`). Open limit: only the run on the 1st requests the previous month's last day, so a missed or failed run on the 1st leaves that day unrequested. 通常収集は既存の固定action private RPC経路を使う。公開 `/trigger` と任意期間指定は廃止（404）し、同等のoverride経路は追加しない。
 
 収集後、runは`packages/collection`で共有DATA bucketへ書く。上記の各artifactは`objects/<2 hex>/<sha256>`へcontent-addressedで保存し、すべてのobjectの後にterminal manifestを書く。objectとterminalはimmutable conditional putとR2 native SHA-256付きで書き、terminalのないrunは保存完了として扱わない。ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。source専用bucket、中央raw-evidence importerへのService Binding、`deferred`応答と`scripts/backfill-raw-evidence.sh`は2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
 
@@ -80,20 +80,23 @@ SONY_BANK_CREDENTIAL_FILE=/secure/path/sony-bank.json \
 Secret値をsource、Wrangler config、shell履歴、標準出力へ置かない。
 
 ```sh
-bun install --frozen-lockfile
-bun test
-mise run //services/collector-sony-bank:typecheck
+mise run install                                 # from the repository root
+mise run //services/collector-sony-bank:test
+mise run //services/collector-sony-bank:ci
 mise run //services/collector-sony-bank:dry-run
-wrangler deploy
 wrangler secret put SONY_BANK_CREDENTIAL_JSON
 ```
+
+Production deployment is the release workflow's, in the order of
+[`infra/deploy-order.json`](../../infra/deploy-order.json), with a `/health` postcheck.
 
 ## 作成するCloudflare resourceとcleanup
 
 - Worker: `kogane-sony-bank-collector-poc`
 - R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。このWorker専用のbucketはない）
-- Cron: `0 21 * * *`
-- Worker secrets: 上記2件
+- Schedule: Processor alarm job `sony-bank` (`config/alarm-jobs.json`, `0 21 * * *` UTC); no Cron Trigger
+- D1 binding: `SCHEDULE_DB` → `kogane-raw-evidence` (the execution lease)
+- Worker secret: 上記1件（`SONY_BANK_CREDENTIAL_JSON`）
 
 PoCを廃棄するときはWorkerだけを削除する。共有DATA bucketは他のcollectorとProcessorも使うため削除しない。旧source専用bucket `kogane-sony-bank-collector-poc`は2026-09-13に削除済み。
 

@@ -103,9 +103,9 @@ Queueは不要である。
 ## 開発とデプロイ
 
 ```bash
-bun install
-bun test
-mise run //services/collector-vpoint:typecheck
+mise run install                              # from the repository root
+mise run //services/collector-vpoint:test
+mise run //services/collector-vpoint:ci
 mise run //services/collector-vpoint:dry-run
 ```
 
@@ -118,7 +118,9 @@ mise run //services/collector-vpoint:dry-run
 - secret: `VPOINT_MEMBER_NUMBER`
 - secret: `VPOINT_EMAIL_RECIPIENT`
 - secret: `VPOINT_EMAIL_FORWARD_TO`
-- Cron: `15 21 * * *`（毎日06:15 JST）
+- D1 binding: `SCHEDULE_DB` → `kogane-raw-evidence`（execution lease）
+- var: `VPOINT_PAY_EMAIL_RECIPIENT`（`wrangler.jsonc`）
+- Schedule: the Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the `vpoint` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), `15 21 * * *` UTC（毎日06:15 JST）. The Worker has no Cron Trigger (`triggers.crons` is empty).
 
 公開manual triggerは廃止（404）。既存のprivate RPC、認証メール受信、VポイントPay通知メール保存と転送を維持する。`GET /health` は秘密値や口座データを返さない。
 
@@ -139,7 +141,7 @@ Vマネー0件・1 page、9 artifact、failure 0のv2 manifestをR2から再読�
 検証環境を削除するときは、次を一組として扱う。
 
 1. Email Routing rules `kogane-vpoint-auth`、`kogane-vpoint-pay`
-2. Worker `kogane-vpoint-collector-poc`（Cron、secrets、`VPointSession` namespaceを含む）
+2. Worker `kogane-vpoint-collector-poc`（secrets、`VPointSession` namespaceを含む）
 
 先にEmail Routing ruleを削除または無効化し、その後Workerを削除する。catch-all ruleと、
 他のcollectorとProcessorも使う共有DATA bucketは削除対象ではない。

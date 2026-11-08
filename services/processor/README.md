@@ -3,7 +3,8 @@
 This private Worker turns sealed, successful financial Layer A artifacts into
 versioned Layer B observations in the existing `kogane-raw-evidence` D1 database.
 It imports the deterministic parser registry directly; it never imports the
-PoC SQLite store. All 12 existing collector sources retain their source-specific
+PoC SQLite store. Every collector source (the 15 sources with an active route in
+`config/ingest-clients.json`) retains its source-specific
 parser contracts, duplicate identities and provider evidence locators.
 
 Apply additive raw-evidence migration `0017_observation_pipeline.sql` before
@@ -11,7 +12,9 @@ deployment. The Worker has no public workers.dev endpoint or route. The protecte
 evidence browser reads the projection views and retains the existing complete
 snapshot and pagination queries, including empty successful snapshots.
 
-Every five minutes, the Worker runs three independently budgeted lanes (see
+On each tick of the five-minute `processor-tick` job in `config/alarm-jobs.json`,
+which the Worker's own `ScheduleAlarm` runs (`src/schedule-alarm.ts`; the Worker
+has no Cron Trigger), it runs three independently budgeted lanes (see
 `docs/observation-lanes.md`, migration `0035_observation_job_lanes.sql`):
 `incremental` consumes the durable work items a D1 trigger appends whenever a
 run is sealed and executes up to 12 jobs; `repair` advances the historical
@@ -70,7 +73,7 @@ The catchup command makes the requested bounded number of private service-bindin
 calls, at most 40 incremental jobs per call plus the default repair and replay
 budgets. `sweep <lane> [maxJobs]` runs a single lane. `replay <plan|start|pause|resume|cancel|inspect> <json>`
 calls the internal replay commands; `start` performs one bounded creation step
-per call and the cron continues the rest. None of this deploys an ops Worker or
+per call and the next processor tick continues the rest. None of this deploys an ops Worker or
 exposes a local server. `status` reports per-lane backlog, oldest pending age,
 unprocessed work items, latest sealed versus latest parsed time, replay plan
 states and `laneTicks` — the latest recorded tick of each scheduled lane that
@@ -78,6 +81,6 @@ keeps no state of its own (`docs/operations.md`) — with no financial values. F
 safe error code and artifact/parser/version, repairing the cause, then explicitly
 resetting that exact job or deploying a corrected parser version.
 
-Validation: `bun test`, `mise run //services/processor:typecheck`, and `mise run //services/processor:dry-run`. Runtime tests
+Validation: `mise run //services/processor:test` (or `:ci`, which also type-checks), `mise run //services/processor:typecheck`, and `mise run //services/processor:dry-run`. Runtime tests
 use Miniflare D1/R2 with successful, empty, failed, missing/checksum, concurrent,
 supersession, interrupted-attempt, and MyJCB metadata cases.

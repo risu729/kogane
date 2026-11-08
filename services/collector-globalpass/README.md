@@ -2,7 +2,7 @@
 
 GLOBAL PASS（Vpassデビット専用サイト）のサーバーレンダリングHTMLを、Cloudflare ContainerのPlaywright Google Chromeで取得し、private R2へ保存する独立PoCである。SMBCカード用VpassアプリAPIや`mnie`をruntime依存・設定源・submoduleとして使用しない。
 
-2026-08-30に、Cloudflare Containerのtimezoneを`Asia/Tokyo`へ合わせるだけでTurnstile token生成を再現し、実アカウントのlogin、daily、15か月backfillをend-to-endで完了した。HTMLとmanifestはprivate R2へ保存済みで、Workers Cronを1日1回だけ有効化している。GitHub Actionsのscheduleは使わない。2026-10-10の公開admin入口廃止後、通常収集は固定dailyのprivate Service Binding／schedule経路のみ。旧手動backfill・診断・container停止入口は404になる。旧staging bucketを読む`/latest-manifest`は2026-09-13に廃止した。
+2026-08-30に、Cloudflare Containerのtimezoneを`Asia/Tokyo`へ合わせるだけでTurnstile token生成を再現し、実アカウントのlogin、daily、15か月backfillをend-to-endで完了した。HTMLとmanifestはprivate R2へ保存済み。The Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`): the Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) once a day for the `prestia-globalpass` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json) (03:17 JST). GitHub Actionsのscheduleは使わない。2026-10-10の公開admin入口廃止後、通常収集は固定dailyのprivate Service Binding／schedule経路のみ。旧手動backfill・診断・container停止入口は404になる。旧staging bucketを読む`/latest-manifest`は2026-09-13に廃止した。
 
 ## Runtime profile
 
@@ -39,8 +39,8 @@ VPC bindingは`network_id: "cf1:network"`ではなくTAMIAの`tunnel_id`を直�
 
 ## 取得・保存の予定
 
-- 手動`mode=daily`: 現在月と直前月を再取得
-- 手動`mode=backfill`: 画面のselectorが提示した全月を1 sessionで取得
+- `daily`: 現在月と直前月を再取得. Every Worker entry point (`alarmCollection` behind `runScheduled` and `runOperation`, and the unused `scheduled` handler) runs `daily` only (`src/worker.ts`).
+- `backfill`（画面のselectorが提示した全月を1 sessionで取得）remains in the container contract (`src/model.ts`, `container/server.mjs`), but no Worker entry point requests it since the manual routes were retired.
 - 共有DATA bucket（`kogane-raw-evidence`）: 各pageを`objects/<2 hex>/<sha256>`へ保存し、最後にterminal `runs/prestia-globalpass/<run-id>/terminal.json`を書く
 - manifest: hash、byte数、提示月、部分失敗を記録
 
@@ -74,7 +74,7 @@ runは`packages/collection`で共有DATA bucketへ直接書き、ProcessorがDAT
 - `GLOBALPASS_PASSWORD`
 - `RELAY_TOKEN`: WebSocket relay専用
 
-session cookie、Turnstile token、Nablarch hidden stateは保存・再利用せず、毎run新しいbrowser contextで取得する。資格情報JSON、secret、実データはGitへ入れない。remote secretは`wrangler.jsonc`にも生成型にも現れないため、`env.d.ts`は上記3 secret名だけをaugmentationする。
+session cookie、Turnstile token、Nablarch hidden stateは保存・再利用せず、毎run新しいbrowser contextで取得する。資格情報JSON、secret、実データはGitへ入れない。remote secretは`wrangler.jsonc`にも生成型にも現れないため、`env.d.ts`は上記3 secret名をaugmentationする (it also still declares `RAW_EVIDENCE_IMPORTER: Fetcher`, which no binding in `wrangler.jsonc` provides and `src/` does not read).
 
 ローカルの必要項目だけを同期する例:
 
@@ -95,7 +95,7 @@ scripts/sync-local-secrets.sh \
 - R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。旧source専用bucketは2026-09-13に削除済み）
 - Browser Run binding: `BROWSER`
 - VPC binding: TAMIA Tunnel `6b0ccf30-68b2-494e-baa8-f4f9f3e46b33`を直接指定
-- Cron: `17 18 * * *`（毎日03:17 JST、Workers Cron）
+- Schedule: the Processor alarm job `prestia-globalpass` (`config/alarm-jobs.json`, daily 03:17 JST, `17 18 * * *` UTC). No Workers Cron Trigger.
 
 現行Containerは`TZ=Asia/Tokyo`を起動環境へ明示し、Google Chrome StableをXvfb上のheaded persistent contextとして起動する。GLOBAL PASS、Turnstile本体、helperを同じTAMIA出口へ固定する。NRT Gateway診断variantを含む現行imageはdigest `sha256:195ebaa959f2676e08e8c6d40335b5984e64e36e905efc957a4061070835e6b1`、runtime revision `timezone-collector-v6`である。v6はContainer-local relayを独自SOCKS5からNode.js HTTP CONNECTへ置換しただけで、通常collectorのbrowser条件はv4から変更していない。
 
@@ -103,7 +103,7 @@ timezone修正後に出口だけを変えたcontrolled A/Bでは、Container直�
 
 追加のCloudflare Gateway診断では、WorkerをTokyo近傍へplacementし、`cf1:network`経由でJP/NRTのCloudflare IPv6 egressを実現した。NRTは2回ともtoken 0だったが、直後のTAMIA controlもtoken 0になったため、短時間の連続challengeまたは時系列変動が交絡している。通常collectorはTAMIAのままとし、NRT variantは十分な間隔を空けた再検証専用に残す。
 
-現行Worker versionは`2abc1133-83db-4c8d-b593-c82ec8ca4dcf`で、deploy出力上もschedule `17 18 * * *`を確認した。
+2026-08-30のWorker version `2abc1133-83db-4c8d-b593-c82ec8ca4dcf`では、deploy出力上もschedule `17 18 * * *`を確認した (a Workers Cron Trigger then; since #430 the Processor alarm calls the Worker instead).
 
 daily/backfillはDATAへの保存を含む処理の成否にかかわらず、最後にephemeralな固定Container instanceへ`destroy()`を送る。破棄要求自体の失敗は収集結果へ混ぜず、構造化logへ記録する。`30s`のidle timeoutも残すが、relay使用後は`stop()` RPCがoutcome `ok`でもinstanceが`running`のまま残ることをlive確認したため、課金停止は`destroy()`で保証する。
 
@@ -255,14 +255,14 @@ validationとログインまで自動化できる。明細取得はこのbounded
 5. PAT 401やBrunhild abortを、それ単独でblockerと判断しない。
 6. Cronはtoken生成、login POST、明細画面、月selector、R2保存の順にbounded testが成功するまで有効化しない。
 
-いずれもtoken生成、ログインPOST、明細画面、月selectorの順にbounded testし、成功してから初回backfillと日次Cronを有効化する。
+This order was completed on 2026-08-30 (login, daily and a 15-month backfill end to end, above). Daily collection now runs from the Processor alarm job, not a Workers Cron Trigger.
 
 ## ローカル検証
 
 ```sh
-bun install --frozen-lockfile
-bun test
-mise run //services/collector-globalpass:typecheck
+mise run install                               # from the repository root
+mise run //services/collector-globalpass:test     # bun test, vitest worker tests, node relay test
+mise run //services/collector-globalpass:ci       # typecheck, cf-typecheck, test, container
 mise run //services/collector-globalpass:dry-run
 ```
 

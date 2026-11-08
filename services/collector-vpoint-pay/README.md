@@ -53,7 +53,7 @@ Keystoreやhardware attestationを使わないため、Workerで再現できる�
 各runはまずrefresh token grantを行う。応答のrotated refresh tokenは単一SQLite
 Durable Objectへ即時保存し、以後それを使う。token、UUID、access tokenはR2、manifest、
 log、HTTP応答へ出さない。secretを更新した場合は、管理token付き
-`POST /reset-credentials`でDurable Objectを再seedする。
+`POST /reset-credentials`でDurable Objectを再seedしていた。That route now answers 410 (`src/worker.ts`), so there is no reseed path while the app collector is stopped.
 
 静的解析ではOkHttp `CertificatePinner`を確認できず、network security configは
 cleartextを禁止するだけだった。これは標準Workers `fetch()`で動く可能性を強く示すが、
@@ -74,9 +74,9 @@ collection-summary.json
 ## 開発とデプロイ
 
 ```bash
-bun install
-bun test
-mise run //services/collector-vpoint-pay:typecheck
+mise run install                                  # from the repository root
+mise run //services/collector-vpoint-pay:test
+mise run //services/collector-vpoint-pay:ci
 mise run //services/collector-vpoint-pay:dry-run
 ```
 
@@ -88,11 +88,11 @@ mise run //services/collector-vpoint-pay:dry-run
 - secret: `VPOINT_PAY_DEVICE_UUID`
 - Cron: なし（app API collector停止）
 
-公開manual collectionはない。`GET /health` は停止状態だけを返す。
+公開manual collectionはない。`GET /health` は停止状態だけを返す。The Worker has no `ScheduledCollection` entrypoint and no job in `config/alarm-jobs.json` serves it (the `vpoint-pay` job there is `supported: false`, with no workspace).
 
 検証環境を削除するときは次を一組で削除する。
 
-1. Worker `kogane-vpoint-pay-collector-poc`（Cron、secrets、Durable Objectを含む）
+1. Worker `kogane-vpoint-pay-collector-poc`（secrets、Durable Objectを含む）
 
 共有DATA bucketは他のcollectorとProcessorも使うため削除しない。
 

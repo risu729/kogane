@@ -10,13 +10,13 @@ Money Forward IDのパスキーを使い、ブラウザなしのCloudflare Worke
 - 当月を含む直近12か月。送信形式は `from=YYYY/M/1&account_id_hash=...&service_id=...`
 - 実行ごとのmanifest（件数、SHA-256、byte数、R2 key、失敗段階）
 
-レスポンスHTMLには残高や明細が含まれるため、本文をWorkerログや手動トリガー応答へ返しません。R2 bucketも公開しません。
+レスポンスHTMLには残高や明細が含まれるため、本文をWorkerログやHTTP応答へ返しません（the Worker serves only `GET /health`; every other path is 404, `src/worker.ts`）。R2 bucketも公開しません。
 
 ## 認証
 
 Workerへ置くのは、正しいMoney Forward IDに保存済みのパスキー1件だけです。Bitwardenのマスターパスワード、`BW_SESSION`、Money ForwardのCookieは置きません。
 
-同じrpIdのパスキーが複数ある場合、アイテム名や配列の先頭だけでは選びません。`auth:select` はBitwarden内の `id.moneyforward.com` 候補を値を表示せず順番に検証し、実際にMEの口座詳細まで取得できた1件だけをローカルmetadataへ記録します。これはパスワード変更時ではなく、パスキーの追加・削除・保存先変更時に再実行します。
+同じrpIdのパスキーが複数ある場合、アイテム名や配列の先頭だけでは選びません。`scripts/select-bitwarden-passkey.ts` はBitwarden内の `id.moneyforward.com` 候補を値を表示せず順番に検証し、実際にMEの口座詳細まで取得できた1件だけをローカルmetadataへ記録します。これはパスワード変更時ではなく、パスキーの追加・削除・保存先変更時に再実行します。
 
 ```bash
 export BW_SESSION="$(bw unlock --raw)"
@@ -36,14 +36,20 @@ unset BW_SESSION
 ## Cloudflare
 
 ```bash
-bun install
+mise run install                                   # from the repository root
 mise run //services/collector-moneyforward:test
-mise run //services/collector-moneyforward:typecheck
+mise run //services/collector-moneyforward:ci
 ./scripts/sync-local-secrets.sh
-./node_modules/.bin/wrangler deploy
 ```
 
-Cronは毎日 `21:15 UTC`（日本時間06:15）です。GitHub Actionsはスケジューラに使いません。Money Forward側の銀行・カード更新を要求する処理はなく、最後にMoney Forwardへ同期済みの内容だけを保存します。
+Production deployment is the release workflow's, in the order of
+[`infra/deploy-order.json`](../../infra/deploy-order.json), with a `/health` postcheck.
+
+The Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`). The
+Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled`
+(`src/schedule-entrypoint.ts`) for the `moneyforward-me` job in
+[`config/alarm-jobs.json`](../../config/alarm-jobs.json), daily at 06:15 JST (21:15 UTC).
+GitHub Actionsはスケジューラに使いません。Money Forward側の銀行・カード更新を要求する処理はなく、最後にMoney Forwardへ同期済みの内容だけを保存します。
 
 ## 中央raw-evidenceへの保存
 
@@ -107,7 +113,7 @@ PoCを廃止するときは次をまとめて削除します。
   identity は secret なしで導出する、[ADR 0029](../../docs/adr/0029-data-classification-and-unkeyed-identity.md)。
   以前に設定した `MONEYFORWARD_ACCOUNT_IDENTITY_KEY` は読まれないので
   `wrangler secret delete MONEYFORWARD_ACCOUNT_IDENTITY_KEY --name kogane-moneyforward-collector-poc` で削除できる）
-- Cron: `15 21 * * *`
+- Schedule: Processor alarm job `moneyforward-me` (`config/alarm-jobs.json`, `15 21 * * *` UTC); no Cron Trigger
 - ローカル照合metadata: `/home/risu/.local/state/kogane/moneyforward-bitwarden-match.json`
 
 共有DATA bucket（`kogane-raw-evidence`）は他のcollectorとProcessorも使うため削除しません。旧source専用bucket `kogane-moneyforward-collector-poc`は2026-09-13に削除済みです。
@@ -125,5 +131,5 @@ when no manifest can be saved. Logging is best effort and cannot stop collection
 Exception messages/stacks, provider response bodies, redirect URLs, cookie names
 or values, CSRF/challenge values, account identifiers and passkey material are
 excluded from diagnostics. Raw evidence storage and collection status semantics
-are unchanged. The central backfill path is separately authenticated, bounded,
-and read-only against the collector R2.
+are unchanged. There is no central backfill path any more; it was retired with
+the per-source bucket on 2026-09-13.
