@@ -35,7 +35,7 @@ export function decimalProjectionExists(release: string): boolean {
  * well-formed name with no projection is `unsupported_semantics`, the same
  * distinction the identity read mode makes for `snapshot`.
  */
-export function decimalPolicySelection(url: URL): string {
+export function decimalPolicySelection(url: Pick<URL, "searchParams">): string {
   const value = url.searchParams.get("decimalPolicy");
   if (value === null) return DEFAULT_DECIMAL_POLICY;
   if (!RELEASE.test(value)) throw new HttpError(400, "invalid_query");

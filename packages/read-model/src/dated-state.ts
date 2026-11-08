@@ -23,7 +23,7 @@ import { POSITION_VALUATION_LOCATOR } from "./sql";
  * one by one (ADR 0019, decision 2), so listing them would state one holding
  * twice.
  */
-export const DATED_STATE_EXCLUDED_PARSERS = [
+const DATED_STATE_EXCLUDED_PARSERS = [
   "sbi-account-assets-current",
   "sony-bank-gross-balance",
 ] as const;
@@ -61,7 +61,7 @@ const IDENTITY_ELIGIBLE = `CASE WHEN p.status='ok' AND f.status='success' AND f.
  * artifact. `identity_eligible` is the run and parse condition
  * `current_identity_observations` puts on a parse.
  */
-export const DATED_SNAPSHOT_CTES = `${snapshotCtes(SNAPSHOT_RELATIONS, { prefix: "dated_", cutoffParam: "?1" })}, dated_parses AS MATERIALIZED (
+const DATED_SNAPSHOT_CTES = `${snapshotCtes(SNAPSHOT_RELATIONS, { prefix: "dated_", cutoffParam: "?1" })}, dated_parses AS MATERIALIZED (
  SELECT s.source_id,s.parser_name,s.dataset,s.artifact_id AS snapshot_artifact_id,s.fetched_at AS captured_at,
   p.id AS parse_run_id,
   ${IDENTITY_ELIGIBLE} AS identity_eligible
@@ -123,7 +123,7 @@ const SNAPSHOT_COLUMNS = `dp.source_id,dp.parser_name,dp.dataset,dp.snapshot_art
 const IDENTITY_COLUMNS = `CASE WHEN io.id IS NULL THEN 0 ELSE 1 END AS identity_recorded,
  am.account_id,am.status AS account_status,im.instrument_id,im.status AS instrument_status`;
 
-export interface DatedSnapshotColumns {
+interface DatedSnapshotColumns {
   source_id: string;
   parser_name: string;
   dataset: string;
@@ -253,7 +253,7 @@ export interface DatedSnapshotRow {
  * captured before `?1`. With a bound past every capture it returns the view's
  * rows exactly (dated-state.test.ts).
  */
-export const DATED_STATEMENT_FACTS_CTE = `dated_statement_ranked AS (
+const DATED_STATEMENT_FACTS_CTE = `dated_statement_ranked AS (
  SELECT b.id,b.parse_run_id,b.source_account,b.instrument AS unit_ref,a.source_id,a.fetched_at,
  d.status AS value_status,d.coefficient,d.scale,
  json_extract(b.extra_json,'$._kogane.paymentDate') AS payment_date,

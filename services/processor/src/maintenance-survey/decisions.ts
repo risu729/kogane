@@ -62,7 +62,7 @@ interface AcceptedProposal {
   id: number;
   ruleId: string;
 }
-export type RevisionResult =
+type RevisionResult =
   | { ok: true; ruleId: string; revision: number; reconciled: boolean }
   | { ok: false; code: string; status: number };
 /** The revision a writer is about to send, as the decision that asked for it sees it. */
@@ -148,7 +148,7 @@ export interface DelegatedSurveyDecision<O> {
 export const ACCEPTED_REASON =
   "maintenance-survey-proposal-accepted" satisfies MaintenanceChangeReason;
 /** The reason code of a rejection's audit record. */
-export const REJECTED_REASON = "maintenance-survey-proposal-rejected";
+const REJECTED_REASON = "maintenance-survey-proposal-rejected";
 /** The decision reference of the revision a proposal's acceptance writes. */
 export function proposalRef(id: number): string {
   return `maintenance-survey:proposal:${id}`;

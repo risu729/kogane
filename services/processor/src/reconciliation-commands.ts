@@ -192,9 +192,17 @@ export async function decideProposal(
     payloadDigest: digest,
   };
   const now = new Date().toISOString();
+  // Every later statement needs the ledger row of THIS command: the same key,
+  // payload and actor. A row another command wrote under the same key in
+  // between (an idempotency conflict) must not carry this command's decision,
+  // relation or resolution, even where the derived ids coincide.
+  const ownLedger =
+    "EXISTS(SELECT 1 FROM decision_operations op WHERE op.operation_id=? AND op.payload_digest=? AND op.actor_id=?)";
+  const ownLedgerBinds = [command.operationId, digest, command.actorId] as const;
   const decisionRow = `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
     SELECT ?,'relation',?,1,?,?,?,?,?,?,NULL,NULL,? FROM decision_operations op
-    WHERE op.operation_id=? AND NOT EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)`;
+    WHERE op.operation_id=? AND op.payload_digest=? AND op.actor_id=?
+      AND NOT EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)`;
   const statements: D1PreparedStatement[] = [
     // The ledger row carries every precondition; later statements exist only if it was written.
     db
@@ -225,6 +233,8 @@ export async function decideProposal(
         proposal.evidence_refs_json,
         now,
         command.operationId,
+        digest,
+        command.actorId,
         proposalDecisionId,
       ),
   ];
@@ -243,12 +253,14 @@ export async function decideProposal(
           proposal.evidence_refs_json,
           now,
           command.operationId,
+          digest,
+          command.actorId,
           relationDecisionId,
         ),
       db
         .prepare(`INSERT INTO entity_relations(id,kind,from_ref,to_ref,valid_from,valid_to,status,decision_revision_id,evidence_refs_json,created_at)
         SELECT ?,?,?,?,NULL,NULL,'accepted',?,?,? FROM decision_revisions d
-        WHERE d.id=? AND NOT EXISTS(SELECT 1 FROM entity_relations WHERE id=?)`)
+        WHERE d.id=? AND NOT EXISTS(SELECT 1 FROM entity_relations WHERE id=?) AND ${ownLedger}`)
         .bind(
           relationId,
           proposal.kind as ReconciliationKind,
@@ -259,6 +271,7 @@ export async function decideProposal(
           now,
           relationDecisionId,
           relationId,
+          ...ownLedgerBinds,
         ),
     );
   }
@@ -267,8 +280,14 @@ export async function decideProposal(
     db
       .prepare(`UPDATE reconciliation_proposals SET status=?,decision_revision_id=?
       WHERE id=? AND status='proposed'
-      AND EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)`)
-      .bind(accept ? "accepted" : "rejected", proposalDecisionId, proposal.id, proposalDecisionId),
+      AND EXISTS(SELECT 1 FROM decision_revisions WHERE id=?) AND ${ownLedger}`)
+      .bind(
+        accept ? "accepted" : "rejected",
+        proposalDecisionId,
+        proposal.id,
+        proposalDecisionId,
+        ...ownLedgerBinds,
+      ),
   );
   const results = await db.batch(statements);
   if (results[0]!.meta.changes === 1) return { ok: true, replayed: false, receipt };

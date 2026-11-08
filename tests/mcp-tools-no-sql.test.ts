@@ -36,12 +36,7 @@ function reachable(entry: string): string[] {
  * functions the MCP path never calls. A module drops off this list when its
  * SQL moves into packages/application.
  */
-const SCREEN_ONLY_SQL: Record<string, string> = {
-  "normalized-decimals.ts": "balances-v2's page functions, which no MCP tool calls",
-  "observation-organization.ts": "balances-v2's page functions, which no MCP tool calls",
-  "read.ts": "the evidence routes; page-read-tools imports only catalogue",
-  "reports-api.ts": "the report routes; capabilities imports only reportArtifactsAvailable",
-};
+const SCREEN_ONLY_SQL: Record<string, string> = {};
 
 /**
  * What the graph may import from a module whose other exports run SQL a
@@ -49,11 +44,7 @@ const SCREEN_ONLY_SQL: Record<string, string> = {
  * packages/application. Importing anything else from it fails the guard, so
  * a screen-only exemption cannot quietly start covering an MCP call.
  */
-const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
-  "balances-v2.ts": ["balanceProjectionReader", "balanceReadConfigured", "readTarget"],
-  "read.ts": ["catalogue"],
-  "reports-api.ts": ["reportArtifactsAvailable"],
-};
+const ALLOWED_IMPORTS: Record<string, readonly string[]> = {};
 
 const modules = reachable("mcp.ts");
 const adapters = modules.filter((name) => !(name in SCREEN_ONLY_SQL));

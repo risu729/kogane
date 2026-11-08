@@ -107,7 +107,7 @@ const OFFER = {
 };
 
 /** A saved simulation that retained its request: replayable (G2-20). */
-export const RETAINED_SIMULATION = {
+const RETAINED_SIMULATION = {
   input_digest: "a".repeat(64),
   plan_json: JSON.stringify({
     request: {
@@ -123,7 +123,7 @@ export const RETAINED_SIMULATION = {
 };
 
 /** A saved simulation that kept only its digest: not reproducible (G2-20). */
-export const DIGEST_ONLY_SIMULATION = {
+const DIGEST_ONLY_SIMULATION = {
   input_digest: "b".repeat(64),
   plan_json: JSON.stringify({ offerRef: "offer:forgotten@v1" }),
   search_coverage: "bounded",

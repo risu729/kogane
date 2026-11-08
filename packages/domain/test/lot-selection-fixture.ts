@@ -28,7 +28,7 @@ import type { TemporalValue } from "../src/time.ts";
 import { absentQuantity } from "../src/values.ts";
 import { q } from "./helpers.ts";
 
-export const EPOCH = "core-epoch-test";
+const EPOCH = "core-epoch-test";
 /** The securities account every fixture trade moves; a second one for out-of-request legs. */
 export const HOLDER = "acct-test-sec";
 export const OTHER = "acct-test-other";
@@ -39,7 +39,7 @@ export const ALPHA = "instrument:test-alpha";
 export const BETA_UNIT = "ii-test-beta";
 export const BETA = "instrument:test-beta";
 export const WRAPPER = "wrapper:test:general";
-export const WRITER = "synthetic-securities-writer-v1";
+const WRITER = "synthetic-securities-writer-v1";
 
 export const day = (value: string): TemporalValue => ({
   kind: "local-date",
@@ -50,7 +50,7 @@ export const day = (value: string): TemporalValue => ({
 export const trade = (value: string): [EventTimeRole, TemporalValue] => ["trade", day(value)];
 export const settle = (value: string): [EventTimeRole, TemporalValue] => ["settlement", day(value)];
 
-export interface FixtureLeg {
+interface FixtureLeg {
   /** A resolved account id, or null for a subject that names none. */
   account?: string | null;
   unit?: string;

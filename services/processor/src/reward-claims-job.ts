@@ -165,7 +165,9 @@ const candidateScope = PROMOTION_RULES.map((rule) => {
   if (rule.unitRef === "JPY") clauses.push(`b.instrument=${parameter("JPY")}`);
   if (rule.programId === "program:j-point") {
     clauses.push(`b.instrument=${parameter("J_POINT")}`);
-    clauses.push(`b.source_account LIKE ${parameter("myjcb:%:j-point:total")}`);
+    // GLOB, not LIKE: LIKE ignores ASCII case, and a row this read selects but
+    // `matches` skips is never claimed, so it would head every page for good.
+    clauses.push(`b.source_account GLOB ${parameter("myjcb:*:j-point:total")}`);
     clauses.push(
       `length(b.source_account) BETWEEN 21 AND 84 AND substr(b.source_account,7,length(b.source_account)-20) NOT GLOB '*[^a-z0-9-]*' AND substr(b.source_account,7,1) GLOB '[a-z0-9]'`,
     );

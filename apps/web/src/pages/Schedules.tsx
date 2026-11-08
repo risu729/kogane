@@ -107,15 +107,19 @@ function Occurrence({ value }: { value: ScheduleOccurrence }): ReactNode {
 function ScheduleCard({
   value,
   refresh,
+  message,
+  setMessage,
 }: {
   value: ScheduleView;
   refresh: () => Promise<unknown>;
+  /** Held by the page: the card remounts on each new revision, its result must not. */
+  message: string;
+  setMessage: (message: string) => void;
 }): ReactNode {
   const [enabled, setEnabled] = useState(value.enabled),
     [timezone, setTimezone] = useState(value.timezone),
     [pattern, setPattern] = useState<SchedulePattern>(value.pattern);
-  const [busy, setBusy] = useState(false),
-    [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
   async function save(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -680,6 +684,7 @@ export function SchedulesPage(): ReactNode {
   const [editor, setEditor] = useState<MaintenanceRule | null | undefined>(),
     [filter, setFilter] = useState("collection"),
     [leaseMessage, setLeaseMessage] = useState(""),
+    [cardMessages, setCardMessages] = useState<Record<string, string>>({}),
     [releasingSources, setReleasingSources] = useState<string[]>([]);
   const leaseRequests = useRef(new Set<string>());
   const refresh = () => client.invalidateQueries({ queryKey: ["schedules"] });
@@ -748,7 +753,15 @@ export function SchedulesPage(): ReactNode {
         <>
           <div className="schedule-grid">
             {query.data.schedules.map((s) => (
-              <ScheduleCard key={`${s.id}:${s.revision}`} value={s} refresh={refresh} />
+              <ScheduleCard
+                key={`${s.id}:${s.revision}`}
+                value={s}
+                refresh={refresh}
+                message={cardMessages[s.id] ?? ""}
+                setMessage={(message) =>
+                  setCardMessages((messages) => ({ ...messages, [s.id]: message }))
+                }
+              />
             ))}
           </div>
           <section className="schedule-section">
@@ -761,9 +774,12 @@ export function SchedulesPage(): ReactNode {
             <p>
               公式サイトの再調査は提案だけを行い、ここに表示される設定を自動では変更しません。新しい案内を確認したら、出典・確認日時と合わせて変更してください。
             </p>
+            {/* Keyed by revision: reopening a rule that changed since the form
+                opened starts from what is stored, so the form never sends an
+                earlier revision's fields under the newer revision number. */}
             {editor !== undefined ? (
               <MaintenanceEditor
-                key={editor?.id ?? "new"}
+                key={editor === null ? "new" : `${editor.id}:${String(editor.revision)}`}
                 rule={editor}
                 sources={query.data.schedules
                   .flatMap((s) => (s.source ? [s.source] : []))

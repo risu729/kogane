@@ -11,7 +11,6 @@ import {
   instrumentCandidates,
   INSTRUMENT_CANDIDATE_POLICY,
   listedAsKey,
-  type CandidateConflict,
   type IdentifierResolutionState,
   type InstrumentCandidate,
   type InstrumentIdentifierFacts,
@@ -64,7 +63,7 @@ export interface ResolutionIdentifier {
 }
 
 /** The payload of a command a person may plan, without the reason they must write. */
-export interface CandidateCommands {
+interface CandidateCommands {
   /**
    * Null when the candidate has a `hold`: its subject is already settled and
    * adopting would re-map it.
@@ -300,6 +299,3 @@ export async function queryInstrumentHistory(
       .map(({ identifierId: _id, ...entry }) => entry),
   }));
 }
-
-/** Conflicts a hint or a separated pair names, for adapters that label them. */
-export type { CandidateConflict };

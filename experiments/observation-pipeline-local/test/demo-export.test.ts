@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import type {
@@ -22,14 +22,19 @@ describe("synthetic deployment export", () => {
   test("fresh exports are deterministic and every evidence link resolves to exact bytes", async () => {
     const temporaryRoot = resolve(tmpdir());
     const directory = mkdtempSync(join(temporaryRoot, "kogane-export-test-"));
-    const before = readdirSync(temporaryRoot).filter((name) =>
+    // The exports' disposable stores live under this test's own directory: the
+    // shared temporary root also holds other processes' exports, which come and
+    // go while this test runs and would make the cleanup check below flaky.
+    const scratchRoot = join(directory, "scratch");
+    mkdirSync(scratchRoot);
+    const before = readdirSync(scratchRoot).filter((name) =>
       name.startsWith("kogane-demo-export-"),
     );
     try {
       const firstPath = join(directory, "first.json");
       const secondPath = join(directory, "second.json");
-      const snapshot = await exportDemo(firstPath);
-      await exportDemo(secondPath);
+      const snapshot = await exportDemo(firstPath, { scratchRoot });
+      await exportDemo(secondPath, { scratchRoot });
       expect(readFileSync(firstPath).equals(readFileSync(secondPath))).toBe(true);
       expect(snapshot.classification).toBe("synthetic");
       expect(decode(snapshot, "/api/meta")).toMatchObject({
@@ -68,10 +73,16 @@ describe("synthetic deployment export", () => {
       }
       expect(observations).toBeGreaterThan(0);
       // Even an output failure must close and remove the temporary SQLite store.
-      await expect(exportDemo(directory)).rejects.toThrow();
+      await expect(exportDemo(directory, { scratchRoot })).rejects.toThrow();
       expect(
-        readdirSync(temporaryRoot).filter((name) => name.startsWith("kogane-demo-export-")),
+        readdirSync(scratchRoot).filter((name) => name.startsWith("kogane-demo-export-")),
       ).toEqual(before);
+      // The check above sees a leak only if the stores were made under
+      // scratchRoot: an export that ignored it would create them in the shared
+      // temporary root instead. A scratch root that does not exist must fail.
+      await expect(
+        exportDemo(join(directory, "unused.json"), { scratchRoot: join(directory, "missing") }),
+      ).rejects.toThrow();
     } finally {
       const target = resolve(directory);
       if (dirname(target) === temporaryRoot && basename(target).startsWith("kogane-export-test-")) {

@@ -53,6 +53,27 @@ could disagree with it. Any change of kind, payload, expected revision or base
 context produces a different plan id, and an approval bound to the old digest
 can never apply to the new one (SC17, INV09).
 
+Planning the same change again returns the same plan while it is open and
+unexpired (`created: false`). Once a plan has expired while still `planned`
+or `approved`, planning the same change over unchanged data is a **renewal**
+([ADR 0080](adr/0080-renew-expired-change-plans.md)):
+
+```
+planId = canonicalDigest({ kind, payload, expectedRevisions, baseContextId,
+                           renewal: { ttlSeconds, window } })
+window = floor(createdAt in epoch ms / (ttlSeconds * 1000))
+```
+
+`createPlan` answers a renewal of the previous window that has not expired,
+and otherwise creates the current window's; a plan created in window w lives
+until at least window w + 1 begins, so three key lookups decide it. The
+expired plan is kept unchanged and stays unapprovable. A committed, stale or
+rejected plan is never renewed. Two callers whose clocks straddle a window
+boundary can each create a renewal; both pin the same revisions, so at most
+one commits and the other is refused `stale_context`. `simulate` re-derives a renewal's id from its
+own `created_at` and `expires_at`, so a renewal is fresh until a pin moves;
+`resimulatedPlanId` is then the plain digest of the current data.
+
 ### Approval id
 
 ```
@@ -166,8 +187,12 @@ receipt's `result` adds `proposalId`, `proposalDecisionRevisionId`, `review`
 (`accept`, `reject` or `withdraw`) and `eventRevisions`.
 
 A withdrawn link cannot be accepted again, a known limit: the proposal row
-stays `accepted` (0032 resolves a proposal once) and the triple's latest
-relation is `rejected`, so the candidate is closed. The two rows can be linked
+stays `accepted` (0032 resolves a proposal once) and the triple's newest
+decision is `rejected`, so the candidate is closed. A link's status is its
+triple's newest decision (by creation time, then insertion order), never a
+proposal recorded after it, in the candidates read and in the purchase lane's
+merge guard alike
+([ADR 0017's amendment](adr/0017-card-purchase-review-commands.md#amendment-2026-11-06-a-later-proposal-never-replaces-a-relation-decision)). The two rows can be linked
 again only through a new proposal, which the purchase lane writes when either
 row's event moves to a new observation
 ([economic-events.md](economic-events.md#pending-to-posted-links)).
@@ -321,6 +346,54 @@ before it looks at the approval:
 The commit payload digest is computed server-side over
 `{ planId, approvalId, kind, payload }`. A caller may send
 `idempotencyPayloadDigest`; a mismatch is `idempotency_conflict`.
+
+The lookup is a read, so a second command can take the key between it and
+the commit batch. The batch therefore decides again: its first statement
+reserves the key only while no receipt holds it, and every later statement
+(the planner's mutation, the approval consumption, the plan's `committed`
+status and the outbox rows) is joined to **this command's own receipt** —
+the same operation id, principal and payload digest
+(`receiptExistsGuard` in `packages/storage-d1/src/atomic/decision-commit.ts`;
+the audit record also requires its `created_at`). The identity planner's
+mapping, decision and supersession statements, which the identity command
+joins to a ledger row under the operation id (a row a command of another kind
+under the same key writes too), each carry the receipt guard as well
+(`identityMutation` in `services/processor/src/change-commands.ts`); a
+reviewed pending-to-posted merge or split carries it on its first decision,
+and its later statements require that decision, whose id is derived from the
+operation id and the merged rows. A command of the same
+principal with another payload that took the key first leaves a receipt none
+of those statements accepts, so the loser writes nothing (its plan stays
+open, its approval unspent, no decision, relation or outbox row) and answers
+`idempotency_conflict`. An identical command that took it first leaves this
+command's own receipt; the statements' own `NOT EXISTS` and status
+conditions keep the loser from writing anything twice — the approval is
+consumed only while its plan is still open, which the batch closes after
+consuming it, so a raced replay spends no second use of a multi-use
+approval — and it answers `replayed: true` with the stored receipt. A
+writer whose statements are not idempotent on their own rows (the card
+settlement writer's ledger row and economic statements) makes that loser's
+batch fail on a trigger instead; D1 rolls it back whole, and `commit`, which
+finds this command's own receipt after any failed batch, answers with that
+receipt rather than the error. Before
+2026-11-06 the join named only the operation id and principal, so such a
+loser could still close its own plan, spend its approval and, where its
+planner derived ids the winner had not written (a relation losing to a card
+settlement, say), write its own decision and relation (an identity assignment
+losing to a relation wrote its manual mapping with no decision), or fail
+with an SQL error instead of the conflict (on the shared `decision_operations`
+row, or, for an override release losing to a relation, on the decision log's
+append-only trigger).
+`decision-commit-receipt-guard.test.ts` (storage-d1) holds the earlier
+statement text frozen and proves the guarded statements equal to it on random
+and scaled stores wherever no other payload holds the key, silent where one
+does, and searching the receipt by key without table statistics; the
+processor tests race a commit against another payload of the same kind and
+of another kind (a relation against a card settlement, both ways, and an
+identity assignment and an override release against a relation), and
+against an identical commit (a relation, a settlement rejection and a
+settlement acceptance), through a D1 wrapper that commits the winner between
+the loser's reads and its batch.
 
 `accepted` ≠ `published`. `accepted` means the judgement is durable;
 `published` means every outbox row of that operation has been processed. The
@@ -623,7 +696,13 @@ already recorded is never undone by a DELETE — an undo is a new revision
   `idempotency_conflict`; an expired approval on a committed operation still
   returning the receipt, and a receipt invisible outside its principal's
   namespace; two parallel commits of one approved plan → exactly one succeeds;
-  a resent identical commit racing itself → one receipt, one mutation; typed
+  a resent identical commit racing itself → one receipt, one mutation; a
+  commit that loses its key to another payload between its reads and its
+  batch → `idempotency_conflict` with its plan open, its approval unspent and
+  nothing written (an identity assignment losing to a relation writes no
+  mapping, an override release no decision), and one that loses it to an
+  identical commit → the stored receipt without spending a second approval
+  use; typed
   relations with their own decision and no derived `same_account` (SC06); an
   agent refused approval and commit; approval digest/expiry/scope binding; the
   outbox publishing once and a duplicate delivery changing nothing; an
@@ -655,6 +734,13 @@ already recorded is never undone by a DELETE — an undo is a new revision
   payloads that reject a caller-supplied impact/approval/revisions, the review
   kinds' exact keys, id shapes, closed reason codes and 1–36 portion lists,
   digest sensitivity to every input, grants, and the error table.
+- `packages/application/test/plan-renewal.test.ts`: a change planned again
+  after its plan expired gets a new open plan that approves and commits, the
+  expired row unchanged; one plan per lifetime across a window boundary;
+  renewal at the exact expiry and window instants; two renewals from clocks
+  either side of a boundary commit once, the other `stale_context`; a
+  renewal fresh in `simulate` until a pin moves; a first plan's digest
+  unchanged; a row whose id is no derivation of its content stale.
 - `packages/application/test/card-review-plan.test.ts`: planning each review
   kind, as a human or an agent, is refused with `unsupported_semantics` and
   writes no row in any command table; a malformed payload is still

@@ -13,23 +13,10 @@ import {
 } from "../../../packages/read-model/src/index";
 import { HttpError } from "./http";
 
-export { isObservationKind } from "../../../packages/read-model/src/index";
 export type { FilterOptionsKind, ObservationReader } from "../../../packages/read-model/src/index";
 export type {
-  ArtifactDetail,
-  ArtifactRow,
-  BalanceHistoryRow,
-  BalanceRow,
-  ObservationDetail,
   ObservationKind,
   Overview,
-  ParseRunDetail,
-  PositionRow,
-  PositionWithValuations,
-  Provenance,
-  TransactionRow,
-  ValuationRow,
-  Warnings,
 } from "../../../packages/observation-shared/src/api-contract.ts";
 
 /**

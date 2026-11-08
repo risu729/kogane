@@ -76,7 +76,7 @@ export const SUBJECT_STATUSES = [
 ] as const;
 export type SubjectStatus = (typeof SUBJECT_STATUSES)[number];
 
-export interface CandidateFreshness {
+interface CandidateFreshness {
   state: "current" | "stale" | "unknown";
   /** Why the newest fetch did not replace this scope (SC15 reason codes). */
   reasonCode: string | null;
@@ -241,7 +241,7 @@ function temporalValueFor(candidate: unknown): TemporalValue {
  * and never borrows another row's date. The precision and basis of the value
  * travel separately in `temporal`, where a date is still a date.
  */
-export function sortKeyFor(asOf: string | null, observedAt: string | null): string {
+function sortKeyFor(asOf: string | null, observedAt: string | null): string {
   return asOf ?? observedAt ?? "";
 }
 
@@ -253,10 +253,7 @@ export function sortKeyFor(asOf: string | null, observedAt: string | null): stri
  * displayed but never pooled with each other, so an unknown column can never
  * become a contender for another unknown column's value.
  */
-export function adoptionTargetKey(
-  definition: MetricDefinition,
-  candidate: ProjectionCandidate,
-): string {
+function adoptionTargetKey(definition: MetricDefinition, candidate: ProjectionCandidate): string {
   return definition.metricId === UNKNOWN_METRIC.metricId
     ? `unknown:${candidate.sourceId}:${candidate.parserName}:${candidate.metric}|${candidate.instrument}`
     : `${definition.metricId}|${candidate.instrument}`;

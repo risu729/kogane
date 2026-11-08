@@ -277,6 +277,7 @@ export {
   type CoverageScope,
   type CoverageSummary,
   executeQuery,
+  type HoldingsProjection,
   type QueryData,
   type QueryExecution,
   type QueryOutcome,

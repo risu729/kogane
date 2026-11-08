@@ -4,11 +4,12 @@
 // snapshots and an exchange-rate board written as the promotion lane writes
 // them. Every account, code, quantity, price, rate and time is invented.
 import type { SQLQueryBindings } from "bun:sqlite";
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { canonicalDigest } from "../../domain/src/context.ts";
 import type { FxConversionPolicy, PriceSelectionPolicy } from "../../domain/src/market-data.ts";
 import { decimalToString, type Quantity } from "../../domain/src/values.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
+import { migrated } from "../../read-model/test/card-usage-fixture.ts";
 import { DatedStore, type Capture } from "../../read-model/test/dated-state-fixture.ts";
 import { migratedDatabase } from "../../read-model/test/price-candidates-fixture.ts";
 import type { MarketDataPolicies } from "../src/query/market-data.ts";
@@ -20,6 +21,15 @@ import {
   ValuationOnDateError,
   type ValuationOnDateRequest,
 } from "../src/query/valuation-on-date.ts";
+
+// Both schema templates (the stub under DatedStore and the full CORE schema of
+// the plan check) replay their migrations once per process, about 1.8 s each
+// alone. Built here, as test/schema-template.ts asks, rather than inside the
+// first test that reaches each, which crossed the 5 s default under load.
+beforeAll(() => {
+  migrated().close();
+  migratedDatabase().close();
+}, 60_000);
 
 function counting(store: DatedStore): SqlExecutor & { calls: number } {
   const sql = {

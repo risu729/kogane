@@ -27,7 +27,6 @@ import {
   assertSame,
   IngestError,
   SHA256,
-  type EvidenceBucketLike,
   type IngestEnv,
   type StoredObjectLike,
 } from "./contract.ts";
@@ -37,12 +36,12 @@ const DEFAULT_MAX_OBJECT_BYTES = 50 * 1024 * 1024;
 const VERIFICATION_REUSE_MS = 300_000;
 
 /** The object-store key of a content-addressed object. */
-export function blobKeyFor(sha256: string): string {
+function blobKeyFor(sha256: string): string {
   return `objects/${sha256.slice(0, 2)}/${sha256}`;
 }
 
 /** The 32 bytes a hex sha256 denotes, for the store's own checksum check. */
-export function hexBytes(value: string): Uint8Array {
+function hexBytes(value: string): Uint8Array {
   if (!SHA256.test(value)) {
     throw new TypeError("invalid sha256");
   }
@@ -201,7 +200,7 @@ function hex(buffer: ArrayBuffer): string {
   return [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export interface VerificationOutcome {
+interface VerificationOutcome {
   verificationEventId: number;
   sha256: string;
   result: string;
@@ -212,6 +211,7 @@ export interface VerificationOutcome {
  * Re-reads the stored bytes and appends the outcome. The event is recorded
  * whatever the outcome is: "we looked and it was gone" is exactly the fact
  * that must survive, so nothing here deletes or rewrites the row it found.
+ * @public The verify request of docs/raw-store.md; no caller in this repository.
  */
 export async function verifyObject(
   env: IngestEnv,
@@ -276,6 +276,3 @@ export async function verifyObject(
   });
   return { verificationEventId: inserted!.id, sha256, result, reused: false };
 }
-
-/** The bucket type the adapter must satisfy, re-exported for the adapters. */
-export type { EvidenceBucketLike };
