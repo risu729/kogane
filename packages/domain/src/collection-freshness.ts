@@ -11,6 +11,7 @@
 //
 // The age is a count of civil days between two dates; nothing here reads an
 // amount, and nothing is inferred from a provider's schedule.
+import { RECENT_DAYS } from "./reported-state.ts";
 import {
   civilFromDays,
   daysBetween,
@@ -20,8 +21,6 @@ import {
 } from "./time.ts";
 
 export const COLLECTION_FRESHNESS_POLICY = "collection-freshness-v1";
-/** Same as `dated-state-freshness-v1`. */
-const RECENT_DAYS = 3;
 
 export const COLLECTION_FRESHNESS_STATES = [
   "same-day",

@@ -105,6 +105,10 @@ describe.if(runnable)("collection quality browser", () => {
       expect(
         await page.locator('nav .freshness[data-state="human-required"]').count(),
       ).toBeGreaterThan(0);
+      // PRESTIA bank's only job is disabled and it was never captured.
+      expect(
+        await page.locator('nav .freshness[data-state="disabled"]').first().textContent(),
+      ).toBe("定期実行の停止中（取得なし）");
       expect(
         await page.getByText("予約状態を確認できません", { exact: false }).count(),
       ).toBeGreaterThan(0);

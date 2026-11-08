@@ -116,6 +116,7 @@ export const SCHEDULE_QUALITY_SQL = `SELECT s.id, s.source, s.kind, s.enabled, s
 export interface SourceJobRow {
   kind: string;
   enabled: number;
+  supported: number;
   occurrence_failure_code: string | null;
 }
 
@@ -125,7 +126,7 @@ export interface SourceJobRow {
  * one source's cells need to say what the source waits on
  * (`collection-freshness-v1`), without reading, or bounding, every job.
  */
-export const SOURCE_JOBS_SQL = `SELECT s.kind, s.enabled,
+export const SOURCE_JOBS_SQL = `SELECT s.kind, s.enabled, s.supported,
        (SELECT newest.failure_code FROM collection_schedule_occurrences newest
          WHERE newest.schedule_id = s.id
          ORDER BY newest.nominal_at DESC LIMIT 1) AS occurrence_failure_code

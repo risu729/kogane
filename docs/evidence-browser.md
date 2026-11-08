@@ -869,8 +869,8 @@ by what its source waits on, when the stored jobs say so: `human-required`
 when a job collects only by hand (`kind: "manual"`, SMBC Direct) or its newest
 attempt (or, for a cell, its unit) stopped on a "a person must act" code
 (`human_required*`, `manual_agreement_required`), else `disabled` when the
-source has collecting jobs (`collection`, `manual`, `email`) and none is
-enabled. Otherwise it is `stale`, or `no-capture` with no age. A fresh capture
+source has supported collecting jobs (`collection`, `manual`, `email`) and
+none is enabled (an unsupported job, like V Point Pay's app job, never is). Otherwise it is `stale`, or `no-capture` with no age. A fresh capture
 is `same-day` or `recent` whatever the source waits on. A capture dated after
 the as-of date (a collector clock ahead) is age 0. The page shows the state
 and age per source in the source list and per cell (当日の取得, N日前の取得,

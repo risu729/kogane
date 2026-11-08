@@ -257,7 +257,7 @@ function SourceCells({ sourceId, offset }: { sourceId: string; offset: number })
             このページは {offset + 1}{" "}
             件目からの保存記録です。対象外・未宣言の口座や期間は列挙できません。新しさは現在の表示に採用された取得の日付から{" "}
             {data.freshnessAsOf.date}
-            （日本時間）までの日数で、当日・1〜3日前は最近、4日以上前は古いと表示します。
+            （日本時間）までの日数です。4日以上前の取得は「古い」と表示し、本人の操作待ちや定期実行の停止が理由のときはそれぞれ「本人操作待ち」「定期実行の停止中」と表示します。
           </p>
           {query.dataUpdatedAt ? (
             <p>表示を読んだ時刻: {new Date(query.dataUpdatedAt).toISOString()}</p>

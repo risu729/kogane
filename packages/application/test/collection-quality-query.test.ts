@@ -26,7 +26,9 @@ import {
   scheduleCollectors,
   sourceCollectors,
   sourceJobSources,
+  waitOfSource,
 } from "../src/query/collection-quality.ts";
+import { collectionFreshness } from "../../domain/src/collection-freshness.ts";
 
 /** Every age is counted to this instant (collection-freshness-v1); after every synthetic capture. */
 const AS_OF = "2099-03-01T00:00:00.000Z";
@@ -279,6 +281,25 @@ describe("the summary", () => {
     expect(pay.schedules.map((job) => [job.id, job.enabled, job.supported])).toEqual([
       ["vpoint-pay", false, false],
     ]);
+  });
+
+  test("the cells route reads the same wait for every source as the summary", async () => {
+    const summary = await queryCollectionQualitySummary(executor(store), { asOf: AS_OF });
+    const waits = new Set<string>();
+    for (const source of summary.sources) {
+      const wait = await waitOfSource(executor(store), source.sourceId);
+      waits.add(String(wait));
+      // The summary's state is the policy's for its own capture and the cells' wait.
+      expect(source.freshness, source.sourceId).toEqual(
+        collectionFreshness(
+          source.latestFetchRun?.completedAt ?? null,
+          summary.freshnessAsOf.date,
+          wait,
+        ),
+      );
+    }
+    // The store above has each kind of wait, so the comparison is not vacuous.
+    expect([...waits].sort()).toEqual(["disabled", "human-required", "null"]);
   });
 
   test("more jobs than the bound are refused, never cut", async () => {
@@ -715,8 +736,9 @@ describe("freshness (collection-freshness-v1)", () => {
     expect(of("sbi-vc-trade")).toEqual({ state: "human-required", ageDays: null });
     expect(of("sony-bank")).toEqual({ state: "no-capture", ageDays: null });
     expect(of("paypay")).toEqual({ state: "no-capture", ageDays: null });
-    // The V Point Pay app job is unsupported and off; its e-mail path has no job.
-    expect(of("v-point-pay")).toEqual({ state: "disabled", ageDays: null });
+    // The V Point Pay app job is unsupported (never enabled); its e-mail path
+    // has no job, so nothing says collection was switched off.
+    expect(of("v-point-pay")).toEqual({ state: "no-capture", ageDays: null });
   });
 
   test("the contract checks each age against the policy and the capture it is of", async () => {
@@ -744,6 +766,8 @@ describe("freshness (collection-freshness-v1)", () => {
       [1, { ...older, freshness: { state: "human-required", ageDays: 2 } }],
       [2, { ...missing, freshness: { state: "stale", ageDays: null } }],
       [2, { ...missing, freshness: { state: "disabled", ageDays: 9 } }],
+      // Consistent with the policy, but not the capture's age (3 days).
+      [0, { ...fresh, freshness: { state: "recent", ageDays: 1 } }],
     ] as const)
       expect(validCollectionQualityCells(withCell(index, value as never))).toBe(false);
     expect(

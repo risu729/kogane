@@ -236,7 +236,8 @@ stored causes. Publication and membership alone never prove full provider
 history, missing pages, retention completeness or resolved account identity.
 `UNCOMPOSED_QUERY_RULE_PARSERS` is empty today but remains pinned against every
 parser-specific guard of the shipped lists, so a new rule must be composed or
-explicitly withheld. No age, stale threshold or retention cap is invented.
+explicitly withheld. No age, stale threshold or retention cap is invented
+(ages: superseded by the amendment of 2026-11-08).
 
 ### Consequences and verification
 
@@ -278,8 +279,8 @@ paging use the URL. Query errors, no captures and no observations have distinct
 messages. Refresh only re-reads stored state. UTC instants are displayed as
 stored, including actual attempt start separately from its nominal schedule.
 
-The expanded strict wire shape has `apiVersion: 2`; version-1 replies are not
-rendered by this page. The quality version is separate from metadata's version.
+The expanded strict wire shape has `apiVersion: 2` (3 since the amendment of
+2026-11-08); version-1 replies are not rendered by this page. The quality version is separate from metadata's version.
 
 The summary adds stored future nominal/due times and `alarm` with `observed`
 or `unavailable` plus a nullable actual time. The App reads a bounded internal
@@ -317,7 +318,8 @@ reached. Unit outcome absence/unknown is explicitly `unit_outcome_unknown`.
 The page now distinguishes stopped, unsupported, authentication-waiting,
 missing-file, pending/refused/unpublished parse, empty publication, unresolved
 identity, unavailable Alarm read and older-current states. No stale or retention
-threshold is invented. The indexed full-CORE plan guard includes new bounded
+threshold is invented (a stale threshold: superseded by the amendment of
+2026-11-08). The indexed full-CORE plan guard includes new bounded
 per-source CTEs while retaining base-table negative controls and frozen
 financial-query digests. Synthetic tests cover missing units, recovery, empty
 publication, identity policy revisions, restricted authority before enumeration,
@@ -345,8 +347,11 @@ content, and each call is an R0 read in the audit log.
 
 ## Amendment 2026-11-08: freshness per source and cell
 
-- Status: proposed (the owner accepted the states provisionally on 2026-11-08
-  03:19 UTC, question 3 of the Phase 3 plan)
+- Status: proposed. The owner accepted these states, provisionally, on
+  2026-11-08 at 03:19 UTC, answering the Phase 3 plan's question "Freshness
+  states: `same-day` / `recent` (1–3 days) / `stale`, plus `human_required`,
+  `disabled` and `no_capture`?" in the Phase 3 planning thread (spelled with
+  hyphens here, like `dated-state-freshness-v1`'s states)
 - Issue: #542 (Phase 3, layers 0–5: "coverage is visible per account and data
   type")
 
@@ -366,8 +371,9 @@ age under `dated-state-freshness-v1` (`same-day`, `recent` up to 3 days,
    threshold, with a second configuration to keep in step.
 3. **One versioned policy, computed per request in the application query
    (chosen).** It reuses the reported state's thresholds, adds the states
-   that explain why data is not fresh from what is already stored, and leaves
-   the SQL unchanged.
+   that explain why data is not fresh from what is already stored. It leaves
+   the existing SQL texts unchanged and adds one small read of a source's own
+   jobs for the cells route.
 
 ### Decision
 
@@ -390,20 +396,26 @@ Asia/Tokyo civil date. Each source and each cell carries
   by hand (`kind: "manual"`) or a job's newest attempt stopped on a "a person
   must act" code (`human_required*`, `manual_agreement_required`, the codes
   that already give `user_action_required`), or, for a cell, its unit's own
-  failure code is one; otherwise `disabled` when the source has collecting
-  jobs (`collection`, `manual`, `email`; not a keepalive) and none is enabled.
+  failure code is one; otherwise `disabled` when the source has supported
+  collecting jobs (`collection`, `manual`, `email`; not a keepalive) and none
+  is enabled. An unsupported job can never be enabled (CORE 0065's CHECK), so
+  it does not say collection was switched off: V Point Pay's only job is the
+  unsupported app job while its e-mail path, which has no job, still
+  delivers, so V Point Pay reads `stale` or `no-capture`, not `disabled`.
   A fresh capture stays `same-day` or `recent` whatever the source waits on.
 - Otherwise data with no capture is `no-capture`, with no age.
 
-The contract checks each pair against the policy (`consistentFreshness`), the
-age against the capture it is of, and the as-of date against its instant.
+The contract checks each pair against the policy (`consistentFreshness`), each
+age against the capture it is of and the answer's as-of date, and the as-of
+date against its instant.
 `apiVersion` is 3. The cells route reads the source's own jobs and their newest
 receipts (`SOURCE_JOBS_SQL`, keyed by the job sources of the source's
 collectors and their aliases), so one source's cells are still served when the
 store has more jobs than the summary's bound. `kogane.collection-quality.read`
 answers the same and its description names the policy.
 
-With production as read on 2026-11-08 (§1.1 of the Phase 3 plan), SMBC Direct
+With production as read through `kogane.collection-quality.read` on
+2026-11-08 at about 03:25 UTC, SMBC Direct
 reads `human-required` with its age, a source with only a disabled job and no
 capture (PRESTIA bank) `disabled` with no age, St.George `stale` (its blocked
 coordinator has no stored "a person must act" code; its fix is #450), and

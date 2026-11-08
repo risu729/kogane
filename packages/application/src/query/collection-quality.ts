@@ -121,14 +121,22 @@ const COLLECTING_KINDS: readonly string[] = ["collection", "manual", "email"];
  * What a source waits on, from its jobs' stored settings and newest receipts
  * (`collection-freshness-v1`): `human-required` when a job collects only by
  * hand or its newest attempt stopped on a "a person must act" code;
- * `disabled` when it has collecting jobs and none is enabled; else nothing.
+ * `disabled` when it has supported collecting jobs and none is enabled; else
+ * nothing. An unsupported job can never be enabled (CORE 0065), so it says
+ * nothing about whether collection was switched off: V Point Pay's app job is
+ * unsupported while its e-mail path, which has no job, still delivers.
  */
 export function sourceWait(
-  jobs: readonly { kind: string; enabled: boolean; failureCode: string | null }[],
+  jobs: readonly {
+    kind: string;
+    enabled: boolean;
+    supported: boolean;
+    failureCode: string | null;
+  }[],
 ): CollectionWait {
   if (jobs.some((job) => job.kind === "manual" || userActionRequired(job.failureCode)))
     return "human-required";
-  const collecting = jobs.filter((job) => COLLECTING_KINDS.includes(job.kind));
+  const collecting = jobs.filter((job) => job.supported && COLLECTING_KINDS.includes(job.kind));
   if (collecting.length > 0 && collecting.every((job) => !job.enabled)) return "disabled";
   return null;
 }
@@ -342,6 +350,7 @@ export async function queryCollectionQualitySummary(
       jobsOfSource.map((job) => ({
         kind: job.kind,
         enabled: job.enabled,
+        supported: job.supported,
         failureCode: job.latest?.failureCode ?? null,
       })),
     );
@@ -474,8 +483,8 @@ export function sourceJobSources(sourceId: string): string[] {
   return [...new Set([...own, ...aliases])].sort();
 }
 
-/** What the jobs of one CORE source wait on, from its stored jobs only. */
-async function waitOfSource(executor: SqlExecutor, sourceId: string): Promise<CollectionWait> {
+/** What the jobs of one CORE source wait on, from its stored jobs only (the cells route's read). */
+export async function waitOfSource(executor: SqlExecutor, sourceId: string): Promise<CollectionWait> {
   const jobs = await executor.all<SourceJobRow>(SOURCE_JOBS_SQL, [
     JSON.stringify(sourceJobSources(sourceId)),
   ]);
@@ -483,6 +492,7 @@ async function waitOfSource(executor: SqlExecutor, sourceId: string): Promise<Co
     jobs.map((job) => ({
       kind: job.kind,
       enabled: job.enabled === 1,
+      supported: job.supported === 1,
       failureCode: safeCode(job.occurrence_failure_code),
     })),
   );

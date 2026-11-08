@@ -21,6 +21,7 @@ import * as z from "zod/mini";
 import {
   COLLECTION_FRESHNESS_POLICY,
   COLLECTION_FRESHNESS_STATES,
+  collectionFreshness,
   consistentFreshness,
   tokyoDate,
 } from "../../domain/src/collection-freshness.ts";
@@ -197,6 +198,19 @@ const freshnessAsOf = z
     date,
   })
   .check(z.refine((value) => tokyoDate(value.at) === value.date));
+/** An age is the civil days from its capture to the answer's as-of date (clamped at 0). */
+function ageOf(
+  capturedAt: string | null | undefined,
+  asOfDate: string,
+  ageDays: number | null,
+): boolean {
+  if (capturedAt == null) return ageDays === null;
+  try {
+    return collectionFreshness(capturedAt, asOfDate, null).ageDays === ageDays;
+  } catch {
+    return false;
+  }
+}
 /** A list with no repeated entry: a reason or a code is stated once. */
 const distinct = <T extends z.ZodMiniType<string>>(entry: T, bound = 100) =>
   z.array(entry).check(
@@ -290,16 +304,24 @@ const source = z
     ),
   );
 
-const summary = z.strictObject({
-  apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
-  freshnessAsOf,
-  sources: z.array(source).check(
-    z.maxLength(COLLECTION_QUALITY_BOUND),
-    z.refine((values) => new Set(values.map((value) => value.sourceId)).size === values.length),
-  ),
-  /** Jobs whose source registers under no CORE source (the Processor tick has none). */
-  otherSchedules: z.array(schedule).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
-});
+const summary = z
+  .strictObject({
+    apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
+    freshnessAsOf,
+    sources: z.array(source).check(
+      z.maxLength(COLLECTION_QUALITY_BOUND),
+      z.refine((values) => new Set(values.map((value) => value.sourceId)).size === values.length),
+    ),
+    /** Jobs whose source registers under no CORE source (the Processor tick has none). */
+    otherSchedules: z.array(schedule).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
+  })
+  .check(
+    z.refine((value) =>
+      value.sources.every((entry) =>
+        ageOf(entry.latestFetchRun?.completedAt, value.freshnessAsOf.date, entry.freshness.ageDays),
+      ),
+    ),
+  );
 
 const period = z
   .strictObject({
@@ -412,20 +434,28 @@ const cell = z
     ),
   );
 
-const cells = z.strictObject({
-  apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
-  freshnessAsOf,
-  sourceId,
-  latestFetchRun: fetchRun,
-  cells: z.array(cell).check(z.maxLength(COLLECTION_QUALITY_PAGE)),
-  coverage: z
-    .strictObject({
-      limit: z.literal(COLLECTION_QUALITY_PAGE),
-      truncated: z.boolean(),
-      nextOffset: z.nullable(count),
-    })
-    .check(z.refine((value) => (value.nextOffset === null) === !value.truncated)),
-});
+const cells = z
+  .strictObject({
+    apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
+    freshnessAsOf,
+    sourceId,
+    latestFetchRun: fetchRun,
+    cells: z.array(cell).check(z.maxLength(COLLECTION_QUALITY_PAGE)),
+    coverage: z
+      .strictObject({
+        limit: z.literal(COLLECTION_QUALITY_PAGE),
+        truncated: z.boolean(),
+        nextOffset: z.nullable(count),
+      })
+      .check(z.refine((value) => (value.nextOffset === null) === !value.truncated)),
+  })
+  .check(
+    z.refine((value) =>
+      value.cells.every((entry) =>
+        ageOf(entry.current?.capturedAt, value.freshnessAsOf.date, entry.freshness.ageDays),
+      ),
+    ),
+  );
 
 export type CollectionQualityTerminal = z.output<typeof terminal>;
 export type CollectionQualityOccurrence = z.output<typeof occurrence>;
