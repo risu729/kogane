@@ -1,16 +1,31 @@
 # Agent instructions
 
-## Language
-
-Use English consistently for repository documentation and other prose, code comments,
-commit messages, pull request titles and descriptions, and new issues and issue
-comments. Preserve intentional localizations, locale-specific fixtures, quoted
-source text, and data whose exact wording is required for correctness. Existing
-Japanese issues stay as they are.
-
 Standing rules for any agent working in this repository. Each rule points to
 the document that carries the detail; when this file and that document
 disagree, the document is right and this file is corrected.
+
+## Language
+
+Write everything in this repository in English: code, identifiers and code
+comments, documentation (ADRs, research notes under `docs/sources/` and service
+READMEs included), commit messages, pull request titles and descriptions, issue
+titles and bodies, and issue, pull request and review comments.
+
+Japanese stays only where it is product data whose exact wording matters:
+
+- text a provider shows on its screens or puts in its files, emails or API
+  responses (for example the MyJCB cell label `ご利用先など／支払区分`);
+- text the web UI shows to users: titles, labels and messages (for example the
+  `依頼の経過` page title);
+- fixture data in tests (not their comments or test names);
+- a short verbatim phrase of the owner, with an English translation beside it.
+
+Such Japanese appears as a term inside an English sentence, never as the
+sentence. Existing Japanese prose in documents, issues and comments is
+rewritten in English, keeping its meaning, links and acceptance criteria, in
+PRs of its own; new text added to a Japanese document is written in English.
+Agents talk with the owner in Japanese outside the repository (chat and
+threads).
 
 ## Continuing the work
 
