@@ -1335,7 +1335,9 @@ format change is needed for that step.
   Legacy artifacts without that timestamp use the run start as a conservative
   lower bound. An old saved success that captured an open day keeps its bytes
   and provider outcome but publishes `coverageStatus: partial` with
-  `coverage_day_not_finished`, even if publication is retried after midnight;
+  `coverage_day_not_finished` on its account unit (the run itself carries no
+  code: the terminal contract refuses one on a `success`; registration records
+  that unit `failed`), even if publication is retried after midnight;
   stored progress and `/api/status` retain this coverage reason and report
   `waitingForHuman: true`. The UI explains that a fresh QR approval and backfill
   are needed, and that retrying shared publication cannot repair coverage. A
