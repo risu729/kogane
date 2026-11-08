@@ -7,7 +7,12 @@ import {
   validMaintenance,
   type MaintenanceRule,
 } from "../src/schedule-model";
-import { scheduledFailure, scheduledResult } from "../src/schedule-result";
+import {
+  RUN_IDS_OVER_LIMIT,
+  scheduledCompletion,
+  scheduledFailure,
+  scheduledResult,
+} from "../src/schedule-result";
 import { withCollectionLease, type ScheduleLeaseDatabase } from "../src/schedule-lease";
 const ms = (value: string) => Date.parse(value);
 function rule(pattern: MaintenanceRule["pattern"]): MaintenanceRule {
@@ -144,6 +149,47 @@ test("a reported run id is one a terminal key can carry", () => {
       "synthetic-card-001",
     ]).runIds,
   ).toEqual(["synthetic-card-001"]);
+});
+test("a collection with more runs than a result carries is a closed failure, never a subset", () => {
+  const ids = (n: number) =>
+    Array.from({ length: n }, (_, i) => `synthetic-card-${String(i + 1).padStart(3, "0")}`);
+  // Exactly the cap, with repeats, is a completed collection naming each run once.
+  expect(scheduledCompletion([...ids(100), ...ids(100)])).toEqual({
+    status: "completed",
+    runIds: ids(100),
+    failureCode: null,
+  });
+  expect(scheduledCompletion([])).toEqual({ status: "completed", runIds: [], failureCode: null });
+  // One more is `run_ids_over_limit` with the first 100 in the order persisted:
+  // a completed answer would let the operation trail state a verdict for runs
+  // it never looked at. Repeats and ids no terminal key carries do not count.
+  expect(scheduledCompletion([...ids(100), "synthetic:card", ids(1)[0]])).toEqual({
+    status: "completed",
+    runIds: ids(100),
+    failureCode: null,
+  });
+  expect(scheduledCompletion(ids(101))).toEqual({
+    status: "failed",
+    runIds: ids(100),
+    failureCode: RUN_IDS_OVER_LIMIT,
+  });
+  expect(scheduledResult({ status: "success", runIds: ids(101) })).toEqual({
+    status: "failed",
+    runIds: ids(100),
+    failureCode: RUN_IDS_OVER_LIMIT,
+  });
+  // A failure keeps its own code, the lease abort's included (it must stay
+  // uncertain), and lists the first 100 runs it persisted.
+  expect(scheduledResult({ status: "failed", runIds: ids(101) })).toEqual({
+    status: "failed",
+    runIds: ids(100),
+    failureCode: "collection_failed",
+  });
+  expect(scheduledFailure(new Error("collection_lease_lost"), ids(101))).toEqual({
+    status: "failed",
+    runIds: ids(100),
+    failureCode: "collection_lease_lost",
+  });
 });
 test("a persistent active lease blocks provider entry; no time expiry is consulted", async () => {
   let ref: string | null = "interrupted",

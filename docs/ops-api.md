@@ -388,8 +388,30 @@ most 64; the pattern is checked, not a fixed list), and at most 100 run ids, eac
 a terminal key can carry (`RUN_ID` in `packages/collection/src/keys.ts`, so
 never a `:`): `collectorOperationResult` in
 `packages/collection/src/operation-rpc.ts`. The collector's own result helpers
-(`scheduledResult`, `scheduledFailure`) report only such ids, and none for a
-run whose terminal was not written, even when the run is listed.
+(`scheduledResult`, `scheduledCompletion`, `scheduledFailure` in
+`packages/collection/src/schedule-result.ts`) report only such ids, each once,
+and none for a run whose terminal was not written, even when the run is
+listed. Every collector answer that names runs comes from them, except SBI VC's
+blocked-session answer (`blockedScheduleResult`), which names its one run
+only when that run's terminal was persisted. Vpass, the one collector that
+persists several runs per collection (one per card), passes them its runs in
+the order it persisted them.
+
+**More than 100 runs.** A collection that finishes with more than 100
+distinct persisted runs answers `failed` with `run_ids_over_limit` and the
+first 100 runs (`MAX_RUN_IDS`, `RUN_IDS_OVER_LIMIT`), so the operation is
+`failed` with those runs listed. It is not answered as `collected` with a
+subset, because tracking would then state `published` or `unpublished` for a
+collection whose other runs it never read; nor is it answered with every run,
+which the Processor refuses as outside the closed shape (`uncertain`, with no
+runs listed). No evidence is lost either way: every run's terminal is in the
+bucket and the collection scan registers it like any other run; only the
+operation's links stop at 100. A collection that fails keeps its own code (a
+lease abort stays `uncertain`) and lists at most its first 100 persisted runs,
+with no marker that more exist: a failed operation is not followed to
+publication, so the shorter list states no verdict, but `runs` alone does not
+say whether it is complete. The alarm path stores the same answer on the
+schedule occurrence.
 
 `startedAt`, `collectedAt`, `publishedAt` and `finishedAt` are set when the
 state is reached; `expiresAt` is acceptance + 24 h.
