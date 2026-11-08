@@ -2,7 +2,13 @@ import { expect, test } from "bun:test";
 import { findConversionPaths, simulateConversion } from "../src/reward-conversion.ts";
 import type { ConversionOffer, MembershipState, OfferValidity } from "../src/rewards.ts";
 import type { LocalDateValue, TemporalValue } from "../src/time.ts";
-import { decimalLiteral, decimalToString, exactQuantity, ROUNDING_MODES } from "../src/values.ts";
+import {
+  absentQuantity,
+  decimalLiteral,
+  decimalToString,
+  exactQuantity,
+  ROUNDING_MODES,
+} from "../src/values.ts";
 
 const day = (value: string): LocalDateValue => ({
   kind: "local-date",
@@ -113,6 +119,36 @@ test("all 24,300 bounded amount-policy combinations match the integer oracle", (
               expect(decimalToString(plan.receive.value.value)).toBe(
                 String(expectedFeasible ? rounded(use * numerator, denominator, mode) : 0),
               );
+              // The adjustments in order, then the refusal or the credit caveat.
+              expect(plan.reasonCodes).toEqual([
+                ...(cap !== null && cap < balance ? ["capped_by_maximum"] : []),
+                ...(use < permitted ? ["rounded_down_to_increment"] : []),
+                expectedFeasible ? "credit_is_not_the_application" : "below_minimum",
+              ]);
+              // The route search reports the same plan, or its refusal by name.
+              const search = findConversionPaths(
+                [
+                  offer({
+                    increment: decimalLiteral(String(increment)),
+                    minimum: decimalLiteral(String(minimum)),
+                    maximumPerRequest: cap === null ? null : decimalLiteral(String(cap)),
+                    ratio: { numerator: String(numerator), denominator: String(denominator) },
+                    rounding: { scale: 0, mode },
+                  }),
+                ],
+                { quantity: quantity(balance), clock: day("2026-04-10") },
+                "points:b",
+                { maxDepth: 1, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null },
+              );
+              if (expectedFeasible) {
+                expect(search.rejected).toEqual([]);
+                expect(search.paths.map((p) => p.hops.map((h) => h.plan))).toEqual([[plan]]);
+              } else {
+                expect(search.paths).toEqual([]);
+                expect(search.rejected).toEqual([
+                  { offerRef: "offer:a-b@v1", reasonCode: "below_minimum" },
+                ]);
+              }
             }
   expect(cases).toBe(24_300);
 });
@@ -590,4 +626,87 @@ test("a required completion date follows the deadline rule on the credit day", (
   expect(at(instant("2026-04-14T15:30:00Z"))).toBe("needs_rule_verification");
   expect(at(instant("2026-04-15T15:30:00Z"))).toBe("route");
   expect(at(instant("2026-04-13T15:30:00Z"))).toBe("completion_after_required_by");
+});
+
+test("a later hop's passed deadline names the credit wait only when the wait passed it", () => {
+  const budget = { maxDepth: 2, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null };
+  // A → C, then C → B; the clock is 2026-04-10 in Tokyo.
+  const reason = (firstProcessingDays: number, applicationDeadline: TemporalValue): string => {
+    const result = findConversionPaths(
+      [
+        offer({ offerId: "offer:a-c", toUnitRef: "points:c", processingDays: firstProcessingDays }),
+        offer({ offerId: "offer:c-b", fromUnitRef: "points:c", applicationDeadline }),
+      ],
+      { quantity: quantity(4), clock: day("2026-04-10") },
+      "points:b",
+      budget,
+    );
+    expect(result.paths).toEqual([]);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.offerRef).toBe("offer:c-b@v1");
+    return result.rejected[0]!.reasonCode;
+  };
+  // Open on the clock's day, closed by the credit day: only applying before
+  // the points are credited would meet it.
+  expect(reason(10, day("2026-04-15"))).toBe("reuse_before_credit");
+  expect(reason(10, day("2026-04-10"))).toBe("reuse_before_credit");
+  // Already closed on the clock's day: no wait for a credit passed it.
+  expect(reason(10, day("2026-04-09"))).toBe("application_deadline_passed");
+  expect(reason(0, day("2026-04-09"))).toBe("application_deadline_passed");
+  // Not established on the clock's day (inside a period, the day holding an
+  // instant) but passed by the credit day: the passed deadline is established,
+  // the credit wait as its cause is not.
+  const april: TemporalValue = {
+    kind: "period",
+    start: "2026-04-01",
+    end: "2026-04-15",
+    endExclusive: false,
+    zone: "Asia/Tokyo",
+    granularity: "day",
+  };
+  expect(reason(10, april)).toBe("application_deadline_passed");
+  const noon: TemporalValue = {
+    kind: "instant",
+    value: "2026-04-10T12:00:00+09:00",
+    zone: "Asia/Tokyo",
+    basis: "provider",
+  };
+  expect(reason(10, noon)).toBe("application_deadline_passed");
+});
+
+test("a refused amount names its refusal, not an adjustment made before it", () => {
+  const budget = { maxDepth: 1, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null };
+  const reasons = (overrides: Partial<ConversionOffer>, held: number) =>
+    findConversionPaths(
+      [offer(overrides)],
+      { quantity: quantity(held), clock: day("2026-04-10") },
+      "points:b",
+      budget,
+    ).rejected.map((r) => r.reasonCode);
+  // 1,500 rounds down to 1,000, which is below the 2,000 minimum.
+  expect(
+    reasons({ increment: decimalLiteral("1000"), minimum: decimalLiteral("2000") }, 1500),
+  ).toEqual(["below_minimum"]);
+  // A cap below the minimum.
+  expect(
+    reasons({ maximumPerRequest: decimalLiteral("500"), minimum: decimalLiteral("1000") }, 4000),
+  ).toEqual(["below_minimum"]);
+  // Every other refusal of the amount, after an adjustment where one can come first.
+  expect(
+    reasons({ maximumPerRequest: decimalLiteral("500"), increment: decimalLiteral("0") }, 4000),
+  ).toEqual(["division_by_zero"]);
+  expect(
+    reasons(
+      { increment: decimalLiteral("1000"), ratio: { numerator: "1", denominator: "0" } },
+      1500,
+    ),
+  ).toEqual(["invalid_ratio"]);
+  expect(
+    findConversionPaths(
+      [offer()],
+      { quantity: absentQuantity("points:a", "missing", "synthetic"), clock: day("2026-04-10") },
+      "points:b",
+      budget,
+    ).rejected.map((r) => r.reasonCode),
+  ).toEqual(["quantity_not_exact"]);
 });

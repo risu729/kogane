@@ -3,7 +3,9 @@
 - Status: accepted (merged 2026-11-06 in #949); the
   [first 2026-11-08 amendment](#amendment-2026-11-08-a-later-proposal-never-replaces-a-pairs-decision)
   is accepted (#1163); the
-  [second](#amendment-2026-11-08-the-correction-history-of-a-source-account)
+  [second](#amendment-2026-11-08-a-pair-plan-pins-every-reference-of-the-pair)
+  is accepted (#1128); the
+  [third](#amendment-2026-11-08-the-correction-history-of-a-source-account)
   is proposed
 - Date: 2026-11-06; amended 2026-11-08
 - Issue: part of #545
@@ -219,10 +221,11 @@ change lifecycle unchanged.
   `unresolved` until a verifier records a witness for them.
 - No server-side candidate provenance is checked: a `relation.accept` of
   `connection_contains` was plannable before this read and still is. The
-  plan pins the revision of the candidate's own reference, so a decision
-  taken in between under that reference makes it stale at approval and
-  commit; a decision recorded in between under one of the pair's other
-  references (another producer's, or a pre-rewrite key) does not.
+  plan pinned only the revision of the candidate's own reference, so a
+  decision recorded in between under one of the pair's other references
+  (another producer's, or a pre-rewrite key) did not make it stale. Closed by
+  the [amendment of 2026-11-08](#amendment-2026-11-08-a-pair-plan-pins-every-reference-of-the-pair):
+  the plan now pins every reference of the pair.
 
 ## Explicitly not decided
 
@@ -347,6 +350,114 @@ Synthetic data only.
   with no such triple both return the same 10,001 rows in the same order;
   without table statistics the plan equals the shipped plan, two keyed index
   ranges and no scan.
+
+## Amendment 2026-11-08: a pair plan pins every reference of the pair
+
+- Status: proposed until the PR that carries it merges, then accepted
+- Date: 2026-11-08
+- Carried by: `packages/application/src/operations/pair-references.ts`
+  (`CONNECTION_PAIR_REFS_SQL`, `withPairPins`, `pairStaleRefs`,
+  `connectionPairGuard`), its calls in
+  `packages/application/src/operations/targets.ts` (the relation and identity
+  planners), `packages/application/src/command/approve.ts`,
+  `packages/application/src/command/commit.ts` and
+  `packages/application/src/operations/relation-writes.ts`;
+  [change lifecycle](../change-lifecycle.md#pair-pins),
+  [identity](../identity.md)
+- Related: [ADR 0055](0055-instrument-candidates.md) (the instrument pair,
+  amended the same day)
+
+### Context
+
+The last item of Consequences recorded an open gap: a plan of
+`relation.accept` or `relation.reject` pinned only the revision (row count)
+of its own `connection_contains` triple. Decision 3 reads the pair's status
+from the newest of the current relations under its references
+(`this-connection`, `same-identity-value`, `legacy-connection-key`), so a
+decision recorded under
+another producer's reference, or under a 0029 reference whose key 0063
+rewrote, between plan and commit changed the pair's status and left the plan
+fresh: the commit then appended a decision on a pair the operator had seen in
+another state. The instrument pair of ADR 0055 had the same shape: an adoption
+pinned both mappings but neither `listed_as` orientation, and the keep-apart
+rejection pinned its own triple only, so a rejection in the other orientation
+or an adoption between plan and commit did not make the other plan stale.
+
+### Options considered
+
+1. **A new subject kind in the lifecycle's revision guard** (say, a pair
+   revision summing every reference's rows). Rejected: it changes the shared
+   guard text in `packages/storage-d1` that the App and the Processor both
+   run, and the existing subject kinds already answer each reference.
+2. **Re-check the candidate read at approval and commit** (as instrument
+   candidate provenance does). Rejected for this: the candidate read is a
+   whole-store read, and it would still be a preceding `SELECT`, not a
+   condition of the commit batch.
+3. **Pin every reference of the pair with the existing subject kinds.**
+   Chosen. No migration, no new subject kind, no change to the guard.
+
+### Decision
+
+- The planner pins, besides the command's own subject, the
+  `relation:connection_contains|<ref>|source_account:<id>` triple under every
+  reference of the pair: each producer's review reference of the identity
+  value the plan's `from_ref` names, and each 0029 reference mapped to that
+  identity value and direct account exactly as decision 3 maps it. A plan
+  under a 0029 reference finds the pair through the same mapping. A triple no
+  connection review names, and no 0029 backfill maps, names no pair and pins
+  only itself.
+- An instrument pair (ADR 0055's amendment of the same day) pins both
+  identifiers' mappings and `listed_as` in both orientations.
+- Approval and commit also re-read the pair's references. A reference the plan
+  does not pin (another producer's first review of the identity value after
+  planning, or a plan made before this amendment) makes the plan stale and
+  marks it so; for an account pair the commit batch carries the same check as
+  a condition of its receipt reservation (`connectionPairGuard`), so a review
+  recorded between the commit's reads and its batch writes nothing.
+- The refusal is the lifecycle's existing `stale_context`, with the moved or
+  unpinned references among its refs. MCP clients reach it through
+  `kogane.command.approve` and `kogane.command.commit`, which re-simulate
+  before forwarding; `simulate` reports the plan stale because the pins it
+  would record differ. Like every refusal that re-simulation finds, it is
+  answered before forwarding, so the plan row is not marked stale.
+
+### Consequences
+
+- The last item of Consequences ("does not") is closed: a decision recorded under any
+  reference of the pair between plan and commit makes the plan stale.
+- A plan of a pair with several references changes digest (its pins are part
+  of it), so a plan made before this change is stale at simulation and is
+  refused at approval and commit; it is planned again.
+- The pins are not `simulation.targets[]` entries: the confirmation screen's
+  table still lists the command's own triple, and the moved reference is named
+  only in the refusal.
+- The cost is one statement per plan, approval and commit of a
+  `connection_contains` triple: one pass over the small review table per use
+  and each backfilled relation by primary key, plus its pinned revisions
+  through the existing guard. No observation table is read.
+
+### Verification
+
+Synthetic data only.
+
+- `packages/application/test/pair-pins.test.ts`: the plan pins the own,
+  another producer's and the 0029 reference; a decision under another
+  producer's reference or the 0029 reference between plan and commit refuses
+  the commit with `stale_context`, writes nothing and marks the plan stale,
+  and `simulate` reports it stale; approval is refused the same way, also
+  when the pair only gains a reference (no approval is written and the plan is
+  marked stale); a reference that appears after planning refuses the commit
+  both before the batch and inside it (a review inserted just before the batch
+  writes no receipt and spends no approval use); with nothing in between the
+  plan commits; the instrument adoption and keep-apart plans pin the same four
+  references, a reverse-orientation rejection makes the adoption stale and an
+  adoption makes the keep-apart stale; the pair read reaches the relations by
+  primary key only on the whole CORE schema without statistics.
+- `services/app/test/pair-pins-mcp.test.ts` on workerd: over real MCP, a plan
+  approved and prepared for commit, then a rejection committed under the other
+  producer's reference, is refused with `stale_context` at confirm and at a
+  new prepare, and a plan made before that decision is refused at approval;
+  nothing is written under the plan's own reference.
 
 ## Amendment 2026-11-08: the correction history of a source account
 
