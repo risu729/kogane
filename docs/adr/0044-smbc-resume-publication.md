@@ -80,6 +80,42 @@ uses migrated CORE/READ databases and R2 to register the partial and full runs,
 parse both earlier and later months plus balance with account context, and prove
 that publication and registration retries create no duplicate parses or rows.
 
+## Amendment 2026-11-08: logout after complete collection
+
+Status: proposed
+Owner decision: 2026-11-08 13:26 UTC
+
+A provider logout or sign-off failure after all planned units were acquired and
+stored is cleanup metadata, never a coverage gap. Complete SMBC backfills remain
+successful and their account units remain eligible for parsing. The existing
+`logoutSucceeded` state is retained across publication retries; the failure
+cleanup path before completion keeps its existing outcome and failure codes.
+Independent coverage refusals still apply: a legacy open-day success retains
+`coverage_day_not_finished` even when the same terminal flags a failed logout.
+
+The uniform collector policy and complete collector audit live in
+[collection](../collection.md#logout-audit-2026-11-08). Reuse the existing
+`terminal-v1` auxiliary run report rather than add a manifest version or attach a
+failure code to a successful run/unit: `reportRef: logout`, `reportKind: logout`,
+`scope: run`, `outcome: failed`, `safeErrorCode: logout_failed`. The failed report
+describes sign-off only. PRESTIA bank and GLOBAL PASS publish the same closed
+report. No provider text or authentication material enters it.
+
+Alternatives considered were leaving the flag only in logs (not durable with
+the run), a new optional terminal field (unnecessary contract expansion), and
+retaining a partial outcome (loses parse eligibility for complete acquisitions).
+Existing terminals stay immutable. An old partial terminal remains partial;
+this decision does not rewrite history or relax parser eligibility. CORE still
+derives only the terminal run/unit reports, so the auxiliary flag is available
+from the stored terminal but is not yet rendered by collection quality screens.
+
+Synthetic collector tests cover completed acquisition plus failed sign-off,
+terminal persistence and unchanged earlier collection failures. Processor
+pipeline tests establish that successful flagged SMBC, PRESTIA bank and GLOBAL
+PASS evidence still registers and publishes parsed observations. The GLOBAL
+PASS plan test also preserves successful registration and dataset eligibility
+for every page of its complete account unit.
+
 ## Amendment 2026-11-08: closed JST days and frozen resume windows
 
 Status: proposed

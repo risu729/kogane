@@ -204,44 +204,60 @@ test("a legacy current-day chunk waits until JST midnight before acquisition", a
   expect(read.manifest.coverageStatus).toBe("complete");
 });
 
-test("publishing an old open-day success after midnight never upgrades its coverage", async () => {
-  const manifest: BackfillManifest = {
-    schemaVersion: "smbc-direct-backfill-worker-poc-v2",
-    source: "smbc-direct",
-    runId: "synthetic-old-success",
-    startedAt: "2099-03-01T01:00:00.000Z",
-    completedAt: "2099-03-01T01:10:00.000Z",
-    status: "success",
-    requestedRange: { start: "2099-03-01", end: "2099-03-01" },
-    completedChunks: 1,
-    totalChunks: 1,
-    transactionCount: 0,
-    artifacts: [],
-    failureCodes: [],
-    logoutSucceeded: true,
-  };
-  for (const now of ["2099-03-01T01:00:00.000Z", "2099-03-02T01:00:00.000Z"]) {
-    setSystemTime(new Date(now));
-    const plan = await buildSharedRunPlan({
-      manifest,
-      manifestBytes: manifestBytes(manifest),
-      prefix: "synthetic",
-      bytesByKey: new Map(),
-      identity: { attemptId: "synthetic-attempt" },
-    });
-    expect(plan.run).toMatchObject({
-      providerOutcome: "success",
-      coverageStatus: "partial",
-      units: [
-        expect.objectContaining({
-          coverageStatus: "partial",
-          safeErrorCode: "coverage_day_not_finished",
-        }),
-      ],
-    });
-    expect(plan.run.safeErrorCode).toBeUndefined();
-  }
-});
+test.each([true, false])(
+  "publishing an old open-day success never upgrades coverage regardless of logout (logoutSucceeded=%s)",
+  async (logoutSucceeded) => {
+    const manifest: BackfillManifest = {
+      schemaVersion: "smbc-direct-backfill-worker-poc-v2",
+      source: "smbc-direct",
+      runId: "synthetic-old-success",
+      startedAt: "2099-03-01T01:00:00.000Z",
+      completedAt: "2099-03-01T01:10:00.000Z",
+      status: "success",
+      requestedRange: { start: "2099-03-01", end: "2099-03-01" },
+      completedChunks: 1,
+      totalChunks: 1,
+      transactionCount: 0,
+      artifacts: [],
+      failureCodes: [],
+      logoutSucceeded,
+    };
+    for (const now of ["2099-03-01T01:00:00.000Z", "2099-03-02T01:00:00.000Z"]) {
+      setSystemTime(new Date(now));
+      const plan = await buildSharedRunPlan({
+        manifest,
+        manifestBytes: manifestBytes(manifest),
+        prefix: "synthetic",
+        bytesByKey: new Map(),
+        identity: { attemptId: "synthetic-attempt" },
+      });
+      expect(plan.run).toMatchObject({
+        providerOutcome: "success",
+        coverageStatus: "partial",
+        units: [
+          expect.objectContaining({
+            coverageStatus: "partial",
+            safeErrorCode: "coverage_day_not_finished",
+          }),
+        ],
+      });
+      expect(plan.run.safeErrorCode).toBeUndefined();
+      expect(plan.run.reports).toEqual(
+        logoutSucceeded
+          ? []
+          : [
+              {
+                reportRef: "logout",
+                reportKind: "logout",
+                scope: "run",
+                outcome: "failed",
+                safeErrorCode: "logout_failed",
+              },
+            ],
+      );
+    }
+  },
+);
 
 test("saved open-day success exposes recovery through progress and the status API until a fresh backfill", async () => {
   setSystemTime(new Date("2099-03-02T01:00:00.000Z"));

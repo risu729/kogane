@@ -341,7 +341,18 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
       },
     ],
     ranges: ranges(input.manifest),
-    reports: [],
+    reports:
+      input.manifest.logoutSucceeded === false
+        ? [
+            {
+              reportRef: "logout",
+              reportKind: "logout",
+              scope: "run",
+              outcome: "failed",
+              safeErrorCode: "logout_failed",
+            },
+          ]
+        : [],
     transformations,
   };
   return { run, artifacts };
