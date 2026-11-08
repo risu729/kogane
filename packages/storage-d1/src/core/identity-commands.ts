@@ -313,15 +313,20 @@ export async function prepareIdentityCommand(
         },
   );
   if (!assign)
-    // The one permitted update: each active override is superseded exactly once, by this release.
-    // Only overrides at or before the revision the release saw: an identical
-    // resend whose batch runs after a later assign finds its own ledger row
-    // (the first send's), and must not release an override it never saw.
+    // The one permitted update: each override the release cites is superseded
+    // exactly once, by this release, and only by this command's own batch.
+    // A second delivery (an identical resend whose batch runs after a later
+    // assign, or a change-lifecycle commit replayed under its receipt guard)
+    // finds the decision too and must not release an override made after it.
+    // Either bound below stops both on its own: the later override is not
+    // cited, and its revision is above the one the release saw. Both are kept,
+    // with the own-ledger-row check, as defense in depth.
     writes.push({
       sql: `UPDATE decision_revisions SET superseded_by=? WHERE subject_kind=? AND subject_ref=?
         AND decision_kind='assign' AND method IN ('manual','legacy-migration') AND superseded_by IS NULL
         AND revision<=?
-        AND EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)
+        AND 'decision_revision:'||id IN (SELECT cited.value FROM decision_revisions released,
+          json_each(released.evidence_refs_json) cited WHERE released.id=?)
         AND EXISTS(SELECT 1 FROM decision_operations op WHERE ${ownLedger})`,
       binds: [
         decisionId,

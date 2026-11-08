@@ -12,6 +12,8 @@ import {
   sharedR2IngestEnabled,
 } from "../src/collection/index.ts";
 import { parseTerminalNotification } from "../src/collection/notifications.ts";
+import { invocationContext } from "../src/invocation-probe.ts";
+import { collectionScanStage } from "../src/worker.ts";
 import {
   ACCOUNT_ID,
   artifact,
@@ -844,4 +846,46 @@ test("a registration that throws does not stop the page or pin the cursor (G1-13
   const second = await collectionScan(harness.env);
   expect(second).toMatchObject({ registered: 1, alreadyRegistered: 2, failed: 0 });
   expect(countOf(harness, "SELECT count(*) AS n FROM fetch_run_seals")).toBe(3);
+});
+
+test("the deployed scan stage logs each thrown registration by a closed code only", async () => {
+  // Before this, the cron's stage passed no `onFailure`: a thrown
+  // registration reached the lane's log line only as a `failed` count, and its
+  // class was never logged although docs/processor.md said it was.
+  const harness = collectionHarness();
+  for (const runId of ["run-001", "run-002", "run-003"]) {
+    await persistSyntheticRun(harness, { run: { runId } });
+  }
+  const poisoned = objectKey((await artifact("balance.json", '{"synthetic":true}')).sha256);
+  const head = harness.bucket.head.bind(harness.bucket);
+  // Each tick, the first read of that object throws the next queued error.
+  const throws: string[] = [];
+  harness.bucket.head = async (key: string) => {
+    const name = key === poisoned ? throws.shift() : undefined;
+    if (name !== undefined) {
+      const error = new Error("synthetic r2 outage: " + key);
+      error.name = name;
+      throw error;
+    }
+    return head(key);
+  };
+  const lines: string[] = [];
+  const stage = (context = invocationContext()) =>
+    collectionScanStage(harness.env as unknown as Env, context, (line) => lines.push(line));
+  throws.push("Error");
+  expect(await stage()).toMatchObject({ listed: 3, registered: 2, failed: 1 });
+  // The code is the built-in class, never the writable name (#989/#1050):
+  // a renamed Error is still `Error`, and the name's text is not logged.
+  throws.push("Outage: " + poisoned);
+  expect(await stage()).toMatchObject({ registered: 0, failed: 1 });
+  expect(lines.map((line) => JSON.parse(line))).toEqual([
+    { event: "collection_scan_registration_failed", code: "Error" },
+    { event: "collection_scan_registration_failed", code: "Error" },
+  ]);
+  expect(lines.join("\n")).not.toContain("Outage");
+  expect(lines.join("\n")).not.toContain("synthetic r2 outage");
+  expect(lines.join("\n")).not.toContain(poisoned);
+  // A tick with nothing thrown logs no failure line.
+  expect(await stage()).toMatchObject({ registered: 1, failed: 0 });
+  expect(lines).toHaveLength(2);
 });

@@ -377,14 +377,19 @@ export class SmbcBackfillSession extends DurableObject<Env> {
             nextRange: null,
             logoutSucceeded,
           };
+          // The completion's own steps name their stage: a failure here is
+          // not one of the last chunk's, and the retry log says which failed.
+          stage = "manifest-write";
           completed.manifestKey = await storeManifest(
             this.env.DATA,
             prefix,
             this.#manifest(completed, artifacts, failureCodes),
           );
+          stage = "progress-persist";
           await this.ctx.storage.put({ progress: completed, artifacts, failureCodes });
           await this.ctx.storage.delete("session");
           await this.ctx.storage.deleteAlarm();
+          stage = "terminal-write";
           await this.#finishRun(completed, artifacts, failureCodes);
           diagnostic.finish(completed.phase === "success" ? "success" : "partial");
           console.log(
