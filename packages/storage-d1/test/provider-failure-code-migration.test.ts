@@ -103,7 +103,7 @@ test("storage writes only failed, closed codes and preserves the first sighting"
         ...(code === undefined ? {} : { providerFailureCode: code }),
       };
       await insertCollectionRunIfAbsent(adapter, sighting);
-      const expected = index < 6 ? null : code;
+      const expected = index < 6 ? null : (code ?? null);
       expect((await readCollectionRun(adapter, sighting))!.provider_failure_code).toBe(expected);
       expect(
         await insertCollectionRunIfAbsent(adapter, {

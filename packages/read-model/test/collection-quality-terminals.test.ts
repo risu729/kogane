@@ -76,7 +76,10 @@ test("failure buckets preserve shipped counts, newest-row selection and terminal
       expect(scans).toEqual([]);
     }
     const args = [JSON.stringify(pairs)];
-    const oldTerminals = store.all(LEGACY_TERMINAL_QUALITY_SQL, args);
+    const oldTerminals = store.all<Omit<TerminalQualityRow, "provider_failure_code">>(
+      LEGACY_TERMINAL_QUALITY_SQL,
+      args,
+    );
     const newTerminals = store.all<TerminalQualityRow>(TERMINAL_QUALITY_SQL, args);
     expect(newTerminals.map(({ provider_failure_code: _code, ...row }) => row)).toEqual(
       oldTerminals,
