@@ -535,8 +535,12 @@ const cells = z
     ),
   );
 
-/** `GET /api/collection-quality/<sourceId>/accounts` (ADR 0088). */
-export const ACCOUNT_COVERAGE_API_VERSION = 1;
+/**
+ * `GET /api/collection-quality/<sourceId>/accounts` (ADR 0088); version 2
+ * adds freshness per account, data type and period (ADR 0088's amendment of
+ * 2026-11-08).
+ */
+export const ACCOUNT_COVERAGE_API_VERSION = 2;
 export const ACCOUNT_COVERAGE_SUFFIX = "/accounts";
 /** More cells than this in one source is refused (413), never cut. */
 export const ACCOUNT_COVERAGE_CELL_BOUND = 2_000;
@@ -576,28 +580,65 @@ const accountPeriod = z
     observations: id,
     /** The cell's own reasons, as the cell page states them. */
     reasons: distinct(z.enum(CELL_REASONS)),
+    /**
+     * The age of the cell's current capture when that capture names the
+     * account (the cell page's own freshness); none for `newest-not-current`,
+     * whose account no current capture names.
+     */
+    freshness,
   })
   .check(
     z.refine((value) =>
       value.standing === "newest-not-current" ? true : value.standing === value.cellState,
     ),
+    z.refine(
+      (value) => (value.freshness.ageDays === null) === (value.standing === "newest-not-current"),
+    ),
   );
 
-const accountDataType = z.strictObject({
-  dataset: z.nullable(text),
-  parser: text,
-  kind: z.enum(OBSERVATION_KINDS),
-  periods: z.array(accountPeriod).check(z.minLength(1), z.maxLength(ACCOUNT_COVERAGE_ENTRY_BOUND)),
-});
+/** The smallest age among entries; null when none has one. */
+function freshestAge(ages: readonly (number | null)[]): number | null {
+  const known = ages.filter((age): age is number => age !== null);
+  return known.length === 0 ? null : Math.min(...known);
+}
 
-const coveredAccount = z.strictObject({
-  accountId: text,
-  /** The account's own label (`accounts.label`), as the identities page shows it. */
-  label: z.string().check(z.maxLength(512)),
-  /** The current mapping statuses of the source accounts that name it here. */
-  statuses: distinct(z.enum(MAPPING_STATUSES)).check(z.minLength(1)),
-  dataTypes: z.array(accountDataType).check(z.minLength(1), z.maxLength(1_000)),
-});
+const accountDataType = z
+  .strictObject({
+    dataset: z.nullable(text),
+    parser: text,
+    kind: z.enum(OBSERVATION_KINDS),
+    periods: z
+      .array(accountPeriod)
+      .check(z.minLength(1), z.maxLength(ACCOUNT_COVERAGE_ENTRY_BOUND)),
+    /** That of its freshest period: the smallest age, explained by what the periods wait on. */
+    freshness,
+  })
+  .check(
+    z.refine(
+      (value) =>
+        value.freshness.ageDays ===
+        freshestAge(value.periods.map((entry) => entry.freshness.ageDays)),
+    ),
+  );
+
+const coveredAccount = z
+  .strictObject({
+    accountId: text,
+    /** The account's own label (`accounts.label`), as the identities page shows it. */
+    label: z.string().check(z.maxLength(512)),
+    /** The current mapping statuses of the source accounts that name it here. */
+    statuses: distinct(z.enum(MAPPING_STATUSES)).check(z.minLength(1)),
+    dataTypes: z.array(accountDataType).check(z.minLength(1), z.maxLength(1_000)),
+    /** That of its freshest period over every data type. */
+    freshness,
+  })
+  .check(
+    z.refine(
+      (value) =>
+        value.freshness.ageDays ===
+        freshestAge(value.dataTypes.map((entry) => entry.freshness.ageDays)),
+    ),
+  );
 
 /** A cell neither of whose captures names an account, with the cell's own reasons. */
 const unattributed = z.strictObject({
@@ -613,6 +654,7 @@ const unattributed = z.strictObject({
 const accountCoverage = z
   .strictObject({
     apiVersion: z.literal(ACCOUNT_COVERAGE_API_VERSION),
+    freshnessAsOf,
     sourceId,
     latestFetchRun: fetchRun,
     /** Every cell of the source was read: no page, no cut. */
@@ -637,6 +679,18 @@ const accountCoverage = z
             sum + account.dataTypes.reduce((inner, type) => inner + type.periods.length, 0),
           0,
         ) <= ACCOUNT_COVERAGE_ENTRY_BOUND,
+    ),
+    // A period's age is that of the capture it names, counted to the answer's date.
+    z.refine((value) =>
+      value.accounts.every((account) =>
+        account.dataTypes.every((type) =>
+          type.periods.every(
+            (entry) =>
+              entry.standing === "newest-not-current" ||
+              ageOf(entry.capture.capturedAt, value.freshnessAsOf.date, entry.freshness.ageDays),
+          ),
+        ),
+      ),
     ),
   );
 

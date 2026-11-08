@@ -412,12 +412,15 @@ transactions a snapshot parser also emits
 calls not current.
 
 **Freshness** (`collection-freshness-v1`, `packages/domain/src/collection-freshness.ts`)
-is computed by the application query, not in SQL: every summary and cells
-answer counts ages to one instant, `freshnessAsOf` (the route's request time), in Asia/Tokyo civil
+is computed by the application query, not in SQL: every summary, cells and
+account answer counts ages to one instant, `freshnessAsOf` (the route's request time), in Asia/Tokyo civil
 days. A cell's age is its current capture's; a source's is its newest visible
-fetch run's, whatever that run's outcome. The cells read the source's own jobs
-(`SOURCE_JOBS_SQL`) to tell what the source waits on. The account view
-(`ACCOUNT_COVERAGE_SQL`) carries no freshness.
+fetch run's, whatever that run's outcome. The cells and the account view read
+the source's own jobs (`SOURCE_JOBS_SQL`) to tell what the source waits on;
+`ACCOUNT_COVERAGE_SQL` itself is unchanged. In the account view a period the
+cell's current capture names carries the cell's freshness, a
+`newest-not-current` period none, and a data type and an account their
+freshest period's ([ADR 0088, amendment of 2026-11-08](adr/0088-collection-quality-per-account.md#amendment-2026-11-08-freshness-per-account-data-type-and-period)).
 
 ### Cost
 

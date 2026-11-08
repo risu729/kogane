@@ -801,7 +801,10 @@ Each source of the summary and each cell of `view: "cells"` carries its
 freshness under `collection-freshness-v1`, counted to the answer's
 `freshnessAsOf`
 ([evidence browser](evidence-browser.md#collection-quality-apicollection-quality));
-the account view carries none. Each summary source with a collector lists its
+in `view: "accounts"` each period carries its cell's freshness when the
+cell's current capture names the account (none when only the newest,
+not-current capture does), and each data type and account that of its
+freshest period ([ADR 0088, amendment of 2026-11-08](adr/0088-collection-quality-per-account.md#amendment-2026-11-08-freshness-per-account-data-type-and-period)). Each summary source with a collector lists its
 provider's data types under `provider-data-types-v1`
 ([ADR 0087](adr/0087-provider-data-type-catalogue.md)).
 Its cells carry provider fetch-unit keys (card tokens, account digests,

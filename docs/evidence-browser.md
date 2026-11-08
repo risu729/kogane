@@ -874,8 +874,10 @@ are answered by one reader, `readCollectionQuality`
   the current account mappings, never through a unit key): per account its
   stored label, mapping statuses and data types (dataset, parser, observation
   kind), each with its periods, the cell's state and reasons, the capture
-  that names the account, its observation count and a standing (`current`,
-  `older-current`, `newest-not-current`). Cells no capture's observation
+  that names the account, its observation count, a standing (`current`,
+  `older-current`, `newest-not-current`) and its freshness; each data type
+  and account also carries the freshness of its freshest period (see
+  Freshness below). Cells no capture's observation
   attributes to an account are listed as `unattributed` with their reasons.
   More than 2,000 cells or 10,000 account periods is
   `413 result_limit_exceeded`, never cut. A period no capture has is not
@@ -887,9 +889,15 @@ no capture has no cells and `latestFetchRun: null` with `no_registered_run`.
 
 **Freshness** (`collection-freshness-v1`,
 [ADR 0045's amendment of 2026-11-08](adr/0045-collection-quality-read.md#amendment-2026-11-08-freshness-per-source-and-cell)).
-The summary and the cells name `freshnessAsOf` (`policy`, the instant `at` and
-its Asia/Tokyo `date`), and each source and cell carries
-`freshness: { state, ageDays }`; the account view carries no freshness. The
+The summary, the cells and the account view name `freshnessAsOf` (`policy`,
+the instant `at` and its Asia/Tokyo `date`), and each source and cell carries
+`freshness: { state, ageDays }`. In the account view
+([ADR 0088, amendment of 2026-11-08](adr/0088-collection-quality-per-account.md#amendment-2026-11-08-freshness-per-account-data-type-and-period))
+each period carries its cell's freshness when the cell's current capture
+names the account, and no age (`no-capture`, or what the source or the unit
+waits on) when only the newest, not-current capture does; each data type and
+each account carries that of its freshest period, the smallest age, so a
+stale month beside a fresh one leaves the group fresh. The
 age is in Asia/Tokyo civil days from the capture's date to that date: for a
 cell its current capture, for a source its newest visible fetch run whatever
 its outcome. The state is `same-day` (0),
@@ -903,8 +911,9 @@ source has supported collecting jobs (`collection`, `manual`, `email`) and
 none is enabled (an unsupported job, like V Point Pay's app job, never is). Otherwise it is `stale`, or `no-capture` with no age. A fresh capture
 is `same-day` or `recent` whatever the source waits on. A capture dated after
 the as-of date (a collector clock ahead) is age 0. The page shows the state
-and age per source in the source list and per cell (当日の取得, N日前の取得,
-古い, 本人操作待ち, 定期実行の停止中, 取得なし).
+and age per source in the source list, per cell, and in the account view per
+account, data type and period (当日の取得, N日前の取得, 古い, 本人操作待ち,
+定期実行の停止中, 取得なし).
 
 **Data types the provider offers** (`provider-data-types-v1`,
 [ADR 0087](adr/0087-provider-data-type-catalogue.md)). The summary names
@@ -933,8 +942,8 @@ A unit with no original file still appears with `unit_without_artifacts`; the
 absence of a stored unit/period is not inferred as complete acquisition.
 Beside a chosen source's cells, `取得単位ごと` / `口座ごと` switches to the
 account view (`?view=accounts`, `口座 × データ種別 × 期間`): one panel per
-account (label, id and mapping status in words) with its data types and
-periods, and a panel `口座に対応付けられない保存記録` with the records no
+account (label, id, mapping status in words and freshness) with its data
+types and periods, each with its freshness, and a panel `口座に対応付けられない保存記録` with the records no
 account is named in, each with its reasons. The default view never requests
 the account route.
 

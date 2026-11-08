@@ -6,7 +6,10 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import type { SQLQueryBindings } from "bun:sqlite";
 import { QualityStore } from "../../read-model/test/collection-quality-fixture.ts";
 import { fullCoreSchema } from "../../read-model/test/card-usage-scale-fixture.ts";
-import { ACCOUNT_COVERAGE_CELL_BOUND as SQL_CELL_BOUND } from "../../read-model/src/collection-quality.ts";
+import {
+  ACCOUNT_COVERAGE_CELL_BOUND as SQL_CELL_BOUND,
+  SOURCE_JOBS_SQL,
+} from "../../read-model/src/collection-quality.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import {
   CollectionQualityLimitError,
@@ -127,9 +130,16 @@ class Identities {
   }
 }
 
+/** The instant ages are counted to (collection-freshness-v1); 2099-02-05 in Asia/Tokyo. */
+const AS_OF = "2099-02-05T03:00:00.000Z";
+
 /** The answer, checked against the wire contract and the route's path check. */
-async function read(store: QualityStore, sourceId: string): Promise<AccountCoverage> {
-  const answer = await queryAccountCoverage(executor(store), { sourceId });
+async function read(
+  store: QualityStore,
+  sourceId: string,
+  asOf: string = AS_OF,
+): Promise<AccountCoverage> {
+  const answer = await queryAccountCoverage(executor(store), { sourceId, asOf });
   expect(answer).not.toBeNull();
   expect(validAccountCoverage(answer)).toBe(true);
   expect(
@@ -143,11 +153,11 @@ async function read(store: QualityStore, sourceId: string): Promise<AccountCover
 
 /** Every cell of the paged cell read, as the account read must cover it. */
 async function pagedCells(store: QualityStore, sourceId: string) {
-  // Ages are not compared here; any one instant serves (collection-freshness-v1).
+  // The account read's own instant, so the two views' ages can be compared.
   const page = await queryCollectionQualityCells(executor(store), {
     sourceId,
     offset: 0,
-    asOf: "2099-01-01T00:00:00.000Z",
+    asOf: AS_OF,
   });
   expect(page!.coverage.truncated).toBe(false);
   return page!.cells;
@@ -168,11 +178,17 @@ async function expectSameCells(store: QualityStore, sourceId: string, answer: Ac
   const seen = new Map<string, { state: string; reasons: readonly string[] }>();
   for (const account of answer.accounts)
     for (const type of account.dataTypes)
-      for (const period of type.periods)
+      for (const period of type.periods) {
         seen.set(key({ ...type, ...period }), {
           state: period.cellState,
           reasons: period.reasons,
         });
+        // A period the current capture names has the cell page's own freshness.
+        if (period.standing !== "newest-not-current")
+          expect(period.freshness).toEqual(
+            cells.find((value) => key(value) === key({ ...type, ...period }))!.freshness,
+          );
+      }
   for (const value of answer.unattributed) {
     expect(seen.has(key(value))).toBe(false);
     seen.set(key(value), { state: value.state, reasons: value.reasons });
@@ -186,9 +202,9 @@ describe("account coverage", () => {
   test("an unknown source is null; an empty source has no account and no cell", async () => {
     const store = new QualityStore();
     try {
-      expect(await queryAccountCoverage(executor(store), { sourceId: "no-such-source" })).toBe(
-        null,
-      );
+      expect(
+        await queryAccountCoverage(executor(store), { sourceId: "no-such-source", asOf: AS_OF }),
+      ).toBe(null);
       const empty = await read(store, "vpass");
       expect(empty).toMatchObject({ cells: 0, accounts: [], unattributed: [] });
     } finally {
@@ -478,6 +494,227 @@ describe("account coverage", () => {
     }
   });
 
+  test("freshness per period, data type and account: the freshest period's age, explained by what the source waits on (collection-freshness-v1)", async () => {
+    const store = new QualityStore();
+    const ids = new Identities(store, "global-pass");
+    try {
+      ids.map("synthetic-ref-a", "synthetic-account-a", "identified");
+      ids.map("synthetic-ref-b", "synthetic-account-b", "provider-local");
+      const month = (value: string) => ({
+        key: `activity-${value}.html`,
+        dataset: "globalpass-activity",
+      });
+      const first = store.run({
+        source: "global-pass",
+        at: "2099-02-01T00:00:00Z",
+        artifacts: [month("2099-01"), month("2098-12")],
+      });
+      for (const artifact of first.artifacts)
+        ids.identify(store.parse(artifact, "global-pass-activity", { kind: "published" })!, [
+          { ref: "synthetic-ref-a", kind: "transaction" },
+        ]);
+      const second = store.run({
+        source: "global-pass",
+        at: "2099-02-02T00:00:00Z",
+        artifacts: [month("2099-01")],
+      });
+      ids.identify(
+        store.parse(second.artifacts[0]!, "global-pass-activity", { kind: "published" })!,
+        [
+          { ref: "synthetic-ref-a", kind: "transaction" },
+          { ref: "synthetic-ref-b", kind: "transaction" },
+        ],
+      );
+      const view = (answer: AccountCoverage) =>
+        answer.accounts.map((account) => ({
+          account: [account.accountId, account.freshness],
+          types: account.dataTypes.map((type) => ({
+            type: type.freshness,
+            periods: type.periods.map((entry) => [entry.period.value, entry.freshness]),
+          })),
+        }));
+      // 2099-02-05T03:00Z is 12:00 on 2099-02-05 in Tokyo: the newer month is 3
+      // days old, the older 4 (stale); a data type and an account read their
+      // freshest period.
+      const answer = await read(store, "global-pass");
+      expect(answer.freshnessAsOf).toEqual({
+        policy: "collection-freshness-v1",
+        at: AS_OF,
+        date: "2099-02-05",
+      });
+      expect(view(answer)).toEqual([
+        {
+          account: ["synthetic-account-a", { state: "recent", ageDays: 3 }],
+          types: [
+            {
+              type: { state: "recent", ageDays: 3 },
+              periods: [
+                ["2099-01", { state: "recent", ageDays: 3 }],
+                ["2098-12", { state: "stale", ageDays: 4 }],
+              ],
+            },
+          ],
+        },
+        {
+          account: ["synthetic-account-b", { state: "recent", ageDays: 3 }],
+          types: [
+            {
+              type: { state: "recent", ageDays: 3 },
+              periods: [["2099-01", { state: "recent", ageDays: 3 }]],
+            },
+          ],
+        },
+      ]);
+      await expectSameCells(store, "global-pass", answer);
+      // The Tokyo midnight, not the UTC one, starts a day.
+      const sameDay = await read(store, "global-pass", "2099-02-02T14:59:59.999Z");
+      expect(sameDay.accounts[1]!.freshness).toEqual({ state: "same-day", ageDays: 0 });
+      expect(
+        (await read(store, "global-pass", "2099-02-02T15:00:00.000Z")).accounts[1]!.freshness,
+      ).toEqual({
+        state: "recent",
+        ageDays: 1,
+      });
+      // A person must act on the source's job: what is stale says so; what is fresh stays fresh.
+      store.occurrence("prestia-globalpass", {
+        nominalAt: "2099-02-03T18:17:00.000Z",
+        status: "failed",
+        failureCode: "human_required_reauth",
+      });
+      const waiting = await read(store, "global-pass");
+      expect(view(waiting)[0]).toEqual({
+        account: ["synthetic-account-a", { state: "recent", ageDays: 3 }],
+        types: [
+          {
+            type: { state: "recent", ageDays: 3 },
+            periods: [
+              ["2099-01", { state: "recent", ageDays: 3 }],
+              ["2098-12", { state: "human-required", ageDays: 4 }],
+            ],
+          },
+        ],
+      });
+      const later = await read(store, "global-pass", "2099-02-10T03:00:00.000Z");
+      expect(later.accounts.map((account) => account.freshness)).toEqual([
+        { state: "human-required", ageDays: 8 },
+        { state: "human-required", ageDays: 8 },
+      ]);
+      await expectSameCells(store, "global-pass", waiting);
+    } finally {
+      store.db.close();
+    }
+  });
+
+  test("an account only a newest, not-current capture names has no age: nothing current names it", async () => {
+    const store = new QualityStore();
+    const ids = new Identities(store, "st-george");
+    try {
+      ids.map("synthetic-ref-old", "synthetic-account-old", "provider-local");
+      ids.map("synthetic-ref-new", "synthetic-account-new", "provider-local");
+      const snapshot = [{ key: "account-snapshot.json", dataset: "account-snapshot" }];
+      const first = store.run({
+        source: "st-george",
+        at: "2099-02-03T00:00:00Z",
+        artifacts: snapshot,
+      });
+      ids.identify(
+        store.parse(first.artifacts[0]!, "st-george-balances", {
+          kind: "published",
+          claim: { completeness: "complete" },
+        })!,
+        [{ ref: "synthetic-ref-old", kind: "balance" }],
+      );
+      const second = store.run({
+        source: "st-george",
+        at: "2099-02-04T00:00:00Z",
+        artifacts: snapshot,
+      });
+      ids.identify(
+        store.parse(second.artifacts[0]!, "st-george-balances", {
+          kind: "published",
+          claim: { completeness: "partial", cause: "page_missing" },
+        })!,
+        [
+          { ref: "synthetic-ref-old", kind: "balance" },
+          { ref: "synthetic-ref-new", kind: "balance" },
+        ],
+      );
+      const answer = await read(store, "st-george");
+      const of = Object.fromEntries(
+        answer.accounts.map((account) => [
+          account.accountId,
+          [
+            account.freshness,
+            account.dataTypes[0]!.freshness,
+            account.dataTypes[0]!.periods[0]!.standing,
+            account.dataTypes[0]!.periods[0]!.freshness,
+          ],
+        ]),
+      );
+      // The cell's current capture (two days old) names only the old account.
+      expect(of).toEqual({
+        "synthetic-account-new": [
+          { state: "no-capture", ageDays: null },
+          { state: "no-capture", ageDays: null },
+          "newest-not-current",
+          { state: "no-capture", ageDays: null },
+        ],
+        "synthetic-account-old": [
+          { state: "recent", ageDays: 2 },
+          { state: "recent", ageDays: 2 },
+          "older-current",
+          { state: "recent", ageDays: 2 },
+        ],
+      });
+      await expectSameCells(store, "st-george", answer);
+    } finally {
+      store.db.close();
+    }
+  });
+
+  test("the contract checks each age against its capture and its freshest period", async () => {
+    const store = new QualityStore();
+    const ids = new Identities(store, "global-pass");
+    try {
+      ids.map("synthetic-ref-a", "synthetic-account-a", "identified");
+      const run = store.run({
+        source: "global-pass",
+        at: "2099-02-01T00:00:00Z",
+        artifacts: [{ key: "activity-2099-01.html", dataset: "globalpass-activity" }],
+      });
+      ids.identify(store.parse(run.artifacts[0]!, "global-pass-activity", { kind: "published" })!, [
+        { ref: "synthetic-ref-a", kind: "transaction" },
+      ]);
+      const answer = await read(store, "global-pass");
+      const edit = (change: (copy: AccountCoverage) => void): AccountCoverage => {
+        const copy = structuredClone(answer);
+        change(copy);
+        return copy;
+      };
+      const period = (copy: AccountCoverage) => copy.accounts[0]!.dataTypes[0]!.periods[0]!;
+      for (const bad of [
+        // Another date than the instant's, or no as-of at all.
+        edit((copy) => (copy.freshnessAsOf.date = "2099-02-04")),
+        edit((copy) => delete (copy as Partial<AccountCoverage>).freshnessAsOf),
+        // An age the capture does not give, or one the policy does not allow.
+        edit((copy) => (period(copy).freshness = { state: "stale", ageDays: 5 })),
+        edit((copy) => (period(copy).freshness = { state: "recent", ageDays: 4 })),
+        // A current period with no age, a newest-not-current one with one.
+        edit((copy) => (period(copy).freshness = { state: "no-capture", ageDays: null })),
+        edit((copy) => (period(copy).standing = "newest-not-current")),
+        // A data type or an account whose age is not its freshest period's.
+        edit(
+          (copy) => (copy.accounts[0]!.dataTypes[0]!.freshness = { state: "stale", ageDays: 9 }),
+        ),
+        edit((copy) => (copy.accounts[0]!.freshness = { state: "no-capture", ageDays: null })),
+      ])
+        expect(validAccountCoverage(bad)).toBe(false);
+      expect(validAccountCoverage(answer)).toBe(true);
+    } finally {
+      store.db.close();
+    }
+  });
+
   test("the read writes nothing", async () => {
     const store = new QualityStore();
     try {
@@ -526,18 +763,24 @@ describe("account coverage", () => {
       current_captured_at: null,
       accounts_json: "[]",
     };
+    // The source's jobs (SOURCE_JOBS_SQL) are none; every other read is the cells.
     const bounded = (rows: number): SqlExecutor => ({
-      all: async <T>() => Array.from({ length: rows }, () => row) as T[],
+      all: async <T>(sql: string) =>
+        (sql === SOURCE_JOBS_SQL ? [] : Array.from({ length: rows }, () => row)) as T[],
       first: async <T>() =>
         ({ source_id: "vpass", fetch_run_id: 1, succeeded: 1, completed_at: null }) as T,
     });
     const full = await queryAccountCoverage(bounded(ACCOUNT_COVERAGE_CELL_BOUND), {
       sourceId: "vpass",
+      asOf: AS_OF,
     });
     expect(full!.unattributed).toHaveLength(ACCOUNT_COVERAGE_CELL_BOUND);
     expect(validAccountCoverage(full)).toBe(true);
     await expect(
-      queryAccountCoverage(bounded(ACCOUNT_COVERAGE_CELL_BOUND + 1), { sourceId: "vpass" }),
+      queryAccountCoverage(bounded(ACCOUNT_COVERAGE_CELL_BOUND + 1), {
+        sourceId: "vpass",
+        asOf: AS_OF,
+      }),
     ).rejects.toBeInstanceOf(CollectionQualityLimitError);
   });
 
@@ -589,18 +832,18 @@ describe("account coverage", () => {
         accounts_json: named(accounts),
       }));
     const executorOf = (accounts: number): SqlExecutor => ({
-      all: async <T>() => rows(accounts) as T[],
+      all: async <T>(sql: string) => (sql === SOURCE_JOBS_SQL ? [] : rows(accounts)) as T[],
       first: async <T>() =>
         ({ source_id: "vpass", fetch_run_id: 1, succeeded: 1, completed_at: null }) as T,
     });
     // 2,000 cells × 5 accounts is exactly the bound of 10,000 entries.
-    const full = await queryAccountCoverage(executorOf(5), { sourceId: "vpass" });
+    const full = await queryAccountCoverage(executorOf(5), { sourceId: "vpass", asOf: AS_OF });
     expect(
       full!.accounts.reduce((sum, account) => sum + account.dataTypes[0]!.periods.length, 0),
     ).toBe(ACCOUNT_COVERAGE_ENTRY_BOUND);
     expect(validAccountCoverage(full)).toBe(true);
-    await expect(queryAccountCoverage(executorOf(6), { sourceId: "vpass" })).rejects.toBeInstanceOf(
-      CollectionQualityLimitError,
-    );
+    await expect(
+      queryAccountCoverage(executorOf(6), { sourceId: "vpass", asOf: AS_OF }),
+    ).rejects.toBeInstanceOf(CollectionQualityLimitError);
   });
 });

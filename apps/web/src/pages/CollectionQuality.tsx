@@ -403,7 +403,7 @@ function AccountPeriod({ value }: { value: AccountCoveragePeriod }): ReactNode {
       <p>
         取得時刻 {value.capture.capturedAt} ·{" "}
         <Link to={`/runs/r_${value.capture.fetchRunId}`}>取得記録</Link> · この口座の観測{" "}
-        {value.observations} 件
+        {value.observations} 件 · 新しさ: <Freshness value={value.freshness} />
       </p>
       <Reasons codes={value.reasons} />
     </li>
@@ -428,6 +428,11 @@ function SourceAccounts({ sourceId }: { sourceId: string }): ReactNode {
             この取得元の保存記録 {data.cells}{" "}
             件を、観測が対応付けられた口座ごとに並べます。保存記録のない期間は列挙できず、欠落とも取得済みとも判定しません。別の取得元にある同じ口座は、その取得元で表示します。
           </p>
+          <p>
+            新しさは、この口座を含む取得のうち現在の表示に採用されたものの日付から{" "}
+            {data.freshnessAsOf.date}
+            （日本時間）までの日数です。口座とデータ種別の新しさは、その中で最も新しい期間のものです。最新の取得にだけ口座がある期間は、現在の表示に採用された取得がないため「取得なし」と表示します。
+          </p>
           {data.accounts.length === 0 ? (
             <EmptyState>
               口座に対応付けられた観測がありません。取得や取引がないことの証明ではありません。
@@ -442,14 +447,17 @@ function SourceAccounts({ sourceId }: { sourceId: string }): ReactNode {
                 <div className="panel-body">
                   <p>
                     口座 <code>{account.accountId}</code> ·{" "}
-                    {account.statuses.map((status) => MAPPING_STATUS_LABELS[status]).join(" / ")}
+                    {account.statuses.map((status) => MAPPING_STATUS_LABELS[status]).join(" / ")} ·
+                    新しさ: <Freshness value={account.freshness} />
                   </p>
                   {account.dataTypes.map((type) => (
                     <section key={`${type.dataset}/${type.parser}/${type.kind}`}>
                       <h3>
                         {KIND_LABELS[type.kind]} · {type.dataset ?? "データ種別不明"}
                       </h3>
-                      <p>解析: {type.parser}</p>
+                      <p>
+                        解析: {type.parser} · 新しさ: <Freshness value={type.freshness} />
+                      </p>
                       <ul>
                         {type.periods.map((value) => (
                           <AccountPeriod

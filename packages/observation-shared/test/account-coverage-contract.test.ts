@@ -15,17 +15,41 @@ const period = {
   capture: { fetchRunId: 7, capturedAt: "2099-01-01T00:00:00.000Z" },
   observations: 2,
   reasons: ["retention_not_assessed"],
+  // 2099-01-01T00:00Z is 2099-01-01 in Tokyo; the answer's date is 2099-01-03.
+  freshness: { state: "recent", ageDays: 2 },
 };
+const NONE = { state: "no-capture", ageDays: null };
+/** The freshness of the freshest period, as the read gives it with no wait. */
+function freshest(periods: unknown[]): unknown {
+  const ages = periods
+    .map((entry) => (entry as { freshness?: { ageDays: number | null } }).freshness?.ageDays)
+    .filter((age): age is number => typeof age === "number");
+  if (ages.length === 0) return NONE;
+  const age = Math.min(...ages);
+  return { state: age === 0 ? "same-day" : age <= 3 ? "recent" : "stale", ageDays: age };
+}
 const account = (accountId: string, periods: unknown[] = [period]) => ({
   accountId,
   label: "Synthetic account",
   statuses: ["identified"],
   dataTypes: [
-    { dataset: "statement-page", parser: "vpass-statement-page", kind: "transaction", periods },
+    {
+      dataset: "statement-page",
+      parser: "vpass-statement-page",
+      kind: "transaction",
+      periods,
+      freshness: freshest(periods),
+    },
   ],
+  freshness: freshest(periods),
 });
 const answer = (overrides: Record<string, unknown> = {}) => ({
-  apiVersion: 1,
+  apiVersion: 2,
+  freshnessAsOf: {
+    policy: "collection-freshness-v1",
+    at: "2099-01-03T00:00:00.000Z",
+    date: "2099-01-03",
+  },
   sourceId: "vpass",
   latestFetchRun: { id: 7, succeeded: true, completedAt: "2099-01-01T00:00:00.000Z" },
   cells: 2,
@@ -59,7 +83,7 @@ describe("account coverage wire check", () => {
 
   test("refuses what the read never answers", () => {
     for (const bad of [
-      answer({ apiVersion: 2 }),
+      answer({ apiVersion: 1 }),
       answer({ extra: true }),
       answer({ cells: 0 }),
       answer({ cells: 2_001 }),
@@ -72,6 +96,41 @@ describe("account coverage wire check", () => {
       answer({ accounts: [account("synthetic-a", [{ ...period, reasons: ["not_a_reason"] }])] }),
       answer({ accounts: [{ ...account("synthetic-a"), statuses: [] }] }),
       answer({ accounts: [{ ...account("synthetic-a"), statuses: ["resolved"] }] }),
+      // Freshness (ADR 0088's amendment of 2026-11-08).
+      answer({ freshnessAsOf: undefined }),
+      answer({
+        freshnessAsOf: {
+          policy: "collection-freshness-v1",
+          at: "2099-01-03T00:00:00.000Z",
+          date: "2099-01-02",
+        },
+      }),
+      answer({ accounts: [account("synthetic-a", [{ ...period, freshness: undefined }])] }),
+      answer({
+        accounts: [
+          account("synthetic-a", [{ ...period, freshness: { state: "recent", ageDays: 1 } }]),
+        ],
+      }),
+      answer({
+        accounts: [
+          account("synthetic-a", [{ ...period, freshness: { state: "stale", ageDays: 2 } }]),
+        ],
+      }),
+      answer({ accounts: [account("synthetic-a", [{ ...period, freshness: NONE }])] }),
+      answer({ accounts: [{ ...account("synthetic-a"), freshness: NONE }] }),
+      answer({
+        accounts: [
+          {
+            ...account("synthetic-a"),
+            dataTypes: [
+              {
+                ...account("synthetic-a").dataTypes[0]!,
+                freshness: { state: "stale", ageDays: 5 },
+              },
+            ],
+          },
+        ],
+      }),
     ])
       expect(validAccountCoverage(bad)).toBe(false);
   });
@@ -82,10 +141,41 @@ describe("account coverage wire check", () => {
         validAccountCoverage(
           answer({
             accounts: [
-              account("synthetic-a", [{ ...period, cellState, standing: "newest-not-current" }]),
+              account("synthetic-a", [
+                { ...period, cellState, standing: "newest-not-current", freshness: NONE },
+              ]),
             ],
           }),
         ),
       ).toBe(true);
+    // ... but never with an age: no current capture names its account.
+    expect(
+      validAccountCoverage(
+        answer({
+          accounts: [account("synthetic-a", [{ ...period, standing: "newest-not-current" }])],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  test("a data type and an account carry their freshest period's age", () => {
+    const older = {
+      ...period,
+      period: { kind: "statement-month", value: "209812", state: null },
+      capture: { fetchRunId: 6, capturedAt: "2098-12-28T00:00:00.000Z" },
+      cellState: "older-current",
+      standing: "older-current",
+      freshness: { state: "stale", ageDays: 6 },
+    };
+    const valid = answer({ accounts: [account("synthetic-a", [period, older])] });
+    expect(validAccountCoverage(valid)).toBe(true);
+    expect((valid.accounts as ReturnType<typeof account>[])[0]!.freshness).toEqual({
+      state: "recent",
+      ageDays: 2,
+    });
+    // The stalest period is not the group's age.
+    const stalest = account("synthetic-a", [period, older]);
+    stalest.dataTypes[0]!.freshness = older.freshness;
+    expect(validAccountCoverage(answer({ accounts: [stalest] }))).toBe(false);
   });
 });

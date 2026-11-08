@@ -92,7 +92,10 @@ describe.if(runnable)("collection quality browser", () => {
           url.pathname.endsWith("/accounts")
         )
           return Response.json(
-            await queryAccountCoverage(executor, { sourceId: url.pathname.split("/").at(-2)! }),
+            await queryAccountCoverage(executor, {
+              sourceId: url.pathname.split("/").at(-2)!,
+              asOf: AS_OF,
+            }),
           );
         if (url.pathname.startsWith("/api/collection-quality/"))
           return Response.json(
@@ -280,6 +283,22 @@ describe.if(runnable)("collection quality browser", () => {
       expect(await page.getByText("取引 · globalpass-activity", { exact: true }).count()).toBe(1);
       expect(await page.getByText("最新の取得が現在の表示対象", { exact: false }).count()).toBe(1);
       expect(await page.getByText("この口座の観測 1 件", { exact: false }).count()).toBe(1);
+      // collection-freshness-v1: the account, its data type and its one month
+      // stand on the month captured one day before the answer's date.
+      const panel = page.locator("section.panel").filter({
+        has: page.getByRole("heading", { name: "Synthetic browser account" }),
+      });
+      expect(await panel.locator('.freshness[data-state="recent"]').allTextContents()).toEqual([
+        "1日前の取得",
+        "1日前の取得",
+        "1日前の取得",
+      ]);
+      expect(
+        await page
+          .getByText("（日本時間）までの日数です。口座とデータ種別の新しさは", { exact: false })
+          .count(),
+      ).toBe(1);
+      expect(await page.getByText("2099-01-03", { exact: false }).count()).toBeGreaterThan(0);
       // The pending month names no account: it is listed apart with its reason.
       const apart = page.locator("section.panel").filter({
         has: page.getByRole("heading", { name: "口座に対応付けられない保存記録" }),

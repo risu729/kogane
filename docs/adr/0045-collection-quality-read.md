@@ -440,7 +440,9 @@ triggered run completes).
   a new version is a new name.
 - The per-account view ([ADR 0088](0088-collection-quality-per-account.md),
   its own `apiVersion` 1) is unchanged: its periods state their capture
-  times and carry no freshness.
+  times and carry no freshness. ADR 0088's
+  [amendment of 2026-11-08](0088-collection-quality-per-account.md#amendment-2026-11-08-freshness-per-account-data-type-and-period)
+  later applies this policy to that view (`apiVersion` 2).
 - Synthetic tests: `packages/domain/test/collection-freshness.test.ts`
   (Tokyo dates across midnight and offsets, every threshold, waits, refusals,
   and that the contract's check accepts exactly the policy's answers);
