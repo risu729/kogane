@@ -221,7 +221,7 @@ test("VPoint three-parser completeness refuses a missing page; a later complete 
   });
   const asOf = freshnessAsOf("2099-03-04T00:00:00.000Z");
   const answer = {
-    apiVersion: 3,
+    apiVersion: 4,
     freshnessAsOf: asOf,
     sourceId: "v-point",
     latestFetchRun: null,

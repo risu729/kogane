@@ -18,6 +18,32 @@ function capture() {
 }
 
 describe("safe collector diagnostics", () => {
+  test("a GLOBAL PASS step code names its category instead of unknown", () => {
+    const failure = (code: string, name = "Error") =>
+      safeErrorDetails(Object.assign(new Error(code), { name, code }));
+    expect(failure("globalpass_challenge_timeout", "TimeoutError")).toEqual({
+      category: "challenge",
+      errorType: "TimeoutError",
+      code: "globalpass_challenge_timeout",
+    });
+    expect(failure("globalpass_login_rejected")).toMatchObject({
+      category: "authentication",
+      code: "globalpass_login_rejected",
+    });
+    expect(failure("globalpass_browser_launch_failed")).toMatchObject({ category: "runtime" });
+    // The step-less code stays honest: nothing is known about it.
+    expect(failure("browser_collection_failed")).toEqual({
+      category: "unknown",
+      errorType: "Error",
+    });
+  });
+  test("a failed run's terminal line carries no error fields", () => {
+    const records = capture();
+    createDiagnostics("prestia-globalpass", runId).finish("failed");
+    expect(records[0]).toMatchObject({ stage: "terminal", outcome: "failed" });
+    expect(records[0]).not.toHaveProperty("errorType");
+    expect(records[0]).not.toHaveProperty("category");
+  });
   test("keeps only bounded operational metadata from a sensitive exception", async () => {
     const records = capture();
     const error = Object.assign(
