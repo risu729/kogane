@@ -55,7 +55,7 @@ const sourceAccount = (branch: string, account: string): string =>
 
 export const mizuhoAccountList: Parser = {
   name: "mizuho-account-list",
-  version: "1.0.0",
+  version: "1.0.1",
   accepts(artifact: ArtifactMeta): boolean {
     return (
       artifact.sourceId === SOURCE &&
@@ -110,7 +110,7 @@ export const mizuhoAccountList: Parser = {
 
 export const mizuhoOrdinaryHistory: Parser = {
   name: "mizuho-ordinary-history",
-  version: "1.0.0",
+  version: "1.0.1",
   accepts(artifact: ArtifactMeta): boolean {
     const unit = HISTORY_UNIT.exec(artifact.fetchUnitKey ?? "");
     return (

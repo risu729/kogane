@@ -126,7 +126,7 @@ function rateText(value: unknown): { text: string; scale: number } | undefined {
 
 export const sbiShinseiExchangeRate: Parser = {
   name: "sbi-shinsei-exchange-rate",
-  version: "1.0.2",
+  version: "1.0.3",
   accepts: (artifact: ArtifactMeta) => acceptsSbiShinseiDataset(artifact, DATASET),
 
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {

@@ -28,13 +28,13 @@ const parse = (html: string, meta = skipMeta()) =>
   myJcbSkipPaymentSchedule.parse(bytes(html), meta);
 
 describe("myjcb-skip-payment-schedule", () => {
-  test("is registered at 0.1.2 with a recorded digest, and accepts only MyJCB credit-schedule HTML", () => {
+  test("is registered at 0.1.3 with a recorded digest, and accepts only MyJCB credit-schedule HTML", () => {
     expect(PARSERS).toContain(myJcbSkipPaymentSchedule);
     // 0.1.0 and 0.1.1 are registered in production with their own digests, so
     // each changed empty-row rule is a new version (migration 0028's digest
     // trigger).
-    expect(myJcbSkipPaymentSchedule.version).toBe("0.1.2");
-    expect(PARSER_DIGESTS.releases["myjcb-skip-payment-schedule"]?.version).toBe("0.1.2");
+    expect(myJcbSkipPaymentSchedule.version).toBe("0.1.3");
+    expect(PARSER_DIGESTS.releases["myjcb-skip-payment-schedule"]?.version).toBe("0.1.3");
     expect(myJcbSkipPaymentSchedule.accepts(skipMeta())).toBe(true);
     expect(myJcbSkipPaymentSchedule.accepts(skipMeta({ mime: "text/html; charset=utf-8" }))).toBe(
       true,

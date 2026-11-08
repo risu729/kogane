@@ -91,7 +91,7 @@ function observationsForSummary(
 
 export const sbiAccountAssetsCurrent: Parser = {
   name: "sbi-account-assets-current",
-  version: "1.0.0",
+  version: "1.0.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "account-assets-current";

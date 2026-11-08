@@ -51,7 +51,7 @@ export function createGlobalPassActivity(
     // 1.2.0: reads the observed empty month (page 1 with no table, no pager
     // and no Found line) as zero observations; every page with a table is
     // read exactly as in 1.1.0.
-    version: "1.2.0",
+    version: "1.2.1",
 
     accepts(artifact: ArtifactMeta): boolean {
       return (

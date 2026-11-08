@@ -83,7 +83,7 @@ function valuationFor(options: {
 
 export const sbiForeignCashPositions: Parser = {
   name: "sbi-foreign-cash-positions",
-  version: "0.3.0",
+  version: "0.3.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "foreign-cash-positions";

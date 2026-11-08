@@ -35,7 +35,7 @@ function requireMeta(a: ArtifactMeta): string {
 }
 export const myJcbJPointBalance: Parser = {
   name: "myjcb-jpoint-balance",
-  version: "1.0.0",
+  version: "1.0.1",
   accepts: (a) =>
     a.sourceId === "myjcb" && a.dataset === "jpoint-balance" && a.mime === "application/json",
   parse(bytes, artifact) {

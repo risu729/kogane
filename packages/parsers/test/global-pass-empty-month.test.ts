@@ -44,7 +44,7 @@ const parse = (bytes: Uint8Array, overrides: Partial<ArtifactMeta> = {}) =>
 
 describe("global-pass-activity 1.2.0: the observed empty month", () => {
   test("is the release that reads the empty month", () => {
-    expect(globalPassActivity.version).toBe("1.2.0");
+    expect(globalPassActivity.version).toBe("1.2.1");
   });
 
   test("reads page 1 with a month select and no table, pager or Found line as zero observations", () => {

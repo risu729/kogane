@@ -59,7 +59,7 @@ for (const file of [
  *   right after `amountSignSource`, and changes nothing else.
  */
 const RELEASE_DELTAS: Record<string, (frozen: Observation[]) => Observation[]> = {
-  "sbi-shinsei-top-balances-and-activity@0.1.3": (frozen) =>
+  "sbi-shinsei-top-balances-and-activity@0.1.4": (frozen) =>
     frozen.map((observation) => {
       if (observation.kind !== "transaction") return observation;
       const kogane = observation.extra["_kogane"] as Record<string, unknown>;

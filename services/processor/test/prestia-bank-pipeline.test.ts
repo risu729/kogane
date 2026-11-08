@@ -121,7 +121,7 @@ test("PRESTIA snapshot with failed signoff registers and publishes native, bank-
   expect(
     (await env.DB.prepare("SELECT parser_name,parser_version FROM published_parse_runs").all())
       .results,
-  ).toEqual([{ parser_name: "prestia-bank-balances", parser_version: "1.0.0" }]);
+  ).toEqual([{ parser_name: "prestia-bank-balances", parser_version: "1.0.1" }]);
   expect(
     (
       await env.DB.prepare(

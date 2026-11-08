@@ -249,7 +249,7 @@ export async function knownBankAccounts(
         JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
         WHERE t.id=?1 AND t.parse_run_id=?2 AND t.source_account=?3
           AND a.source_id='smbc-bank' AND p.parser_name='smbc-direct-transactions'
-          AND p.parser_version='1.1.0'`)
+          AND p.parser_version IN ('1.1.0','1.1.1')`)
         .bind(Number(id), Number(parseRun), debit.sourceAccount)
         .first<{ extra_json: string }>();
       if (evidence) {
