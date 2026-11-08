@@ -3123,6 +3123,38 @@ Phase 3 is done when:
   being wrong about it — header-label matching, warned positional
   fallback, undocumented columns reported — but one real export settles
   it.
+- **A CSV quote that is never closed.** `parseCsv` in
+  `packages/parsers/src/parsers/util.ts` reads a quote that opens a field
+  and is never closed as a field that runs to the end of the file, and
+  records no reason. In `paypay-csv` every row after such a quote
+  disappears into that one cell: when the quote opens the last column
+  (the transaction number) the parse has no warning at all and the
+  swallowed rows end up inside one row's `externalId`; in any other
+  column only the broken row's `expected N columns` warning remains. The
+  Sony history CSV parser refuses every such file (cardinality or exact
+  amount), except a quote opening the last column of the last row, whose
+  value reads the same. Text after a closing quote (`"ab"c`) is likewise
+  joined into the field. No stored export is known to contain either.
+  Two choices are open: whether such a file fails the artifact or keeps
+  the rows before the quote with a reason, and where the check lives.
+  `util.ts` is in the digest closure of all 43 parser releases, so a
+  change there releases every parser; a CSV reader of its own for
+  `paypay-csv` and the Sony history CSV parser would release only those.
+- **Sony history pages and identical rows.** `sony-bank-history-json`
+  and `sony-bank-history-csv` give a row the id
+  `sony-bank-history:<fingerprint of currency, date, signed amount and
+  balance after>:<occurrence>`, so the two views of one row share an id
+  and the current-transactions read collapses them, preferring the CSV.
+  The occurrence counts identical rows within one artifact only. The
+  provider returns three rows per JSON page, so two rows with one
+  fingerprint on different pages (a deposit, a withdrawal of the same
+  amount, then the same deposit again on one day) both get occurrence
+  `0` and one id, while the CSV gives them `0` and `1`. With the CSV of
+  that window present each CSV row wins its own id; without it, the
+  current-transactions read keeps one of the two JSON rows. Qualifying
+  later pages' ids with their page, as Vpass and GLOBAL PASS do, would
+  stop JSON page rows from matching their CSV rows, so every row past
+  page 1 would be listed twice; the fix needs its own decision.
 - **Reward units.** Point grants are recorded today as JPY transactions,
   contradicting `docs/design.md`. The fix direction is clear; the shape of
   `reward_observations` is not, because the payloads that would settle it
