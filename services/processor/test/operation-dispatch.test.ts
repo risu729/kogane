@@ -395,8 +395,8 @@ test("a projection rebuild is handed over, never completed on the handover", asy
 });
 
 test("a collection request whose connection is not enabled waits instead of completing", async () => {
-  // No connection is named in OPS_COLLECTOR_DISPATCH_CONNECTIONS (the
-  // committed default), so nothing is called: the request stays pending with
+  // No connection is named in OPS_COLLECTOR_DISPATCH_CONNECTIONS (absent
+  // here), so nothing is called: the request stays pending with
   // a code that says why (ADR 0048; the full collector path is
   // collector-dispatch.test.ts).
   const harness = withDispatch();
