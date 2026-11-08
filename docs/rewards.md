@@ -68,8 +68,10 @@ into `needs-rule-verification`.
   stored text that does not parse). It is never read as a standing offer, and the
   reader never turns damaged text into `open-ended` or `null`.
 - `availableForOffer` checks neither an `unknown` deadline nor an `unknown` validity
-  and adds no code for them, nor for a clock inside a `period` deadline (a limit;
-  `/offers/simulate` calls it without a clock, so it checks neither field there).
+  and adds no code for them, nor for a clock inside a `period` deadline, on the day
+  of an instant deadline or in another zone, and it reads an instant by the date its
+  offset was written in (`compareTemporal`) (a limit; `/offers/simulate` calls it
+  without a clock, so it checks neither field there).
   Route search rejects an `unknown` validity or deadline as
   `needs_rule_verification` (see "Search eligibility at each hop"), which is why a
   standing offer stores `open-ended` and `null` instead of `unknown`.
@@ -589,7 +591,7 @@ first day and every later day, so it stays a route instead of becoming
 `needs_rule_verification`; a `null` deadline is never passed.
 
 The application deadline is checked at the same day (`conversion-search-v3`). A
-local-date or instant deadline is its own calendar day, and a later day is
+local-date deadline is its own calendar day (an instant: see v4 below), and a later day is
 `application_deadline_passed` (`reuse_before_credit` after an earlier hop). A period
 deadline is passed only after the period ends; a day inside the period establishes
 nothing and yields `needs_rule_verification`. An `unknown` or malformed deadline also
@@ -597,11 +599,29 @@ yields `needs_rule_verification`: only `null` means no deadline (INV05). Before 
 unknown, malformed or period deadline was never checked, so such an offer was a route
 on any day.
 
+Since `conversion-search-v4` the deadline is judged on the application day's calendar
+(the clock's zone), never an assumed one. A local-date or period deadline of another
+zone is not compared and yields `needs_rule_verification`, as a validity of another
+zone does (`zone_mismatch` in `compareTemporal`); a `null` zone on either side is
+compatible. An instant deadline is one moment, read as its civil date on the
+application day's calendar, or in its own zone when the clock names none
+(`civilDateOfInstant`, [ADR 0056](adr/0056-as-of-price-fx-selection.md)): an earlier
+day is a route, a later day is passed, and the day holding the instant is
+`needs_rule_verification`, because a whole day cannot be before or after a moment
+inside it. A zone the runtime does not know yields `needs_rule_verification`, never
+UTC. An instant clock starts on its civil date in its own zone, and one whose zone the
+runtime does not know is `clock_not_a_date`. In v3 a deadline's zone was ignored and an
+instant was read by the date its offset was written in, so `2026-04-15T15:30:00Z`
+(00:30 on the 16th in Tokyo) refused the whole Tokyo 16th, and a day holding an
+instant deadline was always a route.
+
 The `/offers/simulate` goal search starts from today's UTC date as a `local-date`
 with zone `null` (`services/app/src/rewards-api.ts`). A `null` zone is compatible with
 any offer zone, so an `Asia/Tokyo` offer is checked against the UTC date: between
-00:00 and 09:00 JST that is the previous JST day, and an offer's first or last day can
-be judged one day off at the boundary.
+00:00 and 09:00 JST that is the previous JST day, and an offer's first or last day,
+and its application deadline, can be judged one day off at the boundary (a deadline
+of the previous JST day is still a route then). This is a limit of the route's clock,
+not of the search.
 
 For a tier-limited offer, a provider membership claim must name the source program,
 an admitted tier and a validity date/period covering that same day. Missing,
@@ -613,7 +633,7 @@ route passes no membership claims, so every tier-limited offer is
 `needs_rule_verification` there until membership is supplied.
 
 `CONVERSION_SEARCH_RELEASE` is part of the reward projection's build digest
-(`packages/read-model/src/reward-projection.ts`), so each bump (`conversion-search-v2`, then `-v3`)
+(`packages/read-model/src/reward-projection.ts`), so each bump (`conversion-search-v2`, `-v3`, then `-v4`)
 builds a new projection snapshot once; stored snapshots are not rewritten and no
 migration is needed.
 
@@ -622,5 +642,20 @@ The exhaustive eligibility test covers all 960 combinations of ten validity shap
 restricted/unrestricted tiers, three application days and direct/two-hop routes. A
 malformed stored validity establishes no day and stays `needs_rule_verification`.
 `packages/domain/test/reward-conversion.test.ts` also pins unknown, malformed and
-period deadlines. The completion rule is unchanged; a `requiredCompletionBy` with no
-day is still not checked (a limit; no caller passes one today).
+period deadlines, and synthetic day-boundary cases: a Tokyo or Los Angeles day against
+a deadline of the other zone, an instant written in UTC that falls just after
+midnight in Tokyo, a last-second instant read on both calendars, a zoneless clock, a
+zone the runtime does not know, an instant clock, and the completion date below.
+
+A caller's `requiredCompletionBy` follows the same rule on each hop's expected credit
+day (v4): a later day is `completion_after_required_by`; a date or period of another
+zone, a day inside a period, the day holding an instant, an `unknown` or malformed
+value, and an instant read in a zone the runtime does not know (the clock's, or its
+own when the clock names none) are `needs_rule_verification`. In v3 it was compared
+as a bare day, ignoring its zone and reading an instant by the date its offset was
+written in, and an `unknown`, malformed or period value was not checked at all. No caller passes one today
+(`/offers/simulate` passes `null`).
+
+An instant clock is reduced to its civil day: on the day holding an instant deadline
+the result is `needs_rule_verification` even when the clock's moment is before the
+deadline's. This is a limit; no caller passes an instant clock today.

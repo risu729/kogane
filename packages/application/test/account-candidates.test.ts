@@ -40,6 +40,8 @@ import {
   Store,
   world,
 } from "./account-candidates-world.ts";
+import { insertHistory } from "../../read-model/test/relation-history.ts";
+import { LEGACY_ACCOUNT_RELATIONS_SQL } from "./account-relations-legacy-sql.ts";
 import { AGENT, OPERATOR, planners, stubDatabase } from "./instrument-resolution-world.ts";
 import { migratedDatabase, sqliteCommandStore } from "./sqlite-store.ts";
 
@@ -317,6 +319,45 @@ describe("the candidate read over the CORE schema", () => {
         },
       ],
     });
+  });
+
+  test("a same_account proposal recorded after a decision does not replace it (ADR 0077, 2026-11-08)", async () => {
+    const s = world();
+    const pair = {
+      fromRef: "source_account:sa-mf-a",
+      toRef: "source_account:sa-direct-time",
+    };
+    const accepted = await decide(s, OPERATOR, "relation.accept", {
+      relationKind: "same_account",
+      ...pair,
+      validFrom: null,
+      validTo: null,
+      evidenceRefs: [],
+      reason: "synthetic same account",
+    });
+    expect(accepted.result.ok).toBe(true);
+    // A later proposal of the same pair, the row `reconcile.propose` appends
+    // for two source accounts.
+    insertHistory(s.db, [
+      {
+        id: "rel_synthetic_later_same_account_proposal",
+        kind: "same_account",
+        from_ref: pair.fromRef,
+        to_ref: pair.toRef,
+        status: "proposed",
+        created_at: "2099-12-31T00:00:00.000Z",
+      },
+    ]);
+    const [candidate] = candidates(await review(s));
+    expect(candidate!.sameAccount.recorded).toEqual([
+      { fromRef: pair.fromRef, toRef: pair.toRef, status: "accepted" },
+    ]);
+    // The shipped read took the proposal as the pair's current relation.
+    const shipped = s.db.query(LEGACY_ACCOUNT_RELATIONS_SQL).all() as {
+      kind: string;
+      status: string;
+    }[];
+    expect(shipped.find((row) => row.kind === "same_account")?.status).toBe("proposed");
   });
 });
 
