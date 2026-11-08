@@ -1,10 +1,38 @@
 import {
   MIZUHO_CLIENT_ERROR_CODES,
   MIZUHO_PARSE_ERROR_CODES,
+  MIZUHO_LOGIN_CHECKS,
+  MIZUHO_LOGIN_FORMS,
+  MIZUHO_HTTP_STATUS_CLASSES,
+  MizuhoClientError,
   type MizuhoCollection,
 } from "./client";
 
-export type MizuhoPhase = "configuration" | "login" | "collection" | "persistence";
+export type MizuhoPhase =
+  | "configuration"
+  | "login"
+  | "collection"
+  | "account-list"
+  | "history"
+  | "persistence";
+
+/** Project only allow-listed scalar fields; never spread an exception object. */
+export function mizuhoLoginDiagnostic(error: unknown) {
+  if (!(error instanceof MizuhoClientError) || error.code !== "login-unrecognized-page") return {};
+  const value = error.loginDiagnostic;
+  if (
+    !value ||
+    !MIZUHO_LOGIN_CHECKS.includes(value.loginCheck) ||
+    !MIZUHO_LOGIN_FORMS.includes(value.expectedForm) ||
+    !MIZUHO_HTTP_STATUS_CLASSES.includes(value.httpStatusClass)
+  )
+    return {};
+  return {
+    loginCheck: value.loginCheck,
+    expectedForm: value.expectedForm,
+    httpStatusClass: value.httpStatusClass,
+  };
+}
 const ISSUE_CODES = new Set<string>([
   ...MIZUHO_CLIENT_ERROR_CODES,
   ...MIZUHO_PARSE_ERROR_CODES,
