@@ -239,8 +239,9 @@ live PoCでは`wrangler deploy`、private R2 bucket作成、secret投入、第�
 Overlapping runs are prevented by the shared execution lease: every collection takes the
 `myjcb` row of `collection_execution_leases` through `withCollectionLease`
 (`src/worker.ts`, `packages/collection/src/schedule-lease.ts`, binding `SCHEDULE_DB`), and a
-second alarm or operations request while it is held fails with `collection_busy_or_uncertain`
-before contacting MyJCB. The lease is per source, not per connection: one run covers every
+second alarm or operations request while it is held is refused with `collection_busy_or_uncertain`
+before contacting MyJCB, and its scheduled result carries the failure code `collection_busy`
+(`scheduledFailure`, `packages/collection/src/schedule-result.ts`). The lease is per source, not per connection: one run covers every
 configured connection in turn.
 
 Processorの登録の冪等性はこのoverlap問題を解決しない。同じrun IDとterminal digestの再送は同じrunへ収束するが、collectorが別UUIDで二回収集した場合は別の取得事実として両方を保持する。したがって内容hashでrunを潰さず、重複実行の抑止はcollectorの実行lockで行う。追加のscheduled triggerやGitHub Actions cronは作らない。
