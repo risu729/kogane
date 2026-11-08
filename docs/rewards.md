@@ -592,9 +592,9 @@ first day and every later day, so it stays a route instead of becoming
 
 The application deadline is checked at the same day (`conversion-search-v3`). A
 local-date deadline is its own calendar day (an instant: see v4 below), and a later day is
-`application_deadline_passed` (`reuse_before_credit` after an earlier hop). A period
-deadline is passed only after the period ends; a day inside the period establishes
-nothing and yields `needs_rule_verification`. An `unknown` or malformed deadline also
+`application_deadline_passed` (`reuse_before_credit` after an earlier hop when the wait
+for its credit passed it: see v5 below). A period deadline is passed only after the
+period ends; a day inside the period establishes nothing and yields `needs_rule_verification`. An `unknown` or malformed deadline also
 yields `needs_rule_verification`: only `null` means no deadline (INV05). Before v3 an
 unknown, malformed or period deadline was never checked, so such an offer was a route
 on any day.
@@ -615,6 +615,35 @@ instant was read by the date its offset was written in, so `2026-04-15T15:30:00Z
 (00:30 on the 16th in Tokyo) refused the whole Tokyo 16th, and a day holding an
 instant deadline was always a route.
 
+Since `conversion-search-v5` a deadline passed at a later hop's application day is
+`reuse_before_credit` only when the same rule establishes it as not passed on the
+clock's day, the first hop's application day: then the wait for the earlier hops' credits passed it, and only
+applying before a credit arrives would meet it (§4). A deadline already passed on the
+clock's day, or one the clock's day does not establish (a day inside a period deadline,
+the day holding an instant deadline), is `application_deadline_passed` at any hop: the
+passed deadline is established, the credit wait as its cause is not. Before v5 every
+deadline passed after an earlier hop was `reuse_before_credit`, even one closed before
+the clock's day or after a hop with no processing days.
+
+An offer that cannot be taken at a state gets one `rejected` row, the first reason in
+this order (an offer of another source unit is skipped with no row):
+`same_offer_reuse`, `shared_quota_reuse`, `cycle_rejected`, `needs_rule_verification`
+for an offer whose terms are not verified, then its validity on the application day
+(`needs_rule_verification` or `offer_not_valid_at_clock`), membership
+(`needs_rule_verification`), the application deadline (`needs_rule_verification`,
+`application_deadline_passed` or `reuse_before_credit`), the caller's
+`requiredCompletionBy` on the credit day (`needs_rule_verification` or
+`completion_after_required_by`), and last the amount. The amount's row names the
+refusal of `simulateConversion` (`quantity_not_exact`, `below_minimum`, `invalid_ratio`,
+or the increment division's error code), never an adjustment made on the way to it
+(v5): before v5 a balance rounded down to an increment below the minimum was
+`rounded_down_to_increment`, and one capped below the minimum was `capped_by_maximum`. Because the first reason wins, a
+review reason earlier in the order hides a refusal later in it: an offer whose
+membership is unestablished and whose deadline has passed is `needs_rule_verification`
+(a limit). The validity code says `at_clock` but is judged on the hop's application day,
+so a validity that ends while an earlier hop's credit is awaited is
+`offer_not_valid_at_clock`, not `reuse_before_credit` (a limit).
+
 The `/offers/simulate` goal search starts from today's UTC date as a `local-date`
 with zone `null` (`services/app/src/rewards-api.ts`). A `null` zone is compatible with
 any offer zone, so an `Asia/Tokyo` offer is checked against the UTC date: between
@@ -633,7 +662,7 @@ route passes no membership claims, so every tier-limited offer is
 `needs_rule_verification` there until membership is supplied.
 
 `CONVERSION_SEARCH_RELEASE` is part of the reward projection's build digest
-(`packages/read-model/src/reward-projection.ts`), so each bump (`conversion-search-v2`, `-v3`, then `-v4`)
+(`packages/read-model/src/reward-projection.ts`), so each bump (`conversion-search-v2`, `-v3`, `-v4`, then `-v5`)
 builds a new projection snapshot once; stored snapshots are not rewritten and no
 migration is needed.
 
@@ -645,7 +674,10 @@ malformed stored validity establishes no day and stays `needs_rule_verification`
 period deadlines, and synthetic day-boundary cases: a Tokyo or Los Angeles day against
 a deadline of the other zone, an instant written in UTC that falls just after
 midnight in Tokyo, a last-second instant read on both calendars, a zoneless clock, a
-zone the runtime does not know, an instant clock, and the completion date below.
+zone the runtime does not know, an instant clock, and the completion date below. It
+also pins a second hop's deadline open on the clock's day, closed before it, and
+unestablished on it (a period, an instant), and an amount refused below the minimum
+after rounding down or a cap.
 
 A caller's `requiredCompletionBy` follows the same rule on each hop's expected credit
 day (v4): a later day is `completion_after_required_by`; a date or period of another
