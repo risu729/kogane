@@ -539,6 +539,12 @@ read-only live 検証項目:
 
 ## 16. 2026-09-05 Layer A raw-evidence実装
 
+Historical record: the private outbox bucket, the importer, its
+`collector-r2-v-point` credential and Service Binding described in this section were
+retired on 2026-09-13 ([legacy retirement](../legacy-retirement.md)). The
+collector now writes each run once, into the shared `DATA` bucket
+([U09 below](#追記-共通data-r2への切替u09)).
+
 V Point web collectorは現在、browserなしのWorkers fetchとEmail Worker再認証で定期収集し、private R2をimmutable outboxとして使う。中央取り込みはcollectorとは別の`collector-r2-v-point` credentialとService Bindingに分離した。manifest v1/v2、prefix inventory、metadata、checksum、JSON schema、pagination、failure complement、collection summary、V Point Pay email reconciliationを全件検証してから、専用の中央runを冪等にsealする。大runは完全inventoryを固定し、HMAC署名済みcontinuationで最大8 artifactずつ転送し、seal後だけR2 scan位置を進める。
 
 terminal run reportの`producerVersion`には固定source契約`vpoint-r2-v3`を使う。Importerのdeploy revisionをimmutable reportへ混ぜないため、異なる`IMPORTER_VERSION`で同じrunを再走査してもreport本文は変化しない。v3ではcollectorがtransport decode後に再encodeしたJSONを`collector_derived/transformed`、自由形式failure textを除いた中央manifestを`collector_manifest/generated`として登録し、中央が補うnullable fieldと空arrayを含むdescriptor hashまで実D1契約へ一致させる。deploy revisionは失敗・incomplete attemptの診断に限って保持する。
@@ -575,8 +581,12 @@ session値は出力・保存していない。監査はR2へのwrite/deleteやWo
 binding `DATA`（`kogane-raw-evidence`）だけである。切替とimporterは
 2026-09-13に廃止された（`docs/collection.md`）。同じsanitize済みbytesを
 `objects/<2hex>/<sha256>`へcontent-addressedで保存し、
-`runs/v-point/<runId>/terminal.json`を最後に書く。Worker名、cron、Email route、
-`VPointSession` Durable Object、secret、既存bucket bindingは変更しない。
+`runs/v-point/<runId>/terminal.json`を最後に書く。Worker名、Email route、
+`VPointSession` Durable Object、secretは変更しない。
+The only R2 binding is `DATA`. Since
+[#430](https://github.com/risu729/kogane/pull/430) (2026-10-05) the Worker has
+no Cron trigger: the Processor's alarm job `vpoint` (06:15 JST, `15 21 * * *` in
+`config/alarm-jobs.json`) calls its private `ScheduledCollection` entrypoint.
 
 Email routeが受けたVポイントPay通知は`v-point-pay-email`の独立runとして
 `notification.eml`（role `user_capture`）と`normalized-event.json`

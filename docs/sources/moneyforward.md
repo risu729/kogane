@@ -20,9 +20,16 @@ pending/posted状態、取引ID、更新直後の完全性を保証しない。�
 `moneyforward-me`のまま保持し、SMBC、Vpass等の公式sourceへ付け替えない。
 
 既存collectorはMoneyForward IDの保存済みpasskeyで毎run新しいsessionを作り、read-only route
-だけを取得する。収集bytesはprivate R2へmanifest-lastで保存する。Layer A importerはこのR2を
-immutable outboxとしてstrict validationし、中央raw-evidenceへ転送する。source R2へのwrite、
-move、deleteは行わない。
+だけを取得する。
+
+The collector writes the collected bytes to the shared `DATA` bucket as
+content-addressed objects and the `terminal-v1` manifest last; the Processor
+registers that terminal ([U09 below](#共通-data-r2-への切替-u09)). The private
+bucket and the Layer A importer that validated and forwarded it, described in
+the sections below, were retired on 2026-09-13
+([legacy retirement](../legacy-retirement.md)). The daily run is the
+Processor's alarm job `moneyforward-me` (06:15 JST, `15 21 * * *` in
+`config/alarm-jobs.json`); the Worker has no Cron trigger.
 
 ## 調査方法と秘匿境界
 

@@ -860,12 +860,18 @@ remain unreachable. See the PoC's
 [`INVESTIGATION-2026-08-31.md`](../../services/collector-sbi-shinsei/INVESTIGATION-2026-08-31.md)
 for the evidence boundary and enablement checklist.
 
-The deployed schedule is `0 21 * * *`. Teardown inventory is the active Worker,
-the SBI credential and relay secrets (the public admin trigger is retired), the R2 bucket containing the
-success and retained failure manifests/artifacts, the Container application and
-image revisions, and the explicit-tunnel VPC binding configuration. The local
+The schedule is the Processor's alarm job `sbi-shinsei` (06:00 JST,
+`0 21 * * *` in `config/alarm-jobs.json`), which calls the Worker's private
+`ScheduledCollection` entrypoint; the Worker has no Cron trigger since
+[#430](https://github.com/risu729/kogane/pull/430) (2026-10-05). Teardown
+inventory is the active Worker, the SBI credential and relay secrets (the
+public admin trigger is retired), the Container application and image
+revisions, and the explicit-tunnel VPC binding configuration. The collector's
+own R2 bucket was emptied and deleted on 2026-09-13 after its objects were
+copied to `DATA` ([legacy retirement](../legacy-retirement.md)); runs are in
+the shared `DATA` bucket, which is not part of this teardown. The local
 Docker test Container/image should be removed after validation; the cloud
-resources remain active for scheduled collection and evidence retention.
+resources remain active for scheduled collection.
 
 ## Shared DATA bucket (U09, 2026-09-11)
 
@@ -874,8 +880,10 @@ binding to `kogane-raw-evidence` only. The switch and the importer were
 retired on 2026-09-13 (`docs/collection.md`). The Worker persists the run
 itself with `packages/collection` — sanitized provider captures, the
 normalized snapshot and the sanitized collector manifest, then the
-`terminal-v1` manifest last. The daily `0 21 * * *` cron is unchanged, and
-the Container image, relay and tunnel are untouched: the Worker writes the
+`terminal-v1` manifest last. The daily `0 21 * * *` schedule was unchanged by
+this switch (it is a Processor alarm job since
+[#430](https://github.com/risu729/kogane/pull/430), above), and the Container
+image, relay and tunnel are untouched: the Worker writes the
 run, not the container. The run is stored once, in `DATA` (plan 00).
 
 The artifact/role table and what the terminal states are in
