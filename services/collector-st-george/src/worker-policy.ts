@@ -290,13 +290,27 @@ export class CollectionCoordinator {
         const run = selected.pending.run;
         if (run.reason === undefined || !blocksLaterLogins(run.reason))
           await storage.delete("state");
-        else await storage.put("state", { kind: "blocked", reason: run.reason, runId: run.runId });
+        else
+          await storage.put("state", {
+            kind: "blocked",
+            reason: run.reason,
+            runId: run.runId,
+            since: run.completedAt,
+          });
         for (let index = 0; index < current.snapshotChunks; index++)
           await storage.delete(this.chunkKey(run.runId, index));
         return true;
       });
       if (!finished) return { status: "refused", reason: "state-changed" };
       const run = selected.pending.run;
+      if (run.reason !== undefined && blocksLaterLogins(run.reason))
+        logBlockEvent({
+          event: "st-george-collection-blocked",
+          reason: run.reason,
+          blockedRunId: run.runId,
+          blockedSince: run.completedAt,
+          clearedBy: "operator-resume",
+        });
       return run.reason === undefined
         ? { status: "stored", runId: run.runId, terminalKey: result.terminalKey }
         : {
@@ -340,6 +354,13 @@ export class CollectionCoordinator {
       const state = await this.storage.get<StoredState>("state");
       if (state?.kind === "pending") return { status: "failed", reason: "persistence-pending" };
       await this.storage.delete("state");
+      if (state?.kind === "blocked")
+        logBlockEvent({
+          event: "st-george-block-cleared",
+          reason: state.reason,
+          blockedRunId: state.runId ?? null,
+          cause: "operator-resume",
+        });
       return { status: "ready" };
     } finally {
       this.active = false;
@@ -527,7 +548,9 @@ export class CollectionCoordinator {
 }
 
 /** Fixed event names, closed codes, run UUIDs and timestamps only. */
-function logBlockEvent(fields: Record<string, string | null>): void {
+function logBlockEvent(
+  fields: { event: string; reason?: FailureCode } & Record<string, string | null>,
+): void {
   try {
     console.warn(JSON.stringify(fields));
   } catch {

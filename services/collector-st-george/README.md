@@ -68,12 +68,14 @@ browser or container crash, a network error, a changed page, a deadline) is a
 failed run and the next scheduled run tries again (2026-11-08 UTC; before that,
 any failure blocked, which left the collector stopped from 2026-10-07 on a
 `runtime-failed` run). A block of another reason left by that older policy is
-cleared on the next run. The Worker log says why a run did not start:
-`st-george-collection-blocked` when a block is stored,
-`st-george-collection-skipped-blocked` for each run it skips, and
-`st-george-block-cleared` when an older block is lifted. Each carries the
-reason code, the blocking run's id and, for blocks stored from 2026-11-08 on,
-`blockedSince`. A lease held by another execution answers `busy` and
+cleared on the next run. The Worker log records each block:
+`st-george-collection-blocked` when a refused or challenged login stores one,
+`st-george-collection-skipped-blocked` for each run it skips (nothing is
+contacted), and `st-george-block-cleared` when a block of that older policy is
+lifted. Each carries the reason code and the blocking run's id (`null` when the
+stored block has none); the first two also carry `blockedSince` (`null` for a
+block stored before 2026-11-08) and `clearedBy: "operator-resume"`. A lease
+held by another execution answers `busy` and
 records no run. An in-flight marker from an object reset mid-attempt no longer
 blocks: the lease outlives that attempt, so the next run cannot overlap it.
 Enable this schedule only after authenticated cloud collection and downstream

@@ -439,6 +439,7 @@ describe("internal saved-only retry", () => {
         kind: "blocked",
         reason,
         runId: savedRunId,
+        since: savedMetadata.completedAt,
       });
       expect(await onlyRetry(coordinator)).toEqual({ status: "refused", reason: "not-pending" });
       expect(collect).not.toHaveBeenCalled();
