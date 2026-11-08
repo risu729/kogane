@@ -1,8 +1,8 @@
-// SBI Shinsei activity parser 0.1.3 records `_kogane.identityOrigin:
+// SBI Shinsei activity parser 0.1.4 records `_kogane.identityOrigin:
 // "provider-id"` (ADR 0018, 2026-10-09 note). This file walks what deploying it
 // would do to a store that already holds a 0.1.2 parse of a capture: the
-// repair lane re-parses the stored capture under 0.1.3 beside the 0.1.2 run,
-// the settlement sweep proposes the 0.1.3 row under the same bank key, a
+// repair lane re-parses the stored capture under 0.1.4 beside the 0.1.2 run,
+// the settlement sweep proposes the 0.1.4 row under the same bank key, a
 // settlement accepted before G1b keeps reserving it, nothing is adopted by
 // itself, and only a human's acceptance consumes the debit, under the declared
 // alias class. A reference the provider reused later collides with that
@@ -351,7 +351,7 @@ test("an acceptance made before G1b holds the 0.1.2-cited candidate (no claim ro
   expect(await count("SELECT count(*) AS n FROM economic_claims")).toBe(0);
 }, 60000);
 
-test("the repair lane re-parses the stored capture under 0.1.3 beside the 0.1.2 run; nothing is rewritten or adopted", async () => {
+test("the repair lane re-parses the stored capture under 0.1.4 beside the 0.1.2 run; nothing is rewritten or adopted", async () => {
   const before = await adopted();
   const old = await db
     .prepare("SELECT * FROM transaction_observations WHERE parse_run_id=? ORDER BY id")
@@ -360,12 +360,12 @@ test("the repair lane re-parses the stored capture under 0.1.3 beside the 0.1.2 
   expect(old.results).toHaveLength(2);
   for (
     let attempt = 0;
-    attempt < 5 && (await published(BANK))?.parser_version !== "0.1.3";
+    attempt < 5 && (await published(BANK))?.parser_version !== "0.1.4";
     attempt++
   )
     expect((await sweep(env, { lane: "repair" })).lanes.repair?.error).toBe(0);
   const current = await published(BANK);
-  expect(current?.parser_version).toBe("0.1.3");
+  expect(current?.parser_version).toBe("0.1.4");
   reparsed = current!.id;
   await identify(reparsed, SOURCE, BANK);
   // Both runs are kept: the 0.1.2 run is marked superseded, its rows unchanged.
@@ -380,7 +380,7 @@ test("the repair lane re-parses the stored capture under 0.1.3 beside the 0.1.2 
     ).results,
   ).toEqual([
     { parser_version: "0.1.2", status: "ok", superseded: reparsed },
-    { parser_version: "0.1.3", status: "ok", superseded: null },
+    { parser_version: "0.1.4", status: "ok", superseded: null },
   ]);
   expect(
     (
@@ -424,7 +424,7 @@ test("the repair lane re-parses the stored capture under 0.1.3 beside the 0.1.2 
       .bind(BANK)
       .first<Record<string, unknown>>(),
   ).toEqual({ previous: BANK, next: reparsed, kind: "normal" });
-  // The adapter now names the 0.1.3 row; the 0.1.2-cited candidate is no longer current.
+  // The adapter now names the 0.1.4 row; the 0.1.2-cited candidate is no longer current.
   expect(
     (
       await db
@@ -439,14 +439,14 @@ test("the repair lane re-parses the stored capture under 0.1.3 beside the 0.1.2 
   expect(await adopted()).toEqual(before);
 }, 60000);
 
-test("the sweep proposes the 0.1.3 row under the same bank key; the pre-G1b acceptance still reserves it", async () => {
+test("the sweep proposes the 0.1.4 row under the same bank key; the pre-G1b acceptance still reserves it", async () => {
   const before = await adopted();
   await cardSettlementSweep(db);
   const [old012, new013, ...rest] = await candidates();
   expect(rest).toEqual([]);
   expect(new013!.bank_parse_run_id).toBe(reparsed);
   expect(new013!.bank_key).toBe(old012!.bank_key);
-  // Rule 2 no longer refuses the 0.1.3 row; the 0.1.2 one still is.
+  // Rule 2 no longer refuses the 0.1.4 row; the 0.1.2 one still is.
   expect(await cardSettlementDebitIdentity(d1CommandStore(db), new013!.id, facts(new013!))).toEqual(
     {
       admitted: true,
@@ -475,7 +475,7 @@ test("the sweep proposes the 0.1.3 row under the same bank key; the pre-G1b acce
   expect(await adopted()).toEqual(before);
 }, 60000);
 
-test("once the pre-G1b acceptance is withdrawn, a human accepts the 0.1.3 debit under its alias class", async () => {
+test("once the pre-G1b acceptance is withdrawn, a human accepts the 0.1.4 debit under its alias class", async () => {
   const [old012, new013] = await candidates();
   const withdrawn = await command("card-settlement.withdraw", {
     proposalId: old012!.id,
@@ -556,7 +556,7 @@ test("a reference the provider reused later is refused against the holder, never
   );
   expect((await sweep(env, { lane: "incremental" })).lanes.incremental?.error).toBe(0);
   const later = await published(2105);
-  expect(later?.parser_version).toBe("0.1.3");
+  expect(later?.parser_version).toBe("0.1.4");
   await identify(later!.id, SOURCE, 2105);
   // The same card and bank accounts: their ownership is already recorded.
   await statement(2106, 1300, "2026-10-07");

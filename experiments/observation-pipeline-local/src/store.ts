@@ -209,12 +209,14 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
     if (policy === undefined) throw new Error("0066 names no snapshot policy row");
     db.transaction(() => db.exec(policy))();
   }
-  // 0056 moves that row's pinned parser version to 1.0.1, and 0059 to 1.0.2
-  // (ADR 0028 and its amendment). Each UPDATE names the value the one before
-  // wrote, so both are no-ops once applied.
+  // 0056/0059 advance the board reader (ADR 0028 and its amendment). 0084
+  // follows the shared CSV release for all three exact-version policies.
+  // Each UPDATE names its previous value, so reopening preserves later pins
+  // and operator-selected alternatives.
   for (const migration of [
     "0056_sbi_shinsei_exchange_rate_policy_version.sql",
     "0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql",
+    "0084_csv_reader_release_snapshot_policies.sql",
   ])
     db.exec(
       readFileSync(
