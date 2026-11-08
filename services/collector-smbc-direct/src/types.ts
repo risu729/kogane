@@ -59,6 +59,8 @@ export interface BackfillProgress {
   manifestKey: string | null;
   publicationStatus?: "pending" | "persisted" | "failed";
   publicationErrorCode?: string | null;
+  coverageStatus?: "complete" | "partial" | "unknown";
+  coverageErrorCode?: "coverage_day_not_finished" | null;
 }
 
 export interface StoredArtifact {
@@ -68,6 +70,8 @@ export interface StoredArtifact {
   bytes: number;
   sha256: string;
   range?: DateRange;
+  /** Request start, so crossing midnight during a response cannot close its day. */
+  collectedAt?: string;
   transactionCount?: number;
 }
 

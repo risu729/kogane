@@ -32,7 +32,7 @@ import {
   type TerminalTransformation,
 } from "../../../packages/collection/src/index";
 import { sha256Hex } from "./storage";
-import { monthRanges } from "./dates";
+import { lastFinishedJapanDay, monthRanges } from "./dates";
 import type { BackfillManifest, BackfillProgress, StoredArtifact } from "./types";
 
 /** `runs/<source>/…` in DATA. The Processor maps it to the CORE source `smbc-bank`. */
@@ -87,7 +87,7 @@ interface SharedRunIdentity {
  * was added (12 §3, G3-10, G3-11).
  */
 export function waitingForHuman(manifest: BackfillManifest): boolean {
-  return manifest.status !== "success";
+  return manifest.status !== "success" || sharedOutcome(manifest).coverageStatus !== "complete";
 }
 
 /** True while the person who started the backfill still has to act. */
@@ -96,6 +96,7 @@ export function progressWaitingForHuman(progress: BackfillProgress): boolean {
     progress.phase === "waiting_for_approval" ||
     progress.phase === "failed" ||
     progress.phase === "partial" ||
+    progress.coverageErrorCode === "coverage_day_not_finished" ||
     progress.lastErrorCode === "approval_not_completed_generate_new_qr"
   );
 }
@@ -107,6 +108,26 @@ export function sharedOutcome(manifest: BackfillManifest): {
   safeErrorCode?: string;
 } {
   if (manifest.status === "success") {
+    // Old saved successes may have read their last day while it was still
+    // open. Publication retries must not turn that snapshot complete later.
+    // Legacy artifacts lack request timestamps; the run start is a safe lower
+    // bound. Earlier closed months remain usable in an approved continuation.
+    const closed =
+      manifest.requestedRange.end <=
+        lastFinishedJapanDay(new Date(manifest.completedAt ?? manifest.startedAt)) &&
+      manifest.artifacts.every(
+        (artifact) =>
+          !artifact.range ||
+          artifact.range.end <=
+            lastFinishedJapanDay(new Date(artifact.collectedAt ?? manifest.startedAt)),
+      );
+    if (!closed) {
+      return {
+        providerOutcome: "success",
+        coverageStatus: "partial",
+        safeErrorCode: "coverage_day_not_finished",
+      };
+    }
     // Every requested month chunk was collected and stored.
     return { providerOutcome: "success", coverageStatus: "complete" };
   }
@@ -305,7 +326,11 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
     providerOutcome: outcome.providerOutcome,
     coverageStatus: outcome.coverageStatus,
     persistenceComplete: true,
-    ...(outcome.safeErrorCode === undefined ? {} : { safeErrorCode: outcome.safeErrorCode }),
+    // A successful provider acquisition cannot carry a run-level failure code.
+    // Its partial coverage reason belongs to the account unit below.
+    ...(outcome.safeErrorCode === undefined || outcome.providerOutcome === "success"
+      ? {}
+      : { safeErrorCode: outcome.safeErrorCode }),
     units: [
       {
         unitKey: UNIT_KEY,
