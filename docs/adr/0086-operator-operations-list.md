@@ -118,6 +118,11 @@ compound SELECT"; seen in the `services/app` workerd tests).
    not shown; the audit log names who made a request. The stored request
    (`request_json`) is not read, because a rebuild's `reason` is free text.
    Stages and the collector execution stay on the single-operation read.
+   `status` is the stored status, and the `status` filter matches it: READ is
+   not read, so a request the single read reports `completed` through its
+   derived `projected` stage
+   ([ADR 0048, amended 2026-11-07](0048-operation-collector-dispatch.md#amendment-2026-11-07-the-projected-stage-is-derived-from-the-read-pointer))
+   is listed, and filtered, as `running`.
 6. **Plan.** `packages/application/src/operations/list.ts` builds the SQL from
    placeholders only: one arm per allowed (status, kind) pair, each
    `SEARCH ops_requests USING INDEX ops_requests_open (status=? AND kind=?
