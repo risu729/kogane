@@ -66,21 +66,27 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
   const environment = () =>
     ({
       ...env,
+      OPERATOR_SUBJECTS: '["synthetic-agent"]',
+      // A page the operator alone reads names its browser subject here too.
       ...extraEnv,
       ACCESS_ISSUER: issuer,
       ACCESS_AUDIENCE: AUDIENCE,
       ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
-      OPERATOR_SUBJECTS: '["synthetic-agent"]',
     }) as Env;
 
-  /** The UI route as the signed-in browser reads it. */
-  async function route(pathAndQuery: string): Promise<{ status: number; body: unknown }> {
-    const response = await worker.fetch(
+  /** The UI route's response as the signed-in browser receives it. */
+  async function routeResponse(pathAndQuery: string): Promise<Response> {
+    return worker.fetch(
       new Request(`https://fixture.test${pathAndQuery}`, {
         headers: { "cf-access-jwt-assertion": await token("synthetic-reader", AUDIENCE) },
       }),
       environment(),
     );
+  }
+
+  /** The UI route as the signed-in browser reads it. */
+  async function route(pathAndQuery: string): Promise<{ status: number; body: unknown }> {
+    const response = await routeResponse(pathAndQuery);
     return { status: response.status, body: await response.json() };
   }
 
@@ -177,7 +183,7 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
     return page;
   }
 
-  return { route, http, mcp, mcpMessage, direct, listed, expectSameAnswer };
+  return { route, routeResponse, http, mcp, mcpMessage, direct, listed, expectSameAnswer };
 }
 
 /**
