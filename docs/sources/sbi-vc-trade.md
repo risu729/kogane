@@ -53,12 +53,12 @@ Primary sources:
 
 ### On-screen granularity
 
-- Order history: new/closing orders for spot (brokerage/exchange) and leveraged trading. Includes unfilled orders.
-- Execution history: executed trades only. Excludes unfilled/canceled orders.
-- Money/cryptoasset deposit/withdrawal history: yen deposits/withdrawals, cryptoasset deposits/withdrawals, trading profit/loss, etc.
-- Balance history: Japanese-yen/cryptoasset balances as of a reference date/time.
-- Reports: annual/monthly/daily reports can be selected and downloaded as PDFs. Annual transaction reports are also provided to individuals.
-- Annual profit/loss reports cover per-asset transactions/realized profit/loss, beginning/end-of-year valuations and differences for spot trading, and position profit/loss, funding rates, and similar items for leveraged trading.
+- `注文履歴` (“order history”): new/closing orders for spot (brokerage/exchange) and leveraged trading. Includes unfilled orders.
+- `約定履歴` (“execution history”): executed trades only. Excludes unfilled/canceled orders.
+- `入出金・入出庫履歴` (“money/cryptoasset deposit/withdrawal history”): yen deposits/withdrawals, cryptoasset deposits/withdrawals, trading profit/loss, etc.
+- `残高履歴`: Japanese-yen/cryptoasset balances as of a reference date/time.
+- `報告書` (“reports”): annual/monthly/daily reports can be selected and downloaded as PDFs. Annual transaction reports are also provided to individuals.
+- `年間損益報告書` (“annual profit/loss reports”) covers per-asset transactions/realized profit/loss, beginning/end-of-year valuations and differences for spot trading, and position profit/loss, funding rates, and similar items for leveraged trading.
 
 ### Exports
 
