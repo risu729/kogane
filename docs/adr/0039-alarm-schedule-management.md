@@ -191,7 +191,10 @@ time remains null. The next processor tick's reservation repair arms that job's
 alarm for a retry, deferred by current maintenance. An alarm also checks for a
 retry before its next normal nominal. Only enabled collection jobs retry.
 The retry conditionally replaces the attempt reference and writes the immutable
-`retry_claimed_at` in the same UPDATE. It consumes the single retry even if it
+`retry_claimed_at` in the same UPDATE. That UPDATE also requires the enabled
+schedule, revision and next nominal reservation read before the alarm write;
+a concurrent settings or reservation change consumes no retry and makes no call.
+It consumes the single retry even if it
 stops before its own marker. A delayed original cannot mark or dispatch under
 the new reference; two retry handlers cannot both acquire ownership. Completion
 also checks the attempt reference. A claim conflict leaves another owner's row
