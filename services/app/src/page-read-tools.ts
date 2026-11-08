@@ -250,11 +250,16 @@ const TOOLS = {
     routes: ["/api/v2/reports", "/api/v2/reports/:id", "/api/v2/reports/:id/explanation"],
     needs: "reportArtifacts",
     read: (env, { reportId, view, ...params }) => {
-      // A view or a policy names one report; the list takes neither.
-      if (reportId === undefined && (view !== undefined || params.decimalPolicy !== undefined))
-        throw new HttpError(400, "invalid_request", [
-          view === undefined ? "decimalPolicy" : "view",
-        ]);
+      // A view or a policy names one report; the list takes neither, and each
+      // one given is a ref.
+      const wrong =
+        reportId === undefined
+          ? [
+              ...(view === undefined ? [] : ["view"]),
+              ...(params.decimalPolicy === undefined ? [] : ["decimalPolicy"]),
+            ]
+          : [];
+      if (wrong.length > 0) throw new HttpError(400, "invalid_request", wrong);
       return readReportRoute(
         env,
         {
@@ -516,7 +521,9 @@ export type PageReadStore = (feature: PageReadStoreFeature) => Promise<boolean>;
  * This store's features for one request, each probed at most once. `known`
  * supplies an answer the caller already asks for (the reported state's views,
  * which the reported and reconstructed state's reads share), so one tool list
- * asks the schema once per feature.
+ * asks the schema once per feature. A probe that fails is the route's
+ * `503 catalogue_read_failed` (the Worker wraps each route, probe included, in
+ * `catalogue`), never an exception of its own.
  */
 export function pageReadStore(
   env: Env,
@@ -526,7 +533,7 @@ export function pageReadStore(
   return (feature) => {
     let answer = asked.get(feature);
     if (!answer) {
-      answer = known[feature]?.() ?? STORE_FEATURES[feature](env);
+      answer = catalogue(() => known[feature]?.() ?? STORE_FEATURES[feature](env));
       asked.set(feature, answer);
     }
     return answer;
