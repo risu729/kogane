@@ -1191,6 +1191,12 @@
         }
       ],
       "sha256": "9fc982804c910006eb97dc1bc2d1e3ac51d7dd2e13e314443a4893ebc31c2f47"
+    },
+    {
+      "file": "0086_collection_provider_failure_code.sql",
+      "statementCount": 2,
+      "insertStatements": [],
+      "sha256": "2a8cd46c05723bc8bc8dc08ead0307f13a4b1489bf40d26c97f1a69a21145ee5"
     }
   ],
   "tables": [
@@ -4889,6 +4895,13 @@
           "notNull": false,
           "default": null,
           "pk": 0
+        },
+        {
+          "name": "provider_failure_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
         }
       ],
       "primaryKey": [
@@ -4938,6 +4951,7 @@
         }
       ],
       "triggers": [
+        "collection_runs_failure_code_immutable",
         "collection_runs_no_delete",
         "collection_runs_no_replace",
         "collection_runs_progress_only"
@@ -4947,7 +4961,7 @@
         "collection_runs_no_delete"
       ],
       "appendOnly": false,
-      "sqlSha256": "e7abdd919b5c2975"
+      "sqlSha256": "27da8e3874013b4a"
     },
     {
       "name": "collection_scan_state",
@@ -18259,6 +18273,13 @@
       "sqlSha256": "d092d7be355b12c7"
     },
     {
+      "name": "collection_runs_failure_code_immutable",
+      "table": "collection_runs",
+      "timing": "BEFORE",
+      "event": "UPDATE OF PROVIDER_FAILURE_CODE",
+      "sqlSha256": "7b4758206ecf972f"
+    },
+    {
       "name": "collection_runs_no_delete",
       "table": "collection_runs",
       "timing": "BEFORE",
@@ -21820,7 +21841,7 @@
   "summary": {
     "tableCount": 141,
     "viewCount": 44,
-    "triggerCount": 526,
+    "triggerCount": 527,
     "explicitIndexCount": 147,
     "byClassification": {
       "core-keep": [
@@ -22080,6 +22101,6 @@
       "0080_jpoint_program.sql",
       "0085_schedule_dispatch_marker.sql"
     ],
-    "schemaSha256": "b13743e508eb97020636e606ba09a08eac3415ae1eaa63b784de683406e745e4"
+    "schemaSha256": "0b2ddb2a8d7e9b70df8ec4b3937eeef911d2737a1e55ca0d06eb316f47695af9"
   }
 }

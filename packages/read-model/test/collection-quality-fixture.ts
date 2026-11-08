@@ -317,6 +317,7 @@ export class QualityStore {
     outcome: "success" | "partial" | "failed" | null;
     coverage?: "complete" | "partial" | "unknown";
     blockedCode?: string;
+    providerFailureCode?: string;
     fetchRun?: number;
     contract?: string;
     seenAt?: string;
@@ -326,7 +327,7 @@ export class QualityStore {
     const blocked = spec.blockedCode ?? (spec.outcome === null ? "manifest_invalid" : null);
     this.db.run(
       `INSERT INTO collection_runs(id,source,run_id,terminal_key,terminal_digest,registration_contract_version,provider_outcome,
-        coverage_status,first_seen_at,blocked_code) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+        coverage_status,first_seen_at,blocked_code,provider_failure_code) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
       [
         id,
         spec.source,
@@ -338,6 +339,7 @@ export class QualityStore {
         spec.outcome === null ? null : (spec.coverage ?? "complete"),
         spec.seenAt ?? "2099-01-01T00:00:00.000Z",
         blocked,
+        spec.providerFailureCode ?? null,
       ],
     );
     if (spec.fetchRun !== undefined) {

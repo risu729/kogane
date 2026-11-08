@@ -203,10 +203,17 @@ describe("collection quality: attempts, terminals and sources", () => {
       JSON.stringify(["vpass"]),
     ]);
     expect(rows).toEqual([
-      { source: "vpass", blocked_code: null, runs: 1, newest_seen_at: "2099-01-03T00:00:00.000Z" },
+      {
+        source: "vpass",
+        blocked_code: null,
+        provider_failure_code: null,
+        runs: 1,
+        newest_seen_at: "2099-01-03T00:00:00.000Z",
+      },
       {
         source: "vpass",
         blocked_code: "manifest_invalid",
+        provider_failure_code: null,
         runs: 1,
         newest_seen_at: "2099-01-01T00:00:00.000Z",
       },

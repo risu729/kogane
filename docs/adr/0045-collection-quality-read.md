@@ -453,3 +453,28 @@ triggered run completes).
   `packages/read-model/test/collection-quality.test.ts`; route and tool parity
   under one clock in `services/app/test/page-read-reports.test.ts`; the page's
   labels in `apps/web/test/collection-quality.browser.test.ts`.
+
+## Amendment 2026-11-08: retain failed terminal reasons
+
+Status: proposed, in the same change as migration 0086.
+
+A registration refusal such as `provider_run_failed` explains why CORE did not
+seal a run, but loses the validated terminal's reason for the provider failure.
+Reading R2 on every quality query would couple a bounded D1 read to raw-object
+access. Keeping only the registration code leaves the reason unavailable after
+short-lived operational logs expire.
+
+Store the failed terminal's optional closed run-level code in the immutable
+`collection_runs.provider_failure_code` column at first sighting. Keep the
+manifest grammar and leave old or unvalidated rows NULL; no backfill or evidence
+rewrite is performed. Expose a separate normalized `failureCode` on latest
+receipt terminals and unregistered groups, grouping by both registration and
+provider codes. The existing `safeCode` display grammar remains unchanged.
+The shared summary/cell contract advances to version 5; HTTP, MCP and UI use
+one application result. No capability, grant or provider operation is added.
+
+Migration and storage tests cover exact grammar boundaries and immutability;
+registration tests cover refused and registered failed terminals, absent and
+invalid codes, and redelivery. Query tests check normalization and distinct
+buckets, frozen SQL differential tests preserve old counts and selection, and
+the browser renders both views with the existing accessibility checks.
