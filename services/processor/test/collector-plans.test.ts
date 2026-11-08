@@ -301,7 +301,7 @@ test("st-george: the DOM projection and the run manifest register and seal", asy
 });
 
 test("smbc-direct: responses, their extractions and the run manifest register and seal", async () => {
-  const prefix = `raw/smbc-direct/2099/01/01/${RUN_ID}`;
+  const prefix = `raw/smbc-direct/2026/09/01/${RUN_ID}`;
   const bytesByKey = new Map<string, Uint8Array>();
   const stored = async (
     dataset: SmbcStoredArtifact["dataset"],
@@ -322,7 +322,8 @@ test("smbc-direct: responses, their extractions and the run manifest register an
       ...(range ? { range } : {}),
     };
   };
-  const range = { start: "2099-01-01", end: "2099-01-31" };
+  // A completed legacy collection starts after its requested JST days ended.
+  const range = { start: "2026-08-01", end: "2026-08-31" };
   const manifest: BackfillManifest = {
     schemaVersion: "smbc-direct-backfill-worker-poc-v1",
     source: "smbc-direct",
@@ -344,14 +345,14 @@ test("smbc-direct: responses, their extractions and the run manifest register an
       ),
       await stored(
         "transactions-raw",
-        "transactions/20990101-20990131.raw.json.sjis",
+        "transactions/20260801-20260831.raw.json.sjis",
         '{"rows":[]}',
         "application/json",
         range,
       ),
       await stored(
         "transactions-normalized",
-        "transactions/20990101-20990131.normalized.json",
+        "transactions/20260801-20260831.normalized.json",
         '{"transactions":[]}',
         "application/json",
         range,
