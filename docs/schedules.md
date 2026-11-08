@@ -245,9 +245,11 @@ page and one from an MCP client are the same kind of stored operation.
   same operation even after midnight; a new confirmation is a new request. A
   4xx answer other than 408 or 429 is shown as refused and not stored, with
   its code. The answer shows the operation id.
-- **Following it.** The page does not read the operation yet. The request's
-  trail is `GET /api/ops/v1/operations/{id}`, and a finished run appears in
-  **取得履歴** like an alarm run.
+- **Following it.** An accepted request links to **依頼の経過** ("request trail")
+  at `/operations/{id}`. That read-only page follows the request through
+  `GET /api/ops/v1/operations/{id}`. The link survives schedule-card refreshes;
+  opening a new confirmation clears the previous result. A finished run also
+  appears in **取得履歴** like an alarm run.
 
 ## Official-site re-survey
 

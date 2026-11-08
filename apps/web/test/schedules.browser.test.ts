@@ -789,6 +789,9 @@ describe.if(runnable)("operator schedule administration", () => {
       await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
       await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
       await card.getByText(`依頼ID op_${"a".repeat(64)}`, { exact: false }).waitFor();
+      expect(await card.getByRole("link", { name: "依頼の経過を見る" }).getAttribute("href")).toBe(
+        `/operations/op_${"a".repeat(64)}`,
+      );
       expect(collections).toHaveLength(1);
       const sent = collections[0]!;
       expect(sent.origin).toBe(origin);
@@ -822,12 +825,14 @@ describe.if(runnable)("operator schedule administration", () => {
       await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
       await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
       await card.getByText("同じ依頼として扱われます", { exact: false }).waitFor();
+      expect(await card.getByRole("link", { name: "依頼の経過を見る" }).count()).toBe(0);
       fail = false;
       await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
       await card.getByText(`依頼ID op_${"b".repeat(64)}`, { exact: false }).waitFor();
       expect(collections).toHaveLength(2);
       expect(collections[1]!.body["idempotencyKey"]).toBe(collections[0]!.body["idempotencyKey"]);
       await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      expect(await card.getByRole("link", { name: "依頼の経過を見る" }).count()).toBe(0);
       await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
       await page.waitForFunction(() => document.body.textContent?.includes("依頼ID"));
       await card.getByRole("button", { name: "収集を依頼", exact: true }).waitFor();
@@ -917,6 +922,9 @@ describe.if(runnable)("operator schedule administration", () => {
       await card.getByRole("button", { name: "設定を保存", exact: true }).click();
       await card.getByText(`依頼ID op_${"c".repeat(64)}`, { exact: false }).waitFor();
       expect(writes.filter((w) => w.path === "/api/ops/v1/schedules/sony-bank")).toHaveLength(2);
+      expect(await card.getByRole("link", { name: "依頼の経過を見る" }).getAttribute("href")).toBe(
+        `/operations/op_${"c".repeat(64)}`,
+      );
     } finally {
       await page.close();
     }
