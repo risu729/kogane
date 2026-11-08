@@ -94,7 +94,7 @@ branches, so 28 branches without an open PR remain for the daily cleanup or the 
 PRs opened after 12:45 UTC, including the re-landed ones above, are ordinary work in the phase they belong
 to, not Phase 1.
 
-### Phase 2 — Card usage → statement → bank debit (current milestone)
+### Phase 2 — Card usage → statement → bank debit (done 2026-11-08)
 
 Issues: [#543](https://github.com/risu729/kogane/issues/543),
 [#547](https://github.com/risu729/kogane/issues/547),
@@ -137,7 +137,39 @@ the accepted debits hold a cash-movement claim
 the cash-movement view itself was read through `kogane.events.read` (#1094): it lists each
 accepted settlement's debit once and the withdrawn one not at all.
 
-### Phase 3 — Coverage, collection requests and cross-source identity
+**Outcome (2026-11-08, main `76a01e1`):** the done-when holds, so Phase 3 is the
+current milestone. The settlement half is the production run above. For the second sentence,
+each shape is shown as unsupported with a closed reason, on the screens and over MCP; none is
+supported, and [#547](https://github.com/risu729/kogane/issues/547) and
+[#548](https://github.com/risu729/kogane/issues/548) stay open for supporting them:
+
+- **Installments, revolving and bonus payments** (purchase side): counted per
+  source and closed reason on `/purchases` (`unrecognizedReasons`,
+  [#1020](https://github.com/risu729/kogane/pull/1020)) and in
+  `kogane.purchases.explain`. A MyJCB installment slice is
+  `installment_amount_differs` or `payment_split_unknown`; any payment-type code
+  other than the observed single-payment one is `payment_type_unsupported`
+  ([ADR 0004](adr/0004-payment-type-shapes-from-evidence.md)).
+- **Partial payments** (statement side): `照合候補のない請求` on `カード照合` and
+  `kogane.card-settlements.unmatched` give `no_equal_amount_debit` with the
+  ADR 0074 planner's `unsupported` / `no_exact_allocation` (and
+  `in_window_debits_below_total` or `debit_above_total`); a multi-debit
+  allocation is listed but not acceptable.
+- **Refund allocation**: a statement with a zero or negative total is
+  `statement_total_refund_or_zero` on the same list; on `/purchases` a refund is
+  summed apart with `refundsAllocated: false`, and planning `card-refund.allocate`
+  is refused `unsupported_semantics`.
+
+Production on 2026-11-08 (01:50 UTC), read through the MCP Portal: `kogane.card-settlements.unmatched`
+lists eight statements without a candidate: five Vpass statements with a zero total
+(`statement_total_refund_or_zero`), one Vpass statement whose four window debits have no exact
+combination (`no_equal_amount_debit`, planner `unsupported` / `no_exact_allocation`) and two
+MyJCB statements whose due-date window holds no bank debit (`no_debit_in_window`).
+`kogane.purchases.explain` reports 6 current provider rows no event holds, all Vpass
+`amount_not_exact`, with `complete: true`; no installment, revolving or bonus row has been seen
+in production, so those codes are exercised by the synthetic tests only.
+
+### Phase 3 — Coverage, collection requests and cross-source identity (current milestone)
 
 Issues: [#542](https://github.com/risu729/kogane/issues/542),
 [#545](https://github.com/risu729/kogane/issues/545), the per-source issues
@@ -248,8 +280,10 @@ Valuation of provider-reported holdings can proceed before all transaction
 history has been reconstructed. Adding every source is not a prerequisite for
 finishing a representative bank, card, broker or rewards flow.
 
-**The current milestone ([Phase 2](#phase-2--card-usage--statement--bank-debit-current-milestone)) is to complete card usage → statement → bank debit
-coverage without counting an expense twice.** The first statement/debit review
+**The current milestone is [Phase 3](#phase-3--coverage-collection-requests-and-cross-source-identity-current-milestone):
+coverage, collection requests and cross-source identity.** [Phase 2](#phase-2--card-usage--statement--bank-debit-done-2026-11-08),
+card usage → statement → bank debit without counting an expense twice, was
+done on 2026-11-08 for the representative cases. The first statement/debit review
 slice is implemented, and so is the first purchase-event writer for supported
 single-payment card usage (on in production since 2026-09-24), and so is the
 pending-to-posted link review: the purchases page lists the open candidates
@@ -260,9 +294,11 @@ a closed reason, refund and zero totals under their own code, and the ADR 0074
 planner's read-only answer for statements whose window holds no equal debit
 ([card settlements](card-settlements.md#statements-without-a-candidate)); a
 multi-debit allocation is shown but cannot be accepted. Source ownership is
-recorded by the owner default (ADR 0082) for the accounts the candidates name;
-supported bank coverage, partial payments and refund handling still need
-completion.
+recorded by the owner default (ADR 0082) for the accounts the candidates name.
+Installments, revolving and bonus payments, partial payments and refund
+allocation are shown as unsupported with closed reasons and still need support
+([#547](https://github.com/risu729/kogane/issues/547), [#548](https://github.com/risu729/kogane/issues/548));
+bank coverage beyond the current adapters still needs completion.
 Securities executions, settlement, holdings and valuation follow that flow.
 
 The [2026-09 next-milestone plan](plans/2026-09-next-milestone.md) is a
