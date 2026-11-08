@@ -107,6 +107,11 @@ export interface ObligationView {
   /** `principal − settled`; null when either side is not exact, never zero-filled. */
   outstanding: Quantity | null;
   outstandingReasonCode: string | null;
+  /**
+   * Fee totals, confirmed and projected apart, in the principal's unit. Null
+   * only when there is no such fee; a fee that is not exact, or in another
+   * unit, leaves the total unknown with a reason (INV05).
+   */
   confirmedFees: Quantity | null;
   projectedFees: Quantity | null;
   /** Differences the settlements declared; kept beside the obligation, never netted. */
@@ -338,7 +343,27 @@ function temporal(text: string): TemporalValue {
     : { kind: "unknown", reasonCode: "stored_time_unreadable" };
 }
 
-/** Totals per (basis, unit). Two bases are never added, and two units never are (INV03). */
+/**
+ * A total that could not be added. When an operand is not exact, the first
+ * such operand keeps its own status and reason; any other refusal (an operand
+ * in another unit) is a `conflict` with the refusal's code, as the reward
+ * summaries in `packages/domain` report it. It is never zero and never left
+ * out (INV05).
+ */
+function unknownTotal(unitRef: string, operands: readonly Quantity[], code: string): Quantity {
+  const value =
+    code === "value_not_exact"
+      ? operands.map((operand) => operand.value).find((candidate) => candidate.status !== "exact")
+      : undefined;
+  return { unitRef, value: value ?? { status: "conflict", reasonCode: code } };
+}
+
+/**
+ * Totals per (basis, unit). Two bases are never added, and two units never are
+ * (INV03). A group with a leg that is not exact keeps its total, unknown with
+ * that leg's status and reason (its first such leg by index): it is neither
+ * zero nor dropped from the list (INV05).
+ */
 export function basisTotals(legs: readonly LegView[]): BasisTotal[] {
   const groups = new Map<string, { basis: RecognitionBasis; unitRef: string }>();
   for (const leg of legs) {
@@ -360,7 +385,21 @@ export function basisTotals(legs: readonly LegView[]): BasisTotal[] {
       })),
       { unitRef: group.unitRef, basis: group.basis },
     );
-    if (total.ok) totals.push({ basis: group.basis, quantity: total.quantity });
+    if (total.ok) {
+      totals.push({ basis: group.basis, quantity: total.quantity });
+      continue;
+    }
+    totals.push({
+      basis: group.basis,
+      quantity: unknownTotal(
+        group.unitRef,
+        legs
+          .filter((leg) => leg.basis === group.basis && leg.quantity.unitRef === group.unitRef)
+          .sort((left, right) => left.legIndex - right.legIndex)
+          .map((leg) => leg.quantity),
+        total.error.code,
+      ),
+    });
   }
   return totals;
 }
@@ -691,7 +730,7 @@ function feeTotals(
     );
     if (quantities.length === 0) return null;
     const total = sumQuantities(unitRef, quantities);
-    return total.ok ? total.quantity : null;
+    return total.ok ? total.quantity : unknownTotal(unitRef, quantities, total.error.code);
   };
   return { confirmed: pick(true), projected: pick(false) };
 }

@@ -20,7 +20,7 @@ import { validSourceFactRef, type EventState, type SourceFactRef } from "./event
 import type { ProposalStatus } from "./reconcile.ts";
 
 /** The evidence ref that turns a `pending_to_posted` relation command into a proposal review. */
-export const PENDING_POSTED_MARKER_PREFIX = "reconciliation-proposal:";
+const PENDING_POSTED_MARKER_PREFIX = "reconciliation-proposal:";
 /** Decisions about one reconciliation proposal (0032 "Where the decisions live"). */
 export const PROPOSAL_SUBJECT_PREFIX = "proposal:";
 /**
@@ -113,7 +113,7 @@ export function canonicalRelationEnd(ref: SourceFactRef): string | null {
 }
 
 /** `<id>@<revision>`: a row pinned to the parse run the matcher read it in. */
-export function pinnedRef(ref: SourceFactRef): string {
+function pinnedRef(ref: SourceFactRef): string {
   return `${ref.id}@${ref.revision}`;
 }
 

@@ -57,7 +57,7 @@ export function organizedInstrument(
     ? organization.instruments.find((item) => item.role === role)
     : undefined;
 }
-export function OrganizationLineage({ organization }: { organization: Organization }): ReactNode {
+function OrganizationLineage({ organization }: { organization: Organization }): ReactNode {
   return organization?.lineage === "historical" ? (
     <div className="table-secondary">履歴の整理情報（現在の値ではありません）</div>
   ) : null;

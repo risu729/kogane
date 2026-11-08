@@ -28,8 +28,8 @@ import { publishParse, seedUnitRun, startPipeline } from "./harness.ts";
 
 export const PRODUCER = "collector-r2-importer";
 /** The namespace the trusted Vpass binding requires (migration 0020). */
-export const VPASS_NAMESPACE = "vpass-worker-card-v1";
-export const MYJCB_NAMESPACE = "synthetic-myjcb-connection-v1";
+const VPASS_NAMESPACE = "vpass-worker-card-v1";
+const MYJCB_NAMESPACE = "synthetic-myjcb-connection-v1";
 export const TOKEN_A = `vpass-card-v1-${"a".repeat(64)}`;
 export const TOKEN_B = `vpass-card-v1-${"b".repeat(64)}`;
 export const NOW = "2026-09-24T00:00:00.000Z";

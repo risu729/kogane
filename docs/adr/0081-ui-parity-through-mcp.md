@@ -129,13 +129,15 @@ What the code does today (main `02a915a`):
   keeps only its query-parameter checks. The observation pages' helpers
   (organization, filter-option labels, normalized decimals, activity facts)
   are in `packages/application/src/query/` too, since the page reads call
-  them.
+  them, and so are the report catalogue's reads (`report-artifacts.ts`), the
+  evidence browser's run and artifact reads (`evidence-catalogue.ts`) and
+  the collection-quality page's table check (`storeHasFeature`).
   `tests/mcp-tools-no-sql.test.ts` follows the relative imports from
   `services/app/src/mcp.ts` and fails when a module it reaches calls a store
-  or the D1 binding directly or holds a SQL statement. It exempts, by name and
-  with the reason, the modules whose remaining SQL only screen routes call
-  (the evidence and report routes). No SQL an MCP
-  tool runs is left in `services/app`. An exemption fails once its module
+  or the D1 binding directly or holds a SQL statement. It can exempt, by name
+  and with the reason, a module whose remaining SQL only screen routes call;
+  since the evidence browser's reads moved, no module is exempt. No SQL an
+  MCP tool runs is left in `services/app`. An exemption fails once its module
   holds no SQL.
 - The six `ops.*` tools: `services/app/test/delegated-ops-parity.test.ts`
   checks that a delegation holding every `operations.*` capability is shown
@@ -165,3 +167,55 @@ What the code does today (main `02a915a`):
   `kogane.schedules.survey.read`
   ([ADR 0050 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07);
   `services/app/test/delegated-survey.test.ts`).
+
+## Amendment 2026-11-07: raw evidence bytes over MCP
+
+- Status: accepted (risu's choice on 2026-11-07, 05:59 UTC (14:59 JST), in
+  the thread that added the UI read pages)
+
+### Context
+
+Point 1 requires an MCP read for every UI read page. The raw downloads
+(`GET /api/raw/{sha256}` and
+`/api/evidence/v1/runs/{run}/artifacts/{artifact}/raw`) stream an object's
+bytes, which an MCP result can carry only as text; the other page reads
+return an artifact's detail, never its bytes. The same question was asked of
+the delegation status list (`GET /api/v2/delegations`).
+
+### Options considered
+
+1. Both over MCP: the delegation list under `audit.read`, the raw bytes under
+   `evidence.read`, base64 inside `data` up to 1 MiB.
+2. The delegation list only; the raw bytes stay screen-only, recorded as an
+   exception to point 1.
+3. Neither, both recorded as exceptions.
+
+### Decision
+
+risu chose option 1.
+
+- `kogane.evidence.raw.read` returns one object named as either route names
+  it (`sha256`, or `runId` and `artifactId`), resolved by the route's own
+  reader, so it reaches exactly the objects the downloads do. It needs
+  `evidence.read` over `"*"` sources and accounts. The answer is the object's
+  artifact key, declared media type, size, SHA-256 and its bytes as standard
+  base64, all under `data`: the bytes are provider content. The object passes
+  the download's integrity checks, and the bytes read are hashed again and
+  compared with the catalogue. An object over 1 MiB is refused before it is
+  read (`413 raw_too_large`); the browser still downloads it.
+- The delegation list read is not built. At 06:00 UTC (15:00 JST) the same
+  day risu decided to remove the `MCP_DELEGATIONS` allow-list itself;
+  [ADR 0084](0084-mcp-operator-authority-without-delegation.md) removed it
+  together with `GET /api/v2/delegations` and the table it showed, so there
+  is no list to read.
+
+### Consequences
+
+An agent with `evidence.read` can read any raw object the operator can
+download, up to 1 MiB, with the same refusals. Every MCP client holds the
+whole-store grant, `evidence.read` included (ADR 0084), so every client the
+MCP Access application admits can read them. Each call
+is an R0 read of one object in the audit log, which records the object's
+count, never its bytes. `services/app/test/page-read-raw.test.ts` compares
+the decoded bytes with both downloads and checks the refusals, the size
+bound and tampered bytes.

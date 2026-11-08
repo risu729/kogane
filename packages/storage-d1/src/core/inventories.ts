@@ -320,12 +320,3 @@ export async function readFailedAttempt(
     .bind(runId, clientId, externalAttemptId)
     .first<Row>();
 }
-
-/** One inventory item, inserted directly when the inventory is staged. */
-export function inventoryItemInsertSql(): string {
-  return `
-    INSERT INTO run_inventory_items (
-      inventory_id, fetch_run_id, artifact_key, sha256, descriptor_sha256
-    ) VALUES (?, ?, ?, ?, ?)
-  `;
-}

@@ -14,7 +14,7 @@ const MAX_REDIRECTS = 8;
 
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
-export interface StoredCookie {
+interface StoredCookie {
   name: string;
   value: string;
   domain: string;

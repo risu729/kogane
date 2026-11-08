@@ -762,7 +762,7 @@ const endpoints: Record<string, Check<unknown>> = {
  * result itself is checked by the domain contract, so the browser and the
  * agent API validate one definition of `financial-result-v1`.
  */
-export function validSharedQueryResponse(value: unknown): boolean {
+function validSharedQueryResponse(value: unknown): boolean {
   return (
     record(value) &&
     value.schemaVersion === "kogane-query-response-v1" &&

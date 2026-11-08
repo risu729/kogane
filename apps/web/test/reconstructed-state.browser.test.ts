@@ -8,6 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import { RECONSTRUCTED_STATE_REFUSALS } from "../../../packages/application/src/query/reconstructed-state-read.ts";
 import { reportedStateBody } from "../../../packages/application/test/reported-state-world.ts";
 import {
@@ -323,4 +324,13 @@ describe.if(runnable)("reconstructed state", () => {
     }
     await page.close();
   }, 30_000);
+
+  test("the asking and answered page pass the accessibility audit", async () => {
+    const page = await open();
+    expect(await auditView(page)).toEqual([]);
+    await ask(page, WORLD_BANK);
+    await answered(page);
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
 });

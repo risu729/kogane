@@ -1,7 +1,9 @@
 # ADR 0011: Resolve settlement ownership through keyed CTEs, keep the 0044 views as the contract
 
-- Status: accepted; the review list follows in an in-flight PR
-- Date: 2026-09-25
+- Status: accepted; the review list follows in an in-flight PR. The
+  [2026-11-06 amendment](#amendment-2026-11-06-the-ctes-depart-from-the-views-in-one-rule)
+  is accepted (owner approved 2026-11-07 13:39 UTC)
+- Date: 2026-09-25; amended 2026-11-06
 - Implemented by: #251; the `card_settlement_readiness` reads in #256 (open at
   the time of writing, branch `claude/settlement-readiness-cost-wr8pj4`)
 - Carried by: [card settlements](../card-settlements.md),
@@ -61,3 +63,31 @@ stores (including identity runs whose Vpass binding stops being trusted), and
 each caller's differential test compares its read with the shipped text;
 `card-statement-scale.test.ts` and `card-settlement-scale.test.ts` fail on a
 plan that reads the whole store's owners. Synthetic data only.
+
+## Amendment 2026-11-06: the CTEs depart from the views in one rule
+
+- Status: proposed until the PR that carries it merges, then accepted
+- Date: 2026-11-06
+- Carried by: `cardSettlementOwnershipCtes` in
+  `packages/read-model/src/card-settlement-ownership.ts`,
+  [ADR 0017's amendment](0017-card-purchase-review-commands.md#amendment-2026-11-06-a-later-proposal-never-replaces-a-relation-decision),
+  [card settlements](../card-settlements.md)
+
+The decision above keeps the 0044 views as the contract and has the CTEs
+apply the view's own text. Under the views any later row of an owner's
+relation retires a claim, a `proposed` one included, so a proposal could
+remove an accepted owner or lift a dated claim's veto against INV07.
+[ADR 0017's amendment](0017-card-purchase-review-commands.md#amendment-2026-11-06-a-later-proposal-never-replaces-a-relation-decision)
+changes the CTEs so that only a later decision does, and leaves the views as
+they are.
+
+The views are no longer the contract any reader runs: every reader of
+ownership and readiness, the review and commit paths included, uses the keyed
+CTEs (`card-settlement-ownership.ts`, `card-settlement-readiness.ts`), and
+`services/app/src/card-settlements-api.ts` only checks that the views exist.
+Option 1's reason for keeping them (they were read by review and commit
+paths) no longer holds, and rebuilding two views that nothing reads would
+add a migration for no reader. The CTEs and the views agree on every store
+where no proposal follows a decision of the same owner, which
+`card-settlement-ownership.test.ts` checks on the random stores; on stores
+with such a proposal it checks the CTEs against the same store without it.

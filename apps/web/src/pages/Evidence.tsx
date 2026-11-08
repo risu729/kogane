@@ -129,7 +129,7 @@ function HistoryPage({ sourceId }: { sourceId: string }): ReactNode {
             <div
               className="table-scroll"
               role="region"
-              aria-label="保存済みの取得履歴"
+              aria-label="保存済みの取得履歴の表"
               tabIndex={0}
             >
               <table className="evidence-run-table">
@@ -205,7 +205,12 @@ export function EvidenceRunPage({
             {data.items.length === 0 ? (
               <EmptyState>このページに保存ファイルはありません。</EmptyState>
             ) : (
-              <div className="table-scroll" role="region" aria-label="保存ファイル" tabIndex={0}>
+              <div
+                className="table-scroll"
+                role="region"
+                aria-label="保存ファイルの表"
+                tabIndex={0}
+              >
                 <table className="evidence-file-table">
                   <caption>
                     取得元の応答と収集側が生成した記録を、種類の列で区別しています。

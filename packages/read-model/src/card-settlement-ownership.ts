@@ -27,6 +27,16 @@
 // through the same views and tables. card-settlement-ownership.test.ts compares
 // these CTEs with the view on random stores, and every caller's differential
 // test compares its read with the shipped text.
+//
+// One deliberate difference from the view (ADR 0017's amendment of
+// 2026-11-06): a claim is current while no later *decision* names the same
+// owner through either alias of the account. The view lets any later row,
+// a `proposed` one included, retire a claim, so a proposal recorded after an
+// acceptance left the account without an owner, and one recorded after a
+// dated claim lifted that claim's veto and let a timeless owner win. A
+// proposal changes nothing (INV07), so here it neither retires an accepted
+// claim nor a dated veto. The two agree on every store where no proposal
+// follows a decision of the same owner; no reader queries the view.
 export type OwnershipKind = "balance" | "transaction";
 
 /**
@@ -84,9 +94,11 @@ LEFT JOIN entity_relations r ON r.from_ref IN(m.account_id,'account:'||m.account
    AND dated.kind=CASE WHEN owned.kind='balance' THEN 'liable_party' ELSE 'beneficial_owner' END
    AND dated.status='accepted' AND (dated.valid_from IS NOT NULL OR dated.valid_to IS NOT NULL)
    AND NOT EXISTS(SELECT 1 FROM entity_relations latest WHERE latest.kind=dated.kind
-    AND latest.from_ref IN(m.account_id,'account:'||m.account_id) AND latest.to_ref=dated.to_ref AND latest.rowid>dated.rowid))
+    AND latest.from_ref IN(m.account_id,'account:'||m.account_id) AND latest.to_ref=dated.to_ref AND latest.rowid>dated.rowid
+    AND latest.status<>'proposed'))
  AND NOT EXISTS(SELECT 1 FROM entity_relations newer WHERE newer.kind=r.kind
-  AND newer.from_ref IN(m.account_id,'account:'||m.account_id) AND newer.to_ref=r.to_ref AND newer.rowid>r.rowid)
+  AND newer.from_ref IN(m.account_id,'account:'||m.account_id) AND newer.to_ref=r.to_ref AND newer.rowid>r.rowid
+  AND newer.status<>'proposed')
 LEFT JOIN decision_revisions d ON d.id=r.decision_revision_id AND d.superseded_by IS NULL
 WHERE owned.kind IN ('balance','transaction') AND (r.id IS NULL OR d.id IS NOT NULL)
 GROUP BY owned.kind,owned.observation_id)`;

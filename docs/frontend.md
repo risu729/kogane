@@ -29,7 +29,9 @@ escaped React text. The frontend never reads SQLite or R2 directly.
 
 Transaction filters, search, sort, and page selection, balance source/account,
 currency/unit and kind filters, plus position filters and page selection,
-survive visits to detail pages within the current tab. They reset on reload
+survive visits to detail pages within the current tab. A page selection
+belongs to the server window it was chosen in: the next 500 rows or a changed
+server filter open at their first page. They reset on reload
 and are never written to URL parameters, browser history state, localStorage,
 or sessionStorage. Route changes update the document title and focus the new
 heading; typing and API refreshes do not move focus.
@@ -101,7 +103,7 @@ Pages compose these instead of writing their own markup or rules:
 | Filters                       | `.filter-grid` with `.filter-field` controls, one bar per panel spanning edge to edge                                                 |
 | Free-text and checkbox inputs | `.field` (label + input/textarea) and `.check-field`; never a bare native control                                                     |
 | Actions                       | `.button` in a `.button-row`; toggles carry `aria-pressed`                                                                            |
-| Paging                        | `Pagination` (offset or cursor) rendering `.pagination`                                                                               |
+| Paging                        | `Pagination` (offset or cursor) rendering `.pagination`, a named group whose status speaks its label; one label per pager on a page   |
 | Tables                        | `.table-scroll` region with `role="region"`, `tabIndex`, a `<caption>` and a class that sets `min-width`; `.cell-time` for timestamps |
 | Disclosures                   | `.detail-disclosure` (framed; frameless as a panel's last child or when it holds panels) or `.inline-disclosure` (in cells and cards) |
 | Lists                         | `.plain-list` (stacked; an `<ol>` keeps its numbers), `.warning-list` (parser warnings, reason and blocker codes)                     |
@@ -177,7 +179,10 @@ shown to be wrong. Where the server advertises `sharedQuery`, the Overview
 page's summary counts therefore come from `GET /api/v2/query?intent=coverage`
 — the shared application service (`packages/application`) that the agent API
 also calls, with the same scope rules — instead of summing rows in the client.
-On a store without that capability the page keeps its own arithmetic, so the
+While that read is loading or after it fails, the counts show the loading or
+error state and are not replaced by client arithmetic: the Overview's own run
+list is a bounded window of the newest runs, not the whole history. On a
+store without that capability the page keeps its own arithmetic, so the
 local pipeline experiment and snapshot conformance tests are unaffected.
 
 What a page may still decide for itself is unchanged: open and closed

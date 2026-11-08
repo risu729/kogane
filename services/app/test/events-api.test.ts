@@ -32,7 +32,10 @@ afterEach(() => vi.restoreAllMocks());
 
 const DATE = '{"kind":"local-date","value":"2026-03-01","zone":null,"basis":"provider"}';
 
-/** One synthetic purchase event with two bases, and one obligation with a settlement. */
+/**
+ * One synthetic purchase event with two bases, one card settlement whose
+ * obligation-change leg is not known yet, and one obligation with a settlement.
+ */
 async function seedProjection() {
   const decision = (id: string, subjectRef: string) =>
     env.DB.prepare(
@@ -61,6 +64,17 @@ async function seedProjection() {
       `INSERT INTO settlement_relations(id,obligation_id,settlement_component_ref,unit_ref,coefficient,scale,occurred_json,unresolved_coefficient,unresolved_scale,decision_revision_id,superseded_by,created_at)
        VALUES('st-1','obl-1','leg:ev-1#0','JPY','4000',0,?,NULL,NULL,'dr_st_1',NULL,'2026-03-01T00:00:00Z')`,
     ).bind(DATE),
+    decision("dr_ev_settle", "event:ev-settle"),
+    env.DB.prepare(
+      `INSERT INTO economic_event_revisions(event_id,revision,kind,state,unknown_reason,effective_time_json,basis,evidence_support_json,decision_revision_id,superseded_by,created_at)
+       VALUES('ev-settle',1,'card_settlement','debited',NULL,?,'cash-movement','[{"kind":"transaction","id":"transaction:2","revision":"parse_run:1"}]','dr_ev_settle',NULL,'2026-03-01T00:00:00Z')`,
+    ).bind(DATE),
+    env.DB.prepare(
+      "INSERT INTO economic_legs VALUES('ev-settle',1,0,'account:bank','JPY','exact','5000',0,NULL,'decrease','cash-movement')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO economic_legs VALUES('ev-settle',1,1,'account:card','JPY','missing',NULL,NULL,'statement_principal_and_fees_unknown','unresolved','obligation-change')",
+    ),
   ]);
 }
 
@@ -169,6 +183,33 @@ describe("GET /api/v2/activity", () => {
     ]);
     expect(event.explanationRefs[0]).toBe("event:ev-1@1");
     expect(event.explanationRefs).toContain("decision_revision:dr_ev_1");
+  });
+
+  it("lists a settlement's unknown obligation-change total with its reason, never zero", async () => {
+    const body = (await (await call("/api/v2/activity?basis=cash-movement")).json()) as {
+      items: { eventId: string; totals: { basis: string; quantity: unknown }[] }[];
+    };
+    const settlement = body.items.find((item) => item.eventId === "ev-settle")!;
+    expect(settlement.totals).toEqual([
+      {
+        basis: "cash-movement",
+        quantity: {
+          unitRef: "JPY",
+          value: {
+            status: "exact",
+            value: { coefficient: "5000", scale: 0 },
+            normalizationVersion: "exact-arith-v1",
+          },
+        },
+      },
+      {
+        basis: "obligation-change",
+        quantity: {
+          unitRef: "JPY",
+          value: { status: "missing", reasonCode: "statement_principal_and_fees_unknown" },
+        },
+      },
+    ]);
   });
 
   it("defaults to the cash-movement basis and refuses an unknown one", async () => {

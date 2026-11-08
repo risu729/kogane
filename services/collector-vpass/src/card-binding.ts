@@ -27,7 +27,7 @@
 
 export const VPASS_BINDING_CONTRACT = "vpass-card-binding-v2";
 /** The token prefix of this derivation (ADR 0029). */
-export const VPASS_BINDING_TOKEN_PREFIX = "vpass-card-v2-";
+const VPASS_BINDING_TOKEN_PREFIX = "vpass-card-v2-";
 /** The artifact, dataset and format the trusted binding view requires (migrations 0020, 0021, 0055, 0057). */
 export const VPASS_BINDING_ARTIFACT_KEY = "card-identity-binding.json";
 export const VPASS_BINDING_TRANSFORMER_ID = "vpass-card-binding";
