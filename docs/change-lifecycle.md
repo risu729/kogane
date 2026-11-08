@@ -146,7 +146,9 @@ while the plan is fresh. A `listed_as` decision whose evidence does not name
 the pair, a bare `same_account` decision, or a `connection_contains` triple no
 review names pins only its own triple. MCP clients reach the same layer
 (`kogane.command.approve` / `kogane.command.commit` re-simulate before
-forwarding), so they receive the same `stale_context`.
+forwarding), so they receive the same `stale_context`; like every refusal
+that re-simulation finds, it is answered before forwarding, so the plan row is
+not marked stale.
 
 ## Pending-to-posted link review
 

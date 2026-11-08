@@ -1142,6 +1142,8 @@ a temporal command; #546 remains open.
 - Related: [ADR 0077's amendment of the same day](0077-account-connection-candidates.md#amendment-2026-11-08-a-pair-plan-pins-every-reference-of-the-pair),
   which states the mechanism for both families
 
+### Context
+
 A candidate's status reads both identifiers' mappings and `listed_as` in both
 orientations (from each identifier's current instrument to the other
 identifier), but the adoption plan pinned only the two mappings and the
@@ -1149,20 +1151,38 @@ keep-apart plan only its own `listed_as` triple. A rejection recorded in the
 other orientation between plan and commit left an adoption fresh, and an
 adoption recorded in between left a keep-apart fresh.
 
-Decision: a candidate adoption (`identity.assign` with candidate provenance)
-and a `listed_as` decision whose evidence names exactly the subject and one
-other identifier (the candidate's keep-apart payload) each pin both mappings
-and both orientations: `listed_as` from the target (anchor's) instrument to the
+### Options considered
+
+The options are ADR 0077's amendment's (a new pair subject kind in the shared
+revision guard, a candidate-read recheck at approval and commit, or pinning
+every reference with the existing subject kinds); the third is chosen here for
+the same reasons.
+
+### Decision
+
+A candidate adoption (`identity.assign` with candidate provenance) and a
+`listed_as` decision whose evidence names exactly the subject and one other
+identifier (the candidate's keep-apart payload) each pin both mappings and
+both orientations: `listed_as` from the target (anchor's) instrument to the
 subject and from the subject's current instrument to the anchor. Every one of
 them is a function of the two pinned mappings, so the set cannot change while
 the plan is fresh. A decision under any of them between plan and commit makes
-the plan stale (`stale_context`); an adoption plan made before this amendment
-is stale at simulation and refused at approval and commit. A `listed_as`
-decision whose evidence does not name the pair still pins only its own triple.
-No migration and no new subject kind.
+the plan stale (`stale_context`). A `listed_as` decision whose evidence does
+not name the pair still pins only its own triple. No migration and no new
+subject kind.
 
-Verified in `packages/application/test/pair-pins.test.ts` (both plans pin the
-same four references; a reverse-orientation rejection makes the adoption stale;
-an adoption makes the keep-apart stale, and neither commit writes) and
+### Consequences
+
+- An adoption or keep-apart plan made before this amendment pins fewer
+  references than its planner now records, so it is stale at simulation and
+  refused (and marked stale) at approval and commit; it is planned again.
+- A keep-apart plan now also goes stale when either identifier's mapping gets
+  a new revision, as an adoption plan already did.
+
+### Verification
+
+`packages/application/test/pair-pins.test.ts` (both plans pin the same four
+references; a reverse-orientation rejection makes the adoption stale; an
+adoption makes the keep-apart stale, and neither commit writes) and
 `packages/application/test/instrument-candidate-anchor.test.ts` (the adoption
 plan's pins).

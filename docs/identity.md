@@ -290,10 +290,9 @@ refused whole past each. Every read is keyed (ADR 0077, Cost).
 
 Limits today: only SBI Shinsei pairs exist; candidates are listed per
 producer's review (two producers' reviews of one identity value are two
-candidates sharing one status); the
-balance projection reads every accepted relation row, so a later rejection
-does not remove an earlier acceptance from its declared inputs; no history
-view of a pair; no validity period; no leaf-account equivalence and no dedup
+candidates sharing one status); the balance projection reads every accepted
+relation row, so a later rejection does not remove an earlier acceptance from
+its declared inputs; no history view of a pair; no validity period; no leaf-account equivalence and no dedup
 of aggregator against direct rows.
 
 ## Acceptance gates

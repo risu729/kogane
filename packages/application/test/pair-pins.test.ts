@@ -222,6 +222,24 @@ describe("an account pair (ADR 0077) is pinned under every reference", () => {
     s.db.close();
   });
 
+  test("a reference that appears after planning refuses approval and marks the plan stale", async () => {
+    const s = accountWorld();
+    const store = sqliteCommandStore(s.db);
+    const plan = await planned(store, "relation.accept", await ownAccept(s));
+    expect(Object.keys(plan.expectedRevisions)).toEqual([triple(OWN)]);
+    // No pinned revision moves: the pair only gains a reference.
+    s.review(KEY_A, ["sa-direct-ordinary", "sa-direct-time"], undefined, MF_PRODUCER_2);
+    expect(await simulate(plan, store)).toMatchObject({ ok: true, report: { stale: true } });
+    const result = await approved(store, plan);
+    expect(result).toMatchObject({ ok: false, error: "stale_context" });
+    expect(result.ok ? [] : result.refs).toEqual([plan.planId, triple(OTHER_PRODUCER)]);
+    expect(s.db.query("SELECT count(*) AS n FROM approvals").get()).toEqual({ n: 0 });
+    expect(s.db.query("SELECT status FROM change_plans WHERE plan_id=?").get(plan.planId)).toEqual({
+      status: "stale",
+    });
+    s.db.close();
+  });
+
   test("a reference that appears after planning makes the plan stale, also inside the commit batch", async () => {
     for (const phase of ["before-commit", "before-batch"] as const) {
       const s = accountWorld();

@@ -330,7 +330,8 @@ or an adoption between plan and commit did not make the other plan stale.
   unpinned references among its refs. MCP clients reach it through
   `kogane.command.approve` and `kogane.command.commit`, which re-simulate
   before forwarding; `simulate` reports the plan stale because the pins it
-  would record differ.
+  would record differ. Like every refusal that re-simulation finds, it is
+  answered before forwarding, so the plan row is not marked stale.
 
 ### Consequences
 
@@ -355,11 +356,12 @@ Synthetic data only.
   another producer's and the 0029 reference; a decision under another
   producer's reference or the 0029 reference between plan and commit refuses
   the commit with `stale_context`, writes nothing and marks the plan stale,
-  and `simulate` reports it stale; approval is refused the same way; a
-  reference that appears after planning refuses the commit both before the
-  batch and inside it (a review inserted just before the batch writes no
-  receipt and spends no approval use); with nothing in between the plan
-  commits; the instrument adoption and keep-apart plans pin the same four
+  and `simulate` reports it stale; approval is refused the same way, also
+  when the pair only gains a reference (no approval is written and the plan is
+  marked stale); a reference that appears after planning refuses the commit
+  both before the batch and inside it (a review inserted just before the batch
+  writes no receipt and spends no approval use); with nothing in between the
+  plan commits; the instrument adoption and keep-apart plans pin the same four
   references, a reverse-orientation rejection makes the adoption stale and an
   adoption makes the keep-apart stale; the pair read reaches the relations by
   primary key only on the whole CORE schema without statistics.
