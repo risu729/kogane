@@ -3,6 +3,9 @@
 - Status: accepted (merged 2026-10-08 in #576; production dispatch unverified)
 - Date: 2026-10-08
 - Issue: #544
+- Amended: 2026-11-07, the `projected` stage is derived from the READ pointer
+  ([below](#amendment-2026-11-07-the-projected-stage-is-derived-from-the-read-pointer);
+  proposed)
 
 ## Context
 
@@ -237,3 +240,141 @@ Open limits, written down rather than guessed:
 
 Production dispatch, a real collector answering `runOperation`, and a
 production trail to publication are unverified.
+
+## Amendment 2026-11-07: the `projected` stage is derived from the READ pointer
+
+- Status: proposed
+- Date: 2026-11-07
+- Carried by: `packages/application/src/operations/projection-trace.ts`,
+  `trackCollectorPublication` (`collector-dispatch.ts`) and `readOperation`
+  (`requests.ts`); the App's `opsContext` and the MCP tools' context
+  (`services/app/src/ops-api.ts`, `ops-tools.ts`);
+  [ops-api.md](../ops-api.md#collector-execution-adr-0048)
+
+### Context
+
+The decision above left `projected` (contracts/stages.json: "READ content
+validated and published") untraced, so a collection whose runs were adopted
+stayed `status: running` for ever and the operation record could never say
+that the request had reached what a reader sees. Phase 3 of the
+[roadmap](../roadmap.md#phase-3--coverage-collection-requests-and-cross-source-identity)
+asks that a collection be followed to published observations.
+
+CORE and READ are two databases that cannot be joined
+([read-model-d1.md](../read-model-d1.md)). READ's pointer carries the
+watermark `source_revision`: the published content was verified against that
+CORE revision, and the pointer never moves back within an epoch. What CORE does
+not keep is the revision at which a given parse was published:
+`published_parse_runs` and `publication_events` have a time, and
+`core_source_revision` is one row that only counts.
+
+### Options considered
+
+1. **Compare the snapshot's `published_high_water` parse run** with the
+   request's published parse runs, at read time, writing nothing. Rejected: a
+   parse run is published after it is created, so a lower id can be published
+   after a higher one (a pending run finalised later, the activation of an
+   older candidate release); the high water is the input summary migration
+   0038 stopped trusting for exactly this reason.
+2. **Compare times** (the execution's `published_at` with the pointer's
+   `switched_at` or the snapshot's `created_at`). Rejected: both stored times
+   come after the capture whose revision they publish, and the capture time is
+   kept only in the input envelope in R2, so a capture taken before the
+   publication can carry a later time.
+3. **Compare the pointer with CORE's current revision** at read time. Sound,
+   but not stable: the stage would complete and then fall back to pending as
+   soon as any ledger write moved CORE.
+4. **A column for the required revision** (on `ops_collector_dispatches` or a
+   new table). Needs a migration; the 0040 stage row already has a reference
+   column that is free until the stage completes.
+5. **The Processor keeps watching published executions and writes
+   `projected` completed.** It would materialise `status: completed`, but
+   needs READ reads in the dispatch lane and a second watch: a `published`
+   execution is terminal and its 0068 trigger refuses any later update, so it
+   cannot be rescheduled without a migration or a scan of stage rows.
+6. **Store the required revision when publication is recorded; derive the
+   stage at read time.** Chosen. It is the decision outbox's rule
+   (`required_source_revision`, [projection input](../projection-input.md)):
+   a published snapshot at or above the revision a write reached carries it.
+
+### Decision
+
+- When `trackCollectorPublication` records an execution `published`, the same
+  D1 batch inserts its `projected` stage row as `pending`, with
+  `evidence_ref` `core-revision:<core_epoch>:<source_revision>` read from
+  `core_source_revision` inside that batch, and `attempts` 0. It is written
+  only when that batch's own update moved the execution (the `published_at`
+  it set) and never replaces an existing `projected` row. The tracker read
+  the publication before the batch ran and the revision only rises within an
+  epoch, so the stored revision is at or above the one the publication wrote.
+  No migration: `ops_request_stages` (0040) and its `pending` state exist.
+- `readOperation` — the one service behind `GET /api/ops/v1/operations/{id}`
+  and `kogane.ops.operation.get` (ADR 0081) — derives `projected` once
+  `adopted` is complete and `projected` is not, from the READ database the
+  adapter passes (`readStore`, the App's `READ` binding; both transports build
+  it in one place). Three singleton reads: READ's `read_instance` and
+  `balance_snapshot_pointer`, and CORE's `core_source_revision`. Nothing is
+  written.
+  - `completed`, with `evidenceRef` `read-snapshot:<snapshot id>`, when the
+    READ contract is this code's, the pointer, the stored revision and CORE
+    share one epoch, and the pointer's `source_revision` is at or above the
+    stored one.
+  - Otherwise `pending` with no evidence and a closed reason in
+    `failureCode`: `projection_behind` (an older watermark),
+    `read_model_unavailable` (no READ binding, nothing published, another
+    READ contract, or READ could not be read), `read_model_context_changed`
+    (epochs differ) or `projection_revision_unrecorded` (published without a
+    stored revision). Never `completed` for a reason (INV05).
+- The record's `status` reads `completed` when the stored status is `running`
+  and every stage of the kind, the derived one included, is `completed`. A
+  re-send under the same key answers from the same derivation.
+  `ops_requests.status` and the stage row are not changed.
+
+### Consequences
+
+- A collection can be followed through `projected` to `status: completed` on
+  HTTP and MCP alike. No route, schema, MCP tool, capability, flag, binding or
+  migration is added; the App already binds `READ`.
+- The stored request stays `running` and its `projected` row `pending`: the
+  completion is a reading of READ, not a record. A reader that loses READ
+  (dropped, not yet rebuilt) or a CORE restored under a new epoch reports
+  `running` again with the reason; a rebuilt READ captures a CORE at or above
+  the stored revision, so its first publication covers it again. Whatever
+  else reads `ops_requests.status` directly sees `running`.
+- Only executions recorded `published` after this change carry a revision;
+  an earlier one reads `projection_revision_unrecorded` for good. No
+  production execution was ever published (no connection is enabled), so
+  this affects none today.
+- Coverage is a revision comparison over the whole CORE input, whatever the
+  balance projection keeps from the request's parses (a transaction-only
+  collection contributes no balance row, and is still covered once the
+  snapshot was verified at or above the revision). A use restriction that
+  makes the published snapshot unservable does not reopen the stage; the v2
+  routes answer that themselves.
+- `import`, `replay` and `projection` requests never reach `adopted` through
+  an executor today, so their `projected` stays a plain `pending` as before; a
+  rebuild request (`projection`) is still not traced.
+
+### Verification
+
+- `packages/application/test/projection-trace.test.ts` (real CORE and READ
+  migrations in `bun:sqlite`, synthetic ids): the requirement is the
+  publishing batch's revision, written once and only by that batch; no READ,
+  nothing published, an unreadable READ and another contract are
+  `read_model_unavailable`; a pointer one revision behind is
+  `projection_behind`, at or above the requirement `completed` with the
+  request `completed` and the stored rows unchanged; another pointer epoch and
+  a restored CORE are `read_model_context_changed`; a publication without a
+  requirement is `projection_revision_unrecorded`; a re-send under the same
+  key answers the read's record in each of these states, and a first request
+  runs no READ statement; the write and the three reads are keyed lookups on
+  stores without statistics.
+- `services/app/test/ops-api.test.ts`: a collection accepted over HTTP and
+  one over MCP read `read_model_unavailable`, then `projection_behind`, then
+  `completed` with the same stages on both transports against a synthetic
+  READ pointer.
+- `services/processor/test/collector-dispatch.test.ts`: the real tracker
+  stores the requirement when it records `published`; a reader without READ
+  reports `read_model_unavailable`.
+
+A production trail to `projected` is unverified: no connection is enabled.

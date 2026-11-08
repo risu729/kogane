@@ -190,10 +190,12 @@ the four reasons that are never completion (`queued`, `building`, `flag_off`,
 | `session-refresh` | none: its progress is its status                      |
 
 A stage nobody has reported is `pending`. Silence is never progress, and an
-operation turns `completed` only when every stage of its kind has a
-`completed` row written by the executor that held the evidence. Nothing writes
-`projected` yet, so a published collection keeps `status: running`
-([limits](#collector-execution-adr-0048)).
+operation's stored `status` turns `completed` only when every stage of its
+kind has a `completed` row written by the executor that held the evidence.
+One stage is read rather than stored: once `adopted` is complete, `projected`
+is derived from the READ database each time the record is read, and the
+record's `status` reads `completed` when that makes every stage complete
+([projected](#projected-read)).
 
 ## Idempotency
 
@@ -475,9 +477,39 @@ only. A collected execution with no reported run is `unpublished`
 `unpublished` (`publication_not_observed`).
 
 Limits: no deployed collector has served `runOperation` and no connection is
-enabled; `projected` (READ) is not traced, so a published collection stays
-`running`; the requested window is not applied; one collector call is awaited
+enabled; the requested window is not applied; one collector call is awaited
 per Processor invocation, inside the tick; the web UI has no operations view.
+
+### Projected (READ)
+
+When the Processor records an execution `published`, the same batch stores
+the `projected` stage as `pending` with the CORE revision READ has to reach
+(`core-revision:<core_epoch>:<source_revision>`, read from
+`core_source_revision` in that batch; ADR 0048, amended 2026-11-07). The
+operation record — `readOperation`, behind both the HTTP route and
+`kogane.ops.operation.get` — then compares it with READ's published pointer
+whenever it is read, and writes nothing:
+
+| `projected`                                                | When                                                                                                   |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `completed`, `evidenceRef: "read-snapshot:<snapshot id>"`  | the pointer, the stored revision and CORE share one epoch, and the pointer was verified at or above it |
+| `pending`, `failureCode: "projection_behind"`              | the published snapshot was verified at an older revision                                               |
+| `pending`, `failureCode: "read_model_unavailable"`         | no `READ` binding, nothing published, another READ contract, or READ could not be read                 |
+| `pending`, `failureCode: "read_model_context_changed"`     | the epochs differ (CORE restored, or READ built under another epoch)                                   |
+| `pending`, `failureCode: "projection_revision_unrecorded"` | the execution was recorded published before the revision was stored with it                            |
+| `pending`, no `failureCode`                                | `adopted` is not complete                                                                              |
+
+The record's `status` reads `completed` when the stored status is `running`
+and every stage, this one included, is `completed`; a re-send of the request
+answers with that same status. The stored request stays
+`running` and its `projected` row `pending`, so the answer follows READ: it
+falls back to `running` with the reason if READ is lost or CORE is restored
+under a new epoch. Coverage compares revisions over the whole CORE input, so
+a collection whose parses add no balance row is covered once the published
+snapshot was verified at or above its revision. A use restriction that makes
+the snapshot unservable does not reopen the stage. Requests of the other
+kinds never reach `adopted` through an executor, so their `projected` stays a
+plain `pending`; a rebuild request is still not traced.
 
 ## Storage
 
@@ -589,11 +621,15 @@ The collector execution services are in
 | `collectedDispatchesDue` / `trackCollectorPublication`       | the trail of a collected execution, until published or a reason       |
 | `collectorExecution` / `collectorRunTrails` / `trailOutcome` | the `execution` block and the stage ladder it supports                |
 
+`projection-trace.ts` holds the `projected` requirement the published batch
+stores (`projectionRequirementWrite`) and the read-time comparison with the
+READ pointer (`projectionCoverage`); see [projected](#projected-read).
+
 ## What was verified locally, and what was not
 
 Synthetic data only.
 
-- `services/app/test/ops-api.test.ts` (35 checks over the real
+- `services/app/test/ops-api.test.ts` (36 checks over the real
   Worker, the real migrations and the real store): flag-off behaviour, the
   closed route and verb set with the flag on, `/api/meta` discovery, one
   record per request, re-send, idempotency conflict, per-principal scoping,
@@ -608,7 +644,8 @@ Synthetic data only.
   for an accepted and for a collected request, and that `/mcp` publishes the
   operations to every MCP client, which applies them as itself and never sees
   the operator's browser receipt, while HTTP still grades the operator lists
-  (G3-05, ADR 0047, ADR 0084).
+  (G3-05, ADR 0047, ADR 0084), and a published collection followed to
+  `projected` alike on HTTP and MCP against a synthetic READ pointer.
 - `packages/application/test/operations.test.ts` (10 checks; the SQL half
   runs against the real migrations in `bun:sqlite`): request identity,
   principal binding, the stage table per kind, the session policy's safe
@@ -621,15 +658,19 @@ Synthetic data only.
   `services/app/test/conformance.test.ts` pin the new `opsApi`
   capability off in the shared contract.
 - Collector execution (ADR 0048), synthetic source and collector:
-  `services/processor/test/collector-dispatch.test.ts` (19 checks over the
+  `services/processor/test/collector-dispatch.test.ts` (21 checks over the
   real CORE schema and the real registration: success through `published`
   with distinct timestamps, failure, uncertain, an unfinished start, re-send
   with the same key before and after the run, a raced claim, a held lease and
   a lease taken by the collector, unsupported and human-required and supported
   refresh, expiry, maintenance (including windows that never close), one start
-  per tick, the 48-hour horizon, no parser selected, the stored columns);
+  per tick, the 48-hour horizon, no parser selected, the stored columns, the
+  `projected` requirement stored with publication);
   `packages/application/test/collector-trail.test.ts` (the 0068 guards, the
   trail's outcomes and its keyed query plans without table statistics);
+  `packages/application/test/projection-trace.test.ts` (`projected` pending,
+  behind, completed and each closed reason against real CORE and READ
+  migrations, and its keyed statements without table statistics);
   `packages/collection/test/operation-rpc.test.ts` (the connection table
   against `config/alarm-jobs.json`, request refusals before any run, the
   closed answer, the lease refusal mapped to `collection_busy`);

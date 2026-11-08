@@ -49,6 +49,7 @@ import {
   type OperationName,
 } from "../../../packages/application/src/index";
 import { RUN_ID as TERMINAL_RUN_ID } from "../../../packages/collection/src/keys";
+import { d1Executor, type SqlExecutor } from "../../../packages/read-model/src/index";
 import { auditContext, auditedRoute } from "./audit";
 import { principalFor } from "./grants";
 import { assertOwnOrigin, boundedText, HttpError, json } from "./http";
@@ -234,12 +235,23 @@ export function opsContext(env: Env, subject: string, audit?: OperationCall): Op
     throw new HttpError(403, "approval_required");
   return {
     store: d1CommandStore(env.DB),
+    readStore: opsReadStore(env),
     principal,
     ...(audit ? { audit } : {}),
     now: new Date().toISOString().replace(/\.\d{3}Z$/u, "Z"),
     nowMs: Date.now(),
     policy: sessionRefreshPolicy(env.SESSION_REFRESH_POLICY),
   };
+}
+
+/**
+ * The READ database, read only, for the `projected` stage of an operation
+ * record; null when this deployment binds none (the record then says
+ * `read_model_unavailable`). Both transports build their context here.
+ */
+export function opsReadStore(env: Env): SqlExecutor | null {
+  const read = (env as unknown as { READ?: D1Database }).READ;
+  return read ? d1Executor(read) : null;
 }
 
 interface OpsResponse {
