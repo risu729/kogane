@@ -3,19 +3,23 @@
 This collector reads ordinary JPY deposit balances and the first displayed
 transaction page directly from Mizuho Direct. It authenticates with the customer
 number and login password provisioned as Worker secrets on each daily run.
-An operator can also supply an already authenticated session for one request.
 It uses the shared
 DATA bucket, terminal-last persistence, registered Mizuho parsers, and the
 existing balance/transaction projections. No statement upload is involved.
 
-The daily schedule is `25 21 * * *` UTC (06:25 JST), staggered after the other
-daily bank collectors. Each invocation signs in once, collects and persists
-sanitized evidence, and discards its session. Additional authentication or an
-unrecognized login page stops the run; the Worker neither answers challenges
-nor retries password submissions. Scheduled retries are explicitly disabled.
+The Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`).
+The Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled`
+(`src/schedule-entrypoint.ts`) for the `mizuho-bank` job in
+[`config/alarm-jobs.json`](../../config/alarm-jobs.json): daily at 06:25 JST
+(`25 21 * * *` UTC), staggered after the other daily bank collectors. Each
+invocation signs in once, collects and persists sanitized evidence, and
+discards its session. Additional authentication or an unrecognized login page
+stops the run; the Worker neither answers challenges nor retries password
+submissions. The alarm records the occurrence's outcome and does not retry it
+(`services/processor/src/schedule-alarm.ts`).
 `infra/deploy-order.json` includes the Worker in the normal production release,
 with a public health postcheck. Local WSL session-based reads have been verified,
-and the daily cron runs (password login and authenticated cloud collection) have
+and the daily scheduled runs (password login and authenticated cloud collection) have
 registered in production since 2026-09-24. Health success alone does not
 establish successful bank access.
 
@@ -23,8 +27,8 @@ establish successful bank access.
 
 - `GET /health` returns source and schema version, without account information.
 - Public `POST /trigger` is retired (404), including supplied-session injection.
-  Normal collection uses the existing fixed-action private Service Binding and
-  scheduled handler with configured credentials; no replacement HTTP credential
+  Normal collection uses the fixed-action private Service Binding
+  (`ScheduledCollection`) with configured credentials; no replacement HTTP credential
   transport is added. Provision `MIZUHO_CUSTOMER_NUMBER` and
   `MIZUHO_LOGIN_PASSWORD` out of band. CI/CD does not synchronize bank credentials.
 - A login challenge remains human-required; this slice does not invent a new
@@ -36,7 +40,7 @@ establish successful bank access.
   codes. Unknown issue text becomes `unclassified-collection-issue`; neither
   exception text nor private identifiers are logged. Logging is best effort:
   a failed log sink cannot prevent collection, retry a storage write, or turn
-  an already-persisted run into a failure. A login or storage failure fails the scheduled invocation after
+  an already-persisted run into a failure. A login or storage failure returns a `failed` scheduled result after
   recording safe acquisition failure evidence where storage is available.
 - The terminal names the same closed code: each failed unit carries the code
   that stopped it (for example `read-http-error` for a history page, or

@@ -14,9 +14,13 @@ Bitwarden内の既存passkeyをWorkers Web Cryptoで使い、`initiateLoginWithP
 
 ## 収集
 
-- `*/15 * * * *`: `informationTitle`だけを送りsessionを維持する。
-- `5 21 * * *`: 毎日06:05 JSTに固定read allowlistを取得する。
-- Manual operations go through the operations API, which reaches this Worker only over the private `ScheduledCollection.runOperation` binding: a `collection` request (source `sbi-vc-trade`) runs the daily collection, and a `session-refresh` request runs the keepalive and, when it fails, a passkey login without the 6-hour cooldown. The former bearer routes `/run`, `/reauth`, `/collect`, `/health` and their `ADMIN_TOKEN` were removed on 2026-11-08 ([ADR 0069 amendment](../../docs/adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08)); session health is in the keepalive alarm history (`kogane.schedules.read`) and the Worker logs (`sbi_vc_keepalive`, `sbi_vc_reauth`).
+The Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`). The Processor's
+`ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for two
+jobs in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), passing each job's cron shape:
+
+- `sbi-vc-keepalive` (`*/15 * * * *`, every 15 minutes): `informationTitle`だけを送りsessionを維持する。
+- `sbi-vc-trade` (`5 21 * * *`, 毎日06:05 JST): 固定read allowlistを取得する。
+- Manual operations go through the operations API, which reaches this Worker only over the private `ScheduledCollection.runOperation` binding: a `collection` request (source `sbi-vc-trade`) runs the daily collection, and a `session-refresh` request runs the keepalive and, when it fails, a passkey login without the 6-hour cooldown. The former bearer routes `/run`, `/reauth`, `/collect`, `/health` and their `ADMIN_TOKEN` were removed on 2026-11-08 ([ADR 0069 amendment](../../docs/adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08)); session health is in the keepalive alarm history (`kogane.schedules.read`) and the Worker logs (`sbi_vc_keepalive`, `sbi_vc_reauth`). The only public route is `GET /healthz` (CD liveness: status and schema version, no session or provider call); every other path is 404 (`src/worker.ts`).
 - 保存先: 共有DATA bucketのcontent-addressed object（`objects/<2 hex>/<sha256>`）と、最後に書くterminal manifest（`runs/sbi-vc-trade/<run-id>/terminal.json`）。
 - 保存対象: 残高、口座詳細、position summary、約定recent page 0、約定historical全page、JPY入出金historical全page、manifest。
 - page sizeは公式Web clientと同じ30、上限100 page。write eventを指定できるgeneric senderは公開しない。
@@ -27,9 +31,9 @@ Bitwarden内の既存passkeyをWorkers Web Cryptoで使い、`initiateLoginWithP
 ## 検証
 
 ```sh
-bun install --frozen-lockfile
+mise run install                                  # from the repository root
 mise run //services/collector-sbi-vc-trade:test
-mise run //services/collector-sbi-vc-trade:typecheck
+mise run //services/collector-sbi-vc-trade:ci
 mise run //services/collector-sbi-vc-trade:dry-run
 ```
 
@@ -40,7 +44,8 @@ deployはProcessorを先、collectorを後にする（[rollout.md](../../docs/ro
 - Worker: `kogane-sbi-vc-session-poc`
 - Durable Object class: `SbiVcSessionState`
 - R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。このWorker専用のbucketはない）
-- Cron: `*/15 * * * *`, `5 21 * * *`
+- Schedule: Processor alarm jobs `sbi-vc-keepalive` (`*/15 * * * *`) and `sbi-vc-trade` (`5 21 * * *`); no Cron Trigger
+- D1 binding: `SCHEDULE_DB` → `kogane-raw-evidence` (the execution lease)
 - Worker Secrets: `SESSION_SEED`, `SESSION_ENCRYPTION_KEY`, `PASSKEY_CREDENTIAL`
 
 検証終了後は次でまとめて削除する。
