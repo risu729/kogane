@@ -157,8 +157,9 @@ interface RequestState {
   pending: { key: string; at: Date | null } | null;
   busy: boolean;
   message: string;
+  operationId: string | null;
 }
-const IDLE: RequestState = { pending: null, busy: false, message: "" };
+const IDLE: RequestState = { pending: null, busy: false, message: "", operationId: null };
 /**
  * 収集を依頼 (ADR 0048): the same stored request `kogane.ops.collection.request`
  * makes. The confirmation shows what the caller should read first — the last
@@ -179,7 +180,7 @@ function CollectionRequest({
   /** The page's synchronous guard against a second send for the same job. */
   sending: Set<string>;
 }): ReactNode {
-  const { pending, busy, message } = state;
+  const { pending, busy, message, operationId } = state;
   const target = value.collectionRequest;
   if (!target) return null;
   async function send() {
@@ -191,7 +192,8 @@ function CollectionRequest({
       const accepted = await postCollectionRequest(target.source, pending.key, at);
       update({
         pending: null,
-        message: `依頼を受け付けました（依頼ID ${accepted.operationId}）。保存・解析処理の次回実行で収集を始めます。メンテナンス中や前の実行中は終わるまで待ちます。結果は取得履歴に表示されます。`,
+        operationId: accepted.operationId,
+        message: `依頼を受け付けました（依頼ID ${accepted.operationId}）。保存・解析処理の次回実行で収集を始めます。メンテナンス中や前の実行中は終わるまで待ちます。`,
       });
     } catch (error) {
       update({ message: requestFailure(error) });
@@ -210,7 +212,11 @@ function CollectionRequest({
           type="button"
           className="button"
           onClick={() =>
-            update({ message: "", pending: { key: collectionRequestKey(), at: null } })
+            update({
+              message: "",
+              operationId: null,
+              pending: { key: collectionRequestKey(), at: null },
+            })
           }
         >
           収集を依頼
@@ -254,7 +260,17 @@ function CollectionRequest({
           </div>
         </div>
       )}
-      {message ? <p role="status">{message}</p> : null}
+      {message ? (
+        <p role="status">
+          {message}
+          {operationId ? (
+            <>
+              {" "}
+              <Link to={`/operations/${operationId}`}>依頼の経過を見る</Link>
+            </>
+          ) : null}
+        </p>
+      ) : null}
     </div>
   );
 }
