@@ -11,7 +11,7 @@ Live follow-up: on 2026-08-31, logged into Vポイント (V Points) My Page with
 
 ## 1. Scope and safety boundaries
 
-This record covers personal V Point and V Point Pay, comparing official routes through V Point sites/apps, V Point Pay app, Vpass, and 三井住友銀行 (SMBC) app/SMBC ダイレクト (SMBC Direct)/Olive. V Points and V Point Pay balances are separate assets; 三井住友カード (Sumitomo Mitsui Card) billing statements and bank deposits are separate ledgers too. V Money, former T Money, PayPay Points, ANA-mileage-transferable points, and partner-specific points are excluded despite similar names/navigation.
+This record covers personal V Point and V Point Pay, comparing official routes through V Point sites/apps, V Point Pay app, Vpass, and 三井住友銀行 (SMBC) app/SMBC ダイレクト (SMBC Direct)/Olive. V Points and V Point Pay balances are separate assets; 三井住友カード (Sumitomo Mitsui Card) billing statements and bank deposits are separate ledgers too. V Money, former T マネー (T Money), PayPay ポイント (PayPay Points), ANA マイレージ移行可能ポイント (points transferable to ANA Mileage), and partner-specific points are excluded despite similar names/navigation.
 
 Permitted activities are read-only display of existing balances, regular/fixed-expiry/store-limited points, expirations, existing accrual/use/expiry/exchange history, and existing V Point Pay use/refund/top-up history; static analysis, deobfuscation, runtime tracing, and communication metadata observation on user-controlled devices. No writes such as payments, top-ups, exchanges, transfers, ID linking/unlinking, passkey registration, authentication/notification settings, or member-information changes.
 
