@@ -563,6 +563,28 @@ test("a required completion date follows the deadline rule on the credit day", (
   expect(zoneless.rejected).toEqual([
     { offerRef: "offer:a-b@v1", reasonCode: "needs_rule_verification" },
   ]);
+  // A clock zone the runtime does not know cannot place an instant either,
+  // even one in a known zone; it is not read as UTC or as the instant's zone.
+  const unknownClock = findConversionPaths(
+    [
+      offer({
+        processingDays: 5,
+        validTime: { ...day("2026-04-10"), zone: null },
+        applicationDeadline: null,
+      }),
+    ],
+    { quantity: quantity(4), clock: { ...day("2026-04-10"), zone: "Synthetic/Nowhere" } },
+    "points:b",
+    {
+      maxDepth: 1,
+      maxCandidates: 8,
+      maxExpansions: 100,
+      requiredCompletionBy: instant("2026-04-01T00:00:00Z"),
+    },
+  );
+  expect(unknownClock.rejected).toEqual([
+    { offerRef: "offer:a-b@v1", reasonCode: "needs_rule_verification" },
+  ]);
   // An instant is read on the clock's calendar: 2026-04-14T15:30Z is 00:30 on
   // the Tokyo 15th, the credit day itself, which it cannot place.
   expect(at(instant("2026-04-14T15:30:00Z"))).toBe("needs_rule_verification");
