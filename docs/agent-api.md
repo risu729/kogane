@@ -1451,7 +1451,9 @@ values. These steps do not assert that production or any client has passed.
    application allows ChatGPT's two, claude.ai's, Grok's two and Cursor's two
    (16:36 UTC; listed in the
    [ADR 0047 amendment](adr/0047-mcp-client-connection.md#amendment-clients-connect-through-the-mcp-portal-2026-11-07)).
-   Access token 5 minutes, grant session 24 hours.
+   Access token 5 minutes; grant session 730 hours on both applications
+   since 2026-11-08 14:11 UTC (24 hours before; see
+   [Portal grant lifetime](mcp-recovery.md#portal-grant-lifetime-and-re-authentication-2026-11-08)).
 4. _Normal deployment and domain attachment_ — deploy the reviewed commit
    through the ordinary pipeline and verify the live App bindings agree
    with both production configs: the dedicated `ACCESS_MCP_AUDIENCE` is
