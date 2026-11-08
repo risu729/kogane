@@ -54,7 +54,7 @@ export const myJcbCreditLedger: Parser = {
   // 1.2.3 reads every page as 1.2.2: only its digest moved, with the shared
   // skip-payment reader that `myjcb-schedule-page-kind.ts` imports (ADR 0005
   // amendment k).
-  version: "1.2.3",
+  version: "1.2.4",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -212,7 +212,7 @@ export const myJcbPastMonthBalances: Parser = {
   // 1.1.6 reads every page as 1.1.5: only its digest moved, with the shared
   // skip-payment reader that `myjcb-schedule-page-kind.ts` imports (ADR 0005
   // amendment k).
-  version: "1.1.6",
+  version: "1.1.7",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -402,7 +402,7 @@ export const myJcbCreditStatement: Parser = {
   // 1.4.1 reads every page as 1.4.0: only its digest moved, with the shared
   // skip-payment reader that `myjcb-schedule-page-kind.ts` imports (ADR 0005
   // amendment k).
-  version: "1.4.1",
+  version: "1.4.2",
   accepts: (artifact) =>
     artifact.sourceId === SOURCE &&
     artifact.dataset === "credit-detail" &&
@@ -520,7 +520,7 @@ export const myJcbEvidenceOnly: Parser = {
   // 1.1.6 reads every page as 1.1.5: only its digest moved, with the shared
   // skip-payment reader that `myjcb-schedule-page-kind.ts` imports (ADR 0005
   // amendment k).
-  version: "1.1.6",
+  version: "1.1.7",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (

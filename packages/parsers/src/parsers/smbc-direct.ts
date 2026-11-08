@@ -38,7 +38,7 @@ interface NormalizedTransaction {
 
 export const smbcDirectBalance: Parser = {
   name: "smbc-direct-balance",
-  version: "1.1.0",
+  version: "1.1.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return accepts(artifact, "balance-normalized");
@@ -103,7 +103,7 @@ export const smbcDirectBalance: Parser = {
 
 export const smbcDirectTransactions: Parser = {
   name: "smbc-direct-transactions",
-  version: "1.1.0",
+  version: "1.1.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return accepts(artifact, "transactions-normalized");

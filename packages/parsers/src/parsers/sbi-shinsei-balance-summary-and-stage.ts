@@ -110,7 +110,7 @@ function stageCategory(value: unknown): string | number {
 
 export const sbiShinseiBalanceSummaryAndStage: Parser = {
   name: "sbi-shinsei-balance-summary-and-stage",
-  version: "0.1.0",
+  version: "0.1.1",
   accepts: (artifact: ArtifactMeta) => acceptsSbiShinseiDataset(artifact, DATASET),
 
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {

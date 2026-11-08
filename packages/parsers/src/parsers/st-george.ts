@@ -28,7 +28,7 @@ function inputSnapshot(bytes: Uint8Array) {
 function createParser(kind: "balance" | "transaction"): Parser {
   return {
     name: kind === "balance" ? "st-george-balances" : "st-george-transactions",
-    version: "1.0.0",
+    version: "1.0.1",
     accepts(artifact: ArtifactMeta) {
       return (
         artifact.sourceId === "st-george" &&

@@ -52,7 +52,7 @@ export const myJcbSkipPaymentSchedule: Parser = {
   // 0.1.1: the empty row is zero rows only when it is the ledger's one
   // `content` row and shows exactly the observed label; beside other rows it
   // is refused (ADR 0005 amendment f). 0.1.0 is registered but parsed nothing.
-  version: "0.1.2",
+  version: "0.1.3",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
