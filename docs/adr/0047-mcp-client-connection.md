@@ -445,7 +445,7 @@ the particular client's upstream OAuth and refresh behavior is unverified.
 
 ## Amendment: clients connect through the MCP Portal (2026-11-07)
 
-- Status: proposed
+- Status: accepted (owner OK 2026-11-08 01:43 UTC)
 - Date: 2026-11-07
 
 Owner decision, 2026-11-07 16:34 UTC: every MCP client (claude.ai, ChatGPT,
