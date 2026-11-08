@@ -6,6 +6,8 @@
 import {
   ALLOCATION_OUTCOME_CODES,
   ALLOCATION_STATEMENT_REFUSALS,
+  CARD_STATEMENT_ALLOCATION_DEBITS_MAX,
+  CARD_STATEMENT_ALLOCATION_SIZE_MAX,
 } from "../../domain/src/card-settlement-allocation.ts";
 import { UNMATCHED_STATEMENT_CODES } from "../../domain/src/card-settlement-unmatched.ts";
 import { validSourceFactRef } from "../../domain/src/events.ts";
@@ -15,6 +17,18 @@ import { validQuantity } from "../../domain/src/values.ts";
 /** The path the browser reads the list from. */
 export const CARD_STATEMENTS_UNMATCHED_PATH = "/api/v2/reconciliation/card-statements-unmatched";
 const PAGE_LIMIT = 50;
+/** `n` choose `k`, exact for the small bounds below. */
+const choose = (n: number, k: number): number => (k === 0 ? 1 : (choose(n - 1, k - 1) * n) / k);
+/**
+ * Allocations one statement's planner answer may list: the planner lists
+ * every exact allocation of one to `CARD_STATEMENT_ALLOCATION_SIZE_MAX`
+ * debits among at most `CARD_STATEMENT_ALLOCATION_DEBITS_MAX`, uncapped, so
+ * the bound is the number of such debit sets (5,488).
+ */
+export const UNMATCHED_ALLOCATIONS_LIMIT = Array.from(
+  { length: CARD_STATEMENT_ALLOCATION_SIZE_MAX },
+  (_, index) => choose(CARD_STATEMENT_ALLOCATION_DEBITS_MAX, index + 1),
+).reduce((sum, value) => sum + value, 0);
 
 const record = (value: unknown): value is Record<string, any> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -35,7 +49,7 @@ function validPlanner(value: unknown): boolean {
     Array.isArray(value.codes) &&
     value.codes.every((code: unknown) => oneOf(ALLOCATION_OUTCOME_CODES, code)) &&
     Array.isArray(value.allocations) &&
-    value.allocations.length <= 1_000 &&
+    value.allocations.length <= UNMATCHED_ALLOCATIONS_LIMIT &&
     value.allocations.every(
       (allocation: unknown) =>
         record(allocation) &&
@@ -45,7 +59,7 @@ function validPlanner(value: unknown): boolean {
         allocation.rejectionConditions.every(text) &&
         Array.isArray(allocation.members) &&
         allocation.members.length >= 1 &&
-        allocation.members.length <= 3 &&
+        allocation.members.length <= CARD_STATEMENT_ALLOCATION_SIZE_MAX &&
         allocation.members.every(
           (member: unknown) =>
             record(member) &&

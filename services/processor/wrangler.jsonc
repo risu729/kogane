@@ -35,8 +35,10 @@
     // ["sony-bank"]) whose collector an accepted collection or unattended
     // session-refresh request may start through the named collector RPC.
     // Empty means none: such requests wait with `collector_dispatch_disabled`
-    // and expire after 24 hours without contacting any provider.
-    "OPS_COLLECTOR_DISPATCH_CONNECTIONS": "",
+    // and expire after 24 hours without contacting any provider. The owner
+    // allowed dispatch for every healthy connection, added one at a time
+    // after the previous one was followed to publication (2026-11-08).
+    "OPS_COLLECTOR_DISPATCH_CONNECTIONS": "[\"sony-bank\"]",
     // The shared DATA bucket is the existing central bucket; the name is
     // declared so a notification about another bucket is refused.
     "COLLECTION_DATA_BUCKET": "kogane-raw-evidence",
