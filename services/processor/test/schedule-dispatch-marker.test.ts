@@ -100,7 +100,7 @@ beforeEach(async () => {
     .bind(at, at)
     .run();
 });
-function state(): State {
+function state(onSetAlarm?: () => Promise<void>): State {
   const values = new Map<string, unknown>([["job", "mizuho-bank"]]);
   let alarm: number | null = null;
   return {
@@ -116,6 +116,7 @@ function state(): State {
       },
       async setAlarm(value) {
         alarm = value;
+        await onSetAlarm?.();
       },
       async deleteAlarm() {
         alarm = null;
@@ -363,3 +364,51 @@ test("a lost D1 marker acknowledgement never calls the collector or becomes repl
   expect(await retryableOccurrence(db, "mizuho-bank")).toBeNull();
   expect(calls).toBe(0);
 });
+
+test.each(["disabled", "revision_changed", "reservation_changed"] as const)(
+  "a retry whose schedule was %s during the alarm write neither dispatches nor consumes its allowance",
+  async (change) => {
+    await db
+      .prepare(`INSERT INTO collection_schedule_occurrences(id,schedule_id,nominal_at,started_at,status,failure_code,dispatch_protocol,attempt_ref)
+      VALUES('synthetic-stopped','mizuho-bank','2026-01-01T00:00:00.000Z','2026-01-01T00:00:01.000Z','not_dispatched','not_dispatched',1,'synthetic-original')`)
+      .run();
+    const before = await db
+      .prepare("SELECT * FROM collection_schedule_occurrences WHERE id='synthetic-stopped'")
+      .first();
+    let calls = 0;
+    const context = state(async () => {
+      if (change === "disabled")
+        await db
+          .prepare(
+            "UPDATE collection_schedules SET enabled=0,revision=revision+1,next_nominal_at=NULL,next_run_at=NULL WHERE id='mizuho-bank'",
+          )
+          .run();
+      else if (change === "revision_changed")
+        await db
+          .prepare("UPDATE collection_schedules SET revision=revision+1 WHERE id='mizuho-bank'")
+          .run();
+      else
+        await db
+          .prepare(
+            "UPDATE collection_schedules SET next_nominal_at='2099-01-01T00:00:00.000Z',next_run_at='2099-01-01T00:00:00.000Z' WHERE id='mizuho-bank'",
+          )
+          .run();
+    });
+    await new AlarmClass(
+      context,
+      environment(db, async () => {
+        calls++;
+      }),
+    ).alarm();
+    expect(calls).toBe(0);
+    expect(
+      await db
+        .prepare("SELECT * FROM collection_schedule_occurrences WHERE id='synthetic-stopped'")
+        .first(),
+    ).toEqual(before);
+    expect(await retryableOccurrence(db, "mizuho-bank")).toEqual({
+      id: "synthetic-stopped",
+      nominal_at: "2026-01-01T00:00:00.000Z",
+    });
+  },
+);
