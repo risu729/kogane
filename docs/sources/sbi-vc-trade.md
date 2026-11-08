@@ -7,7 +7,7 @@
 
 - Research date: 2026-08-26 (Australia/Sydney)
 - Scope: collection surfaces for Japanese-yen/cryptoasset account data in **VCTRADE**, provided by SBI VCトレード株式会社 (SBI VC Trade Co., Ltd.)
-- Out of scope: the company’s other services, SBI証券 (SBI Securities), cards, and external aggregators
+- Out of scope: the company's other services, SBI証券 (SBI Securities), cards, and external aggregators
 - Constraints: public information, public Web artifacts, read-only static analysis of legitimately distributed apps, and read-only dynamic observation during owner operation are in scope. Do not obtain or record account identifiers, names, email addresses, phone numbers, actual balances, transaction contents, cookie values, tokens, passwords, TOTP seeds, OTPs, or passkeys. Do not place/cancel orders, deposit/withdraw money or cryptoassets, apply for coin lending, change authentication/account settings, or bypass security controls.
 
 ## Conclusion
@@ -26,11 +26,11 @@ triggers, start the keepalive and the daily collection
 
 ### Officially confirmed facts
 
-- `資産状況` (“asset status”) displays holdings in Japanese yen and all assets.
-- `残高履歴` (“balance history”) displays Japanese-yen and all-asset balances as of a reference date/time.
-- `ポジションサマリー` (“position summary”) aggregates leveraged positions by asset and buy/sell direction; `ポジション照会` (“position inquiry”) displays individual positions.
-- `口座詳細` (“account details”) displays net assets, margin for open orders, required position margin, margin maintenance ratio, available withdrawal amounts for money/cryptoassets, and similar fields.
-- Current official tools are browser-based `VCTRADE（シンプルモード）` (“VCTRADE, simple mode”), `VCTRADE（トレーダーモード）` (“VCTRADE, trader mode”), and the iOS/Android `SBI VCトレードアプリ` (“SBI VC Trade app”). The app handles day-over-day changes/graphs of asset holdings, charts, orders, and staking information.
+- `資産状況` ("asset status") displays holdings in Japanese yen and all assets.
+- `残高履歴` ("balance history") displays Japanese-yen and all-asset balances as of a reference date/time.
+- `ポジションサマリー` ("position summary") aggregates leveraged positions by asset and buy/sell direction; `ポジション照会` ("position inquiry") displays individual positions.
+- `口座詳細` ("account details") displays net assets, margin for open orders, required position margin, margin maintenance ratio, available withdrawal amounts for money/cryptoassets, and similar fields.
+- Current official tools are browser-based `VCTRADE（シンプルモード）` ("VCTRADE, simple mode"), `VCTRADE（トレーダーモード）` ("VCTRADE, trader mode"), and the iOS/Android `SBI VCトレードアプリ` ("SBI VC Trade app"). The app handles day-over-day changes/graphs of asset holdings, charts, orders, and staking information.
 - Holding eligible cryptoassets generally enrolls the user in staking automatically. Average quantities are calculated from holdings at 06:59:59 on each business day, and rewards generally appear in deposit history by the 15th of the following month. Eligible assets and rates vary.
 - Coin lending is a separate service requiring an application specifying quantity, with history/status inquiry surfaces. Unlike staking, it has applications, quantity conditions, and lending periods.
 
@@ -53,16 +53,16 @@ Primary sources:
 
 ### On-screen granularity
 
-- `注文履歴` (“order history”): new/closing orders for spot (brokerage/exchange) and leveraged trading. Includes unfilled orders.
-- `約定履歴` (“execution history”): executed trades only. Excludes unfilled/canceled orders.
-- `入出金・入出庫履歴` (“money/cryptoasset deposit/withdrawal history”): yen deposits/withdrawals, cryptoasset deposits/withdrawals, trading profit/loss, etc.
+- `注文履歴` ("order history"): new/closing orders for spot (brokerage/exchange) and leveraged trading. Includes unfilled orders.
+- `約定履歴` ("execution history"): executed trades only. Excludes unfilled/canceled orders.
+- `入出金・入出庫履歴` ("money/cryptoasset deposit/withdrawal history"): yen deposits/withdrawals, cryptoasset deposits/withdrawals, trading profit/loss, etc.
 - `残高履歴`: Japanese-yen/cryptoasset balances as of a reference date/time.
-- `報告書` (“reports”): annual/monthly/daily reports can be selected and downloaded as PDFs. Annual transaction reports are also provided to individuals.
-- `年間損益報告書` (“annual profit/loss reports”) covers per-asset transactions/realized profit/loss, beginning/end-of-year valuations and differences for spot trading, and position profit/loss, funding rates, and similar items for leveraged trading.
+- `報告書` ("reports"): annual/monthly/daily reports can be selected and downloaded as PDFs. Annual transaction reports are also provided to individuals.
+- `年間損益報告書` ("annual profit/loss reports") covers per-asset transactions/realized profit/loss, beginning/end-of-year valuations and differences for spot trading, and position profit/loss, funding rates, and similar items for leveraged trading.
 
 ### Exports
 
-- `損益計算用データ` (“profit/loss calculation data”) is a ZIP containing 2 CSVs: execution history `TRADE_RECORD_LIST` and wallet/trading-account fund movements `CASHFLOW`.
+- `損益計算用データ` ("profit/loss calculation data") is a ZIP containing 2 CSVs: execution history `TRADE_RECORD_LIST` and wallet/trading-account fund movements `CASHFLOW`.
 - Annual profit/loss and similar reports are electronically delivered PDFs, not mailed.
 - For garbled CSV text from September 2022 onward, the official FAQ recommends saving again as UTF-8 with BOM. ZIP extraction may be needed first.
 - The new app officially lists annual/monthly/daily reports, but not CSV/ZIP retrieval. PC trader mode handles annual/monthly/daily reports and profit/loss calculation data; simple mode handles annual/monthly reports and profit/loss calculation data.
@@ -70,7 +70,7 @@ Primary sources:
 ### Periods and counts
 
 - A year for tax/annual reporting runs from January 1 07:00:00 through the following January 1 06:59:59. Daily boundaries also run from 07:00 to 06:59 the next day.
-- Order/execution-history guides distinguish `直近4か月` (“most recent 4 months”) from `4か月以前の履歴` (“history before 4 months ago”) and explain filtering by period, asset, and similar criteria.
+- Order/execution-history guides distinguish `直近4か月` ("most recent 4 months") from `4か月以前の履歴` ("history before 4 months ago") and explain filtering by period, asset, and similar criteria.
 - Public primary sources do not establish maximum retention years including history before 4 months ago, per-retrieval limits, total-count limits, page size, or complete CSV column definitions.
 
 Primary sources:
@@ -88,8 +88,8 @@ Primary sources:
 
 - Unfilled exchange orders appear in a dedicated list. For FAS limit orders, the remaining quantity stays valid after partial execution; for FAK market orders, the remaining quantity expires after partial execution.
 - Unfilled orders are canceled/expire during scheduled maintenance every Wednesday. The official FAQ states there is no other absolute order expiry.
-- Execution history means `約定済み` (“executed”), not the accounting term settled, and excludes unfilled/canceled orders. Blockchain confirmation counts for cryptoasset deposits/withdrawals and accounting finalization times cannot be uniformly established from public screen specifications.
-- A report’s `出金・出庫予定額` (“scheduled money/cryptoasset withdrawal amount”) means requests submitted but not yet completed. Accepted withdrawals are deducted from transferable amounts.
+- Execution history means `約定済み` ("executed"), not the accounting term settled, and excludes unfilled/canceled orders. Blockchain confirmation counts for cryptoasset deposits/withdrawals and accounting finalization times cannot be uniformly established from public screen specifications.
+- A report's `出金・出庫予定額` ("scheduled money/cryptoasset withdrawal amount") means requests submitted but not yet completed. Accepted withdrawals are deducted from transferable amounts.
 - Only 1 cryptoasset withdrawal reservation can exist at once; the next is accepted after completion. Do not enter this screen even for read-only research.
 
 Primary sources:
@@ -114,11 +114,11 @@ Primary sources:
 
 ### Relationship with Bitwarden
 
-Bitwarden itself supports storing/using website/app passkeys. Although Bitwarden is absent from SBI VCトレード’s official provider list, selecting the owner’s existing Bitwarden passkey successfully logged in to current VCTRADE on 2026-08-31. Login success was also seen in ordinary Chrome opened mistakenly at first, but that tab was closed. The authoritative authenticated-traffic/schema evidence below was obtained in **Kogane Capture Chrome**, where the owner subsequently completed login. Bitwarden interoperability is therefore live-confirmed.
+Bitwarden itself supports storing/using website/app passkeys. Although Bitwarden is absent from SBI VCトレード's official provider list, selecting the owner's existing Bitwarden passkey successfully logged in to current VCTRADE on 2026-08-31. Login success was also seen in ordinary Chrome opened mistakenly at first, but that tab was closed. The authoritative authenticated-traffic/schema evidence below was obtained in **Kogane Capture Chrome**, where the owner subsequently completed login. Bitwarden interoperability is therefore live-confirmed.
 
 On the same day, the owner unlocked Bitwarden CLI 2026.8.0 in WSL with their master password and confirmed that the `SBI VCトレード` item held 1 FIDO2 credential. Inspecting field names without displaying values showed the CLI can obtain the structures needed for a WebAuthn assertion: `credentialId`, P-256 `keyValue`, `rpId`, `userHandle`, `counter`, etc. No Kogane-specific credential is created; this existing credential is the unattended-reauthentication candidate. Credential values, master password, and vault session are not saved in Git, PRs, or standard output.
 
-Bitwarden’s official documentation generally warns that exported passkeys may be rejected if their counters diverge from the service. This credential’s stored value and successful browser assertion both had counter `0`. Bitwarden 2026.8.0 also increments only stored counters greater than 0, so this credential does not diverge from Bitwarden itself. The Worker accepts only counter `0`; if it becomes non-zero, it stops instead of guessing automatic updates.
+Bitwarden's official documentation generally warns that exported passkeys may be rejected if their counters diverge from the service. This credential's stored value and successful browser assertion both had counter `0`. Bitwarden 2026.8.0 also increments only stored counters greater than 0, so this credential does not diverge from Bitwarden itself. The Worker accepts only counter `0`; if it becomes non-zero, it stops instead of guessing automatic updates.
 
 Primary sources:
 
@@ -143,7 +143,7 @@ Passive observation on 2026-08-26, using only DNS resolution and HEAD/GET to pub
 - `www.sbivc.co.jp`: confirmed Amazon CloudFront response/cache headers.
 - `simple.sbivc.co.jp`: confirmed a Cloudflare CNAME, `server: cloudflare`, `cf-ray`, and the `__cf_bm` cookie name.
 - `account.sbivc.co.jp`: confirmed a Cloudflare CNAME, the same headers/cookie name, and responses indicating CloudFront behind it.
-- Cloudflare’s official documentation says `__cf_bm` is used by Bot Management or Bot Fight Mode. There is therefore a direct technical signal of bot protection, but active WAF rules, bot mode, challenge conditions, and post-login behavior remain unknown.
+- Cloudflare's official documentation says `__cf_bm` is used by Bot Management or Bot Fight Mode. There is therefore a direct technical signal of bot protection, but active WAF rules, bot mode, challenge conditions, and post-login behavior remain unknown.
 - Absence of CAPTCHA on public routes is not evidence that authenticated or repeated access has no challenges. No signal of Akamai use was observed in this research.
 
 Reference:
@@ -180,7 +180,7 @@ for apk in "$SBI_VC_APK_DIR"/*.apk; do
 done
 ```
 
-Record the Play listing’s package/developer/version, device package/version, base APK manifest, hashes of every split, and consistent signer certificate digests across all splits as provenance. Do not commit APKs, certificates, or analysis output to the repository. Use the same acquisition method and certificate digest when comparing before/after updates.
+Record the Play listing's package/developer/version, device package/version, base APK manifest, hashes of every split, and consistent signer certificate digests across all splits as provenance. Do not commit APKs, certificates, or analysis output to the repository. Use the same acquisition method and certificate digest when comparing before/after updates.
 
 ### 6.2 Next static-analysis experiment
 
@@ -219,11 +219,11 @@ Primary sources:
 
 ### Confirmed facts
 
-- SBI VCトレード’s official FAQ and exchange description say the API is `今後公開予定` (“planned for future publication”). As of 2026-08-26, no public customer API specification, API keys, scopes, or read-only endpoints were found.
+- SBI VCトレード's official FAQ and exchange description say the API is `今後公開予定` ("planned for future publication"). As of 2026-08-26, no public customer API specification, API keys, scopes, or read-only endpoints were found.
 - Public GitHub searches by service name, official host, and Android package found no maintained public client connecting to current authenticated VCTRADE.
 - [`kittyflip-zig/crypto-ledger-tools`](https://github.com/kittyflip-zig/crypto-ledger-tools) is an MIT-licensed local CSV normalization tool whose README has an initial SBI VC Trade adapter item. It is not a network client using API keys; full support for current SBI CSV is also unconfirmed.
 
-Transport/authentication confirmed in third-party implementations is limited to “reading local files manually obtained by the user / no authentication.” Official public Web bundles/source maps, however, make the current Web client’s own transport concrete and were statically analyzed as described next. Endpoint/schema inspection itself is not prohibited; saving secret values and sending write events are prohibited.
+Transport/authentication confirmed in third-party implementations is limited to "reading local files manually obtained by the user / no authentication." Official public Web bundles/source maps, however, make the current Web client's own transport concrete and were statically analyzed as described next. Endpoint/schema inspection itself is not prohibited; saving secret values and sending write events are prohibited.
 
 ### 7.1 Public Web JavaScript / source-map observation
 
@@ -314,10 +314,10 @@ Use only the shared scale from [PR #5](https://github.com/risu729/kogane/pull/5)
 ### Staged verification
 
 1. Retrieve public guides, FAQs, official stores, DNS/HTTP headers, and public HTML/JS/source maps; record URLs, hashes, and times. Do not reproduce or test token/secret-like bundle values.
-2. Pull split APKs from the owner’s device with a legitimate Play installation and check package/version/hashes/signing certificate. Extract host/path/schema/token/session/pinning/integrity candidates with jadx/apktool/MobSF, but keep artifacts/analysis output outside Git.
+2. Pull split APKs from the owner's device with a legitimate Play installation and check package/version/hashes/signing certificate. Extract host/path/schema/token/session/pinning/integrity candidates with jadx/apktool/MobSF, but keep artifacts/analysis output outside Git.
 3. On the Web, the user logs in themselves; observe only method, origin, path, event name, status, content-type, and timing for 1 allowed read-screen operation through DevTools. Do not save request/response bodies, headers, cookies, tokens, IDs, or actual values. If using HAR, exclude bodies/headers at capture time and scan for secrets/PII before sharing.
-4. In the app on the owner’s device, operate only read screens such as assets, balance history, execution history, and reports; observe only host/path/status and similar metadata with standard ADB/logcat/Perfetto or ordinary local VPN capture. If TLS pinning prevents viewing contents, do not bypass it; limit work to static candidates and UI-automation assessment. Stop collection immediately if logcat emits actual values.
-5. Compare confirmed Web/app read events, distinguishing matching schemas from app-specific APIs/tokens. If read-only replay cannot synthesize the body and requires a real session, restrict it to the owner’s device, 1 event, 1 attempt, and a deny-by-default egress proxy.
+4. In the app on the owner's device, operate only read screens such as assets, balance history, execution history, and reports; observe only host/path/status and similar metadata with standard ADB/logcat/Perfetto or ordinary local VPN capture. If TLS pinning prevents viewing contents, do not bypass it; limit work to static candidates and UI-automation assessment. Stop collection immediately if logcat emits actual values.
+5. Compare confirmed Web/app read events, distinguishing matching schemas from app-specific APIs/tokens. If read-only replay cannot synthesize the body and requires a real session, restrict it to the owner's device, 1 event, 1 attempt, and a deny-by-default egress proxy.
 6. The user downloads a report/ZIP themselves once and places it in local temporary storage outside Git. Initially inspect only masked column names, filenames, encoding, and period representations, without loading values. Do not commit, log, or send raw files to the cloud.
 7. Create synthetic fixtures only from confirmed schemas and verify the offline parser. Do not copy actual values into fixtures. Do not explore unknown maximum periods/counts through repeated retrieval.
 
@@ -339,10 +339,10 @@ Rechecked without entering credentials whether public artifacts researched in PR
 
 ### Browser observation
 
-- The initial public-login UI check mistakenly used ordinary Windows Chrome 151, confirming HTTP 200, email address/account number, password, and `パスキーでログイン` (“log in with a passkey”). That tab was closed. Only Kogane Capture Chrome is authoritative for subsequent authenticated network/schema observation.
+- The initial public-login UI check mistakenly used ordinary Windows Chrome 151, confirming HTTP 200, email address/account number, password, and `パスキーでログイン` ("log in with a passkey"). That tab was closed. Only Kogane Capture Chrome is authoritative for subsequent authenticated network/schema observation.
 - Initial display loaded `/libs/simplewebauthn-browser.min.js` and the Cloudflare Turnstile script/iframe.
-- Before credential interaction, the browser sent `POST /api/cccmdipresen/gw/initiateLoginWithPasskey` once and received HTTP 200 `application/json`. The private capture’s response contained `challenge`, RP ID, timeout, and `userVerification`; RP ID was `sbivc.co.jp`, and user verification `required`. Values are not saved in Git or PRs. This event bootstraps a WebAuthn challenge; although POST, it is not a write changing assets/settings. It is a concrete example of why HTTP method alone cannot classify reads/writes.
-- Only the presence of the owner’s SBI VCトレード item and passkey section in the Bitwarden vault was checked. Username, password, passkey material, TOTP, cookies, and response bodies were not displayed/copied/saved. Live bootstrap uses the existing passkey in Kogane Capture Chrome, retaining ID/password + MFA as the officially available fallback.
+- Before credential interaction, the browser sent `POST /api/cccmdipresen/gw/initiateLoginWithPasskey` once and received HTTP 200 `application/json`. The private capture's response contained `challenge`, RP ID, timeout, and `userVerification`; RP ID was `sbivc.co.jp`, and user verification `required`. Values are not saved in Git or PRs. This event bootstraps a WebAuthn challenge; although POST, it is not a write changing assets/settings. It is a concrete example of why HTTP method alone cannot classify reads/writes.
+- Only the presence of the owner's SBI VCトレード item and passkey section in the Bitwarden vault was checked. Username, password, passkey material, TOTP, cookies, and response bodies were not displayed/copied/saved. Live bootstrap uses the existing passkey in Kogane Capture Chrome, retaining ID/password + MFA as the officially available fallback.
 
 ### Public bundles/source maps
 
@@ -368,9 +368,9 @@ Login-page map `b21877a.js.map` had 91,166 bytes and SHA-256 `d5c3e578f302981163
 | `executionList`       | Same as above                | `secureKey`, page, sort, `historical`                  | Execution history. Separate recent/historical views |
 | `getCashflowList`     | Same as above                | `secureKey`, page, `historical`, currency/type filters | Cashflow such as yen deposits/withdrawals           |
 
-The execution-history page’s runtime chunk was `32085e8.js` (23,308 bytes, SHA-256 `5669689931bf53e76a3cd98d4f4144ce70e5fb70e7feef9a74722085bee867c3`); its map had 61,277 bytes and SHA-256 `78b0bcfdaf5c37d72a8b79220c784286fe5dd5363e520e5187e6248d369867aa`. Source `pages/trade-history.vue` uses `sortKey: "executionDatetime"`, `sortAsc: "false"`, and page size 30. It obtains the historical page first, fetches the recent view only for page 0, and merges client-side. Page 1 onward uses only the historical view. The PoC follows that order and those values, without guessed sort keys or scanning every recent page.
+The execution-history page's runtime chunk was `32085e8.js` (23,308 bytes, SHA-256 `5669689931bf53e76a3cd98d4f4144ce70e5fb70e7feef9a74722085bee867c3`); its map had 61,277 bytes and SHA-256 `78b0bcfdaf5c37d72a8b79220c784286fe5dd5363e520e5187e6248d369867aa`. Source `pages/trade-history.vue` uses `sortKey: "executionDatetime"`, `sortAsc: "false"`, and page size 30. It obtains the historical page first, fetches the recent view only for page 0, and merges client-side. Page 1 onward uses only the historical view. The PoC follows that order and those values, without guessed sort keys or scanning every recent page.
 
-The deposit/withdrawal-history page’s chunk was `12ae015.js` (10,317 bytes, SHA-256 `d2a77c40f3a80e68010be78f14eec395c9fbddc7562ff4d65673b15242d5e706`); its map’s SHA-256 was `4746882930a46470b5042c68ca9b3482afc3c92d745b8964dc50e904a6032269`. Source `pages/account-activity/history.vue` scans each page once with page size 30 and `historical: "true"`, without recent/old merging. Default filters are `currency: ["JPY"]` and `cashflowType: ["REMITTANCE_DEPOSIT", "REMITTANCE_WITHDRAW"]`. The public UI sends no date field; the PoC likewise sends no arbitrary date filter with a guessed format.
+The deposit/withdrawal-history page's chunk was `12ae015.js` (10,317 bytes, SHA-256 `d2a77c40f3a80e68010be78f14eec395c9fbddc7562ff4d65673b15242d5e706`); its map's SHA-256 was `4746882930a46470b5042c68ca9b3482afc3c92d745b8964dc50e904a6032269`. Source `pages/account-activity/history.vue` scans each page once with page size 30 and `historical: "true"`, without recent/old merging. Default filters are `currency: ["JPY"]` and `cashflowType: ["REMITTANCE_DEPOSIT", "REMITTANCE_WITHDRAW"]`. The public UI sends no date field; the PoC likewise sends no arbitrary date filter with a guessed format.
 
 In public source, `secureKey` is `store.state.loginId`; it is not confirmed as an Authorization bearer. Cookie names, presence of CSRF, binding of cookies to `secureKey`, server session TTL, refresh method, and whether ordinary HTTP replay is allowed after Turnstile remain unconfirmed in a live session. Do not interpret client constant `sessionTimeoutTime: 14400` as a server-side 4-hour guarantee.
 
@@ -381,11 +381,11 @@ In public source, `secureKey` is `store.state.loginId`; it is not confirmed as a
 - Passkey start: `POST /api/cccmdipresen/gw/initiateLoginWithPasskey`, with data `channel: "SIMPLE_MODE"`.
 - Passkey completion: `POST /api/cccmdipresen/gw/loginWithPasskey`. Sends challenge, credential ID, authenticator data, client data JSON, signature, and user handle.
 
-Password-login requests contain Turnstile token `response`, but public source’s passkey-start/completion request DTOs have no Turnstile token field. Start/completion returned 200 in Kogane Capture Chrome on 2026-08-31, and the same 2 requests succeeded with the new Worker session below. This demonstrated that this passkey route requires neither a Turnstile token, browser cookies, nor Cloudflare bot cookies.
+Password-login requests contain Turnstile token `response`, but public source's passkey-start/completion request DTOs have no Turnstile token field. Start/completion returned 200 in Kogane Capture Chrome on 2026-08-31, and the same 2 requests succeeded with the new Worker session below. This demonstrated that this passkey route requires neither a Turnstile token, browser cookies, nor Cloudflare bot cookies.
 
-Second auth’s `authType` is `0` for email, `1` for authenticator/TOTP, and `2` for SMS. On password-login failure, the client resets the widget rather than reusing the Turnstile token. Cloudflare specifies Turnstile tokens as 5-minute/single-use, not session credentials to save/reuse. After passkey completion, the flow goes to login-success handling without the second-auth endpoint.
+Second auth's `authType` is `0` for email, `1` for authenticator/TOTP, and `2` for SMS. On password-login failure, the client resets the widget rather than reusing the Turnstile token. Cloudflare specifies Turnstile tokens as 5-minute/single-use, not session credentials to save/reuse. After passkey completion, the flow goes to login-success handling without the second-auth endpoint.
 
-When login result `isAgreed` is false, the current UI proceeds to write event `setAgreement`. The collector does not automatically agree to terms; it stops that login and waits for the owner’s agreement. Since 2026-11-07 the collector retries the passkey login hourly while it waits, so collection resumes on its own once the owner has agreed ([§16](#16-resuming-after-a-terms-agreement-2026-11-07)).
+When login result `isAgreed` is false, the current UI proceeds to write event `setAgreement`. The collector does not automatically agree to terms; it stops that login and waits for the owner's agreement. Since 2026-11-07 the collector retries the passkey login hourly while it waits, so collection resumes on its own once the owner has agreed ([§16](#16-resuming-after-a-terms-agreement-2026-11-07)).
 
 ### Authenticated live verification
 
@@ -403,11 +403,11 @@ On 2026-08-31, the owner selected the existing Bitwarden-stored passkey in the *
 |     8 | Read-only trade-report list                             | `tradeReportList` twice, both HTTP 200 JSON                         |
 |     9 | page reload                                             | Redirect to `/login#verifyGa`                                       |
 
-Live `loginWithPasskey` request keys matched the public DTO: challenge, credential ID, authenticator data, client data JSON, signature, and user handle, with no Turnstile field. All fields used unpadded base64url. `clientDataJSON` had `webauthn.get`, origin `https://simple.sbivc.co.jp`, and `crossOrigin: false`; authenticator data was 37 bytes, with matching RP ID hash, flags `0x1d` (UP/UV/BE/BS), counter 0, and a P-256 ECDSA ASN.1 DER signature. Converting the Bitwarden-stored credential ID’s UUID to raw 16 bytes matched the request value; the user handle matched too.
+Live `loginWithPasskey` request keys matched the public DTO: challenge, credential ID, authenticator data, client data JSON, signature, and user handle, with no Turnstile field. All fields used unpadded base64url. `clientDataJSON` had `webauthn.get`, origin `https://simple.sbivc.co.jp`, and `crossOrigin: false`; authenticator data was 37 bytes, with matching RP ID hash, flags `0x1d` (UP/UV/BE/BS), counter 0, and a P-256 ECDSA ASN.1 DER signature. Converting the Bitwarden-stored credential ID's UUID to raw 16 bytes matched the request value; the user handle matched too.
 
 The `accountMargin` body contained `cashBalance`, `receivedMarginList` (46 items), `lendingLimitList` (33 items), `withdrawalLimitList` (23 items), `restrictedWithdrawalAmountList` (23 items), and related margin fields. Only counts/field names were recorded, not items, amounts, assets, or similar values. The `getAuthStatus` body had `isIdentified` and `isTotpIdentified`; `getPasskeyList` items had channel, credential ID, last-used datetime, label, registration datetime/source IP fields, and list length 1. Values were not saved.
 
-On the asset-holdings screen, `positionSummaryList` sent only `{secureKey}` and returned HTTP 200 JSON. This account’s live response body was an empty object, so position-item shape is not live-confirmed; the public bundle DTO structure remains provisional. The balance collector includes this event in its fixed allowlist alongside `cashBalanceList` and `accountMargin`.
+On the asset-holdings screen, `positionSummaryList` sent only `{secureKey}` and returned HTTP 200 JSON. This account's live response body was an empty object, so position-item shape is not live-confirmed; the public bundle DTO structure remains provisional. The balance collector includes this event in its fixed allowlist alongside `cashBalanceList` and `accountMargin`.
 
 The trade-history screen sent `executionList` twice as in the public source, with request keys `historical`, `isCloseOrder`, `isExOrder`, page number/size, `secureKey`, and sort ascending/key. Both returned HTTP 200; one had 6 items and the other 0. Distinguish recent/historical through request field `historical`, not inferred from response values. Live item keys included execution ID/sub-number, currency pair, product ID, execution quantity/price/datetime, commission amount/currency, trade/order price, order/buy-sell/close/ex-order type, settle/swap/base-currency PL, trade channel, public/internal memo, and value date. The envelope contained page number/size/total pages/total size and meta `secureKey`, session update time, status, and timestamp. Only field names/counts were saved; actual values were discarded.
 
@@ -415,7 +415,7 @@ The trade-report list sent `tradeReportList` twice, with request keys basis date
 
 Initial home display and read APIs succeeded, but reloading returned to `/login#verifyGa`. The cause remains unresolved among short-lived post-passkey sessions, additional verification on reload, cookie/sessionStorage combinations, Kogane Capture conditions, and other possibilities. Persistence across normal reload, transferring cookies/`secureKey` to Bun, and reuse by daily cron therefore remain unproven.
 
-Passkeys are not a proprietary method like SMBC Safety Pass requiring biometric approval on a particular bank app’s registered device every time. The existing Bitwarden credential logged in live, and its WebAuthn credential structure was obtainable through the CLI. Owner policy creates no Kogane-specific credential; the same existing credential is used for unattended Worker reauthentication. Treat private keys, credential IDs, user handles, and counters as financial credentials restricted to Worker Secrets, not Git or Durable Objects; only resulting sessions go into encrypted Durable Object state.
+Passkeys are not a proprietary method like SMBC Safety Pass requiring biometric approval on a particular bank app's registered device every time. The existing Bitwarden credential logged in live, and its WebAuthn credential structure was obtainable through the CLI. Owner policy creates no Kogane-specific credential; the same existing credential is used for unattended Worker reauthentication. Treat private keys, credential IDs, user handles, and counters as financial credentials restricted to Worker Secrets, not Git or Durable Objects; only resulting sessions go into encrypted Durable Object state.
 
 Cloudflare Workers Web Crypto implemented the same RP ID/origin, flags, counter, credential ID conversion, and P1363→DER signature conversion as the browser assertion above. Only required fields from the existing credential were supplied from Bitwarden CLI to Worker Secrets, and actual login from the Cloudflare Worker succeeded. With credential counter 0, no divergence from Bitwarden itself was observed; neither a dedicated passkey nor Container/browser handoff is needed.
 
@@ -439,13 +439,13 @@ Synthetic tests verified request shapes, recent/historical separation, paginatio
 
 1. Kogane Capture Chrome login succeeded with the existing passkey.
 2. Treated Kuebiko raw capture as a secret artifact; passed cookies and `secureKey` to a mode-600 tmpfs file without stdout exposure.
-3. Confirmed once that replay without cookies produces the application’s `ログインしていません` (“not logged in”) 403.
-4. With cookies + `secureKey`, the Bun client’s `cashBalanceList`, `accountMargin`, `positionSummaryList`, `executionList` recent/historical, and `getCashflowList` historical all returned HTTP 200 JSON and gateway `OK`.
+3. Confirmed once that replay without cookies produces the application's `ログインしていません` ("not logged in") 403.
+4. With cookies + `secureKey`, the Bun client's `cashBalanceList`, `accountMargin`, `positionSummaryList`, `executionList` recent/historical, and `getCashflowList` historical all returned HTTP 200 JSON and gateway `OK`.
 5. Confirmed pagination stopping and private output modes, then deleted the tmpfs session file. Actual values/counts/secrets were not recorded in Git/PRs.
 6. Triggered Workers Cron several times and confirmed rolling refresh of the encrypted session and 8 cookies.
 7. Supplied a minimal existing Bitwarden passkey to Worker Secrets; Worker-only new login and immediately subsequent read-only keepalive succeeded.
 
-Both direct authenticated-session replay and new bootstrap for use after expiry were demonstrated Worker-only. The existing Bun collector’s fixed read allowlist was also ported into the Worker, through saving sanitized responses to private R2. Password-route Turnstile, browser TLS fingerprints, Chrome, Containers, and TAMIA are not adopted.
+Both direct authenticated-session replay and new bootstrap for use after expiry were demonstrated Worker-only. The existing Bun collector's fixed read allowlist was also ported into the Worker, through saving sanitized responses to private R2. Password-route Turnstile, browser TLS fingerprints, Chrome, Containers, and TAMIA are not adopted.
 
 ### Runtime candidate priority
 
@@ -461,7 +461,7 @@ Both direct authenticated-session replay and new bootstrap for use after expiry 
 
 GitHub code search was rerun on 2026-08-31 for `simple.sbivc.co.jp`, `co.jp.sbivc.trade.app`, and `cashBalanceList`, but found no maintained public client logging in to current VCTRADE for network retrieval. No SBI VCトレード implementation was found in the CCXT snapshot of 2026-08-29 either.
 
-`kittyflip-zig/crypto-ledger-tools` is an MIT-licensed local CSV normalizer, not a network client. The 2026-06 snapshot’s `sbivc_trade_record` adapter recognizes `trade_record_list` or columns `約定日時/銘柄/売買/数量` (“execution datetime/asset/buy-sell/quantity”) and converts quantity, execution rate, fees, and similar fields to common JPY-quote records. SBI-specific fixtures/tests and a `CASHFLOW` parser were not found. It is an offline-import reference, not a precedent for authentication/session automation.
+`kittyflip-zig/crypto-ledger-tools` is an MIT-licensed local CSV normalizer, not a network client. The 2026-06 snapshot's `sbivc_trade_record` adapter recognizes `trade_record_list` or columns `約定日時/銘柄/売買/数量` ("execution datetime/asset/buy-sell/quantity") and converts quantity, execution rate, fees, and similar fields to common JPY-quote records. SBI-specific fixtures/tests and a `CASHFLOW` parser were not found. It is an offline-import reference, not a precedent for authentication/session automation.
 
 Additional technical references:
 
@@ -505,7 +505,7 @@ Leave-one-out tests using only `accountMargin` gave the following results.
 | Full header minus `__cf_bm`                                                 | HTTP 200 / gateway `OK`                                                        |
 | Full header minus `AWSALB`/`AWSALBCORS`/`AWSALBAPP-*`                       | Application-side 403                                                           |
 
-One attempt passed with only 6 cookies but was not reproducible, so do not remove `AWSALB` and `AWSALBCORS` from production input. The reproducible set here was 8 cookies: `vct_bff_sid`, `JSESSIONID`, split `AWSALBAPP-0..3`, `AWSALB`, and `AWSALBCORS`. Excluding `__cf_bm` still succeeded; the full header succeeded with both Bun’s default User-Agent and Chrome User-Agent. Cloudflare Bot Management cookies and Chrome UA are therefore not prerequisites for same-host replay. AWS routing cookies rotate frequently, so long-running collectors may need a cookie jar tracking response `Set-Cookie`. Do not yet assert parity across other IPs/regions.
+One attempt passed with only 6 cookies but was not reproducible, so do not remove `AWSALB` and `AWSALBCORS` from production input. The reproducible set here was 8 cookies: `vct_bff_sid`, `JSESSIONID`, split `AWSALBAPP-0..3`, `AWSALB`, and `AWSALBCORS`. Excluding `__cf_bm` still succeeded; the full header succeeded with both Bun's default User-Agent and Chrome User-Agent. Cloudflare Bot Management cookies and Chrome UA are therefore not prerequisites for same-host replay. AWS routing cookies rotate frequently, so long-running collectors may need a cookie jar tracking response `Set-Cookie`. Do not yet assert parity across other IPs/regions.
 
 ### Read-only collector verification with real data
 
@@ -537,7 +537,7 @@ and `5 21 * * *` in `config/alarm-jobs.json` are the only ones
 
 - Initially supply the empirically required 8 cookies and `secureKey` in Worker Secret `SESSION_SEED`.
 - Use Worker Secret `SESSION_ENCRYPTION_KEY` as an AES-256-GCM key to encrypt rotated sessions in the Durable Object.
-- Worker Secret `PASSKEY_CREDENTIAL` contains only the existing Bitwarden credential’s credential ID, PKCS#8 P-256 private key, RP ID, user handle, counter, and algorithm/curve. It excludes the master password and Bitwarden session key.
+- Worker Secret `PASSKEY_CREDENTIAL` contains only the existing Bitwarden credential's credential ID, PKCS#8 P-256 private key, RP ID, user handle, counter, and algorithm/curve. It excludes the master password and Bitwarden session key.
 - Each keepalive run (`*/15 * * * *`) sends the light read-only event
   `informationTitle` once; the official UI itself sends it every 10 minutes.
 - The daily job (`5 21 * * *`, 06:05 JST) reads cash balances, account margin,
@@ -561,8 +561,8 @@ and `5 21 * * *` in `config/alarm-jobs.json` are the only ones
 - Track only the 8 cookies from `Set-Cookie`, ignoring `__cf_bm`. Changes to `meta.secureKey` also update encrypted state.
 - Plaintext health contains only last attempt/success, HTTP status, a closed gateway-status category (`OK` or `rejected`; non-`OK` strings returned by the gateway are neither saved nor logged), cookie-update count, consecutive-failure count, and fixed error codes. It excludes balances/history/cookie values/response bodies.
 - Manual `/run`, `/reauth`, `/collect`, `/health`, and `ADMIN_TOKEN` were retired on 2026-11-08. Request manual collection through operations API `collection` and forced login through `session-refresh` (at most once per hour) ([ADR 0069](../adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08)).
-- Reauthenticate only when keepalive returns HTTP 401/403, gateway rejection, or a missing seed (while a terms agreement is pending, also on the gateway’s 3xx `http_rejected`; [§16](#16-resuming-after-a-terms-agreement-2026-11-07)). A 6-hour cooldown (1 hour for up to 72 hours while an agreement is pending) prevents repeated logins; concurrent operations of the same kind collapse into one Promise, and keepalive/reauthentication session changes are serialized within the Durable Object.
-- Passkey-completion response `body.accountId` matched the immediately subsequent read API’s `secureKey`, so use it as the new session’s `secureKey`. If `isAgreed !== true`, end that login with `manual_agreement_required` without sending `setAgreement`.
+- Reauthenticate only when keepalive returns HTTP 401/403, gateway rejection, or a missing seed (while a terms agreement is pending, also on the gateway's 3xx `http_rejected`; [§16](#16-resuming-after-a-terms-agreement-2026-11-07)). A 6-hour cooldown (1 hour for up to 72 hours while an agreement is pending) prevents repeated logins; concurrent operations of the same kind collapse into one Promise, and keepalive/reauthentication session changes are serialized within the Durable Object.
+- Passkey-completion response `body.accountId` matched the immediately subsequent read API's `secureKey`, so use it as the new session's `secureKey`. If `isAgreed !== true`, end that login with `manual_agreement_required` without sending `setAgreement`.
 
 ### Live results
 
@@ -574,11 +574,11 @@ A subrequest with `redirect: "error"` in Workers runtime threw TypeError without
 
 Cron fired several times, remaining HTTP 200, gateway `OK`, and consecutive failures 0 at least as of 2026-08-31 02:00 UTC.
 
-On the same day, Bitwarden CLI was unlocked in WSL and only the required 7 fields were extracted from the `SBI VCトレード` item’s existing FIDO2 credential to tmpfs. After supplying the Worker Secret, `/reauth` was executed once; the Cloudflare Worker successively completed `initiateLoginWithPasskey`, P-256 WebAuthn assertion generation, `loginWithPasskey`, and `informationTitle` with the new session. Health showed reauthentication success, HTTP 200, gateway `OK`, 3 cookie updates, and 0 consecutive failures. No Chrome, TAMIA, Japanese residential IP, Turnstile token, previous session cookies, or `__cf_bm` were used.
+On the same day, Bitwarden CLI was unlocked in WSL and only the required 7 fields were extracted from the `SBI VCトレード` item's existing FIDO2 credential to tmpfs. After supplying the Worker Secret, `/reauth` was executed once; the Cloudflare Worker successively completed `initiateLoginWithPasskey`, P-256 WebAuthn assertion generation, `loginWithPasskey`, and `informationTitle` with the new session. Health showed reauthentication success, HTTP 200, gateway `OK`, 3 cookie updates, and 0 consecutive failures. No Chrome, TAMIA, Japanese residential IP, Turnstile token, previous session cookies, or `__cf_bm` were used.
 
 On the same day, an R2 binding and daily Cron were added to the Worker and an admin-authenticated `POST /collect` was executed once. The 6 artifacts `cash-balances`, `account-margin`, `position-summary`, `executions-recent-page-0001`, `executions-historical-page-0001`, and `cashflows-historical-page-0001`, totaling 35,180 bytes, plus a manifest were saved to private R2 with status `success` and failure 0. All artifacts were retrieved again from R2, confirming manifest SHA-256 matches, JSON-envelope gateway status `OK`, and exclusion of `meta.secureKey`. Financial values/bodies were neither displayed nor logged.
 
-On 2026-09-07, 5 parsers were added to normalize the same 6 datasets into Layer B with source separation. Recent/historical executions share the provider’s record shape and composite identity, so one parser using a collision-free tuple of `CExecutionId` and `CExecutionIdSubNo` handles both without duplicate implementation. Cashflow direction comes from signed `cashflowAmount`, not inferred from type labels. Cryptoasset quantity/amount/price retain decimal text and scale, without guessed conversion to known minor units as for fiat currencies. Every observation retains a fixed source account, JSON locator, and sanitized gateway meta/page context.
+On 2026-09-07, 5 parsers were added to normalize the same 6 datasets into Layer B with source separation. Recent/historical executions share the provider's record shape and composite identity, so one parser using a collision-free tuple of `CExecutionId` and `CExecutionIdSubNo` handles both without duplicate implementation. Cashflow direction comes from signed `cashflowAmount`, not inferred from type labels. Cryptoasset quantity/amount/price retain decimal text and scale, without guessed conversion to known minor units as for fiat currencies. Every observation retains a fixed source account, JSON locator, and sanitized gateway meta/page context.
 
 Timestamps (parsers 0.2.1, 2026-11-06): `meta.timestamp`, `statusDate`,
 `executionDatetime` and `eventDatetime` are read in the audited slash form
@@ -620,7 +620,7 @@ The importer also rejects duplicate provider identities within one page and thro
 Recent/historical views are validated as separate sets, so the same execution tuple may appear
 in both views; Layer B retains it with the same externalId and different sourceView.
 
-When `collect` detects a pagination anomaly, the collector saves the last provider response that caused it before finalizing a partial manifest. For that final artifact, the importer validates the envelope, gateway status, secret removal, R2 metadata, hash, size, and dataset position; rather than treating it as a normal page, it catalogues it centrally as “raw evidence of the failure cause.” This preserves the anomalous response while sealing the whole run as partial/failed.
+When `collect` detects a pagination anomaly, the collector saves the last provider response that caused it before finalizing a partial manifest. For that final artifact, the importer validates the envelope, gateway status, secret removal, R2 metadata, hash, size, and dataset position; rather than treating it as a normal page, it catalogues it centrally as "raw evidence of the failure cause." This preserves the anomalous response while sealing the whole run as partial/failed.
 The observation pipeline carries parent fetch-run status and failure count into artifact metadata
 and excludes runs without success and failure 0 from execution across all parsers.
 Current queries recheck the same conditions, so even successful parses left by an older implementation
@@ -629,7 +629,7 @@ run to 0 current observations.
 
 The outbox remains even if immediate transfer fails; `scripts/backfill-raw-evidence.sh` repeats separate top-level requests with cursors. Each request scans at most 1 R2 object and, when it finds a manifest, idempotently resubmits only 1 run. Automatic retries/monitoring belong to the later reconciler and are outside this change.
 
-Manifests exceeding the synchronous limit are counted as deferred rather than backfill failures, advancing the cursor. This prevents large runs from permanently blocking later synchronously transferable runs, while deferred runs remain candidates for the reconciler’s Queue chunking.
+Manifests exceeding the synchronous limit are counted as deferred rather than backfill failures, advancing the cursor. This prevents large runs from permanently blocking later synchronously transferable runs, while deferred runs remain candidates for the reconciler's Queue chunking.
 
 ### Production verification of central transfer
 
