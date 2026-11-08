@@ -69,7 +69,7 @@ is `"true"`. The route set is closed: any other path under `/api/ops/v1` is
 | `POST /api/ops/v1/projections`               | `{reason, idempotencyKey?}`                                | `202 {operationId, status}` | The request is stored. Publication is complete when `projected` is.        |
 | `POST /api/ops/v1/sessions/{source}/refresh` | `{idempotencyKey?}`                                        | `202 {operationId, status}` | The request is stored; `waiting_for_human` when a person must act.         |
 | `GET /api/ops/v1/operations/{id}`            | –                                                          | `200` operation record      | Reads the stored record; it never asks a downstream system "are you done". |
-| `GET /api/ops/v1/operations`                 | query `kind`, `status`, `cursor`, `limit`                  | `200` one page of summaries | Reads the caller's stored requests, newest first ([list](#the-list)).      |
+| `GET /api/ops/v1/operations`                 | query `kind`, `status`, `cursor`, `limit`                  | `200` one page of summaries | Reads every principal's stored requests, newest first ([list](#the-list)). |
 
 An import's `runId` is checked against the bucket key's own run grammar
 (`RUN_ID` in `packages/collection/src/keys.ts`, imported by
@@ -241,9 +241,11 @@ whichever principal made it: the operator in the browser or any MCP client
 - **Cost.** One range of the index `ops_requests_open` per allowed
   (status, kind) pair (thirty without a filter, six for a kind, five for a
   status, one for both), each limited to the page, merged newest first. Rows
-  sharing the boundary timestamp are sorted. No row is read only to be
-  skipped, so a page reads at most (pairs × (limit + 1)) rows plus ties, at
-  any store size. No migration was added.
+  sharing the boundary timestamp are sorted, and after a cursor the tied rows
+  at or ahead of it are skipped. No range reads another pair's rows, so a
+  page reads at most (pairs × (limit + 1)) rows plus ties, at any store
+  size; the rows it does not return are the other pairs' candidates and
+  those ties. No migration was added.
 - **Audit.** Each request is recorded once as `ops.operation.list`, with the
   number of rows shown and whether a next page exists
   ([audit log](audit-log.md)).
@@ -672,11 +674,11 @@ The collector execution services are in
 
 Synthetic data only.
 
-- `services/app/test/ops-api.test.ts` (35 checks over the real
+- `services/app/test/ops-api.test.ts` (41 checks over the real
   Worker, the real migrations and the real store): flag-off behaviour, the
   closed route and verb set with the flag on, `/api/meta` discovery, one
-  record per request, re-send, idempotency conflict, per-principal scoping,
-  schema refusals of SQL / storage keys / external URLs / unknown keys /
+  record per request, re-send, idempotency conflict, one operation per
+  principal for one key (either principal reads the other's), schema refusals of SQL / storage keys / external URLs / unknown keys /
   impossible dates (G3-13), an import run id outside the terminal key's
   grammar, that the import schema accepts exactly the run ids
   `terminalKey` accepts and that the MCP import tool publishes that grammar,

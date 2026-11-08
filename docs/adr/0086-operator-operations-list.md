@@ -142,9 +142,12 @@ compound SELECT"; seen in the `services/app` workerd tests).
 - No migration and no new index.
 - A page reads, per arm, at most `page+1` rows plus the rows that share the
   boundary `created_at` (the index has no `operation_id`, so SQLite sorts the
-  last order term within one timestamp). No row is read only to be dropped,
-  so a page costs at most (arms × (page + 1)) rows plus ties, at any store
-  size: thirty arms at most, 1,530 rows for a page of 50. Option 3's index is
+  last order term within one timestamp, and after a cursor skips the tied
+  rows at or ahead of it). No arm reads a row of another (status, kind) pair
+  or filters on a column the index does not hold; the rows a page reads but
+  does not return are the other arms' candidates and those ties. A page costs
+  at most (arms × (page + 1)) rows plus ties, at any store size: thirty arms
+  at most, 1,530 rows for a page of 50. Option 3's index is
   the fix if the unfiltered page's thirty ranges show as a cost.
 - The query and paging live in `packages/application` (`listOperations`), not
   in the route or the tool: both adapters pass the store they are given and
