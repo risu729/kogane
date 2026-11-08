@@ -21,7 +21,7 @@ The following are strictly prohibited.
 - Changes to payment cards, member information, external-ID linking, passwords, OTP delivery methods, easy login, biometrics, or similar settings
 - Issuing ticket-pickup codes, campaign/points use, or new registration/consent for external services
 
-Do not retain member IDs, names, birth dates, addresses, phone numbers, emails, payment/transit-IC card numbers, reservation numbers, deposit-reference numbers, Cookies, OTPs, sessions/tokens, passkey private keys, actual reservations, boarding dates, routes, trains, seats, amounts, or receipt addressees in HARs, screenshots, HTML, PDFs, logs, or the repository. Do not bypass security controls such as WAF/CAPTCHA, rate limits, certificate pinning, or device integrity/attestation.
+Do not retain member IDs, names, birth dates, addresses, phone numbers, emails, payment/transit-IC card numbers, reservation numbers, `お預かり番号` (deposit-reference number), Cookies, OTPs, sessions/tokens, passkey private keys, actual reservations, boarding dates, routes, trains, seats, amounts, or receipt addressees in HARs, screenshots, HTML, PDFs, logs, or the repository. Do not bypass security controls such as WAF/CAPTCHA, rate limits, certificate pinning, or device integrity/attestation.
 
 ## 2. Research method and strength of evidence
 
@@ -37,12 +37,12 @@ Do not retain member IDs, names, birth dates, addresses, phone numbers, emails, 
 | ----------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | Valid reservations before departure | Smart EX reservation ledger    | Web/EX app `予約確認/変更/払戻` (reservation confirmation/change/refund)                                            | Product, boarding date, route, train, accommodation/seat, passengers, IC assignment, payment-card identification | Change/refund buttons coexist; highest risk. Not a replacement for all past history    |
 | Purchases/changes/refunds           | Smart EX usage history         | Web `ご利用履歴・領収書の発行` (usage history/receipt issuance), app `購入履歴・領収書` (purchase history/receipts) | Reconciles reservations, changes, and refunds as separate events; up to 15 months                                | Station refunds after ticket pickup, etc. may be absent. No official CSV/API           |
-| Receipts/refund statements/fees     | Smart EX displayed documents   | Web/app receipt display                                                                                             | Invoice-compliant; reconciles purchases and refunds/fees by deposit-reference number                             | Not one net statement. PDF depends on device. Includes addressee/actual values         |
+| Receipts/refund statements/fees     | Smart EX displayed documents   | Web/app receipt display                                                                                             | Invoice-compliant; reconciles purchases and refunds/fees by `お預かり番号`                                       | Not one net statement. PDF depends on device. Includes addressee/actual values         |
 | Actual card charges/refunds         | Card issuer                    | Finalized card statements                                                                                           | Final authority for authorization/settlement and refunds across billing cutoffs                                  | Smart EX boarding date may differ from card usage date                                 |
 | Shinkansen boarding rights/gate use | Smart EX carriage/gate records | Reservation details, gate-issued EX usage slip                                                                      | IC assignments and train/seat guidance at boarding                                                               | Independent gate entry/exit history/export in public UI unconfirmed                    |
 | IC balances/conventional-line use   | IC issuer                      | Suica/ICOCA and similar apps/history                                                                                | Authority for conventional-line fares/IC balances                                                                | Smart EX charges are not deducted from IC balance. Keep separate from Smart EX history |
 
-Use separate objects for `reservation`, `purchase_event`, `refund_event`, `receipt_document`, `boarding_assignment`, `card_settlement`, and `transit_ic_event`. Deposit-reference numbers are reconciliation candidates within Smart EX, but are treated like secrets/PII and never used as repository keys. Use random local source keys for storage.
+Use separate objects for `reservation`, `purchase_event`, `refund_event`, `receipt_document`, `boarding_assignment`, `card_settlement`, and `transit_ic_event`. `お預かり番号` are reconciliation candidates within Smart EX, but are treated like secrets/PII and never used as repository keys. Use random local source keys for storage.
 
 ## 4. Reservation, usage, and refund history
 
@@ -54,7 +54,7 @@ Confirmed facts from the [official reservation-confirmation procedure](https://w
 - Details show the last four digits and international brand of the payment card.
 - Boarding transit-IC assignment status can be checked. A displayed number indicates assignment.
 
-Official screen examples show boarding date, train name, departure/arrival times, route, accommodation/seat, etc. Live validation should check round-trip/connecting journeys as one reservation, companions, non-reserved seating, early-discount products, and changed/ticket-picked-up/gate-entered state fields. However, reservation details have adjacent `変更` (change), `払戻` (refund), and `IC指定` (IC assignment) controls, making this retrieval route more dangerous than usage history.
+Official screen examples show boarding date, train name, departure/arrival times, route, accommodation/seat, etc. Live validation should check whether round-trip/connecting journeys are treated as one reservation, and check state fields for companions, non-reserved seating, early-discount products, changed reservations, ticket pickup, and gate entry. However, reservation details have adjacent `変更` (change), `払戻` (refund), and `IC指定` (IC assignment) controls, making this retrieval route more dangerous than usage history.
 
 The reservation list is a source for current/future carriage-contract state, not a settlement-event ledger for the past 15 months. Disappearance alone does not establish boarding, refund, or expiry; reconcile it with usage history/refund statements.
 
@@ -82,13 +82,13 @@ Public official material did not establish rows per page, total maximum count, p
 Confirmed facts from the [receipt display service](https://smart-ex.jp/reservation/reserve_smart/receipt/):
 
 - Display is available from 5:30 the day after reservation completion through 23:30 up to 15 months later, not on the reservation day.
-- `領収書表示` (receipt display), `払戻明細` (refund statement), and, where fees apply, `払戻手数料` (refund fee) are separate documents. Calculate final net cost by combining documents with the same deposit-reference number.
+- `領収書表示` (receipt display), `払戻明細` (refund statement), and, where fees apply, `払戻手数料` (refund fee) are separate documents. Calculate final net cost by combining documents with the same `お預かり番号`.
 - Entering an addressee and printing produces an invoice-compliant screen. There is no issuance-count limit within the display period.
 - For purchases from 2023-04-08 onward, coverage was expanded to specified-amount refunds for non-use, delays of two hours or more, etc.
 
 The [PDF FAQ](https://faq.expy.jp/faq/show/1298?site_domain=smart-ex) says saving displayed receipts as PDF depends on the device; Web-form applications are mailed on paper with no PDF issuance. Thus, this is an official HTML/print-view route converted to PDF with device printing, not an official PDF-download API. Official public material did not establish CSV, bulk export, or machine-readable receipt schemas.
 
-Collecting only receipts omits refunds/fees. The collector needs document types and separately reconciles counts of `領収書表示`, `払戻明細`, and `払戻手数料`. PDFs may contain boarding dates, routes, amounts, addressees, and deposit-reference numbers. Originals belong in encrypted storage outside the repository; this research's live validation checks only field names without saving documents.
+Collecting only receipts omits refunds/fees. The collector needs document types and separately reconciles counts of `領収書表示`, `払戻明細`, and `払戻手数料`. PDFs may contain boarding dates, routes, amounts, addressees, and `お預かり番号`. Originals belong in encrypted storage outside the repository; this research's live validation checks only field names without saving documents.
 
 ### 4.4 Post-departure, non-use, and automatic refunds
 
@@ -256,7 +256,7 @@ This demonstrates receipt retrieval through a Playwright browser route, but does
 
 ### 10.2 Public reservation-notification email Gist
 
-[dora1998's Gist](https://gist.github.com/dora1998/5a626f20797bd305fd93c76faab9da1b/8ba79dde474131fe4a20e12107467302d4b201b7) (revision `8ba79dde474131fe4a20e12107467302d4b201b7`, 2019, no license shown) uses Google Apps Script to search reservation emails from `yoyaku@expy.jp`, extract deposit-reference number, boarding date, stations, times, and train with regular expressions, and create Google Calendar events.
+[dora1998's Gist](https://gist.github.com/dora1998/5a626f20797bd305fd93c76faab9da1b/8ba79dde474131fe4a20e12107467302d4b201b7) (revision `8ba79dde474131fe4a20e12107467302d4b201b7`, 2019, no license shown) uses Google Apps Script to search reservation emails from `yoyaku@expy.jp`, extract `お預かり番号`, boarding date, stations, times, and train with regular expressions, and create Google Calendar events.
 
 This is a concrete secondary-notification transport without login/session handling. However, it does not guarantee complete changes/refunds/automatic refunds/receipts/IC assignments/card settlement, and calendar creation is a write. This collector does not execute it. Even if email becomes a supplementary source, Smart EX usage history remains authoritative and email bodies/PII are not saved.
 
@@ -328,7 +328,7 @@ Read-only live validation:
 - [ ] Reservation list/detail field names, states, round-trip/connection/companion structure; no saved values
 - [ ] Oldest 15-month history boundary, inquiry period, rows per page, pagination, total count, stable-ID presence
 - [ ] Reservation/change/refund/non-use/delay/fee event types and before/after/original-transaction link-field presence
-- [ ] `領収書表示`/`払戻明細`/`払戻手数料` counts, HTML/print/PDF fields, deposit-reference links
+- [ ] `領収書表示`/`払戻明細`/`払戻手数料` counts, HTML/print/PDF fields, `お預かり番号` links
 - [ ] Presence of CSV/JSON/export navigation; do not assume unmentioned functions are absent
 - [ ] Boarding IC only `specified`/assignment counts; no capture of 17-digit numbers
 - [ ] Actual-boarding/gate-history presence and distinction from reservations/purchases; do not open IC balances/conventional-line history
@@ -340,7 +340,7 @@ Immediate stops:
 
 - A confirmation/execution button for reservation, purchase, change, refund/cancellation, passenger reduction, IC assignment/editing, ticket pickup, or settings becomes a target
 - OTP sending, 3D Secure, identity verification, WESTER linking/consent, passkey/biometric registration, or password reset is required
-- Member/card/IC/reservation/deposit-reference numbers, Cookies/tokens/OTPs, actual dates/routes/trains/seats/amounts/addressees could remain in logs/HAR/screenshots/HTML/PDF
+- Member/card/IC/reservation/`お預かり番号`, Cookies/tokens/OTPs, actual dates/routes/trains/seats/amounts/addressees could remain in logs/HAR/screenshots/HTML/PDF
 - 401/403/429, CAPTCHA/bot/interstitial, Akamai denial, authentication loop, or pinning/integrity error occurs
 - Unknown `_ActionID/_PageID`, unexpected redirects, generic selectors, or inability to separate write/read sessions
 - Cannot determine source boundaries among Smart EX, Express Reservation, card settlement, and IC transit ledgers
@@ -349,7 +349,7 @@ Immediate stops:
 
 ### Confirmed
 
-- Smart EX usage history covers up to 15 months from the day after reservation, displaying reservations/changes/refunds. Receipts, refund statements, and refund fees are separate documents, combined by deposit-reference number to calculate net cost.
+- Smart EX usage history covers up to 15 months from the day after reservation, displaying reservations/changes/refunds. Receipts, refund statements, and refund fees are separate documents, combined by `お預かり番号` to calculate net cost.
 - Official CSV/public API/bulk PDF is unconfirmed. Receipt PDF saving depends on device printing.
 - Smart EX charges the card at reservation, not boarding-IC balance. IC identifies Shinkansen boarding rights; conventional-line fares/IC balances have separate ledgers.
 - Direct login uses ID/password and risk-based OTP. Easy login is a dedicated password-only URL, not a passkey. Direct Smart EX passkeys are unconfirmed; do not reinterpret WESTER passkeys as Smart EX-specific support.
