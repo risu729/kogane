@@ -309,6 +309,7 @@ describe("account coverage", () => {
       });
       const old = store.parse(first.artifacts[0]!, "st-george-balances", {
         kind: "published",
+        version: "1.0.1",
         claim: { completeness: "complete" },
       })!;
       ids.identify(old, [{ ref: "synthetic-ref-old", kind: "balance" }]);
@@ -319,6 +320,7 @@ describe("account coverage", () => {
       });
       const partial = store.parse(second.artifacts[0]!, "st-george-balances", {
         kind: "published",
+        version: "1.0.1",
         claim: { completeness: "partial", cause: "page_missing" },
       })!;
       ids.identify(partial, [
