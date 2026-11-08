@@ -21,24 +21,22 @@ over `/mcp`, whose callers are all agent-only
 `kogane.ops.*` tools there, which every MCP client applies as itself
 (`src/ops-tools.ts`, [ops-api](ops-api.md#mcp), ADR 0084).
 
-**The committed production configuration enables one MCP reader.**
-The owner's dedicated `mcp-client:<sub>` entry grants `summary.read` and
-`records.read` across sources and accounts, with a 100-row read budget
-including cursor offset and pagination lookahead.
-`AGENT_GRANTS` remains empty: this configuration grants no proposals or raw
-evidence. Because the owner's subject is the operator (`OPERATOR_SUBJECTS`),
-its MCP principal also applies the operations of ADR 0063 inside that
-whole-store scope, as itself
-([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)). The MCP audience is
+**Every MCP client holds the whole-store grant.**
+There is no grant table (`AGENT_GRANTS` is empty and unread): every client the
+MCP Access application admits holds `fullGrant` (`packages/application/src/grants.ts`),
+that is all six capabilities, including `evidence.read`, `audit.read`,
+`interpretation.propose` and `schedules.read`, with `"*"` for `sources`,
+`accounts` and `scheduleSources`, bounded only by the fixed per-call limits
+(at most 1000 rows per read, including cursor offset and pagination lookahead)
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)). Each
+client applies the operations of ADR 0063 as itself. The MCP audience is
 separate from the browser audience. The dedicated `kogane-mcp.takuk.me`
 hostname must be attached to the App Worker independently, because the
 current version deployment does not synchronize App triggers. Configuration
 and deployment are not evidence that a client connected; the ordered live
 checks in [Connecting an MCP client](#connecting-an-mcp-client) still apply.
-That entry names no schedule capability, so it reads no maintenance window.
-Maintenance windows can be read under their own capability (`schedules.read`);
-revising one, like a job setting, is an operation any MCP client the MCP
-Access application admits applies as itself, over every schedule
+Maintenance windows are read under `schedules.read`; revising one, like a job
+setting, is an operation any MCP client applies as itself, over every schedule
 ([below](#maintenance-windows)). Lease release stays operator-only
 ([schedules](schedules.md#settings-api)): its MCP tool exists and refuses
 every call ([below](#maintenance-windows)).
