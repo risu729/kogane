@@ -498,6 +498,11 @@ POST /api/command/v1/operation  { operationId }                     -> { receipt
 - POST only, on exactly these five paths. Everything else in the evidence
   browser stays GET-only; any other non-GET request is still `405`.
 - No query string, body bounded to 16 KiB, `no-store` on every answer.
+- An `Origin` that is present and not the Worker's own is
+  `403 origin_not_allowed` before the flag, the grant or the body is read
+  ([ADR 0078](adr/0078-own-origin-state-changing-routes.md)), so a page on
+  another site cannot drive the operator's browser session into an approval
+  or a commit. A client that sends no `Origin` is unaffected.
 - Only the upstream status and JSON body cross back to the client: no upstream
   headers, no exception text, no provider content.
 
@@ -592,7 +597,7 @@ lifecycle codes `invalid_command`, `commands_disabled`, `subject_not_granted`,
 
 Statuses: 400 invalid input, 403 refusal (`approval_required`,
 `commands_disabled`, `subject_not_granted`, `actor_not_supported`,
-`evidence_restricted`), 404 not found, 409 conflict (`stale_context`,
+`evidence_restricted`, `origin_not_allowed`), 404 not found, 409 conflict (`stale_context`,
 `idempotency_conflict`, approval/plan state), 429 `budget_exceeded`, 500
 `commit_failed`, 503 this deployment cannot serve the request at all
 (`grants_misconfigured`, `command_executor_unavailable`). No error text

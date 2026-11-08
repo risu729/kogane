@@ -230,7 +230,12 @@ any write that would re-point a bound target, even a direct one.
 ## Authorization
 
 Two gates in order, after the Access check that every route of this Worker
-already does:
+already does. Between them, on a `POST`, sits the own-origin rule: an
+`Origin` that is present and not the Worker's own is
+`403 origin_not_allowed` before a grant, a schema or the store is touched
+([ADR 0078](adr/0078-own-origin-state-changing-routes.md)). With the flag
+off the route answers as it did before (a `POST` is `405`), whatever its
+`Origin`. An operator's `curl` sends no `Origin` and is unaffected.
 
 1. the deployment flag `OPS_API_ENABLED`;
 2. the change lifecycle's principal grading (`OPERATOR_SUBJECTS` +
@@ -279,6 +284,7 @@ carries the route label, the status and the code, never a ref.
 | `approval_required`    | 403  | An agent asked for work only an operator may request            |
 | `subject_not_granted`  | 403  | The verified subject is in neither grant list                   |
 | `actor_not_supported`  | 403  | The verified subject is not a shape the decision log can record |
+| `origin_not_allowed`   | 403  | A `POST` carried another site's `Origin` (ADR 0078)             |
 | `not_found`            | 404  | No such operations route                                        |
 | `receipt_not_found`    | 404  | No such operation for this principal                            |
 | `idempotency_conflict` | 409  | The same key was reused for a different payload                 |
