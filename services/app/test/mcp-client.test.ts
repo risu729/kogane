@@ -1009,8 +1009,9 @@ describe("an internal failure leaves only a closed code (G3-08)", () => {
         "2026-07-28 tools/call",
         await modern("tools/call", { name: "kogane.context.open", arguments: {} }, { environment }),
       ],
-      // The tool list asks the store whether purchases are served: a probe
-      // its route makes too, so the route's 503 catalogue_read_failed.
+      // The tool list's store reads are the availability checks (the
+      // reported state, card settlements, the page reads, card purchases),
+      // each one its route makes too: the route's 503 catalogue_read_failed.
       ["2025-11-25 tools/list", await rpc("tools/list", {}, { environment })],
       ["2026-07-28 tools/list", await modern("tools/list", {}, { environment })],
       [

@@ -680,18 +680,24 @@ and run tables, the tool is neither listed nor callable (`unknown_tool` on
 `/mcp`, `404 not_found` on its HTTP path), like `kogane.reported-state.read`;
 so is `kogane.events.read` without `economic_event_revisions`. When the store
 fails while one of these checks runs, the answer is
-`503 catalogue_read_failed`, as on the route (`pageReadStore`): on the HTTP
-path that response, and on `/mcp` the Worker's response to the whole
-`tools/call` or `tools/list` request, with no exception text
-(`test/page-read-probe.test.ts`). A limit: the other tools' store checks run
-outside `pageReadStore`. `tools/list` asks the reported state's views (for
-`kogane.reported-state.read` and `kogane.reconstructed-state.read`) and the
-card settlement schema before the page reads, and the card purchase schema
-after them; a failure in any of those is still `500 internal_error` for the
-whole request. So is the same failure when `kogane.reported-state.read`,
-`kogane.reconstructed-state.read`, `kogane.purchases.explain` or a
-`kogane.card-settlements.*` read is called, on `/mcp` or on its HTTP path,
-where their routes answer `503 catalogue_read_failed`.
+`503 catalogue_read_failed`, as on the route: on the HTTP path that
+response, and on `/mcp` the Worker's response to the whole `tools/call` or
+`tools/list` request, with no exception text in the answer, the log or the
+audit record. The same holds for the other tools that exist only with some
+tables or views: `kogane.reported-state.read` and
+`kogane.reconstructed-state.read` (the reported state's views),
+`kogane.purchases.explain` (card purchase recognition), and
+`kogane.card-settlements.read` and `kogane.card-settlements.ownership` (the
+card settlement schema). The page reads' checks run through `catalogue` in
+`pageReadStore`, the others' in `agent-api.ts` (`test/page-read-probe.test.ts`,
+`test/agent-probe.test.ts`). Every store read `tools/list` makes is one of
+these checks, so a store failure there is always `503`. A limit: once a
+tool's check has passed, a store failure inside the tool's own read differs.
+A page read runs its route's reader in `catalogue`, so it is
+`503 catalogue_read_failed` as a tool result (`isError: true` on `/mcp`);
+every other tool, the five above included, answers `500 internal_error` for
+the whole request on both agent paths, where the UI route of the same read
+answers `503 catalogue_read_failed`.
 
 `kogane.reports.read` takes `{ reportId?, view?, offset?, decimalPolicy? }`:
 without `reportId` it is the list (`offset` only), with it the detail
@@ -1169,8 +1175,9 @@ are unchanged.
 | no token, expired token, person not in the MCP application's policy                                                                                               | Cloudflare Access                           | Access's own `401` (Managed OAuth) — not this Worker                                                                      |
 | assertion missing, forged, expired, from another issuer, not for the MCP application (the browser's, both, another), without `sub`, or with an agent-only subject | Worker                                      | `401 authentication_required`                                                                                             |
 | Access keys unreachable; `ACCESS_MCP_AUDIENCE` misconfigured                                                                                                      | Worker                                      | `503 identity_keys_unavailable` / `503 auth_not_configured`                                                               |
-| an unexpected failure inside a tool or the tool list (the store, a bug)                                                                                           | Worker                                      | `500 internal_error`; the exception text never reaches the client or the log                                              |
-| a store failure while a tool or the tool list checks that a read's tables or views exist (card purchases, card settlements, reported state)                       | Worker                                      | `503 catalogue_read_failed`, as its route answers; the exception text never reaches the client or the log                 |
+| an unexpected failure inside a tool (the store outside a page read, a bug) or the tool list (a bug)                                                               | Worker                                      | `500 internal_error`; the exception text never reaches the client or the log                                              |
+| a store failure while a tool or the tool list checks that a read's tables or views exist (the page reads, card purchases, card settlements, the reported state)   | Worker                                      | `503 catalogue_read_failed`, as its route answers; the exception text never reaches the client or the log                 |
+| a store failure inside a page read's own read                                                                                                                     | tool                                        | `isError: true`, `{"error":"catalogue_read_failed"}`, as its route answers                                                |
 | `Origin` of another site                                                                                                                                          | Worker                                      | `403 origin_not_allowed`                                                                                                  |
 | `GET` / `DELETE`; a query string                                                                                                                                  | Worker                                      | `405 method_not_allowed` / `400 invalid_query`                                                                            |
 | media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                                         | `415` / `406` / `400` / `400` / `413`                                                                                     |
@@ -1432,9 +1439,10 @@ leftover `AGENT_API_GRANTS` value says (ADR 0084); the whole-store grant
 reaching a raw locator, and a proposal beyond the published target bound
 refused without a write; a server-derived proposal
 actor that a body or header cannot change, and adopted answers identical
-before and after a proposal; unpublished tools; an internal failure inside
-a tool or the tool list answered `500 internal_error` in both eras with no
-exception text in the answer or the log; the connection in both eras; the SDK's transport refusals; tool definitions against SEP-986 and
+before and after a proposal; unpublished tools; a store failure inside
+a tool answered `500 internal_error`, and inside the tool list (whose store
+reads are the availability checks) `503 catalogue_read_failed`, in both eras
+with no exception text in the answer or the log; the connection in both eras; the SDK's transport refusals; tool definitions against SEP-986 and
 Claude Code's load-time checks; and the UI's
 `GET /api/v2/query`, `POST /api/agent/v1/financial.query` and MCP in both
 eras returning deep-equal objects with the same gap reasons.
