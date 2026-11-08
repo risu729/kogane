@@ -14,6 +14,11 @@ import type {
   SurveyFailureCode,
 } from "../../../../packages/collection/src/maintenance-survey-model";
 import { ApiError } from "../api";
+import {
+  collectionRequestKey,
+  CollectionRequestError,
+  postCollectionRequest,
+} from "../collection-request-api";
 import { Link } from "../router";
 import "../styles/schedules.css";
 const PATH = "/api/ops/v1/schedules";
@@ -104,13 +109,129 @@ function Occurrence({ value }: { value: ScheduleOccurrence }): ReactNode {
     </div>
   );
 }
+const DISPATCH_OFF = {
+  lane_disabled: "依頼の処理が停止しているため、送った依頼は実行されません。",
+  connection_disabled:
+    "この接続は依頼による収集がまだ有効ではありません。送った依頼は実行されず24時間後に期限切れになるため、送信できません。",
+};
+function requestFailure(error: unknown): string {
+  if (error instanceof CollectionRequestError) {
+    if (error.status === 401 || error.status === 403) return "管理者のログインが必要です。";
+    if (error.status === 0)
+      return "接続できませんでした。依頼が保存されたか分からないため、もう一度送信してください（同じ依頼として扱われます）。";
+    if (error.code === "target_missing") return "この出典は依頼の対象として登録されていません。";
+  }
+  return "依頼を保存できたか確認できません。もう一度送信してください（同じ依頼として扱われます）。";
+}
+/**
+ * 収集を依頼 (ADR 0048): the same stored request `kogane.ops.collection.request`
+ * makes. The confirmation shows what the caller should read first — the last
+ * run, a held lease, the next scheduled run and the maintenance status —
+ * because a request cannot be taken back once a collector starts it.
+ */
+function CollectionRequest({
+  value,
+  lease,
+}: {
+  value: ScheduleView;
+  lease: ScheduleSnapshot["leases"][number] | undefined;
+}): ReactNode {
+  // One key per confirmation: a retry after a lost answer is the same request.
+  const [key, setKey] = useState<string | null>(null),
+    [busy, setBusy] = useState(false),
+    [message, setMessage] = useState("");
+  const sending = useRef(false);
+  const target = value.collectionRequest;
+  if (!target) return null;
+  async function send() {
+    if (sending.current || key === null || !target) return;
+    sending.current = true;
+    setBusy(true);
+    setMessage("");
+    try {
+      const accepted = await postCollectionRequest(target.source, key);
+      setKey(null);
+      setMessage(
+        `依頼を受け付けました（依頼ID ${accepted.operationId}）。保存・解析処理の次回実行で収集を始めます。メンテナンス中や前の実行中は終わるまで待ちます。結果は取得履歴に表示されます。`,
+      );
+    } catch (error) {
+      setMessage(requestFailure(error));
+    } finally {
+      sending.current = false;
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="schedule-request">
+      <h3>収集を依頼</h3>
+      {target.dispatch !== "enabled" ? (
+        <p>{DISPATCH_OFF[target.dispatch]}</p>
+      ) : key === null ? (
+        <button
+          type="button"
+          className="button"
+          onClick={() => {
+            setMessage("");
+            setKey(collectionRequestKey());
+          }}
+        >
+          収集を依頼
+        </button>
+      ) : (
+        <div role="group" aria-label={`${name(value.id)}の収集依頼の確認`}>
+          <p>
+            {name(value.id)}
+            にログインし、毎日の収集と同じ範囲を取得します。期間は指定できません。収集が始まった依頼は取り消せません。送信する前に、次の状態を確認してください。
+          </p>
+          <dl>
+            <dt>前回の実行</dt>
+            <dd>
+              {value.latest
+                ? `${fmt(value.latest.startedAt)} · ${STATUS[value.latest.status]}`
+                : "記録なし"}
+            </dd>
+            <dt>実行中の収集</dt>
+            <dd>
+              {lease
+                ? `あり（開始 ${fmt(lease.startedAt)}）。終わるまで依頼は待機します。`
+                : "なし"}
+            </dd>
+            <dt>次の定期実行</dt>
+            <dd>{fmt(value.nextRunAt)}</dd>
+            <dt>メンテナンス時間</dt>
+            <dd>{REF[value.maintenance.status]}。停止時間中は終了まで待機します。</dd>
+          </dl>
+          <div className="schedule-actions">
+            <button type="button" className="button" disabled={busy} onClick={send}>
+              {busy ? "送信中…" : "依頼を送信"}
+            </button>
+            <button
+              type="button"
+              className="button"
+              disabled={busy}
+              onClick={() => {
+                setKey(null);
+                setMessage("");
+              }}
+            >
+              やめる
+            </button>
+          </div>
+        </div>
+      )}
+      {message ? <p role="status">{message}</p> : null}
+    </div>
+  );
+}
 function ScheduleCard({
   value,
+  lease,
   refresh,
   message,
   setMessage,
 }: {
   value: ScheduleView;
+  lease: ScheduleSnapshot["leases"][number] | undefined;
   refresh: () => Promise<unknown>;
   /** Held by the page: the card remounts on each new revision, its result must not. */
   message: string;
@@ -266,6 +387,7 @@ function ScheduleCard({
       ) : (
         <p className="muted">この設定による実行記録はまだありません。</p>
       )}
+      <CollectionRequest value={value} lease={lease} />
     </article>
   );
 }
@@ -756,6 +878,7 @@ export function SchedulesPage(): ReactNode {
               <ScheduleCard
                 key={`${s.id}:${s.revision}`}
                 value={s}
+                lease={query.data.leases.find((lease) => lease.source === s.source)}
                 refresh={refresh}
                 message={cardMessages[s.id] ?? ""}
                 setMessage={(message) =>

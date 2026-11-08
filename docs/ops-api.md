@@ -354,6 +354,12 @@ collector's `ScheduledCollection` entrypoint, method `runOperation`. There is no
 URL, no generic executor and no other transport
 ([ADR 0048](adr/0048-operation-collector-dispatch.md)).
 
+**From the schedules page.** The operator's **収集を依頼** on `/schedules`
+posts this route after a confirmation step, and the schedules snapshot says
+for each job which CORE source a request names and whether this lane would
+start it (`collectionRequest`, [schedules](schedules.md#収集を依頼-collection-request);
+owner decision 2026-11-08 03:19 UTC).
+
 **Connection.** The request's CORE source and action select one connection — an
 alarm job of `config/alarm-jobs.json`, mirrored as `OPERATION_CONNECTIONS` in
 `packages/collection/src/operation-rpc.ts`. The call carries
