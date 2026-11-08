@@ -373,7 +373,11 @@ expiry: nothing dispatches it, so nothing expires it.
 An unattended refresh is executed like a collection (below) through a
 `refresh-session` connection. The only one is SBI VC's keepalive job
 (`sbi-vc-keepalive`); for every other source an unattended refresh ends
-`unsupported` with `session_refresh_unsupported` and contacts nobody.
+`unsupported` with `session_refresh_unsupported` and contacts nobody. SBI VC
+runs its keepalive and, if that fails, one passkey login without its 6-hour
+cooldown. It makes at most one such forced login per hour whoever asks; a
+request inside that hour runs the keepalive under the alarm's own login policy
+(ADR 0069, 2026-11-08).
 
 ## Collector execution (ADR 0048)
 
@@ -439,7 +443,10 @@ records no run ([St George](sources/st-george.md)).
 
 **After a start nothing is retried.** A collector failure, an uncertain call
 and a start that never recorded an outcome are terminal; a provider login is
-never repeated by this path (G3-11, ADR 0039). Re-sending the same key returns
+never repeated by this path (G3-11, ADR 0039). A St George collection request
+is the one way to lift a login pause without changing the credential: it allows
+one login, at most once per 24 hours whoever sends it, and a request inside that
+spacing ends `failed` with `st_george_paused_<reason>` (ADR 0069). Re-sending the same key returns
 the same operation; a new key is a new request.
 
 **The trail.** For a `collected` execution, each tick reads (at most five

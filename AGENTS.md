@@ -211,6 +211,12 @@ leases, maintenance windows, earlier requests) as the tool description and
 [ops API: requesting a collection as an agent](docs/ops-api.md#requesting-a-collection-as-an-agent)
 list.
 
+The same holds for a provider login that a requested collection or session
+refresh makes (owner, 2026-11-08 03:57 UTC, [ADR 0069](docs/adr/0069-collector-admin-retirement.md)):
+agents may request it, within limits the collector applies to every caller. A
+requested St George collection lifts a login pause at most once per 24 h, and
+SBI VC makes at most one forced passkey login per hour.
+
 ## Toolchain
 
 - mise is the task runner ([tooling](docs/tooling.md), [ci](docs/ci.md)):
