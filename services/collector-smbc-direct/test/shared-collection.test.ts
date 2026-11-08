@@ -26,7 +26,7 @@ import { runPrefix, sha256Hex, storeManifest } from "../src/storage";
 import type { BackfillManifest, BackfillProgress, StoredArtifact } from "../src/types";
 
 const RUN_ID = "00000000-0000-4000-8000-000000000000";
-const STARTED_AT = "2026-09-01T00:00:00.000Z";
+const STARTED_AT = "2099-02-01T00:00:00.000Z";
 const PREFIX = runPrefix(STARTED_AT, RUN_ID);
 const SESSION_REF = "session-11111111-1111-4111-8111-111111111111";
 const IDENTITY = { attemptId: "attempt-0000", acquisitionSessionRef: SESSION_REF };
@@ -91,7 +91,7 @@ async function manifestOf(overrides: Partial<BackfillManifest> = {}): Promise<Ba
     source: "smbc-direct",
     runId: RUN_ID,
     startedAt: STARTED_AT,
-    completedAt: "2026-09-01T00:10:00.000Z",
+    completedAt: "2099-02-01T00:10:00.000Z",
     status: "success",
     requestedRange: { start: "2099-01-01", end: "2099-01-31" },
     completedChunks: 1,
@@ -115,6 +115,29 @@ function inputOf(manifest: BackfillManifest) {
 }
 
 describe("terminal field derivation", () => {
+  test("failed logout is durable without lowering completed acquisition or unit coverage", async () => {
+    const manifest = await manifestOf({ logoutSucceeded: false });
+    const bucket = new FakeR2Bucket();
+    expect((await persistSharedRun(bucket, inputOf(manifest))).outcome).toBe("persisted");
+    const terminal = await readTerminal(bucket, "smbc-direct", manifest.runId);
+    if (terminal.outcome !== "found") throw new Error("missing terminal");
+    expect(terminal.manifest).toMatchObject({
+      providerOutcome: "success",
+      coverageStatus: "complete",
+    });
+    expect(terminal.manifest.safeErrorCode).toBeUndefined();
+    expect(terminal.manifest.units[0]?.coverageStatus).toBe("complete");
+    expect(terminal.manifest.artifacts).toHaveLength(manifest.artifacts.length + 1);
+    expect(terminal.manifest.reports).toEqual([
+      {
+        reportRef: "logout",
+        reportKind: "logout",
+        scope: "run",
+        outcome: "failed",
+        safeErrorCode: "logout_failed",
+      },
+    ]);
+  });
   test("a media type loses its charset parameter, never its identity", () => {
     expect(baseMediaType("application/json; charset=Shift_JIS")).toBe("application/json");
     expect(baseMediaType("application/json")).toBe("application/json");
@@ -132,6 +155,31 @@ describe("terminal field derivation", () => {
 describe("G1-08/G1-09/G3-10/G3-11 run outcome", () => {
   test("a completed backfill covers the range it was asked for", async () => {
     expect(sharedOutcome(await manifestOf())).toEqual({
+      providerOutcome: "success",
+      coverageStatus: "complete",
+    });
+  });
+
+  test("a day must close before acquisition, even if completion crosses midnight", async () => {
+    const manifest = await manifestOf({
+      startedAt: "2099-01-31T01:00:00.000Z",
+      completedAt: "2099-01-31T15:00:00.000Z",
+    });
+    // No timestamp on an old artifact cannot prove its last day was closed.
+    expect(sharedOutcome(manifest)).toMatchObject({
+      coverageStatus: "partial",
+      safeErrorCode: "coverage_day_not_finished",
+    });
+    expect(waitingForHuman(manifest)).toBeTrue();
+    const captured = (collectedAt: string) => ({
+      ...manifest,
+      artifacts: manifest.artifacts.map((artifact) => ({ ...artifact, collectedAt })),
+    });
+    expect(sharedOutcome(captured("2099-01-31T14:59:59.999Z"))).toMatchObject({
+      coverageStatus: "partial",
+      safeErrorCode: "coverage_day_not_finished",
+    });
+    expect(sharedOutcome(captured("2099-01-31T15:00:00.000Z"))).toEqual({
       providerOutcome: "success",
       coverageStatus: "complete",
     });

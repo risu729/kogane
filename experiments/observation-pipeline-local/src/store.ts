@@ -210,7 +210,7 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
     db.transaction(() => db.exec(policy))();
   }
   // 0056/0059 advance the board reader (ADR 0028 and its amendment). 0084
-  // follows the shared CSV release for all three exact-version policies.
+  // follows the shared CSV release for all four exact-version policies.
   // Each UPDATE names its previous value, so reopening preserves later pins
   // and operator-selected alternatives.
   for (const migration of [

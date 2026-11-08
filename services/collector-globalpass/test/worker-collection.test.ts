@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import type { CollectionManifest } from "../src/model";
+import { parseTerminalManifest } from "../../../packages/collection/src/index";
 
 let container: {
   startAndWaitForPorts(): Promise<void>;
@@ -110,6 +111,63 @@ async function run(
 }
 
 describe("GLOBAL PASS diagnostics preserve the current collection contract", () => {
+  test("complete data and a failed logout publish successful complete units with a durable flag", async () => {
+    const r = await run([
+      metadata,
+      artifact,
+      { ...artifact, month: "2099-01" },
+      { type: "logout", failed: true },
+    ]);
+    expect(r.manifest).toMatchObject({
+      status: "success",
+      captureComplete: true,
+      logoutFailed: true,
+      failures: [],
+    });
+    if (!r.result.shared) throw new Error("missing shared publication");
+    const bytes = r.stored.get(r.result.shared.terminalKey)!;
+    const terminal = parseTerminalManifest(JSON.parse(new TextDecoder().decode(bytes)));
+    expect(terminal.providerOutcome).toBe("success");
+    expect(terminal.coverageStatus).toBe("partial");
+    expect(terminal.units[0]?.coverageStatus).toBe("complete");
+    expect(terminal.reports).toContainEqual({
+      reportRef: "logout",
+      reportKind: "logout",
+      scope: "run",
+      outcome: "failed",
+      safeErrorCode: "logout_failed",
+    });
+    expect(terminal.artifacts.filter((a) => a.unitKey === "account")).toHaveLength(2);
+    expect(
+      r.logs
+        .map((line) => JSON.parse(line))
+        .find((record) => record.event === "globalpass-collection-stored"),
+    ).toMatchObject({ status: "success", logoutFailed: true });
+  });
+  test("logout flags cannot disguise incomplete collection or admit later artifacts", async () => {
+    for (const records of [
+      [metadata, artifact, { type: "logout", failed: true }],
+      [
+        metadata,
+        artifact,
+        { ...artifact, month: "2099-01" },
+        { type: "logout", failed: true },
+        artifact,
+      ],
+      [
+        metadata,
+        artifact,
+        { ...artifact, month: "2099-01" },
+        { type: "logout", failed: "private-value" },
+      ],
+    ]) {
+      const r = await run(records);
+      expect(r.manifest?.status).toBe("partial");
+      expect(r.manifest?.failures.map((failure) => failure.errorCode)).toContain(
+        "container_contract_invalid",
+      );
+    }
+  });
   test("retains sanitized partial evidence with a completed shared terminal", async () => {
     const r = await run([
       metadata,
