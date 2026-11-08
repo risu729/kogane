@@ -350,7 +350,8 @@ content, and each call is an R0 read in the audit log.
 - Status: proposed. The owner accepted these states, provisionally, on
   2026-11-08 at 03:19 UTC, answering the Phase 3 plan's question "Freshness
   states: `same-day` / `recent` (1–3 days) / `stale`, plus `human_required`,
-  `disabled` and `no_capture`?" in the Phase 3 planning thread (spelled with
+  `disabled` and `no_capture`?" in [the Phase 3 plan](../plans/2026-11-phase3-coverage-identity.md)
+  (3d, recorded under its decisions; spelled with
   hyphens here, like `dated-state-freshness-v1`'s states)
 - Issue: #542 (Phase 3, layers 0–5: "coverage is visible per account and data
   type")

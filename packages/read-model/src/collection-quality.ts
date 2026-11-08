@@ -124,7 +124,8 @@ export interface SourceJobRow {
  * The jobs whose source (the job vocabulary of `config/alarm-jobs.json`) is in
  * `?1`, a JSON array, with the failure code of each one's newest receipt: what
  * one source's cells need to say what the source waits on
- * (`collection-freshness-v1`), without reading, or bounding, every job.
+ * (`collection-freshness-v1`). It scans the configured jobs by key and reads
+ * the newest receipt only of the source's own jobs.
  */
 export const SOURCE_JOBS_SQL = `SELECT s.kind, s.enabled, s.supported,
        (SELECT newest.failure_code FROM collection_schedule_occurrences newest

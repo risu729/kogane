@@ -488,7 +488,10 @@ export function sourceJobSources(sourceId: string): string[] {
 }
 
 /** What the jobs of one CORE source wait on, from its stored jobs only (the cells route's read). */
-export async function waitOfSource(executor: SqlExecutor, sourceId: string): Promise<CollectionWait> {
+export async function waitOfSource(
+  executor: SqlExecutor,
+  sourceId: string,
+): Promise<CollectionWait> {
   const jobs = await executor.all<SourceJobRow>(SOURCE_JOBS_SQL, [
     JSON.stringify(sourceJobSources(sourceId)),
   ]);
