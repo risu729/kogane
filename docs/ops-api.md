@@ -10,16 +10,17 @@ six operation-request kinds are distinct from the newer operator-only
 [schedule settings API](schedules.md#settings-api). A collection or unattended
 session-refresh request reaches a collector only through the named collector RPC
 the alarm uses, and only for a connection the Processor's
-`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names; the committed value names none
-([collector execution](#collector-execution-adr-0048),
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names; the committed value names
+`sony-bank`, `sbi-securities`, `mobile-suica`, `moneyforward-me` and `myjcb` ([collector execution](#collector-execution-adr-0048),
 [ADR 0048](adr/0048-operation-collector-dispatch.md)).
 
-The six things an operator asks this system to _do_ — collect a source,
+The things an operator asks this system to _do_ — collect a source,
 re-register a persisted run, replay a parse, rebuild the read model, refresh a
-session, and read what happened — as one authenticated API under
-`/api/ops/v1`, served by the same Worker that serves the reads. Their MCP tool
-definitions are published only to a delegated `/mcp` caller and refuse every
-other one ([MCP](#mcp)).
+session — and the two reads of what happened (one request, and the list of
+every request, whichever principal made it) as one authenticated API under
+`/api/ops/v1`, served by
+the same Worker that serves the reads. Each route has an MCP tool over the
+same service, which every MCP client uses as itself ([MCP](#mcp)).
 
 This implements unified plan 02 §4-5 and the U06 backlog row. Everything here
 is **off by default**: with `OPS_API_ENABLED` unset these paths answer exactly
@@ -44,7 +45,8 @@ identity, one record and one vocabulary, so that:
   session (G3-06, G3-14);
 - a person looking at a screen and an operator with `curl` reach the same
   application service and get the same record (G3-05); a model with an MCP
-  client cannot request an operation at all (ADR 0047).
+  client requests one through the same service as itself, never as the
+  operator ([MCP](#mcp), ADR 0084).
 
 The one thing the API deliberately cannot be is a generic proxy: there is no
 route that takes SQL, a table name, a bucket key, a URL, a database id or a
@@ -54,8 +56,8 @@ in protected GitHub workflows (02 §6).
 
 ## Routes
 
-All six are authenticated, and all six are refused unless `OPS_API_ENABLED` is
-`"true"`. The route set is closed: any other path under `/api/ops/v1` is
+All seven are authenticated, and all seven are refused unless `OPS_API_ENABLED`
+is `"true"`. The route set is closed: any other path under `/api/ops/v1` is
 `404 not_found`, and any verb other than `POST` (accept) and `GET` (read) is
 `405 method_not_allowed`, exactly as everywhere else on this Worker.
 
@@ -67,6 +69,7 @@ All six are authenticated, and all six are refused unless `OPS_API_ENABLED` is
 | `POST /api/ops/v1/projections`               | `{reason, idempotencyKey?}`                                | `202 {operationId, status}` | The request is stored. Publication is complete when `projected` is.        |
 | `POST /api/ops/v1/sessions/{source}/refresh` | `{idempotencyKey?}`                                        | `202 {operationId, status}` | The request is stored; `waiting_for_human` when a person must act.         |
 | `GET /api/ops/v1/operations/{id}`            | –                                                          | `200` operation record      | Reads the stored record; it never asks a downstream system "are you done". |
+| `GET /api/ops/v1/operations`                 | query `kind`, `status`, `cursor`, `limit`                  | `200` one page of summaries | Reads every principal's stored requests, newest first ([list](#the-list)). |
 
 An import's `runId` is checked against the bucket key's own run grammar
 (`RUN_ID` in `packages/collection/src/keys.ts`, imported by
@@ -88,7 +91,7 @@ completion (`contracts/stages.json`, 05 §6).
 
 ### `GET /api/ops/v1/health` — the release postcheck's route
 
-One more route lives under the same prefix and is **not** one of the six. It is
+One more route lives under the same prefix and is **not** one of the seven. It is
 authenticated like everything else here, but it is _outside_ `OPS_API_ENABLED`:
 a postcheck that only works once an unrelated flag is on is not a postcheck
 (plan 11 §6, `services/app/src/health.ts`, [ci-cd.md](ci-cd.md#postcheck)).
@@ -112,7 +115,7 @@ of any kind in the answer.
 
 Who may read it (`services/app/src/health.ts`):
 
-- **the operator**, graded by the same loader the six routes use, so an
+- **the operator**, graded by the same loader the seven routes use, so an
   `AGENT_GRANTS` subject is refused with `403 approval_required` here too;
 - **an Access service token** whose common name (its Client ID) is listed in
   the deployment variable `HEALTH_PROBE_TOKENS`. This is how CD calls the
@@ -124,7 +127,7 @@ Who may read it (`services/app/src/health.ts`):
 An empty `HEALTH_PROBE_TOKENS` means _no_ service token, which fails the
 release rather than opening the route. A `HEALTH_PROBE_TOKENS` that is present
 but cannot be read closes the route to everyone with `503 grants_misconfigured`,
-as an unreadable grant list does on the six routes. Empty subject lists are a
+as an unreadable grant list does on the seven routes. Empty subject lists are a
 _usable_ configuration (deny-all when no subjects are configured): `grants.usable` is
 false only for a list that is present but unreadable, or a subject named in
 both lists, and then the deployment is `degraded` — a release does not certify
@@ -189,10 +192,68 @@ the four reasons that are never completion (`queued`, `building`, `flag_off`,
 | `session-refresh` | none: its progress is its status                      |
 
 A stage nobody has reported is `pending`. Silence is never progress, and an
-operation turns `completed` only when every stage of its kind has a
-`completed` row written by the executor that held the evidence. Nothing writes
-`projected` yet, so a published collection keeps `status: running`
-([limits](#collector-execution-adr-0048)).
+operation's stored `status` turns `completed` only when every stage of its
+kind has a `completed` row written by the executor that held the evidence.
+One stage is read rather than stored: once `adopted` is complete, `projected`
+is derived from the READ database each time the record is read, and the
+record's `status` reads `completed` when that makes every stage complete
+([projected](#projected-read)).
+
+### The list
+
+`GET /api/ops/v1/operations` answers one page of every request in the store,
+whichever principal made it: the operator in the browser or any MCP client
+([ADR 0086](adr/0086-operator-operations-list.md),
+`packages/application/src/operations/list.ts`; whole-store reads, owner
+2026-11-08 04:21 UTC):
+
+```jsonc
+{
+  "schemaVersion": "kogane-operation-list-v1",
+  "operations": [
+    {
+      "operationId": "op_<64 hex>",
+      "kind": "collection",
+      "status": "running",
+      "source": "sony-bank",
+      "dispatch": { "state": "dispatched", "attempts": 1 },
+      "failureCode": null,
+      "acceptedAt": "2026-09-11T00:00:00Z",
+      "updatedAt": "2026-09-11T00:05:00Z",
+    },
+  ],
+  "nextCursor": null, // or the operationId to pass as `cursor` for the next page
+}
+```
+
+- **Order.** Newest first by acceptance time, then by operation id, both
+  descending. Neither column changes after insert, so the order is stable,
+  and a cursor taken from one page continues after it under any filter.
+- **Query.** `kind` (one of the five kinds), `status` (one of the six
+  statuses), `cursor` (the `nextCursor` of the previous page) and `limit`
+  (1–50, default 20). Each key at most once. An unknown key is
+  `400 invalid_query` without a ref; a repeated key or a value outside its
+  list is `400 invalid_query` naming the key. A cursor that names no
+  operation is `404 receipt_not_found` with ref `cursor`; any principal's
+  operation is a cursor.
+- **Content.** A summary has no stages, no `execution` block, no target and
+  no principal; read one operation for the first three, and the
+  [audit log](audit-log.md) for who requested it. The stored request is not
+  read, so a rebuild's `reason` never appears. `status` is the stored status,
+  and the `status` filter matches it: READ is not read, so a request whose
+  record reads `completed` through the derived `projected` stage
+  ([projected](#projected-read)) is listed, and filtered, as `running`.
+- **Cost.** One range of the index `ops_requests_open` per allowed
+  (status, kind) pair (thirty without a filter, six for a kind, five for a
+  status, one for both), each limited to the page, merged newest first. Rows
+  sharing the boundary timestamp are sorted, and after a cursor the tied rows
+  at or ahead of it are skipped. No range reads another pair's rows, so a
+  page reads at most (pairs × (limit + 1)) rows plus ties, at any store
+  size; the rows it does not return are the other pairs' candidates and
+  those ties. No migration was added.
+- **Audit.** Each request is recorded once as `ops.operation.list`, with the
+  number of rows shown and whether a next page exists
+  ([audit log](audit-log.md)).
 
 ## Idempotency
 
@@ -207,7 +268,8 @@ is the validated request without its key.
 - The same key with a **different** payload is `409 idempotency_conflict`, with
   the operation id as the only ref. Neither request is silently dropped.
 - A key belongs to its principal: two subjects using the same key hold two
-  operations, and neither can read or resend the other's.
+  operations, and neither can resend the other's. Either can read both
+  ([reads](#authorization)).
 - Two senders racing on one key — both reading "no such operation" before
   either writes — get the same answers as if they had arrived in order: the
   insert is guarded on the row not existing, the loser inserts nothing, and it
@@ -229,14 +291,19 @@ any write that would re-point a bound target, even a direct one.
 ## Authorization
 
 Two gates in order, after the Access check that every route of this Worker
-already does:
+already does. Between them, on a `POST`, sits the own-origin rule: an
+`Origin` that is present and not the Worker's own is
+`403 origin_not_allowed` before a grant, a schema or the store is touched
+([ADR 0078](adr/0078-own-origin-state-changing-routes.md)). With the flag
+off the route answers as it did before (a `POST` is `405`), whatever its
+`Origin`. An operator's `curl` sends no `Origin` and is unaffected.
 
 1. the deployment flag `OPS_API_ENABLED`;
 2. the change lifecycle's principal grading (`OPERATOR_SUBJECTS` +
    `AGENT_GRANTS`, resolved by the one resolver described in
    [change-lifecycle.md](change-lifecycle.md), "Grants"). Both are allow-lists:
 
-   | Verified subject                    | All six routes and tools                     |
+   | Verified subject                    | All seven routes                             |
    | ----------------------------------- | -------------------------------------------- |
    | listed in `OPERATOR_SUBJECTS`       | served                                       |
    | listed in `AGENT_GRANTS`            | `403 approval_required`                      |
@@ -254,12 +321,17 @@ already does:
    intended.**
 
    The routes are the only transport that reaches this resolver: `/mcp`
-   refuses an operations tool from its caller object before any grading
-   ([MCP](#mcp)).
+   never grades its caller by these lists and runs an operations tool as the
+   MCP client itself (`callDelegatedOpsTool`, [MCP](#mcp)).
 
-Reads are scoped to the principal that accepted the operation. An operation
-belonging to someone else answers `404 receipt_not_found`, exactly like one
-that does not exist: the API never confirms an id it will not show.
+Reads are whole-store, like every other read since
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md) (owner,
+2026-11-08 04:21 UTC; [ADR 0086](adr/0086-operator-operations-list.md)): any
+caller the transport authenticated — the operator on these routes, any MCP
+client on `/mcp` — reads and lists every operation, whichever principal
+accepted it. Only an id that does not exist answers `404 receipt_not_found`.
+Writes are unchanged: a request is accepted, re-sent and bound under the
+caller's own principal.
 
 ## Errors
 
@@ -270,19 +342,20 @@ log or a queue (G3-08) — not even a source or release id that failed the
 registry lookup — and Zod's own messages are never returned. The request log
 carries the route label, the status and the code, never a ref.
 
-| Code                   | HTTP | Means                                                           |
-| ---------------------- | ---- | --------------------------------------------------------------- |
-| `invalid_request`      | 400  | The body failed the published schema; `refs` names the fields   |
-| `invalid_query`        | 400  | These routes take no query string                               |
-| `target_missing`       | 400  | The source or parser release is not declared in the registry    |
-| `approval_required`    | 403  | An agent asked for work only an operator may request            |
-| `subject_not_granted`  | 403  | The verified subject is in neither grant list                   |
-| `actor_not_supported`  | 403  | The verified subject is not a shape the decision log can record |
-| `not_found`            | 404  | No such operations route                                        |
-| `receipt_not_found`    | 404  | No such operation for this principal                            |
-| `idempotency_conflict` | 409  | The same key was reused for a different payload                 |
-| `request_too_large`    | 413  | The body exceeds 16 KiB                                         |
-| `grants_misconfigured` | 503  | This deployment's grant lists cannot be read; nobody is graded  |
+| Code                   | HTTP | Means                                                                                  |
+| ---------------------- | ---- | -------------------------------------------------------------------------------------- |
+| `invalid_request`      | 400  | The body failed the published schema; `refs` names the fields                          |
+| `invalid_query`        | 400  | A query string where none is taken, or a list query outside its closed keys and values |
+| `target_missing`       | 400  | The source or parser release is not declared in the registry                           |
+| `approval_required`    | 403  | An agent asked for work only an operator may request                                   |
+| `subject_not_granted`  | 403  | The verified subject is in neither grant list                                          |
+| `actor_not_supported`  | 403  | The verified subject is not a shape the decision log can record                        |
+| `origin_not_allowed`   | 403  | A `POST` carried another site's `Origin` (ADR 0078)                                    |
+| `not_found`            | 404  | No such operations route                                                               |
+| `receipt_not_found`    | 404  | No such operation, as an id or a list cursor                                           |
+| `idempotency_conflict` | 409  | The same key was reused for a different payload                                        |
+| `request_too_large`    | 413  | The body exceeds 16 KiB                                                                |
+| `grants_misconfigured` | 503  | This deployment's grant lists cannot be read; nobody is graded                         |
 
 Neither authorization code carries a subject, a list or a configured value. A
 misconfiguration is logged once as
@@ -290,7 +363,7 @@ misconfiguration is logged once as
 
 ## MCP
 
-The six operations have MCP tool definitions (`src/ops-tools.ts`), each
+The seven routes have MCP tool definitions (`src/ops-tools.ts`), each
 generated from the Zod schema its route validates with:
 
 | Tool                            | Route                                        |
@@ -301,6 +374,7 @@ generated from the Zod schema its route validates with:
 | `kogane.ops.projection.request` | `POST /api/ops/v1/projections`               |
 | `kogane.ops.session.refresh`    | `POST /api/ops/v1/sessions/{source}/refresh` |
 | `kogane.ops.operation.get`      | `GET /api/ops/v1/operations/{id}`            |
+| `kogane.ops.operation.list`     | `GET /api/ops/v1/operations`                 |
 
 **Every `/mcp` principal uses them as itself.** Since
 [ADR 0047](adr/0047-mcp-client-connection.md), `/mcp` accepts only an identity
@@ -316,15 +390,54 @@ lists still grade only the browser's routes. `delegatedOpsTools` (#660, ADR 0063
 S3) publishes each tool to a resolved principal holding its `operations.*`
 capability, and `callDelegatedOpsTool` runs it through the same services; a
 collection request or session refresh needs a prepare and an exact
-confirmation. Every MCP client holds all six.
+confirmation. Every MCP client holds all seven.
 For the same input, a call over MCP and its route give the same receipt and
 store the same request ([ADR 0081](adr/0081-ui-parity-through-mcp.md),
 `services/app/test/delegated-ops-parity.test.ts`).
 
-`kogane.ops.operation.get` is defined over the same service as the read
-route; on `/mcp` it reads only the calling principal's own operations, so an operation the operator requested
-in the browser is followed on the HTTP read route, `execution` block included. No agent-API grant capability reads
-an operation.
+`kogane.ops.operation.get` and `kogane.ops.operation.list` are defined over
+the same services as the two read routes (`readOperation` and
+`listOperations`). Both are whole-store (owner, 2026-11-08 04:21 UTC): an
+MCP client lists and reads every operation, those the operator requested in
+the browser and those any MCP client accepted, with the same answer as the
+route, `execution` block included. A principal whose delegation scope names
+fewer sources or accounts is refused an operation outside its scope, and the
+list, as `400 target_missing`; since ADR 0084 no MCP client has such a scope.
+The list tool takes the
+route's query as arguments (`kind`, `status`, `cursor`, `limit`, with `limit`
+a number), validated by the same schema (`operationListSchema` in
+`src/ops-api.ts`); a refusal is `invalid_request` with the field paths, as on
+the other tools, where the route answers `invalid_query` naming the key. No
+agent-API grant capability reads an operation.
+
+### Requesting a collection as an agent
+
+An agent may request collections without a count or rate limit (owner,
+2026-11-08 03:19 UTC); nothing in the App or the Processor caps them. The
+`kogane.ops.collection.request` description tells the caller to read the
+source's history first, and every item is an existing read:
+
+| Read first                                                    | Tool                                                                                                                                      |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| the source's collection quality: latest runs and stage codes  | `kogane.collection-quality.read` with `source`                                                                                            |
+| its schedule, next alarm, recent occurrences and held leases  | `kogane.schedules.read`                                                                                                                   |
+| its maintenance windows and the maintenance-adjusted due time | `kogane.schedules.maintenance.read` with `source`                                                                                         |
+| earlier requests and how they ended                           | `kogane.ops.operation.list` with `kind: "collection"` (each summary names its source and status), then `kogane.ops.operation.get` for one |
+
+It then does not request while the source's alarm is due, its maintenance
+window is on, a lease is held or an earlier request has not finished, and when
+the latest runs failed it finds the cause before requesting again. The
+dispatcher holds a request during maintenance and while a lease is held anyway
+([collector execution](#collector-execution-adr-0048)); reading first avoids a
+request that can only wait, expire or fail the same way. The rule is in the
+tool description, not in code.
+
+Both operations reads are whole-store ([MCP](#mcp), ADR 0086): a request
+the operator or another MCP client made is listed and read like the caller's
+own. Requests are
+accepted without a cap, but the dispatch lane starts at most one collector per
+tick (`COLLECTOR_STARTS_PER_TICK`), so several requests start one after
+another, not in parallel.
 
 ## Session refresh and human-required states
 
@@ -343,7 +456,11 @@ expiry: nothing dispatches it, so nothing expires it.
 An unattended refresh is executed like a collection (below) through a
 `refresh-session` connection. The only one is SBI VC's keepalive job
 (`sbi-vc-keepalive`); for every other source an unattended refresh ends
-`unsupported` with `session_refresh_unsupported` and contacts nobody.
+`unsupported` with `session_refresh_unsupported` and contacts nobody. SBI VC
+runs its keepalive and, if that fails, one passkey login without its 6-hour
+cooldown. It makes at most one such forced login per hour whoever asks; a
+request inside that hour runs the keepalive under the alarm's own login policy
+(ADR 0069, 2026-11-08).
 
 ## Collector execution (ADR 0048)
 
@@ -353,6 +470,12 @@ alarm already uses**: the `SCHEDULE_<WORKSPACE>` Service Binding to the
 collector's `ScheduledCollection` entrypoint, method `runOperation`. There is no
 URL, no generic executor and no other transport
 ([ADR 0048](adr/0048-operation-collector-dispatch.md)).
+
+**From the schedules page.** The operator's **収集を依頼** on `/schedules`
+posts this route after a confirmation step, and the schedules snapshot says
+for each job which CORE source a request names and whether this lane would
+start it (`collectionRequest`, [schedules](schedules.md#収集を依頼-collection-request);
+owner decision 2026-11-08 03:19 UTC).
 
 **Connection.** The request's CORE source and action select one connection — an
 alarm job of `config/alarm-jobs.json`, mirrored as `OPERATION_CONNECTIONS` in
@@ -367,20 +490,55 @@ applied** (`execution.scope: "collector_default"`).
 
 **States.** `execution.state` is closed:
 
-| State               | Means                                                                                         | `status` of the request |
-| ------------------- | --------------------------------------------------------------------------------------------- | ----------------------- |
-| `accepted`          | stored; no executor has looked at it                                                          | `accepted`              |
-| `waiting_for_human` | a refresh the source policy hands to a person; never dispatched, never expires                | `waiting_for_human`     |
-| `waiting`           | not started, nothing contacted; `reasonCode` says why                                         | `accepted`              |
-| `started`           | the collector was called; no answer recorded yet                                              | `running`               |
-| `collected`         | the collector reports its terminal(s) persisted; `runs` lists them                            | `running`               |
-| `refreshed`         | the collector reports the session renewed                                                     | `completed`             |
-| `published`         | every reported run settled and at least one has an adopted (published) parse                  | `running` (see limits)  |
-| `unpublished`       | every run settled with nothing adopted, or nothing settled within 48 h; `reasonCode` says why | `failed`                |
-| `failed`            | the collector's own closed failure code; a run it still persisted is listed in `runs`         | `failed`                |
-| `uncertain`         | the call threw, answered outside the closed shape, or never recorded an outcome in an hour    | `failed`                |
-| `expired`           | not started within 24 h of acceptance                                                         | `blocked`               |
-| `unsupported`       | no connection (or no binding) serves the source and action                                    | `blocked`               |
+| State               | Means                                                                                                                                                                                                                                           | `status` of the request |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `accepted`          | stored; no executor has looked at it                                                                                                                                                                                                            | `accepted`              |
+| `waiting_for_human` | a refresh the source policy hands to a person; never dispatched, never expires                                                                                                                                                                  | `waiting_for_human`     |
+| `waiting`           | not started, nothing contacted; `reasonCode` says why                                                                                                                                                                                           | `accepted`              |
+| `started`           | the collector was called; no answer recorded yet                                                                                                                                                                                                | `running`               |
+| `collected`         | the collector reports its terminal(s) persisted; `runs` lists them                                                                                                                                                                              | `running`               |
+| `refreshed`         | the collector reports the session renewed                                                                                                                                                                                                       | `completed`             |
+| `published`         | every reported run settled and at least one has an adopted (published) parse                                                                                                                                                                    | `running` (see limits)  |
+| `unpublished`       | every run settled with nothing adopted, or nothing settled within 48 h; `reasonCode` says why                                                                                                                                                   | `failed`                |
+| `failed`            | the collector's own closed failure code; a run it still persisted is listed in `runs`                                                                                                                                                           | `failed`                |
+| `uncertain`         | the call threw, answered outside the closed shape or with a lease abort (`collection_deadline_exceeded`, `collection_lease_lost`, [ADR 0085](adr/0085-collection-lease-heartbeat.md)), or never recorded an outcome in an hour; `runs` is empty | `failed`                |
+| `expired`           | not started within 24 h of acceptance                                                                                                                                                                                                           | `blocked`               |
+| `unsupported`       | no connection (or no binding) serves the source and action                                                                                                                                                                                      | `blocked`               |
+
+The closed shape a collector answers is `status` (`completed` or `failed`), a
+`failureCode` exactly when it failed (lower-case letters, digits and `_`, at
+most 64; the pattern is checked, not a fixed list), and at most 100 run ids, each one
+a terminal key can carry (`RUN_ID` in `packages/collection/src/keys.ts`, so
+never a `:`): `collectorOperationResult` in
+`packages/collection/src/operation-rpc.ts`. The collector's own result helpers
+(`scheduledResult`, `scheduledCompletion`, `scheduledFailure` in
+`packages/collection/src/schedule-result.ts`) report only such ids, each once,
+and none for a run whose terminal was not written, even when the run is
+listed. Every collector answer that names runs comes from them, except SBI VC's
+blocked-session answer (`blockedScheduleResult`), which names its one run
+only when that run's terminal was persisted. Vpass, the one collector that
+persists several runs per collection (one per card), passes them its runs in
+the order it persisted them.
+
+**More than 100 runs.** A collection that finishes with more than 100
+distinct persisted runs answers `failed` with `run_ids_over_limit` and the
+first 100 runs (`MAX_RUN_IDS`, `RUN_IDS_OVER_LIMIT`), so the operation is
+`failed` with those runs listed. It is not answered as `collected` with a
+subset, because tracking would then state `published` or `unpublished` for a
+collection whose other runs it never read; nor is it answered with every run,
+which the Processor refuses as outside the closed shape (`uncertain`, with no
+runs listed). No evidence is lost either way: every run's terminal is in the
+bucket and the collection scan registers it like any other run; only the
+operation's links stop at 100. A collection that fails keeps its own code and
+answers at most its first 100 persisted runs, with no marker that more exist:
+a `failed` operation lists them and is not followed to publication, so the
+shorter list states no verdict, but `runs` alone does not say whether it is
+complete; a lease abort's answer makes the operation `uncertain`, which lists
+none. The alarm path stores the same answer on the schedule occurrence, the
+lease abort's runs included (as `uncertain`). Before this cap the alarm stored
+every Vpass card run, and an occurrence naming more than 100 runs made the
+collection-quality summary fall outside its contract (at most 100 `terminals`
+per occurrence), so the web client refused the whole page.
 
 `startedAt`, `collectedAt`, `publishedAt` and `finishedAt` are set when the
 state is reached; `expiresAt` is acceptance + 24 h.
@@ -403,16 +561,16 @@ takes, releases, replaces or expires `collection_execution_leases`; the collecto
 claims it inside `runScheduled` as for the alarm, so the same source never runs
 twice at once. If another execution takes the lease between the lane's read and
 the collector's claim, the collector refuses before contacting anyone and the
-request ends `failed` with `collection_busy`. St George is the exception: its
-session coordinator already turns a refused lease into a persisted failed run
-(an existing behaviour of that collector), so there the race ends `failed` with
-`collection_failed` and that run listed, and — as after any failed St George
-run — the coordinator refuses later runs, alarm or operation, until the operator
-resumes it ([St George](sources/st-george.md)).
+request ends `failed` with `collection_busy`. St George does the same since
+2026-11-08 UTC: its session coordinator answers `busy` for a refused lease and
+records no run ([St George](sources/st-george.md)).
 
 **After a start nothing is retried.** A collector failure, an uncertain call
 and a start that never recorded an outcome are terminal; a provider login is
-never repeated by this path (G3-11, ADR 0039). Re-sending the same key returns
+never repeated by this path (G3-11, ADR 0039). A St George collection request
+is the one way to lift a login pause without changing the credential: it allows
+one login, at most once per 24 hours whoever sends it, and a request inside that
+spacing ends `failed` with `st_george_paused_<reason>` (ADR 0069). Re-sending the same key returns
 the same operation; a new key is a new request.
 
 **The trail.** For a `collected` execution, each tick reads (at most five
@@ -435,13 +593,64 @@ only. A collected execution with no reported run is `unpublished`
 `unpublished` (`publication_not_observed`).
 
 Limits: no deployed collector has served `runOperation` and no connection is
-enabled; `projected` (READ) is not traced, so a published collection stays
-`running`; the requested window is not applied; one collector call is awaited
-per Processor invocation, inside the tick; the web UI has no operations view.
+enabled; the requested window is not applied; one collector call is awaited
+per Processor invocation, inside the tick. The web UI cannot request an
+operation, and no page lists operations: the list route
+([ADR 0086](adr/0086-operator-operations-list.md)) is read over HTTP and MCP
+only.
+
+**The 依頼の経過 page.** `/operations/op_<id>` in the observation client
+shows this record read-only: status, stages with their evidence (a fetch run
+links to its 取得記録), the execution and every reported run with its counts,
+each closed code by Japanese name beside the code. It reads once per opening
+and again only when asked, and the 監査ログ page links each `op_` target to
+it. The browser validates the record first
+(`packages/observation-shared/src/operation-contract.ts`); a record outside
+the contract is an error. A `403` says the trail is the operator's; a `404`
+says the operation is not found, which also covers a deployment with
+`OPS_API_ENABLED` off. The read is whole-store
+([ADR 0086](adr/0086-operator-operations-list.md), owner 2026-11-08 04:21
+UTC): the page shows an operation an MCP client (`mcp-client:<sub>`)
+requested, and `kogane.ops.operation.get` reads one the operator requested,
+with the same record. The read-route guard
+(`services/app/test/ui-mcp-parity.test.ts`) maps the page's route to that
+tool
+([ADR 0048, amendment of 2026-11-07](adr/0048-operation-collector-dispatch.md#amendment-2026-11-07--the-operators-依頼の経過-page-proposed)).
+
+### Projected (READ)
+
+When the Processor records an execution `published`, the same batch stores
+the `projected` stage as `pending` with the CORE revision READ has to reach
+(`core-revision:<core_epoch>:<source_revision>`, read from
+`core_source_revision` in that batch; ADR 0048, amended 2026-11-07). The
+operation record — `readOperation`, behind both the HTTP route and
+`kogane.ops.operation.get` — then compares it with READ's published pointer
+whenever it is read, and writes nothing:
+
+| `projected`                                                | When                                                                                                   |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `completed`, `evidenceRef: "read-snapshot:<snapshot id>"`  | the pointer, the stored revision and CORE share one epoch, and the pointer was verified at or above it |
+| `pending`, `failureCode: "projection_behind"`              | the published snapshot was verified at an older revision                                               |
+| `pending`, `failureCode: "read_model_unavailable"`         | no `READ` binding, nothing published, another READ contract, or READ could not be read                 |
+| `pending`, `failureCode: "read_model_context_changed"`     | the epochs differ (CORE restored, or READ built under another epoch)                                   |
+| `pending`, `failureCode: "projection_revision_unrecorded"` | the execution was recorded published before the revision was stored with it                            |
+| `pending`, no `failureCode`                                | `adopted` is not complete                                                                              |
+
+The record's `status` reads `completed` when the stored status is `running`
+and every stage, this one included, is `completed`; a re-send of the request
+answers with that same status. The stored request stays
+`running` and its `projected` row `pending`, so the answer follows READ: it
+falls back to `running` with the reason if READ is lost or CORE is restored
+under a new epoch. Coverage compares revisions over the whole CORE input, so
+a collection whose parses add no balance row is covered once the published
+snapshot was verified at or above its revision. A use restriction that makes
+the snapshot unservable does not reopen the stage. Requests of the other
+kinds never reach `adopted` through an executor, so their `projected` stays a
+plain `pending`; a rebuild request is still not traced.
 
 ## Storage
 
-Every request to the six routes, and every operations MCP tool call, is
+Every request to the seven routes, and every operations MCP tool call, is
 recorded in the common audit log ([audit log](audit-log.md), ADR 0064): an
 accepted request's `accepted` record is the last statement of the acceptance
 batch (so a request exists exactly when its record does), and a re-send, a read
@@ -495,7 +704,8 @@ writing their own SQL against the tables above:
 | Service                                                                                                        | For                                                         |
 | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | `requestCollection` / `requestImport` / `requestReplay` / `requestProjectionRebuild` / `requestSessionRefresh` | the six accept paths                                        |
-| `readOperation`                                                                                                | the operation record, scoped to a principal                 |
+| `readOperation`                                                                                                | one operation record, of any principal (ADR 0086)           |
+| `listOperations` (`operations/list.ts`)                                                                        | one page of every request, newest first (ADR 0086)          |
 | `pendingDispatches({store, nowMs, limit})`                                                                     | the Processor alarm tick's queue of undispatched requests   |
 | `recordDispatch({operationId, outcome, targetRef?})`                                                           | one dispatch; binds `target_ref` once, answers who holds it |
 | `recordOperationStage({operationId, stage, state})`                                                            | stage evidence; completes the operation when all stages are |
@@ -549,15 +759,19 @@ The collector execution services are in
 | `collectedDispatchesDue` / `trackCollectorPublication`       | the trail of a collected execution, until published or a reason       |
 | `collectorExecution` / `collectorRunTrails` / `trailOutcome` | the `execution` block and the stage ladder it supports                |
 
+`projection-trace.ts` holds the `projected` requirement the published batch
+stores (`projectionRequirementWrite`) and the read-time comparison with the
+READ pointer (`projectionCoverage`); see [projected](#projected-read).
+
 ## What was verified locally, and what was not
 
 Synthetic data only.
 
-- `services/app/test/ops-api.test.ts` (35 checks over the real
+- `services/app/test/ops-api.test.ts` (43 checks over the real
   Worker, the real migrations and the real store): flag-off behaviour, the
   closed route and verb set with the flag on, `/api/meta` discovery, one
-  record per request, re-send, idempotency conflict, per-principal scoping,
-  schema refusals of SQL / storage keys / external URLs / unknown keys /
+  record per request, re-send, idempotency conflict, one operation per
+  principal for one key (either principal reads the other's), schema refusals of SQL / storage keys / external URLs / unknown keys /
   impossible dates (G3-13), an import run id outside the terminal key's
   grammar, that the import schema accepts exactly the run ids
   `terminalKey` accepts and that the MCP import tool publishes that grammar,
@@ -566,9 +780,25 @@ Synthetic data only.
   replay plan written into the 0035 tables exactly once, `waiting_for_human`
   (G3-11), stage progress and completion, the read route's `execution` block
   for an accepted and for a collected request, and that `/mcp` publishes the
-  operations to every MCP client, which applies them as itself and never sees
-  the operator's browser receipt, while HTTP still grades the operator lists
-  (G3-05, ADR 0047, ADR 0084).
+  operations to every MCP client, which applies them as itself and reads the
+  operator's browser receipt exactly as the route answers it, while HTTP
+  still grades the operator lists (G3-05, ADR 0047, ADR 0084, ADR 0086), and
+  a published collection followed to `projected` alike on HTTP and MCP
+  against a synthetic READ pointer. Its
+  list checks (ADR 0086) cover the whole-store page (two operators shown the
+  same page of both's requests), cursor paging, the filters, every refusal,
+  the audit record and the list's query plans on D1 without table statistics.
+- `services/app/test/delegated-ops-parity.test.ts`: the list tool and the
+  route answer the same page of both principals' requests in the stored
+  order, the get tool and the route read the operator's request and the MCP
+  client's alike, the operator's operation pages on as the tool's cursor, a
+  bad limit, an unknown key and an unknown cursor are refused, and the call
+  is recorded once as `read` with its row count on `mcp`.
+- `packages/application/test/operations-list.test.ts`: the list paged to its
+  end for every filter shape on random synthetic stores against an in-memory
+  reference (two principals, the same pages whichever asks), the summary
+  shape, cursors of another principal and of no operation, and the query
+  plans without table statistics.
 - `packages/application/test/operations.test.ts` (10 checks; the SQL half
   runs against the real migrations in `bun:sqlite`): request identity,
   principal binding, the stage table per kind, the session policy's safe
@@ -581,15 +811,19 @@ Synthetic data only.
   `services/app/test/conformance.test.ts` pin the new `opsApi`
   capability off in the shared contract.
 - Collector execution (ADR 0048), synthetic source and collector:
-  `services/processor/test/collector-dispatch.test.ts` (19 checks over the
+  `services/processor/test/collector-dispatch.test.ts` (21 checks over the
   real CORE schema and the real registration: success through `published`
   with distinct timestamps, failure, uncertain, an unfinished start, re-send
   with the same key before and after the run, a raced claim, a held lease and
   a lease taken by the collector, unsupported and human-required and supported
   refresh, expiry, maintenance (including windows that never close), one start
-  per tick, the 48-hour horizon, no parser selected, the stored columns);
+  per tick, the 48-hour horizon, no parser selected, the stored columns, the
+  `projected` requirement stored with publication);
   `packages/application/test/collector-trail.test.ts` (the 0068 guards, the
   trail's outcomes and its keyed query plans without table statistics);
+  `packages/application/test/projection-trace.test.ts` (`projected` pending,
+  behind, completed and each closed reason against real CORE and READ
+  migrations, and its keyed statements without table statistics);
   `packages/collection/test/operation-rpc.test.ts` (the connection table
   against `config/alarm-jobs.json`, request refusals before any run, the
   closed answer, the lease refusal mapped to `collection_busy`);
@@ -599,11 +833,12 @@ Synthetic data only.
   `services/processor/test/schedule-native-runtime.test.ts` (a real workerd
   Processor tick starting one request over a named service binding).
 
-Not verified: no deployed instance, no live Access policy, no real provider or
-session, and no deployed collector has served `runOperation`; no connection is
-enabled in the committed configuration. No operations tool has run for a
-real MCP client; dated client connection evidence is in the
-[recovery runbook](mcp-recovery.md).
+The tests above use no deployed instance, live Access policy, real provider or
+session. In production, `sony-bank` served `runOperation` for an MCP client's
+collection request, and the run it reported was registered and every
+parse-selected artifact published; the other connections the committed
+configuration names had not run a request when they were added. Dated MCP
+client connection evidence is in the [recovery runbook](mcp-recovery.md).
 
 Acceptance ids and the test that carries each:
 
@@ -623,7 +858,7 @@ Flag defaults when absent (not the current committed settings):
 
 | Variable                             | Worker    | Default | Effect                                                                                    |
 | ------------------------------------ | --------- | ------- | ----------------------------------------------------------------------------------------- |
-| `OPS_API_ENABLED`                    | app       | `""`    | `"true"` serves the six routes and publishes their tools to every MCP client (ADR 0084)   |
+| `OPS_API_ENABLED`                    | app       | `""`    | `"true"` serves the seven routes and publishes their tools to every MCP client (ADR 0084) |
 | `SESSION_REFRESH_POLICY`             | app       | `""`    | Sources a collector may refresh unattended; absent = a person                             |
 | `OPS_DISPATCH_ENABLED`               | processor | `""`    | `"1"`/`"true"` runs the `operation_dispatch` lane                                         |
 | `OPS_COLLECTOR_DISPATCH_CONNECTIONS` | processor | `""`    | JSON array of connection ids whose collector the lane may call; empty or malformed = none |
@@ -652,8 +887,8 @@ tables are unread by the previous revision.
 
 Order: CORE `0068` is applied, the collectors (with `runOperation`) are
 uploaded, then the Processor, then the App ([rollout](rollout.md#4-deployment-order)).
-With the committed empty `OPS_COLLECTOR_DISPATCH_CONNECTIONS`, the first ticks
-only decline requests no connection serves, expire requests older than 24 hours
+With an empty `OPS_COLLECTOR_DISPATCH_CONNECTIONS` (as committed until
+2026-11-08), the first ticks only decline requests no connection serves, expire requests older than 24 hours
 and leave the rest waiting with `collector_dispatch_disabled`; no provider is
 contacted.
 
@@ -665,6 +900,18 @@ a fresh idempotency key at a time the source's alarm is not due, and read
 `GET /api/ops/v1/operations/{id}` until `execution.state` is `published`,
 `unpublished`, `failed` or `uncertain`. Rollback: remove the id; a request
 already `started` is not interrupted, and nothing started is retried.
+The owner allowed every healthy connection (2026-11-08 03:19 UTC). `sony-bank`
+came first; once its first request was followed to publication, the healthy
+connections that wait on no open fix were added together, and their first
+requests are sent one connection at a time, each after the previous one ends.
+The committed value names `sony-bank`, `sbi-securities`, `mobile-suica`,
+`moneyforward-me` and `myjcb`. `sbi-vc-trade`, `sbi-vc-keepalive` and
+`st-george` follow [#1131](https://github.com/risu729/kogane/pull/1131)
+([#1140](https://github.com/risu729/kogane/issues/1140)); the remaining
+connections (`prestia-globalpass`, `sbi-shinsei`, `vpass`, `mizuho-bank`,
+`vpoint`, `prestia-bank`) come after their open fixes. `mobile-suica` and
+`myjcb` drive a browser and run far longer than `sony-bank`; the Processor tick
+waits for them, so their first requests are watched for `uncertain`.
 `SESSION_REFRESH_POLICY` must also name `sbi-vc-trade` before an unattended
 refresh of it is dispatched, and only once its unattended renewal has been
 demonstrated.

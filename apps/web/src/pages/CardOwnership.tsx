@@ -222,7 +222,7 @@ export function CardOwnershipPage({ proposalId }: { proposalId: string }): React
     <>
       <div className="page-head">
         <div className="breadcrumb">
-          <Link to="/reconciliation">照合候補に戻る</Link>
+          <Link to={`/reconciliation/${proposalId}`}>照合候補に戻る</Link>
         </div>
         <h1>口座の保有者を確認</h1>
         <p className="lede">

@@ -1,5 +1,8 @@
 import { createBrowserDiagnostics } from "./diagnostics.mjs";
+import { obtainChallengeToken } from "./challenge.mjs";
+import { CollectorFailure, failureCode } from "./failure.mjs";
 import http from "node:http";
+import net from "node:net";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { access, mkdtemp, rm } from "node:fs/promises";
@@ -36,7 +39,14 @@ const ACTIVITY_PATH = "/p/statementInquiry/RW1313010201";
 const PAGER_POST_TIMEOUT_MS = 10_000;
 const PAGER_SETTLE_TIMEOUT_MS = 15_000;
 const DAILY_MONTHS = 2;
-const RUNTIME_REVISION = "timezone-collector-v7";
+// The Turnstile token is waited for at most this long per attempt, and the
+// login page is loaded afresh for each of at most CHALLENGE_ATTEMPTS attempts
+// (no credential is sent before a token exists). Observed 2026-11-05..07: the
+// token came after 25 s once and not within 45 s twice; a fresh page gets a
+// fresh challenge instead of waiting on a stuck one.
+const CHALLENGE_ATTEMPTS = 3;
+const CHALLENGE_ATTEMPT_TIMEOUT_MS = 45_000;
+const RUNTIME_REVISION = "timezone-collector-v8";
 const ACTIVITY_LABEL =
   /ご利用明細|利用明細|account activity|transaction(?:s| history)?|usage details|card activity|statement/iu;
 const PROBE_VARIANTS = [
@@ -281,7 +291,14 @@ async function readActivityPager(page) {
     const tables = document.querySelectorAll("table.tableStyle4").length;
     const top = pagers[0];
     if (!top) {
-      return { pagers: 0, total: null, index: null, count: null, nextEnabled: false, tables };
+      return {
+        pagers: 0,
+        total: null,
+        index: null,
+        count: null,
+        nextEnabled: false,
+        tables,
+      };
     }
     const total = /(?:\bFound\s+(\d{1,5})\s+Results?\b|検索結果\s*(\d{1,5})\s*件)/iu.exec(
       text(top.querySelector("div.resultCountHeader")),
@@ -392,7 +409,13 @@ async function walkActivityPages(page, response, month) {
     if (Buffer.byteLength(html) > MAX_HTML_BYTES) {
       throw new Error(`${month} activity HTML exceeded byte limit`);
     }
-    await writeLine(response, { type: "artifact", month, page: index, pageCount, html });
+    await writeLine(response, {
+      type: "artifact",
+      month,
+      page: index,
+      pageCount,
+      html,
+    });
   }
 }
 
@@ -950,12 +973,52 @@ async function probeTurnstile(payload) {
   }
 }
 
+/**
+ * Runs one collection. A failure is answered with one closed `error` record:
+ * the failure code (`failure.mjs`), the stage it failed in, how many challenge
+ * attempts were made and the last HTTP error status the page saw. No message,
+ * URL or provider text.
+ */
 async function collect(payload, response) {
   const diagnostics = createBrowserDiagnostics(payload.relayUrl);
-  return diagnostics.step("collection", () => collectBrowser(payload, response, diagnostics));
+  const lastHttpError = { status: null, host: null, seen: 0 };
+  const challenge = { attempts: 0 };
+  try {
+    await diagnostics.step("collection", () =>
+      collectBrowser(payload, response, diagnostics, lastHttpError, challenge),
+    );
+  } catch (error) {
+    const stage = diagnostics.failedStage;
+    const attempts =
+      error instanceof CollectorFailure && Number.isInteger(error.attempts)
+        ? error.attempts
+        : challenge.attempts;
+    await writeLine(response, {
+      type: "error",
+      operation: "browser-collection",
+      errorType: error instanceof Error ? error.name : "UnknownError",
+      errorCode: failureCode(error, stage),
+      ...(stage ? { stage } : {}),
+      challengeAttempts: attempts,
+      // The Worker admits 400-599 only; a status outside it (Chrome accepts
+      // up to 999) would turn this record into a contract failure.
+      ...(Number.isInteger(lastHttpError.status) &&
+      lastHttpError.status >= 400 &&
+      lastHttpError.status <= 599
+        ? { lastHttpStatus: lastHttpError.status }
+        : {}),
+    });
+  }
 }
 
-async function collectBrowser(payload, response, diagnostics) {
+function httpHostClass(hostname) {
+  if (hostname === GLOBALPASS_HOST) return "globalpass";
+  if (hostname === TURNSTILE_HOST) return "turnstile";
+  if (hostname === TURNSTILE_HELPER_HOST) return "turnstile-helper";
+  return "other";
+}
+
+async function collectBrowser(payload, response, diagnostics, lastHttpError, challenge) {
   const relay = await diagnostics.step("relay-start", () =>
     startConnectRelay({
       relayToken: payload.relayToken,
@@ -964,15 +1027,22 @@ async function collectBrowser(payload, response, diagnostics) {
     }),
   );
   const config = probeConfiguration("chrome-stable-no-ua-all-tamia");
-  const launched = await diagnostics.step("browser-launch", () =>
-    launchProbeContext(config, relay.port),
-  );
+  let launched;
+  try {
+    launched = await diagnostics.step("browser-launch", () =>
+      launchProbeContext(config, relay.port),
+    );
+  } catch (error) {
+    // The relay must not outlive a browser that never started.
+    diagnostics.relaySummary(relay.stats());
+    await relay.close().catch(() => undefined);
+    throw error;
+  }
   const { browser, context } = launched;
   let page;
-  const networkDiagnostic = [];
-  const recordNetwork = (value) => {
-    if (networkDiagnostic.length < 24) networkDiagnostic.push(value);
-  };
+  // A flag, not `primaryError !== undefined`: `throw undefined` is still a failure.
+  let failed = false;
+  let primaryError;
   try {
     await context.route("**/*", async (route) => {
       const url = new URL(route.request().url());
@@ -983,76 +1053,46 @@ async function collectBrowser(payload, response, diagnostics) {
       }
     });
     page = await context.newPage();
-    page.on("requestfailed", (request) => {
-      const url = new URL(request.url());
-      recordNetwork({
-        event: "requestfailed",
-        host: url.hostname,
-        path: normalizeDiagnosticPath(url),
-        resourceType: request.resourceType(),
-        error: request.failure()?.errorText?.slice(0, 100) ?? "unknown",
-      });
-    });
     page.on("response", (pageResponse) => {
       if (pageResponse.status() < 400) return;
       diagnostics.http(pageResponse.status());
       const url = new URL(pageResponse.url());
-      recordNetwork({
-        event: "http",
-        host: url.hostname,
-        path: normalizeDiagnosticPath(url),
-        status: pageResponse.status(),
-      });
+      lastHttpError.status = pageResponse.status();
+      lastHttpError.host = httpHostClass(url.hostname);
+      lastHttpError.seen += 1;
     });
     page.setDefaultTimeout(45_000);
+    // The first challenge attempt counts the login page's own HTTP errors.
+    const httpSeenAtLoginPage = lastHttpError.seen;
     await diagnostics.step("login-page", () =>
       page.goto(LOGIN_URL, { waitUntil: "domcontentloaded" }),
     );
-    try {
-      await diagnostics.step("challenge", () =>
-        page.waitForFunction(() => {
-          const input = document.querySelector("[name=cf-turnstile-response]");
-          return Boolean(input && "value" in input && input.value.length > 20);
-        }),
-      );
-    } catch (error) {
-      const diagnostic = await page.evaluate(() => {
-        const response = document.querySelector("[name=cf-turnstile-response]");
-        const body = document.body?.innerText ?? "";
-        return {
-          urlHost: location.hostname,
-          title: document.title.slice(0, 80),
-          responseField: response?.tagName ?? null,
-          responseLength: response && "value" in response ? response.value.length : 0,
-          loginFormVisible: Boolean(document.querySelector("#usrId")),
-          denied: /Access Denied|アクセスが拒否/iu.test(body),
-          frames: [...document.querySelectorAll("iframe")]
-            .map((frame) => {
-              try {
-                const url = new URL(frame.src);
-                return { host: url.hostname, path: url.pathname.slice(0, 120) };
-              } catch {
-                return null;
-              }
-            })
-            .filter(Boolean)
-            .slice(0, 8),
-        };
-      });
-      throw new Error(
-        `GLOBAL PASS Turnstile token unavailable (${RUNTIME_REVISION}): ${JSON.stringify({ networkDiagnostic, ...diagnostic })}`,
-        { cause: error },
-      );
-    }
-    await page.locator("#usrId").fill(payload.user);
-    await page.locator("#password").fill(payload.password);
+    const challengeAttempts = await diagnostics.step("challenge", () =>
+      obtainChallengeToken(page, {
+        diagnostics,
+        lastHttpError,
+        loginUrl: LOGIN_URL,
+        attempts: CHALLENGE_ATTEMPTS,
+        attemptTimeoutMs: CHALLENGE_ATTEMPT_TIMEOUT_MS,
+        httpSeenAtStart: httpSeenAtLoginPage,
+        onAttempt: (attempt) => {
+          challenge.attempts = attempt;
+        },
+      }),
+    );
+    challenge.attempts = challengeAttempts;
     await diagnostics.step("login-submit", async () => {
+      await page.locator("#usrId").fill(payload.user);
+      await page.locator("#password").fill(payload.password);
       await (await visibleLoginButton(page)).click();
       await page.waitForLoadState("domcontentloaded");
       await page.waitForTimeout(2_000);
       const body = await page.locator("body").innerText();
       if (/Access Denied|アクセスが拒否/iu.test(body)) {
-        throw new Error("GLOBAL PASS login was denied by the edge");
+        throw new CollectorFailure(
+          "globalpass_login_denied",
+          "GLOBAL PASS login was denied by the edge",
+        );
       }
       if (
         await page
@@ -1060,7 +1100,10 @@ async function collectBrowser(payload, response, diagnostics) {
           .isVisible()
           .catch(() => false)
       ) {
-        throw new Error("GLOBAL PASS login returned to the credential form");
+        throw new CollectorFailure(
+          "globalpass_login_rejected",
+          "GLOBAL PASS login returned to the credential form",
+        );
       }
     });
 
@@ -1089,14 +1132,69 @@ async function collectBrowser(payload, response, diagnostics) {
       });
     }
     await diagnostics.step("logout", () => signOut(page));
-  } finally {
-    try {
-      await diagnostics.step("browser-close", () => launched.close());
-    } finally {
-      await diagnostics.step("relay-close", () => relay.close());
-    }
+  } catch (error) {
+    failed = true;
+    primaryError = error;
   }
+  // A teardown failure is logged, but it never replaces the failure that
+  // ended the run, nor takes over its stage.
+  const blame = !failed;
+  let teardownError;
+  try {
+    await diagnostics.step("browser-close", () => launched.close(), { blame });
+  } catch (error) {
+    teardownError ??= error;
+  }
+  diagnostics.relaySummary(relay.stats());
+  try {
+    await diagnostics.step("relay-close", () => relay.close(), { blame });
+  } catch (error) {
+    teardownError ??= error;
+  }
+  if (failed) throw primaryError;
+  if (teardownError !== undefined) throw teardownError;
 }
+
+// The process-level last resort: a failure nothing else handled is logged as
+// one closed record (error name and socket code only, never its message), and
+// the process still exits, because its state is unknown after such a failure.
+// The Worker then sees the collection request fail.
+const CRASH_CODES = new Set([
+  "ECONNRESET",
+  "EPIPE",
+  "ETIMEDOUT",
+  "ECONNREFUSED",
+  "ECONNABORTED",
+  "ERR_STREAM_PREMATURE_CLOSE",
+  "ERR_STREAM_DESTROYED",
+]);
+function logCrash(kind, error) {
+  try {
+    const name = error instanceof Error ? error.name : "UnknownError";
+    const code = error && typeof error === "object" ? Reflect.get(error, "code") : undefined;
+    console.error(
+      JSON.stringify({
+        event: "globalpass-container-crash",
+        kind,
+        errorType: ["Error", "TypeError", "RangeError", "SyntaxError", "TimeoutError"].includes(
+          name,
+        )
+          ? name
+          : "UnknownError",
+        code: typeof code === "string" && CRASH_CODES.has(code) ? code : "other",
+        collecting,
+      }),
+    );
+  } catch {}
+}
+process.on("uncaughtException", (error) => {
+  logCrash("uncaught-exception", error);
+  process.exit(1);
+});
+process.on("unhandledRejection", (error) => {
+  logCrash("unhandled-rejection", error);
+  process.exit(1);
+});
 
 http
   .createServer(async (request, response) => {
@@ -1143,16 +1241,7 @@ http
         "content-type": "application/x-ndjson; charset=utf-8",
         "cache-control": "no-store",
       });
-      try {
-        await collect(payload, response);
-      } catch (error) {
-        await writeLine(response, {
-          type: "error",
-          operation: "browser-collection",
-          errorType: error instanceof Error ? error.name : "UnknownError",
-          errorCode: "browser_collection_failed",
-        });
-      }
+      await collect(payload, response);
       response.end();
     } catch {
       if (!response.headersSent) {

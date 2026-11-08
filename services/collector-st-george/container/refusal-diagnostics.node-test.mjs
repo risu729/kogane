@@ -5,6 +5,7 @@ import {
   createRuntimeDiagnostics,
   hasExpectedLoginForm,
   publicFailure,
+  readNotices,
   readState,
 } from "./browser.mjs";
 
@@ -27,6 +28,7 @@ function fixture(spec) {
   let clicks = 0;
   let requestEvents = 0;
   let postSubmitStateReads = 0;
+  const noticeReads = [];
   let detached = 0;
   let sessions = 0;
   const session = {
@@ -91,8 +93,12 @@ function fixture(spec) {
       assert.equal(current, LOGIN);
       throw new Error("synthetic-navigation-timeout");
     },
-    async evaluate(operation) {
+    async evaluate(operation, argument) {
       if (operation === hasExpectedLoginForm) return true;
+      if (operation === readNotices) {
+        noticeReads.push(argument);
+        return spec.notices ?? [];
+      }
       assert.equal(operation, readState);
       if (!submitted) return { reason: null, login: true, portfolio: false };
       postSubmitStateReads++;
@@ -107,6 +113,7 @@ function fixture(spec) {
   };
   return {
     page,
+    noticeReads: () => noticeReads,
     verify() {
       assert.equal(clicks, 1);
       assert.equal(requestEvents, 1);
@@ -179,7 +186,36 @@ const unchanged = [
     expected: "authentication-challenge",
     stateReads: 1,
   },
-  { name: "login remains", target: LOGIN, login: true, expected: "login-rejected", stateReads: 1 },
+  {
+    name: "login remains",
+    target: LOGIN,
+    login: true,
+    expected: "login-rejected",
+    stateReads: 1,
+    noticeRead: true,
+  },
+  {
+    name: "login remains with the bank's notice",
+    target: LOGIN,
+    noticeRead: true,
+    login: true,
+    expected: "login-rejected",
+    stateReads: 1,
+    notices: [
+      "  Log on\n",
+      "The details you entered don't match our records. Call 13 33 30 or write to help@example.invalid. Ref 1234-5678.",
+      "Log on",
+      "x".repeat(400),
+      "A duplicate does not count toward the four",
+      "A fifth distinct notice is dropped",
+    ],
+    expectedNotices: [
+      "Log on",
+      "The details you entered don't match our records. Call # or write to [email] Ref #.",
+      "x".repeat(160),
+      "A duplicate does not count toward the four",
+    ],
+  },
 ];
 
 async function run(spec) {
@@ -209,11 +245,25 @@ async function run(spec) {
       if (spec.refusalCallbackThrows) throw new Error(secret);
       diagnostic.refusal(value);
     },
-  ).catch((error) => {
-    diagnostic.failure(error);
-    return publicFailure(error);
+    diagnostic.notices,
+  ).catch((error) => publicFailure(error, diagnostic.failure(error)));
+  const { diagnostic: summary, ...publicResult } = result;
+  assert.deepEqual(publicResult, {
+    status: "failed",
+    reason: spec.expected ?? "unexpected-route",
   });
-  assert.deepEqual(result, { status: "failed", reason: spec.expected ?? "unexpected-route" });
+  // After a submitted login, notices are read only on the login page: a
+  // portfolio with a fragment or path suffix, or an unknown bank page, may
+  // carry the customer's name.
+  assert.deepEqual(fake.noticeReads(), spec.noticeRead ? [true] : []);
+  assert.deepEqual(summary, {
+    stage: "login-result-state",
+    errorType: "CollectionError",
+    loginPostCount: 1,
+    refusal: spec.refusalCallbackThrows ? "unknown" : (spec.refusal ?? "unknown"),
+    durationMs: 0,
+    notices: spec.expectedNotices ?? [],
+  });
   assert.deepEqual(refusals, spec.refusal ? [spec.refusal] : []);
   assert.deepEqual(records, [
     {
@@ -223,6 +273,7 @@ async function run(spec) {
       loginPostCount: 1,
       refusal: spec.refusalCallbackThrows ? "unknown" : (spec.refusal ?? "unknown"),
       durationMs: 0,
+      noticeCount: (spec.expectedNotices ?? []).length,
     },
   ]);
   assert.equal(JSON.stringify(records).includes(secret), false);

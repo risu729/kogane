@@ -68,6 +68,59 @@ describe("St.George shared evidence", () => {
     expect(hasProviderArtifact(read.manifest)).toBe(false);
     expect(read.manifest.safeErrorCode).toBe("authentication-challenge");
   });
+  test("a failed run's manifest keeps what the browser saw, re-redacted", async () => {
+    const { snapshot: _snapshot, ...base } = input();
+    const bucket = new FakeR2Bucket();
+    await persistSharedRun(bucket, {
+      ...base,
+      reason: "login-rejected",
+      diagnostic: {
+        stage: "login-result-state",
+        errorType: "CollectionError",
+        refusal: "unknown",
+        loginPostCount: 1,
+        durationMs: 41_000,
+        notices: ["Log on", "Access number 12345678 is not recognised"],
+      },
+    });
+    const read = await readTerminal(bucket, "st-george", base.runId);
+    if (read.outcome !== "found") throw new Error("terminal missing");
+    const manifestArtifact = read.manifest.artifacts.find(
+      (value) => value.artifactKey === "manifest.json",
+    )!;
+    const body = await bucket.get(manifestArtifact.storageRef.key);
+    const manifest = JSON.parse(new TextDecoder().decode(await body!.arrayBuffer()));
+    expect(manifest.failures).toEqual([
+      {
+        operation: "collect",
+        message: "login-rejected",
+        diagnostic: {
+          stage: "login-result-state",
+          errorType: "CollectionError",
+          refusal: "unknown",
+          loginPostCount: 1,
+          durationMs: 41_000,
+          notices: ["Log on", "Access number # is not recognised"],
+        },
+      },
+    ]);
+  });
+  test("a malformed diagnostic is dropped, never stored and never fails the run", async () => {
+    const { snapshot: _snapshot, ...base } = input();
+    const plan = await buildSharedRunPlan({
+      ...base,
+      reason: "runtime-failed",
+      diagnostic: { stage: "synthetic-secret" } as never,
+    });
+    const manifest = plan.artifacts.find((value) => value.artifactKey === "manifest.json")!;
+    const text = new TextDecoder().decode(
+      (manifest.body as { kind: "bytes"; bytes: Uint8Array }).bytes,
+    );
+    expect(text).not.toContain("synthetic-secret");
+    expect(JSON.parse(text).failures).toEqual([
+      { operation: "collect", message: "runtime-failed" },
+    ]);
+  });
   test("rejects undeclared credential fields before preparing any persisted bytes", async () => {
     const run = input();
     const tainted = { ...run.snapshot!, cookie: "synthetic-secret" };

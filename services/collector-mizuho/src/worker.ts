@@ -78,6 +78,8 @@ export function createCollection(overrides: Partial<Dependencies> = {}) {
           version: env.COLLECTOR_SCHEMA_VERSION,
           artifacts: collection?.artifacts ?? [],
           failedUnits: collection?.failedUnits ?? ["account-list"],
+          failedUnitCodes: collection?.failedUnitCodes ?? {},
+          ...(errorCode ? { failureCode: errorCode } : {}),
           failed: collection === undefined,
           partial: collection?.partial ?? false,
         });

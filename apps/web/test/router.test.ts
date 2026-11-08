@@ -37,8 +37,14 @@ describe("route matching", () => {
       `/confirm/${"c".repeat(64)}`,
       `/purchases/${purchase}`,
       "/reconciliation/card-settlement-synthetic/ownership",
+      "/reconciliation/card-settlement-synthetic",
     ])
       expect(matchRoute(`${path}/`)).toEqual(matchRoute(path));
+    expect(matchRoute("/reconciliation/card-settlement-synthetic/")).toEqual({
+      name: "reconciliationReview",
+      proposalId: "card-settlement-synthetic",
+    });
+    expect(matchRoute("/reconciliation")).toEqual({ name: "reconciliation" });
     expect(matchRoute(`/purchases/${purchase}/`)).toEqual({ name: "purchase", eventId: purchase });
     expect(matchRoute("/reconciliation/card-settlement-synthetic/ownership/")).toEqual({
       name: "cardOwnership",
@@ -51,6 +57,9 @@ describe("route matching", () => {
       `/purchases/purchase_${"a".repeat(64)}/extra/`,
       `/purchases/purchase_${"a".repeat(63)}/`,
       "/reconciliation/x/ownership/extra/",
+      "/reconciliation/x/extra/",
+      "/reconciliation/a.b/",
+      `/reconciliation/${"a".repeat(129)}/`,
       "/purchases/arbitrary/",
     ])
       expect(matchRoute(path).name).toBe("notFound");

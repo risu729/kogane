@@ -133,6 +133,7 @@ into `needs-rule-verification`.
 | `rule_out_of_force`                  | 評価日がこの版の適用期間外（読めない期間は「常に有効」と扱わない）                                 |
 | `rule_transition_unconfirmed`        | 起算日か期限が版の適用期間外で、版の切替時の扱いが記録されていない                                 |
 | `rule_bucket_kind_not_covered`       | この版はこのkindを対象にしていない                                                                 |
+| `bucket_kind_unclassified`           | providerの数量は保持しているが、bucketの種類が確認されていない                                     |
 | `fixed_deadline_not_derivable`       | 期限はロットごとに決まり、providerの表示以外に根拠がない                                           |
 | `qualifying_activity_policy_missing` | inactivity ruleの対象活動定義が解決できない                                                        |
 | `membership_out_of_scope`            | tier条件つきruleで、この保有に必要tierのclaimがない                                                |
@@ -370,7 +371,7 @@ CORE側の `reward_programs` / `expiry_rules` / `conversion_offers`（版管理�
 ### 固定する入力
 
 processorの `reward_read_projection` lane（`reward_claims_sweep` の後、`report_job` の前、
-`decision_outbox` は最後のまま）が、05 §3の楽観的captureを行う。
+その後に `decision_outbox`、最後に `audit_overflow`）が、05 §3の楽観的captureを行う。
 
 ```text
 revision r0 を読む
@@ -505,7 +506,7 @@ COREのclaim・rule・offer、保存済み入力と原本は維持する。
 
 - `packages/domain/test/reward-expiry-basis.test.ts` — 表示期限と算定期限の一致・不一致、
   読めない表示、期限固定ロット、確認済みの無期限、tier claimの記録、同日の起算活動の決定性、
-  12個の理由コードそれぞれ（日付も0も「期限切れ」も出ないこと、cases が閉じた一覧と一致すること）、
+  13個の理由コードそれぞれ（日付も0も「期限切れ」も出ないこと、cases が閉じた一覧と一致すること）、
   適用期間の境界をまたぐ2つのrule版（v1最終日・v2初日、v2開始前の起算日、v1終了後の期限、
   読めない期間）、rule×履歴×kind×数量×表示の全組み合わせで全bucketが残り数量が変わらず
   `deadline_passed` が根拠のある暦日にだけ付くこと、validatorの拒否。

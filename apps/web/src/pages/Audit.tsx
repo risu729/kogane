@@ -29,7 +29,8 @@ import {
 } from "../audit-api.ts";
 import { displayLabel } from "../labels.ts";
 import { Pagination } from "../pagination.tsx";
-import { navigate, useLocation } from "../router.tsx";
+import { isOperationId, operationRoute } from "../operations-api.ts";
+import { Link, navigate, useLocation } from "../router.tsx";
 import { Badge, EmptyState, Notice, Panel, QueryBoundary, type Tone } from "../ui.tsx";
 
 const SELECTS: {
@@ -286,6 +287,14 @@ function RecordRow({ record }: { record: AuditRecordWire }): ReactNode {
       <td>
         {record.targetRef === null ? (
           <span className="muted">対象なし</span>
+        ) : isOperationId(record.targetRef) ? (
+          // An operations request: its stored trail is one page away.
+          <>
+            <Code value={record.targetRef} />
+            <span className="audit-meta">
+              <Link to={operationRoute(record.targetRef)}>依頼の経過を見る</Link>
+            </span>
+          </>
         ) : (
           <Code value={record.targetRef} />
         )}

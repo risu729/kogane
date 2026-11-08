@@ -616,6 +616,48 @@ describe("holdings from the adopted projection", () => {
     expect(outcome.error.code).toBe("incomplete_evidence");
   });
 
+  test("one subject holding several units counts once in each unit", async () => {
+    // An exchange account's cash per asset, or a broker's foreign cash per
+    // currency: one subject scope, one adopted measurement per unit.
+    const outcome = await run(
+      grant(),
+      request({ intent: "holdings" }),
+      reader(),
+      projectionStub({
+        rows: [
+          adopted({ metric_id: "exchange.cash-balance" }),
+          adopted({
+            metric_id: "exchange.cash-balance",
+            unit_ref: "BTC",
+            quantity_coefficient: "5",
+            quantity_scale: 1,
+          }),
+        ],
+      }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    if (outcome.result.data.intent !== "holdings") throw new Error("unreachable");
+    expect(outcome.result.data.units).toEqual([
+      { unitRef: "BTC", coefficient: "5", scale: 1, adoptedCount: 1 },
+      { unitRef: "JPY", coefficient: "60000", scale: 0, adoptedCount: 1 },
+    ]);
+  });
+
+  test("one subject twice in the same unit is refused even under two metrics", async () => {
+    const outcome = await run(
+      grant(),
+      request({ intent: "holdings" }),
+      reader(),
+      projectionStub({
+        rows: [adopted(), adopted({ metric_id: "broker.foreign-cash-deposit" })],
+      }),
+    );
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("incomplete_evidence");
+  });
+
   test("a scope larger than the subtotal bound is refused, never partially summed", async () => {
     const outcome = await run(
       grant(),

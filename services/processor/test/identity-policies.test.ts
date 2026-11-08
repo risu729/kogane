@@ -9,6 +9,7 @@ import {
   dependencyDigest,
   IDENTITY_POLICY_VERSION,
   MIZUHO_POLICY_VERSION,
+  MYJCB_POLICY_VERSION,
   NO_EVIDENCE,
   SBI_SHINSEI_POLICY_VERSION,
   requiredIdentityPolicySql,
@@ -149,6 +150,40 @@ test("every SBI Shinsei parse requires policy 2 of the default family, with no e
   });
 });
 
+test("only MyJCB J-POINT captures require policy 2 of the default family", () => {
+  expect(MYJCB_POLICY_VERSION).toBe(2);
+  // Policy-1 runs sealed before the resolver's J-POINT rule mapped the total
+  // as unrecognized; those parses are re-identified append-only.
+  const jpoint = { ...NO_EVIDENCE, myJcbJPointArtifact: true };
+  expect(selectIdentityPolicy(parse("myjcb"), jpoint)).toEqual({
+    policyFamily: DEFAULT_POLICY_FAMILY,
+    release: "identity-default-v2",
+    policyVersion: 2,
+    dependencySet: [],
+    eligibility: { status: "eligible" },
+  });
+  expect(selectIdentityPolicy(parse("myjcb"), jpoint, 1)).toMatchObject({
+    release: "identity-default-v1",
+    policyVersion: 1,
+  });
+  // A statement capture keeps the base policy, so its root mapping is never
+  // re-revised (card-settlement ownership evidence cites the mapping id).
+  expect(selectIdentityPolicy(parse("myjcb"), NO_EVIDENCE)).toEqual({
+    policyFamily: DEFAULT_POLICY_FAMILY,
+    release: "identity-default-v1",
+    policyVersion: BASE_IDENTITY_POLICY_VERSION,
+    dependencySet: [],
+    eligibility: {
+      status: "fallback",
+      family: DEFAULT_POLICY_FAMILY,
+      reason: "not-a-jpoint-capture",
+    },
+  });
+  expect(
+    selectIdentityPolicy(parse("myjcb"), { ...NO_EVIDENCE, myJcbJPointArtifact: false }),
+  ).toMatchObject({ policyVersion: BASE_IDENTITY_POLICY_VERSION });
+});
+
 test("the same release over a different evidence set has a different dependency digest", async () => {
   const a = selectIdentityPolicy(parse("vpass"), { vpassBindings: [binding("a")] });
   const b = selectIdentityPolicy(parse("vpass"), { vpassBindings: [binding("b")] });
@@ -172,7 +207,7 @@ test("the same release over a different evidence set has a different dependency 
 
 test("the required-policy SQL keeps the audited eligibility expression and validates its alias", () => {
   expect(requiredIdentityPolicySql("a").replace(/\s+/gu, " ")).toBe(
-    "CASE WHEN a.source_id='vpass' AND EXISTS( SELECT 1 FROM trusted_vpass_card_bindings binding WHERE binding.financial_artifact_id=a.id) THEN 2 WHEN a.source_id='mizuho-bank' THEN 2 WHEN a.source_id='sbi-shinsei-bank' THEN 2 ELSE 1 END",
+    "CASE WHEN a.source_id='vpass' AND EXISTS( SELECT 1 FROM trusted_vpass_card_bindings binding WHERE binding.financial_artifact_id=a.id) THEN 2 WHEN a.source_id='mizuho-bank' THEN 2 WHEN a.source_id='sbi-shinsei-bank' THEN 2 WHEN a.source_id='myjcb' AND a.dataset='jpoint-balance' THEN 2 ELSE 1 END",
   );
   for (const alias of ["", "1a", "a.b", "a;", "a b"])
     expect(() => requiredIdentityPolicySql(alias)).toThrow("identity_sql_alias_invalid");

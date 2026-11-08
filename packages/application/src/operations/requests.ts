@@ -8,8 +8,10 @@
 // Four rules hold in every function below.
 //
 // 1. The actor is the caller's verified principal. Nothing here reads an actor
-//    from a payload, and every read is filtered by the principal that accepted
-//    the request.
+//    from a payload. A request's row is addressed by the principal that
+//    accepted it, so a re-send finds its own record; reading an accepted
+//    operation is whole-store, like every other read since ADR 0084 (ADR 0086,
+//    owner 2026-11-08 04:21 UTC).
 // 2. A request names a *declared* source, a registered parser release or a
 //    bounded run identifier — never a table, a bucket key, a URL or SQL
 //    (G3-13). The registry is asked; free text is not trusted.
@@ -34,6 +36,8 @@ import { canonicalDigest } from "../../../domain/src/context.ts";
 import type { CommandStore, PreparedWrite, Principal } from "../command/contract.ts";
 import { commandError, type CommandResult } from "../command/errors.ts";
 import { collectorExecution, type CollectorExecutionReport } from "./collector-trail.ts";
+import { projectionCoverage, projectionRequirement } from "./projection-trace.ts";
+import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import type { OperationCall } from "../audit/call.ts";
 
 export const OPERATION_KINDS = [
@@ -259,6 +263,8 @@ interface StageRow {
 const ROW_COLUMNS = `operation_id,kind,principal,idempotency_key,payload_digest,source_id,status,
  dispatch_state,dispatch_attempts,target_ref,failure_code,created_at,updated_at`;
 const SELECT_ROW = `SELECT ${ROW_COLUMNS} FROM ops_requests WHERE operation_id=?1 AND principal=?2`;
+/** Any principal's request: the reads are whole-store (ADR 0086). */
+const SELECT_ANY_ROW = `SELECT ${ROW_COLUMNS} FROM ops_requests WHERE operation_id=?1`;
 const SELECT_STAGES = `SELECT stage,state,evidence_ref,failure_code,attempts,updated_at
  FROM ops_request_stages WHERE operation_id=?1`;
 const INSERT_REQUEST = `INSERT INTO ops_requests
@@ -303,12 +309,16 @@ function receiptOf(row: OpsRow, stages: readonly StageRow[]): OperationReceipt {
 
 async function loadReceipt(
   store: CommandStore,
+  readStore: SqlExecutor | null | undefined,
   operationId: string,
-  principal: string,
 ): Promise<OperationReceipt | null> {
-  const row = await store.first<OpsRow>(SELECT_ROW, [operationId, principal]);
+  const row = await store.first<OpsRow>(SELECT_ANY_ROW, [operationId]);
   if (!row) return null;
-  const receipt = receiptOf(row, await store.all<StageRow>(SELECT_STAGES, [operationId]));
+  const receipt = await withProjection(
+    store,
+    readStore,
+    receiptOf(row, await store.all<StageRow>(SELECT_STAGES, [operationId])),
+  );
   return {
     ...receipt,
     execution: await collectorExecution(store, {
@@ -320,12 +330,54 @@ async function loadReceipt(
   };
 }
 
+/**
+ * The `projected` stage, derived at read time once adoption is complete
+ * (ADR 0048, amended): `completed` when the published READ snapshot covers the
+ * CORE revision stored when the execution was recorded published, otherwise
+ * `pending` with the closed reason as its `failureCode` and no evidence. A
+ * `projected` row some executor completed is reported as stored. The request
+ * reads `completed` when this makes every stage of its kind complete; the
+ * stored row is not changed, so a reader that loses sight of READ (lost,
+ * rebuilt, another CORE epoch) reports `running` again with that reason.
+ */
+async function withProjection(
+  store: CommandStore,
+  readStore: SqlExecutor | null | undefined,
+  receipt: OperationReceipt,
+): Promise<OperationReceipt> {
+  const adopted = receipt.stages.find((stage) => stage.stage === "adopted");
+  const projected = receipt.stages.find((stage) => stage.stage === "projected");
+  if (adopted?.state !== "completed" || !projected || projected.state === "completed")
+    return receipt;
+  const verdict = await projectionCoverage(
+    store,
+    readStore,
+    projectionRequirement(projected.evidenceRef),
+  );
+  const derived: OperationStageReport =
+    verdict.state === "completed"
+      ? { ...projected, state: "completed", evidenceRef: verdict.evidenceRef, failureCode: null }
+      : { ...projected, state: "pending", evidenceRef: null, failureCode: verdict.reasonCode };
+  const stages = receipt.stages.map((stage) => (stage.stage === "projected" ? derived : stage));
+  const status =
+    receipt.status === "running" && stages.every((stage) => stage.state === "completed")
+      ? "completed"
+      : receipt.status;
+  return { ...receipt, stages, status };
+}
+
 export interface OperationContext {
   store: CommandStore;
   /** The verified caller; `principal.id` is the only actor that is stored. */
   principal: Principal;
   /** ISO-8601 second precision, supplied by the adapter. */
   now: string;
+  /**
+   * The READ database (U11), read only, for the `projected` stage of an
+   * operation record; null or absent when this deployment binds none, which
+   * the record reports as `read_model_unavailable`.
+   */
+  readStore?: SqlExecutor | null;
   /**
    * The route's or tool's audit call (ADR 0064). An accepted request's
    * `accepted` record is the last statement of the acceptance batch, joined
@@ -423,7 +475,13 @@ async function accept(input: AcceptInput): Promise<CommandResult<AcceptedOperati
   // answer with someone else's request.
   if (row.payload_digest !== payloadDigest)
     return commandError("idempotency_conflict", [operationId]);
-  const receipt = receiptOf(row, await store.all<StageRow>(SELECT_STAGES, [operationId]));
+  // A re-send answers with the same record a read does, `projected` derived
+  // the same way (ADR 0048, amended): never the stored requirement reference.
+  const receipt = await withProjection(
+    store,
+    input.readStore,
+    receiptOf(row, await store.all<StageRow>(SELECT_STAGES, [operationId])),
+  );
   return { ok: true, receipt, replayed };
 }
 
@@ -563,9 +621,10 @@ export async function requestProjectionRebuild(
 /**
  * `POST /api/ops/v1/sessions/{source}/refresh`: ask the party that owns the
  * source's credentials to renew its session. This path never holds, returns or
- * logs a credential, and it never retries a login: when the source policy says
- * a person is needed the operation is stored as `waiting_for_human` and the UI
- * shows that state (12 §3, G3-11).
+ * logs a credential. When the source policy says a person is needed the
+ * operation is stored as `waiting_for_human` and the UI shows that state
+ * (12 §3, G3-11). Otherwise the collector renews the session itself and limits
+ * its own forced logins (SBI VC: at most one per hour, ADR 0069).
  */
 export async function requestSessionRefresh(
   input: OperationContext & {
@@ -588,32 +647,34 @@ export async function requestSessionRefresh(
 }
 
 /**
- * `GET /api/ops/v1/operations/{id}`: the stored record of one accepted
- * request, scoped to the principal that accepted it. An operation belonging to
- * someone else answers exactly like one that does not exist.
+ * `GET /api/ops/v1/operations/{id}` and `kogane.ops.operation.get`: the stored
+ * record of one accepted request, whichever principal accepted it. Reads are
+ * whole-store like every other read since ADR 0084 (ADR 0086, owner
+ * 2026-11-08 04:21 UTC); only an id that does not exist is `receipt_not_found`.
+ * The `projected` stage of an adopted operation is derived from `readStore` at
+ * read time (`withProjection`); nothing is written.
  */
 export async function readOperation(
+  // The caller's principal is not a filter: every caller reads the same record.
   input: OperationContext & { operationId: string },
 ): Promise<CommandResult<{ receipt: OperationReceipt }>> {
-  const receipt = await loadReceipt(input.store, input.operationId, input.principal.id);
+  const receipt = await loadReceipt(input.store, input.readStore, input.operationId);
   if (!receipt) return commandError("receipt_not_found", [input.operationId]);
   return { ok: true, receipt };
 }
 
 /**
- * The source an accepted operation is bound to, read only from the caller's
- * own row: `null` when the operation does not exist or another principal
- * accepted it, so the two answer alike. `sourceId` is `null` for an operation
- * that names no source (a projection rebuild).
+ * The source an accepted operation is bound to, whichever principal accepted
+ * it: `null` when the operation does not exist. `sourceId` is `null` for an
+ * operation that names no source (a projection rebuild).
  */
-export async function ownOperationSource(
+export async function operationSource(
   store: CommandStore,
   operationId: string,
-  principalId: string,
 ): Promise<{ sourceId: string | null } | null> {
   const row = await store.first<{ source_id: string | null }>(
-    "SELECT source_id FROM ops_requests WHERE operation_id=?1 AND principal=?2",
-    [operationId, principalId],
+    "SELECT source_id FROM ops_requests WHERE operation_id=?1",
+    [operationId],
   );
   return row ? { sourceId: row.source_id } : null;
 }

@@ -250,11 +250,16 @@ const TOOLS = {
     routes: ["/api/v2/reports", "/api/v2/reports/:id", "/api/v2/reports/:id/explanation"],
     needs: "reportArtifacts",
     read: (env, { reportId, view, ...params }) => {
-      // A view or a policy names one report; the list takes neither.
-      if (reportId === undefined && (view !== undefined || params.decimalPolicy !== undefined))
-        throw new HttpError(400, "invalid_request", [
-          view === undefined ? "decimalPolicy" : "view",
-        ]);
+      // A view or a policy names one report; the list takes neither, and each
+      // one given is a ref.
+      const wrong =
+        reportId === undefined
+          ? [
+              ...(view === undefined ? [] : ["view"]),
+              ...(params.decimalPolicy === undefined ? [] : ["decimalPolicy"]),
+            ]
+          : [];
+      if (wrong.length > 0) throw new HttpError(400, "invalid_request", wrong);
       return readReportRoute(
         env,
         {
@@ -269,25 +274,38 @@ const TOOLS = {
     },
   }),
   "kogane.collection-quality.read": tool({
-    title: "Collection quality per job, source and dataset",
+    title: "Collection quality per job, source, dataset and account",
     description:
-      "What each collection stage last did, in closed codes: without `source`, the summary per configured job and per source (schedules, the actual alarm where known, latest runs and stage outcomes); with `source`, that source's cells per unit, dataset and period (`offset` pages them). Identifiers, capture times, counts and codes only, no amount. The same answer as GET /api/collection-quality and /api/collection-quality/{source}, under evidence.read and a whole-store read grant, as on the route. Served while the store has the scheduling tables. Read-only.",
+      "What each collection stage last did, in closed codes: without `source`, the summary per configured job and per source (schedules, the actual alarm where known, latest runs and stage outcomes); with `source`, that source's cells per unit, dataset and period (`view: cells`, the default; `offset` pages them) or the same cells regrouped by the accounts the observations of their newest or current capture name (`view: accounts`, unpaged: per account its stored label, mapping statuses and data types with their periods, standing and reasons, and apart the cells no observation attributes to an account; a fetch unit key is never read as an account, and a period no capture has is not listed). In the summary and in `view: cells`, each source and cell carries its freshness under `collection-freshness-v1`, counted to the answer's `freshnessAsOf` (Asia/Tokyo civil days): `same-day`, `recent` (1-3 days), `stale`, or for data that is not fresh `human-required` (collection waits on the owner) or `disabled` (no collecting job enabled), and `no-capture`; `view: accounts` carries no freshness. Each summary source with a collector also lists the data types its provider offers under `provider-data-types-v1` (balances, movements, card usage and statements, positions, executions, income, documents, points, ...), each `collected`, `partial` or `not_collected` with its parsers and the issue that tracks the rest. Identifiers, capture times, counts, labels and codes only, no amount. The same answer as GET /api/collection-quality, /api/collection-quality/{source} and /api/collection-quality/{source}/accounts, under evidence.read and a whole-store read grant, as on the route. Served while the store has the scheduling tables. Read-only.",
     schema: z.strictObject({
       source: z
         .string()
         .regex(/^[a-z0-9][a-z0-9-]{0,99}$/u)
         .optional(),
+      view: z.enum(["cells", "accounts"]).optional(),
       offset: OFFSET.optional(),
     }),
     capability: "evidence.read",
-    routes: ["/api/collection-quality", "/api/collection-quality/:source"],
+    routes: [
+      "/api/collection-quality",
+      "/api/collection-quality/:source",
+      "/api/collection-quality/:source/accounts",
+    ],
     needs: "collectionQuality",
-    read: (env, { source, ...params }) =>
-      readCollectionQuality(env, {
+    read: (env, { source, view, ...params }) => {
+      // A view names one source's page; the account view is unpaged.
+      if (source === undefined && view !== undefined)
+        throw new HttpError(400, "invalid_request", ["view"]);
+      if (view === "accounts" && params.offset !== undefined)
+        throw new HttpError(400, "invalid_request", ["offset"]);
+      return readCollectionQuality(env, {
         pathname:
-          source === undefined ? "/api/collection-quality" : `/api/collection-quality/${source}`,
+          source === undefined
+            ? "/api/collection-quality"
+            : `/api/collection-quality/${source}${view === "accounts" ? "/accounts" : ""}`,
         searchParams: query(params),
-      }),
+      });
+    },
   }),
   "kogane.evidence.read": tool({
     title: "Evidence browser: sealed runs and their artifacts",
@@ -407,7 +425,7 @@ const TOOLS = {
   "kogane.schedules.read": tool({
     title: "Collection schedules page",
     description:
-      "The schedules page as the operator sees it: each configured collection job (enabled, times, next run, the actual alarm and its reservation, the source's maintenance status, the latest run), the maintenance windows, recent occurrences and held execution leases. The same answer as GET /api/ops/v1/schedules without its `survey` part (the maintenance re-survey's proposals, read by kogane.schedules.survey.read), under schedules.read over every schedule source and evidence.read over the whole store (its occurrences carry run and evidence ids). Served while schedule settings are on. Read-only: nothing is edited, released or relayed as an operator.",
+      "The schedules page as the operator sees it: each configured collection job (enabled, times, next run, the actual alarm and its reservation, the source's maintenance status, the latest run, and `collectionRequest`: the CORE source a kogane.ops.collection.request names for the job and whether the Processor would dispatch it — `enabled`, `lane_disabled` or `connection_disabled`, null when no collector serves a request for it), the maintenance windows, recent occurrences and held execution leases. The same answer as GET /api/ops/v1/schedules without its `survey` part (the maintenance re-survey's proposals, read by kogane.schedules.survey.read), under schedules.read over every schedule source and evidence.read over the whole store (its occurrences carry run and evidence ids). Served while schedule settings are on. Read-only: nothing is edited, released or relayed as an operator.",
     schema: z.strictObject({}),
     // The jobs are `schedules.read`'s, over every schedule source; the
     // occurrences' run and evidence ids (`runIds`, `runLinks`) and the held
@@ -516,7 +534,9 @@ export type PageReadStore = (feature: PageReadStoreFeature) => Promise<boolean>;
  * This store's features for one request, each probed at most once. `known`
  * supplies an answer the caller already asks for (the reported state's views,
  * which the reported and reconstructed state's reads share), so one tool list
- * asks the schema once per feature.
+ * asks the schema once per feature. A probe that fails is the route's
+ * `503 catalogue_read_failed` (the Worker wraps each route, probe included, in
+ * `catalogue`), never an exception of its own.
  */
 export function pageReadStore(
   env: Env,
@@ -526,7 +546,7 @@ export function pageReadStore(
   return (feature) => {
     let answer = asked.get(feature);
     if (!answer) {
-      answer = known[feature]?.() ?? STORE_FEATURES[feature](env);
+      answer = catalogue(() => known[feature]?.() ?? STORE_FEATURES[feature](env));
       asked.set(feature, answer);
     }
     return answer;

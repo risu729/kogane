@@ -450,5 +450,14 @@ async function failureReason(
     [operationId],
   );
   if (taken) return commandError("idempotency_conflict", [operationId]);
+  // The operation id is taken in the decision ledger by a route that keeps
+  // no receipt (the direct identity command or the rule acceptance of a
+  // reconciliation proposal): its decision ids derive from the same key, so
+  // the reservation refuses it.
+  const ledger = await store.first<{ operation_id: string }>(
+    "SELECT operation_id FROM decision_operations WHERE operation_id=?1",
+    [operationId],
+  );
+  if (ledger) return commandError("idempotency_conflict", [operationId]);
   return commandError("commit_failed", [plan.planId]);
 }

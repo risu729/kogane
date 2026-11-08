@@ -1,3 +1,4 @@
+import { RUN_ID } from "./keys";
 import { LEASE_ABORT_CODES, type LeaseAbortCode } from "./schedule-lease";
 
 export interface ScheduledResult {
@@ -5,7 +6,48 @@ export interface ScheduledResult {
   runIds: string[];
   failureCode: string | null;
 }
-const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
+/**
+ * At most this many run references leave one result: the Processor refuses an
+ * answer with more (`collectorOperationResult`), and an operation stores no
+ * more (migration 0068).
+ */
+export const MAX_RUN_IDS = 100;
+
+/**
+ * The closed code of a collection that persisted more distinct runs than one
+ * result may carry. Such a result is `failed`, never a `completed` that lists
+ * a subset: the Processor follows a completed operation's reported runs to
+ * publication, and a subset would let it state a verdict (`published`,
+ * `unpublished`) for a collection whose other runs it never looked at. Every
+ * run's terminal is still in the bucket and the collection scan registers it
+ * like any other; only the result's links stop at the first
+ * {@link MAX_RUN_IDS}.
+ */
+export const RUN_IDS_OVER_LIMIT = "run_ids_over_limit";
+
+/**
+ * The run ids a result may name: ids a terminal key can carry
+ * (`runs/<source>/<runId>/terminal.json`, keys.ts `RUN_ID`), each once, in
+ * the order given. Anything else names no persisted run.
+ */
+function distinctRunIds(values: readonly unknown[]): string[] {
+  return [
+    ...new Set(values.filter((id): id is string => typeof id === "string" && RUN_ID.test(id))),
+  ];
+}
+
+/**
+ * The result of a collection that finished after persisting these runs:
+ * `completed` with every distinct run id, or, past {@link MAX_RUN_IDS},
+ * `failed` with {@link RUN_IDS_OVER_LIMIT} and the first {@link MAX_RUN_IDS}.
+ */
+export function scheduledCompletion(runIds: readonly unknown[]): ScheduledResult {
+  const distinct = distinctRunIds(runIds);
+  return distinct.length > MAX_RUN_IDS
+    ? { status: "failed", runIds: distinct.slice(0, MAX_RUN_IDS), failureCode: RUN_IDS_OVER_LIMIT }
+    : { status: "completed", runIds: distinct, failureCode: null };
+}
+
 /** Return only closed operational outcomes and exact persisted run references. */
 export function scheduledResult(value: unknown): ScheduledResult {
   const v = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
@@ -27,16 +69,15 @@ export function scheduledResult(value: unknown): ScheduledResult {
     terminal.persisted === false ||
     (typeof body.persistence === "string" &&
       !["persisted", "already_persisted", "stored"].includes(body.persistence));
-  const supplied = Array.isArray(v.runIds) ? v.runIds : unwritten ? [] : [body.runId];
-  const runIds = [
-    ...new Set(supplied.filter((id): id is string => typeof id === "string" && RUN_ID.test(id))),
-  ].slice(0, 100);
+  // The verdict comes first: a listed run id does not outrank it.
+  const supplied = unwritten ? [] : Array.isArray(v.runIds) ? v.runIds : [body.runId];
   const failed =
     !["success", "partial", "stored", "completed"].includes(String(body.status)) || unwritten;
+  if (!failed) return scheduledCompletion(supplied);
   return {
-    status: failed ? "failed" : "completed",
-    runIds,
-    failureCode: failed ? "collection_failed" : null,
+    status: "failed",
+    runIds: distinctRunIds(supplied).slice(0, MAX_RUN_IDS),
+    failureCode: "collection_failed",
   };
 }
 
@@ -60,12 +101,18 @@ export function isLeaseAbortCode(code: string | null): code is LeaseAbortCode {
  * failed". A holder that stopped itself reports its own closed code
  * (`collection_deadline_exceeded`, `collection_lease_lost`). Every other error
  * stays `collection_failed`. No error text leaves.
+ *
+ * The runs it still persisted are listed once each, at most the first
+ * {@link MAX_RUN_IDS}, and the failure keeps its own code (a lease abort must
+ * stay uncertain). A failed operation is not followed to publication, so a
+ * shorter list states no verdict about the runs past it, whose terminals the
+ * collection scan registers like any other.
  */
 export function scheduledFailure(error: unknown, runIds: readonly string[] = []): ScheduledResult {
   const message = error instanceof Error ? error.message : null;
   return {
     status: "failed",
-    runIds: [...runIds],
+    runIds: distinctRunIds(runIds).slice(0, MAX_RUN_IDS),
     failureCode:
       message === LEASE_REFUSAL
         ? "collection_busy"
