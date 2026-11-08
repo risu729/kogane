@@ -64,8 +64,8 @@ write for 10 minutes while the Processor can is the open limit in the ADR.)
 Such a run is recorded `uncertain` (`collection_deadline_exceeded` or
 `collection_lease_lost`), since the provider may have been contacted, and is
 never replayed. St George instead records a failed run with the stop as its
-reason and blocks until the operator resumes it, as after any failed St George
-run.
+reason; its next scheduled run tries again. Only a refused, challenged or unrecognised St
+George login blocks the source until the operator resumes it.
 
 **停止した実行を解除** remains for the operator, for a source that should not
 wait for the tick. Only after confirming the previous execution stopped, use it.
@@ -113,9 +113,9 @@ Processor's dispatch only reads the lease and never releases or replaces it;
 the collector acquires and releases it exactly as for an alarm run, and a
 stopped execution's lease is freed by the `processor-tick` alarm or the
 operator, as above. A collector that finds its lease held reports `collection_busy` (alarm
-receipts included) rather than `collection_failed`; St George, whose session
-coordinator records a refused lease as a failed run, still reports
-`collection_failed` and then refuses later runs until the operator resumes it.
+receipts included) rather than `collection_failed`. St George does the same
+since 2026-11-08 UTC; before that its session coordinator recorded a refused
+lease as a failed run and refused later runs until the operator resumed it.
 
 Deployment applies CORE 0065 and uploads named collector entrypoints before the
 Processor and App. It removes the fourteen configured Cron jobs and reconciles

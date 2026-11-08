@@ -96,11 +96,13 @@ stopped, because the server has no way to know that it stopped.
    been contacted. The alarm records the occurrence `uncertain` with that code,
    and an operations-API execution ends `uncertain` with it, exactly like a lost
    dispatch answer. Nothing replays it. St George is the exception: its
-   coordinator turns every error of a collection into a failed run that blocks
-   the source until the operator resumes it, and keeps the stop as that run's
-   reason (`deadline-exceeded`, `collection-interrupted`), so its occurrence
-   ends `failed` with `st_george_deadline_exceeded` or
-   `st_george_collection_interrupted` and nothing runs again on its own.
+   coordinator turns every error of a collection into a failed run and keeps
+   the stop as that run's reason (`deadline-exceeded`,
+   `collection-interrupted`), so its occurrence ends `failed` with
+   `st_george_deadline_exceeded` or `st_george_collection_interrupted`. The
+   next scheduled run tries again (amended 2026-11-08: such a run no longer
+   blocks the source; only a refused, challenged or unrecognised login does, see the
+   [St George README](../../services/collector-st-george/README.md#configuration-and-operations)).
 4. **The Processor frees a silent lease.** On every `processor-tick` (every
    5 minutes), next to the abandon sweep, `expireStaleLeases` frees each held
    lease whose `heartbeat_at` is older than 10 minutes. A lease claimed by a
@@ -191,8 +193,8 @@ runs and its heartbeat is written.
   so `changes()` in the record's statement is the release's own; a claim by an
   older build under a heartbeat left behind is judged by its age; a live
   holder's heartbeat is written and cleared on real D1.
-- `services/collector-st-george/test/worker-policy.test.ts`: a stop blocks with
-  its own reason.
+- `services/collector-st-george/test/worker-policy.test.ts`: a stop fails with
+  its own reason and does not block the next run.
 - That a Durable Object reset by `ctx.abort(code)` fails its in-flight call
   with `code` as the error message, and leaves the lease held with its
   heartbeat stopped, was checked on workerd during review with a throwaway
