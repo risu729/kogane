@@ -262,6 +262,7 @@ describe("ADR 0084: every MCP client activates only installed operations", () =>
       "kogane.ops.projection.request",
       "kogane.ops.session.refresh",
       "kogane.ops.operation.get",
+      "kogane.ops.operation.list",
     ]);
     // Without the private Processor binding no command tool is installed.
     for (const name of ["kogane.command.approve", "kogane.Access.update"]) {

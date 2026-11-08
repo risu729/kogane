@@ -1,6 +1,6 @@
 // The operations API as MCP tools (unified plan 02 §4, U06).
 //
-// Six tools, one per route, and not one line of semantics of its own: each
+// Seven tools, one per route, and not one line of semantics of its own: each
 // tool validates with the *same* Zod schema its HTTP route uses and calls the
 // same application service with the same verified principal, so the two
 // transports write one operation record for one request (G3-05). The tool
@@ -28,7 +28,7 @@ import {
   replayDelegatedConfirmation,
   previewProviderOperation,
   operationIdFor,
-  ownOperationSource,
+  operationSource,
   SESSION_REFRESH_MODES,
   statusForCommandError,
 } from "../../../packages/application/src/index";
@@ -41,7 +41,10 @@ import {
   collectionSchema,
   importSchema,
   operationIdSchema,
+  operationListQuery,
+  operationListSchema,
   opsContext,
+  opsReadStore,
   opsServices,
   parseRequest,
   projectionSchema,
@@ -58,6 +61,7 @@ export const OPS_TOOL_NAMES = [
   "kogane.ops.projection.request",
   "kogane.ops.session.refresh",
   "kogane.ops.operation.get",
+  "kogane.ops.operation.list",
 ] as const;
 export type OpsToolName = (typeof OPS_TOOL_NAMES)[number];
 
@@ -91,7 +95,7 @@ export const OPS_MCP_TOOLS = [
     name: "kogane.ops.collection.request",
     title: "Request collection of a declared source",
     description:
-      "Record a request to collect a declared source over a date window. Accepted means the request is stored, not that a provider was contacted; the collector runs it later.",
+      "Record a request to collect a declared source over a date window. Accepted means the request is stored, not that a provider was contacted; the collector runs it later. Before requesting, read the source's past history: its collection quality (kogane.collection-quality.read with the source), its schedule, next alarm, recent occurrences and held execution leases (kogane.schedules.read), its maintenance windows (kogane.schedules.maintenance.read), and earlier requests (kogane.ops.operation.list with kind collection, whose summaries name the source and status, then kogane.ops.operation.get for one; both read every principal's requests). Do not request while the source's alarm is due, its maintenance window is on, a lease is held or an earlier request has not finished, and when its latest runs failed, find the cause before requesting again.",
     inputSchema: inputSchema(collectionSchema),
     annotations: REQUEST_HINTS,
   },
@@ -123,7 +127,7 @@ export const OPS_MCP_TOOLS = [
     name: "kogane.ops.session.refresh",
     title: "Request a session refresh for one source",
     description:
-      "Ask the party that holds a source's credentials to renew its session. Never returns or accepts a credential, and never retries a login: when the source policy needs a person the operation is stored as waiting_for_human.",
+      "Ask the party that holds a source's credentials to renew its session. Never returns or accepts a credential. When the source policy needs a person the operation is stored as waiting_for_human. For an unattended source whose connection is enabled for dispatch, the collector renews the session itself and may log in once: SBI VC runs its keepalive and, if that fails, one passkey login, at most one forced login per hour whoever asks. Otherwise the request waits as collector_dispatch_disabled.",
     inputSchema: inputSchema(sessionRefreshSchema),
     annotations: REQUEST_HINTS,
   },
@@ -131,8 +135,16 @@ export const OPS_MCP_TOOLS = [
     name: "kogane.ops.operation.get",
     title: "Read the progress of one accepted operation",
     description:
-      "Report the stored stage progress and failure code of one operation this principal accepted. Stages nobody has reported are pending: enqueued work is never reported as done.",
+      "Report the stored stage progress and failure code of one accepted operation, whichever principal requested it (the operator in the browser or any MCP client). Stages nobody has reported are pending: enqueued work is never reported as done.",
     inputSchema: inputSchema(operationIdSchema),
+    annotations: READ_HINTS,
+  },
+  {
+    name: "kogane.ops.operation.list",
+    title: "List accepted operations",
+    description:
+      "List one page of every accepted operation, whichever principal requested it (the operator in the browser or any MCP client), newest first, as summaries without stages or execution (ADR 0086). Filter by kind or status; pass nextCursor as cursor for the next page. status is the stored status: the READ projection is not checked here, so a request kogane.ops.operation.get reads as completed may be listed, and filtered, as running. Follow one with kogane.ops.operation.get.",
+    inputSchema: inputSchema(operationListSchema),
     annotations: READ_HINTS,
   },
 ] as const;
@@ -177,6 +189,11 @@ export async function callOpsTool(
           context,
           parseRequest(operationIdSchema, argument).operationId,
         );
+      case "kogane.ops.operation.list":
+        return await opsServices.list(
+          context,
+          operationListQuery(parseRequest(operationListSchema, argument)),
+        );
     }
   } catch (error) {
     if (!(error instanceof HttpError)) throw error;
@@ -197,6 +214,7 @@ const DELEGATED_OPS_CAPABILITIES: Readonly<Record<OpsToolName, DelegationCapabil
   "kogane.ops.projection.request": "operations.projection.request",
   "kogane.ops.session.refresh": "operations.session.refresh",
   "kogane.ops.operation.get": "operations.read",
+  "kogane.ops.operation.list": "operations.read",
 };
 export const EXECUTABLE_OPS_CAPABILITIES = [
   "operations.import.request",
@@ -259,6 +277,7 @@ function delegatedContext(
 ): OpsContext {
   return {
     store: d1CommandStore(env.DB),
+    readStore: opsReadStore(env),
     principal: {
       id: principal.id,
       kind: "delegated",
@@ -409,16 +428,28 @@ export async function callDelegatedOpsTool(
     }
     if (name === "kogane.ops.operation.get") {
       const input = parseRequest(operationIdSchema, body ?? {});
-      // Resolve the caller's own row before reading progress; denied and absent are identical.
-      const own = await ownOperationSource(context.store, input.operationId, principal.id);
+      // Reads are whole-store (ADR 0086, owner 2026-11-08 04:21 UTC): the row
+      // may be any principal's. Its source is resolved first so that a
+      // principal scoped to fewer sources is refused one outside its scope;
+      // denied and absent are identical.
+      const target = await operationSource(context.store, input.operationId);
       if (
-        !own ||
-        (own.sourceId === null
+        !target ||
+        (target.sourceId === null
           ? principal.scopes.sources !== "*" || principal.scopes.accounts !== "*"
-          : !sourceAllowed(principal, own.sourceId))
+          : !sourceAllowed(principal, target.sourceId))
       )
         throw new HttpError(400, "target_missing");
       return await opsServices.operation(context, input.operationId);
+    }
+    if (name === "kogane.ops.operation.list") {
+      const input = parseRequest(operationListSchema, body ?? {});
+      // The page is every principal's requests, of any source; a principal
+      // scoped to fewer sources or accounts would be shown rows outside its
+      // scope, so it is refused like a read it may not make (ADR 0086).
+      if (principal.scopes.sources !== "*" || principal.scopes.accounts !== "*")
+        throw new HttpError(400, "target_missing");
+      return await opsServices.list(context, operationListQuery(input));
     }
     if (name === "kogane.ops.import.request") {
       const input = parseRequest(importSchema, body ?? {});

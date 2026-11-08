@@ -1,10 +1,11 @@
 // `kogane.reports.read` and `kogane.collection-quality.read` (ADR 0081): the
 // report pages and the collection quality page over MCP answer what their UI
-// routes answer, through the routes' own readers. A report read by an agent
-// is refused outright when its explanation and export are (ADR 0072,
-// amendment of 2026-11-06). Every value is invented.
+// routes answer, through the routes' own readers, the collection quality
+// page's account view (ADR 0088) included. A report read by an agent is
+// refused outright when its explanation and export are (ADR 0072, amendment
+// of 2026-11-06). Every value is invented.
 import { env } from "cloudflare:test";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import { canonicalJson, type ReportBody } from "../../../packages/domain/src/index";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import {
@@ -220,6 +221,19 @@ describe("report page reads", () => {
       expect(overHttp.body).toMatchObject({ error: "invalid_request" });
       expect((await page.mcp(REPORTS, args)).body).toEqual(overHttp.body);
     }
+    // The list takes neither a view nor a policy: each one given is a ref.
+    for (const [args, refs] of [
+      [{ view: "body" }, ["view"]],
+      [{ decimalPolicy: "decimal-v1" }, ["decimalPolicy"]],
+      [{ view: "explanation", decimalPolicy: "decimal-v1" }, ["view", "decimalPolicy"]],
+    ] as [Record<string, unknown>, string[]][]) {
+      const overHttp = await page.http(REPORTS, args);
+      expect(overHttp, JSON.stringify(args)).toEqual({
+        status: 400,
+        body: { error: "invalid_request", refs },
+      });
+      expect((await page.mcp(REPORTS, args)).body).toEqual(overHttp.body);
+    }
   });
 });
 
@@ -228,6 +242,7 @@ describe("collection quality page reads", () => {
     expect(PAGE_READ_ROUTES[QUALITY]).toEqual([
       "/api/collection-quality",
       "/api/collection-quality/:source",
+      "/api/collection-quality/:source/accounts",
     ]);
     const names = async (grant: unknown) =>
       (await pageReadMcpTools(grant as never, pageReadStore(env as Env))).map((tool) => tool.name);
@@ -238,12 +253,25 @@ describe("collection quality page reads", () => {
     ).not.toContain(QUALITY);
   });
 
-  it("answer the summary and a source's cells exactly as the routes do", async () => {
+  it("answer the summary, a source's cells and its account view exactly as the routes do", async () => {
+    // One clock for every call: each answer counts its ages to `now`
+    // (`freshnessAsOf`, collection-freshness-v1).
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date());
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const before = await tableCounts();
     for (const [query, args] of [
       ["/api/collection-quality", {}],
       ["/api/collection-quality/sony-bank", { source: "sony-bank" }],
+      ["/api/collection-quality/sony-bank", { source: "sony-bank", view: "cells" }],
       ["/api/collection-quality/sony-bank?offset=0", { source: "sony-bank", offset: 0 }],
+      [
+        "/api/collection-quality/sony-bank?offset=0",
+        { source: "sony-bank", view: "cells", offset: 0 },
+      ],
+      ["/api/collection-quality/sony-bank/accounts", { source: "sony-bank", view: "accounts" }],
     ] as const) {
       const route = await page.route(query);
       expect(route.status, query).toBe(200);
@@ -263,6 +291,11 @@ describe("collection quality page reads", () => {
     for (const [query, args, status] of [
       ["/api/collection-quality?offset=0", { offset: 0 }, 400],
       ["/api/collection-quality/absent-source", { source: "absent-source" }, 404],
+      [
+        "/api/collection-quality/absent-source/accounts",
+        { source: "absent-source", view: "accounts" },
+        404,
+      ],
     ] as [string, Record<string, unknown>, number][]) {
       const route = await page.route(query);
       expect(route.status, query).toBe(status);
@@ -270,6 +303,23 @@ describe("collection quality page reads", () => {
       const overHttp = await page.http(QUALITY, args);
       expect(overHttp, query).toEqual({ status, body: refusal });
       expect((await page.mcp(QUALITY, args)).body).toEqual(refusal);
+    }
+    // The account view takes no query on its route; a tool argument outside
+    // its closed shape is refused before any read, as for every page read.
+    expect((await page.route("/api/collection-quality/sony-bank/accounts?offset=0")).status).toBe(
+      400,
+    );
+    for (const args of [
+      { view: "accounts" },
+      { view: "cells" },
+      { source: "sony-bank", view: "accounts", offset: 0 },
+      { source: "sony-bank", view: "unknown" },
+      { source: "sony-bank/accounts" },
+    ]) {
+      const overHttp = await page.http(QUALITY, args);
+      expect(overHttp.status, JSON.stringify(args)).toBe(400);
+      expect(overHttp.body).toMatchObject({ error: "invalid_request" });
+      expect((await page.mcp(QUALITY, args)).body).toEqual(overHttp.body);
     }
     // No deployment configures a grant without evidence.read (ADR 0084), so
     // it is given to the shared service both transports call.
@@ -305,7 +355,7 @@ describe("where the store lacks the tables", () => {
 });
 
 describe("the audit rows of the report and collection quality reads", () => {
-  it("count the list's items, truncated while a cursor follows, one report, and a source's cells", async () => {
+  it("count the list's items, truncated while a cursor follows, one report, a source's cells and the cells its account view read", async () => {
     // More reports than one page, so the list's first page has a cursor.
     await env.DB.batch(
       Array.from({ length: 50 }, (_, index) =>
@@ -333,6 +383,9 @@ describe("the audit rows of the report and collection quality reads", () => {
     ).toBe(false);
     const cells = await page.http(QUALITY, { source: "sony-bank" }, EVIDENCE_GRANT);
     expect(cells.status).toBe(200);
+    const accounts = await page.mcp(QUALITY, { source: "sony-bank", view: "accounts" });
+    expect(accounts.isError).toBe(false);
+    expect(accounts.body.data.cells).toBe(cells.body.data.cells.length);
     const rows = (
       await env.DB.prepare(
         "SELECT path,operation,risk_class,result,diff_json FROM audit_records WHERE rowid>? ORDER BY rowid",
@@ -359,6 +412,8 @@ describe("the audit rows of the report and collection quality reads", () => {
         cells.body.data.cells.length,
         cells.body.data.coverage.truncated,
       ),
+      // The cells the account view read, never its accounts.
+      read("mcp", "collection-quality.read", cells.body.data.cells.length),
     ]);
   });
 });

@@ -18,7 +18,6 @@ export default defineConfig({
     env: {
       SESSION_SEED: bindings.secret(),
       SESSION_ENCRYPTION_KEY: bindings.secret(),
-      ADMIN_TOKEN: bindings.secret(),
       PASSKEY_CREDENTIAL: bindings.secret(),
 
       COLLECTOR_SCHEMA_VERSION: bindings.text("sbi-vc-trade-worker-poc-v1"),

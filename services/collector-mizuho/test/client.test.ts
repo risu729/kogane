@@ -7,6 +7,9 @@ import {
   safeMizuhoErrorCode,
   type MizuhoSession,
 } from "../src/client";
+import { readFileSync } from "node:fs";
+import { MizuhoParseError } from "../../../packages/parsers/src/parsers/mizuho-html";
+import { MIZUHO_HTML_ERROR_CODES } from "../src/client";
 
 // Synthetic values and markup only. These tests never contact a bank.
 const ORIGIN = "https://web1.ib.mizuhobank.co.jp";
@@ -134,6 +137,7 @@ describe("direct Mizuho read transport", () => {
     expect(result.artifacts).toHaveLength(1);
     expect(result.issues).toEqual(["authentication-required"]);
     expect(result.failedUnits).toEqual(["ordinary:001:1234567"]);
+    expect(result.failedUnitCodes).toEqual({ "ordinary:001:1234567": "authentication-required" });
   });
   test("refreshes the list before each account and uses rediscovered row indexes", async () => {
     const q = queued([
@@ -232,6 +236,7 @@ describe("direct Mizuho read transport", () => {
     expect(result.histories).toHaveLength(1);
     expect(result.issues).toContain("account-limit");
     expect(result.failedUnits).toContain("ordinary:002:7654321");
+    expect(result.failedUnitCodes["ordinary:002:7654321"]).toBe("account-limit");
   });
   test("does not guess account transitions when the observed read event is missing", async () => {
     const q = queued([html(accountHtml().replace("/BALINQ0301002B", "/BALINQ0301003B"))]);
@@ -345,6 +350,44 @@ describe("private session boundary", () => {
       parseSession(JSON.stringify({ ...session(), cookies: "a=x\r\nprivate-secret" })),
     ).toThrow("invalid-session-cookies");
     expect(safeMizuhoErrorCode(new Error("private-secret"))).toBe("read-parse-error");
+    expect(safeMizuhoErrorCode(new MizuhoParseError("unrecognized-empty-state"))).toBe(
+      "parse-unrecognized-empty-state",
+    );
+    expect(safeMizuhoErrorCode(new MizuhoParseError("private-secret"))).toBe("read-parse-error");
+  });
+  test("lists every code the shared Mizuho HTML parser throws", () => {
+    const source = readFileSync(
+      new URL("../../../packages/parsers/src/parsers/mizuho-html.ts", import.meta.url),
+      "utf8",
+    );
+    const thrown = new Set(
+      [
+        ...source.matchAll(/fail\("([a-z-]+)"\)/gu),
+        ...source.matchAll(/,\s*"([a-z]+(?:-[a-z]+)+)",?\s*\)/gu),
+      ].map((m) => m[1]!),
+    );
+    expect([...thrown].sort()).toEqual([...MIZUHO_HTML_ERROR_CODES].sort());
+  });
+  test("keeps a history page the parser refuses and names the parser's check", async () => {
+    const empty = form(
+      "ACCHST_04110B",
+      `${span("txtBrnch", "テスト支店")}${span("txtTransType", "普通")}${span("txtAccNo", "1234567")}`,
+      "history-token",
+    );
+    const q = queued([html(accountHtml()), html(empty)]);
+    const result = await collectMizuho({ session: session(), fetcher: q.fetcher });
+    expect(result.partial).toBe(true);
+    expect(result.issues).toEqual(["parse-unrecognized-empty-state"]);
+    expect(result.failedUnits).toEqual(["ordinary:001:1234567"]);
+    expect(result.failedUnitCodes).toEqual({
+      "ordinary:001:1234567": "parse-unrecognized-empty-state",
+    });
+    expect(result.artifacts.map((artifact) => [artifact.unitKey, artifact.partial])).toEqual([
+      ["account-list", false],
+      ["ordinary:001:1234567:page:unparsed", true],
+    ]);
+    expect(result.artifacts[1]?.artifactKey).toBe("ordinary/001-1234567/history/unparsed.html");
+    expect(result.artifacts[1]?.body).not.toContain("history-token");
   });
   test("rejects credential fields and duplicate state instead of submitting them", () => {
     const invalid = session();

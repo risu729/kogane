@@ -74,6 +74,14 @@ const RESULTS = {
   parse: { lanes: { incremental: { parsed: 1 } } },
   collection: { enabled: true, status: "scanned", seen: 2 },
   identity: { processedRuns: 2, identifiedRuns: 1, identifiedObservations: 9 },
+  instrumentAutoAdoption: {
+    pairs: 2,
+    evaluated: true,
+    eligible: 2,
+    adopted: 1,
+    conflicts: 1,
+    refused: 0,
+  },
   balanceProjection: { enabled: true, status: "unchanged", snapshotId: "a".repeat(64) },
   reconcile: {
     slices: 2,
@@ -191,6 +199,7 @@ function stagesFor(
 
 const RECORDED = [
   "identity_sweep",
+  "instrument_auto_adoption",
   "reconciliation_sweep",
   "card_debit_account_sweep",
   "card_settlement_sweep",
@@ -229,6 +238,7 @@ test("a tick records one row per recorded lane with exactly the counts its log l
     "observation_sweep",
     "collection_scan",
     "identity_sweep",
+    "instrument_auto_adoption",
     "balance_projection",
     "reconciliation_sweep",
     "card_debit_account_sweep",
@@ -262,6 +272,7 @@ test("a tick records one row per recorded lane with exactly the counts its log l
   expect(counts["card_settlement_sweep"]).toEqual(SETTLEMENT_COUNTS);
   expect(counts["card_debit_account_sweep"]).toEqual(RESULTS.debitAccounts);
   expect(counts["identity_sweep"]).toEqual(RESULTS.identity);
+  expect(counts["instrument_auto_adoption"]).toEqual(RESULTS.instrumentAutoAdoption);
   // Identifiers, cursors, release names and open-ended outcome keys stay in
   // the log line only.
   expect(counts["reward_claims_sweep"]).toEqual({ scanned: 4, promoted: 2, skipped: 1 });
@@ -375,6 +386,8 @@ test("a lane whose flag is off records `skipped-by-flag`, is not run and still l
     "observation_sweep",
     "collection_scan",
     "identity_sweep",
+    // No flag: the rule's gate decides whether anything is read.
+    "instrument_auto_adoption",
     "balance_projection",
     // No flag: price promotion runs whatever the other flags say.
     "price_promotion",
@@ -394,6 +407,7 @@ test("a lane whose flag is off records `skipped-by-flag`, is not run and still l
   const rows = await ticks();
   expect(rows.map((row) => [row.lane, row.outcome])).toEqual([
     ["identity_sweep", "ran"],
+    ["instrument_auto_adoption", "ran"],
     ["reconciliation_sweep", "skipped-by-flag"],
     ["card_debit_account_sweep", "skipped-by-flag"],
     ["card_settlement_sweep", "skipped-by-flag"],

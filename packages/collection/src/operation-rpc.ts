@@ -17,7 +17,8 @@
 // Dependency-free like the rest of this package: collectors bundle it, so the
 // validation below is the same closed-key style as `manifest.ts` rather than a
 // schema library (the App's request schemas stay Zod).
-import type { ScheduledResult } from "./schedule-result";
+import { RUN_ID } from "./keys";
+import { MAX_RUN_IDS, type ScheduledResult } from "./schedule-result";
 
 export const COLLECTOR_OPERATION_VERSION = "kogane-collector-operation-v1";
 
@@ -251,7 +252,16 @@ function refusal(failureCode: string): ScheduledResult {
 export async function runCollectorOperation(
   value: unknown,
   workspace: string,
-  runScheduled: (cron: string, scheduledTime: number) => Promise<ScheduledResult>,
+  runScheduled: (
+    cron: string,
+    scheduledTime: number,
+    /**
+     * The accepted request itself. A collector may treat it as the operator's
+     * explicit decision where its alarm would wait for one (St George's
+     * login block, SBI VC's login cooldown); the alarm never passes it.
+     */
+    request: CollectorOperationRequest,
+  ) => Promise<ScheduledResult>,
 ): Promise<ScheduledResult> {
   const parsed = parseCollectorOperationRequest(value);
   if (!parsed.ok) return refusal(parsed.code);
@@ -264,24 +274,24 @@ export async function runCollectorOperation(
   )
     return refusal("connection_mismatch");
   if (connection.action !== request.action) return refusal("action_unsupported");
-  return runScheduled(connection.cron, request.requestedAtMs);
+  return runScheduled(connection.cron, request.requestedAtMs, request);
 }
 
-const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 const SAFE_CODE = /^[a-z0-9_]{1,64}$/u;
 
 /**
  * What the Processor accepts back over the binding: the closed result shape,
- * or null when the value is not one. A malformed answer arrived *after* the
- * collector was called, so the caller treats null as an uncertain outcome —
- * never as "nothing happened".
+ * or null when the value is not one. A run id must be one a terminal key can
+ * carry (keys.ts `RUN_ID`): no other id can name a persisted run. A malformed
+ * answer arrived *after* the collector was called, so the caller treats null
+ * as an uncertain outcome — never as "nothing happened".
  */
 export function collectorOperationResult(value: unknown): ScheduledResult | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const { status, runIds, failureCode } = record;
   if (status !== "completed" && status !== "failed") return null;
-  if (!Array.isArray(runIds) || runIds.length > 100) return null;
+  if (!Array.isArray(runIds) || runIds.length > MAX_RUN_IDS) return null;
   if (!runIds.every((id): id is string => typeof id === "string" && RUN_ID.test(id))) return null;
   if (failureCode !== null && (typeof failureCode !== "string" || !SAFE_CODE.test(failureCode)))
     return null;

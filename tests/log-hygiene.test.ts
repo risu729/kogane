@@ -139,6 +139,10 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
       "compared with the two lease stop codes, otherwise passed to safeFailureCode, which " +
       "admits only the closed failure codes",
   },
+  "services/collector-st-george/src/worker-policy.ts": {
+    count: 1,
+    reason: "compared with the lease refusal code only; the message is never logged or returned",
+  },
   "services/collector-vpoint-pay/src/state.ts": {
     count: 1,
     reason:
@@ -148,6 +152,12 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
   "services/processor/src/invocation-probe.ts": {
     count: 1,
     reason: "tested against the platform-limit phrase; only a boolean is kept",
+  },
+  "services/processor/src/schedule-alarm.ts": {
+    count: 1,
+    reason:
+      "tested against runtime phrases (connection lost, object reset, timeout, limit) by " +
+      "alarmErrorKind; only the closed kind is kept",
   },
   "services/processor/src/metadata-extractors/index.ts": {
     count: 1,

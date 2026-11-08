@@ -9,6 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { Glob } from "bun";
 import { join } from "node:path";
 import * as domain from "../src/index.ts";
+import * as legacy from "./card-settlement-allocation-legacy.ts";
 import {
   ALLOCATION_DEBIT_EXCLUSIONS,
   ALLOCATION_OUTCOME_CODES,
@@ -17,6 +18,7 @@ import {
   ALLOCATION_RUN_REFUSALS,
   ALLOCATION_STATEMENT_REFUSALS,
   CARD_STATEMENT_ALLOCATION_DEBITS_MAX,
+  CARD_STATEMENT_ALLOCATION_LISTED_MAX,
   CARD_STATEMENT_ALLOCATION_RELEASE,
   CARD_STATEMENT_ALLOCATION_STATEMENTS_MAX,
   planCardStatementAllocations,
@@ -150,6 +152,8 @@ describe("what the one-to-one matcher does today", () => {
     expect(only(run([statement(1, 3000)], [debit(1, 2000)])).outcome).toEqual({
       status: "unsupported",
       allocations: [],
+      allocationCount: 0,
+      allocationsTruncated: false,
       codes: ["no_exact_allocation", "in_window_debits_below_total"],
     });
   });
@@ -274,6 +278,8 @@ describe("exact allocations", () => {
     expect(only(run([statement(1, 3000)], debits)).outcome).toEqual({
       status: "unsupported",
       allocations: [],
+      allocationCount: 0,
+      allocationsTruncated: false,
       codes: ["no_exact_allocation"],
     });
     const three = only(
@@ -354,6 +360,8 @@ describe("no exact allocation is unsupported, with the direction of the differen
     expect(result.outcome).toEqual({
       status: "unsupported",
       allocations: [],
+      allocationCount: 0,
+      allocationsTruncated: false,
       codes: ["no_debit_in_window"],
     });
     expect(result.pairExclusions).toEqual([
@@ -482,6 +490,8 @@ describe("a refused debit that could pay still competes (as in ADR 0057)", () =>
     expect(only(run([statement(1, 3000)], [debit(1, 3000, dateless)])).outcome).toEqual({
       status: "unsupported",
       allocations: [],
+      allocationCount: 0,
+      allocationsTruncated: false,
       codes: ["no_debit_in_window"],
     });
   });
@@ -559,6 +569,159 @@ describe("statement refusals", () => {
       ["balance:5", { status: "refused", code: "statement_repeated" }],
       ["balance:6", { status: "refused", code: "statement_repeated" }],
     ]);
+  });
+});
+
+// ADR 0074, amendment 2026-11-07 ("a bounded list of allocations"): every
+// exact allocation is counted, the first `CARD_STATEMENT_ALLOCATION_LISTED_MAX`
+// are listed, and the list says when it stops short.
+describe("a bounded list of allocations", () => {
+  const THREE = { ...POLICY, maxDebitsPerAllocation: 3 };
+  /** The worst window: 32 equal debits, any three of which pay the total (4,960 sums). */
+  const equalDebits = Array.from({ length: CARD_STATEMENT_ALLOCATION_DEBITS_MAX }, (_, i) =>
+    debit(i + 1, 1000),
+  );
+  const legacyRun = (
+    statements: readonly AllocationStatementInput[],
+    debits: readonly AllocationDebitInput[],
+    policy: CardStatementAllocationPolicy,
+    held: CardStatementAllocationInput["held"] = NONE,
+  ) => {
+    const result = legacy.planCardStatementAllocations({ statements, debits, policy, held });
+    if (!result.ok) throw new Error(`legacy run refused: ${result.refusal}`);
+    return result;
+  };
+
+  test("the worst window is counted whole, listed first-50 in the shipped order, and marked truncated", () => {
+    const result = only(run([statement(1, 3000)], equalDebits, { policy: THREE }));
+    const shipped = legacyRun([statement(1, 3000)], equalDebits, THREE).statements[0]!;
+    if (result.outcome.status !== "needs_review" || shipped.outcome.status !== "needs_review")
+      throw new Error("expected needs_review");
+    expect(shipped.outcome.allocations).toHaveLength(4960);
+    expect(result.outcome).toEqual({
+      status: "needs_review",
+      codes: shipped.outcome.codes,
+      allocations: shipped.outcome.allocations.slice(0, CARD_STATEMENT_ALLOCATION_LISTED_MAX),
+      allocationCount: 4960,
+      allocationsTruncated: true,
+    });
+    expect(result.outcome.allocations).toHaveLength(CARD_STATEMENT_ALLOCATION_LISTED_MAX);
+    expect(result.pairExclusions).toEqual(shipped.pairExclusions);
+  });
+
+  test("a run at both bounds (16 statements, 32 equal debits) stays small and quick", () => {
+    const statements = Array.from({ length: CARD_STATEMENT_ALLOCATION_STATEMENTS_MAX }, (_, i) =>
+      statement(i + 1, 3000),
+    );
+    const started = performance.now();
+    const result = run(statements, equalDebits, { policy: THREE });
+    const elapsed = performance.now() - started;
+    for (const item of result.statements)
+      expect(item.outcome).toMatchObject({
+        status: "needs_review",
+        codes: ["candidate_not_unique", "debit_in_other_statement_allocation"],
+        allocationCount: 4960,
+        allocationsTruncated: true,
+      });
+    // Uncapped, this run's answer serialized to about 112 MB (79,360
+    // allocations); capped it is 800 allocations, about 1.1 MB.
+    expect(
+      result.statements.reduce(
+        (sum, item) =>
+          sum + (item.outcome.status === "refused" ? 0 : item.outcome.allocations.length),
+        0,
+      ),
+    ).toBe(CARD_STATEMENT_ALLOCATION_STATEMENTS_MAX * CARD_STATEMENT_ALLOCATION_LISTED_MAX);
+    expect(JSON.stringify(result).length).toBeLessThan(2_000_000);
+    // Measured at about 0.13 s; the ceiling catches a search that stopped
+    // pruning or started materializing every combination, not scheduling noise.
+    expect(elapsed).toBeLessThan(10_000);
+  });
+
+  test("exactly the bound is listed whole and not truncated; one more is", () => {
+    // Ten halves make 45 pairs; each debit of the whole total adds one single.
+    const window = (singles: number) =>
+      only(
+        run(
+          [statement(1, 3000)],
+          [
+            ...Array.from({ length: 10 }, (_, i) => debit(i + 1, 1500)),
+            ...Array.from({ length: singles }, (_, i) => debit(i + 11, 3000)),
+          ],
+        ),
+      );
+    expect(CARD_STATEMENT_ALLOCATION_LISTED_MAX).toBe(50);
+    const at = window(5);
+    expect(at.outcome).toMatchObject({ allocationCount: 50, allocationsTruncated: false });
+    expect(memberIds(at)).toHaveLength(50);
+    const over = window(6);
+    expect(over.outcome).toMatchObject({ allocationCount: 51, allocationsTruncated: true });
+    // Fewest debits first: the six singles, then the first 44 pairs by ref id.
+    expect(memberIds(over)).toHaveLength(50);
+    expect(memberIds(over).slice(0, 6)).toEqual(
+      [11, 12, 13, 14, 15, 16].map((id) => [`transaction:${id}`]),
+    );
+    expect(memberIds(over).at(-1)).toEqual(["transaction:7", "transaction:9"]);
+  });
+
+  test("differential: the shipped planner below the bound, its first allocations above it", () => {
+    let truncated = 0;
+    let whole = 0;
+    for (let seed = 1; seed <= 200; seed++) {
+      const random = mulberry32(seed + 10_000);
+      const pick = <T>(items: readonly T[]) => items[Math.floor(random() * items.length)]!;
+      const policy = { ...POLICY, maxDebitsPerAllocation: 1 + Math.floor(random() * 3) };
+      // Few distinct amounts and many debits, so some windows pass the bound.
+      const debits = Array.from(
+        { length: Math.floor(random() * (CARD_STATEMENT_ALLOCATION_DEBITS_MAX + 1)) },
+        (_, i) =>
+          debit(i + 1, pick([500, 1000, 1000, 1500, 2000]), {
+            occurred:
+              random() < 0.05
+                ? { kind: "unknown", reasonCode: "not_reported" }
+                : day(`2026-09-${String(6 + Math.floor(random() * 9)).padStart(2, "0")}`),
+            ...(random() < 0.05 ? { alias: "shared-alias" } : {}),
+          }),
+      );
+      const statements = Array.from({ length: 1 + Math.floor(random() * 4) }, (_, i) =>
+        statement(i + 1, pick([1500, 2000, 3000, 4500])),
+      );
+      const held = {
+        bankKeys: debits.filter(() => random() < 0.05).map((item) => item.bankKey),
+        aliasClasses: [],
+        statementKeys: [],
+      };
+      const result = run(statements, debits, { policy, held });
+      const shipped = legacyRun(statements, debits, policy, held);
+      expect(result.manifest).toEqual({
+        ...shipped.manifest,
+        release: CARD_STATEMENT_ALLOCATION_RELEASE,
+      });
+      expect(result.debitExclusions).toEqual(shipped.debitExclusions);
+      expect(result.statements).toHaveLength(shipped.statements.length);
+      for (const [index, item] of result.statements.entries()) {
+        const before = shipped.statements[index]!;
+        if (before.outcome.status === "refused") {
+          expect(item as unknown).toEqual(before);
+          continue;
+        }
+        const all = before.outcome.allocations;
+        if (all.length > CARD_STATEMENT_ALLOCATION_LISTED_MAX) truncated++;
+        else whole++;
+        expect(item as unknown).toEqual({
+          ...before,
+          outcome: {
+            ...before.outcome,
+            allocations: all.slice(0, CARD_STATEMENT_ALLOCATION_LISTED_MAX),
+            allocationCount: all.length,
+            allocationsTruncated: all.length > CARD_STATEMENT_ALLOCATION_LISTED_MAX,
+          },
+        });
+      }
+    }
+    // Both sides of the bound were compared, not only the easy one.
+    expect(truncated).toBeGreaterThan(10);
+    expect(whole).toBeGreaterThan(100);
   });
 });
 
@@ -736,7 +899,12 @@ describe("property: the planner agrees with a brute-force oracle", () => {
         const outcome = item.outcome;
         if (outcome.status === "refused") throw new Error(`seed ${seed}: unexpected refusal`);
         const { candidates, competes } = expected[index]!;
-        expect(memberIds(item)).toEqual(candidates);
+        // Every candidate is counted; the first ones are listed (ADR 0074, 2026-11-07).
+        expect(memberIds(item)).toEqual(candidates.slice(0, CARD_STATEMENT_ALLOCATION_LISTED_MAX));
+        expect(outcome.allocationCount).toBe(candidates.length);
+        expect(outcome.allocationsTruncated).toBe(
+          candidates.length > CARD_STATEMENT_ALLOCATION_LISTED_MAX,
+        );
         const shared = candidates.flat().some((id) => (statementsUsing.get(id) ?? 0) > 1);
         expect(outcome.status).toBe(
           candidates.length === 0

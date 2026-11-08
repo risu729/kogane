@@ -6,6 +6,7 @@ import { auditView } from "./a11y-audit.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { settlementReview } from "../../../packages/application/test/card-settlement-fixture.ts";
 import { cardSettlementImpact } from "../../../packages/domain/src/card-settlement.ts";
+import type { CardSettlementReview } from "../../../packages/domain/src/card-settlement-review.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -29,14 +30,14 @@ const unmatched = {
   manifest: {
     codes: [],
     planner: {
-      release: "card-statement-allocation-v1",
+      release: "card-statement-allocation-v2",
       policy: {
         policyVersion: "card-statement-unmatched-display-v1",
         window: { minDaysFromDue: -3, maxDaysFromDue: 3 },
         maxDebitsPerAllocation: 3,
       },
       partition: "page-overlapping-windows",
-      bounds: { statements: 16, debits: 32 },
+      bounds: { statements: 16, debits: 32, allocations: 50 },
     },
     pageSize: 50,
     acceptance: "single-debit-candidates-only",
@@ -85,6 +86,8 @@ const unmatched = {
             ],
           },
         ],
+        allocationCount: 1,
+        allocationsTruncated: false,
       },
       acceptable: false,
     },
@@ -111,6 +114,38 @@ const unmatched = {
   ],
   nextOffset: null,
 };
+/** One statement whose window holds 32 equal debits: 4,960 exact sums, the first 50 listed. */
+const truncated = {
+  ...unmatched,
+  items: [
+    {
+      ...unmatched.items[0]!,
+      debitsInWindow: 32,
+      planner: {
+        status: "needs_review",
+        codes: ["candidate_not_unique"],
+        allocations: Array.from({ length: 50 }, (_, index) => ({
+          kind: "multiple-debits",
+          ownership: "unknown",
+          rejectionConditions: ["owner_not_established"],
+          members: [0, 1, 2].map((offset) => ({
+            ref: {
+              kind: "transaction",
+              id: `transaction:${100 + index + offset}`,
+              revision: "parse_run:6",
+            },
+            sourceId: "smbc-bank",
+            sourceAccount: "synthetic-bank",
+            accountId: null,
+            amount: yen("1000"),
+          })),
+        })),
+        allocationCount: 4960,
+        allocationsTruncated: true,
+      },
+    },
+  ],
+};
 
 describe.if(runnable)("card settlement review", () => {
   let browser: Browser;
@@ -122,6 +157,12 @@ describe.if(runnable)("card settlement review", () => {
   let planRevision = 0;
   let action = "accept";
   let older: ReturnType<typeof settlementReview>[] = [];
+  /** A second statement's candidates, newest first; empty serves one statement. */
+  let second: ReturnType<typeof settlementReview>[] = [];
+  /** The candidates a `relatedTo` read returns, and the reads of them. */
+  let related: CardSettlementReview[] = [];
+  const relatedReads: URLSearchParams[] = [];
+  let unmatchedPage: unknown = unmatched;
   const posted: { operation: string; body: Record<string, unknown> }[] = [];
   beforeEach(() => {
     review = settlementReview();
@@ -130,6 +171,10 @@ describe.if(runnable)("card settlement review", () => {
     planRevision = 0;
     action = "accept";
     older = [];
+    second = [];
+    related = [];
+    relatedReads.length = 0;
+    unmatchedPage = unmatched;
     posted.length = 0;
   });
   beforeAll(async () => {
@@ -156,6 +201,15 @@ describe.if(runnable)("card settlement review", () => {
                 candidateCount: older.length + 1,
                 candidates: [review, ...older.slice(0, 1)],
               },
+              ...(second.length
+                ? [
+                    {
+                      statementKey: "statement-synthetic-2",
+                      candidateCount: second.length,
+                      candidates: second.slice(0, 2),
+                    },
+                  ]
+                : []),
             ],
             nextOffset: null,
             coverage: {
@@ -171,7 +225,10 @@ describe.if(runnable)("card settlement review", () => {
           url.searchParams.has("statementKey")
         )
           return Response.json({
-            items: [review, ...older],
+            items:
+              url.searchParams.get("statementKey") === "statement-synthetic-2"
+                ? second
+                : [review, ...older],
             nextOffset: null,
             coverage: {
               scope: "card-statement-bank-debit-candidates",
@@ -180,6 +237,22 @@ describe.if(runnable)("card settlement review", () => {
               limit: 50,
             },
           });
+        if (
+          url.pathname === "/api/v2/reconciliation/card-settlements" &&
+          url.searchParams.has("relatedTo")
+        ) {
+          relatedReads.push(url.searchParams);
+          return Response.json({
+            items: related,
+            nextOffset: null,
+            coverage: {
+              scope: "card-statement-bank-debit-candidates",
+              completeTransactionHistory: false,
+              netAssets: "unknown",
+              limit: 50,
+            },
+          });
+        }
         if (url.pathname === "/api/v2/reconciliation/card-settlements")
           return Response.json({
             items: [
@@ -197,7 +270,7 @@ describe.if(runnable)("card settlement review", () => {
             },
           });
         if (url.pathname === "/api/v2/reconciliation/card-statements-unmatched")
-          return Response.json(unmatched);
+          return Response.json(unmatchedPage);
         if (url.pathname.startsWith("/api/command/v1/")) {
           const operation = url.pathname.split("/").at(-1)!;
           const body = (await request.json()) as Record<string, unknown>;
@@ -286,7 +359,11 @@ describe.if(runnable)("card settlement review", () => {
     await page.goto(origin + path);
     await page
       .getByRole("heading", {
-        name: path.startsWith("/confirm/") ? "変更の確認" : "カード請求と引落の照合",
+        name: path.startsWith("/confirm/")
+          ? "変更の確認"
+          : path === "/reconciliation"
+            ? "カード請求と引落の照合"
+            : "請求と引落の照合候補",
         exact: true,
       })
       .waitFor();
@@ -332,6 +409,21 @@ describe.if(runnable)("card settlement review", () => {
     expect(text).toContain("三井住友銀行 · synthetic-bank · 2000 JPY");
     expect(text).toContain("返金の割り当ては未対応");
     expect(text).toContain("まだ採用できません");
+    expect(await section.getByRole("button", { name: /採用/u }).count()).toBe(0);
+    await page.close();
+  });
+
+  test("a statement with more combinations than the server lists says how many it does not show", async () => {
+    unmatchedPage = truncated;
+    const page = await open();
+    const section = page.getByRole("region", { name: "照合候補のない請求" });
+    const note = section.getByRole("note");
+    await note.waitFor();
+    expect(await note.innerText()).toContain(
+      "一致する組み合わせ 4,960件のうち、出金の件数が少ない順に先頭の50件を表示しています。",
+    );
+    expect(await section.locator(".unmatched-allocation").count()).toBe(50);
+    expect(await section.innerText()).toContain("組み合わせが一つに決まりません");
     expect(await section.getByRole("button", { name: /採用/u }).count()).toBe(0);
     await page.close();
   });
@@ -583,6 +675,89 @@ describe.if(runnable)("card settlement review", () => {
     ).toBe(true);
     await page.close();
   });
+  test("the list links each candidate to its own page", async () => {
+    const page = await open();
+    expect(
+      await page
+        .getByRole("link", { name: "同じ請求・出金の他の候補を確認", exact: true })
+        .getAttribute("href"),
+    ).toBe(`/reconciliation/${review.proposalId}`);
+    // The list itself reads no competitors.
+    expect(relatedReads).toHaveLength(0);
+    await page.close();
+  });
+
+  test("a wrong acceptance is corrected from its page: withdrawn there, the competitor opened from it", async () => {
+    review = {
+      ...review,
+      revision: 1,
+      status: "accepted",
+      impact: cardSettlementImpact(review.facts, "accepted"),
+      history: [
+        {
+          revision: 1,
+          status: "accepted",
+          decisionRevisionId: "decision-1",
+          createdAt: "2026-09-11T00:00:00Z",
+        },
+      ],
+    };
+    detailRevision = 1;
+    planRevision = 1;
+    const other = settlementReview();
+    other.proposalId = "cs-other-debit";
+    other.facts.bankDebit.sourceAccount = "synthetic-bank-other";
+    other.acceptanceBlockers = ["allocation_already_used"];
+    related = [other];
+    const page = await open(`/reconciliation/${review.proposalId}`);
+    await page.getByRole("list", { name: "他の候補" }).waitFor();
+    expect(relatedReads.map((params) => params.toString())).toEqual([
+      `relatedTo=${review.proposalId}`,
+    ]);
+    const competitors = page.getByRole("list", { name: "他の候補" });
+    const text = await competitors.innerText();
+    expect(text).toContain("確認待ち");
+    expect(text).toContain("synthetic-bank-other");
+    expect(text).toContain("同じ請求・出金を別の決済へ配賦済みの場合は採用不可");
+    expect(await competitors.getByRole("link").first().getAttribute("href")).toBe(
+      "/reconciliation/cs-other-debit",
+    );
+    // The candidate's own review starts open, with its withdrawal and history.
+    expect(await page.locator("main").innerText()).toContain(
+      "解除しても、この判断と原本は履歴に残ります",
+    );
+    expect(
+      await page
+        .getByRole("link", { name: "照合候補の一覧に戻る", exact: true })
+        .getAttribute("href"),
+    ).toBe("/reconciliation");
+    await page.getByLabel("判断の理由", { exact: true }).fill("別の銀行明細が支払に対応していた");
+    await page.getByRole("button", { name: "採用を解除する内容を確認" }).click();
+    await page.getByRole("heading", { name: "変更の確認", exact: true }).waitFor();
+    await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
+    expect(posted.find((row) => row.operation === "plan")?.body).toMatchObject({
+      kind: "card-settlement.withdraw",
+      payload: { proposalId: review.proposalId },
+    });
+    // The confirmation returns to the candidate's page, not the list.
+    expect(
+      await page.getByRole("link", { name: "照合候補に戻る", exact: true }).getAttribute("href"),
+    ).toBe(`/reconciliation/${review.proposalId}`);
+    expect(posted.some((row) => row.operation === "approve" || row.operation === "commit")).toBe(
+      false,
+    );
+    await page.close();
+  });
+
+  test("a candidate with no competitor says so, and fits a narrow screen", async () => {
+    const page = await open(`/reconciliation/${review.proposalId}`);
+    await page.getByText("同じ請求・出金を対象とする他の候補はありません。").waitFor();
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+    ).toBe(true);
+    await page.close();
+  });
 
   test("the review and its confirmation pass the accessibility audit", async () => {
     const page = await open();
@@ -613,7 +788,14 @@ describe.if(runnable)("card settlement review", () => {
     await summary.click();
     expect(await page.locator(".settlement-older > section").count()).toBe(1);
     await page.getByRole("button", { name: "この請求の候補をすべて表示（3 件）" }).click();
-    await page.getByText("1–3 件目 / 3 件", { exact: true }).waitFor();
+    // The pager names its statement, and so does its spoken count.
+    const pager = page.getByRole("navigation", {
+      name: "請求 1 件目（MyJCB · synthetic-card · 2026-09）の候補のページ",
+      exact: true,
+    });
+    expect(await pager.getByRole("status").textContent()).toBe(
+      "請求 1 件目（MyJCB · synthetic-card · 2026-09）の候補：1–3 件目 / 3 件",
+    );
     // The full list adds the one the group did not carry, and repeats none.
     expect(await page.locator(".settlement-older section.panel").count()).toBe(2);
     expect(await page.getByRole("button", { name: "採用内容を確認" }).count()).toBe(3);
@@ -624,4 +806,43 @@ describe.if(runnable)("card settlement review", () => {
     ).toBe(true);
     await page.close();
   });
+  test("two statements' full candidate lists are paged under their own names", async () => {
+    const stale = (n: number) => ({
+      ...settlementReview(),
+      proposalId: `card-settlement-stale-${n}`,
+      createdAt: `2026-09-0${n}T00:00:00Z`,
+      acceptanceBlockers: ["statement_changed"],
+    });
+    older = [stale(2), stale(1)];
+    // Another statement of the same card, account and month: the importer-era
+    // and collector-era captures of one month are two statements
+    // (docs/card-settlements.md). Every value is invented.
+    const recaptured = (n: number) => ({
+      ...settlementReview(),
+      proposalId: `card-settlement-recaptured-${n}`,
+      createdAt: `2026-09-2${n}T00:00:00Z`,
+      acceptanceBlockers: n === 3 ? [] : ["statement_changed"],
+    });
+    second = [recaptured(3), recaptured(2), recaptured(1)];
+    const page = await open();
+    for (const summary of await page.locator(".settlement-older > summary").all())
+      await summary.click();
+    // Each click replaces its button with the list, so take the first twice.
+    const show = page.getByRole("button", { name: "この請求の候補をすべて表示（3 件）" });
+    await show.first().click();
+    await page.locator(".settlement-older nav").first().waitFor();
+    await show.first().click();
+    await page.locator(".settlement-older nav").nth(1).waitFor();
+    const pagers = await page
+      .locator(".settlement-older nav")
+      .evaluateAll((navs) => navs.map((nav) => nav.getAttribute("aria-label")));
+    // Each statement's pager says which statement it pages, by its place in
+    // the list where card, account and month are the same.
+    expect(pagers).toEqual([
+      "請求 1 件目（MyJCB · synthetic-card · 2026-09）の候補のページ",
+      "請求 2 件目（MyJCB · synthetic-card · 2026-09）の候補のページ",
+    ]);
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
 });

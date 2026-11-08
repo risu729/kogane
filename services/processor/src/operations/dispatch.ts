@@ -17,7 +17,6 @@
 import {
   abandonStartedCollectorDispatches,
   claimCollectorStart,
-  type CollectorAction,
   collectorActionForKind,
   type CollectorBinding,
   collectedDispatchesDue,
@@ -34,10 +33,7 @@ import {
   type CommandStore,
   type OperationReceipt,
 } from "../../../../packages/application/src/index.ts";
-import {
-  coreSourceId,
-  type RegistrationBudget,
-} from "../../../../packages/application/src/collection/index.ts";
+import { type RegistrationBudget } from "../../../../packages/application/src/collection/index.ts";
 import {
   COLLECTOR_OPERATION_VERSION,
   collectorOperationResult,
@@ -45,6 +41,11 @@ import {
   type CollectorOperationRequest,
   type OperationConnection,
 } from "../../../../packages/collection/src/operation-rpc.ts";
+import {
+  collectorDispatchConnections,
+  connectionFor,
+  opsDispatchEnabled,
+} from "./collection-targets.ts";
 import { CollectionKeyError, terminalKey } from "../../../../packages/collection/src/keys.ts";
 import { afterMaintenance } from "../../../../packages/collection/src/schedule-model.ts";
 import { isLeaseAbortCode } from "../../../../packages/collection/src/schedule-result.ts";
@@ -52,6 +53,8 @@ import { d1CommandStore } from "../../../../packages/storage-d1/src/core/command
 import type { D1Like } from "../../../../packages/storage-d1/src/d1.ts";
 import { registerCollectionRun, safeFailureCode, type CollectionEnv } from "../collection/index.ts";
 import { maintenanceForSchedule } from "../schedule-store.ts";
+
+export { collectorDispatchConnections, connectionFor, opsDispatchEnabled };
 
 /** Requests taken per tick. */
 export const DEFAULT_DISPATCH_LIMIT = 5;
@@ -82,23 +85,6 @@ export interface DispatchEnv extends CollectionEnv {
    * provider is contacted (ADR 0048).
    */
   OPS_COLLECTOR_DISPATCH_CONNECTIONS?: string | undefined;
-}
-
-export function opsDispatchEnabled(value: string | undefined): boolean {
-  return value === "1" || value === "true";
-}
-
-/** The enabled connections; anything but a JSON array of strings enables none. */
-export function collectorDispatchConnections(value: string | undefined): ReadonlySet<string> {
-  if (!value) return new Set();
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string"))
-      return new Set(parsed);
-  } catch {
-    /* A malformed list enables nothing; the safe direction is "do not call". */
-  }
-  return new Set();
 }
 
 /** The named RPC a collector's `ScheduledCollection` entrypoint serves (ADR 0048). */
@@ -397,11 +383,11 @@ async function dispatchImport(
 }
 
 /**
- * Whether a run names a terminal key at all. The App's run grammar admits
- * characters (`:`) the bucket key grammar refuses, and the key builder throws
- * on them; such a request can never register, so it ends with the closed
- * `operation_payload_invalid` instead of an unclassified throw that failed the
- * whole lane on every tick.
+ * Whether a run names a terminal key at all. The App now accepts only the
+ * bucket key grammar, but a payload stored before it did can still carry a
+ * character (`:`) the key builder throws on; such a request can never
+ * register, so it ends with the closed `operation_payload_invalid` instead of
+ * an unclassified throw that failed the whole lane on every tick.
  */
 function terminalAddressable(source: string, runId: string): boolean {
   try {
@@ -445,23 +431,6 @@ async function dispatchReplay(
 }
 
 // ── the collector branch (ADR 0048) ─────────────────────────────────────
-
-/**
- * The one connection that serves a CORE source for an action: the named
- * collector job whose terminals register under that source. None, or an
- * ambiguous table, is no connection — never a guess.
- */
-export function connectionFor(
-  connections: readonly OperationConnection[],
-  coreSource: string | null,
-  action: CollectorAction,
-): OperationConnection | null {
-  if (coreSource === null) return null;
-  const matches = connections.filter(
-    (entry) => entry.action === action && coreSourceId(entry.terminalSource) === coreSource,
-  );
-  return matches.length === 1 ? matches[0]! : null;
-}
 
 const LEASE_HELD = `SELECT 1 AS held FROM collection_execution_leases
  WHERE source=?1 AND lease_ref IS NOT NULL`;

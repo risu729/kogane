@@ -98,6 +98,11 @@ describe("operation connections", () => {
   });
 });
 
+const OPERATOR_DECISION: Readonly<Record<string, string>> = {
+  "collector-st-george": "this.#run(cron, time, true)",
+  "collector-sbi-vc-trade": 'this.#run(cron, time, accepted.action === "refresh-session")',
+};
+
 describe("collector entrypoints", () => {
   for (const workspace of workspaces)
     test(`${workspace} serves runOperation for its own workspace`, () => {
@@ -107,9 +112,11 @@ describe("collector entrypoints", () => {
       );
       expect(entrypoint).toContain("export class ScheduledCollection");
       expect(entrypoint).toContain(
-        `return runCollectorOperation(request, "${workspace}", (cron, time) =>`,
+        `return runCollectorOperation(request, "${workspace}", (cron, time`,
       );
-      expect(entrypoint).toContain("this.runScheduled(cron, time)");
+      // Two collectors treat an accepted request as the operator's decision
+      // (ADR 0069, 2026-11-08 amendment); the rest run exactly as the alarm.
+      expect(entrypoint).toContain(OPERATOR_DECISION[workspace] ?? "this.runScheduled(cron, time)");
       const worker = readFileSync(join(REPO_ROOT, "services", workspace, "src/worker.ts"), "utf8");
       const alarm = worker.slice(worker.indexOf("export async function alarmCollection("));
       expect(alarm.slice(0, alarm.indexOf("\n}\n"))).toContain("return scheduledFailure(error");
