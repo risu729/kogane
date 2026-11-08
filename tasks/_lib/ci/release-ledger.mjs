@@ -32,6 +32,9 @@ import { fileURLToPath } from "node:url";
 /** The GitHub Environment this repository releases into. There is no other. */
 export const ENVIRONMENT = "production";
 
+/** The status description's closed code for a progress file that is there but unreadable. */
+export const PROGRESS_UNREADABLE = "release_progress_unreadable";
+
 /**
  * Whether `candidate` is an ancestor of (or identical to) `descendant`.
  *
@@ -803,10 +806,24 @@ export async function main(argv, env) {
     // actually did goes into the status description (and, in full, into the
     // uploaded progress artefact).
     const progressFile = options["progress"] ?? "";
-    const progress =
-      progressFile === "" || !existsSync(progressFile)
-        ? null
-        : JSON.parse(readFileSync(progressFile, "utf8"));
+    // A file that is there but cannot be read as an object — cut short because
+    // the step writing it was itself what failed, say — must not stop a
+    // failure from being posted: the status then says so with a closed code
+    // in place of the summary. Success refuses it below like any other
+    // missing record.
+    let progress = null;
+    let progressUnreadable = false;
+    if (progressFile !== "" && existsSync(progressFile)) {
+      try {
+        progress = JSON.parse(readFileSync(progressFile, "utf8"));
+      } catch {
+        progress = null;
+      }
+      if (progress === null || typeof progress !== "object" || Array.isArray(progress)) {
+        progress = null;
+        progressUnreadable = true;
+      }
+    }
     const state = options["state"] ?? "failure";
     if (state === "success") {
       // Fail closed: without this run's own progress record nothing shows that
@@ -829,7 +846,7 @@ export async function main(argv, env) {
         );
       }
     }
-    const summary = String(progress?.["summary"] ?? "");
+    const summary = progressUnreadable ? PROGRESS_UNREADABLE : String(progress?.["summary"] ?? "");
     const description = [options["description"] ?? "", summary]
       .filter((part) => part !== "")
       .join(" — ");
