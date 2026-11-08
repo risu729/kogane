@@ -442,12 +442,39 @@ candidate's stored `statement_key` (source, producer, acquisition namespace,
 card account and period, as `card_statement_facts` keys it), so the
 importer-era and collector-era captures of one month are separate statements.
 Statements are ordered by their newest candidate, ten to a page. Each judges
-its five newest candidates and any accepted one, however old, and leads with
-one of them:
+its five newest candidates and any accepted one, however old, and leads with:
 
 1. its accepted candidate, if any (an acceptance reserves the statement);
-2. otherwise the newest proposed candidate with no acceptance blocker;
+2. otherwise the newest proposed candidate with no acceptance blocker, among
+   its five newest and the older ones the search below judges;
 3. otherwise the newest candidate.
+
+When none of the five newest is accepted or ready and the statement has older
+candidates, the list searches those for rule 2
+([ADR 0090](adr/0090-ready-lead-beyond-newest-candidates.md)): newest first,
+50 a pass, it judges the older ones no decision names whose facts claim the
+same established owner and both accounts (`cardSettlementEligible` requires
+each of those, so a candidate without them is never ready), and stops at the
+first ready one, once a pass is short, or after 200 of them (four passes). A
+ready one found leads, ahead of the five newest; none found leaves the newest
+leading, as rule 3 says.
+
+Each group says how far the lead was looked for (`leadSearch`):
+`not_searched`, `found`, `none_ready` (every older candidate that could be
+ready was judged) or `truncated` (the search stopped after 200, so a ready
+candidate older than those is not ruled out; a statement with exactly 200 is
+`truncated` too, since the last full pass does not read whether more follow).
+The coverage carries the limit (`olderCandidatesSearched: 200`). For
+`truncated` the page says, under the lead, that it checked up to 200 of the
+older candidates that could be ready, that older ones were not checked so a
+ready one is not ruled out, and that opening `この請求のほかの候補` and
+`この請求の候補をすべて表示` shows every one; it never reads as "nothing to
+decide". The passes are separate reads that page by position, not one
+snapshot: a decision recorded, while a page load is between two passes, on
+an older candidate an earlier pass judged moves the later candidates up one
+place, so the next pass can skip one, and that load can say `none_ready` or
+lead with an older ready candidate than the newest. The next load reads
+again; the statement's full list judges every candidate.
 
 The other judged candidates follow, newest first, collapsed under the lead
 (`この請求のほかの候補（N 件）`, N the statement's other candidates). `candidateCount` counts every candidate of the
@@ -468,15 +495,7 @@ named by the heading, the month and that time, so the candidates of one
 statement are told apart by ear as well as by eye. The flat list
 (`?offset=`) and one review (`?proposalId=`) are unchanged.
 
-A limit: a ready candidate older than the five newest of its statement is never
-the lead. When none of those five is a proposed candidate without blockers, the
-newest leads, with its blockers, and the older ready one is only in the
-statement's full list. The sweep proposes after each capture, so the newest
-candidates cite the newest facts; this happens only when the five newer ones
-are all blocked or decided (for example they cite another debit of the same
-amount that is no longer current, or the operator rejected them).
-
-Another limit: the pages are offsets into that order, taken when each page is
+A limit: the pages are offsets into that order, taken when each page is
 read. A new candidate moves its statement to the head of the list and the
 statements that were before it down one place, so a reader paging on can see
 the last statement of the previous page again, and does not meet the moved
@@ -1055,7 +1074,41 @@ ten statements (`statement_page`), then reaches each statement's candidates
 through `card_settlement_candidates_statement` and judges at most its five
 newest and its accepted ones (the two grouped rows of the table above,
 measured 2026-11-07 before the debit-account evidence read was added to every
-list; the flat list's first page measured 104 ms in the same run).
+list; the flat list's first page measured 104 ms in the same run). A statement
+whose five newest hold no acceptance and none ready, and which has older
+candidates, adds the search for an older ready one (ADR 0090): one read a pass
+(`CARD_SETTLEMENT_STATEMENT_OLDER_SQL`) for every statement still searching,
+which reaches those statements' candidates by the same index, ranks every one
+of them (as the window read does), reads each older one's latest decision by
+key and its facts, and judges at most 50 of them per statement. A pass is one
+read for all the statements of the page still searching, not one per
+statement. The search stops after four passes (200 judged per statement) and
+says `truncated`. A page of ten statements therefore makes at most eight
+reads (the statement page, the window, four passes, the decision history and
+the debit-account evidence) and the search judges at most 10 × 200 = 2,000
+older candidates, beside the window's five newest and accepted ones per
+statement, however long the histories grow. What still grows with the
+history is the ranking: each pass ranks every candidate of the statements it
+searches, as the window read does once, so a page whose statements all search
+ranks their candidates up to five times. The search does not run for a
+statement its newest candidates decide, which on the scaled store is every
+statement, so the two grouped rows above are unchanged there (not measured
+again).
+`card-settlement-review-scale.test.ts` checks its plan without statistics;
+the frozen text of the grouped read before it
+(`card-settlement-statement-group-legacy-sql.ts`, digest-pinned) returns the
+same rows as the current read on the random and scaled stores, every page of
+the grouped list equals the shipped one where no statement's lead changes, and
+with synthetic newer stale candidates added, only the one statement's lead
+changes, to the newest ready candidate its full list holds, found on the first
+or the second pass; with the ready one past the limit the search stops after
+four reads and only the statement's `leadSearch` differs (`truncated`).
+`card-settlement-statements.test.ts` compares the search's choice with a
+reference on random stores with synthetic history, and on a scripted store
+checks the loop's bound and codes (199, 200 and 201 older candidates), the
+worst page (ten truncated statements: eight reads, 200 judged each) and, on
+drawn histories, each statement's lead and code against a reference written
+from the counts.
 Not changed here, and not measured: the ownership review's account mapping
 reads (`queryCardOwnership`'s mappings, `prepareOwnershipReview`'s mapping read
 and the two mapping terms of its commit guard) still read
