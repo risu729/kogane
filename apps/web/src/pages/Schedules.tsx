@@ -19,6 +19,7 @@ import {
   CollectionRequestError,
   postCollectionRequest,
 } from "../collection-request-api";
+import { operationRoute } from "../operations-api.ts";
 import { Link } from "../router";
 import "../styles/schedules.css";
 const PATH = "/api/ops/v1/schedules";
@@ -266,7 +267,7 @@ function CollectionRequest({
           {operationId ? (
             <>
               {" "}
-              <Link to={`/operations/${operationId}`}>依頼の経過を見る</Link>
+              <Link to={operationRoute(operationId)}>依頼の経過を見る</Link>
             </>
           ) : null}
         </p>
