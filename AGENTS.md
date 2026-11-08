@@ -159,7 +159,9 @@ UTC.
   prepare/confirm; R3 refused), through the common command layer, and with an
   audit record. The MCP Access policy decides who that can be, and the owner
   limits tools in the MCP client. A rule, heuristic or the HTTP agent route
-  only reads and proposes
+  only reads and proposes, except the recorded rule decisions an ADR names
+  (provider-linked reconciliation, purchase recognition, `instrument-auto-v1`
+  in [ADR 0055](docs/adr/0055-instrument-candidates.md#amendment-2026-11-08-adopt-sbis-bare-domestic-code-onto-its-listing-by-rule))
   ([change lifecycle](docs/change-lifecycle.md#grants),
   [agent API](docs/agent-api.md#card-purchase-explanation)). Grants, Access,
   the operator list, secrets and deployment (R4) are never operations

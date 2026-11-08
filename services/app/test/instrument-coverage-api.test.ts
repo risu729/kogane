@@ -203,6 +203,7 @@ describe("GET /api/identity/instrument-coverage", () => {
           states: {
             "unresolved-candidates": 2,
             "resolved-by-decision": 0,
+            "resolved-by-rule": 0,
             "shared-without-decision": 0,
             "kept-separate": 0,
             "no-candidate": 0,
