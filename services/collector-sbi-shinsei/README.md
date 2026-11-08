@@ -186,6 +186,15 @@ Worker WebSocket still completes a normal close handshake. Worker relay events
 include only the bounded peer close code and `wasClean` flag, never close reason
 text, so platform-level disconnections can be distinguished from application
 cleanup without exposing connection details.
+Every local CONNECT socket keeps an `error` listener for its whole life, so a
+Chrome reset ends that tunnel, never the Container process. A refused CONNECT
+(a host outside the allowlist, or a port other than 443) is answered 403 and
+then drained so its close is seen. Before 2026-11-08 a reset on such a socket
+was an unhandled `read ECONNRESET` (the crash seen in the GLOBAL PASS copy of
+this relay). On shutdown the proxy logs one `sbi-shinsei-container-relay-summary`
+line: `connects`, `refused`, `refusedWhileClosing`, `established`,
+`upstreamFailed` (502), `upstreamTimeout` (504) and `socketErrors` by closed
+code, with the run id and no host.
 Run `node --test container/relay-lifecycle.node-test.mjs container/child-lifecycle.node-test.mjs` for loopback WebSocket tests of normal closure, delayed
 handshakes, shutdown, and timeout fallback; these require only the root dev dependency.
 
