@@ -3160,7 +3160,11 @@ Phase 3 is done when:
   stop JSON page rows from matching their CSV rows, so with the CSV
   present every JSON row past page 1 would be listed beside its CSV row,
   and a row would change id whenever another fetch window put it on
-  another page; the fix needs its own decision.
+  another page. Owner decision (2026-11-08): the CSV, which is skipped only
+  for a currency with no transactions, is the only source of history
+  transactions; a window whose CSV is missing or whose row count differs
+  from the JSON `countCnt` is an error, never filled from the JSON; the work
+  is [#1182](https://github.com/risu729/kogane/issues/1182).
 - **A V Point Pay notification amount with a minus sign.** The Layer A
   extractor keeps a leading `-` in `amountYen`, and
   `v-point-pay-notification-event` 1.0.0 accepts a signed integer there,
