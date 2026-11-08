@@ -516,7 +516,9 @@ export type PageReadStore = (feature: PageReadStoreFeature) => Promise<boolean>;
  * This store's features for one request, each probed at most once. `known`
  * supplies an answer the caller already asks for (the reported state's views,
  * which the reported and reconstructed state's reads share), so one tool list
- * asks the schema once per feature.
+ * asks the schema once per feature. A probe that fails is the route's
+ * `503 catalogue_read_failed` (the Worker wraps each route, probe included, in
+ * `catalogue`), never an exception of its own.
  */
 export function pageReadStore(
   env: Env,
@@ -526,7 +528,7 @@ export function pageReadStore(
   return (feature) => {
     let answer = asked.get(feature);
     if (!answer) {
-      answer = known[feature]?.() ?? STORE_FEATURES[feature](env);
+      answer = catalogue(() => known[feature]?.() ?? STORE_FEATURES[feature](env));
       asked.set(feature, answer);
     }
     return answer;
