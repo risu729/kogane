@@ -319,7 +319,7 @@ and the page `/identities/account-candidates` (`口座の対応候補`), whose
 buttons plan the named payload with the reason a person writes after reading
 the candidate again; approval and commit happen on the confirmation screen.
 Views `open`, `held`, `decided`, `connections`, `unreviewed`; 50 items a page.
-Bounds: 64 current reviews, 1,000 aggregator source accounts, 10,000 newest
+Bounds: 64 current reviews, 1,000 aggregator source accounts, 10,000 current
 relation rows (and 10,000 backfilled relations under a rewritten key),
 refused whole past each. Every read is keyed (ADR 0077, Cost).
 

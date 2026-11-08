@@ -198,10 +198,15 @@ change lifecycle unchanged.
   being newer, decides the pair. This ADR states the mechanism; it does not
   assert a production count.
 - Rejecting an accepted pair appends a later `rejected` row, and the
-  candidate reads `rejected`. The balance projection reads every `accepted`
-  relation row, not the newest of a pair, so the earlier acceptance stays
-  among its declared inputs; it moves no balance today (a `connection:` scope
-  has no measurement), and changing that projection is not decided here.
+  candidate reads `rejected`. When this ADR merged the balance projection
+  read every `accepted` relation row, so the earlier acceptance stayed among
+  its declared inputs. Since
+  [ADR 0001's amendment of 2026-11-06](0001-domain-axes.md#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision)
+  it reads each triple's current row, so a rejection under the reference the
+  acceptance was recorded under withdraws it; an acceptance recorded under
+  another of the pair's references (another producer's, or a pre-rewrite key)
+  is another triple and stays among its declared relations. Either way it
+  moves no balance today (a `connection:` scope has no measurement).
 - Reviews are producer-scoped: a collector-era MoneyForward source account is
   listed with a reviewed connection only when its identity value equals the
   review's key; a value no review names is `unreviewed`.
@@ -316,6 +321,9 @@ no proposal writer produces today, so only `same_account` was reachable.
 - Cost: unchanged plan, one keyed range of a `(kind, ref)` index per kind and
   one sort of the rows found, now with one more term.
 - No migration, no stored plan changes, nothing adopts.
+- The consequence above that the balance projection reads every `accepted`
+  row had been stale since ADR 0001's amendment of 2026-11-06; it now states
+  what the projection reads.
 
 ### Verification
 
