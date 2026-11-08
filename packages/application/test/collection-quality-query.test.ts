@@ -541,15 +541,13 @@ describe("one reason per stored state", () => {
   test("a collector's hyphenated unit code keeps its meaning", () => {
     const entry = cell(
       row({
-        published: 1,
-        failed: 1,
-        failure_codes_json: '["parser-rejected"]',
         unit_failed: 1,
-        unit_failure_code: "collection-unit-failed",
+        unit_failure_code: "read-http-error",
       }),
     );
-    expect(entry.newest.failureCodes).toEqual(["parser_rejected"]);
-    expect(entry.newest.unitFailureCode).toBe("collection_unit_failed");
+    expect(entry.newest.unitFailureCode).toBe("read_http_error");
+    expect(entry.reasons).toContain("unit_failed");
+    expect(entry.reasons).not.toContain("user_action_required");
     expect(valid(entry)).toBe(true);
   });
 
