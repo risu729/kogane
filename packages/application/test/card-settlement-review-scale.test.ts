@@ -36,6 +36,7 @@ import {
   CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT,
   CARD_SETTLEMENT_REVIEW_SQL,
   CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS,
+  CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED,
   CARD_SETTLEMENT_STATEMENT_GROUP_SQL,
   CARD_SETTLEMENT_STATEMENT_OLDER_SQL,
   CARD_SETTLEMENT_STATEMENT_PAGE_SIZE,
@@ -182,6 +183,7 @@ function expectOnlyLead(
       return;
     }
     expect(shipped.candidates.some(decidableReview)).toBe(false);
+    expect(entry.leadSearch).toBe("found");
     expect(entry.candidateCount).toBe(shipped.candidateCount);
     expect(entry.candidates[0]!.proposalId).toBe(ready.proposalId);
     expect(entry.candidates[0]!.status).toBe("proposed");
@@ -194,7 +196,9 @@ function expectOnlyLead(
  * Each statement's lead against its whole list, judged candidate by candidate
  * through `queryCardSettlements({ statementKey })`: its accepted candidate,
  * else the newest ready one (the same review the statement's list returns),
- * else the newest.
+ * else the newest. A statement whose search stopped at its limit leads with
+ * its newest and says so, and only when its newest candidates decide nothing
+ * and it has more older candidates that could be ready than the limit.
  */
 async function expectLeads(page: {
   statements: CardSettlementStatementPage["statements"];
@@ -215,9 +219,34 @@ async function expectLeads(page: {
       (item) => item.status === "proposed" && item.acceptanceBlockers.length === 0,
     );
     const [first] = group.candidates;
+    const window = all.slice(0, CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT);
+    const searched =
+      all.length > CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT &&
+      !all.some((item) => item.status === "accepted") &&
+      !window.some(decidableReview);
+    const couldBeReady = all
+      .slice(CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT)
+      .filter(
+        (item) =>
+          item.status === "proposed" &&
+          item.facts.ownership === "established-same" &&
+          item.facts.statement.accountId !== null &&
+          item.facts.bankDebit.accountId !== null,
+      );
+    const readyAt = ready === undefined ? -1 : couldBeReady.indexOf(ready);
+    if (!searched) expect(group.leadSearch).toBe("not_searched");
     if (all.some((item) => item.status === "accepted")) expect(first!.status).toBe("accepted");
-    else if (ready !== undefined) expect(first).toEqual(ready);
-    else expect(first).toEqual(all[0]);
+    else if (searched && (readyAt >= CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED || readyAt < 0)) {
+      expect(first).toEqual(all[0]);
+      expect(group.leadSearch).toBe(
+        couldBeReady.length >= CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED
+          ? "truncated"
+          : "none_ready",
+      );
+    } else if (ready !== undefined) {
+      expect(first).toEqual(ready);
+      if (searched) expect(group.leadSearch).toBe("found");
+    } else expect(first).toEqual(all[0]);
   }
 }
 
@@ -489,6 +518,7 @@ describe("card settlement readiness reads on a scaled store without statistics",
 
         // Rejected: no candidate of the statement is ready, the newest leads
         // as before, and the search ends once a pass is short.
+        db.run("SAVEPOINT older_rejected");
         db.query(
           `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
            VALUES('dr_synthetic_reject','relation',?,1,'reject','manual','synthetic-operator',NULL,'synthetic','[]',NULL,NULL,'2026-12-02T00:00:00Z')`,
@@ -510,9 +540,42 @@ describe("card settlement readiness reads on a scaled store without statistics",
             1e6,
           ]) as { n: number }[]
         )[0]!.n;
+        expect(eligibleOlder).toBeLessThan(CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED);
         expect(read.count()).toBe(
           Math.floor(eligibleOlder / CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS) + 1,
         );
+        expect(
+          fresh.statements.find((entry) => entry.statementKey === group.statementKey)!.leadSearch,
+        ).toBe("none_ready");
+        await expectLeads(fresh);
+        db.run("ROLLBACK TO older_rejected");
+        db.run("RELEASE older_rejected");
+
+        // Enough more that the ready one lies past the search's limit: the
+        // search stops after its last pass, the newest leads as the shipped
+        // list led, and the group says the search was cut, never that no
+        // candidate is ready.
+        const newest = copy(CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED)[0]!;
+        read = passes();
+        fresh = await everyPage(read.executor);
+        legacy = await everyPage(executor(true));
+        expect(read.count()).toBe(
+          CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED / CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS,
+        );
+        expect(fresh.statements.map((entry) => entry.statementKey)).toEqual(
+          legacy.statements.map((entry) => entry.statementKey),
+        );
+        fresh.statements.forEach((entry, index) => {
+          const shipped = legacy.statements[index]!;
+          if (entry.statementKey !== group.statementKey) expect(entry).toEqual(shipped);
+          else {
+            expect(entry.leadSearch).toBe("truncated");
+            expect(shipped.leadSearch).toBe("none_ready");
+            expect({ ...entry, leadSearch: "none_ready" }).toEqual(shipped);
+            expect(entry.candidates[0]!.proposalId).toBe(newest);
+            expect(entry.candidates.map((item) => item.proposalId)).not.toContain(ready.proposalId);
+          }
+        });
         await expectLeads(fresh);
       } finally {
         db.run("ROLLBACK TO older_ready");

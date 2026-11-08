@@ -193,10 +193,11 @@ describe("card settlement review boundary", () => {
           statementKey: "statement-synthetic",
           candidateCount: 1,
           candidates: [{ proposalId: "card-settlement-synthetic" }],
+          leadSearch: "not_searched",
         },
       ],
       nextOffset: null,
-      coverage: { limit: 10, candidatesPerStatement: 5 },
+      coverage: { limit: 10, candidatesPerStatement: 5, olderCandidatesSearched: 200 },
     });
     expect((await call(PATH + "/statements?offset=10")).status).toBe(200);
     const one = await call(PATH + "?statementKey=statement-synthetic");

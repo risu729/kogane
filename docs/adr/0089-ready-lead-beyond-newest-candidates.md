@@ -4,7 +4,10 @@
 - Date: 2026-11-08
 - Carried by: `packages/application/src/query/card-settlements.ts`
   (`queryCardSettlementStatements`, `CARD_SETTLEMENT_STATEMENT_OLDER_SQL`,
-  `CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS`)
+  `CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS`,
+  `CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED`);
+  `packages/domain/src/card-settlement-review.ts`
+  (`CARD_SETTLEMENT_LEAD_SEARCHES`); `apps/web/src/pages/Reconciliation.tsx`
 - Related: [card settlements](../card-settlements.md#candidate-and-decision-lifecycle)
   (the grouped list, #1021), [ADR 0081](0081-ui-parity-through-mcp.md) (the
   page and its MCP read call one service)
@@ -46,17 +49,40 @@ ready candidate to the newest copy.
    proposed), and their facts claim the `established-same` owner and both
    accounts (`cardSettlementEligible` requires each, so a candidate without
    them always has a blocker).
+5. **Option 4, bounded, with a closed reason.** As option 4, but judge at
+   most a fixed number of a statement's older candidates per page read and
+   say in the group how far the search went. Unbounded, option 4 walks every
+   undecided older candidate whose facts could be eligible, a read per 50, on
+   every page load: candidates are append-only and stale recaptures keep
+   those facts, so a statement whose recent candidates are all blocked grows
+   that walk without limit: the reads and readiness work of one page load
+   would grow with the history, bounded only by D1's per-invocation query
+   and time limits.
 
 ## Decision
 
-Option 4. A statement leads with its accepted candidate, else the newest
-proposed candidate with no acceptance blocker of all its candidates, else its
-newest candidate. The search reads `CARD_SETTLEMENT_STATEMENT_OLDER_SQL` (the
-statements still searching, the window size, the candidates passed and the
-pass size, 50), judges the rows with the same readiness CTEs and review
-mapping as every list, and stops a statement at its first ready candidate or
-at a pass shorter than 50. The ready candidate found is added to the group's
-judged candidates and leads; the others follow newest first as before.
+Option 5. A statement leads with its accepted candidate, else the newest
+proposed candidate with no acceptance blocker among its five newest and the
+older candidates the search judged, else its newest candidate. The search
+reads `CARD_SETTLEMENT_STATEMENT_OLDER_SQL` (the statements still searching,
+the window size, the candidates passed and the pass size, 50), judges the
+rows with the same readiness CTEs and review mapping as every list, and stops
+a statement at its first ready candidate, at a pass shorter than 50, or after
+`CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED` (200, four passes) of its older
+candidates. The ready candidate found is added to the group's judged
+candidates and leads; the others follow newest first as before.
+
+Each group says how far its lead was looked for, `leadSearch`, a closed code
+(`CARD_SETTLEMENT_LEAD_SEARCHES`): `not_searched` (the five newest hold an
+acceptance or a ready candidate, or there is no older candidate), `found`,
+`none_ready` (every older candidate that could be ready was judged; none is),
+or `truncated` (the search judged 200 without finding one and stopped; a full
+last pass does not read whether more follow, so a statement with exactly 200
+is `truncated` too). `truncated` is unknown, never "none ready" (INV05): the
+page says the older candidates past the limit were not checked and points to
+the statement's full list, which judges every candidate. The page's coverage
+carries the limit as `olderCandidatesSearched`.
+
 Nothing else in the page changes: the statements, their order and counts,
 the window and its rows, and every statement whose window holds an acceptance
 or a ready candidate.
@@ -66,15 +92,24 @@ read of the grouped list (ADR 0081) show the same lead.
 
 ## Consequences
 
-- The page's lead rule holds for every statement: the decidable candidate,
-  when one exists, is shown first.
+- The page's lead rule holds for every statement whose ready candidate is
+  among its five newest or its 200 newest older candidates that could be
+  ready; past them the group says `truncated` instead of implying none is
+  ready.
 - A statement's group can carry one candidate older than its five newest, and
-  `candidateCount` still counts every candidate. The wire contract is
-  unchanged (`candidatesPerStatement` stays 5; at most 50 candidates a group).
-- Cost: no change for a statement its newest candidates decide. For one they
-  do not, one keyed read a pass, judging at most 50 candidates per statement;
-  when none of its older candidates is ready the search walks every one that
-  could be, a pass per 50 (docs/card-settlements.md, Cost).
+  `candidateCount` still counts every candidate. The wire contract adds
+  `leadSearch` to each group and `olderCandidatesSearched` (200) to the
+  coverage, both checked by the web client's contract
+  (`validCardSettlementStatementPage`); `candidatesPerStatement` stays 5 and a
+  group carries at most 50 candidates.
+- Cost: no change for a statement its newest candidates decide. Otherwise at
+  most four more keyed reads per page load, one a pass for every statement
+  still searching, each judging at most 50 candidates per statement, so at
+  most 2,000 judged candidates a page and eight reads in all with the page,
+  window, history and evidence reads. Each pass reaches every candidate of
+  the statements it searches through `card_settlement_candidates_statement`
+  to rank them, as the shipped window read does once (docs/card-settlements.md,
+  Cost).
 - A malformed older candidate the search judges before finding a ready one is
   an unavailable answer (`card_settlement_facts_invalid`), as a malformed
   candidate of the window already is.
@@ -88,11 +123,23 @@ read of the grouped list (ADR 0081) show the same lead.
   `card-settlement-statements.test.ts`); every page equals the shipped list's
   where no lead changes; with five, then sixty-five, synthetic newer stale
   candidates only that statement's lead changes, to the newest ready
-  candidate its full list holds (one pass, then two); after the operator
-  rejects it the page equals the shipped one again and the search stops at a
-  short pass; the search's plan reads nothing whole without table statistics.
+  candidate its full list holds (one pass, then two, `found`); after the
+  operator rejects it the page equals the shipped one again and the search
+  stops at a short pass (`none_ready`); with 200 more the ready one lies past
+  the limit, the search stops after four reads, the lead is the shipped one
+  and only `leadSearch` differs (`truncated`); every statement's lead and
+  code are checked against its full list; the search's plan reads nothing
+  whole without table statistics.
 - `packages/application/test/card-settlement-statements.test.ts`: on random
   stores with synthetic history (owners and accounts drawn otherwise,
   rejected candidates, tied creation times) the search chooses exactly the
   candidates a TypeScript reference chooses for windows of 1, 2 and 5 and
-  several passes, and the grouped read equals the frozen text.
+  several passes, and the grouped read equals the frozen text. A scripted
+  store checks the loop: only undecided statements are searched, one read a
+  pass for the statements still searching, never more than four, and each
+  of the four codes, including a ready candidate on the last pass judged
+  (`found`), one just past it and a statement with exactly 200 (`truncated`).
+- `apps/web/test/card-settlement-contract.test.ts` refuses a group without a
+  known `leadSearch` and a coverage without `olderCandidatesSearched`;
+  `apps/web/test/card-settlement.browser.test.ts` shows the `truncated` note
+  and no note for `none_ready`.

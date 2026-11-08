@@ -8,6 +8,7 @@ import {
 import {
   CARD_DEBIT_ACCOUNT_STATEMENT_REFUSALS,
   type CardSettlementDebitAccountReview,
+  type CardSettlementLeadSearch,
   type CardSettlementReview,
   type CardSettlementReviewPage,
   type CardSettlementStatementGroup,
@@ -32,6 +33,15 @@ export const CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT = 5;
  * for a ready lead judges (ADR 0089).
  */
 export const CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS = 50;
+/**
+ * The most older candidates of a statement the search judges on one read of
+ * the grouped list, a whole number of passes (ADR 0089). A statement the
+ * search leaves unfinished says so (`leadSearch: "truncated"`), so a page
+ * load reads at most four more times however long the statements' histories
+ * grow.
+ */
+export const CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED =
+  4 * CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS;
 const HISTORY_LIMIT = 20;
 const STATEMENT_KEY_LIMIT = 1024;
 interface ReviewRow {
@@ -461,15 +471,21 @@ const decidable = (candidate: CardSettlementReview): boolean =>
  * statement leaves the search at its first ready candidate or once a pass
  * returns fewer than a full pass of its candidates. Only candidates no
  * decision names and whose facts could be eligible are judged
- * (`CARD_SETTLEMENT_STATEMENT_OLDER_SQL`).
+ * (`CARD_SETTLEMENT_STATEMENT_OLDER_SQL`), at most
+ * `CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED` per statement: a statement still
+ * searching after them is `truncated`, never reported as having none ready.
  */
 async function olderReadyCandidates(
   sql: SqlExecutor,
   keys: string[],
-): Promise<Map<string, CardSettlementReview>> {
+): Promise<{ found: Map<string, CardSettlementReview>; truncated: Set<string> }> {
   const found = new Map<string, CardSettlementReview>();
   let searching = keys;
-  for (let passed = 0; searching.length > 0; passed += CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS) {
+  for (
+    let passed = 0;
+    searching.length > 0 && passed < CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED;
+    passed += CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS
+  ) {
     const rows = await sql.all<ReviewRow>(CARD_SETTLEMENT_STATEMENT_OLDER_SQL, [
       JSON.stringify(searching),
       CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT,
@@ -493,7 +509,7 @@ async function olderReadyCandidates(
     }
     searching = next;
   }
-  return found;
+  return { found, truncated: new Set(searching) };
 }
 
 /**
@@ -502,9 +518,11 @@ async function olderReadyCandidates(
  * candidate first. Each group judges its newest
  * `CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT` candidates and any accepted one;
  * when none of those is accepted or ready to accept and the statement has
- * older candidates, it also searches those for the newest ready one
- * (ADR 0089). It leads with the one `leadFirst` picks and says how many
- * candidates the statement has; the rest are one
+ * older candidates, it also searches at most
+ * `CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED` of those for the newest ready
+ * one and says how far it looked (`leadSearch`, ADR 0089). It leads with
+ * the one `leadFirst` picks and says how many candidates the statement has;
+ * the rest are one
  * `queryCardSettlements({ statementKey })` away. No candidate is hidden or
  * removed: candidates are append-only.
  */
@@ -530,32 +548,41 @@ export async function queryCardSettlementStatements(
     statement,
     reviews: rows.filter((row) => row.statement_key === statement.statement_key).map(review),
   }));
-  const older = await olderReadyCandidates(
-    sql,
-    judged
-      .filter(
-        ({ statement, reviews }) =>
-          reviews.length < statement.candidate_count && !reviews.some(decidable),
-      )
-      .map(({ statement }) => statement.statement_key),
-  );
+  const searched = judged
+    .filter(
+      ({ statement, reviews }) =>
+        reviews.length < statement.candidate_count && !reviews.some(decidable),
+    )
+    .map(({ statement }) => statement.statement_key);
+  const older = await olderReadyCandidates(sql, searched);
   const chosen = judged.map(({ statement, reviews }) => {
-    const ready = older.get(statement.statement_key);
-    return { statement, reviews: ready === undefined ? reviews : [...reviews, ready] };
+    const key = statement.statement_key;
+    const ready = older.found.get(key);
+    const leadSearch: CardSettlementLeadSearch = !searched.includes(key)
+      ? "not_searched"
+      : ready !== undefined
+        ? "found"
+        : older.truncated.has(key)
+          ? "truncated"
+          : "none_ready";
+    return { statement, leadSearch, reviews: ready === undefined ? reviews : [...reviews, ready] };
   });
   await withHistory(
     sql,
     chosen.flatMap((group) => group.reviews),
   );
-  const groups: CardSettlementStatementGroup[] = chosen.map(({ statement, reviews }) => {
-    const candidates = leadFirst(reviews);
-    if (candidates.length === 0) throw new Error("card_settlement_statement_unavailable");
-    return {
-      statementKey: statement.statement_key,
-      candidateCount: statement.candidate_count,
-      candidates,
-    };
-  });
+  const groups: CardSettlementStatementGroup[] = chosen.map(
+    ({ statement, leadSearch, reviews }) => {
+      const candidates = leadFirst(reviews);
+      if (candidates.length === 0) throw new Error("card_settlement_statement_unavailable");
+      return {
+        statementKey: statement.statement_key,
+        candidateCount: statement.candidate_count,
+        candidates,
+        leadSearch,
+      };
+    },
+  );
   return {
     statements: groups,
     nextOffset:
@@ -568,6 +595,7 @@ export async function queryCardSettlementStatements(
       netAssets: "unknown",
       limit: CARD_SETTLEMENT_STATEMENT_PAGE_SIZE,
       candidatesPerStatement: CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT,
+      olderCandidatesSearched: CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED,
     },
   };
 }

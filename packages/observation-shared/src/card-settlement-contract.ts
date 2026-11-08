@@ -1,5 +1,6 @@
 import {
   CARD_SETTLEMENT_DEBIT_ACCOUNT_ABSENCES,
+  CARD_SETTLEMENT_LEAD_SEARCHES,
   type CardSettlementReviewPage,
   type CardSettlementStatementPage,
 } from "../../domain/src/card-settlement-review.ts";
@@ -70,7 +71,8 @@ export function validCardSettlementReviewPage(value: unknown): value is CardSett
 
 /**
  * The grouped list: at most 10 statements, each with at least one judged
- * candidate and a count no smaller than the candidates it carries.
+ * candidate, a count no smaller than the candidates it carries and a closed
+ * code for how far its lead was looked for (ADR 0089).
  */
 export function validCardSettlementStatementPage(
   value: unknown,
@@ -85,7 +87,8 @@ export function validCardSettlementStatementPage(
     value.coverage.completeTransactionHistory !== false ||
     value.coverage.netAssets !== "unknown" ||
     value.coverage.limit !== 10 ||
-    value.coverage.candidatesPerStatement !== 5
+    value.coverage.candidatesPerStatement !== 5 ||
+    value.coverage.olderCandidatesSearched !== 200
   )
     return false;
   return value.statements.every(
@@ -98,6 +101,7 @@ export function validCardSettlementStatementPage(
       group.candidates.length <= 50 &&
       revision(group.candidateCount) &&
       group.candidateCount >= group.candidates.length &&
+      (CARD_SETTLEMENT_LEAD_SEARCHES as readonly unknown[]).includes(group.leadSearch) &&
       group.candidates.every(validReview),
   );
 }

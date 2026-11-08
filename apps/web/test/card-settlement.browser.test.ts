@@ -122,6 +122,7 @@ describe.if(runnable)("card settlement review", () => {
   let planRevision = 0;
   let action = "accept";
   let older: ReturnType<typeof settlementReview>[] = [];
+  let leadSearch = "not_searched";
   const posted: { operation: string; body: Record<string, unknown> }[] = [];
   beforeEach(() => {
     review = settlementReview();
@@ -130,6 +131,7 @@ describe.if(runnable)("card settlement review", () => {
     planRevision = 0;
     action = "accept";
     older = [];
+    leadSearch = "not_searched";
     posted.length = 0;
   });
   beforeAll(async () => {
@@ -155,6 +157,7 @@ describe.if(runnable)("card settlement review", () => {
                 statementKey: "statement-synthetic",
                 candidateCount: older.length + 1,
                 candidates: [review, ...older.slice(0, 1)],
+                leadSearch,
               },
             ],
             nextOffset: null,
@@ -164,6 +167,7 @@ describe.if(runnable)("card settlement review", () => {
               netAssets: "unknown",
               limit: 10,
               candidatesPerStatement: 5,
+              olderCandidatesSearched: 200,
             },
           });
         if (
@@ -623,5 +627,31 @@ describe.if(runnable)("card settlement review", () => {
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
     ).toBe(true);
     await page.close();
+  });
+
+  test("a lead search the server stopped at its limit is said, and the full list stays one click away", async () => {
+    const stale = (n: number) => ({
+      ...settlementReview(),
+      proposalId: `card-settlement-stale-${n}`,
+      createdAt: `2026-09-0${n}T00:00:00Z`,
+      acceptanceBlockers: ["statement_changed"],
+    });
+    review = { ...review, acceptanceBlockers: ["bank_debit_changed"] };
+    older = [stale(2), stale(1)];
+    leadSearch = "truncated";
+    const page = await open();
+    const note = page.getByRole("note").filter({ hasText: "この請求の古い候補" });
+    await note.waitFor();
+    expect(await note.textContent()).toContain("新しい順に 200 件まで確かめました");
+    expect(await note.textContent()).toContain("採用できる候補がないとは限りません");
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+    leadSearch = "none_ready";
+    const searched = await open();
+    await searched.getByText("この請求のほかの候補（2 件）", { exact: true }).waitFor();
+    expect(await searched.getByRole("note").filter({ hasText: "この請求の古い候補" }).count()).toBe(
+      0,
+    );
+    await searched.close();
   });
 });
