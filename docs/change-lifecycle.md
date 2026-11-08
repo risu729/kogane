@@ -347,6 +347,32 @@ The commit payload digest is computed server-side over
 `{ planId, approvalId, kind, payload }`. A caller may send
 `idempotencyPayloadDigest`; a mismatch is `idempotency_conflict`.
 
+The key must also be free in the decision ledger (`decision_operations`). A
+commit that writes a ledger row writes it in the same batch as its receipt, so
+a ledger row under a key with no receipt comes from a route that keeps no
+receipt: the direct identity command (`/identity-revise`, the legacy CLI path)
+or the reconciliation job's rule acceptance of a proposal (`acceptProposal` in
+`services/processor/src/reconciliation-commands.ts`). Those derive their
+decision ids from the operation id with the same key function the commit
+writers use (`dr` over `["command", id]` for identity commands and relations,
+`["proposal", id]` for proposal decisions), so before 2026-11-07 a commit
+reusing such a key found the other route's ledger row and decision as if they
+were its own: an identity commit answered an accepted receipt and wrote
+nothing, and a relation commit tried to link the identity decision, which the
+0029 `entity_relations_provenance` trigger refused with an unexplained SQL
+error; a relation commit under a key the rule acceptance used skipped its own
+ledger row and wrote its decision and relation against the rule's. The rule
+acceptance's keys are `reconciliation-<digest>`, while a review commits under
+the key its caller chose (the web client's is `op-` and part of the approval
+id), so a reviewer judging a proposal the rule accepted commits as before. The
+receipt reservation now also requires that no ledger row holds the
+key, so such a commit writes nothing and answers `idempotency_conflict` with
+its plan open and its approval unspent; the caller commits again under a fresh
+operation id. Stored ids are unchanged (nothing is re-derived). The other
+direction already held: the direct route reads the ledger first and answers
+`idempotency_conflict` for a row with another payload digest or actor
+(`decision-log.md`).
+
 The lookup is a read, so a second command can take the key between it and
 the commit batch. The batch therefore decides again: its first statement
 reserves the key only while no receipt holds it, and every later statement
@@ -522,8 +548,8 @@ allow-lists. The committed configuration names the human operator in
 One resolver reads them — `resolvePrincipal` in
 `packages/application/src/command/grants.ts`, through the Worker's adapter
 `services/app/src/grants.ts` — and it is the only grading on any command
-surface: the five command routes and the six `/api/ops/v1` routes call it.
-The six operations MCP tools would too, but `/mcp` refuses them from its
+surface: the five command routes and the seven `/api/ops/v1` routes call it.
+The seven operations MCP tools would too, but `/mcp` refuses them from its
 agent-only caller before they get that far
 ([ADR 0047](adr/0047-mcp-client-connection.md)); the delegated command,
 decision and operations tools (`services/app/src/delegated-command-tools.ts`,
@@ -694,7 +720,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
 
 ## Verified locally (synthetic data only)
 
-- `services/processor/test/change-lifecycle.test.ts` (31 tests):
+- `services/processor/test/change-lifecycle.test.ts` (34 tests):
   plan contents and server-computed impact; SC17/AT69 (approval refused with
   `stale_context` after a concurrent change, plan marked stale, re-simulation
   yields a new digest); a stale plan refused at commit with **no rows written

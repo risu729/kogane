@@ -1,10 +1,27 @@
+// `GET /api/v2/reconciliation/card-settlements` and its `/ownership` read: the
+// `カード照合` pages' review list, one statement's candidates, one review, the
+// candidates a review competes with, and one candidate's ownership review.
+// Operator-only. The answer is the application service's
+// (`readCardSettlementsForGrant`, `readCardOwnershipForGrant`), the one an
+// agent gets from `kogane.card-settlements.read` and
+// `kogane.card-settlements.ownership` (ADR 0081 point 2): request rules,
+// refusal codes and the grant's row budget are decided there, once for both
+// transports. This file only turns the query string into that request, under
+// the reader grant a signed-in browser holds over every GET route
+// (`readerGrant`), and the service's outcome into a response.
+//
+// The `/statements` grouping has no MCP read yet (a listed gap in
+// `test/ui-mcp-parity.test.ts`) and keeps its own query rules here.
+import { ERROR_STATUS } from "../../../packages/application/src/index";
 import { storeHasFeature } from "../../../packages/application/src/query/store-schema.ts";
-import { queryCardOwnership } from "../../../packages/application/src/query/card-ownership.ts";
+import { queryCardSettlementStatements } from "../../../packages/application/src/query/card-settlements.ts";
 import {
-  queryCardSettlementStatements,
-  queryCardSettlements,
-} from "../../../packages/application/src/query/card-settlements.ts";
+  CARD_SETTLEMENTS_MAX_OFFSET,
+  readCardOwnershipForGrant,
+  readCardSettlementsForGrant,
+} from "../../../packages/application/src/query/card-settlements-read.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
+import { readerGrant } from "./agent-api";
 import { principalFor } from "./grants";
 import { HttpError, json } from "./http";
 
@@ -18,7 +35,52 @@ export async function cardSettlementsAvailable(env: Env): Promise<boolean> {
   return storeHasFeature(d1Executor(env.DB), "cardSettlements");
 }
 
-/** Operator-only; agents read the same answers through `kogane.card-settlements.*` on a whole-store grant. */
+/**
+ * The service's request from a query string: each key once as its text, a
+ * repeated key as the list of its values (which the service refuses as it
+ * refuses any non-text value), and `offset` as a number when its text is a
+ * plain decimal. Any other `offset` text stays text, so the service refuses it
+ * as it refuses `{"offset": "1"}` over MCP.
+ */
+function serviceRequest(params: URLSearchParams): Record<string, unknown> {
+  const request: Record<string, unknown> = {};
+  for (const key of new Set(params.keys())) {
+    const values = params.getAll(key);
+    const value = values[0]!;
+    request[key] =
+      values.length !== 1
+        ? values
+        : key === "offset" && /^(0|[1-9]\d*)$/u.test(value)
+          ? Number(value)
+          : value;
+  }
+  return request;
+}
+
+/** The grouped list's page offset: `offset` alone, as the route has always taken it. */
+function statementsOffset(params: URLSearchParams): number {
+  for (const [key, value] of params) {
+    if (
+      !["offset", "proposalId", "statementKey", "relatedTo"].includes(key) ||
+      params.getAll(key).length !== 1 ||
+      !value
+    )
+      throw new HttpError(400, "invalid_query");
+  }
+  const text = params.get("offset") ?? "0";
+  const offset = Number(text);
+  if (
+    !/^(0|[1-9]\d*)$/u.test(text) ||
+    !Number.isSafeInteger(offset) ||
+    offset > CARD_SETTLEMENTS_MAX_OFFSET
+  )
+    throw new HttpError(400, "invalid_offset");
+  if (params.has("proposalId") || params.has("statementKey") || params.has("relatedTo"))
+    throw new HttpError(400, "invalid_query");
+  return offset;
+}
+
+/** Operator-only; agents read the same answers through `kogane.card-settlements.*`. */
 export async function cardSettlementsApi(
   request: Request,
   env: Env,
@@ -34,49 +96,17 @@ export async function cardSettlementsApi(
   const principal = principalFor(env, subject);
   if (principal.kind !== "human" || !principal.capabilities.includes("interpretation.accept"))
     throw new HttpError(403, "operator_required");
-  for (const [key, value] of url.searchParams) {
-    if (
-      !["offset", "proposalId", "statementKey"].includes(key) ||
-      url.searchParams.getAll(key).length !== 1 ||
-      !value
-    )
-      throw new HttpError(400, "invalid_query");
-  }
-  const text = url.searchParams.get("offset") ?? "0";
-  const offset = Number(text);
-  if (!/^(0|[1-9]\d*)$/u.test(text) || !Number.isSafeInteger(offset) || offset > 1_000_000)
-    throw new HttpError(400, "invalid_offset");
-  const proposalId = url.searchParams.get("proposalId");
-  if (
-    proposalId !== null &&
-    (!/^[A-Za-z0-9_-]{1,128}$/u.test(proposalId) || url.searchParams.has("offset"))
-  )
-    throw new HttpError(400, "invalid_query");
-  const statementKey = url.searchParams.get("statementKey");
-  if (
-    statementKey !== null &&
-    (statementKey.length > 1024 || proposalId !== null || ownership || grouped)
-  )
-    throw new HttpError(400, "invalid_query");
-  if (grouped) {
-    if (proposalId !== null) throw new HttpError(400, "invalid_query");
+  const sql = d1Executor(env.DB);
+  if (grouped)
     return json({
       apiVersion: 2,
-      ...(await queryCardSettlementStatements(d1Executor(env.DB), { offset })),
+      ...(await queryCardSettlementStatements(sql, { offset: statementsOffset(url.searchParams) })),
     });
-  }
-  if (ownership) {
-    if (proposalId === null || url.searchParams.has("offset"))
-      throw new HttpError(400, "invalid_query");
-    const review = await queryCardOwnership(d1Executor(env.DB), proposalId);
-    if (!review) throw new HttpError(404, "not_found");
-    return json({ apiVersion: 2, ...review });
-  }
-  const page = await queryCardSettlements(d1Executor(env.DB), {
-    offset,
-    ...(proposalId === null ? {} : { proposalId }),
-    ...(statementKey === null ? {} : { statementKey }),
-  });
-  if (proposalId !== null && page.items.length === 0) throw new HttpError(404, "not_found");
-  return json({ apiVersion: 2, ...page });
+  const input = { grant: readerGrant(subject), sql, request: serviceRequest(url.searchParams) };
+  const outcome = ownership
+    ? await readCardOwnershipForGrant(input)
+    : await readCardSettlementsForGrant(input);
+  if (outcome.status === "refused") return json(outcome.error, ERROR_STATUS[outcome.error.code]);
+  if (outcome.status === "not_found") throw new HttpError(404, "not_found");
+  return json({ apiVersion: 2, ...outcome.answer });
 }

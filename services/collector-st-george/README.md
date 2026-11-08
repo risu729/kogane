@@ -35,8 +35,27 @@ fallback. A Durable Object serializes collection, records interrupted attempts,
 and retains only a validated financial snapshot while its storage is incomplete.
 A later trigger retries storing that same snapshot rather than logging in again.
 
+A failed run keeps what the browser saw in its R2 manifest (`failures[0].diagnostic`,
+2026-11-08 UTC), because Worker logs last only 7 days: the closed `stage`,
+`errorType` and `refusal` labels, `loginPostCount`, `durationMs`, and `notices`,
+the visible text of up to four alerts and headings (`[role=alert]`, `.error`,
+then `h1`, `h2`) on the bank's page when the run stopped. Before a login is
+submitted any page on the bank's origin is read, since nobody is logged in yet;
+after a submit only the login page is read, because any other page may greet
+the customer by name. The page itself is checked again inside the browser, so
+a navigation in between cannot hand over another page. Each notice is bounded
+to 160 characters, every run of numbers (any script, with spaces, dots,
+slashes or hyphens between) becomes one `#`, and email-shaped words become
+`[email]`; the container and the Worker both apply this, and the Worker drops
+a diagnostic outside the closed shape (including a longer notice) without
+failing the run. Form values are never read. The manifest keeps its
+`collector_manifest` role, which the evidence registry treats as generated,
+not provider content: a failed run has no provider artifact and is not
+registered, so this text stays in the run's R2 objects. Exposing or sealing a
+failed run's manifest must account for it.
+
 When a collection failure is caught, the container attempts to emit one `st-george-runtime-failure` event with
-`stage`, `errorType`, `refusal`, `loginPostCount` and `durationMs`. Stage and exception type
+`stage`, `errorType`, `refusal`, `loginPostCount`, `durationMs` and `noticeCount` (never the notice text). Stage and exception type
 are closed labels; exception messages, stacks, URLs, provider text and credentials
 are excluded. `loginPostCount` observes browser-issued requests to the known login
 POST route: 0 means none observed, 1 means one, and 2 means two or more. It does not

@@ -79,6 +79,17 @@ export interface ScheduleView {
     verifiedAt: string;
   };
   latest: ScheduleOccurrence | null;
+  /**
+   * How this job can be asked to collect now (ADR 0048): the CORE source a
+   * `POST /api/ops/v1/collections` names, and whether the Processor's dispatch
+   * lane would start it. Null when no collector connection serves a request
+   * for this job; absent from a Processor that predates it.
+   */
+  collectionRequest?: ScheduleCollectionRequest | null;
+}
+export interface ScheduleCollectionRequest {
+  source: string;
+  dispatch: "enabled" | "lane_disabled" | "connection_disabled";
 }
 export interface ScheduleOccurrence {
   id: string;

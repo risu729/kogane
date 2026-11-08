@@ -1,9 +1,11 @@
 // The operations API (`/api/ops/v1`, unified plan 02 §4-5, U06).
 //
 // One Hono sub-app mounted inside the existing `fetch` handler, after the
-// Access check and before the Worker's GET-only boundary, so these six paths
-// are the third — and last — explicitly enumerated non-GET surface of this
-// Worker. Everything outside them still answers 405.
+// Access check and before the Worker's GET-only boundary, so its five POST
+// paths are the third — and last — explicitly enumerated non-GET surface of
+// this Worker. Everything outside them still answers 405. Its two GET paths
+// read one operation and list them all, whichever principal requested them
+// (ADR 0086; reads are whole-store, owner 2026-11-08 04:21 UTC).
 //
 // What this module is allowed to be: a transport. It parses a bounded JSON
 // body with a closed Zod schema, hands the validated request to the
@@ -31,7 +33,13 @@ import {
   type CommandResult,
   d1CommandStore,
   type ImportRequest,
+  listOperations,
+  OPERATION_KINDS,
+  OPERATION_LIST_DEFAULT_LIMIT,
+  OPERATION_LIST_MAX_LIMIT,
+  OPERATION_STATUSES,
   type OperationContext,
+  type OperationListQuery,
   principalCan,
   type ProjectionRequest,
   readOperation,
@@ -168,6 +176,61 @@ export const operationIdSchema = z.strictObject({
   operationId: z.string().regex(/^op_[0-9a-f]{64}$/u),
 });
 
+/**
+ * The list's query (ADR 0086), one schema for both transports: the MCP tool
+ * `kogane.ops.operation.list` validates its arguments with it, and the list
+ * route validates its query string with it after reading each key once.
+ */
+export const operationListSchema = z.strictObject({
+  kind: z.enum(OPERATION_KINDS).optional(),
+  status: z.enum(OPERATION_STATUSES).optional(),
+  cursor: operationIdSchema.shape.operationId.optional(),
+  limit: z.number().int().min(1).max(OPERATION_LIST_MAX_LIMIT).optional(),
+});
+type OperationListInput = z.infer<typeof operationListSchema>;
+
+/** The service's query for a validated list input; absent keys take their defaults. */
+export function operationListQuery(input: OperationListInput): OperationListQuery {
+  return {
+    kind: input.kind ?? null,
+    status: input.status ?? null,
+    cursor: input.cursor ?? null,
+    limit: input.limit ?? OPERATION_LIST_DEFAULT_LIMIT,
+  };
+}
+
+/** The keys the list route reads from its query string; each at most once. */
+const LIST_QUERY_KEYS = ["kind", "status", "cursor", "limit"] as const;
+/** A limit as the query string spells it: no sign, no leading zero, no fraction. */
+const LIST_LIMIT = /^[1-9][0-9]?$/u;
+
+/**
+ * The list route's query string (ADR 0086). Every key is closed and appears at
+ * most once; a value outside its closed list is refused. A refusal is
+ * `invalid_query` naming the offending key, never the value — and an unknown
+ * key is refused without a ref, because its name is the caller's text.
+ */
+function parseListQuery(params: URLSearchParams): OperationListQuery {
+  const keys = [...params.keys()];
+  if (keys.some((key) => !(LIST_QUERY_KEYS as readonly string[]).includes(key)))
+    throw new HttpError(400, "invalid_query");
+  const candidate: Record<string, string | number> = {};
+  for (const key of LIST_QUERY_KEYS) {
+    const values = params.getAll(key);
+    if (values.length === 0) continue;
+    if (values.length > 1) throw new HttpError(400, "invalid_query", [key]);
+    const value = values[0]!;
+    if (key === "limit" && !LIST_LIMIT.test(value))
+      throw new HttpError(400, "invalid_query", [key]);
+    candidate[key] = key === "limit" ? Number(value) : value;
+  }
+  const outcome = operationListSchema.safeParse(candidate);
+  if (outcome.success) return operationListQuery(outcome.data);
+  // Every key is known here, so the first failing key is a closed name.
+  const key = outcome.error.issues[0]?.path[0];
+  throw new HttpError(400, "invalid_query", typeof key === "string" ? [key] : []);
+}
+
 /** A window has to be a window: `to` before `from` is not a narrow request. */
 function orderedWindow(from: string | null, to: string | null): boolean {
   return from === null || to === null || from <= to;
@@ -293,11 +356,18 @@ export const opsServices = {
   },
   async operation(context: OpsContext, operationId: string) {
     const outcome = await readOperation({ ...context, operationId });
-    // An operation another principal accepted answers exactly like one that
-    // does not exist: the API never confirms that an id it cannot show exists.
+    // Whole-store (ADR 0086): any principal's operation is read; only an id
+    // that does not exist is `receipt_not_found`.
     if (!outcome.ok)
       throw new HttpError(statusForCommandError(outcome.error), outcome.error, outcome.refs ?? []);
     return { status: 200, body: outcome.receipt };
+  },
+  async list(context: OpsContext, query: OperationListQuery) {
+    const outcome = await listOperations({ ...context, query });
+    // A cursor naming no operation is `receipt_not_found`.
+    if (!outcome.ok)
+      throw new HttpError(statusForCommandError(outcome.error), outcome.error, outcome.refs ?? []);
+    return { status: 200, body: outcome.page };
   },
 };
 
@@ -316,11 +386,15 @@ interface OpsAudit {
 }
 
 /** Records what a successful operations answer was when its writer recorded nothing. */
-function answered(audit: OpsAudit | undefined, outcome: OpsResponse, read: boolean): Response {
+function answered(
+  audit: OpsAudit | undefined,
+  outcome: OpsResponse,
+  read: false | { rows: number; truncated: boolean },
+): Response {
   const operationId = (outcome.body as { operationId?: unknown }).operationId;
   if (audit)
     audit.quiet = read
-      ? { result: "read", rows: 1, truncated: false }
+      ? { result: "read", ...read }
       : // A re-sent request: the same operation, named by the id the service derived.
         {
           result: "replayed",
@@ -386,13 +460,25 @@ app.get("/operations/:id", async (context) => {
   const ops = opsContext(context.env, context.env.VERIFIED_SUBJECT, context.env.AUDIT?.call);
   const { operationId } = parseRequest(operationIdSchema, { operationId: context.req.param("id") });
   const outcome = await opsServices.operation(ops, operationId);
-  return answered(context.env.AUDIT, outcome, true);
+  return answered(context.env.AUDIT, outcome, { rows: 1, truncated: false });
+});
+
+app.get("/operations", async (context) => {
+  const ops = opsContext(context.env, context.env.VERIFIED_SUBJECT, context.env.AUDIT?.call);
+  const query = parseListQuery(new URL(context.req.url).searchParams);
+  const outcome = await opsServices.list(ops, query);
+  // The record counts the rows shown and whether a next page exists; it never
+  // names an operation of the page.
+  return answered(context.env.AUDIT, outcome, {
+    rows: outcome.body.operations.length,
+    truncated: outcome.body.nextCursor !== null,
+  });
 });
 
 /**
  * The operation a request names, from its method and path alone, or null for
  * one this API does not serve (which is not recorded: it is not an
- * operation). The six routes above, nothing else.
+ * operation). The seven routes above, nothing else.
  */
 export function opsOperation(method: string, path: string): OperationName | null {
   const rest = path.slice(OPS_PREFIX.length);
@@ -404,6 +490,7 @@ export function opsOperation(method: string, path: string): OperationName | null
     if (/^\/sessions\/[^/]+\/refresh$/u.test(rest)) return "ops.session.refresh";
   }
   if (method === "GET" && /^\/operations\/[^/]+$/u.test(rest)) return "ops.operation.get";
+  if (method === "GET" && rest === "/operations") return "ops.operation.list";
   return null;
 }
 
@@ -437,7 +524,8 @@ export async function opsApi(
   // acceptance batch writes an accepted request's own, and every other
   // answer — a re-send, a read, a refusal — is recorded after it.
   return auditedRoute(auditContext(request, env, "ui", subject), operation, async (call) => {
-    if (url.search) throw new HttpError(400, "invalid_query");
+    // Only the list reads a query string; every other route takes none.
+    if (url.search && operation !== "ops.operation.list") throw new HttpError(400, "invalid_query");
     // A page on another site never reaches the grant, the schema or the
     // store (ADR 0078); the refusal is recorded like any other.
     if (request.method === "POST") assertOwnOrigin(request, url);

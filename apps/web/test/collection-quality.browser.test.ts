@@ -6,6 +6,7 @@ import { auditView } from "./a11y-audit.ts";
 import type { SQLQueryBindings } from "bun:sqlite";
 import { QualityStore } from "../../../packages/read-model/test/collection-quality-fixture.ts";
 import {
+  queryAccountCoverage,
   queryCollectionQualityCells,
   queryCollectionQualitySummary,
 } from "../../../packages/application/src/query/collection-quality.ts";
@@ -34,6 +35,38 @@ describe.if(runnable)("collection quality browser", () => {
       },
       artifacts: [],
     });
+    // One GLOBAL PASS month whose observation the identity layer maps to an
+    // unresolved account, and one whose parse is still pending.
+    const month = store.run({
+      source: "global-pass",
+      at: "2099-01-02T00:00:00Z",
+      artifacts: [
+        { key: "activity-2099-01.html", dataset: "globalpass-activity" },
+        { key: "activity-2098-12.html", dataset: "globalpass-activity" },
+      ],
+    });
+    const parse = store.parse(month.artifacts[0]!, "global-pass-activity", { kind: "published" })!;
+    store.parse(month.artifacts[1]!, "global-pass-activity", { kind: "pending" });
+    store.db.run(
+      "INSERT INTO transaction_observations(id,parse_run_id,source_account,raw_locator,extra_json) VALUES(990001,?,'synthetic-ref','$[0]','{}')",
+      [parse],
+    );
+    store.db.run(
+      "INSERT INTO source_accounts VALUES('synthetic-ref','global-pass','collector-r2-importer','[\"synthetic-ref\"]')",
+    );
+    store.db.run(
+      "INSERT INTO accounts VALUES('synthetic-account','Synthetic browser account','synthetic-role','unresolved')",
+    );
+    store.db.run(
+      "INSERT INTO account_mappings VALUES('synthetic-map','synthetic-ref',1,'synthetic-account','rule','synthetic_reason',1,'2099-01-01','Synthetic browser account','unresolved')",
+    );
+    store.db.run("INSERT INTO identity_runs VALUES('synthetic-identity',?,1,'2099-01-01')", [
+      parse,
+    ]);
+    store.db.run(
+      "INSERT INTO identity_observations VALUES('synthetic-identity-1','synthetic-identity','transaction',990001,'synthetic-ref','synthetic-map','[]')",
+    );
+    store.db.run("INSERT INTO identity_run_seals VALUES('synthetic-identity',1,'2099-01-01')");
     const executor: Parameters<typeof queryCollectionQualityCells>[0] = {
       all: async <T>(sql: string, args: readonly unknown[]) =>
         store.db.query(sql).all(...(args as SQLQueryBindings[])) as T[],
@@ -54,6 +87,13 @@ describe.if(runnable)("collection quality browser", () => {
           });
         if (url.pathname === "/api/collection-quality")
           return Response.json(await queryCollectionQualitySummary(executor, { asOf: AS_OF }));
+        if (
+          url.pathname.startsWith("/api/collection-quality/") &&
+          url.pathname.endsWith("/accounts")
+        )
+          return Response.json(
+            await queryAccountCoverage(executor, { sourceId: url.pathname.split("/").at(-2)! }),
+          );
         if (url.pathname.startsWith("/api/collection-quality/"))
           return Response.json(
             await queryCollectionQualityCells(executor, {
@@ -94,11 +134,23 @@ describe.if(runnable)("collection quality browser", () => {
       expect(
         await page.getByText("本人による認証・操作が必要です", { exact: false }).count(),
       ).toBeGreaterThan(0);
-      // collection-freshness-v1: the source's newest run is two days old; the
-      // unit with no file waits on a person and has no current capture.
-      expect(await page.locator('.freshness[data-state="recent"]').first().textContent()).toBe(
-        "2日前の取得",
-      );
+      // collection-freshness-v1: the chosen source's newest run is two days old
+      // (GLOBAL PASS, listed before it, is one day old); the unit with no file
+      // waits on a person and has no current capture.
+      expect(
+        await page
+          .locator("p", { hasText: "最新の取得記録の新しさ" })
+          .locator('.freshness[data-state="recent"]')
+          .textContent(),
+      ).toBe("2日前の取得");
+      const listed = (sourceId: string) =>
+        page
+          .locator("nav li")
+          .filter({ has: page.getByRole("link", { name: sourceId, exact: true }) })
+          .locator(".freshness")
+          .textContent();
+      expect(await listed("vpass")).toBe("2日前の取得");
+      expect(await listed("global-pass")).toBe("1日前の取得");
       expect(
         await page.locator('.freshness[data-state="human-required"]').first().textContent(),
       ).toBe("本人操作待ち（取得なし）");
@@ -205,4 +257,86 @@ describe.if(runnable)("collection quality browser", () => {
       await page.close();
     }
   }, 60000);
+  test("the account view lists a source's periods per account and the records no account names", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setViewportSize({ width: 375, height: 812 });
+      const before = requests.length;
+      await page.goto(`${origin}/collection-quality?source=global-pass`);
+      // The default view reads the cells, never the account regrouping.
+      await page.getByRole("heading", { name: "口座・カード × データ種別 × 期間" }).waitFor();
+      expect(requests.slice(before).some((request) => request.path.endsWith("/accounts"))).toBe(
+        false,
+      );
+      await page.getByRole("link", { name: "口座ごと", exact: true }).click();
+      await page.getByRole("heading", { name: "口座 × データ種別 × 期間", exact: true }).waitFor();
+      expect(
+        await page
+          .getByRole("link", { name: "口座ごと", exact: true })
+          .getAttribute("aria-current"),
+      ).not.toBeNull();
+      await page.getByRole("heading", { name: "Synthetic browser account" }).waitFor();
+      expect(await page.getByText("口座の対応が未確定", { exact: false }).count()).toBe(1);
+      expect(await page.getByText("取引 · globalpass-activity", { exact: true }).count()).toBe(1);
+      expect(await page.getByText("最新の取得が現在の表示対象", { exact: false }).count()).toBe(1);
+      expect(await page.getByText("この口座の観測 1 件", { exact: false }).count()).toBe(1);
+      // The pending month names no account: it is listed apart with its reason.
+      const apart = page.locator("section.panel").filter({
+        has: page.getByRole("heading", { name: "口座に対応付けられない保存記録" }),
+      });
+      expect(await apart.getByText("解析待ち・解析中です", { exact: false }).count()).toBe(1);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      expect(
+        requests.slice(before).filter((request) => request.path.endsWith("/accounts")),
+      ).toEqual([{ path: "/api/collection-quality/global-pass/accounts", method: "GET" }]);
+      expect(await auditView(page)).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+  test("the account view states an empty answer as unknown and shows a refused one as refused, never in part", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setViewportSize({ width: 375, height: 812 });
+      // vpass has a unit with no file and no observation: no account is named.
+      await page.goto(`${origin}/collection-quality?source=vpass&view=accounts`);
+      await page.getByRole("heading", { name: "口座 × データ種別 × 期間", exact: true }).waitFor();
+      expect(
+        await page
+          .getByText(
+            "口座に対応付けられた観測がありません。取得や取引がないことの証明ではありません。",
+            {
+              exact: true,
+            },
+          )
+          .count(),
+      ).toBe(1);
+      const apart = page.locator("section.panel").filter({
+        has: page.getByRole("heading", { name: "口座に対応付けられない保存記録" }),
+      });
+      expect(
+        await apart
+          .getByText("この口座・カードの原本ファイルがありません", { exact: false })
+          .count(),
+      ).toBeGreaterThan(0);
+      expect(await auditView(page)).toEqual([]);
+      // More cells than the bound is refused whole (413): no account, period
+      // or count is shown, only the refusal.
+      await page.route("**/api/collection-quality/global-pass/accounts", (route) =>
+        route.fulfill({ status: 413, json: { error: "result_limit_exceeded" } }),
+      );
+      await page.goto(`${origin}/collection-quality?source=global-pass&view=accounts`);
+      await page.getByRole("alert").filter({ hasText: "(HTTP 413)" }).waitFor();
+      expect(
+        await page.getByRole("heading", { name: "口座 × データ種別 × 期間", exact: true }).count(),
+      ).toBe(0);
+      expect(await page.getByText("Synthetic browser account", { exact: false }).count()).toBe(0);
+      expect(await page.getByText("この口座の観測", { exact: false }).count()).toBe(0);
+      expect(await auditView(page)).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
 });

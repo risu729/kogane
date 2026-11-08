@@ -26,6 +26,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import demo from "./snapshot-worker";
 import worker from "../src/worker";
 import { seedRegistry } from "./fixtures";
+import { validOperationRecord } from "../../../packages/observation-shared/src/operation-contract";
 import { PURCHASES_TOOL_NAME } from "../src/agent-service";
 import { MCP_TOOLS, RECONSTRUCTED_STATE_MCP_TOOLS } from "../src/mcp";
 import { OPS_MCP_TOOLS, OPS_TOOL_NAMES } from "../src/ops-tools";
@@ -34,6 +35,8 @@ import { CollectionKeyError, RUN_ID, terminalKey } from "../../../packages/colle
 import {
   claimCollectorStart,
   d1CommandStore,
+  operationListArms,
+  operationListSql,
   projectionRequirementWrite,
   recordCollectorOutcome,
   recordOperationStage,
@@ -254,6 +257,8 @@ describe("collection requests are accepted, not executed (G3-06, G3-14)", () => 
     expect(read.status).toBe(200);
     const receipt = (await read.json()) as Record<string, any>;
     expect(receipt.schemaVersion).toBe("kogane-operation-v1");
+    // The record the browser's 依頼の経過 page accepts (operation-contract.ts).
+    expect(validOperationRecord(receipt, first.json.operationId)).toBe(true);
     expect(receipt.stages.map((stage: any) => [stage.stage, stage.state])).toEqual([
       ["persisted", "pending"],
       ["registered", "pending"],
@@ -306,6 +311,7 @@ describe("collection requests are accepted, not executed (G3-06, G3-14)", () => 
     const read = await call(`${OPS}/operations/${operationId}`, { environment: ENABLED });
     expect(read.status).toBe(200);
     const receipt = (await read.json()) as Record<string, any>;
+    expect(validOperationRecord(receipt, operationId)).toBe(true);
     expect(receipt.status).toBe("running");
     expect(receipt.targetRef).toBe("collector:sony-bank");
     expect(receipt.stages[0]).toMatchObject({ stage: "persisted", state: "completed" });
@@ -346,7 +352,7 @@ describe("collection requests are accepted, not executed (G3-06, G3-14)", () => 
     expect(JSON.stringify(conflict.json)).not.toContain("2026-02-01");
   });
 
-  it("keeps one operation per principal: another subject's request is its own", async () => {
+  it("keeps one operation per principal, and either principal reads the other's (ADR 0086)", async () => {
     const mine = await ops("/collections", { ...COLLECTION, idempotencyKey: "shared-key" });
     const theirs = await call(`${OPS}/collections`, {
       body: { ...COLLECTION, idempotencyKey: "shared-key" },
@@ -355,10 +361,21 @@ describe("collection requests are accepted, not executed (G3-06, G3-14)", () => 
     });
     const other = (await theirs.json()) as Record<string, any>;
     expect(other.operationId).not.toBe(mine.json.operationId);
-    // And neither principal can read the other's operation.
+    // Reads are whole-store (owner, 2026-11-08 04:21 UTC): each principal
+    // reads the other's operation exactly as its own principal does.
     const read = await call(`${OPS}/operations/${other.operationId}`, { environment: ENABLED });
-    expect(read.status).toBe(404);
-    expect((await read.json()).error).toBe("receipt_not_found");
+    expect(read.status).toBe(200);
+    const byOwner = await call(`${OPS}/operations/${other.operationId}`, {
+      subject: SECOND_OPERATOR,
+      environment: ENABLED,
+    });
+    expect(await read.json()).toEqual(await byOwner.json());
+    const back = await call(`${OPS}/operations/${mine.json.operationId}`, {
+      subject: SECOND_OPERATOR,
+      environment: ENABLED,
+    });
+    expect(back.status).toBe(200);
+    expect((await back.json()).operationId).toBe(mine.json.operationId);
   });
 });
 
@@ -758,6 +775,7 @@ describe("stage progress is evidence, not a guess", () => {
     receipt = (await (
       await call(`${OPS}/operations/${operationId}`, { environment: ENABLED })
     ).json()) as Record<string, any>;
+    expect(validOperationRecord(receipt, operationId)).toBe(true);
     expect(receipt.status).toBe("completed");
     expect(receipt.stages[0]).toMatchObject({
       state: "completed",
@@ -809,6 +827,7 @@ describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)
       "kogane.ops.projection.request",
       "kogane.ops.session.refresh",
       "kogane.ops.operation.get",
+      "kogane.ops.operation.list",
     ]);
   });
 
@@ -1014,7 +1033,15 @@ describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)
         THROUGH_MCP,
       );
       expect(viaMcp.result.isError).not.toBe(true);
-      return [(await http.json()) as Record<string, any>, viaMcp.result.structuredContent];
+      const receipts = [
+        (await http.json()) as Record<string, any>,
+        viaMcp.result.structuredContent,
+      ];
+      // Every derived `projected` state is a record the 依頼の経過 page accepts.
+      receipts.forEach((receipt, index) =>
+        expect(validOperationRecord(receipt, ids[index])).toBe(true),
+      );
+      return receipts;
     };
     const projected = (receipt: Record<string, any>) => ({
       status: receipt.status,
@@ -1079,7 +1106,7 @@ describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)
     });
   });
 
-  it("never shows the operator's browser receipt to its MCP principal", async () => {
+  it("shows the operator's browser receipt to its MCP principal as the route does (ADR 0086)", async () => {
     const accepted = await ops("/imports", {
       source: "sony-bank",
       runId: "run-read-through-http",
@@ -1089,6 +1116,7 @@ describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)
     });
     expect(overHttp.status).toBe(200);
     const receipt = (await overHttp.json()) as Record<string, unknown>;
+    expect(validOperationRecord(receipt, accepted.json.operationId)).toBe(true);
     expect(receipt).toMatchObject({
       operationId: accepted.json.operationId,
       status: "accepted",
@@ -1100,9 +1128,213 @@ describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)
         THROUGH_MCP,
       );
     const read = await get(accepted.json.operationId);
+    expect(read.result.isError).not.toBe(true);
+    expect(read.result.structuredContent).toEqual(receipt);
     const missing = await get(`op_${"0".repeat(64)}`);
-    expect(read.result.isError).toBe(true);
-    expect(read.result.structuredContent).toEqual(missing.result.structuredContent);
-    expect(read.result.structuredContent).not.toEqual(receipt);
+    expect(missing.result.isError).toBe(true);
+  });
+});
+
+describe("the operator lists every principal's operations (ADR 0086)", () => {
+  /** Two operators, so the list is shown to be no one principal's. */
+  const LISTER = "ops-list-operator";
+  const LISTER_PEER = "ops-list-peer";
+  const LISTING = {
+    ...ENABLED,
+    OPERATOR_SUBJECTS: JSON.stringify([LISTER, LISTER_PEER]),
+  };
+  /** Free text an operator may store with a rebuild; the list never shows it. */
+  const REASON = "synthetic rebuild reason";
+
+  async function request(path: string, body: unknown, subject = LISTER) {
+    const response = await call(`${OPS}${path}`, { body, subject, environment: LISTING });
+    expect(response.status).toBe(202);
+    return ((await response.json()) as { operationId: string }).operationId;
+  }
+
+  async function list(query = "", subject = LISTER, environment: Record<string, unknown> = {}) {
+    const response = await call(`${OPS}/operations${query}`, {
+      subject,
+      environment: { ...LISTING, ...environment },
+    });
+    return { status: response.status, json: (await response.json()) as Record<string, any> };
+  }
+
+  async function seed() {
+    return {
+      collection: await request("/collections", { ...COLLECTION, idempotencyKey: "list-1" }),
+      imported: await request("/imports", { source: "sony-bank", runId: "run-list-import" }),
+      projection: await request("/projections", { reason: REASON, idempotencyKey: "list-2" }),
+      peer: await request("/projections", { reason: REASON }, LISTER_PEER),
+    };
+  }
+
+  const idsOf = (page: Record<string, any>): string[] =>
+    page["operations"].map((entry: { operationId: string }) => entry.operationId);
+
+  /** Every stored request of the shape, of every principal, in the list's order. */
+  async function storedIds(where = "1", ...binds: unknown[]): Promise<string[]> {
+    return (
+      await env.DB.prepare(
+        `SELECT operation_id FROM ops_requests WHERE ${where} ORDER BY created_at DESC,operation_id DESC`,
+      )
+        .bind(...binds)
+        .all<{ operation_id: string }>()
+    ).results.map((entry) => entry.operation_id);
+  }
+
+  it("answers every principal's requests newest first, as summaries without payload text", async () => {
+    const ids = await seed();
+    const own = await list("?limit=50");
+    expect(own.status).toBe(200);
+    expect(own.json["schemaVersion"]).toBe("kogane-operation-list-v1");
+    const stored = await storedIds();
+    expect(idsOf(own.json)).toEqual(stored.slice(0, 50));
+    expect(own.json["nextCursor"]).toBe(stored.length > 50 ? stored[49] : null);
+    // The peer's request is listed with the caller's: reads are whole-store
+    // (owner, 2026-11-08 04:21 UTC).
+    for (const id of [ids.collection, ids.imported, ids.projection, ids.peer])
+      expect(idsOf(own.json)).toContain(id);
+    const projection = own.json["operations"].find(
+      (entry: { operationId: string }) => entry.operationId === ids.projection,
+    );
+    expect(Object.keys(projection).sort()).toEqual([
+      "acceptedAt",
+      "dispatch",
+      "failureCode",
+      "kind",
+      "operationId",
+      "source",
+      "status",
+      "updatedAt",
+    ]);
+    expect(projection).toMatchObject({ kind: "projection", status: "accepted", source: null });
+    // The stored request is not read: a rebuild's reason is the operator's text.
+    expect(JSON.stringify(own.json)).not.toContain(REASON);
+    // The peer is shown the same page.
+    expect((await list("?limit=50", LISTER_PEER)).json).toEqual(own.json);
+  });
+
+  it("pages by cursor and filters by kind and status, each a closed value", async () => {
+    await seed();
+    const all = await storedIds();
+    expect(all.length).toBeGreaterThanOrEqual(4);
+    const first = await list("?limit=2");
+    expect(idsOf(first.json)).toEqual(all.slice(0, 2));
+    expect(first.json["nextCursor"]).toBe(all[1]);
+    // The next page is the same whichever operator asks for it.
+    const second = await list(`?limit=2&cursor=${first.json["nextCursor"]}`, LISTER_PEER);
+    expect(idsOf(second.json)).toEqual(all.slice(2, 4));
+    expect(second.json["nextCursor"]).toBe(all.length > 4 ? all[3] : null);
+    const imports = await list("?kind=import&limit=50");
+    expect(idsOf(imports.json)).toEqual((await storedIds("kind='import'")).slice(0, 50));
+    expect(idsOf(imports.json).length).toBeGreaterThan(0);
+    const projections = await list("?status=accepted&kind=projection&limit=50");
+    expect(idsOf(projections.json)).toEqual(
+      (await storedIds("status='accepted' AND kind='projection'")).slice(0, 50),
+    );
+    const completed = await list("?status=completed&limit=50");
+    expect(idsOf(completed.json)).toEqual((await storedIds("status='completed'")).slice(0, 50));
+  });
+
+  it("refuses a query outside its closed keys and values, naming the key and never the value", async () => {
+    const cases: [string, string[] | undefined][] = [
+      ["?purge=1", undefined],
+      ["?kind=import&kind=replay", ["kind"]],
+      ["?kind=DROP%20TABLE", ["kind"]],
+      ["?kind=", ["kind"]],
+      ["?status=done", ["status"]],
+      ["?limit=0", ["limit"]],
+      ["?limit=51", ["limit"]],
+      ["?limit=05", ["limit"]],
+      ["?cursor=not-an-operation", ["cursor"]],
+    ];
+    for (const [query, refs] of cases) {
+      const refused = await list(query);
+      expect(refused.status, query).toBe(400);
+      expect(refused.json["error"], query).toBe("invalid_query");
+      expect(refused.json["refs"], query).toEqual(refs);
+      expect(JSON.stringify(refused.json), query).not.toMatch(/purge|DROP|done|not-an-operation/u);
+    }
+    // A cursor of another principal pages on; one of no operation is refused.
+    const peer = await request("/projections", { reason: REASON }, LISTER_PEER);
+    expect((await list(`?cursor=${peer}`)).status).toBe(200);
+    const refused = await list(`?cursor=op_${"0".repeat(64)}`);
+    expect(refused.status).toBe(404);
+    expect(refused.json).toMatchObject({ error: "receipt_not_found", refs: ["cursor"] });
+  });
+
+  it("refuses an agent and a stranger on the route, and is absent while the flag is off", async () => {
+    const agent = await list("", AGENT, { AGENT_GRANTS: JSON.stringify([AGENT]) });
+    expect(agent.status).toBe(403);
+    expect(agent.json["error"]).toBe("approval_required");
+    const stranger = await list("", STRANGER);
+    expect(stranger.status).toBe(403);
+    expect(stranger.json["error"]).toBe("subject_not_granted");
+    const off = await list("", LISTER, { OPS_API_ENABLED: "" });
+    expect(off.status).toBe(404);
+    expect(off.json["error"]).toBe("not_found");
+    const post = await call(`${OPS}/operations`, {
+      body: {},
+      subject: LISTER,
+      environment: LISTING,
+    });
+    expect(post.status).toBe(404);
+  });
+
+  it("records each read as a count in the audit log, never an operation of the page", async () => {
+    await seed();
+    const recorded = async () =>
+      (
+        await env.DB.prepare(
+          "SELECT result,target_ref,diff_json FROM audit_records WHERE operation='ops.operation.list' AND principal=? ORDER BY recorded_at,audit_id",
+        )
+          .bind(LISTER)
+          .all<Record<string, unknown>>()
+      ).results;
+    const before = (await recorded()).length;
+    expect((await list("?limit=1")).status).toBe(200);
+    const records = (await recorded()).slice(before);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ result: "read", target_ref: null });
+    expect(JSON.parse(records[0]!["diff_json"] as string)).toEqual({
+      kind: "read",
+      rows: 1,
+      truncated: true,
+    });
+  });
+
+  it("reads ops_requests through ops_requests_open without table statistics", async () => {
+    expect(
+      await env.DB.prepare(
+        "SELECT count(*) AS n FROM sqlite_master WHERE name='sqlite_stat1'",
+      ).first("n"),
+    ).toBe(0);
+    const shapes = [
+      { kind: null, status: null },
+      { kind: "collection", status: null },
+      { kind: null, status: "running" },
+      { kind: "replay", status: "failed" },
+    ] as const;
+    for (const shape of shapes)
+      for (const after of [false, true]) {
+        const arms = operationListArms(shape);
+        const binds: unknown[] = [21];
+        for (const [status, kind] of arms) binds.push(status, kind);
+        if (after) binds.push("2026-09-11T00:00:00Z", `op_${"0".repeat(64)}`);
+        const plan = (
+          await env.DB.prepare(`EXPLAIN QUERY PLAN ${operationListSql(arms.length, after)}`)
+            .bind(...binds)
+            .all<{ detail: string }>()
+        ).results.map((entry) => entry.detail);
+        const reads = plan.filter((line) => /\bops_requests\b/u.test(line));
+        // No filter is all thirty (status, kind) pairs: D1 accepts the nested compound.
+        expect(reads).toHaveLength(arms.length);
+        const range = after ? " AND created_at<?)" : ")";
+        for (const line of reads)
+          expect(line).toBe(
+            `SEARCH ops_requests USING INDEX ops_requests_open (status=? AND kind=?${range}`,
+          );
+      }
   });
 });

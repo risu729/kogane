@@ -10,7 +10,8 @@ import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 import worker from "../src/worker";
 import { callTool, toolContext } from "../src/agent-service";
 import { readMcpTools } from "../src/read-tools";
-import type { Grant } from "../../../packages/application/src/index";
+import { fullGrant, GRANT_LIMITS, type Grant } from "../../../packages/application/src/index";
+import { readerGrant } from "../src/agent-api";
 
 const OWNER = "synthetic-settlement-owner";
 const PRINCIPAL = `mcp-client:${OWNER}`;
@@ -28,6 +29,14 @@ let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let jwks: { keys: unknown[] };
 let issuer: string;
 let sequence = 0;
+/** Another candidate over the same synthetic rows, under the given keys. */
+let insertCandidate: (
+  id: string,
+  statementKey: string,
+  bankKey: string,
+  digest: string,
+  createdAt: string,
+) => Promise<void>;
 
 beforeAll(async () => {
   await seedRegistry();
@@ -75,11 +84,31 @@ beforeAll(async () => {
     revision: `parse_run:${bankParse}`,
   };
   facts.bankDebit.sourceId = "smbc-bank";
-  await env.DB.prepare(`INSERT INTO card_settlement_candidates
+  insertCandidate = async (id, statementKey, bankKey, digest, createdAt) => {
+    await env.DB.prepare(`INSERT INTO card_settlement_candidates
     (id,statement_key,bank_key,statement_observation_id,statement_parse_run_id,bank_observation_id,bank_parse_run_id,policy_release,facts_json,proposal_digest,created_at)
-    VALUES(?,'statement-read-tool','bank-read-tool',?,?,?,?,'card-statement-settlement-v1',?,?,'2026-09-11T00:00:00Z')`)
-    .bind(ID, card!.id, cardParse, bank!.id, bankParse, JSON.stringify(facts), "b".repeat(64))
-    .run();
+    VALUES(?,?,?,?,?,?,?,'card-statement-settlement-v1',?,?,?)`)
+      .bind(
+        id,
+        statementKey,
+        bankKey,
+        card!.id,
+        cardParse,
+        bank!.id,
+        bankParse,
+        JSON.stringify(facts),
+        digest,
+        createdAt,
+      )
+      .run();
+  };
+  await insertCandidate(
+    ID,
+    "statement-read-tool",
+    "bank-read-tool",
+    "b".repeat(64),
+    "2026-09-11T00:00:00Z",
+  );
   keys = await generateKeyPair("RS256", { extractable: true });
   jwks = {
     keys: [{ ...(await exportJWK(keys.publicKey)), kid: "fixture", alg: "RS256", use: "sig" }],
@@ -342,6 +371,166 @@ describe("card settlement reads for agents", () => {
     ] as const) {
       expect((await http(tool, args)).status).toBe(404);
       expect((await call(tool, args)).isError).toBe(true);
+    }
+  });
+
+  it("refuse and page alike on the page route and both agent transports, each under its own grant", async () => {
+    // The page holds the browser's reader grant and an MCP client the full
+    // grant; both carry the published row budget, so they page equally deep.
+    expect(readerGrant(OWNER).budget.maxRows).toBe(GRANT_LIMITS.maxRows);
+    expect(fullGrant(PRINCIPAL).budget.maxRows).toBe(GRANT_LIMITS.maxRows);
+    const STATEMENT = "statementKey=statement-read-tool";
+    for (const [args, query, status, code] of [
+      [{}, "", 200, null],
+      [{ offset: 0 }, "?offset=0", 200, null],
+      [{ offset: 950 }, "?offset=950", 200, null],
+      [{ offset: 951 }, "?offset=951", 413, "budget_exceeded"],
+      [{ offset: 1_000_000 }, "?offset=1000000", 413, "budget_exceeded"],
+      [{ offset: -1 }, "?offset=-1", 400, "invalid_query"],
+      [{ offset: 1_000_001 }, "?offset=1000001", 400, "invalid_query"],
+      [{ offset: 1e20 }, "?offset=100000000000000000000", 400, "invalid_query"],
+      [{ offset: 1.5 }, "?offset=1.5", 400, "invalid_query"],
+      [{ offset: "abc" }, "?offset=abc", 400, "invalid_query"],
+      [{ offset: "01" }, "?offset=01", 400, "invalid_query"],
+      [{ offset: "" }, "?offset=", 400, "invalid_query"],
+      [{ proposalId: ID }, `?proposalId=${ID}`, 200, null],
+      [{ proposalId: ID, offset: 0 }, `?proposalId=${ID}&offset=0`, 400, "invalid_query"],
+      [{ statementKey: "statement-read-tool", offset: 950 }, `?${STATEMENT}&offset=950`, 200, null],
+      [
+        { statementKey: "statement-read-tool", offset: 951 },
+        `?${STATEMENT}&offset=951`,
+        413,
+        "budget_exceeded",
+      ],
+      [{ relatedTo: ID, offset: 951 }, `?relatedTo=${ID}&offset=951`, 413, "budget_exceeded"],
+      // The budget precedes the anchor's read: a missing anchor deep down is not looked up.
+      [
+        { relatedTo: "missing", offset: 951 },
+        "?relatedTo=missing&offset=951",
+        413,
+        "budget_exceeded",
+      ],
+    ] as const) {
+      const route = await worker.fetch(
+        new Request(`https://fixture.test/api/v2/reconciliation/card-settlements${query}`, {
+          headers: { "cf-access-jwt-assertion": await token(APP_AUD) },
+        }),
+        environment(),
+      );
+      const expected = (await route.json()) as Record<string, unknown>;
+      expect({ query, status: route.status, code: expected["code"] ?? null }).toEqual({
+        query,
+        status,
+        code,
+      });
+      const viaHttp = await http(LIST, args);
+      expect({ query, status: viaHttp.status, body: await viaHttp.json() }).toEqual({
+        query,
+        status,
+        body: expected,
+      });
+      const viaMcp = await call(LIST, args);
+      expect({ query, isError: viaMcp.isError === true, body: viaMcp.structuredContent }).toEqual({
+        query,
+        isError: status >= 400,
+        body: expected,
+      });
+    }
+    // The ownership read takes `proposalId` alone, on every path.
+    for (const [args, query] of [
+      [{ proposalId: ID, offset: -1 }, `?proposalId=${ID}&offset=-1`],
+      [{ proposalId: ID, statementKey: "k" }, `?proposalId=${ID}&statementKey=k`],
+      [{}, ""],
+    ] as const) {
+      const route = await worker.fetch(
+        new Request(
+          `https://fixture.test/api/v2/reconciliation/card-settlements/ownership${query}`,
+          { headers: { "cf-access-jwt-assertion": await token(APP_AUD) } },
+        ),
+        environment(),
+      );
+      expect(route.status).toBe(400);
+      const expected = await route.json();
+      expect(expected).toMatchObject({ code: "invalid_query" });
+      expect(await (await http(OWNERSHIP, args)).json()).toEqual(expected);
+      expect((await call(OWNERSHIP, args)).structuredContent).toEqual(expected);
+    }
+  });
+
+  // Last: it adds candidates the tests above do not expect.
+  it("read one statement's candidates and a review's competitors as the pages do, on both transports", async () => {
+    // A recapture of the same statement, paired with another debit.
+    await insertCandidate(
+      "card-settlement-read-tool-recapture",
+      "statement-read-tool",
+      "bank-read-tool-other",
+      "c".repeat(64),
+      "2026-09-12T00:00:00Z",
+    );
+    const before = await writes();
+    for (const [args, query] of [
+      [{ statementKey: "statement-read-tool" }, "?statementKey=statement-read-tool"],
+      [
+        { statementKey: "statement-read-tool", offset: 1 },
+        "?statementKey=statement-read-tool&offset=1",
+      ],
+      [{ statementKey: "statement-none" }, "?statementKey=statement-none"],
+      [{ relatedTo: ID }, `?relatedTo=${ID}`],
+      [{ relatedTo: ID, offset: 0 }, `?relatedTo=${ID}&offset=0`],
+      [
+        { relatedTo: "card-settlement-read-tool-recapture" },
+        "?relatedTo=card-settlement-read-tool-recapture",
+      ],
+    ] as const) {
+      const expected = await page(query);
+      const viaHttp = await http(LIST, args);
+      expect(viaHttp.status).toBe(200);
+      expect(await viaHttp.json()).toEqual(expected);
+      const viaMcp = await call(LIST, args);
+      expect(viaMcp.isError).not.toBe(true);
+      expect(viaMcp.structuredContent).toEqual(expected);
+    }
+    // The competitors never include the review itself.
+    expect(
+      ((await page(`?relatedTo=${ID}`)) as { items: { proposalId: string }[] }).items.map(
+        (item) => item.proposalId,
+      ),
+    ).toEqual(["card-settlement-read-tool-recapture"]);
+    expect(await writes()).toEqual(before);
+    // A missing anchor is not found on every path, never an empty page.
+    const route = await worker.fetch(
+      new Request("https://fixture.test/api/v2/reconciliation/card-settlements?relatedTo=missing", {
+        headers: { "cf-access-jwt-assertion": await token(APP_AUD) },
+      }),
+      environment(GRANT),
+    );
+    expect(route.status).toBe(404);
+    const viaHttp = await http(LIST, { relatedTo: "missing" });
+    expect(viaHttp.status).toBe(404);
+    const viaMcp = await call(LIST, { relatedTo: "missing" });
+    expect(viaMcp.isError).toBe(true);
+    expect(viaMcp.structuredContent).toEqual(await viaHttp.json());
+    for (const args of [
+      { relatedTo: ID, proposalId: ID },
+      { relatedTo: ID, statementKey: "statement-read-tool" },
+      { statementKey: "statement-read-tool", proposalId: ID },
+      { relatedTo: "/etc" },
+      { statementKey: "" },
+      { statementKey: "k".repeat(1025) },
+    ]) {
+      const refused = await http(LIST, args);
+      expect(refused.status).toBe(400);
+      const answer = await call(LIST, args);
+      expect(answer.isError).toBe(true);
+    }
+    const shallow = { ...GRANT, budget: { ...GRANT.budget, maxRows: 50 } };
+    for (const args of [
+      { relatedTo: ID, offset: 1 },
+      { statementKey: "statement-read-tool", offset: 1 },
+    ]) {
+      const answer = await direct(LIST, args, shallow);
+      expect(answer.status).toBe(413);
+      expect(answer.body).toMatchObject({ code: "budget_exceeded" });
     }
   });
 });

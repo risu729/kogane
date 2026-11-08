@@ -278,7 +278,7 @@ New collectors (#455–#510) start only when the owner asks, or after Phase 3.
 
 | Original phases                         | Implemented foundation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Work still needed for product completion                                                                                             |
 | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| 0–3: collection, evidence, observations | Source collectors, shared raw evidence, versioned parsing and publication; operations-API collection requests executed through the named collector RPC and traced to publication                                                                                                                                                                                                                                                                                                                                 | Coverage by account and data type; enabling and verifying request dispatch in production, requested windows, READ projection tracing |
+| 0–3: collection, evidence, observations | Source collectors, shared raw evidence, versioned parsing and publication; operations-API collection requests executed through the named collector RPC and traced to publication, the trail shown read-only on the 依頼の経過 page                                                                                                                                                                                                                                                                               | Coverage by account and data type; enabling and verifying request dispatch in production, requested windows, READ projection tracing |
 | 4–5: accounts and instruments           | Provider-local identities, mappings and append-only corrections; instrument candidates on a page and an agent read, decided through the change lifecycle except SBI's bare domestic code onto its listing, adopted by rule `instrument-auto-v1`; per-source counts of their states ([ADR 0055](adr/0055-instrument-candidates.md), [0073](adr/0073-instrument-coverage-per-source.md)); aggregator-to-direct account containment candidates the same way ([ADR 0077](adr/0077-account-connection-candidates.md)) | Evidence-backed resolution across direct providers, aggregators and brokers; review of unresolved identities                         |
 | 6–7: reconciliation and economic events | Candidate matching, decisions, event/leg/allocation/obligation/settlement contracts; own-transfer proposals and unregistered planners, nothing adopts ([ADR 0057](adr/0057-own-transfer-proposals.md))                                                                                                                                                                                                                                                                                                           | More transaction families and continuous event production from adopted observations                                                  |
 | 8: reported state snapshots             | Adopted balance measurements, overlap handling and READ snapshots; reported state on a date (positions, provider valuations, balances, card payables); reported holdings changes between two dates, served by a route and a panel of the `/state` page ([ADR 0075](adr/0075-reported-holdings-change-between-dates.md))                                                                                                                                                                                          | Adoption across sources on a date, dated identity, liabilities beyond provider statements                                            |
@@ -325,7 +325,12 @@ lifecycle. Statements without a settlement candidate are listed on
 a closed reason, refund and zero totals under their own code, and the ADR 0074
 planner's read-only answer for statements whose window holds no equal debit
 ([card settlements](card-settlements.md#statements-without-a-candidate)); a
-multi-debit allocation is shown but cannot be accepted. Source ownership is
+multi-debit allocation is shown but cannot be accepted. Each statement/debit
+candidate has its own page listing the candidates it competes with, which the
+purchase chain links, so a wrong match is corrected there by a withdrawal and
+another candidate's acceptance
+([correcting a match](card-settlements.md#correcting-a-match)); agents read
+the same list through `kogane.card-settlements.read` (`relatedTo`). Source ownership is
 recorded by the owner default (ADR 0082) for the accounts the candidates name.
 Installments, revolving and bonus payments, partial payments and refund
 allocation are shown as unsupported with closed reasons and still need support
@@ -389,6 +394,18 @@ or have no candidate
 identifiers, not a match rate; money and reward units have no resolution
 state, and a candidate across providers needs a second source whose identity
 rule records comparable identifiers.
+
+Per source, `/collection-quality?source=<id>&view=accounts` (and
+`kogane.collection-quality.read` with `view: "accounts"`) regroups the
+collection quality cells by the accounts their newest or current capture's
+observations map to: per account and data type (dataset, parser, observation
+kind) the periods that are current, held back by a newer capture that is not
+current, or only in a capture that is not current, each with the cell's closed
+reasons, and apart from them the cells no observation attributes to an
+account ([ADR 0088](adr/0088-collection-quality-per-account.md)). A period no
+capture has is not listed and not claimed missing; an account two sources name
+is shown under each; whether an account is the owner's is not decided there.
+It is not verified against production.
 
 Contracts: [collection](collection.md), [observations](observations.md),
 [identity](identity.md), [source identities](identity-sources.md).

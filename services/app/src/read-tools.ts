@@ -15,6 +15,7 @@ import {
   readCardOwnershipForGrant,
   CARD_SETTLEMENT_PROPOSAL_ID,
   CARD_SETTLEMENTS_MAX_OFFSET,
+  CARD_SETTLEMENT_STATEMENT_KEY_MAX,
 } from "../../../packages/application/src/index";
 import {
   readAuditForGrant,
@@ -108,10 +109,13 @@ const schemas = {
       .max(64),
     knowledge: z.literal("current"),
   }),
-  // The route's query parameters, as a body; the patterns are the route's own.
+  // The page route's query parameters, as a body: the published shape of the
+  // service's request rules (`readCardSettlementsForGrant`), which decide.
   "kogane.card-settlements.read": z.strictObject({
     offset: z.number().int().min(0).max(CARD_SETTLEMENTS_MAX_OFFSET).optional(),
     proposalId: z.string().regex(CARD_SETTLEMENT_PROPOSAL_ID).optional(),
+    statementKey: z.string().min(1).max(CARD_SETTLEMENT_STATEMENT_KEY_MAX).optional(),
+    relatedTo: z.string().regex(CARD_SETTLEMENT_PROPOSAL_ID).optional(),
   }),
   "kogane.card-settlements.ownership": z.strictObject({
     proposalId: z.string().regex(CARD_SETTLEMENT_PROPOSAL_ID),
@@ -144,7 +148,7 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
   "kogane.economic-readiness.read":
     "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled.",
   "kogane.card-settlements.read":
-    "The card statement to bank debit reviews of the カード照合 page: one page (offset) or one review (proposalId), with the source facts, evidence references, acceptance blockers and decision history, the same answer as GET /api/v2/reconciliation/card-settlements, under records.read and a whole-store read grant. Read-only; deciding a review is a card-settlement.accept, card-settlement.reject or card-settlement.withdraw plan through the change lifecycle, graded there.",
+    "The card statement to bank debit reviews of the カード照合 pages: one page (offset), one statement's candidates (statementKey, with offset), one review (proposalId, alone), or the candidates a review competes with (relatedTo, with offset: those sharing its statement key, its bank debit key, or its statement's source, resolved account and period, every status, never the review itself; not_found when it names no candidate), with the source facts, evidence references, acceptance blockers, debit-account evidence and decision history, the same answer as GET /api/v2/reconciliation/card-settlements, under records.read and a whole-store read grant. Read-only; deciding a review, or correcting a wrong acceptance by withdrawing it and accepting a competitor, is a card-settlement.accept, card-settlement.reject or card-settlement.withdraw plan through the change lifecycle, graded there.",
   "kogane.card-settlements.ownership":
     "The ownership review of one card settlement candidate: both accounts' current mappings, recorded ownership claims, self-declaration and owner-default blockers, the same answer as GET /api/v2/reconciliation/card-settlements/ownership, under records.read and a whole-store read grant. Read-only; recording ownership is a relation plan through the change lifecycle, graded there.",
   "kogane.audit.search":
