@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { vPointPayNotificationEvent } from "../src/parsers/v-point-pay.ts";
-import type { ArtifactMeta } from "../src/types.ts";
+import type { ArtifactMeta, ParseResult } from "../src/types.ts";
 import { FIXTURES_ROOT } from "./fixture-root.ts";
 
 const fixture = (name: string): Record<string, unknown> =>
@@ -51,6 +51,47 @@ const v2 = (provenance: (id: string) => unknown) => {
 };
 
 describe("v-point-pay notification events refuse drift", () => {
+  test("release 1.0.2 preserves every complete fixture result frozen from 1.0.1", () => {
+    const frozen = JSON.parse(
+      readFileSync(
+        join(FIXTURES_ROOT, "v-point-pay-parser-boundaries", "expected-1.0.1.json"),
+        "utf8",
+      ),
+    ) as { parser: string; version: string; results: Record<string, ParseResult> };
+    expect(frozen.parser).toBe(vPointPayNotificationEvent.name);
+    expect(frozen.version).toBe("1.0.1");
+    expect(vPointPayNotificationEvent.version).toBe("1.0.2");
+    expect(Object.keys(frozen.results).sort()).toEqual([
+      "balance-addition",
+      "charge",
+      "declined",
+      "usage",
+    ]);
+    for (const [name, expected] of Object.entries(frozen.results)) {
+      expect(parse(fixture(name)), name).toEqual(expected);
+    }
+  });
+
+  test("negative non-declined notification amounts fail the whole artifact with a closed reason", () => {
+    for (const name of ["usage", "charge", "balance-addition"]) {
+      for (const amountYen of [-1, -1200, -1_000_000_000_000]) {
+        const event: Record<string, unknown> = { ...fixture(name), amountYen };
+        for (const input of [
+          event,
+          {
+            ...event,
+            schemaVersion: "vpoint-pay-email-event-v2",
+            sourceProvenance: direct(event["id"] as string),
+          },
+        ]) {
+          expect(() => parse(input)).toThrow(
+            new Error("v_point_pay_negative_notification_amount_unsupported"),
+          );
+        }
+      }
+    }
+  });
+
   test("run preconditions and envelope", () => {
     expect(() => parse(usage(), { runStatus: "partial" })).toThrow(/successful failure-free/u);
     expect(() => parse(usage(), { runFailureCount: 1 })).toThrow(/successful failure-free/u);
@@ -130,6 +171,17 @@ describe("v-point-pay notification events refuse drift", () => {
     expect(declined.observations).toHaveLength(1);
     expect(declined.observations[0]).toMatchObject({ kind: "transaction", status: "declined" });
     expect(declined.observations[0]).not.toHaveProperty("amountMinor");
+    for (const amountYen of [-1200, 0, 1200, null]) {
+      const transaction = parse({ ...fixture("declined"), amountYen }).observations[0];
+      expect(transaction).toMatchObject({
+        kind: "transaction",
+        status: "declined",
+        extra: { amountYen },
+      });
+      for (const field of ["amountMinor", "amountText", "amountScale", "currency"]) {
+        expect(transaction).not.toHaveProperty(field);
+      }
+    }
     const zero = parse(usage({ amountYen: 0 })).observations[0];
     expect(zero?.kind === "transaction" && Object.is(zero.amountMinor, 0)).toBe(true);
     // The description falls back from merchant to detail to subject.

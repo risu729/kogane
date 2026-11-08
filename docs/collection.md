@@ -348,6 +348,20 @@ carried over unchanged, so no capture is parsed twice.
 | `collection-summary.json`                        | `collector_summary`          |
 | `manifest.json`                                  | `collector_manifest`         |
 
+For each currency/window, the first JSON history page's `countCnt` is the
+expected total, already checked against every walked JSON page. A zero total
+skips CSV; a positive total requires a CSV whose logical data-row count,
+excluding the header and blank lines, equals that total. The collector uses
+the shared CSV reader so quoted multiline cells and quote recovery count as
+in parsing. This check runs before collection returns artifacts, so failures
+end the shared run as `failed`, with no JSON transaction fallback:
+`history_csv_missing_with_transactions` (empty/missing body or failed CSV
+HTTP request), `history_csv_count_mismatch` (short or long CSV), or
+`history_csv_invalid` (invalid encoding/header). The allowlisted code is
+stored at terminal, report and account-unit scope, without provider text or
+amounts. Transport failures likewise fail the run. Existing failed-run
+artifact retention is unchanged. See [ADR 0092](adr/0092-sony-history-csv-only.md).
+
 Sanitizer: the collector's own `sanitizeWalletHtml` (Sony Bank Wallet
 statements), the same pass the retired legacy path applied before the importer
 forwarded the object verbatim. The collector stores exactly those bytes and

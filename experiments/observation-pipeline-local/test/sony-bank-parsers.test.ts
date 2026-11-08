@@ -334,7 +334,7 @@ describe("Sony Bank fail-closed boundaries", () => {
 });
 
 describe("Sony Bank current source views", () => {
-  test("prefers official CSV over the overlapping provider JSON transactions", () => {
+  test("only the official CSV supplies current deposit history transactions", () => {
     const store = freshTestStore("kogane-sony-current-");
     upsertSource(store, { id: "sony-bank", provider: "Sony Bank", ingestion: "collector-r2" });
     const fetchRunId = insertFetchRun(store, {
@@ -372,14 +372,14 @@ describe("Sony Bank current source views", () => {
       publishParseRun(store, artifactId, parser.name, parseRunId);
     };
 
-    // Insert CSV first so source-view priority, not append order, selects it.
-    add(sonyBankHistoryCsv, "yen-history-csv", "text/csv", bytes("yen-history.csv"));
     add(
       sonyBankHistoryJson,
       "yen-history-page-0001",
       "application/json",
       bytes("yen-history-page-0001.json"),
     );
+    expect(currentTransactions(store)).toEqual([]);
+    add(sonyBankHistoryCsv, "yen-history-csv", "text/csv", bytes("yen-history.csv"));
     const current = currentTransactions(store);
     expect(current).toHaveLength(2);
     expect(

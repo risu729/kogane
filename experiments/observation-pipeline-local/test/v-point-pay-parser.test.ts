@@ -110,17 +110,12 @@ describe("V Point Pay normalized notification-event Layer B", () => {
     expect(transaction).not.toHaveProperty("currency");
   });
 
-  test("derives usage direction from eventType even when Layer A retains a signed display", () => {
+  test("refuses a negative notification amount whose provider meaning is unknown", () => {
     const input = value("usage");
     input["amountYen"] = -1200;
-    expect(
-      vPointPayNotificationEvent.parse(encode(input), artifact()).observations[0],
-    ).toMatchObject({
-      kind: "transaction",
-      amountMinor: -1200,
-      amountText: "-1200",
-      extra: { amountYen: -1200, _kogane: { amountSignSource: "eventType" } },
-    });
+    expect(() => vPointPayNotificationEvent.parse(encode(input), artifact())).toThrow(
+      new Error("v_point_pay_negative_notification_amount_unsupported"),
+    );
   });
 
   test("emits balance only when the source event carries balanceYen", () => {

@@ -5,200 +5,217 @@
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-調査日: 2026-08-26
+Research date: 2026-08-26
 
-## 1. Scopeと禁止事項
+## 1. Scope and prohibitions
 
-同じANA Mileage Club（AMC）会員関係でも、次のledgerを分離して扱う。
+Separate the following ledgers even under the same ANA Mileage Club (AMC) membership.
 
-- **ANA Pay**: prepaid残高、チャージ、Visa/iD等の決済、取消・返金、利用履歴
-- **AMC**: マイル口座グループ別残高、積算・利用明細、個別有効期限、プレミアムポイント等
-- **ANAカードファミリーマイル**: 家族の個人口座を特典交換時に合算する制度境界
-- **予約/航空券/ANA SKY コイン/ANAカード請求**: それぞれ別source。残高・明細と混同しない
+- **ANA Pay**: prepaid balance, top-ups, Visa/iD and other payments, cancellations/refunds, usage history
+- **AMC**: balances by mileage account group, accrual/redemption statements, individual expiry dates, Premium Points, etc.
+- **ANAカードファミリーマイル (ANA Card Family Miles)**: the scheme boundary pooling family members' personal accounts at award redemption
+- **Reservations/flight tickets/ANA SKY コイン (ANA SKY COINS)/ANA card billing**: separate sources; do not conflate with balances/statements
 
-支払、チャージ、マイルからANA Payへの交換、特典交換、予約、取消、家族登録、profile/認証設定変更は
-行わない。AMC番号、wallet/device ID、氏名、予約、token、cookie、OTP、passkey material、実残高・実額を
-保存せず、security controlを回避しない。
+Do not make payments, top-ups, mileage-to-ANA Pay conversions, award redemptions, reservations,
+cancellations, family registrations, or profile/authentication settings changes. Do not store AMC numbers,
+wallet/device IDs, names, reservations, tokens, cookies, OTPs, passkey material, or actual balances/amounts;
+do not bypass security controls.
 
-## 2. 調査方法と公式URL
+## 2. Research method and official URLs
 
-- ANA/ANA Xの公式ページ・FAQ、Google Playを優先。
-- 認証不要のWebページ/header/JS入口をWSLから観測し、accountへloginしていない。
-- GitHubの公開実装をpackage ID、ANA Pay host、AMC明細URLで検索し、transport/schemaをコード確認。
-- APK取得/decompile、本人データのruntime captureは未実施。次実験を具体化した。
+- Prioritized official ANA/ANA X pages/FAQs and Google Play.
+- Observed public web pages/headers/JS entry points requiring no authentication from WSL; did not log in to accounts.
+- Searched public GitHub implementations by package ID, ANA Pay host, and AMC statement URL, inspecting transport/schema in code.
+- Did not retrieve/decompile APKs or capture the owner's data at runtime. Specified next experiments.
 
-主要一次source:
+Main primary sources:
 
 - [ANA Pay](https://www.ana.co.jp/ja/jp/amc/ana-pay/)
-- [ANA Payチャージ](https://www.ana.co.jp/ja/jp/amc/ana-pay/usage/charge/)
-- [ANA Pay利用履歴FAQ](https://faq.ana-x.co.jp/faq/anapay/web/knowledge731.html)
-- [ANA Pay残高期限FAQ](https://faq.ana-x.co.jp/faq/anapay/web/knowledge729.html)
-- [マイル確認方法](https://www.ana.co.jp/ja/jp/amc/check/)
-- [マイル有効期限](https://www.ana.co.jp/ja/jp/amc/valid/)
-- [AMC 2段階認証](https://www.ana.co.jp/ja/my/amc/about-amc-two-steps-verification/)
-- [ワンタイムパスワード](https://www.ana.co.jp/ja/jp/amc/news/info/2022/amc_login_detail.html)
-- [ANAカードファミリーマイル](https://www.ana.co.jp/ja/jp/amc/anacard/familymile/)
+- [ANA Pay top-ups](https://www.ana.co.jp/ja/jp/amc/ana-pay/usage/charge/)
+- [ANA Pay usage history FAQ](https://faq.ana-x.co.jp/faq/anapay/web/knowledge731.html)
+- [ANA Pay balance expiry FAQ](https://faq.ana-x.co.jp/faq/anapay/web/knowledge729.html)
+- [How to check miles](https://www.ana.co.jp/ja/jp/amc/check/)
+- [Mileage expiry](https://www.ana.co.jp/ja/jp/amc/valid/)
+- [AMC two-step verification](https://www.ana.co.jp/ja/my/amc/about-amc-two-steps-verification/)
+- [One-time passwords](https://www.ana.co.jp/ja/jp/amc/news/info/2022/amc_login_detail.html)
+- [ANA Card Family Miles](https://www.ana.co.jp/ja/jp/amc/anacard/familymile/)
 - [ANA Mileage Club Android app](https://play.google.com/store/apps/details?id=jp.co.ana.anamile&hl=ja)
 - [ANA travel app](https://play.google.com/store/apps/details?id=jp.co.ana.android.tabidachi)
 
-## 3. 公式経路、粒度、期間、export
+## 3. Official routes, granularity, periods, and exports
 
-| 経路                                | read範囲                                                      | 粒度/state                                        | 期間/件数/export                                                 | tradeoff                                       |
-| ----------------------------------- | ------------------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------- |
-| ANA Mileage Club app / ANA Pay home | ANA Pay残高、利用履歴、チャージ、決済                         | wallet event。取消・返金/cashbackを含む           | 原則12か月。iOS最大999件、Android全履歴表示。app外確認・印刷不可 | 公式正本だがdevice-bound                       |
-| ANA Pay internal read API候補       | 残高、登録source状態、履歴                                    | JSON event、pageNumber/pageSize                   | 公開実装はpaginationを実装。公式APIではない                      | headless候補だがdevice ID/token境界が重い      |
-| AMC Web                             | グループ別マイル残高、積算/利用実績、有効期限、PP、SKY コイン | accrual/redemption単位。用途・期間限定groupを分離 | live UIの選択期間/件数上限は未確認。公式CSV/PDF未確認            | browser bootstrap後のDOM/export候補            |
-| AMC app                             | マイル/期限/PP、ANA Pay入口、デジタル会員証                   | mobile summary/detail                             | export未確認                                                     | account統合表示は便利、UI automationは高コスト |
-| 公式通知/email                      | 積算/期限等の通知                                             | event通知、ledgerではない                         | 網羅性なし                                                       | 補助証拠のみ                                   |
-| ANAカードファミリーマイル           | 特典利用時の家族合算可能額                                    | 個人口座の所有権/期限を維持したpool               | family全履歴exportではない                                       | 家族明細をprime会員個人口座に混ぜない          |
+| Route                               | Read scope                                                        | Granularity/state                                                    | Period/count/export                                                                              | Tradeoff                                                              |
+| ----------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| ANA Mileage Club app / ANA Pay home | ANA Pay balance, usage history, top-ups, payments                 | Wallet events, including cancellations/refunds/cashback              | Generally 12 months; iOS maximum 999 rows, Android all history. Cannot view outside app or print | Official authoritative record, but device-bound                       |
+| Candidate ANA Pay internal read API | Balance, registered source status, history                        | JSON events, pageNumber/pageSize                                     | Public implementations paginate; not an official API                                             | Headless candidate, but substantial device ID/token boundary          |
+| AMC Web                             | Group balances, accrual/redemption records, expiry, PP, SKY COINS | Accrual/redemption units; separate limited-use/limited-period groups | Selectable periods/row limits in live UI unverified; official CSV/PDF unverified                 | DOM/export candidate after browser bootstrap                          |
+| AMC app                             | Miles/expiry/PP, ANA Pay entry, digital membership card           | Mobile summary/detail                                                | Export unverified                                                                                | Convenient integrated account display; costly UI automation           |
+| Official notifications/email        | Accrual/expiry and other notifications                            | Event notifications, not a ledger                                    | Not comprehensive                                                                                | Supplementary evidence only                                           |
+| ANA Card Family Miles               | Family amount poolable at award use                               | Pool retaining individual account ownership/expiry                   | Not a full family history export                                                                 | Do not mix family statements into the prime member's personal account |
 
 ### ANA Pay
 
-公式FAQは、homeの「利用履歴」でチャージと決済を確認でき、原則利用から12か月、iOSは999件まで、
-Androidは全利用履歴を表示可能とする。タイミングにより12か月より前が見える場合があるがretention保証と
-みなさない。印刷もapp外確認も不可。月間チャージ額には購入取消の返金やcampaign cashbackも含まれるため、
-「チャージ」表示を外部資金流入だけと解釈しない。
+The official FAQ says top-ups and payments can be checked in `利用履歴` ("usage history") on home,
+generally for 12 months after use: up to 999 rows on iOS and all usage history on Android. Depending on timing,
+older than 12 months may be visible; do not treat this as a retention guarantee. Printing and viewing outside
+the app are unavailable. Monthly top-up amounts include refunds for purchase cancellations and campaign
+cashback, so do not interpret a `チャージ` ("top-up") display solely as external funding inflow.
 
-ANA Pay残高の有効期限は、最後に残高を使用またはチャージした翌月から48か月。AMCマイルをANA Payへ
-移すと別wallet残高・別期限になるため、交換前AMC event、交換後ANA Pay charge、支払を別eventとして扱う。
-pending/settledの公式field名は未確認。authorization、売上確定、取消、返金、cashbackを残高差だけで推測しない。
+ANA Pay balance expires 48 months from the month following its last use or top-up. Moving AMC miles to
+ANA Pay creates a separate wallet balance/expiry, so treat the pre-conversion AMC event, post-conversion
+ANA Pay top-up, and payment as separate events. Official pending/settled field names are unverified.
+Do not infer authorization, sales confirmation, cancellation, refund, or cashback from balance differences alone.
 
-### AMCマイル
+### AMC miles
 
-AMCマイルは口座グループ1〜4で利用可能特典と期限が異なる。通常マイルは積算月から36か月後の月末まで
-という公式原則があるが、用途・期間限定や例外は各group/lotのexpiryを正本とする。totalだけでなく、
-積算日、利用日、明細type、増減、利用後残高、失効予定月/groupを必要schemaとする。
+AMC account groups 1–4 differ in available awards and expiry. The official general rule gives ordinary miles
+until the end of the month 36 months after accrual, but use each group/lot's expiry as authoritative for
+limited-use/limited-period miles and exceptions. Required schema includes accrual date, use date, statement
+type, change, balance after use, and scheduled expiry month/group, in addition to totals.
 
-ファミリーマイルは家族のマイル所有権を恒久移転する共通walletではなく、登録家族の個人口座を対象特典の
-申込時に合算する制度。各人の積算・期限・利用明細は各AMC sourceに残る。prime会員の残高に家族全員分を
-加算保存せず、pool membershipと特典時の利用配分を別relationshipとして扱う。
+Family Miles is not a shared wallet permanently transferring family members' mileage ownership: it pools
+registered family members' personal accounts when applying for eligible awards. Each person's accrual,
+expiry, and redemption statements remain in their AMC source. Do not add and store the whole family's miles
+in the prime member's balance; represent pool membership and allocation at award use as separate relationships.
 
-## 4. 認証、MFA、passkey、Bitwarden
+## 4. Authentication, MFA, passkeys, and Bitwarden
 
-AMC WebはAMC番号等とWeb passwordを基本にし、一部serviceでは登録emailへone-time passwordを送る
-2段階認証を公式案内している。OTPの対象画面、trusted-device/session寿命、ANA Pay appへのsession handoff、
-refresh policyはlive未確認。公式sourceでpasskey対応を確認できなかったため、対応/非対応を断定しない。
+AMC Web is based on AMC number or similar identifiers and Web password; official guidance describes
+two-step verification sending a one-time password to registered email for some services. OTP screens,
+trusted-device/session lifetimes, session handoff to the ANA Pay app, and refresh policies have not been
+verified live. No official source establishing passkey support was found; do not assert support or non-support.
 
-BitwardenはWeb passwordを保存できるが、email OTP、app biometric/device ID、ANA Pay wallet IDを代替しない。
-当該accountにBitwarden item/passkeyが存在する事実も確認していない。vault、email session、OTP、device ID、
-refresh tokenをcloudへ置かない。本人browser/appでbootstrapし、read-only reusable sessionが確認できた場合のみ
-暗号化したsource-scoped envelopeを使う。OTP、本人確認、account lock、password変更要求で停止する。
+Bitwarden can store Web passwords, but does not replace email OTP, app biometric/device ID, or ANA Pay
+wallet ID. The existence of a Bitwarden item/passkey for this account has not been checked either.
+Do not put vaults, email sessions, OTPs, device IDs, or refresh tokens in the cloud. Bootstrap in the owner's
+browser/app; use an encrypted source-scoped envelope only if a reusable read-only session is established.
+Stop on OTP, identity verification, account locks, or password change requests.
 
 ## 5. WAF / JS / APK / deobfuscation
 
-公開 `www.ana.co.jp` はWSLから200となり、`_abck`/`bm_sz` cookieを設定したためAkamai Bot Managerがedgeに
-いる証拠となる。旧AMC gateway `cam.ana.co.jp`は`Server: AkamaiNetStorage`。これは公開Web経路の事実で、
-ANA Pay APIが同じWAF/policyとは限らない。FAQはGETとHEADで応答が異なり、client/method差を観測した。
+Public `www.ana.co.jp` returned 200 from WSL and set `_abck`/`bm_sz` cookies, evidence of Akamai Bot Manager
+at the edge. The old AMC gateway `cam.ana.co.jp` had `Server: AkamaiNetStorage`. These are facts about the
+public web route; the ANA Pay API need not use the same WAF/policy. FAQ GET and HEAD responses differed,
+showing client/method differences.
 
-公開Web JSはnav、login gateway、analyticsを含む大規模bundleで、認証前静的解析だけではmember read APIを
-確定していない。source map、route/config、XHR/fetch、GraphQL/REST keyをread-onlyで調べる。challenge token、
-Bot Manager cookie生成、fingerprintを模倣・迂回しない。
+Public Web JS consists of large bundles including navigation, login gateways, and analytics; pre-authentication
+static analysis alone did not establish member read APIs. Examine source maps, routes/config, XHR/fetch,
+and GraphQL/REST keys read-only. Do not imitate or bypass challenge tokens, Bot Manager cookie generation,
+or fingerprints.
 
-主Android packageはANA Mileage Club/ANA Payの`jp.co.ana.anamile`。旅行予約app
-`jp.co.ana.android.tabidachi`は予約/搭乗中心の別packageで、ANA Pay/AMC sourceと混ぜない。所有端末または
-正規Play flowからsplit APKを取得し署名/version/hashを確認後、aapt2/apkanalyzer、JADX/apktool、native
-strings/readelfでmanifest、host/path、JSON/protobuf、token store、WebView、pinning/attestationを調べる。
-R8難読化はresource、Retrofit/Alamofire相当schema、call graph、runtime metadataを照合し、mappingを捏造しない。
+The main Android package is `jp.co.ana.anamile` for ANA Mileage Club/ANA Pay. Travel reservation app
+`jp.co.ana.android.tabidachi` is a separate package focused on reservations/boarding; do not mix it with
+ANA Pay/AMC sources. Obtain split APKs from an owned device or legitimate Play flow; verify signature/version/hash,
+then use aapt2/apkanalyzer, JADX/apktool, and native strings/readelf to examine manifests, hosts/paths,
+JSON/protobuf, token stores, WebView, and pinning/attestation. Cross-check R8 obfuscation against resources,
+Retrofit/Alamofire-equivalent schemas, call graphs, and runtime metadata; do not fabricate mappings.
 
-本人が既存残高/履歴を開く1回のdynamic observationではhost/path/method/status/header名とredacted keyだけ
-記録する。支払/チャージ/交換/予約endpointは名前だけdeny分類しpayloadを作らない。pinning/attestationで
-観測不能なら解除・hookせず、その障壁を結果にする。
+For one dynamic observation while the owner opens existing balances/history, record only hosts/paths/methods/statuses,
+header names, and redacted keys. Classify payment/top-up/conversion/reservation endpoints as denied by name only;
+do not construct payloads. If pinning/attestation prevents observation, do not remove it or hook around it;
+record the barrier as the result.
 
-## 6. 公開third-party clientのtransport/auth
+## 6. Public third-party client transport/auth
 
 ### ANA Pay: `dvcrn/pocketsmith-anapay` / `moneymoney-anapay-extension`
 
 - [pocketsmith-anapay](https://github.com/dvcrn/pocketsmith-anapay)
 - [moneymoney-anapay-extension](https://github.com/dvcrn/moneymoney-anapay-extension)
 
-両実装は `https://teikei1.api.mkpst.com` を使う。`POST /ana/accounts/login`へ`anaWalletId`と`deviceId`を
-JSON送信し、access/refresh token、scope、expiry等を受ける。以後Bearer tokenで
-`GET /accounts?balanceReferenceFlag=1&nfcStatusReferenceFlag=1`から残高・登録source/NFC/eKYC状態、
-`GET /salesDetails?pageSize=N&pageNumber=N&historyType=&settlementType=`からpaged履歴を取得する。
-履歴schemaはsaleDatetime、settlementType、dealType、descriptionType、shopName、amount、wallet settlement
-番号/sub番号、point conversion amount等。
+Both implementations use `https://teikei1.api.mkpst.com`. They send `anaWalletId` and `deviceId` as JSON to
+`POST /ana/accounts/login`, receiving access/refresh tokens, scope, expiry, etc. They then use Bearer tokens
+with `GET /accounts?balanceReferenceFlag=1&nfcStatusReferenceFlag=1` for balances/registered source/NFC/eKYC
+status and `GET /salesDetails?pageSize=N&pageNumber=N&historyType=&settlementType=` for paged history.
+History schema includes saleDatetime, settlementType, dealType, descriptionType, shopName, amount,
+wallet settlement number/sub-number, point conversion amount, etc.
 
-これは具体的transport prior artだが公式documented APIではない。公開Go実装はaccount responseを標準出力へ
-出し得てPII/秘密漏えいとなり、明確なlicenseも確認できないためcodeを採用しない。login自体は認証POSTだが、
-wallet/device IDをpassword同等に保護し、書込scopeのtokenをそのままcollectorに渡さない。refresh tokenの実際の
-更新endpoint/rotation、device binding、現行app互換、pinningは未確認。
+This is concrete transport prior art, not an officially documented API. The public Go implementation may
+print account responses to stdout, leaking PII/secrets, and no clear license was found; do not adopt its code.
+Login is an authentication POST, but protect wallet/device IDs like passwords, and do not give the collector
+an unchanged token with write scope. Actual refresh token update endpoint/rotation, device binding,
+current app compatibility, and pinning are unverified.
 
 ### AMC: `tuckn/userscript-ana-mile-csv-export`
 
-[repository](https://github.com/tuckn/userscript-ana-mile-csv-export) はログイン済み
-`cam.ana.co.jp/psz/amcj/jsp/renew/mile/reference.jsp`上で`#meisaitable`等のDOMを読み、表示中明細をBOM付き
-CSVとしてlocal downloadする。network login/APIを実装せずambient browser sessionに依存する。2026年にも
-更新され、現行DOM evidenceとして有用だがlicenseを確認できずcodeは取り込まない。表示期間を変えるwrite相当
-form送信や全期間paginationは別途live確認する。
+The [repository](https://github.com/tuckn/userscript-ana-mile-csv-export) reads DOM such as `#meisaitable`
+on logged-in `cam.ana.co.jp/psz/amcj/jsp/renew/mile/reference.jsp`, downloading displayed statements locally
+as BOM-prefixed CSV. It implements no network login/API, relying on the ambient browser session.
+Updated in 2026 as well, it is useful current DOM evidence, but its license could not be verified;
+do not import the code. Form submissions equivalent to writes to change displayed periods, and
+pagination across all periods, require separate live verification.
 
-航空便検索/予約、partner/法人APIは個人AMCマイル・ANA Pay consumer ledger APIとして転用しない。
+Do not repurpose flight search/reservation or partner/corporate APIs as personal AMC mileage/ANA Pay consumer ledger APIs.
 
-## 7. read/write隔離
+## 7. Read/write isolation
 
-- ANA Pay allowlist候補はBearer付き`GET /accounts`と`GET /salesDetails`のみ。login bootstrapは本人端末の別境界。
-- hostを`teikei1.api.mkpst.com`に固定し、path/query schema、response content-typeを検証。任意URL/汎用POST禁止。
-- payment source登録、charge、pay、refund要求、mile conversion、NFC登録、eKYC、profile/device操作をdeny。
-- AMCは残高/実績照会GETまたは観測済みreadだけ。特典交換、予約、家族登録、移行、password変更をdeny。
-- raw response、wallet/device ID、token、AMC番号、店名、予約、実額をlog/trace/crash dumpへ出さない。
-- 401/403/409/429、OTP、Bot challenge、schema/version/host差、write scopeだけのtokenで停止。
+- ANA Pay allowlist candidates are only Bearer-authenticated `GET /accounts` and `GET /salesDetails`. Login bootstrap is a separate boundary on the owner's device.
+- Pin the host to `teikei1.api.mkpst.com`; verify path/query schemas and response content-type. No arbitrary URLs/generic POST.
+- Deny payment source registration, charge, pay, refund requests, mile conversion, NFC registration, eKYC, and profile/device operations.
+- AMC permits only balance/record inquiry GETs or observed reads. Deny award redemption, reservations, family registration, transfers, and password changes.
+- Do not emit raw responses, wallet/device IDs, tokens, AMC numbers, store names, reservations, or actual amounts to logs/traces/crash dumps.
+- Stop on 401/403/409/429, OTP, Bot challenges, schema/version/host differences, or tokens with only write scope.
 
-## 8. Runtime適性
+## 8. Runtime suitability
 
-| runtime                      | 適性              | 判断                                                                                |
-| ---------------------------- | ----------------- | ----------------------------------------------------------------------------------- |
-| local browser / owner device | 最適              | OTP/device bootstrap、公式表示、redacted observation                                |
-| Local WSL                    | 適                | APK/JS/DOM parser、暗号化artifact処理                                               |
-| Cloudflare Workers           | 条件付き          | proven ANA Pay GET/AMC replayなら可能。bootstrap、Akamai、device ID/token運用が課題 |
-| Cloudflare Containers        | 適                | browser/parserを隔離できるがdevice trustはない                                      |
-| OCI container                | 適                | digest固定、secret store、read-only FS、egress allowlistでreplay実験向き            |
-| Kubernetes                   | 過剰              | CronJob/Secret/NetworkPolicyは可能だが単一accountにはcost大                         |
-| Android実機                  | ANA Pay調査に必須 | 正規app/device state。定常UI automationは更新・生体・write UIで脆い                 |
+| Runtime                      | Suitability                    | Assessment                                                                                                   |
+| ---------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| Local browser / owner device | Best                           | OTP/device bootstrap, official displays, redacted observation                                                |
+| Local WSL                    | Suitable                       | APK/JS/DOM parsers, encrypted artifact processing                                                            |
+| Cloudflare Workers           | Conditional                    | Possible for proven ANA Pay GET/AMC replay; bootstrap, Akamai, and device ID/token management are challenges |
+| Cloudflare Containers        | Suitable                       | Can isolate browser/parser, but has no device trust                                                          |
+| OCI container                | Suitable                       | Good for replay experiments with digest pinning, secret store, read-only FS, and egress allowlist            |
+| Kubernetes                   | Excessive                      | CronJob/Secret/NetworkPolicy possible, but costly for a single account                                       |
+| Physical Android device      | Essential for ANA Pay research | Legitimate app/device state; routine UI automation is fragile due to updates, biometrics, and write UI       |
 
-## 9. PR #5共通 A-E / cost
+## 9. PR #5 common A-E / cost
 
 - A: direct documented/export API suitable for scheduled headless use
 - B: stable read-only internal API with renewable/reusable session
 - C: browser/app bootstrap + headless replay plausible
 - D: full browser/device automation probably required
 - E: manual capture remains safe default
-- Cost: 1 = small wrapper、5 = device-bound/adversarial
+- Cost: 1 = small wrapper, 5 = device-bound/adversarial
 
-| route                                   |     Level | Cost | 判定                                                      |
-| --------------------------------------- | --------: | ---: | --------------------------------------------------------- |
-| AMC表示明細をuserscript/manual CSV化    |         E |  1-2 | 安全な初期経路。表示期間/retention未確認                  |
-| ANA Pay app履歴manual capture           |         E |    2 | 12か月・platform件数制限。公式exportなし                  |
-| ANA Pay local bootstrap + GET replay    |     C候補 |    4 | endpoint/schema具体的。token renewal/device binding未確認 |
-| AMC browser bootstrap + DOM/read replay |         C |  3-4 | 現行DOM実装あり。OTP/Akamai/session寿命が課題             |
-| ANA Pay/AMC app UI automation           |         D |    5 | device、生体、頻繁な更新、write隣接                       |
-| documented consumer API                 | A該当なし |    5 | 公開公式API/exportなし                                    |
+| Route                                                    |       Level | Cost | Assessment                                                                     |
+| -------------------------------------------------------- | ----------: | ---: | ------------------------------------------------------------------------------ |
+| Export displayed AMC statements as userscript/manual CSV |           E |  1-2 | Safe initial route; display periods/retention unverified                       |
+| Manual ANA Pay app history capture                       |           E |    2 | 12 months and platform row limits; no official export                          |
+| ANA Pay local bootstrap + GET replay                     | C candidate |    4 | Concrete endpoints/schemas; token renewal/device binding unverified            |
+| AMC browser bootstrap + DOM/read replay                  |           C |  3-4 | Current DOM implementation exists; OTP/Akamai/session lifetimes are challenges |
+| ANA Pay/AMC app UI automation                            |           D |    5 | Devices, biometrics, frequent updates, adjacent writes                         |
+| Documented consumer API                                  |  No A route |    5 | No public official API/export                                                  |
 
-総合は **C候補/cost 4**。安全な初期経路はAMCがE/cost 1-2、ANA PayがE/cost 2。ANA Pay read APIの
-renewalとscope/device bindingを実証できればB候補へ再評価する。
+Overall **C candidate/cost 4**. Safe initial routes are E/cost 1-2 for AMC and E/cost 2 for ANA Pay.
+Reassess as a B candidate if ANA Pay read API renewal and scope/device binding can be demonstrated.
 
-## 10. read-only live検証 / stop条件
+## 10. Read-only live verification / stop conditions
 
-1. 公式domain/package/version/signer、login方式、2FA triggerだけ確認。password/OTPは本人入力し記録しない。
-2. ANA Payで残高field、expiry、履歴type/status、12か月境界、件数、detail、取消/返金/cashback表示をschemaだけ記録。
-3. iOS/Android差は所有端末だけで確認し、新規transactionを作らない。app外export不可を現行versionで再確認。
-4. AMC Webでgroup別残高、lot expiry、積算/利用列、期間filter、pagination、row上限、CSV/PDF controlを確認。
-5. Family Milesはmember count、pool表示、個人残高との関係だけ確認し、登録/特典交換画面へ進まない。
-6. 正規split APK/公開JSを静的解析し、read/write endpointとtoken lifecycleを別表にする。
-7. 本人が既存履歴を開く1回だけredacted metadata観測。ANA Payの2 GET候補以外は送信せず停止。
-8. 同一端末session→同一local host→OCIの順で各1回read replay。renewal endpointはschema確認後も自動実行せず、
-   まずtoken失効を停止条件として寿命を測る。
+1. Check only official domains/packages/versions/signers, login methods, and 2FA triggers. The owner enters passwords/OTPs; do not record them.
+2. In ANA Pay, record only schemas: balance fields, expiry, history types/statuses, 12-month boundary, counts, details, cancellation/refund/cashback displays.
+3. Check iOS/Android differences only on owned devices; do not create new transactions. Recheck that export outside the app is unavailable in the current version.
+4. On AMC Web, check group balances, lot expiry, accrual/redemption columns, period filters, pagination, row limits, and CSV/PDF controls.
+5. For Family Miles, check only member count, pool display, and relationship to personal balances; do not enter registration/award redemption screens.
+6. Statically analyze legitimate split APKs/public JS, tabulating read/write endpoints separately from token lifecycles.
+7. Observe redacted metadata once while the owner opens existing history. Do not send anything beyond the two ANA Pay GET candidates; stop otherwise.
+8. Replay one read each in order: same-device session → same local host → OCI. Even after verifying the renewal
+   endpoint schema, do not execute it automatically; first measure lifetime using token expiry as the stop condition.
 
-即時stop: 支払/チャージ/交換/特典/予約/取消/家族・設定操作、OTP/recovery、PIN/生体、Bot challenge、
-pinning/attestation、未知host/path、POST/PUT/PATCH/DELETE（本人loginを除く）、401/403/409/429、account lock、
-PII redaction失敗、response schema drift。controlを迂回せずmanual routeへ戻す。
+Immediate stop: payment/top-up/conversion/award/reservation/cancellation/family/settings operations,
+OTP/recovery, PIN/biometrics, Bot challenges, pinning/attestation, unknown hosts/paths,
+POST/PUT/PATCH/DELETE (except owner login), 401/403/409/429, account locks, PII redaction failure,
+or response schema drift. Return to manual routes without bypassing controls.
 
-## 11. 事実・推測・未確認
+## 11. Facts, hypotheses, and unverified items
 
-**確認事実:** ANA Payは12か月、iOS999件/Android全件、app外確認/印刷不可、残高期限48か月。AMCは
-group別残高/期限と2段階認証。Family Milesは特典時の家族合算。Akamai Web edge。公開実装のANA Pay
-Bearer JSON GET/paginationとAMC DOM→CSV transport。
+**Established facts:** ANA Pay offers 12 months, iOS 999 rows/Android all rows, no viewing outside the app/printing,
+and 48-month balance expiry. AMC provides group balances/expiry and two-step verification. Family Miles
+pools family miles at award use. Akamai Web edge. Public implementations show ANA Pay Bearer JSON GET/pagination
+and AMC DOM → CSV transport.
 
-**推測:** ANA Payの2 GETはread collectorに適合し得るが、公開実装だけで安定性・正規scope・現行互換を
-保証できない。AMC family poolは各個人口座eventの二重計上を避けるrelationshipとして表現すべき。
+**Hypotheses:** ANA Pay's two GETs may fit a read collector, but public implementations alone cannot guarantee
+stability, legitimate scope, or current compatibility. The AMC family pool should be represented as a relationship
+avoiding double counting of individual account events.
 
-**未確認:** ANA Pay pending/settled全state、API現行version、refresh rotation、device/integrity/pinning、
-AMC明細期間・件数・公式export、session寿命、passkey/Bitwarden適合、family利用配分、Web/app schema一致。
+**Unverified:** All ANA Pay pending/settled states; current API version; refresh rotation; device/integrity/pinning;
+AMC statement periods/counts/official export; session lifetimes; passkey/Bitwarden compatibility;
+family redemption allocation; and consistency between Web/app schemas.
