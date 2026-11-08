@@ -3,7 +3,7 @@
 - Status: accepted (merged 2026-11-07 in [#1025](https://github.com/risu729/kogane/pull/1025))
 - Date: 2026-11-07
 - Issue: part of [#445](https://github.com/risu729/kogane/issues/445) (Phase 2
-  of the [roadmap](../roadmap.md#phase-2--card-usage--statement--bank-debit-done-2026-11-08))
+  of the [roadmap](../roadmap.md#phase-2--card-usage--statement--bank-debit))
 - Decided by: the owner, 2026-11-07 04:16 UTC, choosing "release now, limited
   to successful runs" over "hold until every card is `complete`"
 - Carried by: `packages/application/src/collection/descriptors.ts`
