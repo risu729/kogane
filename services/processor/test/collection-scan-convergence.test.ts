@@ -760,3 +760,109 @@ test("a normal registration spends exactly what it spent before seal refusals we
   // seal's refusal adds no operation to the path that seals.
   expect({ ...budget.meter }).toEqual({ d1Statements: 74, d1Batches: 3, r2Operations: 5 });
 });
+
+/** A three-artifact run registered one artifact at a time: left `pending`. */
+async function persistPending(harness: CollectionHarness, id: string): Promise<void> {
+  await persistSyntheticRun(harness, {
+    run: { runId: id },
+    artifacts: [
+      await artifact("a.json", `{"synthetic":"a-${id}"}`),
+      await artifact("b.json", `{"synthetic":"b-${id}"}`),
+      await artifact("c.json", `{"synthetic":"c-${id}"}`),
+    ],
+  });
+  const first = await registerCollectionRun(
+    harness.env,
+    { source: SOURCE, runId: id },
+    { artifactBudget: 1, now: () => new Date(START_MS) },
+  );
+  expect(first).toMatchObject({ outcome: "pending", catalogued: 1, artifacts: 3 });
+}
+
+/**
+ * A run left `pending` whose terminal is then not found at its key. Evidence
+ * is append-only, so this is not normal operation; a wrongly keyed terminal,
+ * or a terminal write that failed after the run was registered from a
+ * listing, would leave one. Returns how to put the same bytes back.
+ */
+async function pendingWithoutTerminal(harness: CollectionHarness, id: string) {
+  await persistPending(harness, id);
+  const key = terminalKey(SOURCE, id);
+  const entry = harness.bucket.entries.get(key)!;
+  harness.bucket.entries.delete(key);
+  return () => {
+    harness.bucket.entries.set(key, entry);
+  };
+}
+
+/** Puts the walk past `id`, so only a continuation can reach it this tick. */
+function walkPast(harness: CollectionHarness, id: string): void {
+  harness.db.query("UPDATE collection_scan_state SET cursor = ?1").run(terminalKey(SOURCE, id));
+}
+
+test("pending runs whose terminal is missing do not hold the continuations from the others", async () => {
+  const harness = collectionHarness();
+  const restore: (() => void)[] = [];
+  for (let n = 1; n <= 5; n += 1) restore.push(await pendingWithoutTerminal(harness, runId(n)));
+  await persistPending(harness, "run-006");
+  walkPast(harness, "run-006");
+  const stagesBefore = stageRows(harness);
+
+  // The five missing terminals come first in id order. They are tried,
+  // nothing is recorded for them, and they spend none of the five
+  // continuations, so the healthy run is continued on this tick and seals.
+  const first = await tick(harness, START_MS + HOUR_MS);
+  expect(first).toMatchObject({
+    listed: 0,
+    continued: 6,
+    continuedMissing: 5,
+    missing: 5,
+    registered: 1,
+    pending: 0,
+  });
+  expect(sealed(harness)).toBe(1);
+  // The only stage rows the tick wrote are run-006's.
+  expect(stageRows(harness) - stagesBefore).toBe(
+    countOf(
+      harness,
+      `SELECT count(*) AS n FROM collection_run_stages s
+         JOIN collection_runs r ON r.id = s.collection_run_id
+        WHERE r.run_id = 'run-006' AND s.recorded_at > '${new Date(START_MS).toISOString()}'`,
+    ),
+  );
+
+  // Every tick says so with a count while the five stay pending, and they
+  // are tried again on every tick, at one R2 read each (the walk is put past
+  // the registered run again so that the meter holds the continuations only).
+  walkPast(harness, "run-006");
+  const budget = new RegistrationBudget();
+  const second = await tick(harness, START_MS + HOUR_MS + 5 * 60 * 1000, { budget });
+  expect(second).toMatchObject({ continued: 5, continuedMissing: 5, missing: 5, registered: 0 });
+  expect({ ...budget.meter }).toEqual({ d1Statements: 0, d1Batches: 0, r2Operations: 5 });
+
+  // They stay recoverable: a terminal found again is continued from the
+  // progress CORE holds and seals, reusing its fetch run.
+  for (const put of restore) put();
+  const third = await tick(harness, START_MS + HOUR_MS + 10 * 60 * 1000);
+  expect(third).toMatchObject({ continued: 5, continuedMissing: 0, registered: 5 });
+  expect(sealed(harness)).toBe(6);
+  expect(countOf(harness, "SELECT count(*) AS n FROM fetch_runs")).toBe(6);
+});
+
+test("pending runs without a terminal beyond the continuations read leave the rest to the walk", async () => {
+  const harness = collectionHarness();
+  for (let n = 1; n <= 3; n += 1) await pendingWithoutTerminal(harness, runId(n));
+  await persistPending(harness, "run-004");
+  walkPast(harness, "run-004");
+  // Only three pending runs are read, all without a terminal, so run-004 is
+  // not continued; the walk's next cycle reaches it and registers it. (The
+  // deployed bounds are five continuations of 25 runs read: the same holds
+  // when more than 20 of the 25 oldest pending runs have no terminal.)
+  const options: ScanOptions = { maxContinuations: 1, maxContinuationReads: 3 };
+  const first = await tick(harness, START_MS + HOUR_MS, options);
+  expect(first).toMatchObject({ continued: 3, continuedMissing: 3, registered: 0 });
+  expect(sealed(harness)).toBe(0);
+  const second = await tick(harness, START_MS + HOUR_MS + 5 * 60 * 1000, options);
+  expect(second).toMatchObject({ continued: 3, continuedMissing: 3, listed: 1, registered: 1 });
+  expect(sealed(harness)).toBe(1);
+});

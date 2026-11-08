@@ -4,7 +4,9 @@
   [amendment of 2026-09-26](#amendment-2026-09-26-a-seal-core-refuses-is-a-verdict)
   is accepted (merged 2026-09-27 in #271), and the
   [amendment of 2026-11-06](#amendment-2026-11-06-a-registration-that-throws-spends-none-of-the-five)
-  is accepted (owner approved 2026-11-07 13:39 UTC)
+  is accepted (owner approved 2026-11-07 13:39 UTC); the
+  [amendment of 2026-11-08](#amendment-2026-11-08-a-pending-run-whose-terminal-is-missing-spends-no-continuation)
+  is proposed
 - Date: 2026-09-26
 - Amends: [ADR 0010](0010-terminal-registration-budget.md) (how the scan's
   per-tick registration count is spent; the operation budget is unchanged)
@@ -407,3 +409,118 @@ test fails); after it, the walk completes, the 24 others seal, the six have no v
 attempted again by the next walk (`failed: 6`) without holding the page, and
 once the trigger is dropped they register. The existing collection scan
 suites pass unchanged.
+
+## Amendment 2026-11-08: a pending run whose terminal is missing spends no continuation
+
+- Status: proposed
+- Date: 2026-11-08
+
+### Context
+
+Before it lists anything, the scan continues up to five staged registrations
+(`pending` runs), oldest first by `collection_runs.id`
+([processor §3.3](../processor.md#33-operation-budget-and-staged-registration-issue-87)).
+A continuation calls `registerTerminal(source, runId)`, which reads the
+terminal first. When no object is at the terminal key it answers `missing`
+and records nothing. That is right for a key nobody has seen, but a pending
+run's terminal was read once already: its digest is on the row. If it is no
+longer found, the run stays `pending`, stays the oldest, and is selected
+again on the next tick, for good.
+
+Evidence is append-only and a collector writes the terminal last with a
+conditional put, so this is not normal operation. It could still happen with
+a wrongly keyed terminal, or with a run registered from a listing whose
+terminal write then failed. On synthetic data with the code before this
+amendment: five pending runs whose terminals were then removed, and a sixth
+pending run with its terminal in place, give `continued: 5, missing: 5,
+registered: 0` on every tick; the sixth is never continued and waits for the
+walk to list its terminal. With fewer than five such runs the others are
+still continued, in the slots left. The only signals were the `missing` and
+`continued` counts on the lane's log line, the same every tick, and the
+health route's `registration.pending` and oldest pending age, which do not
+say why.
+
+### Options considered
+
+1. **Keep the behaviour and state it as a limit.** Rejected: five such runs
+   would end staged continuation for every other run, which then waits a
+   whole walk per step.
+2. **Record the disappearance** (a `registered` `retryable` stage with a
+   closed code such as `terminal_missing`), so the run leaves the pending
+   set. Rejected: CORE judged nothing about the terminal, the stage history
+   is append-only evidence, and a `retryable` row would be answered from CORE
+   for 24 hours, so a terminal found again would wait for that interval and
+   for the walk instead of being continued on the next tick. It is the
+   option the amendment of 2026-11-06 rejected for throws, for the same
+   reasons.
+3. **Rotate the continuation order between ticks.** Rejected: rotating needs
+   a position kept between ticks, and `collection_scan_state` has no column
+   for one, so it needs a migration; a position derived from the clock
+   aliases with the `processor-tick` cadence, which the operator can change;
+   and once more than five runs are pending it gives up oldest first, so a
+   large healthy run no longer finishes over consecutive ticks.
+4. **A continuation whose terminal is missing spends none of the five, with
+   a bound on the pending runs read.** Chosen. It is the rule the amendment
+   of 2026-11-06 applied to a throw in the listing.
+
+### Decision
+
+- The scan reads up to `DEFAULT_SCAN_CONTINUATION_READS` (25) pending runs,
+  oldest first, and continues them in that order until five continuations
+  found their terminal, the runs read are exhausted, or the invocation's
+  budget is spent. The query is unchanged except for its `LIMIT`.
+- A continuation answered `missing` records nothing, as before, and spends
+  none of the five. It costs one R2 read of the invocation's 500 operations.
+  The run stays `pending` and is tried again on every tick, so it is
+  continued from the progress CORE holds on the first tick after its
+  terminal is found again; the queue and the walk register it too, as
+  before.
+- The tick's summary, and so its `collection_scan` log line, gains one count,
+  `continuedMissing`: of `continued`, the runs whose terminal was not found.
+  It is a subset of `missing`. Nothing else changes: the listing, what spends
+  one of the listing's five, the queue consumer, and a continuation that
+  throws or yields (it still spends one).
+- No migration, no new column, no new state; nothing is written for a
+  missing terminal.
+
+### Consequences
+
+- Up to 20 pending runs without a terminal cost 20 R2 reads per tick and
+  leave the five continuations to the others.
+- **Open limit:** when more than 20 of the 25 oldest pending runs have no
+  terminal, fewer than five continuations find one, and a pending run after
+  those 25 is not continued at all; the walk still continues it when it
+  lists its terminal. `continuedMissing` on every tick is the operator's
+  signal; nothing pages.
+- **Open limit:** a pending run whose terminal key now holds other bytes (a
+  new digest) is not covered. Its continuation inserts a row for the new
+  digest, which is blocked `terminal_digest_conflict` and answered from that
+  row on later ticks, while the pending row stays pending and spends one of
+  the five on every tick (checked once on synthetic data, one such run over
+  three ticks, each `continued: 1` with the conflict counted in
+  `alreadyJudged`; no test pins it). A
+  terminal is written with a conditional put and never overwritten, so this
+  needs an object replaced outside the collectors.
+- A pending run whose terminal never comes back stays `pending` and is
+  counted in the health route's `registration.pending` and oldest pending
+  age for as long as it lasts; closing it needs a decision this amendment
+  does not make.
+
+### Verification
+
+`services/processor/test/collection-scan-convergence.test.ts`:
+
+- "pending runs whose terminal is missing do not hold the continuations from
+  the others": five pending runs whose terminals are removed, then a sixth
+  pending run, with the walk past it. Before the change the tick answers
+  `continued: 5, missing: 5, registered: 0` (the test fails); after it,
+  `continued: 6, continuedMissing: 5, registered: 1`, the only stage rows
+  written are the sixth run's, the next tick tries the five again at one R2
+  read each (`r2Operations: 5`, no D1 statement), and once the terminals are
+  put back the next tick registers all five on their existing fetch runs.
+- "pending runs without a terminal beyond the continuations read leave the
+  rest to the walk": with three runs read and one continuation, three runs
+  without a terminal leave the fourth to the walk, which registers it on the
+  next cycle.
+
+The existing collection scan suites pass unchanged.

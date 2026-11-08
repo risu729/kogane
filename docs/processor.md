@@ -74,7 +74,8 @@ remembered position inside a page could.
 Only new work does: a registration, a pending run the listing reaches, a
 first verdict, a retry that is due, a missing terminal. A registration that
 threw spends none (amendment of 2026-11-06, below). The continuations that run before the listing have their own bound of
-five and spend none of these. A terminal
+five and spend none of these; a continuation whose terminal is not found
+spends none of that five either (§3.3, amendment of 2026-11-08). A terminal
 CORE has already judged under the current registration contract and the same
 terminal digest is answered from its `collection_runs` row and spends
 nothing:
@@ -351,6 +352,29 @@ registered, the queue retries the message, the scan leaves its cursor, and an
 `import` operation waits with `registration_deferred`. A message deferred on
 every delivery reaches the DLQ after `max_retries` like any retried message,
 and the scan walk registers its run anyway (G1-04).
+
+**A pending run whose terminal is not found**
+([ADR 0024, amendment of 2026-11-08](adr/0024-collection-scan-judged-terminals.md#amendment-2026-11-08-a-pending-run-whose-terminal-is-missing-spends-no-continuation)).
+Evidence is append-only, so a terminal that was read once should still be at
+its key; a wrongly keyed terminal, or a run registered from a listing whose
+terminal write then failed, would break that. Its continuation answers
+`missing`, which records nothing, so the run stays the oldest pending one.
+Such a continuation spends none of the five: the lane reads up to 25 pending
+runs (`DEFAULT_SCAN_CONTINUATION_READS`), oldest first, and stops once five
+continuations found their terminal. A missing terminal costs one R2 read of
+the 500 operations and is tried again on every tick, so the run registers
+from the progress CORE holds as soon as its terminal is found again (or when
+the queue delivers its notification, or the walk lists it). Each tick's
+`collection_scan` log line counts them in `continuedMissing` (a subset of
+`continued` and `missing`), and the health route's `registration.pending`
+and oldest pending age (§13) keep counting them. **Open limit:** when more
+than 20 of the 25 oldest pending runs have no terminal, fewer than five
+continuations find one on a tick and a pending run after those 25 is not
+continued at all; the walk still continues it when it lists its terminal, as
+before this amendment. It does not cover a pending run whose terminal key now
+holds other bytes: the new digest's row is blocked
+`terminal_digest_conflict`, the pending row stays pending, and it spends one
+of the five on every tick.
 
 The final step is never split by a yield, but an invocation can still end
 inside it. The next call then re-enters it: the run report is found under its
