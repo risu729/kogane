@@ -154,7 +154,7 @@ implementation each (`src/agent-service.ts`), reachable two ways. The read
 tools of `src/read-tools.ts` (`kogane.instruments.history`,
 `kogane.instruments.coverage`, `kogane.accounts.candidates`,
 `kogane.card-settlements.unmatched`, `kogane.economic-readiness.read`, `kogane.card-settlements.read`, `kogane.card-settlements.ownership`, `kogane.audit.search`, `kogane.audit.get`) are reachable both ways too; the dated reported state's read
-(`kogane.reported-state.read`) is served on the same condition as the eighth, the two card settlement reads while `cardSettlementReconciliation` is, and each is listed only to a grant its service
+(`kogane.reported-state.read`) is served on the same condition as the eighth, the three card settlement reads (`kogane.card-settlements.read`, `.ownership` and `.unmatched`) while `cardSettlementReconciliation` is, and each is listed only to a grant its service
 would answer, which the whole-store grant always is ([below](#instrument-coverage),
 [shared history reads](#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10)). The two
 maintenance tools (`src/schedule-tools.ts`) exist while `SCHEDULES_ENABLED` is
@@ -175,7 +175,7 @@ the other delegated MCP tools are described there too.
 | `kogane.instruments.candidates`        | `POST /api/agent/v1/instruments.candidates`        | `kogane.instruments.candidates`        | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                                                                                                                                      |
 | `kogane.instruments.coverage`          | `POST /api/agent/v1/instruments.coverage`          | `kogane.instruments.coverage`          | `summary.read` on `"*"` sources and accounts; listed only to such a grant ([below](#instrument-coverage))                                                                                                                                                           |
 | `kogane.accounts.candidates`           | `POST /api/agent/v1/accounts.candidates`           | `kogane.accounts.candidates`           | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#account-candidates))                                                                                                                                                            |
-| `kogane.card-settlements.unmatched`    | `POST /api/agent/v1/card-settlements.unmatched`    | `kogane.card-settlements.unmatched`    | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#card-statements-without-a-candidate))                                                                                                                                           |
+| `kogane.card-settlements.unmatched`    | `POST /api/agent/v1/card-settlements.unmatched`    | `kogane.card-settlements.unmatched`    | `records.read` on `"*"` sources and accounts, while `cardSettlementReconciliation` is served; listed only to such a grant ([below](#card-statements-without-a-candidate))                                                                                           |
 | `kogane.economic-readiness.read`       | `POST /api/agent/v1/economic-readiness.read`       | `kogane.economic-readiness.read`       | `records.read` on `"*"` sources and accounts; listed only to such a grant ([ADR 0067](adr/0067-economic-row-readiness.md))                                                                                                                                          |
 | `kogane.card-settlements.read`         | `POST /api/agent/v1/card-settlements.read`         | `kogane.card-settlements.read`         | `records.read` on `"*"` sources and accounts, while `cardSettlementReconciliation` is served; `offset + 50` within `maxRows`; the `カード照合` page's own read ([card settlements](card-settlements.md#agent-reads), [ADR 0081](adr/0081-ui-parity-through-mcp.md)) |
 | `kogane.card-settlements.ownership`    | `POST /api/agent/v1/card-settlements.ownership`    | `kogane.card-settlements.ownership`    | the same; the page's ownership review of one candidate                                                                                                                                                                                                              |
@@ -524,7 +524,10 @@ for `no_equal_amount_debit`, the ADR 0074 planner's read-only answer
 ([card settlements](card-settlements.md#statements-without-a-candidate)). It
 is the `カード照合` page's own service (`reviewUnmatchedCardStatements`), so an
 agent and the page read one answer. It is listed on `/mcp` only to a grant
-holding `records.read` over the whole store.
+holding `records.read` over the whole store, and it exists exactly while the
+route does: where the settlement views are absent the route and the tool's
+HTTP path are `404` and its MCP name is `unknown_tool`, as for
+`kogane.card-settlements.read`.
 
 Input, a closed object: `offset` (optional, 0 to 100,000). Output:
 `kogane-card-statements-unmatched-v1` with the manifest (the closed codes,

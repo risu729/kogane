@@ -363,7 +363,8 @@ reason; an agent reads the same page with `kogane.card-settlements.unmatched`
 (`packages/application/src/query/card-statements-unmatched.ts`) and nothing
 else. The route is `GET /api/v2/reconciliation/card-statements-unmatched`
 (operator-only, like the candidate list; `offset` only); the agent tool needs
-`records.read` over the whole store. Both read only.
+`records.read` over the whole store. Both read only, and both exist only where
+the settlement views do (otherwise `404`, and `unknown_tool` over MCP).
 
 A statement is listed when no candidate cites its observation and parse run
 (found through the candidates' `statement_key` index). Its `code` is the one
@@ -411,7 +412,10 @@ Limits:
   statement stays listed with that code until the sweep's cursor reaches it
   (normally within one pass of five-minute ticks).
 - The page is by statement id, 50 per page, and the grant's `maxRows` bounds
-  how deep a caller pages (`budget_exceeded`).
+  how deep a caller pages (`budget_exceeded`). `offset` counts the statements
+  without a candidate when each page is read: a statement that gains a
+  candidate leaves the list and the later ones move back one place, so paging
+  on can pass over one of them until the list is read again from the start.
 - A debit without a resolved account has no alias class, so the planner
   excludes it (`identity_not_admitted`).
 - A window row the sweep never compares (no exact amount, or a debit date
@@ -462,6 +466,13 @@ statement's full list. The sweep proposes after each capture, so the newest
 candidates cite the newest facts; this happens only when the five newer ones
 are all blocked or decided (for example they cite another debit of the same
 amount that is no longer current, or the operator rejected them).
+
+Another limit: the pages are offsets into that order, taken when each page is
+read. A new candidate moves its statement to the head of the list and the
+statements that were before it down one place, so a reader paging on can see
+the last statement of the previous page again, and does not meet the moved
+one later (it is now on the first page). The flat list only gains rows at its
+head, so paging on repeats a row and never passes over one.
 
 Acceptance also requires explicit ownership evidence: the card account's
 `liable_party` and bank account's `beneficial_owner` must identify the same

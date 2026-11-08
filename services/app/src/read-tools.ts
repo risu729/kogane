@@ -54,12 +54,15 @@ import { mcpInputSchema } from "./mcp-input-schema";
 export const REPORTED_STATE_TOOL_NAME = "kogane.reported-state.read";
 /**
  * The カード照合 reads: served exactly while
- * `GET /api/v2/reconciliation/card-settlements` is (its views exist); otherwise
- * the path is 404 and the MCP name `unknown_tool`.
+ * `GET /api/v2/reconciliation/card-settlements` and
+ * `GET /api/v2/reconciliation/card-statements-unmatched` are (both need the
+ * settlement views, `cardSettlementsAvailable`); otherwise the path is 404 and
+ * the MCP name `unknown_tool`.
  */
 export const CARD_SETTLEMENT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "kogane.card-settlements.read",
   "kogane.card-settlements.ownership",
+  "kogane.card-settlements.unmatched",
 ]);
 
 const schemas = {
@@ -181,11 +184,11 @@ export function readMcpTools(
       case "kogane.instruments.coverage":
         return grantAllows(grant, "summary.read") && wholeStore(grant);
       case "kogane.accounts.candidates":
-      case "kogane.card-settlements.unmatched":
       case "kogane.economic-readiness.read":
         return grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.card-settlements.read":
       case "kogane.card-settlements.ownership":
+      case "kogane.card-settlements.unmatched":
         return served.cardSettlements && grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.audit.search":
       case "kogane.audit.get":
