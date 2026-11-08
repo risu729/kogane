@@ -385,6 +385,180 @@ describe("an instrument pair (ADR 0055) is pinned under both orientations and bo
   });
 });
 
+// A `same_account` decision, and a `listed_as` decision whose evidence does
+// not name exactly the subject and one other identifier, decide no pair:
+// every reader takes such a triple's status from its own rows only, and the
+// plan shows that triple only. Their plans pin the triple alone, and a decision under any other
+// triple (the reverse orientation included) leaves what the plan showed, and
+// what its commit writes, unchanged.
+describe("a decision that names no pair pins its own triple only", () => {
+  const sameAccount = (fromRef: string, toRef: string, reason: string): RelationPayload => ({
+    relationKind: "same_account",
+    fromRef,
+    toRef,
+    validFrom: null,
+    validTo: null,
+    evidenceRefs: [],
+    reason,
+  });
+
+  test("same_account: a decision in the reverse orientation leaves the plan fresh, and both are read apart", async () => {
+    const s = accountWorld();
+    const store = sqliteCommandStore(s.db);
+    const aggregator = "source_account:sa-mf-a";
+    const own = `relation:same_account|${aggregator}|${DIRECT}`;
+    const payload = sameAccount(aggregator, DIRECT, "synthetic keep apart");
+    expect(await pairReferences(store, "relation.reject", payload)).toEqual([]);
+    const plan = await planned(store, "relation.reject", payload);
+    expect(plan.expectedRevisions).toEqual({ [own]: 0 });
+    const approval = await approved(store, plan);
+    if (!approval.ok) throw new Error("approval refused");
+    // The reverse orientation is accepted in between: another triple.
+    await decide(store, s.db, "relation.accept", sameAccount(DIRECT, aggregator, "synthetic"));
+    expect(await simulate(plan, store)).toMatchObject({ ok: true, report: { stale: false } });
+    expect(await committed(store, s.db, plan.planId, approval.approval.approvalId)).toMatchObject({
+      ok: true,
+    });
+    expect(
+      s.db
+        .query(
+          "SELECT from_ref AS fromRef,status FROM entity_relations WHERE kind='same_account' ORDER BY from_ref",
+        )
+        .all(),
+    ).toEqual([
+      { fromRef: DIRECT, status: "accepted" },
+      { fromRef: aggregator, status: "rejected" },
+    ]);
+    // The candidate read reports each orientation with its own status and
+    // derives no status of the pair from them.
+    const candidate = (await queryAccountCandidates(s.sql)).candidates.find(
+      (item) => item.connectionRef === OWN && item.directSourceAccountId === "sa-direct-time",
+    )!;
+    expect(candidate.sameAccount.recorded).toEqual([
+      { fromRef: aggregator, toRef: DIRECT, status: "rejected" },
+      { fromRef: DIRECT, toRef: aggregator, status: "accepted" },
+    ]);
+    s.db.close();
+  });
+
+  test("listed_as not naming the subject and one other identifier names no pair and pins its own triple", async () => {
+    const w = await instrumentWorld();
+    const id = ids(w);
+    const store = sqliteCommandStore(w.db);
+    const resolution = await queryInstrumentResolution(w.sql);
+    const candidate = candidateOf(resolution, id.listing9001, id.broker9001);
+    const instrumentOf = (identifier: string) =>
+      resolution.identifiers.find((row) => row.identifierId === identifier)!.instrumentId;
+    const anchor = candidate.anchorIdentifierId;
+    const subject = candidate.subjectIdentifierId;
+    const forward = `relation:listed_as|instrument:${instrumentOf(anchor)}|identifier:${subject}`;
+    const keepApart = (evidenceRefs: string[]): RelationPayload => ({
+      relationKind: "listed_as",
+      fromRef: `instrument:${instrumentOf(anchor)}`,
+      toRef: `identifier:${subject}`,
+      validFrom: null,
+      validTo: null,
+      evidenceRefs,
+      reason: "synthetic keep apart",
+    });
+    // None, only the subject, two without the subject, or three identifiers:
+    // no pair is named.
+    for (const evidence of [
+      [],
+      [`identifier:${subject}`],
+      [`identifier:${anchor}`, `identifier:${id.venue9001}`],
+      [`identifier:${anchor}`, `identifier:${subject}`, `identifier:${id.venue9001}`],
+    ])
+      expect(await pairReferences(store, "relation.reject", keepApart(evidence))).toEqual([]);
+    const plan = await planned(store, "relation.reject", keepApart([]));
+    expect(plan.expectedRevisions).toEqual({ [forward]: 0 });
+    const approval = await approved(store, plan);
+    if (!approval.ok) throw new Error("approval refused");
+    // The reverse orientation is rejected in between: another triple.
+    await decide(store, w.db, "relation.reject", {
+      ...keepApart([]),
+      fromRef: `instrument:${instrumentOf(subject)}`,
+      toRef: `identifier:${anchor}`,
+    });
+    expect(await simulate(plan, store)).toMatchObject({ ok: true, report: { stale: false } });
+    expect(await committed(store, w.db, plan.planId, approval.approval.approvalId)).toMatchObject({
+      ok: true,
+    });
+    expect(
+      w.db
+        .query("SELECT count(*) AS n FROM entity_relations WHERE kind='listed_as' AND to_ref=?")
+        .get(`identifier:${subject}`),
+    ).toEqual({ n: 1 });
+    w.db.close();
+  });
+
+  // A hand-built payload whose evidence names the pair but whose instrument is
+  // not the anchor's current one: its triple is no reference of the pair, and
+  // the pinned anchor mapping keeps it so until the commit. The plan pins its
+  // own triple, both mappings and the reverse orientation; a decision under
+  // the pair's own forward orientation leaves it fresh, and its rejection
+  // leaves the pair's candidate as it was.
+  test("listed_as naming the pair from another instrument decides no reference of the pair", async () => {
+    const w = await instrumentWorld();
+    const id = ids(w);
+    const store = sqliteCommandStore(w.db);
+    const resolution = await queryInstrumentResolution(w.sql);
+    const candidate = candidateOf(resolution, id.listing9001, id.broker9001);
+    const instrumentOf = (identifier: string) =>
+      resolution.identifiers.find((row) => row.identifierId === identifier)!.instrumentId;
+    const anchor = candidate.anchorIdentifierId;
+    const subject = candidate.subjectIdentifierId;
+    const other = instrumentOf(id.tokyo9002);
+    expect([instrumentOf(anchor), instrumentOf(subject)]).not.toContain(other);
+    const keepApart = candidate.commands!.keepApart.payload as RelationPayload;
+    const payload: RelationPayload = {
+      ...keepApart,
+      fromRef: `instrument:${other}`,
+      reason: "synthetic keep apart",
+    };
+    const own = `relation:listed_as|instrument:${other}|identifier:${subject}`;
+    const forward = `relation:listed_as|instrument:${instrumentOf(anchor)}|identifier:${subject}`;
+    const reverse = `relation:listed_as|instrument:${instrumentOf(subject)}|identifier:${anchor}`;
+    const plan = await planned(store, "relation.reject", payload);
+    expect(plan.expectedRevisions).toEqual({
+      [`instrument_mapping:${anchor}`]: 1,
+      [`instrument_mapping:${subject}`]: 1,
+      [own]: 0,
+      [reverse]: 0,
+    });
+    expect(Object.keys(plan.expectedRevisions)).not.toContain(forward);
+    const approval = await approved(store, plan);
+    if (!approval.ok) throw new Error("approval refused");
+    // An acceptance under the pair's own forward orientation, in between.
+    await decide(store, w.db, "relation.accept", {
+      ...keepApart,
+      reason: "synthetic listing, the pair's own orientation",
+    });
+    const pairNow = async () =>
+      candidateOf(await queryInstrumentResolution(w.sql), anchor, subject).status;
+    expect(await pairNow()).toBe("proposed");
+    expect(await simulate(plan, store)).toMatchObject({ ok: true, report: { stale: false } });
+    expect(await committed(store, w.db, plan.planId, approval.approval.approvalId)).toMatchObject({
+      ok: true,
+    });
+    // The rejection is recorded, yet the pair stays proposed: it decided no
+    // reference of the pair.
+    expect(await pairNow()).toBe("proposed");
+    expect(
+      w.db
+        .query(
+          "SELECT from_ref AS fromRef FROM entity_relations WHERE kind='listed_as' ORDER BY from_ref",
+        )
+        .all(),
+    ).toEqual(
+      [`instrument:${instrumentOf(anchor)}`, `instrument:${other}`]
+        .sort()
+        .map((fromRef) => ({ fromRef })),
+    );
+    w.db.close();
+  });
+});
+
 test("the account pair's references are read by key on the whole CORE schema without statistics", () => {
   const db = migratedDatabase();
   const plan = (text: string, args: readonly unknown[]) =>

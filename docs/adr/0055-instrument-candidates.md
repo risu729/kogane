@@ -1354,13 +1354,35 @@ the same reasons.
 A candidate adoption (`identity.assign` with candidate provenance) and a
 `listed_as` decision whose evidence names exactly the subject and one other
 identifier (the candidate's keep-apart payload) each pin both mappings and
-both orientations: `listed_as` from the target (anchor's) instrument to the
-subject and from the subject's current instrument to the anchor. Every one of
-them is a function of the two pinned mappings, so the set cannot change while
-the plan is fresh. A decision under any of them between plan and commit makes
-the plan stale (`stale_context`). A `listed_as` decision whose evidence does
-not name the pair still pins only its own triple. No migration and no new
-subject kind.
+both orientations: `listed_as` from the target instrument (the adoption's
+target, which the planner requires to be the anchor's current instrument, or
+the keep-apart's own `fromRef`) to the subject and from the subject's current
+instrument to the anchor. Every one of them is a function of the two pinned
+mappings, so the set cannot change while the plan is fresh. A decision under
+any of them between plan and commit makes the plan stale (`stale_context`). No
+migration and no new subject kind.
+
+A `listed_as` decision whose evidence does not name exactly the subject and
+one other identifier (none, one, two without the subject, or three or more)
+names no pair and pins only its own triple, and that is all it needs. Its
+triple names one instrument and one identifier. The candidate read applies it
+to the pair of that identifier and each identifier mapped to the instrument
+when the read runs, so the pairs it keeps apart are a set that follows
+mappings recorded after the commit, not a pair the plan could pin. The plan
+shows only the triple, and only a decision under that triple changes it.
+Pinning every identifier mapped to the instrument, with each one's reverse
+orientation, was considered and rejected: it would refuse the plan over pairs
+it never showed, and could not bound a decision whose reach is read afresh on
+every candidate read. Evidence of three or more identifiers names no single
+other identifier, so it names no pair either.
+
+A hand-built `listed_as` payload whose evidence names the pair but whose
+`fromRef` is not the anchor's current instrument is pinned as above: its own
+triple, both mappings and the reverse orientation, not `listed_as` from the
+anchor's current instrument. Its triple is then no reference of the pair, and
+the pinned anchor mapping keeps it so until the commit, so the commit cannot
+change the pair's candidate; the candidate read applies it as it applies a
+decision that names no pair. The extra mapping pin can only refuse the plan.
 
 ### Consequences
 
@@ -1374,6 +1396,11 @@ subject kind.
 
 `packages/application/test/pair-pins.test.ts` (both plans pin the same four
 references; a reverse-orientation rejection makes the adoption stale; an
-adoption makes the keep-apart stale, and neither commit writes) and
+adoption makes the keep-apart stale, and neither commit writes; a `listed_as`
+plan whose evidence names none, only the subject, two without the subject or
+three identifiers pins its own triple only and commits after a rejection in
+the reverse orientation; a plan naming the pair from another instrument does
+not pin the pair's forward orientation, commits after a decision under it and
+leaves the pair's candidate status unchanged) and
 `packages/application/test/instrument-candidate-anchor.test.ts` (the adoption
 plan's pins).
