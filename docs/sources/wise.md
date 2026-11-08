@@ -1,91 +1,67 @@
-# Wise 個人口座の直接取得調査
+# Wise personal-account direct-retrieval research
 
 > Dated source research and implementation notes. Earlier runtime/schedule
 > claims may be superseded by later changes. See the [research scope](README.md),
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-調査日: 2026-08-26
+Research date: 2026-08-26
 
-## 1. 対象と結論
+## 1. Scope and conclusion
 
-この記録の対象は **Wise の個人口座（personal profile）** だけである。
-Wise Business、Wise Platform の契約済みパートナー、Open Banking の認可済み
-AISP/TPP は、個人口座で誰でも使える経路と誤認しないための比較対象としてのみ扱う。
-aggregator は初期取得経路にしない。
+This record covers **Wise personal accounts (personal profiles)** only. Wise Business, contracted Wise Platform partners, and authorized Open Banking AISP/TPPs are comparisons only, to avoid mistaking them for routes available to every personal-account holder. Do not use aggregators for initial retrieval.
 
-結論は次のとおり。
+Conclusions follow.
 
-- 個人口座で現在確認できる安全な初期経路は、公式 Web/app からの明細 export。
-- 現行の公式開発者資料で「Personal API Token」と呼ばれるものは
-  **Wise Business 専用**であり、個人口座向けセルフサービス token ではない。
-- Wise Platform の OAuth 2.0 は契約済みパートナー向けで、client ID/secret、
-  Developer Hub、mTLS が必要。個人が自分の口座だけを読むための一般公開 OAuth app
-  登録経路は確認できない。
-- したがって安全な現在値は **自動化レベル E、実装コスト 1**
-  （手動 export とローカル import）。これは personal Web/app の内部 transport 調査を
-  先送りする理由ではない。公開 login JavaScript の静的解析までは実施し、認証済み
-  personal read transport と公式 Play split APK は次の read-only 検証対象として残した。
-- ブラウザ replay は C/D 候補、コスト 4 だが、Cloudflare の bot protection、再認証、
-  passkey/2-step verification を伴うため、正確な read route と session 更新を確認するまで
-  既定にしない。
-- 契約により read-only OAuth または Open Banking AISP の `accounts` scope を取得できる
-  組織だけは A 候補だが、これは個人口座保有者が単独で開始できる経路ではない。
+- The currently confirmed safe initial route for personal accounts is statement export from official Web/app.
+- What current official developer material calls a Personal API Token is **Wise Business-only**, not a self-service personal-account token.
+- Wise Platform OAuth 2.0 is for contracted partners and requires client ID/secret, Developer Hub, and mTLS. No public OAuth app-registration route was confirmed for individuals reading only their own accounts.
+- The current safe rating is therefore **automation level E, implementation cost 1** (manual export/local import). This does not justify deferring personal Web/app internal-transport research. Public login JavaScript was statically analyzed; authenticated personal read transport and official Play split APKs remain next read-only validation targets.
+- Browser replay is a C/D candidate at cost 4, but involves Cloudflare bot protection, reauthentication, passkeys/2-step verification. Do not make it the default until exact read routes and session renewal are confirmed.
+- Only organizations able to obtain contracted read-only OAuth or Open Banking AISP `accounts` scope are A candidates; personal-account holders cannot start this route alone.
 
-残高、取引内容、口座・カード識別子、氏名・住所などの PII、cookie、token、OTP、
-passkey は取得・記録していない。送金、換金、入出金、カード操作、設定変更も行っていない。
+No balances, transaction contents, account/card identifiers, PII such as names/addresses, cookies, tokens, OTPs, or passkeys were retrieved or recorded. No transfers, currency exchange, deposits/withdrawals, card operations, or settings changes were performed.
 
-## 2. 調査方法
+## 2. Research method
 
-- Wise Help Centre、Wise Platform API docs、公式ストア掲載を優先した。
-- ログイン前の公開ページと HTTP response header だけを読み取り確認した。
-- 2026-08-26 の `/login` が配る Next.js build と JavaScript chunk を公式 origin から取得し、
-  SHA-256 を取って Prettier 3.9.6 で整形後、文字列と call site を静的に追跡した。repository
-  には bundle や artifact を保存していない。公開 source map は 403 だった。
-- Chrome の既存タブを確認したが Wise の認証済みタブはなかった。login、MFA、口座画面への
-  遷移は行わず、本人データを伴う runtime trace も取得しなかった。
-- Google Play の公式掲載で package/version を確認した。正規 split APK を取得できる管理下の
-  Android 端末と Android 解析 toolchain はこの環境になく、第三者 APK mirror は使っていない。
-- 公開 GitHub 実装は transport/auth と read/write 境界の確認にだけ使った。
-- 公式ドキュメントにない個人口座の API 可用性を、API schema の存在から推定しない。
-- 件数上限、session 寿命、内部 API の安定性など、公開根拠がないものは未確認とした。
+- Prioritized Wise Help Centre, Wise Platform API docs, and official store listings.
+- Read only public pre-login pages and HTTP response headers.
+- Retrieved the Next.js build and JavaScript chunks served by `/login` on 2026-08-26 from the official origin, took SHA-256 hashes, formatted with Prettier 3.9.6, and statically traced strings/call sites. No bundles/artifacts were saved to the repository. Public source maps returned 403.
+- Checked existing Chrome tabs; none was authenticated to Wise. No login, MFA, account navigation, or runtime traces involving personal data were performed.
+- Checked package/version in official Google Play. This environment lacked a controlled Android device for legitimate split-APK acquisition and an Android analysis toolchain; no third-party APK mirrors were used.
+- Used public GitHub implementations only to check transport/auth and read/write boundaries.
+- Do not infer undocumented personal-account API availability from the existence of API schemas.
+- Count limits, session lifetimes, internal-API stability, and other items without public evidence remain unconfirmed.
 
-## 3. 公式 Web/app で見える対象
+## 3. Objects visible in official Web/app
 
-### 3.1 main account、currency balances、jars
+### 3.1 Main account, currency balances, and jars
 
-Wise 個人口座は一人につき一つで、その中に main account、複数通貨、任意の jars/groups
-がある。個人口座の対象範囲は地域によって異なる。
+Wise allows one personal account per person, containing a main account, multiple currencies, and optional jars/groups. Personal-account coverage varies by region.
 
-- main account は保有、受取、送金、換金、カード支払の元となる複数通貨を持つ。
-- Jar は main account と分離した同一/異通貨の保管単位。カード支払や Direct Debit の
-  通常の引落元にはならないが、Jar からの送金や main account への移動は可能。
-- 公式 Platform model では通常通貨残高が `STANDARD`、Jar が `SAVINGS`。
-  `STANDARD` は通貨ごとに一つ、`SAVINGS` は同じ通貨で複数を持てる。
-- API の Balance schema には `amount`（利用可能額）、`reservedAmount`（予約中）、
-  `cashAmount`、`totalWorth`、`investmentState`、`visible` がある。
+- The main account holds multiple currencies for holding, receiving, sending, conversion, and card payments.
+- A Jar stores the same or different currencies separately from the main account. It is not the normal source for card payments/Direct Debits, but can send money or move it to the main account.
+- The official Platform model uses `STANDARD` for ordinary currency balances and `SAVINGS` for Jars. There is one `STANDARD` per currency, while multiple `SAVINGS` can share a currency.
+- The Balance API schema includes `amount` (available), `reservedAmount` (reserved), `cashAmount`, `totalWorth`, `investmentState`, and `visible`.
 
-個人口座の公式説明:
+Official personal-account descriptions:
 
 - https://wise.com/help/articles/2897226/what-is-a-wise-account
 - https://wise.com/help/articles/2897234/getting-started-with-your-wise-account
 - https://wise.com/help/articles/2978074/what-are-jars-and-how-can-i-keep-money-in-them
 - https://docs.wise.com/guides/product/accounts/balance-accounts
 
-### 3.2 Assets（Interest / Stocks）
+### 3.2 Assets (Interest / Stocks)
 
-Interest と Stocks は提供地域・通貨に依存する。currency または Jar を Cash 以外で
-保有する形であり、全個人口座にあるとは限らない。
+Interest and Stocks depend on supported regions/currencies. They hold a currency or Jar in something other than Cash and are not available to every personal account.
 
-- Web/app は total returns、実現/未実現損益、fund performance を表示する。
-- standard/accounting statement の PDF には `Earnings since start` が入る。
-- holdings statement は指定日の unit 数と評価額を示す。
-- 日々の unit price の再評価は現金移動ではないため、通常の accounting transaction
-  としては自動記録されない場合がある。
-- Platform Balance は `investmentState` が `INVESTED` 等でも表示対象になり得るが、
-  公式ガイドは `NOT_INVESTED` 以外を API で操作不可として扱うよう求めている。
+- Web/app shows total returns, realized/unrealized gains/losses, and fund performance.
+- Standard/accounting PDF statements include `Earnings since start`.
+- Holdings statements show units and valuations on a specified date.
+- Daily unit-price revaluation is not cash movement and may not be automatically recorded as an ordinary accounting transaction.
+- Platform Balances may be displayed with `investmentState` such as `INVESTED`, but official guidance requires treating anything other than `NOT_INVESTED` as unavailable for API operations.
 
-個人向け Assets の事実:
+Facts about personal Assets:
 
 - https://wise.com/help/articles/B9ZPY1rj6TlzvVOhtonFo/understanding-how-your-money-is-performing-when-you-hold-it-as-stocks
 - https://wise.com/help/articles/4Mo9V7MyXos6scM7xvhg15/licences-and-regulators-when-holding-money-as-interest-and-stocks
@@ -93,207 +69,172 @@ Interest と Stocks は提供地域・通貨に依存する。currency または
 
 ### 3.3 Cards
 
-公式 Web/app の Cards と Activity は、物理/デジタルカード、カード利用、pending 状態を
-表示する。公式 Android package は `com.transferwise.android`。公式ストア外 APK は
-初期経路にしない。
+Official Web/app Cards and Activity show physical/digital cards, card usage, and pending status. The official Android package is `com.transferwise.android`. Do not use APKs outside official stores as the initial route.
 
-Platform の card transaction model は次を区別する。
+The Platform card-transaction model distinguishes the following.
 
-- `IN_PROGRESS`: authorization 済み、未 capture（UI の pending に相当）。
-- `COMPLETED`: capture/settle 済み。
-- `DECLINED`、`CANCELLED`、`UNKNOWN`。
-- merchant が回収しない予約額は通常 7 日、pre-authorisation は最大 30 日で解放される。
-  ただし `CANCELLED` 後に merchant が遅れて capture し `COMPLETED` へ移る例外がある。
-- refund は元明細の上書きではなく別 `REFUND` transaction になる API model。
+- `IN_PROGRESS`: authorized, not captured (UI pending).
+- `COMPLETED`: captured/settled.
+- `DECLINED`, `CANCELLED`, `UNKNOWN`.
+- Reserved amounts not collected by merchants are normally released after 7 days; pre-authorisations take up to 30 days. Exceptionally, a merchant may capture late after `CANCELLED`, transitioning to `COMPLETED`.
+- API refunds are separate `REFUND` transactions rather than overwriting original rows.
 
-個人口座 UI の pending/completed の説明:
+Personal-account UI explanations of pending/completed:
 
 - https://wise.com/help/articles/2935784/my-wise-card-transaction-is-still-pending
 - https://wise.com/help/articles/2977995/i-need-to-reverse-or-dispute-a-card-transaction
 - https://docs.wise.com/guides/product/issue-cards/card-transaction
 - https://play.google.com/store/apps/details?id=com.transferwise.android
 
-### 3.4 conversion、exchange rate、fees
+### 3.4 Conversion, exchange rates, and fees
 
-- 個人口座内の通貨 conversion は通常数秒で反映され、Wise は mid-market rate と
-  通貨ペアに応じた conversion fee を適用すると説明する。
-- card 支払時に支払通貨の残高がなければ、利用可能な残高から自動 conversion され得る。
-- Platform statement の JSON は `exchangeDetails` と `totalFees` を transaction 単位で持つ。
-- Web/app の currency statement は fee 表示を選べ、別の年次 Statement of Fees もある。
-- Assets は fund unit の再評価が cash transaction ではないため、通常明細だけでは
-  日々の評価損益を完全には表さない。holdings/Assets statement を併用する。
+- Personal-account currency conversions normally appear within seconds; Wise says it applies the mid-market rate and currency-pair-specific conversion fees.
+- Without balance in a card payment's currency, available balances may be converted automatically.
+- Platform statement JSON has transaction-level `exchangeDetails` and `totalFees`.
+- Web/app currency statements allow fee display, and a separate annual Statement of Fees exists.
+- Assets fund-unit revaluation is not a cash transaction, so ordinary statements alone do not fully represent daily unrealized gains/losses. Combine holdings/Assets statements.
 
 - https://wise.com/help/articles/2596980/how-can-i-convert-money
 - https://wise.com/help/articles/2893489/fees-for-holding-receiving-and-spending-money
 
-## 4. 明細、期間、件数、export
+## 4. Statements, periods, counts, and export
 
-### 4.1 currency/Jar statements
+### 4.1 Currency/Jar statements
 
-公式 Web/app の statement は currency と Jar を対象にする。
+Official Web/app statements cover currencies and Jars.
 
-| 項目     | 確認結果                                                                          |
-| -------- | --------------------------------------------------------------------------------- |
-| 期間     | 1 ファイル最大 365 日。全期間は 365 日以下に分割する                              |
-| 内容     | Wise currency account 内の全取引。hidden activity も含む                          |
-| 対象外   | 外部 payment method を含む全 transfer は Transactions export を使う               |
-| Web 形式 | PDF、XLSX、CSV、MT940、QIF、CAMT.053 version 10                                   |
-| app 形式 | PDF、CSV、XLSX                                                                    |
-| 複数対象 | Web と Android は複数 currency/Jar を一括選択。大きい場合は zip またはメール link |
-| 手数料   | accounting statement で fee を別表示できる                                        |
-| 再認証   | download の確定時に Wise password の入力が必要と公式案内にある                    |
-| 件数     | 公開された row 上限は確認できない                                                 |
+| Item             | Confirmed result                                                                               |
+| ---------------- | ---------------------------------------------------------------------------------------------- |
+| Period           | Maximum 365 days per file; split the full period into at most 365-day intervals                |
+| Contents         | All transactions within Wise currency accounts, including hidden activity                      |
+| Excluded         | Use Transactions export for all transfers including external payment methods                   |
+| Web formats      | PDF, XLSX, CSV, MT940, QIF, CAMT.053 version 10                                                |
+| App formats      | PDF, CSV, XLSX                                                                                 |
+| Multiple targets | Web/Android can select multiple currencies/Jars together; large exports use zip or email links |
+| Fees             | Accounting statements can display fees separately                                              |
+| Reauthentication | Official guidance requires a Wise password when confirming download                            |
+| Count            | No public row limit confirmed                                                                  |
 
-公式根拠:
+Official evidence:
 
 - https://wise.com/help/articles/2736049/how-do-i-download-a-statement
 
 ### 4.2 Transactions export
 
-Web の Transactions page は最大 365 日の範囲で transfer を一覧、検索、filter、download
-できる。mobile app では transfer list download は提供されない。
+Web Transactions can list, search, filter, and download transfers for up to 365 days. The mobile app does not provide transfer-list downloads.
 
-filter は date、recipient、transfer type、status、direction、card、category、currency。
-形式は CSV または PDF。公開された件数上限や pagination 単位は確認できない。
+Filters are date, recipient, transfer type, status, direction, card, category, and currency. Formats are CSV/PDF. No public count limits or pagination units were confirmed.
 
 - https://wise.com/help/articles/2489458/how-do-i-download-a-list-of-my-transfers
 
-### 4.3 fee statement と Assets
+### 4.3 Fee statements and Assets
 
-- Statement of Fees は前年単位で、口座開設以来の対象年を選べる。
-- fee は通貨別に分類される。US based customer では現在提供されない。
-- Assets の gain/loss は Statement of Fees に含まれない。
-- currency statement 自体には fee を表示できる。
+- Statement of Fees covers previous calendar years; eligible years since account opening can be selected.
+- Fees are grouped by currency. Currently unavailable to US-based customers.
+- Assets gains/losses are excluded from Statement of Fees.
+- Currency statements themselves can display fees.
 
 - https://wise.com/help/articles/6UgnJEesw6frs2o6lXEnwD/how-do-i-get-a-statement-of-the-fees-ive-paid
 
-### 4.4 Platform API の粒度（可用性とは別）
+### 4.4 Platform API granularity (separate from availability)
 
-契約済み user token 等で使う balance statement endpoint は、deposit、withdrawal、
-conversion、card transaction、fee を返し、JSON/CSV/PDF/XLSX/CAMT.053/MT940/QIF を
-選べる。
+Balance-statement endpoints used with contracted user tokens, etc. return deposits, withdrawals, conversions, card transactions, and fees in JSON/CSV/PDF/XLSX/CAMT.053/MT940/QIF.
 
-- interval は最大 469 日。
-- JSON transaction は `type`、timestamp、`amount`、`totalFees`、`details`、
-  `exchangeDetails`、`runningBalance`、`referenceNumber` を持つ。
-- 一つの statement response 内の件数上限/pagination は公開資料で確認できない。
-- UK/EEA は statement が SCA 対象になり得る。公式案内では追加認証は通常 90 日に一度で、
-  Web/app で statement を見たことも認証に数えられる。
+- Maximum interval is 469 days.
+- JSON transactions have `type`, timestamp, `amount`, `totalFees`, `details`, `exchangeDetails`, `runningBalance`, and `referenceNumber`.
+- Per-response count limits/pagination were not confirmed in public material.
+- UK/EEA statements may require SCA. Official guidance says additional authentication is normally once every 90 days; viewing statements in Web/app also counts as authentication.
 
-Card Transactions V4 は別の partner API である。
+Card Transactions V4 is a separate partner API.
 
-- 過去 90 日の card transaction のみ。
-- `pageSize` は 10–100、default 20、`lastId` cursor。
-- list は ID 降順。単一取得で debit/credit の非集約 movement まで得られる。
+- Only card transactions from the past 90 days.
+- `pageSize` 10–100, default 20, `lastId` cursor.
+- Lists are descending by ID. Single retrieval can include unaggregated debit/credit movements.
 
 - https://docs.wise.com/guides/product/accounts/balance-accounts
 - https://docs.wise.com/api-reference/balance-statement/tag
 - https://docs.wise.com/api-reference/card-transaction/cardtransactiongetv4
 
-これらの schema が personal profile を表現できることと、個人口座保有者が token を
-セルフサービス発行できることは別である。
+Schemas representing personal profiles do not establish self-service token issuance for personal-account holders.
 
-## 5. 認証、personal token、OAuth
+## 5. Authentication, personal tokens, and OAuth
 
-### 5.1 Web/app の本人認証
+### 5.1 Web/app identity authentication
 
-確認できた方式は次のとおり。
+Confirmed methods follow.
 
-- email + password は passkey を使えない場合の fallback。
-- 2-step verification は passkey、Wise app notification、authenticator app の TOTP、
-  SMS、条件により voice call/WhatsApp。
-- SMS は current verification method から完全には削除できないと公式案内にある。
-- 新しい device では追加 challenge が必要になり得る。
-- statement download は Wise password の再入力が明記されている。
-- app は通知・生体認証を担うが、Web も同じ security settings を管理できる。
+- Email + password is the fallback when passkeys cannot be used.
+- 2-step verification supports passkeys, Wise app notifications, authenticator-app TOTP, SMS, and conditionally voice calls/WhatsApp.
+- Official guidance says SMS cannot be completely removed from current verification methods.
+- New devices may require additional challenges.
+- Statement downloads explicitly require reentering the Wise password.
+- The app handles notifications/biometrics; Web can manage the same security settings.
 
-公開 login build の静的解析では、次を確認した。これらは **identity/auth transport** であり、
-personal balance/transaction API ではない。
+Static analysis of the public login build confirmed the following. These are **identity/auth transport**, not personal balance/transaction APIs.
 
-- Axios の既定は `XSRF-TOKEN` cookie と `X-XSRF-TOKEN` header の組合せを持つ。
-- login は `POST /gateway/v2/login`、passkey/OTT は
-  `/gateway/v1/one-time-token/...`、Web 端末 challenge は `/v1/device/web/challenge` を使う。
-- password、TOTP、push、phone、passkey の OTT challenge route が同じ login app にある。
-- bundle にある固定 client marker は公開アプリ自身の識別子であり、個人 bearer/session token
-  ではない。値を collector credential として扱わない。
-- personal session cookie/token の発行形式、更新 route、寿命、device binding は login 前の
-  bundle だけでは確定できない。
+- Axios defaults pair the `XSRF-TOKEN` cookie with the `X-XSRF-TOKEN` header.
+- Login uses `POST /gateway/v2/login`; passkeys/OTT use `/gateway/v1/one-time-token/...`; Web device challenges use `/v1/device/web/challenge`.
+- Password, TOTP, push, phone, and passkey OTT-challenge routes coexist in the same login app.
+- Fixed client markers in the bundle identify the public app itself, not personal bearer/session tokens. Do not treat their values as collector credentials.
+- Personal session-cookie/token issuance formats, renewal routes, lifetimes, and device binding cannot be established from the pre-login bundle alone.
 
 - https://wise.com/help/articles/2932125/how-do-i-add-change-or-remove-my-step-verification-settings
 - https://wise.com/help/articles/2951949/i-cant-use-my-step-verification-method
 
-### 5.2 Passkey と Bitwarden
+### 5.2 Passkeys and Bitwarden
 
-**確認事実:** Wise は WebAuthn passkey を login と 2-step approval に使える。
-設定後は passkey が default 2-step method になり、2-step が必要な action にも使える。
-Wise が例示する保存先は Apple iCloud、Google Password Manager、1Password である。
+**Confirmed:** Wise supports WebAuthn passkeys for login and 2-step approval. Once configured, passkeys become the default 2-step method and can approve actions requiring 2-step verification. Wise's example storage providers are Apple iCloud, Google Password Manager, and 1Password.
 
 - https://wise.com/help/articles/4OTG2Z93XXyaurUviZRg5O/how-can-i-use-a-passkey
 
-**確認事実:** Bitwarden browser extension は一般の WebAuthn passkey の保存・利用と、
-通常 login/password/TOTP の autofill をサポートする。
+**Confirmed:** Bitwarden's browser extension supports storing/using general WebAuthn passkeys and autofilling normal login/password/TOTP.
 
 - https://bitwarden.com/help/auto-fill-browser/
 - https://bitwarden.com/help/autosave-from-browser-extensions/
 
-**推測:** Wise が標準 WebAuthn flow を使うため Bitwarden passkey も動く可能性は高い。
-ただし Wise の公式記事は Bitwarden を互換保存先として明記しておらず、この組合せを
-個人口座で live 確認していない。したがって「Wise が Bitwarden を公式対応」とは書かない。
-また、Bitwarden extension の popup や passkey prompt を headless automation が操作する
-前提にも置かない。
+**Inference:** Bitwarden passkeys are likely to work because Wise uses standard WebAuthn flows. However, official Wise articles do not explicitly name Bitwarden as compatible storage, and this combination has not been tested live on a personal account. Do not claim official Wise support for Bitwarden. Do not assume headless automation can operate extension popups or passkey prompts.
 
-### 5.3 「Personal API Token」の実際
+### 5.3 What Personal API Token actually means
 
-現行公式資料は明確に次を記載する。
+Current official material explicitly states the following.
 
-- token の対象は **自分の Wise Business account**。
-- Business profile の `Connect and manage apps > API tokens` で発行する。
-- bearer token として `Authorization` header に入れ、revoke まで有効。
-- endpoint scope は quote、recipient、transfer、batch、transfer event 等に限定される。
-- balance statement は US/Canada/Australia/New Zealand/Singapore/Malaysia based の
-  Business account 以外では personal token で非対応。
+- Tokens cover **your own Wise Business account**.
+- Issue them under the Business profile's `Connect and manage apps > API tokens`.
+- Use bearer tokens in the `Authorization` header; valid until revoked.
+- Endpoint scope is limited to quotes, recipients, transfers, batches, transfer events, etc.
+- Balance statements do not support personal tokens except for Business accounts based in the US/Canada/Australia/New Zealand/Singapore/Malaysia.
 
 - https://docs.wise.com/guides/developer/auth-and-security/personal-api-token
 
-よって名称だけを根拠に Wise **個人口座**で発行可能とは判断しない。Help Centre の
-一般説明や古い third-party README に personal customer/API の表現があっても、現在の
-access guide と発行手順を優先する。
+Do not infer issuance for Wise **personal accounts** from the name alone. Prioritize current access guidance/issuance procedures even when generic Help Centre material or older third-party READMEs mention personal customers/APIs.
 
-### 5.4 OAuth 2.0 と Open Banking
+### 5.4 OAuth 2.0 and Open Banking
 
-Wise Platform OAuth は一般消費者向け app registration ではない。
+Wise Platform OAuth is not consumer app registration.
 
-- partnership agreement、Developer Hub で発行される client ID/secret、redirect URL、
-  mTLS setup が前提。
-- user access token は 12 時間、refresh token は最大 20 年。refresh すると旧 access token
-  が失効し、refresh token も rotate し得る。
-- credential scope は契約した integration model に依存する。
+- Requires a partnership agreement, Developer Hub-issued client ID/secret, redirect URL, and mTLS setup.
+- User access tokens last 12 hours; refresh tokens up to 20 years. Refresh invalidates the old access token and may rotate refresh tokens.
+- Credential scope depends on the contracted integration model.
 
-Wise Open Banking は認可済み AISP/TPP 向けに `accounts` scope の balances/transactions
-という read-only model を持つが、規制・登録・mTLS・consent が必要。個人用 API key の
-代替ではない。
+Wise Open Banking offers authorized AISP/TPPs a read-only model for balances/transactions under `accounts` scope, but requires regulation, registration, mTLS, and consent. It is not a replacement for a personal API key.
 
 - https://docs.wise.com/guides/developer/auth-and-security
 - https://docs.wise.com/guides/developer/auth-and-security/oauth-2-setup
 - https://docs.wise.com/guides/developer/auth-and-security/user-access-token
 - https://docs.wise.com/guides/developer/open-banking
 
-## 6. CDN、WAF、anti-bot
+## 6. CDN, WAF, and anti-bot
 
-2026-08-26 にログイン前の公開 response を確認した。
+Public pre-login responses were checked on 2026-08-26.
 
-### 確認事実
+### Confirmed facts
 
-- `wise.com` と `api.wise.com` は Cloudflare edge address に解決した。
-- Web と API response は `server: cloudflare`、`cf-ray`、`cf-cache-status` を返した。
-- Web/API は `__cf_bm` cookie を返した。Cloudflare 公式資料上、これは Bot Management
-  または Bot Fight Mode 系の保護で使われる cookie であり、どちらの product/plan かは
-  response だけでは確定できない。
-- login page の CSP/HTML には `challenges.cloudflare.com`、Turnstile、reCAPTCHA、
-  Sardine/Moscwise の fraud/device signals に関係する参照が含まれた。
-- bearer token なしの API GET は 401 で、認証 data は返らなかった。
-- Wise の privacy notice は website/app interaction、typing cadence、keystroke、touch、
-  mouse behavior などの behavioural biometrics を fraud detection に利用すると説明する。
+- `wise.com` and `api.wise.com` resolved to Cloudflare edge addresses.
+- Web/API responses returned `server: cloudflare`, `cf-ray`, and `cf-cache-status`.
+- Web/API returned `__cf_bm`. Official Cloudflare material associates it with Bot Management or Bot Fight Mode protection; responses alone do not establish which product/plan.
+- Login-page CSP/HTML referenced `challenges.cloudflare.com`, Turnstile, reCAPTCHA, and Sardine/Moscwise fraud/device signals.
+- API GET without a bearer token returned 401 and no authenticated data.
+- Wise's privacy notice describes fraud detection using behavioral biometrics such as website/app interactions, typing cadence, keystrokes, touch, and mouse behavior.
 
 - https://wise.com/login
 - https://api.wise.com/
@@ -301,74 +242,54 @@ Wise Open Banking は認可済み AISP/TPP 向けに `accounts` scope の balanc
 - https://developers.cloudflare.com/fundamentals/reference/policies-compliances/cloudflare-cookies/
 - https://developers.cloudflare.com/turnstile/reference/content-security-policy/
 
-### 未確認・推測
+### Unconfirmed/inferred
 
-- Turnstile/reCAPTCHA が通常 login のどの条件で発火するかは未確認。
-- Bot Management と Bot Fight Mode のどちらか、bot score、rate rule、account takeover rule、
-  IP reputation threshold は未確認。
-- internal API と mobile API の origin、device binding、certificate pinning は未確認。
-- Cloudflare や fraud provider の検出を回避する実装は行わない。
+- Conditions triggering Turnstile/reCAPTCHA in normal login are unconfirmed.
+- Bot Management versus Bot Fight Mode, bot scores, rate rules, account-takeover rules, and IP-reputation thresholds are unconfirmed.
+- Internal/mobile API origins, device binding, and certificate pinning are unconfirmed.
+- Do not implement evasion of Cloudflare/fraud-provider detection.
 
-## 7. app と Web の役割
+## 7. App and Web roles
 
-| Surface      | 読み取り用途                                               | export                                          | 認証上の役割                                              |
-| ------------ | ---------------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------- |
-| Web          | Home、balances、Jars/Assets、Cards、Activity、Transactions | 全形式、transfer list、複数 currency/Jar に最適 | passkey/password、security settings、download 時 password |
-| app          | 同じ口座状態、即時通知、card 状態、Activity                | PDF/CSV/XLSX。transfer list download は不可     | trusted-device notification、生体、passkey/2-step         |
-| Platform API | 契約 scope 内の balance/statement/card data                | JSON と statement formats                       | bearer OAuth/personal Business token、場合により SCA/mTLS |
+| Surface      | Read use                                                           | Export                                                         | Authentication role                                       |
+| ------------ | ------------------------------------------------------------------ | -------------------------------------------------------------- | --------------------------------------------------------- |
+| Web          | Home, balances, Jars/Assets, Cards, Activity, Transactions         | Best for all formats, transfer lists, multiple currencies/Jars | Passkey/password, security settings, download password    |
+| App          | Same account state, immediate notifications, card status, Activity | PDF/CSV/XLSX; no transfer-list downloads                       | Trusted-device notifications, biometrics, passkeys/2-step |
+| Platform API | Balance/statement/card data within contracted scope                | JSON and statement formats                                     | Bearer OAuth/personal Business token; sometimes SCA/mTLS  |
 
-収集目的では Web export が最も広く、app は notification/2-step と spot check に向く。
+Web exports have the broadest collection coverage; the app suits notifications/2-step and spot checks.
 
-### 7.1 現行 Web JavaScript の静的 inventory
+### 7.1 Static inventory of current Web JavaScript
 
-2026-08-26 に公式 `/login` から取得した build ID は `login-app_main_7d8f91a`。entry は
-`pages/login-6024adb12c070424.js`、主要 app chunk は `_app-335f04025d26a9b1.js`
-（取得時 SHA-256 `d9a1c9f84d347f66630eda0d5cc288921bc7cca54e257f5c21f9700b9ceda0f1`）だった。
-整形・文字列追跡で 5.1 の identity route、XSRF 設定、passkey/OTT/device challenge を確認した。
-minified file が指す source map は公式 origin で 403 だったため、公開 bundle だけを解析した。
+The build ID retrieved from official `/login` on 2026-08-26 was `login-app_main_7d8f91a`. Entry was `pages/login-6024adb12c070424.js`; the main app chunk was `_app-335f04025d26a9b1.js` (acquisition SHA-256 `d9a1c9f84d347f66630eda0d5cc288921bc7cca54e257f5c21f9700b9ceda0f1`). Formatting/string tracing confirmed section 5.1 identity routes, XSRF configuration, and passkey/OTT/device challenges. The minified file's source map returned 403 at the official origin, so only public bundles were analyzed.
 
-`/home`、`/activity`、`/transactions`、`/balances`、`/your-account` の未認証 GET はいずれも
-`/login?redirectUrl=...` へ移り、login build manifest は login/account recovery 系 route だけを
-配る。したがって、この artifact から personal balance/activity chunk や read endpoint を
-見つけられなかったことは「endpoint がない」という証拠ではなく、認証後に別 app/bootstrap が
-配られるという証拠境界である。
+Unauthenticated GETs to `/home`, `/activity`, `/transactions`, `/balances`, and `/your-account` all redirected to `/login?redirectUrl=...`; the login build manifest serves only login/account-recovery routes. Thus, failure to find personal balance/activity chunks or read endpoints in this artifact does not prove absence; the evidence boundary is that another app/bootstrap is served after authentication.
 
 - https://wise.com/login
 
-### 7.2 personal read route の確認対象と recipient 除外
+### 7.2 Personal read-route targets and recipient exclusion
 
-公開 Platform API と personal internal API は別物として扱う。前者の path/schema を後者へ
-当てはめない。認証後の passive trace で次の UI 操作が発生させる request を一つずつ対応付ける。
+Treat public Platform APIs and personal internal APIs separately; do not apply the former's paths/schemas to the latter. Map requests from each following UI operation in authenticated passive traces.
 
-| UI read                 | 必要な schema                                                          | 取り込まないもの                               |
-| ----------------------- | ---------------------------------------------------------------------- | ---------------------------------------------- |
-| Home                    | currency balance、reserved/available、Jar、Assets の有無               | profile/account ID、氏名、住所                 |
-| Activity 一覧/詳細      | stable ID の有無、timestamp、amount/currency、status、type、pagination | counterparty 名、口座番号、reference/free text |
-| card pending/completed  | authorization/posted/cancelled/refund、reserved と settled の差        | card number/token、merchant location の詳細    |
-| conversion/fee 表示     | source/target amount/currency、rate、fee、同一 event の関連付け        | quote/conversion の作成 request                |
-| statement/transfer list | period、format、生成済み document の read                              | recipient filter 値、PDF/CSV の実データ        |
+| UI read                 | Required schema                                                          | Excluded                                                  |
+| ----------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------- |
+| Home                    | Currency balance, reserved/available, Jar, Assets presence               | Profile/account IDs, names, addresses                     |
+| Activity list/detail    | Stable-ID presence, timestamp, amount/currency, status, type, pagination | Counterparty names, account numbers, references/free text |
+| Card pending/completed  | Authorization/posted/cancelled/refund, reserved versus settled           | Card numbers/tokens, detailed merchant locations          |
+| Conversion/fee display  | Source/target amounts/currencies, rates, fees, same-event linkage        | Quote/conversion creation requests                        |
+| Statement/transfer list | Period, format, reads of generated documents                             | Recipient-filter values, actual PDF/CSV data              |
 
-recipient 一覧・作成・編集 route は収集対象外で、`recipient`/`beneficiary` 専用 path にはアクセス
-しない。Activity response に相手情報が同居しても、collector は必要な取引状態だけを schema
-allowlist し、名前、bank detail、message/reference を破棄する。pending と posted は別 record と
-決め打ちせず、stable ID と状態遷移を確認してから reserved/settled をモデル化する。
+Recipient list/create/edit routes are excluded; do not access `recipient`/`beneficiary`-specific paths. Even if Activity responses include counterparties, schema-allowlist only needed transaction states and discard names, bank details, messages/references. Do not assume pending/posted are separate records; verify stable IDs/state transitions before modeling reserved/settled.
 
-初回は passive page load で自然に発生した `GET` だけを候補にする。read が GraphQL/RPC の
-`POST` で実装されていても、method 名だけで安全と推定せず呼ばない。正確な path、query key、
-pagination、fee/FX field、session/renewal は認証済み trace がない現在は未確認である。
+Initially consider only `GET` requests naturally generated by passive page loads. Even if reads use GraphQL/RPC `POST`, do not infer safety from method names or call them. Exact paths, query keys, pagination, fee/FX fields, and session/renewal remain unconfirmed without authenticated traces.
 
-### 7.3 公式 Android split APK の provenance と静的解析
+### 7.3 Official Android split-APK provenance and static analysis
 
-公式 Google Play listing で確認した package は `com.transferwise.android`、2026-08-26 時点の
-表示 version は `9.38.0`（2026-08-24 更新）。この調査環境には `adb`、`apksigner`、
-`bundletool`、`jadx`、`apktool`、`aapt2`、`apkanalyzer`、MobSF がなく、Docker だけがあった。
-また、管理下端末に Play から正規 install 済みの artifact がなかったため、versionCode、split
-一覧、SHA-256、signer certificate digest、manifest、host/path/schema は未取得である。
+The official Google Play listing showed package `com.transferwise.android`, version `9.38.0` as of 2026-08-26 (updated 2026-08-24). This environment had Docker only, without `adb`, `apksigner`, `bundletool`, `jadx`, `apktool`, `aapt2`, `apkanalyzer`, or MobSF. No legitimate Play-installed artifact was available on a controlled device, so versionCode, split inventory, SHA-256, signer-certificate digest, manifest, and hosts/paths/schemas were not obtained.
 
 - https://play.google.com/store/apps/details?id=com.transferwise.android
 
-第三者 mirror ではなく、本人管理の Google Play 端末へ公式 app を install/update した後、次の
-手順で全 split を取得する。端末の account data は開かず、repository 外の一時領域を使う。
+After installing/updating the official app from Google Play on a user-controlled device, retrieve every split as follows rather than using third-party mirrors. Do not open device account data; use temporary storage outside the repository.
 
 ```bash
 PKG=com.transferwise.android
@@ -393,51 +314,33 @@ rg -a -n \
   "$OUT/jadx" "$OUT/apktool-base"
 ```
 
-全 split の package/versionCode と signer digest の一致を先に検証し、base だけでなく code/config
-split も `jadx` へ渡す。manifest の exported component、app/deep link、network security config、
-WebView/native client、protobuf/JSON schema、session storage/renewal、Android Keystore/biometric、
-Play Integrity/attestation、certificate pinning 候補を inventory 化する。難読化解除と call graph
-追跡は対象だが、integrity/pinning/root/debugger 検出の **回避** はしない。MobSF は version/digest
-を固定したローカル container にだけ投入し、公開 cloud scanner へ APK を upload しない。
+First verify matching package/versionCode and signer digests across all splits, and pass code/config splits as well as base to `jadx`. Inventory manifest exported components, app/deep links, network security config, WebView/native clients, protobuf/JSON schemas, session storage/renewal, Android Keystore/biometrics, Play Integrity/attestation, and certificate-pinning candidates. Deobfuscation/call-graph tracing is in scope; **bypassing** integrity/pinning/root/debugger detection is not. Submit to MobSF only in a local container pinned by version/digest; do not upload APKs to public cloud scanners.
 
-### 7.4 本人操作の read-only runtime metadata 観測
+### 7.4 User-operated read-only runtime metadata observation
 
-Web は本人が通常 login/MFA を完了した後、DevTools/CDP で現在の Home と Activity を再読込し、
-method、host、ID を template 化した path、query **key 名**、status、content-type、schema key だけを
-memory 内で集計する。header、cookie、token、request/response body、金額、ID、相手情報は保存しない。
-今回、既存 Chrome タブに Wise はなかったため実行していない。
+For Web, after the user completes normal login/MFA, reload current Home and Activity through DevTools/CDP. Aggregate only method, host, ID-templated paths, query **key names**, status, content-type, and schema keys in memory. Do not save headers, cookies, tokens, request/response bodies, amounts, IDs, or counterparties. This was not performed because no existing Chrome tab had Wise.
 
-Android は改変していない公式 app で本人が Home/Activity を開く間に、DNS/SNI/IP と、OS trust
-の範囲で得られる場合だけ method/host/path、process/thread call site を観測する。通信 metadata
-を得られなければ TLS handshake/host までで止める。Frida 等で URL construction を
-runtime tracing すること自体は対象だが、token/header/body を hook せず、pinning/integrity を
-無効化しない。Web/app の host、path、schema、session issuance/renewal が同じとは仮定しない。
+For Android, while the user opens Home/Activity in the unmodified official app, observe DNS/SNI/IP and, only where available within OS trust, method/host/path and process/thread call sites. If communication metadata is unavailable, stop at TLS handshake/host. Runtime tracing of URL construction with Frida or similar is in scope, but do not hook tokens/headers/bodies or disable pinning/integrity. Do not assume matching Web/app hosts, paths, schemas, or session issuance/renewal.
 
-## 8. 公式 sample と公開 third-party client
+## 8. Official samples and public third-party clients
 
-### 8.1 Wise 公式 sample
+### 8.1 Official Wise samples
 
-Wise は一般用 SDK ではなく、OAuth connect と SCA の Next.js sample を公開している。
-Wise API call は browser client ではなく server-side で行い、bearer token を
-`Authorization` header に付ける。SCA sample は `x-2fa-approval` / result header を扱う。
-これは partnership credential が前提の実装例で、個人口座 token の発行手段ではない。
+Wise publishes Next.js OAuth-connect/SCA samples rather than a general SDK. Wise API calls run server-side rather than in the browser client, with bearer tokens in `Authorization`. The SCA sample handles `x-2fa-approval`/result headers. These examples require partnership credentials and do not issue personal-account tokens.
 
-- repository: https://github.com/transferwise/wise-platform-samples
-- 確認 commit: https://github.com/transferwise/wise-platform-samples/tree/a7d09f2695b13adbe21fe0b0cb8ae603b983f0a8
+- https://github.com/transferwise/wise-platform-samples
+- https://github.com/transferwise/wise-platform-samples/tree/a7d09f2695b13adbe21fe0b0cb8ae603b983f0a8
 
 ### 8.2 Hillpro/WiseApi.Client
 
-MIT の非公式 .NET 10 client。確認 commit は
-`b759e1430351f0348778fdb3e313cc5db5733ac5`。
+Unofficial MIT-licensed .NET 10 client, checked at commit `b759e1430351f0348778fdb3e313cc5db5733ac5`.
 
-- `HttpClient` + delegating handler で全 request に `Authorization: Bearer` を付与。
-- production は `https://api.wise.com`、sandbox は `https://api.wise-sandbox.com`。
-- GET の profiles、multi-currency account、balances、rates に加え、balance create/delete、
-  quote、conversion/movement という **write endpoint も同じ client に含む**。
-- OAuth client credentials、authorization code、registration code、refresh token を実装。
-- statements、cards、recipients、transfers は当該 commit では deferred。
-- README は personal token が personal/small business で動くと書くが、現行 Wise 公式資料の
-  Business-only 発行手順と不一致。公式資料を優先する。
+- `HttpClient` plus delegating handlers add `Authorization: Bearer` to all requests.
+- Production uses `https://api.wise.com`; sandbox uses `https://api.wise-sandbox.com`.
+- Alongside GET profiles/multi-currency accounts/balances/rates, **the same client includes write endpoints** for balance creation/deletion, quotes, conversions/movements.
+- Implements OAuth client credentials, authorization codes, registration codes, and refresh tokens.
+- Statements, cards, recipients, and transfers are deferred at this commit.
+- README claims personal tokens work for personal/small-business users, conflicting with current Wise official Business-only issuance procedures. Prioritize official material.
 
 - https://github.com/Hillpro/WiseApi.Client
 - https://github.com/Hillpro/WiseApi.Client/blob/b759e1430351f0348778fdb3e313cc5db5733ac5/src/WiseApi.Client/Http/Handlers/AuthenticationHandler.cs
@@ -445,199 +348,171 @@ MIT の非公式 .NET 10 client。確認 commit は
 
 ### 8.3 fightmegg/transferwise
 
-MIT の古い Node.js client。`node-fetch`、bearer token、旧 host
-`https://api.transferwise.com`、旧 `/borderless-accounts?profileId=...` を使用する。
-最後に確認できた default-branch commit は
-`3515c1ea9500ab869c5333b6d3210b04f418d477`（2020-12-03）であり、現行 collector の
-基盤にはしない。
+Old MIT-licensed Node.js client using `node-fetch`, bearer tokens, legacy host `https://api.transferwise.com`, and legacy `/borderless-accounts?profileId=...`. The last confirmed default-branch commit was `3515c1ea9500ab869c5333b6d3210b04f418d477` (2020-12-03); do not use it as the current collector's foundation.
 
 - https://github.com/fightmegg/transferwise/tree/3515c1ea9500ab869c5333b6d3210b04f418d477
 
-## 9. read-only scope と write endpoint の隔離
+## 9. Read-only scopes and write-endpoint isolation
 
-### 個人口座の現在値
+### Current personal-account position
 
-個人口座保有者が発行できる read-only API token/scope は確認できない。したがって
-「read-only scope の token を保管すれば安全」という設計は現時点では成立しない。
+No read-only API tokens/scopes issuable by personal-account holders were confirmed. A design assuming safety merely from storing a read-only-scoped token therefore does not currently hold.
 
-personal internal transport を検証する collector は、公開 Platform client と完全に分ける。
-初回 inventory は本人の通常 UI 操作が自然に発生させた request の観測だけとし、次を強制する。
+Collectors validating personal internal transport must be completely separate from public Platform clients. Initial inventory observes only requests naturally generated by the user's normal UI operations, enforcing the following.
 
-- allowlist 候補は確認済み host 上の `GET` かつ Home balance、Activity list/detail、card
-  status、既存 statement metadata に対応した path だけ。未確認 path を再送しない。
-- `POST`/`PUT`/`PATCH`/`DELETE` は、read に見える GraphQL/RPC も含め初回は全て拒否する。
-- recipient/beneficiary、quote、conversion、transfer、funding、card control、Jar movement、
-  profile/security/notification settings の path は method に関係なく拒否する。
-- redirect を自動追従せず、host/path/method を再判定する。401/403/SCA/OTT/429 では停止し、
-  session refresh、MFA、device challenge を replay しない。
-- response から balance/transaction/status/fee/FX の許可 field だけを memory 内で抽出し、
-  ID、相手、reference、口座・カード detail、cookie/token を log/artifact に出さない。
+- Allowlist candidates are only `GET` on confirmed hosts and paths corresponding to Home balances, Activity list/detail, card status, and existing statement metadata. Do not replay unconfirmed paths.
+- Initially reject all `POST`/`PUT`/`PATCH`/`DELETE`, including GraphQL/RPC that appears read-only.
+- Reject recipient/beneficiary, quote, conversion, transfer, funding, card-control, Jar-movement, and profile/security/notification-settings paths regardless of method.
+- Do not follow redirects automatically; reassess host/path/method. Stop for 401/403/SCA/OTT/429 without replaying session refresh, MFA, or device challenges.
+- Extract only allowlisted balance/transaction/status/fee/FX fields in memory. Never emit IDs, counterparties, references, account/card details, or cookies/tokens to logs/artifacts.
 
-session/token issuance と renewal は未確認である。login bundle の XSRF/OTT route を personal
-data bearer と同一視せず、session replay 可否は Set-Cookie や Authorization 値そのものを保存
-せずに、credential **種別と更新イベントの有無**だけで判定する。
+Session/token issuance and renewal are unconfirmed. Do not equate login-bundle XSRF/OTT routes with personal-data bearer credentials. Assess session replay using only credential **types and presence of renewal events**, without saving actual Set-Cookie/Authorization values.
 
-### 契約 API が利用可能になった場合
+### If contracted APIs become available
 
-read-only collector は Wise client library 全体を渡さず、次のような小さい adapter にする。
+Use a small adapter like the following, rather than exposing the entire Wise client library to read-only collectors.
 
-許可候補:
+Allowlist candidates:
 
-- `GET /v2/profiles`（personal profile 選択後、PII を永続化しない）。
-- `GET /v4/profiles/{profileId}/balances?types=STANDARD,SAVINGS`。
-- `GET /v1/profiles/{profileId}/balance-statements/{balanceId}/statement.*`。
-- 必要な場合だけ card transaction の GET。カード識別子は保存しない。
+- `GET /v2/profiles` (do not persist PII after selecting the personal profile).
+- `GET /v4/profiles/{profileId}/balances?types=STANDARD,SAVINGS`.
+- `GET /v1/profiles/{profileId}/balance-statements/{balanceId}/statement.*`.
+- Card-transaction GET only if needed; do not store card identifiers.
 
-強制拒否:
+Mandatory denials:
 
-- HTTP `POST`、`PUT`、`PATCH`、`DELETE` の全て。
-- `/transfers`、`/recipients`、`/quotes`、`/balance-movements`。
-- balance/card の create/delete/status、PIN、spending permission。
-- funding、conversion、send、direct debit、webhook subscription。
+- All HTTP `POST`, `PUT`, `PATCH`, `DELETE`.
+- `/transfers`, `/recipients`, `/quotes`, `/balance-movements`.
+- Balance/card creation/deletion/status, PIN, spending permissions.
+- Funding, conversion, sending, direct debit, webhook subscriptions.
 
-実装条件:
+Implementation requirements:
 
-- egress proxy で host、method、path を allowlist。redirect 先も再検査する。
-- token/refresh token は secrets manager に置き、ログ・URL・artifact に出さない。
-- response は schema validate し、profile/card/account identifier と PII を collector log から除外。
-- Open Banking の `accounts` scope のような provider-enforced read-only scope がある場合は
-  それを使い、application allowlist と二重化する。
-- SCA/OTT が要求されたら自動回避せず user handoff または停止。
+- Allowlist host/method/path through an egress proxy; recheck redirect destinations.
+- Store tokens/refresh tokens in a secrets manager, never logs/URLs/artifacts.
+- Schema-validate responses; exclude profile/card/account identifiers and PII from collector logs.
+- Where provider-enforced read-only scope exists, such as Open Banking `accounts`, use it alongside the application allowlist.
+- Hand off or stop when SCA/OTT is required; do not bypass automatically.
 
-## 10. runtime 適性
+## 10. Runtime suitability
 
-| Runtime               | 適性                   | 理由                                                                                          |
-| --------------------- | ---------------------- | --------------------------------------------------------------------------------------------- |
-| Cloudflare Workers    | 条件付き               | 承認済み bearer REST の GET には軽量。個人口座 token がなく、passkey/browser login は実行不可 |
-| Cloudflare Containers | C/D 実験のみ           | full browser を置けるが Cloudflare egress、ephemeral disk、bot protection、再認証が不安定要因 |
-| 通常の OCI container  | C/D 実験の第一候補     | Playwright と固定した browser build、local encrypted session を管理しやすい                   |
-| Kubernetes            | 不適                   | 単一個人口座では運用面が過剰。IP/session の分散は fraud 判定を悪化させ得る                    |
-| ローカル対話 browser  | live validation に最適 | passkey/2-step/password 再入力を本人が行い、UI 状態を確認できる                               |
+| Runtime                   | Suitability                    | Reason                                                                                                              |
+| ------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare Workers        | Conditional                    | Lightweight for authorized bearer REST GETs; no personal-account token and cannot perform passkey/browser login     |
+| Cloudflare Containers     | C/D experiments only           | Full browsers possible; Cloudflare egress, ephemeral disk, bot protection, reauthentication are instability factors |
+| Ordinary OCI container    | First C/D experiment candidate | Easier management of Playwright, pinned browser builds, and locally encrypted sessions                              |
+| Kubernetes                | Unsuitable                     | Operationally excessive for one personal account; distributed IPs/sessions may worsen fraud decisions               |
+| Local interactive browser | Best for live validation       | User completes passkey/2-step/password reentry and checks UI state                                                  |
 
-Workers は V8 isolate と Fetch API で REST GET を扱えるが、global state に session を置かない。
-契約 OAuth が mTLS を要求する場合、Cloudflare Workers の mTLS binding は候補になるものの、
-Cloudflare に proxy された origin への client certificate request には制約があるため、実際の
-Wise mTLS host で事前検証が必要。
+Workers can handle REST GET through V8 isolates/Fetch API, but do not put sessions in global state. If contracted OAuth requires mTLS, Workers mTLS bindings are candidates; however, client-certificate requests to Cloudflare-proxied origins have restrictions, so validate against actual Wise mTLS hosts beforehand.
 
-Containers は outbound host allowlist と Worker 側での credential injection を使えるが、disk は
-sleep/restart で初期化される。browser profile を container disk に永続化しない。
+Containers offer outbound host allowlists and Worker-side credential injection, but disk resets on sleep/restart. Do not persist browser profiles on container disks.
 
 - https://developers.cloudflare.com/workers/reference/how-workers-works/
 - https://developers.cloudflare.com/workers/runtime-apis/bindings/mtls/
 - https://developers.cloudflare.com/containers/platform-details/architecture/
 - https://developers.cloudflare.com/containers/platform-details/outbound-traffic/
 
-## 11. 自動化レベルとコスト
+## 11. Automation levels and costs
 
-PR #5 の共通定義だけを使う。
+Use only PR #5's common definitions.
 
-- **A**: scheduled headless に適した公式 documented/export API。
-- **B**: renewable/reusable session の安定した read-only internal API。
-- **C**: browser/app bootstrap 後の headless replay が可能そう。
-- **D**: full browser/device automation が必要。
-- **E**: manual capture が安全な既定。
-- cost は 1（小さい wrapper）から 5（device-bound/adversarial automation）。
+- **A**: official documented/export API suitable for scheduled headless operation.
+- **B**: stable read-only internal API with renewable/reusable sessions.
+- **C**: headless replay seems possible after browser/app bootstrap.
+- **D**: full browser/device automation required.
+- **E**: manual capture is the safe default.
+- Cost ranges from 1 (small wrapper) to 5 (device-bound/adversarial automation).
 
-### 現在の評価
+### Current assessment
 
-| 経路                     | Level  |  Cost | 判定                                                                     |
-| ------------------------ | ------ | ----: | ------------------------------------------------------------------------ |
-| Web/app 手動 export      | **E**  | **1** | 推奨。公式、広い形式、365 日 chunk                                       |
-| 個人セルフサービス API   | —      |     — | token/OAuth 発行経路を確認できない                                       |
-| 契約 OAuth/Open Banking  | A      |   3–5 | 技術的には最良だが partnership/regulatory cost。個人 MVP 対象外          |
-| authenticated Web replay | C 候補 |     4 | 公開 login transport は確認、personal read path/session renewal は未確認 |
-| full browser automation  | D      |     4 | Cloudflare/fraud signals、passkey/2-step、password 再入力                |
-| 公式 Android app replay  | D 候補 |     5 | split APK/transport/device binding/pinning/integrity を未確認            |
+| Route                         | Level       |  Cost | Assessment                                                                        |
+| ----------------------------- | ----------- | ----: | --------------------------------------------------------------------------------- |
+| Manual Web/app export         | **E**       | **1** | Recommended; official, broad formats, 365-day chunks                              |
+| Personal self-service API     | —           |     — | No token/OAuth issuance route confirmed                                           |
+| Contracted OAuth/Open Banking | A           |   3–5 | Technically best, with partnership/regulatory cost; outside personal MVP          |
+| Authenticated Web replay      | C candidate |     4 | Public login transport confirmed; personal read paths/session renewal unconfirmed |
+| Full browser automation       | D           |     4 | Cloudflare/fraud signals, passkeys/2-step, password reentry                       |
+| Official Android app replay   | D candidate |     5 | Split APK/transport/device binding/pinning/integrity unconfirmed                  |
 
-**source record の代表値は E / cost 1** とする。
+Use **E / cost 1 as the source record's representative rating**.
 
-## 12. read-only live 検証
+## 12. Read-only live validation
 
-### 公開状態だけで実施済み
+### Completed in public state only
 
-- 公式 Help/API docs の現在の wording と URL。
-- `wise.com`、login、`api.wise.com` の DNS/response header。
-- 未認証 API が 401 で data を返さないこと。
-- 現行 login Next.js bundle の取得、hash、整形、identity/XSRF/OTT/device challenge call site。
-- personal UI route が未認証では login app へ redirect され、personal read chunk を配らないこと。
-- 公式 Play package/version/update date と、正規 split APK/toolchain が未取得である障壁。
-- 開いていた Chrome タブに Wise がないこと。login や runtime trace は開始していない。
-- 公開 repository の commit、license、transport/auth/write surface。
+- Current official Help/API documentation wording and URLs.
+- DNS/response headers for `wise.com`, login, and `api.wise.com`.
+- Unauthenticated API returns 401 without data.
+- Current login Next.js bundle acquisition, hashing, formatting, identity/XSRF/OTT/device-challenge call sites.
+- Unauthenticated personal UI routes redirect to login and do not serve personal read chunks.
+- Official Play package/version/update date and the barrier of unavailable legitimate split APKs/toolchain.
+- No Wise among open Chrome tabs; no login/runtime trace started.
+- Public repository commits, licenses, transport/auth/write surfaces.
 
-### 本人同席で次に確認する項目
+### Next checks with the user present
 
-値を記録せず、画面の有無・形式・schema だけを確認する。
+Check only screen presence, formats, and schemas without recording values.
 
-1. 個人 profile に API token menu がないこと。Business profile へ切り替えない。
-2. Home を一度再読込し、balance/Jar/Assets/card の種類と、それぞれの read request の
-   method/host/template path/status/pagination key/schema key だけを対応付ける。
-3. Activity 一覧/詳細を一つずつ開き、pending/posted/cancelled/refund、stable ID、fee/FX field の
-   **有無だけ**を確認する。recipient filter/list/settings へ移動しない。
-4. session の credential 種別、更新イベント、新規 device challenge の有無だけを記録する。
-   cookie/header/token の値、寿命を測るための長時間保持、refresh request の手動再送はしない。
-5. Statement 作成画面で 365 日制限、currency/Jar、format、fee-separate option を確認。
-6. Transactions の filter と CSV/PDF option を確認。download は本人が明示した場合だけ。
-7. Security settings で現在利用可能な method 名だけを確認。追加・削除・default 変更はしない。
-8. browser DevTools は request method/host/template path/status と schema key だけを記録し、
-   header/body/cookie/token/ID/金額/取引内容を保存しない。
-9. 公式 Play app の全 split と signer/versionCode を 7.3 の手順で確認し、static host/path/schema/
-   session/device/integrity/pinning 候補を inventory 化する。runtime は 7.4 の metadata に限る。
-10. もし export sample が必要なら、本人がローカルで作った完全に sanitized な header-only
-    sample を使う。実取引ファイルを repository や issue に置かない。
+1. Confirm no API-token menu in the personal profile; do not switch to Business.
+2. Reload Home once, mapping balance/Jar/Assets/card types only to their read requests' method/host/template path/status/pagination keys/schema keys.
+3. Open one Activity list/detail each; confirm **presence only** of pending/posted/cancelled/refund, stable IDs, and fee/FX fields. Do not navigate to recipient filters/lists/settings.
+4. Record only session credential types, renewal events, and new-device challenge presence. Do not record cookie/header/token values, retain long-lived sessions to measure lifetime, or manually replay refresh requests.
+5. Check the 365-day limit, currency/Jar, formats, and fee-separate option on Statement creation screens.
+6. Check Transactions filters/CSV-PDF options. Download only on explicit user instruction.
+7. In Security settings, check only currently available method names; no additions/deletions/default changes.
+8. Browser DevTools records only request method/host/template path/status/schema keys; no headers/bodies/cookies/tokens/IDs/amounts/transaction contents.
+9. Check all official Play app splits and signer/versionCode through section 7.3; inventory static host/path/schema/session/device/integrity/pinning candidates. Limit runtime to section 7.4 metadata.
+10. If export samples are needed, use fully sanitized header-only samples created locally by the user. Do not place actual transaction files in the repository/issues.
 
-### stop 条件
+### Stop conditions
 
-次のいずれかで直ちに停止する。
+Stop immediately on any of the following.
 
-- 送金、換金、入出金、recipient 作成、Jar 移動、Assets 売買、card freeze/status/PIN、
-  profile/security 変更へ進む UI または API。
-- passkey/API token/2-step method の作成、削除、再設定、default 変更。
-- OTP、password、passkey、recovery code、token、cookie、card/account identifier、PII の
-  chat/log/trace への露出。
-- CAPTCHA、Turnstile、reCAPTCHA、account restriction、fraud warning、device verification。
-- 403 SCA、401 再認証、429、想定外 redirect、想定外の non-GET request。read に見える
-  GraphQL/RPC `POST` も安全性が証明できるまでは実行しない。
-- Cloudflare/fraud control の回避、stealth、fingerprint spoofing が必要になった場合。
-- pinning/integrity/root/debugger detection の無効化、hook による秘密/header/body 取得が必要な場合。
-- export が email delivery になり、本人の明示操作なしに外部送信を発生させる場合。
+- UI/API leading to sending, conversion, deposits/withdrawals, recipient creation, Jar movement, Assets trades, card freeze/status/PIN, or profile/security changes.
+- Passkey/API-token/2-step-method creation, deletion, reset, or default changes.
+- Exposure of OTPs, passwords, passkeys, recovery codes, tokens, cookies, card/account identifiers, or PII in chat/logs/traces.
+- CAPTCHA, Turnstile, reCAPTCHA, account restrictions, fraud warnings, device verification.
+- 403 SCA, 401 reauthentication, 429, unexpected redirects, or unexpected non-GET requests. Do not execute apparently read-only GraphQL/RPC `POST` until safety is proven.
+- Cloudflare/fraud-control bypass, stealth, or fingerprint spoofing becomes necessary.
+- Disabling pinning/integrity/root/debugger detection or hooking secrets/headers/bodies becomes necessary.
+- Export becomes email delivery and would send externally without explicit user action.
 
-login/2-step は本人が公式 UI で直接完了し、agent は秘密を受け取らない。失敗後に連続再試行
-せず、現在の account state を再確認してから終了する。
+The user completes login/2-step directly in official UI; the agent receives no secrets. Do not retry repeatedly after failure; recheck current account state before ending.
 
-## 13. 確認済み、推測、未確認
+## 13. Confirmed, inferred, and unconfirmed
 
-### 確認済み
+### Confirmed
 
-- 個人口座 Web/app は currency/Jar statement を 365 日ずつ export できる。
-- Web は PDF/XLSX/CSV/MT940/QIF/CAMT.053、app は PDF/CSV/XLSX。
-- Transactions の CSV/PDF download は Web のみで、最大 365 日。
-- pending/completed の区別と reserved funds の model がある。
-- Wise は passkey、app/TOTP/SMS 等の 2-step verification を提供する。
-- 現行 Personal API Token は Business account 用。
-- Platform OAuth/Open Banking は partnership/mTLS 等を前提とする。
-- Cloudflare edge と `__cf_bm`、challenge/fraud 関連の public dependency がある。
-- 現行 public login build は XSRF cookie/header、login/OTT/passkey/device challenge の identity
-  route を持つが、personal balance/activity route は未認証 build に含まれない。
-- 公式 Android package は `com.transferwise.android`。公式 listing の観測 version は 9.38.0。
-- 公開 client は bearer HTTPS REST を実装し、一部は write endpoint も同居させる。
+- Personal-account Web/app can export currency/Jar statements in 365-day intervals.
+- Web supports PDF/XLSX/CSV/MT940/QIF/CAMT.053; app supports PDF/CSV/XLSX.
+- Transactions CSV/PDF download is Web-only, up to 365 days.
+- Pending/completed distinctions and reserved-funds models exist.
+- Wise offers passkeys and app/TOTP/SMS and other 2-step verification.
+- Current Personal API Tokens are for Business accounts.
+- Platform OAuth/Open Banking require partnership/mTLS, etc.
+- Cloudflare edge, `__cf_bm`, and public challenge/fraud dependencies exist.
+- Current public login builds have identity routes for XSRF cookies/headers and login/OTT/passkey/device challenges, but unauthenticated builds lack personal balance/activity routes.
+- Official Android package is `com.transferwise.android`; observed official-listing version is 9.38.0.
+- Public clients implement bearer HTTPS REST; some include write endpoints.
 
-### 推測
+### Inferences
 
-- Bitwarden passkey は標準 WebAuthn のため動く可能性が高いが、Wise 公式互換表では未確認。
-- browser bootstrap 後の read-only internal API replay は技術的には可能かもしれない。
-- OCI browser は Cloudflare Containers より session/egress を固定しやすい。
+- Standard WebAuthn makes Bitwarden passkey compatibility likely, but it is unconfirmed in Wise's official compatibility list.
+- Read-only internal-API replay after browser bootstrap may be technically possible.
+- OCI browsers make fixed sessions/egress easier than Cloudflare Containers.
 
-### 未確認
+### Unconfirmed
 
-- 個人口座で read-only API token/OAuth を例外的に提供される地域・legacy account の有無。
-- Web CSV/XLSX の全 column、encoding、row 上限、同一 transaction の安定 ID。
-- statement に pending card transaction が入る時点と、後日の確定/取消時の差分表現。
-- Assets holdings statement の個人口座全地域での形式、API の unit/cost basis coverage。
-- 複数 physical/digital card の export 区別と card filter の識別方法。
-- authenticated Web/mobile の host、endpoint、pagination、session/refresh lifetime。
-- 正規 Play split APK の versionCode、hash、signer、manifest、host/path/schema。
-- Web/app transport の差、device binding、mobile TLS pinning、Play Integrity/App Attest の利用。
-- Cloudflare challenge/fraud rule の発火条件。
-- Wise と Bitwarden の組合せに対する公式サポート可否。
+- Regions/legacy accounts exceptionally providing personal-account read-only API tokens/OAuth.
+- All Web CSV/XLSX columns, encoding, row limits, stable IDs for the same transaction.
+- When pending card transactions enter statements and later finalization/cancellation differences.
+- Assets holdings-statement formats across personal-account regions and API unit/cost-basis coverage.
+- Export distinctions among multiple physical/digital cards and card-filter identification.
+- Authenticated Web/mobile hosts, endpoints, pagination, session/refresh lifetimes.
+- Legitimate Play split-APK versionCode, hashes, signer, manifest, hosts/paths/schemas.
+- Web/app transport differences, device binding, mobile TLS pinning, Play Integrity/App Attest use.
+- Cloudflare challenge/fraud-rule trigger conditions.
+- Official support for the Wise/Bitwarden combination.
 
-以上が確認できるまでは、個人口座の collector を API level A/B と評価しない。
+Do not rate the personal-account collector API level A/B until these are confirmed.
