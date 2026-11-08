@@ -104,11 +104,22 @@ function Occurrence({ value }: { value: ScheduleOccurrence }): ReactNode {
     </div>
   );
 }
-/** A card's last save result and the revision it describes. */
+/**
+ * A card's last save result: the revision the save was made from and the
+ * revision it describes (the one it wrote; the same one when it wrote none).
+ */
 interface CardMessage {
+  from: number;
   revision: number;
   text: string;
 }
+/**
+ * Whether a card showing `revision` shows the message: at the revision the
+ * save wrote, and at the one it was made from until that one is read back
+ * (or while the read back fails), never at a later revision written elsewhere.
+ */
+const describes = (message: CardMessage | undefined, revision: number): message is CardMessage =>
+  message !== undefined && (message.revision === revision || message.from === revision);
 function ScheduleCard({
   value,
   refresh,
@@ -128,7 +139,7 @@ function ScheduleCard({
   async function save(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
-    setMessage({ revision: value.revision, text: "" });
+    setMessage({ from: value.revision, revision: value.revision, text: "" });
     try {
       const result = await request<{ reservation: string }>(`/${value.id}`, {
         revision: value.revision,
@@ -140,6 +151,7 @@ function ScheduleCard({
       // save stored exactly the next revision: the message is about that one,
       // never about a later change read back from elsewhere.
       setMessage({
+        from: value.revision,
         revision: value.revision + 1,
         text:
           result.reservation === "pending"
@@ -148,7 +160,7 @@ function ScheduleCard({
       });
       await refresh();
     } catch (error) {
-      setMessage({ revision: value.revision, text: failure(error) });
+      setMessage({ from: value.revision, revision: value.revision, text: failure(error) });
     } finally {
       setBusy(false);
     }
@@ -243,7 +255,7 @@ function ScheduleCard({
           >
             {busy ? "保存中…" : "設定を保存"}
           </button>
-          <p role="status">{message?.revision === value.revision ? message.text : ""}</p>
+          <p role="status">{describes(message, value.revision) ? message.text : ""}</p>
         </form>
       )}
       <dl>
