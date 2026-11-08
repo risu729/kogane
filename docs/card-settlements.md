@@ -106,9 +106,10 @@ combine, 1 to 3; no defaults), it answers per statement:
   statements, and `excluded_debit_competes` when a debit refused as an
   unresolved duplicate or for a missing date could complete an exact sum):
   every candidate listed, none chosen;
-- `unsupported`: `no_debit_in_window`, or `no_exact_allocation` with
-  `in_window_debits_below_total` (a shortfall) and/or `debit_above_total`
-  (an excess). No remainder is computed and no debit is called a partial
+- `unsupported`: `no_debit_in_window`, or `no_exact_allocation`, joined by
+  `in_window_debits_below_total` when the window's debits sum below the total
+  (a shortfall) and `debit_above_total` when one debit exceeds it (an excess);
+  with neither, the debits reach the total but no combination equals it. No remainder is computed and no debit is called a partial
   payment: how a provider represents a partial payment, an overpayment or a
   debit paying several statements has not been observed;
 - `refused` for a statement that is malformed, repeated, not exact, not
@@ -384,9 +385,10 @@ owner, 2026-11-07 03:58 UTC):
 - `needs_review` (`candidate_not_unique`, and
   `debit_in_other_statement_allocation` or `excluded_debit_competes`): every
   combination listed, none chosen;
-- `unsupported` (`no_exact_allocation` with `in_window_debits_below_total`
-  and/or `debit_above_total`): no remainder is computed, and the page says it
-  does not judge whether that is a partial payment or an overpayment;
+- `unsupported` (`no_exact_allocation`, joined by
+  `in_window_debits_below_total` and/or `debit_above_total` when they apply):
+  no remainder is computed, and the page says it does not judge whether that
+  is a partial payment or an overpayment;
 - `refused` with the planner's statement code, or `run_refused` with
   `input_bound_exceeded` for a group past 16 statements or 32 debits, or whose
   window read reached its bound.
