@@ -3140,11 +3140,10 @@ Phase 3 is done when:
   verbatim cell in `extra` keeps a trailing line break. Text after a
   closing quote (`"ab"c`) is likewise joined into the field. No stored
   export is known to contain either.
-  Two choices are open: whether such a file fails the artifact or keeps
-  the rows before the quote with a reason, and where the check lives.
   `util.ts` is in the digest closure of all 43 parser releases, so a
-  change there releases every parser; a CSV reader of its own for
-  `paypay-csv` and the Sony history CSV parser would release only those.
+  change there releases every parser. Owner decision (2026-11-08): fix the
+  shared reader, and tolerate such a file rather than fail it; the work is
+  [#1176](https://github.com/risu729/kogane/issues/1176).
 - **Sony history pages and identical rows.** `sony-bank-history-json`
   and `sony-bank-history-csv` give a row the id
   `sony-bank-history:<fingerprint of currency, date, signed amount and
@@ -3161,7 +3160,11 @@ Phase 3 is done when:
   stop JSON page rows from matching their CSV rows, so with the CSV
   present every JSON row past page 1 would be listed beside its CSV row,
   and a row would change id whenever another fetch window put it on
-  another page; the fix needs its own decision.
+  another page. Owner decision (2026-11-08): the CSV, which is skipped only
+  for a currency with no transactions, is the only source of history
+  transactions; a window whose CSV is missing or whose row count differs
+  from the JSON `countCnt` is an error, never filled from the JSON; the work
+  is [#1182](https://github.com/risu729/kogane/issues/1182).
 - **A V Point Pay notification amount with a minus sign.** The Layer A
   extractor keeps a leading `-` in `amountYen`, and
   `v-point-pay-notification-event` 1.0.0 accepts a signed integer there,
@@ -3170,10 +3173,10 @@ Phase 3 is done when:
   A negative `charge` would therefore read as an inflow and a negative
   `usage` as an outflow; only `extra.amountYen` keeps the stated sign.
   No observation or document records what a negative notification
-  amount means (a reversal, a correction or a display variant). Whether
-  such an event keeps no amount, as `paypay-csv` 0.2.2 does for a signed
-  cell (ADR 0004), or fails the artifact is open; either is a release of
-  this parser.
+  amount means (a reversal, a correction or a display variant). Owner
+  decision (2026-11-08): since the meaning is unknown, such an event fails
+  the artifact; the work, a release of this parser, is
+  [#1181](https://github.com/risu729/kogane/issues/1181).
 - **Reward units.** Point grants are recorded today as JPY transactions,
   contradicting `docs/design.md`. The fix direction is clear; the shape of
   `reward_observations` is not, because the payloads that would settle it

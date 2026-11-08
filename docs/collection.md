@@ -1317,7 +1317,7 @@ format change is needed for that step.
   `waitingForHuman`, and a run that lost its session carries
   `human_required_approval` (G3-10, G3-11). `/api/status` reports
   `waitingForHuman` while the person still has to act.
-- **Open limits (owner decision pending; the code is as described).**
+- **Open limits (decided 2026-11-08, not yet implemented; the code is as described).**
   - _A failed logout makes a finished backfill partial and unrecoverable._ In
     the completion branch of `SmbcBackfillSession.alarm()`
     (`src/session.ts`, `progress.completedChunks >= ranges.length`), a
@@ -1334,8 +1334,11 @@ format change is needed for that step.
     sign-off differently: `collectPrestiaBank`
     (`services/collector-prestia-bank/src/client.ts`) catches it and returns
     `signoffFailed: true`, the run stays `success`, and `signoffFailed` is
-    reported only in the body the run returns, not in its terminal. Whether a
-    failed logout should cost the run its coverage is not decided.
+    reported only in the body the run returns, not in its terminal. Owner
+    decision (2026-11-08): a failed logout after a complete collection keeps
+    the run `success` with a flag, as Prestia does, as one rule for every
+    collector; the work is
+    [#1177](https://github.com/risu729/kogane/issues/1177).
     `test/retry-diagnostics.test.ts` ("a completion whose logout fails ends
     partial with logout_failed and cannot be resumed") pins today's behaviour.
 - Verified with synthetic data only: `test/shared-collection.test.ts` and
