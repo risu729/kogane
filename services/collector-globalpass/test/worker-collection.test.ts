@@ -11,7 +11,7 @@ mock.module("@cloudflare/containers", () => ({
   Container: class {},
   getContainer: () => container,
 }));
-const { runCollection } = await import("../src/worker");
+const { relayOutcome, runCollection } = await import("../src/worker");
 const spies: ReturnType<typeof spyOn>[] = [];
 afterEach(() => {
   for (const spy of spies.splice(0)) spy.mockRestore();
@@ -179,6 +179,123 @@ describe("GLOBAL PASS diagnostics preserve the current collection contract", () 
     expect(r.manifest?.failures[0]?.errorCode).toBe("browser_collection_failed");
     expect(r.destroyed).toBe(1);
     expect([...r.stored.keys()].filter((key) => key.endsWith("/terminal.json"))).toHaveLength(1);
+  });
+});
+
+describe("GLOBAL PASS relay outcome", () => {
+  test.each([
+    [{ failure: undefined, peerClosed: true, readEnded: true, opened: true }, "peer-closed"],
+    [
+      {
+        failure: { side: "read" as const, afterPeerClosed: true },
+        peerClosed: true,
+        readEnded: false,
+        opened: true,
+      },
+      "peer-closed",
+    ],
+    [{ failure: undefined, peerClosed: false, readEnded: true, opened: true }, "upstream-closed"],
+    [
+      {
+        failure: { side: "read" as const, afterPeerClosed: false },
+        peerClosed: false,
+        readEnded: false,
+        opened: false,
+      },
+      "upstream-connect-failed",
+    ],
+    [
+      {
+        failure: { side: "read" as const, afterPeerClosed: false },
+        peerClosed: true,
+        readEnded: false,
+        opened: true,
+      },
+      "upstream-read-failed",
+    ],
+    [
+      {
+        failure: { side: "write" as const, afterPeerClosed: false },
+        peerClosed: false,
+        readEnded: true,
+        opened: true,
+      },
+      "upstream-write-failed",
+    ],
+  ] as const)("%j ends as %s", (input, outcome) => {
+    expect(relayOutcome(input)).toBe(outcome);
+  });
+});
+
+describe("GLOBAL PASS container failure codes", () => {
+  test("a challenge timeout reaches the manifest, the terminal and the log as closed codes", async () => {
+    const r = await run([
+      {
+        type: "error",
+        operation: "browser-collection",
+        errorType: "TimeoutError",
+        errorCode: "globalpass_challenge_timeout",
+        stage: "challenge",
+        challengeAttempts: 3,
+        lastHttpStatus: 401,
+      },
+    ]);
+    expect(r.manifest?.status).toBe("failed");
+    expect(r.manifest?.failures[0]).toEqual({
+      operation: "browser-collection",
+      errorType: "TimeoutError",
+      errorCode: "globalpass_challenge_timeout",
+      stage: "challenge",
+      challengeAttempts: 3,
+      lastHttpStatus: 401,
+    });
+    expect(r.result.shared?.outcome).toBeDefined();
+    const terminalKey = [...r.stored.keys()].find((key) => key.endsWith("/terminal.json"));
+    const terminal = JSON.parse(new TextDecoder().decode(r.stored.get(terminalKey!)!));
+    expect(JSON.stringify(terminal)).toContain('"safeErrorCode":"globalpass_challenge_timeout"');
+    const events = r.logs.map((line) => JSON.parse(line));
+    expect(
+      events.find((e) => e.stage === "browser-collection" && e.outcome === "failed"),
+    ).toMatchObject({
+      category: "challenge",
+      errorType: "TimeoutError",
+      code: "globalpass_challenge_timeout",
+    });
+    const terminalLine = events.find((e) => e.stage === "terminal");
+    expect(terminalLine).toMatchObject({ outcome: "failed" });
+    expect(terminalLine).not.toHaveProperty("errorType");
+    expect(terminalLine).not.toHaveProperty("category");
+  });
+  test("a code outside the closed list is a contract failure, not a stored code", async () => {
+    const r = await run([
+      {
+        type: "error",
+        operation: "browser-collection",
+        errorType: "Error",
+        errorCode: "private-provider-text",
+      },
+    ]);
+    expect(r.manifest?.failures[0]?.errorCode).toBe("container_contract_invalid");
+    expect(JSON.stringify(r.manifest)).not.toContain("private-");
+  });
+  test.each([
+    { stage: "private-stage" },
+    { challengeAttempts: 11 },
+    { challengeAttempts: 1.5 },
+    { lastHttpStatus: 200 },
+    { lastHttpStatus: "401" },
+    { extra: true },
+  ])("an error record with %j is refused", async (field) => {
+    const r = await run([
+      {
+        type: "error",
+        operation: "browser-collection",
+        errorType: "Error",
+        errorCode: "globalpass_login_rejected",
+        ...field,
+      },
+    ]);
+    expect(r.manifest?.failures[0]?.errorCode).toBe("container_contract_invalid");
   });
 });
 

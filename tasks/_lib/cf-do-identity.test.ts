@@ -1,6 +1,10 @@
-import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { afterAll, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  doIdentityFailureCode,
   preservedDoTargets,
   readDoIdentity,
   verifyDoIdentity,
@@ -195,5 +199,60 @@ describe("code-only DO publication preserves live lifecycle and namespace", () =
         env: { SESSION: { ...artifact.env.SESSION, worker: "other" } },
       }),
     ).toThrow("binding_changed");
+  });
+});
+
+describe("the command line reports closed codes only", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "kogane-cf-do-identity-"));
+  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+  const script = join(REPO_ROOT, "tasks/_lib/ci/cf-do-identity.mjs");
+  const run = (cwd: string, args: string[], env: Record<string, string> = {}) =>
+    spawnSync("node", [script, ...args], {
+      cwd,
+      // Nothing that could reach Cloudflare: no account, no token.
+      env: { PATH: process.env.PATH ?? "", HOME: scratch, ...env },
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+
+  test("a refusal prints its code, not a stack trace", () => {
+    expect(run(scratch, [])).toMatchObject({ status: 1, stderr: "cf_do_invalid_command\n" });
+    const checkout = join(scratch, "checkout");
+    const runner = join(scratch, "runner");
+    mkdirSync(join(checkout, "infra"), { recursive: true });
+    mkdirSync(runner, { recursive: true });
+    writeFileSync(join(checkout, "infra/deploy-order.json"), JSON.stringify({ workers: [] }));
+    writeFileSync(join(runner, "release-plan.json"), JSON.stringify({ selected: [] }));
+    expect(
+      run(checkout, ["capture", join(runner, "identity.json")], { RUNNER_TEMP: runner }),
+    ).toMatchObject({ status: 1, stderr: "cf_do_credentials_missing\n" });
+  });
+
+  test("an unexpected error prints one closed code instead of its message", () => {
+    // No deployment ledger in this directory: the read fails with a message
+    // that names paths, and none of it may reach the release log.
+    const empty = join(scratch, "empty");
+    mkdirSync(empty, { recursive: true });
+    expect(run(empty, ["capture", join(empty, "identity.json")])).toMatchObject({
+      status: 1,
+      stderr: "cf_do_internal_error\n",
+    });
+  });
+
+  test("codes that name a Worker or binding survive; anything else is internal", () => {
+    for (const code of [
+      "cf_do_readback_http_403",
+      "cf_do_pending_lifecycle_sbi-vc-trade-worker",
+      "cf_do_namespace_missing_processor_SCHEDULE_ALARMS",
+    ])
+      expect(doIdentityFailureCode(new Error(code))).toBe(code);
+    for (const error of [
+      new Error("ENOENT: no such file or directory, open '/x/infra/deploy-order.json'"),
+      new Error("cf_do_ with spaces"),
+      new SyntaxError("Unexpected token"),
+      "cf_do_invalid_command",
+      undefined,
+    ])
+      expect(doIdentityFailureCode(error)).toBe("cf_do_internal_error");
   });
 });

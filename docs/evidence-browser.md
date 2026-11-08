@@ -103,11 +103,11 @@ The boundary is written as rules, not intentions:
 
 ## The read model
 
-The pages below are implemented and covered by the 25 tests in
-`test/api.test.ts` and the 5 real-browser tests in `test/browser.test.ts`,
-of the PoC's 73 passing tests. Against the demo store that `bun src/demo.ts`
-builds — 2 sources, 4 artifacts, 4 parse runs, 28 observations — they
-render the whole dataset.
+The pages below are implemented and covered by the 42 tests in
+`test/api.test.ts` and the real-browser tests in `test/browser.test.ts`,
+beside the rest of the PoC's suite. Against the demo store that
+`bun src/demo.ts` builds — 3 sources, 11 artifacts, 11 parse runs, 49
+observations — they render the whole dataset.
 
 Every page reads exactly one endpoint and holds nothing that response did
 not carry. The endpoints mirror the page URLs under `/api`, with `/`
@@ -160,7 +160,10 @@ running server advertises. Verified locally with synthetic fixtures only.
 
 ### Overview — `/`
 
-Row counts for all nine tables the schema defines, the source registry
+Row counts for nine of the twelve tables `schema.sql` defines (`COUNTED_TABLES`
+in `src/queries.ts`: sources, fetch runs, raw objects, artifacts, parse runs
+and the four observation tables; the store also applies four tables from
+shared CORE migrations, which are not counted), the source registry
 with artifact counts, every fetch run, and every parse run with its parser
 and version, status, warning count, and whether it is current or
 superseded. Answers: what is in here, where did it come from, and which
@@ -347,10 +350,10 @@ fine either way; the trees were not.
 
 The pieces:
 
-- `src/queries.ts` — every read query. The "current" predicate,
-  `p.superseded_by_parse_run_id IS NULL AND p.status = 'ok'`, is a single
-  constant applied by each current-state view rather than a phrase
-  repeated per route. The SQL was carried over verbatim from the module it
+- `src/queries.ts` — every read query. The "current" predicate
+  (`CURRENT`: membership in `published_parse_runs` and the dataset's
+  eligibility scope) is a single constant applied by each current-state
+  view rather than a phrase repeated per route. The SQL was carried over verbatim from the module it
   replaced, including the source-qualified keys described below.
 - `packages/parsers/src/money.ts` — the minor-unit table, `formatAmount` and
   `amountSign`. It imports no runtime API, so the same module runs on Bun, on
@@ -366,9 +369,10 @@ The pieces:
 - `apps/web` — a React client built by Vite: a hand-written pushState router
   (`apps/web/src/router.tsx`, so there is no routing dependency), a typed fetch
   layer (`apps/web/src/api.ts`), shared presentational components
-  (`apps/web/src/ui.tsx`), one page per route under `apps/web/src/pages/`, and one
-  plain stylesheet whose colours are custom properties, with light and
-  dark through `prefers-color-scheme`.
+  (`apps/web/src/ui.tsx`), one page per route under `apps/web/src/pages/`, and
+  plain stylesheets whose colours are custom properties in
+  `apps/web/src/styles/tokens.css`, which declares a light colour scheme only
+  ([frontend](frontend.md#design-tokens-and-stylesheet-layout)).
 
 Hono is the choice because the same app object runs on Bun now and on
 Cloudflare Workers later, which is where the rest of Kogane already lives
@@ -448,9 +452,10 @@ Three properties hold on that path set:
   (`OPERATOR_SUBJECTS`) holds every command; an agent (`AGENT_GRANTS`) may
   plan and simulate, and its `approve`/`commit` is `403 approval_required`; a
   subject in **neither** list holds nothing and gets `403 subject_not_granted`.
-  Both lists are empty in the committed configuration, so nothing can be
-  approved or committed until a deployment names its operator — that is
-  intended, and while either list is present but unreadable every command
+  With both lists empty nothing can be approved or committed until a
+  deployment names its operator; the committed configuration names one in
+  `OPERATOR_SUBJECTS` and leaves `AGENT_GRANTS` empty
+  (`services/app/wrangler.jsonc`). While either list is present but unreadable every command
   answers `503 grants_misconfigured` rather than falling back to a default
   role ([change-lifecycle.md](change-lifecycle.md), "Grants").
 - **This Worker still writes nothing.** It forwards the verified actor to the
@@ -702,8 +707,9 @@ deployment facts are:
 
 - `POST /api/agent/v1/{capabilities,context.open,financial.query,explain,reconcile.propose}`,
   `POST /api/agent/v1/purchases.explain` while card purchase recognition is
-  served, and `POST /mcp` are one of the browser's two non-GET allow-lists (the other
-  is the change lifecycle's `/api/command/v1/*`). Both are registered
+  served, and `POST /mcp` are one of the Worker's non-GET allow-lists (the
+  others are the change lifecycle's `/api/command/v1/*` and the
+  `/api/ops/v1/*` operations and schedules routes). Each is registered
   explicitly in `src/worker.ts` before the GET-only check, behind the same
   `auth.ts` gate as every read route, with bounded bodies, `no-store` and the
   same closed 401/403 answers. Everything outside them is refused with 405.
@@ -775,11 +781,11 @@ should ever depend on it.
   calling `openStore()`. Either would make read-only a property of the
   process rather than only of the handler.
 - Server-side pagination and filtering. Every endpoint returns everything, and no
-  query in `src/queries.ts` carries a `LIMIT`. The demo store is 28
-  observations and a real store is not: both live collectors run daily on
-  a Cloudflare Cron trigger (`services/collector-sbi-securities`,
-  `services/collector-vpass`), and the SBI collector's README records an initial
-  backfill over 2024-08-28 to 2026-05-29 in windows of at most 90 days.
+  query in `src/queries.ts` carries a `LIMIT`. The demo store is 49
+  observations and a real store is not: the live collectors
+  (`services/collector-sbi-securities`, `services/collector-vpass` and the
+  others) run on their configured collection schedules through Durable Object
+  alarms ([schedules](schedules.md)); their own `crons` lists are empty.
   The transaction list sorts and filters in the browser now, which helps a
   reader and bounds nothing: the whole result set is still serialized,
   sent, and held in memory. The bound belongs in SQL, with a
@@ -790,13 +796,16 @@ should ever depend on it.
   all, or hand out a short-lived R2 URL instead. Serving through the
   Worker means the Worker streams financial documents; handing out a URL
   moves the inert-response problem to R2's own response headers.
-- Whether the client should be served under a restrictive
-  `Content-Security-Policy` of its own. It would have to admit the bundle
-  and the stylesheet, so it is narrower than it once would have been, and
-  it remains defence in depth against a future mistake rather than a fix
-  for a known hole. It is worth more than it was: the pages now execute
-  script, where before they did not. `/api/raw/<sha256>` already carries
-  `sandbox`.
+- Whether every answer of the local server should carry the deployed
+  Worker's headers. Today `src/serve.ts` gives only the app document a
+  `Content-Security-Policy` (`default-src 'self'`, `base-uri 'none'`,
+  `form-action 'none'`, `frame-ancestors 'none'`, `object-src 'none'`) with
+  `nosniff`, `Referrer-Policy: no-referrer` and `no-store`; `src/api.ts`
+  gives every `/api/` answer `no-store` and `nosniff`, and
+  `/api/raw/<sha256>` `sandbox`; the bundle and the stylesheet carry none of
+  them. The deployed Worker (`services/app`) sets one fixed set on every
+  answer
+  ([production evidence browser](production-evidence-browser.md#response-headers)).
 - Character encoding on the raw route. Bytes are served with the stored
   content type, so a Shift-JIS CSV stored as `text/csv` with no charset
   renders as mojibake. Whether the charset belongs in the stored content
@@ -854,8 +863,44 @@ tables. Every answer is checked by `validApiResponse` against
   `coverage.nextOffset`; an unknown or invisible source is 404.
 
 A missing stage is a reason, never a zero or an empty success: a source with
-no capture has no cells and `latestFetchRun: null` with `no_registered_run`. A
-capture time is shown as stored; nothing judges an age against a threshold.
+no capture has no cells and `latestFetchRun: null` with `no_registered_run`.
+
+**Freshness** (`collection-freshness-v1`,
+[ADR 0045's amendment of 2026-11-08](adr/0045-collection-quality-read.md#amendment-2026-11-08-freshness-per-source-and-cell)).
+Each answer names `freshnessAsOf` (`policy`, the instant `at` and its
+Asia/Tokyo `date`), and each source and cell carries
+`freshness: { state, ageDays }`. The age is in Asia/Tokyo civil days from the
+capture's date to that date: for a cell its current capture, for a source its
+newest visible fetch run whatever its outcome. The state is `same-day` (0),
+`recent` (1 to 3 days) or `stale` (more), the thresholds of
+`dated-state-freshness-v1`. Data that is stale or has no capture is explained
+by what its source waits on, when the stored jobs say so: `human-required`
+when a job collects only by hand (`kind: "manual"`, SMBC Direct) or its newest
+attempt (or, for a cell, its unit) stopped on a "a person must act" code
+(`human_required*`, `manual_agreement_required`), else `disabled` when the
+source has supported collecting jobs (`collection`, `manual`, `email`) and
+none is enabled (an unsupported job, like V Point Pay's app job, never is). Otherwise it is `stale`, or `no-capture` with no age. A fresh capture
+is `same-day` or `recent` whatever the source waits on. A capture dated after
+the as-of date (a collector clock ahead) is age 0. The page shows the state
+and age per source in the source list and per cell (当日の取得, N日前の取得,
+古い, 本人操作待ち, 定期実行の停止中, 取得なし).
+
+**Data types the provider offers** (`provider-data-types-v1`,
+[ADR 0087](adr/0087-provider-data-type-catalogue.md)). The summary names
+`dataTypesVersion`, and each source with a collector carries `dataTypes`: the
+data types its provider offers for the account kinds it collects (`balance`,
+`cash_movement`, `card_usage`, `card_statement`, `position`, `execution`,
+`settlement_cash`, `asset_transfer`, `income`, `valuation_history`,
+`term_deposit`, `document`, `fx_rate`, `reward_balance`, `reward_activity`,
+`reward_expiry`), each `collected` (with the parsers that publish it),
+`partial` (with its parsers and the issue that tracks the rest) or
+`not_collected` (with the issue). A source the catalogue does not describe
+(one with no collector, and `kogane-synthetic`) has `dataTypes: null`. The list is checked in
+(`packages/application/src/collection/provider-data-types.ts`), built from the
+source research and the per-source issues; it describes the provider, not the
+owner's holdings, and it is not checked against production. The page lists
+them per source under 取得元が提供するデータ種別, and the source list counts
+the types not wholly collected.
 
 Open `/collection-quality` and choose a source. It shows source reasons and
 last attempts alongside the source/unit/dataset/period cells. Actual Alarm
@@ -871,6 +916,7 @@ No rows never prove zero transactions. Missing sealed identity runs and
 unresolved current account mappings have separate reasons. Provider retention
 caps stay `retention_not_assessed`; page/coverage failures keep their stored
 closed causes. Older-current and not-in-latest states identify newer acquisition
-gaps without an invented stale threshold. Continuation and empty page messages
+gaps; freshness counts the age of the current capture under the versioned
+policy above. Continuation and empty page messages
 never claim full history. Production scope verification remains separate
 ([checklist](plans/2026-10-collection-quality-completion.md)).

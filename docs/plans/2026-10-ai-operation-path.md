@@ -14,9 +14,11 @@
   real-client activation remains open. On 2026-11-07
   [ADR 0084](../adr/0084-mcp-operator-authority-without-delegation.md) removed
   the `MCP_DELEGATIONS` declaration, its roles and the delegation status
-  (S3's declaration core and S8's status part): the operator's MCP principal
-  now resolves from `OPERATOR_SUBJECTS` and its read grant, and the sections
-  below that describe declarations record the earlier design. See the
+  (S3's declaration core and S8's status part), and `AGENT_API_GRANTS` with
+  them: every MCP client the MCP Access application admits now resolves as
+  itself over the whole store, without reading `OPERATOR_SUBJECTS` or a
+  grant table, and the sections below that describe declarations and grants
+  record the earlier design. See the
   [current resume plan](2026-10-mcp-maintenance-followups.md).
   The decisions it rests on are [ADR 0063](../adr/0063-delegated-ai-operation-path.md)
   (delegated AI operation path) and

@@ -150,8 +150,9 @@ existing self-Worker/class namespaces, with no native exports or migrations.
 Canonical migration histories remain unchanged. A build guard checks their
 actual artifacts; before publication the live migration tag must match the
 latest canonical tag, and after publication all active namespace IDs must
-match the captured baseline. Pending DO lifecycle work requires a separate
-Wrangler rollout. Processor and PRESTIA opt into trigger synchronization on the
+match the captured baseline. A refused check prints only its closed `cf_do_…`
+code, and an unexpected error prints `cf_do_internal_error`. Pending DO
+lifecycle work requires a separate Wrangler rollout. Processor and PRESTIA opt into trigger synchronization on the
 versions strategy: Processor preserves its Queue consumer settings; PRESTIA
 applies its checked-in workersDev:true/previewUrls:false after version upload.
 The three Container full-deploy steps also explicitly consent to synchronization.
@@ -281,7 +282,10 @@ is introduced.
     something failed: that is the run that most needs an account of itself.
 15. **Postchecks** the health routes of what it deployed.
 16. **Records** the deployment as `success`, or as `failure` and stops, with the
-    progress summary in the status description either way.
+    progress summary in the status description either way. A progress file
+    that exists but cannot be read as a record (cut short, say) does not stop
+    the `failure` status: its description carries `release_progress_unreadable`
+    in place of the summary. `success` is refused for the same file.
 
 ### The release ledger, and why a late run is harmless (G5-12)
 
@@ -531,7 +535,7 @@ rather than pretending to check something.
 requested over its `workers.dev` hostname, unauthenticated, and must answer
 200 **with** the identity field the ledger names (`schemaVersion` for most,
 `service` for Vpass). SBI VC Trade uses `/healthz`, a static liveness answer;
-its existing `/health` remains protected by the collector admin token. 200 alone is not a
+it has no other public route (its admin routes were retired on 2026-11-08). 200 alone is not a
 pass: an edge error page and an empty body are both 200-shaped.
 
 **The authenticated half.** The App authenticates every request through
@@ -582,7 +586,9 @@ variable when building. The stamp runs **before** every bundle and the manifest
 are computed, so the manifest
 digests the configuration that is actually uploaded and the re-verification
 before the first upload still holds. A configuration that already carries a
-sha is an error, not a second rewrite.
+sha is an error, not a second rewrite, and a declaration whose value is
+neither empty nor a full lowercase sha (uppercase, non-hex, not a string) is
+refused as `release_sha_invalid_declaration` rather than skipped as undeclared.
 
 **When the service token is missing** the step fails with a message naming the
 two secrets and this page's setup section. That is deliberate: skipping the

@@ -47,6 +47,8 @@ const TRADE_URL = `${ORIGIN}/api/cccmdipresen/gw/trade`;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const KEEPALIVE_CRON = "*/15 * * * *";
 const COLLECTION_CRON = "5 21 * * *";
+/** The spacing of logins forced by requested session refreshes (ADR 0069, 2026-11-08). */
+export const FORCED_REAUTH_SPACING_MS = 60 * 60 * 1000;
 const INITIAL_HEALTH: HealthState = {
   initializedAt: null,
   lastAttemptAt: null,
@@ -67,9 +69,12 @@ export class SbiVcSessionState extends DurableObject<Env> {
   #collectionRunning: Promise<CollectionSummary> | null = null;
   #operationTail: Promise<void> = Promise.resolve();
   /** Classify local persistence errors before the RPC boundary loses their identity. */
-  async runScheduledCollection(cron: string): Promise<ScheduledResult> {
+  async runScheduledCollection(
+    cron: string,
+    options: { forceReauth?: boolean } = {},
+  ): Promise<ScheduledResult> {
     try {
-      const health = await ensureHealthySession(this);
+      const health = await ensureHealthySession(this, options.forceReauth === true);
       if (cron === KEEPALIVE_CRON)
         return {
           status: health.lastErrorCode === null ? "completed" : "failed",
@@ -84,6 +89,19 @@ export class SbiVcSessionState extends DurableObject<Env> {
         return { status: "failed", runIds: [], failureCode: "terminal_persistence_failed" };
       return scheduledFailure(error);
     }
+  }
+  /**
+   * A requested refresh logs in without the cooldown at most once per
+   * `FORCED_REAUTH_SPACING_MS`, whoever sends it; after that it keeps the
+   * alarm's own policy. Read and written inside `#exclusive`, so two requests
+   * cannot both take the same hour.
+   */
+  async #claimForcedReauth(attemptAt: string): Promise<boolean> {
+    const last = await this.ctx.storage.get<string>("forcedReauthAt");
+    const elapsed = last === undefined ? Infinity : Date.parse(attemptAt) - Date.parse(last);
+    if (Number.isFinite(elapsed) && elapsed < FORCED_REAUTH_SPACING_MS) return false;
+    await this.ctx.storage.put("forcedReauthAt", attemptAt);
+    return true;
   }
   async getHealth(): Promise<HealthState> {
     const health = { ...INITIAL_HEALTH, ...(await this.ctx.storage.get<HealthState>("health")) };
@@ -109,13 +127,14 @@ export class SbiVcSessionState extends DurableObject<Env> {
       this.#leaseOptions(),
     );
   }
-  async runReauthenticate(force = false): Promise<HealthState> {
+  /** `requested`: a session-refresh request, which may force one login per hour. */
+  async runReauthenticate(requested = false): Promise<HealthState> {
     return withCollectionLease(
       this.env,
       "sbi-vc-trade",
       async () => {
         if (this.#reauthRunning) return this.#reauthRunning;
-        this.#reauthRunning = this.#exclusive(() => this.#performReauthenticate(force));
+        this.#reauthRunning = this.#exclusive(() => this.#performReauthenticate(requested));
         try {
           return await this.#reauthRunning;
         } finally {
@@ -316,9 +335,12 @@ export class SbiVcSessionState extends DurableObject<Env> {
       throw error;
     }
   }
-  async #performReauthenticate(force: boolean): Promise<HealthState> {
+  async #performReauthenticate(requested: boolean): Promise<HealthState> {
     const previous = await this.getHealth();
     const attemptAt = new Date().toISOString();
+    const force = requested && (await this.#claimForcedReauth(attemptAt));
+    // Inside the hour a request gets exactly what the alarm would do.
+    if (requested && !force && !shouldReauthenticate(previous)) return previous;
     if (!force && previous.lastReauthAttemptAt) {
       const elapsed = Date.now() - Date.parse(previous.lastReauthAttemptAt);
       if (Number.isFinite(elapsed) && elapsed < reauthCooldownMs(previous, Date.now()))
@@ -535,38 +557,9 @@ export default {
     if (request.method === "GET" && path === "/healthz") {
       return Response.json({ status: "ok", schemaVersion: env.COLLECTOR_SCHEMA_VERSION });
     }
-    if (!(await isAuthorized(request, env.ADMIN_TOKEN))) return new Response(null, { status: 404 });
-    const stub = env.SESSION_STATE.getByName("singleton");
-    if (request.method === "POST" && path === "/run")
-      return Response.json(await stub.runKeepAlive());
-    if (request.method === "POST" && path === "/reauth") {
-      const reauthenticated = await stub.runReauthenticate(true);
-      if (reauthenticated.lastReauthErrorCode !== null)
-        return Response.json(reauthenticated, { status: 502 });
-      return Response.json(await stub.runKeepAlive());
-    }
-    if (request.method === "POST" && path === "/collect") {
-      const health = await ensureHealthySession(stub);
-      if (health.lastErrorCode !== null) {
-        // U09: in shared mode the blocked attempt is recorded as a failed run
-        // so the operations API sees it; no login is retried here.
-        const blocked = await stub.recordBlockedCollection();
-        return Response.json(
-          {
-            ...health,
-            waitingForHuman: waitingForHuman(health),
-            ...(blocked ? { blockedRun: blocked } : {}),
-          },
-          { status: 502 },
-        );
-      }
-      const result = await stub.runCollection();
-      return Response.json(result, { status: result.status === "success" ? 200 : 502 });
-    }
-    if (request.method === "GET" && path === "/health") {
-      const health = await stub.getHealth();
-      return Response.json({ ...health, waitingForHuman: waitingForHuman(health) });
-    }
+    // Every other operation goes through the operations API (ADR 0069,
+    // 2026-11-08 amendment): collection and session refresh reach this Worker
+    // only over the private `ScheduledCollection` binding.
     return new Response(null, { status: 404 });
   },
   async scheduled(controller, env): Promise<void> {
@@ -591,13 +584,20 @@ export default {
     throw new Error("unknown_cron_trigger");
   },
 } satisfies ExportedHandler<Env>;
+/**
+ * A keepalive, then a passkey login when its result calls for one. `requested`
+ * is a session-refresh request: any failed keepalive is followed by a login
+ * without the cooldown the alarm keeps, at most once per
+ * `FORCED_REAUTH_SPACING_MS`; inside that hour the alarm's own policy applies.
+ */
 async function ensureHealthySession(
   stub: Pick<SbiVcSessionState, "runKeepAlive" | "runReauthenticate">,
+  requested = false,
 ): Promise<HealthState> {
   let health = await stub.runKeepAlive();
-  if (!shouldReauthenticate(health)) return health;
+  if (requested ? health.lastErrorCode === null : !shouldReauthenticate(health)) return health;
   const previousReauthSuccessAt = health.lastReauthSuccessAt;
-  const reauthenticated = await stub.runReauthenticate(false);
+  const reauthenticated = await stub.runReauthenticate(requested);
   if (
     reauthenticated.lastReauthErrorCode === null &&
     reauthenticated.lastReauthSuccessAt !== previousReauthSuccessAt
@@ -632,22 +632,6 @@ function classifyCryptoError(error: unknown): string {
       return "crypto_error";
   }
 }
-async function isAuthorized(request: Request, expected: string): Promise<boolean> {
-  const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) return false;
-  const encoder = new TextEncoder();
-  const [providedHash, expectedHash] = await Promise.all([
-    crypto.subtle.digest("SHA-256", encoder.encode(authorization.slice(7))),
-    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
-  ]);
-  const provided = new Uint8Array(providedHash);
-  const wanted = new Uint8Array(expectedHash);
-  let difference = 0;
-  for (let index = 0; index < wanted.length; index += 1) {
-    difference |= provided[index]! ^ wanted[index]!;
-  }
-  return difference === 0;
-}
 async function readBoundedText(response: Response, limit: number): Promise<string> {
   if (!response.body) throw new Error("missing_response_body");
   const reader = response.body.getReader();
@@ -673,15 +657,16 @@ async function readBoundedText(response: Response, limit: number): Promise<strin
   return new TextDecoder().decode(body);
 }
 
-/** Private service-binding collection; public token/Access routes keep their checks. */
+/** Private service-binding collection: the alarm, and the operations API's requests. */
 export async function alarmCollection(
   env: Env,
   cron: string,
   _scheduledTime: number,
+  options: { forceReauth?: boolean } = {},
 ): Promise<ScheduledResult> {
   try {
     const stub = env.SESSION_STATE.getByName("singleton");
-    return await stub.runScheduledCollection(cron);
+    return await stub.runScheduledCollection(cron, options);
   } catch (error) {
     return scheduledFailure(error);
   }

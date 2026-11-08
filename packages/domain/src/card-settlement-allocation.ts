@@ -24,6 +24,13 @@
 // never zero (INV05). The date window and the most debits one allocation may
 // combine come from an explicit, versioned policy without defaults; nothing
 // in the repository supplies one. Nothing here reads storage or a clock.
+//
+// Every exact combination is counted, and the first
+// `CARD_STATEMENT_ALLOCATION_LISTED_MAX` in the outcome's order are listed with
+// that count and a closed truncation marker (ADR 0074, amendment 2026-11-07,
+// "a bounded list of allocations"): the search visits each combination once
+// and keeps at most twice that many, so a window of 32 equal debits (4,960
+// three-debit sums) no longer builds thousands of allocations per statement.
 import { type CardBankDebitFact, type CardStatementFact } from "./card-settlement.ts";
 import { validSourceFactRef, type SourceFactRef } from "./events.ts";
 import { hasExactKeys, isRecord, isSafeInt, isText } from "./guards.ts";
@@ -38,7 +45,7 @@ import {
 } from "./values.ts";
 
 /** The planner release, pinned in every manifest. A changed rule is a new release. */
-export const CARD_STATEMENT_ALLOCATION_RELEASE = "card-statement-allocation-v1";
+export const CARD_STATEMENT_ALLOCATION_RELEASE = "card-statement-allocation-v2";
 /** Statements one run reads at most; past it the run is refused, never cut. */
 export const CARD_STATEMENT_ALLOCATION_STATEMENTS_MAX = 16;
 /** Debits one run reads at most; past it the run is refused, never cut. */
@@ -47,6 +54,15 @@ export const CARD_STATEMENT_ALLOCATION_DEBITS_MAX = 32;
 export const CARD_STATEMENT_ALLOCATION_SIZE_MAX = 3;
 /** The furthest a policy's window may reach, in civil days either side of the due date. */
 export const CARD_STATEMENT_ALLOCATION_WINDOW_DAYS_MAX = 31;
+/**
+ * Allocations one statement's outcome lists at most: the first in its order
+ * (fewest debits first, then by member ref ids). Every exact combination is
+ * still counted and decides the status and codes; past this many the outcome
+ * says `allocationsTruncated: true` beside `allocationCount`, so nothing is
+ * hidden silently (INV05). Without it one statement of 32 debits could list
+ * 4,960 allocations (ADR 0074, amendment 2026-11-07).
+ */
+export const CARD_STATEMENT_ALLOCATION_LISTED_MAX = 50;
 
 // ---------------------------------------------------------------------------
 // The policy. Explicit and versioned; no field has a default.
@@ -237,15 +253,34 @@ export interface CardStatementAllocation {
 export type StatementAllocationOutcome =
   | { status: "refused"; code: AllocationStatementRefusal }
   /** Exactly one allocation, none of whose debits is in another candidate. A proposal, never a decision. */
-  | { status: "proposed"; allocations: [CardStatementAllocation]; codes: [] }
-  /** Two or more candidates, a debit two statements could use, or a competing refused debit: none is chosen. */
+  | {
+      status: "proposed";
+      allocations: [CardStatementAllocation];
+      codes: [];
+      allocationCount: 1;
+      allocationsTruncated: false;
+    }
+  /**
+   * Two or more candidates, a debit two statements could use, or a competing
+   * refused debit: none is chosen. `allocationCount` is every exact
+   * allocation; the first `CARD_STATEMENT_ALLOCATION_LISTED_MAX` are listed,
+   * and `allocationsTruncated` is true exactly when the count is above that.
+   */
   | {
       status: "needs_review";
       allocations: CardStatementAllocation[];
       codes: AllocationOutcomeCode[];
+      allocationCount: number;
+      allocationsTruncated: boolean;
     }
   /** No exact allocation: the codes say why; no amount is invented for the difference. */
-  | { status: "unsupported"; allocations: []; codes: AllocationOutcomeCode[] };
+  | {
+      status: "unsupported";
+      allocations: [];
+      codes: AllocationOutcomeCode[];
+      allocationCount: 0;
+      allocationsTruncated: false;
+    };
 
 export interface StatementAllocationResult {
   statementRef: SourceFactRef | null;
@@ -384,18 +419,21 @@ function allocationOf(
 }
 
 /**
- * Every combination of at most `size` debits (ordered by amount, then ref id)
- * whose exact sum equals `total`. Amounts are positive, so a branch whose
- * running sum already exceeds the total is not extended.
+ * Visits each combination of at most `size` debits (ordered by amount, then
+ * ref id) whose exact sum equals `total`, in search order, until `visit`
+ * returns true. Amounts are positive, so a branch whose running sum already
+ * exceeds the total is not extended. Nothing is collected here: what the
+ * caller keeps is the caller's bound.
  */
-function exactCombinations<T extends { input: AllocationDebitInput }>(
+function visitExactCombinations<T extends { input: AllocationDebitInput }>(
   total: Quantity,
   debits: readonly T[],
   size: number,
-): T[][] {
-  const found: T[][] = [];
+  visit: (members: readonly T[]) => boolean,
+): void {
+  let stopped = false;
   const walk = (start: number, chosen: T[], sum: Quantity | null) => {
-    for (let index = start; index < debits.length; index++) {
+    for (let index = start; index < debits.length && !stopped; index++) {
       const debit = debits[index]!;
       const next =
         sum === null
@@ -407,12 +445,62 @@ function exactCombinations<T extends { input: AllocationDebitInput }>(
       // Sorted ascending: every later debit is at least this one, so stop.
       if (order.order > 0) break;
       const members = [...chosen, debit];
-      if (order.order === 0) found.push(members);
+      if (order.order === 0) stopped = visit(members);
       else if (members.length < size) walk(index + 1, members, next.quantity);
     }
   };
   walk(0, [], null);
-  return found;
+}
+
+/** The listing order: fewest members first, then by the members' ref ids (each list ordered by ref id). */
+function listedOrder(a: readonly string[], b: readonly string[]): number {
+  if (a.length !== b.length) return a.length - b.length;
+  return compareText(a.join("\n"), b.join("\n"));
+}
+
+/** A statement's exact combinations: how many, which debits any of them uses, and the first ones. */
+interface CandidateSummary {
+  count: number;
+  debitIds: ReadonlySet<string>;
+  /** At most `CARD_STATEMENT_ALLOCATION_LISTED_MAX`, in `listedOrder`, members by ref id. */
+  listed: AdmittedDebit[][];
+}
+
+const NO_CANDIDATES: CandidateSummary = { count: 0, debitIds: new Set(), listed: [] };
+
+/**
+ * Counts every exact combination and keeps the first
+ * `CARD_STATEMENT_ALLOCATION_LISTED_MAX` in listing order. What is kept never
+ * exceeds twice the bound: on reaching it, it is sorted and cut back, which
+ * keeps exactly the first ones because the order is total (members are
+ * distinct admitted debits, whose ref ids are unique).
+ */
+function summarizeCandidates(
+  total: Quantity,
+  debits: readonly AdmittedDebit[],
+  size: number,
+): CandidateSummary {
+  let count = 0;
+  const debitIds = new Set<string>();
+  let kept: { ids: string[]; members: AdmittedDebit[] }[] = [];
+  const cut = () => {
+    kept.sort((a, b) => listedOrder(a.ids, b.ids));
+    if (kept.length > CARD_STATEMENT_ALLOCATION_LISTED_MAX)
+      kept = kept.slice(0, CARD_STATEMENT_ALLOCATION_LISTED_MAX);
+  };
+  visitExactCombinations(total, debits, size, (found) => {
+    count++;
+    const members = [...found].sort((a, b) =>
+      compareText(a.input.debit.ref.id, b.input.debit.ref.id),
+    );
+    const ids = members.map((member) => member.input.debit.ref.id);
+    for (const id of ids) debitIds.add(id);
+    kept.push({ ids, members });
+    if (kept.length >= 2 * CARD_STATEMENT_ALLOCATION_LISTED_MAX) cut();
+    return false;
+  });
+  cut();
+  return { count, debitIds, listed: kept.map((entry) => entry.members) };
 }
 
 /** Within one unit only: a comparison across units is not an order. */
@@ -423,14 +511,6 @@ function byAmountThenRef(
   const order = compareQuantities(a.input.debit.amount, b.input.debit.amount);
   if (order.ok && order.order !== 0) return order.order;
   return compareText(a.input.debit.ref.id, b.input.debit.ref.id);
-}
-
-function allocationOrder(a: CardStatementAllocation, b: CardStatementAllocation): number {
-  if (a.members.length !== b.members.length) return a.members.length - b.members.length;
-  return compareText(
-    a.members.map((member) => member.ref.id).join("\n"),
-    b.members.map((member) => member.ref.id).join("\n"),
-  );
 }
 
 /**
@@ -530,7 +610,7 @@ export function planCardStatementAllocations(
   interface Planned {
     result: StatementAllocationResult;
     statement: CardStatementFact | null;
-    candidates: AdmittedDebit[][];
+    candidates: CandidateSummary;
     inWindow: AdmittedDebit[];
     /** Whether a competing refused debit could complete an exact allocation. */
     competes: boolean;
@@ -546,7 +626,7 @@ export function planCardStatementAllocations(
           pairExclusions: [],
         },
         statement: null,
-        candidates: [],
+        candidates: NO_CANDIDATES,
         inWindow: [],
         competes: false,
       });
@@ -561,7 +641,7 @@ export function planCardStatementAllocations(
         pairExclusions: [],
       },
       statement: null,
-      candidates: [],
+      candidates: NO_CANDIDATES,
       inWindow: [],
       competes: false,
     });
@@ -593,7 +673,7 @@ export function planCardStatementAllocations(
         else inWindow.push(debit);
       }
       pairExclusions.sort((a, b) => compareText(a.debitRef.id, b.debitRef.id));
-      const candidates = exactCombinations(
+      const candidates = summarizeCandidates(
         statement.amount,
         [...inWindow].sort(byAmountThenRef),
         policy.maxDebitsPerAllocation,
@@ -606,20 +686,28 @@ export function planCardStatementAllocations(
           (debit.date === null || withinWindow(debit.date)),
       );
       const rivalIds = new Set(rivals.map((debit) => debit.input.debit.ref.id));
-      const competes =
-        candidates.length > 0 &&
-        rivals.length > 0 &&
-        exactCombinations(
+      // The search stops at the first exact combination a rival completes.
+      let competes = false;
+      if (candidates.count > 0 && rivals.length > 0)
+        visitExactCombinations(
           statement.amount,
           [...inWindow, ...rivals].sort(byAmountThenRef),
           policy.maxDebitsPerAllocation,
-        ).some((members) => members.some((member) => rivalIds.has(member.input.debit.ref.id)));
+          (members) =>
+            (competes = members.some((member) => rivalIds.has(member.input.debit.ref.id))),
+        );
       planned.push({
         result: {
           statementRef: statement.ref,
           statementKey: item.statementKey,
           // Replaced below once every statement's candidates are known.
-          outcome: { status: "unsupported", allocations: [], codes: [] },
+          outcome: {
+            status: "unsupported",
+            allocations: [],
+            codes: [],
+            allocationCount: 0,
+            allocationsTruncated: false,
+          },
           pairExclusions,
         },
         statement,
@@ -635,18 +723,16 @@ export function planCardStatementAllocations(
   // are ambiguous; a debit in the candidates of two statements contests both.
   const statementsByDebit = new Map<string, Set<number>>();
   planned.forEach((plan, index) => {
-    for (const candidate of plan.candidates)
-      for (const member of candidate) {
-        const id = member.input.debit.ref.id;
-        const set = statementsByDebit.get(id) ?? new Set<number>();
-        set.add(index);
-        statementsByDebit.set(id, set);
-      }
+    for (const id of plan.candidates.debitIds) {
+      const set = statementsByDebit.get(id) ?? new Set<number>();
+      set.add(index);
+      statementsByDebit.set(id, set);
+    }
   });
   for (const plan of planned) {
     const statement = plan.statement;
     if (statement === null) continue;
-    if (plan.candidates.length === 0) {
+    if (plan.candidates.count === 0) {
       const codes: AllocationOutcomeCode[] = [];
       if (plan.inWindow.length === 0) codes.push("no_debit_in_window");
       else {
@@ -665,28 +751,41 @@ export function planCardStatementAllocations(
         )
           codes.push("debit_above_total");
       }
-      plan.result.outcome = { status: "unsupported", allocations: [], codes };
+      plan.result.outcome = {
+        status: "unsupported",
+        allocations: [],
+        codes,
+        allocationCount: 0,
+        allocationsTruncated: false,
+      };
       continue;
     }
-    const allocations = plan.candidates
-      .map((members) =>
-        allocationOf(
-          statement,
-          [...members].sort((a, b) => compareText(a.input.debit.ref.id, b.input.debit.ref.id)),
-        ),
-      )
-      .sort(allocationOrder);
-    const elsewhere = plan.candidates.some((members) =>
-      members.some((member) => (statementsByDebit.get(member.input.debit.ref.id)?.size ?? 0) > 1),
+    // Already in listing order, members by ref id.
+    const allocations = plan.candidates.listed.map((members) => allocationOf(statement, members));
+    const count = plan.candidates.count;
+    const elsewhere = [...plan.candidates.debitIds].some(
+      (id) => (statementsByDebit.get(id)?.size ?? 0) > 1,
     );
-    if (allocations.length === 1 && !elsewhere && !plan.competes) {
-      plan.result.outcome = { status: "proposed", allocations: [allocations[0]!], codes: [] };
+    if (count === 1 && !elsewhere && !plan.competes) {
+      plan.result.outcome = {
+        status: "proposed",
+        allocations: [allocations[0]!],
+        codes: [],
+        allocationCount: 1,
+        allocationsTruncated: false,
+      };
       continue;
     }
     const codes: AllocationOutcomeCode[] = ["candidate_not_unique"];
     if (elsewhere) codes.push("debit_in_other_statement_allocation");
     if (plan.competes) codes.push("excluded_debit_competes");
-    plan.result.outcome = { status: "needs_review", allocations, codes };
+    plan.result.outcome = {
+      status: "needs_review",
+      allocations,
+      codes,
+      allocationCount: count,
+      allocationsTruncated: count > allocations.length,
+    };
   }
 
   const statements = planned

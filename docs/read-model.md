@@ -368,13 +368,14 @@ maps its rows to the contract and the closed reason codes. It is not an
 `ObservationReader` method: like the dated reads it is composed by an
 application query over an executor.
 
-| Text                       | Reads                                                                                                                                                        | Bound                                                    |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
-| `SCHEDULE_QUALITY_SQL`     | every `collection_schedules` row, its newest receipt by `nominal_at` (the unique index) and its held lease                                                   | 201 rows; more is refused                                |
-| `TERMINAL_QUALITY_SQL`     | the `collection_runs` rows of exactly the (collector, run id) pairs a receipt names, with the newest `registered` stage and the visible fetch run            | the pairs given                                          |
-| `UNREGISTERED_QUALITY_SQL` | never-registered terminals of the given collectors, once per run by its newest row, grouped by code                                                          | every row of those sources, by index; grows with history |
-| `SOURCE_QUALITY_SQL`       | every visible source and its newest visible fetch run, read by id                                                                                            | 201 rows; more is refused                                |
-| `CELL_QUALITY_SQL`         | one source's visible artifacts named by a dataset, a job or a recorded parse; their jobs, parses, publications, claims and unit outcomes; current membership | 501 cells from an offset                                 |
+| Text                       | Reads                                                                                                                                                        | Bound                                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| `SCHEDULE_QUALITY_SQL`     | every `collection_schedules` row, its newest receipt by `nominal_at` (the unique index) and its held lease                                                   | 201 rows; more is refused                                               |
+| `SOURCE_JOBS_SQL`          | the `collection_schedules` rows of the given job sources (one CORE source's jobs) and the failure code of each one's newest receipt                          | scans the configured jobs by primary key; one row per job of the source |
+| `TERMINAL_QUALITY_SQL`     | the `collection_runs` rows of exactly the (collector, run id) pairs a receipt names, with the newest `registered` stage and the visible fetch run            | the pairs given                                                         |
+| `UNREGISTERED_QUALITY_SQL` | never-registered terminals of the given collectors, once per run by its newest row, grouped by code                                                          | every row of those sources, by index; grows with history                |
+| `SOURCE_QUALITY_SQL`       | every visible source and its newest visible fetch run, read by id                                                                                            | 201 rows; more is refused                                               |
+| `CELL_QUALITY_SQL`         | one source's visible artifacts named by a dataset, a job or a recorded parse; their jobs, parses, publications, claims and unit outcomes; current membership | 501 cells from an offset                                                |
 
 A cell is (dataset, parser, fetch unit, period, MyJCB statement state,
 currentness rule). Its newest capture is its newest fetch run by capture time;
@@ -405,6 +406,13 @@ Positions reads: the Transactions read applies no snapshot selection, so the
 transactions a snapshot parser also emits
 (`sbi-shinsei-top-balances-and-activity`) stay listed from a capture this read
 calls not current.
+
+**Freshness** (`collection-freshness-v1`, `packages/domain/src/collection-freshness.ts`)
+is computed by the application query, not in SQL: every answer counts ages to
+one instant, `freshnessAsOf` (the route's request time), in Asia/Tokyo civil
+days. A cell's age is its current capture's; a source's is its newest visible
+fetch run's, whatever that run's outcome. The cells read the source's own jobs
+(`SOURCE_JOBS_SQL`) to tell what the source waits on.
 
 ### Cost
 

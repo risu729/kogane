@@ -74,7 +74,32 @@ beforeEach(() => {
     return Response.json(jwks);
   });
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  schemaAhead = false;
+});
+
+/**
+ * A deployment whose code is ahead of its CORE schema: the settlement views'
+ * `sqlite_master` check (`cardSettlementsAvailable`) finds nothing, so the
+ * カード照合 routes are not served. Every other statement runs as given.
+ */
+let schemaAhead = false;
+function withoutSettlementViews(db: D1Database): D1Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare")
+        return (sql: string) =>
+          target.prepare(
+            sql.includes("sqlite_master") && sql.includes("card_settlement_reviews")
+              ? "SELECT 0 AS present"
+              : sql,
+          );
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
 
 interface CallOptions {
   method?: string;
@@ -105,6 +130,7 @@ async function call(path: string, options: CallOptions = {}) {
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
   return worker.fetch(new Request(`https://fixture.test${path}`, init), {
     ...env,
+    DB: schemaAhead ? withoutSettlementViews(env.DB) : env.DB,
     ACCESS_ISSUER: issuer,
     ACCESS_AUDIENCE: "fixture-audience",
     ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
@@ -205,6 +231,24 @@ describe("kogane.card-settlements.unmatched", () => {
     });
     expect(overMcp["result"].isError).toBe(false);
     expect(overMcp["result"].structuredContent).toEqual(overRoute);
+  });
+
+  it("is absent, not refused, while the route is not served, on both transports (ADR 0081)", async () => {
+    schemaAhead = true;
+    expect((await call(PATH)).status).toBe(404);
+    const listed = await mcp({ method: "tools/list" });
+    expect(listed["result"].tools.map((tool: { name: string }) => tool.name)).not.toContain(TOOL);
+    expect(
+      readMcpTools(narrow({}), { reportedState: true, cardSettlements: false }).map(
+        (tool) => tool.name,
+      ),
+    ).not.toContain(TOOL);
+    expect((await call(AGENT_PATH, { subject: "synthetic-agent", body: {} })).status).toBe(404);
+    const overMcp = await mcp({
+      method: "tools/call",
+      params: { name: TOOL, arguments: {} },
+    });
+    expect(JSON.stringify(overMcp)).toContain("unknown_tool");
   });
 
   it("is graded by the agent's grant and its strict input, and writes nothing", async () => {

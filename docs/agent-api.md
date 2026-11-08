@@ -154,7 +154,7 @@ implementation each (`src/agent-service.ts`), reachable two ways. The read
 tools of `src/read-tools.ts` (`kogane.instruments.history`,
 `kogane.instruments.coverage`, `kogane.accounts.candidates`,
 `kogane.card-settlements.unmatched`, `kogane.economic-readiness.read`, `kogane.card-settlements.read`, `kogane.card-settlements.ownership`, `kogane.audit.search`, `kogane.audit.get`) are reachable both ways too; the dated reported state's read
-(`kogane.reported-state.read`) is served on the same condition as the eighth, the two card settlement reads while `cardSettlementReconciliation` is, and each is listed only to a grant its service
+(`kogane.reported-state.read`) is served on the same condition as the eighth, the three card settlement reads (`kogane.card-settlements.read`, `.ownership` and `.unmatched`) while `cardSettlementReconciliation` is, and each is listed only to a grant its service
 would answer, which the whole-store grant always is ([below](#instrument-coverage),
 [shared history reads](#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10)). The two
 maintenance tools (`src/schedule-tools.ts`) exist while `SCHEDULES_ENABLED` is
@@ -175,7 +175,7 @@ the other delegated MCP tools are described there too.
 | `kogane.instruments.candidates`        | `POST /api/agent/v1/instruments.candidates`        | `kogane.instruments.candidates`        | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                                                                                                                                                                                                                                          |
 | `kogane.instruments.coverage`          | `POST /api/agent/v1/instruments.coverage`          | `kogane.instruments.coverage`          | `summary.read` on `"*"` sources and accounts; listed only to such a grant ([below](#instrument-coverage))                                                                                                                                                                                                                                                               |
 | `kogane.accounts.candidates`           | `POST /api/agent/v1/accounts.candidates`           | `kogane.accounts.candidates`           | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#account-candidates))                                                                                                                                                                                                                                                                |
-| `kogane.card-settlements.unmatched`    | `POST /api/agent/v1/card-settlements.unmatched`    | `kogane.card-settlements.unmatched`    | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#card-statements-without-a-candidate))                                                                                                                                                                                                                                               |
+| `kogane.card-settlements.unmatched`    | `POST /api/agent/v1/card-settlements.unmatched`    | `kogane.card-settlements.unmatched`    | `records.read` on `"*"` sources and accounts, while `cardSettlementReconciliation` is served; listed only to such a grant ([below](#card-statements-without-a-candidate))                                                                                                                                                                                               |
 | `kogane.economic-readiness.read`       | `POST /api/agent/v1/economic-readiness.read`       | `kogane.economic-readiness.read`       | `records.read` on `"*"` sources and accounts; listed only to such a grant ([ADR 0067](adr/0067-economic-row-readiness.md))                                                                                                                                                                                                                                              |
 | `kogane.card-settlements.read`         | `POST /api/agent/v1/card-settlements.read`         | `kogane.card-settlements.read`         | `records.read` on `"*"` sources and accounts, while `cardSettlementReconciliation` is served; `offset + 50` within `maxRows`; the `カード照合` pages' own read: a page, one statement (`statementKey`), one review (`proposalId`) or its competitors (`relatedTo`) ([card settlements](card-settlements.md#agent-reads), [ADR 0081](adr/0081-ui-parity-through-mcp.md)) |
 | `kogane.card-settlements.ownership`    | `POST /api/agent/v1/card-settlements.ownership`    | `kogane.card-settlements.ownership`    | the same; the page's ownership review of one candidate                                                                                                                                                                                                                                                                                                                  |
@@ -319,9 +319,11 @@ registry entries. Units are never added together, the answer carries
 liabilities mean an asset subtotal is not even a lower bound (addendum 05 §5).
 
 Every row is re-checked against the grant before it is summed, and a subject
-scope reached through two scope pairs is refused with `incomplete_evidence`
-rather than counted twice (INV06). A scope larger than the projection's
-subtotal bound is refused with `budget_exceeded`, never partially summed. An
+scope counted twice in one unit (for example reached through two scope pairs)
+is refused with `incomplete_evidence` rather than counted twice (INV06). A
+subject that holds several units counts once in each unit. A scope larger
+than the projection's subtotal bound is refused with `budget_exceeded`, never
+partially summed. An
 unresolved, conflicting or stale measure inside the scope makes the answer
 `partial` and names the reason code; it never silently disappears from the
 figure.
@@ -522,7 +524,10 @@ for `no_equal_amount_debit`, the ADR 0074 planner's read-only answer
 ([card settlements](card-settlements.md#statements-without-a-candidate)). It
 is the `カード照合` page's own service (`reviewUnmatchedCardStatements`), so an
 agent and the page read one answer. It is listed on `/mcp` only to a grant
-holding `records.read` over the whole store.
+holding `records.read` over the whole store, and it exists exactly while the
+route does: where the settlement views are absent the route and the tool's
+HTTP path are `404` and its MCP name is `unknown_tool`, as for
+`kogane.card-settlements.read`.
 
 Input, a closed object: `offset` (optional, 0 to 100,000). Output:
 `kogane-card-statements-unmatched-v1` with the manifest (the closed codes,
@@ -531,7 +536,9 @@ the planner release, the display policy, the partition and bounds, and
 `nextOffset`. Each item has the statement's ref, source, source account,
 resolved account, total (null when not exact), due date (null when absent),
 period, `code`, `debitsInWindow`, `planner` (null unless asked) and
-`acceptable: false`.
+`acceptable: false`. A planner answer lists at most the first 50 allocations
+(`manifest.planner.bounds.allocations`), with `allocationCount` (all of them)
+and `allocationsTruncated` (true when more exist than are listed).
 
 Authorization: `records.read`, else `403 unauthorized`; sources and accounts
 both `"*"`, else `403 evidence_restricted`; `offset + 50` within `maxRows`,
@@ -682,12 +689,33 @@ detail, never its bytes; the bytes are `kogane.evidence.raw.read`'s.
 `kogane.collection-quality.read` exist where their routes do: while the store
 lacks the reported state's views, `report_artifacts`, or the five scheduling
 and run tables, the tool is neither listed nor callable (`unknown_tool` on
-`/mcp`, `404 not_found` on its HTTP path), like `kogane.reported-state.read`.
+`/mcp`, `404 not_found` on its HTTP path), like `kogane.reported-state.read`;
+so is `kogane.events.read` without `economic_event_revisions`. When the store
+fails while one of these checks runs, the answer is
+`503 catalogue_read_failed`, as on the route: on the HTTP path that
+response, and on `/mcp` the Worker's response to the whole `tools/call` or
+`tools/list` request, with no exception text in the answer, the log or the
+audit record. The same holds for the other tools that exist only with some
+tables or views: `kogane.reported-state.read` and
+`kogane.reconstructed-state.read` (the reported state's views),
+`kogane.purchases.explain` (card purchase recognition), and
+`kogane.card-settlements.read` and `kogane.card-settlements.ownership` (the
+card settlement schema). The page reads' checks run through `catalogue` in
+`pageReadStore`, the others' in `agent-api.ts` (`test/page-read-probe.test.ts`,
+`test/agent-probe.test.ts`). Every store read `tools/list` makes is one of
+these checks, so a store failure there is always `503`. A limit: once a
+tool's check has passed, a store failure inside the tool's own read differs.
+A page read runs its route's reader in `catalogue`, so it is
+`503 catalogue_read_failed` as a tool result (`isError: true` on `/mcp`);
+every other tool, the five above included, answers `500 internal_error` for
+the whole request on both agent paths, where the UI route of the same read
+answers `503 catalogue_read_failed`.
 
 `kogane.reports.read` takes `{ reportId?, view?, offset?, decimalPolicy? }`:
 without `reportId` it is the list (`offset` only), with it the detail
 (`view: "body"`, the default) or the explanation (`view: "explanation"`);
-`view` or `decimalPolicy` without `reportId` is `400 invalid_request`. The
+`view` or `decimalPolicy` without `reportId` is `400 invalid_request`, with
+each one given as a ref. The
 list is the operator's list, so it names restricted reports too. The detail
 and explanation are the operator route's answer with one difference, ADR
 0072's rule for an agent read: a restricted report, or one without a complete
@@ -698,6 +726,11 @@ answers; the operator page re-displays the first and shows the second as
 
 `kogane.collection-quality.read` takes `{ source?, offset? }`: without
 `source` the summary (which takes no `offset`), with it that source's cells.
+Each source and cell carries its freshness under `collection-freshness-v1`,
+counted to the answer's `freshnessAsOf`
+([evidence browser](evidence-browser.md#collection-quality-apicollection-quality)),
+and each summary source with a collector lists its provider's data types
+under `provider-data-types-v1` ([ADR 0087](adr/0087-provider-data-type-catalogue.md)).
 Its cells carry provider fetch-unit keys (card tokens, account digests,
 connection ids, a branch and account number; ADR 0045), so it needs
 `evidence.read`, the capability of the evidence routes, not `records.read`.
@@ -883,16 +916,20 @@ See [the writer contract](schedules.md#the-writers-contract-for-delegated-execut
 `schedules.lease.release`, R3; [ADR 0081](adr/0081-ui-parity-through-mcp.md)
 point 3). The schedules page's 停止した実行を解除 has this tool so that the
 screen operation exists on MCP, but the release stays the operator's: it
-asserts that the execution holding the lease stopped, which the server cannot
-verify ([ADR 0063](adr/0063-delegated-ai-operation-path.md) item 5), and no
+asserts that the execution holding the lease stopped before the server can
+tell from ten minutes of heartbeat silence
+([ADR 0063](adr/0063-delegated-ai-operation-path.md) item 5,
+[ADR 0085](adr/0085-collection-lease-heartbeat.md)), and no
 delegation capability names it. While `SCHEDULES_ENABLED` is on the tool is
 listed to every MCP client, with the arguments the page's route takes
 (`source`, `leaseRef`, `confirmedStopped: true`), and every call answers `403 operation_not_delegable`,
 whatever its arguments, grant or delegation. The call reads no store and is
 not relayed to the Processor; it is recorded once as `refused` on `mcp` at R3.
 It has no `/api/agent/v1` route, and a browser session on `/mcp` is not offered
-it. A lease that will not clear is released by the operator on the schedules
-page ([schedules](schedules.md#settings-api)).
+it. A lease whose holder went silent is freed by the Processor's
+`processor-tick` alarm once its heartbeat is ten minutes old; one that should
+not wait for that is released by the operator on the schedules page
+([schedules](schedules.md#settings-api)).
 
 **Re-survey proposals** (`kogane.schedules.survey.read`, operation
 `schedules.survey.read`, R0; `kogane.schedules.survey.decide`, operation
@@ -930,6 +967,51 @@ Refusals are closed codes:
 - `confirmation_required`, `confirmation_invalid`, `confirmation_expired`: a confirm without its digest, with one prepared for another payload, or after ten minutes.
 - `idempotency_conflict`: the key was used for another payload.
 - `operation_not_delegable`: an acceptance of a proposal with `rule_absent_from_page`, `rule_disabled_by_operator`, `ambiguous_rule_match`, `cancellation_stated` or `contradictory_windows`, or one that, against the source's rules at prepare or confirm, would disable a rule, re-enable a disabled one, or equal or overlap another enabled rule. It is recorded at R3 and stays with the operator on the schedules page; rejecting such a proposal is allowed.
+
+### Change lifecycle decisions
+
+The confirmation page's operations (`POST /api/command/v1/{plan,simulate,approve,commit,operation}`,
+catalogue `command.*`) are on `/mcp` as five tools, listed to every MCP client
+while `COMMANDS_ENABLED` is on and a Processor binding exists
+(`src/delegated-command-tools.ts`, `src/delegated-decision-tools.ts`). Both
+paths forward to the Processor's one command route, which runs
+`createPlan`, `simulate`, `approve` and `commit` in `packages/application`; the
+App writes no plan, approval, receipt or decision itself.
+
+| Tool                           | Risk | Input                                                                                                                                                      |
+| ------------------------------ | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kogane.command.plan`          | R1   | `kind` (a `CHANGE_KINDS` value), `payload` (the page's payload for that kind), optional `baseContextId`, `idempotencyKey`                                  |
+| `kogane.command.simulate`      | R0   | `planId`                                                                                                                                                   |
+| `kogane.command.operation.get` | R0   | `operationId`: the caller's own receipt                                                                                                                    |
+| `kogane.command.approve`       | R2   | `planId`, `planDigest`, `scope`, `idempotencyKey`, `step` (`prepare`, then `confirm` with `confirmationDigest`)                                            |
+| `kogane.command.commit`        | R2   | `planId`, `approvalId` (the caller's own approval), `operationId`, optional `revertsAuditId`, `step` (`prepare`, then `confirm` with `confirmationDigest`) |
+
+An MCP client plans, approves and commits as itself (`mcp-client:<sub>`,
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)): the same
+principal must approve and commit, and the receipt names it. Approve and
+commit decide only the `identity`, `relation` and `card-settlement` kinds; any
+other kind is refused `operation_not_delegable`, and the Processor refuses to
+plan it for an MCP client with `unsupported_semantics`. Those are the kinds
+whose planners exist: the card purchase review and economic-event kinds are
+refused `unsupported_semantics` for every caller. A `prepare` checks the plan
+(open, not expired, digest unchanged, simulation not stale) and the approval,
+and returns a `cfm_` digest; it writes no approval and no decision. A
+`confirm` with that digest within ten minutes applies it, and a repeated
+confirm replays the result. A refusal from the lifecycle is the same code on
+both paths (`stale_context` with the candidate's ref, `plan_not_found`, …).
+
+This is how the カード照合 decisions work over MCP (Phase 2 unit 2g.2,
+[ADR 0081](adr/0081-ui-parity-through-mcp.md)): `card-settlement.accept`,
+`card-settlement.withdraw` and `card-settlement.reject` with
+`{"proposalId", "reason"}`, and the ownership review's `relation.accept` or
+`relation.reject` with the payload the card-ownership page builds from
+`kogane.card-settlements.ownership`
+([card settlements](card-settlements.md#candidate-and-decision-lifecycle)).
+[`services/app/test/card-settlement-decisions-parity.test.ts`](../services/app/test/card-settlement-decisions-parity.test.ts)
+runs each of them on both paths over the real App Worker and the Processor's
+command route, and compares the receipts and refusals. Guard 3 of the
+[parity guards](#ui-and-mcp-parity-guards-adr-0081-2026-11-07) fails when a
+kind becomes plannable that these tools do not decide.
 
 ## Contexts, cursors and hand-off
 
@@ -1165,7 +1247,9 @@ are unchanged.
 | no token, expired token, person not in the MCP application's policy                                                                                               | Cloudflare Access                           | Access's own `401` (Managed OAuth) — not this Worker                                                                                              |
 | assertion missing, forged, expired, from another issuer, not for the MCP application (the browser's, both, another), without `sub`, or with an agent-only subject | Worker                                      | `401 authentication_required`                                                                                                                     |
 | Access keys unreachable; `ACCESS_MCP_AUDIENCE` misconfigured                                                                                                      | Worker                                      | `503 identity_keys_unavailable` / `503 auth_not_configured`                                                                                       |
-| an unexpected failure inside a tool or the tool list (the store, a bug)                                                                                           | Worker                                      | `500 internal_error`; the exception text never reaches the client or the log                                                                      |
+| an unexpected failure inside a tool (the store outside a page read, a bug) or the tool list (a bug)                                                               | Worker                                      | `500 internal_error`; the exception text never reaches the client or the log                                                                      |
+| a store failure while a tool or the tool list checks that a read's tables or views exist (the page reads, card purchases, card settlements, the reported state)   | Worker                                      | `503 catalogue_read_failed`, as its route answers; the exception text never reaches the client or the log                                         |
+| a store failure inside a page read's own read                                                                                                                     | tool                                        | `isError: true`, `{"error":"catalogue_read_failed"}`, as its route answers                                                                        |
 | `Origin` of another site                                                                                                                                          | Worker                                      | `403 origin_not_allowed`                                                                                                                          |
 | `GET` / `DELETE`; a query string                                                                                                                                  | Worker                                      | `405 method_not_allowed` / `400 invalid_query`                                                                                                    |
 | media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                                         | `415` / `406` / `400` / `400` / `413`                                                                                                             |
@@ -1206,15 +1290,16 @@ Codex and Claude Code rows need loopback on the Portal application before use.
 
 ### Owner hand-off, in order
 
-This is the current activation recipe for the approved read grant. The
+This is the current activation recipe for the MCP client. The
 initial empty-audience/empty-grant staging and one-source summary-only grant
 in ADR 0047 are historical; the activation amendment replaces those initial
 values. These steps do not assert that production or any client has passed.
 
 1. _Code and local checks_ — review the activation configuration and run
    the [local checks](#local-checks-before-any-production-change) on the
-   exact commit to be deployed. It enables MCP reads after deployment; it
-   does not keep an empty grant.
+   exact commit to be deployed. Nothing in it configures a grant: once
+   deployed, a non-empty `ACCESS_MCP_AUDIENCE` alone opens `/mcp`, with the
+   whole-store grant, to whoever the MCP application admits.
 2. _Access configuration readback_ — confirm the dedicated self-hosted MCP
    Access application covers `kogane-mcp.takuk.me`, has its own audience,
    the approved owner identity and approved posture requirements. The
@@ -1243,10 +1328,10 @@ values. These steps do not assert that production or any client has passed.
 4. _Normal deployment and domain attachment_ — deploy the reviewed commit
    through the ordinary pipeline and verify the live App bindings agree
    with both production configs: the dedicated `ACCESS_MCP_AUDIENCE` is
-   distinct from `ACCESS_AUDIENCE`; exactly `mcp-client:<owner-sub>` has
-   `summary.read` and `records.read`, sources/accounts `"*"`, and budgets
-   `maxRows: 100`, `maxProposalTargets: 3`, `maxExplainDepth: 3`.
-   `AGENT_GRANTS` stays empty. The App's version
+   distinct from `ACCESS_AUDIENCE`. No table grants the MCP client any
+   more (ADR 0084): every `mcp-client:<sub>` the MCP application admits holds
+   the whole-store grant ([Grants](#grants)), so there is no grant binding to
+   verify. The App's version
    publication does not synchronize triggers: attach the approved custom
    domain once through the Cloudflare API and verify its destination is
    `kogane-evidence-browser`. A domain declaration is not that attachment.
@@ -1265,9 +1350,11 @@ values. These steps do not assert that production or any client has passed.
 7. _Fresh-session calls_ — in each intended client, start a new conversation
    with only this connector enabled and perform these existing tool calls:
    - `kogane.capabilities` with `{}`: the result must report
-     `principal: "mcp-client:<owner-sub>"`, exactly `summary.read` and
-     `records.read`, whole-store source/account scope and the configured
-     100-row read budget. The bare owner subject is not an alternative identity.
+     `principal: "mcp-client:<owner-sub>"`, every capability of the
+     whole-store grant ([Grants](#grants)), `"*"` for sources, accounts and
+     schedule sources, and the published bounds (`maxRows` 1000,
+     `maxProposalTargets` 50, `maxExplainDepth` 8). The bare owner subject is
+     not an alternative identity.
    - On the first page (no cursor), `kogane.financial.query` with
      `{"intent":"coverage","limit":50}` and with
      `{"intent":"activity","limit":50}`: both must return
@@ -1275,39 +1362,19 @@ values. These steps do not assert that production or any client has passed.
      refusal. Preserve their actual completeness and gap reasons; a missing
      projection or empty data is not proof of a complete financial result.
      `maxRows` is a read budget, not a returned-page size: the shared query
-     requires `offset + limit + 1 <= maxRows` for lookahead. On the first page,
-     99 is the largest allowed limit; an omitted limit defaults to 100 and is
-     refused under this grant. Later cursors consume the same budget.
-   - The same activity query with `limit: 101`: expect a tool error with
-     `code: "budget_exceeded"`, not silent truncation or a widened grant.
-   - Raw evidence remains ungranted: `kogane.explain` on an observation ref
-     returned by a structured read must list `evidence.read` as restricted
-     and expose no raw-locator node. If no observation ref is available,
-     record this check as not checked; do not invent a production locator.
-   - `kogane.reconcile.propose` must receive a schema- and budget-valid
-     negative probe: distinct `from`/`to` and exactly one `evidenceRefs`
-     entry, so two targets plus one evidence ref fit `maxProposalTargets: 3`.
-     This synthetic shape matches the existing parser and names no financial
-     account:
-
-     ```json
-     {
-       "kind": "same_account",
-       "from": "source_account:synthetic-from",
-       "to": "source_account:synthetic-to",
-       "evidenceRefs": ["fetch_artifact:1"],
-       "reason": "synthetic denied capability probe",
-       "method": "ai"
-     }
-     ```
-
-     Expect `code: "unauthorized"` and
-     `capability:interpretation.propose`; the capability refusal occurs before
-     target/evidence resolution. Two evidence refs would instead exceed the
-     parser's target budget and would not test that capability gate.
-     Operator/write tools remain unpublished; attempts cannot approve,
-     commit, change settings or trigger collection. Use only the existing
-     tool schemas and record refusals without copying financial values.
+     requires `offset + limit + 1 <= maxRows` for lookahead, so on the first
+     page 999 is the largest allowed limit.
+   - The same activity query with `limit: 1000`: expect a tool error with
+     `code: "budget_exceeded"`, not silent truncation. A `limit` above 1000
+     is `invalid_query` before the store is read.
+   - The whole-store grant holds `evidence.read` and
+     `interpretation.propose`, so `kogane.explain` may show raw-locator nodes
+     and `kogane.reconcile.propose` records a proposal: neither is a refusal
+     probe any more, and no proposal is sent as an activation check.
+     The operation tools are published and apply as the client itself
+     (ADR 0084, [ops-api](ops-api.md#mcp)); none is called as an activation
+     check. Use only the existing tool schemas and record refusals without
+     copying financial values.
      There is no source outside this grant: all sources and accounts are in
      scope, so an outside-source refusal is not this activation's acceptance
      test. Corroborate the session with the MCP application's Access logs and
@@ -1319,13 +1386,13 @@ values. These steps do not assert that production or any client has passed.
 8. _Refresh and subsequent session_ — verify the actual OAuth refresh under
    the approved posture policy and repeat a read in a fresh client session.
    Record registration, login, initial tool call and refresh separately.
-   Proposals, raw evidence and delegated writes require separate reviewed
-   grants/implementation; this activation grants none of them.
+   The whole-store grant includes proposals, raw-evidence identifiers and
+   the operations of ADR 0063 (ADR 0084); no step above exercises them.
 
 Revocation, fastest first: remove the owner from the MCP application's policy
 (Access refuses at the next refresh, at most one access-token lifetime
-later); unset `ACCESS_MCP_AUDIENCE` or remove the grant entry and deploy
-(`401` or `403` at the Worker); disconnect the client.
+later); unset `ACCESS_MCP_AUDIENCE` and deploy (`401` at the Worker);
+disconnect the client.
 
 ### Gaps, with the evidence and the owner's question
 
@@ -1354,8 +1421,9 @@ later); unset `ACCESS_MCP_AUDIENCE` or remove the grant entry and deploy
   OAuth requests and refresh under that policy remain live checks. Since
   2026-11-07 07:10 UTC the policy has no posture requirement (step 2).
 - **Plans.** ChatGPT developer mode is documented for paid plans on the web,
-  with conflicting statements about write actions on personal plans; the
-  configured grant here is read-only. Verify registration and actual reads
+  with conflicting statements about write actions on personal plans; an MCP
+  client here also writes (proposals and the operations of ADR 0063, ADR
+  0084). Verify registration and actual reads
   on the owner's intended plan; do not infer connection support from a plan name.
 - **Tool names with dots.** Allowed by the 2025-11-25 naming guidance;
   whether claude.ai and ChatGPT accept them is seen at step 7.
@@ -1442,8 +1510,10 @@ the closed request, and that no path moves a table, the change counter or the
 source revision. `services/app/test/purchases-explain.test.ts` repeats it over
 the real Worker: the same page as the query and as the operator route, one
 object over HTTP and MCP with provider text only under `data`, 401 before any
-grant and 403 for the operator without an agent grant (neither preparing a
-statement), each grant and `maxRows` refusal preparing only the schema check,
+grant (preparing no statement), the operator and any other proved subject
+both served since every proved caller holds the whole-store grant (ADR 0084),
+a subject in `AGENT_GRANTS` refused the operator's route, the `maxRows` refusal preparing
+only the schema check,
 404 and `unknown_tool` when CORE 0047 is absent while
 `kogane.capabilities` reports `cardPurchaseRecognition: false`, a retired
 `EVENTS_V2_ENABLED` value that does not hide the tool, the refusal
@@ -1464,17 +1534,16 @@ including approve and commit, card settlements and purchases, operations and
 health, browser reads, the shared query, raw evidence, the HTTP agent routes,
 assets) and `/mcp` refusing the browser audience, both audiences, another
 audience or issuer, an expired or forged assertion, service tokens and
-spoofed headers; the grant failing closed (absent, empty, unparsable,
-mis-shaped, out-of-vocabulary, only the bare subject's, another person's);
-source, account and budget limits on reads and proposals; the whole answer
-of every tool naming no denied source or account, the context's source
-selection being exactly the granted source, and a denied source's new
-publication leaving a scoped context identical; a server-derived proposal
+spoofed headers; the same tools and the whole-store capabilities whatever a
+leftover `AGENT_API_GRANTS` value says (ADR 0084); the whole-store grant
+reaching a raw locator, and a proposal beyond the published target bound
+refused without a write; a server-derived proposal
 actor that a body or header cannot change, and adopted answers identical
-before and after a proposal; unpublished tools; an internal failure inside
-a tool or the tool list answered `500 internal_error` in both eras with no
-exception text in the answer or the log; the connection in both eras; the SDK's transport refusals; tool definitions against SEP-986 and
-Claude Code's load-time checks; each single capability; and the UI's
+before and after a proposal; unpublished tools; a store failure inside
+a tool answered `500 internal_error`, and inside the tool list (whose store
+reads are the availability checks) `503 catalogue_read_failed`, in both eras
+with no exception text in the answer or the log; the connection in both eras; the SDK's transport refusals; tool definitions against SEP-986 and
+Claude Code's load-time checks; and the UI's
 `GET /api/v2/query`, `POST /api/agent/v1/financial.query` and MCP in both
 eras returning deep-equal objects with the same gap reasons.
 `test/mcp-sdk-client.test.ts` drives `/mcp` with the official
@@ -1570,7 +1639,12 @@ the reviewed S3/R2/jobs slices and #564's native writer. It was integrated
 against main `c0c4088a`; #652's temporal refusal and #643's release guard are
 preserved. The [integration plan](plans/2026-10-mcp-maintenance-followups.md)
 records the publication and activation boundaries. No grant or deployment is
-implied by this implementation.
+implied by this implementation. Since
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+(2026-11-07) "the delegation" below is any MCP client acting as itself over
+every schedule source, with the fixed 200-write rolling-day budget; the
+mentions of `MCP_DELEGATIONS` and the financial-reader grant describe the
+state before it.
 
 The closed MCP payload accepts `apply`, `prepare` and `confirm` plus an
 idempotency key. R1 apply keeps the seven-day joined-deferral bound. R2
@@ -1613,16 +1687,20 @@ The tests use synthetic local D1 data and synthetic Access keys. They cover
 signed MCP entry, revocation and scope-before-replay, both hard bounds,
 prepare/effect linkage, shared daily budget, rollback, exact retries,
 concurrent joined windows and losing-provenance writes. Production migration
-state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
-the committed MCP financial-reader grant receives no schedule authority.
+state and real-client use were not checked. `MCP_DELEGATIONS` stayed empty
+then, and the committed MCP financial-reader grant received no schedule
+authority; [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+(2026-11-07) removed both, and every MCP client now reads and revises
+maintenance windows over every schedule source, as itself.
 S6 survey acceptance remained unavailable pending the separate owner decision
 (delegated survey decisions since 2026-11-07: [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07));
 no survey grammar, grants, Access, authentication or deployment is changed.
 
 ## The MCP client's operation authority (ADR 0084, 2026-11-07)
 
-Status: proposed until its pull request merges
-([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
+Status: accepted (merged 2026-11-07 in
+[#1034](https://github.com/risu729/kogane/pull/1034);
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
 
 There is no delegation declaration and no grant table. `resolveDelegation`
 (`packages/application/src/delegation/resolve.ts`) takes only the verified
@@ -1662,8 +1740,8 @@ and confirm pages) is removed with the table it showed.
 It compares the UI against the tools `tools/list` publishes to an MCP client,
 which since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
 holds every agent capability and every operation over the whole store, with `COMMANDS_ENABLED`, `OPS_API_ENABLED`
-and `SCHEDULES_ENABLED` on and a Processor binding. It has two guards, each
-with an allow-list of the gaps known when it landed. The allow-lists in the
+and `SCHEDULES_ENABLED` on and a Processor binding. Guards 1 and 2 each have
+an allow-list of the gaps known when they landed. The allow-lists in the
 test are authoritative; the tables below are the state on 2026-11-07 at main `12a6f82`. A fixed
 gap must leave its list in the same PR (the test fails on a listed gap that is
 no longer one), and a new entry is a regression of ADR 0081 that needs the
@@ -1736,6 +1814,16 @@ owner's agreement.
    | ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
    | Card settlements | `…/card-settlements/statements` (grouped by statement; `kogane.card-settlements.read` returns the same candidates ungrouped) |
    | Report export    | `/api/v2/reports/:id/export` (not served over MCP, [ADR 0072](adr/0072-report-artifact-pages.md) amendment)                  |
+
+3. **Change kinds.** Guard 1 sees the change lifecycle as five `command.*`
+   operations, whatever kind a page plans. So the test also takes every
+   `CHANGE_KINDS` value whose planner exists (all but the card purchase review
+   and economic-event kinds today). It fails when the published
+   `kogane.command.plan` schema does not accept one of them, or when
+   `kogane.command.approve` and `kogane.command.commit` do not decide its
+   family ([change lifecycle decisions](#change-lifecycle-decisions)).
+   Registering a card purchase review planner without an MCP decision path
+   therefore fails here.
 
 ADR 0081 point 2 (no SQL in an MCP adapter) has its own guard,
 [`tests/mcp-tools-no-sql.test.ts`](../tests/mcp-tools-no-sql.test.ts).

@@ -139,6 +139,10 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
       "compared with the two lease stop codes, otherwise passed to safeFailureCode, which " +
       "admits only the closed failure codes",
   },
+  "services/collector-st-george/src/worker-policy.ts": {
+    count: 1,
+    reason: "compared with the lease refusal code only; the message is never logged or returned",
+  },
   "services/collector-vpoint-pay/src/state.ts": {
     count: 1,
     reason:

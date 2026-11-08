@@ -123,8 +123,8 @@ carries its closed reason as `reason_code`: `operator-edit` for the operator's
 edit, `maintenance-survey-proposal-accepted` for an accepted proposal.
 `schedules.maintenance.read` (R0) is one `read` record on whichever agent path
 served it. `schedules.maintenance.update` exists on `mcp` as well as on `ui`;
-there it is graded by the caller's resolved MCP authority (the operator's own
-MCP principal, [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), not its grant. A caller that does not
+there it is graded by the caller's resolved MCP authority (any MCP client,
+as itself, [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), not its grant. A caller that does not
 resolve one gets one `refused` record (`failed` for
 `503 delegation_misconfigured`) with the delegation's or the schema's code,
 `principal_kind` `agent` and no `delegation_ref`, and nothing is relayed to
@@ -163,11 +163,11 @@ These records have no subject; the principal is the Processor's own, kind
 `automatic`, and the builder admits only `applied`, `accepted` and `failed`
 on these paths, so none of them is capped.
 
-| Path    | Written when                                                                                                         | Operation, class                                                                               | Principal                              | What it names                                                                                                                                                                                                                 |
-| ------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `alarm` | `ScheduleAlarm` claims an occurrence of a `collection`-kind job (`src/schedule-alarm.ts`)                            | `alarm.occurrence.claim`, R2, `accepted`                                                       | `alarm:<job id>`                       | target `schedule:<job id>`, scope the job's schedule source, refs `occurrence:<occurrence id>` and `schedule:<job id>@<revision>`, diff `none`; the dispatch outcome stays in the occurrence row                              |
-| `alarm` | the `processor-tick` alarm frees a collection lease whose holder went silent (`expireStaleLeases`, ADR 0085)         | `alarm.lease.expire`, R2, `applied`                                                            | `alarm:processor-tick`                 | target `collection-lease:<source>`, scope that source, diff `{"kind":"release","released":true}`; written only when the release changed the row (`changes()=1`) and the source is unlocked                                    |
-| `lane`  | a tick of `reconciliation_sweep`, `card_settlement_sweep`, `purchase_recognition` or `maintenance_survey` wrote rows | `lane.tick`, R2 with a rule decision or commit, R1 with proposals only; `applied`, or `failed` | `lane:<lane>`, hyphens for underscores | refs `decision-revisions:<a>-<b>`, `commit-seq:<epoch>:<a>-<b>`, `proposals:<kind>:<a>-<b>` per closed kind; diff `{"kind":"lane","decisionRevisions":…,"commits":…,"proposals":[{"kind":…,"count":…}]}`; no target, no scope |
+| Path    | Written when                                                                                                                                     | Operation, class                                                                               | Principal                              | What it names                                                                                                                                                                                                                 |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `alarm` | `ScheduleAlarm` claims an occurrence of a `collection`-kind job (`src/schedule-alarm.ts`)                                                        | `alarm.occurrence.claim`, R2, `accepted`                                                       | `alarm:<job id>`                       | target `schedule:<job id>`, scope the job's schedule source, refs `occurrence:<occurrence id>` and `schedule:<job id>@<revision>`, diff `none`; the dispatch outcome stays in the occurrence row                              |
+| `alarm` | the `processor-tick` alarm frees a collection lease whose holder went silent (`expireStaleLeases`, ADR 0085)                                     | `alarm.lease.expire`, R2, `applied`                                                            | `alarm:processor-tick`                 | target `collection-lease:<source>`, scope that source, diff `{"kind":"release","released":true}`; written only when the release changed the row (`changes()=1`) and the source is unlocked                                    |
+| `lane`  | a tick of `instrument_auto_adoption`, `reconciliation_sweep`, `card_settlement_sweep`, `purchase_recognition` or `maintenance_survey` wrote rows | `lane.tick`, R2 with a rule decision or commit, R1 with proposals only; `applied`, or `failed` | `lane:<lane>`, hyphens for underscores | refs `decision-revisions:<a>-<b>`, `commit-seq:<epoch>:<a>-<b>`, `proposals:<kind>:<a>-<b>` per closed kind; diff `{"kind":"lane","decisionRevisions":…,"commits":…,"proposals":[{"kind":…,"count":…}]}`; no target, no scope |
 
 **The alarm record** is the last statement of the claim's own batch, joined
 to the occurrence row that batch inserted (id, `started_at`, `started`) and
@@ -187,12 +187,13 @@ epoch), `reconciliation_proposals`, `card_settlement_candidates` and
 each part a seek on the table's key — and, after it, the lane's own rows above
 the mark:
 
-| Lane                    | Its own rows                                                                                                                                                                    |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reconciliation_sweep`  | rule decisions of `rule:reconciliation-v1` (the automatic acceptance of a provider-linked pair); `reconciliation_proposals` of method `rule`                                    |
-| `card_settlement_sweep` | `card_settlement_candidates`                                                                                                                                                    |
-| `purchase_recognition`  | rule decisions of `rule:card-purchase-recognition-v1`, the commit rows of that principal (ADR 0054); `reconciliation_proposals` of method `rule` (pending-to-posted candidates) |
-| `maintenance_survey`    | `maintenance_survey_proposals`                                                                                                                                                  |
+| Lane                       | Its own rows                                                                                                                                                                                                                |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `instrument_auto_adoption` | rule decisions of `rule:instrument-auto-v1` (an SBI bare domestic code adopted onto its listing, [ADR 0055](adr/0055-instrument-candidates.md#amendment-2026-11-08-adopt-sbis-bare-domestic-code-onto-its-listing-by-rule)) |
+| `reconciliation_sweep`     | rule decisions of `rule:reconciliation-v1` (the automatic acceptance of a provider-linked pair); `reconciliation_proposals` of method `rule`                                                                                |
+| `card_settlement_sweep`    | `card_settlement_candidates`                                                                                                                                                                                                |
+| `purchase_recognition`     | rule decisions of `rule:card-purchase-recognition-v1`, the commit rows of that principal (ADR 0054); `reconciliation_proposals` of method `rule` (pending-to-posted candidates)                                             |
+| `maintenance_survey`       | `maintenance_survey_proposals`                                                                                                                                                                                              |
 
 Each reference is an inclusive range of positions — the rowid of the
 TEXT-keyed tables, the commit sequence, the survey proposal's integer key —
@@ -487,8 +488,11 @@ The tests use synthetic local D1 data and synthetic Access keys. They cover
 signed MCP entry, revocation and scope-before-replay, both hard bounds,
 prepare/effect linkage, shared daily budget, rollback, exact retries,
 concurrent joined windows and losing-provenance writes. Production migration
-state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
-the committed MCP financial-reader grant receives no schedule authority.
+state and real-client use were not checked. `MCP_DELEGATIONS` stayed empty
+then, and the committed MCP financial-reader grant received no schedule
+authority; [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+(2026-11-07) removed both, and every MCP client now reads and revises
+maintenance windows over every schedule source, as itself.
 S6 survey acceptance remained unavailable pending the separate owner decision
 (delegated survey decisions since 2026-11-07: [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07));
 no survey grammar, grants, Access, authentication or deployment is changed.

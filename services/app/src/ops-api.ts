@@ -49,9 +49,10 @@ import {
   type OperationName,
 } from "../../../packages/application/src/index";
 import { RUN_ID as TERMINAL_RUN_ID } from "../../../packages/collection/src/keys";
+import { d1Executor, type SqlExecutor } from "../../../packages/read-model/src/index";
 import { auditContext, auditedRoute } from "./audit";
 import { principalFor } from "./grants";
-import { boundedText, HttpError, json } from "./http";
+import { assertOwnOrigin, boundedText, HttpError, json } from "./http";
 
 export const OPS_PREFIX = "/api/ops/v1";
 /** Largest request body any operations route reads, in bytes. */
@@ -234,12 +235,23 @@ export function opsContext(env: Env, subject: string, audit?: OperationCall): Op
     throw new HttpError(403, "approval_required");
   return {
     store: d1CommandStore(env.DB),
+    readStore: opsReadStore(env),
     principal,
     ...(audit ? { audit } : {}),
     now: new Date().toISOString().replace(/\.\d{3}Z$/u, "Z"),
     nowMs: Date.now(),
     policy: sessionRefreshPolicy(env.SESSION_REFRESH_POLICY),
   };
+}
+
+/**
+ * The READ database, read only, for the `projected` stage of an operation
+ * record; null when this deployment binds none (the record then says
+ * `read_model_unavailable`). Both transports build their context here.
+ */
+export function opsReadStore(env: Env): SqlExecutor | null {
+  const read = (env as unknown as { READ?: D1Database }).READ;
+  return read ? d1Executor(read) : null;
 }
 
 interface OpsResponse {
@@ -418,6 +430,7 @@ export async function opsApi(
   const operation = opsOperation(request.method, url.pathname);
   if (operation === null) {
     if (url.search) throw new HttpError(400, "invalid_query");
+    if (request.method === "POST") assertOwnOrigin(request, url);
     return app.fetch(request, { ...env, VERIFIED_SUBJECT: subject });
   }
   // One audit record per operations request (ADR 0064, path `ui`): the
@@ -425,6 +438,9 @@ export async function opsApi(
   // answer — a re-send, a read, a refusal — is recorded after it.
   return auditedRoute(auditContext(request, env, "ui", subject), operation, async (call) => {
     if (url.search) throw new HttpError(400, "invalid_query");
+    // A page on another site never reaches the grant, the schema or the
+    // store (ADR 0078); the refusal is recorded like any other.
+    if (request.method === "POST") assertOwnOrigin(request, url);
     const audit: OpsAudit = { call, quiet: { result: "skip" } };
     const response = await app.fetch(request, { ...env, VERIFIED_SUBJECT: subject, AUDIT: audit });
     return { response, outcome: audit.quiet };
