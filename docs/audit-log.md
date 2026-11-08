@@ -122,8 +122,8 @@ carries its closed reason as `reason_code`: `operator-edit` for the operator's
 edit, `maintenance-survey-proposal-accepted` for an accepted proposal.
 `schedules.maintenance.read` (R0) is one `read` record on whichever agent path
 served it. `schedules.maintenance.update` exists on `mcp` as well as on `ui`;
-there it is graded by the caller's resolved MCP authority (the operator's own
-MCP principal, [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), not its grant. A caller that does not
+there it is graded by the caller's resolved MCP authority (any MCP client,
+as itself, [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), not its grant. A caller that does not
 resolve one gets one `refused` record (`failed` for
 `503 delegation_misconfigured`) with the delegation's or the schema's code,
 `principal_kind` `agent` and no `delegation_ref`, and nothing is relayed to
@@ -485,8 +485,11 @@ The tests use synthetic local D1 data and synthetic Access keys. They cover
 signed MCP entry, revocation and scope-before-replay, both hard bounds,
 prepare/effect linkage, shared daily budget, rollback, exact retries,
 concurrent joined windows and losing-provenance writes. Production migration
-state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
-the committed MCP financial-reader grant receives no schedule authority.
+state and real-client use were not checked. `MCP_DELEGATIONS` stayed empty
+then, and the committed MCP financial-reader grant received no schedule
+authority; [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+(2026-11-07) removed both, and every MCP client now reads and revises
+maintenance windows over every schedule source, as itself.
 S6 survey acceptance remained unavailable pending the separate owner decision
 (delegated survey decisions since 2026-11-07: [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07));
 no survey grammar, grants, Access, authentication or deployment is changed.

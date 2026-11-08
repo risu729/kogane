@@ -21,21 +21,20 @@ The operations API ([ops-api.md](ops-api.md)) is not served over `/mcp`:
 change lifecycle's operator capability, which no capability in the table
 below reaches.
 
-**The committed production configuration enables one MCP reader.**
-The owner's dedicated `mcp-client:<sub>` entry grants `summary.read` and
-`records.read` across sources and accounts, with a 100-row read budget
-including cursor offset and pagination lookahead.
-`AGENT_GRANTS` remains empty: this configuration grants no proposals or raw
-evidence. Because the owner's subject is the operator (`OPERATOR_SUBJECTS`),
-its MCP principal also applies the operations of ADR 0063 inside that
-whole-store scope, as itself
-([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)). The MCP audience is
+**No table grants an MCP client
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).** Every
+`mcp-client:<sub>` the MCP Access application admits holds the whole-store
+grant ([Grants](#grants)): every capability below, including proposals, raw
+evidence and maintenance windows, over every source, account and schedule
+source, within the published per-call bounds. It also applies the operations
+of ADR 0063 this deployment installs, over the whole store, as itself and never
+as the operator, whether
+or not its subject is in `OPERATOR_SUBJECTS`. The MCP audience is
 separate from the browser audience. The dedicated `kogane-mcp.takuk.me`
 hostname must be attached to the App Worker independently, because the
 current version deployment does not synchronize App triggers. Configuration
 and deployment are not evidence that a client connected; the ordered live
 checks in [Connecting an MCP client](#connecting-an-mcp-client) still apply.
-That entry names no schedule capability, so it reads no maintenance window.
 Maintenance windows can be read under their own capability (`schedules.read`);
 revising one, like a job setting, is an operation any MCP client the MCP
 Access application admits applies as itself, over every schedule
@@ -678,7 +677,16 @@ detail, never its bytes; the bytes are `kogane.evidence.raw.read`'s.
 `kogane.collection-quality.read` exist where their routes do: while the store
 lacks the reported state's views, `report_artifacts`, or the five scheduling
 and run tables, the tool is neither listed nor callable (`unknown_tool` on
-`/mcp`, `404 not_found` on its HTTP path), like `kogane.reported-state.read`.
+`/mcp`, `404 not_found` on its HTTP path), like `kogane.reported-state.read`;
+so is `kogane.events.read` without `economic_event_revisions`. When the store
+fails while one of these checks runs, the answer is
+`503 catalogue_read_failed`, as on the route (`pageReadStore`): on the HTTP
+path that response, and on `/mcp` the Worker's response to the whole
+`tools/call` or `tools/list` request, with no exception text
+(`test/page-read-probe.test.ts`). A limit: `tools/list` asks the reported
+state's views for `kogane.reported-state.read` and
+`kogane.reconstructed-state.read` before the page reads, and a failure there
+is still `500 internal_error`.
 
 `kogane.reports.read` takes `{ reportId?, view?, offset?, decimalPolicy? }`:
 without `reportId` it is the list (`offset` only), with it the detail
@@ -1188,15 +1196,16 @@ runbook.
 
 ### Owner hand-off, in order
 
-This is the current activation recipe for the approved read grant. The
+This is the current activation recipe for the MCP client. The
 initial empty-audience/empty-grant staging and one-source summary-only grant
 in ADR 0047 are historical; the activation amendment replaces those initial
 values. These steps do not assert that production or any client has passed.
 
 1. _Code and local checks_ — review the activation configuration and run
    the [local checks](#local-checks-before-any-production-change) on the
-   exact commit to be deployed. It enables MCP reads after deployment; it
-   does not keep an empty grant.
+   exact commit to be deployed. Nothing in it configures a grant: once
+   deployed, a non-empty `ACCESS_MCP_AUDIENCE` alone opens `/mcp`, with the
+   whole-store grant, to whoever the MCP application admits.
 2. _Access configuration readback_ — confirm the dedicated self-hosted MCP
    Access application covers `kogane-mcp.takuk.me`, has its own audience,
    the approved owner identity and approved posture requirements. The
@@ -1214,10 +1223,10 @@ values. These steps do not assert that production or any client has passed.
 4. _Normal deployment and domain attachment_ — deploy the reviewed commit
    through the ordinary pipeline and verify the live App bindings agree
    with both production configs: the dedicated `ACCESS_MCP_AUDIENCE` is
-   distinct from `ACCESS_AUDIENCE`; exactly `mcp-client:<owner-sub>` has
-   `summary.read` and `records.read`, sources/accounts `"*"`, and budgets
-   `maxRows: 100`, `maxProposalTargets: 3`, `maxExplainDepth: 3`.
-   `AGENT_GRANTS` stays empty. The App's version
+   distinct from `ACCESS_AUDIENCE`. No table grants the MCP client any
+   more (ADR 0084): every `mcp-client:<sub>` the MCP application admits holds
+   the whole-store grant ([Grants](#grants)), so there is no grant binding to
+   verify. The App's version
    publication does not synchronize triggers: attach the approved custom
    domain once through the Cloudflare API and verify its destination is
    `kogane-evidence-browser`. A domain declaration is not that attachment.
@@ -1235,9 +1244,11 @@ values. These steps do not assert that production or any client has passed.
 7. _Fresh-session calls_ — in each intended client, start a new conversation
    with only this connector enabled and perform these existing tool calls:
    - `kogane.capabilities` with `{}`: the result must report
-     `principal: "mcp-client:<owner-sub>"`, exactly `summary.read` and
-     `records.read`, whole-store source/account scope and the configured
-     100-row read budget. The bare owner subject is not an alternative identity.
+     `principal: "mcp-client:<owner-sub>"`, every capability of the
+     whole-store grant ([Grants](#grants)), `"*"` for sources, accounts and
+     schedule sources, and the published bounds (`maxRows` 1000,
+     `maxProposalTargets` 50, `maxExplainDepth` 8). The bare owner subject is
+     not an alternative identity.
    - On the first page (no cursor), `kogane.financial.query` with
      `{"intent":"coverage","limit":50}` and with
      `{"intent":"activity","limit":50}`: both must return
@@ -1245,39 +1256,19 @@ values. These steps do not assert that production or any client has passed.
      refusal. Preserve their actual completeness and gap reasons; a missing
      projection or empty data is not proof of a complete financial result.
      `maxRows` is a read budget, not a returned-page size: the shared query
-     requires `offset + limit + 1 <= maxRows` for lookahead. On the first page,
-     99 is the largest allowed limit; an omitted limit defaults to 100 and is
-     refused under this grant. Later cursors consume the same budget.
-   - The same activity query with `limit: 101`: expect a tool error with
-     `code: "budget_exceeded"`, not silent truncation or a widened grant.
-   - Raw evidence remains ungranted: `kogane.explain` on an observation ref
-     returned by a structured read must list `evidence.read` as restricted
-     and expose no raw-locator node. If no observation ref is available,
-     record this check as not checked; do not invent a production locator.
-   - `kogane.reconcile.propose` must receive a schema- and budget-valid
-     negative probe: distinct `from`/`to` and exactly one `evidenceRefs`
-     entry, so two targets plus one evidence ref fit `maxProposalTargets: 3`.
-     This synthetic shape matches the existing parser and names no financial
-     account:
-
-     ```json
-     {
-       "kind": "same_account",
-       "from": "source_account:synthetic-from",
-       "to": "source_account:synthetic-to",
-       "evidenceRefs": ["fetch_artifact:1"],
-       "reason": "synthetic denied capability probe",
-       "method": "ai"
-     }
-     ```
-
-     Expect `code: "unauthorized"` and
-     `capability:interpretation.propose`; the capability refusal occurs before
-     target/evidence resolution. Two evidence refs would instead exceed the
-     parser's target budget and would not test that capability gate.
-     Operator/write tools remain unpublished; attempts cannot approve,
-     commit, change settings or trigger collection. Use only the existing
-     tool schemas and record refusals without copying financial values.
+     requires `offset + limit + 1 <= maxRows` for lookahead, so on the first
+     page 999 is the largest allowed limit.
+   - The same activity query with `limit: 1000`: expect a tool error with
+     `code: "budget_exceeded"`, not silent truncation. A `limit` above 1000
+     is `invalid_query` before the store is read.
+   - The whole-store grant holds `evidence.read` and
+     `interpretation.propose`, so `kogane.explain` may show raw-locator nodes
+     and `kogane.reconcile.propose` records a proposal: neither is a refusal
+     probe any more, and no proposal is sent as an activation check.
+     The operation tools are published and apply as the client itself
+     (ADR 0084, [ops-api](ops-api.md#mcp)); none is called as an activation
+     check. Use only the existing tool schemas and record refusals without
+     copying financial values.
      There is no source outside this grant: all sources and accounts are in
      scope, so an outside-source refusal is not this activation's acceptance
      test. Corroborate the session with the MCP application's Access logs and
@@ -1289,13 +1280,13 @@ values. These steps do not assert that production or any client has passed.
 8. _Refresh and subsequent session_ — verify the actual OAuth refresh under
    the approved posture policy and repeat a read in a fresh client session.
    Record registration, login, initial tool call and refresh separately.
-   Proposals, raw evidence and delegated writes require separate reviewed
-   grants/implementation; this activation grants none of them.
+   The whole-store grant includes proposals, raw-evidence identifiers and
+   the operations of ADR 0063 (ADR 0084); no step above exercises them.
 
 Revocation, fastest first: remove the owner from the MCP application's policy
 (Access refuses at the next refresh, at most one access-token lifetime
-later); unset `ACCESS_MCP_AUDIENCE` or remove the grant entry and deploy
-(`401` or `403` at the Worker); disconnect the client.
+later); unset `ACCESS_MCP_AUDIENCE` and deploy (`401` at the Worker);
+disconnect the client.
 
 ### Gaps, with the evidence and the owner's question
 
@@ -1318,8 +1309,9 @@ later); unset `ACCESS_MCP_AUDIENCE` or remove the grant entry and deploy
   Current Portal documentation supports posture checks; actual upstream
   OAuth requests and refresh under that policy remain live checks.
 - **Plans.** ChatGPT developer mode is documented for paid plans on the web,
-  with conflicting statements about write actions on personal plans; the
-  configured grant here is read-only. Verify registration and actual reads
+  with conflicting statements about write actions on personal plans; an MCP
+  client here also writes (proposals and the operations of ADR 0063, ADR
+  0084). Verify registration and actual reads
   on the owner's intended plan; do not infer connection support from a plan name.
 - **Tool names with dots.** Allowed by the 2025-11-25 naming guidance;
   whether claude.ai and ChatGPT accept them is seen at step 7.
@@ -1404,8 +1396,10 @@ the closed request, and that no path moves a table, the change counter or the
 source revision. `services/app/test/purchases-explain.test.ts` repeats it over
 the real Worker: the same page as the query and as the operator route, one
 object over HTTP and MCP with provider text only under `data`, 401 before any
-grant and 403 for the operator without an agent grant (neither preparing a
-statement), each grant and `maxRows` refusal preparing only the schema check,
+grant (preparing no statement), the operator and any other proved subject
+both served since every proved caller holds the whole-store grant (ADR 0084),
+a subject in `AGENT_GRANTS` refused the operator's route, the `maxRows` refusal preparing
+only the schema check,
 404 and `unknown_tool` when CORE 0047 is absent while
 `kogane.capabilities` reports `cardPurchaseRecognition: false`, a retired
 `EVENTS_V2_ENABLED` value that does not hide the tool, the refusal
@@ -1426,17 +1420,15 @@ including approve and commit, card settlements and purchases, operations and
 health, browser reads, the shared query, raw evidence, the HTTP agent routes,
 assets) and `/mcp` refusing the browser audience, both audiences, another
 audience or issuer, an expired or forged assertion, service tokens and
-spoofed headers; the grant failing closed (absent, empty, unparsable,
-mis-shaped, out-of-vocabulary, only the bare subject's, another person's);
-source, account and budget limits on reads and proposals; the whole answer
-of every tool naming no denied source or account, the context's source
-selection being exactly the granted source, and a denied source's new
-publication leaving a scoped context identical; a server-derived proposal
+spoofed headers; the same tools and the whole-store capabilities whatever a
+leftover `AGENT_API_GRANTS` value says (ADR 0084); the whole-store grant
+reaching a raw locator, and a proposal beyond the published target bound
+refused without a write; a server-derived proposal
 actor that a body or header cannot change, and adopted answers identical
 before and after a proposal; unpublished tools; an internal failure inside
 a tool or the tool list answered `500 internal_error` in both eras with no
 exception text in the answer or the log; the connection in both eras; the SDK's transport refusals; tool definitions against SEP-986 and
-Claude Code's load-time checks; each single capability; and the UI's
+Claude Code's load-time checks; and the UI's
 `GET /api/v2/query`, `POST /api/agent/v1/financial.query` and MCP in both
 eras returning deep-equal objects with the same gap reasons.
 `test/mcp-sdk-client.test.ts` drives `/mcp` with the official
@@ -1532,7 +1524,12 @@ the reviewed S3/R2/jobs slices and #564's native writer. It was integrated
 against main `c0c4088a`; #652's temporal refusal and #643's release guard are
 preserved. The [integration plan](plans/2026-10-mcp-maintenance-followups.md)
 records the publication and activation boundaries. No grant or deployment is
-implied by this implementation.
+implied by this implementation. Since
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+(2026-11-07) "the delegation" below is any MCP client acting as itself over
+every schedule source, with the fixed 200-write rolling-day budget; the
+mentions of `MCP_DELEGATIONS` and the financial-reader grant describe the
+state before it.
 
 The closed MCP payload accepts `apply`, `prepare` and `confirm` plus an
 idempotency key. R1 apply keeps the seven-day joined-deferral bound. R2
@@ -1575,16 +1572,20 @@ The tests use synthetic local D1 data and synthetic Access keys. They cover
 signed MCP entry, revocation and scope-before-replay, both hard bounds,
 prepare/effect linkage, shared daily budget, rollback, exact retries,
 concurrent joined windows and losing-provenance writes. Production migration
-state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
-the committed MCP financial-reader grant receives no schedule authority.
+state and real-client use were not checked. `MCP_DELEGATIONS` stayed empty
+then, and the committed MCP financial-reader grant received no schedule
+authority; [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+(2026-11-07) removed both, and every MCP client now reads and revises
+maintenance windows over every schedule source, as itself.
 S6 survey acceptance remained unavailable pending the separate owner decision
 (delegated survey decisions since 2026-11-07: [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07));
 no survey grammar, grants, Access, authentication or deployment is changed.
 
 ## The MCP client's operation authority (ADR 0084, 2026-11-07)
 
-Status: proposed until its pull request merges
-([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
+Status: accepted (merged 2026-11-07 in
+[#1034](https://github.com/risu729/kogane/pull/1034);
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
 
 There is no delegation declaration and no grant table. `resolveDelegation`
 (`packages/application/src/delegation/resolve.ts`) takes only the verified
