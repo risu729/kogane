@@ -200,6 +200,15 @@ production, coverage is visible per account and data type, and resolved and
 unresolved accounts and instruments are distinguished. New collectors
 (#455–#510) are not part of this phase.
 
+The [Phase 3 plan](plans/2026-11-phase3-coverage-identity.md) (accepted 2026-11-08, 03:19 UTC)
+holds the units 3a–3i and the production baseline of 2026-11-08. The owner decided on
+2026-11-08 that the done-when needs every source visible and request → published verified on
+the healthy connections, not every failing collector fixed; that agents may request collections
+without a limit after reading the source's history; that an almost certain match (such as an
+SBI listing and SBI's own code for the same Japanese securities code) is adopted automatically
+and the rest decided by an agent over MCP; and that requested windows and replay tracing stay
+out of this phase ([plan, section 6](plans/2026-11-phase3-coverage-identity.md#6-owner-decisions-2026-11-08)).
+
 ### Phase 4 — Non-card events and dated state
 
 Issues: [#549](https://github.com/risu729/kogane/issues/549),
