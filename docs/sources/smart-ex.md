@@ -5,312 +5,211 @@
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-調査日: 2026-08-26（公開情報、ログアウト状態の公開 endpoint/JavaScript、公開第三者実装）、
-ユーザー会員情報を使う live 検証は未実施
-
-## 1. 対象範囲と安全境界
-
-この記録の単位は、個人向け **スマートEX** の予約、利用、払戻、購入履歴、領収書、乗車用
-交通系 IC カード指定である。同じ EX アプリが扱うエクスプレス予約、EX旅パック、e5489、WESTER、
-各交通系 IC カード発行者、クレジットカード発行会社の台帳は、連携境界を説明する場合を除き対象外
-である。
-
-許可するのは、既存予約、既存の購入/変更/払戻履歴、既存領収書/払戻明細/払戻手数料、既存の
-乗車用 IC カード指定状態を read-only で表示・取得することと、公開 JavaScript、正規アプリの静的
-解析/deobfuscation、read-only runtime tracing、通信メタデータ観測である。
-
-次の操作は厳格に禁止する。
-
-- 新規予約、購入、変更、人数減、取消/払戻、再購入、座席/列車/区間変更
-- 乗車用 IC カードの追加/指定/変更/削除、同行者 IC リストの編集
-- 決済用カード、会員情報、外部 ID 連携、password、OTP 受信方法、簡単 login、biometric 等の設定変更
-- きっぷ受取 code 発行、campaign/ポイント利用、外部サービスへの新規登録/同意
-
-会員 ID、氏名、生年月日、住所、電話、email、決済カード/交通系 IC カード番号、予約番号、
-お預かり番号、Cookie、OTP、session/token、passkey private key、実際の予約、乗車日、区間、列車、
-座席、金額、宛名を、HAR、screenshot、HTML、PDF、log、repository に残さない。WAF/CAPTCHA、rate
-limit、certificate pinning、端末 integrity/attestation 等の security control は回避しない。
-
-## 2. 調査方法と証拠の強さ
-
-- [スマートEX公式サイト](https://smart-ex.jp/)、[公式FAQ](https://faq.expy.jp/?site_domain=smart-ex)、
-  [公式 Google Play listing](https://play.google.com/store/apps/details?id=jp.co.jr_central.exreserve)
-  を主な根拠にした。検索 aggregator は根拠にしていない。
-- 2026-08-26 にログアウト状態で、公開 URL の status/header/redirect とログイン HTML/JavaScript を
-  低頻度で観測した。credential 入力、login、OTP 発行、private page/API replay、challenge 誘発、
-  負荷試験は行っていない。
-- 公開 GitHub/Gist 実装は commit/revision を固定し、transport、auth、DOM selector、出力範囲と
-  security/privacy 上の欠点を確認した。公開済みの領収書 PDF は開いていない。
-- Google Play から正規 install した APK/split APK はこの環境では取得していない。package/version
-  までを公式 listing で確認し、binary transport は再現可能な次実験とした。
-- 以下では **確認事実**、そこからの **推測/設計判断**、**未確認** を分ける。
-
-## 3. 正本と境界
-
-| 記録                    | 正本候補                | 主な read surface                                        | 強み                                                                      | 境界/欠落                                                         |
-| ----------------------- | ----------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| 発車前の有効予約        | スマートEX予約台帳      | Web/EXアプリの「予約確認/変更/払戻」                     | 商品、乗車日、区間、列車、設備/座席、人数、IC指定、決済カードの識別を確認 | 変更/払戻 button が同居し最も危険。過去全履歴の代替ではない       |
-| 購入・変更・払戻        | スマートEX利用履歴      | Web「ご利用履歴・領収書の発行」、app「購入履歴・領収書」 | 予約、変更、払戻を別 event として照合。最大15か月                         | きっぷ受取後の駅払戻等が表示されない場合がある。公式 CSV/API なし |
-| 領収書/払戻明細/手数料  | スマートEX表示文書      | Web/app の領収書表示                                     | インボイス対応、購入と払戻/手数料をお預かり番号で照合                     | 1枚の net statement ではない。PDFは端末依存。宛名/実値を含む      |
-| 実際のカード請求/返金   | カード発行会社          | カード確定明細                                           | authorization/settlement、締め日を跨ぐ返金の最終正本                      | スマートEXの乗車日とカードの利用日は一致しない場合がある          |
-| 新幹線の乗車権/改札利用 | スマートEX運送/改札記録 | 予約詳細、改札のEXご利用票                               | IC指定と乗車時の列車/座席案内                                             | 公開UIで独立したgate入出場履歴/exportは未確認                     |
-| IC残高・在来線利用      | IC発行者                | Suica/ICOCA等のapp/履歴                                  | 在来線運賃・IC残高の正本                                                  | スマートEX代金はIC残高から引かれない。Smart EX履歴と混ぜない      |
-
-`reservation`、`purchase_event`、`refund_event`、`receipt_document`、`boarding_assignment`、
-`card_settlement`、`transit_ic_event` を別 object とする。お預かり番号は Smart EX 内の照合候補だが、
-秘密/PII と同様に扱い、repository key にしない。保存にはランダム local source key を使う。
-
-## 4. 予約、利用、払戻の履歴
-
-### 4.1 発車前の予約
-
-[予約確認の公式手順](https://www.smart-ex.jp/reservation/guide/referral/) による確認事実:
-
-- Web/EXアプリの「予約確認/変更/払戻」から予約一覧と詳細を開く。
-- 詳細には決済に使ったカードの下4桁と国際ブランドを表示する。
-- 乗車用交通系 IC カードの指定状態を確認できる。番号が表示されれば指定済みである。
+Research date: 2026-08-26 (public information, logged-out public endpoints/JavaScript, public third-party implementations);
+no live validation using member information was performed.
 
-公式画面例は乗車日、列車名、発着時刻、区間、設備/座席等を示す。live 検証では、往復/乗継を一つの
-予約として扱うか、同行者、自由席、早特、変更済み、きっぷ受取済み、入場済みの state field を確認
-する。ただし予約詳細には「変更」「払戻」「IC指定」が隣接するため、取得 route は利用履歴より危険
-である。
-
-予約一覧は現在/将来の運送契約状態の source であり、過去15か月の決済 event ledger ではない。
-予約が一覧から消えたことだけで、乗車、払戻、失効を断定せず、利用履歴/払戻明細と照合する。
+## 1. Scope and safety boundaries
 
-### 4.2 利用履歴の粒度と期間
+The unit of this record is personal **スマートEX (Smart EX)** reservations, use, refunds, purchase history, receipts, and boarding transit-IC assignments. エクスプレス予約 (Express Reservation), EX旅パック (EX Travel Packages), e5489, WESTER, transit-IC issuers, and credit-card issuers' ledgers handled by the same EX app are excluded except when explaining integration boundaries.
 
-[ブラウザ版利用履歴FAQ](https://faq.expy.jp/faq/show/244?site_domain=smart-ex) と
-[EXアプリ版FAQ](https://faq.expy.jp/faq/show/245?site_domain=smart-ex) は、予約日の翌日から
-**最大15か月分**の利用履歴を照会できるとする。Web は照会期間を選び「再検索」、app は期間を選ぶ。
+Permitted activities are read-only display/retrieval of existing reservations, purchase/change/refund history, receipts/refund statements/refund fees, and boarding-IC assignment status; public JavaScript, legitimate-app static analysis/deobfuscation, read-only runtime tracing, and communication metadata observation.
 
-[領収書表示サービス](https://smart-ex.jp/reservation/reserve_smart/receipt/) は利用履歴に予約、変更、
-払戻が表示され、カード明細との照合に使えるとする。したがって履歴1行を「乗車1回」と解釈せず、
-少なくとも次を別 event として扱う。
+The following are strictly prohibited.
 
-- 予約/購入
-- 変更後商品の新規決済
-- 変更前商品の払戻
-- 会員操作による払戻
-- 発車時刻経過、未使用、遅延/運休等による自動・特定額払戻
-- 払戻手数料/未使用手数料
+- New reservations, purchases, changes, passenger reductions, cancellations/refunds, repurchases, or seat/train/route changes
+- Adding/assigning/changing/deleting boarding IC cards or editing companion IC lists
+- Changes to payment cards, member information, external-ID linking, passwords, OTP delivery methods, easy login, biometrics, or similar settings
+- Issuing ticket-pickup codes, campaign/points use, or new registration/consent for external services
 
-[カード請求FAQ](https://faq.expy.jp/faq/show/319?site_domain=smart-ex) によると、原則として予約日が
-購入決済日、払戻操作完了日が払戻日で、カード請求書の「利用日」は乗車日ではない。
-[変更時の返金FAQ](https://faq.expy.jp/faq/show/276?site_domain=smart-ex) は、原則として変更後商品を
-新たに決済してから変更前商品を払戻すとする。一時的な二重表示を重複購入として消去しない。
+Do not retain member IDs, names, birth dates, addresses, phone numbers, emails, payment/transit-IC card numbers, reservation numbers, deposit-reference numbers, Cookies, OTPs, sessions/tokens, passkey private keys, actual reservations, boarding dates, routes, trains, seats, amounts, or receipt addressees in HARs, screenshots, HTML, PDFs, logs, or the repository. Do not bypass security controls such as WAF/CAPTCHA, rate limits, certificate pinning, or device integrity/attestation.
 
-[二重請求の確認FAQ](https://faq.expy.jp/faq/show/389?site_domain=smart-ex) は、Smart EXからカード会社
-へ購入/返金 data を速やかに送る一方、締め日や確定処理で反映が遅れ、きっぷ受取後の駅払戻等は
-Smart EX利用履歴に表示されない場合があるとする。Smart EX履歴は transport/order event の正本、
-カード確定明細は実際の settlement の正本として照合する。
+## 2. Research method and strength of evidence
 
-公開公式資料には、1 page 件数、全体の最大件数、pagination token、stable row ID、CSV/JSON/API、
-変更前後や原取引/払戻を結ぶ machine-readable ID の説明を確認できなかった。公開第三者実装は
-`div.pager` の「次へ」が存在し得ることを示すが、件数仕様の根拠にはしない。
+- Primary evidence was the [official Smart EX site](https://smart-ex.jp/), [official FAQ](https://faq.expy.jp/?site_domain=smart-ex), and [official Google Play listing](https://play.google.com/store/apps/details?id=jp.co.jr_central.exreserve). Search aggregators were not used as evidence.
+- On 2026-08-26, public URL statuses/headers/redirects and login HTML/JavaScript were observed at low frequency while logged out. No credential entry, login, OTP issuance, private-page/API replay, challenge triggering, or load testing was performed.
+- Public GitHub/Gist implementations were pinned to commits/revisions and checked for transport, authentication, DOM selectors, output scope, and security/privacy shortcomings. Published receipt PDFs were not opened.
+- No APK/split APK legitimately installed from Google Play was obtained in this environment. Package/version were checked in the official listing; binary transport remains a reproducible next experiment.
+- Below, **confirmed facts**, resulting **inferences/design decisions**, and **unconfirmed items** are separated.
 
-### 4.3 領収書、払戻明細、払戻手数料、PDF/export
+## 3. Authoritative records and boundaries
 
-[領収書表示サービス](https://smart-ex.jp/reservation/reserve_smart/receipt/) による確認事実:
+| Record                              | Candidate authoritative record | Main read surface                                                                                                   | Strength                                                                                                         | Boundary/gaps                                                                          |
+| ----------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Valid reservations before departure | Smart EX reservation ledger    | Web/EX app `予約確認/変更/払戻` (reservation confirmation/change/refund)                                            | Product, boarding date, route, train, accommodation/seat, passengers, IC assignment, payment-card identification | Change/refund buttons coexist; highest risk. Not a replacement for all past history    |
+| Purchases/changes/refunds           | Smart EX usage history         | Web `ご利用履歴・領収書の発行` (usage history/receipt issuance), app `購入履歴・領収書` (purchase history/receipts) | Reconciles reservations, changes, and refunds as separate events; up to 15 months                                | Station refunds after ticket pickup, etc. may be absent. No official CSV/API           |
+| Receipts/refund statements/fees     | Smart EX displayed documents   | Web/app receipt display                                                                                             | Invoice-compliant; reconciles purchases and refunds/fees by deposit-reference number                             | Not one net statement. PDF depends on device. Includes addressee/actual values         |
+| Actual card charges/refunds         | Card issuer                    | Finalized card statements                                                                                           | Final authority for authorization/settlement and refunds across billing cutoffs                                  | Smart EX boarding date may differ from card usage date                                 |
+| Shinkansen boarding rights/gate use | Smart EX carriage/gate records | Reservation details, gate-issued EX usage slip                                                                      | IC assignments and train/seat guidance at boarding                                                               | Independent gate entry/exit history/export in public UI unconfirmed                    |
+| IC balances/conventional-line use   | IC issuer                      | Suica/ICOCA and similar apps/history                                                                                | Authority for conventional-line fares/IC balances                                                                | Smart EX charges are not deducted from IC balance. Keep separate from Smart EX history |
 
-- 表示期間は予約完了日の翌日5:30から最大15か月後23:30まで。予約当日は表示できない。
-- 「領収書表示」、払戻時の「払戻明細」、手数料がある場合の「払戻手数料」は別 document である。
-  最終的な net 負担は、同じお預かり番号の document を組み合わせて算出する。
-- 宛名を入力して印刷するとインボイス対応画面になる。表示期間内なら発行回数に制限はない。
-- 2023-04-08購入分以降は、未使用/2時間以上の遅延等による特定額払戻にも対応範囲が拡張された。
+Use separate objects for `reservation`, `purchase_event`, `refund_event`, `receipt_document`, `boarding_assignment`, `card_settlement`, and `transit_ic_event`. Deposit-reference numbers are reconciliation candidates within Smart EX, but are treated like secrets/PII and never used as repository keys. Use random local source keys for storage.
 
-[PDF FAQ](https://faq.expy.jp/faq/show/1298?site_domain=smart-ex) は、表示した領収書をPDF保存できるかは
-端末依存とし、WEBフォーム申請分は紙郵送でPDF発行しない。したがって「公式 PDF download API」
-ではなく、公式 HTML/print view を端末の印刷機能でPDF化する route である。CSV、bulk export、
-machine-readable receipt schema は公開公式資料で確認できない。
+## 4. Reservation, usage, and refund history
 
-領収書だけを集めると払戻/手数料を落とす。collector は document type を持ち、`領収書表示`、
-`払戻明細`、`払戻手数料` の件数を別々に照合する。PDFは乗車日、区間、金額、宛名、お預かり番号等を
-含み得るため、原本はrepository外の暗号化保管とし、この調査のlive検証では保存せずfield名だけを
-確認する。
+### 4.1 Reservations before departure
 
-### 4.4 発車後・未使用・自動払戻
+Confirmed facts from the [official reservation-confirmation procedure](https://www.smart-ex.jp/reservation/guide/referral/):
 
-[払戻条件](https://smart-ex.jp/reservation/guide/cancel/) は、原則として改札入場前/きっぷ受取前かつ
-発車時刻前に会員操作で払戻できる一方、結果はemailで通知されず、乗車日の翌々日以降に利用履歴で
-確認するとする。[未使用FAQ](https://faq.expy.jp/faq/show/267?site_domain=smart-ex) は、乗車日の翌日
-以降に手数料を引いた自動払戻を行い、翌々日以降に履歴/文書を確認するとする。
+- Open reservation lists/details from Web/EX app `予約確認/変更/払戻`.
+- Details show the last four digits and international brand of the payment card.
+- Boarding transit-IC assignment status can be checked. A displayed number indicates assignment.
 
-本 collector は払戻を実行しない。予約時点で `unused`/`cancelled` と決めず、公式 ledger に自動払戻
-event が現れるまで provisional とする。運休/遅延時の特別取扱い banner も操作誘導であり、読むだけに
-留める。
+Official screen examples show boarding date, train name, departure/arrival times, route, accommodation/seat, etc. Live validation should check round-trip/connecting journeys as one reservation, companions, non-reserved seating, early-discount products, and changed/ticket-picked-up/gate-entered state fields. However, reservation details have adjacent `変更` (change), `払戻` (refund), and `IC指定` (IC assignment) controls, making this retrieval route more dangerous than usage history.
 
-## 5. 交通系 IC カードと乗車履歴の境界
+The reservation list is a source for current/future carriage-contract state, not a settlement-event ledger for the past 15 months. Disappearance alone does not establish boarding, refund, or expiry; reconcile it with usage history/refund statements.
 
-[交通系ICカード乗車案内](https://www.smart-ex.jp/entraining/iccard/) は、Smart EX代金が登録した
-決済カードから予約時に決済され、交通系 IC カード残高からは引かれないと明記する。新幹線改札では
-ICを乗車権の識別に使い、改札機から乗車日、区間、列車、座席等を記した「EXご利用票（座席のご案内）」
-が出る。この紙は乗車案内であり、決済領収書ではない。
+### 4.2 Usage-history granularity and period
 
-[登録・変更案内](https://www.smart-ex.jp/reservation/other/ic_card/) によると、全国相互利用対象10種類、
-モバイルSuica/PASMO/ICOCA等を指定できる。1名/複数名、本人/同行者により指定方法が異なる。
-[IC指定FAQ](https://faq.expy.jp/faq/show/592?site_domain=smart-ex) は、詳細画面に17桁番号を表示する。
-この番号は取得/保存せず、`specified=true/false` と座席への割当数だけを観測する。
+The [browser usage-history FAQ](https://faq.expy.jp/faq/show/244?site_domain=smart-ex) and [EX app FAQ](https://faq.expy.jp/faq/show/245?site_domain=smart-ex) state that **up to 15 months** of history can be queried from the day after reservation. On Web, choose a period and `再検索` (search again); in the app, choose a period.
 
-[在来線乗継FAQ](https://faq.expy.jp/faq/show/259?site_domain=smart-ex) によると、在来線区間には別運賃が
-必要である。したがって同じ IC で連続して改札を通っても、Smart EX新幹線代金、在来線IC運賃、IC残高
-を一つの取引へ統合しない。
+The [receipt display service](https://smart-ex.jp/reservation/reserve_smart/receipt/) says history displays reservations, changes, and refunds for reconciliation with card statements. Do not interpret one history row as one journey; distinguish at least these events.
 
-公開資料では、Smart EX UI に独立した改札入場/出場時刻、実乗車 flag、gate ID、EXご利用票のdigital
-copy、乗車実績CSV/APIがあることを確認できなかった。予約/購入履歴は「予約/決済の履歴」であり、
-実乗車を常に証明する「gate履歴」とは見なさない。[privacy page](https://www.smart-ex.jp/privacy/) は
-運営者が予約情報や乗車実績を扱うとするが、それが会員向けにexportされるとは限らない。
+- Reservation/purchase
+- New payment for the changed product
+- Refund of the previous product
+- Member-initiated refund
+- Automatic/specified-amount refunds for departure-time passage, non-use, delays/cancellations, etc.
+- Refund/non-use fees
 
-IC登録/指定/解除はすべて account/booking write で、read-only検証では実行しない。2:00～3:00等の
-指定/照会制限にも自動retryせず、時間を改める。
+The [card-billing FAQ](https://faq.expy.jp/faq/show/319?site_domain=smart-ex) says the reservation date is generally the purchase-settlement date and completed refund-operation date is the refund date; the card statement's `利用日` (usage date) is not the boarding date. The [refund-on-change FAQ](https://faq.expy.jp/faq/show/276?site_domain=smart-ex) says the changed product is generally charged before the previous product is refunded. Do not remove temporary double display as a duplicate purchase.
 
-## 6. 認証、MFA、passkey、Bitwarden
+The [double-charge FAQ](https://faq.expy.jp/faq/show/389?site_domain=smart-ex) says Smart EX promptly sends purchase/refund data to card issuers, but billing cutoffs/finalization may delay reflection; station refunds after ticket pickup may be absent from Smart EX history. Reconcile Smart EX history as the authority for transport/order events with finalized card statements as the authority for actual settlement.
 
-### 6.1 Smart EXの直接login
+Public official material did not establish rows per page, total maximum count, pagination tokens, stable row IDs, CSV/JSON/API, or machine-readable IDs linking before/after changes or original transactions/refunds. A public third-party implementation suggests `div.pager` can have `次へ` (next), but is not evidence of count specifications.
 
-[公式ブラウザ操作](https://smart-ex.jp/reservation/reserve_smart/sp/) は、会員ID（10桁）と
-password（4～8桁）で login するとする。[2025年の公式案内](https://www.smart-ex.jp/topics/detail/?id=834)
-と [OTP FAQ](https://faq.expy.jp/faq/show/1174?site_domain=smart-ex) は、2025-09-27以降、端末/browserの
-変更や複数環境など普段と異なるアクセスと判断された場合に login OTP を要求することがあるとする。
+### 4.3 Receipts, refund statements, refund fees, and PDF/export
 
-[OTP受取方法FAQ](https://faq.expy.jp/faq/show/323?site_domain=smart-ex) による確認事実:
+Confirmed facts from the [receipt display service](https://smart-ex.jp/reservation/reserve_smart/receipt/):
 
-- 2022-05-21以降の新規会員は電話番号へのSMSまたは自動音声案内を使う。
-- それ以前からの会員にはemail設定が残る場合がある。
-- emailから電話へ変更するとemailに戻せないなど、受信方法変更は不可逆性を含む。
+- Display is available from 5:30 the day after reservation completion through 23:30 up to 15 months later, not on the reservation day.
+- `領収書表示` (receipt display), `払戻明細` (refund statement), and, where fees apply, `払戻手数料` (refund fee) are separate documents. Calculate final net cost by combining documents with the same deposit-reference number.
+- Entering an addressee and printing produces an invoice-compliant screen. There is no issuance-count limit within the display period.
+- For purchases from 2023-04-08 onward, coverage was expanded to specified-amount refunds for non-use, delays of two hours or more, etc.
 
-OTP送信/入力が必要なら人へhandoffし、値をfile/log/clipboard historyへ残さない。受信方法変更、電話/
-email変更、account再登録はwriteのため行わない。3D Secureは予約/変更時のカード決済認証で、read-only
-login MFAと混同しない。
+The [PDF FAQ](https://faq.expy.jp/faq/show/1298?site_domain=smart-ex) says saving displayed receipts as PDF depends on the device; Web-form applications are mailed on paper with no PDF issuance. Thus, this is an official HTML/print-view route converted to PDF with device printing, not an official PDF-download API. Official public material did not establish CSV, bulk export, or machine-readable receipt schemas.
 
-### 6.2 簡単login、EXアプリbiometric、passkey
+Collecting only receipts omits refunds/fees. The collector needs document types and separately reconciles counts of `領収書表示`, `払戻明細`, and `払戻手数料`. PDFs may contain boarding dates, routes, amounts, addressees, and deposit-reference numbers. Originals belong in encrypted storage outside the repository; this research's live validation checks only field names without saving documents.
 
-[簡単login案内](https://smart-ex.jp/reservation/reserve_smart/access/) は、会員別・端末別の専用画面を
-bookmarkし、passwordだけでloginする機能である。これはpasskey/WebAuthnでも、MFAでもない。
-専用URLは会員を識別し得るためsecretと同様に扱い、log/screenshot/repositoryへ残さない。設定作成・
-削除はwriteなので行わない。
+### 4.4 Post-departure, non-use, and automatic refunds
 
-[EXアプリ公式listing](https://play.google.com/store/apps/details?id=jp.co.jr_central.exreserve) は
-指紋/Face ID loginを案内する。これはappのlocal credential unlock/device認証であり、Smart EXの
-WebAuthn passkey対応を示さない。Smart EX直接loginのpasskey公式案内は今回確認できなかった。
+The [refund conditions](https://smart-ex.jp/reservation/guide/cancel/) generally allow member-initiated refunds before gate entry/ticket pickup and departure, but say results are not emailed and should be checked in history from two days after boarding. The [non-use FAQ](https://faq.expy.jp/faq/show/267?site_domain=smart-ex) says automatic refunds minus fees occur from the day after boarding; check history/documents from two days after boarding.
 
-### 6.3 WESTER外部ID
+This collector does not execute refunds. Do not decide `unused`/`cancelled` at reservation time; retain provisional status until the official ledger shows an automatic refund event. Special-treatment banners for cancellations/delays also guide operations; read them only.
 
-[外部ID利用サービス](https://smart-ex.jp/reservation/other/id_link/) は、事前に紐付けたWESTER IDで
-Smart EX Web/EXアプリへloginでき、紐付け時にはWESTER password、OTP、情報提供同意を行うとする。
-既に連携済みならWESTER loginはread入口候補だが、新規連携/解除/同意はwriteで行わない。
+## 5. Transit IC cards and boarding-history boundaries
 
-JR西日本の[passkey FAQ](https://faq-support.westjr.co.jp/hc/ja/articles/55648108612761-%E3%83%91%E3%82%B9%E3%82%AD%E3%83%BC%E3%81%AE%E7%99%BB%E9%8C%B2-%E5%89%8A%E9%99%A4%E6%96%B9%E6%B3%95%E3%82%92%E6%95%99%E3%81%88%E3%81%A6%E3%81%8F%E3%81%A0%E3%81%95%E3%81%84)
-はWESTER会員supportでpasskeyを登録/削除できることを確認する。ただしWESTER passkeyが、既存連携済み
-Smart EXへのfederated loginで常に利用可能かはSmart EX公式資料で確認できない。**WESTERのpasskey対応
-をSmart EX直接loginのpasskey対応と読み替えない。**
+The [transit-IC boarding guide](https://www.smart-ex.jp/entraining/iccard/) explicitly says Smart EX charges the registered payment card at reservation, without deducting transit-IC balance. Shinkansen gates use IC to identify boarding rights and issue an `EXご利用票（座席のご案内）` (EX usage slip/seat guide) showing boarding date, route, train, seat, etc. This paper is boarding guidance, not a payment receipt.
 
-### 6.4 Bitwarden: 確認と推測
+The [registration/change guide](https://www.smart-ex.jp/reservation/other/ic_card/) says the ten nationwide interoperable types, モバイルSuica (Mobile Suica)/PASMO/ICOCA, etc. can be assigned. Assignment varies by single/multiple passengers and self/companions. The [IC assignment FAQ](https://faq.expy.jp/faq/show/592?site_domain=smart-ex) shows a 17-digit number on details. Do not retrieve/save it; observe only `specified=true/false` and seat assignment counts.
 
-Bitwardenは一般に[browser autofill](https://bitwarden.com/help/auto-fill-browser/)、
-[Android autofill](https://bitwarden.com/help/auto-fill-android/)、
-[passkey保存](https://bitwarden.com/help/storing-passkeys/)を提供する。したがってSmart EX ID/password
-のautofill、またはWESTERが受け付ける環境でpasskey providerになる可能性はある。
+The [conventional-line connection FAQ](https://faq.expy.jp/faq/show/259?site_domain=smart-ex) says conventional-line segments require separate fares. Even when the same IC passes consecutive gates, do not merge Smart EX Shinkansen charges, conventional-line IC fares, and IC balances into one transaction.
 
-Smart EX/EXアプリとの公式Bitwarden連携・互換性は確認できない。EXアプリbiometricはBitwarden
-passkeyではなく、簡単loginはsecret-bearing URL + passwordである。会員ID、password、簡単login URL、
-OTP受信先、card/IC番号を一つのruntime secretへ集約しない。
+Public material did not confirm independent gate entry/exit times, actual-boarding flags, gate IDs, digital EX usage-slip copies, or boarding-record CSV/API in Smart EX UI. Reservation/purchase history records reservations/payments and is not always gate history proving actual travel. The [privacy page](https://www.smart-ex.jp/privacy/) says the operator handles reservations and boarding records, but does not imply member export.
 
-未確認: session寿命/refresh、device/IP binding、OTP risk判定、WESTER federationのtoken/session、
-WESTER passkeyからSmart EXへの実際のlogin、EXアプリbiometricのcredential保存方式。
+All IC registration/assignment/removal is an account/booking write and is not performed in read-only validation. For assignment/inquiry restrictions such as 2:00–3:00, return later without automatic retries.
 
-## 7. CDN、WAF、anti-bot
+## 6. Authentication, MFA, passkeys, and Bitwarden
 
-2026-08-26のログアウト状態の低頻度観測:
+### 6.1 Direct Smart EX login
 
-| 公開入口                                                       | 結果                                                  | 言えること / 言えないこと                                           |
-| -------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------- |
-| `https://smart-ex.jp/`                                         | `301`後`200`、HSTS、public HTML                       | marketing/help surface。auth originと同じ防御とは限らない           |
-| `https://shinkansen2.jr-central.co.jp/RSV_P/S_smart_index.htm` | `200`、`X-Akamai-Transformed`、`_abck`/`bm_sz` cookie | Smart EX auth surfaceにAkamai介在。bot-management系cookieの強い候補 |
-| `https://shinkansen2.jr-central.co.jp/RSV_P/smart_index.htm`   | 同じく`200`、Akamai header/cookie                     | smartphone loginも同じclassic form backend候補                      |
-| `https://faq.expy.jp/?site_domain=smart-ex`                    | `200`、`Server: nginx`                                | FAQは別surface。auth protectionの根拠にならない                     |
+The [official browser procedure](https://smart-ex.jp/reservation/reserve_smart/sp/) specifies a 10-digit member ID and a 4–8-character password. The [2025 official notice](https://www.smart-ex.jp/topics/detail/?id=834) and [OTP FAQ](https://faq.expy.jp/faq/show/1174?site_domain=smart-ex) say that since 2025-09-27, login OTP may be required when access is judged unusual, such as a changed device/browser or multiple environments.
 
-Akamaiの[bot管理説明](https://techdocs.akamai.com/cloud-security/docs/about-bots) はlogin/transactional path
-をbehavioral detectionで保護する用途を説明する。今回のheader/cookie観測はAkamaiとbot管理の介在候補
-を示すが、Bot Manager/Account Protector/WAFの契約product、policy、score、challenge条件、native app
-保護を確定しない。Cloudflare固有headerはauth入口で観測しなかったが、Cloudflare/WAF不在の証拠には
-しない。
+Confirmed facts from the [OTP delivery-method FAQ](https://faq.expy.jp/faq/show/323?site_domain=smart-ex):
 
-401/403/429、CAPTCHA/challenge/interstitial、認証loop、予想外のOTP、Akamai denialが出たら停止する。
-cookie合成、telemetry偽装、fingerprint spoofing、CAPTCHA solver、rate-limit探索、proxy rotation、
-pinning/integrity bypassを行わない。Cloud providerのheadless browserはIP/device変化でOTP/bot判定を
-増やし得る。
+- New members from 2022-05-21 onward use phone-number SMS or automated voice guidance.
+- Earlier members may retain email settings.
+- Delivery-method changes can be irreversible, such as being unable to return to email after switching to phone.
 
-## 8. 公開Web JavaScriptと具体的transport
+If OTP sending/entry is required, hand off to a human and retain no value in files/logs/clipboard history. Delivery-method, phone/email changes, or account re-registration are writes and are not performed. 3D Secure is card-payment authentication for reservations/changes, distinct from read-only login MFA.
 
-### 8.1 ログインtransport
+### 6.2 Easy login, EX app biometrics, and passkeys
 
-2026-08-26に公開login pageとJavaScriptを静的解析した確認事実:
+The [easy-login guide](https://smart-ex.jp/reservation/reserve_smart/access/) describes bookmarking a member/device-specific screen and logging in with only a password. This is neither passkey/WebAuthn nor MFA. The dedicated URL may identify the member; treat it like a secret, excluding it from logs/screenshots/repository. Creating/deleting settings is a write and is not performed.
 
-- login formは `POST https://shinkansen2.jr-central.co.jp/RSV_P/ClientService`。
-- 会員ID/password input名はそれぞれ`01`/`02`。値は入力・取得していない。
-- formは`_PageID`、`_ActionID`、`_DataStoreID`、`_SeqNo`、`_ControlID`、`_WBSessionID`、
-  `AppSessionID`等のhidden fieldを持つ。値はsessionごとに変わり、記録しない。
-- login pageの`_PageID`は`RSWP100P211`、login actionは`RSWP100AIDP312`。WESTER login導線も同じ
-  form/action frameworkを使う。
-- `cfEXPY_common.js`の`cfEXPY_doAction(argsAid)`は`_ActionID`を設定し、form全体をsubmitする。
-  JSON REST/GraphQLではなく、server-side page stateをhidden fieldで往復するclassic HTML POSTである。
+The [official EX app listing](https://play.google.com/store/apps/details?id=jp.co.jr_central.exreserve) advertises fingerprint/Face ID login. This is local credential unlocking/device authentication and does not demonstrate Smart EX WebAuthn passkey support. No official direct Smart EX passkey-login guidance was confirmed in this research.
 
-provenance:
+### 6.3 WESTER external ID
+
+The [external-ID service](https://smart-ex.jp/reservation/other/id_link/) says a previously linked WESTER ID can log in to Smart EX Web/EX app; linking involves a WESTER password, OTP, and information-sharing consent. An already-linked WESTER login is a candidate read entrypoint; new linking/unlinking/consent are writes and are not performed.
+
+JR西日本 (JR West)'s [passkey FAQ](https://faq-support.westjr.co.jp/hc/ja/articles/55648108612761-%E3%83%91%E3%82%B9%E3%82%AD%E3%83%BC%E3%81%AE%E7%99%BB%E9%8C%B2-%E5%89%8A%E9%99%A4%E6%96%B9%E6%B3%95%E3%82%92%E6%95%99%E3%81%88%E3%81%A6%E3%81%8F%E3%81%A0%E3%81%95%E3%81%84) confirms passkey registration/deletion through WESTER member support. However, Smart EX official material does not confirm that WESTER passkeys always work for federated login to an already-linked Smart EX account. **Do not reinterpret WESTER passkey support as direct Smart EX passkey-login support.**
+
+### 6.4 Bitwarden: confirmation and inference
+
+Bitwarden generally provides [browser autofill](https://bitwarden.com/help/auto-fill-browser/), [Android autofill](https://bitwarden.com/help/auto-fill-android/), and [passkey storage](https://bitwarden.com/help/storing-passkeys/). It may therefore autofill Smart EX IDs/passwords or serve as a passkey provider where WESTER accepts it.
+
+Official Bitwarden integration/compatibility with Smart EX/EX app is unconfirmed. EX app biometrics are not Bitwarden passkeys; easy login is a secret-bearing URL plus password. Do not combine member ID, password, easy-login URL, OTP destination, and card/IC numbers into one runtime secret.
+
+Unconfirmed: session lifetime/refresh, device/IP binding, OTP risk decisions, WESTER federation tokens/sessions, actual Smart EX login through WESTER passkeys, and EX app biometric credential storage.
+
+## 7. CDN, WAF, and anti-bot
+
+Low-frequency logged-out observations on 2026-08-26:
+
+| Public entrypoint                                              | Result                                                 | What can/cannot be concluded                                             |
+| -------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `https://smart-ex.jp/`                                         | `301` then `200`, HSTS, public HTML                    | Marketing/help surface; may differ from auth-origin protection           |
+| `https://shinkansen2.jr-central.co.jp/RSV_P/S_smart_index.htm` | `200`, `X-Akamai-Transformed`, `_abck`/`bm_sz` cookies | Akamai on Smart EX auth surface; strong bot-management-cookie candidates |
+| `https://shinkansen2.jr-central.co.jp/RSV_P/smart_index.htm`   | Also `200`, Akamai headers/cookies                     | Smartphone login may share the classic-form backend                      |
+| `https://faq.expy.jp/?site_domain=smart-ex`                    | `200`, `Server: nginx`                                 | Separate FAQ surface, not evidence for auth protection                   |
+
+Akamai's [bot-management explanation](https://techdocs.akamai.com/cloud-security/docs/about-bots) describes behavioral detection protecting login/transactional paths. Observed headers/cookies suggest Akamai and bot-management involvement, but do not establish contracted Bot Manager/Account Protector/WAF products, policies, scores, challenge conditions, or native-app protection. No Cloudflare-specific headers were observed at auth entrypoints, but this does not prove Cloudflare/WAF absence.
+
+Stop for 401/403/429, CAPTCHA/challenge/interstitial, authentication loops, unexpected OTP, or Akamai denial. Do not synthesize cookies, falsify telemetry/fingerprints, use CAPTCHA solvers, probe rate limits, rotate proxies, or bypass pinning/integrity. Cloud-provider headless browsers may increase OTP/bot decisions through IP/device changes.
+
+## 8. Public Web JavaScript and concrete transport
+
+### 8.1 Login transport
+
+Confirmed facts from static analysis of public login pages/JavaScript on 2026-08-26:
+
+- The login form uses `POST https://shinkansen2.jr-central.co.jp/RSV_P/ClientService`.
+- Member-ID/password input names are `01`/`02`. Values were not entered or retrieved.
+- The form has hidden fields including `_PageID`, `_ActionID`, `_DataStoreID`, `_SeqNo`, `_ControlID`, `_WBSessionID`, and `AppSessionID`. Values vary by session and are not recorded.
+- Login-page `_PageID` is `RSWP100P211`; login action is `RSWP100AIDP312`. WESTER login navigation uses the same form/action framework.
+- `cfEXPY_doAction(argsAid)` in `cfEXPY_common.js` sets `_ActionID` and submits the entire form. This is classic HTML POST exchanging server-side page state through hidden fields, not JSON REST/GraphQL.
+
+Provenance:
 
 - `/_javascript/cfEXPY_common.js?20260824`: SHA-256
   `b4371b3107a1eabbbcbfbe678a501817cef78e3671b218399a6a624e24847e82`
 - `/_javascript/common_func.js?20260824`: SHA-256
   `b6cef7849910306a2d1efd87bc98b823f1bec0b88897366f5f61327230409fb7`
-- login page固有`RSWP100P211.js?20260824`: SHA-256
+- Login-page-specific `RSWP100P211.js?20260824`: SHA-256
   `7ab1638e790ece608db76fad27678d2df6ae61014ceb5c6bf35ec8cbe8038ba0`
 
-### 8.2 read/write隔離への含意
+### 8.2 Implications for read/write isolation
 
-`/RSV_P/ClientService`という同一path、同一POST methodがlogin、read、予約、変更、払戻、設定変更を
-dispatchし得る。**origin + method + path allowlistだけでは安全にならない。** 少なくとも`_PageID`、
-`_ActionID`、画面title、期待するbutton label、response pageを組み合わせ、liveで確認したread action
-だけをallowlistにする必要がある。
+The same path `/RSV_P/ClientService` and POST method may dispatch login, reads, reservations, changes, refunds, and settings changes. **Origin + method + path allowlists alone are insufficient.** At minimum, combine `_PageID`, `_ActionID`, page title, expected button label, and response page, allowing only read actions confirmed live.
 
-匿名pageだけでは、利用履歴一覧、詳細、領収書表示、払戻明細、paginationの`_PageID/_ActionID`を確認
-できなかった。認証後のread-only動的観測でfield名だけを取得し、値を保存しない。action IDを推測して
-POSTしない。
+Anonymous pages did not establish usage-history list/detail, receipt-display, refund-statement, or pagination `_PageID/_ActionID`. In authenticated read-only dynamic observation, retrieve only field names without saving values. Do not guess action IDs and POST them.
 
-現時点のtransport証拠は、browser sessionを保ったHTML navigationのC/D候補を強く支持するが、安定
-renewable sessionを持つB clientの証拠ではない。
+Current transport evidence strongly supports a C/D candidate using HTML navigation with a browser session, but does not establish a B client with a stable renewable session.
 
-## 9. 公式EXアプリ、APK、静的/動的解析
+## 9. Official EX app, APK, and static/dynamic analysis
 
-### 9.1 appとwebの役割
+### 9.1 App and Web roles
 
-[公式Google Play listing](https://play.google.com/store/apps/details?id=jp.co.jr_central.exreserve) を
-2026-08-26に直接確認した情報:
+Information checked directly in the [official Google Play listing](https://play.google.com/store/apps/details?id=jp.co.jr_central.exreserve) on 2026-08-26:
 
-- package: `jp.co.jr_central.exreserve`
-- version: `10.0.0`
-- Play表示の最終更新日: `2026-08-10`
-- Smart EXとエクスプレス予約の共用app。予約、確認、変更/払戻、購入履歴/領収書、会員情報、IC指定、
-  biometric loginを提供する。
+- Package: `jp.co.jr_central.exreserve`
+- Version: `10.0.0`
+- Last update shown on Play: `2026-08-10`
+- Shared app for Smart EX and Express Reservation, providing reservations, confirmation, changes/refunds, purchase history/receipts, member information, IC assignment, and biometric login.
 
-同じpackageが複数サービスを扱うため、解析/collectorではservice=`smart-ex`を明示し、エクスプレス
-予約のaccount/host/page/schemaを混ぜない。appはbiometric/device-bound authとapp固有transportの同定に
-向くが、予約/変更/払戻writeが中心に同居する。Webはclassic formのfield/actionを観測しやすく、
-receipt printにも向くため初期routeはWebを優先する。
+Because one package handles multiple services, specify service=`smart-ex` in analysis/collectors and do not mix Express Reservation accounts/hosts/pages/schemas. The app suits identifying biometric/device-bound auth and app-specific transport, but reservation/change/refund writes coexist centrally. Prefer Web initially because classic-form fields/actions are easier to observe and receipt printing is supported.
 
-公式standalone APK配布は確認できない。第三者mirrorは初期provenanceに使わず、ユーザー管理Androidへ
-Google Playから正規installしたartifactを使う。
+No official standalone APK distribution was confirmed. Do not use third-party mirrors for initial provenance; use artifacts legitimately installed from Google Play on user-controlled Android.
 
-### 9.2 正規APK/split APKの次実験
+### 9.2 Next experiment for legitimate APK/split APKs
 
-この環境にはGoogle Play install済みのユーザー管理Android、`adb`、`apksigner`、`bundletool`、`jadx`、
-`apktool`、MobSFが揃っていないためbinaryを取得しなかった。次の手順で、repository外の暗号化一時領域
-に取得する。
+This environment lacked the complete set of a user-controlled Android with Google Play installation, `adb`, `apksigner`, `bundletool`, `jadx`, `apktool`, and MobSF, so no binary was obtained. Use the following procedure in encrypted temporary storage outside the repository.
 
 ```bash
 PKG=jp.co.jr_central.exreserve
 adb shell dumpsys package "$PKG" | grep -E 'version(Name|Code)|firstInstallTime|lastUpdateTime'
 adb shell pm path "$PKG"
-# 上で得たbase.apkと全split_config*.apkを一つずつadb pullする
+# Use adb pull for base.apk and every split_config*.apk obtained above, one by one
 sha256sum artifact/*.apk
 apksigner verify --verbose --print-certs artifact/*.apk
 jadx -d jadx-out artifact/*.apk
@@ -318,200 +217,155 @@ apktool d -f artifact/base.apk -o apktool-out
 rg -a -n 'https?://|wss://|ClientService|RSWP|retrofit|okhttp|webview|oauth|saml|bearer|cookie|session|pin|certificate|integrity|attestation|akamai' jadx-out apktool-out
 ```
 
-- 全splitのsigner digest一致を確認し、package/version/signer/hash/取得日時だけをprovenance recordに残す。
-  APK/decompiled codeはcommit/第三者cloudへuploadしない。
-- Manifest、network security config、WebView/native境界、host/path/action ID定数、serializer/model、
-  session/cookie更新、biometric key storage、Akamai mobile module、pinning/integrity候補を列挙する。
-- R8/ProGuard/string encryptionのdeobfuscation、URL builder/serializer/read methodのruntime tracingは
-  対象にできる。ただしtoken/cookie/key/OTP/PII/実値をlogせず、pinning/integrity判定を変更するhookは
-  作らない。
-- MobSFはlocal static scanのみ。自動dynamic action、第三者cloud upload、binary再配布をしない。
+- Verify matching signer digests across all splits; retain only package/version/signer/hash/acquisition time in provenance records. Do not commit APKs/decompiled code or upload them to third-party clouds.
+- Inventory manifest, network security config, WebView/native boundaries, host/path/action-ID constants, serializers/models, session/cookie renewal, biometric key storage, Akamai mobile modules, and pinning/integrity candidates.
+- R8/ProGuard/string-encryption deobfuscation and runtime tracing of URL builders/serializers/read methods can be in scope. Never log tokens/cookies/keys/OTPs/PII/actual values or create hooks changing pinning/integrity decisions.
+- MobSF is for local static scans only. No automatic dynamic actions, third-party cloud upload, or binary redistribution.
 
-### 9.3 read-only app動的観測
+### 9.3 Read-only app dynamic observation
 
-1. 既存install/既存sessionがあればSmart EX serviceを選び、予約一覧、購入履歴、既存文書表示だけを開く。
-2. bodyを保存せず、DNS/SNI、host、method、path template、status、content-type、field名のみを観測する。
-3. user-installed CAをappが通常受理する場合だけlocal proxyを使う。拒否/pinning/integrity errorならpatch/
-   hookで回避せず、encrypted metadata観測へ戻る。
-4. runtime tracingはread page/serializerだけに限定し、予約検索/購入/変更/払戻/IC/設定methodは呼ばない。
-5. write endpointとのscope/session分離を確認できなければdirect replayせず、UI/manual routeに戻す。
+1. With an existing installation/session, select Smart EX and open only reservation lists, purchase history, and existing document displays.
+2. Without saving bodies, observe only DNS/SNI, host, method, path template, status, content-type, and field names.
+3. Use a local proxy only if the app normally accepts a user-installed CA. For rejection/pinning/integrity errors, return to encrypted-metadata observation without patch/hook bypasses.
+4. Limit runtime tracing to read pages/serializers; do not call reservation search/purchase/change/refund/IC/settings methods.
+5. Without confirmed scope/session separation from write endpoints, do not replay directly; return to UI/manual routes.
 
-## 10. 公開third-party implementation
+## 10. Public third-party implementations
 
 ### 10.1 `hhhryoma/smartex-receipt`
 
-[hhhryoma/smartex-receipt](https://github.com/hhhryoma/smartex-receipt) のcommit
-[`7ba77bedc4749369e1cf589501878b4d45ecd641`](https://github.com/hhhryoma/smartex-receipt/blob/7ba77bedc4749369e1cf589501878b4d45ecd641/index.js)
-（2026-08-02、license表示なし）は、Playwright 1.52 + persistent ChromiumでWeb UIを操作する具体的な
-第三者実装である。
+[hhhryoma/smartex-receipt](https://github.com/hhhryoma/smartex-receipt) at commit [`7ba77bedc4749369e1cf589501878b4d45ecd641`](https://github.com/hhhryoma/smartex-receipt/blob/7ba77bedc4749369e1cf589501878b4d45ecd641/index.js) (2026-08-02, no license shown) is a concrete third-party implementation operating Web UI with Playwright 1.52 and persistent Chromium.
 
-transport/auth実装:
+Transport/auth implementation:
 
-- `https://shinkansen2.jr-central.co.jp/RSV_P/smart_index.htm`へ移動し、`input[name="01"]`/`02`へ
-  `.env`の会員ID/passwordを入力する。
-- OTP pageを本文文字列で検出し、SMS送信buttonをclickする。OTPを`output/otp.txt`から読み、input
-  `tx01`等へ入れる。persistent profileを`output/.browser-profile`へ保存する。
-- login後、`cfEXPY_doAction`を持つmenu linkの「利用履歴/領収書/購入履歴」を文字列検索し、
-  `input[name="b1"][value="領収書表示"]`をpageごとに処理する。
-- print popupをPlaywright `page.pdf()`でPDF化し、`div.pager`の「次へ」を辿る。直接API clientではなく、
-  Smart EX HTML/form sessionを使うC/D型である。
+- Navigates to `https://shinkansen2.jr-central.co.jp/RSV_P/smart_index.htm` and enters member ID/password from `.env` into `input[name="01"]`/`02`.
+- Detects OTP pages by body text and clicks the SMS-send button. Reads OTP from `output/otp.txt`, enters it into inputs such as `tx01`, and saves a persistent profile to `output/.browser-profile`.
+- After login, searches menu links with `cfEXPY_doAction` for `利用履歴/領収書/購入履歴` (usage history/receipts/purchase history) and processes `input[name="b1"][value="領収書表示"]` page by page.
+- Converts print popups to PDF through Playwright `page.pdf()` and follows `次へ` in `div.pager`. This is C/D using Smart EX HTML/form sessions, not a direct API client.
 
-そのまま採用できない理由:
+Reasons it cannot be adopted unchanged:
 
-- passwordをplain `.env`、sessionをpersistent browser profile、OTPをplain fileへ置き、OTP値をconsole
-  logする。debug modeは認証後HTML/screenshot、通常実行は実日付/区間/金額を含み得るPDFを保存する。
-- public repository自身にroute/date名のPDF出力がcommitされている。PDF本文は調査で開いていないが、
-  privacy設計の反例であり、fork/実行/再配布しない。
-- `force: true`、汎用「戻る/OK/次へ」selector、body text fallbackはDOM変更時に予期しないbuttonを押す
-  危険がある。strict read-only collectorでgeneric clickを使わない。
-- `領収書表示`だけを対象にし、`払戻明細`/`払戻手数料`を収集しないためnet costを完全に再現しない。
-- SMS送信を自動clickし最大3回retryする。strict routeではOTPはhuman handoffし、失敗時に自動retryしない。
-- LINE pushという外部write/秘密追加を含むため除外する。
+- Stores passwords in plaintext `.env`, sessions in persistent browser profiles, and OTPs in plaintext files, logging OTP values to the console. Debug mode saves authenticated HTML/screenshots; normal runs save PDFs potentially containing actual dates/routes/amounts.
+- The public repository itself commits PDF outputs with route/date names. PDF bodies were not opened in this research, but this is a privacy-design counterexample; do not fork, run, or redistribute it.
+- `force: true`, generic `戻る/OK/次へ` (back/OK/next) selectors, and body-text fallback risk unexpected button presses after DOM changes. Strict read-only collectors must not use generic clicks.
+- It targets only `領収書表示`, omitting `払戻明細`/`払戻手数料`, and cannot fully reconstruct net cost.
+- Automatically clicks SMS sending and retries up to three times. Strict routes hand OTP off to humans without automatic retries on failure.
+- Exclude its LINE push, an external write and additional secret.
 
-この実装はPlaywright browser routeで領収書を取得できる実例だが、B型internal API、current stability、
-利用規約適合、完全な履歴取得を証明しない。
+This demonstrates receipt retrieval through a Playwright browser route, but does not prove a B-level internal API, current stability, terms compliance, or complete history retrieval.
 
-### 10.2 予約通知emailの公開Gist
+### 10.2 Public reservation-notification email Gist
 
-[dora1998のGist](https://gist.github.com/dora1998/5a626f20797bd305fd93c76faab9da1b/8ba79dde474131fe4a20e12107467302d4b201b7)
-（revision `8ba79dde474131fe4a20e12107467302d4b201b7`、2019、license表示なし）は、Google Apps Scriptで
-`yoyaku@expy.jp`からの予約emailを検索し、お預かり番号、乗車日、駅、時刻、列車を正規表現で抽出して
-Google Calendar eventを作る。
+[dora1998's Gist](https://gist.github.com/dora1998/5a626f20797bd305fd93c76faab9da1b/8ba79dde474131fe4a20e12107467302d4b201b7) (revision `8ba79dde474131fe4a20e12107467302d4b201b7`, 2019, no license shown) uses Google Apps Script to search reservation emails from `yoyaku@expy.jp`, extract deposit-reference number, boarding date, stations, times, and train with regular expressions, and create Google Calendar events.
 
-これはemailという二次通知transportの具体例であり、login/sessionを扱わない。一方、変更/払戻/自動
-払戻/領収書/IC指定/カードsettlementの完全性を保証せず、calendar作成はwriteである。本collectorでは
-実行しない。emailを補助sourceにする場合も、Smart EX利用履歴を正本とし、本文/PIIを保存しない。
+This is a concrete secondary-notification transport without login/session handling. However, it does not guarantee complete changes/refunds/automatic refunds/receipts/IC assignments/card settlement, and calendar creation is a write. This collector does not execute it. Even if email becomes a supplementary source, Smart EX usage history remains authoritative and email bodies/PII are not saved.
 
-GitHub code/repository検索では、現行のdocumented personal API/SDK、Smart EXのrenewable read API
-client、EXアプリ10.0.0の公開署名検証済みdecompilationを確認できなかった。不在を証明するものではない。
+GitHub code/repository searches did not confirm a current documented personal API/SDK, renewable Smart EX read-API client, or public signature-verified decompilation of EX app 10.0.0. This does not prove absence.
 
-## 11. read/write隔離
+## 11. Read/write isolation
 
-最小allowlist:
+Minimum allowlist:
 
-- 通常loginと既存WESTER federation login（新規連携、reset、設定変更を除外）
-- 予約一覧/詳細の表示。ただしbutton押下は「詳細」「戻る」の厳密selectorのみ
-- 「ご利用履歴・領収書の発行」/「購入履歴・領収書」の期間指定、再検索、read pagination
-- 既存「領収書表示」「払戻明細」「払戻手数料」の表示/print view
-- 乗車用ICの`指定済/指定なし`と割当数の表示。番号値は取得しない
+- Normal login and existing WESTER federation login (exclude new linking, resets, settings changes)
+- Reservation list/detail display, with button presses limited to strict selectors for `詳細` (details) and `戻る` (back)
+- Period selection, `再検索`, and read pagination in `ご利用履歴・領収書の発行`/`購入履歴・領収書`
+- Display/print views of existing `領収書表示`, `払戻明細`, and `払戻手数料`
+- Display of boarding-IC `指定済/指定なし` (assigned/unassigned) and assignment counts; do not retrieve numbers
 
-denylist:
+Denylist:
 
-- 「新幹線予約」「予約を続ける」「購入」「変更」「払戻」「取消」「人数を減らす」
-- 「乗車用ICカードを指定」「新しいカードを登録」、IC追加/編集/削除/並替
-- 「お客様情報の変更・退会」「パスワード変更」「簡単login設定」「外部ID利用サービスの管理」
-- OTP受信方法/電話/email/card変更、biometric/passkey登録、退会、規約同意
-- 受取code、ticket発券、EXポイント利用、旅パック/旅先予約、LINE/calendar通知
+- `新幹線予約` (Shinkansen reservation), `予約を続ける` (continue reservation), `購入` (purchase), `変更`, `払戻`, `取消` (cancel), `人数を減らす` (reduce passengers)
+- `乗車用ICカードを指定` (assign boarding IC card), `新しいカードを登録` (register new card); IC addition/editing/deletion/reordering
+- `お客様情報の変更・退会` (change customer information/withdraw membership), `パスワード変更` (change password), `簡単login設定` (easy-login settings), `外部ID利用サービスの管理` (manage external-ID services)
+- OTP delivery-method/phone/email/card changes, biometric/passkey registration, membership withdrawal, terms consent
+- Pickup codes, ticket issuance, EXポイント (EX Points) use, travel-package/destination reservations, LINE/calendar notifications
 
-実装gate:
+Implementation gates:
 
-1. origin/path/methodに加え`_PageID + _ActionID + page title + exact label`をallowlistにする。
-2. form actionが`ClientService`でもunknown action IDならsubmit前に停止する。
-3. selectorはbutton name/valueと親pageを固定し、`force:true`、generic `OK/次へ/戻る`、座標clickを使わない。
-4. click前に全form/buttonを分類し、deny語または未知actionが1つでもtarget候補なら人へhandoffする。
-5. responseのpage ID/titleが期待と異なる、利用履歴から予約操作画面へredirectした場合は停止する。
-6. receipt addressee入力はaccount writeではないがPIIを生成するため、この検証では空欄のままにする。
+1. In addition to origin/path/method, allowlist `_PageID + _ActionID + page title + exact label`.
+2. Stop before submitting unknown action IDs even when the form action is `ClientService`.
+3. Fix selectors to button names/values and parent pages; never use `force:true`, generic `OK/次へ/戻る` (OK/next/back), or coordinate clicks.
+4. Classify all forms/buttons before clicking; hand off if any target candidate has a denied term or unknown action.
+5. Stop on unexpected response page IDs/titles or redirects from usage history to reservation-operation screens.
+6. Receipt-addressee entry is not an account write, but generates PII, so leave it blank in this validation.
 
-## 12. Workers / Browser Run / Containers / OCI / Kubernetes適性
+## 12. Workers / Browser Run / Containers / OCI / Kubernetes suitability
 
-- **Cloudflare Workers**: [Fetch API](https://developers.cloudflare.com/workers/runtime-apis/fetch/) はHTTP
-  POST、HTML parser、schedule、normalizationには使える。しかしSmart EXはmutable hidden sessionと
-  action IDを同一`ClientService`へPOSTし、Akamai/OTPもある。renewable sessionとread actionの完全分離を
-  live証明するまではcollector本体に不向き。sanitized parser/後段変換には向く。
-- **Cloudflare Browser Run**: [公式概要](https://developers.cloudflare.com/browser-run/) はPlaywright/CDP
-  browser sessionを提供し、[Human in the Loop](https://developers.cloudflare.com/browser-run/features/human-in-the-loop/)
-  はMFA/秘密入力で人へhandoffできる。C候補だが、cloud IP/device変化がAkamai/OTPを増やし得る。
-  Session Recording/Live ViewにPIIが残るためrecordingを無効化し、remote secret policyを別途確認する。
-- **Cloudflare Containers**: [公式Containers](https://developers.cloudflare.com/containers/) はfull filesystem、
-  任意runtime、既存OCI imageに対応する。Playwright、PDF print、local parser、jadx/apktool等にWorkersより
-  適するが、Android device/Play provenance/Akamai受容を解決しない。
-- **OCI/local container**: pinned Playwright/browser/parserをread-only rootfs、ephemeral `/tmp`、暗号化
-  profile volume、egress allowlistで動かす現実的候補。profile/receipt/debugをimage layerやrepositoryへ
-  入れず、処理後secure deleteではなくephemeral volume破棄を使う。
-- **Kubernetes**: 多数sourceのCronJob、per-source NetworkPolicy、external secret、retry/observabilityには
-  向くがSmart EX単体には過剰。未知DOM/OTP/401/403/429/writeをretryしないcontrollerが必要。
-- **Android device automation**: EXアプリ routeは実機/managed emulatorが必要でWorkers/ordinary OCI
-  単体には不向き。pinning/integrity bypassを前提にしない。
+- **Cloudflare Workers**: the [Fetch API](https://developers.cloudflare.com/workers/runtime-apis/fetch/) supports HTTP POST, HTML parsing, schedules, and normalization. However, Smart EX POSTs mutable hidden sessions/action IDs to one `ClientService`, with Akamai/OTP. Unsuitable as the collector itself until renewable sessions and complete read-action separation are proven live; suitable for sanitized parsers/downstream transforms.
+- **Cloudflare Browser Run**: the [official overview](https://developers.cloudflare.com/browser-run/) provides Playwright/CDP browser sessions; [Human in the Loop](https://developers.cloudflare.com/browser-run/features/human-in-the-loop/) allows handoff for MFA/secrets. A C candidate, but cloud IP/device changes may increase Akamai/OTP checks. Disable Session Recording because recording/Live View can retain PII, and check remote-secret policy separately.
+- **Cloudflare Containers**: [official Containers](https://developers.cloudflare.com/containers/) support full filesystems, arbitrary runtimes, and existing OCI images. Better suited than Workers to Playwright, PDF printing, local parsers, and jadx/apktool, but do not solve Android devices/Play provenance/Akamai acceptance.
+- **OCI/local container**: a practical candidate with pinned Playwright/browser/parsers, read-only rootfs, ephemeral `/tmp`, encrypted profile volumes, and egress allowlists. Keep profiles/receipts/debug out of image layers/repository; discard ephemeral volumes after processing rather than using secure deletion.
+- **Kubernetes**: suits many-source CronJobs, per-source NetworkPolicies, external secrets, retries/observability, but excessive for Smart EX alone. Requires a controller that does not retry unknown DOM/OTP/401/403/429/writes.
+- **Android device automation**: EX app routes require a real device/managed emulator and do not suit Workers/ordinary OCI alone. Do not assume pinning/integrity bypasses.
 
-## 13. PR #5共通の自動化レベルA-Eとcost 1-5
+## 13. PR #5 common automation levels A–E and cost 1–5
 
-共通定義:
+Common definitions:
 
-- **A**: 公式/documented read-only APIまたは機械取得用公式export
-- **B**: 安定したinternal read APIとrenewable/reusable sessionを直接利用
-- **C**: 人のbrowser/app login bootstrap後にheadless HTTP/browser replay
-- **D**: full browser/device UI automationが継続的に必要
-- **E**: 手動capture/import
+- **A**: official/documented read-only API or official machine-retrieval export
+- **B**: direct use of stable internal read APIs and renewable/reusable sessions
+- **C**: headless HTTP/browser replay after human browser/app login bootstrap
+- **D**: ongoing full browser/device UI automation required
+- **E**: manual capture/import
 
-| route                              | 現時点の判定     |    cost | 根拠/昇格条件                                                                                               |
-| ---------------------------------- | ---------------- | ------: | ----------------------------------------------------------------------------------------------------------- |
-| 公式領収書/払戻文書の手動print     | **E**            |   **1** | 最大15か月、回数制限なし。PDF化は端末依存、bulk/CSV/APIなし                                                 |
-| Web利用履歴・領収書Playwright      | **C候補**        | **3-4** | 公開第三者実装でsession付きUI/PDFを具体化。Akamai/OTP、hidden action、privacy hardening、払戻文書追加が必要 |
-| Web予約一覧/IC指定状態             | **D**            |   **4** | 変更/払戻/IC writeが隣接し、pathも共通。read actionの厳密allowlistをlive確認できればC/4                     |
-| internal `ClientService`直接replay | **C候補、B未達** |   **4** | classic form/session/action IDは確認。renewal、read-only action、schema stability、Akamai受容は未確認       |
-| EXアプリ                           | **D**            |   **5** | shared service app、device/biometric、APK transport未確認、write隣接                                        |
-| email通知parse                     | **C補助**        |   **2** | login不要にできるが二次通知で不完全。正本/領収書/IC/settlementを置換しない                                  |
-| Smart EX全体                       | **D**            |   **4** | receiptはC候補だが、予約/IC/実乗車境界と安全なwrite隔離にfull browser確認が残る                             |
+| Route                                             | Current assessment       |    Cost | Evidence/promotion conditions                                                                                                           |
+| ------------------------------------------------- | ------------------------ | ------: | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Manual print of official receipt/refund documents | **E**                    |   **1** | Up to 15 months, no issuance-count limit. PDF is device-dependent; no bulk/CSV/API                                                      |
+| Web usage history/receipts via Playwright         | **C candidate**          | **3-4** | Public third-party implementation demonstrates session UI/PDF. Requires Akamai/OTP, hidden actions, privacy hardening, refund documents |
+| Web reservations/IC assignment status             | **D**                    |   **4** | Adjacent change/refund/IC writes share paths. C/4 if strict read-action allowlists confirmed live                                       |
+| Direct internal `ClientService` replay            | **C candidate, below B** |   **4** | Classic form/session/action IDs confirmed; renewal, read-only actions, schema stability, Akamai acceptance unconfirmed                  |
+| EX app                                            | **D**                    |   **5** | Shared-service app, device/biometrics, APK transport unconfirmed, adjacent writes                                                       |
+| Email notification parsing                        | **C supplement**         |   **2** | May avoid login but incomplete secondary notifications. Does not replace authority/receipts/IC/settlement                               |
+| Smart EX overall                                  | **D**                    |   **4** | Receipts are C candidates; reservation/IC/actual-boarding boundaries and safe write isolation still require full-browser confirmation   |
 
-Aは選ばない。公式にHTML/print viewはあるが、documented machine API/CSV/bulk exportではない。Bへの
-昇格は、利用履歴/receipt専用read action ID、renewable session、Akamaiに許容される低頻度replay、
-変更/払戻actionとの構造的分離をlive証明した後に限定する。
+Do not choose A. Official HTML/print views exist, but are not documented machine APIs/CSV/bulk export. Promotion to B requires live proof of usage-history/receipt-only read-action IDs, renewable sessions, low-frequency replay accepted by Akamai, and structural separation from change/refund actions.
 
-## 14. read-only live検証チェックリストとstop条件
+## 14. Read-only live-validation checklist and stop conditions
 
-read-only live検証:
+Read-only live validation:
 
-- [ ] Smart EX serviceだけが選択され、エクスプレス予約/旅パック/e5489 dataを混ぜていない
-- [ ] 予約一覧/詳細のfield名、state、往復/乗継/同行者構造。値は保存しない
-- [ ] 利用履歴の最古15か月境界、照会期間、1 page件数、pagination、総件数、stable ID有無
-- [ ] 予約/変更/払戻/未使用/遅延/手数料のevent typeと、変更前後/原取引link field有無
-- [ ] 「領収書表示」「払戻明細」「払戻手数料」の件数、HTML/print/PDF fieldとお預かり番号link
-- [ ] CSV/JSON/export導線の有無。公開資料にない機能を存在しないと決めつけない
-- [ ] 乗車用ICは`specified`/割当数だけ確認し、17桁番号をcaptureしない
-- [ ] 実乗車/gate履歴の有無と、予約/購入履歴との区別。IC残高/在来線履歴は開かない
-- [ ] login/OTP/WESTER/biometric/session timeoutとhuman handoff点。設定変更はしない
-- [ ] 各read画面のorigin/method/path/page ID/action ID/field名/response pageを値なしで観測
-- [ ] Akamai/401/403/429/CAPTCHA時のretry無効、secret/PII redaction、unknown action default deny
+- [ ] Only Smart EX service selected; no Express Reservation/travel-package/e5489 data mixed in
+- [ ] Reservation list/detail field names, states, round-trip/connection/companion structure; no saved values
+- [ ] Oldest 15-month history boundary, inquiry period, rows per page, pagination, total count, stable-ID presence
+- [ ] Reservation/change/refund/non-use/delay/fee event types and before/after/original-transaction link-field presence
+- [ ] `領収書表示`/`払戻明細`/`払戻手数料` counts, HTML/print/PDF fields, deposit-reference links
+- [ ] Presence of CSV/JSON/export navigation; do not assume unmentioned functions are absent
+- [ ] Boarding IC only `specified`/assignment counts; no capture of 17-digit numbers
+- [ ] Actual-boarding/gate-history presence and distinction from reservations/purchases; do not open IC balances/conventional-line history
+- [ ] Login/OTP/WESTER/biometric/session timeout and human-handoff points; no settings changes
+- [ ] Observe origin/method/path/page ID/action ID/field names/response page for each read screen, without values
+- [ ] Disable retries on Akamai/401/403/429/CAPTCHA; secret/PII redaction; default-deny unknown actions
 
-即時stop:
+Immediate stops:
 
-- 予約、購入、変更、払戻/取消、人数減、IC指定/編集、ticket受取、設定変更の確認/実行buttonがtargetに
-  なった
-- OTP送信、3D Secure、本人確認、WESTER連携/同意、passkey/biometric登録、password resetを要求された
-- 会員/card/IC/予約/お預かり番号、Cookie/token/OTP、実日付/区間/列車/座席/金額/宛名がlog/HAR/
-  screenshot/HTML/PDFへ残り得る
-- 401/403/429、CAPTCHA/bot/interstitial、Akamai denial、認証loop、pinning/integrity errorが出た
-- unknown`_ActionID/_PageID`、unexpected redirect、generic selector、write/read session分離不能がある
-- Smart EXとエクスプレス予約、card settlement、IC transit ledgerのsource boundaryを判定できない
+- A confirmation/execution button for reservation, purchase, change, refund/cancellation, passenger reduction, IC assignment/editing, ticket pickup, or settings becomes a target
+- OTP sending, 3D Secure, identity verification, WESTER linking/consent, passkey/biometric registration, or password reset is required
+- Member/card/IC/reservation/deposit-reference numbers, Cookies/tokens/OTPs, actual dates/routes/trains/seats/amounts/addressees could remain in logs/HAR/screenshots/HTML/PDF
+- 401/403/429, CAPTCHA/bot/interstitial, Akamai denial, authentication loop, or pinning/integrity error occurs
+- Unknown `_ActionID/_PageID`, unexpected redirects, generic selectors, or inability to separate write/read sessions
+- Cannot determine source boundaries among Smart EX, Express Reservation, card settlement, and IC transit ledgers
 
-## 15. 結論、推測、未確認
+## 15. Conclusions, inferences, and unconfirmed items
 
-### 確認できたこと
+### Confirmed
 
-- Smart EX利用履歴は予約翌日から最大15か月で、予約/変更/払戻を表示する。領収書、払戻明細、払戻
-  手数料は別documentで、お預かり番号を合わせてnet負担を求める。
-- 公式CSV/public API/bulk PDFは確認できない。領収書のPDF保存は端末print機能依存である。
-- Smart EX代金は予約時にcard決済され、乗車用IC残高から引かれない。ICは新幹線乗車権の識別で、
-  在来線運賃/IC残高は別台帳である。
-- 直接loginはID/passwordとrisk-based OTP。簡単loginはpassword-only専用URLでpasskeyではない。
-  Smart EX直接passkeyは未確認。WESTER側passkeyをSmart EX固有対応と読み替えない。
-- auth WebはAkamai介在を示し、公開JSはhidden session/page/actionを同一`ClientService`へPOSTするclassic
-  transportである。path/methodだけでread/writeを隔離できない。
-- 公開Playwright実装はreceipt取得のC可能性を具体化するが、secret/OTP/PII保存、generic click、払戻
-  document欠落、public PDF commitのため採用できない。
+- Smart EX usage history covers up to 15 months from the day after reservation, displaying reservations/changes/refunds. Receipts, refund statements, and refund fees are separate documents, combined by deposit-reference number to calculate net cost.
+- Official CSV/public API/bulk PDF is unconfirmed. Receipt PDF saving depends on device printing.
+- Smart EX charges the card at reservation, not boarding-IC balance. IC identifies Shinkansen boarding rights; conventional-line fares/IC balances have separate ledgers.
+- Direct login uses ID/password and risk-based OTP. Easy login is a dedicated password-only URL, not a passkey. Direct Smart EX passkeys are unconfirmed; do not reinterpret WESTER passkeys as Smart EX-specific support.
+- Auth Web indicates Akamai involvement; public JS is classic transport POSTing hidden session/page/actions to one `ClientService`. Path/method alone cannot isolate reads/writes.
+- Public Playwright code demonstrates C-level receipt potential, but cannot be adopted because it saves secrets/OTPs/PII, uses generic clicks, omits refund documents, and commits public PDFs.
 
-### 推測/設計判断
+### Inferences/design decisions
 
-- 購入/払戻の正本はSmart EX利用履歴、実settlementはcard確定明細、乗車権/IC指定は予約/改札、在来線
-  IC利用はIC発行者として分けるのが最も二重計上を防ぎやすい。
-- receipt/history限定ならC/3-4候補だが、Smart EX全体はdangerous adjacent actionsのためD/4。安全な
-  初期routeはE/1である。
-- `ClientService`のread action IDとsession renewalをliveで固定できれば限定的Bへ進める可能性はある。
+- Separating Smart EX usage history as purchase/refund authority, finalized card statements for actual settlement, reservations/gates for boarding rights/IC assignment, and IC issuers for conventional-line IC use best prevents double counting.
+- Receipt/history-only is a C/3-4 candidate; Smart EX overall is D/4 due to dangerous adjacent actions. The safe initial route is E/1.
+- Limited B may be possible if `ClientService` read-action IDs and session renewal can be established live.
 
-### 未確認
+### Unconfirmed
 
-- 利用履歴のpage size/最大件数、stable ID、変更前後/原取引と払戻のlink、CSV/JSON/export。
-- actual boarding/gate eventの会員向け表示/export、EXご利用票digital copy。
-- authenticated read画面の`_PageID/_ActionID`、session lifetime/refresh、Akamai challenge/rate条件。
-- EXアプリ10.0.0のhost/path/schema、WebView/native境界、signer、pinning/integrity候補。
-- Smart EXへのWESTER passkey federated loginとBitwarden固有互換。
+- Usage-history page size/maximum counts, stable IDs, before/after/original-transaction/refund links, CSV/JSON/export.
+- Member display/export of actual-boarding/gate events and digital EX usage-slip copies.
+- Authenticated read-screen `_PageID/_ActionID`, session lifetime/refresh, Akamai challenge/rate conditions.
+- EX app 10.0.0 hosts/paths/schemas, WebView/native boundaries, signer, pinning/integrity candidates.
+- WESTER passkey federated login to Smart EX and Bitwarden-specific compatibility.
