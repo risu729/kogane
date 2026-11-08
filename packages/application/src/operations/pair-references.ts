@@ -30,15 +30,20 @@
 //   The pair's references are both identifiers' mappings and `listed_as` in
 //   both orientations (each identifier's current instrument to the other
 //   identifier). Every one of them is a function of the two mappings, which
-//   are pinned, so the set cannot grow while the plan is fresh.
+//   are pinned, so the set cannot grow while the plan is fresh. The forward
+//   orientation pinned is the command's own target instrument: an adoption's
+//   target must be the anchor's current instrument (targets.ts), while a
+//   hand-built `listed_as` from another instrument pins its own triple, which
+//   is then no reference of the pair and, the anchor's mapping being pinned,
+//   cannot become one before the commit.
 //
 // Anything else names no pair, and its plan pins its own subject as before.
 // That includes `same_account` (every reader takes a triple's status from its
 // own rows, each orientation apart) and a `listed_as` decision whose evidence
-// does not name exactly two identifiers (the candidate read applies it to
-// whichever identifiers map to its instrument when the read runs, a set, not
-// a pair). Nothing outside their own triple changes what such a plan showed
-// or what its commit writes.
+// does not name exactly the subject and one other identifier (the candidate
+// read applies it to whichever identifiers map to its instrument when the
+// read runs, a set, not a pair). Nothing outside their own triple changes
+// what such a plan showed or what its commit writes.
 import type {
   ChangeKind,
   ChangePayload,

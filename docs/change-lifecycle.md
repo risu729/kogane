@@ -155,13 +155,23 @@ else to pin:
   what the plan showed nor what its commit writes. A rejection withdraws only
   its own orientation: an acceptance stored in the other orientation stays in
   force in the projection.
-- A `listed_as` decision whose evidence does not name exactly two
-  identifiers. Its triple names one instrument and one identifier. The
-  instrument candidate read applies it to the pair of that identifier and
+- A `listed_as` decision whose evidence does not name exactly the subject and
+  one other identifier. Its triple names one instrument and one identifier.
+  The instrument candidate read applies it to the pair of that identifier and
   each identifier mapped to the instrument when the read runs, not when the
   decision is committed. Those pairs are a set that follows later mappings,
-  not one pair, and the plan shows none of them. So no pair is named: the
-  plan pins the triple, which is all it showed.
+  not one pair, and the plan shows none of them. So no pair is named: the plan
+  pins the triple, which is all it showed.
+
+A `listed_as` payload whose evidence names the pair but whose instrument
+(`fromRef`) is not the other identifier's current one (a hand-built payload;
+the candidate's keep-apart payload names that instrument) is pinned as the
+table says: its own triple, both mappings and the reverse orientation. It
+does not pin `listed_as` from the other identifier's current instrument,
+because its triple is no reference of the pair: the candidate read applies it
+as it applies a decision that names no pair, and the pinned mapping keeps it
+so until the commit. The mapping pin can only refuse such a plan, never let
+its commit act on a state it did not show.
 
 MCP clients reach the same layer
 (`kogane.command.approve` / `kogane.command.commit` re-simulate before
@@ -836,10 +846,13 @@ already recorded is never undone by a DELETE — an undo is a new revision
   appears (before the batch or inside it), refuses approval or commit with
   `stale_context` and writes nothing, over the lifecycle and over MCP; the
   pair read reaches relations by primary key only without table statistics; a
-  `same_account` plan, and a `listed_as` plan whose evidence names no two
-  identifiers, pin their own triple only and commit after a decision in the
-  reverse orientation, and the account candidate read reports the two
-  `same_account` orientations apart.
+  `same_account` plan, and a `listed_as` plan whose evidence does not name the
+  subject and one other identifier, pin their own triple only and commit after
+  a decision in the reverse orientation, and the account candidate read
+  reports the two `same_account` orientations apart; a `listed_as` plan naming
+  the pair from another instrument does not pin the pair's forward
+  orientation, commits after a decision under it, and leaves the pair's
+  candidate status unchanged.
 - `services/processor/test/balance-projection.test.ts` "the
   dispatcher routes the balance-projection target to that processor": a
   `balance-projection` row reaches A07's real processor and rebuilds the

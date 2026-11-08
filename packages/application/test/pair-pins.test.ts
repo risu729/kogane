@@ -386,9 +386,9 @@ describe("an instrument pair (ADR 0055) is pinned under both orientations and bo
 });
 
 // A `same_account` decision, and a `listed_as` decision whose evidence does
-// not name exactly two identifiers, decide no pair: every reader takes such a
-// triple's status from its own rows only, and the plan shows that triple
-// only. Their plans pin the triple alone, and a decision under any other
+// not name exactly the subject and one other identifier, decide no pair:
+// every reader takes such a triple's status from its own rows only, and the
+// plan shows that triple only. Their plans pin the triple alone, and a decision under any other
 // triple (the reverse orientation included) leaves what the plan showed, and
 // what its commit writes, unchanged.
 describe("a decision that names no pair pins its own triple only", () => {
@@ -441,7 +441,7 @@ describe("a decision that names no pair pins its own triple only", () => {
     s.db.close();
   });
 
-  test("listed_as without two named identifiers names no pair and pins its own triple", async () => {
+  test("listed_as not naming the subject and one other identifier names no pair and pins its own triple", async () => {
     const w = await instrumentWorld();
     const id = ids(w);
     const store = sqliteCommandStore(w.db);
@@ -461,10 +461,12 @@ describe("a decision that names no pair pins its own triple only", () => {
       evidenceRefs,
       reason: "synthetic keep apart",
     });
-    // None, only the subject, or three identifiers: no pair is named.
+    // None, only the subject, two without the subject, or three identifiers:
+    // no pair is named.
     for (const evidence of [
       [],
       [`identifier:${subject}`],
+      [`identifier:${anchor}`, `identifier:${id.venue9001}`],
       [`identifier:${anchor}`, `identifier:${subject}`, `identifier:${id.venue9001}`],
     ])
       expect(await pairReferences(store, "relation.reject", keepApart(evidence))).toEqual([]);
@@ -487,6 +489,72 @@ describe("a decision that names no pair pins its own triple only", () => {
         .query("SELECT count(*) AS n FROM entity_relations WHERE kind='listed_as' AND to_ref=?")
         .get(`identifier:${subject}`),
     ).toEqual({ n: 1 });
+    w.db.close();
+  });
+
+  // A hand-built payload whose evidence names the pair but whose instrument is
+  // not the anchor's current one: its triple is no reference of the pair, and
+  // the pinned anchor mapping keeps it so until the commit. The plan pins its
+  // own triple, both mappings and the reverse orientation; a decision under
+  // the pair's own forward orientation leaves it fresh, and its rejection
+  // leaves the pair's candidate as it was.
+  test("listed_as naming the pair from another instrument decides no reference of the pair", async () => {
+    const w = await instrumentWorld();
+    const id = ids(w);
+    const store = sqliteCommandStore(w.db);
+    const resolution = await queryInstrumentResolution(w.sql);
+    const candidate = candidateOf(resolution, id.listing9001, id.broker9001);
+    const instrumentOf = (identifier: string) =>
+      resolution.identifiers.find((row) => row.identifierId === identifier)!.instrumentId;
+    const anchor = candidate.anchorIdentifierId;
+    const subject = candidate.subjectIdentifierId;
+    const other = instrumentOf(id.tokyo9002);
+    expect([instrumentOf(anchor), instrumentOf(subject)]).not.toContain(other);
+    const keepApart = candidate.commands!.keepApart.payload as RelationPayload;
+    const payload: RelationPayload = {
+      ...keepApart,
+      fromRef: `instrument:${other}`,
+      reason: "synthetic keep apart",
+    };
+    const own = `relation:listed_as|instrument:${other}|identifier:${subject}`;
+    const forward = `relation:listed_as|instrument:${instrumentOf(anchor)}|identifier:${subject}`;
+    const reverse = `relation:listed_as|instrument:${instrumentOf(subject)}|identifier:${anchor}`;
+    const plan = await planned(store, "relation.reject", payload);
+    expect(plan.expectedRevisions).toEqual({
+      [`instrument_mapping:${anchor}`]: 1,
+      [`instrument_mapping:${subject}`]: 1,
+      [own]: 0,
+      [reverse]: 0,
+    });
+    expect(Object.keys(plan.expectedRevisions)).not.toContain(forward);
+    const approval = await approved(store, plan);
+    if (!approval.ok) throw new Error("approval refused");
+    // An acceptance under the pair's own forward orientation, in between.
+    await decide(store, w.db, "relation.accept", {
+      ...keepApart,
+      reason: "synthetic listing, the pair's own orientation",
+    });
+    const pairNow = async () =>
+      candidateOf(await queryInstrumentResolution(w.sql), anchor, subject).status;
+    expect(await pairNow()).toBe("proposed");
+    expect(await simulate(plan, store)).toMatchObject({ ok: true, report: { stale: false } });
+    expect(await committed(store, w.db, plan.planId, approval.approval.approvalId)).toMatchObject({
+      ok: true,
+    });
+    // The rejection is recorded, yet the pair stays proposed: it decided no
+    // reference of the pair.
+    expect(await pairNow()).toBe("proposed");
+    expect(
+      w.db
+        .query(
+          "SELECT from_ref AS fromRef FROM entity_relations WHERE kind='listed_as' ORDER BY from_ref",
+        )
+        .all(),
+    ).toEqual(
+      [`instrument:${instrumentOf(anchor)}`, `instrument:${other}`]
+        .sort()
+        .map((fromRef) => ({ fromRef })),
+    );
     w.db.close();
   });
 });

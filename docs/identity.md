@@ -180,8 +180,8 @@ also pin `listed_as` in both orientations, so a decision recorded under any
 reference of the pair between plan and commit makes the plan stale
 ([change lifecycle: pair pins](change-lifecycle.md#pair-pins)). The pins are
 checked at approval and atomically in the commit batch. A `listed_as`
-decision whose evidence does not name exactly two identifiers names no pair
-and pins only its own triple: the read applies it to every identifier mapped
+decision whose evidence does not name exactly the subject and one other
+identifier names no pair and pins only its own triple: the read applies it to every identifier mapped
 to its instrument when the read runs, a set that follows later mappings, and
 its plan shows only the triple.
 A direct manual assignment carries no candidate provenance and cannot use

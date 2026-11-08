@@ -325,16 +325,19 @@ or an adoption between plan and commit did not make the other plan stale.
   migration rewrites (0063 rewrote `reference_json`, never an id); its other
   triples are the reverse orientation and, for an aggregator account several
   producers list, the same decision under another producer's source account
-  id. No reader combines any of them: the balance projection reads each as a
-  triple of its own (`projectionRelationsSql`; the
+  id. No reader derives one status from several of them: the balance
+  projection takes each triple's current row on its own
+  (`projectionRelationsSql`; the
   [ADR 0001 amendment of 2026-11-06](0001-domain-axes.md#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision)
-  rule is per exact triple), and decision 5 reports each stored triple with
-  its own status and derives no status of the pair. The plan shows the one
-  triple. A decision under any other triple between plan and commit
-  therefore changes neither what the plan showed nor what the commit writes. Pinning the reverse orientation was considered and rejected: it
-  would refuse a plan for a change it neither showed nor depends on, while
-  the reverse orientation stored before planning, which the plan does not
-  show either, would still be accepted. What stays open is a meaning, not a
+  rule is per exact triple) and turns each accepted one into a symmetric
+  `same` claim, and decision 5 reports each stored triple with its own status
+  and derives no status of the pair. The plan shows the one triple. A
+  decision under any other triple between plan and commit therefore changes
+  neither what the plan showed nor what the commit writes. Pinning the
+  reverse orientation was considered and rejected: it would refuse a plan for
+  a change it neither showed nor depends on, while the reverse orientation
+  stored before planning, which the plan does not show either, would still be
+  accepted. What stays open is a meaning, not a
   stale plan: a rejection withdraws only its own orientation, so an
   acceptance stored in the other orientation stays in force in the
   projection.
