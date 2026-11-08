@@ -106,6 +106,22 @@ claim and release; the records do not say which. With the owner's go-ahead
 exact-reference UPDATE on CORE D1, not through the page. These two releases
 therefore have no audit record.
 
+The next Vpass occurrence, 2026-11-07 21:00 UTC, also ended `uncertain`
+(`dispatch_uncertain`, no `finished_at`). Read from Workers Logs on
+2026-11-08: the Vpass alarm object claimed the occurrence at 21:00:00.609 UTC,
+but neither the Processor nor the Vpass Worker has an invocation record of
+that attempt. One more alarm invocation of the same object, at 21:01:39 UTC,
+ended `canceled` after 32 ms with no log line. The claim had already moved the
+schedule to the next occurrence, so a retried alarm could only re-arm for it.
+A Vpass lease was nevertheless held: the processor tick triggered at 21:10:05
+freed it at 21:15:01 UTC (`alarm.lease.expire`) under the ten-minute heartbeat
+rule, so its last heartbeat was written before about 21:05. The collector had
+therefore most likely been called and had claimed its lease before both
+executions stopped without a record. No deploy ran in that window, the logs
+show no exception or limit, the other alarms of 21:00 finished normally, and
+the reservation for the next occurrence stayed armed. The alarm and lease log
+lines below were added so the next such stop shows where it happened.
+
 An accepted operations-API collection or session refresh runs through the same
 named collector RPC and the same lease
 ([ADR 0048](adr/0048-operation-collector-dispatch.md),
@@ -138,6 +154,52 @@ a claim whose record cannot be written is rolled back with it and retried by
 the same bookkeeping wakeup. The outcome stays in the occurrence row. The
 `processor-tick` and `sbi-vc-keepalive` occurrences record nothing
 ([audit log](audit-log.md#the-processors-own-records-alarm-and-lane)).
+
+### Alarm and lease log lines
+
+Each alarm writes structured lines to Workers Logs for
+`kogane-observation-pipeline` (`services/processor/src/schedule-alarm.ts`).
+They hold job and occurrence ids, instants, closed codes and counts only:
+
+- `schedule_alarm` with `outcome`: `claimed` (with `nominalAt`, `lagMs`,
+  `claimMs` and the next reservation `nextDueAt`), `deferred` (with the
+  nominal, the stored run time and the maintenance-adjusted `dueAt`), `early`,
+  `disabled`, `no_job`, or `claim_conflict` (the claim inserted no occurrence
+  row; a `started` row already there for that occurrence is marked
+  `uncertain`/`dispatch_uncertain`, and nothing is dispatched).
+- `schedule_dispatch_start`, written just before the collector call, with the
+  target workspace.
+- `schedule_dispatch_result` with `status`, `failureCode`, `runCount` and
+  `durationMs`; when the call threw, also the error's `errorName` and a closed
+  `errorKind` (`network_lost`, `object_reset`, `timeout`, `limit_exceeded`,
+  `overloaded`, `d1`, `other`). The error message itself is never logged,
+  because a collector's error may carry provider text.
+- `schedule_bookkeeping_retry` now also names the `jobId`, the
+  `occurrenceId` once claimed, the `phase` that threw (`load`, `plan`,
+  `claim`, `dispatch`, `record`), `errorName` and `errorKind`.
+
+So an occurrence that ends `uncertain` with no `finished_at` (the hourly
+abandonment rule above) can be placed: a `claimed` line with no
+`schedule_dispatch_start` stopped between the claim and the call, a start
+with no result stopped while the call was open, and a result with no later
+line lost the receipt update.
+
+The tick's `collection_lease_expired` line names the freed lease reference,
+its `startedAt` and its `lastHeartbeatAt`, so the gap between them shows how
+long the silent holder lived after its claim.
+
+A collector whose lease claim is refused logs `collection_lease_busy`
+(`packages/collection/src/schedule-lease.ts`) with the holder's lease
+reference (the one the operator's release names), its `started_at` and
+`heartbeat_at`, and both ages measured against D1's `now` (`holderAgeMs`,
+`holderSilentMs`; `started_at` is written on the claiming isolate's clock,
+`heartbeat_at` on D1's).
+The read that describes the holder is best-effort; the refusal never depends
+on it. A claim statement that throws logs `collection_lease_claim_failed` with
+the error's name. Vpass also logs the answer it returns to the Processor as
+`vpass-scheduled-result` (`nominalAt`, `status`, `failureCode`, `runCount`,
+`durationMs`).
+Workers Logs keep seven days.
 
 The trusted workflow refuses pre-alarm release/rollback targets before checkout
 and before any production mutation. Removing the ScheduleAlarm class requires a

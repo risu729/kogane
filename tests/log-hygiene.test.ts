@@ -153,6 +153,12 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     count: 1,
     reason: "tested against the platform-limit phrase; only a boolean is kept",
   },
+  "services/processor/src/schedule-alarm.ts": {
+    count: 1,
+    reason:
+      "tested against runtime phrases (connection lost, object reset, timeout, limit) by " +
+      "alarmErrorKind; only the closed kind is kept",
+  },
   "services/processor/src/metadata-extractors/index.ts": {
     count: 1,
     reason: "a MetadataError's message is its closed code",
