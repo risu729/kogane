@@ -14,6 +14,7 @@ import {
 } from "../../../packages/application/src/query/account-candidates.ts";
 import { world, type Store } from "../../../packages/application/test/account-candidates-world.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { auditView } from "./a11y-audit.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -229,4 +230,26 @@ describe.if(runnable)("account candidate review", () => {
     expect(posted).toEqual([]);
     await tab.close();
   });
+
+  test("the open and held views and the confirmation pass the accessibility audit", async () => {
+    const tab = await open();
+    expect(await auditView(tab)).toEqual([]);
+    await tab.getByRole("button", { name: "採用を保留", exact: true }).click();
+    await tab
+      .getByText("複数の連携の確認記録に含まれているため", { exact: false })
+      .first()
+      .waitFor();
+    expect(await auditView(tab)).toEqual([]);
+    await tab.close();
+    const confirm = await open();
+    const card = confirm.locator(".identity-card").first();
+    await card.getByLabel("判断の理由", { exact: true }).fill("synthetic: reviewed connection");
+    await card
+      .getByRole("button", { name: "この連携に含まれる口座として採用する内容を確認", exact: true })
+      .click();
+    await confirm.getByRole("heading", { name: "変更の確認", exact: true }).waitFor();
+    await confirm.locator(".skeleton-bar").first().waitFor({ state: "detached" });
+    expect(await auditView(confirm)).toEqual([]);
+    await confirm.close();
+  }, 60_000);
 });

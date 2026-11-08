@@ -61,7 +61,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/myjcb.ts":
       "7d5429e4af80b8dd56ef66a6133a629bd39f7c14c0006a8591b99b28fe7e9c22",
     "poc/observation-pipeline/src/parsers/paypay-csv.ts":
-      "a89829e4856c7baa3abcda2e25762b7debf4a22fddc777756adb920ed8951621",
+      "2f18716870c4e097727b9f9288baea343893b44e8704a272295eed51d6fe8dfc",
     "poc/observation-pipeline/src/parsers/prestia-bank-html.ts":
       "d8810ae3e9adcffe0411f2692ed17b22514074c00867be2e1d6e01cc12b53de2",
     "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts":
@@ -89,23 +89,23 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/sbi-strict.ts":
       "4e9d1d18fb245ec195703c709fa5e380303f639aeb00fc6df05db09f44985abb",
     "poc/observation-pipeline/src/parsers/sbi-vc-account-margin.ts":
-      "9ac2a9a144cef635e384de45700dfcaf423472bf0038dfe1e37076297882da74",
+      "b77ee193373962221f7090872de7ae1ed44a9a51c88bd7ab217418d41889ea5b",
     "poc/observation-pipeline/src/parsers/sbi-vc-cash-balances.ts":
-      "9bcf349102da0fcf6edbef9398776c8270726f3120cee2cb6e2f1e4b6507d7ac",
+      "8c7a61e569cf0db8f4207b6a0bc7ab81f434b8b8ffc0c366d07177594699c5a6",
     "poc/observation-pipeline/src/parsers/sbi-vc-cashflows.ts":
-      "91db33cc51a5145bbf4b66f2f2c1ca1c035cbbe3ec140b79ea7fb9c259c880e9",
+      "110a26755bc315196d1ebc709a1ec15e56493920112394c1034accf6743e0c8f",
     "poc/observation-pipeline/src/parsers/sbi-vc-common.ts":
-      "5f397ff8c09b17f11b26700a8b2c741685d4f3e565c32e29dacd086ac6317a1d",
+      "6a3ea6520c1ebab0689aee143c0f55cc9f86094bf9ad129e9b9af2bb3d2932f1",
     "poc/observation-pipeline/src/parsers/sbi-vc-executions.ts":
-      "fcc0857c20b31c75c921b2d3ec068f9732ade58eb8a455483b6ef0ba812f447f",
+      "078451981fac6f29dabdfd2800cbca0b350acd3944e792485856fdf8e5fab526",
     "poc/observation-pipeline/src/parsers/sbi-vc-position-summary.ts":
-      "24ecb7343fdadbe8f5a786b1d5c6399a95b650acadff19abf0a148adfe8511ff",
+      "824a1864fde63420547668762f46df7a4fe5393f599f16a4cf9fdff0d84a33e7",
     "poc/observation-pipeline/src/parsers/sbi-yen-detail-history.ts":
       "1c250eb3217c6e6cadaa2dd4d9dcef559d5d4bd61ec8e76671ea4f575995958b",
     "poc/observation-pipeline/src/parsers/smbc-direct.ts":
       "8bcfc548b22fd477afa1613fbfaf5941ed59d384b23c29ffcb156970cdc96193",
     "poc/observation-pipeline/src/parsers/sony-bank.ts":
-      "6c198e41f78003be8f6f1074c28f78721b5cfb2fb031392c91d62ae2ec9a3ee4",
+      "db523e92416d91841c6197add258a62f11c9d56e6eb528289c687f22318653b7",
     "poc/observation-pipeline/src/parsers/st-george.ts":
       "3774b40435d48158e2fa4baba73c928029941f7e54975b8801b4c41863d5318a",
     "poc/observation-pipeline/src/parsers/util.ts":
@@ -329,8 +329,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "paypay-csv": {
-      version: "0.2.0",
-      codeDigest: "de25da7b1c16f88a75f4586a3226ea78030cd93f958206f48df60b69ad0bfbf5",
+      version: "0.2.2",
+      codeDigest: "8f7ce2bd807873f173077de42f647802be2f67d8fffaacb39d80b9ac148a1f2e",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -489,8 +489,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-vc-account-margin": {
-      version: "0.2.0",
-      codeDigest: "5ba40f8ccefde687589e79933da9285bcbac86d9aa7a31ac2472f24be596303f",
+      version: "0.2.1",
+      codeDigest: "e3a7fd37bc6942a5179b24a94dddb96512cc0f3a653fe3d8d78f66ab81d285e8",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -503,8 +503,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-vc-cash-balances": {
-      version: "0.2.0",
-      codeDigest: "9ff5de971f9321542f68537d4deb2aa21a095f4e4d2dc8f7ca5eadb06219ea96",
+      version: "0.2.1",
+      codeDigest: "4cf9a3e4496212ea68531acdf63cc8c0ad393757dc5f0bb4b43d531dd9540ee6",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -517,8 +517,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-vc-cashflows": {
-      version: "0.2.0",
-      codeDigest: "5ae8cdd153fab930ee0c12252c4821e8421b9054ab608d9dffd7ec1e24caaa84",
+      version: "0.2.1",
+      codeDigest: "ee54c6c8f8f221f824297e168c5b03d3773b82684eb74d4215cf18877b663f13",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -531,8 +531,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-vc-executions": {
-      version: "0.2.0",
-      codeDigest: "9a8fa02e8180bd3c0d0a768329fd3208b6ad764a348af49c962f27a386d9bb24",
+      version: "0.2.1",
+      codeDigest: "6ed977190130f6da2bc232923d4fb74a4aff6de2ce2e0b4f21ae85262137af62",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -545,8 +545,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-vc-position-summary": {
-      version: "0.2.0",
-      codeDigest: "ca0bf337ee5d67d4b3c0a665c505467d7775136c4e89180db3394f9dcc92ad0e",
+      version: "0.2.1",
+      codeDigest: "cff6369ca7fa3314f21bd991317afdc14841ce8631098f6cce587cf68616667a",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -600,8 +600,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-gross-balance": {
-      version: "1.0.1",
-      codeDigest: "36dc34bc89f73c4635f21a110259f143b111c1ca082266cbf821cb22958ed46c",
+      version: "1.0.2",
+      codeDigest: "812863b4938ea0e839b9f6d1e518ffd2b33b83c482024a6cc928a2b7c8913b18",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -614,8 +614,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-history-csv": {
-      version: "1.0.1",
-      codeDigest: "36dc34bc89f73c4635f21a110259f143b111c1ca082266cbf821cb22958ed46c",
+      version: "1.0.2",
+      codeDigest: "812863b4938ea0e839b9f6d1e518ffd2b33b83c482024a6cc928a2b7c8913b18",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -628,8 +628,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-history-json": {
-      version: "1.0.0",
-      codeDigest: "36dc34bc89f73c4635f21a110259f143b111c1ca082266cbf821cb22958ed46c",
+      version: "1.0.1",
+      codeDigest: "812863b4938ea0e839b9f6d1e518ffd2b33b83c482024a6cc928a2b7c8913b18",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -642,8 +642,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-wallet-history": {
-      version: "1.0.2",
-      codeDigest: "36dc34bc89f73c4635f21a110259f143b111c1ca082266cbf821cb22958ed46c",
+      version: "1.0.3",
+      codeDigest: "812863b4938ea0e839b9f6d1e518ffd2b33b83c482024a6cc928a2b7c8913b18",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

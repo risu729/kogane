@@ -19,7 +19,7 @@ export function Pagination({
   actions,
   bare = false,
 }: {
-  /** Accessible name of the row, e.g. 表示ページ. */
+  /** Accessible name of the row, e.g. 表示ページ; also spoken before the count. */
   label: string;
   /** Announced count text: "60件中 1–50件", "2ページ目 · このページ20件". */
   status: ReactNode;
@@ -33,8 +33,15 @@ export function Pagination({
   bare?: boolean;
 }): ReactNode {
   return (
-    <div className={bare ? "pagination pagination-bare" : "pagination"} aria-label={label}>
+    <div
+      className={bare ? "pagination pagination-bare" : "pagination"}
+      role="group"
+      aria-label={label}
+    >
+      {/* The label is spoken with the count, so two pagers on one page never
+       * announce the same message. */}
       <span role="status" aria-live="polite">
+        <span className="visually-hidden">{label}：</span>
         {status}
       </span>
       <button

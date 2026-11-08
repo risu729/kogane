@@ -38,7 +38,7 @@ function ArtifactTable({ rows }: { rows: ArtifactRow[] }): ReactNode {
       count={`${rows.length}件`}
       note="解析件数には旧解析の記録も含みます。現行の取引件数とは異なる場合があります。"
     >
-      <div className="table-scroll" role="region" aria-label="保存された原本" tabIndex={0}>
+      <div className="table-scroll" role="region" aria-label="保存された原本の表" tabIndex={0}>
         <table className="artifact-table">
           <caption>
             取得日時は記録された表記のままです。件数は解析された記録の数で、取得元の全履歴を表しません。

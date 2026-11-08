@@ -69,8 +69,8 @@ export const STRUCTURE_STEP_RESERVE = 16;
  * An inventory chunk: a fixed part and a part per item (measured 7 plus 3 per
  * item, 97 for a full chunk of `MAX_INVENTORY_CHUNK_ITEMS`).
  */
-export const INVENTORY_CHUNK_BASE = 16;
-export const INVENTORY_ITEM_RESERVE = 4;
+const INVENTORY_CHUNK_BASE = 16;
+const INVENTORY_ITEM_RESERVE = 4;
 
 /**
  * The final step: the run report, the seal — direct, of at most

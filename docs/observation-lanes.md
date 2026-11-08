@@ -27,14 +27,34 @@ jobs of that lane, so a 10,000-job replay backlog cannot delay a run sealed a
 minute ago, and a slow history scan cannot delay either. Jobs are ordered by
 `priority DESC, available_at_ms, fetch_artifact_id` inside a lane.
 
+The interrupted-attempt repair (`UPDATE parse_runs ... WHERE status='pending'`)
+reads the partial index `parse_runs_pending` (migration 0083,
+[ADR 0079](adr/0079-pending-parse-run-index.md)), which holds the pending
+parse runs only; before it, every sweep read every parse run. Every statement
+one scheduled tick prepares is explained without table statistics by
+`services/processor/test/tick-query-plan.test.ts`, which lists the whole reads
+a tick still makes and the document that accepts each. Two of them are open
+limits recorded only here, not changed: the identity sweep's candidate page
+(`identitySweepCandidatesSql`, `identity_page`) orders every successful parse
+run by publication before its `LIMIT`, and the reward claim sweep's candidate
+page (`rewardCandidateQuery`) walks `balance_observations` by id from the
+first row and skips the ones outside its scope or already claimed, so when
+fewer than a page are left it reads every balance observation. Both run on
+every tick; their text is pinned by
+`packages/storage-d1/test/identity-sweep-query.test.ts` and
+`services/processor/test/reward-claims-query-differential.test.ts`, and
+neither cost is measured.
+
 Existing rows in `observation_parse_jobs` became `lane='incremental'` through
 the column default; jobs created by the repair scan are `repair`, jobs created
 from a plan are `replay` and carry `replay_plan_id` and `target_release`.
 
 `observation_lane_state` records each lane's last sweep time, jobs created and
-executed, and a cursor (highest processed work item for incremental, the scan
-cursor mirror for repair, the last stepped plan for replay). It is operational
-state and may be reset.
+executed, and a cursor (the last work item completed for incremental, the scan
+cursor mirror for repair, the last stepped plan for replay). A sweep that
+completes no item or steps no plan keeps the incremental or replay cursor; the
+repair mirror reads 0 after the scan wraps. It is operational state and may be
+reset.
 
 ## Work items (durable seal outbox)
 
@@ -61,8 +81,12 @@ deployed parser that accepts the artifact, and advances the item's
 `cursor_artifact_id`. An item is marked processed with an outcome
 (`jobs_created`, `no_new_jobs`, `not_eligible`) only after its last page; a
 sweep interrupted mid-run resumes from the cursor, and re-issued inserts are
-no-ops. Partial or failed runs are recorded as `not_eligible` and are not
-retried by this lane.
+no-ops. The item's `jobs_created` is read from the table when the cursor moves
+(the incremental jobs of the artifacts examined), not from the sweep's own
+inserts, so jobs a stopped sweep inserted before it could move the cursor still
+count, and the update is fenced on the cursor it read, so two sweeps never count
+the same pages twice. Partial or failed runs are recorded as `not_eligible` and
+are not retried by this lane.
 
 Delivery assumptions (addendum §3): items may be consumed twice by concurrent
 sweeps, out of order, or lost by an operator. All three are safe: job creation
@@ -95,6 +119,10 @@ The sweep's replay lane continues creation steps for running plans (two plans
 per sweep) and marks a plan `completed` once creation is complete and no job
 of the plan is pending or running. Plans and steps are idempotent: a second
 `start` or step re-examines the same artifact range and inserts nothing new.
+A step's `jobs_created` is the plan's jobs among the artifacts it read, from the
+table, and the plan update is fenced on the creation cursor the step read: a
+step stopped or paused after its inserts repeats its range and still counts
+them, once.
 
 Guarantees:
 

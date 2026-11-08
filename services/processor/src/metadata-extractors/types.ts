@@ -19,10 +19,7 @@ export const LEGACY_METADATA_RELEASE = "legacy-metadata-v1";
  * evidence, so a correction to the extraction rules can be applied and
  * compared without touching what an old parse read. */
 export const MANIFEST_METADATA_RELEASE = "manifest-metadata-v2";
-export const METADATA_EXTRACTOR_RELEASES = [
-  LEGACY_METADATA_RELEASE,
-  MANIFEST_METADATA_RELEASE,
-] as const;
+const METADATA_EXTRACTOR_RELEASES = [LEGACY_METADATA_RELEASE, MANIFEST_METADATA_RELEASE] as const;
 export type MetadataExtractorRelease = (typeof METADATA_EXTRACTOR_RELEASES)[number];
 export function isMetadataExtractorRelease(value: string): value is MetadataExtractorRelease {
   return (METADATA_EXTRACTOR_RELEASES as readonly string[]).includes(value);
@@ -44,7 +41,7 @@ export const EMPTY_METADATA_OUTPUT: MetadataOutput = {
   statementState: null,
 };
 
-export interface MetadataInput {
+interface MetadataInput {
   artifactId: number;
   role: string;
   rawSha256: string;
@@ -88,11 +85,6 @@ export interface ExtractorContext {
   db: D1Database;
   /** Raw bytes of an artifact, checksum-verified by the caller. */
   read(row: ManifestArtifactRow): Promise<Uint8Array>;
-}
-
-export interface MetadataExtractor {
-  release: MetadataExtractorRelease;
-  extract(context: ExtractorContext, row: MetadataArtifact): Promise<MetadataExtraction>;
 }
 
 export function record(value: unknown): Record<string, unknown> {

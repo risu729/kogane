@@ -16,6 +16,7 @@
 import { parse } from "parse5";
 import type { SourceFactRef } from "../../../packages/domain/src/events.ts";
 import {
+  CARD_INFORMATION_READER_VERSION,
   readMyJcbCardInformation,
   type CardInformationReading,
 } from "../../../packages/domain/src/myjcb-card-information.ts";
@@ -29,9 +30,6 @@ import {
   type CardDebitAccountStatement,
 } from "../../../packages/domain/src/card-debit-account.ts";
 
-/** The version of `readMyJcbCardInformation` a row records. A changed reading
- * is a new version and new rows; old rows stay. */
-export const CARD_INFORMATION_READER_VERSION = "myjcb-card-information-1.0.0";
 /** Pages read per tick. */
 const CARD_DEBIT_ACCOUNT_BATCH = 20;
 const MAX_PAGE_BYTES = 3_000_000;

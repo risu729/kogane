@@ -10,6 +10,7 @@
 // disagreement is `conflict`, not a silent choice. Nothing in this file
 // performs an exchange; `simulateConversion` and `findConversionPaths` return
 // bounded plans and the conditions that still need checking.
+import { canonicalJson } from "./context.ts";
 import {
   hasExactKeys,
   isArrayOf,
@@ -32,8 +33,14 @@ import {
   type CivilDate,
   type EndOfMonthPolicy,
   type LocalDateValue,
+  type TemporalOrder,
   type TemporalValue,
 } from "./time.ts";
+import {
+  compareToOpenEnded,
+  validOpenEndedPeriodValue,
+  type OpenEndedPeriodValue,
+} from "./open-ended-period.ts";
 import {
   exactQuantity,
   integerDecimal,
@@ -412,6 +419,24 @@ export type RewardUncertaintyCode = (typeof REWARD_UNCERTAINTY_CODES)[number];
 
 // ── conversion offers ────────────────────────────────────────────────
 
+/**
+ * When an offer can be applied for. `open-ended` is a standing offer whose
+ * provider announces no end date; `unknown` means the period was not
+ * established and is never read as a standing offer.
+ */
+export type OfferValidity = TemporalValue | OpenEndedPeriodValue;
+
+export function validOfferValidity(value: unknown): value is OfferValidity {
+  return validTemporalValue(value) || validOpenEndedPeriodValue(value);
+}
+
+/** `clock` against an offer's validity; `ordered` with a non-zero order is outside it. */
+export function compareOfferValidity(clock: TemporalValue, validity: OfferValidity): TemporalOrder {
+  return validity.kind === "open-ended"
+    ? compareToOpenEnded(clock, validity)
+    : compareTemporal(clock, validity);
+}
+
 export interface ConversionOffer {
   offerId: string;
   version: string;
@@ -434,8 +459,9 @@ export interface ConversionOffer {
   eligibleRestrictionRefs: readonly string[];
   /** Tiers the offer is open to; `null` means every tier. */
   eligibleTiers: readonly string[] | null;
-  validTime: TemporalValue;
-  applicationDeadline: TemporalValue;
+  validTime: OfferValidity;
+  /** Last day to apply; `null` means the provider announces no deadline (a standing offer). */
+  applicationDeadline: TemporalValue | null;
   processingPolicyRef: string;
   /** Calendar days between an accepted application and the destination credit. */
   processingDays: number;
@@ -899,8 +925,8 @@ export function validConversionOffer(value: unknown): value is ConversionOffer {
     isArrayOf(isOneOf(BUCKET_KINDS), 10)(value.eligibleBucketKinds) &&
     isRefList(value.eligibleRestrictionRefs, 100) &&
     (value.eligibleTiers === null || isRefList(value.eligibleTiers, 100)) &&
-    validTemporalValue(value.validTime) &&
-    validTemporalValue(value.applicationDeadline) &&
+    validOfferValidity(value.validTime) &&
+    (value.applicationDeadline === null || validTemporalValue(value.applicationDeadline)) &&
     REF(value.processingPolicyRef) &&
     isSafeInt(value.processingDays, 0, 3650) &&
     REF(value.roundingPolicyRef) &&
@@ -1127,6 +1153,17 @@ function agreementOf(displayed: DisplayedExpiry | null, computed: ComputedExpiry
   return order.order === 0 ? "agree" : "disagree";
 }
 
+/** Text order by Unicode code point: SQLite's BINARY order over UTF-8. */
+function codePointOrder(a: string, b: string): -1 | 0 | 1 {
+  const left = [...a];
+  const right = [...b];
+  for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
+    const order = left[index]!.codePointAt(0)! - right[index]!.codePointAt(0)!;
+    if (order !== 0) return order < 0 ? -1 : 1;
+  }
+  return left.length < right.length ? -1 : left.length > right.length ? 1 : 0;
+}
+
 /**
  * The deadline of a holding under one rule version, with the provider's
  * display and the computed answer kept apart per bucket.
@@ -1194,27 +1231,35 @@ export function estimateExpiry(
 
   // 2. Membership: only a tier-gated rule consumes it.
   const tiers = rule.applicability.tiers;
+  // Claims are listed by tier, then by the claim as it is stored, so the
+  // basis does not depend on the order the membership claims were handed in.
+  // Tiers compare by code point, the order SQLite's BINARY `ORDER BY tier`
+  // gives MEMBERSHIP_SQL's rows; UTF-16 unit order differs from it past U+FFFF.
   const matching =
     tiers === null
       ? []
-      : membership.filter(
-          (state) =>
-            state.programId === holding.programId &&
-            state.holdingRef === holding.holdingRef &&
-            tiers.includes(state.tier),
-        );
+      : membership
+          .filter(
+            (state) =>
+              state.programId === holding.programId &&
+              state.holdingRef === holding.holdingRef &&
+              tiers.includes(state.tier),
+          )
+          .map((state) => {
+            const claim = {
+              tier: state.tier,
+              source: state.source,
+              valid: state.valid,
+              evidenceRefs: [...new Set(state.evidenceRefs)],
+            };
+            return { claim, text: canonicalJson(claim) };
+          })
+          .sort(
+            (a, b) => codePointOrder(a.claim.tier, b.claim.tier) || codePointOrder(a.text, b.text),
+          )
+          .map(({ claim }) => claim);
   const membershipBasis: ExpiryMembershipBasis | null =
-    tiers === null
-      ? null
-      : {
-          requiredTiers: [...new Set(tiers)],
-          claims: matching.map((state) => ({
-            tier: state.tier,
-            source: state.source,
-            valid: state.valid,
-            evidenceRefs: [...new Set(state.evidenceRefs)],
-          })),
-        };
+    tiers === null ? null : { requiredTiers: [...new Set(tiers)], claims: matching };
   const outOfScope = ruleFailure === null && tiers !== null && matching.length === 0;
   if (outOfScope) {
     push(uncertaintyCodes, "membership_out_of_scope");
@@ -1534,12 +1579,14 @@ export function availableForOffer(
       push(uncertaintyCodes, "membership_self_reported");
   }
   if (clock) {
-    const validity = compareTemporal(clock, offer.validTime);
+    const validity = compareOfferValidity(clock, offer.validTime);
     if (validity.kind === "ordered" && validity.order !== 0)
       push(uncertaintyCodes, "offer_not_valid_at_clock");
-    const deadline = compareTemporal(clock, offer.applicationDeadline);
-    if (deadline.kind === "ordered" && deadline.order > 0)
-      push(uncertaintyCodes, "application_deadline_passed");
+    if (offer.applicationDeadline !== null) {
+      const deadline = compareTemporal(clock, offer.applicationDeadline);
+      if (deadline.kind === "ordered" && deadline.order > 0)
+        push(uncertaintyCodes, "application_deadline_passed");
+    }
   }
   const summed = sumQuantities(
     offer.fromUnitRef,

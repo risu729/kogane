@@ -21,23 +21,13 @@ export {
   artifactRequest,
   coreSourceId,
   createRunRequest,
-  EXTERNAL_ID_NAMESPACE,
-  instantMs,
   REGISTRATION_CONTRACT_VERSION,
   runRangeRequests,
-  runReportRequest,
-  TerminalRegistrationError,
-  unitReportRequest,
   unitRequest,
 } from "./descriptors.ts";
 export {
-  artifactStepReserve,
-  DEFAULT_ARTIFACT_BUDGET,
-  DEFAULT_INVENTORY_CHUNK,
   DIRECT_SEAL_ARTIFACTS,
   registerTerminal,
   RETRYABLE_RETRY_INTERVAL_MS,
-  type RegisterTerminalInput,
   type RegisterTerminalOutcome,
-  type RegistrationPhase,
 } from "./register-terminal.ts";
