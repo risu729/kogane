@@ -242,7 +242,12 @@ over every source and account. The seven
 `kogane.ops.*` tools of [ops-api.md](ops-api.md) are published on `/mcp`,
 whose callers are all agent-only, to every MCP client, which applies them as
 itself ([ops-api](ops-api.md#mcp), ADR 0084): with `OPS_API_ENABLED` off an
-operations tool name is `unknown_tool`.
+operations tool name is `unknown_tool`. Its two reads,
+`kogane.ops.operation.get` and `kogane.ops.operation.list`, are whole-store
+like every other read: an MCP client reads and lists every operations
+request, the operator's browser requests and other MCP clients' included
+(owner, 2026-11-08 04:21 UTC;
+[ADR 0086](adr/0086-operator-operations-list.md)).
 
 ### Intents
 

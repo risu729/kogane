@@ -260,7 +260,7 @@ describe("operations requests over MCP, as the MCP client (ADR 0081, ADR 0084)",
     }
   });
 
-  it("lists the MCP client's own requests as the route lists the operator's (ADR 0086)", async () => {
+  it("lists and reads every principal's requests as the route does (ADR 0086, whole-store)", async () => {
     const reason = "synthetic rebuild for list parity";
     const overHttp = await route("/projections", { reason, idempotencyKey: "list-parity-http" });
     expect(overHttp.status).toBe(202);
@@ -285,25 +285,41 @@ describe("operations requests over MCP, as the MCP client (ADR 0081, ADR 0084)",
     const mcpPage = mcpList.structuredContent as unknown as Page;
     expect(mcpPage.schemaVersion).toBe(httpPage.schemaVersion);
     const ids = (page: Page) => page.operations.map((entry) => entry["operationId"]);
-    // Each principal holds its own list: the MCP client is never shown the
-    // operator's browser requests, nor the operator the MCP client's.
-    const ownMcp = (
+    // Reads are whole-store (owner, 2026-11-08 04:21 UTC): the operator in the
+    // browser and the MCP client are shown the same page, of both principals'
+    // requests, in the stored order.
+    const everyProjection = (
       await env.DB.prepare(
-        "SELECT operation_id FROM ops_requests WHERE principal=? AND kind='projection' ORDER BY created_at DESC,operation_id DESC",
-      )
-        .bind(DELEGATE)
-        .all<{ operation_id: string }>()
+        "SELECT operation_id FROM ops_requests WHERE kind='projection' ORDER BY created_at DESC,operation_id DESC",
+      ).all<{ operation_id: string }>()
     ).results.map((row) => row.operation_id);
-    expect(ids(mcpPage)).toEqual(ownMcp);
+    const principals = (
+      await env.DB.prepare(
+        "SELECT DISTINCT principal FROM ops_requests WHERE operation_id IN (?,?) ORDER BY principal",
+      )
+        .bind(httpId, mcpId)
+        .all<{ principal: string }>()
+    ).results.map((row) => row.principal);
+    expect(principals).toEqual([DELEGATE, OWNER].sort());
+    expect(mcpPage).toEqual(httpPage);
+    expect(ids(mcpPage)).toEqual(everyProjection.slice(0, 50));
     expect(ids(mcpPage)).toContain(mcpId);
-    expect(ids(mcpPage)).not.toContain(httpId);
-    expect(ids(httpPage)).toContain(httpId);
-    expect(ids(httpPage)).not.toContain(mcpId);
+    expect(ids(mcpPage)).toContain(httpId);
     // One service, one summary for the same request.
     const summary = (page: Page, id: string) =>
       receipt(page.operations.find((entry) => entry["operationId"] === id)!);
     expect(summary(mcpPage, mcpId)).toEqual(summary(httpPage, httpId));
     expect(JSON.stringify(mcpPage)).not.toContain(reason);
+    // Each transport reads the request the other principal made, and both
+    // answer the same receipt for it.
+    for (const id of [httpId, mcpId]) {
+      const overRoute = await route(`/operations/${id}`);
+      expect(overRoute.status, id).toBe(200);
+      const overTool = await tool("kogane.ops.operation.get", { operationId: id });
+      expect(overTool.isError, id).not.toBe(true);
+      expect(overTool.structuredContent, id).toEqual(overRoute.body);
+      expect(overTool.structuredContent["operationId"], id).toBe(id);
+    }
 
     // Refusals are the service's and the schema's, never the refused value.
     expect((await tool("kogane.ops.operation.list", { limit: 0 })).structuredContent).toEqual({
@@ -314,10 +330,10 @@ describe("operations requests over MCP, as the MCP client (ADR 0081, ADR 0084)",
       error: "invalid_request",
       refs: ["(body)"],
     });
-    // The operator's operation is no cursor of the MCP client's list.
-    expect((await tool("kogane.ops.operation.list", { cursor: httpId })).structuredContent).toEqual(
-      { error: "receipt_not_found", refs: ["cursor"] },
-    );
+    expect(
+      (await tool("kogane.ops.operation.list", { cursor: `op_${"0".repeat(64)}` }))
+        .structuredContent,
+    ).toEqual({ error: "receipt_not_found", refs: ["cursor"] });
 
     const recorded = await env.DB.prepare(
       "SELECT principal_kind,path,subject,result,target_ref,diff_json FROM audit_records WHERE principal=? AND operation='ops.operation.list' AND result='read' ORDER BY recorded_at DESC,audit_id DESC LIMIT 1",
@@ -333,8 +349,19 @@ describe("operations requests over MCP, as the MCP client (ADR 0081, ADR 0084)",
     });
     expect(JSON.parse(String(recorded!["diff_json"]))).toEqual({
       kind: "read",
-      rows: ownMcp.length,
-      truncated: false,
+      rows: Math.min(everyProjection.length, 50),
+      truncated: everyProjection.length > 50,
     });
+
+    // The operator's operation is a cursor of the MCP client's list like any
+    // other, and both transports answer the same next page.
+    const afterHttp = await tool("kogane.ops.operation.list", {
+      kind: "projection",
+      cursor: httpId,
+    });
+    expect(afterHttp.isError).not.toBe(true);
+    const afterHttpRoute = await route(`/operations?kind=projection&cursor=${httpId}`);
+    expect(afterHttpRoute.status).toBe(200);
+    expect(afterHttp.structuredContent).toEqual(afterHttpRoute.body);
   });
 });

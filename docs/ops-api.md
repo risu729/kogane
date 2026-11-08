@@ -17,7 +17,8 @@ the alarm uses, and only for a connection the Processor's
 The things an operator asks this system to _do_ — collect a source,
 re-register a persisted run, replay a parse, rebuild the read model, refresh a
 session — and the two reads of what happened (one request, and the list of
-one's own requests) as one authenticated API under `/api/ops/v1`, served by
+every request, whichever principal made it) as one authenticated API under
+`/api/ops/v1`, served by
 the same Worker that serves the reads. Each route has an MCP tool over the
 same service, which every MCP client uses as itself ([MCP](#mcp)).
 
@@ -197,9 +198,11 @@ operation turns `completed` only when every stage of its kind has a
 
 ### The list
 
-`GET /api/ops/v1/operations` answers one page of the caller's own requests
+`GET /api/ops/v1/operations` answers one page of every request in the store,
+whichever principal made it: the operator in the browser or any MCP client
 ([ADR 0086](adr/0086-operator-operations-list.md),
-`packages/application/src/operations/list.ts`):
+`packages/application/src/operations/list.ts`; whole-store reads, owner
+2026-11-08 04:21 UTC):
 
 ```jsonc
 {
@@ -228,17 +231,18 @@ operation turns `completed` only when every stage of its kind has a
   (1–50, default 20). Each key at most once. An unknown key is
   `400 invalid_query` without a ref; a repeated key or a value outside its
   list is `400 invalid_query` naming the key. A cursor that names no
-  operation of the caller is `404 receipt_not_found` with ref `cursor`.
-- **Content.** A summary has no stages, no `execution` block and no target;
-  read one operation for those. The stored request is not read, so a
-  rebuild's `reason` never appears.
-- **Cost.** Without a filter, one range of the index `ops_requests_principal`.
-  With a kind or a status, one range of `ops_requests_open` per allowed
-  (status, kind) pair, each limited to the page, merged newest first. Rows
-  sharing the boundary timestamp are sorted, and rows of other principals
-  with the same status and kind are read and skipped, so a filtered page can
-  read every row of its pairs below the cursor when the caller holds few of
-  them. No migration was added.
+  operation is `404 receipt_not_found` with ref `cursor`; any principal's
+  operation is a cursor.
+- **Content.** A summary has no stages, no `execution` block, no target and
+  no principal; read one operation for the first three, and the
+  [audit log](audit-log.md) for who requested it. The stored request is not
+  read, so a rebuild's `reason` never appears.
+- **Cost.** One range of the index `ops_requests_open` per allowed
+  (status, kind) pair (thirty without a filter, six for a kind, five for a
+  status, one for both), each limited to the page, merged newest first. Rows
+  sharing the boundary timestamp are sorted. No row is read only to be
+  skipped, so a page reads at most (pairs × (limit + 1)) rows plus ties, at
+  any store size. No migration was added.
 - **Audit.** Each request is recorded once as `ops.operation.list`, with the
   number of rows shown and whether a next page exists
   ([audit log](audit-log.md)).
@@ -256,7 +260,8 @@ is the validated request without its key.
 - The same key with a **different** payload is `409 idempotency_conflict`, with
   the operation id as the only ref. Neither request is silently dropped.
 - A key belongs to its principal: two subjects using the same key hold two
-  operations, and neither can read or resend the other's.
+  operations, and neither can resend the other's. Either can read both
+  ([reads](#authorization)).
 - Two senders racing on one key — both reading "no such operation" before
   either writes — get the same answers as if they had arrived in order: the
   insert is guarded on the row not existing, the loser inserts nothing, and it
@@ -306,9 +311,14 @@ already does:
    refuses an operations tool from its caller object before any grading
    ([MCP](#mcp)).
 
-Reads are scoped to the principal that accepted the operation. An operation
-belonging to someone else answers `404 receipt_not_found`, exactly like one
-that does not exist: the API never confirms an id it will not show.
+Reads are whole-store, like every other read since
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md) (owner,
+2026-11-08 04:21 UTC; [ADR 0086](adr/0086-operator-operations-list.md)): any
+caller the transport authenticated — the operator on these routes, any MCP
+client on `/mcp` — reads and lists every operation, whichever principal
+accepted it. Only an id that does not exist answers `404 receipt_not_found`.
+Writes are unchanged: a request is accepted, re-sent and bound under the
+caller's own principal.
 
 ## Errors
 
@@ -328,7 +338,7 @@ carries the route label, the status and the code, never a ref.
 | `subject_not_granted`  | 403  | The verified subject is in neither grant list                                          |
 | `actor_not_supported`  | 403  | The verified subject is not a shape the decision log can record                        |
 | `not_found`            | 404  | No such operations route                                                               |
-| `receipt_not_found`    | 404  | No such operation for this principal, as an id or a list cursor                        |
+| `receipt_not_found`    | 404  | No such operation, as an id or a list cursor                                           |
 | `idempotency_conflict` | 409  | The same key was reused for a different payload                                        |
 | `request_too_large`    | 413  | The body exceeds 16 KiB                                                                |
 | `grants_misconfigured` | 503  | This deployment's grant lists cannot be read; nobody is graded                         |
@@ -373,10 +383,13 @@ store the same request ([ADR 0081](adr/0081-ui-parity-through-mcp.md),
 
 `kogane.ops.operation.get` and `kogane.ops.operation.list` are defined over
 the same services as the two read routes (`readOperation` and
-`listOperations`). On `/mcp` both read only the calling principal's own
-operations, those `mcp-client:<sub>` accepted: an operation the operator
-requested in the browser is neither listed nor read over MCP, and is followed
-on the HTTP routes, `execution` block included. The list tool takes the
+`listOperations`). Both are whole-store (owner, 2026-11-08 04:21 UTC): an
+MCP client lists and reads every operation, those the operator requested in
+the browser and those any MCP client accepted, with the same answer as the
+route, `execution` block included. A principal whose delegation scope names
+fewer sources or accounts is refused an operation outside its scope, and the
+list, as `400 target_missing`; since ADR 0084 no MCP client has such a scope.
+The list tool takes the
 route's query as arguments (`kind`, `status`, `cursor`, `limit`, with `limit`
 a number), validated by the same schema (`operationListSchema` in
 `src/ops-api.ts`); a refusal is `invalid_request` with the field paths, as on
@@ -552,8 +565,8 @@ writing their own SQL against the tables above:
 | Service                                                                                                        | For                                                         |
 | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | `requestCollection` / `requestImport` / `requestReplay` / `requestProjectionRebuild` / `requestSessionRefresh` | the six accept paths                                        |
-| `readOperation`                                                                                                | the operation record, scoped to a principal                 |
-| `listOperations` (`operations/list.ts`)                                                                        | one page of a principal's requests, newest first (ADR 0086) |
+| `readOperation`                                                                                                | one operation record, of any principal (ADR 0086)           |
+| `listOperations` (`operations/list.ts`)                                                                        | one page of every request, newest first (ADR 0086)          |
 | `pendingDispatches({store, nowMs, limit})`                                                                     | the Processor alarm tick's queue of undispatched requests   |
 | `recordDispatch({operationId, outcome, targetRef?})`                                                           | one dispatch; binds `target_ref` once, answers who holds it |
 | `recordOperationStage({operationId, stage, state})`                                                            | stage evidence; completes the operation when all stages are |
@@ -624,20 +637,23 @@ Synthetic data only.
   replay plan written into the 0035 tables exactly once, `waiting_for_human`
   (G3-11), stage progress and completion, the read route's `execution` block
   for an accepted and for a collected request, and that `/mcp` publishes the
-  operations to every MCP client, which applies them as itself and never sees
-  the operator's browser receipt, while HTTP still grades the operator lists
-  (G3-05, ADR 0047, ADR 0084). Its list checks (ADR 0086) cover scoping,
-  cursor paging, the filters, every refusal, the audit record and the list's
-  query plans on D1 without table statistics.
-- `services/app/test/delegated-ops-parity.test.ts`: the list tool lists the
-  MCP client's own requests in the stored order, never the operator's browser
-  requests, gives the same summary as the route for the same request, refuses
-  a bad limit, an unknown key and the operator's operation as a cursor, and
-  records one `read` with its row count on `mcp`.
+  operations to every MCP client, which applies them as itself and reads the
+  operator's browser receipt exactly as the route answers it, while HTTP
+  still grades the operator lists (G3-05, ADR 0047, ADR 0084, ADR 0086). Its
+  list checks (ADR 0086) cover the whole-store page (two operators shown the
+  same page of both's requests), cursor paging, the filters, every refusal,
+  the audit record and the list's query plans on D1 without table statistics.
+- `services/app/test/delegated-ops-parity.test.ts`: the list tool and the
+  route answer the same page of both principals' requests in the stored
+  order, the get tool and the route read the operator's request and the MCP
+  client's alike, the operator's operation pages on as the tool's cursor, a
+  bad limit, an unknown key and an unknown cursor are refused, and the call
+  is recorded once as `read` with its row count on `mcp`.
 - `packages/application/test/operations-list.test.ts`: the list paged to its
   end for every filter shape on random synthetic stores against an in-memory
-  reference, the summary shape, foreign cursors, and the query plans without
-  table statistics.
+  reference (two principals, the same pages whichever asks), the summary
+  shape, cursors of another principal and of no operation, and the query
+  plans without table statistics.
 - `packages/application/test/operations.test.ts` (10 checks; the SQL half
   runs against the real migrations in `bun:sqlite`): request identity,
   principal binding, the stage table per kind, the session policy's safe

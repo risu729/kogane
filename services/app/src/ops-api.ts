@@ -4,7 +4,8 @@
 // Access check and before the Worker's GET-only boundary, so its five POST
 // paths are the third — and last — explicitly enumerated non-GET surface of
 // this Worker. Everything outside them still answers 405. Its two GET paths
-// read one operation and list the caller's own (ADR 0086).
+// read one operation and list them all, whichever principal requested them
+// (ADR 0086; reads are whole-store, owner 2026-11-08 04:21 UTC).
 //
 // What this module is allowed to be: a transport. It parses a bounded JSON
 // body with a closed Zod schema, hands the validated request to the
@@ -343,16 +344,15 @@ export const opsServices = {
   },
   async operation(context: OpsContext, operationId: string) {
     const outcome = await readOperation({ ...context, operationId });
-    // An operation another principal accepted answers exactly like one that
-    // does not exist: the API never confirms that an id it cannot show exists.
+    // Whole-store (ADR 0086): any principal's operation is read; only an id
+    // that does not exist is `receipt_not_found`.
     if (!outcome.ok)
       throw new HttpError(statusForCommandError(outcome.error), outcome.error, outcome.refs ?? []);
     return { status: 200, body: outcome.receipt };
   },
   async list(context: OpsContext, query: OperationListQuery) {
     const outcome = await listOperations({ ...context, query });
-    // A cursor naming no operation of this principal is `receipt_not_found`,
-    // like one that does not exist.
+    // A cursor naming no operation is `receipt_not_found`.
     if (!outcome.ok)
       throw new HttpError(statusForCommandError(outcome.error), outcome.error, outcome.refs ?? []);
     return { status: 200, body: outcome.page };

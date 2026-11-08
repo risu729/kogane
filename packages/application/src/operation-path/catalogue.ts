@@ -124,7 +124,7 @@ export const OPERATION_CATALOGUE = {
     capability: "interpretation.accept",
     paths: OPS,
   },
-  // A principal's list of its own requests (ADR 0086): the list route and
+  // The whole-store list of requests (ADR 0086): the list route and
   // `kogane.ops.operation.list`, over one service.
   "ops.operation.list": {
     risk: ["R0"],

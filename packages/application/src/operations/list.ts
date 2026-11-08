@@ -1,26 +1,22 @@
-// The operator's own operations requests, newest first (ADR 0086).
+// Every operations request in the store, newest first (ADR 0086).
 //
-// `readOperation` answers for one id; this answers "which ids do I hold". It
-// is a read of `ops_requests` scoped to the verified principal, in one stable
-// total order — `created_at` descending, then `operation_id` descending — and
-// paged by keyset: the cursor is the operation id of the last row of the
-// previous page, resolved to its position with the same principal filter.
+// `readOperation` answers for one id; this answers "which ids exist". Like
+// every other read since ADR 0084 it is whole-store: any caller the transport
+// authenticated (the operator in the browser or any MCP client) lists every
+// principal's requests (owner, 2026-11-08 04:21 UTC). One stable total order
+// (`created_at` descending, then `operation_id` descending) is paged by
+// keyset: the cursor is the operation id of the last row of the previous
+// page, resolved to its position.
 //
-// Every page uses an index of migration 0040 (ADR 0086, "Decision"):
+// Every page reads `ops_requests_open (status, kind, created_at)` of
+// migration 0040, one range per (status, kind) pair the filters allow (all
+// thirty pairs with no filter), each limited to the page, and merges the
+// ranges newest first (ADR 0086, "Decision").
 //
-//   * no filter: one range on `ops_requests_principal (principal, created_at)`;
-//   * a kind, a status or both: one arm per (status, kind) pair the filters
-//     allow, each a range on `ops_requests_open (status, kind, created_at)`
-//     limited to the page, merged newest first. The principal is checked on
-//     the rows each arm reads (`+principal` keeps the planner on that index).
-//
-// What a page reads: the rows it returns plus one, the rows that share the
-// cursor's `created_at` ahead of it, and, on a filtered page, every row of
-// another principal in each arm's range until that arm has its page. An arm
-// in which this principal has fewer rows than the page reads to the end of
-// its (status, kind) range, so a filtered page costs up to every row of the
-// allowed pairs below the cursor, whoever holds them (ADR 0086,
-// "Consequences").
+// What a page reads: per arm, the rows it can return plus one, and the rows
+// that share the cursor's `created_at` ahead of it. No row is read only to be
+// dropped, so a page costs at most arms x (page + 1) rows plus ties, whatever
+// the store's size (ADR 0086, "Consequences").
 //
 // A summary carries identifiers, closed codes, counts and timestamps only. The
 // stored request (`request_json`) is never read here: a rebuild's `reason` is
@@ -83,38 +79,33 @@ interface ListRow {
 const LIST_COLUMNS = `operation_id,kind,status,source_id,dispatch_state,dispatch_attempts,
  failure_code,created_at,updated_at`;
 const NEWEST_FIRST = "ORDER BY created_at DESC,operation_id DESC";
-const CURSOR_POSITION =
-  "SELECT created_at FROM ops_requests WHERE operation_id=?1 AND principal=?2";
+const CURSOR_POSITION = "SELECT created_at FROM ops_requests WHERE operation_id=?1";
 
-/** The (status, kind) pairs a filter allows, or null for no filter. */
+/** The (status, kind) pairs a filter allows: all thirty for no filter. */
 export function operationListArms(
   query: Pick<OperationListQuery, "kind" | "status">,
-): (readonly [OperationStatus, OperationKind])[] | null {
-  if (query.kind === null && query.status === null) return null;
+): (readonly [OperationStatus, OperationKind])[] {
   const statuses = query.status === null ? OPERATION_STATUSES : [query.status];
   const kinds = query.kind === null ? OPERATION_KINDS : [query.kind];
   return statuses.flatMap((status) => kinds.map((kind) => [status, kind] as const));
 }
 
 /**
- * The page's SQL. `?1` is the principal and `?2` the page size plus one; the
- * (status, kind) pairs follow, then, after a cursor, its `created_at` and
- * operation id. Only placeholders vary with the input: every value is bound.
+ * The page's SQL. `?1` is the page size plus one; the (status, kind) pairs
+ * follow, then, after a cursor, its `created_at` and operation id. Only
+ * placeholders vary with the input: every value is bound.
  */
-export function operationListSql(arms: number | null, afterCursor: boolean): string {
-  const at = (arms ?? 0) * 2 + 3;
+export function operationListSql(arms: number, afterCursor: boolean): string {
+  const at = arms * 2 + 2;
   const after = afterCursor
     ? ` AND created_at<=?${at} AND (created_at<?${at} OR operation_id<?${at + 1})`
     : "";
-  if (arms === null)
-    return `SELECT ${LIST_COLUMNS} FROM ops_requests WHERE principal=?1${after}
- ${NEWEST_FIRST} LIMIT ?2`;
   const parts: string[] = [];
   for (let arm = 0; arm < arms; arm++)
     parts.push(`SELECT * FROM (SELECT ${LIST_COLUMNS} FROM ops_requests
- WHERE status=?${arm * 2 + 3} AND kind=?${arm * 2 + 4} AND +principal=?1${after}
- ${NEWEST_FIRST} LIMIT ?2)`);
-  return `${compound(parts)}\n${NEWEST_FIRST} LIMIT ?2`;
+ WHERE status=?${arm * 2 + 2} AND kind=?${arm * 2 + 3}${after}
+ ${NEWEST_FIRST} LIMIT ?1)`);
+  return `${compound(parts)}\n${NEWEST_FIRST} LIMIT ?1`;
 }
 
 /** D1 refuses a compound SELECT of more terms than this ("too many terms in compound SELECT"). */
@@ -122,7 +113,8 @@ const D1_COMPOUND_TERMS = 5;
 
 /**
  * `UNION ALL` of the arms, nested so that no compound has more terms than D1
- * accepts: the six statuses of a kind filter are two subqueries of three.
+ * accepts: the six statuses of a kind filter are two subqueries of three,
+ * and the thirty pairs of no filter are two subqueries of three of five.
  */
 function compound(parts: readonly string[]): string {
   if (parts.length <= D1_COMPOUND_TERMS) return parts.join("\nUNION ALL\n");
@@ -148,30 +140,27 @@ function summaryOf(row: ListRow): OperationSummary {
 }
 
 /**
- * `GET /api/ops/v1/operations`: one page of the principal's own requests.
- * A cursor that names no operation of this principal answers
- * `receipt_not_found`, exactly as one that does not exist: the list never
- * confirms an id it will not show.
+ * `GET /api/ops/v1/operations` and `kogane.ops.operation.list`: one page of
+ * every principal's requests. A cursor that names no operation answers
+ * `receipt_not_found`.
  */
 export async function listOperations(input: {
   store: CommandStore;
+  /** The verified caller. It is not a filter: every caller is shown the same pages. */
   principal: Principal;
   query: OperationListQuery;
 }): Promise<CommandResult<{ page: OperationListPage }>> {
-  const { store, principal, query } = input;
-  const binds: unknown[] = [principal.id, query.limit + 1];
+  const { store, query } = input;
+  const binds: unknown[] = [query.limit + 1];
   const arms = operationListArms(query);
-  for (const [status, kind] of arms ?? []) binds.push(status, kind);
+  for (const [status, kind] of arms) binds.push(status, kind);
   if (query.cursor !== null) {
-    const position = await store.first<{ created_at: string }>(CURSOR_POSITION, [
-      query.cursor,
-      principal.id,
-    ]);
+    const position = await store.first<{ created_at: string }>(CURSOR_POSITION, [query.cursor]);
     if (!position) return commandError("receipt_not_found", ["cursor"]);
     binds.push(position.created_at, query.cursor);
   }
   const rows = await store.all<ListRow>(
-    operationListSql(arms?.length ?? null, query.cursor !== null),
+    operationListSql(arms.length, query.cursor !== null),
     binds,
   );
   const page = rows.slice(0, query.limit).map(summaryOf);
