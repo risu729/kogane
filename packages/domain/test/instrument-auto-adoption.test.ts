@@ -179,6 +179,21 @@ describe("rule instrument-auto-v1", () => {
       for (const key of keys)
         expect(adoptions([listing("7203"), bare("7203")], new Map([[key, status]]))).toEqual([]);
     }
+    // A listed_as relation joining either side to a third instrument.
+    for (const key of [
+      listedAsKey("instrument-third", "ii-bare-7203"),
+      listedAsKey("instrument-ii-listing-7203", "ii-third"),
+    ])
+      expect(
+        adoptions([listing("7203"), bare("7203")], new Map([[key, "rejected" as const]])),
+      ).toEqual([]);
+    // A relation elsewhere does not stop it.
+    expect(
+      adoptions(
+        [listing("7203"), bare("7203")],
+        new Map([[listedAsKey("instrument-third", "ii-third"), "accepted" as const]]),
+      ),
+    ).toHaveLength(1);
   });
 
   test("an ambiguous subject is left to a person: two listings of one code", () => {

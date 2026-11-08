@@ -48,9 +48,10 @@ const MICS = JAPANESE_LISTING_MICS.map((mic) => `'${mic}'`).join(",");
 export const INSTRUMENT_AUTO_ADOPTION_SQL = {
   /**
    * Pairs of the rule's shape not on one instrument yet, both mapped by rule:
-   * the bare code is read by the `(namespace, scope, value)` key range, its
-   * listings by the same key, each current mapping by `(identifier_id,
-   * revision)`. A pair the rule then declines stays counted here.
+   * the listings on the four MICs by the `(namespace, scope, value)` key
+   * range, the bare code of each by the same key, each current mapping by
+   * `(identifier_id, revision)` (the plan without table statistics). A pair
+   * the rule then declines stays counted here.
    */
   gate: `SELECT count(*) AS n FROM instrument_identifiers s
  JOIN current_instrument_mappings ms ON ms.identifier_id=s.id AND ms.method='rule'
@@ -77,7 +78,11 @@ export interface InstrumentAutoAdoptionResult {
   adopted: number;
   /** Adoptions not written because the subject's mapping moved (another tick, a person). */
   conflicts: number;
-  /** Adoptions refused for another reason (the target vanished, an invalid command). */
+  /**
+   * Adoptions refused for another reason: the anchor's mapping moved after
+   * the read (the guard; the command reports `target_missing`), the target
+   * vanished, or an invalid command.
+   */
   refused: number;
 }
 

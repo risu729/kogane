@@ -1137,7 +1137,7 @@ a temporal command; #546 remains open.
 
 - Status: proposed
 - Date: 2026-11-08
-- Issue: part of #546; Phase 3 unit 3g ([roadmap](../roadmap.md), layers 0–5)
+- Issue: part of #546; Phase 3 unit 3g ([plan](../plans/2026-11-phase3-coverage-identity.md))
 - Owner direction, 2026-11-08 03:16 UTC: matches that are almost certainly
   right (SBI's, for example) may be adopted automatically; the rest may be
   decided by an agent over MCP when judgement is needed
@@ -1197,11 +1197,16 @@ no benefit.
      does not); neither states an ISIN, a share class or a product class;
    - both identifiers are used by `sbi-securities` only, and every use states
      JPY (no unconfirmed currency);
-   - nobody decided anything about either: both current mappings are the
-     identity rule's own, every identifier on the anchor's instrument is
-     mapped by rule, the subject shares its instrument with nobody, and no
-     `listed_as` relation in any status joins either identifier to the
-     other's instrument;
+   - no decision is recorded about either, as far as the candidate read
+     sees: both current mappings are the identity rule's own, every
+     identifier on the anchor's instrument is mapped by rule, the subject
+     shares its instrument with nobody, and no `listed_as` relation in any
+     status names either identifier or either instrument. The read covers
+     identifiers that have a current observation, as the candidate page does;
+     a manual mapping of an identifier no current observation names is not
+     seen, and stops nothing (the subject's own mapping is read at its
+     current revision, and the write's expected revision refuses a later
+     change);
    - the subject is unambiguous: this is its only candidate and it is in no
      separated pair (a code held on 東証 and 名証 gives the bare code two
      candidates and is left to a person).
@@ -1268,8 +1273,10 @@ over MCP (`kogane.instruments.candidates`, then the change lifecycle).
 - What an adoption moves: the subject's current mapping. Readers keyed by the
   current instrument now see one instrument for the listing and the bare
   code: the reported-state rows name the listing's instrument for a bare-code
-  row, and a holdings change between a bare-code row and a listing row no
-  longer reports `instrument_differs`. Valuation and the report job still key
+  row. The holdings change (ADR 0075) keys rows by the provider's market text
+  and code, so it pairs a bare-code row with a listing row only where that
+  text alone did not decide the identifier; such a pair no longer reports
+  `instrument_differs`. Valuation and the report job still key
   prices by the provider-local `instrument:<source>:<market>:<code>`, and the
   lot adapter (ADR 0059) is served by no route; a lot query over the bare
   code's old instrument would name it remapped (`needs_review`).
@@ -1278,7 +1285,9 @@ over MCP (`kogane.instruments.candidates`, then the change lifecycle).
   adopts on the code. Inside one source, with both identifiers in current
   published observations, that means SBI shows one code for two issues at
   once, which a person corrects as in Decision 6.
-- Cost: the gate is two key seeks per bare code; the full read is the walk of
+- Cost: the gate walks the listing identifiers on the four MICs by their
+  `(namespace, scope)` key range, with a key seek for the bare code and for
+  each current mapping (the plan without table statistics); the full read is the walk of
   the Cost section above (about 0.8 to 0.95 s per 100,000 observations on
   workerd), at most 24 times a day and only while a pair of the shape waits.
   Remote D1 is still unmeasured.
@@ -1293,7 +1302,7 @@ over MCP (`kogane.instruments.candidates`, then the change lifecycle).
   another country, MIC, namespace, source or kind, an ISIN, RIC, share class
   or product class, a non-JPY, several, missing or unconfirmed currency, a
   manual mapping on either side or on the anchor's instrument, a `listed_as`
-  relation in any status, and two listings of one code are all left proposed;
+  relation in any status naming either side, and two listings of one code are all left proposed;
   an adopted pair is not adopted again and reads `resolved-by-rule`, and a
   manual sharer still reads `resolved-by-decision`.
 - `services/processor/test/instrument-auto-adoption.test.ts`, over CORE

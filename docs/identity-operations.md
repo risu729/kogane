@@ -91,7 +91,8 @@ earlier decision, made as above. An agent reads the same list through
 
 On `/identities`, `銘柄の整理状況` counts per source how many of these
 identifiers (security, crypto and product) wait on a candidate
-(`未判断の候補あり`), were resolved by a person's decision, share an
+(`未判断の候補あり`), were resolved by a person's decision or by rule
+`instrument-auto-v1` (`自動規則により同じ銘柄`), share an
 instrument without a recorded decision, were kept apart or have no
 candidate; a decision made on the candidate page moves the counts
 once it is committed ([ADR 0073](adr/0073-instrument-coverage-per-source.md)).

@@ -156,7 +156,8 @@ Securities' bare domestic code `sbi-security-code/JP/<code>` onto SBI's own
 listing `mic-symbol/<XTKS|XNGO|XFKA|XSAP>/<code>` of the same Japanese
 securities code, both used by SBI Securities only, all in JPY, with no ISIN,
 RIC, share class or product class stated, no conflict, nobody's decision on
-either side (no manual mapping, no `listed_as` relation in any status) and no
+either side (no manual mapping, no `listed_as` relation in any status naming
+either identifier or instrument) and no
 second candidate or separated pair for the bare code. Example: `7203` held on
 東証 (`mic-symbol/XTKS/7203`) and traded on `PTS（X）`
 (`sbi-security-code/JP/7203`).

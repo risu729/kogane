@@ -510,7 +510,7 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
   // and do nothing: no R2 list, no CORE write, no cursor movement
   // (docs/processor.md §6).
   expect(lines[1]).toMatchObject({ event: "collection_scan", enabled: false, status: "skipped" });
-  expect(lines[5]).toMatchObject({
+  expect(lines[6]).toMatchObject({
     event: "operation_dispatch",
     enabled: false,
     status: "skipped",

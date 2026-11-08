@@ -22,7 +22,6 @@
 import {
   type InstrumentCandidateSet,
   type InstrumentIdentifierFacts,
-  listedAsKey,
   type ListedAsStatuses,
 } from "./instrument-candidates.ts";
 
@@ -45,6 +44,9 @@ export const JAPANESE_LISTING_MICS = ["XFKA", "XNGO", "XSAP", "XTKS"] as const;
  * anything else is not one.
  */
 export const JAPANESE_SECURITIES_CODE = /^[0-9][0-9A-Z][0-9][0-9A-Z]$/u;
+
+/** The instrument and identifier a `listedAsKey` names. */
+const LISTED_AS_KEY = /^instrument:(.+)\|identifier:(.+)$/su;
 
 /** One adoption the rule makes: re-map `subject` onto `anchor`'s instrument. */
 export interface InstrumentAutoAdoption {
@@ -108,6 +110,14 @@ export function instrumentAutoAdoptions(
     count(candidate.subjectIdentifierId);
   }
   const separated = new Set(set.separated.flatMap((pair) => pair.identifierIds));
+  const relatedInstruments = new Set<string>();
+  const relatedIdentifiers = new Set<string>();
+  for (const key of listedAs.keys()) {
+    const match = LISTED_AS_KEY.exec(key);
+    if (match === null) continue;
+    relatedInstruments.add(match[1]!);
+    relatedIdentifiers.add(match[2]!);
+  }
 
   const adoptions: InstrumentAutoAdoption[] = [];
   for (const candidate of set.candidates) {
@@ -156,9 +166,13 @@ export function instrumentAutoAdoptions(
     const anchorGroup = byInstrument.get(anchor.instrumentId) ?? [];
     if (!anchorGroup.every((row) => row.mappingMethod === "rule")) continue;
     if ((byInstrument.get(subject.instrumentId) ?? []).length !== 1) continue;
+    // Any `listed_as` relation, in any status, naming either identifier or
+    // either instrument: a person or an agent has looked at one of them.
     if (
-      listedAs.has(listedAsKey(anchor.instrumentId, subject.identifierId)) ||
-      listedAs.has(listedAsKey(subject.instrumentId, anchor.identifierId))
+      relatedIdentifiers.has(anchor.identifierId) ||
+      relatedIdentifiers.has(subject.identifierId) ||
+      relatedInstruments.has(anchor.instrumentId) ||
+      relatedInstruments.has(subject.instrumentId)
     )
       continue;
     // 5. The subject is unambiguous.
