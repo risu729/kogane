@@ -403,7 +403,8 @@ maintenance amendments install those adapters through the existing writers;
 S6 survey acceptance was still unavailable then (since 2026-11-07: [ADR 0050, 2026-11-07 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)).
 
 Only installed adapters are advertised: persisted-run import, replay,
-whole-store projection, own operation reads and inert command planning.
+whole-store projection, own operation reads (whole-store since
+[ADR 0086](0086-operator-operations-list.md)) and inert command planning.
 `MCP_DELEGATIONS` remains empty in every checked-in configuration.
 
 History reads reuse #629's `readInstrumentHistoryForGrant` across owner HTTP,

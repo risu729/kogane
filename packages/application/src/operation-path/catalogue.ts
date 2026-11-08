@@ -124,6 +124,15 @@ export const OPERATION_CATALOGUE = {
     capability: "interpretation.accept",
     paths: OPS,
   },
+  // The whole-store list of requests (ADR 0086): the list route and
+  // `kogane.ops.operation.list`, over one service.
+  "ops.operation.list": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "interpretation.accept",
+    paths: OPS,
+  },
   // ── schedule settings (W1–W6) ──────────────────────────────────────────
   "schedules.job.update": {
     risk: ["R2"],

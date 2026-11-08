@@ -121,7 +121,8 @@ test("a session refresh needs a person unless the deployment says otherwise (G3-
 
 import { migratedDatabase, sqliteCommandStore } from "./sqlite-store.ts";
 import {
-  ownOperationSource,
+  operationSource,
+  readOperation,
   recordDispatch,
   requestCollection,
   requestProjectionRebuild,
@@ -204,7 +205,7 @@ function racingStores(store: CommandStore): [CommandStore, CommandStore] {
   return [winner, loser];
 }
 
-test("an operation's source is read only from the caller's own row", async () => {
+test("an operation and its source are read whichever principal accepted it (ADR 0086)", async () => {
   const store = sqliteCommandStore(migratedDatabase());
   const collection = await requestCollection({
     store,
@@ -220,16 +221,36 @@ test("an operation's source is read only from the caller's own row", async () =>
   });
   if (!collection.ok || !projection.ok) throw new Error("both requests must be accepted");
   const collectionId = collection.receipt.operationId;
-  expect(await ownOperationSource(store, collectionId, OPERATOR.id)).toEqual({
-    sourceId: "sony-bank",
-  });
+  expect(await operationSource(store, collectionId)).toEqual({ sourceId: "sony-bank" });
   // A request that names no source is told apart from a missing one.
-  expect(await ownOperationSource(store, projection.receipt.operationId, OPERATOR.id)).toEqual({
+  expect(await operationSource(store, projection.receipt.operationId)).toEqual({
     sourceId: null,
   });
-  // Another principal's operation answers exactly like one that does not exist.
-  expect(await ownOperationSource(store, collectionId, "mcp-client:someone-else")).toBeNull();
-  expect(await ownOperationSource(store, "op_missing", OPERATOR.id)).toBeNull();
+  expect(await operationSource(store, "op_missing")).toBeNull();
+  // Reads are whole-store (owner, 2026-11-08 04:21 UTC): another principal
+  // reads the operator's request exactly as the operator does.
+  const other: Principal = { ...OPERATOR, id: "mcp-client:someone-else" };
+  const byOperator = await readOperation({
+    store,
+    principal: OPERATOR,
+    now: NOW,
+    operationId: collectionId,
+  });
+  const byOther = await readOperation({
+    store,
+    principal: other,
+    now: NOW,
+    operationId: collectionId,
+  });
+  expect(byOperator.ok).toBe(true);
+  expect(byOther).toEqual(byOperator);
+  expect(
+    await readOperation({ store, principal: other, now: NOW, operationId: "op_missing" }),
+  ).toEqual({
+    ok: false,
+    error: "receipt_not_found",
+    refs: ["op_missing"],
+  });
 });
 
 test("a raced re-send of the same key and payload is one operation, created once (G3-06, G3-14)", async () => {

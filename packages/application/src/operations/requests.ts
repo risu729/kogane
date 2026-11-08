@@ -8,8 +8,10 @@
 // Four rules hold in every function below.
 //
 // 1. The actor is the caller's verified principal. Nothing here reads an actor
-//    from a payload, and every read is filtered by the principal that accepted
-//    the request.
+//    from a payload. A request's row is addressed by the principal that
+//    accepted it, so a re-send finds its own record; reading an accepted
+//    operation is whole-store, like every other read since ADR 0084 (ADR 0086,
+//    owner 2026-11-08 04:21 UTC).
 // 2. A request names a *declared* source, a registered parser release or a
 //    bounded run identifier — never a table, a bucket key, a URL or SQL
 //    (G3-13). The registry is asked; free text is not trusted.
@@ -261,6 +263,8 @@ interface StageRow {
 const ROW_COLUMNS = `operation_id,kind,principal,idempotency_key,payload_digest,source_id,status,
  dispatch_state,dispatch_attempts,target_ref,failure_code,created_at,updated_at`;
 const SELECT_ROW = `SELECT ${ROW_COLUMNS} FROM ops_requests WHERE operation_id=?1 AND principal=?2`;
+/** Any principal's request: the reads are whole-store (ADR 0086). */
+const SELECT_ANY_ROW = `SELECT ${ROW_COLUMNS} FROM ops_requests WHERE operation_id=?1`;
 const SELECT_STAGES = `SELECT stage,state,evidence_ref,failure_code,attempts,updated_at
  FROM ops_request_stages WHERE operation_id=?1`;
 const INSERT_REQUEST = `INSERT INTO ops_requests
@@ -307,9 +311,8 @@ async function loadReceipt(
   store: CommandStore,
   readStore: SqlExecutor | null | undefined,
   operationId: string,
-  principal: string,
 ): Promise<OperationReceipt | null> {
-  const row = await store.first<OpsRow>(SELECT_ROW, [operationId, principal]);
+  const row = await store.first<OpsRow>(SELECT_ANY_ROW, [operationId]);
   if (!row) return null;
   const receipt = await withProjection(
     store,
@@ -644,39 +647,34 @@ export async function requestSessionRefresh(
 }
 
 /**
- * `GET /api/ops/v1/operations/{id}`: the stored record of one accepted
- * request, scoped to the principal that accepted it. An operation belonging to
- * someone else answers exactly like one that does not exist. The `projected`
- * stage of an adopted operation is derived from `readStore` at read time
- * (`withProjection`); nothing is written.
+ * `GET /api/ops/v1/operations/{id}` and `kogane.ops.operation.get`: the stored
+ * record of one accepted request, whichever principal accepted it. Reads are
+ * whole-store like every other read since ADR 0084 (ADR 0086, owner
+ * 2026-11-08 04:21 UTC); only an id that does not exist is `receipt_not_found`.
+ * The `projected` stage of an adopted operation is derived from `readStore` at
+ * read time (`withProjection`); nothing is written.
  */
 export async function readOperation(
+  // The caller's principal is not a filter: every caller reads the same record.
   input: OperationContext & { operationId: string },
 ): Promise<CommandResult<{ receipt: OperationReceipt }>> {
-  const receipt = await loadReceipt(
-    input.store,
-    input.readStore,
-    input.operationId,
-    input.principal.id,
-  );
+  const receipt = await loadReceipt(input.store, input.readStore, input.operationId);
   if (!receipt) return commandError("receipt_not_found", [input.operationId]);
   return { ok: true, receipt };
 }
 
 /**
- * The source an accepted operation is bound to, read only from the caller's
- * own row: `null` when the operation does not exist or another principal
- * accepted it, so the two answer alike. `sourceId` is `null` for an operation
- * that names no source (a projection rebuild).
+ * The source an accepted operation is bound to, whichever principal accepted
+ * it: `null` when the operation does not exist. `sourceId` is `null` for an
+ * operation that names no source (a projection rebuild).
  */
-export async function ownOperationSource(
+export async function operationSource(
   store: CommandStore,
   operationId: string,
-  principalId: string,
 ): Promise<{ sourceId: string | null } | null> {
   const row = await store.first<{ source_id: string | null }>(
-    "SELECT source_id FROM ops_requests WHERE operation_id=?1 AND principal=?2",
-    [operationId, principalId],
+    "SELECT source_id FROM ops_requests WHERE operation_id=?1",
+    [operationId],
   );
   return row ? { sourceId: row.source_id } : null;
 }
