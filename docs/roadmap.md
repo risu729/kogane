@@ -339,7 +339,7 @@ New collectors ([#455](https://github.com/risu729/kogane/issues/455)–[#510](ht
 under [#440](https://github.com/risu729/kogane/issues/440)) are implemented by Codex
 running on the owner's PC from the issue text, not by this project's Claude threads
 (owner, 2026-11-09 19:06 UTC). They come after the existing collectors collect what
-their sites already offer and they miss today (the per-source issues
+their sites already offer but they do not collect today (the per-source issues
 [#441](https://github.com/risu729/kogane/issues/441)–[#454](https://github.com/risu729/kogane/issues/454)
 and the `not_collected` and `partial` entries of the provider data-type catalogue,
 [ADR 0087](adr/0087-provider-data-type-catalogue.md)), unless the owner names a new
