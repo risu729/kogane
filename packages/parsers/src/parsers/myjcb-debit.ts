@@ -35,7 +35,7 @@ export const myJcbDebitLedger: Parser = {
         kind: "transaction" as const,
         sourceAccount: `myjcb:${connection}:root`,
         externalId: `myjcb-debit:${row.section}:${fingerprint}:${occurrence}`,
-        status: row.section === "ordinary" ? "transferred" : "銀行振替済",
+        status: row.section === "ordinary" ? "transferred" : "bank-transferred",
         amountText: (-providerAmount).toString(),
         amountScale: 0,
         currency: "JPY",
@@ -49,6 +49,7 @@ export const myJcbDebitLedger: Parser = {
           cells: [...row.cells],
           _kogane: {
             canonicalDataset: "debit-detail",
+            identityOrigin: "row-fingerprint-occurrence",
             statementState: "debit",
             providerStatus: row.section === "difference" ? row.cells[5] : null,
             amountBasis: row.section === "ordinary" ? "debit-transfer" : "debit-difference",

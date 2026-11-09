@@ -33,6 +33,15 @@ Each observation retains the original columns and section. Provider debit
 amounts become outflow-negative transaction observations; a signed difference
 retains its sign before that explicit conversion. Nothing creates a cash
 reconciliation, a credit payment, an adopted purchase or a cross-account match.
+Difference status `銀行振替済` is recorded verbatim in provider metadata and
+maps to the closed observation status `bank-transferred`; ordinary rows use
+`transferred`. Transaction-family registry v4 records fingerprint identity
+and an unsupported purchase writer for these rows. Debit transfer rows are
+not classified as credit-card settlements.
+
+Registration v6 adds only `debit-detail` and `debit-other-detail` sanitized
+HTML datasets. Versions v1 through v5 retain their earlier mappings, and debit
+menus stay evidence-only. Parser releases are self-registered as usual.
 
 External IDs fingerprint the section and complete row contents, with an
 occurrence suffix for identical rows within one page. Month position and

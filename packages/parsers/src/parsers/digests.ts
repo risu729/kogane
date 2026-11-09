@@ -57,7 +57,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/moneyforward.ts":
       "743299901b3f796a7e53ff39db06b8cacf9039136c30fd8daeec66dbed4545aa",
     "poc/observation-pipeline/src/parsers/myjcb-debit.ts":
-      "b62663bf3ee961e17d26893858615f022d8dcac5dea9f2b8dc2386f5600667d6",
+      "351cc8786811af43e65b9e8804cb7296442d15bd39c3ec28f00068e6fe3a7e05",
     "poc/observation-pipeline/src/parsers/myjcb-jpoint.ts":
       "f53f9d187aab2027151a01be3d4aae1f3792006583ffb40045b4cfa2020c1bf8",
     "poc/observation-pipeline/src/parsers/myjcb-skip-payment-schedule.ts":
@@ -307,7 +307,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "myjcb-debit-ledger": {
       version: "1.0.0",
-      codeDigest: "fb2c9aa93a24e0b5fe0c76cd519f6adae454b9fc606f1f48d431480d2e94acc0",
+      codeDigest: "1288092e480aae280f658c2663a946abbd99bad4dbf7ce7884a78eec23b6af2b",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -325,7 +325,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "myjcb-debit-other-statement": {
       version: "1.0.0",
-      codeDigest: "fb2c9aa93a24e0b5fe0c76cd519f6adae454b9fc606f1f48d431480d2e94acc0",
+      codeDigest: "1288092e480aae280f658c2663a946abbd99bad4dbf7ce7884a78eec23b6af2b",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

@@ -105,3 +105,4 @@ for current behavior.
 - [ADR 0096: Walk SBI's retained execution history in every normal collection](0096-sbi-scheduled-execution-history.md) — proposed; disjoint windows, provider-based foreign cutoff, per-window evidence and registration v4, no persisted progress
 
 - [ADR 0098: Preserve SBI weekly asset history and select one revision per point](0098-sbi-weekly-asset-history.md) — proposed; observed all-period GET, exact raw capture and bounded year shards, conditional category membership, registration v5, production per-point revision selection
+- [ADR 0101: Read observed MyJCB debit statement rows separately from credit payments](0101-myjcb-debit-statements.md) — proposed; desktop ordinary/difference rows and separate known-empty other statements, all offered periods daily, registration v6 and independent unit eligibility, card switching deferred

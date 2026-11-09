@@ -51,6 +51,7 @@ import { ID } from "../../../evidence-contract/src/validate.ts";
  * - `terminal-registration-v4` (ADR 0096): SBI's dated execution keys and
  *   their matching per-artifact requested ranges; earlier mappings are frozen.
  * - `terminal-registration-v5` (ADR 0098): SBI weekly asset history.
+ * - `terminal-registration-v6` (ADR 0101): observed MyJCB debit statement pages.
  *
  * A terminal already registered under an earlier version whose descriptors
  * the current version does not change is not registered again: the new
@@ -58,7 +59,7 @@ import { ID } from "../../../evidence-contract/src/validate.ts";
  * `register-terminal.ts`, ADR 0022). Registering it again would parse the same
  * capture twice, and a Mizuho capture's transactions would be listed twice.
  */
-export const REGISTRATION_CONTRACT_VERSION = "terminal-registration-v5";
+export const REGISTRATION_CONTRACT_VERSION = "terminal-registration-v6";
 
 /** Every version this code can derive, oldest first; each derivation is kept reproducible. */
 export const REGISTRATION_CONTRACT_VERSIONS = [
@@ -66,6 +67,7 @@ export const REGISTRATION_CONTRACT_VERSIONS = [
   "terminal-registration-v2",
   "terminal-registration-v3",
   "terminal-registration-v4",
+  "terminal-registration-v5",
   REGISTRATION_CONTRACT_VERSION,
 ] as const;
 export type RegistrationContractVersion = (typeof REGISTRATION_CONTRACT_VERSIONS)[number];
@@ -245,6 +247,18 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
   // `credit-menu.html` is not listed: its parser accepts only the media type
   // `text/html; charset=utf-8`, which no terminal can declare.
   myjcb: [
+    {
+      key: /^[^/]+\/debit-detail-(?:0[0-9]|1[0-4])\.html$/u,
+      role: "sanitized_provider_capture",
+      mediaTypes: HTML_TYPE,
+      dataset: "debit-detail",
+    },
+    {
+      key: /^[^/]+\/debit-other-detail-(?:0[1-9]|1[0-4])\.html$/u,
+      role: "sanitized_provider_capture",
+      mediaTypes: HTML_TYPE,
+      dataset: "debit-other-detail",
+    },
     {
       key: /^[^/]+\/jpoint-balance\.json$/u,
       role: "provider_response",
@@ -450,16 +464,24 @@ export function artifactDataset(
   return datasetByRules(table[collectorSource]!, artifact);
 }
 
+/** v5 predates MyJCB debit datasets; earlier mappings must keep that meaning. */
+const V5_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
+  ...ARTIFACT_DATASETS,
+  myjcb: ARTIFACT_DATASETS["myjcb"]!.filter(
+    (rule) => rule.dataset !== "debit-detail" && rule.dataset !== "debit-other-detail",
+  ),
+};
+
 /** v4 keeps the execution-window mapping but predates weekly assets. */
 const V4_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
-  ...ARTIFACT_DATASETS,
+  ...V5_ARTIFACT_DATASETS,
   "sbi-securities": ARTIFACT_DATASETS["sbi-securities"]!.filter(
     (rule) => rule.dataset !== "account-assets-history",
   ),
 };
 
 const V3_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
-  ...ARTIFACT_DATASETS,
+  ...V5_ARTIFACT_DATASETS,
   "sbi-securities": SBI_LEGACY_DATASET_RULES,
 };
 /** `terminal-registration-v2`'s table: ADR 0022's, with Vpass withheld. */
@@ -479,7 +501,8 @@ const DATASETS_BY_VERSION: Readonly<
   "terminal-registration-v2": V2_ARTIFACT_DATASETS,
   "terminal-registration-v3": V3_ARTIFACT_DATASETS,
   "terminal-registration-v4": V4_ARTIFACT_DATASETS,
-  "terminal-registration-v5": ARTIFACT_DATASETS,
+  "terminal-registration-v5": V5_ARTIFACT_DATASETS,
+  "terminal-registration-v6": ARTIFACT_DATASETS,
 };
 
 /** The dataset the first matching rule names, or null. */
@@ -862,7 +885,8 @@ export function artifactRequest(
   const dataset = artifactDataset(manifest.source, artifact, contractVersion);
   const sbiHistory =
     (contractVersion === "terminal-registration-v4" ||
-      contractVersion === "terminal-registration-v5") &&
+      contractVersion === "terminal-registration-v5" ||
+      contractVersion === "terminal-registration-v6") &&
     manifest.source === "sbi-securities" &&
     (dataset === "domestic-trade-records" || dataset === "foreign-trade-records");
   const windowRange = sbiHistory

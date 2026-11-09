@@ -25,6 +25,7 @@ import { MYJCB_LEDGER_SNAPSHOT_CTES } from "../../../packages/read-model/src/sql
 import { currentCardUsageSql } from "../../../packages/read-model/src/card-usage.ts";
 import { myJcbRunPlan, PRODUCER } from "../../collector-myjcb/src/shared-collection.ts";
 import type { RawArtifact } from "../../collector-myjcb/src/types.ts";
+import { collectDebit, collectDebitOther } from "../../collector-myjcb/src/collector.ts";
 import { registerCollectionRun } from "../src/collection/index.ts";
 import { cardPurchaseSweep } from "../src/card-purchase-job.ts";
 import { identitySweep } from "../src/identity-store.ts";
@@ -418,7 +419,7 @@ test("ADR 0005 amendment: a connection that stopped at a month registers and sea
     )
       .bind(runId)
       .first<string>("v"),
-  ).toBe("terminal-registration-v5");
+  ).toBe("terminal-registration-v6");
   expect(
     (
       await env.DB.prepare(
@@ -1021,4 +1022,96 @@ test("ADR 0005 amendment (h): one page at four positions parses once its entries
         .all()
     ).results,
   ).toEqual([{ statement_state: "unknown", period: null, n: 4 }]);
+}, 60000);
+
+test("ADR 0101: real debit collectors register and publish eligible units on a partial multi-connection run", async () => {
+  const rowPage =
+    '<select name="seq"><option value="0" selected>2030年1月16日～2030年2月15日分</option></select><div class="pc-disp"><table><tr><th>ご利用者</th><th>お振替日</th><th>ご利用先など</th><th>お振替金額</th><th>摘要</th><th>承認番号</th></tr><tr><td>本人</td><td>2030/02/01</td><td>架空店舗</td><td>100</td><td></td><td>000001</td></tr></table><table><tr><th>ご利用者</th><th>差額発生日</th><th>ご利用先など</th><th>差額</th><th>摘要</th><th>お取引結果</th><th>承認番号</th></tr><tr><td>本人</td><td>2030/02/02</td><td>架空店舗</td><td>-20</td><td></td><td>銀行振替済</td><td>000001</td></tr></table></div>';
+  const emptyPage =
+    '<select name="seq"><option value="1" selected="selected">2030年1月16日～2030年2月15日分</option></select><p class="comment">[2030年1月16日 ～ 2030年2月15日分]のご利用代金明細はございません</p>';
+  const client: Parameters<typeof collectDebit>[0] = {
+    async get(operation, query) {
+      const body =
+        operation === "debit-menu"
+          ? '<a href="/iss-pc/member/debit/details/debitDetail.html?seq=0">latest</a><select name="seq"><option value="1">past</option></select>'
+          : operation === "debit-other-menu"
+            ? '<select name="seq"><option value="1">past</option></select>'
+            : operation === "debit-other-detail"
+              ? '<h1 class="heading01-01">選択された月のご請求はございません。</h1>'
+              : query?.get("seq") === "0"
+                ? rowPage
+                : emptyPage;
+      return {
+        url: new URL("https://my.jcb.co.jp/"),
+        status: 200,
+        contentType: HTML,
+        body: new TextEncoder().encode(body).buffer,
+      };
+    },
+  };
+  const debit = await collectDebit(client),
+    other = await collectDebitOther(client);
+  expect(debit.unreadMonths).toEqual([]);
+  expect(other.code).toBe("complete");
+  const runId = "00000000-0000-4000-8000-00000000a101";
+  const captures = [...debit.artifacts, ...other.artifacts];
+  const plan = await myJcbRunPlan({
+    schemaVersion: "myjcb-worker-poc-v1",
+    runId,
+    startedAt: "2026-10-01T00:00:00Z",
+    completedAt: "2026-10-01T00:05:00Z",
+    status: "partial",
+    trigger: "scheduled",
+    connections: [
+      {
+        summary: {
+          connectionId: "synthetic-debit",
+          bootstrapMode: "session",
+          status: "success",
+          cardCount: 1,
+          periodCount: debit.periodCount,
+          artifactCount: captures.length,
+          debitOtherCode: other.code,
+        },
+        artifacts: captures,
+      },
+      {
+        summary: {
+          connectionId: "synthetic-unavailable",
+          bootstrapMode: "session",
+          status: "failed",
+          cardCount: 0,
+          periodCount: 0,
+          artifactCount: 0,
+          stopCode: "login",
+          capturedMonthCount: 0,
+        },
+        artifacts: [],
+      },
+    ],
+    failures: [{ connectionId: "synthetic-unavailable", operation: "collect", code: "login" }],
+  });
+  expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
+  expect(await registerCollectionRun(env, { source: "myjcb", runId })).toMatchObject({
+    outcome: "registered",
+  });
+  expect(await sweep(env)).toMatchObject({ parsed: 3, error: 0 });
+  const observations = async () =>
+    (
+      await env.DB.prepare(
+        "SELECT t.external_id,t.status,t.amount_text,t.extra_json FROM transaction_observations t JOIN parse_runs p ON p.id=t.parse_run_id JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id WHERE a.fetch_run_id=? ORDER BY t.id",
+      )
+        .bind(await fetchRun(runId))
+        .all<{ external_id: string; status: string; amount_text: string; extra_json: string }>()
+    ).results;
+  const rows = await observations();
+  expect(rows.map((r) => [r.status, r.amount_text])).toEqual([
+    ["transferred", "-100"],
+    ["bank-transferred", "20"],
+  ]);
+  expect(new Set(rows.map((r) => r.external_id)).size).toBe(2);
+  expect(JSON.parse(rows[1]!.extra_json)._kogane.providerStatus).toBe("銀行振替済");
+  await registerCollectionRun(env, { source: "myjcb", runId });
+  expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
+  expect(await observations()).toEqual(rows);
 }, 60000);
