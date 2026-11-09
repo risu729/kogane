@@ -49,8 +49,9 @@ test("the explicit retained end participates in the parser input fingerprint", a
   };
   const input = { rawSha256: meta.sha256, manifestDigest: "1".repeat(64), meta };
   expect(await inputFingerprint(input)).toBe(await inputFingerprint(input));
+  const earlierEnd = { ...meta, retainedHistoryEnd: "2099-04-01" };
   expect(await inputFingerprint(input)).not.toBe(
-    await inputFingerprint({ ...input, meta: { ...meta, retainedHistoryEnd: "2099-04-01" } }),
+    await inputFingerprint({ ...input, meta: earlierEnd }),
   );
   const withoutEnd = { ...meta } as Partial<typeof meta>;
   delete withoutEnd.retainedHistoryEnd;
