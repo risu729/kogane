@@ -50,6 +50,45 @@ Earlier failure manifests remain as verification history: 2 cold/listen failures
 
 Detailed evidence and next capture steps are recorded in [`INVESTIGATION-2026-08-31.md`](./INVESTIGATION-2026-08-31.md).
 
+## Balance-summary schema drift (2026-11-09)
+
+An authenticated, ordinary Top-page navigation on 2026-11-09 returned HTTP 200
+with `application/json` for the existing bodyless
+`POST /SFC/app/IFTP_TopAdapter/getBalanceSummaryAndStage`. Its
+`responseParam.summary.responseParam` included two previously unregistered string
+fields: `hyperDepositBalance` and `yenDepositBalance`. The collector's strict
+summary validator rejected these keys. A rejected summary is omitted from the
+stored artifacts and records `read:balance-summary-and-stage`,
+`ResponseSchemaError`, `provider_response_invalid`; the other validated responses
+remain evidence, so the run ends `partial`.
+
+The validator now accepts these two optional scalar fields alongside the earlier
+summary shape. Synthetic tests cover the full four-response handoff with the new
+fields, retention in the summary artifact, the earlier shape without them and
+continued rejection of unknown fields or nested values. The fields remain raw
+provider evidence; this change adds no balance interpretation or account mapping.
+The independent `sbi-shinsei-balance-summary-and-stage` parser also accepts the
+fields in version 0.1.2. It still publishes only the existing amount-free stage
+category observation; neither new aggregate becomes a balance observation or
+repeats a balance the top/yen-deposit datasets already report.
+
+A read-only D1/R2 check on 2026-11-09 inspected two persisted production
+manifests, verifying each object's SHA-256 and byte size before reporting only
+counts and closed codes. Both were `partial` with exactly one failure:
+`read:balance-summary-and-stage`, `ResponseSchemaError`,
+`provider_response_invalid`. Both omitted the summary dataset and retained the
+top, exchange-rate and yen-deposit captures. This corroborates the deployed
+schema-validation failure reported in
+[#1215](https://github.com/risu729/kogane/issues/1215). The generic failure code
+does not name the rejected field; the separately observed new fields reproduce
+that rejection in synthetic inputs. This does not establish the cause of every
+earlier partial run. No production collection has been run with this fix.
+After deployment, verify a daily or explicitly authorized
+requested run reaches `success`, follows through publication and shows deposit
+accounts as `same-day` in `kogane.collection-quality.read` (`view: accounts`).
+Until then, production recovery remains pending. The `container-snapshot`
+current-selection rule and success/partial classification are unchanged.
+
 ## Worker surface
 
 | Trigger                           | Behavior                                                                                                                                                                                                       |

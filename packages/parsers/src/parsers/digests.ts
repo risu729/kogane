@@ -77,7 +77,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/sbi-foreign-trade-records.ts":
       "7fd23bbf6cc8e58674faf4f25d5190f8119ad6a6d2c22d5eb7f9f126c4925052",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-balance-summary-and-stage.ts":
-      "a9082cec5eef9bbed6080e44d753434a4086b788b661cd40d4c0f90b47423888",
+      "afed75b6bba5c0934a7be8085dda09d3ccb24992ea1dfead6968c7a4489b5be3",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-common.ts":
       "e9d08f2520bd293d5b4bd4656af8bb318fba01143734a1fd01bafb0a5ce5781f",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-exchange-rate.ts":
@@ -433,8 +433,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-shinsei-balance-summary-and-stage": {
-      version: "0.1.1",
-      codeDigest: "d1ea3ca2c8858d14d5c41b03bea34910d4842a0b7fda9f014365616783709b5f",
+      version: "0.1.2",
+      codeDigest: "cab94f3a9aae671e507d56835f5839fdb755e96d221f7d75a3a0c1ade98677c8",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
