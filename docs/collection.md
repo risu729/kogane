@@ -967,7 +967,11 @@ window, and `full_snapshot` with no range when it did not.
 One daily cron (`25 21 * * *` UTC, 06:25 JST) signs in once with the Worker
 secrets and reads the account list, then the first displayed history page of
 each ordinary JPY account, at most ten accounts: a run holds up to 11
-artifacts. Accounts past the limit, and accounts whose read failed, are
+artifacts. The client verifies the bank query day's full current-and-two-prior-
+month period, both directions and an empty keyword; a narrower initial page
+is replaced by the observed period-selection read. Invalid or clipped echoed
+controls fail the account as `invalid-history-period`. Page traversal remains
+unobserved, so this does not assert complete all-page coverage. Accounts past the limit, and accounts whose read failed, are
 units with no artifact, `coverageStatus: unknown` and the closed code that
 stopped them as `safeErrorCode` (`account-limit`, a client code such as
 `read-http-error`, or the HTML parser's check as `parse-<code>`; anything else

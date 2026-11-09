@@ -56,7 +56,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // みずほポイント are not collected (docs/sources/mizuho-bank.md, #441).
   "mizuho-bank": [
     collected("balance", ["mizuho-account-list"]),
-    partial("cash_movement", ["mizuho-ordinary-history"], 441),
+    partial("cash_movement", ["mizuho-ordinary-history"], 1229),
     // 2026-11-09: registered account lists show no held deposit products; see source notes.
     missing("term_deposit", 1241),
     missing("document", 441),
