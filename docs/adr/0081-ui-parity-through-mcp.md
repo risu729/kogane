@@ -523,7 +523,9 @@ complete (INV05).
    gains `nextPage`: `offered`, `none` or `budget_exceeded`. These are the
    codes and the rule proposed for `kogane.purchases.explain`'s `nextPage`
    in PR [#1173](https://github.com/risu729/kogane/pull/1173), open when this
-   amendment was written, so the two can share one list when both merge.
+   amendment was written. With both merged, `PURCHASES_NEXT_PAGE` is this
+   list and `kogane.purchases.explain` decides its refusal and its offer with
+   the same `pageBeyondBudget`.
 
 ### Decision
 

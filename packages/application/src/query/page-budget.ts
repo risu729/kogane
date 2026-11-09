@@ -1,8 +1,8 @@
 // The grant's row budget on an offset-paged read: one rule decides both
 // whether a request is refused (`budget_exceeded`) and whether an answer
 // offers its next page, so an answer never names a page the same grant is
-// refused. Used by the card settlement reads and the statements without a
-// candidate (ADR 0081, 2026-11-08 amendment).
+// refused. Used by the card settlement reads, the statements without a
+// candidate (ADR 0081, 2026-11-08 amendment) and `kogane.purchases.explain`.
 import type { CardSettlementNextPage } from "../../../domain/src/card-settlement-review.ts";
 import type { Grant } from "../grants.ts";
 

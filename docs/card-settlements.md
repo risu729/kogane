@@ -1223,8 +1223,9 @@ the list, `/ownership` and `/statements`, and on every tenth grouped
 offset from 0 to 1,000 over 1,002 statements: every answer is byte-identical
 except the three changes recorded under [Agent reads](#agent-reads) (the
 `400 invalid_query`, the `413 budget_exceeded` past the budget, and the next
-page withheld at offsets 950 and 989 to 990 grouped, where the frozen handler
-named one the route refuses), and methods and non-operators answer as before
+page withheld where the frozen handler named one the route refuses: among the
+compared offsets, 950 and 989 to 990 grouped; in general any page from offset
+941, or 981 grouped), and methods and non-operators answer as before
 (`services/app/test/card-settlements-api-differential.test.ts`,
 `card-settlement-statements-differential.test.ts`). Every card settlement
 read and the statements without a candidate are walked from offset 0 along
