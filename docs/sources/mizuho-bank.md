@@ -306,7 +306,6 @@ methods/path templates/statuses. No queries/cookies/authorization/SSO codes/actu
 
 Do not navigate to J-Coin, MyJCB, or card company points in this scope.
 
-
 ### Authenticated browser access checked on 2026-11-09 UTC
 
 For [issue 1252](https://github.com/risu729/kogane/issues/1252), ordinary read-only
