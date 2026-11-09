@@ -140,7 +140,7 @@ principal reaches the same writers through the MCP tools, never these routes.
 
 ## Amendment: a silent lease is freed by the Processor (2026-11-07, ADR 0085)
 
-Status: proposed (ADR 0085)
+Status: accepted (merged 2026-11-07 in [#1037](https://github.com/risu729/kogane/pull/1037), with ADR 0085)
 
 [ADR 0085](0085-collection-lease-heartbeat.md) replaces "a process death leaves
 a lease blocked; only the operator … may release that exact lease": a holder
@@ -151,7 +151,7 @@ the operator's release is unchanged.
 
 ## Amendment: a durable pre-RPC dispatch marker (2026-11-08)
 
-Status: proposed
+Status: accepted (merged 2026-11-09 in [#1191](https://github.com/risu729/kogane/pull/1191))
 Date: 2026-11-08
 
 ### Context and options considered

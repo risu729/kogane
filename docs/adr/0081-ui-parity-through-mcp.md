@@ -243,7 +243,7 @@ bound and tampered bytes.
 
 ## Amendment: one request rule and one budget for the card settlement reads (2026-11-07)
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1085](https://github.com/risu729/kogane/pull/1085))
 - Date: 2026-11-07
 
 ### Context
@@ -307,7 +307,7 @@ two changes; the existing route tests are unchanged.
 
 ## Amendment: the grouped card settlement list over MCP (2026-11-07)
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1088](https://github.com/risu729/kogane/pull/1088))
 - Date: 2026-11-07
 
 ### Context
@@ -380,7 +380,7 @@ covers the service's refusals before any read.
 
 ## Amendment: one pre-check for the MCP approve and commit tools (2026-11-08)
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1171](https://github.com/risu729/kogane/pull/1171))
 - Date: 2026-11-08
 
 ### Context

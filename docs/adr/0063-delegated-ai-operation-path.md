@@ -572,7 +572,7 @@ An exact completed retry returns `replayed: true`, `reservation: null` and
 saved revision. The effect/revision remain identical and no second private
 call, reconciliation, effect audit or budget charge occurs.
 
-## Operator delegation status amendment — 2026-11-06 (proposed)
+## Operator delegation status amendment — 2026-11-06
 
 - Status: accepted (merged 2026-11-06 in #926). Plan slice S8,
   the delegation-status part; the audit page is a separate pull request.

@@ -6,16 +6,19 @@
 - Issue: #544
 - Amended: 2026-11-07, the `projected` stage is derived from the READ pointer
   ([below](#amendment-2026-11-07-the-projected-stage-is-derived-from-the-read-pointer);
-  proposed)
+  accepted, #1097)
 - Amended: 2026-11-07, the operator's 依頼の経過 page
-  ([below](#amendment-2026-11-07--the-operators-依頼の経過-page-proposed);
-  proposed)
+  ([below](#amendment-2026-11-07--the-operators-依頼の経過-page);
+  accepted, #1075)
 - Amended: 2026-11-08, a collection with more than 100 runs
   ([below](#amendment-a-collection-with-more-than-100-runs-2026-11-08);
-  proposed)
+  accepted, #1111)
 - Amended: 2026-11-08, five connections enabled and verified in production
   ([below](#amendment-2026-11-08-five-connections-enabled-and-verified-in-production);
-  proposed)
+  accepted, #1179)
+- Amended: 2026-11-08, St George and SBI VC enabled
+  ([below](#amendment-2026-11-08-st-george-and-sbi-vc-enabled);
+  accepted, #1189)
 
 ## Context
 
@@ -259,7 +262,7 @@ production trail to publication are unverified.
 
 ## Amendment 2026-11-07: the `projected` stage is derived from the READ pointer
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1097](https://github.com/risu729/kogane/pull/1097))
 - Date: 2026-11-07
 - Carried by: `packages/application/src/operations/projection-trace.ts`,
   `trackCollectorPublication` (`collector-dispatch.ts`) and `readOperation`
@@ -399,9 +402,9 @@ written; the
 [2026-11-08 amendment](#amendment-2026-11-08-five-connections-enabled-and-verified-in-production)
 followed four to `completed`.
 
-## Amendment 2026-11-07 — the operator's 依頼の経過 page (proposed)
+## Amendment 2026-11-07 — the operator's 依頼の経過 page
 
-Status: proposed (accepted when its pull request merges).
+Status: accepted (merged 2026-11-08 in [#1075](https://github.com/risu729/kogane/pull/1075)).
 
 **Context.** Phase 3 of the [roadmap](../roadmap.md#phase-3--coverage-collection-requests-and-cross-source-identity)
 asks that a collection can be requested and followed to published
@@ -497,7 +500,7 @@ for the MCP client's).
 
 ## Amendment: a collection with more than 100 runs (2026-11-08)
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1111](https://github.com/risu729/kogane/pull/1111))
 - Date: 2026-11-08
 - Carried by: `MAX_RUN_IDS`, `RUN_IDS_OVER_LIMIT`, `scheduledCompletion`,
   `scheduledResult` and `scheduledFailure` in
@@ -582,7 +585,7 @@ first 100 runs. `collectorOperationResult` checks the same `MAX_RUN_IDS`.
 
 ## Amendment 2026-11-08: five connections enabled and verified in production
 
-Status: proposed (accepted when its pull request merges).
+Status: accepted (merged 2026-11-08 in [#1179](https://github.com/risu729/kogane/pull/1179)).
 
 ### Context
 
@@ -633,7 +636,7 @@ George and SBI VC in #1140).
 
 ## Amendment 2026-11-08: St George and SBI VC enabled
 
-Status: proposed (accepted when its pull request merges).
+Status: accepted (merged 2026-11-09 in [#1189](https://github.com/risu729/kogane/pull/1189)).
 
 ### Context
 

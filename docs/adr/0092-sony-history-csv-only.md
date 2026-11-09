@@ -1,6 +1,6 @@
 # ADR 0092: Sony Bank deposit history uses only the official CSV in current transactions
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1188](https://github.com/risu729/kogane/pull/1188))
 - Date: 2026-11-08
 - Owner decision: 2026-11-08 13:29 UTC, with the completeness addition on 2026-11-08
 - Issue: [1182](https://github.com/risu729/kogane/issues/1182)

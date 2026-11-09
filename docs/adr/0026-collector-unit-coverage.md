@@ -2,7 +2,7 @@
 
 ## Amendment: SBI VC retries the login while a terms agreement is pending (2026-11-07)
 
-Status: proposed (accepted when the PR that carries it merges).
+Status: accepted (merged 2026-11-07 in [#1035](https://github.com/risu729/kogane/pull/1035)).
 
 Context. The 2026-10-10 amendment below made SBI VC's
 `manual_agreement_required` stop every unattended login, leaving the owner's

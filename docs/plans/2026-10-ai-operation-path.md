@@ -1118,7 +1118,7 @@ acceptance and concrete client delegation remain separate owner decisions.
   (`in_force`, `not_yet_valid`, `expired`), daily write budget and
   `delegationRef`; the schedules and confirm pages show it as a read-only
   notice. The route and shape are recorded in
-  [ADR 0063's amendment](../adr/0063-delegated-ai-operation-path.md#operator-delegation-status-amendment--2026-11-06-proposed);
+  [ADR 0063's amendment](../adr/0063-delegated-ai-operation-path.md#operator-delegation-status-amendment--2026-11-06);
   [agent API](../agent-api.md#the-operators-mcp-principal-adr-0084-2026-11-07)
   (removed by ADR 0084).
   Service, contract and desktop/mobile browser tests cover it. The audit page

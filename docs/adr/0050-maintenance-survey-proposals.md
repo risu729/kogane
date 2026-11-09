@@ -292,7 +292,7 @@ revision's actor kind, reason and decision reference.
 
 ## Amendment: delegated decisions over MCP (2026-11-07)
 
-- Status: proposed (accepted when the PR that adds it merges)
+- Status: accepted (merged 2026-11-07 in [#1058](https://github.com/risu729/kogane/pull/1058))
 - Date: 2026-11-07
 - Decided by: the owner, 2026-11-07 06:01 UTC, on which proposals an agent may
   accept (option A below); [ADR 0081](0081-ui-parity-through-mcp.md) (every

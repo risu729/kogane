@@ -128,7 +128,7 @@ No `entity_relations` kind means "this row is not a purchase", "refund of" or
 
 ## Amendment 2026-11-06: a later proposal never replaces a relation decision
 
-- Status: proposed until the PR that carries it merges, then accepted
+- Status: accepted (merged 2026-11-07 in [#991](https://github.com/risu729/kogane/pull/991))
 - Date: 2026-11-06
 - Carried by: `RELATION_SQL` in `packages/application/src/operations/targets.ts`,
   `LISTED_AS_SQL` in `packages/read-model/src/instrument-resolution.ts`,

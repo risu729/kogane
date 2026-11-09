@@ -1,6 +1,6 @@
 # ADR 0086: Operations requests are read and listed whole-store, newest first, through the indexes of migration 0040, on the route and over MCP
 
-- Status: proposed (accepted when the PR that carries it merges)
+- Status: accepted (merged 2026-11-08 in [#1074](https://github.com/risu729/kogane/pull/1074))
 - Date: 2026-11-07
 - Builds on: [ADR 0048](0048-operation-collector-dispatch.md) (an operation's
   collector execution trail), [ADR 0064](0064-common-audit-log.md) (one audit

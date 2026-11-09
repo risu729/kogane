@@ -7,7 +7,7 @@
 - Supersedes: [ADR 0063](0063-delegated-ai-operation-path.md) items 2 (the
   `MCP_DELEGATIONS` declaration), 4 (roles and declared capabilities and
   scopes), the delegation part of item 11 (revocation) and its
-  [2026-11-06 delegation-status amendment](0063-delegated-ai-operation-path.md#operator-delegation-status-amendment--2026-11-06-proposed);
+  [2026-11-06 delegation-status amendment](0063-delegated-ai-operation-path.md#operator-delegation-status-amendment--2026-11-06);
   the `AGENT_API_GRANTS` table of [ADR 0047](0047-mcp-client-connection.md)
   and the agent API (`docs/agent-api.md`, A08)
 - Amends: [ADR 0081](0081-ui-parity-through-mcp.md) point 3

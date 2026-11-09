@@ -1,6 +1,6 @@
 # ADR 0090: A statement's ready candidate leads the grouped card settlement list however old it is
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1132](https://github.com/risu729/kogane/pull/1132))
 - Date: 2026-11-08
 - Carried by: `packages/application/src/query/card-settlements.ts`
   (`queryCardSettlementStatements`, `CARD_SETTLEMENT_STATEMENT_OLDER_SQL`,

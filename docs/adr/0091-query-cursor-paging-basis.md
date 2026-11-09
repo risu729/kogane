@@ -1,6 +1,6 @@
 # ADR 0091: A query cursor is bound to its context's pinned inputs, not to the request's clock
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1172](https://github.com/risu729/kogane/pull/1172))
 - Date: 2026-11-08
 - Carried by: `packages/application/src/context/open.ts` (`pagingBasisRef`),
   `packages/application/src/query/cursor.ts`,
