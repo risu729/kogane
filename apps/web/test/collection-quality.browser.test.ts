@@ -228,16 +228,19 @@ describe.if(runnable)("collection quality browser", () => {
         })
         .waitFor();
       expect(await page.getByText("synthetic-card", { exact: false }).count()).toBe(0);
-      // provider-data-types-v1: Sony Bank's history is partial and its term
-      // deposits are not collected, each linked to the issue that tracks it;
+      // provider-data-types-v1: Sony Bank's full retained history is collected;
+      // term deposits remain uncollected and link to their tracking issue.
       // the source list counts the types not wholly collected.
-      expect(await page.locator('li[data-status="partial"]').count()).toBeGreaterThan(0);
+      expect(await page.locator('li[data-status="partial"]').count()).toBe(0);
+      expect(
+        await page.locator('li[data-status="collected"]', { hasText: "cash_movement" }).count(),
+      ).toBe(1);
       expect(
         await page.locator('li[data-status="not_collected"]', { hasText: "term_deposit" }).count(),
       ).toBe(1);
       expect(
         await page
-          .locator('li[data-status="partial"]', { hasText: "cash_movement" })
+          .locator('li[data-status="not_collected"]', { hasText: "term_deposit" })
           .getByRole("link", { name: "残りの対応 #449" })
           .getAttribute("href"),
       ).toBe("https://github.com/risu729/kogane/issues/449");
@@ -366,7 +369,7 @@ describe.if(runnable)("collection quality browser", () => {
       });
       await catalogue.waitFor();
       expect(await catalogue.getByText("入出金明細", { exact: false }).count()).toBe(1);
-      expect(await catalogue.getByText("一部のみ", { exact: false }).count()).toBeGreaterThan(0);
+      expect(await catalogue.getByText("一部のみ", { exact: false }).count()).toBe(0);
       expect(await catalogue.getByText("未収集", { exact: false }).count()).toBeGreaterThan(0);
       expect(
         await catalogue.locator('a[href="https://github.com/risu729/kogane/issues/449"]').count(),
