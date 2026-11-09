@@ -132,15 +132,19 @@ Merging needs no owner approval in general. Before merging a large or
 hard-to-undo change, ask the owner, unless the owner already asked for that
 change (owner, 2026-11-06 13:25 UTC). Examples:
 
-- adds or changes a migration (`packages/storage-d1/migrations/`) or a resource in
-  `infra/resources.json`; rollback restores no database
-  ([CI/CD: rollback](docs/ci-cd.md#rollback-plan-11-7));
+- adds or changes a resource in `infra/resources.json`;
 - changes a feature flag, grant, `OPERATOR_SUBJECTS`, Access audience or
-  policy, secret name or binding in a `wrangler.jsonc`;
+  policy, or secret name;
 - adds an agent or MCP operation or capability in
   `packages/application/src/operation-path/catalogue.ts`;
 - changes `.github/workflows/`, the release ledger or the rollback floor;
 - adopts or replaces a major library, framework or provider.
+
+A D1 migration (`packages/storage-d1/migrations/`) or a `wrangler.jsonc`
+configuration or binding change needs no owner approval (owner, 2026-11-09
+00:37 UTC). Rollback restores no database
+([CI/CD: rollback](docs/ci-cd.md#rollback-plan-11-7)), so after merging a
+migration, check that the production deploy applied it.
 
 Renovate PRs: those with native auto-merge on follow the shared preset and
 need no agent and no owner approval, even when they update a workflow or
