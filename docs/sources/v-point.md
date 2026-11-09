@@ -5,310 +5,194 @@
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-調査日: 2026-08-26（公開情報、ログアウト状態の公開 endpoint、公開 JavaScript、公開第三者実装）
+Research date: 2026-08-26 (public information, logged-out public endpoints, public JavaScript, public third-party implementations)
 
-Live追試: 2026-08-31、Kogane Capture Chromeのユーザー口座でVポイントMy Pageへloginし、
-`balance_info`、`tpoint_history`、`smfg_point`をread-onlyで検証した。値、加盟店、会員番号、
-Cookie、個人情報はrepositoryへ保存していない。PoCは`services/collector-vpoint/`に置く。
-同日のVポイントPay app静的解析と独立Worker設計は`docs/sources/v-point-pay.md`および
-`services/collector-vpoint-pay/`へ分離した。
+Live follow-up: on 2026-08-31, logged into Vポイント (V Points) My Page with the user's account in Kogane Capture Chrome and validated `balance_info`, `tpoint_history`, and `smfg_point` read-only. No values, merchants, member numbers, Cookies, or personal information were saved to the repository. The PoC is in `services/collector-vpoint/`. That day's VポイントPay (V Point Pay) app static analysis and independent Worker design are separate in `docs/sources/v-point-pay.md` and `services/collector-vpoint-pay/`.
 
-## 1. 対象範囲と安全境界
+## 1. Scope and safety boundaries
 
-この記録の単位は個人向けの V Point と V Point Pay である。V Point サイト/アプリ、V Point Pay
-アプリ、Vpass、三井住友銀行アプリ/SMBC ダイレクト/Olive という複数の公式経路を比較する。
-V Point と V Point Pay 残高は別資産であり、三井住友カードの請求明細や銀行預金も別台帳である。
-V Money、旧 T マネー、PayPay ポイント、ANA マイレージ移行可能ポイント、提携先独自ポイントは、
-名称や導線が近くても対象に含めない。
+This record covers personal V Point and V Point Pay, comparing official routes through V Point sites/apps, V Point Pay app, Vpass, and 三井住友銀行 (SMBC) app/SMBC ダイレクト (SMBC Direct)/Olive. V Points and V Point Pay balances are separate assets; 三井住友カード (Sumitomo Mitsui Card) billing statements and bank deposits are separate ledgers too. V Money, former T マネー (T Money), PayPay ポイント (PayPay Points), ANA マイレージ移行可能ポイント (points transferable to ANA Mileage), and partner-specific points are excluded despite similar names/navigation.
 
-許可するのは、既存残高、通常/有効期限固定/ストア限定ポイント、期限、獲得・利用・失効・交換等の
-既存履歴、V Point Pay の既存利用/返金/チャージ履歴の read-only 表示と、ユーザー管理端末での
-静的解析、deobfuscation、runtime tracing、通信メタデータ観測である。支払、チャージ、交換、移行、
-ID 連携/解除、passkey 登録、認証/通知設定変更、会員情報変更等の write は行わない。
+Permitted activities are read-only display of existing balances, regular/fixed-expiry/store-limited points, expirations, existing accrual/use/expiry/exchange history, and existing V Point Pay use/refund/top-up history; static analysis, deobfuscation, runtime tracing, and communication metadata observation on user-controlled devices. No writes such as payments, top-ups, exchanges, transfers, ID linking/unlinking, passkey registration, authentication/notification settings, or member-information changes.
 
-V 会員番号、Yahoo! JAPAN ID、Vpass ID、SMBC ID、電話番号、氏名、生年月日、カード/口座番号、
-Cookie、OTP、app passcode、session/token、passkey private key、実残高、実履歴、実加盟店名を、
-取得物、HAR、screenshot、log、commit に残さない。WAF/CAPTCHA、rate limit、certificate pinning、
-端末 integrity/attestation 等の security control は回避しない。
+Do not retain `V会員番号` (V member number), Yahoo! JAPAN IDs, Vpass IDs, SMBC IDs, phones, names, birth dates, card/account numbers, Cookies, OTPs, app passcodes, sessions/tokens, passkey private keys, actual balances/history/merchant names in acquired artifacts, HARs, screenshots, logs, or commits. Do not bypass WAF/CAPTCHA, rate limits, certificate pinning, device integrity/attestation, or other security controls.
 
-## 2. 調査方法と証拠の強さ
+## 2. Research method and evidence strength
 
-- V Point、三井住友カード、三井住友銀行、Google Play の公式ページを主な根拠にした。
-  aggregator は探索にも根拠にも使っていない。
-- 2026-08-26 にログアウト状態で公開 URL の status/header/redirect と、誰でも配信を受けられる
-  V Point My Page の JavaScript bundle を低頻度で観測した。認証、credential 入力、challenge 誘発、
-  private API replay、負荷試験は行っていない。
-- 公開 GitHub 実装は commit を固定して確認した。加えて、ユーザー管理の非公開 Vpass 5.12.0 静的
-  解析 snapshot をローカル参照し、transport/auth/schema の型・フィールド名を確認した。後者は
-  public third-party client ではなく、公開 URL の根拠にも使わない。snapshot に記載された provenance/
-  signature は、今回 APK を再取得・再検証した事実とは分ける。
-- VポイントPay APK候補は2026-08-31に別途取得・解析した。binary、通常/復号DEX、decompiler outputは
-  private archiveへ保存し、本書のVポイントWeb検証とは証拠境界を分ける。詳細は
-  `docs/sources/v-point-pay.md`を参照する。
-- 以下では **確認事実**、そこからの **推測/設計判断**、**未確認** を明示的に分ける。
+- Primary evidence came from official V Point, Sumitomo Mitsui Card, SMBC, and Google Play pages. Aggregators were used for neither discovery nor evidence.
+- On 2026-08-26, observed public URL statuses/headers/redirects and publicly served V Point My Page JavaScript bundles at low frequency while logged out. No authentication, credential entry, challenge triggering, private-API replay, or load testing.
+- Checked public GitHub implementations at pinned commits. Also locally referenced a user-controlled private Vpass 5.12.0 static-analysis snapshot for transport/auth/schema type/field names. This is not a public third-party client or evidence for public URLs. Its provenance/signature claims are distinct from fresh APK acquisition/verification in this research.
+- V Point Pay APK candidates were separately acquired/analyzed on 2026-08-31. Binaries, normal/decrypted DEX, and decompiler output went to a private archive, with evidence boundaries separate from this V Point Web validation. See `docs/sources/v-point-pay.md`.
+- Below, explicitly separate **confirmed facts**, resulting **inferences/design decisions**, and **unconfirmed items**.
 
-## 3. 台帳の正本と経路別 trade-off
+## 3. Authoritative ledgers and route tradeoffs
 
-| 資産/記録                                           | 正本候補               | read surface            | 強み                                                                      | 主な欠落/危険                                                                    |
-| --------------------------------------------------- | ---------------------- | ----------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| 統合後 V Point 残高・通常/固定期限/ストア限定・履歴 | V Point サイト/アプリ  | My Page、V Point アプリ | 期限 bucket と統合後履歴を一箇所で確認。公開 JS に具体的な内部 API/schema | 公式 CSV/PDF は公開資料で未確認。電話認証/passkey/Cloudflare session が絡む      |
-| 三井住友カード由来ポイント                          | Vpass                  | Vpass Web/app           | カード側付与、Olive クレジットモード、統合前/未連携の確認                 | 未連携履歴は 1 年かつ 100 件。full history endpoint は静的解析 snapshot で未確認 |
-| SMBC/Olive の銀行・デビット由来ポイント             | SMBC アプリ/ダイレクト | V POINT/サービス画面    | 銀行・デビット・銀行プログラムの由来確認                                  | 銀行残高等の対象外 PII が近い。クレジット付与は Vpass が正本候補                 |
-| V Point Pay 残高・利用/返金/チャージ                | V Point Pay app        | app home、利用明細      | Pay の現在残高と authorization/settlement/refund の表示                   | 支払/チャージ write と密接。保持期間、件数、export、内部 transport は未確認      |
+| Asset/record                                                                  | Candidate authority | Read surface            | Strength                                                                                | Main gaps/risks                                                                                   |
+| ----------------------------------------------------------------------------- | ------------------- | ----------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Integrated V Point balance, regular/fixed-expiry/store-limited points/history | V Point site/app    | My Page, V Point app    | Expiry buckets/integrated history together; concrete internal APIs/schemas in public JS | Official CSV/PDF unconfirmed publicly; phone/passkey/Cloudflare sessions involved                 |
+| Sumitomo Mitsui Card-origin points                                            | Vpass               | Vpass Web/app           | Card accrual, Olive credit mode, pre-integration/unlinked coverage                      | Unlinked history limited to 1 year/100 rows; full-history endpoint unconfirmed in static snapshot |
+| SMBC/Olive bank/debit-origin points                                           | SMBC app/Direct     | V POINT/services screen | Bank/debit/bank-program origins                                                         | Nearby out-of-scope bank balances/PII; Vpass candidate authority for credit accrual               |
+| V Point Pay balance/use/refunds/top-ups                                       | V Point Pay app     | App home, usage details | Current Pay balance and authorization/settlement/refund display                         | Adjacent payment/top-up writes; retention/counts/export/internal transport unconfirmed            |
 
-同じ「Vポイント」表示でも、V Point 台帳と V Point Pay のプリペイド残高を足し合わせない。ポイントを
-Pay へ移行するとポイント側の減少と Pay 側の増加という二つの ledger event が生じるため、同一資産の
-重複表示でも消費でもない。公開仕様では二つを結ぶ安定 ID を確認できず、金額と時刻だけで自動結合
-しない。
+Do not add the V Point ledger and V Point Pay prepaid balances despite the same V Points display. Moving points to Pay creates two ledger events, decreasing points and increasing Pay, rather than duplicate display of one asset or consumption. Public specifications did not establish stable linking IDs; do not automatically join by amount/time alone.
 
-推奨 source-of-record は次のとおりである。
+Recommended sources of record:
 
-1. 統合後の spendable V Point、通常/固定期限/ストア限定の expiry bucket、統合後履歴は V Point
-   サイト/アプリ。
-2. 三井住友カード/Olive クレジットモードの付与 provenance と旧/未連携履歴は Vpass。
-3. SMBC 銀行・Olive デビット/ポイント払いモードの付与 provenance は SMBC 側。ただし銀行口座の
-   値は収集しない。
-4. V Point Pay 残高、利用、settlement、返金、チャージは V Point Pay app の別台帳。
+1. V Point site/app for integrated spendable V Points, regular/fixed-expiry/store-limited expiry buckets, and integrated history.
+2. Vpass for Sumitomo Mitsui Card/Olive credit-mode accrual provenance and old/unlinked history.
+3. SMBC for SMBC bank/Olive debit/points-payment-mode provenance; no bank-account values collected.
+4. Separate V Point Pay app ledger for Pay balance, use, settlement, refunds, and top-ups.
 
-## 4. V Point の残高、種類、期限、履歴
+## 4. V Point balances, types, expiry, and history
 
-### 4.1 通常、有効期限固定、ストア限定
+### 4.1 Regular, fixed-expiry, and store-limited points
 
-[Vポイントサービス利用規約](https://privacy.vpoint.co.jp/terms/point/) による確認事実:
+Confirmed facts from [V Point terms of service](https://privacy.vpoint.co.jp/terms/point/):
 
-- 通常ポイントは、最後のポイント変動から 1 年で失効する。変動には通常ポイントの獲得/利用/交換
-  と、ストア限定ではない有効期限固定ポイントの利用が含まれる。
-- 有効期限固定ポイントは個別の期限を持ち、その獲得/利用によって当該期限は延びない。
-- ストア限定ポイントの獲得/利用は、通常ポイントの期限を延長しない。
-- V Point サイトは、保有ポイントの内訳と期限を表示する。
+- Regular points expire one year after the last point activity, including regular accrual/use/exchange and use of non-store-limited fixed-expiry points.
+- Fixed-expiry points have individual expirations, not extended by their accrual/use.
+- Store-limited accrual/use does not extend regular-point expiry.
+- V Point sites display held-point breakdowns/expirations.
 
-[有効期限固定ポイント FAQ](https://ssl.help.tsite.jp/faq/show/62773?site_domain=qa-tsite) は、
-「ストア限定」と「どこでも使えるが期限固定」の二種類を説明する。利用順は概ねストア限定、
-どこでも使える期限固定、通常ポイントで、同種では期限が近いものが先である。
-[ストア限定ポイント FAQ](https://ssl.help.tsite.jp/faq/show/43147?site_domain=qa-tsite) は、利用先と
-期限が限定され、履歴にも表示されるとする。
+The [fixed-expiry points FAQ](https://ssl.help.tsite.jp/faq/show/62773?site_domain=qa-tsite) describes `ストア限定` (store-limited) and points usable anywhere with fixed expiry. Usage order is generally store-limited, anywhere fixed-expiry, then regular, with earliest-expiring first within each type. The [store-limited points FAQ](https://ssl.help.tsite.jp/faq/show/43147?site_domain=qa-tsite) says use locations/expiry are restricted and shown in history.
 
-保存する最低単位は、`asset=v_point`、`point_type`、利用可能数量、期限日、ストア/アライアンス制限、
-`observed_at` である。最短期限だけでなく取得できる全 expiry bucket を snapshot とし、通常ポイント
-の動的な期限を恒久 lot の期限と誤解しない。
+Minimum stored granularity is `asset=v_point`, `point_type`, available quantity, expiry date, store/alliance restrictions, and `observed_at`. Snapshot all available expiry buckets, not just the earliest; do not mistake dynamic regular-point expiry for permanent-lot expiry.
 
-### 4.2 履歴粒度、期間、件数、export
+### 4.2 History granularity, periods, counts, and export
 
-[My Page の見方](https://ssl.help.tsite.jp/faq/show/35501?site_domain=qa-tsite) と
-[確認方法 FAQ](https://ssl.help.tsite.jp/faq/show/42305?site_domain=qa-tsite) による確認事実:
+Confirmed facts from [My Page guide](https://ssl.help.tsite.jp/faq/show/35501?site_domain=qa-tsite) and [checking-method FAQ](https://ssl.help.tsite.jp/faq/show/42305?site_domain=qa-tsite):
 
-- My Page は総ポイント、通常/有効期限固定の内訳、ストア限定残高と期限を表示する。
-- V Point 履歴は **過去 3 年分まで** 表示できる。利用日順/反映日順、期間や種別による絞込、
-  明細詳細がある。
-- 獲得グラフは月単位で最大 12 か月、年単位で最大 5 年である。ただしストア限定や返品/取消による
-  マイナス等を除外するため、台帳の完全な代替ではない。
-- V Point サイト/アプリは残高と履歴を確認できる。電話照会は残高だけで、ストア限定を表示しない。
+- My Page shows total points, regular/fixed-expiry breakdowns, store-limited balances/expirations.
+- V Point history displays **up to the past 3 years**, with use-date/reflection-date sorting, period/type filtering, and row details.
+- Accrual graphs cover up to 12 months monthly or 5 years annually. They exclude store-limited points and negative returns/cancellations, etc., so do not replace complete ledgers.
+- Sites/apps show balances/history; phone inquiries show only balances without store-limited points.
 
-公開 JavaScript と2026-08-31のlive response schemaから確認できた履歴行のフィールドは
-`date_reflect`、`date_use`、`point_div`、`store_company`、`store_category`、`store_name`、
-`point_type`、`point`、`is_use_mbo`、`store_alliance_name`、`reason` である。
-`point_div` は獲得、利用、失効、訂正、取消等、`point_type` は通常、
-ストア限定、どこでも使える期限固定を区別する。公開bundleの表示語対応は下の2026-10-09記録に限定する。規約上の活動分類は未確認。
+History fields confirmed from public JavaScript and live response schemas on 2026-08-31 are `date_reflect`, `date_use`, `point_div`, `store_company`, `store_category`, `store_name`, `point_type`, `point`, `is_use_mbo`, `store_alliance_name`, and `reason`. `point_div` distinguishes accrual/use/expiry/correction/cancellation, etc.; `point_type` distinguishes regular/store-limited/anywhere-fixed-expiry points. Public-bundle display mappings are limited to the 2026-10-09 record below; activity classification under the terms remains unconfirmed.
 
-公開公式資料には、V Point 履歴の CSV/PDF download、1 page 件数、総件数上限、API、欠番や取消行の
-安定 ID を確認できなかった。「export 不可」と断定せず、**公開資料で未確認** とする。3 年を超える
-保存が必要なら、まず月次/四半期の read-only capture を検証し、画面の `results.total` と取得行数を
-一致させる。
+Official public material did not establish CSV/PDF downloads, per-page/total count limits, APIs, or stable IDs for missing/cancelled rows. Treat this as **unconfirmed in public material**, not impossible export. For retention beyond 3 years, first validate monthly/quarterly read-only capture, matching `results.total` to retrieved row counts.
 
-### 4.3 Vpass、ID 連携、SMBC/Olive
+### 4.3 Vpass, ID linking, and SMBC/Olive
 
-[Vpass のポイント履歴 FAQ](https://qa.smbc-card.com/mem/detail?category=61&id=1939&site=4H4A00IO)
-による確認事実:
+Confirmed facts from [Vpass points-history FAQ](https://qa.smbc-card.com/mem/detail?category=61&id=1939&site=4H4A00IO):
 
-- V会員番号と三井住友カード側を ID 連携済みなら、Vpass/Vpass app から統合後の V Point 履歴へ
-  遷移する。2024-04-21 以前の履歴は別表示である。
-- 未連携の Vpass 履歴は **過去 1 年以内、最大 100 件**。100 件を超えた分は確認できない。
-- 通常のカード利用ポイントは原則として月間利用合計から計算されるため、カード利用 1 件と
-  ポイント付与 1 行を機械的に対応づけられない。
-- PayPay ポイントへの交換分、ANA マイレージ移行可能ポイント、提携先独自ポイント等は main の
-  V Point 表示に含まれない場合がある。
+- With linked `V会員番号`/Sumitomo Mitsui Card IDs, Vpass/app navigates to integrated V Point history. History on or before 2024-04-21 is separate.
+- Unlinked Vpass history covers **the past 1 year, maximum 100 rows**; excess rows cannot be checked.
+- Ordinary card-use points are generally calculated from monthly total usage, preventing mechanical one-card-transaction/one-accrual-row matching.
+- Exchanges to PayPay Points, ANA-mileage-transferable points, and partner-specific points may be absent from the main V Point display.
 
-[交換履歴 FAQ](https://qa.smbc-card.com/mem/detail?category=16&id=272&site=4H4A00IO) も、連携済みは
-V Point 側、未連携は 1 年/100 件の Vpass 側という分岐を案内する。
-[2024 年統合案内](https://www.smbc-card.com/mem/cardinfo/23/cardinfo4010742.jsp) は、ID 連携により
-旧 T ポイントと SMBC グループ側ポイントをまとめ、Vpass でも合計表示できるとする。
-[連携手順](https://www.smbc-card.com/mem/for_info/vpo_idrenkei.jsp) は V Point Pay/Vpass Web/app での
-連携を案内するが、連携・解除は write のため live 検証しない。
+The [exchange-history FAQ](https://qa.smbc-card.com/mem/detail?category=16&id=272&site=4H4A00IO) also splits linked V Point versus unlinked 1-year/100-row Vpass history. The [2024 integration guide](https://www.smbc-card.com/mem/cardinfo/23/cardinfo4010742.jsp) says ID linking combines former T Points and SMBC Group points, allowing combined Vpass display. [Linking instructions](https://www.smbc-card.com/mem/for_info/vpo_idrenkei.jsp) cover V Point Pay/Vpass Web/app, but linking/unlinking are writes and not tested live.
 
-[SMBC の履歴 FAQ](https://qa.smbc.co.jp/faq/show/8824?site_domain=default) は、SMBC アプリ/ダイレクトの
-`V POINT`/サービスから履歴へ進む経路を示す一方、Olive のクレジットモード/カード利用の付与は
-Vpass で確認するよう案内する。付与予定は表示されない。
-[Olive 付与タイミング FAQ](https://qa.smbc.co.jp/faq/show/7616?site_domain=default) と
-[Vpass 表示 FAQ](https://qa.smbc-card.com/mem/nyukai/detail?category=215&id=2374&site=4H4A00IO) から、
-クレジット、デビット、ポイント払いモード、支店/カード、特典名が attribution 候補になる。
+The [SMBC history FAQ](https://qa.smbc.co.jp/faq/show/8824?site_domain=default) routes from SMBC app/Direct `V POINT`/services to history, but directs Olive credit-mode/card accrual checks to Vpass. Scheduled accruals are not displayed. [Olive accrual-timing FAQ](https://qa.smbc.co.jp/faq/show/7616?site_domain=default) and [Vpass display FAQ](https://qa.smbc-card.com/mem/nyukai/detail?category=215&id=2374&site=4H4A00IO) suggest credit/debit/points-payment modes, branches/cards, and benefit names as attribution candidates.
 
-設計判断: Vpass/SMBC の表示は V Point 全履歴の代替ではなく、付与 provenance と legacy gap を埋める
-補助 source とする。SMBC 画面を読む場合も、預金残高、口座番号、入出金明細は収集対象外にする。
+Design decision: Vpass/SMBC displays supplement accrual provenance/legacy gaps rather than replace full V Point history. Bank deposit balances, account numbers, and deposit/withdrawal statements remain excluded when reading SMBC screens.
 
 ## 5. V Point Pay
 
-### 5.1 残高、利用、authorization/settlement、返金
+### 5.1 Balance, use, authorization/settlement, and refunds
 
-[V Point Pay の残高説明](https://qa.smbc-card.com/mem/nyukai/detail?category=189&id=1774&site=4H4A00IO)
-は、ポイント等からチャージしたプリペイド残高を買い物に使うサービスとする。
-[利用明細 FAQ](https://qa.smbc-card.com/mem/nyukai/detail?category=193&id=1810&site=4H4A00IO) は、app home
-から利用明細を開く導線を示す。
+[V Point Pay balance explanation](https://qa.smbc-card.com/mem/nyukai/detail?category=189&id=1774&site=4H4A00IO) describes prepaid shopping balances topped up from points, etc. The [usage-details FAQ](https://qa.smbc-card.com/mem/nyukai/detail?category=193&id=1810&site=4H4A00IO) routes from app home to usage details.
 
-状態の確認事実:
+Confirmed status facts:
 
-- [利用額の変更 FAQ](https://qa.smbc-card.com/mem/detail?category=189&id=1806&site=4H4A00IO) によると、
-  まず加盟店の利用承認情報で残高が減り、後から加盟店売上額が届くと明細/残高がその確定額へ変わる
-  場合がある。最初の表示を posted と断定しない。
-- [返金 FAQ](https://qa.smbc-card.com/mem/detail?category=193&id=1805&site=4H4A00IO) によると、返金は
-  加盟店情報到着後、通常 1～4 週間程度で、利用明細にはプラス額として表示される。
-- [有効期限 FAQ](https://qa.smbc-card.com/mem/detail?category=189&id=1800&site=4H4A00IO) は、初回登録から
-  5 年、所定期間内の利用/チャージでそこから 5 年に更新されるとする。古い説明と条件が異なり得る
-  ため、実装時は現行 FAQ と app 表示を再確認する。
-- [チャージ反映 FAQ](https://qa.smbc-card.com/mem/nyukai/detail?category=189&id=1799&site=4H4A00IO) は、
-  ポイント/ギフトからのチャージと、本人確認を要するカード/銀行チャージで反映時期が異なるとする。
+- The [usage-amount changes FAQ](https://qa.smbc-card.com/mem/detail?category=189&id=1806&site=4H4A00IO) says merchant authorization first reduces balance; later merchant sales amounts may update statement/balance to finalized amounts. Do not assume first display is posted.
+- The [refund FAQ](https://qa.smbc-card.com/mem/detail?category=193&id=1805&site=4H4A00IO) says refunds normally appear as positive amounts in usage details about 1–4 weeks after merchant information arrives.
+- The [expiry FAQ](https://qa.smbc-card.com/mem/detail?category=189&id=1800&site=4H4A00IO) specifies 5 years from registration, renewed to 5 years from qualifying use/top-up within the specified period. Conditions may differ from older guidance; recheck current FAQ/app display when implementing.
+- The [top-up reflection FAQ](https://qa.smbc-card.com/mem/nyukai/detail?category=189&id=1799&site=4H4A00IO) distinguishes reflection times for points/gifts versus card/bank top-ups requiring identity verification.
 
-モデルは少なくとも `authorization_observed`、`settled`、`refund`、`charge` を分ける。authorization
-表示を後から破壊的に上書きせず snapshot とする。公開資料では authorization ID、settlement ID、
-原取引と返金の link ID、merchant/currency の完全フィールドを確認できないため、live で schema を
-確認するまで金額・日付一致だけで結合しない。
+At minimum distinguish `authorization_observed`, `settled`, `refund`, and `charge`. Snapshot authorizations without destructive later overwrites. Public material did not establish authorization/settlement IDs, original/refund linking IDs, or complete merchant/currency fields. Do not join by matching amounts/dates alone before live schema validation.
 
-### 5.2 期間、件数、export
+### 5.2 Periods, counts, and export
 
-公開公式資料には V Point Pay 利用明細の保持期間、CSV/PDF、file export、行の安定 ID を確認できなかった。
-後続のAPK解析ではbalance応答の`inquiry_period`を最古月として、`target_month=yyyyMM`で月別JSONを
-取得する構造を確認した。固定保持期間を仮定せず、実口座の最古月、authorizationがsettled行へ更新
-されるか別行になるか、返金の原取引linkageをlive検証項目とする。
+Official public material did not establish retention, CSV/PDF/file export, or stable row IDs for Pay usage details. Later APK analysis found monthly JSON via `target_month=yyyyMM`, using balance-response `inquiry_period` as the earliest month. Do not assume fixed retention; leave earliest actual-account month, whether authorization updates settled rows or creates separate rows, and original/refund linkage for live validation.
 
-[ポイントチャージ手順](https://qa.smbc-card.com/mem/vptapp/detail?category=189&id=1778) は公式情報だが、
-実行はポイント減少/Pay 残高増加を起こす write である。read-only 検証ではチャージ画面へ遷移せず、
-既存履歴に現れた行だけを読む。
+[Points top-up instructions](https://qa.smbc-card.com/mem/vptapp/detail?category=189&id=1778) are official information, but execution decreases points/increases Pay balances and is a write. Do not navigate to top-up screens in read-only validation; read only rows in existing history.
 
-## 6. 認証、MFA、passkey、Bitwarden
+## 6. Authentication, MFA, passkeys, and Bitwarden
 
-### 6.1 V Point サイト/アプリ
+### 6.1 V Point site/app
 
-- [ログイン FAQ](https://ssl.help.tsite.jp/faq/show/69477?site_domain=qa-tsite) は、スマートフォンでは
-  Yahoo! JAPAN ID を使わず V会員番号で login できる経路と、Yahoo! JAPAN ID 経路を案内する。
-- [公式アプリ利用手順](https://web.tsite.jp/pt/howto_app/?mode=PC) は、V会員番号または Yahoo! JAPAN
-  ID での登録後、電話発信による本人確認を案内する。
-- [passkey FAQ](https://ssl.help.tsite.jp/faq/show/73314?site_domain=qa-tsite) によると、2026-05-18
-  時点で V Point サイト/アプリは passkey に対応する。登録には login と電話認証が必要で、現時点の
-  対応は iOS、Android/PC は非対応である。これは WebAuthn/FIDO 系 passkey の公式確認である。
+- The [login FAQ](https://ssl.help.tsite.jp/faq/show/69477?site_domain=qa-tsite) describes smartphone login using `V会員番号` without Yahoo! JAPAN ID, as well as Yahoo! JAPAN ID routes.
+- [Official app instructions](https://web.tsite.jp/pt/howto_app/?mode=PC) describe registration with `V会員番号` or Yahoo! JAPAN ID followed by identity verification through an outgoing phone call.
+- The [passkey FAQ](https://ssl.help.tsite.jp/faq/show/73314?site_domain=qa-tsite) says V Point site/app supports passkeys as of 2026-05-18. Registration requires login/phone verification; currently iOS-only, without Android/PC support. This officially confirms WebAuthn/FIDO-family passkeys.
 
-電話認証、Yahoo! JAPAN 側の追加認証、passkey 登録/削除が必要になったら人へ handoff する。既存
-passkey での login は read の入口になり得るが、新規登録は設定 write のため行わない。
+Hand off for phone verification, additional Yahoo! JAPAN authentication, or passkey registration/deletion. Existing-passkey login may be a read entrypoint; new registration is a settings write and not performed.
 
 ### 6.2 V Point Pay
 
-- [app passcode FAQ](https://qa.smbc-card.com/mem/nyukai/detail?category=194&id=2874&site=4H4A00IO) は、
-  カード情報表示や手続に 6 桁 passcode を使う。
-- [SMS 認証 FAQ](https://qa.smbc-card.com/mem/nyukai/detail?category=196&id=1770&site=4H4A00IO) は SMS
-  認証コードを案内する。
-- [再認証 FAQ](https://qa.smbc-card.com/mem/vptapp/detail?category=189&id=1808&site=4H4A00IO) は、長期
-  未使用後に電話番号、氏名カナ、生年月日、SMS code、新しい 6 桁 passcode を使う再認証を示す。
-- [生体認証 FAQ](https://qa.smbc-card.com/mem/info/detail?id=1776&search=true) の Face ID/Touch ID は
-  app passcode の代替/unlock で、V Point Pay の WebAuthn passkey 対応の証拠ではない。
+- The [app passcode FAQ](https://qa.smbc-card.com/mem/nyukai/detail?category=194&id=2874&site=4H4A00IO) uses six-digit passcodes for card-information display/procedures.
+- The [SMS authentication FAQ](https://qa.smbc-card.com/mem/nyukai/detail?category=196&id=1770&site=4H4A00IO) describes SMS authentication codes.
+- The [reauthentication FAQ](https://qa.smbc-card.com/mem/vptapp/detail?category=189&id=1808&site=4H4A00IO) describes post-inactivity reauthentication using phone number, kana name, birth date, SMS code, and a new six-digit passcode.
+- The [biometric authentication FAQ](https://qa.smbc-card.com/mem/info/detail?id=1776&search=true) describes Face ID/Touch ID as app-passcode replacement/unlocking, not evidence of V Point Pay WebAuthn passkeys.
 
-V Point Pay の passkey 対応は今回確認できなかった。app の biometric unlock、SMS、V Point 側の
-iOS passkey を同じ認証方式として扱わない。
+V Point Pay passkeys were not confirmed. Do not equate app biometric unlock, SMS, and V Point iOS passkeys.
 
 ### 6.3 Vpass / SMBC
 
-[Vpass Web FAQ](https://qa.smbc-card.com/mem/detail?category=216&id=2283&site=4H4A00IO) は、Web は
-Vpass ID/password のみを受け付け、SMBC ID は Vpass app のみとする。
-[Vpass app login FAQ](https://qa.smbc-card.com/mem/detail?category=177&id=1335&site=4H4A00IO) は、
-Vpass ID または SMBC ID/password と optional biometric/自動 login を案内する。
-[生体認証 FAQ](https://qa.smbc-card.com/fs/collection/detail?id=991) は app biometric login の説明で、
-WebAuthn passkey の確認ではない。三井住友銀行アプリの SMBC Safety Pass 等の端末認証は銀行 route
-固有で、V Point 全体の共通 passkey と見なさない。3D Secure の SMS/email OTP は決済時認証であり、
-残高照会 login MFA と混同しない。
+The [Vpass Web FAQ](https://qa.smbc-card.com/mem/detail?category=216&id=2283&site=4H4A00IO) says Web accepts only Vpass ID/password, while SMBC ID is app-only. The [Vpass app login FAQ](https://qa.smbc-card.com/mem/detail?category=177&id=1335&site=4H4A00IO) describes Vpass ID or SMBC ID/password with optional biometric/automatic login. The [biometric authentication FAQ](https://qa.smbc-card.com/fs/collection/detail?id=991) describes app biometrics, not WebAuthn passkeys. Device authentication such as SMBC Safety Pass in the SMBC app is bank-route-specific, not shared V Point passkeys. 3D Secure SMS/email OTP is payment authentication, distinct from balance-inquiry login MFA.
 
-### 6.4 Bitwarden: 確認と推測
+### 6.4 Bitwarden: confirmation and inference
 
-Bitwarden は一般に [browser autofill](https://bitwarden.com/help/auto-fill-browser/)、
-[Android autofill](https://bitwarden.com/help/auto-fill-android/)、
-[passkey 保存](https://bitwarden.com/help/storing-passkeys/) を提供する。したがって Vpass Web の
-ID/password や、対応 OS/browser での passkey provider になり得るという一般論はある。
+Bitwarden generally provides [browser autofill](https://bitwarden.com/help/auto-fill-browser/), [Android autofill](https://bitwarden.com/help/auto-fill-android/), and [passkey storage](https://bitwarden.com/help/storing-passkeys/). It may therefore generally serve Vpass Web ID/password autofill or passkeys on supported OS/browser combinations.
 
-ただし、V Point が公式に Bitwarden との互換性を明示した情報は確認できない。V Point passkey が
-現時点で iOS 限定であること、V Point Pay/Vpass/SMBC app の biometric unlock は passkey ではない
-ことから、**Bitwarden で全経路を無人化できるとは推測しない**。ID、電話、氏名/生年月日、app
-passcode、OTP を一つの vault item/runtime に集約しない。
+However, no official V Point statement of Bitwarden compatibility was confirmed. Given currently iOS-only V Point passkeys and non-passkey biometric unlock in Pay/Vpass/SMBC apps, **do not infer Bitwarden can make every route unattended**. Do not combine IDs, phones, names/birth dates, app passcodes, and OTPs in one vault item/runtime.
 
-未確認: 各 session の寿命/refresh、端末/IP binding、電話/SMS challenge 頻度、Yahoo! JAPAN 側の
-MFA 条件、V Point passkey の Bitwarden iOS provider 互換、Pay/Vpass app device key。
+Unconfirmed: each session's lifetime/refresh, device/IP binding, phone/SMS challenge frequency, Yahoo! JAPAN MFA conditions, V Point passkey compatibility with Bitwarden's iOS provider, and Pay/Vpass app device keys.
 
-## 7. CDN、WAF、anti-bot
+## 7. CDN, WAF, and anti-bot
 
-2026-08-26 のログアウト状態の低頻度観測:
+Low-frequency logged-out observations on 2026-08-26:
 
-| 公開入口                                                | 結果                                                                        | 言えること / 言えないこと                                                  |
-| ------------------------------------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `https://vpoint.net/`                                   | `302` で `https://tsite.jp/`、`Server: nginx`                               | 旧/案内入口の redirect。認証 origin の防御を示さない                       |
-| `https://web.tsite.jp/`                                 | `200`、CloudFront の `X-Cache`/`Via`/`X-Amz-Cf-*`                           | 公開コンテンツに CloudFront が介在                                         |
-| `https://mypage.tsite.jp/tpoint/?hid=1`                 | `200`、`Server: cloudflare`、`CF-Cache-Status: DYNAMIC`、Sydney の `CF-Ray` | 認証 My Page SPA の front door は Cloudflare。WAF/bot product/score は不明 |
-| `https://www.smbc-card.com/mem/index.jsp`               | `403`、`Server: AkamaiGHost`                                                | Vpass 公開入口に Akamai が介在。匿名 curl 403 の理由は未確認               |
-| `https://www.smbc-card.com/mem/for_vpointapp/index.jsp` | `403`、`Server: AkamaiGHost`                                                | カード側 V Point app 導線も Akamai。login 後挙動は不明                     |
-| `https://qa.smbc-card.com/`                             | `200`、`Server: Apache`                                                     | FAQ は取得可能。Vpass/app API と同じ保護とは限らない                       |
-| `https://direct.smbc.co.jp/aib/aibgsjsw5001.jsp`        | `200`、`X-Akamai-Transformed`                                               | SMBC Direct 公開入口で Akamai 介在を確認                                   |
+| Public entrypoint                                       | Result                                                                   | What can/cannot be concluded                                               |
+| ------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| `https://vpoint.net/`                                   | `302` to `https://tsite.jp/`, `Server: nginx`                            | Old/guidance-entry redirect; does not establish auth-origin defenses       |
+| `https://web.tsite.jp/`                                 | `200`, CloudFront `X-Cache`/`Via`/`X-Amz-Cf-*`                           | CloudFront on public content                                               |
+| `https://mypage.tsite.jp/tpoint/?hid=1`                 | `200`, `Server: cloudflare`, `CF-Cache-Status: DYNAMIC`, Sydney `CF-Ray` | Auth My Page SPA front door is Cloudflare; WAF/bot products/scores unknown |
+| `https://www.smbc-card.com/mem/index.jsp`               | `403`, `Server: AkamaiGHost`                                             | Akamai on public Vpass entry; reason for anonymous curl 403 unknown        |
+| `https://www.smbc-card.com/mem/for_vpointapp/index.jsp` | `403`, `Server: AkamaiGHost`                                             | Akamai on card-side V Point app entry too; authenticated behavior unknown  |
+| `https://qa.smbc-card.com/`                             | `200`, `Server: Apache`                                                  | FAQ accessible; may differ from Vpass/app API protection                   |
+| `https://direct.smbc.co.jp/aib/aibgsjsw5001.jsp`        | `200`, `X-Akamai-Transformed`                                            | Akamai confirmed at public SMBC Direct entry                               |
 
-これらは CDN/front-door header の観測であり、WAF の製品設定、bot 判定、app API の防御、login 後の
-challenge、Cloudflare/Akamai の全 surface 適用を証明しない。V Point My Page 自体が Cloudflare
-fronted なので Cloudflare Worker から必ず通るとも、同一 provider のため特別に通りやすいとも
-推測しない。
+These CDN/front-door headers do not establish WAF settings, bot decisions, app-API defenses, authenticated challenges, or Cloudflare/Akamai protection across all surfaces. Cloudflare-fronted My Page does not imply guaranteed access or special ease from Cloudflare Workers because they share a provider.
 
-401/403/429、CAPTCHA/challenge/interstitial、認証 loop、予想外の reauthentication が出たら停止する。
-cookie/header 合成による防御回避、browser fingerprint spoofing、CAPTCHA solver、rate-limit 探索、
-pinning/integrity bypass を行わない。
+Stop for 401/403/429, CAPTCHA/challenges/interstitials, authentication loops, or unexpected reauthentication. No cookie/header synthesis to bypass defenses, browser-fingerprint spoofing, CAPTCHA solvers, rate-limit probing, or pinning/integrity bypasses.
 
-## 8. 公式 web/app/APK と first-party transport
+## 8. Official Web/apps/APKs and first-party transport
 
-### 8.1 公式 app と web の役割
+### 8.1 Official app and Web roles
 
-| 公式 app                                                                          | Google Play package    | 2026-08-26 の Play metadata version | 主な read 役割                                                        |
-| --------------------------------------------------------------------------------- | ---------------------- | ----------------------------------- | --------------------------------------------------------------------- |
-| [V Point](https://play.google.com/store/apps/details?id=jp.co.ccc.Tsite)          | `jp.co.ccc.Tsite`      | `3.7.3`                             | 統合ポイント残高、種類、期限、履歴。獲得/利用/交換等 write 導線も同居 |
-| [V Point Pay](https://play.google.com/store/apps/details?id=com.smbc_card.vpoint) | `com.smbc_card.vpoint` | `2.5.0`                             | Pay 残高、利用/settlement/refund/charge。支払/チャージが中心に同居    |
-| [Vpass](https://play.google.com/store/apps/details?id=com.smbc_card.vpass)        | `com.smbc_card.vpass`  | `5.12.0`                            | カード由来ポイント/連携状態、Olive credit provenance                  |
-| [三井住友銀行](https://play.google.com/store/apps/details?id=jp.co.smbc.direct)   | `jp.co.smbc.direct`    | `12.7.0`                            | SMBC/Olive bank/debit provenance。預金等の対象外データが近い          |
+| Official app                                                                      | Google Play package    | Play metadata version on 2026-08-26 | Main read role                                                                 |
+| --------------------------------------------------------------------------------- | ---------------------- | ----------------------------------- | ------------------------------------------------------------------------------ |
+| [V Point](https://play.google.com/store/apps/details?id=jp.co.ccc.Tsite)          | `jp.co.ccc.Tsite`      | `3.7.3`                             | Integrated balances/types/expiry/history; adjacent accrual/use/exchange writes |
+| [V Point Pay](https://play.google.com/store/apps/details?id=com.smbc_card.vpoint) | `com.smbc_card.vpoint` | `2.5.0`                             | Pay balance/use/settlement/refunds/top-ups; payments/top-ups coexist centrally |
+| [Vpass](https://play.google.com/store/apps/details?id=com.smbc_card.vpass)        | `com.smbc_card.vpass`  | `5.12.0`                            | Card-origin points/linking state, Olive credit provenance                      |
+| [SMBC](https://play.google.com/store/apps/details?id=jp.co.smbc.direct)           | `jp.co.smbc.direct`    | `12.7.0`                            | SMBC/Olive bank/debit provenance; nearby excluded deposits/data                |
 
-Web は V Point の履歴 pagination/schema と Vpass legacy route の観測に向く。アプリは device-bound
-認証、Pay の current ledger、first-party app API の同定に向くが、write との近さが強い。最初から
-app UI automation を選ばず、V Point web、既存 Vpass session、最後に Pay/SMBC device の順とする。
+Web suits observing V Point history pagination/schemas and Vpass legacy routes. Apps suit device-bound auth, current Pay ledgers, and first-party API identification, but are close to writes. Do not start with app UI automation; proceed through V Point Web, existing Vpass sessions, then Pay/SMBC devices.
 
-version は可変である。artifact ごとに package、versionCode/versionName、取得日時、SHA-256、signer
-certificate digest を記録する。公式 standalone APK 配布は確認できない。
+Versions change. Record package, versionCode/versionName, acquisition time, SHA-256, and signer-certificate digest per artifact. Official standalone APK distribution was not confirmed.
 
-### 8.2 V Point My Page の公開 JavaScript
+### 8.2 Public V Point My Page JavaScript
 
-匿名取得できる [V Point My Page SPA](https://mypage.tsite.jp/tpoint/?hid=1) の 2026-08-26 時点の
-Nuxt chunk `/_nuxt/64c5c08.js` を静的解析し、次の same-origin first-party transport を確認した。
+Static analysis of anonymously accessible [V Point My Page SPA](https://mypage.tsite.jp/tpoint/?hid=1) Nuxt chunk `/_nuxt/64c5c08.js` as of 2026-08-26 confirmed this same-origin first-party transport.
 
-| method/path                | client が使う request/response schema                                                                                                     | 解釈                                                               |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `POST /api/balance_info`   | `status`; `results.common[] {point, expiration, point_type}`; `results.store[] {alliance_name, items[] {point, expiration}}`; `get_month` | 通常/期限固定/ストア限定の残高・期限 bucket                        |
-| `POST /api/tpoint_history` | multipart: `page`, `get_graph`, `sort`, 各種 filter, `filter_date`; response `results.total/history/graph`                                | V Point 履歴 pagination と graph。内部名 `tpoint` は legacy naming |
-| `POST /api/smfg_point`     | `results.get_point.point_smbc`, `point_smcc`                                                                                              | SMBC bank/card 側のポイント分離表示候補                            |
-| `POST /api/tmoney_history` | V Money 履歴                                                                                                                              | **V Point Pay ではないため対象外**                                 |
+| Method/path                | Client request/response schema                                                                                                            | Interpretation                                                |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `POST /api/balance_info`   | `status`; `results.common[] {point, expiration, point_type}`; `results.store[] {alliance_name, items[] {point, expiration}}`; `get_month` | Regular/fixed-expiry/store-limited balances/expiry buckets    |
+| `POST /api/tpoint_history` | Multipart: `page`, `get_graph`, `sort`, filters, `filter_date`; response `results.total/history/graph`                                    | History pagination/graphs; internal `tpoint` is legacy naming |
+| `POST /api/smfg_point`     | `results.get_point.point_smbc`, `point_smcc`                                                                                              | Candidate separate SMBC bank/card points display              |
+| `POST /api/tmoney_history` | V Money history                                                                                                                           | **Excluded: not V Point Pay**                                 |
 
-`tpoint_history` の filter は獲得、利用、取消、失効、移行、訂正、期限延長、再発行、その他と、
-利用日/反映日 sort を含む。client は `results.total` と収集行数を比較して pagination する。これは
-具体的な read API/schema の強い証拠だが、公開 API ではなく session/cookie 保護された internal API
-である。2026-08-31にはユーザー管理browserの通常login sessionから、同一originのread-only requestを
-live検証した。renewable session、CSRF、rate limit、schema stability、利用規約上の自動取得可否は
-引き続き未確認である。
+`tpoint_history` filters include accrual, use, cancellation, expiry, transfer, correction, expiry extension, reissuance, others, and use/reflection-date sorting. Clients compare `results.total` with collected rows to paginate. This strongly establishes concrete read APIs/schemas, but they are session/cookie-protected internal APIs, not public APIs. On 2026-08-31, same-origin read-only requests were validated live through a user-controlled browser's normal login session. Renewable sessions, CSRF, rate limits, schema stability, and terms permission for automated retrieval remain unconfirmed.
 
-### 8.3 正規 split APK の次実験
+### 8.3 Next legitimate split-APK experiment
 
-この調査ではV Point/V Point Pay/SMBCのAPKを新規取得しなかった。ユーザー管理AndroidにGoogle Play
-から正規installした後、各packageで次を行う。binary/decompiled/decrypted artifactはKoganeのpublic
-repositoryへ入れず、既存のprivate Android archive repositoryにprovenanceとともに保存する。
+This research did not newly acquire V Point/V Point Pay/SMBC APKs. After legitimate Google Play installation on user-controlled Android, perform the following per package. Keep binary/decompiled/decrypted artifacts out of Kogane's public repository; save them with provenance in the existing private Android archive repository.
 
 ```bash
-PKG=jp.co.ccc.Tsite  # com.smbc_card.vpoint / com.smbc_card.vpass / jp.co.smbc.direct に変更
+PKG=jp.co.ccc.Tsite  # Change to com.smbc_card.vpoint / com.smbc_card.vpass / jp.co.smbc.direct
 adb shell dumpsys package "$PKG" | grep -E 'version(Name|Code)|firstInstallTime|lastUpdateTime'
 adb shell pm path "$PKG"
-# 上で得た base.apk と全 split_config*.apk を一つずつ adb pull する
+# Use adb pull for base.apk and every split_config*.apk obtained above, one by one
 sha256sum artifact/*.apk
 apksigner verify --verbose --print-certs artifact/*.apk
 jadx -d jadx-out artifact/*.apk
@@ -316,351 +200,219 @@ apktool d -f artifact/base.apk -o apktool-out
 rg -a -n 'https?://|wss://|retrofit|okhttp|graphql|grpc|protobuf|oauth|bearer|cookie|session|pin|certificate|integrity|attestation|safetynet' jadx-out apktool-out
 ```
 
-- 全 split の signer digest が一致することを確認し、package/version/signer/hashをpublic provenance
-  recordにも残す。APK/decompiled codeはprivate archiveだけへcommitする。
-- Manifest、network security config、host/path、Retrofit/OkHttp/gRPC/GraphQL/protobuf schema、session/
-  token 更新 call、Play Integrity/attestation/pinning library 候補を列挙する。
-- R8/ProGuard、string encryption の deobfuscation、read method の runtime tracing は対象にできる。
-  ただし token/cookie/key/PII/実値を log せず、pinning/integrity 判定を変更する hook は作らない。
-- MobSF は local static scan に限定し、第三者 cloud upload、自動 dynamic action、binary 再配布をしない。
+- Verify matching signer digests across all splits and include package/version/signer/hash in public provenance records too. Commit APK/decompiled code only to the private archive.
+- Inventory manifest, network security config, hosts/paths, Retrofit/OkHttp/gRPC/GraphQL/protobuf schemas, session/token renewal calls, and Play Integrity/attestation/pinning-library candidates.
+- R8/ProGuard/string-encryption deobfuscation and read-method runtime tracing can be in scope. Never log tokens/cookies/keys/PII/actual values or hook changes to pinning/integrity decisions.
+- MobSF is local static scanning only; no third-party cloud upload, automatic dynamic actions, or binary redistribution.
 
-## 9. 静的解析 artifact と公開 third-party implementation の具体的 transport/auth
+## 9. Concrete transport/auth in static-analysis artifacts and public third-party implementations
 
-### 9.1 ユーザー管理の Vpass 5.12.0 静的解析 snapshot
+### 9.1 User-controlled Vpass 5.12.0 static-analysis snapshot
 
-ユーザー管理の非公開 repository にある Vpass `5.12.0` の JADX/apktool 解析 snapshot を参照した。
-この snapshot は public third-party client ではなく、repository/commit/code への link は公開文書に
-載せない。transport/schema の事実確認に限定し、APK/decompiled code を再配布・転載しない。snapshot
-の metadata にある Google Play 由来/apksigner verified という provenance は、今回こちらで signer を
-再検証した事実ではない。再現には、[公式 Google Play listing](https://play.google.com/store/apps/details?id=com.smbc_card.vpass)
-からユーザー管理端末へ正規 install し、8.3 の手順で独立に signer/hash を確認する必要がある。
+Referenced a Vpass `5.12.0` JADX/apktool snapshot in the user's private repository. This is not a public third-party client; do not put repository/commit/code links in public documents. Limit use to transport/schema fact checking, without redistributing/reproducing APK/decompiled code. Snapshot metadata claiming Google Play provenance/apksigner verification does not establish fresh signer verification here. Reproduction requires legitimate installation from the [official Google Play listing](https://play.google.com/store/apps/details?id=com.smbc_card.vpass) on a user-controlled device and independent signer/hash checks through section 8.3.
 
-具体的な実装確認:
+Concrete implementation findings:
 
-- `AppService.java` と `FaVpointAPI.java` は Retrofit/OkHttp/Gson による
-  `POST https://spap.smbc-card.com/api/v3/fa/Vpoint` を実装する。
-  request body は空の `AppRequest` である。
-- `AppClient.java` と `BaseClient.java` では、条件付き `Authorization`、`X-App-Version`、
-  `X-OS-Version`、app User-Agent、
-  JSON content type/cache-control、`X-VappSessionTime`、cookie jar/interceptor が確認できる。
-- `FaVpoint.java` と `FaVpointPoint.java` の response model は `cardIdentifyKey`、`pointAccountNumber`、
-  `pointIntegration`、`points[] {pointAmount, expirationPoint, pointExpirationDate}` を持つ。ここでは値を
-  取得/記録せず、field 名だけを確認した。Realm local cache への保存もある。
-- 同 snapshot の protected DEX 解析は Vpass ID/password、永続 device UUID、push token、
-  company/timestamp 等を app-layer 暗号 envelope
-  にし、login token/cookie/session-time を組み合わせる auth flow を記載する。5.12.0 では RSA OAEP と
-  AES-CBC の候補が確認されているが、秘密の取得/復号/replay は行っていない。
+- `AppService.java` and `FaVpointAPI.java` implement `POST https://spap.smbc-card.com/api/v3/fa/Vpoint` through Retrofit/OkHttp/Gson, with an empty `AppRequest` body.
+- `AppClient.java` and `BaseClient.java` show conditional `Authorization`, `X-App-Version`, `X-OS-Version`, app User-Agent, JSON content type/cache-control, `X-VappSessionTime`, cookie jars/interceptors.
+- `FaVpoint.java` and `FaVpointPoint.java` responses have `cardIdentifyKey`, `pointAccountNumber`, `pointIntegration`, and `points[] {pointAmount, expirationPoint, pointExpirationDate}`. Only field names were checked, no values retrieved/recorded. Realm local caching also exists.
+- Protected-DEX analysis in the snapshot describes an auth flow combining app-layer encrypted envelopes of Vpass ID/password, persistent device UUID, push token, company/timestamp, etc. with login tokens/cookies/session-time. RSA OAEP/AES-CBC candidates were identified for 5.12.0, but no secrets were retrieved/decrypted/replayed.
 
-`Fa/Vpoint` は Vpass 側の残高/期限 bucket と連携状態を返す具体的 read endpoint である。一方、同じ
-`AppService` から V Point の全履歴 endpoint は確認できず、app が web/V Point 側へ遷移する可能性が
-ある。static な暗号手順だけでは、現行 device header、cookie、Akamai/session 条件を満たす renewable
-client にはならない。これは B ではなく C 候補の材料である。
+`Fa/Vpoint` is a concrete read endpoint returning Vpass balances/expiry buckets/linking state. The same `AppService` did not reveal full V Point history; the app may navigate to Web/V Point. Static crypto procedures alone do not create a renewable client meeting current device-header/cookie/Akamai/session conditions. This supports C candidacy, not B.
 
-### 9.2 公開されている旧 Vpass scraper
+### 9.2 Public old Vpass scraper
 
-[hdemon/vpass-scraper](https://github.com/hdemon/vpass-scraper/blob/902e5322e6f94f847742bd70c11d661857a090a4/get_current_state.py)
-（2017、license 表示未確認）は Selenium/Chrome で `https://www.smbc-card.com/mem/index.jsp` に Vpass
-ID/password を入力し、別画面でカード有効期限/CVV を使ってカード番号を表示する旧 DOM 実装である。
-V Point の残高/履歴 client ではなく、sensitive card data を要求し、MFA/Akamai/現行 DOM を扱わない。
-本 collector には採用しない。GitHub 検索では、現行 V Point Pay の個人向け read client、公式 public
-API/SDK を確認できなかったが、不在を証明するものではない。
+[hdemon/vpass-scraper](https://github.com/hdemon/vpass-scraper/blob/902e5322e6f94f847742bd70c11d661857a090a4/get_current_state.py) (2017, license display unconfirmed) is an old Selenium/Chrome DOM implementation entering Vpass ID/password at `https://www.smbc-card.com/mem/index.jsp`, then using card expiry/CVV to display the card number on another screen. It is not a V Point balance/history client, requires sensitive card data, and lacks MFA/Akamai/current DOM support. Do not adopt it. GitHub searches found no current personal V Point Pay read client or official public API/SDK, but do not prove absence.
 
-## 10. read-only 動的観測
+## 10. Read-only dynamic observation
 
-### 10.1 2026-08-31 live検証結果
+### 10.1 Live results on 2026-08-31
 
-Kogane Capture Chromeでユーザーが通常loginしたsessionを使い、値を出力せずstatus、schema、件数だけを
-観測した。Web画面のV会員番号はmaskされたままだったが、API requestには会員番号fieldがなく、session
-だけで以下が成功した。
+Using the user's normal Kogane Capture Chrome login session, observed only statuses, schemas, and counts without outputting values. Web-screen `V会員番号` remained masked; API requests had no member-number field and succeeded through the session alone.
 
-| endpoint                   | HTTP / application status | liveで確認した範囲                                                                 |
-| -------------------------- | ------------------------- | ---------------------------------------------------------------------------------- |
-| `POST /api/balance_info`   | `200` / `0000`            | `results.get_month/common/store/tmoney`; `common[]`の`point/expiration/point_type` |
-| `POST /api/tpoint_history` | `200` / `0000`            | `total=149`; page 1-4各30件、page 5は29件、page 6は0件。全件走査と終端を確認       |
-| `POST /api/smfg_point`     | `200` / `0000`            | `point_smbc`, `point_smcc`                                                         |
-| `POST /api/rank_info`      | `200` / `0000`            | transportだけ確認。collector対象外                                                 |
+| Endpoint                   | HTTP/application status | Live-confirmed scope                                                                   |
+| -------------------------- | ----------------------- | -------------------------------------------------------------------------------------- |
+| `POST /api/balance_info`   | `200` / `0000`          | `results.get_month/common/store/tmoney`; `common[]` `point/expiration/point_type`      |
+| `POST /api/tpoint_history` | `200` / `0000`          | `total=149`; pages 1–4 each 30 rows, page 5 29, page 6 0; full traversal/end confirmed |
+| `POST /api/smfg_point`     | `200` / `0000`          | `point_smbc`, `point_smcc`                                                             |
+| `POST /api/rank_info`      | `200` / `0000`          | Transport only; excluded from collector                                                |
 
-履歴requestは`page`、`get_graph=1`、`sort=use`、獲得/利用/取消/失効/移行/訂正/期限延長/
-再発行filter、`filter_date=""`のmultipartである。PoCは`results.total`へ達した時点で停止し、空の
-終端pageを通常runでは要求しない。匿名sessionでは同じAPIがHTTP 200でもapplication status `0010`を
-返すため、HTTP statusだけでlogin成否を判定しない。
+History requests are multipart with `page`, `get_graph=1`, `sort=use`, accrual/use/cancellation/expiry/transfer/correction/expiry-extension/reissuance filters, and `filter_date=""`. The PoC stops at `results.total` and does not request empty terminal pages in normal runs. Anonymous sessions return application status `0010` even with HTTP 200, so HTTP status alone cannot determine login success.
 
-このrunではKuebiko本体のrequest artifactにMy Page trafficが残らず、同時にattachされたChrome操作側の
-CDPから確認した。複数debugger attachmentの競合が候補だが未確定であり、「Kuebikoに記録がない」ことを
-「通信がない」という証拠にはしない。Cookie、会員番号、実残高、履歴値、加盟店、個人情報はrepositoryや
-tool outputへ保存していない。
+This run left no My Page traffic in Kuebiko's own request artifacts; confirmation came through CDP from concurrently attached Chrome controls. Competing debugger attachments are a candidate cause, not confirmed. Missing Kuebiko records do not prove no communication. Cookies, member numbers, actual balances/history values/merchants/PII were saved to neither repository nor tool output.
 
-### 10.2 次の動的観測
+### 10.2 Next dynamic observations
 
-1. **V Point web**: ユーザー管理 browser で通常 login し、残高/全 expiry bucket と履歴 1 page だけを
-   開く。DevTools では origin、method、path template、status、content-type、field 名、pagination
-   metadata だけを allowlist 収集する。`/api/balance_info` と `/api/tpoint_history` の request/response
-   shape を照合し、値は即時破棄する。
-2. **Vpass/SMBC**: 既存 login state がある場合だけポイント画面を開き、連携済み/未連携 route、旧履歴、
-   100 件/1 年境界、Olive mode attribution を確認する。ID 連携、銀行口座画面、認証設定へ進まない。
-3. **V Point Pay**: home 残高と既存利用明細だけを開き、最古日、page/count、authorization/settlement/
-   refund/charge の field 名と state transition を観測する。コード表示、支払、チャージ、交換へ進まない。
-4. **sanitization**: Cookie/Authorization/CSRF/OTP、query/body 値、ID、電話/氏名/生年月日、実額、
-   merchant を capture 前または直後に削除する。HAR は既定で保存せず、field 名だけの合成 schema を
-   作る。secret scanner と手動 review 前に共有しない。
-5. **app metadata**: user-installed CA を app が通常受理する場合だけ、body/secret を保存しない local
-   proxy で host/method/path/status/content-type を観測する。拒否/pinning/integrity error なら bypass
-   せず、DNS/SNI/IP/timing のみへ戻る。
-6. **runtime tracing**: URL builder、serializer/model、read method 呼出を対象にできるが、token/cookie/
-   crypto key/OTP/PII/実値を log しない。write method の発火や security 判定変更 hook は禁止する。
-7. **replay gate**: method/path/schema が明らかに read-only で、既存 session を安全に再利用できる場合
-   だけ 1 件の idempotent read を隔離環境で試す。login/refresh と read/write scope を分離できない、
-   または MFA/電話認証が再発する場合は B とせず browser/device/manual に戻す。
+1. **V Point Web**: normal user-controlled-browser login; open only balances/all expiry buckets and one history page. Allowlist DevTools origin/method/path template/status/content-type/field names/pagination metadata. Compare `/api/balance_info` and `/api/tpoint_history` request/response shapes; immediately discard values.
+2. **Vpass/SMBC**: only with existing login state, open point screens to check linked/unlinked routes, old history, 100-row/1-year boundaries, Olive-mode attribution. No ID linking, bank-account screens, or auth settings.
+3. **V Point Pay**: only home balances/existing usage details; observe earliest dates, pages/counts, authorization/settlement/refund/top-up fields/state transitions. No code display, payments, top-ups, exchanges.
+4. **Sanitization**: remove Cookies/Authorization/CSRF/OTPs, query/body values, IDs, phones/names/birth dates, actual amounts/merchants before or immediately after capture. Do not save HARs by default; create synthetic field-name-only schemas. Do not share before secret-scanner/manual review.
+5. **App metadata**: only if the app normally accepts user-installed CAs, observe host/method/path/status/content-type through a local proxy saving no bodies/secrets. On rejection/pinning/integrity errors, return to DNS/SNI/IP/timing only without bypassing.
+6. **Runtime tracing**: URL builders, serializers/models, read-method calls can be in scope; never log tokens/cookies/crypto keys/OTPs/PII/actual values. No triggering write methods or hooks changing security decisions.
+7. **Replay gate**: try one isolated idempotent read only when method/path/schema are clearly read-only and existing sessions can be safely reused. Without separation of login/refresh and read/write scopes, or recurring MFA/phone verification, return to browser/device/manual rather than B.
 
-## 11. read/write 隔離
+## 11. Read/write isolation
 
-最小 allowlist:
+Minimum allowlist:
 
-- 既存 session の通常 login と read-only 再認証（新規登録/reset/設定変更を除外）
-- V Point の残高、全 expiry bucket、履歴一覧/詳細、filter/sort/pagination の表示
-- Vpass のポイント残高/期限/統合状態/旧履歴と、SMBC/Olive のポイント provenance の表示
-- V Point Pay の既存残高、利用、settlement、返金、既存チャージ履歴の表示
-- 公式画面に既存 CSV/PDF/export があれば、その既存 file の download
+- Normal existing-session login/read-only reauthentication (exclude new registration/resets/settings)
+- V Point balances, all expiry buckets, history list/detail, filters/sorting/pagination
+- Vpass points/expiry/integration state/old history and SMBC/Olive points provenance
+- Existing V Point Pay balances/use/settlement/refunds/top-up history
+- Download existing CSV/PDF/export files if present in official screens
 
-denylist:
+Denylist:
 
-- V Point/V Point Pay での支払、コード表示、チャージ、交換、移行、送付、出金、ポイント利用
-- V会員番号/Yahoo! JAPAN/Vpass/SMBC ID の連携・解除、ID/会員統合
-- passkey 登録/削除、password/passcode reset、電話/SMS/email/生体/通知/端末設定変更
-- Olive/カード/銀行の支払、振込、振替、残高移動、口座/カード設定、申込、解約
-- campaign/くじ/mission entry、規約同意を伴う新サービス開始
+- V Point/Pay payments, code display, top-ups, exchanges, transfers, sending, withdrawals, points use
+- `V会員番号`/Yahoo! JAPAN/Vpass/SMBC ID linking/unlinking, ID/member integration
+- Passkey registration/deletion, password/passcode resets, phone/SMS/email/biometric/notification/device settings
+- Olive/card/bank payments, transfers, account transfers, balance movements, account/card settings, applications/cancellations
+- Campaign/lottery/mission entry, new services requiring terms consent
 
-実装では origin + method + path allowlist を使い、既定を deny とする。`GET` だから安全、`POST` だから
-write とは決めつけない。実際に V Point の read API は `POST` である。endpoint ごとに response field
-と UI action を対応させ、未知 path、redirect、method、content-type では送信前に停止する。
+Use origin + method + path allowlists, denying by default. Do not assume `GET` safe or `POST` a write; V Point read APIs actually use `POST`. Map response fields to UI actions per endpoint; stop before sending unknown paths, redirects, methods, or content-types.
 
-## 12. Workers / Browser Run / Containers / OCI / Kubernetes 適性
+## 12. Workers / Browser Run / Containers / OCI / Kubernetes suitability
 
-- **Cloudflare Workers**: [Fetch API](https://developers.cloudflare.com/workers/runtime-apis/fetch/) は外部
-  HTTP API 呼出と JSON/HTML parser、schedule、schema normalization に適する。V Point internal API の
-  session が人手で安全に bootstrap/renew でき、Cloudflare/Akamai に許容されることを live 証明した後の
-  read collector に向く。device-bound app、電話/SMS/passkey、Android runtime には単体で不向き。
-- **Cloudflare Browser Run**: [Browser Run の公式説明](https://developers.cloudflare.com/changelog/post/2026-04-15-br-rename/)
-  は full browser session、record/replay、human-in-the-loop を提供する。V Point web の C、Vpass Web の
-  D 候補だが、remote browser からの login が challenge を増やす可能性があり、秘密を recording に
-  残さず、401/403/429/CAPTCHA で停止する必要がある。
-- **Cloudflare Containers**: [Containers](https://developers.cloudflare.com/containers/) は任意 runtime、
-  filesystem、既存 OCI image、CPU/memory intensive tool を Workers と組み合わせられる。Playwright、
-  parser、jadx/apktool 等の隔離 job には Workers より適する。ただし Android device/emulator、Play
-  distribution、device attestation、persistent secure session が必要な Pay collector の即時解決ではない。
-- **OCI/container runtime**: local/CI の hardened OCI image は browser/parser/decompiler の version 固定、
-  read-only filesystem、network allowlist、ephemeral secrets、artifact 非保存に最も実務的である。login
-  profile と解析 image を分離する。
-- **Kubernetes**: 多数 source の schedule、per-source NetworkPolicy、Secret provider、job isolation、
-  retry/observability には向くが、この一 family には運用過剰。OTP/CAPTCHA/unknown write を自動 retry
-  しない controller が必要で、Android device farm の security control bypass を正当化しない。
+- **Cloudflare Workers**: [Fetch API](https://developers.cloudflare.com/workers/runtime-apis/fetch/) suits external HTTP API calls, JSON/HTML parsers, schedules, schema normalization. Suitable for read collectors after live proof that humans can safely bootstrap/renew V Point internal sessions and Cloudflare/Akamai accepts them. Unsuitable alone for device-bound apps, phone/SMS/passkeys, Android runtimes.
+- **Cloudflare Browser Run**: [official Browser Run description](https://developers.cloudflare.com/changelog/post/2026-04-15-br-rename/) provides full-browser sessions, record/replay, human-in-the-loop. C candidate for V Point Web/D for Vpass Web; remote logins may increase challenges. Keep secrets out of recordings; stop for 401/403/429/CAPTCHA.
+- **Cloudflare Containers**: [Containers](https://developers.cloudflare.com/containers/) combines arbitrary runtimes, filesystems, existing OCI images, and CPU/memory-intensive tools with Workers. Better than Workers for isolated Playwright/parser/jadx/apktool jobs, but no immediate solution for Pay's Android devices/emulators, Play distribution, device attestation, persistent secure sessions.
+- **OCI/container runtime**: hardened local/CI OCI images are most practical for pinned browser/parser/decompiler versions, read-only filesystems, network allowlists, ephemeral secrets, no retained artifacts. Separate login profiles from analysis images.
+- **Kubernetes**: suits many-source scheduling, per-source NetworkPolicies, Secret providers, job isolation, retries/observability, but operationally excessive for one family. Controllers must not retry OTP/CAPTCHA/unknown writes; device farms do not justify security-control bypasses.
 
-## 13. PR #5 共通の自動化レベル A-E と cost 1-5
+## 13. PR #5 common automation levels A–E and cost 1–5
 
-共通定義:
+Common definitions:
 
-- **A**: 公式/documented read-only API または公式 export を定期取得
-- **B**: 安定した internal read API と renewable/reusable session を直接利用
-- **C**: 人の browser/app login bootstrap 後に headless HTTP/browser replay
-- **D**: full browser/device UI automation が継続的に必要
-- **E**: 手動 capture/import
+- **A**: scheduled official/documented read-only APIs or official exports
+- **B**: direct stable internal read APIs with renewable/reusable sessions
+- **C**: headless HTTP/browser replay after human browser/app login bootstrap
+- **D**: ongoing full browser/device UI automation required
+- **E**: manual capture/import
 
-| route                               | 現時点の判定                 |    cost | 根拠/昇格条件                                                                                                                                                                  |
-| ----------------------------------- | ---------------------------- | ------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| V Point web                         | **C 候補**                   | **3-4** | 公開 JS で具体的な same-origin read POST/schema/pagination を確認。session renewal、MFA、Cloudflare、規約、schema stability を live 証明できれば B/3。公式 export/API は未確認 |
-| Vpass app のポイント残高            | **C 候補**                   |   **4** | 現行 5.12.0 の host/path/model/auth envelope は具体化したが device/cookie/session/Akamai が必要。全履歴 endpoint は未確認                                                      |
-| Vpass/SMBC/Olive web/app provenance | **D**                        |   **4** | 複数 ID、端末認証、legacy/linked route、銀行データ隔離が必要。限定 route の安定 API が確認できれば C                                                                           |
-| V Point Pay                         | **D**                        |   **5** | app-only に近く、write と同居。保持期間/schema/transport/session/pinning/integrity は未確認                                                                                    |
-| family 全体                         | **D**（ポイント側は C 候補） | **4-5** | Point と Pay を別台帳で完全に取るには device が残る。安全な初期 route は E/1                                                                                                   |
+| Route                               | Current assessment              |    Cost | Evidence/promotion conditions                                                                                                                                         |
+| ----------------------------------- | ------------------------------- | ------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| V Point Web                         | **C candidate**                 | **3-4** | Concrete same-origin read POST/schema/pagination in public JS; B/3 after live proof of renewal/MFA/Cloudflare/terms/schema stability. Official export/API unconfirmed |
+| Vpass app point balance             | **C candidate**                 |   **4** | Current 5.12.0 host/path/model/auth envelope concrete, but device/cookie/session/Akamai required; full-history endpoint unconfirmed                                   |
+| Vpass/SMBC/Olive Web/app provenance | **D**                           |   **4** | Multiple IDs, device auth, legacy/linked routes, bank-data isolation; C if stable limited-route APIs confirmed                                                        |
+| V Point Pay                         | **D**                           |   **5** | Nearly app-only, adjacent writes; retention/schema/transport/session/pinning/integrity unconfirmed                                                                    |
+| Entire family                       | **D** (points are C candidates) | **4-5** | Complete separate Point/Pay ledgers still require devices; safe initial route E/1                                                                                     |
 
-現時点で A は選ばない。公式 CSV/PDF/public personal API が確認できず、V Point web/Vpass endpoint は
-internal implementation である。まず E/1 の sanitized sample で schema と二重計上防止を確定し、
-V Point web だけを C として限定導入する。Pay を同時に無理に B/C 化しない。
+Do not choose A currently. Official CSV/PDF/public personal APIs remain unconfirmed; Web/Vpass endpoints are internal. First establish schemas/double-counting prevention with E/1 sanitized samples, then introduce only V Point Web as limited C. Do not force Pay into B/C simultaneously.
 
-## 14. live 検証チェックリストと stop 条件
+## 14. Live-validation checklist and stop conditions
 
-read-only live 検証項目:
+Read-only live checks:
 
-- [x] V Point My Page の `common`/`store` expiry bucket schemaと総残高API
-- [x] 履歴の`results.total`、1 page件数、全page走査、行schema
-- [ ] 履歴の利用日/反映日sort、各filter、detail、最古3年境界
-- [ ] CSV/PDF/export 導線の有無と、存在する場合の期間、header、encoding、最大件数
-- [ ] ID 連携済み/未連携を変更せず識別し、Vpass の旧履歴、1 年/100 件境界を確認
-- [ ] Olive credit/debit/point mode と SMBC bank/card provenance label。銀行/カード実値は記録しない
-- [ ] V Point Pay の最古表示日、page/count、authorization→settled、返金、既存チャージの表示形態
-- [ ] Point→Pay 移行済みの二 ledger event に公開 link ID があるか。値を保存せず field 名だけ確認
-- [ ] V Point/Vpass/Pay/SMBC ごとの login/MFA/passkey/biometric、session timeout、human handoff 点
-- [ ] My Page/Vpass/Pay app の host/method/path/content-type/schema と read/write route の分離
-- [ ] 401/403/429/CAPTCHA 時の retry 無効化、secret/PII redaction、unknown endpoint default deny
+- [x] V Point My Page `common`/`store` expiry-bucket schemas and total-balance API
+- [x] History `results.total`, per-page count, all-page traversal, row schema
+- [ ] History use/reflection-date sorting, filters, details, oldest 3-year boundary
+- [ ] CSV/PDF/export presence and, if present, periods, headers, encoding, maximum counts
+- [ ] Identify linking state without changing it; Vpass old history, 1-year/100-row boundaries
+- [ ] Olive credit/debit/points modes and SMBC bank/card provenance labels; no bank/card values recorded
+- [ ] Earliest Pay date, page/count, authorization→settled, refunds, existing top-up displays
+- [ ] Public linking IDs between existing Point→Pay ledger events; field names only, no saved values
+- [ ] Login/MFA/passkey/biometrics, timeouts, human-handoff points per V Point/Vpass/Pay/SMBC
+- [ ] My Page/Vpass/Pay app hosts/methods/paths/content-types/schemas and read/write route separation
+- [ ] Disable retries on 401/403/429/CAPTCHA; secret/PII redaction; default-deny unknown endpoints
 
-即時 stop:
+Immediate stops:
 
-- 支払、チャージ、交換、移行、ID 連携、認証設定変更、キャンペーン参加等の確認/実行 button が出た
-- OTP、電話発信、passkey 登録、password/passcode reset、本人確認、規約同意が要求された
-- Cookie/token/OTP/ID/電話/氏名/生年月日、実残高/実履歴/加盟店等が log/HAR/screenshot に残り得る
-- 401/403/429、CAPTCHA、bot/interstitial、認証 loop、pinning/integrity/attestation error が出た
-- unknown origin/path/method、write と read の scope/session が分離できない、想定外 request が発火する
-- V Point と V Point Pay、V Money、カード/銀行台帳の asset/source boundary が判定できない
+- Confirmation/execution buttons for payments, top-ups, exchanges, transfers, ID linking, auth settings, campaign entry, etc.
+- OTP, outgoing phone calls, passkey registration, password/passcode reset, identity verification, terms consent required
+- Cookies/tokens/OTPs/IDs/phones/names/birth dates, actual balances/history/merchants could remain in logs/HAR/screenshots
+- 401/403/429, CAPTCHA, bot/interstitials, auth loops, pinning/integrity/attestation errors
+- Unknown origin/path/method, inseparable write/read scopes/sessions, unexpected requests
+- Cannot distinguish asset/source boundaries among V Point, Pay, V Money, card/bank ledgers
 
-## 15. 結論、推測、未確認
+## 15. Conclusions, inferences, and unconfirmed items
 
-### 確認できたこと
+### Confirmed
 
-- V Point は通常、どこでも使える有効期限固定、ストア限定を分け、My Page 履歴は最大 3 年である。
-  Vpass 未連携履歴は 1 年/100 件という別制限がある。
-- V Point Pay は V Point と別のプリペイド台帳で、authorization 後に settled 額へ変わり、返金は
-  後日プラス表示され得る。公開資料に保持期間/export は確認できない。
-- V Point My Page の公開 JS は、残高・期限 bucket と履歴 pagination の具体的な first-party internal
-  POST API/schema を含む。
-- 通常login sessionを使ったlive検証で、会員番号をrequestへ渡さず、残高、SMBC内訳、履歴149件の
-  全5pageをread-only APIから取得できた。匿名時はHTTP 200/application status `0010`、認証時は`0000`。
-- ユーザー管理の Vpass 5.12.0 静的解析 snapshot は `spap.smbc-card.com/api/v3/fa/Vpoint`、
-  Retrofit/OkHttp/Gson、header/
-  cookie/session-time、残高/期限/連携状態 model を具体化する。
-- V Point passkey は公式に確認できるが現時点で iOS 限定。Pay/Vpass/SMBC app の biometric unlock を
-  passkey と見なせず、Bitwarden 固有互換も未確認である。
-- V Point My Page は Cloudflare、Vpass/SMBC Direct は Akamai の介在を匿名 header で確認した。
+- V Points distinguish regular, anywhere fixed-expiry, and store-limited points; My Page history covers up to 3 years. Unlinked Vpass history separately limits 1 year/100 rows.
+- Pay is a separate prepaid ledger; authorization can later become settled amounts and refunds may appear positively later. Public retention/export unconfirmed.
+- Public My Page JS includes concrete first-party internal POST APIs/schemas for balances/expiry buckets/history pagination.
+- Live normal-session validation retrieved balances, SMBC breakdowns, and all 149 history rows across 5 pages without passing member numbers in requests. Anonymous HTTP 200 has application status `0010`; authenticated status is `0000`.
+- User-controlled Vpass 5.12.0 static snapshots establish `spap.smbc-card.com/api/v3/fa/Vpoint`, Retrofit/OkHttp/Gson, headers/cookies/session-time, balance/expiry/linking models.
+- V Point passkeys are officially confirmed, currently iOS-only. Pay/Vpass/SMBC app biometric unlocking is not passkeys; Bitwarden compatibility unconfirmed.
+- Anonymous headers confirm Cloudflare for My Page and Akamai for Vpass/SMBC Direct.
 
-### 推測/設計判断
+### Inferences/design decisions
 
-- 統合 V Point の正本は V Point web/app、card/bank provenance は Vpass/SMBC、Pay ledger は V Point
-  Pay と分けるのが最も二重計上を防ぎやすい。
-- V Point web のread-only replay自体はlive証明できたためC/3のPoCへ進める。Bへの昇格にはrenewable
-  sessionの生成・更新を証明する必要がある。family全体はPay deviceが残るためD/4-5と評価する。
-- Vpass の `Fa/Vpoint` は残高/期限/連携状態用で、全履歴は V Point web へ委ねる可能性がある。
+- Separate integrated V Point authority into Web/app, card/bank provenance into Vpass/SMBC, and Pay into its own ledger to best prevent double counting.
+- Live read-only V Point Web replay supports a C/3 PoC. B requires proof of renewable-session generation/renewal. The family remains D/4-5 because Pay devices are needed.
+- Vpass `Fa/Vpoint` is for balances/expiry/linking; full history may be delegated to V Point Web.
 
-### 未確認
+### Unconfirmed
 
-- 各 surface の公式 CSV/PDF/export、V Point の総件数上限、Pay の保持期間/page/count。
-- 履歴/Pay の安定 row ID、原取引と返金、Point→Pay 二台帳を結ぶ link ID。
-- V Point internal API の session/CSRF/refresh/rate limit/規約上の扱い、Vpass endpoint の現行 live 応答。
-- V Point Pay/SMBC/V Point APK の host/path/schema、pinning/integrity 候補、Pay の app API/WAF。
-- Bitwarden と V Point iOS passkey のサービス固有互換、Pay/Vpass の passkey availability。
+- Official CSV/PDF/export per surface, total V Point count limits, Pay retention/pages/counts.
+- Stable history/Pay row IDs and linking IDs for original/refund and Point→Pay ledgers.
+- Internal V Point sessions/CSRF/refresh/rate limits/terms treatment, current live Vpass responses.
+- V Point Pay/SMBC/V Point APK hosts/paths/schemas, pinning/integrity candidates, Pay app APIs/WAF.
+- Service-specific Bitwarden/V Point iOS passkey compatibility, Pay/Vpass passkey availability.
 
-## 16. 2026-09-05 Layer A raw-evidence実装
+## 16. 2026-09-05 Layer A raw-evidence implementation
 
 Historical record: the private outbox bucket, the importer, its
 `collector-r2-v-point` credential and Service Binding described in this section were
 retired on 2026-09-13 ([legacy retirement](../legacy-retirement.md)). The
 collector now writes each run once, into the shared `DATA` bucket
-([U09 below](#追記-共通data-r2への切替u09)).
+([U09 below](#addendum-switch-to-shared-data-r2-u09)).
 
-V Point web collectorは現在、browserなしのWorkers fetchとEmail Worker再認証で定期収集し、private R2をimmutable outboxとして使う。中央取り込みはcollectorとは別の`collector-r2-v-point` credentialとService Bindingに分離した。manifest v1/v2、prefix inventory、metadata、checksum、JSON schema、pagination、failure complement、collection summary、V Point Pay email reconciliationを全件検証してから、専用の中央runを冪等にsealする。大runは完全inventoryを固定し、HMAC署名済みcontinuationで最大8 artifactずつ転送し、seal後だけR2 scan位置を進める。
+The V Point Web collector now collects on a schedule through browserless Workers fetch and Email Worker reauthentication, using private R2 as an immutable outbox. Central ingestion is separated through a `collector-r2-v-point` credential and Service Binding independent of the collector. It validates all manifest v1/v2, prefix inventories, metadata, checksums, JSON schemas, pagination, failure complements, collection summaries, and V Point Pay email reconciliation before idempotently sealing a dedicated central run. Large runs fix a complete inventory and transfer up to 8 artifacts per HMAC-signed continuation, advancing the R2 scan position only after sealing.
 
-terminal run reportの`producerVersion`には固定source契約`vpoint-r2-v3`を使う。Importerのdeploy revisionをimmutable reportへ混ぜないため、異なる`IMPORTER_VERSION`で同じrunを再走査してもreport本文は変化しない。v3ではcollectorがtransport decode後に再encodeしたJSONを`collector_derived/transformed`、自由形式failure textを除いた中央manifestを`collector_manifest/generated`として登録し、中央が補うnullable fieldと空arrayを含むdescriptor hashまで実D1契約へ一致させる。deploy revisionは失敗・incomplete attemptの診断に限って保持する。
+Terminal-run `producerVersion` uses the fixed source contract `vpoint-r2-v3`. Excluding Importer deployment revisions from immutable reports means rescanning the same run with different `IMPORTER_VERSION` leaves report bodies unchanged. v3 registers collector transport-decoded/reencoded JSON as `collector_derived/transformed` and central manifests stripped of free-form failure text as `collector_manifest/generated`, matching actual D1 contracts through descriptor hashes including centrally added nullable fields/empty arrays. Deployment revisions remain only for failed/incomplete-attempt diagnostics.
 
-実 R2を変更せずに24 manifestを監査し、v1 5件、v2 19件、成功13件、失敗11件、reconciliation参照10件がstrict contractへ適合した。`bash scripts/audit-v-point-r2.sh` (removed with the importer on 2026-09-13) で同じaggregate-only監査を再実行できた。監査は本文、値、object key、個別hash、secretを出力しない。reconciliationは旧3件と現行7件でexact policy文字列が異なるため、観測した2値だけを明示的に受理し、任意文字列への緩和はしていない。candidateは実在history page・実row count内index・`sha256(JSON.stringify(row))`へ束縛し、entry内重複を拒否する。
+Without modifying actual R2, audited 24 manifests: v1 5, v2 19, successful 13, failed 11, reconciliation references 10, all conforming to strict contracts. `bash scripts/audit-v-point-r2.sh` (removed with the importer on 2026-09-13) reproduced the same aggregate-only audit, outputting no bodies, values, object keys, individual hashes, or secrets. Reconciliation has different exact policy strings in 3 old versus 7 current records; only those two observed values are explicitly accepted, without arbitrary-string relaxation. Candidates bind to existing history pages, indices within actual row counts, and `sha256(JSON.stringify(row))`; duplicates within entries are rejected.
 
-V Moneyは同一session/APIで取得されるが別の電子マネー台帳である。現時点の監査済みaccountは全runで空pageなので、Layer AのV Point contractは空のV Money観測だけを保存可能とし、非空になった場合はfail closedする。非空履歴を自動帰属させる前に、独立source ID、asset/account境界、parser、reconciliation方針を別PRで設計する。
+V Money is retrieved through the same session/API but is a separate electronic-money ledger. All audited-account runs currently have empty pages; Layer A's V Point contract permits only empty V Money observations and fails closed on nonempty results. Before attributing nonempty history automatically, design independent source IDs, asset/account boundaries, parsers, and reconciliation policy in a separate PR.
 
-## 追記: strict Layer B parser と本番aggregate canary（2026-09-07）
+## Addendum: strict Layer B parser and production aggregate canary (2026-09-07)
 
-Layer Bは、merged Layer Aが厳密検証した`balance-info`、`smfg-point`、
-`history-page-*`だけを金融観測へ変換する。`collection-summary`と履歴graphは
-完全性確認用で、空の`vmoney-history-page-*`は別asset境界なので観測を作らない。
-`point_type`、`point_div`、`get_month`の数値enumには名称を推測せず、元fieldと
-値を`extra`へ保持する。履歴の金額と符号は`point`値をそのまま使う。
+Layer B converts only merged Layer A's strictly validated `balance-info`, `smfg-point`, and `history-page-*` into financial observations. `collection-summary` and history graphs support completeness checks; empty `vmoney-history-page-*` produces no observations across its separate asset boundary. Do not guess numeric enum names for `point_type`, `point_div`, or `get_month`; preserve original fields/values in `extra`. History amounts/signs use `point` unchanged.
 
-履歴行には安定したprovider IDが観測されていないため、`externalId`や行間の
-reconciliation identityを作らない。重複を削らず全occurrenceをraw locator付きで
-保存し、current query側で最新の完全runだけを一つのsnapshotとして選ぶ。これに
-より日次の全履歴再取得を二重計上せず、最新runから消えた履歴や期限bucketも
-currentに残さない。
+History rows have no observed stable provider IDs; invent neither `externalId` nor cross-row reconciliation identities. Preserve every occurrence with raw locators without deduplication; current queries choose only the latest complete run as one snapshot. This avoids double counting daily full-history retrieval and leaves no disappeared rows/expiry buckets in current state.
 
-本番R2に対するlocal/read-onlyのaggregate canaryは167 objectを走査し、現行strict
-contractで26 manifestを有効、139 objectを非manifestとしてskip、2 manifestを固定の
-validation failure categoryへ縮約した。有効manifestはsuccess 15、failed 11、partial 0。
-success 15件の金融artifact 111件をすべてparseし、balance 45件とtransaction 2,262件を
-得た。failed runは0 observationで、全transactionに発明したexternal IDがないことも
-aggregateで確認した。object key、hash、body、provider text、個別金融値、credential、
-session値は出力・保存していない。監査はR2へのwrite/deleteやWorker deployを行わない。
+A local/read-only aggregate canary on production R2 scanned 167 objects: 26 valid manifests under current strict contracts, 139 non-manifest skips, and 2 manifests reduced to fixed validation-failure categories. Valid manifests: success 15, failed 11, partial 0. All 111 financial artifacts across 15 successful runs parsed into 45 balances and 2,262 transactions. Failed runs yielded 0 observations; aggregate checks confirmed no invented external IDs on transactions. No object keys, hashes, bodies, provider text, individual financial values, credentials, or session values were output/saved. The audit performs no R2 writes/deletes or Worker deployments.
 
-## 追記: 共通DATA R2への切替（U09）
+## Addendum: switch to shared DATA R2 (U09)
 
-`services/collector-vpoint`は`COLLECTION_TARGET`を読まない。保存先は
-binding `DATA`（`kogane-raw-evidence`）だけである。切替とimporterは
-2026-09-13に廃止された（`docs/collection.md`）。同じsanitize済みbytesを
-`objects/<2hex>/<sha256>`へcontent-addressedで保存し、
-`runs/v-point/<runId>/terminal.json`を最後に書く。Worker名、Email route、
-`VPointSession` Durable Object、secretは変更しない。
+`services/collector-vpoint` does not read `COLLECTION_TARGET`; its only destination is binding `DATA` (`kogane-raw-evidence`). Switching/importer retired on 2026-09-13 (`docs/collection.md`). The same sanitized bytes are content-addressed in `objects/<2hex>/<sha256>`; `runs/v-point/<runId>/terminal.json` is written last. Worker name, Email route, `VPointSession` Durable Object, and secrets are unchanged.
 The only R2 binding is `DATA`. Since
 [#430](https://github.com/risu729/kogane/pull/430) (2026-10-05) the Worker has
 no Cron trigger: the Processor's alarm job `vpoint` (06:15 JST, `15 21 * * *` in
 `config/alarm-jobs.json`) calls its private `ScheduledCollection` entrypoint.
 
-Email routeが受けたVポイントPay通知は`v-point-pay-email`の独立runとして
-`notification.eml`（role `user_capture`）と`normalized-event.json`
-（role `collector_derived`）を保存する。run identityはmessageのSHA-256なので
-再配送は同一digestの再送として扱われる。同じmailがVポイント本体の
-post-auth収集を起動した場合、両runは同じ`acquisitionSessionRef`
-（`email-<message sha256>`）を持ち、sourceは混ぜない。
+V Point Pay notifications received by Email routes save `notification.eml` (role `user_capture`) and `normalized-event.json` (role `collector_derived`) as independent `v-point-pay-email` runs. Run identity is the message SHA-256, so redelivery resends the same digest. When the same email triggers V Point post-auth collection, both runs share `acquisitionSessionRef` (`email-<message sha256>`) without mixing sources.
 
-VポイントPay email reconciliation reportは作らない。旧bucketの
-prefix列挙に依存する集計であり、notificationを数え落とすためで、
-source横断の再照合はterminalを読むProcessor（U08）の担当である。
-Processorの`SHARED_R2_INGEST_ENABLED`は登録のゲートであり、collectorの
-保存先スイッチではない。既存terminalはそのまま有効である。詳細は`docs/collection.md`。
+No V Point Pay email reconciliation report is created: its old-bucket-prefix aggregation omits notifications. Cross-source reconciliation belongs to the terminal-reading Processor (U08). Processor `SHARED_R2_INGEST_ENABLED` gates registration, not collector destinations. Existing terminals remain valid; see `docs/collection.md`.
 
-## 2026-10-09: 公開UI enum表示語と期限算定の境界
+## 2026-10-09: public UI enum labels and expiry-calculation boundaries
 
-匿名で取得できた [My Page HTML](https://mypage.tsite.jp/tpoint/?hid=1) は
-[first-party asset](https://mypage.tsite.jp/_nuxt/6e0bc81.js) を直接script参照する。
-取得UTCは `2026-10-09T09:44:51.0733363+00:00`、raw HTTP body SHA256はHTML
-`9fbdadf2616f5206d2e3f878f341569167414aa00f795c81df91f467fa3ad59b`、asset
-`78df56dd541250c8a0b5aa190e2323686c02834bf8b4a6b5e78e9320afcd0692`。
-公開moduleが数値を配列indexとして表示語へ直接写像することを確認した。
+Anonymously available [My Page HTML](https://mypage.tsite.jp/tpoint/?hid=1) directly references a [first-party asset](https://mypage.tsite.jp/_nuxt/6e0bc81.js) script. Acquisition UTC was `2026-10-09T09:44:51.0733363+00:00`; raw HTTP body SHA256: HTML `9fbdadf2616f5206d2e3f878f341569167414aa00f795c81df91f467fa3ad59b`, asset `78df56dd541250c8a0b5aa190e2323686c02834bf8b4a6b5e78e9320afcd0692`. Public modules directly map numbers as array indices to display labels.
 
-| field      | 値               | 公開moduleの表示語                     |
-| ---------- | ---------------- | -------------------------------------- |
-| point_div  | 1, 2, 3, 4, 5, 6 | 貯める、使う、失効、修正、取消、その他 |
-| point_type | 1, 2             | ｽﾄｱ限定、期間限定                      |
-| point_type | 0                | 空。通常ポイントとは断定しない         |
+| Field      | Value            | Public-module display label                                                                         |
+| ---------- | ---------------- | --------------------------------------------------------------------------------------------------- |
+| point_div  | 1, 2, 3, 4, 5, 6 | `貯める` (earn), `使う` (use), `失効` (expire), `修正` (correct), `取消` (cancel), `その他` (other) |
+| point_type | 1, 2             | `ｽﾄｱ限定` (store-limited), `期間限定` (limited-period)                                              |
+| point_type | 0                | Empty; does not establish regular points                                                            |
 
-これは配信moduleのlookupの証拠で、認証UIでの実行や安定したserver enum契約の
-証明ではない。ログイン、認証header、private API、口座値は取得していない。
-この記録でruntimeのexpiry activity写像を有効化していない。
-`date_use` と `date_reflect` は別のsort/group入力であり、
-[FAQ35501](https://ssl.help.tsite.jp/faq/show/35501?site_domain=qa-tsite) も利用日/反映日の
-並替を説明するが、規約第3条の最終変動日とのfield対応を確定しない。
-通常ポイントにも表示期限があるため、expiration有無はbucket kindの証拠ではない。
+This proves the served module's lookup, not execution in authenticated UI or a stable server enum contract. No login, auth headers, private APIs, or account values were acquired. This record enables no runtime expiry-activity mapping. `date_use` and `date_reflect` are separate sort/group inputs; [FAQ35501](https://ssl.help.tsite.jp/faq/show/35501?site_domain=qa-tsite) also describes sorting by use/reflection date but does not establish which field maps to Article 3's last activity date. Regular points also display expiration, so expiration presence does not establish bucket kind.
 
-[2026-04-01規約](https://privacy.vpoint.co.jp/terms/point/) と
-[2024-04-22公式PDF](https://privacy.cccmkhd.co.jp/wp-content/uploads/2024/04/point_20240422.pdf)
-の第3条は同一表現ではない。現行版は通常の獲得/利用/交換とストア限定でない
-固定期限ポイントの利用を期限更新対象へ明記する。中間版と既存期限の移行扱い、
-取消/修正の活動撤回、起算日/閏日/境界時刻は未確定である。旧v1 seedは歴史記録のまま
-変更せず、今回のunknown-kind gateはそれを使った実期限算定を有効にしない。
+Article 3 differs between [2026-04-01 terms](https://privacy.vpoint.co.jp/terms/point/) and [2024-04-22 official PDF](https://privacy.cccmkhd.co.jp/wp-content/uploads/2024/04/point_20240422.pdf). Current terms explicitly renew expiry for regular accrual/use/exchange and non-store-limited fixed-expiry usage. Intermediate versions/transitions for existing expiry, activity withdrawal after cancellation/correction, base dates/leap days/boundary times remain unresolved. Keep old v1 seeds unchanged as history; this unknown-kind gate does not enable actual expiry calculation using them.
 
-### 残る最小観測（提案のみ、未実施）
+### Minimum remaining observations (proposed only, not performed)
 
-1. 既存の許可済み保存資料/通常認証UIで、commonの種類表示と同じ行のenumを照合する。
-   生会員番号・残高・本文をrepoへ写さず、field/value→labelの根拠refと取得物digestを記録。
-   type0が空であるだけならregularとはしない。
-2. 同じ行の利用日と反映日が異なる例を照合し、規約の最終変動日がどちらを指すかを
-   first-party説明で確認する。説明が無ければownerからサポートへ確認する文面を準備する。
-   送信・追加login・API再取得はこのPRでは実施しない。
-3. 取消/修正と元行の関係、規約改訂時の既存期限の扱いを確認し、確認済みsubsetだけを
-   分類する。同一runの全page/total/filter/sortと窓の端の根拠を固定inputに持たせる。
-   最新capture eligibilityをlifetime history completeへ昇格させない。
+1. Match common type displays with same-row enums in existing authorized stored material/normal authenticated UI. Record field/value→label evidence refs/acquisition digests without copying raw member numbers/balances/bodies to the repo. Empty type 0 alone does not establish regular points.
+2. Match rows with differing use/reflection dates and seek first-party explanation of which is the terms' last activity date. Without explanation, prepare wording for the owner to ask support. This PR does not send it, log in again, or refetch APIs.
+3. Confirm cancellation/correction relationships to originals and existing-expiry treatment after terms revisions; classify only confirmed subsets. Fix same-run all-pages/total/filter/sort/window-edge evidence in inputs. Do not promote latest-capture eligibility to lifetime-history completeness.
 
-### #554の実算定に不足する最小の観測事実
+### Minimum observed facts missing for actual calculation in #554
 
-新しい取得や入力契約を作る前に、次の4点を同じ会員holding・同じ取得runの根拠へ結び付ける必要がある。
+Before creating new acquisition/input contracts, tie these four facts to evidence for the same member holding and acquisition run.
 
-1. **活動と種類**：履歴rowの `point_div` / `point_type` の元field・値・表示ラベルがどれか、
-   それが通常ポイントの貯める/使う/交換か、ストア限定か、期間限定の使用かを確認する。
-   公開bundleのラベルだけでは `point_type=0`、交換、修正/取消の対象row・関係、規約上の
-   起算対象を確定できない。未確認enumを無活動として除外しない。
-2. **基準日**：同じ活動の `date_use` と `date_reflect` の値を表示と突合し、
-   規約第3条の「変動」日へ使うfield、日付のtime zone/日境界、取消・訂正後の起算日を
-   providerの説明または確認済み事例へ結び付ける。表示順や最新rowだけでは基準日を決めない。
-3. **取得窓**：同じrunのfilter・sort・全page、totalと実row数、最古/最新日、
-   providerが参照可能な期間と欠落の有無を確認する。既存適格captureの3 dataset公開は
-   生涯履歴の完全性ではない。空配列や最大3年表示だけで「起算活動なし」と断定しない。
-4. **適用規約**：起算候補日から評価日までの有効規約版、変更発効日、
-   旧期間限定ポイント使用/旧起算日の引継ぎ・経過措置を確認する。
-   2024年版と2026年4月1日版の相違は確認済みだが、対象holdingへの移行規則は未確認。
-   現行seedのopen-ended期間を根拠に過去へ現行ruleを適用しない。
+1. **Activity/type**: confirm original `point_div`/`point_type` fields, values, labels and whether rows represent regular earn/use/exchange, store-limited points, or limited-period usage. Public-bundle labels alone do not establish `point_type=0`, exchanges, correction/cancellation targets/relationships, or qualifying activity under the terms. Do not exclude unconfirmed enums as inactivity.
+2. **Basis date**: reconcile the same activity's `date_use`/`date_reflect` values with displays; tie the field for Article 3's `変動` (activity) date, time zone/day boundaries, and post-cancellation/correction base dates to provider explanations/confirmed examples. Display order/latest rows alone do not establish basis dates.
+3. **Acquisition window**: confirm same-run filters/sorting/all pages, total versus actual rows, oldest/newest dates, provider-accessible period/gaps. Publishing 3 datasets from existing eligible captures is not lifetime completeness. Empty arrays/maximum 3-year displays alone do not establish no qualifying activity.
+4. **Applicable terms**: confirm versions effective between candidate base dates/evaluation date, change-effective dates, carryover/transitions for old limited-period use/base dates. Differences between 2024 and April 1, 2026 versions are confirmed; holding-specific transition rules remain unconfirmed. Do not apply current rules historically based on open-ended current-seed periods.
 
-それぞれの確認済み事実とsource refsが揃って初めて、分類版・起算活動・取得窓・日付basis・
-適用規約を既存の固定inputへ接続する設計を決める。今回はこのadapterを実装せず、#554を閉じない。
+Only after confirmed facts/source refs exist should a design connect classification versions, qualifying activities, windows, date bases, and applicable terms to existing fixed inputs. This PR implements no such adapter and does not close #554.

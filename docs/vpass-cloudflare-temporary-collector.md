@@ -124,13 +124,8 @@ not delete the shared `DATA` bucket: every collector and the Processor use it.
 If the legacy Free-plan Queue still exists, remove it separately with
 `npx wrangler queues delete kogane-vpass-collector-poc`.
 
-## 共通 DATA R2 への切替 (U09)
+<a id="共通-data-r2-への切替-u09"></a>
 
-Collector は常に共通 bucket `kogane-raw-evidence` へ書く。`src/sanitize.ts`
-（旧 importer と同じ `vpass-json-sanitizer` v1）で sanitize した bytes を
-content-addressed に保存し、terminal manifest を最後に書く。card ごとに 1 run
-（`<runId>-card-NNN`、`acquisitionSessionRef` は session の runId）で、raw
-envelope・cookie・card identify key は保存しない。`COLLECTION_TARGET` の切替、
-per-source bucket、importer による中央転送は 2026-09-13 に廃止した
-（[legacy-retirement.md](legacy-retirement.md)）。artifact と role の対応と deploy
-順は `docs/collection.md` の該当節を参照。
+## Switch to shared DATA R2 (U09)
+
+The collector always writes to the shared `kogane-raw-evidence` bucket. It stores bytes sanitized by `src/sanitize.ts` (the former importer's same `vpass-json-sanitizer` v1) under content-addressed keys, then writes the terminal manifest last. Each card is 1 run (`<runId>-card-NNN`, with the session runId as `acquisitionSessionRef`); raw envelopes, cookies and card identify keys are not retained. The `COLLECTION_TARGET` switch, per-source bucket and central transfer by the importer were retired on 2026-09-13 ([legacy-retirement.md](legacy-retirement.md)). See the relevant section of `docs/collection.md` for artifact-to-role mappings and deployment order.

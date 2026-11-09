@@ -84,14 +84,17 @@ are separate claims. Historical acceptance records are linked from the
   (`GET /api/ops/v1/operations/{id}`, shown read-only on the operator's
   依頼の経過 page, opened from the audit log or from a request just sent on the schedules page, and `kogane.ops.operation.get`,
   whole-store on both; the browser requests no operation). The committed
-  `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, `sbi-securities`, `mobile-suica`, `moneyforward-me` and `myjcb`; requests for
-  any other connection wait and expire after 24 hours. In production one
-  request per named connection was followed to publication. Collectors run their daily
+  `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, `sbi-securities`, `mobile-suica`,
+  `moneyforward-me`, `myjcb`, `st-george`, `sbi-vc-trade` and `sbi-vc-keepalive`; requests for
+  any other connection wait and expire after 24 hours. Production checks followed one
+  request per original connection (`sony-bank`, `sbi-securities`, `mobile-suica`,
+  `moneyforward-me`, `myjcb`) to publication. The three additional connections still
+  need their post-deployment request checks. Collectors run their daily
   scope, not a requested window; READ projection of a run is derived from the READ pointer each time the record is read, not stored; only
   SBI VC's keepalive is an unattended session refresh. An accepted operation is
   still not an executed collection. The schedules page's **収集を依頼** sends the
   same request after a confirmation, and only for the connections the lane
-  would start (the five above); the others show why there is no button
+  would start; the others show why there is no button
   ([schedules](schedules.md#収集を依頼-collection-request)).
 - SMBC Direct unattended login and V Point Pay automatic app login remain
   unsupported. V Point email collection is a separate supported path.
@@ -103,8 +106,11 @@ The committed [App config](../services/app/wrangler.jsonc) and
 boolean feature flags, including scheduling, operations, purchase recognition,
 rewards, reports and READ projections. CORE migrations reach 0083 (no
 file uses 0054, 0067, 0073, 0074, 0076 or 0081); READ reaches 0005. The Processor's
-`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, `sbi-securities`, `mobile-suica`, `moneyforward-me` and `myjcb`, the collectors
-the operation dispatch lane calls. These are repository facts, not live database/deployment readback.
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, `sbi-securities`, `mobile-suica`,
+`moneyforward-me`, `myjcb`, `st-george`, `sbi-vc-trade` and `sbi-vc-keepalive`, the connections
+the operation dispatch lane calls. The App's `SESSION_REFRESH_POLICY` is
+`{"sbi-vc-trade":"unattended"}`; other sources still require a person for session
+refresh. These are repository facts, not live database/deployment readback.
 
 App names a human operator in `OPERATOR_SUBJECTS`. `AGENT_GRANTS` is empty.
 There is no `AGENT_API_GRANTS` or `MCP_DELEGATIONS` (both removed by

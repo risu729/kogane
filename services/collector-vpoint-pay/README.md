@@ -1,69 +1,49 @@
 # V Point Pay Worker PoC
 
-VポイントPayのプリペイド残高と取得可能な全月の利用明細を、公式Android
-アプリのfirst-party JSON APIから取得し、raw responseとmanifestをprivate R2へ
-保存する独立PoCである。Vポイント/VマネーのWeb台帳は`services/collector-vpoint/`、
-三井住友カード請求明細はVpass collectorであり、相互に混ぜない。
+This independent PoC captures `VポイントPay` (V Point Pay) prepaid balances and usage details for every available month from the official Android app's first-party JSON API, storing raw responses and a manifest in private R2. The `Vポイント` (V Point)/`Vマネー` (V Money) Web ledger belongs to `services/collector-vpoint/`, and `三井住友カード` (Sumitomo Mitsui Card) billing statements belong to the Vpass collector; they are not mixed.
 
-## 静的解析で確認したread surface
+<a id="静的解析で確認したread-surface"></a>
 
-APK candidate `com.smbc_card.vpoint` 2.5.0のRetrofit定義と復号済み保護DEXから、
-次を確認した。binary、通常のdecompiler output、復号DEXはprivate Android archive
-だけに保存し、このrepositoryにはsanitize済み仕様と実装だけを置く。
+## Read surface confirmed by static analysis
 
-- `POST /vpoint/api/v2/token`: authorization codeまたはrefresh token grant
-- `GET /vpoint/api/v2/prepaid/balance`: JPY残高、チャージ上限、`inquiry_period`
-- `GET /vpoint/api/v1/prepaid/transaction?target_month=yyyyMM`: 月別利用明細
-- `X-Vapp-Access-Token`、アプリ/OS/User-Agent、時刻依存`device_id` header
+The following were confirmed from the Retrofit definitions and decrypted protected DEX of APK candidate `com.smbc_card.vpoint` 2.5.0. Binaries, ordinary decompiler output and decrypted DEX stay only in the private Android archive; this repository contains only sanitized specifications and implementation.
 
-明細schemaには利用日、説明、元通貨/金額、請求通貨/金額、各種手数料、為替
-レート、確定状態、承認番号、remarks、activity type、transaction typeがある。
-authorization、settlement、refund、chargeを同一状態として潰さずraw snapshotを残す。
+- `POST /vpoint/api/v2/token`: authorization-code or refresh-token grant.
+- `GET /vpoint/api/v2/prepaid/balance`: JPY balance, top-up limit and `inquiry_period`.
+- `GET /vpoint/api/v1/prepaid/transaction?target_month=yyyyMM`: monthly usage details.
+- `X-Vapp-Access-Token`, app/OS/User-Agent and time-dependent `device_id` headers.
 
-残高応答の`inquiry_period`はアプリが月選択肢の最古月として使う。PoCもこの値から
-JST当月までをinclusiveに走査し、想定外応答に対して120か月の安全上限を置く。
+The detail schema includes usage date, description, original currency/amount, billing currency/amount, fees, exchange rate, confirmation state, authorization number, remarks, activity type and transaction type. Raw snapshots retain authorization, settlement, refund and charge as distinct states.
 
-## 停止状態
+The app uses balance-response `inquiry_period` as its earliest selectable month. This PoC likewise scans inclusively from that value through the current JST month, with a 120-month safety limit for unexpected responses.
 
-app API collectorは停止している。Cronはなく、手動の`/trigger`、`/probe`、
-`/reset-credentials`はHTTP 410を返す。遅延配送されたscheduled eventも収集しない。
-`/health`は`collectionEnabled: false`と`status: "disabled"`を返す。
-Durable Objectとapp credential secretsは保持する。管理tokenだけが廃止対象である。旧source専用bucketのR2原本は2026-09-13に中央DATAへ
-コピー・検証した後に削除した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。VポイントPay通知メールは
-`services/collector-vpoint/`で引き続き収集する。以下の認証・デプロイ説明は研究記録である。
+<a id="停止状態"></a>
 
-VポイントPayの中央evidenceは、`services/collector-vpoint`が共有DATA bucketへ保存する
-`v-point-pay-email` runだけである（旧専用Importerは2026-09-13に廃止）。app snapshotや停止中
-endpointは対象にしない。email source、app API source、Vポイント本体から生成したreconciliationは
-別境界であり、このWorkerのCronやpollingを有効化する変更は別途live contract確認後に行う。
+## Disabled state
 
-認証不要の`/probe`による到達確認は、残高・明細取得の成功を意味しない。
-APIの認証には同じセッション由来の実UUIDとrefresh tokenが必要で、仮UUIDでは代用しない。
-端末アプリとの同時利用やtoken更新の競合は未検証であり、自動的な再登録・端末移行は行わない。
+The app API collector is stopped. It has no Cron; manual `/trigger`, `/probe` and `/reset-credentials` return HTTP 410. Delayed scheduled events do not collect either. `/health` returns `collectionEnabled: false` and `status: "disabled"`. The Durable Object and app credential secrets are retained; only the admin token is being retired. Original R2 objects in the old dedicated source bucket were copied to central DATA, verified and then deleted on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)). V Point Pay notification emails continue to be collected by `services/collector-vpoint/`. The authentication/deployment explanations below are research records.
 
-公開 `/credential-status` は廃止（404）し、状態・credentialを読まない。停止中の `/trigger`、`/probe`、`/reset-credentials` は引き続き410で、DOとapp credential自体は変更しない。
+Central V Point Pay evidence consists only of `v-point-pay-email` runs saved to shared DATA by `services/collector-vpoint` (the old dedicated Importer was retired on 2026-09-13). App snapshots and disabled endpoints are excluded. The email source, app API source and reconciliation generated from V Point itself are separate boundaries. Enabling this Worker's Cron or polling requires separate live-contract verification first.
 
-## 認証とWorker化
+Reaching the unauthenticated `/probe` does not mean balance/detail capture succeeded. API authentication needs a real UUID and refresh token from the same session; a placeholder UUID is not a substitute. Concurrent use with the device app and token-refresh races are unverified; no automatic re-registration or device migration is performed.
 
-初回だけ正規アプリの電話番号/SMS/6桁app passcodeを使う。アプリが得たrefresh
-tokenと、Realmに保存されたrandom device UUIDをWorker secretへ一度コピーする。
-保護DEXの`EncryptDevice`はUUIDと現在epoch秒だけで`device_id`を生成し、Android
-Keystoreやhardware attestationを使わないため、Workerで再現できる。
+Public `/credential-status` is retired (404) and reads neither state nor credentials. Disabled `/trigger`, `/probe` and `/reset-credentials` remain 410, without changing the DO or app credentials themselves.
 
-各runはまずrefresh token grantを行う。応答のrotated refresh tokenは単一SQLite
-Durable Objectへ即時保存し、以後それを使う。token、UUID、access tokenはR2、manifest、
-log、HTTP応答へ出さない。
+<a id="認証とworker化"></a>
+
+## Authentication and Worker execution
+
+Initial setup alone uses the official app's phone number/SMS/6-digit app passcode. Copy its refresh token and the random device UUID stored in Realm into Worker secrets once. Protected-DEX `EncryptDevice` generates `device_id` from only the UUID and current epoch seconds, without Android Keystore or hardware attestation, so it can be reproduced in a Worker.
+
+Each run first performs a refresh-token grant. The rotated refresh token in the response is saved immediately in a single SQLite Durable Object and used thereafter. Tokens, UUID and access tokens appear in neither R2, manifests, logs nor HTTP responses.
 After a secret update, the Durable Object used to be reseeded through the
 admin-token `POST /reset-credentials`. That route now answers 410 (`src/worker.ts`), so there is no reseed path while the app collector is stopped.
 
-静的解析ではOkHttp `CertificatePinner`を確認できず、network security configは
-cleartextを禁止するだけだった。これは標準Workers `fetch()`で動く可能性を強く示すが、
-refresh token寿命、端末revoke、実enum値はowner accountでのlive検証前である。
+Static analysis found no OkHttp `CertificatePinner`; network security configuration only prohibited cleartext. This strongly suggests standard Workers `fetch()` may work, but refresh-token lifetime, device revocation and actual enum values await live verification with the owner's account.
 
 ## R2 layout
 
-再有効化した場合、runは共有DATA bucketへ次のartifactを`objects/<2 hex>/<sha256>`として保存し、
-最後にterminal `runs/v-point-pay/<run-id>/terminal.json`を書く。
+If re-enabled, runs save the following artifacts as `objects/<2 hex>/<sha256>` in shared DATA, then write terminal `runs/v-point-pay/<run-id>/terminal.json` last.
 
 ```text
 balance.json
@@ -72,7 +52,9 @@ transactions-YYYYMM.json
 collection-summary.json
 ```
 
-## 開発とデプロイ
+<a id="開発とデプロイ"></a>
+
+## Development and deployment
 
 ```bash
 mise run install                                  # from the repository root
@@ -81,29 +63,24 @@ mise run //services/collector-vpoint-pay:ci
 mise run //services/collector-vpoint-pay:dry-run
 ```
 
-必要なresources/secrets:
+Required resources/secrets:
 
-- R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。旧source専用bucketは2026-09-13に削除済み）
+- R2 binding: `DATA` → `kogane-raw-evidence` (shared by all collectors; the old dedicated source bucket was deleted on 2026-09-13)
 - SQLite Durable Object: `VPointPayCredentialState`
 - secret: `VPOINT_PAY_REFRESH_TOKEN`
 - secret: `VPOINT_PAY_DEVICE_UUID`
-- Cron: なし（app API collector停止）
+- Cron: none (app API collector stopped)
 
-公開manual collectionはない。`GET /health` は停止状態だけを返す。The Worker has no `ScheduledCollection` entrypoint and no job in `config/alarm-jobs.json` serves it (the `vpoint-pay` job there is `supported: false`, with no workspace).
+There is no public manual collection. `GET /health` returns only the disabled state. The Worker has no `ScheduledCollection` entrypoint and no job in `config/alarm-jobs.json` serves it (the `vpoint-pay` job there is `supported: false`, with no workspace).
 
-検証環境を削除するときは次を一組で削除する。
+When removing the verification environment, remove the following as a unit.
 
-1. Worker `kogane-vpoint-pay-collector-poc`（secrets、Durable Objectを含む）
+1. Worker `kogane-vpoint-pay-collector-poc` (including secrets and Durable Object).
 
-共有DATA bucketは他のcollectorとProcessorも使うため削除しない。
+Keep shared DATA because other collectors and the Processor also use it.
 
 ## 2026-08-31 deployment checkpoint
 
-WorkerとR2 bucketを実際に作成し、`GET /health`がHTTP 200となることを確認した。
-続いてWorkerの標準`fetch()`から認証不要の`/vpoint/api/v2/common_settings`を呼ぶ
-`POST /probe`もHTTP 200となった。したがって、Cloudflare edge IP、WorkerのTLS stack、
-ブラウザ不在という条件だけではapp originに拒否されない。
+The Worker and R2 bucket were actually created, and `GET /health` was confirmed to return HTTP 200. Next, `POST /probe`, calling unauthenticated `/vpoint/api/v2/common_settings` through standard Worker `fetch()`, also returned HTTP 200. Thus Cloudflare edge IP, the Worker TLS stack and browser absence alone did not cause rejection by the app origin.
 
-owner app bootstrap前なので、app credential secretsはplaceholderである。`/trigger`の
-実口座成功、R2 raw data、enum、最古月は未確認。作成物と削除手順は
-`RESOURCE_INVENTORY.md`に固定した。
+App credential secrets were placeholders because owner app bootstrap had not happened. Real-account `/trigger` success, R2 raw data, enums and the earliest month were unconfirmed. Created resources and removal steps were recorded in `RESOURCE_INVENTORY.md`.

@@ -5,306 +5,363 @@
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-調査日: 2026-08-26（Australia/Sydney）
+Research date: 2026-08-26 (Australia/Sydney)
 
-## 結論
+## Conclusion
 
-- 本資料の対象は **JP BANK VISA / Mastercard の JP BANK Card WEB** である。JP BANK JCB / EXTAGE は MyJCB に遷移する別 source family であり、混在させない。
-- JP BANK Card WEB はカード台帳であり、ゆうちょ銀行口座の残高・入出金明細ではない。カード側の加盟店別明細と、口座側の月次引落 1 行を別 observation として保持し、後段で照合する。
-- 公式 Web では次回支払額、利用可能額、最新から過去 15 か月分の利用明細、確定 WEB 明細、ポイント残高等を照会できる。公式ページは明細データ download と印刷を案内し、過去の sanitized read-only 観測では CSV control を確認した。native PDF は未確認で、browser print-to-PDF は銀行発行 PDF ではない。
-- 公式の login は ID/password。旧 `One Time Pass` app はネットショッピング認証用で、通常 login MFA の証拠ではない。passkey/WebAuthn、Bitwarden 対応、端末 binding、risk-based 追加認証は未確認である。
-- login host は Akamai 配下で、今回の非 browser HEAD は 403 になった。現時点の共通評価は **D / cost 4**、安全な初期経路は **手動 CSV: E / cost 1**。read-only transport と reusable session を実測できた場合だけ **C / cost 4 candidate** に進める。
-- reverse engineering を一律に除外しない。公式資料で不足する項目は、公開 HTML/JS 静的解析、認証済み browser の redacted network 観測、必要なら公式 APK の静的/動的解析で確認する。禁止するのは取引/write、秘密・PII 保存、security control bypass である。
+- This document covers **JP BANK Card WEB for JP BANK VISA / Mastercard**. JP BANK JCB / EXTAGE leads to MyJCB, a separate source family; do not mix them.
+- JP BANK Card WEB is a card ledger, not ゆうちょ銀行 (Japan Post Bank) account balances/deposit-withdrawal statements. Retain merchant-level card statements and the single monthly account debit as separate observations; reconcile downstream.
+- Official Web offers next payment amount, available credit, the latest 15 months of usage statements, confirmed WEB statements, points balances, etc. Official pages describe statement data download/printing; past sanitized read-only observations found a CSV control. Native PDF unverified; browser print-to-PDF is not a bank-issued PDF.
+- Official login uses ID/password. The old `One Time Pass` app was for online shopping authentication, not evidence of ordinary login MFA. Passkeys/WebAuthn, Bitwarden support, device binding, risk-based extra authentication are unverified.
+- Login host is behind Akamai; this non-browser HEAD returned 403. Current common assessment: **D / cost 4**; safe initial route: **manual CSV: E / cost 1**. Advance to **C / cost 4 candidate** only after measuring read-only transport/reusable sessions.
+- Do not categorically exclude reverse engineering. Fill gaps in official material through public HTML/JS static analysis, authenticated browser redacted network observation, and official APK static/dynamic analysis if needed. Prohibited: transactions/writes, secrets/PII retention, security-control bypass.
 
-## 調査上の安全境界
+## Research safety boundaries
 
-公開公式ページ・規約を主資料とし、未認証 HTTP/DNS、GitHub code search、公開 third-party source を read-only で確認した。この調査回では login していない。
+Used public official pages/terms as main sources; checked unauthenticated HTTP/DNS, GitHub code search,
+and public third-party source read-only. No login in this research pass.
 
-口座番号、カード/会員番号、カード suffix、氏名、メール、ID/password、cookie、OTP、token、残高、利用額、加盟店、取引明細等の秘密・PII・実値を取得または記録していない。production collector でもログ、screenshot、HAR、DOM dump、fixture、CI artifact、Git に残さない。
+Did not retrieve/record secrets, PII, or actual values: account numbers, card/member numbers, card suffixes,
+names, email, IDs/passwords, cookies, OTPs, tokens, balances, usage amounts, merchants, transaction statements,
+etc. Production collectors must also keep them out of logs, screenshots, HARs, DOM dumps, fixtures, CI artifacts, Git.
 
-collector が許可するのは、既存 session の確認、カード種別の一般化された列挙、現在/確定明細、利用可能額、read-only balance、ポイント残高/期限/履歴、既存明細 download/print、logout に限る。登録、申込、支払、変更、交換、解除、制限設定等は行わない。
+Collector permissions are limited to existing session checks, generalized card type enumeration, current/confirmed
+statements, available credit, read-only balances, points balance/expiry/history, existing statement download/print,
+and logout. No registration, applications, payments, changes, exchanges, cancellation, restriction settings, etc.
 
-記述の確度は次のとおり。
+Evidence confidence:
 
-- **確認済み:** 公式資料に明記、または未認証 endpoint で直接観測。
-- **観測済み:** 過去の sanitized read-only browser 観測。公開仕様ではないため再確認対象。
-- **推測:** adjacent platform 等と整合するが、JP BANK Card WEB 自体では未実証。
-- **未確認:** bounded read-only live 検証が必要。
+- **Established:** explicit official material or direct observation at unauthenticated endpoints.
+- **Observed:** past sanitized read-only browser observations; subject to rechecking because not public specifications.
+- **Hypothesis:** consistent with adjacent platforms etc., but not demonstrated in JP BANK Card WEB itself.
+- **Unverified:** requires bounded read-only live verification.
 
-## 1. source family とカード列挙
+## 1. Source family and card enumeration
 
-### 対象・対象外
+### In/out of scope
 
-[JP BANK Card WEB の公式説明](https://wwws.jp-bank.japanpost.jp/credit1/service/cardweb.html) は VISA/Mastercard 会員向けと明記する。[ゆうちょ銀行のカード top](https://www.jp-bank.japanpost.jp/kojin/card/credit/kj_crd_cdt_top_index.html) も、VISA/Mastercard を JP BANK Card WEB、JCB を MyJCB に分けている。
+The [official JP BANK Card WEB explanation](https://wwws.jp-bank.japanpost.jp/credit1/service/cardweb.html)
+explicitly targets VISA/Mastercard members. The [Japan Post Bank card home](https://www.jp-bank.japanpost.jp/kojin/card/credit/kj_crd_cdt_top_index.html)
+also separates VISA/Mastercard into JP BANK Card WEB and JCB into MyJCB.
 
-| source                                | 対象                      | 本資料での扱い          |
-| ------------------------------------- | ------------------------- | ----------------------- |
-| JP BANK Card WEB                      | JP BANK VISA / Mastercard | 対象                    |
-| MyJCB                                 | JP BANK JCB / EXTAGE 等   | 別 source、対象外       |
-| ゆうちょダイレクト / ゆうちょ通帳 app | 預金口座残高・入出金      | 別 source、引落照合だけ |
+| Source                                                                | Scope                                         | Treatment here                             |
+| --------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------ |
+| JP BANK Card WEB                                                      | JP BANK VISA / Mastercard                     | In scope                                   |
+| MyJCB                                                                 | JP BANK JCB / EXTAGE etc.                     | Separate source, out of scope              |
+| ゆうちょダイレクト (Yucho Direct) / ゆうちょ通帳 (Yucho Passbook) app | Deposit account balances/deposits-withdrawals | Separate source; debit reconciliation only |
 
-### 本会員 root
+### Primary member root
 
-[カード比較表](https://www.jp-bank.japanpost.jp/kojin/card/credit/lineup/kj_crd_cdt_lu_popup.html) と [一般カード](https://www.jp-bank.japanpost.jp/kojin/card/credit/lineup/ippan/kj_crd_cdt_lu_ipn_index.html) から、少なくとも次を列挙できる。
+The [card comparison](https://www.jp-bank.japanpost.jp/kojin/card/credit/lineup/kj_crd_cdt_lu_popup.html)
+and [ordinary cards](https://www.jp-bank.japanpost.jp/kojin/card/credit/lineup/ippan/kj_crd_cdt_lu_ipn_index.html)
+establish at least the following.
 
-| product family                   | brand           | 形態                                            | 状態     |
-| -------------------------------- | --------------- | ----------------------------------------------- | -------- |
-| JP BANK VISA ALente              | Visa            | product 条件に応じキャッシュカード一体型/単体型 | 確認済み |
-| JP BANK VISA/Mastercard 一般     | Visa/Mastercard | 一体型/単体型                                   | 確認済み |
-| JP BANK VISA/Mastercard ゴールド | Visa/Mastercard | product 固有の一体型/単体型                     | 確認済み |
+| Product family                          | Brand           | Form                                                                | State       |
+| --------------------------------------- | --------------- | ------------------------------------------------------------------- | ----------- |
+| JP BANK VISA ALente                     | Visa            | Combined cash/credit or standalone, depending on product conditions | Established |
+| JP BANK VISA/Mastercard 一般 (ordinary) | Visa/Mastercard | Combined/standalone                                                 | Established |
+| JP BANK VISA/Mastercard ゴールド (Gold) | Visa/Mastercard | Product-specific combined/standalone                                | Established |
 
-raw card 名、番号、suffix、名義を保存せず、内部で生成した opaque `card_root_id` と一般化した `product_family` / `brand` だけを保持する。
+Retain only internally generated opaque `card_root_id` and generalized `product_family` / `brand`,
+not raw card names/numbers/suffixes/cardholders.
 
-### 家族・ETC・追加カード
+### Family, ETC, and additional cards
 
-- 一般カードの公式ページは、一体型本会員に一体型家族カード 1 枚、単体型本会員に複数の単体型家族カードを発行可能としている。
-- [追加カード・サービス](https://www.jp-bank.japanpost.jp/kojin/card/credit/futai/kj_crd_cdt_fti_index.html) と [VISA/Mastercard サービス](https://www.jp-bank.japanpost.jp/kojin/card/credit/lineup/vmservice/kj_crd_cdt_lu_vsv_index.html) は、家族、ETC、iD、PiTaPa、WAON、Plus EX 等を列挙する。本 source では、これらの利用が card ledger に現れる場合だけ対象にする。
-- [WEB 明細申込案内](https://wwws.jp-bank.japanpost.jp/credit1/oshiharai/wm_mail_top.html) は本会員を申込対象とする。一方、[JP BANK Card WEB 特約](https://wwws.jp-bank.japanpost.jp/credit1/service/cardweb05.html) は家族会員にも制限付き利用を認める。
-- 本会員明細/CSV が家族・ETC を専用列、カード名、masked number、名義のどれで区別するかは未確認。
+- Official ordinary-card pages allow one combined family card for combined-card primary members, and multiple standalone family cards for standalone primary members.
+- [Additional cards/services](https://www.jp-bank.japanpost.jp/kojin/card/credit/futai/kj_crd_cdt_fti_index.html) and [VISA/Mastercard services](https://www.jp-bank.japanpost.jp/kojin/card/credit/lineup/vmservice/kj_crd_cdt_lu_vsv_index.html) list family, ETC, iD, PiTaPa, WAON, Plus EX, etc. This source covers their usage only when it appears in the card ledger.
+- [WEB statement application guidance](https://wwws.jp-bank.japanpost.jp/credit1/oshiharai/wm_mail_top.html) targets primary members; [JP BANK Card WEB special terms](https://wwws.jp-bank.japanpost.jp/credit1/service/cardweb05.html) also allow limited use by family members.
+- How primary member statements/CSV distinguish family/ETC—dedicated columns, card names, masked numbers, or cardholders—is unverified.
 
-data model は `instrument_kind = primary | family | etc | other_addon | unknown` とし、安定した非 PII discriminator がない場合は root 配下の `unknown` のままにする。表示名や suffix から永続 ID を作らない。
+Data model: `instrument_kind = primary | family | etc | other_addon | unknown`. Without a stable non-PII
+discriminator, retain `unknown` under the root. Do not derive permanent IDs from display names/suffixes.
 
-## 2. 残高・明細・確定/未確定・粒度
+## 2. Balances, statements, confirmed/pending, and granularity
 
-### 公式に確認できる対象
+### Officially established scope
 
-[利用可能サービス](https://wwws.jp-bank.japanpost.jp/credit2/service/cardweb01.html) は次を明記する。
+[Available services](https://wwws.jp-bank.japanpost.jp/credit2/service/cardweb01.html) explicitly list:
 
-- 次回支払額。
-- 最新から過去 15 か月分の利用明細。
-- 現在の利用可能額。
-- カード利用代金 WEB 明細。
-- JP バンクカードポイント残高と交換受付。
-- リボ/分割内容の照会・変更、臨時支払、キャッシング。
+- Next payment amount.
+- Latest 15 months of usage statements.
+- Current available credit.
+- Card usage WEB statements.
+- JP バンクカードポイント (JP Bank Card Points) balances/exchange requests.
+- Revolving/installment inquiry/changes, extra payments, cash advances.
 
-最後の項目群は read と write が隣接する。残高/予定額の照会だけを allowlist にし、変更・支払・申込 control は触らない。
+The last group has adjacent reads/writes. Allowlist only balance/expected amount inquiries; do not touch
+change/payment/application controls.
 
-### 明細行の粒度
+### Statement row granularity
 
-[明細の見方](https://wwws.jp-bank.japanpost.jp/credit2/member/meisai_guide.html) は次の line-level 情報を説明する。
+The [statement guide](https://wwws.jp-bank.japanpost.jp/credit2/member/meisai_guide.html) describes:
 
-- 利用日、利用店名、利用金額。
-- 支払区分、分割回数、今回回数。
-- 分割・リボ・キャッシング等の支払予定額。
-- `#`（あとからリボ対象）、`B`（あとから分割対象）等の表示。
-- ポイント対象表示。
-- 海外利用時の換算関連情報。
+- Usage date, merchant name, usage amount.
+- Payment classification, installment count, current installment number.
+- Scheduled payments for installments/revolving/cash advances etc.
+- Markers such as `#` (eligible for later revolving conversion), `B` (eligible for later installment conversion).
+- Points eligibility display.
+- Conversion-related information for overseas use.
 
-利用日は、前回案内後に売上票/data が到着した利用の表示日であり、現実の authorization timestamp と同一とは限らない。`use_date` として source semantics を保持し、別 timestamp を創作しない。
+Usage date is the displayed date for usage whose sales slips/data arrived after the previous notification,
+not necessarily the actual authorization timestamp. Retain source semantics as `use_date`; invent no other timestamps.
 
-推奨 schema は `source_cycle`, `source_status`, `use_date`, `merchant_raw`, `amount`, `currency`, `payment_category`, `installment_count`, `scheduled_payment`, `point_eligible`, `instrument_kind`, `source_row_hash`。加盟店・金額は private encrypted store のみで扱い、test fixture は synthetic にする。
+Recommended schema: `source_cycle`, `source_status`, `use_date`, `merchant_raw`, `amount`, `currency`,
+`payment_category`, `installment_count`, `scheduled_payment`, `point_eligible`, `instrument_kind`, `source_row_hash`.
+Handle merchants/amounts only in private encrypted stores; use synthetic test fixtures.
 
-### 現在・確定・取消/返金
+### Current, confirmed, cancellations/refunds
 
-- [WEB 明細 flow](https://wwws.jp-bank.japanpost.jp/credit1/oshiharai/web_meisai_flow.html) と [通知時期](https://wwws.jp-bank.japanpost.jp/credit1/oshiharai/web_meisai_mail.html) は、支払額確定後に 1 請求 1 回の通知を送り、紙相当の WEB 明細を確認できるとする。次回請求がなければ通知しない。
-- [FAQ](https://wwws.jp-bank.japanpost.jp/credit1/oshiharai/web_meisai_faq.html) は、あとからリボ等により翌月初めに当該明細が更新され得るとする。download 済み明細も無条件に immutable としない。
-- 認証済み画面に現在明細と確定 WEB 明細が分かれていることは観測済みだが、現行仕様を再確認する。
-- authorization 未確定行の有無、pending/posted label、売上到着後の key、加盟店名変更、取消、返金、negative/correction 行、元取引との link は未確認。
+- [WEB statement flow](https://wwws.jp-bank.japanpost.jp/credit1/oshiharai/web_meisai_flow.html) and [notification timing](https://wwws.jp-bank.japanpost.jp/credit1/oshiharai/web_meisai_mail.html) say a notification is sent once per bill after payment confirmation, offering paper-equivalent WEB statements. No notification without a next bill.
+- [FAQ](https://wwws.jp-bank.japanpost.jp/credit1/oshiharai/web_meisai_faq.html) says later revolving changes etc. can update that statement at the beginning of the next month. Do not treat downloaded statements as unconditionally immutable.
+- Separation of current statements and confirmed WEB statements in authenticated screens was observed; recheck current specifications.
+- Authorization pending rows, pending/posted labels, keys after sales arrival, merchant name changes, cancellations, refunds, negative/correction rows, original transaction links are unverified.
 
-現在 cycle は provisional として保守的に upsert し、確定 cycle snapshot を billed record の基準とする。符号や加盟店名だけで refund と決めない。
+Conservatively upsert current cycles as provisional; use confirmed cycle snapshots as the billed record basis.
+Do not identify refunds solely by signs/merchant names.
 
-## 3. 期間・件数・CSV/PDF/export
+## 3. Periods, counts, CSV/PDF/exports
 
-| 項目                        | 調査結果                                         | 確度               |
-| --------------------------- | ------------------------------------------------ | ------------------ |
-| 履歴期間                    | 最新から過去 15 か月                             | 公式確認済み       |
-| 区切り                      | 請求/月単位                                      | 公式確認済み       |
-| 画面 1 回の件数、pagination | 公開記載なし                                     | 未確認             |
-| 明細 data download          | あり                                             | 公式確認済み       |
-| CSV                         | 過去の sanitized login 済み観測で control を確認 | 観測済み、再確認要 |
-| CSV encoding/schema         | 公開記載なし                                     | 未確認             |
-| native PDF download         | 根拠を確認できず                                 | 未確認             |
-| 印刷/browser PDF            | 印刷は公式、PDF は browser rendering             | 印刷確認済み       |
-| OFX/QIF                     | 公式経路を確認できず                             | 根拠なし           |
+| Item                         | Finding                                               | Confidence                 |
+| ---------------------------- | ----------------------------------------------------- | -------------------------- |
+| History period               | Latest 15 months                                      | Officially established     |
+| Division                     | Per bill/month                                        | Officially established     |
+| Rows per display, pagination | Not publicly described                                | Unverified                 |
+| Statement data download      | Available                                             | Officially established     |
+| CSV                          | Control found in past sanitized logged-in observation | Observed; needs rechecking |
+| CSV encoding/schema          | Not publicly described                                | Unverified                 |
+| Native PDF download          | No evidence established                               | Unverified                 |
+| Printing/browser PDF         | Printing official; PDF is browser rendering           | Printing established       |
+| OFX/QIF                      | No official route established                         | No evidence                |
 
-[WEB 明細案内](https://wwws.jp-bank.japanpost.jp/credit1/oshiharai/web_meisai_about.html) は page 印刷と明細 data download を案内する。[特約](https://wwws.jp-bank.japanpost.jp/credit1/service/cardweb05.html) は download data の形式等を銀行が指定するとするが、公開案内では形式を明記していない。したがって CSV は強い実装候補だが documented API contract ではない。browser print-to-PDF は `rendered copy` と表示し、銀行発行 PDF と呼ばない。
+[WEB statement guidance](https://wwws.jp-bank.japanpost.jp/credit1/oshiharai/web_meisai_about.html) describes
+page printing and statement data download. [Special terms](https://wwws.jp-bank.japanpost.jp/credit1/service/cardweb05.html)
+say the bank specifies download formats etc., but public guidance does not name the format. CSV is therefore
+a strong implementation candidate, not a documented API contract. Label browser print-to-PDF `rendered copy`,
+not bank-issued PDF.
 
-live 検証では、filename pattern、MIME、encoding、header、quote、改行、日付/金額 format、empty month、最大行数、pagination だけを記録する。raw export は private inbox で hash 後に parse し、retention policy に従い暗号化または削除する。Git へ入れない。
+During live verification, record only filename patterns, MIME, encoding, headers, quoting, line endings,
+date/amount formats, empty months, maximum rows, pagination. Hash raw exports in a private inbox before parsing;
+encrypt/delete under retention policy. Do not put them in Git.
 
-## 4. ポイント
+## 4. Points
 
-[ポイント規則](https://wwws.jp-bank.japanpost.jp/credit2/service/point/point.html) と [ポイント画面](https://wwws.jp-bank.japanpost.jp/credit2/service/point/index.html) から次を確認できる。
+[Points rules](https://wwws.jp-bank.japanpost.jp/credit2/service/point/point.html) and the
+[points screen](https://wwws.jp-bank.japanpost.jp/credit2/service/point/index.html) establish:
 
-- 一般/ALente は shopping 1,000 円ごとに 1 point、ゴールドは 2 point。
-- 獲得月から 2 年で失効。
-- 現在残高、有効期限、JP BANK Card WEB で受け付けた交換履歴を照会可能。
-- 明細書にも point 情報がある。
+- Ordinary/ALente: one point per JPY 1,000 shopping; Gold: two points.
+- Expiry two years from accrual month.
+- Current balance, expiry, and exchanges accepted through JP BANK Card WEB can be queried.
+- Statements also include points information.
 
-point 交換、cashback、他社 point 移行は write であり禁止。家族/ETC 利用分を member 別に配分できるかは未確認なので、当初は card root level の observation とする。
+Points exchange/cashback/transfers to other points are prohibited writes. Attribution of family/ETC usage
+by member is unverified; initially observe at card root level.
 
-## 5. 認証・MFA・端末・passkey・Bitwarden
+## 5. Authentication, MFA, devices, passkeys, and Bitwarden
 
-### 確認済み
+### Established
 
-- [login 方法](https://wwws.jp-bank.japanpost.jp/credit1/service/cardweb02.html) は登録済み ID/password を使う。
-- [利用環境](https://wwws.jp-bank.japanpost.jp/credit1/kankyo.html) は JavaScript と cookie を利用し、Windows の current Edge/Firefox/Chrome、macOS の current Safari を推奨する。
-- 新規登録、再登録、password recovery/change は card/contact 情報を伴う write flow であり、collector は行わない。
-- 家族会員の利用機能には制限がある。
-- [旧 One Time Pass app](https://wwws.jp-bank.japanpost.jp/credit2/update/otp.html) は 60 秒 OTP を表示するネットショッピング認証用 app で、2024 年 4 月以降順次利用不可、現在はメール通知 OTP に移行すると案内する。
-- [OTP 特約](https://wwws.jp-bank.japanpost.jp/credit2/update/otp_kiyaku.html) は shopping OTP と JP BANK Card WEB login password を明確に分離する。したがって 3-D Secure OTP を read-only login MFA とみなさない。
+- [Login](https://wwws.jp-bank.japanpost.jp/credit1/service/cardweb02.html) uses registered ID/password.
+- [Supported environment](https://wwws.jp-bank.japanpost.jp/credit1/kankyo.html) uses JavaScript/cookies, recommends current Edge/Firefox/Chrome on Windows and current Safari on macOS.
+- New registration, re-registration, password recovery/change are write flows involving card/contact information; collectors do not perform them.
+- Family members have limited features.
+- The [old One Time Pass app](https://wwws.jp-bank.japanpost.jp/credit2/update/otp.html) displays 60-second OTPs for online shopping; guidance says phased unavailability from April 2024, transitioning to email OTP.
+- [OTP special terms](https://wwws.jp-bank.japanpost.jp/credit2/update/otp_kiyaku.html) explicitly separate shopping OTP from JP BANK Card WEB login passwords. Do not regard 3-D Secure OTP as read-only login MFA.
 
-### 事実と推測の分離
+### Separating facts and hypotheses
 
-- **login MFA/device binding:** risk-based email/SMS、追加確認、remembered-device cookie、同時 session 制約、session rotation の有無は未確認。
-- **passkey:** 公式資料で WebAuthn/passkey を確認できなかった。将来も非対応とは断定しない。Apple Pay の Face ID/Touch ID は決済認証で、WEB login passkey ではない。
-- **Bitwarden:** 公式な関係はない。通常の ID/password form なら autofill 可能と推測できるが未検証。WebAuthn が確認できるまで Bitwarden passkey 保管を前提にしない。
-- **app 生体認証:** current statement app を確認していないため、WEB login との関係もない。
+- **Login MFA/device binding:** risk-based email/SMS, extra checks, remembered-device cookies, concurrent session limits, rotation are unverified.
+- **Passkeys:** official material did not establish WebAuthn/passkeys. Do not assert future non-support. Apple Pay Face ID/Touch ID is payment authentication, not WEB login passkeys.
+- **Bitwarden:** no official relationship. Autofill for ordinary ID/password forms is plausible but untested. Do not assume Bitwarden passkey storage until WebAuthn is established.
+- **App biometrics:** no current statement app established, hence no relationship to WEB login either.
 
-credential は利用者が既に作成した secret record を参照し、値を log しない。session state は暗号化し、可能なら host-bound、source 単位で消去可能にする。予期しない OTP、recovery、端末登録は user handoff/stop であり、メール自動取得や認証弱体化の許可ではない。
+Credentials reference existing user-created secret records without logging values. Encrypt session state;
+make it host-bound and erasable per source if possible. Unexpected OTP, recovery, device registration require
+user handoff/stop, not permission for automated email retrieval or authentication weakening.
 
-## 6. Web/app と次段階の静的・動的解析
+## 6. Web/app and next-stage static/dynamic analysis
 
-JP BANK Card WEB は browser で利用でき、app-only ではない。明細取得用の現行 first-party app は公式 route から確認できなかった。旧 One Time Pass app は 3-D Secure 用、legacy JP BANK Card iD app は決済設定用であり、カード明細 collector ではない。
+JP BANK Card WEB is browser-accessible, not app-only. No current first-party statement app was established
+from official routes. The old One Time Pass app was for 3-D Secure; legacy JP BANK Card iD app for payment
+settings, not statement collection.
 
-公開資料で不足する場合は次の順序で具体化する。
+Where public material is insufficient, proceed in this order.
 
-1. **公開 HTML/JS 静的解析:** loaded page の script URL/hash、module 名、form action、download link、route shape を記録する。page が露出していない write endpoint の探索は行わない。
-2. **認証済み browser の動的観測:** 既存 session の DevTools で、card list、月選択、明細照会、point read、CSV download の method、origin、path template、status、content-type、redirect、redacted response shape だけを記録する。body、cookie、token、ID、氏名、残高、加盟店、raw response は保存しない。
-3. **read-only replay 判定:** idempotent と分類できた 1 request だけを同一 browser session で試す。CSRF state が write と共用、semantics 不明、challenge 発生、state 変更の可能性があれば停止する。
-4. **現行公式 app が見つかった場合の APK:** 公式 store または owner 提供 package から入手し、package/version/signing certificate hash/APK hash を記録する。`aapt`、`apkanalyzer`、`jadx`、MobSF 等で manifest、network security config、hostname、transport library、response model を静的解析し、owner-controlled 実機で read-only call を動的観測する。certificate pinning/device attestation は記録対象であり、bypass しない。
+1. **Public HTML/JS static analysis:** record loaded scripts' URLs/hashes, module names, form actions, download links, route shapes. Do not discover write endpoints not exposed by pages.
+2. **Authenticated browser dynamic observation:** in existing-session DevTools, record only card list, month selection, statements, points reads, CSV download methods/origins/path templates/statuses/content-types/redirects/redacted response shapes. Save no bodies, cookies, tokens, IDs, names, balances, merchants, raw responses.
+3. **Read-only replay decision:** try only one request classified idempotent in the same browser session. Stop on CSRF shared with writes, unknown semantics, challenges, or possible state changes.
+4. **APK if a current official app is found:** obtain from official store or owner-provided package, record package/version/signing certificate hash/APK hash. Statically inspect manifest, network security config, hostnames, transport libraries, response models with `aapt`, `apkanalyzer`, `jadx`, MobSF etc.; dynamically observe read-only calls on owner-controlled devices. Record certificate pinning/device attestation without bypassing.
 
-reverse engineering、APK/JS 解析、通信観測自体は非目標でも禁止でもない。security control の改変・回避、CAPTCHA 解決、stealth/fingerprint 偽装、rate-limit 回避、write call、秘密/PII 保存は禁止する。
+Reverse engineering, APK/JS analysis, and traffic observation themselves are neither non-goals nor prohibited.
+Security-control modification/bypass, CAPTCHA solving, stealth/fingerprint spoofing, rate-limit bypass,
+write calls, and secrets/PII retention are prohibited.
 
 ## 7. CDN/WAF/Akamai/anti-bot
 
-2026-08-26 の read-only 観測では、`https://www.jp-bank-card.jp/` の HEAD は `403 Forbidden`、`Server: AkamaiGHost`、`AKAMAI` edge header を返し、DNS は `dsca.akamaiedge.net` に解決した。公開資料 host は 200 を返したが、DNS は同様に Akamai edge である。
+Read-only observations on 2026-08-26: HEAD to `https://www.jp-bank-card.jp/` returned `403 Forbidden`,
+`Server: AkamaiGHost`, `AKAMAI` edge headers; DNS resolved to `dsca.akamaiedge.net`. Public documentation
+hosts returned 200 but likewise resolved to Akamai edge.
 
-以上から Akamai fronting と、この環境の非 browser request 拒否は確認できる。ただし 1 回の 403 から Bot Manager、WAF rule、device fingerprint、rate policy、API gateway 製品の有効化を断定しない。独立した API gateway host は未確認。
+This establishes Akamai fronting and rejection of non-browser requests in this environment. One 403 does not
+establish Bot Manager, WAF rules, device fingerprints, rate policies, or API gateway products. Independent
+API gateway hosts are unverified.
 
-403/429、challenge/interstitial、CAPTCHA、redirect loop、追加 login 検証、device enrollment で停止する。UA 偽装、Akamai cookie 合成、challenge solve、IP rotation 等の bypass は行わない。次の正当な手段は、利用者 handoff を伴う公式推奨 browser である。
+Stop on 403/429, challenges/interstitials, CAPTCHA, redirect loops, extra login verification, device enrollment.
+Do not spoof UA, synthesize Akamai cookies, solve challenges, rotate IPs, or otherwise bypass. The next
+legitimate route is the officially recommended browser with user handoff.
 
-## 8. public third-party client と具体的 transport/auth
+## 8. Public third-party clients and concrete transport/auth
 
-GitHub code search では JP BANK Card host を対象にした公開 client を確認できなかった。次の 2 件は adjacent な SMBC/Vpass platform 用であり、JP BANK Card の直接証拠ではない。
+GitHub code search found no public client targeting JP BANK Card hosts. The two below target adjacent
+SMBC/Vpass platforms, not direct JP BANK Card evidence.
 
 ### `braineo/smbcCardSpider`
 
-[GPL-2.0 repository](https://github.com/braineo/smbcCardSpider) は 2016 年に最終 push された旧実装で、`requests.Session`、ID/password、JSON POST を使用する。[source](https://github.com/braineo/smbcCardSpider/blob/bb3c4798a96c55934ed2a9a58d6cea25f59acb98/SMBC_card.py) には次の SMBC host endpoint がある。
+The [GPL-2.0 repository](https://github.com/braineo/smbcCardSpider), last pushed in 2016, uses
+`requests.Session`, ID/password, JSON POST. Its [source](https://github.com/braineo/smbcCardSpider/blob/bb3c4798a96c55934ed2a9a58d6cea25f59acb98/SMBC_card.py)
+contains these SMBC host endpoints.
 
-- `/memapi/jaxrs/xt_login/agree/v1`: login。
-- `/memapi/jaxrs/web_meisai/web_meisai_top/v1`: 明細。
-- `/memapi/jaxrs/multicard/dropdownlist_init/v1`: card list。
-- `/memapi/jaxrs/multicard/operation_card_update/v1`: selected card 切替。
+- `/memapi/jaxrs/xt_login/agree/v1`: login.
+- `/memapi/jaxrs/web_meisai/web_meisai_top/v1`: statements.
+- `/memapi/jaxrs/multicard/dropdownlist_init/v1`: card list.
+- `/memapi/jaxrs/multicard/operation_card_update/v1`: selected card switching.
 
-payload envelope は request timestamp/hash を含み、cookie session を維持する。古い SMBC code であり、JP BANK Card origin に同じ path があるとは限らない。
+Payload envelopes include request timestamps/hashes, retaining cookie sessions. This is old SMBC code;
+the same paths need not exist at JP BANK Card origins.
 
 ### `4noha/openmoney` Vpass plugin
 
-[repository](https://github.com/4noha/openmoney) は 2026 年の public code だが license 表示がない。[Vpass plugin](https://github.com/4noha/openmoney/blob/21f33ca84bc114c2cfd0e3eacbdfacebc7838abd/plugins/vpass/scraper.py) は Playwright で SMBC host の `/memx/web_meisai/top/index.html` を開き、月を選び、`CSV形式で保存する` control を download し、Shift-JIS CSV を parse、失敗時は HTML table に fallback する。Akamai `_abck` cookie 待機と人手 OTP も実装する。
+The [repository](https://github.com/4noha/openmoney) is public 2026 code with no license displayed.
+Its [Vpass plugin](https://github.com/4noha/openmoney/blob/21f33ca84bc114c2cfd0e3eacbdfacebc7838abd/plugins/vpass/scraper.py)
+uses Playwright to open SMBC `/memx/web_meisai/top/index.html`, select months, download through
+`CSV形式で保存する` ("save in CSV format"), parse Shift-JIS CSV, and fall back to HTML tables on failure.
+It also implements waiting for Akamai `_abck` cookies and manual OTP.
 
-screenshot、raw env credential、automation detection 変更、SMBC selector は本 collector に流用しない。Shift-JIS、13 か月、route/selector も JP BANK Card の仕様とはみなさない。
+Do not reuse screenshots, raw environment credentials, automation detection changes, or SMBC selectors in
+this collector. Shift-JIS, 13 months, routes/selectors are not JP BANK Card specifications either.
 
-### 評価
+### Assessment
 
-adjacent Vpass 実装と認証済み JP BANK Card 画面で `/memx/web_meisai/top/index.html` route family が整合するため、関連 backend は推測できる。しかし `/memapi/jaxrs` transport、session 再利用、card switch を JP BANK Card の確認済み事実に昇格するには、JP BANK Card origin の redacted read-only network 観測が必要である。
+Adjacent Vpass implementations align with the `/memx/web_meisai/top/index.html` route family observed in
+authenticated JP BANK Card screens, suggesting related backends. Promoting `/memapi/jaxrs` transport,
+session reuse, or card switching to established JP BANK Card facts requires redacted read-only network
+observations at JP BANK Card origins.
 
-## 9. read/write 隔離
+## 9. Read/write isolation
 
-blocklist ではなく route/action allowlist を使う。初期 allowlist は次のみ。
+Use route/action allowlists, not blocklists. Initial allowlist only:
 
-- session status、一般化した card/root list。
-- 現在/確定明細、idempotent と確認済みの月選択。
-- 既知の明細 data download/print。
-- 利用可能額、read-only balance/schedule。
-- point 残高・期限・交換履歴の照会。
-- logout。
+- Session status, generalized card/root lists.
+- Current/confirmed statements, month selection confirmed idempotent.
+- Known statement data download/print.
+- Available credit, read-only balances/schedules.
+- Points balance/expiry/exchange history inquiries.
+- Logout.
 
-次は明示的に deny する。
+Explicitly deny:
 
-- JP BANK Card WEB / WEB 明細の登録・解除。
-- ID/password/email/address/引落口座等の変更。
-- あとからリボ/分割、臨時・早期支払、支払 plan 変更。
-- cash advance。
-- point 交換/cashback/移行。
-- limit 増額、利用制限設定。
-- 家族/ETC/iD/PiTaPa/WAON/Plus EX 等の申込。
-- 3-D Secure 決済、Apple Pay 等の provisioning、campaign entry、購入・支払。
+- JP BANK Card WEB / WEB statement registration/cancellation.
+- ID/password/email/address/debit account etc. changes.
+- Later revolving/installment conversion, extra/early payments, payment plan changes.
+- Cash advances.
+- Points exchange/cashback/transfers.
+- Limit increases, usage restriction settings.
+- Family/ETC/iD/PiTaPa/WAON/Plus EX etc. applications.
+- 3-D Secure payments, Apple Pay etc. provisioning, campaign entry, purchases/payments.
 
-read に POST を使う可能性はあるため HTTP method だけで write と決めない。ただし semantics 不明の POST は deny し、同じ endpoint が read/write action を受ける場合は正確な read request を分類・guard できるまで自動化しない。
+Reads may use POST; do not classify writes by HTTP method alone. Deny semantically unknown POSTs; if the
+same endpoint accepts read/write actions, do not automate until exact read requests can be classified/guarded.
 
 ## 10. Workers / Browser Run / Containers / OCI / Kubernetes
 
-| runtime                         | 適性               | 判断                                                                                          |
-| ------------------------------- | ------------------ | --------------------------------------------------------------------------------------------- |
-| Cloudflare Workers `fetch` のみ | 低い               | 非 browser request が Akamai 403。通常 browser/bootstrap を提供できない                       |
-| Cloudflare Browser Run          | 検証候補           | Puppeteer/Playwright/CDP session 再利用は可能だが、cloud egress と Akamai acceptance は未証明 |
-| Cloudflare Containers           | 技術的には可能     | `linux/amd64` full browser/parser は動くが、login handoff、egress identity、WAF は解決しない  |
-| controlled host の OCI image    | packaging に適する | browser/parser を再現可能にする。session は host-bound encrypted store が必要                 |
-| Kubernetes                      | 可能だが過剰       | scheduled Pod は可能でも secret/egress/storage/concurrency の運用面が増える                   |
-| local 公式推奨 browser          | 初回実験に最適     | visible handoff、local credential、CSV download が可能で、公式環境に最も近い                  |
+| Runtime                              | Suitability             | Assessment                                                                                  |
+| ------------------------------------ | ----------------------- | ------------------------------------------------------------------------------------------- |
+| Cloudflare Workers `fetch` only      | Low                     | Non-browser requests receive Akamai 403; cannot provide ordinary browser/bootstrap          |
+| Cloudflare Browser Run               | Verification candidate  | Puppeteer/Playwright/CDP session reuse possible; cloud egress/Akamai acceptance unproven    |
+| Cloudflare Containers                | Technically possible    | `linux/amd64` full browsers/parsers run, but login handoff, egress identity, WAF unresolved |
+| OCI image on controlled host         | Suitable packaging      | Reproducible browser/parser; sessions need host-bound encrypted stores                      |
+| Kubernetes                           | Possible but excessive  | Scheduled Pods possible, with more secret/egress/storage/concurrency operations             |
+| Local officially recommended browser | Best initial experiment | Visible handoff, local credentials, CSV download; closest to official environment           |
 
-[Cloudflare Browser Run](https://developers.cloudflare.com/browser-run/features/reuse-sessions/) は reconnectable session を、[session management](https://developers.cloudflare.com/browser-run/cdp/session-management/) は keep-alive を案内する。[Cloudflare Containers](https://developers.cloudflare.com/containers/platform-details/architecture/) は isolated VM と `linux/amd64` image を案内する。[OCI Image Specification](https://specs.opencontainers.org/image-spec/) と [Kubernetes Images](https://kubernetes.io/docs/concepts/containers/images/) は portable image/container 実行の根拠である。runtime capability は origin が自動化を許容する根拠ではない。
+[Cloudflare Browser Run](https://developers.cloudflare.com/browser-run/features/reuse-sessions/) describes
+reconnectable sessions; [session management](https://developers.cloudflare.com/browser-run/cdp/session-management/)
+describes keep-alive. [Cloudflare Containers](https://developers.cloudflare.com/containers/platform-details/architecture/)
+describes isolated VMs and `linux/amd64` images. [OCI Image Specification](https://specs.opencontainers.org/image-spec/)
+and [Kubernetes Images](https://kubernetes.io/docs/concepts/containers/images/) support portable image/container
+execution. Runtime capability does not establish that origins accept automation.
 
-## 11. 共通 A–E / cost 評価
+## 11. Common A–E / cost assessment
 
-PR #5 の共通定義を変更せず使用する。
+Use PR #5 definitions unchanged.
 
-- **A:** direct documented/export API suitable for scheduled headless use。
-- **B:** stable read-only internal API with renewable/reusable session。
-- **C:** browser/app bootstrap + headless replay plausible。
-- **D:** full browser/device automation probably required。
-- **E:** manual capture remains safe default。
-- cost は 1（small wrapper）から 5（device-bound/adversarial）。
+- **A:** direct documented/export API suitable for scheduled headless use.
+- **B:** stable read-only internal API with renewable/reusable session.
+- **C:** browser/app bootstrap + headless replay plausible.
+- **D:** full browser/device automation probably required.
+- **E:** manual capture remains safe default.
+- Cost ranges from 1 (small wrapper) to 5 (device-bound/adversarial).
 
-| 経路                                                  | level       | cost | 判断                                                                  |
-| ----------------------------------------------------- | ----------- | ---: | --------------------------------------------------------------------- |
-| 確定明細 data/CSV の手動 download → local import      | E           |    1 | 現時点の推奨。CSV format は再確認                                     |
-| 手動 browser print-to-PDF → import                    | E           |    2 | 非構造で native bank PDF ではない fallback                            |
-| visible local browser login + controlled CSV download | D           |    3 | human handoff、selector、session challenge、subcard/schema 検証が必要 |
-| browser bootstrap 後の read-only replay               | C candidate |    4 | adjacent transport はあるが JP BANK Card endpoint/session は未確認    |
-| cloud/container から unattended login                 | D           |    5 | full browser と Akamai 対応が必要で brittle                           |
+| Route                                                       | Level       | Cost | Assessment                                                                   |
+| ----------------------------------------------------------- | ----------- | ---: | ---------------------------------------------------------------------------- |
+| Manual confirmed statement data/CSV download → local import | E           |    1 | Current recommendation; recheck CSV format                                   |
+| Manual browser print-to-PDF → import                        | E           |    2 | Unstructured fallback, not native bank PDF                                   |
+| Visible local browser login + controlled CSV download       | D           |    3 | Requires human handoff, selectors, session challenges, subcard/schema checks |
+| Read-only replay after browser bootstrap                    | C candidate |    4 | Adjacent transport exists, but JP BANK Card endpoints/sessions unverified    |
+| Unattended login from cloud/containers                      | D           |    5 | Full browser/Akamai handling needed; brittle                                 |
 
-**現時点の source 評価は D / cost 4。** unattended collector には full browser が必要と考えられる。安定した read-only transport と renewable/reusable session を redacted live 観測で確認できた場合に限り **C / cost 4 candidate** へ更新する。A/B の根拠はない。production-first MVP は **manual CSV: E / cost 1** とする。
+**Current source assessment: D / cost 4.** Unattended collectors likely require full browsers. Update to
+**C / cost 4 candidate** only after redacted live observations establish stable read-only transport and
+renewable/reusable sessions. No evidence for A/B. Production-first MVP: **manual CSV: E / cost 1**.
 
-## 12. read-only live 検証項目
+## 12. Read-only live verification items
 
-既に登録済みの利用者 account と local 公式推奨 browser を使い、1 回の bounded run を行う。登録・変更はしない。
+Use an already registered user account and local officially recommended browser for one bounded run.
+No registration/changes.
 
-1. 公式 URL、issuer/brand boundary、JCB が同 session に混ざらないことを確認。
-2. existing session と fresh login の挙動を確認し、ID/password/cookie/form body を保存しない。
-3. login MFA/risk confirmation、remembered device、session lifetime/reuse を redacted metadata だけで確認。新 OTP receipt は自動化しない。
-4. root product と `primary/family/etc/other` の一般化だけを列挙し、表示名・suffix は記録しない。
-5. current/unfinalized と finalized cycle の field/status transition を確認。
-6. use date、merchant、amount、payment category、installment、refund/correction、family/ETC hint、authorization pending layer の有無を確認。実値は保存しない。
-7. month selector、empty/oldest month、件数、pagination、15 か月境界を確認。
-8. 既存明細を 1 回 download し、filename/MIME/encoding/header/quote/date/amount format/limit/hash だけを記録。schema 確認後に test file を削除。
-9. native PDF control の有無を確認。なければ browser PDF を rendered output とする。
-10. point 残高/期限/履歴の schema だけを確認し、交換 flow を開かない。
-11. DevTools redaction 下で card list、月選択、明細表示、download の method/path template/status/content-type/shape だけを分類。
-12. logout 後、設定、申込、支払方法、point、利用制限が変更されていないことを確認。
+1. Check official URLs, issuer/brand boundaries, and that JCB is not mixed into the same session.
+2. Check existing session/fresh login behavior without saving IDs/passwords/cookies/form bodies.
+3. Check login MFA/risk confirmation, remembered devices, session lifetime/reuse with redacted metadata only. Do not automate new OTP receipt.
+4. Enumerate only generalized root products and `primary/family/etc/other`, without display names/suffixes.
+5. Check current/unfinalized and finalized cycle field/status transitions.
+6. Check use dates, merchants, amounts, payment categories, installments, refunds/corrections, family/ETC hints, presence of authorization pending layers. Save no actual values.
+7. Check month selectors, empty/oldest months, counts, pagination, 15-month boundary.
+8. Download existing statements once; record only filename/MIME/encoding/headers/quoting/date/amount formats/limits/hashes. Delete test files after schema checks.
+9. Check for native PDF controls. Otherwise call browser PDF rendered output.
+10. Check points balance/expiry/history schemas only; do not open exchange flows.
+11. Under DevTools redaction, classify only card list, month selection, statement display, download methods/path templates/status/content-types/shapes.
+12. After logout, verify settings, applications, payment methods, points, usage restrictions unchanged.
 
-### stop 条件
+### Stop conditions
 
-- 購入、支払、cash advance、申込、交換、登録、解除、設定変更の confirmation。
-- read/write semantics が不明な control/endpoint。
-- 予期しない OTP、security question、device enrollment、passkey 作成、password reset/recovery。
-- 403/429、CAPTCHA、Akamai challenge、redirect loop、security control 弱体化/回避が必要な状態。
-- secret、full identifier、PII、残高、加盟店、実明細が capture/log に入りそうな状態。
-- replay が read/write 境界を越える、または pinning/attestation bypass が必要な状態。
-- harmless な login/download 失敗が 1 回を超える状態。
+- Confirmation of purchases, payments, cash advances, applications, exchanges, registration, cancellation, settings changes.
+- Semantically unknown read/write controls/endpoints.
+- Unexpected OTP, security questions, device enrollment, passkey creation, password reset/recovery.
+- 403/429, CAPTCHA, Akamai challenges, redirect loops, need to weaken/bypass security controls.
+- Risk of captures/logs retaining secrets, full identifiers, PII, balances, merchants, actual statements.
+- Replay crossing read/write boundaries or requiring pinning/attestation bypass.
+- More than one harmless login/download failure.
 
-停止時は redacted error class、route template、timestamp、status code だけを残し、**manual E / cost 1** に戻る。
+On stopping, retain only redacted error classes, route templates, timestamps, status codes; return to **manual E / cost 1**.
 
-## 未確認事項
+## Unverified items
 
-- login MFA/risk/device binding、session lifetime/renewal/concurrency。
-- JP BANK Card 固有 transport と reusable read-only session。
-- CSV encoding/schema、row/page limit、subcard discriminator。
-- pending/posted/refund/reversal/installment の正確な表現と immutable key。
-- native PDF download。
-- 1 login で複数 VISA/Mastercard root を切替可能か。
-- point 履歴の粒度と家族/ETC 帰属。
-- intended runtime の通常 browser automation を Akamai が challenge なしで許容するか。
+- Login MFA/risk/device binding, session lifetime/renewal/concurrency.
+- JP BANK Card-specific transport and reusable read-only sessions.
+- CSV encoding/schemas, row/page limits, subcard discriminators.
+- Exact pending/posted/refund/reversal/installment representations and immutable keys.
+- Native PDF download.
+- Switching multiple VISA/Mastercard roots in one login.
+- Points history granularity and family/ETC attribution.
+- Whether Akamai accepts ordinary browser automation in the intended runtime without challenges.
 
-## 主要一次資料
+## Main primary sources
 
 - [JP BANK Card WEB overview](https://wwws.jp-bank.japanpost.jp/credit1/service/cardweb.html)
-- [JP BANK Card WEB 利用可能サービス](https://wwws.jp-bank.japanpost.jp/credit2/service/cardweb01.html)
+- [JP BANK Card WEB available services](https://wwws.jp-bank.japanpost.jp/credit2/service/cardweb01.html)
 - [JP BANK Card WEB login](https://wwws.jp-bank.japanpost.jp/credit1/service/cardweb02.html)
-- [JP BANK Card WEB 特約](https://wwws.jp-bank.japanpost.jp/credit1/service/cardweb05.html)
-- [カード利用代金 WEB 明細](https://wwws.jp-bank.japanpost.jp/credit1/oshiharai/web_meisai_about.html)
-- [WEB 明細 FAQ](https://wwws.jp-bank.japanpost.jp/credit1/oshiharai/web_meisai_faq.html)
-- [利用代金明細の見方](https://wwws.jp-bank.japanpost.jp/credit2/member/meisai_guide.html)
-- [サイト利用環境](https://wwws.jp-bank.japanpost.jp/credit1/kankyo.html)
-- [JP バンクカードポイント](https://wwws.jp-bank.japanpost.jp/credit2/service/point/point.html)
-- [One Time Pass app 移行案内](https://wwws.jp-bank.japanpost.jp/credit2/update/otp.html)
+- [JP BANK Card WEB special terms](https://wwws.jp-bank.japanpost.jp/credit1/service/cardweb05.html)
+- [Card usage WEB statements](https://wwws.jp-bank.japanpost.jp/credit1/oshiharai/web_meisai_about.html)
+- [WEB statement FAQ](https://wwws.jp-bank.japanpost.jp/credit1/oshiharai/web_meisai_faq.html)
+- [Usage statement guide](https://wwws.jp-bank.japanpost.jp/credit2/member/meisai_guide.html)
+- [Supported site environments](https://wwws.jp-bank.japanpost.jp/credit1/kankyo.html)
+- [JP Bank Card Points](https://wwws.jp-bank.japanpost.jp/credit2/service/point/point.html)
+- [One Time Pass app migration guidance](https://wwws.jp-bank.japanpost.jp/credit2/update/otp.html)

@@ -1,36 +1,42 @@
-# 金融データの意味の監査（2026-09-08）
+<a id="金融データの意味の監査2026-09-08"></a>
+
+# Audit of financial-data meanings (2026-09-08)
 
 > Historical record: 2026-09-08. Scope, counts, resources and rollout
 > instructions below describe that record, not a current production check.
 > Use [current status](current-status.md), [rollout controls](rollout.md) and
 > the [documentation index](README.md) for maintained references.
 
-表示モデルは観測の格納テーブル名ではなく、その記録が何を測っているかで決める。A/Bの値を保持し、根拠のあるC解釈として追加する。ユーザーの合計や税務値を、異なる意味の観測を足して作らない。
+The display model follows what a record measures, not the name of the table storing it. A/B values are retained, with an evidenced C interpretation added. User totals and tax values are not created by adding observations with different meanings.
 
-| 種類       | 例                                           | 同一視しないもの                   |
-| ---------- | -------------------------------------------- | ---------------------------------- |
-| 時点残高   | 預金、ポイント、電子マネー、預り金           | 期間中の獲得・利用、買付余力       |
-| 出来事     | 入出金、カード利用、返金、証券約定、利用通知 | 現在残高、期間合計、損益           |
-| 期間実績   | 先月の獲得ポイント                           | 現在のポイント、個々の獲得履歴     |
-| 請求       | 月次請求額、今回支払明細                     | 利用総額、支払い済み、未払債務残高 |
-| 評価       | 市場価格、評価額、円換算値                   | 保有数量、取得価額、実現損益       |
-| 余力・制限 | 買付可能額、出金可能額                       | 追加で保有する現金                 |
+| Type                  | Examples                                                                              | Not equivalent to                                        |
+| --------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Point-in-time balance | Deposits, points, electronic money, custody cash                                      | Earnings/usage during a period, buying power             |
+| Event                 | Deposits/withdrawals, card usage, refunds, securities executions, usage notifications | Current balance, period total, P&L                       |
+| Period activity       | Points earned last month                                                              | Current points, individual earning history               |
+| Bill                  | Monthly bill, current payment details                                                 | Total usage, payment completed, outstanding debt balance |
+| Valuation             | Market price, valuation, yen-converted value                                          | Held quantity, acquisition cost, realized P&L            |
+| Capacity/limit        | Buying power, withdrawable amount                                                     | Additional cash holdings                                 |
 
-## 確認した問題と表示上の修正
+<a id="確認した問題と表示上の修正"></a>
 
-1. VPointのSMFG表示は先月獲得実績。公式公開コードとの対応は [残高表示方針](balance-presentation.md) に記録。共通残高・店舗限定残高とは分ける。
-2. MyJCB確定明細は `_kogane.amountBasis=current-statement-payment`、未確定明細は `unconfirmed-usage`。利用日が金額の出金日になるわけではない。月次合計と明細は二重計上しない。
-3. SBI証券円履歴は原額と `_kogane.direction` を別々に保持する。正数の出金があり、符号だけで入金と表示してはいけない。
-4. 証券約定の金額は受渡金額等であり、買いの正数もある。約定日・受渡日・数量・単価は別概念。`posted` から受渡完了や損益を推定しない。
-5. VPointPayの通知は決済完了ではない。拒否や金額未記録をゼロに置き換えない。通知内残高は、その通知が報告した時点の量。
-6. 銀行出金は費用、入金は収入とは限らない。振替・カード引落し・返金・証券資金移動は対応根拠なしに合算・相殺・統合しない。
+## Findings and presentation corrections
 
-監査元は `src/parsers/myjcb.ts`, `sbi-yen-detail-history.ts`, `sbi-foreign-trade-records.ts`, `sbi-vc-executions.ts`, `v-point.ts`, `v-point-pay.ts`, `mobile-suica-sf-history.ts`（現在は`packages/parsers/src/parsers/`配下）および既存の設計・各ソース資料。
+1. VPoint's SMFG display is last month's earned activity. Its mapping to official public code is recorded in [balance presentation policy](balance-presentation.md). It is separate from common and store-limited balances.
+2. Confirmed MyJCB details use `_kogane.amountBasis=current-statement-payment`; unconfirmed details use `unconfirmed-usage`. The usage date does not become the amount's cash-withdrawal date. Monthly totals and detail rows are not counted twice.
+3. Yen history from `SBI証券` (SBI Securities) retains original amounts and `_kogane.direction` separately. Withdrawals can be positive; sign alone must not label them as deposits.
+4. Securities execution amounts include settlement amounts, and buys can be positive. Execution date, settlement date, quantity and unit price are separate concepts. `posted` establishes neither completed settlement nor P&L.
+5. VPointPay notifications are not completed payments. Declines and unrecorded amounts are not replaced with zero. A balance in a notification is the quantity at the time that notification reports.
+6. Bank withdrawals are not necessarily expenses, nor deposits income. Transfers, card debits, refunds and securities funding movements are not added, offset or merged without matching evidence.
 
-## 未証明の境界
+The audit read `src/parsers/myjcb.ts`, `sbi-yen-detail-history.ts`, `sbi-foreign-trade-records.ts`, `sbi-vc-executions.ts`, `v-point.ts`, `v-point-pay.ts`, `mobile-suica-sf-history.ts` (now under `packages/parsers/src/parsers/`), together with existing designs and source references.
 
-`financial-measures-v2` で時点残高と期間実績・請求を別ページへ分けた。`activity-meaning-v1` で各明細の種類、金額の意味、方向、日付の役割、状態を独立に解釈する。APIは表示対象と同じ観測IDから必要な名前付き項目だけを取得し、原本全体や認証情報を一覧に広げない。元の金額と日時を変更しない。
+<a id="未証明の境界"></a>
 
-MyJCBでは利用日と期間表示を併記し、今回支払額と未確定利用額を区別する。SBI円履歴は正数の出金でも出金区分を明記する。証券は約定と受渡しを区別し、確認済みの数量・単価・受渡日だけを示す。クレカ利用は実績の一種だが、現金支出や残高の減少とは同一視しない。取引一覧の金額は中立色とし、`posted` は「履歴に記録」であって支払済みとは表示しない。
+## Unproven boundaries
 
-支払済みや未払額、所得・費用の分類、複数ソース間の経済的同一性、ポイントの通貨換算、全口座の重複しない総資産範囲は、この表示変更では成立しない。将来の照合・計算でも、方向・時点・対象期間・金額の意味・単位・状態を別々に検証する必要がある。
+`financial-measures-v2` separates point-in-time balances from period activity/bills on different pages. `activity-meaning-v1` independently interprets each detail row's kind, amount meaning, direction, date roles and state. The API reads only the necessary named fields from the same observation IDs it displays; it does not spread whole originals or authentication information into lists. Original amounts and timestamps are unchanged.
+
+MyJCB shows usage dates alongside period labels, distinguishing current payment amounts from unconfirmed usage amounts. SBI yen history explicitly shows the withdrawal classification even for positive withdrawals. Securities distinguish execution from settlement and display only established quantities, unit prices and settlement dates. Card usage is a type of activity, but not equivalent to cash spending or a balance reduction. Transaction-list amounts use a neutral color; `posted` means `履歴に記録` ("recorded in history"), not paid.
+
+This presentation change does not establish paid/outstanding amounts, income/expense classifications, economic identity across sources, point-to-currency conversions, or a non-overlapping total-asset scope across every account. Future reconciliation and calculations must also verify direction, reference time, target period, amount meaning, unit and state separately.

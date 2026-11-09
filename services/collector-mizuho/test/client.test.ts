@@ -349,11 +349,11 @@ describe("private session boundary", () => {
     expect(() =>
       parseSession(JSON.stringify({ ...session(), cookies: "a=x\r\nprivate-secret" })),
     ).toThrow("invalid-session-cookies");
-    expect(safeMizuhoErrorCode(new Error("private-secret"))).toBe("read-parse-error");
+    expect(safeMizuhoErrorCode(new Error("private-secret"))).toBe("internal-error");
     expect(safeMizuhoErrorCode(new MizuhoParseError("unrecognized-empty-state"))).toBe(
       "parse-unrecognized-empty-state",
     );
-    expect(safeMizuhoErrorCode(new MizuhoParseError("private-secret"))).toBe("read-parse-error");
+    expect(safeMizuhoErrorCode(new MizuhoParseError("private-secret"))).toBe("internal-error");
   });
   test("lists every code the shared Mizuho HTML parser throws", () => {
     const source = readFileSync(

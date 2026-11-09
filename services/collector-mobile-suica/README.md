@@ -1,97 +1,65 @@
 # Mobile Suica read-only Worker PoC
 
-JRE IDのパスキー認証からMobile SuicaのSF履歴保存までを、Cloudflare
-Workerで日次実行するPoCである。BitwardenはWorkerから参照しない。認証情報を
-更新したときだけ、所有者がWSLでBitwardenをunlockし、必要なJRE ID credential
-だけを`JRE_ID_CREDENTIAL_JSON` Worker Secretへコピーする。
+A PoC that runs daily in a Cloudflare Worker from JRE ID passkey authentication through Mobile Suica SF-history storage. The Worker does not access Bitwarden. Only when authentication material changes does the owner unlock Bitwarden in WSL and copy the necessary JRE ID credential into Worker Secret `JRE_ID_CREDENTIAL_JSON`.
 
-日次実行は次の経路だけを使う。
+Daily execution uses only this path.
 
-1. Worker Secretからsource-scoped JRE ID credentialを読む。
-2. Cloudflare Browser Renderingを起動し、CDP virtual authenticatorへcredentialを
-   一時的に登録する。
-3. 公式Mobile Suica入口からJRE IDへ遷移し、画面自身のFingerprint/Fraud Defense
-   処理とWebAuthn ceremonyを実行する。
-4. 会員メニューの「SF（電子マネー）利用履歴」をクリックし、履歴画面の短命な
-   Cookieと`baseVariable`をWorker内部だけで受け取る。
-5. plain Worker `fetch`で履歴を1ページだけ取得する。HTMLをparseした後、唯一の
-   `baseVariable`を`__KOGANE_REDACTED_BASE_VARIABLE__`へ置換し、CP932へ再encodeした
-   sanitized HTML、正規化JSON、summaryを共有DATA bucket（`kogane-raw-evidence`）へ保存する。
+1. Read the source-scoped JRE ID credential from the Worker Secret.
+2. Start Cloudflare Browser Rendering and temporarily register the credential in a CDP virtual authenticator.
+3. Navigate from the official Mobile Suica entrypoint to JRE ID, running the page's own Fingerprint/Fraud Defense processing and WebAuthn ceremony.
+4. Click `SF（電子マネー）利用履歴` ("SF electronic-money usage history") in the member menu, receiving the history screen's short-lived cookies and `baseVariable` only inside the Worker.
+5. Fetch only 1 history page with plain Worker `fetch`. After parsing HTML, replace its sole `baseVariable` with `__KOGANE_REDACTED_BASE_VARIABLE__`, re-encode sanitized HTML as CP932, and save it, normalized JSON and summary to shared DATA (`kogane-raw-evidence`).
 6. Writes the run's `terminal-v1` manifest last (`src/shared-run.ts`, `packages/collection`);
    the Processor registers the terminal in process. There is no Service Binding import any
-   more (see 収集物 below).
+   more (see Captured artifacts below).
 
-Bitwarden vault、master password、`BW_SESSION`、JRE ID password、Cookie、raw
-WebAuthn assertionはR2、ログ、manifest、Gitへ保存しない。
+Bitwarden vaults, master passwords, `BW_SESSION`, JRE ID passwords, cookies and raw WebAuthn assertions are stored in neither R2, logs, manifests nor Git.
 
 ## 2026-08-31 live validation
 
-- WSLの`bw` CLIが返した`id.jreast.co.jp`用P-256 credentialをローカルで署名検証した。
-- `bw:sync`でusername、RP ID、credential ID、user handle、counter、PKCS#8 private
-  keyだけをsource-scoped Worker Secretへコピーした。
-- Worker上のcrypto検査はES256、16-byte credential ID、37-byte authenticator data、
-  flags `0x1d`、counter 0で成功した。
-- plain WorkerとTAMIA VPC経由の直接JRE APIは、どちらもWebAuthn challenge前の
-  `AUTH_FS2`で`CO-AT5000`になった。成功captureのFingerprint値をコピーしても
-  変わらず、IPだけでは解決しなかった。この失敗経路は実行系から削除した。
-- Browser RenderingはJRE challenge `CO-SC0001`を受け、virtual authenticatorが
-  assertionを返し、Mobile Suica会員メニューへ復帰した。
-- 会員メニューの`StartApplication`はURL GETではなく、JavaScriptが生成するPOSTを
-  使う。成功経路は`POST /ka/lg/SuicaChangeTransfer.aspx`から
-  `POST /iq/ir/SuicaDisp.aspx`へ進む。
-- Browserから得たsessionをplain Worker fetchへ引き継ぎ、15件・1ページ・3 artifact・
-  failure 0をprivate R2へ保存した。R2 manifestを再取得して保存完了も確認した。
+- Locally verified signatures with the P-256 credential for `id.jreast.co.jp` returned by WSL `bw` CLI.
+- `bw:sync` copied only username, RP ID, credential ID, user handle, counter and PKCS#8 private key into the source-scoped Worker Secret.
+- Worker cryptographic checks succeeded with ES256, a 16-byte credential ID, 37-byte authenticator data, flags `0x1d` and counter 0.
+- Direct JRE API calls through both plain Worker and TAMIA VPC returned `CO-AT5000` at `AUTH_FS2`, before the WebAuthn challenge. Copying Fingerprint values from a successful capture did not change this; IP alone did not solve it. This failed path was removed from execution.
+- Browser Rendering received JRE challenge `CO-SC0001`, the virtual authenticator returned an assertion, and navigation returned to the Mobile Suica member menu.
+- Member-menu `StartApplication` uses a JavaScript-generated POST rather than URL GET. The successful path goes from `POST /ka/lg/SuicaChangeTransfer.aspx` to `POST /iq/ir/SuicaDisp.aspx`.
+- Passing the browser session to plain Worker fetch saved 15 records, 1 page, 3 artifacts and failure 0 in private R2. Rereading the R2 manifest also confirmed complete storage.
 
 ## 2026-09-05 production raw-evidence verification
 
-- 中央`kogane-ingest`はschema `0009`、version
-  `cd26355d-36b0-4eb9-b93f-57b588113429`、Importerの最終versionは
-  `72067520-54bc-414b-81d7-2861746f96e4`、collector v2はversion
-  `dccc680b-f365-4ede-9071-2370a9138baf`で検証した。Cronは`10 21 * * *`を維持した。
-- source R2は40 object / 10 manifestだった。事前検証で1 pageを処理した後、initial
-  resumeは残り39 pageを処理し、合計40 page / 10 manifestへ到達した。続くfull replayも
-  40 page / 10 manifestを走査した。
-- 中央はbackfill前の0 runから、10 run / 10 sealed / 0 unsealed / 40 artifactになった。
-  full replay後も同じ件数で、冪等再送により追加runやartifactは作られなかった。
-- 中央のHTML 10件はすべてCP932として有効で、固定sentinelが各1件、`baseVariable`の値は
-  sentinelだけだった。実object key、hash、履歴本文は記録しない。
-- backfillとreplayの前後でsource R2の40 objectは変更・削除されなかった。
-- 旧v1の実shapeに対しては、同一browser sessionをrunより前にcaptureした
-  `capturedSessionAt`をcanonical ISOかつ`completedAt`以下に限って受理し、R2で厳密検証する
-  parameter付きHTML media typeを中央descriptorでは`text/html`へ正規化する狭い互換だけを
-  追加した。
-- manual live v2 canaryは未実施である。既存scheduleを変更せず、次回06:10 JSTのscheduled
-  runを次のcanaryとして確認する。
+- Central `kogane-ingest` schema `0009`, version `cd26355d-36b0-4eb9-b93f-57b588113429`, final Importer version `72067520-54bc-414b-81d7-2861746f96e4` and collector v2 version `dccc680b-f365-4ede-9071-2370a9138baf` were verified. Cron stayed `10 21 * * *`.
+- Source R2 had 40 objects / 10 manifests. After a precheck processed 1 page, initial resume processed the remaining 39 pages, reaching 40 pages / 10 manifests. A subsequent full replay also scanned 40 pages / 10 manifests.
+- Central state changed from 0 runs before backfill to 10 runs / 10 sealed / 0 unsealed / 40 artifacts. Full replay retained those counts; idempotent resends created no extra run or artifact.
+- All 10 central HTML objects were valid CP932, each had 1 fixed sentinel, and `baseVariable` held only that sentinel. Actual object keys, hashes and history bodies are not recorded.
+- Source R2's 40 objects were neither changed nor deleted by backfill/replay.
+- Only narrow compatibility was added for actual old-v1 shapes: accept `capturedSessionAt` from the same browser session captured before the run only when canonical ISO and no later than `completedAt`; normalize parameterized HTML media types, strictly validated in R2, to `text/html` in the central descriptor.
+- A manual live-v2 canary was not run. Without changing the existing schedule, the next scheduled 06:10 JST run is the next canary to check.
 
-## 収集物
+<a id="収集物"></a>
+
+## Captured artifacts
 
 ```text
-objects/<2 hex>/<sha256>                    sf-history-page-0001.html、sf-history.json、collection-summary.json
-runs/mobile-suica/<run-id>/terminal.json    最後に書くrunの完了記録（artifact keyとobjectの対応を持つ）
+objects/<2 hex>/<sha256>                    sf-history-page-0001.html, sf-history.json, collection-summary.json
+runs/mobile-suica/<run-id>/terminal.json    run completion record written last (artifact key/object mapping)
 ```
 
-runは`packages/collection`で共有DATA bucket（`kogane-raw-evidence`）へ書き、Processorが
-terminalをin-processで登録する（[processor.md](../../docs/processor.md)）。source専用bucket、
-`RAW_EVIDENCE_IMPORTER` Service Binding、backfill scriptは2026-09-13に廃止した
-（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
+`packages/collection` writes runs to shared DATA (`kogane-raw-evidence`); the Processor registers terminals in-process ([processor.md](../../docs/processor.md)). The dedicated source bucket, `RAW_EVIDENCE_IMPORTER` Service Binding and backfill script were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)).
 
-HTMLとJSONには本人の交通・購買履歴、残高、金額が含まれる。R2 bucketはpublicに
-しない。保存するHTMLは`baseVariable`を固定sentinelへ置換済みであり、元の値をR2へ
-保存しない。Cookie、passkey、WebAuthn assertionも保存しない。
+HTML and JSON contain the owner's transport/purchase history, balances and amounts. The R2 bucket must not be public. Stored HTML already has `baseVariable` replaced by a fixed sentinel; the original value is not saved to R2. Cookies, passkeys and WebAuthn assertions are not stored either.
 
-日付検索は「指定日以前」で、1ページ最大100件である。v2は1ページだけを取得し、
-100件未満ならcomplete success、100件ちょうどなら3 artifactを保存した上で
-`partial` / `history_boundary_unproven`とする。前日cursorへ進めず、完全取得を主張しない。
+Date search uses `指定日以前` ("on or before the specified day"), with at most 100 records per 1 page. v2 captures only 1 page: fewer than 100 records is complete success; exactly 100 saves the 3 artifacts, then returns `partial` / `history_boundary_unproven`. It does not move to a previous-day cursor or claim complete capture.
 The alarm entry point (`alarmCollection`, `src/worker.ts`) reports a persisted `partial`
 run as completed (`packages/collection/src/schedule-result.ts`); the `partial` status and
 its issue code stay on the terminal. A run whose terminal was not written is reported as failed.
 
-各objectのR2 custom metadataは`packages/collection`が書く`sha256`と`byteSize`だけである。
+Each object's R2 custom metadata contains only `sha256` and `byteSize` written by `packages/collection`.
 
-## Bitwardenからのローカル同期
+<a id="bitwardenからのローカル同期"></a>
 
-同期はパスキーの登録・更新・削除、JRE ID変更などの後だけ行う。Workerの日次実行は
-Bitwardenへ接続しない。
+## Local synchronization from Bitwarden
+
+Synchronize only after passkey registration/update/deletion, a JRE ID change or similar changes. The Worker's daily execution never connects to Bitwarden.
 
 ```sh
 cd services/collector-mobile-suica
@@ -101,17 +69,17 @@ node scripts/sync-bitwarden-passkey.mjs
 unset BW_SESSION
 ```
 
-`scripts/sync-bitwarden-passkey.mjs`はRP ID `id.jreast.co.jp`に完全一致するcredentialが1件だけであることを
-確認してから、`wrangler secret put JRE_ID_CREDENTIAL_JSON`を実行する。Vault全体や
-master passwordは送らない。署名検査はローカルの `scripts/verify-bitwarden-passkey.mjs` を使う。旧公開 `/credential-check` と browser 診断入口は404であり、認証情報の状態を公開しない。
+`scripts/sync-bitwarden-passkey.mjs` first checks that exactly 1 credential matches RP ID `id.jreast.co.jp`, then runs `wrangler secret put JRE_ID_CREDENTIAL_JSON`. It sends neither the whole vault nor master password. Local `scripts/verify-bitwarden-passkey.mjs` verifies signatures. The former public `/credential-check` and browser diagnostic entrypoints return 404 and expose no credential state.
 
-## 実行
+<a id="実行"></a>
+
+## Execution
 
 The Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`). The
 Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled`
 (`src/schedule-entrypoint.ts`) for the `mobile-suica` job in
 [`config/alarm-jobs.json`](../../config/alarm-jobs.json): daily at 06:10 JST (21:10 UTC),
-which avoids the 00:50–05:00 JST service outage. 通常収集は既存の固定action private RPC経路のみ。旧 `/trigger?asOf=YYYY-MM-DD` は404で、任意日付指定は廃止した。
+which avoids the 00:50–05:00 JST service outage. Normal collection uses only the existing fixed-action private RPC path. The old `/trigger?asOf=YYYY-MM-DD` returns 404; arbitrary-date selection is retired.
 
 ```sh
 mise run install                                  # from the repository root
@@ -123,17 +91,17 @@ mise run //services/collector-mobile-suica:dry-run
 Production deployment is the release workflow's, in the order of
 [`infra/deploy-order.json`](../../infra/deploy-order.json), with a `/health` postcheck.
 
-管理用Bearerは不要。登録済みadmin secretの削除は、対応codeの本番反映と残存依存ゼロの確認後に限る。
+No admin bearer is needed. A registered admin secret is deleted only after the matching code is in production and zero remaining dependencies have been confirmed.
 
-## resourceとcleanup
+<a id="resourceとcleanup"></a>
+
+## Resources and cleanup
 
 - Worker: `kogane-mobile-suica-collector-poc`
 - Browser binding: `BROWSER`
-- R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。旧source専用bucketは2026-09-13に削除済み）
+- R2 binding: `DATA` → `kogane-raw-evidence` (shared by all collectors; the old dedicated source bucket was deleted on 2026-09-13)
 - Schedule: Processor alarm job `mobile-suica` (`config/alarm-jobs.json`, `10 21 * * *` UTC); no Cron Trigger
 - D1 binding: `SCHEDULE_DB` → `kogane-raw-evidence` (the execution lease, `packages/collection/src/schedule-lease.ts`)
 - Secrets: `JRE_ID_CREDENTIAL_JSON`
 
-旧`MOBILE_SUICA_SESSION_JSON`、`JRE_ID_FINGERPRINT`、TAMIA VPC bindingは実行に不要で
-ある。削除時はWorkerだけを削除する。共有DATA bucketは他のcollectorとProcessorも使うため
-削除しない。
+The former `MOBILE_SUICA_SESSION_JSON`, `JRE_ID_FINGERPRINT` and TAMIA VPC binding are unnecessary for execution. Cleanup deletes only the Worker. Keep shared DATA because other collectors and the Processor also use it.

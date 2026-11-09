@@ -58,6 +58,17 @@ establish successful bank access.
   published from it; it is kept for inspection and as a fixture for a
   parser fix. A page that does not sanitize to itself again is not kept. From 2026-11-01 to 11-06 every daily run's history page
   was refused this way (`read-parse-error` in the Worker log).
+- A refused login page keeps `login-unrecognized-page` and adds closed
+  `loginCheck` (`form-count`, `field-value`, `missing-token`,
+  `credential-controls`, `entry-base`, or `post-login-form`), `httpStatusClass`
+  and the expected form's allow-listed name to `mizuho-collection-result`.
+  These are structural checks, never provider text, URLs, tokens or form values.
+  The result also carries `phaseDurationsMs` for `login`, `account-list`,
+  `history` and `persistence`; repeated phases accumulate, and unvisited phases
+  are zero. Account-list and history starts have their own phase records.
+  Unknown exceptions, including programming errors and unlisted error codes,
+  become `internal-error` on the failed unit/run and in the safe log. Known
+  client and parser refusals retain their existing closed codes.
 
 The configured Processor route is `mizuho-bank` / `collector-mizuho-bank` in
 `config/ingest-clients.json`. The existing idempotent bootstrap must be applied

@@ -975,6 +975,18 @@ the parser refuses is still stored, sanitized and `partial`, under the
 `unparsed` key above; no parser accepts that key, so it is evidence only.
 Additional authentication stops the run, and scheduled retries are disabled.
 
+The `mizuho-collection-result` record distinguishes six closed login-page
+checks under the existing `login-unrecognized-page` code: `form-count`,
+`field-value`, `missing-token`, `credential-controls`, `entry-base`, and
+`post-login-form`. A refused shape also carries `httpStatusClass` and the
+expected form's allow-listed name, never the observed form name or page text.
+`phaseDurationsMs` counts elapsed milliseconds in `login`, `account-list`,
+`history`, and `persistence`, accumulating repeated phases; unvisited phases
+are zero. Unknown exceptions and unlisted error codes use `internal-error`,
+including on failed units, instead of masquerading as `read-parse-error`.
+Known client and parser errors keep their closed codes. These diagnostics
+change no login retry, publication or evidence-retention rule.
+
 The `mizuho-weekly` maintenance rule defers the Sunday run until 08:15 JST
 (Saturday 22:00 to Sunday 08:15). The official window ends at 08:00
 (`config/maintenance-research.json`); revision 2 of the rule (2026-11-08,

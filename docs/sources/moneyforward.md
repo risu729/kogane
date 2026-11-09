@@ -5,222 +5,212 @@
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-- 調査日: 2026-08-31、2026-09-07（Asia/Tokyo）
-- canonical source: `moneyforward-me`
-- collector: `services/collector-moneyforward`
-- 対象: 認証済みMoneyForward ME画面の連携先一覧、口座詳細、直近12か月の月別明細fragment
-- 対象外: 金融機関側の更新要求、連携追加・削除、振込・支払・取引、MoneyForward設定変更、
-  provider公式明細と同等の完全性の主張
+- Research dates: 2026-08-31, 2026-09-07 (Asia/Tokyo)
+- Canonical source: `moneyforward-me`
+- Collector: `services/collector-moneyforward`
+- Scope: linked institution lists, account details, latest 12 months of monthly statement fragments in authenticated MoneyForward ME screens
+- Out of scope: requests to refresh financial institutions, adding/deleting links, transfers/payments/transactions, MoneyForward settings changes,
+  claims of completeness equivalent to official provider statements
 
-## 結論
+## Conclusion
 
-MoneyForward MEは、公式金融機関sourceへ直接到達できない期間の補助snapshotとして利用する。
-MoneyForwardが取得・正規化して画面へ表示した内容であり、各金融機関の公式raw response、全期間、
-pending/posted状態、取引ID、更新直後の完全性を保証しない。中央ではcanonical sourceを
-`moneyforward-me`のまま保持し、SMBC、Vpass等の公式sourceへ付け替えない。
+Use MoneyForward ME as supplementary snapshots while official financial institution sources are inaccessible.
+This is data MoneyForward retrieved/normalized/displayed, not a guarantee of each institution's official raw
+responses, complete periods, pending/posted states, transaction IDs, or completeness immediately after refresh.
+Retain canonical source `moneyforward-me` centrally; do not relabel it as SMBC, Vpass, or other official sources.
 
-既存collectorはMoneyForward IDの保存済みpasskeyで毎run新しいsessionを作り、read-only route
-だけを取得する。
+Existing collectors create new sessions every run using stored MoneyForward ID passkeys, retrieving only
+read-only routes.
 
 The collector writes the collected bytes to the shared `DATA` bucket as
 content-addressed objects and the `terminal-v1` manifest last; the Processor
-registers that terminal ([U09 below](#共通-data-r2-への切替-u09)). The private
+registers that terminal ([U09 below](#switch-to-shared-data-r2-u09)). The private
 bucket and the Layer A importer that validated and forwarded it, described in
 the sections below, were retired on 2026-09-13
 ([legacy retirement](../legacy-retirement.md)). The daily run is the
 Processor's alarm job `moneyforward-me` (06:15 JST, `15 21 * * *` in
 `config/alarm-jobs.json`); the Worker has no Cron trigger.
 
-## 調査方法と秘匿境界
+## Research method and confidentiality boundaries
 
-2026-08-31のcollector検証は、所有者の既存accountとBitwarden保存済みpasskeyを用いて、
-ローカルおよびCloudflare Workersのread-only collectionを実行した。2026-09-07のimporter監査は
-localhost限定の一時Workerとproduction R2のread-only bindingを使い、全取得可能objectを
-走査した。
+Collector verification on 2026-08-31 performed local/Cloudflare Workers read-only collection using the owner's
+existing account/Bitwarden-stored passkey. The 2026-09-07 importer audit used a localhost-only temporary Worker
+and production R2 read-only binding to scan all available objects.
 
-監査結果とGit記録には件数、schema、固定failure codeだけを残す。object key、個別hash、本文、
-残高、取引、口座識別子、CSRF、session、Cookie、passkey material、secretは出力・保存しない。
-source R2の前後でwrite/deleteを実行していない。
+Audit results/Git records retain only counts, schemas, fixed failure codes. Do not output/store object keys,
+individual hashes, bodies, balances, transactions, account identifiers, CSRF, sessions, cookies, passkey material,
+secrets. No source R2 writes/deletes before or after the audit.
 
-## 収集surfaceとrun境界
+## Collection surfaces and run boundaries
 
-collectorが許可するread surfaceは次の3種類だけである。
+Only three collector read surfaces are allowed.
 
-1. 連携先一覧の完全HTML 1件
-2. 一覧から列挙した各口座の詳細HTML 1件
-3. 各口座について当月を含む直近12か月の明細HTML fragment
+1. One complete linked-institutions index HTML
+2. One detail HTML for each account enumerated from that index
+3. Monthly statement HTML fragments for the latest 12 months including current month, per account
 
-manifestは`moneyforward-worker-poc-v1`で、日付、run UUID、開始・完了時刻、status、
-artifact順序、dataset、media type、byte size、SHA-256、失敗stageを宣言する。manifest自身を
-最後に保存することで、prefixだけを見て未完runを成功扱いしない。
+Manifest `moneyforward-worker-poc-v1` declares dates, run UUID, start/completion times, status, artifact order,
+dataset, media type, byte size, SHA-256, failure stage. Saving it last prevents incomplete runs being treated
+as successes based only on prefixes.
 
-完全な収集順序はaccounts index、その後に各口座のdetail、同口座の12か月fragmentである。
-R2 write failure時は保存済みartifactがこの順序のsubsequenceで、failureが欠落分の完全な補集合
-でなければならない。provider read failureとR2 write failureを混同せず、status、failure stage、
-failure code、保存artifact数を相互照合する。
+Complete order: accounts index, then each account's detail and its 12 monthly fragments. On R2 write failure,
+saved artifacts must be a subsequence of that order and failures the exact complement of missing items.
+Distinguish provider read failures from R2 write failures, cross-checking status, failure stages/codes,
+and saved artifact counts.
 
-保存済みmanifestが取り得るfailure contractはcollectorの生成点に固定する。
+Pin accepted saved-manifest failure contracts to collector generation sites.
 
-| operation      | failureCode                         | 許可stage                                                                                                                                                     | 必須detail                                               |
-| -------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `collect`      | `credential_configuration_required` | `credential-load`                                                                                                                                             | `errorType: Error`、HTTP/reasonなし                      |
-| `collect`      | `operation_failed`                  | `login-entry`, `passkey-options`, `passkey-sign`, `passkey-assert`, `auth-redirect`, `accounts-index`, `account-selector`, `account-detail`, `monthly-detail` | allowlist済みgeneric `errorType`、HTTP/reasonなし        |
-| `collect`      | `provider_http_failed`              | `passkey-options`, `passkey-assert`, `account-detail`, `monthly-detail`                                                                                       | `MoneyForwardHttpError`と`httpStatus`を必須、reasonなし  |
-| `collect`      | `provider_protocol_failed`          | `login-entry`, `passkey-options`, `passkey-assert`, `auth-redirect`, `accounts-index`, `account-selector`, `account-detail`                                   | `MoneyForwardProtocolError`とstage固有`reasonCode`を必須 |
-| `r2:{dataset}` | `operation_failed`                  | `artifact-store`                                                                                                                                              | allowlist済みgeneric `errorType`、HTTP/reasonなし        |
+| Operation      | failureCode                         | Allowed stages                                                                                                                                                | Required detail                                                      |
+| -------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `collect`      | `credential_configuration_required` | `credential-load`                                                                                                                                             | `errorType: Error`, no HTTP/reason                                   |
+| `collect`      | `operation_failed`                  | `login-entry`, `passkey-options`, `passkey-sign`, `passkey-assert`, `auth-redirect`, `accounts-index`, `account-selector`, `account-detail`, `monthly-detail` | Allowlisted generic `errorType`, no HTTP/reason                      |
+| `collect`      | `provider_http_failed`              | `passkey-options`, `passkey-assert`, `account-detail`, `monthly-detail`                                                                                       | Required `MoneyForwardHttpError` and `httpStatus`, no reason         |
+| `collect`      | `provider_protocol_failed`          | `login-entry`, `passkey-options`, `passkey-assert`, `auth-redirect`, `accounts-index`, `account-selector`, `account-detail`                                   | Required `MoneyForwardProtocolError` and stage-specific `reasonCode` |
+| `r2:{dataset}` | `operation_failed`                  | `artifact-store`                                                                                                                                              | Allowlisted generic `errorType`, no HTTP/reason                      |
 
-protocol reasonも生成点どおりに限定する。
+Likewise constrain protocol reasons to generation sites.
 
-| reasonCode                  | 許可stage                                                            | protocol `httpStatus`                                                                |
-| --------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `unexpected-redirect`       | `login-entry`, `auth-redirect`, `accounts-index`, `account-selector` | `login-entry`, `auth-redirect`, `account-selector`だけ任意。`accounts-index`では禁止 |
-| `redirect-limit`            | `login-entry`, `auth-redirect`, `accounts-index`, `account-selector` | 禁止                                                                                 |
-| `missing-location`          | `login-entry`, `auth-redirect`, `accounts-index`, `account-selector` | 禁止                                                                                 |
-| `invalid-response`          | `passkey-options`, `passkey-assert`, `account-selector`              | 禁止                                                                                 |
-| `missing-csrf`              | `login-entry`, `account-detail`                                      | 禁止                                                                                 |
-| `missing-account-context`   | `account-detail`                                                     | 禁止                                                                                 |
-| `session-not-authenticated` | `accounts-index`                                                     | 禁止                                                                                 |
+| reasonCode                  | Allowed stages                                                       | Protocol `httpStatus`                                                                                 |
+| --------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `unexpected-redirect`       | `login-entry`, `auth-redirect`, `accounts-index`, `account-selector` | Optional only for `login-entry`, `auth-redirect`, `account-selector`; prohibited for `accounts-index` |
+| `redirect-limit`            | `login-entry`, `auth-redirect`, `accounts-index`, `account-selector` | Prohibited                                                                                            |
+| `missing-location`          | `login-entry`, `auth-redirect`, `accounts-index`, `account-selector` | Prohibited                                                                                            |
+| `invalid-response`          | `passkey-options`, `passkey-assert`, `account-selector`              | Prohibited                                                                                            |
+| `missing-csrf`              | `login-entry`, `account-detail`                                      | Prohibited                                                                                            |
+| `missing-account-context`   | `account-detail`                                                     | Prohibited                                                                                            |
+| `session-not-authenticated` | `accounts-index`                                                     | Prohibited                                                                                            |
 
-`manifest-store`失敗はmanifest自体を保存できないため、manifest内failureとしては受理しない。
+`manifest-store` failures cannot save the manifest itself, so are not accepted as failures within manifests.
 
 ## Layer A strict validation
 
-中央stateを作る前に、Importerは次をすべて検証する。
+Before creating central state, the Importer validates all of:
 
-- manifest keyの日付/run UUIDとmanifest本文の一致、exact field set、固定schema
-- manifest objectのcontent type、size、exact custom metadata、native checksum（存在時）、
-  再計算SHA-256
-- 同一prefixの全object inventoryをcursor付きで走査し、manifestと完全一致すること
-- artifactごとのfilename、dataset、media type、size、metadata、native/recomputed SHA-256
-- UTF-8 HTML、accounts indexの一意なdetail link数、detailのCSRF・account/service marker
-- monthly artifactが完全documentでないfragmentで、宣言年月とfilenameが一致すること
-- status、failure、期待dataset、保存artifact、順序、件数の完全な関係
+- Manifest key date/run UUID agreement with body, exact field set, fixed schema
+- Manifest object content type, size, exact custom metadata, native checksum (if present),
+  recomputed SHA-256
+- Cursor-based full same-prefix object inventory, exactly matching the manifest
+- Each artifact's filename, dataset, media type, size, metadata, native/recomputed SHA-256
+- UTF-8 HTML, unique accounts index detail-link count, detail CSRF/account/service markers
+- Monthly artifacts are fragments, not full documents; declared year/month matches filenames
+- Exact relationships among status, failures, expected datasets, saved artifacts, order, counts
 
-未知field、未知dataset、重複key、過剰account、13か月以上、巨大object、cursor停滞、prefix外key、
-宣言外objectはfail closedである。実装上の上限は64 accounts、各12か月、data artifact最大833、
-artifact最大8 MiB、manifestを含むrun合計64 MiBである。
+Fail closed on unknown fields/datasets, duplicate keys, excessive accounts, 13 or more months, huge objects,
+stalled cursors, out-of-prefix keys, undeclared objects. Implementation limits: 64 accounts, 12 months each,
+833 data artifacts maximum, 8 MiB per artifact, 64 MiB total run including manifest.
 
-## 中央raw-evidence contract
+## Central raw-evidence contract
 
-中央routeはmigration `0014_moneyforward_collector_r2.sql`が定義する専用client
-`collector-r2-moneyforward`、producer `collector-r2-importer`、source `moneyforward-me`だけを
-許可する。storage origin templateは
-`raw/moneyforward/{date}/{run-id}/{artifact}`に固定し、具体的なsource keyはHMAC fingerprintへ
-変換する。
+Central route allows only dedicated client `collector-r2-moneyforward`, producer `collector-r2-importer`,
+source `moneyforward-me` defined by migration `0014_moneyforward_collector_r2.sql`. Fixed storage origin template
+`raw/moneyforward/{date}/{run-id}/{artifact}`; convert specific source keys to HMAC fingerprints.
 
-data artifactはsource R2 bytesを再serializeせず
-`provider_response / exact / not_applicable`としてcatalogueする。中央用manifestは自由形式failure
-messageを固定codeへ置換した新規生成物なので、source manifestと同一bytesとは扱わない。
+Catalogue data artifacts as `provider_response / exact / not_applicable` without reserializing source R2 bytes.
+Central manifests are newly generated, replacing free-form failure messages with fixed codes; do not treat them
+as byte-identical to source manifests.
 
-中央runは固定`sourceRunKey`とcontract `producerVersion: moneyforward-r2-v2`を使う。
-deploymentごとに変わるImporter revisionをterminal reportへ入れず、失敗・中断attemptの診断に
-だけ記録する。これにより同じsource runを別deploymentからreplayしてもimmutable descriptor、
-terminal report、sealへ収束する。
+Central runs use fixed `sourceRunKey` and contract `producerVersion: moneyforward-r2-v2`. Do not include
+per-deployment Importer revisions in terminal reports; record only for failed/interrupted attempt diagnostics.
+This lets replay of the same source run from different deployments converge on immutable descriptors,
+terminal reports, seals.
 
 ## Bounded replay
 
-完全inventoryを固定後、1 requestあたり5 data artifactsをstaged inventoryへ転送する。
-versioned AES-256-GCM continuationはmanifest、中央run/unit、inventory digest、offsetを
-暗号化・認証する。
-artifactを各chunkで再読込し、固定inventoryとsize/hashが一致しなければ停止する。最終chunkだけ
-unit/run terminal reportを追加してsealする。
+After fixing complete inventories, transfer five data artifacts per request into staged inventory. Versioned
+AES-256-GCM continuations encrypt/authenticate manifests, central runs/units, inventory digests, offsets.
+Reread artifacts per chunk; stop on size/hash differences from fixed inventories. Only the final chunk appends
+unit/run terminal reports and seals.
 
-backfill scan cursorも専用client tokenから導出したkeyによるversioned AES-256-GCMで保護し、
-R2 cursorの最大長、外側cursorの最大長、
-最大page数、transfer token長、offset進行を制限する。処理中manifestがsealされるまでsource scan
-cursorを進めない。collector側stateには暗号化cursorだけをmode 0600で保存し、direct/backfill
-応答はsource object keyを返さない。専用client tokenまたはfingerprint keyのrotation後は旧cursorを
-拒否し、保存cursorを削除して先頭からidempotentに再走査する。
+Backfill scan cursors also use versioned AES-256-GCM with keys derived from dedicated client tokens. Bound
+R2 cursor length, outer cursor length, maximum pages, transfer token length, offset progress. Do not advance
+source scan cursors until the current manifest is sealed. Save only encrypted cursors in collector state
+with mode 0600; direct/backfill responses return no source object keys. After dedicated client token or
+fingerprint key rotation, reject old cursors, delete saved cursors, rescan idempotently from the start.
 
 ## Production R2 aggregate audit
 
-2026-09-07のread-only full scanでは、manifest 10件とdata artifact 530件を検査した。statusは
-success 10 / partial 0 / failed 0、内訳はaccounts index 10、account detail 40、monthly fragment
-480だった。全10 manifestと参照artifactがstrict validatorを通過した。
+Read-only full scan on 2026-09-07 examined 10 manifests/530 data artifacts: success 10 / partial 0 / failed 0;
+10 accounts indexes, 40 account details, 480 monthly fragments. All 10 manifests/referenced artifacts passed
+strict validation.
 
-この集計は当時取得可能だったobjectのsnapshotであり、将来のrun数を固定するものではない。
-rollout時は同じauditを再実行し、strict failure 0を確認する。source object件数と集約checksumは
-backfill前後で比較するが、object key、個別hash、本文、金融値を運用出力へ含めない。
+This is a snapshot of objects available then, not a fixed future run count. Rerun the same audit during rollout,
+confirming zero strict failures. Compare source object counts/aggregate checksums before/after backfill;
+exclude object keys, individual hashes, bodies, financial values from operational output.
 
 ## Layer B semantic boundary
 
-`monthly-transactions`だけを取引のcanonical routeにする。`account-detail`にも直近取引が表示されるが、
-同じ取引を含むbounded recent viewであり、`accounts-index`とともにstrict evidence-only parserで
-surface markerだけを検証し、金融observationは生成しない。underlying bank/cardへsourceを付け替えず、
-source accountはverified detailのaccount/service JSON tupleを専用keyでHMAC化したaccount unitで
-分離する。sorted accounts indexの同ordinalとの一致とrun内一意性を検証し、ordinalはprovenanceに
-だけ残す。連携先追加・削除によるordinal変動はidentityを変えない。生の識別値はunit metadataや
-ログへ出さず、legacy ordinal-only artifactはLayer Bへ昇格させない。
+Only `monthly-transactions` is the canonical transaction route. `account-detail` also shows recent transactions,
+but is a bounded recent view containing the same transactions. Alongside `accounts-index`, validate only surface
+markers with strict evidence-only parsers, generating no financial observations. Do not relabel sources as
+underlying banks/cards. Separate source accounts by account units HMAC-ing verified detail account/service JSON
+tuples with a dedicated key. Verify agreement with the same ordinal in sorted accounts index and uniqueness
+within runs; retain ordinals only as provenance. Ordinal changes from link additions/deletions do not change
+identity. Keep raw identifiers out of unit metadata/logs; do not promote legacy ordinal-only artifacts to Layer B.
 
-月別fragmentでは各tooltip tableの直前100 bytes以内にproviderの`YYYY-MM-DD`が一意にあり、
-table数とISO日付token数が一致する。カレンダー端には前月・翌月の日も含まれるため、それらのrow shape、
-description、明示符号付きJPY integerを検証した後、artifact filenameの宣言年月と一致する日だけを
-observationへ昇格する。これにより隣接月fragment間の重複を避ける。provider ID、pending/posted状態、
-underlying金融機関の取引identityは推測しない。
+Monthly fragments require a unique provider `YYYY-MM-DD` within 100 bytes preceding each tooltip table,
+with table count equal to ISO date token count. Calendar edges include previous/next-month days. Validate their
+row shapes, descriptions, explicit signed JPY integers, then promote only days matching artifact filename's
+declared year/month to observations, avoiding overlap between adjacent monthly fragments. Do not infer provider
+IDs, pending/posted states, or underlying financial institution transaction identities.
 
-current viewはsource、HMAC account unit、年月ごとに最新のsuccessful/failure-free parse artifactを選ぶ。
-新しい完全な空fragmentもsnapshotとして選ぶため、その月の旧rowを残さない。partial/failed runはraw
-evidenceとして残すだけでLayer Bへ昇格しない。
-全fragmentはcalendar marker 1個を要求する。追加構造監査ではnonempty 407件、empty 73件で、
-480件すべてscript 0・tooltip以外のtable 0だった。73 empty共通のdialog/calendar/selectのtagと
-attribute-name構造を固定し、任意div・calendar単独・途中で切れたtableで旧snapshotを消さない。
+Current views select latest successful/failure-free parsed artifacts per source, HMAC account unit, year/month.
+New complete empty fragments also become snapshots, removing old rows for that month. Partial/failed runs remain
+raw evidence only, not Layer B. All fragments require one calendar marker. Additional structure audit: 407
+nonempty, 73 empty; all 480 had zero scripts/tables other than tooltips. Pin tag/attribute-name structures of
+dialog/calendar/select shared by the 73 empty fragments; arbitrary divs, lone calendars, or truncated tables
+must not erase old snapshots.
 
-同日のLayer B read-only full canaryでは540 objects、success manifest 10件、data artifact 530件を
-再走査した。monthly 480件のtooltip body 8,603 rowsを全件検証し、宣言年月内の6,880 observations
-（inflow 1,883 / outflow 4,997）だけを生成した。隣接月の1,723 rowsはshapeと金額表現を検証して
-emitせず、accounts index/detail計50件はevidence-onlyとして受理した。Layer A/Layer B failureは0件
-だった。この出力は集約件数と固定failure codeだけで、本文、key、hash、個別金融値を含まない。
+Same-day Layer B read-only full canary rescanned 540 objects: 10 successful manifests/530 data artifacts.
+Validated all 8,603 tooltip body rows from 480 monthly artifacts, generating only 6,880 in-month observations
+(inflow 1,883 / outflow 4,997). Validated shapes/amount representations of 1,723 adjacent-month rows without
+emitting; accepted 50 accounts index/detail artifacts as evidence-only. Zero Layer A/Layer B failures.
+Output contained only aggregate counts/fixed failure codes, no bodies, keys, hashes, individual financial values.
 
 ## Runtime feasibility and recommendation
 
-| 経路                      | 評価             | 用途                                           |
-| ------------------------- | ---------------- | ---------------------------------------------- |
-| MoneyForward ME collector | C / cost 3       | passkey bootstrap後のread-only補助snapshot     |
-| private R2 Layer A replay | A / cost 1       | manifest確定済みrunのbounded central ingestion |
-| 金融機関公式collector     | sourceごとに評価 | 取得可能なら正本として優先                     |
+| Route                                     | Assessment          | Purpose                                                   |
+| ----------------------------------------- | ------------------- | --------------------------------------------------------- |
+| MoneyForward ME collector                 | C / cost 3          | Supplementary read-only snapshots after passkey bootstrap |
+| Private R2 Layer A replay                 | A / cost 1          | Bounded central ingestion of manifest-finalized runs      |
+| Official financial institution collectors | Assessed per source | Prefer as authoritative when accessible                   |
 
-collectorの非公開HTML routeとfragment構造は将来変更され得る。validatorは推測で緩和せず、新shapeを
-本文非公開のfixtureとaggregate監査で確認してからcontract versionを上げる。中央へ既存runを
-上書きせず、新しい固定contract namespaceでreplayする。
+Private collector HTML routes/fragment structures may change. Do not loosen validators by guessing;
+verify new shapes with fixtures keeping bodies private and aggregate audits, then raise contract versions.
+Do not overwrite existing central runs; replay under new fixed contract namespaces.
 
-## 実装・関連記録
+## Implementation and related records
 
-- `services/collector-moneyforward/README.md`: authentication、read-only collection、source limitations
-- `services/collector-r2-importer/README.md` (removed with the importer on 2026-09-13): strict validator、chunking、cursor、rollout order
-- `docs/sources/smbc-bank.md`: MoneyForward経由で弱化・欠落するSMBC/Vpass固有情報
+- `services/collector-moneyforward/README.md`: authentication, read-only collection, source limitations
+- `services/collector-r2-importer/README.md` (removed with the importer on 2026-09-13): strict validator, chunking, cursors, rollout order
+- `docs/sources/smbc-bank.md`: SMBC/Vpass-specific information weakened/missing through MoneyForward
 - `packages/storage-d1/migrations/core/0014_moneyforward_collector_r2.sql`: central route/policy
 
-## 未確認事項
+## Unverified items
 
-- 長期運用時のMoneyForward HTML revisionと非公開route変更頻度
-- 無料accountにおけるsource側の実更新頻度と更新遅延
-- 12か月より古い画面外データの安全な公式export経路
-- 連携sourceごとのpending/posted semanticsと公式取引IDへの照合可能性
+- MoneyForward HTML revision/private route change frequency in long-term operation
+- Actual source refresh frequency/delays for free accounts
+- Safe official export routes for off-screen data older than 12 months
+- Per-linked-source pending/posted semantics and reconciliation with official transaction IDs
 
-これらを推測で補完せず、MoneyForward snapshotのprovenanceと取得時刻を保持し、金融機関公式source
-と同等の完全性は宣言しない。
+Do not fill these gaps by guessing. Retain MoneyForward snapshot provenance/retrieval times; do not claim
+completeness equivalent to official financial institution sources.
 
-## 共通 DATA R2 への切替 (U09)
+## Switch to shared DATA R2 (U09)
 
-Collector は `COLLECTION_TARGET` を読まない。保存先は共通 bucket
-`kogane-raw-evidence`（binding `DATA`）だけである。切替と importer は
-2026-09-13 に廃止された（`docs/collection.md`）。run は `packages/collection`
-経由で保存され、terminal manifest を最後に書く。保存する HTML は廃止前に
-中央へ送っていたものと同じ bytes で、account ごとの unit と取得できた月の
-range を terminal に持つ。artifact と role の対応は `docs/collection.md`
-の該当節を参照。
+Collector does not read `COLLECTION_TARGET`. Its only destination is shared bucket `kogane-raw-evidence`
+(binding `DATA`). Switching and the importer were retired on 2026-09-13 (`docs/collection.md`). Runs are
+stored through `packages/collection`, writing terminal manifests last. Saved HTML is byte-identical to what
+was sent centrally before retirement; terminals contain per-account units and ranges for retrieved months.
+See the relevant section of `docs/collection.md` for artifact/role mappings.
 
-account unit の key は、account/service tuple の key なし・domain 分離の SHA-256
-`moneyforward-account-v2-<64 hex>` である（[ADR 0027](../adr/0027-moneyforward-collector-account-identity.md)、
-[ADR 0029](../adr/0029-data-classification-and-unkeyed-identity.md)）。
-Collector は保存前の account detail HTML から旧 importer と同じ検証で tuple を読み、
-`["moneyforward-account-v2", account[id_hash], service[id]]` を hash する。secret は
-使わない。tuple が欠落・検証失敗のときは run 全体が positional unit
-（`account-NN`）のまま保存され、parser は account を名指す artifact を
-`parser_rejected` にする。ログは固定 code（`identity`）だけを持ち、識別値は
-出力しない。旧 importer の HMAC identity（`moneyforward-account-v1-`）も parser は
-受け付けるが、その key は失われており、同じ account の v1 と v2 は別 account になる
-（ADR 0030 の修正により、owner が確認した v1→v2 の組を一度だけ保存値に上書きする
-rewrite で対応付ける。migration 0062 が組を staging し、0063 が importer 側の保存値を
-v2 に上書きして importer 時代の account entity に寄せる。
-[identity operations](../identity-operations.md#one-time-identity-value-rewrite)）。
+Account unit keys are unkeyed, domain-separated SHA-256 of account/service tuples:
+`moneyforward-account-v2-<64 hex>` ([ADR 0027](../adr/0027-moneyforward-collector-account-identity.md),
+[ADR 0029](../adr/0029-data-classification-and-unkeyed-identity.md)). Collector reads tuples from account detail
+HTML before saving, using the same validation as the old importer, and hashes
+`["moneyforward-account-v2", account[id_hash], service[id]]`. No secret used. Missing/invalid tuples leave
+the entire run stored as positional units (`account-NN`); parsers mark account-naming artifacts `parser_rejected`.
+Logs carry only fixed code `identity`, no identifiers. Parsers also accept old importer HMAC identities
+(`moneyforward-account-v1-`), but their key was lost, so v1/v2 for the same account become separate accounts
+(ADR 0030's amendment maps owner-confirmed v1→v2 pairs through a one-time stored-value overwrite rewrite.
+Migration 0062 stages pairs; 0063 overwrites importer-side stored values to v2, aligning with importer-era
+account entities. [Identity operations](../identity-operations.md#one-time-identity-value-rewrite)).

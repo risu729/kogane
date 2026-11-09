@@ -248,11 +248,11 @@ describe("balance projection builder", () => {
     ).toEqual(["50000", "50000"]);
   });
 
-  test("source-authority-v2: Mizuho no longer yields to another bank on an unproven overlap", () => {
+  test("listed direct deposits at different institutions are disjoint without identity adoption", () => {
     // Two banks' own deposit balances in one target, provider-local, with no
     // adopted relation between them. v1 ranked `mizuho-bank` unreviewed, so
     // the other bank was adopted and Mizuho alone was left unresolved; as two
-    // direct sources neither may win an unproven overlap (ADR 0015).
+    // direct sources the deposit allow-list now establishes disjointness.
     const build = (mizuhoRank: number) =>
       buildBalanceProjection(
         [
@@ -280,9 +280,67 @@ describe("balance projection builder", () => {
     const v2 = build(authorityRank("mizuho-bank"));
     for (const scopeKey of ["m-smbc", "m-mizuho"])
       expect(stateOf(v2, scopeKey)).toMatchObject({
-        state: "unresolved",
-        reasonCode: "overlap_unknown",
+        state: "adopted",
+        reasonCode: null,
       });
+  });
+
+  test("all registry-listed bank deposit readings qualify, but other metrics and unknown sources do not", () => {
+    const smbc = deposit("m-smbc", "smbc-own", "11", { subjectStatus: "provider-local" });
+    for (const [sourceId, parserName, metric] of [
+      ["sbi-shinsei-bank", "sbi-shinsei-yen-deposit-account", "yen_deposit_account_balance"],
+      ["sbi-shinsei-bank", "sbi-shinsei-yen-deposit-account", "yen_deposit_savings_balance"],
+      ["sbi-shinsei-bank", "sbi-shinsei-top-balances-and-activity", "account_balance"],
+      ["mizuho-bank", "mizuho-account-list", "account_balance"],
+    ] as const) {
+      const other = deposit("m-other", "other-own", "17", {
+        sourceId,
+        parserName,
+        metric,
+        subjectStatus: "provider-local",
+      });
+      const build = buildBalanceProjection([smbc, other], []);
+      expect(build.rows.map((row) => [row.state, row.reasonCode])).toEqual([
+        ["adopted", null],
+        ["adopted", null],
+      ]);
+      expect(build.relations).toHaveLength(1);
+      for (const subjectStatus of ["aggregate", "unresolved"] as const) {
+        const excluded = buildBalanceProjection([smbc, { ...other, subjectStatus }], []);
+        expect(excluded.relations).toHaveLength(0);
+        expect(excluded.rows.every((row) => row.reasonCode === "overlap_unknown")).toBe(true);
+      }
+      for (const patch of [
+        { authorityRank: AUTHORITY_RANKS.aggregator },
+        { sourceId: "unknown-bank" },
+        { sourceId: "moneyforward" },
+        { parserName: "unknown-parser" },
+        { metric: "unlisted_balance" },
+      ]) {
+        expect(buildBalanceProjection([smbc, { ...other, ...patch }], []).relations).toHaveLength(
+          0,
+        );
+      }
+    }
+  });
+
+  test("a shared scope with an unlisted witness cannot gain the new policy by input order", () => {
+    const smbc = deposit("m-smbc", "smbc-own", "11", { subjectStatus: "provider-local" });
+    const direct = deposit("m-direct", "shinsei-own", "17", {
+      sourceId: "sbi-shinsei-bank",
+      parserName: "sbi-shinsei-top-balances-and-activity",
+      subjectStatus: "provider-local",
+    });
+    const restated = {
+      ...direct,
+      scopeKey: "m-restated",
+      authorityRank: AUTHORITY_RANKS.aggregator,
+    };
+    for (const witnesses of [
+      [direct, restated],
+      [restated, direct],
+    ])
+      expect(buildBalanceProjection([smbc, ...witnesses], []).relations).toHaveLength(0);
   });
 
   test("SC15: the four meanings of an empty fetch stay four different answers", () => {

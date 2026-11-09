@@ -1,52 +1,44 @@
 # V Point Worker PoC
 
-Vポイント本体の残高・期限bucket・SMBC由来内訳・最大3年の履歴、およびVマネー残高・
-最大3年の履歴を、認証済みVポイントMy Page sessionでfirst-party JSON APIから取得し、
-raw responseを共有DATA bucket（`kogane-raw-evidence`）へ保存するPoCである。VポイントPayとVpass明細は別の
-サービス・認証・台帳であるため含めない。
+This PoC uses an authenticated `Vポイント` (V Point) My Page session to capture balances, expiry buckets, SMBC-derived breakdowns and up to 3 years of V Point history, plus `Vマネー` (V Money) balances and up to 3 years of history, from first-party JSON APIs. Raw responses go to shared DATA (`kogane-raw-evidence`). V Point Pay and Vpass details are excluded because they have separate services, authentication and ledgers.
 
-runは`packages/collection`で共有DATA bucketへ直接書き、terminalを最後に書く。terminalが書けないrunは成功扱いにしない。ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。`kogane-collector-r2-importer`へのService Binding、source専用bucket、backfill route/scriptは2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
+`packages/collection` writes runs directly to shared DATA and writes the terminal last. A run that cannot write its terminal is not treated as successful. The Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). The Service Binding to `kogane-collector-r2-importer`, dedicated source bucket and backfill routes/scripts were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)).
 
 ## Runtime profile
 
-- **Browser: なし。** Cloudflare Browser Run、Container Chrome/Chromium、既存browser cookieを使用しない。
-- Worker `fetch`でfirst-party form chainを進め、Email Workerで認証コードを受け、SQLite Durable Objectに短命sessionを保持してJSON APIを収集する。
-- Kogane Capture Chromeはendpoint/schemaの本人確認に使っただけで、production collectorはbrowserを起動しない。
+- **Browser: none.** It uses neither Cloudflare Browser Run, Container Chrome/Chromium nor existing browser cookies.
+- Worker `fetch` follows the first-party form chain, an Email Worker receives authentication codes, and a SQLite Durable Object retains short-lived sessions for JSON-API capture.
+- Kogane Capture Chrome was used only for owner verification of endpoints/schemas; the production collector starts no browser.
 
-## Liveで確認したデータソース
+<a id="liveで確認したデータソース"></a>
 
-2026-08-31、Kogane Capture Chromeのユーザー口座で次を確認した。値、加盟店、Cookie、
-会員番号、個人情報はこのrepositoryへ保存していない。
+## Live-verified data sources
+
+The following were verified with the user's account in Kogane Capture Chrome on 2026-08-31. Values, merchants, cookies, member numbers and personal information are not stored in this repository.
 
 - `POST https://mypage.tsite.jp/api/balance_info`
   - `results.common[]`: `point`, `expiration`, `point_type`
-  - `results.store[]`: store限定の期限bucket
-  - `results.tmoney`: Vマネー残高・有効期限。live口座では空objectだった
+  - `results.store[]`: store-limited expiry buckets.
+  - `results.tmoney`: V Money balance/expiry; an empty object in the live account.
 - `POST https://mypage.tsite.jp/api/tpoint_history`
-  - multipart `page`, `get_graph`, `sort`と全履歴filter
-  - live口座では`total=149`。page 1-4は各30件、page 5は29件、終端のpage 6は0件で、
-    すべてHTTP 200 / application status `0000`を確認した。PoCはtotalへ達したpage 5で停止する。
+  - multipart `page`, `get_graph`, `sort` and all history filters.
+  - The live account had `total=149`: pages 1–4 each had 30 records, page 5 had 29, and terminal page 6 had 0; all returned HTTP 200 / application status `0000`. The PoC stops on page 5 once total is reached.
 - `POST https://mypage.tsite.jp/api/smfg_point`
   - `results.get_point.point_smbc`, `point_smcc`
 - `POST https://mypage.tsite.jp/api/tmoney_history`
-  - multipart `page`, `sort`と、利用・チャージ・取消・失効・移行・返金の全履歴filter
-  - Vポイント履歴と同じMy Page sessionを使用する
-  - live口座ではHTTP 200 / application status `0000`、`total=0`, `history=[]`だった
+  - multipart `page`, `sort` and all usage/top-up/cancellation/expiry/migration/refund history filters.
+  - Uses the same My Page session as V Point history.
+  - The live account returned HTTP 200 / application status `0000`, `total=0`, `history=[]`.
 
-[Vポイント公式FAQ](https://ssl.help.tsite.jp/faq/show/25463?site_domain=qa-tsite)は、
-Vマネー履歴を同じMy Pageで確認でき、履歴上限は過去3年と説明している。また、
-[公式チャージ案内](https://t-point.tsite.jp/finance/tmoney/charge/ptcharge/)もVマネーと
-三井住友カードのVポイントPayを明確に区別する。Vマネーは別の電子マネー台帳だが、この
-collectorの認証境界とデータソースには含まれるため、同じrunで収集する。
+The [official V Point FAQ](https://ssl.help.tsite.jp/faq/show/25463?site_domain=qa-tsite) explains that V Money history is available in the same My Page, limited to the past 3 years. The [official top-up guide](https://t-point.tsite.jp/finance/tmoney/charge/ptcharge/) also explicitly distinguishes V Money from `三井住友カード` (Sumitomo Mitsui Card) V Point Pay. V Money is a separate electronic-money ledger, but belongs to this collector's authentication boundary/data sources and is collected in the same run.
 
-## 認証とsession自動更新
+<a id="認証とsession自動更新"></a>
 
-My Page APIは未認証でもHTTP 200を返すが、application statusは`0010`となる。認証済みは
-`0000`。2026-08-31、Kogane Capture Chromeの通信とブラウザなしのlive requestを照合し、
-V会員番号とメール認証からsessionを生成できることを確認した。passwordは使わない。
+## Authentication and automatic session renewal
 
-loginのfirst-party form chainは次のとおり。各画面からhidden fieldとStruts tokenを引き継ぎ、
-responseのWindows-31Jをdecodeする。
+My Page APIs return HTTP 200 even without authentication, but application status is `0010`; authenticated status is `0000`. On 2026-08-31, Kogane Capture Chrome traffic was compared with browserless live requests, confirming that a session can be created using a V member number and email authentication, without a password.
+
+The first-party login form chain follows below. Hidden fields and Struts tokens pass between screens, and Windows-31J responses are decoded. In the sequence, `V会員番号` means "V member number", `メール送信` means "send email", and `メール認証コード` means "email authentication code".
 
 ```text
 GET  /tm/pc/login/STKIp0018001.do
@@ -58,33 +50,26 @@ POST /tm/pc/login/STKIp0002045.do  (メール認証コード)
 POST https://mypage.tsite.jp/api/user_info
 ```
 
-メール認証コードは連続したlive mailで4桁、5桁、6桁を確認したため、固定長と仮定しない。
-メール記載の有効時間は1分である。最後の`POST /api/user_info`は省略できず、ここでMy Page用
-`SESSIONID`が発行される。これを呼ばずに`/api/balance_info`へ進むと`0010`となる。
+Consecutive live emails had 4-, 5- and 6-digit authentication codes, so no fixed length is assumed. Emails state a 1-minute validity period. Final `POST /api/user_info` cannot be omitted: it issues My Page `SESSIONID`. Going directly to `/api/balance_info` without it returns `0010`.
 
-本番PoCでは、SQLite Durable Objectの単一instanceが次を保持する。
+In the production PoC, a single SQLite Durable Object instance retains:
 
-- 有効なMy Page session Cookie
-- メール待機中だけ、最大2分のserializable challenge state
+- A valid My Page session cookie.
+- Serializable challenge state for at most 2 minutes, only while awaiting email.
 
-sessionがない、または`0010`になったrunは新しい認証メールを要求する。対象アドレスだけの
-Cloudflare Email Routing ruleが同じWorkerの`email()` handlerへ配送し、handlerは元メールを
-従来のGmail宛へ転送したうえでコードを抽出する。Durable Objectがloginを完了すると、email
-event内でcollectionを再実行する。通常のcatch-all転送ruleは変更していない。
+A run without a session, or receiving `0010`, requests a new authentication email. A Cloudflare Email Routing rule scoped to the target address delivers to this Worker's `email()` handler, which forwards the original message to the existing Gmail destination and extracts the code. Once the Durable Object completes login, collection runs again within the email event. The ordinary catch-all forwarding rule is unchanged.
 
-Cookie、会員番号、認証コード、メール本文、challenge stateをsource、log、R2、manifestへ
-保存しない。Cookieとchallenge stateはDurable Object storage内だけに置く。
+Cookies, member numbers, authentication codes, email bodies and challenge state are stored in neither source, logs, R2 nor manifests. Cookies/challenge state remain only in Durable Object storage.
 
-Web画面のV会員番号はlogin後もmask表示だったが、collection API自体は会員番号をrequest
-fieldとして要求しない。会員番号はsession再生成専用のWorker secretである。
+The Web screen kept the V member number masked even after login, but collection APIs do not require it as a request field. The member number is a Worker secret solely for session regeneration.
 
-ログイン画面はCloudflare越しでも通常表示でき、APIも匿名curlへ`0010`を返すため、今回の
-観測ではbot challengeが主障害ではない。標準Workers `fetch()`でlogin、メール認証、JSON
-collectionまで完了し、browser、TLS impersonation、Containerは不要だった。
+Login screens displayed normally through Cloudflare, and anonymous curl API calls returned `0010`, so bot challenges were not the main obstacle in this observation. Standard Workers `fetch()` completed login, email authentication and JSON collection without a browser, TLS impersonation or Container.
 
-## 保存内容
+<a id="保存内容"></a>
 
-各runは次のartifactを共有DATA bucketの`objects/<2 hex>/<sha256>`へcontent-addressedで保存し、最後にterminal `runs/v-point/<run-id>/terminal.json`を書く。collector manifestはartifactとして保存せず、terminalがrunの記録になる。
+## Stored contents
+
+Each run content-addresses the following artifacts in shared DATA at `objects/<2 hex>/<sha256>`, then writes terminal `runs/v-point/<run-id>/terminal.json` last. No collector manifest is stored as an artifact; the terminal records the run.
 
 ```text
 balance-info.json
@@ -96,11 +81,11 @@ vmoney-history-page-0001.json
 collection-summary.json
 ```
 
-Vポイント履歴とVマネー履歴は毎run、`filter_date`を空にして公開上限の最大3年を全page
-走査する。現在はVポイント149件を5 request、Vマネー0件を1 requestで取得できるため、
-Queueは不要である。
+Every run scans all pages of the public maximum 3-year V Point and V Money history with empty `filter_date`. Current capture needs 5 requests for 149 V Point records and 1 request for 0 V Money records, so no Queue is needed.
 
-## 開発とデプロイ
+<a id="開発とデプロイ"></a>
+
+## Development and deployment
 
 ```bash
 mise run install                              # from the repository root
@@ -109,125 +94,87 @@ mise run //services/collector-vpoint:ci
 mise run //services/collector-vpoint:dry-run
 ```
 
-必要なCloudflare resources/secrets:
+Required Cloudflare resources/secrets:
 
-- R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。旧source専用bucketは2026-09-13に削除済み）
+- R2 binding: `DATA` → `kogane-raw-evidence` (shared by all collectors; the old dedicated source bucket was deleted on 2026-09-13)
 - SQLite Durable Object: `VPointSession`
-- Email Routing rule: `kogane-vpoint-auth`（`vpoint@takuk.me`だけをWorkerへ配送）
-- Email Routing rule: `kogane-vpoint-pay`（`vpointpay@takuk.me`だけを同じWorkerへ配送）
+- Email Routing rule: `kogane-vpoint-auth` (delivers only `vpoint@takuk.me` to the Worker)
+- Email Routing rule: `kogane-vpoint-pay` (delivers only `vpointpay@takuk.me` to the same Worker)
 - secret: `VPOINT_MEMBER_NUMBER`
 - secret: `VPOINT_EMAIL_RECIPIENT`
 - secret: `VPOINT_EMAIL_FORWARD_TO`
-- D1 binding: `SCHEDULE_DB` → `kogane-raw-evidence`（execution lease）
-- var: `VPOINT_PAY_EMAIL_RECIPIENT`（`wrangler.jsonc`）
-- Schedule: the Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the `vpoint` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), `15 21 * * *` UTC（毎日06:15 JST）. The Worker has no Cron Trigger (`triggers.crons` is empty).
+- D1 binding: `SCHEDULE_DB` → `kogane-raw-evidence` (execution lease)
+- var: `VPOINT_PAY_EMAIL_RECIPIENT` (`wrangler.jsonc`)
+- Schedule: the Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the `vpoint` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), `15 21 * * *` UTC (daily 06:15 JST). The Worker has no Cron Trigger (`triggers.crons` is empty).
 
-公開manual triggerは廃止（404）。既存のprivate RPC、認証メール受信、VポイントPay通知メール保存と転送を維持する。`GET /health` は秘密値や口座データを返さない。
+Public manual triggers are retired (404). Existing private RPC, authentication-email receipt, V Point Pay notification-email storage and forwarding remain. `GET /health` returns neither secrets nor account data.
 
-旧source bucketのhistorical outbox（Vポイント本体のmanifestとVポイントPay通知メールのpair）は、2026-09-13に中央DATAへコピー・検証した後に削除した。`backfill-raw-evidence.sh`と`backfill-vpoint-pay-email-raw-evidence.sh`が呼んでいたroute、通知保存後に`waitUntil`から呼んでいたService Binding、`services/collector-r2-importer`の監査scriptも同時に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。両scriptも削除済みである。
+The historical outbox in the old source bucket (V Point manifests and V Point Pay notification-email pairs) was copied to central DATA, verified and then deleted on 2026-09-13. Routes used by `backfill-raw-evidence.sh` and `backfill-vpoint-pay-email-raw-evidence.sh`, the Service Binding called from `waitUntil` after notification storage, and `services/collector-r2-importer` audit scripts were retired at the same time ([legacy-retirement.md](../../docs/legacy-retirement.md)). Both scripts were also deleted.
 
-2026-09-05のread-only contract auditではsource R2のmanifest 24件（v1 5件、v2 19件、成功13件、失敗11件）とreconciliation参照10件がすべてstrict validatorへ適合した。旧reconciliation 3件は旧exact match policy、残り7件は現行exact policyであり、両方を明示的な互換契約として扱う。
+The read-only contract audit on 2026-09-05 found all 24 source-R2 manifests (5 v1, 19 v2; 13 successful, 11 failed) and 10 reconciliation references passed strict validators. The 3 old reconciliations used the old exact-match policy, and the remaining 7 used the current exact policy; both are explicit compatibility contracts.
 
-2026-08-31のproduction verificationでは、初回triggerが認証メールを要求し、Email Workerが
-受信・Gmail転送・session生成・再収集を完了した。成功runは履歴149件を5 pageで走査し、
-8 artifactとfailure 0のmanifestをR2へ保存した。続くmanual triggerも追加メールなしで
-Durable Objectのsessionを再利用し、同じ149件・5 page・8 artifactで成功した。
+In production verification on 2026-08-31, the first trigger requested an authentication email; the Email Worker received it, forwarded it to Gmail, generated a session and recollected. The successful run scanned 149 history records over 5 pages and saved 8 artifacts plus a failure-0 manifest in R2. A subsequent manual trigger reused the Durable Object session without another email, again succeeding with 149 records, 5 pages and 8 artifacts.
 
-同日のVマネー追加後のproduction verificationでは、同じメール認証とMy Page sessionで
-`/api/tmoney_history`もHTTP 200 / application status `0000`となった。live口座のVマネー
-履歴は0件だったが、空のpage 1 raw responseを欠落させず保存した。Vポイント149件・5 page、
-Vマネー0件・1 page、9 artifact、failure 0のv2 manifestをR2から再読して確認した。
+Production verification after adding V Money that day also returned HTTP 200 / application status `0000` from `/api/tmoney_history` with the same email authentication and My Page session. Although the live account had 0 V Money history records, the empty page-1 raw response was retained. Rereading the R2 v2 manifest confirmed 149 V Point records / 5 pages, 0 V Money records / 1 page, 9 artifacts and failure 0.
 
-検証環境を削除するときは、次を一組として扱う。
+Treat the following as a unit when removing the verification environment.
 
-1. Email Routing rules `kogane-vpoint-auth`、`kogane-vpoint-pay`
-2. Worker `kogane-vpoint-collector-poc`（secrets、`VPointSession` namespaceを含む）
+1. Email Routing rules `kogane-vpoint-auth`, `kogane-vpoint-pay`.
+2. Worker `kogane-vpoint-collector-poc` (including secrets and the `VPointSession` namespace).
 
-先にEmail Routing ruleを削除または無効化し、その後Workerを削除する。catch-all ruleと、
-他のcollectorとProcessorも使う共有DATA bucketは削除対象ではない。
+Remove/disable Email Routing rules first, then remove the Worker. The catch-all rule and shared DATA used by other collectors and the Processor are excluded from removal.
 
-## VポイントPayとapp archive
+<a id="vポイントpayとapp-archive"></a>
 
-VポイントPayはプリペイドJPY残高・authorization・settlement・refund・chargeの別台帳で、
-正本は`com.smbc_card.vpoint`アプリである。このWeb PoCではAPKを取得・decompileしていない。
-`services/collector-vpoint-pay`のapp pollingは停止済みであり、このEmail Workerやraw-evidence導入で
-再有効化しない。
-将来app解析を行う場合、binary/decompiled/decrypted artifactは既存private Android archive
-repositoryへ保存し、Koganeにはprovenance、hash、再現手順、sanitize済みのschemaだけを置く。
+## V Point Pay and the app archive
 
-## VポイントPay通知メールの取り込みと照合
+`VポイントPay` (V Point Pay) is a separate ledger for prepaid JPY balances, authorization, settlement, refund and charge, with `com.smbc_card.vpoint` as its authoritative app. This Web PoC neither obtained nor decompiled its APK. App polling in `services/collector-vpoint-pay` is stopped and is not re-enabled by this Email Worker or raw-evidence adoption. Future app analysis keeps binary/decompiled/decrypted artifacts in the existing private Android archive repository; Kogane holds only provenance, hashes, reproduction steps and sanitized schemas.
 
-同じWorkerのVポイントPay専用Email Routing ruleを通知archiveにも使う。Gmailから対象通知を
-`vpointpay@takuk.me`へ転送すると、Gmailは原本を`message/rfc822`のinline attachmentとして
-送る。handlerは`forceRfc822Attachments`で内側の原本を分離し、内側のFromが
-`info@prepaid.smbc-card.com`で、subjectが次のいずれかである場合だけ取り込む。
+<a id="vポイントpay通知メールの取り込みと照合"></a>
 
-- ご利用のお知らせ
-- チャージ受付のお知らせ
-- プリペイド残高加算のお知らせ
-- ご利用不可のお知らせ／カードがご利用頂けませんでした
+## V Point Pay notification-email import and reconciliation
 
-原本（`notification.eml`）と正規化結果（`normalized-event.json`）は通知1通を1 runとして
-共有DATA bucketへcontent-addressedで保存し、最後にterminal
-`runs/v-point-pay-email/<原本のsha256>/terminal.json`を書く。run IDが原本hashなので、同じ通知を
-再転送しても`already_persisted`となり原本は増えない。Gmailから`message/rfc822`添付で転送された通知は元から
-Gmailに存在するためWorkerから戻さない。公式送信元から`vpointpay@takuk.me`へ直接届いた通知は、
-DATA保存後に従来のGmail宛へ転送する。OTPや転送先確認メールなど対象外メールも従来どおり
-転送する。この区別により、VポイントPayの登録メールをaliasへ変更してもGmailで通知を読め、
-Gmailからのbackfillは転送loopを起こさない。
+The same Worker's V Point Pay-specific Email Routing rule also archives notifications. Forwarding target notifications from Gmail to `vpointpay@takuk.me` sends originals as inline `message/rfc822` attachments. The handler separates inner originals with `forceRfc822Attachments` and imports only when the inner From is `info@prepaid.smbc-card.com` and subject is one of:
 
-既存メールのbackfill手順:
+- `ご利用のお知らせ` ("usage notification").
+- `チャージ受付のお知らせ` ("top-up acceptance notification").
+- `プリペイド残高加算のお知らせ` ("prepaid balance addition notification").
+- `ご利用不可のお知らせ／カードがご利用頂けませんでした` ("unavailable-use notification / your card could not be used").
 
-1. Gmailで次を検索する。
+Original `notification.eml` and normalized `normalized-event.json` are content-addressed in shared DATA as 1 run per 1 notification, followed last by terminal `runs/v-point-pay-email/<original-sha256>/terminal.json`. The run ID is the original hash, so forwarding the same notification again yields `already_persisted` without adding another original. Notifications forwarded from Gmail as `message/rfc822` attachments already exist in Gmail and are not sent back by the Worker. Official-sender notifications delivered directly to `vpointpay@takuk.me` are forwarded to the existing Gmail destination after DATA storage. Other mail, such as OTPs or forwarding-address confirmations, is also forwarded as before. This distinction lets Gmail continue displaying notifications after the registered V Point Pay address changes to the alias, while Gmail backfill avoids forwarding loops.
+
+Existing-email backfill procedure:
+
+1. Search Gmail with:
 
    ```text
    from:info@prepaid.smbc-card.com (subject:"ご利用のお知らせ" OR subject:"チャージ受付のお知らせ" OR subject:"プリペイド残高加算のお知らせ" OR subject:"ご利用不可のお知らせ" OR subject:"カードがご利用頂けませんでした") -in:spam -in:trash
    ```
 
-2. 検索結果を原本添付のまま`vpointpay@takuk.me`へ転送する。Gmail APIを使う場合は
-   `message/rfc822`を保持し、1 request最大10通で分割する。
-3. 転送した通知はそれぞれ`v-point-pay-email` runとしてDATAへ保存される。再転送は安全
-   （`already_persisted`）だが、欠落分だけ再転送してよい。handlerが通知を保存するのは
-   envelope宛先が`VPOINT_PAY_EMAIL_RECIPIENT`（`vpointpay@takuk.me`）の場合だけで、
-   `vpoint@takuk.me`へ転送した通知は保存されない。
+2. Forward results with original attachments intact to `vpointpay@takuk.me`. Gmail API use must preserve `message/rfc822`, splitting requests at a maximum of 10 messages per 1 request.
+3. Each forwarded notification is saved to DATA as a `v-point-pay-email` run. Re-forwarding is safe (`already_persisted`), but forwarding only missing messages is sufficient. The handler stores notifications only when the envelope recipient is `VPOINT_PAY_EMAIL_RECIPIENT` (`vpointpay@takuk.me`); notifications forwarded to `vpoint@takuk.me` are not stored.
 
-`vpoint@takuk.me`はVポイントWeb認証メール専用、
-`vpointpay@takuk.me`はVポイントPayアプリの登録先、公式通知、過去通知のbackfill先とする。両routeは
-同じWorkerへ届くが、後者はコード抽出には使われない。通常のcatch-all転送ruleは残す。
+`vpoint@takuk.me` is solely for V Point Web authentication emails; `vpointpay@takuk.me` is the V Point Pay app registration address, official-notification destination and historical-notification backfill destination. Both routes reach the same Worker, but the latter is not used for code extraction. Keep the ordinary catch-all forwarding rule.
 
-collectorのメール照合reportは旧source bucketの`raw/v-point-pay-email/`一覧に依存していたため、
-2026-09-13の退役以降は生成していない。source横断の照合はterminalを読むProcessorの責務である
-（[collection.md](../../docs/collection.md#v-point-servicescollector-vpoint)）。以下は当時の照合ruleの記録である。
+The collector's email reconciliation report depended on old source-bucket `raw/v-point-pay-email/` listings, so none has been generated since retirement on 2026-09-13. Cross-source reconciliation belongs to the Processor reading terminals ([collection.md](../../docs/collection.md#v-point-servicescollector-vpoint)). The following records the reconciliation rules at that time.
 
-照合は次のexact ruleだけを使う。
+Reconciliation uses only these exact rules.
 
-- メールに`内、利用Vポイント数`が明記された場合、その値を使う。
-- チャージの`取引内容`が`ポイント`と明記された場合、そのチャージ額を使う。
-- JST暦日とVポイント数がVポイント履歴の利用行に完全一致した1件だけを`matched`とする。
-- 0件は`unmatched`、複数は`ambiguous`、明示額がない通知は`not-comparable`とする。
+- Use the explicit value when email states `内、利用Vポイント数` ("of which, V Points used").
+- Use the top-up amount when top-up `取引内容` ("transaction description") explicitly states `ポイント` ("points").
+- Only exactly 1 usage-history row matching the JST calendar day and V Point count is `matched`.
+- 0 rows are `unmatched`, multiple rows are `ambiguous`, and notifications without an explicit amount are `not-comparable`.
 
-加盟店名の近似、前後日へのずらし、金額の補正、候補の自動選択は行わない。reportはsource keyと
-row fingerprintを参照するだけで、メール原本、正規化event、Vポイント履歴、VポイントPay app
-履歴のいずれも変更・削除・統合しない。appのlive transaction snapshotがまだない場合は
-`unavailable-no-live-snapshot`を明示する。
+No approximate merchant matching, adjacent-day shifting, amount adjustment or automatic candidate selection is performed. Reports refer only to source keys and row fingerprints; they do not change, delete or merge original emails, normalized events, V Point history or V Point Pay app history. A missing live app transaction snapshot is explicitly `unavailable-no-live-snapshot`.
 
-2026-08-31のlive backfillではGmail検索85通、R2 event 85件で一致した。Vポイント履歴149件との
-exact照合は、比較可能34件中11件matched、23件unmatched、0件ambiguous、51件not-comparable
-だった。不一致23件は推測で修正していない。VポイントPay app履歴はlive credential消失後のため
-未取得で、email対appの照合は実行していない。
+Live backfill on 2026-08-31 matched 85 Gmail search results with 85 R2 events. Exact reconciliation against 149 V Point history records yielded, among 34 comparable events, 11 matched, 23 unmatched and 0 ambiguous, plus 51 not-comparable. The 23 unmatched events were not corrected by guessing. V Point Pay app history had not been captured after live credentials were lost; email-to-app reconciliation was not run.
 
-## 段階別の運用ログ
+<a id="段階別の運用ログ"></a>
 
-`collector-stage-started` / `collector-stage-failed`はrunIdで同一実行を関連付け、
-残高・SMFGポイント・Vポイント履歴・Vマネー履歴・R2保存・メール照合・manifest保存を
-区別する。失敗には固定の`failureCode`、許可した`errorType`、確認できたHTTP status、
-4桁のapplication code、ページ不整合の`reasonCode`だけを残す。部分失敗も個別に記録し、
-manifest自体が保存できない場合もrunIdをログに残す。
+## Operational logs by stage
 
-再認証は`vpoint-auth-step`でメール要求・コード送信・session確認までを区別する。
-通知メールには独立したrunIdがあり、parse・保存・転送・コード処理を追跡できる。
-認証後の収集は`vpoint-post-auth-collection`のparentRunIdでメール処理へ結び付く。
+`collector-stage-started` / `collector-stage-failed` correlate the same execution by runId, distinguishing balance, SMFG points, V Point history, V Money history, R2 storage, email reconciliation and manifest storage. Failures retain only fixed `failureCode`, allowed `errorType`, observed HTTP status, 4-digit application code and page-inconsistency `reasonCode`. Partial failures are logged individually; runId remains in logs even if the manifest itself cannot be saved.
 
-例外message/stack、レスポンス本文、URL、Cookie、token、認証コード、メール宛先・本文は
-ログへ流さない。公式raw dataのR2保存、失敗/部分成功、メール再転送防止の挙動は維持する。
-VポイントPayのapp API Workerは別途停止されており、このWorkerの通知メール収集は継続する。
+`vpoint-auth-step` distinguishes reauthentication email requests, code submission and session checks. Notification emails have independent runIds for parsing, storage, forwarding and code-processing traces. Post-authentication collection links to email processing through `vpoint-post-auth-collection` parentRunId.
+
+Exception messages/stacks, response bodies, URLs, cookies, tokens, authentication codes, email addresses and email bodies do not enter logs. Official raw-data R2 storage, failed/partial outcomes and email-reforward prevention remain. The V Point Pay app API Worker is stopped separately; this Worker's notification-email capture continues.

@@ -1,20 +1,20 @@
-# SBI VCトレード（VCTRADE）調査
+# SBI VCトレード (SBI VC Trade / VCTRADE) research
 
 > Dated source research and implementation notes. Earlier runtime/schedule
 > claims may be superseded by later changes. See the [research scope](README.md),
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-- 調査日: 2026-08-26（Australia/Sydney）
-- 対象: SBI VCトレード株式会社が提供する **VCTRADE** の日本円・暗号資産口座データ取得面
-- 対象外: 同社の別サービス、SBI証券、カード、外部アグリゲーター
-- 制約: 公開情報、公開Web artifact、正規配布アプリのread-only静的解析、および本人操作によるread-only動的観測を対象とする。口座識別子、氏名、メールアドレス、電話番号、実残高、取引内容、Cookie値、token、パスワード、TOTPシード、OTP、passkeyを取得・記録しない。注文、取消、入出金、暗号資産の入出庫、貸コイン申込、認証・口座設定変更、security control bypassは実施しない。
+- Research date: 2026-08-26 (Australia/Sydney)
+- Scope: collection surfaces for Japanese-yen/cryptoasset account data in **VCTRADE**, provided by SBI VCトレード株式会社 (SBI VC Trade Co., Ltd.)
+- Out of scope: the company's other services, SBI証券 (SBI Securities), cards, and external aggregators
+- Constraints: public information, public Web artifacts, read-only static analysis of legitimately distributed apps, and read-only dynamic observation during owner operation are in scope. Do not obtain or record account identifiers, names, email addresses, phone numbers, actual balances, transaction contents, cookie values, tokens, passwords, TOTP seeds, OTPs, or passkeys. Do not place/cancel orders, deposit/withdraw money or cryptoassets, apply for coin lending, change authentication/account settings, or bypass security controls.
 
-## 結論
+## Conclusion
 
-SBI VCトレードには、暗号資産・日本円の資産状況、残高履歴、注文履歴、約定履歴、入出金・入出庫履歴、損益・報告書、ステーキング、貸コインの読み取り面がある。一方、顧客向け公開APIは現時点で未提供で、公式FAQは将来の公開予定としている。認証済みCookieと`secureKey`を使う内部Web gatewayのbrowser外replayに加え、既存Bitwarden passkeyからCloudflare Workerだけで新規sessionを作る無人再認証も2026-08-31に実証できた。固定read allowlistによるcollectorをブラウザーなしで運用できる見込みである。
+SBI VCトレード has read surfaces for cryptoasset/yen asset status, balance history, order history, execution history, deposit/withdrawal history, profit/loss and reports, staking, and coin lending. A public customer API is not currently provided; the official FAQ describes future plans to publish one. Alongside browserless replay of the internal Web gateway with authenticated cookies and `secureKey`, unattended reauthentication creating a new session solely in a Cloudflare Worker from an existing Bitwarden passkey was demonstrated on 2026-08-31. A collector using a fixed read allowlist appears operable without a browser.
 
-総合評価は、手動エクスポート + ローカル解析が **E / コスト1**、無人passkey再認証を含むWeb collectorが **B / コスト3** である。標準Bun/Workers `fetch`によるread-only collectorとWorkers Web Cryptoによるpasskey loginは実データで成功し、Cloudflare IP、browser TLS fingerprint、Chrome、Turnstileはpasskey経路の必須条件ではなかった。固定read allowlistの日次収集とprivate R2保存までWorkerへ統合済みで、完全ブラウザーまたはアプリ自動化は不要になった。残るのはabsolute expiry時fallbackと仕様変更の長期観測、PoCから本設計への統合である。
+Overall assessment: manual export + local parsing is **E / cost 1**; a Web collector including unattended passkey reauthentication is **B / cost 3**. A read-only collector using standard Bun/Workers `fetch` and passkey login using Workers Web Crypto succeeded with real data; Cloudflare IP, browser TLS fingerprints, Chrome, and Turnstile were not prerequisites for the passkey route. Daily collection with a fixed read allowlist and private R2 storage is integrated into the Worker, making full browser/app automation unnecessary. Remaining work is long-term observation of fallback at absolute expiry and specification changes, and integration from the PoC into the main design.
 
 Since 2026-09-13 the daily run is stored in the shared `DATA` bucket rather
 than a private one, and since 2026-10-05 the Processor's alarms, not Cron
@@ -22,147 +22,147 @@ triggers, start the keepalive and the daily collection
 ([§15](#15-cloudflare-workers-sessionpasskey-poc),
 [shared DATA bucket](#shared-data-bucket-u09-2026-09-11)).
 
-## 1. 口座・商品と列挙できる情報
+## 1. Accounts, products, and enumerable information
 
-### 公式に確認できた事実
+### Officially confirmed facts
 
-- 「資産状況」は日本円と全銘柄の保有状況を表示する。
-- 「残高履歴」は基準日時点の日本円および全銘柄の残高を表示する。
-- 「ポジションサマリー」はレバレッジ取引の建玉を銘柄・売買方向ごとに集約し、「ポジション照会」は個別建玉を表示する。
-- 「口座詳細」は純資産、注文中証拠金、建玉必要証拠金、証拠金維持率、出金・出庫可能額等を表示する。
-- 公式の現行ツールは、ブラウザー向けの「VCTRADE（シンプルモード）」「VCTRADE（トレーダーモード）」と、iOS/Androidの「SBI VCトレードアプリ」である。アプリは保有資産の前日比・推移グラフ、チャート、注文、ステーキング情報を扱う。
-- ステーキングは対象暗号資産を保有することで原則自動参加となり、各営業日06:59:59時点の保有数量を基に平均数量を算出し、報酬は原則翌月15日までに入金履歴へ反映される。対象銘柄・料率は変動する。
-- 貸コインは数量を指定して申し込む別サービスであり、履歴・状況照会面がある。ステーキングと異なり申込、数量条件、貸出期間がある。
+- `資産状況` ("asset status") displays holdings in Japanese yen and all assets.
+- `残高履歴` ("balance history") displays Japanese-yen and all-asset balances as of a reference date/time.
+- `ポジションサマリー` ("position summary") aggregates leveraged positions by asset and buy/sell direction; `ポジション照会` ("position inquiry") displays individual positions.
+- `口座詳細` ("account details") displays net assets, margin for open orders, required position margin, margin maintenance ratio, available withdrawal amounts for money/cryptoassets, and similar fields.
+- Current official tools are browser-based `VCTRADE（シンプルモード）` ("VCTRADE, simple mode"), `VCTRADE（トレーダーモード）` ("VCTRADE, trader mode"), and the iOS/Android `SBI VCトレードアプリ` ("SBI VC Trade app"). The app handles day-over-day changes/graphs of asset holdings, charts, orders, and staking information.
+- Holding eligible cryptoassets generally enrolls the user in staking automatically. Average quantities are calculated from holdings at 06:59:59 on each business day, and rewards generally appear in deposit history by the 15th of the following month. Eligible assets and rates vary.
+- Coin lending is a separate service requiring an application specifying quantity, with history/status inquiry surfaces. Unlike staking, it has applications, quantity conditions, and lending periods.
 
-一次資料:
+Primary sources:
 
-- [照会機能一覧](https://www.sbivc.co.jp/guide/1-14)
-- [取引ツール・アプリ](https://www.sbivc.co.jp/services/tools-apps)
-- [報告書の項目説明](https://www.sbivc.co.jp/faqs/content/w6w84vhcjqwi)
-- [ステーキング](https://www.sbivc.co.jp/services/staking)
-- [貸コイン](https://home.sbivc.co.jp/services/lending)
-- [貸コインの申込・履歴](https://www.sbivc.co.jp/faqs/content/ktg3vu85rt7)
+- [Inquiry feature list](https://www.sbivc.co.jp/guide/1-14)
+- [Trading tools/apps](https://www.sbivc.co.jp/services/tools-apps)
+- [Report field descriptions](https://www.sbivc.co.jp/faqs/content/w6w84vhcjqwi)
+- [Staking](https://www.sbivc.co.jp/services/staking)
+- [Coin lending](https://home.sbivc.co.jp/services/lending)
+- [Coin-lending applications/history](https://www.sbivc.co.jp/faqs/content/ktg3vu85rt7)
 
-### 推測しない事項
+### Matters not inferred
 
-- 対象暗号資産の全銘柄リストと料率は頻繁に更新されるため、この文書へ固定列挙しない。
-- 貸コインの現行履歴カラム完全一覧は、公開された現行一次資料から確定できない。
-- 資産総額の報告値では、未決済レバレッジ建玉の評価損益が除外される。画面上の別の評価額と同一と仮定してはならない。
+- The complete eligible-cryptoasset list and rates change frequently and are not pinned in this document.
+- The complete current coin-lending history column list cannot be established from current public primary sources.
+- Reported total assets exclude unrealized profit/loss on open leveraged positions. Do not assume equality with other valuations displayed on screen.
 
-## 2. 明細粒度、期間、件数、CSV/PDF
+## 2. Statement granularity, periods, counts, CSV/PDF
 
-### 画面上の粒度
+### On-screen granularity
 
-- 注文履歴: 現物（販売所・取引所）およびレバレッジの新規・決済注文。未約定も含む。
-- 約定履歴: 約定済みの取引のみ。未約定・取消済み注文は含まない。
-- 入出金・入出庫履歴: 日本円入金・出金、暗号資産入庫・出庫、取引損益等。
-- 残高履歴: 基準日時点の日本円・暗号資産残高。
-- 報告書: 年次・月次・日次を選択しPDFをダウンロードできる。個人には年間取引報告書も用意される。
-- 年間損益報告書は、現物について銘柄別の取引・実現損益、年初・年末評価と差額を、レバレッジについて建玉損益とファンディングレート等を扱う。
+- `注文履歴` ("order history"): new/closing orders for spot (brokerage/exchange) and leveraged trading. Includes unfilled orders.
+- `約定履歴` ("execution history"): executed trades only. Excludes unfilled/canceled orders.
+- `入出金・入出庫履歴` ("money/cryptoasset deposit/withdrawal history"): yen deposits/withdrawals, cryptoasset deposits/withdrawals, trading profit/loss, etc.
+- `残高履歴`: Japanese-yen/cryptoasset balances as of a reference date/time.
+- `報告書` ("reports"): annual/monthly/daily reports can be selected and downloaded as PDFs. Annual transaction reports are also provided to individuals.
+- `年間損益報告書` ("annual profit/loss reports") covers per-asset transactions/realized profit/loss, beginning/end-of-year valuations and differences for spot trading, and position profit/loss, funding rates, and similar items for leveraged trading.
 
-### エクスポート
+### Exports
 
-- 「損益計算用データ」はZIPで、約定履歴 `TRADE_RECORD_LIST` とウォレット/取引口座の資金移動 `CASHFLOW` の2 CSVを含む。
-- 年間損益報告書等は電子交付PDFであり、郵送交付ではない。
-- 2022年9月以降のCSVで文字化けする場合、公式FAQはUTF-8 BOM付きでの再保存を案内している。ZIPは先に展開が必要な場合がある。
-- 新アプリで公式に列挙されるのは年次・月次・日次報告書であり、CSV/ZIP取得は列挙されていない。PCのトレーダーモードは年次・月次・日次・損益計算用データ、シンプルモードは年次・月次・損益計算用データを扱う。
+- `損益計算用データ` ("profit/loss calculation data") is a ZIP containing 2 CSVs: execution history `TRADE_RECORD_LIST` and wallet/trading-account fund movements `CASHFLOW`.
+- Annual profit/loss and similar reports are electronically delivered PDFs, not mailed.
+- For garbled CSV text from September 2022 onward, the official FAQ recommends saving again as UTF-8 with BOM. ZIP extraction may be needed first.
+- The new app officially lists annual/monthly/daily reports, but not CSV/ZIP retrieval. PC trader mode handles annual/monthly/daily reports and profit/loss calculation data; simple mode handles annual/monthly reports and profit/loss calculation data.
 
-### 期間と件数
+### Periods and counts
 
-- 税務・年間報告上の1年は、1月1日07:00:00から翌年1月1日06:59:59まで。日次の区切りも07:00から翌06:59である。
-- 注文履歴・約定履歴のガイドは「直近4か月」と「4か月以前の履歴」を分け、期間・銘柄等による絞り込みを案内する。
-- 公開一次資料からは、4か月以前を含む最大保存年数、1回の取得上限、総件数上限、ページサイズ、CSVの完全な列定義を確定できない。
+- A year for tax/annual reporting runs from January 1 07:00:00 through the following January 1 06:59:59. Daily boundaries also run from 07:00 to 06:59 the next day.
+- Order/execution-history guides distinguish `直近4か月` ("most recent 4 months") from `4か月以前の履歴` ("history before 4 months ago") and explain filtering by period, asset, and similar criteria.
+- Public primary sources do not establish maximum retention years including history before 4 months ago, per-retrieval limits, total-count limits, page size, or complete CSV column definitions.
 
-一次資料:
+Primary sources:
 
-- [報告書の表示・PDF取得](https://www.sbivc.co.jp/guide/4-63)
-- [ツール別に確認できる報告書](https://www.sbivc.co.jp/faqs/content/e6vz-8vae19)
-- [年間損益報告書と損益計算用CSV](https://www.sbivc.co.jp/faqs/content/apvc2fpgs6)
-- [年間の集計期間](https://www.sbivc.co.jp/faqs/content/jt0lgp_bl5gv)
-- [報告書はPDF電子交付](https://www.sbivc.co.jp/faqs/content/wcl7k4f45k)
-- [CSV文字コード](https://www.sbivc.co.jp/faqs/content/mtjuaeit_5ib)
-- [注文履歴](https://www.sbivc.co.jp/guide/4-21)
-- [約定履歴](https://www.sbivc.co.jp/guide/4-49)
+- [Viewing reports/downloading PDFs](https://www.sbivc.co.jp/guide/4-63)
+- [Reports available by tool](https://www.sbivc.co.jp/faqs/content/e6vz-8vae19)
+- [Annual profit/loss report and calculation CSV](https://www.sbivc.co.jp/faqs/content/apvc2fpgs6)
+- [Annual aggregation period](https://www.sbivc.co.jp/faqs/content/jt0lgp_bl5gv)
+- [Electronic PDF report delivery](https://www.sbivc.co.jp/faqs/content/wcl7k4f45k)
+- [CSV encoding](https://www.sbivc.co.jp/faqs/content/mtjuaeit_5ib)
+- [Order history](https://www.sbivc.co.jp/guide/4-21)
+- [Execution history](https://www.sbivc.co.jp/guide/4-49)
 
-## 3. pending / settled の区別
+## 3. Distinguishing pending / settled
 
-- 取引所の未約定注文は専用一覧に表示される。FASの指値注文は一部約定後の残数量が有効なまま残り、FAKの成行注文は一部約定後の残数量が失効する。
-- 未約定注文は毎週水曜日の定期メンテナンスで取消・失効する。これ以外の絶対的な注文期限はないと公式FAQが説明する。
-- 約定履歴はsettledという会計用語ではなく「約定済み」を表し、未約定・取消済みは除外される。暗号資産入出庫のブロックチェーン上の確定数や会計上の最終確定時点は、公開画面仕様から一律に断定できない。
-- 報告書の「出金・出庫予定額」は、依頼済みだが手続未完了の金額である。受付済み出金・出庫は移動可能額から控除される。
-- 暗号資産の出庫予約は同時に1件のみで、完了後に次を受け付ける。この画面は読み取り調査でも進入禁止とする。
+- Unfilled exchange orders appear in a dedicated list. For FAS limit orders, the remaining quantity stays valid after partial execution; for FAK market orders, the remaining quantity expires after partial execution.
+- Unfilled orders are canceled/expire during scheduled maintenance every Wednesday. The official FAQ states there is no other absolute order expiry.
+- Execution history means `約定済み` ("executed"), not the accounting term settled, and excludes unfilled/canceled orders. Blockchain confirmation counts for cryptoasset deposits/withdrawals and accounting finalization times cannot be uniformly established from public screen specifications.
+- A report's `出金・出庫予定額` ("scheduled money/cryptoasset withdrawal amount") means requests submitted but not yet completed. Accepted withdrawals are deducted from transferable amounts.
+- Only 1 cryptoasset withdrawal reservation can exist at once; the next is accepted after completion. Do not enter this screen even for read-only research.
 
-一次資料:
+Primary sources:
 
-- [未約定注文一覧](https://www.sbivc.co.jp/guide/4-89)
-- [約定履歴に含まれない状態](https://www.sbivc.co.jp/guide/4-22)
-- [取引所ルール（FAS/FAK）](https://www.sbivc.co.jp/auction)
-- [未約定注文の有効期限](https://www.sbivc.co.jp/faqs/content/ohdsqdyigx)
-- [暗号資産出庫予約](https://www.sbivc.co.jp/guide/1-16)
-- [受付済み出金・出庫と移動可能額](https://www.sbivc.co.jp/faqs/content/dokbb1fmd)
+- [Unfilled-order list](https://www.sbivc.co.jp/guide/4-89)
+- [States excluded from execution history](https://www.sbivc.co.jp/guide/4-22)
+- [Exchange rules (FAS/FAK)](https://www.sbivc.co.jp/auction)
+- [Unfilled-order expiry](https://www.sbivc.co.jp/faqs/content/ohdsqdyigx)
+- [Cryptoasset withdrawal reservations](https://www.sbivc.co.jp/guide/1-16)
+- [Accepted withdrawals and transferable amounts](https://www.sbivc.co.jp/faqs/content/dokbb1fmd)
 
-## 4. 認証、MFA、passkey、Bitwarden
+## 4. Authentication, MFA, passkeys, Bitwarden
 
-### 確認できた事実
+### Confirmed facts
 
-- 従来ログインは登録メールアドレスまたは口座番号とパスワードを使い、認証アプリ設定時は6桁コードを続けて入力する。
-- 2025-09-03から多要素認証が必須。認証アプリまたはSMSを使い、どちらも未設定の場合は登録メールアドレスへコードが送られる。
-- 認証アプリはQRコードまたはアカウントキーで登録するTOTP型である。シード/キーとコードは秘密として一切取得しない。
-- passkeyは2026-03-18にWebのトレーダー/シンプル/マイページへ導入され、同年6月から現行アプリにも対応した。FIDO2を用い、生体情報は端末内に留まる。passkeyログインでは追加の二要素認証を省略できる一方、ID/パスワード + MFAも残る。
-- 公式の対応プロバイダー列挙はiCloudキーチェーン、Googleパスワードマネージャー、Windows Hello。最大5件のpasskeyを登録できる。同一OS内のクラウド同期はあり得るが、異なるOS間での同期は保証されない。
-- ログイン失敗を繰り返すとロックされ、パスワード再設定が必要になる。
+- Traditional login uses the registered email address or account number and password, followed by a 6-digit code when an authenticator app is configured.
+- MFA has been mandatory since 2025-09-03. It uses an authenticator app or SMS; if neither is configured, a code is sent to the registered email address.
+- Authenticator-app setup uses TOTP registered by QR code or account key. Seeds/keys and codes are secrets and must never be obtained.
+- Passkeys were introduced to Web trader/simple/My Page modes on 2026-03-18 and supported in the current app from June that year. They use FIDO2; biometric information stays on the device. Passkey login can skip additional two-factor authentication, while ID/password + MFA remains available.
+- Officially listed providers are iCloud Keychain, Google Password Manager, and Windows Hello. Up to 5 passkeys can be registered. Cloud synchronization within the same OS is possible, but synchronization across different OSs is not guaranteed.
+- Repeated login failures cause a lock requiring a password reset.
 
-### Bitwardenとの関係
+### Relationship with Bitwarden
 
-Bitwarden自体はWebサイト・アプリのpasskey保存と利用に対応する。SBI VCトレードの公式対応プロバイダー一覧にBitwardenはないものの、2026-08-31に本人の既存Bitwarden passkeyを選択して現行VCTRADEへ正常loginできた。最初に誤って開いた通常Chromeでもlogin成功を見たが、そのtabは閉じた。後述する認証済み通信・schema evidenceの正本は、その後に本人がloginを完了した**Kogane Capture Chrome**で取得した。したがってBitwardenとの相互運用性はlive確認済みである。
+Bitwarden itself supports storing/using website/app passkeys. Although Bitwarden is absent from SBI VCトレード's official provider list, selecting the owner's existing Bitwarden passkey successfully logged in to current VCTRADE on 2026-08-31. Login success was also seen in ordinary Chrome opened mistakenly at first, but that tab was closed. The authoritative authenticated-traffic/schema evidence below was obtained in **Kogane Capture Chrome**, where the owner subsequently completed login. Bitwarden interoperability is therefore live-confirmed.
 
-同日、WSLのBitwarden CLI 2026.8.0を本人がmaster passwordでunlockし、`SBI VCトレード` itemが1件のFIDO2 credentialを持つことを確認した。値を表示せずfield名だけを検査した結果、`credentialId`、P-256の`keyValue`、`rpId`、`userHandle`、`counter`等、WebAuthn assertionに必要な構造をCLIから取得できる。Kogane専用credentialは新設せず、この既存credentialを無人再認証候補とする。credential値、master password、vault sessionはGit、PR、標準出力へ保存しない。
+On the same day, the owner unlocked Bitwarden CLI 2026.8.0 in WSL with their master password and confirmed that the `SBI VCトレード` item held 1 FIDO2 credential. Inspecting field names without displaying values showed the CLI can obtain the structures needed for a WebAuthn assertion: `credentialId`, P-256 `keyValue`, `rpId`, `userHandle`, `counter`, etc. No Kogane-specific credential is created; this existing credential is the unattended-reauthentication candidate. Credential values, master password, and vault session are not saved in Git, PRs, or standard output.
 
-Bitwarden公式はexport済みpasskeyのcounterがservice側と一致しない場合に拒否され得ると一般論として説明する。一方、このcredentialの保存値と成功したbrowser assertionはいずれもcounter `0`だった。Bitwarden 2026.8.0の実装も保存counterが0より大きい場合だけincrementするため、このcredentialではBitwarden本体とのcounter分岐は起きない。Workerはcounter `0`だけを受理し、将来non-zeroへ変化した場合は自動更新を推測せず停止する。
+Bitwarden's official documentation generally warns that exported passkeys may be rejected if their counters diverge from the service. This credential's stored value and successful browser assertion both had counter `0`. Bitwarden 2026.8.0 also increments only stored counters greater than 0, so this credential does not diverge from Bitwarden itself. The Worker accepts only counter `0`; if it becomes non-zero, it stops instead of guessing automatic updates.
 
-一次資料:
+Primary sources:
 
-- [通常ログイン](https://www.sbivc.co.jp/guide/1-1)
-- [多要素認証の必須化と方式](https://www.sbivc.co.jp/faqs/content/fychc8w9x)
-- [認証アプリの設定](https://www.sbivc.co.jp/faqs/content/mmiani3gx8)
-- [passkeyの仕様・対応環境](https://www.sbivc.co.jp/guide/5-1)
-- [passkey導入案内](https://www.sbivc.co.jp/faqs/content/ym7cngjgatqv)
-- [passkey登録上限](https://www.sbivc.co.jp/guide/5-6)
-- [ログインロック](https://www.sbivc.co.jp/faqs/content/m9howuvxidze)
-- [Bitwarden公式: passkey保存・自動入力](https://bitwarden.com/help/storing-passkeys/)
-- [Bitwarden公式: vault exportとpasskey counterの注意](https://bitwarden.com/help/export-your-data/)
+- [Normal login](https://www.sbivc.co.jp/guide/1-1)
+- [Mandatory MFA and methods](https://www.sbivc.co.jp/faqs/content/fychc8w9x)
+- [Authenticator-app setup](https://www.sbivc.co.jp/faqs/content/mmiani3gx8)
+- [Passkey specification/supported environments](https://www.sbivc.co.jp/guide/5-1)
+- [Passkey introduction](https://www.sbivc.co.jp/faqs/content/ym7cngjgatqv)
+- [Passkey registration limit](https://www.sbivc.co.jp/guide/5-6)
+- [Login lock](https://www.sbivc.co.jp/faqs/content/m9howuvxidze)
+- [Bitwarden official: passkey storage/autofill](https://bitwarden.com/help/storing-passkeys/)
+- [Bitwarden official: vault export/passkey counter caution](https://bitwarden.com/help/export-your-data/)
 
-### 未確認
+### Unknowns
 
-セッション有効期間、refresh tokenの有無、端末信頼の具体的期限、証明書ピンニング、端末attestation、非公開APIの署名方式は公開資料から確認できない。
+Public documentation does not establish session lifetime, presence of refresh tokens, specific device-trust expiry, certificate pinning, device attestation, or private-API signature methods.
 
 ## 5. WAF / anti-bot
 
-2026-08-26に公開ホストへDNS解決とHEAD/GETのみを行った受動的観測では、次を確認した。Cookieの**値**は保存していない。
+Passive observation on 2026-08-26, using only DNS resolution and HEAD/GET to public hosts, confirmed the following. Cookie **values** were not saved.
 
-- `www.sbivc.co.jp`: Amazon CloudFrontの応答・キャッシュヘッダーを確認。
-- `simple.sbivc.co.jp`: CloudflareのCNAME、`server: cloudflare`、`cf-ray`、`__cf_bm` Cookie名を確認。
-- `account.sbivc.co.jp`: CloudflareのCNAME、同ヘッダー/Cookie名に加え、背後のCloudFrontを示す応答を確認。
-- Cloudflare公式資料によれば `__cf_bm` はBot ManagementまたはBot Fight Modeで使われる。したがってbot対策の存在を示す一次的な技術信号はあるが、適用中のWAFルール、botモード、チャレンジ条件、ログイン後の挙動は不明。
-- 公開ルートでCAPTCHAが出なかったことは、ログイン後や反復アクセスでチャレンジがない証拠にはならない。Akamaiの利用を示す信号は今回観測しなかった。
+- `www.sbivc.co.jp`: confirmed Amazon CloudFront response/cache headers.
+- `simple.sbivc.co.jp`: confirmed a Cloudflare CNAME, `server: cloudflare`, `cf-ray`, and the `__cf_bm` cookie name.
+- `account.sbivc.co.jp`: confirmed a Cloudflare CNAME, the same headers/cookie name, and responses indicating CloudFront behind it.
+- Cloudflare's official documentation says `__cf_bm` is used by Bot Management or Bot Fight Mode. There is therefore a direct technical signal of bot protection, but active WAF rules, bot mode, challenge conditions, and post-login behavior remain unknown.
+- Absence of CAPTCHA on public routes is not evidence that authenticated or repeated access has no challenges. No signal of Akamai use was observed in this research.
 
-資料:
+Reference:
 
-- [CloudflareのCookie説明](https://developers.cloudflare.com/fundamentals/reference/policies-compliances/cloudflare-cookies/)
+- [Cloudflare cookie documentation](https://developers.cloudflare.com/fundamentals/reference/policies-compliances/cloudflare-cookies/)
 
-## 6. 公式アプリとWebの役割
+## 6. Roles of the official app and Web
 
-- 現行Androidアプリの公式packageは `co.jp.sbivc.trade.app`、iOS App Store IDは `6639604109`。
-- 公式サイトから遷移するGoogle Playの公式listingは開発者を `SBI VC Trade Co., Ltd.` とし、2026-08-05更新を表示する。2026-08-26に同じGoogle Play公開payloadを `google-play-scraper` で構造化した結果、versionNameは `3.2.4` だった。versionCodeは公開listingから取得できなかったため未確認である。
-- 旧モバイルアプリは2026-01-28に終了し、2026-01-29から現行アプリへ一本化された。旧APK/旧マニュアルから現在のtransportや認証を推測しない。
-- シンプルモードはPC/スマートフォン向けの簡易UI、トレーダーモードはPC向け高機能UI、現行アプリは保有推移、TradingViewチャート、スピード注文、ステーキング表示を統合する。
-- 正規split APKの取得、署名確認、逆コンパイル、deobfuscation、静的解析、runtime tracing、通信メタデータ観測は調査対象である。ただし、改変APKの実行、証明書pinning/attestation/root検知/Cloudflare challengeの回避、秘密・PII・実値の保存、write操作は行わない。
+- The current official Android app package is `co.jp.sbivc.trade.app`; its iOS App Store ID is `6639604109`.
+- The official Google Play listing linked from the official website names developer `SBI VC Trade Co., Ltd.` and shows an update date of 2026-08-05. Structuring the same public Google Play payload with `google-play-scraper` on 2026-08-26 yielded versionName `3.2.4`. versionCode could not be obtained from the public listing and remains unconfirmed.
+- The old mobile app ended on 2026-01-28; the current app became the sole app from 2026-01-29. Do not infer current transport/authentication from old APKs/manuals.
+- Simple mode provides a simplified PC/smartphone UI; trader mode a feature-rich PC UI; the current app integrates holdings trends, TradingView charts, speed orders, and staking displays.
+- Obtaining legitimate split APKs, signature verification, decompilation, deobfuscation, static analysis, runtime tracing, and traffic-metadata observation are in scope. Do not execute modified APKs, bypass certificate pinning/attestation/root detection/Cloudflare challenges, save secrets/PII/actual values, or perform writes.
 
-### 6.1 正規split APKの取得状況とprovenance
+### 6.1 Legitimate split-APK acquisition status and provenance
 
-今回のWSL/Windows環境には、Playから当該アプリを正規インストール済みのAndroid端末、ADB、Android SDK build-tools、認可済みGoogle Play delivery clientがなかった。Google Playの公開listingはAPK download URLを提供しない。このため、第三者APK mirrorへ切り替えず、split APK、manifest、signing certificate、versionCode、native library、pinning/integrity実装の実解析は未実施である。
+This WSL/Windows environment had no Android device with the app legitimately installed from Play, ADB, Android SDK build-tools, or authorized Google Play delivery client. The public Google Play listing provides no APK download URL. Without switching to third-party APK mirrors, actual analysis of split APKs, manifest, signing certificate, versionCode, native libraries, and pinning/integrity implementations therefore remains unperformed.
 
-次回は本人所有端末へGoogle Playから正規インストールした同packageを使い、Git管理外の一時領域へsplitをpullする。`pm path`が返すbase/config splitをすべて保存し、単一APKだけを完全artifactと誤認しない。
+Next time, use the same package legitimately installed from Google Play on an owner-controlled device and pull splits into temporary storage outside Git. Save every base/config split returned by `pm path`; do not mistake a single APK for the complete artifact.
 
 ```bash
 export SBI_VC_APK_DIR="$(mktemp -d)"
@@ -180,11 +180,11 @@ for apk in "$SBI_VC_APK_DIR"/*.apk; do
 done
 ```
 
-Play listingのpackage/developer/version、端末のpackage/version、base APK manifest、全splitのhash、全splitで一貫するsigner certificate digestをprovenance recordにする。APK、certificate、解析出力はrepositoryへcommitしない。更新前後を比較する場合は同じ取得方法とcertificate digestを用いる。
+Record the Play listing's package/developer/version, device package/version, base APK manifest, hashes of every split, and consistent signer certificate digests across all splits as provenance. Do not commit APKs, certificates, or analysis output to the repository. Use the same acquisition method and certificate digest when comparing before/after updates.
 
-### 6.2 静的解析の次実験
+### 6.2 Next static-analysis experiment
 
-正規artifactを得たら、最初にmanifest/resources/native libraryを分け、次にdecompiled codeを見る。
+Once legitimate artifacts are obtained, separate manifest/resources/native libraries first, then examine decompiled code.
 
 ```bash
 for apk in "$SBI_VC_APK_DIR"/*.apk; do
@@ -196,7 +196,7 @@ rg -n -i \
   "$SBI_VC_APK_DIR/jadx" "$SBI_VC_APK_DIR"/apktool-*
 ```
 
-MobSFはlocal-onlyで起動し、image digestを記録してからbaseとsplitsを同一versionのartifact setとして確認する。結果HTML/JSONは秘密・PII scan後もGitへ入れない。
+Run MobSF locally only, record the image digest, then inspect the base and splits as an artifact set of the same version. Do not put result HTML/JSON in Git even after secret/PII scans.
 
 ```bash
 docker pull opensecurity/mobile-security-framework-mobsf:latest
@@ -206,82 +206,82 @@ docker run --rm -it -p 127.0.0.1:8000:8000 \
   opensecurity/mobile-security-framework-mobsf:latest
 ```
 
-調べる対象はhost/path、request/response model名、WebSocket/REST/GraphQL、token/session更新、secure storage、network security config、certificate pinning、Play Integrity/attestation候補、root/anti-tamper候補である。文字列やクラスの存在は「実行時に有効」の証明ではなく候補として記録する。難読化解除と制御回避を混同しない。
+Investigate hosts/paths, request/response model names, WebSocket/REST/GraphQL, token/session refresh, secure storage, network security config, certificate pinning, Play Integrity/attestation candidates, and root/anti-tamper candidates. Strings/classes are candidates, not proof of runtime activation. Do not confuse deobfuscation with control bypass.
 
-一次資料:
+Primary sources:
 
-- [公式ツール一覧とストアリンク](https://www.sbivc.co.jp/services/tools-apps)
-- [旧アプリ終了と現行アプリへの移行](https://www.sbivc.co.jp/newsview/r1rbpq2ec0)
-- [Google Play公式掲載](https://play.google.com/store/apps/details?id=co.jp.sbivc.trade.app)
-- [Apple App Store公式掲載](https://apps.apple.com/jp/app/6639604109)
+- [Official tool list/store links](https://www.sbivc.co.jp/services/tools-apps)
+- [Old-app retirement/migration to the current app](https://www.sbivc.co.jp/newsview/r1rbpq2ec0)
+- [Official Google Play listing](https://play.google.com/store/apps/details?id=co.jp.sbivc.trade.app)
+- [Official Apple App Store listing](https://apps.apple.com/jp/app/6639604109)
 
-## 7. 公開APIとthird-party client
+## 7. Public API and third-party clients
 
-### 確認できた事実
+### Confirmed facts
 
-- SBI VCトレード公式FAQと取引所説明は、APIを「今後公開予定」としている。2026-08-26時点で、顧客向けの公開API仕様、APIキー、scope、read-only endpointは見つからない。
-- 公開GitHubをサービス名、公式ホスト、Android packageで検索したが、現在の認証済みVCTRADEへ接続する維持された公開クライアントは確認できなかった。
-- [`kittyflip-zig/crypto-ledger-tools`](https://github.com/kittyflip-zig/crypto-ledger-tools) はMITライセンスのローカルCSV正規化ツールで、READMEにSBI VC Trade adapterの初期項目がある。APIキーを使うネットワーククライアントではなく、現在のSBI CSVへの完全対応も未確認である。
+- SBI VCトレード's official FAQ and exchange description say the API is `今後公開予定` ("planned for future publication"). As of 2026-08-26, no public customer API specification, API keys, scopes, or read-only endpoints were found.
+- Public GitHub searches by service name, official host, and Android package found no maintained public client connecting to current authenticated VCTRADE.
+- [`kittyflip-zig/crypto-ledger-tools`](https://github.com/kittyflip-zig/crypto-ledger-tools) is an MIT-licensed local CSV normalization tool whose README has an initial SBI VC Trade adapter item. It is not a network client using API keys; full support for current SBI CSV is also unconfirmed.
 
-第三者実装として確認できるtransport/authは「利用者が手動取得したローカルファイルを読む / 認証なし」に限られる。一方、公式の公開Web bundle/source mapは現行Web client自身のtransportを具体化しており、次節のとおり静的解析した。endpoint/schemaの確認自体を禁止せず、秘密値の保存とwrite eventの送信を禁止する。
+Transport/authentication confirmed in third-party implementations is limited to "reading local files manually obtained by the user / no authentication." Official public Web bundles/source maps, however, make the current Web client's own transport concrete and were statically analyzed as described next. Endpoint/schema inspection itself is not prohibited; saving secret values and sending write events are prohibited.
 
-### 7.1 公開Web JavaScript / source mapの観測
+### 7.1 Public Web JavaScript / source-map observation
 
-2026-08-26、`https://simple.sbivc.co.jp/` はNuxt clientとして4つの公開bundleを配信し、main bundle `/_nuxt/f89914f.js` のSHA-256は `ff7856cdbd3080d87c8bfba7f45fb6b2982fdf26699114a57bd7089a3f87582f` だった。対応する [`f89914f.js.map`](https://simple.sbivc.co.jp/_nuxt/f89914f.js.map) も公開され、TypeScriptのsource filenameと`sourceContent`を含む。source mapは調査時点でHTTP 200、882,355 bytes、`Last-Modified: 2026-08-05`だった。bundle hashとファイル名はdeployで変わるため固定API versionではない。
+On 2026-08-26, `https://simple.sbivc.co.jp/` served 4 public bundles as a Nuxt client; main bundle `/_nuxt/f89914f.js` had SHA-256 `ff7856cdbd3080d87c8bfba7f45fb6b2982fdf26699114a57bd7089a3f87582f`. The corresponding [`f89914f.js.map`](https://simple.sbivc.co.jp/_nuxt/f89914f.js.map) was also public, containing TypeScript source filenames and `sourceContent`. At research time, the source map returned HTTP 200, 882,355 bytes, and `Last-Modified: 2026-08-05`. Bundle hashes/filenames change on deployment and are not fixed API versions.
 
-公開source `plugins/api/serverAPIClient.ts` から確認したWeb transportは次のとおり。
+Public source `plugins/api/serverAPIClient.ts` established the following Web transport.
 
-- 同一originへJSON POSTし、bodyは概ね `{ event, data }`、responseは `{ meta, body }`。timeoutは15秒。
-- loginは `/api/cccmdipresen/gw/login`、追加認証は `/api/cccmdipresen/gw/loginSecondAuth`、passkey開始/完了は専用path、market dataは `/api/cccmdipresen/gw/market`。
-- 認証後の資産、注文、約定、cashflow、報告書、貸コイン、設定、注文/出金等は同じ `/api/cccmdipresen/gw/trade` に送られ、`event`で機能を振り分ける。
-- read候補eventには `cashBalanceList`、`orderList`、`executionList`、`accountMargin`、`getCashflowList`、`tradeReportList`、`monthlyTradeReport`、`yearlyPlReport`、`plCalcData`、`lendingStatusList` がある。
-- 同一path/sessionのwrite eventには `exStreamingOrder`、`requestWithdrawal`、`executeNetDeposit`、`applyReserveRequest`、`lendingRequest`、MFA/passkey/customer設定変更がある。HTTP path/methodだけではread/writeを隔離できず、event allowlistが必須である。
-- `executionList`は`historical=true/false`の結果をclient側でmergeする実装を持ち、直近/過去データが別backend viewであることを示す。
-- Vuexの`loginId`、wallet、report状態を`sessionStorage`へpersistするコードがある。別のWeb3/NFT wallet moduleは`accessToken`/`refreshToken`とAuthorization headerを使うが、VCTRADE取引口座sessionと同一と扱わない。
-- bundleはCloudflare Turnstile script/site-key設定を含み、login requestにchallenge response fieldがある。さらにsecret-likeなclient config値も公開bundleに見えるが、値は取得記録・転載・有効性試験をしていない。security control bypassへ使用しない。
-- `sessionTimeoutTime: 14400`というclient定数があるが、server sessionの実寿命が4時間だとはまだ確認できない。
+- JSON POST to the same origin, generally with body `{ event, data }` and response `{ meta, body }`. Timeout: 15 seconds.
+- Login uses `/api/cccmdipresen/gw/login`, additional authentication `/api/cccmdipresen/gw/loginSecondAuth`, passkey start/completion dedicated paths, and market data `/api/cccmdipresen/gw/market`.
+- Authenticated assets, orders, executions, cashflow, reports, coin lending, settings, orders/withdrawals, etc. go to the same `/api/cccmdipresen/gw/trade`, with functions dispatched by `event`.
+- Candidate read events include `cashBalanceList`, `orderList`, `executionList`, `accountMargin`, `getCashflowList`, `tradeReportList`, `monthlyTradeReport`, `yearlyPlReport`, `plCalcData`, and `lendingStatusList`.
+- Write events on the same path/session include `exStreamingOrder`, `requestWithdrawal`, `executeNetDeposit`, `applyReserveRequest`, `lendingRequest`, and MFA/passkey/customer settings changes. HTTP path/method alone cannot isolate reads/writes; an event allowlist is mandatory.
+- `executionList` merges `historical=true/false` results client-side, showing recent/past data are separate backend views.
+- Code persists Vuex `loginId`, wallet, and report state to `sessionStorage`. A separate Web3/NFT wallet module uses `accessToken`/`refreshToken` and an Authorization header; do not treat it as the VCTRADE trading-account session.
+- The bundle contains Cloudflare Turnstile script/site-key configuration and a challenge-response field in login requests. Secret-like client config values are also visible in the public bundle, but were neither recorded, reproduced, nor tested for validity. Do not use them to bypass security controls.
+- A client constant `sessionTimeoutTime: 14400` exists, but an actual server session lifetime of 4 hours is not yet confirmed.
 
-core trade callには明示的Authorization headerが見えないため、same-origin browser session/Cookieを使う可能性が高いという**推測**に留める。Cookie名、CSRF、server側session更新、passkey後のsession確立は本人操作のsanitized network metadataで確認する。公開source mapの存在はAPIが公開・安定・利用許諾済みであることを意味しない。
+Because no explicit Authorization header is visible in core trade calls, use of same-origin browser sessions/cookies remains an **inference**. Check cookie names, CSRF, server-side session refresh, and post-passkey session establishment through sanitized network metadata from owner operation. A public source map does not mean the API is public, stable, or licensed for use.
 
-### 7.2 Web/app transport差
+### 7.2 Web/app transport differences
 
-Web側は上記のsame-origin event gatewayまで確認できた。アプリ側はsplit APK未取得のため、host、protocol、request model、token storage、pinning/integrity、Webと同じgatewayを使うかを確認できていない。アプリがWebView、native REST、WebSocket等のどれかを推測で決めない。正規APKのhost/schema候補をWebの一覧とdiffし、本人のread-only画面操作時に実際に使われる候補だけを動的観測で昇格する。
+The Web side is confirmed through the same-origin event gateway above. Without split APKs, app-side hosts, protocols, request models, token storage, pinning/integrity, and use of the same gateway remain unconfirmed. Do not guess whether the app uses WebView, native REST, WebSocket, or another method. Diff host/schema candidates from the legitimate APK against the Web list; promote only candidates actually used during owner read-only screen operation through dynamic observation.
 
-一次資料:
+Primary sources:
 
-- [API公開予定の公式FAQ](https://www.sbivc.co.jp/faqs/content/5c0nv5540jm3)
-- [取引所サービス説明](https://www.sbivc.co.jp/auction)
+- [Official FAQ on planned API publication](https://www.sbivc.co.jp/faqs/content/5c0nv5540jm3)
+- [Exchange-service description](https://www.sbivc.co.jp/auction)
 
-## 8. read / write endpointの隔離
+## 8. Isolating read / write endpoints
 
-### 推奨境界
+### Recommended boundary
 
-最も安全な構成では、認証済みネットワーク接続そのものを解析器から除外する。利用者が公式画面でPDF/ZIPを手動取得し、ローカル解析器は読み取り専用でマウントされた入力だけを処理する。生ファイル、PII、金額、アドレス、口座IDはGit、ログ、クラウドへ送らない。
+The safest configuration excludes authenticated network connections themselves from the parser. The user manually obtains PDF/ZIP files from official screens; the local parser processes only read-only-mounted input. Do not send raw files, PII, amounts, addresses, or account IDs to Git, logs, or the cloud.
 
-将来公式API、または観測済み内部transportを使う場合も、次を満たすまで接続しない。
+Even when using a future official API or observed internal transport, do not connect until the following hold.
 
-1. 公式APIなら読み取り専用scopeとendpointが文書化されている。内部transportなら本人操作の1回観測で副作用のないevent/schemaが確認できている。
-2. 書き込み権限を持たないcredentialが最善。現行Webのように同一sessionへread/writeが混在する場合は、collector側egress proxyでorigin+path+eventを固定し、write eventを構造的に送信不能にする。
-3. 確認済みread eventだけをallowlistに置く。HTTP GET/POSTという理由だけで安全とはみなさない。
-4. deny-by-default、外向き通信先制限、レスポンスログの値マスク、少量の合成試験を行う。
+1. For an official API, read-only scopes/endpoints are documented. For internal transport, side-effect-free events/schemas are confirmed by one observation of owner operation.
+2. Credentials without write authority are best. If reads/writes share a session as on the current website, fix origin+path+event in a collector-side egress proxy, making write events structurally unsendable.
+3. Allowlist only confirmed read events. Do not regard HTTP GET/POST alone as proof of safety.
+4. Apply deny-by-default, outbound-destination restrictions, response-log value masking, and small synthetic tests.
 
-### UIを観察する場合のallowlist
+### Allowlist for UI observation
 
-資産状況、残高履歴、注文履歴、約定履歴、入出金・入出庫履歴、報告書、貸コイン履歴、ステーキング表示だけを候補とする。ただし未約定注文一覧やポジション照会には取消・決済操作が隣接するため、一覧表示後はクリックしない。
+Only asset status, balance history, order history, execution history, money/cryptoasset deposit/withdrawal history, reports, coin-lending history, and staking displays are candidates. Cancellation/closing operations are adjacent to unfilled-order lists and position inquiries, so do not click after displaying the list.
 
 ### denylist
 
-注文、スピード注文、取消・変更、クイック決済、日本円入出金、暗号資産入出庫、出庫アドレス追加・削除、貸コイン申込・取消、積立、パスワード/MFA/passkey/個人情報/銀行口座設定、規約同意は全面禁止とする。JavaScriptアプリ内でread/writeが同一セッションに混在する以上、ブラウザー自動化だけでは強いtransport分離を証明できない。
+Orders, speed orders, cancellation/modification, quick closing, yen deposits/withdrawals, cryptoasset deposits/withdrawals, adding/deleting withdrawal addresses, coin-lending applications/cancellations, recurring purchases, password/MFA/passkey/personal-information/bank-account settings, and agreement to terms are all prohibited. With reads/writes sharing the same JavaScript-app session, browser automation alone cannot prove strong transport isolation.
 
-## 9. Workers / Containers / OCI / Kubernetes適性
+## 9. Workers / Containers / OCI / Kubernetes suitability
 
-- **ローカルOCIコンテナ: 適合。** ZIP/CSV/PDFのオフライン解析器をOCI imageとして再現可能にできる。入力はread-only mount、出力はローカル、network none、非root、固定digestが望ましい。単一利用者には通常のローカルCLIでも十分。
-- **Cloudflare Workers: 適合。** 標準Bun/Workers `fetch`でCookie + `secureKey` replayが成功し、15分Cron、暗号化Durable Object状態、`Set-Cookie`追従を実装した。Workers Web Cryptoと既存Bitwarden passkeyによる新規session bootstrapも実証した。
-- **Cloudflare Containers: 不要。** Worker-onlyのpasskey loginが成功したため、full Chrome/WebAuthn用Containerを追加する理由はない。
-- **Cloudflare Browser Rendering: 不要。** 認証・read transportの両方をWorkerだけで実証した。
-- **Kubernetes: 単一口座には過剰。** 組織内で多数の手動エクスポートを処理する場合に限りCronJob、Secret、NetworkPolicy等を検討できるが、まず認証済み取得を行わない設計を維持する。
+- **Local OCI container: suitable.** An offline ZIP/CSV/PDF parser can be reproducible as an OCI image. Read-only input mounts, local output, no network, non-root operation, and pinned digests are desirable. An ordinary local CLI is enough for a single user.
+- **Cloudflare Workers: suitable.** Cookie + `secureKey` replay succeeded with standard Bun/Workers `fetch`; a 15-minute Cron, encrypted Durable Object state, and `Set-Cookie` tracking were implemented. New-session bootstrap with Workers Web Crypto and an existing Bitwarden passkey was also demonstrated.
+- **Cloudflare Containers: unnecessary.** Worker-only passkey login succeeded, so there is no reason to add a Container for full Chrome/WebAuthn.
+- **Cloudflare Browser Rendering: unnecessary.** Both authentication and read transport were demonstrated with only a Worker.
+- **Kubernetes: excessive for one account.** CronJobs, Secrets, NetworkPolicies, and similar features could be considered only for processing many manual exports within an organization; retain a design without authenticated retrieval first.
 
-基盤の一次資料:
+Infrastructure primary sources:
 
 - [Cloudflare Workers Scheduled handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/)
 - [Cloudflare Containers](https://developers.cloudflare.com/containers/get-started/)
@@ -289,64 +289,64 @@ Web側は上記のsame-origin event gatewayまで確認できた。アプリ側�
 - [OCI Image Specification](https://specs.opencontainers.org/image-spec/)
 - [Kubernetes CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/)
 
-## 10. 共通A–E / cost評価
+## 10. Shared A–E / cost assessment
 
-[PR #5](https://github.com/risu729/kogane/pull/5) の共通尺度だけを使用する。
+Use only the shared scale from [PR #5](https://github.com/risu729/kogane/pull/5).
 
-- A: 定期的なheadless実行に適した、文書化された直接export/API
-- B: 更新・再利用可能なsessionを使う安定したread-only内部API
-- C: browser/app bootstrap後のheadless replayが現実的
-- D: 完全なbrowser/device自動化が必要と思われる
-- E: 手動captureが安全な既定
-- cost 1: 小さなwrapper程度 ～ cost 5: 端末拘束・対botを伴う自動化
+- A: documented direct export/API suitable for scheduled headless execution
+- B: stable read-only internal API with renewable/reusable sessions
+- C: headless replay after browser/app bootstrap is feasible
+- D: full browser/device automation appears necessary
+- E: manual capture is the safe default
+- cost 1: small wrapper through cost 5: device-bound automation with bot protection
 
-| 方式                               |                評価 | 判断                                                                                                      |
-| ---------------------------------- | ------------------: | --------------------------------------------------------------------------------------------------------- |
-| 手動PDF/ZIP取得 + ローカル解析     |           **E / 1** | 公式exportを使い、秘密を処理系から隔離できる。推奨。                                                      |
-| 将来の公式read-only API            |     未評価（A候補） | 現在は仕様未公開。scope・endpoint・rate limit確認後に再調査。                                             |
-| 非公開Web API + passkey無人再認証  |           **B / 3** | Worker-onlyで新規passkey session、15分rolling更新、日次read収集、private R2保存に成功。残課題は長期運用。 |
-| Web完全自動化                      | **D / 5（不採用）** | Worker-only経路が成立したため不要。書き込み隣接の危険も増える。                                           |
-| アプリ静的解析 + read-only動的観測 |     **C候補 / 4-5** | 正規split取得、署名、host/schema、token/session、pinning/integrity候補を確認する次段階。                  |
-| アプリ/端末完全自動化              |           **D / 5** | 端末認証とread/write操作面の混在。解析結果に基づき再評価する。                                            |
+| Method                                                |               Assessment | Decision                                                                                                                                           |
+| ----------------------------------------------------- | -----------------------: | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Manual PDF/ZIP retrieval + local parsing              |                **E / 1** | Official exports isolate secrets from processing. Recommended.                                                                                     |
+| Future official read-only API                         | Unassessed (A candidate) | Specification not public yet. Reinvestigate after checking scopes/endpoints/rate limits.                                                           |
+| Private Web API + unattended passkey reauthentication |                **B / 3** | Worker-only new passkey sessions, 15-minute rolling refresh, daily read collection, and private R2 storage succeeded. Long-term operation remains. |
+| Full Web automation                                   |  **D / 5 (not adopted)** | Unnecessary because the Worker-only route works. Also increases risk from adjacent writes.                                                         |
+| App static analysis + read-only dynamic observation   |    **C candidate / 4-5** | Next stage checks legitimate splits, signatures, hosts/schemas, tokens/sessions, and pinning/integrity candidates.                                 |
+| Full app/device automation                            |                **D / 5** | Device authentication and mixed read/write surfaces. Reassess based on analysis results.                                                           |
 
-## 11. read-only live検証計画とstop条件
+## 11. Read-only live verification plan and stop conditions
 
-### 段階的検証
+### Staged verification
 
-1. 公開ガイド、FAQ、公式ストア、DNS/HTTPヘッダー、公開HTML/JS/source mapを取得し、URL、hash、日時を記録する。bundle内のtoken/secret-like値は転載・試験しない。
-2. 正規Play install済み本人端末からsplit APKをpullし、package/version/hash/signing certificateを確認する。jadx/apktool/MobSFでhost/path/schema/token/session/pinning/integrity候補を抽出するが、artifact・解析出力はGitへ置かない。
-3. Webは利用者が自分でログインし、DevToolsで許可済みread画面1回分のmethod、origin、path、event名、status、content-type、timingだけを観測する。request/response body、header、Cookie、token、ID、実値を保存しない。HARを使うならcapture時点でbody/headerを除外し、共有前にsecret/PII scanする。
-4. アプリは本人端末で資産・残高履歴・約定履歴・報告書等のread画面だけを操作し、標準ADB/logcat/Perfettoまたは通常のローカルVPN captureでhost/path/status等のmetadataだけを観測する。TLS pinningで内容が見えない場合は迂回せず、静的候補とUI automationの評価に留める。logcatに実値が出る場合は収集を即停止する。
-5. Web/appで確認したread eventを比較し、同じschemaか、app固有API/tokenがあるかを区別する。read-only replayを行う場合は、bodyを合成できず実sessionが必要なら本人端末内、1 event、1回、deny-by-default egress proxyの条件に限定する。
-6. 利用者が報告書/ZIPを自分で一度ダウンロードし、Git管理外のローカル一時領域へ置く。最初は値を読み込まず、列名、ファイル名、文字コード、期間表現だけをマスク済みで確認する。生ファイルはcommit・ログ・クラウド送信しない。
-7. 確認できたschemaだけから合成fixtureを作り、オフラインparserを検証する。実値をfixtureへ転記しない。最大期間・件数が不明でも反復取得で探索しない。
+1. Retrieve public guides, FAQs, official stores, DNS/HTTP headers, and public HTML/JS/source maps; record URLs, hashes, and times. Do not reproduce or test token/secret-like bundle values.
+2. Pull split APKs from the owner's device with a legitimate Play installation and check package/version/hashes/signing certificate. Extract host/path/schema/token/session/pinning/integrity candidates with jadx/apktool/MobSF, but keep artifacts/analysis output outside Git.
+3. On the Web, the user logs in themselves; observe only method, origin, path, event name, status, content-type, and timing for 1 allowed read-screen operation through DevTools. Do not save request/response bodies, headers, cookies, tokens, IDs, or actual values. If using HAR, exclude bodies/headers at capture time and scan for secrets/PII before sharing.
+4. In the app on the owner's device, operate only read screens such as assets, balance history, execution history, and reports; observe only host/path/status and similar metadata with standard ADB/logcat/Perfetto or ordinary local VPN capture. If TLS pinning prevents viewing contents, do not bypass it; limit work to static candidates and UI-automation assessment. Stop collection immediately if logcat emits actual values.
+5. Compare confirmed Web/app read events, distinguishing matching schemas from app-specific APIs/tokens. If read-only replay cannot synthesize the body and requires a real session, restrict it to the owner's device, 1 event, 1 attempt, and a deny-by-default egress proxy.
+6. The user downloads a report/ZIP themselves once and places it in local temporary storage outside Git. Initially inspect only masked column names, filenames, encoding, and period representations, without loading values. Do not commit, log, or send raw files to the cloud.
+7. Create synthetic fixtures only from confirmed schemas and verify the offline parser. Do not copy actual values into fixtures. Do not explore unknown maximum periods/counts through repeated retrieval.
 
-### 即時停止条件
+### Immediate stop conditions
 
-- ログイン、MFA、passkey、メール/SMSコード、QR、TOTPシード、秘密鍵、Cookie/token値の入力・表示・保存が調査者側に必要になる。本人が通常操作し、調査者が値を見ずmetadataだけを観測できる場合を除く。
-- 追加規約への同意、端末登録、認証設定変更、パスワード再設定が要求される。
-- 403、429、Cloudflare challenge、CAPTCHA、アクセス制限、ログイン失敗またはロック警告が出る。反復再試行、別IP、header偽装を行わない。
-- 注文、取消、決済、入出金、入出庫、アドレス登録、貸コイン申込、積立、設定変更へ進む必要がある。
-- certificate pinning、Play Integrity/attestation、root/anti-tamper、難読化が存在すること自体は停止条件ではないが、それらのsecurity controlを迂回しなければ観測・実行できない。
-- allowlist外event、write event、method/path/schema不明のrequestを送る必要がある。
-- ファイルや画面にPII、実残高、実取引、暗号資産アドレス等が見え、マスク前にログ・保存される可能性がある。
+- The researcher needs to enter/display/save login, MFA, passkey, email/SMS codes, QR, TOTP seeds, private keys, or cookie/token values, except where the owner operates normally and the researcher can observe only metadata without seeing values.
+- Agreement to additional terms, device registration, authentication-settings changes, or password reset is required.
+- A 403, 429, Cloudflare challenge, CAPTCHA, access restriction, login failure, or lock warning appears. Do not repeatedly retry, change IPs, or spoof headers.
+- Progress requires orders, cancellation, closing, money/cryptoasset deposits/withdrawals, address registration, coin-lending applications, recurring purchases, or settings changes.
+- Certificate pinning, Play Integrity/attestation, root/anti-tamper, or obfuscation is present and observation/execution requires bypassing those security controls. Their presence alone is not a stop condition.
+- Sending non-allowlisted events, write events, or requests with unknown method/path/schema is necessary.
+- Files/screens show PII, real balances/transactions, cryptoasset addresses, or similar information that might be logged/saved before masking.
 
-このstop条件に達した経路は中止し、E / cost 1の手動export方式を維持する。別のread-only静的解析や、制御回避を伴わない観測まで一律に禁止するものではない。
+Stop a route that reaches these conditions and retain manual export at E / cost 1. This does not prohibit all other read-only static analysis or observation without control bypass.
 
-## 12. 2026-08-31 現行Webの再検証
+## 12. Reverification of the current Web on 2026-08-31
 
-PR #23で調べた公開artifactが現行deployでも使われているか、認証情報を入力せず再確認した。ファイル名はNuxt deployごとに変わり得る観測値であり、collectorの固定契約にしない。
+Rechecked without entering credentials whether public artifacts researched in PR #23 were still used in the current deployment. Filenames are observations that may change with each Nuxt deployment, not fixed collector contracts.
 
-### ブラウザー観測
+### Browser observation
 
-- 公開login UIの最初の確認は誤って通常Windows Chrome 151で行い、HTTP 200、メールアドレス/口座番号、password、`パスキーでログイン`を確認した。このtabは閉じた。以降の認証済みnetwork/schema観測はKogane Capture Chromeだけを正本とする。
-- 初期表示時に`/libs/simplewebauthn-browser.min.js`とCloudflare Turnstileのscript/iframeを読み込んだ。
-- credential操作前に、browserは`POST /api/cccmdipresen/gw/initiateLoginWithPasskey`を1回送り、HTTP 200 `application/json`を受けた。秘密capture内のresponseは`challenge`、RP ID、timeout、`userVerification`を持ち、RP IDは`sbivc.co.jp`、user verificationは`required`だった。値はGitやPRへ保存しない。このeventはWebAuthn challenge bootstrapで、POSTであっても資産・設定を変更するwriteではない。HTTP methodだけでread/writeを分類できない具体例である。
-- Bitwarden vaultには本人のSBI VCトレードitemとpasskey sectionが存在することだけを確認した。username、password、passkey material、TOTP、Cookie、response bodyは表示・複製・保存していない。live bootstrapではKogane Capture Chromeで既存passkeyを使い、ID/password + MFAは公式に残るfallbackとする。
+- The initial public-login UI check mistakenly used ordinary Windows Chrome 151, confirming HTTP 200, email address/account number, password, and `パスキーでログイン` ("log in with a passkey"). That tab was closed. Only Kogane Capture Chrome is authoritative for subsequent authenticated network/schema observation.
+- Initial display loaded `/libs/simplewebauthn-browser.min.js` and the Cloudflare Turnstile script/iframe.
+- Before credential interaction, the browser sent `POST /api/cccmdipresen/gw/initiateLoginWithPasskey` once and received HTTP 200 `application/json`. The private capture's response contained `challenge`, RP ID, timeout, and `userVerification`; RP ID was `sbivc.co.jp`, and user verification `required`. Values are not saved in Git or PRs. This event bootstraps a WebAuthn challenge; although POST, it is not a write changing assets/settings. It is a concrete example of why HTTP method alone cannot classify reads/writes.
+- Only the presence of the owner's SBI VCトレード item and passkey section in the Bitwarden vault was checked. Username, password, passkey material, TOTP, cookies, and response bodies were not displayed/copied/saved. Live bootstrap uses the existing passkey in Kogane Capture Chrome, retaining ID/password + MFA as the officially available fallback.
 
-### 公開bundle/source map
+### Public bundles/source maps
 
-`/login`から直接または実行時に観測した現行chunkは次の5件だった。
+The following 5 current chunks were observed directly from `/login` or at runtime.
 
 | artifact     |     bytes | SHA-256                                                            |
 | ------------ | --------: | ------------------------------------------------------------------ |
@@ -356,174 +356,174 @@ PR #23で調べた公開artifactが現行deployでも使われているか、認
 | `85a3155.js` | 1,564,956 | `4bf32b912ad1b72cfab6e9a2bfde4601d53ccac45b06966dae6b97775ca3dbf6` |
 | `f89914f.js` |   496,749 | `ff7856cdbd3080d87c8bfba7f45fb6b2982fdf26699114a57bd7089a3f87582f` |
 
-全5件の`.map`もHTTP 200だった。`f89914f.js.map`は882,355 bytes、SHA-256 `2c7c20685a71b1e9748e48e7cd8cb7d9e00271a9f68a4feccf22e5a3f69492fe`で、PR #23時点と同じmain bundle/source内容だった。`serverAPIClient.ts`から再確認した最小read schemaは次のとおり。
+All 5 `.map` files also returned HTTP 200. `f89914f.js.map` had 882,355 bytes and SHA-256 `2c7c20685a71b1e9748e48e7cd8cb7d9e00271a9f68a4feccf22e5a3f69492fe`, with the same main bundle/source contents as at PR #23. The minimal read schema rechecked from `serverAPIClient.ts` follows.
 
-login page map `b21877a.js.map`は91,166 bytes、SHA-256 `d5c3e578f302981163acf19289631468cb0185b4229c231cd5c5c69a7fe2935a`、配布`simplewebauthn-browser.min.js`は9,234 bytes、SHA-256 `7597a071cdf7634156e2185a61b6e3f535fe544c23d3bad1be7f599c0a3b4cfa`だった。sourceは`@simplewebauthn/browser@13.2.2`に対応する。ここに記録した主要artifactの`Last-Modified`はすべて2026-08-05だった。
+Login-page map `b21877a.js.map` had 91,166 bytes and SHA-256 `d5c3e578f302981163acf19289631468cb0185b4229c231cd5c5c69a7fe2935a`; distributed `simplewebauthn-browser.min.js` had 9,234 bytes and SHA-256 `7597a071cdf7634156e2185a61b6e3f535fe544c23d3bad1be7f599c0a3b4cfa`. The source corresponds to `@simplewebauthn/browser@13.2.2`. All major artifacts recorded here had `Last-Modified` 2026-08-05.
 
-| event                 | path                         | request dataの必須要素                                 | 用途                                |
-| --------------------- | ---------------------------- | ------------------------------------------------------ | ----------------------------------- |
-| `cashBalanceList`     | `/api/cccmdipresen/gw/trade` | `secureKey`                                            | 日本円・暗号資産残高                |
-| `accountMargin`       | 同上                         | `secureKey`                                            | 純資産、証拠金等の口座詳細          |
-| `positionSummaryList` | 同上                         | `secureKey`                                            | 保有ポジションsummary               |
-| `executionList`       | 同上                         | `secureKey`, page, sort, `historical`                  | 約定履歴。recent/historicalが別view |
-| `getCashflowList`     | 同上                         | `secureKey`, page, `historical`, currency/type filters | 日本円入出金等のcashflow            |
+| event                 | path                         | Required request-data elements                         | Purpose                                             |
+| --------------------- | ---------------------------- | ------------------------------------------------------ | --------------------------------------------------- |
+| `cashBalanceList`     | `/api/cccmdipresen/gw/trade` | `secureKey`                                            | Japanese-yen/cryptoasset balances                   |
+| `accountMargin`       | Same as above                | `secureKey`                                            | Account details such as net assets/margins          |
+| `positionSummaryList` | Same as above                | `secureKey`                                            | Held-position summary                               |
+| `executionList`       | Same as above                | `secureKey`, page, sort, `historical`                  | Execution history. Separate recent/historical views |
+| `getCashflowList`     | Same as above                | `secureKey`, page, `historical`, currency/type filters | Cashflow such as yen deposits/withdrawals           |
 
-約定履歴pageの実行時chunkは`32085e8.js`（23,308 bytes、SHA-256 `5669689931bf53e76a3cd98d4f4144ce70e5fb70e7feef9a74722085bee867c3`）、mapは61,277 bytes、SHA-256 `78b0bcfdaf5c37d72a8b79220c784286fe5dd5363e520e5187e6248d369867aa`だった。source `pages/trade-history.vue`は`sortKey: "executionDatetime"`、`sortAsc: "false"`、page size 30を使う。最初にhistorical pageを取得し、page 0だけrecent viewも取得してclient側でmergeする。page 1以降はhistorical viewだけである。PoCもこの順序と値へ合わせ、推測のsort keyやrecent全page走査を行わない。
+The execution-history page's runtime chunk was `32085e8.js` (23,308 bytes, SHA-256 `5669689931bf53e76a3cd98d4f4144ce70e5fb70e7feef9a74722085bee867c3`); its map had 61,277 bytes and SHA-256 `78b0bcfdaf5c37d72a8b79220c784286fe5dd5363e520e5187e6248d369867aa`. Source `pages/trade-history.vue` uses `sortKey: "executionDatetime"`, `sortAsc: "false"`, and page size 30. It obtains the historical page first, fetches the recent view only for page 0, and merges client-side. Page 1 onward uses only the historical view. The PoC follows that order and those values, without guessed sort keys or scanning every recent page.
 
-入出金履歴pageのchunkは`12ae015.js`（10,317 bytes、SHA-256 `d2a77c40f3a80e68010be78f14eec395c9fbddc7562ff4d65673b15242d5e706`）、mapのSHA-256は`4746882930a46470b5042c68ca9b3482afc3c92d745b8964dc50e904a6032269`だった。source `pages/account-activity/history.vue`はpage size 30で`historical: "true"`を1回ずつpage走査し、recent/old mergeをしない。default filterは`currency: ["JPY"]`、`cashflowType: ["REMITTANCE_DEPOSIT", "REMITTANCE_WITHDRAW"]`である。公開UIはdate fieldを送らないため、PoCもformatを推測した任意date filterを送らない。
+The deposit/withdrawal-history page's chunk was `12ae015.js` (10,317 bytes, SHA-256 `d2a77c40f3a80e68010be78f14eec395c9fbddc7562ff4d65673b15242d5e706`); its map's SHA-256 was `4746882930a46470b5042c68ca9b3482afc3c92d745b8964dc50e904a6032269`. Source `pages/account-activity/history.vue` scans each page once with page size 30 and `historical: "true"`, without recent/old merging. Default filters are `currency: ["JPY"]` and `cashflowType: ["REMITTANCE_DEPOSIT", "REMITTANCE_WITHDRAW"]`. The public UI sends no date field; the PoC likewise sends no arbitrary date filter with a guessed format.
 
-`secureKey`はpublic source上の`store.state.loginId`であり、Authorization bearerとは確認できない。Cookie名、CSRFの有無、Cookieと`secureKey`の結合、server session TTL、refresh方法、Turnstile通過後に通常HTTP replayが許可されるかは、まだlive sessionで未確認である。client定数`sessionTimeoutTime: 14400`をserver側4時間保証と解釈しない。
+In public source, `secureKey` is `store.state.loginId`; it is not confirmed as an Authorization bearer. Cookie names, presence of CSRF, binding of cookies to `secureKey`, server session TTL, refresh method, and whether ordinary HTTP replay is allowed after Turnstile remain unconfirmed in a live session. Do not interpret client constant `sessionTimeoutTime: 14400` as a server-side 4-hour guarantee.
 
-### login transportと境界
+### Login transport and boundaries
 
-- password login: `POST /api/cccmdipresen/gw/login`, `{event: "login", data: {accountId, password, response}}`。`response`はTurnstile token。
-- second auth: `POST /api/cccmdipresen/gw/loginSecondAuth`, `{event: "loginSecondAuth", data: {accountId, authCode}}`。
-- passkey開始: `POST /api/cccmdipresen/gw/initiateLoginWithPasskey`, dataは`channel: "SIMPLE_MODE"`。
-- passkey完了: `POST /api/cccmdipresen/gw/loginWithPasskey`。challenge、credential ID、authenticator data、client data JSON、signature、user handleを送る。
+- Password login: `POST /api/cccmdipresen/gw/login`, `{event: "login", data: {accountId, password, response}}`. `response` is the Turnstile token.
+- Second auth: `POST /api/cccmdipresen/gw/loginSecondAuth`, `{event: "loginSecondAuth", data: {accountId, authCode}}`.
+- Passkey start: `POST /api/cccmdipresen/gw/initiateLoginWithPasskey`, with data `channel: "SIMPLE_MODE"`.
+- Passkey completion: `POST /api/cccmdipresen/gw/loginWithPasskey`. Sends challenge, credential ID, authenticator data, client data JSON, signature, and user handle.
 
-password login requestにはTurnstile tokenの`response`があるが、公開source上のpasskey開始・完了request DTOにはTurnstile token fieldがない。2026-08-31のKogane Capture Chromeで開始・完了が200となり、後述のWorker新規sessionでも同じ2 requestが成功した。したがって今回のpasskey経路ではTurnstile token、browser Cookie、Cloudflare bot cookieを必要としないことまで実証した。
+Password-login requests contain Turnstile token `response`, but public source's passkey-start/completion request DTOs have no Turnstile token field. Start/completion returned 200 in Kogane Capture Chrome on 2026-08-31, and the same 2 requests succeeded with the new Worker session below. This demonstrated that this passkey route requires neither a Turnstile token, browser cookies, nor Cloudflare bot cookies.
 
-second authの`authType`は`0`がemail、`1`がauthenticator/TOTP、`2`がSMSである。password loginが失敗した場合、clientはTurnstile tokenを再利用せずwidgetをresetする。Turnstile tokenはCloudflare仕様上5分・single-useであり、保存・再利用するsession credentialではない。passkey completion後はsecond-auth endpointを通らずlogin成功処理へ進む。
+Second auth's `authType` is `0` for email, `1` for authenticator/TOTP, and `2` for SMS. On password-login failure, the client resets the widget rather than reusing the Turnstile token. Cloudflare specifies Turnstile tokens as 5-minute/single-use, not session credentials to save/reuse. After passkey completion, the flow goes to login-success handling without the second-auth endpoint.
 
-login resultの`isAgreed`がfalseの場合、現行UIは`setAgreement` write eventへ進む。collectorは規約同意を自動実行せず、そのloginを停止して本人の同意を待つ。Since 2026-11-07 the collector retries the passkey login hourly while it waits, so collection resumes on its own once the owner has agreed ([§16](#16-resuming-after-a-terms-agreement-2026-11-07)).
+When login result `isAgreed` is false, the current UI proceeds to write event `setAgreement`. The collector does not automatically agree to terms; it stops that login and waits for the owner's agreement. Since 2026-11-07 the collector retries the passkey login hourly while it waits, so collection resumes on its own once the owner has agreed ([§16](#16-resuming-after-a-terms-agreement-2026-11-07)).
 
-### 認証済みlive検証
+### Authenticated live verification
 
-2026-08-31、本人が**Kogane Capture Chrome profile**でBitwardenに保存していた既存passkeyを選択しloginに成功した。以下の認証済みnetwork/schema evidenceはすべてこのprofileで取得した。秘密、request/response bodyの実値、Cookie値、口座ID、残高、IPは保存していない。
+On 2026-08-31, the owner selected the existing Bitwarden-stored passkey in the **Kogane Capture Chrome profile** and logged in successfully. All authenticated network/schema evidence below was obtained in this profile. Secrets, actual request/response-body values, cookie values, account IDs, balances, and IPs were not saved.
 
-| 順序 | sanitized metadata                                    | 結果                                                           |
-| ---: | ----------------------------------------------------- | -------------------------------------------------------------- |
-|    1 | 未認証`accountMargin` / `positionSummaryList`         | HTTP 403 `text/html`                                           |
-|    2 | `initiateLoginWithPasskey`                            | HTTP 200 JSON                                                  |
-|    3 | WebAuthn assertionを本人が承認し`loginWithPasskey`    | HTTP 200 JSON                                                  |
-|    4 | 認証後`accountMargin`                                 | HTTP 200 JSON                                                  |
-|    5 | `informationTitle`, `getAuthStatus`, `getPasskeyList` | すべてHTTP 200 JSON                                            |
-|    6 | read-onlyの保有資産画面                               | `positionSummaryList`と`accountMargin`がHTTP 200 JSON          |
-|    7 | read-onlyの取引履歴画面                               | `executionList`をrecent/historical各1回、どちらもHTTP 200 JSON |
-|    8 | read-onlyの取引報告書一覧                             | `tradeReportList`を2回、どちらもHTTP 200 JSON                  |
-|    9 | page reload                                           | `/login#verifyGa`へredirect                                    |
+| Order | sanitized metadata                                      | Result                                                              |
+| ----: | ------------------------------------------------------- | ------------------------------------------------------------------- |
+|     1 | Unauthenticated `accountMargin` / `positionSummaryList` | HTTP 403 `text/html`                                                |
+|     2 | `initiateLoginWithPasskey`                              | HTTP 200 JSON                                                       |
+|     3 | Owner approves WebAuthn assertion; `loginWithPasskey`   | HTTP 200 JSON                                                       |
+|     4 | Authenticated `accountMargin`                           | HTTP 200 JSON                                                       |
+|     5 | `informationTitle`, `getAuthStatus`, `getPasskeyList`   | All HTTP 200 JSON                                                   |
+|     6 | Read-only asset-holdings screen                         | `positionSummaryList` and `accountMargin`: HTTP 200 JSON            |
+|     7 | Read-only trade-history screen                          | `executionList` once each for recent/historical, both HTTP 200 JSON |
+|     8 | Read-only trade-report list                             | `tradeReportList` twice, both HTTP 200 JSON                         |
+|     9 | page reload                                             | Redirect to `/login#verifyGa`                                       |
 
-liveの`loginWithPasskey` request keyは公開DTOどおりchallenge、credential ID、authenticator data、client data JSON、signature、user handleで、Turnstile fieldはなかった。全fieldはpaddingなしbase64urlだった。`clientDataJSON`は`webauthn.get`、origin `https://simple.sbivc.co.jp`、`crossOrigin: false`、authenticator dataは37 bytes、RP ID hash一致、flags `0x1d`（UP/UV/BE/BS）、counter 0、signatureはP-256 ECDSAのASN.1 DERだった。Bitwarden保存credential IDはUUIDをraw 16 bytesへ変換するとrequest値と一致し、user handleも一致した。
+Live `loginWithPasskey` request keys matched the public DTO: challenge, credential ID, authenticator data, client data JSON, signature, and user handle, with no Turnstile field. All fields used unpadded base64url. `clientDataJSON` had `webauthn.get`, origin `https://simple.sbivc.co.jp`, and `crossOrigin: false`; authenticator data was 37 bytes, with matching RP ID hash, flags `0x1d` (UP/UV/BE/BS), counter 0, and a P-256 ECDSA ASN.1 DER signature. Converting the Bitwarden-stored credential ID's UUID to raw 16 bytes matched the request value; the user handle matched too.
 
-`accountMargin` bodyには`cashBalance`、`receivedMarginList`（46件）、`lendingLimitList`（33件）、`withdrawalLimitList`（23件）、`restrictedWithdrawalAmountList`（23件）と関連margin fieldが存在した。件数とfield名だけを記録し、各item・金額・銘柄等は保存していない。`getAuthStatus` bodyは`isIdentified`と`isTotpIdentified`、`getPasskeyList` itemはchannel、credential ID、last-used datetime、label、register datetime/source IP fieldを持ち、list lengthは1だった。値は保存していない。
+The `accountMargin` body contained `cashBalance`, `receivedMarginList` (46 items), `lendingLimitList` (33 items), `withdrawalLimitList` (23 items), `restrictedWithdrawalAmountList` (23 items), and related margin fields. Only counts/field names were recorded, not items, amounts, assets, or similar values. The `getAuthStatus` body had `isIdentified` and `isTotpIdentified`; `getPasskeyList` items had channel, credential ID, last-used datetime, label, registration datetime/source IP fields, and list length 1. Values were not saved.
 
-保有資産画面では`positionSummaryList`が`{secureKey}`だけを送りHTTP 200 JSONとなった。この口座のlive response bodyは空objectだったため、position item shapeはlive確認できておらず、公開bundle DTOの構造を暫定とする。残高collectorでは`cashBalanceList`、`accountMargin`と併せてこのeventを固定allowlistに含める。
+On the asset-holdings screen, `positionSummaryList` sent only `{secureKey}` and returned HTTP 200 JSON. This account's live response body was an empty object, so position-item shape is not live-confirmed; the public bundle DTO structure remains provisional. The balance collector includes this event in its fixed allowlist alongside `cashBalanceList` and `accountMargin`.
 
-取引履歴画面は公開sourceどおり`executionList`を2回送り、request keyは`historical`、`isCloseOrder`、`isExOrder`、page number/size、`secureKey`、sort ascending/keyだった。両方HTTP 200で、一方は6 item、他方は0 itemだった。recent/historicalの対応をresponse値から推測せず、requestの`historical` fieldで区別する。live item keyにはexecution ID/sub-number、currency pair、product ID、約定数量・価格・日時、commission amount/currency、trade/order price、order/buy-sell/close/ex-order type、settle/swap/base-currency PL、trade channel、public/internal memo、value dateがあった。envelopeにはpage number/size/total pages/total sizeとmetaの`secureKey`、session update time、status、timestampがあった。field名と件数だけを保存し、実値は破棄した。
+The trade-history screen sent `executionList` twice as in the public source, with request keys `historical`, `isCloseOrder`, `isExOrder`, page number/size, `secureKey`, and sort ascending/key. Both returned HTTP 200; one had 6 items and the other 0. Distinguish recent/historical through request field `historical`, not inferred from response values. Live item keys included execution ID/sub-number, currency pair, product ID, execution quantity/price/datetime, commission amount/currency, trade/order price, order/buy-sell/close/ex-order type, settle/swap/base-currency PL, trade channel, public/internal memo, and value date. The envelope contained page number/size/total pages/total size and meta `secureKey`, session update time, status, and timestamp. Only field names/counts were saved; actual values were discarded.
 
-取引報告書一覧は`tradeReportList`を2回送り、request keyはbasis date from/to、unread-only、page number/size、`secureKey`、statement typeだった。どちらもHTTP 200で各7 itemを返し、item keyはbasis date、read status/name、report title、statement type、pagination fieldはstringだった。値は破棄した。list eventはtyped allowlistへ加えるが、report detail/downloadはread statusを更新する可能性が未確認なのでクリック・実装しない。
+The trade-report list sent `tradeReportList` twice, with request keys basis date from/to, unread-only, page number/size, `secureKey`, and statement type. Both returned HTTP 200 with 7 items each; item keys were basis date, read status/name, report title, and statement type, and pagination fields were strings. Values were discarded. The list event is added to the typed allowlist, but report details/downloads are neither clicked nor implemented because possible read-status updates remain unconfirmed.
 
-最初のhome表示とread APIは成功したが、reload後は`/login#verifyGa`へ戻った。原因はpasskey後sessionの短期性、reload時の追加検証、Cookie/sessionStorageの組合せ、Kogane Capture条件等のいずれか未確定である。このため「sessionが通常reloadで永続する」「Cookieと`secureKey`をBunへ移せる」「daily cronで再利用できる」はまだ証明されていない。
+Initial home display and read APIs succeeded, but reloading returned to `/login#verifyGa`. The cause remains unresolved among short-lived post-passkey sessions, additional verification on reload, cookie/sessionStorage combinations, Kogane Capture conditions, and other possibilities. Persistence across normal reload, transferring cookies/`secureKey` to Bun, and reuse by daily cron therefore remain unproven.
 
-passkeyはSMBC Safety Passのように特定bank appの登録端末で毎回生体承認させる独自方式ではない。既存Bitwarden credentialでlive loginでき、CLIからWebAuthn credential構造も取得できた。利用者方針によりKogane専用credentialは作成せず、同じ既存credentialをWorker側の無人再認証に使う。private key、credential ID、user handle、counterは金融credentialとしてGitやDurable Objectへ置かずWorker Secretだけに限定し、生成後のsessionだけを暗号化Durable Object状態にする。
+Passkeys are not a proprietary method like SMBC Safety Pass requiring biometric approval on a particular bank app's registered device every time. The existing Bitwarden credential logged in live, and its WebAuthn credential structure was obtainable through the CLI. Owner policy creates no Kogane-specific credential; the same existing credential is used for unattended Worker reauthentication. Treat private keys, credential IDs, user handles, and counters as financial credentials restricted to Worker Secrets, not Git or Durable Objects; only resulting sessions go into encrypted Durable Object state.
 
-Cloudflare Workers Web Cryptoで、上記browser assertionと同じRP ID/origin、flags、counter、credential ID変換、P1363→DER署名変換を実装した。Bitwarden CLIから既存credentialの必要fieldだけをWorker Secretへ投入し、Cloudflare Workerからの実loginに成功した。credentialのcounterは0のためBitwarden本体との分岐は観測されず、専用passkeyもContainer/browser handoffも不要である。
+Cloudflare Workers Web Crypto implemented the same RP ID/origin, flags, counter, credential ID conversion, and P1363→DER signature conversion as the browser assertion above. Only required fields from the existing credential were supplied from Bitwarden CLI to Worker Secrets, and actual login from the Cloudflare Worker succeeded. With credential counter 0, no divergence from Bitwarden itself was observed; neither a dedicated passkey nor Container/browser handoff is needed.
 
 ## 13. read-only gateway PoC
 
-[`packages/sbi-vc-trade-client`](../../packages/sbi-vc-trade-client/)に、認証済みsessionから上記4 eventだけを呼ぶローカルBun clientを追加した。
+A local Bun client calling only the 4 events above from an authenticated session was added to [`packages/sbi-vc-trade-client`](../../packages/sbi-vc-trade-client/).
 
-設計上の制限:
+Design constraints:
 
-1. generic event senderをexportしない。同じ`trade` pathにある注文、取消、出金・出庫、貸コイン申込、積立、MFA/passkey変更を呼ぶAPIは実装しない。
-2. browser loginとread replayを分離する。PoCはpassword、TOTP、SMS/email OTP、Turnstile token、passkey secretを受け取らない。
-3. 一時session fileはCookie headerと`secureKey`だけを持ち、mode 600を強制する。値をargument、stdout、errorへ出さない。
-4. recentとhistoricalを別々に取得する。1回だけの`historical=true`で全期間を得たと仮定しない。
-5. responseはHTTP success、JSON content type、`meta.status === "OK"`を確認する。maintenance HTMLやvalidation errorをraw dataとして保存しない。
-6. paginationは`list`と`totalSize`が確認できた場合だけ続行し、100 pageの既定上限を設ける。schema不明時に無限走査しない。
-7. outputには実残高・履歴が含まれるためlocal private directoryだけに置き、Git、CI artifact、stdout、Cloudflareへ送らない。
+1. Export no generic event sender. Implement no APIs for orders, cancellation, money/cryptoasset withdrawals, coin-lending applications, recurring purchases, or MFA/passkey changes sharing the `trade` path.
+2. Separate browser login from read replay. The PoC accepts no passwords, TOTP, SMS/email OTPs, Turnstile tokens, or passkey secrets.
+3. Temporary session files contain only a Cookie header and `secureKey` and enforce mode 600. Do not expose values in arguments, stdout, or errors.
+4. Retrieve recent and historical separately. Do not assume a single `historical=true` retrieves the full period.
+5. Require HTTP success, JSON content type, and `meta.status === "OK"`. Do not save maintenance HTML or validation errors as raw data.
+6. Continue pagination only when `list` and `totalSize` are confirmed, with a default cap of 100 pages. Do not scan indefinitely on unknown schemas.
+7. Output contains actual balances/history: keep it only in local private directories, not Git, CI artifacts, stdout, or Cloudflare.
 
-synthetic testでは、request shape、recent/historical分離、pagination停止、non-JSON/error拒否、error textにsession値を含めないことを確認した。さらにKogane Capture Chromeの認証済みsessionをmode 600のtmpfs file経由でlocal Bun clientへ渡し、固定allowlistの全collectorを実データで完走した。直接HTTP replay、pagination、session rolling更新、無人passkey再認証まで実証済みで、server absolute TTLだけが未確認である。
+Synthetic tests verified request shapes, recent/historical separation, pagination stopping, non-JSON/error rejection, and exclusion of session values from error text. The authenticated Kogane Capture Chrome session was also passed to the local Bun client through a mode-600 tmpfs file, and every fixed-allowlist collector completed with real data. Direct HTTP replay, pagination, rolling session refresh, and unattended passkey reauthentication are demonstrated; only server absolute TTL remains unconfirmed.
 
-### 完了したlive検証
+### Completed live verification
 
-1. 既存passkeyによるKogane Capture Chrome loginに成功した。
-2. Kuebikoのraw captureを秘密artifactとして扱い、Cookieと`secureKey`をstdoutへ出さずmode 600のtmpfs fileへ渡した。
-3. Cookieなしreplayがapplication側の「ログインしていません」403になることを1回確認した。
-4. Cookie + `secureKey`ではBun clientの`cashBalanceList`、`accountMargin`、`positionSummaryList`、`executionList` recent/historical、`getCashflowList` historicalがすべてHTTP 200 JSON、gateway `OK`になった。
-5. pagination停止とprivate output modeを確認し、session tmpfs fileを削除した。実値・実件数・秘密はGit/PRへ記録していない。
-6. Workers Cronを複数回発火させ、暗号化sessionと8 Cookieのrolling更新を確認した。
-7. 既存Bitwarden passkeyをWorker Secretへ最小化投入し、Worker-onlyの新規loginと直後のread-only keepaliveに成功した。
+1. Kogane Capture Chrome login succeeded with the existing passkey.
+2. Treated Kuebiko raw capture as a secret artifact; passed cookies and `secureKey` to a mode-600 tmpfs file without stdout exposure.
+3. Confirmed once that replay without cookies produces the application's `ログインしていません` ("not logged in") 403.
+4. With cookies + `secureKey`, the Bun client's `cashBalanceList`, `accountMargin`, `positionSummaryList`, `executionList` recent/historical, and `getCashflowList` historical all returned HTTP 200 JSON and gateway `OK`.
+5. Confirmed pagination stopping and private output modes, then deleted the tmpfs session file. Actual values/counts/secrets were not recorded in Git/PRs.
+6. Triggered Workers Cron several times and confirmed rolling refresh of the encrypted session and 8 cookies.
+7. Supplied a minimal existing Bitwarden passkey to Worker Secrets; Worker-only new login and immediately subsequent read-only keepalive succeeded.
 
-認証済みsessionのdirect replayと、失効後に使う新規bootstrapの両方をWorker-onlyで実証した。さらに既存Bun collectorの固定read allowlistをWorkerへ移植し、sanitize後のresponseをprivate R2へ保存するところまで完了した。password経路のTurnstile、browser TLS fingerprint、Chrome、Container、TAMIAは採用しない。
+Both direct authenticated-session replay and new bootstrap for use after expiry were demonstrated Worker-only. The existing Bun collector's fixed read allowlist was also ported into the Worker, through saving sanitized responses to private R2. Password-route Turnstile, browser TLS fingerprints, Chrome, Containers, and TAMIA are not adopted.
 
-### runtime候補の優先順位
+### Runtime candidate priority
 
-| runtime                             | 現時点の判断 | 次に証明すること                                                             |
-| ----------------------------------- | ------------ | ---------------------------------------------------------------------------- |
-| Worker-only + 既存Bitwarden passkey | **採用**     | Cloudflare IPから新規login、8 Cookie/`secureKey`構築、read確認まで成功       |
-| Worker keepalive                    | **採用**     | 15分CronとCookie rotation成功。実際のabsolute expiry到達時fallbackを長期観測 |
-| Container + full Chrome             | 不採用       | Worker-only認証が成立したため不要                                            |
-| Worker-only + password              | 非推奨       | DOM Turnstileとsingle-use tokenを別runtimeへ渡す不安定性が大きい             |
-| Browser Rendering                   | 後順位       | current CDP schemaでWebAuthn virtual authenticatorを使えるか未確認           |
+| Runtime                                  | Current decision | Next proof                                                                                         |
+| ---------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------- |
+| Worker-only + existing Bitwarden passkey | **Adopted**      | New login from Cloudflare IP, construction of 8 cookies/`secureKey`, and read checks succeeded     |
+| Worker keepalive                         | **Adopted**      | 15-minute Cron and cookie rotation succeeded. Observe fallback on actual absolute expiry long-term |
+| Container + full Chrome                  | Not adopted      | Unnecessary because Worker-only authentication works                                               |
+| Worker-only + password                   | Not recommended  | High instability in passing DOM Turnstile/single-use tokens to a separate runtime                  |
+| Browser Rendering                        | Lower priority   | WebAuthn virtual-authenticator support in the current CDP schema remains unconfirmed               |
 
-### third-party client再調査
+### Third-party client reinvestigation
 
-2026-08-31にGitHub code searchを`simple.sbivc.co.jp`、`co.jp.sbivc.trade.app`、`cashBalanceList`で再実行したが、現行VCTRADEへloginしてnetwork取得するmaintained public clientは見つからなかった。CCXTの2026-08-29 snapshotにもSBI VCトレードimplementationは確認できない。
+GitHub code search was rerun on 2026-08-31 for `simple.sbivc.co.jp`, `co.jp.sbivc.trade.app`, and `cashBalanceList`, but found no maintained public client logging in to current VCTRADE for network retrieval. No SBI VCトレード implementation was found in the CCXT snapshot of 2026-08-29 either.
 
-`kittyflip-zig/crypto-ledger-tools`はnetwork clientではなくMITのlocal CSV normalizerである。2026-06 snapshotの`sbivc_trade_record` adapterは`trade_record_list`または`約定日時/銘柄/売買/数量`列を認識し、数量、約定rate、手数料等をJPY quoteの共通recordへ変換する。一方、SBI専用fixture/testと`CASHFLOW` parserは確認できない。offline importの参考にはなるが、auth/session automationの先例ではない。
+`kittyflip-zig/crypto-ledger-tools` is an MIT-licensed local CSV normalizer, not a network client. The 2026-06 snapshot's `sbivc_trade_record` adapter recognizes `trade_record_list` or columns `約定日時/銘柄/売買/数量` ("execution datetime/asset/buy-sell/quantity") and converts quantity, execution rate, fees, and similar fields to common JPY-quote records. SBI-specific fixtures/tests and a `CASHFLOW` parser were not found. It is an offline-import reference, not a precedent for authentication/session automation.
 
-追加の技術資料:
+Additional technical references:
 
 - [Turnstile server-side validation](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)
 - [Workers Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)
-- [現行login page source map](https://simple.sbivc.co.jp/_nuxt/b21877a.js.map)
-- [約定履歴page source map](https://simple.sbivc.co.jp/_nuxt/32085e8.js.map)
-- [入出金履歴page source map](https://simple.sbivc.co.jp/_nuxt/12ae015.js.map)
+- [Current login-page source map](https://simple.sbivc.co.jp/_nuxt/b21877a.js.map)
+- [Execution-history page source map](https://simple.sbivc.co.jp/_nuxt/32085e8.js.map)
+- [Deposit/withdrawal-history page source map](https://simple.sbivc.co.jp/_nuxt/12ae015.js.map)
 - [`crypto-ledger-tools` SBI adapter](https://github.com/kittyflip-zig/crypto-ledger-tools/blob/33758391c2b93ce99812257b2e4c1c82b67c6a1d/src/crypto_ledger_tools/exchange_adapters.py)
 
-残る未確認事項は、server absolute TTL、passkey credential失効時のerror schema、rate limit、report取得によるread status更新、最大page size、history retention、アプリ固有transport/pinning/integrityである。
+Remaining unknowns are server absolute TTL, the error schema for expired passkey credentials, rate limits, read-status updates on report retrieval, maximum page size, history retention, and app-specific transport/pinning/integrity.
 
-## 14. 2026-08-31 認証済みWeb sessionの直接replay
+## 14. Direct replay of an authenticated Web session on 2026-08-31
 
-本人がKogane Capture ChromeでBitwarden passkey loginを完了した後、read-only eventだけを使ってbrowser外replayを1回ずつ検証した。Kogane Captureは`--net-log-capture-mode=Everything`で起動していたため、raw capture自体はCookie等を含み得る秘密artifactとして扱う。Cookie値、`secureKey`、口座識別子、金額、銘柄、取引内容、response bodyは標準出力、Git、PR本文へ出していない。
+After the owner completed Bitwarden passkey login in Kogane Capture Chrome, browserless replay was verified once per read-only event. Kogane Capture was launched with `--net-log-capture-mode=Everything`, so raw capture itself is treated as a secret artifact potentially containing cookies and similar data. Cookie values, `secureKey`, account identifiers, amounts, assets, transaction contents, and response bodies were not exposed in stdout, Git, or PR bodies.
 
-### 認証とsession境界
+### Authentication and session boundaries
 
-- `initiateLoginWithPasskey`と`loginWithPasskey`はKogane Capture ChromeでHTTP 200 JSONだった。live `loginWithPasskey` requestのtop-level fieldはWebAuthn assertion一式で、Turnstile response fieldはなかった。
-- 認証前の`trade` callはHTTP 403 HTML、認証後の`accountMargin`、`positionSummaryList`、`executionList`、`tradeReportList`はHTTP 200 JSONだった。
-- KuebikoのNetLogでは、認証済み`trade` requestに`cookie` headerがあり、responseには複数の`set-cookie` headerがあった。公開bundleだけから推測していたCookie session利用をlive確認できた。
-- Kuebikoが保存した最新`secureKey`だけを使い、Cookieを付けずWSL/Bunから`accountMargin`を送るとHTTP 403、HTML titleは`ログインしていません`だった。Cloudflare challenge pageではなくapplication session拒否である。
-- 同じWSL/Bun、同じrequest bodyへ認証済みCookieを付けるとHTTP 200 `application/json`、gateway status `OK`になった。したがって、この試験ではbrowser TLS fingerprintやbrowser process自体はreplayの必須条件ではなく、Cookieと`secureKey`の組が必要だった。
-- Cookieと`secureKey`のserver側absolute TTLは未確認である。一度reloadで`/login#verifyGa`へ戻った観測もあるため、client定数だけからsession lifetimeを決めない。別IP/regionへの移送とpasskeyからの完全無人bootstrapは後続Worker試験で成功した。
+- `initiateLoginWithPasskey` and `loginWithPasskey` returned HTTP 200 JSON in Kogane Capture Chrome. Live `loginWithPasskey` top-level request fields were the full WebAuthn assertion, with no Turnstile response field.
+- Unauthenticated `trade` calls returned HTTP 403 HTML; authenticated `accountMargin`, `positionSummaryList`, `executionList`, and `tradeReportList` returned HTTP 200 JSON.
+- Kuebiko NetLog showed a `cookie` header on authenticated `trade` requests and multiple `set-cookie` response headers. Cookie-session use, previously inferred only from public bundles, was live-confirmed.
+- Sending `accountMargin` from WSL/Bun with only the latest Kuebiko-saved `secureKey` and no cookies returned HTTP 403 with HTML title `ログインしていません`. This was application-session rejection, not a Cloudflare challenge page.
+- Adding authenticated cookies to the same WSL/Bun request body returned HTTP 200 `application/json` and gateway status `OK`. Browser TLS fingerprints or the browser process itself were therefore not prerequisites for replay in this test; cookies paired with `secureKey` were required.
+- Server-side absolute TTL of cookies and `secureKey` remains unconfirmed. A reload once returned to `/login#verifyGa`, so do not derive session lifetime solely from client constants. Transfer to another IP/region and fully unattended bootstrap from passkeys succeeded in subsequent Worker tests.
 
-### Cookie最小化とrotation
+### Cookie minimization and rotation
 
-認証後の19回の`trade` requestについて、Cookie値と`secureKey`を出力せずSHA-256同値比較だけを行った。`secureKey`、`vct_bff_sid`、`JSESSIONID`、`AWSALBAPP-0`から`AWSALBAPP-3`は全期間で同一だった。一方、`AWSALB`、`AWSALBCORS`、2個の`__cf_bm`は繰り返し変化し、完全なCookie headerは19回中ほぼ毎回異なった。
+For 19 authenticated `trade` requests, only SHA-256 equality comparisons were performed without outputting cookie values or `secureKey`. `secureKey`, `vct_bff_sid`, `JSESSIONID`, and `AWSALBAPP-0` through `AWSALBAPP-3` stayed identical throughout. `AWSALB`, `AWSALBCORS`, and 2 `__cf_bm` cookies changed repeatedly, and the full Cookie header differed almost every time across the 19 requests.
 
-login responseの属性では、`vct_bff_sid`と`__cf_bm`の`Expires`が約30分後、`AWSALB`、`AWSALBCORS`、`AWSALBAPP-0..3`が約7日後だった。`JSESSIONID`には`Expires`/`Max-Age`がなくsession cookieだった。後続の認証済み`trade` responseも同じcookie名を`Set-Cookie`し、`vct_bff_sid`は同じ値のまま約30分先へ、AWS routing cookieは約7日先へ期限を延長していた。したがって30分は固定login寿命ではなくrolling idle windowの可能性が高い。再認証を避ける常駐collectorは30分未満のread-only keepaliveと`Set-Cookie`追従が必要になる。server側absolute lifetimeは引き続き不明である。
+Login-response attributes set `Expires` about 30 minutes ahead for `vct_bff_sid`/`__cf_bm` and about 7 days ahead for `AWSALB`, `AWSALBCORS`, and `AWSALBAPP-0..3`. `JSESSIONID` had neither `Expires` nor `Max-Age`, making it a session cookie. Subsequent authenticated `trade` responses also set the same cookie names through `Set-Cookie`, extending unchanged `vct_bff_sid` values about 30 minutes ahead and AWS routing cookies about 7 days ahead. Thus 30 minutes is likely a rolling idle window rather than fixed login lifetime. A persistent collector avoiding reauthentication needs read-only keepalive less than 30 minutes apart and `Set-Cookie` tracking. Server absolute lifetime remains unknown.
 
-`accountMargin`だけを使ったleave-one-out試験では次の結果になった。
+Leave-one-out tests using only `accountMargin` gave the following results.
 
-| Cookie subset                                           | 結果                                                    |
-| ------------------------------------------------------- | ------------------------------------------------------- |
-| `vct_bff_sid` + `JSESSIONID`だけ                        | application側403                                        |
-| 上記2個 + `AWSALBAPP-0..3`                              | 初回は200、後の再試験では403。routing先依存で再現性なし |
-| 上記成功集合から`AWSALBAPP` fragmentを1個ずつ除外       | 4通りすべてapplication側403                             |
-| `AWSALBAPP-0..3` + `JSESSIONID`（`vct_bff_sid`なし）    | application側403                                        |
-| `AWSALBAPP-0..3` + `vct_bff_sid`（`JSESSIONID`なし）    | application側403                                        |
-| 完全headerから`__cf_bm`を除外                           | HTTP 200 / gateway `OK`                                 |
-| 完全headerから`AWSALB`/`AWSALBCORS`/`AWSALBAPP-*`を除外 | application側403                                        |
+| Cookie subset                                                               | Result                                                                         |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Only `vct_bff_sid` + `JSESSIONID`                                           | Application-side 403                                                           |
+| Those 2 + `AWSALBAPP-0..3`                                                  | Initially 200, but 403 on later retest. Routing-dependent and not reproducible |
+| Remove each `AWSALBAPP` fragment individually from the successful set above | All 4 cases: application-side 403                                              |
+| `AWSALBAPP-0..3` + `JSESSIONID` (without `vct_bff_sid`)                     | Application-side 403                                                           |
+| `AWSALBAPP-0..3` + `vct_bff_sid` (without `JSESSIONID`)                     | Application-side 403                                                           |
+| Full header minus `__cf_bm`                                                 | HTTP 200 / gateway `OK`                                                        |
+| Full header minus `AWSALB`/`AWSALBCORS`/`AWSALBAPP-*`                       | Application-side 403                                                           |
 
-6 cookieだけで通った試行はあったが再現しなかったため、production入力から`AWSALB`と`AWSALBCORS`を除外してはならない。今回再現できた集合は、`vct_bff_sid`、`JSESSIONID`、分割された`AWSALBAPP-0..3`、`AWSALB`、`AWSALBCORS`の8 cookieである。`__cf_bm`は除外しても成功し、Bun既定User-AgentとChrome User-Agentの両方で完全headerは成功した。したがってCloudflare Bot Management cookieやChrome UAは同一host replayの必須条件ではない。一方、AWS routing cookieは頻繁にrotationするため、長時間collectorではresponseの`Set-Cookie`を追従するcookie jarが必要になる可能性がある。別IP/regionでも同じとはまだ断定しない。
+One attempt passed with only 6 cookies but was not reproducible, so do not remove `AWSALB` and `AWSALBCORS` from production input. The reproducible set here was 8 cookies: `vct_bff_sid`, `JSESSIONID`, split `AWSALBAPP-0..3`, `AWSALB`, and `AWSALBCORS`. Excluding `__cf_bm` still succeeded; the full header succeeded with both Bun's default User-Agent and Chrome User-Agent. Cloudflare Bot Management cookies and Chrome UA are therefore not prerequisites for same-host replay. AWS routing cookies rotate frequently, so long-running collectors may need a cookie jar tracking response `Set-Cookie`. Do not yet assert parity across other IPs/regions.
 
-### read-only collectorの実データ検証
+### Read-only collector verification with real data
 
-`packages/sbi-vc-trade-client`へCookieと`secureKey`をmode 600のtmpfs fileで渡し、次の固定allowlistだけを実行した。
+Cookies and `secureKey` were passed to `packages/sbi-vc-trade-client` through a mode-600 tmpfs file; only the following fixed allowlist was executed.
 
 - `cashBalanceList`
 - `accountMargin`
 - `positionSummaryList`
-- `executionList`のrecent page 0とhistorical pagination
-- `getCashflowList`のhistorical pagination（JPY入出金filter）
+- `executionList` recent page 0 and historical pagination
+- `getCashflowList` historical pagination (JPY deposit/withdrawal filter)
 
-全eventがHTTP 200 JSON、gateway status `OK`となり、collectorは6個のlocal artifactを生成して正常終了した。さらにsession inputを上記8 cookieへ型付けした後も、`__cf_bm`を送らずcollector全体が再度成功した。実件数と実値は公開文書へ記録しない。paginationは`list`と`totalSize`で停止し、最大100 pageの上限を維持した。最初の出力directoryはmode 700、各JSONはmode 600で、Git管理外の`~/.local/share/kogane/sbi-vc-trade/<timestamp>/`へ保存した。8-cookie再検証のoutputとsession fileはtmpfs上で確認後に削除した。Cookie/`secureKey`はartifactへ含めていない。
+All events returned HTTP 200 JSON and gateway status `OK`; the collector produced 6 local artifacts and exited successfully. After typing session input to the 8 cookies above, the full collector also succeeded again without sending `__cf_bm`. Actual counts/values are not recorded in public documentation. Pagination stopped using `list` and `totalSize`, retaining the maximum cap of 100 pages. The initial output directory was mode 700 and each JSON mode 600, stored outside Git at `~/.local/share/kogane/sbi-vc-trade/<timestamp>/`. Output and the session file for the 8-cookie retest were deleted after verification on tmpfs. Cookies/`secureKey` were excluded from artifacts.
 
-この結果により、transport部分は標準的なWorkers/Bun `fetch`へ移植した。さらに既存Bitwarden passkeyをWorker Web Cryptoで利用し、Cookie/`secureKey`の新規bootstrapにも成功した。write eventと同じgateway/sessionを共有するため、今後もgeneric event senderを作らず、compile-time read allowlistを維持する。
+These results led to porting the transport to standard Workers/Bun `fetch`. Using the existing Bitwarden passkey with Worker Web Crypto also successfully bootstrapped new cookies/`secureKey`. Because the gateway/session is shared with write events, continue without a generic event sender and retain the compile-time read allowlist.
 
-## 15. Cloudflare Workers session・passkey PoC
+## 15. Cloudflare Workers session/passkey PoC
 
-[`services/collector-sbi-vc-trade`](../../services/collector-sbi-vc-trade/)へ、一時Worker `kogane-sbi-vc-session-poc`を追加した。GitHub Actionsはtriggerに使わない。
+Temporary Worker `kogane-sbi-vc-session-poc` was added under [`services/collector-sbi-vc-trade`](../../services/collector-sbi-vc-trade/). GitHub Actions is not used as a trigger.
 
 The Worker uses a Durable Object on the paid Cloudflare plan. Since
 [#430](https://github.com/risu729/kogane/pull/430) (2026-10-05) it has no Cron
@@ -533,11 +533,11 @@ trigger: the Processor's `ScheduleAlarm` calls its private
 and `5 21 * * *` in `config/alarm-jobs.json` are the only ones
 `runScheduled` accepts ([schedules](../schedules.md)).
 
-### 構成
+### Configuration
 
-- `SESSION_SEED` Worker Secretに、実測で必要だった8 Cookieと`secureKey`を初期投入する。
-- `SESSION_ENCRYPTION_KEY` Worker SecretをAES-256-GCM keyとし、rotation後のsessionをDurable Objectへ暗号化保存する。
-- `PASSKEY_CREDENTIAL` Worker Secretには、既存Bitwarden credentialのcredential ID、PKCS#8 P-256 private key、RP ID、user handle、counter、algorithm/curveだけを投入する。master passwordとBitwarden session keyは投入しない。
+- Initially supply the empirically required 8 cookies and `secureKey` in Worker Secret `SESSION_SEED`.
+- Use Worker Secret `SESSION_ENCRYPTION_KEY` as an AES-256-GCM key to encrypt rotated sessions in the Durable Object.
+- Worker Secret `PASSKEY_CREDENTIAL` contains only the existing Bitwarden credential's credential ID, PKCS#8 P-256 private key, RP ID, user handle, counter, and algorithm/curve. It excludes the master password and Bitwarden session key.
 - Each keepalive run (`*/15 * * * *`) sends the light read-only event
   `informationTitle` once; the official UI itself sends it every 10 minutes.
 - The daily job (`5 21 * * *`, 06:05 JST) reads cash balances, account margin,
@@ -551,34 +551,34 @@ and `5 21 * * *` in `config/alarm-jobs.json` are the only ones
   the private bucket `kogane-sbi-vc-trade-poc` under
   `raw/sbi-vc-trade/YYYY/MM/DD/<run-id>/`; that bucket was emptied and deleted
   ([legacy retirement](../legacy-retirement.md)).
-- responseの`meta.secureKey`はsession更新へ使った後に削除し、R2へ保存しない。
+- Remove response `meta.secureKey` after using it for session refresh; do not save it in R2.
 - The sanitized artifacts of a run are held in the Durable Object's memory
   until the terminal is written, and nothing is staged
   (`services/collector-sbi-vc-trade/src/worker.ts`, `#performCollection`).
   Writing each artifact to R2 as soon as it was read was the behaviour of the
   retired private-bucket path.
-- responseは64 KiB上限でJSON envelopeと`meta.status === "OK"`だけを確認し、bodyを保存しない。
-- `Set-Cookie`は8 Cookieだけを追従し、`__cf_bm`は無視する。`meta.secureKey`が変化した場合も暗号化状態へ反映する。
-- 平文healthはlast attempt/success、HTTP status、gateway statusの閉じた区分（`OK`か`rejected`。gatewayが返した`OK`以外の文字列は保存もlogもしない）、Cookie更新数、連続失敗数、固定error codeだけで、残高・履歴・Cookie値・response bodyを含まない。
-- 手動`/run`、`/reauth`、`/collect`、`/health`と`ADMIN_TOKEN`は2026-11-08に廃止した。手動の収集はoperations APIの`collection`、強制loginは`session-refresh`（1時間に1回まで）で依頼する（[ADR 0069](../adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08)）。
-- keepaliveがHTTP 401/403、gateway拒否、seed欠落になった場合だけ再認証する（while a terms agreement is pending, also on the gateway's 3xx `http_rejected`; [§16](#16-resuming-after-a-terms-agreement-2026-11-07)）。6時間cooldown（1 hour for up to 72 hours while an agreement is pending）で反復loginを抑止し、同種の同時実行を単一Promiseへ畳み込み、keepaliveと再認証のsession変更はDurable Object内で直列化する。
-- passkey完了responseの`body.accountId`は直後のread APIの`secureKey`と一致したため、新規sessionの`secureKey`として使う。`isAgreed !== true`なら`setAgreement`を送らずそのloginを`manual_agreement_required`で終える。
+- Responses are capped at 64 KiB; check only the JSON envelope and `meta.status === "OK"`, without saving the body.
+- Track only the 8 cookies from `Set-Cookie`, ignoring `__cf_bm`. Changes to `meta.secureKey` also update encrypted state.
+- Plaintext health contains only last attempt/success, HTTP status, a closed gateway-status category (`OK` or `rejected`; non-`OK` strings returned by the gateway are neither saved nor logged), cookie-update count, consecutive-failure count, and fixed error codes. It excludes balances/history/cookie values/response bodies.
+- Manual `/run`, `/reauth`, `/collect`, `/health`, and `ADMIN_TOKEN` were retired on 2026-11-08. Request manual collection through operations API `collection` and forced login through `session-refresh` (at most once per hour) ([ADR 0069](../adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08)).
+- Reauthenticate only when keepalive returns HTTP 401/403, gateway rejection, or a missing seed (while a terms agreement is pending, also on the gateway's 3xx `http_rejected`; [§16](#16-resuming-after-a-terms-agreement-2026-11-07)). A 6-hour cooldown (1 hour for up to 72 hours while an agreement is pending) prevents repeated logins; concurrent operations of the same kind collapse into one Promise, and keepalive/reauthentication session changes are serialized within the Durable Object.
+- Passkey-completion response `body.accountId` matched the immediately subsequent read API's `secureKey`, so use it as the new session's `secureKey`. If `isAgreed !== true`, end that login with `manual_agreement_required` without sending `setAgreement`.
 
-### live結果
+### Live results
 
-2026-08-31 JST、Kuebiko NetLog末尾256 MiBから直近の認証済み`trade` requestを構造化し、値を標準出力へ出さず8 Cookieを抽出した。最新`informationTitle` requestから`secureKey`も取得し、mode 600のtmpfsを経由して`wrangler secret put`の標準入力へ渡した。seed tmpfs fileは投入直後に削除した。
+On 2026-08-31 JST, the latest authenticated `trade` request was structured from the final 256 MiB of Kuebiko NetLog; 8 cookies were extracted without exposing values in stdout. `secureKey` was also obtained from the latest `informationTitle` request and passed through mode-600 tmpfs to standard input of `wrangler secret put`. The seed tmpfs file was deleted immediately after submission.
 
-初回実行はHTTP 200 JSON、gateway `OK`となり、3件のsession更新を暗号化状態へ反映した。したがって現在の認証済みsessionはCloudflare Workers egressへ移送可能で、少なくともこの経路では日本の家庭IP、TAMIA、browser TLS fingerprint、Chrome User-Agent、`__cf_bm`は必要ない。後続試験ではCloudflare IPからのlogin/passkey bootstrapにも成功した。
+The first run returned HTTP 200 JSON and gateway `OK`, reflecting 3 session updates in encrypted state. The current authenticated session was therefore transferable to Cloudflare Workers egress; at least on this route, Japanese residential IPs, TAMIA, browser TLS fingerprints, Chrome User-Agent, and `__cf_bm` are unnecessary. Subsequent tests also succeeded at login/passkey bootstrap from Cloudflare IPs.
 
-Workers runtimeで`redirect: "error"`を指定したsubrequestはresponseを返さずTypeErrorになった。同じrequestを`redirect: "manual"`（追従なし）へ変えると200になったため、SBI側3xxを観測したとは記録せず、Workers fetchのredirect mode差として扱う。
+A subrequest with `redirect: "error"` in Workers runtime threw TypeError without returning a response. Changing the same request to `redirect: "manual"` (no following) produced 200; record this as a Workers fetch redirect-mode difference, not an observed SBI-side 3xx.
 
-Cronは複数回実発火し、少なくとも2026-08-31 02:00 UTCの時点でもHTTP 200、gateway `OK`、連続失敗0だった。
+Cron fired several times, remaining HTTP 200, gateway `OK`, and consecutive failures 0 at least as of 2026-08-31 02:00 UTC.
 
-同日、WSLでBitwarden CLIをunlockし、`SBI VCトレード` itemの既存FIDO2 credentialから必要7 fieldだけをtmpfsへ抽出した。Worker Secret投入後に`/reauth`を1回実行し、Cloudflare Workerから`initiateLoginWithPasskey`、P-256 WebAuthn assertion生成、`loginWithPasskey`、新sessionでの`informationTitle`まで連続成功した。healthは再認証成功、HTTP 200、gateway `OK`、Cookie更新3件、連続失敗0を示した。Chrome、TAMIA、日本家庭IP、Turnstile token、過去session Cookie、`__cf_bm`は使っていない。
+On the same day, Bitwarden CLI was unlocked in WSL and only the required 7 fields were extracted from the `SBI VCトレード` item's existing FIDO2 credential to tmpfs. After supplying the Worker Secret, `/reauth` was executed once; the Cloudflare Worker successively completed `initiateLoginWithPasskey`, P-256 WebAuthn assertion generation, `loginWithPasskey`, and `informationTitle` with the new session. Health showed reauthentication success, HTTP 200, gateway `OK`, 3 cookie updates, and 0 consecutive failures. No Chrome, TAMIA, Japanese residential IP, Turnstile token, previous session cookies, or `__cf_bm` were used.
 
-同日、WorkerへR2 bindingと日次Cronを追加し、admin認証付き`POST /collect`を1回実行した。`cash-balances`、`account-margin`、`position-summary`、`executions-recent-page-0001`、`executions-historical-page-0001`、`cashflows-historical-page-0001`の6 artifact、合計35,180 bytesとmanifestをprivate R2へ保存し、status `success`、failure 0だった。全artifactをR2から再取得し、manifestのSHA-256一致、JSON envelopeのgateway status `OK`、`meta.secureKey`非含有を確認した。金融値とbodyは表示・ログ出力していない。
+On the same day, an R2 binding and daily Cron were added to the Worker and an admin-authenticated `POST /collect` was executed once. The 6 artifacts `cash-balances`, `account-margin`, `position-summary`, `executions-recent-page-0001`, `executions-historical-page-0001`, and `cashflows-historical-page-0001`, totaling 35,180 bytes, plus a manifest were saved to private R2 with status `success` and failure 0. All artifacts were retrieved again from R2, confirming manifest SHA-256 matches, JSON-envelope gateway status `OK`, and exclusion of `meta.secureKey`. Financial values/bodies were neither displayed nor logged.
 
-2026-09-07には同じ6 datasetをLayer Bへsource-separatedに正規化する5 parserを追加した。recent/historicalの約定はprovider上で同じrecord shapeと複合identityを持つため、重複実装せず`CExecutionId`と`CExecutionIdSubNo`の衝突しないtupleを使う単一parserに集約した。cashflowの方向はtype labelから推測せず、signed `cashflowAmount`を正本とする。暗号資産のquantity/amount/priceは10進textとscaleを保持し、法定通貨のような既知minor unitへ推測変換しない。全観測には固定source accountとJSON locator、sanitized gateway meta/page contextを残す。
+On 2026-09-07, 5 parsers were added to normalize the same 6 datasets into Layer B with source separation. Recent/historical executions share the provider's record shape and composite identity, so one parser using a collision-free tuple of `CExecutionId` and `CExecutionIdSubNo` handles both without duplicate implementation. Cashflow direction comes from signed `cashflowAmount`, not inferred from type labels. Cryptoasset quantity/amount/price retain decimal text and scale, without guessed conversion to known minor units as for fiat currencies. Every observation retains a fixed source account, JSON locator, and sanitized gateway meta/page context.
 
 Timestamps (parsers 0.2.1, 2026-11-06): `meta.timestamp`, `statusDate`,
 `executionDatetime` and `eventDatetime` are read in the audited slash form
@@ -589,20 +589,20 @@ is refused, never repaired: an execution or cashflow page fails, and a gateway
 timestamp or status date leaves the instant empty. 0.2.0 checked the ISO form
 only for its shape; see [observations](../observations.md#sbi-vc-trade-an-iso-timestamp-that-does-not-exist-is-refused-five-parsers-021).
 
-production R2への再現可能なread-only actual-shape canary
-（`services/collector-r2-importer/scripts/audit-sbi-vc-r2.sh`）では、2026-09-07
-時点の63 object / 9 manifestを走査し、9件すべてがsuccessful run、全artifactが
-exactly one parserへ一致してparse failure 0であることをaggregateだけで確認した。
-canaryはlocalhostの一時WorkerからR2 list/get以外を行わず、object key、hash、body、
-金融値、account identifier、secretを出力しない。観測された9 runではpositionと
-recent executionsはいずれもemptyで、historical executions/cashflowsは各1 page
-だったため、non-empty position/recent、multi-page chain、recent/historical間の
-同一identity overlapはproduction evidenceでは未確認である。これらの境界は匿名
-synthetic fixtureとnegative testで固定し、実観測済みとは表現しない。
+A reproducible read-only actual-shape canary against production R2
+(`services/collector-r2-importer/scripts/audit-sbi-vc-r2.sh`) scanned the 63 objects / 9 manifests
+present as of 2026-09-07, confirming only through aggregates that all 9 runs were successful, every artifact
+matched exactly one parser, and parse failures were 0.
+The canary performs only R2 list/get from a temporary localhost Worker and outputs no object keys, hashes, bodies,
+financial values, account identifiers, or secrets. In the 9 observed runs, positions and
+recent executions were both empty; historical executions/cashflows each had 1 page.
+Non-empty positions/recent executions, multi-page chains, and same-identity overlap between
+recent/historical views are therefore unconfirmed in production evidence. Those boundaries are pinned with anonymous
+synthetic fixtures and negative tests, not described as actually observed.
 
-これによりrolling keepaliveとabsolute/session失効後の無人復旧経路の両方を実証した。未確認なのは、実際にabsolute expiryへ達した瞬間の自動fallback、credential revoke、backend schema変更、長期rate limitである。手動`/reauth`成功だけでCron fallbackの全failure modeまで証明したとは扱わない。
+This demonstrated both rolling keepalive and an unattended recovery route after absolute/session expiry. Automatic fallback at the actual instant of absolute expiry, credential revocation, backend schema changes, and long-term rate limits remain unconfirmed. Successful manual `/reauth` alone does not prove every failure mode of Cron fallback.
 
-### 中央raw-evidence転送
+### Central raw-evidence transfer
 
 Historical record: the private outbox bucket, the importer
 (`kogane-collector-r2-importer`), its Service Binding and
@@ -611,35 +611,35 @@ retired on 2026-09-13 ([legacy retirement](../legacy-retirement.md)). The
 collector now writes each run once, into `DATA`
 ([below](#shared-data-bucket-u09-2026-09-11)).
 
-private R2を削除しないdurable outboxとして維持したまま、`kogane-collector-r2-importer`への内部Service Bindingを追加した。collectorは最後にmanifestを保存してrun境界を確定し、そのkeyだけをimporterへ渡す。
+An internal Service Binding to `kogane-collector-r2-importer` was added while keeping private R2 as a durable outbox without deleting it. The collector saves the manifest last to establish the run boundary and passes only its key to the importer.
 
-各artifactとmanifestのR2 putは`etagDoesNotMatch: "*"`で同一keyへの上書きを拒否し、R2 native SHA-256を指定する。UUIDのrun prefixとmanifest-lastを将来のR2 notificationでもcommit markerとして使えるため、別の`commit.json`は追加しない。既存outboxはnative SHA-256が未設定でも、manifest値・custom metadata・再計算SHA-256の一致でbackfill可能なままにする。
+Each artifact/manifest R2 put uses `etagDoesNotMatch: "*"` to reject overwriting the same key and specifies native R2 SHA-256. UUID run prefixes and manifest-last can serve as commit markers for future R2 notifications too, so no separate `commit.json` is added. Existing outbox data without native SHA-256 remains backfillable through agreement of manifest values, custom metadata, and recalculated SHA-256.
 
-importerはSBI VC Trade固有の順序・pagination契約を使い、manifest schema/source/run/date/status、固定dataset、履歴pageの連番・`totalSize`一貫性・page長・終了条件、失敗時に次に欠けるdataset、prefix内の全object、size、custom metadata、SHA-256を中央run作成前に検証する。collector、importer、Layer B parserはいずれもpage size 30、page番号、`totalNumOfPages`、`totalSize`、list cardinalityを検証し、recent viewが単一pageを超える場合はtruncation evidenceとしてfail closedする。artifactは最大4 MiB、最大204件なので全bytesを同時保持せず逐次検証し、転送時に再読込・再検証した元bytesを再serializeせず送る。同期Service Binding経路はdata artifact 11件までとし、12件以上は中央stateを作らずR2にdeferして後続Queue reconcilerへ委ねる。中央routeとBearer clientは`collector-r2-sbi-vc`専用で、SBI証券用clientとは分離する。
-importerは同一pageとhistorical page chain全体でprovider identityの重複も拒否する。
-recent/historical viewは別集合として検証するため、同じ約定tupleが両viewに現れる
-こと自体は許容し、Layer Bでは同じexternalIdと異なるsourceViewで保持する。
+Using SBI VC Trade-specific ordering/pagination contracts, the importer validates manifest schema/source/run/date/status, fixed datasets, sequential historical pages/consistent `totalSize`/page lengths/stopping conditions, the next missing dataset on failure, all prefix objects, sizes, custom metadata, and SHA-256 before creating a central run. The collector, importer, and Layer B parsers all validate page size 30, page numbers, `totalNumOfPages`, `totalSize`, and list cardinality, failing closed with truncation evidence when the recent view exceeds one page. Artifacts are at most 4 MiB and at most 204 in number; validate sequentially without retaining all bytes at once, then transfer original bytes reread/revalidated at transfer time without reserialization. The synchronous Service Binding route allows up to 11 data artifacts; 12 or more defer in R2 to the later Queue reconciler without creating central state. The central route and Bearer client are dedicated to `collector-r2-sbi-vc`, separate from the SBI証券 client.
+The importer also rejects duplicate provider identities within one page and throughout the historical page chain.
+Recent/historical views are validated as separate sets, so the same execution tuple may appear
+in both views; Layer B retains it with the same externalId and different sourceView.
 
-`collect`がpagination異常を検出した場合、collectorは原因になった最後のprovider responseを保存してからpartial manifestを確定する。importerはその末尾artifactについてenvelope、gateway status、secret除去、R2 metadata、hash、sizeとdataset位置を検証し、正常pageとは見なさず「失敗原因のraw evidence」として中央へcatalogueする。これにより異常responseを失わず、run全体はpartial/failedのままsealされる。
-Observation pipelineはparent fetch-runのstatusとfailure countをartifact metadataへ
-引き継ぎ、successかつfailure 0でないrunを全parser共通で実行対象から除外する。
-current query側も同じ条件を再検証するため、旧実装がpartial runへsuccessful parseを
-残していてもcurrent observationにはならない。pagination total changedのpartial
-runがcurrent observation 0になるend-to-end regressionで固定している。
+When `collect` detects a pagination anomaly, the collector saves the last provider response that caused it before finalizing a partial manifest. For that final artifact, the importer validates the envelope, gateway status, secret removal, R2 metadata, hash, size, and dataset position; rather than treating it as a normal page, it catalogues it centrally as "raw evidence of the failure cause." This preserves the anomalous response while sealing the whole run as partial/failed.
+The observation pipeline carries parent fetch-run status and failure count into artifact metadata
+and excludes runs without success and failure 0 from execution across all parsers.
+Current queries recheck the same conditions, so even successful parses left by an older implementation
+on partial runs do not become current observations. An end-to-end regression pins a pagination-total-changed partial
+run to 0 current observations.
 
-即時転送が失敗してもoutboxは残り、`scripts/backfill-raw-evidence.sh`がcursor付きの別top-level requestを繰り返す。各requestはR2 objectを最大1件走査し、manifestに当たった場合も1 runだけを冪等再送する。自動再試行・監視は後続reconcilerの責務であり、この変更には含めない。
+The outbox remains even if immediate transfer fails; `scripts/backfill-raw-evidence.sh` repeats separate top-level requests with cursors. Each request scans at most 1 R2 object and, when it finds a manifest, idempotently resubmits only 1 run. Automatic retries/monitoring belong to the later reconciler and are outside this change.
 
-同期上限を超えるmanifestはbackfill失敗でなくdeferredとして数え、cursorを進める。これにより大きなrunが後続の同期可能runを恒久的に遮断せず、deferred run自体はreconcilerのQueue分割処理対象として残る。
+Manifests exceeding the synchronous limit are counted as deferred rather than backfill failures, advancing the cursor. This prevents large runs from permanently blocking later synchronously transferable runs, while deferred runs remain candidates for the reconciler's Queue chunking.
 
-### 中央転送の本番検証
+### Production verification of central transfer
 
-2026-09-04 JSTに中央D1 migration `0006_sbi_vc_trade_collector_r2.sql`、中央ingest Worker、collector-R2 importer、SBI VC Trade collectorを順に本番反映した。中央`/health`はschema `0006`を返し、synthetic round tripもsealedまで完了した。
+On 2026-09-04 JST, central D1 migration `0006_sbi_vc_trade_collector_r2.sql`, the central ingest Worker, collector-R2 importer, and SBI VC Trade collector were deployed to production in that order. Central `/health` returned schema `0006`; a synthetic round trip also completed through sealed.
 
-その後、実アカウントで新しいcollectionを1回実行した。source側は6 data artifactとmanifestを保存して`success`、中央側は7 artifactを受理してsealedとなった。金融値やresponse bodyを表示せず、source R2のartifact 1件と中央content-addressed objectを再取得して比較した結果、byte列、SHA-256、sizeが完全一致した。
+One new collection was then run on the real account. The source saved 6 data artifacts and a manifest with `success`; the central side accepted 7 artifacts and sealed. Without displaying financial values or response bodies, 1 source R2 artifact and the central content-addressed object were retrieved again and compared: bytes, SHA-256, and size matched exactly.
 
-既存outbox全体のbackfillでは35 object、5 manifest、30 data objectを走査し、5 runすべてが中央でsealedとなった。同じbackfillをもう一度実行すると5 manifestすべてが既存runへ冪等reuseされ、中央D1集計は5 runs、5 seals、35 artifacts、unsealed 0だった。source R2 objectは削除していない。
+Backfill of the entire existing outbox scanned 35 objects, 5 manifests, and 30 data objects; all 5 runs sealed centrally. Running the same backfill again idempotently reused existing runs for all 5 manifests; central D1 aggregates were 5 runs, 5 seals, 35 artifacts, and 0 unsealed. Source R2 objects were not deleted.
 
-### cleanup対象
+### Cleanup targets
 
 - Worker: `kogane-sbi-vc-session-poc`
 - Durable Object class: `SbiVcSessionState`

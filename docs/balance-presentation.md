@@ -1,69 +1,73 @@
-# 残高・請求額の表示方針
+<a id="残高請求額の表示方針"></a>
 
-`financial-measures-v2` は観測の意味と通常表示を整理する読み取り専用の投影であり、原本、解析結果、口座の対応付けを変更しない。旧 `balance-view-v1` のレスポンスは読み取れるが、画面では現在の規則で再分類する。
+# Balance and billed-amount presentation policy
 
-## 保有量と期間実績の分離
+`financial-measures-v2` is a read-only projection that organizes observation meanings and normal presentation; it changes no original evidence, parser result or account mapping. Responses using the old `balance-view-v1` remain readable, but the screen reclassifies them under the current rules.
 
-`/balances` は時点残高・その集計・参考額、`/summaries` は期間実績と請求を表示する。後者は個々の取引にも残高にも加算しない。サーバーの `view=balances|summaries` は分類をページング前に適用する。未指定のAPIは互換性のため従来の格納形式を返す。
+<a id="保有量と期間実績の分離"></a>
 
-分類には `measurementKind`（残高／集計残高／期間実績／請求額／余力／未確認）、`assetClass`（現金／前払式／ポイント等）、`timeBasis` を別々に持たせる。保有ポイントは残高だが通貨ではない。利用制限・期限と獲得対象期間は別であり、期限から対象月を推定しない。
+## Separate holdings from period activity
 
-MyJCBの期間一覧は最新の完全な取得に表示された全請求月を返す。旧「最新残高」の1件だけを使わない。請求月は利用期間でも支払済みの証拠でもない。Vポイントの期間実績は従来通り完全な取得回を単位に選ぶ。
+`/balances` shows point-in-time balances, their aggregates and reference amounts; `/summaries` shows period activity and bills. The latter are added to neither individual transactions nor balances. The server's `view=balances|summaries` applies classification before pagination. For compatibility, an API request without it returns the previous storage format.
 
-VポイントSMFGの `point_smcc` / `point_smbc` は公式マイページで「連携しているVポイントサービスの獲得ポイント（先月分）」と表示される。保有量ではない。2026-09-08に公開UIの [状態モジュール](https://mypage.tsite.jp/_nuxt/64c5c08.js) のフィールド→getterと [表示コンポーネント](https://mypage.tsite.jp/_nuxt/d7645f4.js) のgetter→表示見出しを照合した。これは現在の解釈規則の根拠であり、過去のBの `not-inferred` や `displayed_point_balance` を書き換えない。
+Classification carries `measurementKind` (balance / aggregate balance / period activity / billed amount / available capacity / unconfirmed), `assetClass` (cash / prepaid / points, etc.) and `timeBasis` separately. Held points are a balance, but not a currency. Usage restrictions and expiry are separate from the earning period; expiry does not establish the target month.
 
-SMFGのAPIには絶対年月が保存されていないため「先月分（対象年月は未特定）」とする。`observed_at` が取得時刻のコピーである場合があり、そこから対象月を事実として捏造しない。VPoint `point_type` / `get_month` の厳密な意味も未確認。共通・店舗限定バケットの配列番号は、取得回をまたぐ恒久的IDとは扱わない。
+MyJCB's period list returns every billing month displayed in the latest complete capture, rather than only the old single (1-row) "latest balance" entry. A billing month is neither a usage period nor evidence of payment. Period activity for `Vポイント` (V Point) continues to be selected by complete capture.
 
-## 意味を分ける
+`VポイントSMFG` (V Point SMFG) fields `point_smcc` / `point_smbc` are displayed on the official member page as `連携しているVポイントサービスの獲得ポイント（先月分）` ("points earned through linked V Point services, last month"). They are not holdings. On 2026-09-08, the public UI's [state module](https://mypage.tsite.jp/_nuxt/64c5c08.js) field-to-getter mapping was checked against the [display component](https://mypage.tsite.jp/_nuxt/d7645f4.js) getter-to-heading mapping. This is evidence for the current interpretation rule; it does not rewrite historical Layer B `not-inferred` or `displayed_point_balance` values.
 
-- 預金・預かり金などの残高は資産側の記録として表示する。
-- 月次カード請求額は独立した「請求額」欄に表示する。MyJCB の `credit_statement_payment_amount` は支払い済みの過去請求も含み、現在の未払債務を証明しない。元の符号を保持し、機械的に負数へ変えない。
-- 未払債務は請求額と別概念。残存額、支払い・返金の反映、基準時点を取得できるまで推定しない。将来純資産に反映する場合はこの残存債務を控除し、請求額との二重計上を防ぐ。
-- 集計値、余力、限度額は個別残高から分離する。ポイントは元の単位の保有残高として扱い、円換算しない。通知に含まれるプリペイド残高は通知時の報告値であって現在値・最終決済の証拠ではない。未対応の情報は意味未確認として残す。
-- 種類の分類だけでは加算可能とはしない。今回の全項目は `netAssetEligible: false`。異なる基準時点や集計範囲を無視した純資産合計は作らない。
+The SMFG API retains no absolute year and month, so the display is `先月分（対象年月は未特定）` ("last month; target year and month unidentified"). `observed_at` can be a copy of the capture time; it is not used to fabricate the target month as a fact. The precise meanings of VPoint `point_type` / `get_month` are also unconfirmed. Common/store-limited bucket array positions are not permanent identifiers across captures.
 
-分類はデータソース・解析器・項目の組で決める。同名の項目だけで別データソースへ一般化しない。
+<a id="意味を分ける"></a>
 
-## 同じ残高の根拠をまとめる
+## Keep meanings separate
 
-対象は、SBI新生銀行の同じ取得で返される `yen_deposit_account_balance` と `yen_deposit_savings_balance` の対だけ。商品名が一致するという理由だけではまとめない。
+- Deposit and custody-cash balances are displayed as records on the asset side.
+- Monthly card bills appear in a separate `請求額` ("billed amount") section. MyJCB `credit_statement_payment_amount` includes historical bills that have already been paid and does not prove current outstanding debt. The original sign is retained rather than mechanically made negative.
+- Outstanding debt is separate from a billed amount. It is not estimated until the remaining amount, reflected payments/refunds and reference time can be captured. If reflected in net assets later, that remaining debt is deducted without counting the bill twice.
+- Aggregates, available capacity and limits are separate from individual balances. Points remain holdings in their original unit, without conversion to yen. A prepaid balance in a notification is the amount reported at notification time, not proof of its current value or final settlement. Unsupported information remains semantically unconfirmed.
+- A type classification alone does not make quantities additive. Every field in this change has `netAssetEligible: false`. No net-asset total ignores differing reference times or aggregation scopes.
 
-現在の整理済み口座と、その行自身に結び付いた有効な商品証拠を必要とする。データソース、元口座、口座参照と整理先、原本、解析、商品、通貨、基準時点、観測時点が一致し、相補的な行がちょうど2件あり、金額の整数文字列および元の金額表記も一致するときのみ1行にまとめる。整数比較に浮動小数点を使わない。
+Classification is determined by the source, parser and field together. A same-named field is not generalized to another source.
 
-通常表示は代表行の金額をそのまま使い、2件分を加算しない。双方の観測へのリンクと項目名を残す。金額が食い違う、または候補が曖昧な場合は両方を表示して警告する。根拠不足なら個別表示を維持する。
+<a id="同じ残高の根拠をまとめる"></a>
 
-履歴はまとめず、各観測をそのまま表示する。時点が違う観測、別の商品・口座・取得、全体集計との重複はこの規則では統合しない。
+## Group evidence for the same balance
 
-## 絞り込みとページング
+Only the pair `yen_deposit_account_balance` and `yen_deposit_savings_balance` returned by the same `SBI新生銀行` (SBI Shinsei Bank) capture is eligible. Matching product names alone do not justify grouping.
 
-サーバーは元の有効な最新候補に口座・データソース・通貨条件を適用し、最大5,000件の完全な候補集合を取得してから表示グループを作る。上限を超えた場合は413を返し、部分集合を正しい全体として扱わない。絞り込みで対象を狭めて再取得できる。
+Grouping requires the current organized account and valid product evidence tied to each row itself. A pair becomes 1 row only when the source, source account, account reference and organized destination, original evidence, parse, product, currency, reference time and observation time match; there are exactly 2 complementary rows; and both the integer amount strings and original amount text agree. Integer comparison uses no floating point.
 
-項目条件はグループ作成後、いずれかの根拠項目への一致で適用する。どちらの項目を検索しても同じグループと双方の根拠が返る。その後、通常表示を500件単位でページングする。履歴のページングは独立して元の観測単位を維持する。
+Normal presentation uses the representative row's amount unchanged rather than adding the 2 amounts. Links and field names for both observations remain. Disagreeing amounts or ambiguous candidates are both displayed with a warning. Insufficient evidence leaves the rows separate.
 
-画面内の50件区切りは分類をまたいで1つとし、そのページ内の行を種類別に並べる。表示件数は受信した範囲の件数であり、全保有口座数ではない。
+History is not grouped: each observation is displayed unchanged. This rule does not merge observations at different times, different products/accounts/captures, or overlaps with overall aggregates.
 
-「残高0を除外」は受信した最新・履歴の両一覧に適用する表示条件。金額の最小単位が整数のゼロと確認できる行だけを隠し、未記録・未解析値や負数は残す。画面内ページングの前に適用し、切り替え時は先頭へ戻る。詳細画面から戻っても条件を保持するが、永続保存はしない。サーバーの未受信ページは自動走査しない。
+<a id="絞り込みとページング"></a>
 
-## 互換性と保護
+## Filtering and pagination
 
-既存の残高フィールド・金額・符号は変更せず、APIに任意の `interpretation` を追加する。古いデータの画面表示は分類のみ行い、クライアント側で部分的な重複統合をしない。元行を含まない根拠配列はAPI検証で拒否する。
+The server applies account, source and currency conditions to the original valid latest candidates, obtains the complete candidate set of at most 5,000 rows, then builds display groups. Beyond the bound it returns 413 rather than presenting a subset as the correct whole. Filters can narrow the scope for another request.
 
-DB移行や再解析は不要。既存のCloudflare Access保護、原本の公開制限、読み取り上限を維持する。
+Field conditions are applied after grouping, matching either evidence field. Searching either field returns the same group with both pieces of evidence. Normal presentation is then paged in groups of 500 rows. History pagination is independent and retains the original observation unit.
 
-## 読み取りモデル（v2）
+The screen uses 1 set of 50-row pages across classifications; rows within a page are arranged by type. The displayed count is the received window's count, not the total number of held accounts.
 
-上記の分類・まとめ規則は変更していない。`/api/v2/balances/latest` は同じ
-`interpretation` を返し、同じ厳格な根拠一致条件で証拠を束ねる。変わったのは
-**いつ**その計算を行うかで、リクエストごとではなく入力contextごとに一度だけ
-行い、結果を投影として保存する。詳細は
-[Balance read model](balance-read-model.md)。
+`残高0を除外` ("exclude zero balances") is a display condition applied to both received latest and history lists. It hides only rows whose amount in minor units is established as integer zero, retaining unrecorded/unparsed values and negative amounts. It is applied before screen pagination and returns to the first page when toggled. The condition survives a return from details, but is not persisted. Unreceived server pages are not scanned automatically.
 
-v2の行はさらに次を持つ。採用状態（`adopted` / `excluded` / `unresolved` /
-`conflict` / `stale`）と理由コード、計算に使える正規化値
-（`ObservedQuantity`）、指標定義（`metricId` と版）、根拠付きの時点
-（`TemporalReference`）、鮮度。**根拠の件数は残高の件数ではない**ため、画面は
-両者を別々に表示する。
+<a id="互換性と保護"></a>
 
-小計は単位別の `knownAssetsSubtotal` と `liabilitiesCoverage: 'unknown'` の組で
-返す。`netWorth` フィールドは存在せず、応答検証が拒否する。未取得の負債がある
-ため、資産の部分合計は下限ですらない。
+## Compatibility and protection
+
+Existing balance fields, amounts and signs remain unchanged; the API adds optional `interpretation`. Old data is only classified for display, without partial client-side deduplication. API validation rejects evidence arrays that do not include the original row.
+
+No database migration or reparse is needed. Existing Cloudflare Access protection, original-evidence publication restrictions and read bounds remain.
+
+<a id="読み取りモデルv2"></a>
+
+## Read model (v2)
+
+The classification and grouping rules above are unchanged. `/api/v2/balances/latest` returns the same `interpretation` and groups evidence under the same strict matching conditions. What changed is **when** this is computed: once per input context, with the result stored as a projection, rather than on every request. See [Balance read model](balance-read-model.md).
+
+A v2 row also carries adopted state (`adopted` / `excluded` / `unresolved` / `conflict` / `stale`) and reason codes, a normalized value usable in calculations (`ObservedQuantity`), a metric definition (`metricId` and version), an evidenced reference time (`TemporalReference`) and freshness. **An evidence count is not a balance count**, so the screen shows them separately.
+
+Subtotals are returned as per-unit `knownAssetsSubtotal` together with `liabilitiesCoverage: 'unknown'`. No `netWorth` field exists; response validation rejects it. Because some liabilities are uncaptured, the partial asset total is not even a lower bound.

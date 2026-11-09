@@ -779,25 +779,25 @@ longer-lived, lossy rewards path.
   and whether any app endpoint shares transport or records with the PC member
   website. Static path similarity is not sufficient evidence.
 
-## 追記: 共通DATA R2への切替（U09）
+## Addendum: switch to shared DATA R2 (U09)
 
-`services/collector-mobile-suica`は`COLLECTION_TARGET`を読まない。保存先は
-binding `DATA`（`kogane-raw-evidence`）だけである。切替とimporterは
-2026-09-13に廃止された（`docs/collection.md`）。sanitize済みbytesをそのまま
-`objects/<2hex>/<sha256>`へ保存し、
-`runs/mobile-suica/<runId>/terminal.json`を最後に書く。
+`services/collector-mobile-suica` does not read `COLLECTION_TARGET`. Its only storage
+destination is binding `DATA` (`kogane-raw-evidence`). Switching and the importer
+were retired on 2026-09-13 (`docs/collection.md`). It stores sanitized bytes unchanged
+at `objects/<2hex>/<sha256>`, writing
+`runs/mobile-suica/<runId>/terminal.json` last.
 
-artifactは`sf-history-page-0001.html`（role `sanitized_provider_capture`、
-`baseVariable`をsentinelへ置換したCP932 HTML）、`sf-history.json`
-（role `collector_derived`）、`collection-summary.json`（role `collector_summary`）。
-terminalは`as-of-selector` range（selector/date/request）と、sanitizer・normalizerの
-transformationを記録する。`coverageStatus`が`complete`になるのは成功かつ
-履歴終端を証明できた場合だけで、証明できない場合は`history_boundary_unproven`付きの
-`partial`である。cookie・session envelope・browser bootstrapはartifactにしない。
+Artifacts are `sf-history-page-0001.html` (role `sanitized_provider_capture`, CP932 HTML
+with `baseVariable` replaced by a sentinel), `sf-history.json` (role `collector_derived`),
+and `collection-summary.json` (role `collector_summary`). The terminal records the
+`as-of-selector` range (selector/date/request) and sanitizer/normalizer transformations.
+`coverageStatus` becomes `complete` only on success with a proven history boundary;
+otherwise it is `partial` with `history_boundary_unproven`. Cookies, session envelopes,
+and browser bootstrap are not artifacts.
 
-Worker名、Browser binding、secretは変更しない。Processorの
-`SHARED_R2_INGEST_ENABLED`は登録のゲートであり、collectorの保存先スイッチではない。
-詳細は`docs/collection.md`。
+Worker names, Browser bindings, and secrets do not change. The Processor's
+`SHARED_R2_INGEST_ENABLED` is the registration gate, not a collector storage destination
+switch. See `docs/collection.md` for details.
 
 The Worker has no Cron trigger since
 [#430](https://github.com/risu729/kogane/pull/430) (2026-10-05): the
