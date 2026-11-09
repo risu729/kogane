@@ -13,7 +13,10 @@ import { unitScopeAdmitted } from "./util.ts";
 const SOURCE = "mizuho-bank";
 const ACCOUNT_DATASET = "mizuho-account-list-html";
 const HISTORY_DATASET = "mizuho-ordinary-history-html";
-const HISTORY_UNIT = /^ordinary:(\d{3}):(\d{7}):page:([1-9]\d*):([1-9]\d*)$/u;
+// `page:<from>:<to>` is a listed page; `page:empty` the observed empty page.
+const HISTORY_UNIT = /^ordinary:(\d{3}):(\d{7}):page:(?:([1-9]\d*):([1-9]\d*)|(empty))$/u;
+const historyPageKey = (unit: RegExpExecArray): string =>
+  unit[5] === "empty" ? "empty" : `${unit[3]}-${unit[4]}`;
 
 function requireRun(artifact: ArtifactMeta): void {
   if (
@@ -55,7 +58,7 @@ const sourceAccount = (branch: string, account: string): string =>
 
 export const mizuhoAccountList: Parser = {
   name: "mizuho-account-list",
-  version: "1.0.1",
+  version: "1.0.2",
   accepts(artifact: ArtifactMeta): boolean {
     return (
       artifact.sourceId === SOURCE &&
@@ -110,7 +113,7 @@ export const mizuhoAccountList: Parser = {
 
 export const mizuhoOrdinaryHistory: Parser = {
   name: "mizuho-ordinary-history",
-  version: "1.0.1",
+  version: "1.1.0",
   accepts(artifact: ArtifactMeta): boolean {
     const unit = HISTORY_UNIT.exec(artifact.fetchUnitKey ?? "");
     return (
@@ -118,7 +121,7 @@ export const mizuhoOrdinaryHistory: Parser = {
       (artifact.dataset === HISTORY_DATASET || artifact.dataset === null) &&
       artifact.mime === "text/html" &&
       unit !== null &&
-      artifact.artifactKey === `ordinary/${unit[1]}-${unit[2]}/history/${unit[3]}-${unit[4]}.html`
+      artifact.artifactKey === `ordinary/${unit[1]}-${unit[2]}/history/${historyPageKey(unit)}.html`
     );
   },
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
@@ -133,8 +136,11 @@ export const mizuhoOrdinaryHistory: Parser = {
       accountNumber: unit[2]!,
     });
     if (
-      String(result.displayedRange.from) !== unit[3] ||
-      String(result.displayedRange.to) !== unit[4]
+      unit[5] === "empty"
+        ? result.state !== "empty"
+        : result.state !== "listed" ||
+          String(result.displayedRange.from) !== unit[3] ||
+          String(result.displayedRange.to) !== unit[4]
     ) {
       throw new MizuhoParseError("artifact-page-range-mismatch");
     }
@@ -181,13 +187,22 @@ export const mizuhoOrdinaryHistory: Parser = {
       warnings: [],
       issues: [],
       coverage: [
-        containerClaim({
-          artifact,
-          issues: [],
-          observedCount: result.transactions.length,
-          expectedCount: result.displayedRange.to - result.displayedRange.from + 1,
-          evidenceRefs: ["html:#txtDispDetails", "html:#txtAllDispDetails"],
-        }),
+        result.state === "empty"
+          ? // The page lists nothing and states no count: a complete, empty page.
+            containerClaim({
+              artifact,
+              issues: [],
+              observedCount: 0,
+              expectedCount: null,
+              evidenceRefs: ["html:form[name=ACCHST_04110B]"],
+            })
+          : containerClaim({
+              artifact,
+              issues: [],
+              observedCount: result.transactions.length,
+              expectedCount: result.displayedRange.to - result.displayedRange.from + 1,
+              evidenceRefs: ["html:#txtDispDetails", "html:#txtAllDispDetails"],
+            }),
       ],
     };
   },

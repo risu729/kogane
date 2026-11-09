@@ -961,6 +961,7 @@ window, and `full_snapshot` with no range when it did not.
 | ------------------------------------------------------ | ---------------------------- | ---------------------------------------------- |
 | `account-list.html`                                    | `sanitized_provider_capture` | `account-list`                                 |
 | `ordinary/<branch>-<account>/history/<from>-<to>.html` | `sanitized_provider_capture` | `ordinary:<branch>:<account>:page:<from>:<to>` |
+| `ordinary/<branch>-<account>/history/empty.html`       | `sanitized_provider_capture` | `ordinary:<branch>:<account>:page:empty`       |
 | `ordinary/<branch>-<account>/history/unparsed.html`    | `sanitized_provider_capture` | `ordinary:<branch>:<account>:page:unparsed`    |
 
 One daily cron (`25 21 * * *` UTC, 06:25 JST) signs in once with the Worker
@@ -971,8 +972,15 @@ units with no artifact, `coverageStatus: unknown` and the closed code that
 stopped them as `safeErrorCode` (`account-limit`, a client code such as
 `read-http-error`, or the HTML parser's check as `parse-<code>`; anything else
 stays `collection-unit-failed`), which make the run `partial`. A history page
-the parser refuses is still stored, sanitized and `partial`, under the
-`unparsed` key above; no parser accepts that key, so it is evidence only.
+with no transaction block at all (the observed empty state,
+[docs/sources/mizuho-bank.md](sources/mizuho-bank.md#empty-history-page-2026-11-09))
+is one complete page with no rows, stored under the `empty` key above and
+parsed into no transaction and a complete empty page claim; it does not make
+the run `partial`. A history page the parser refuses is still stored, sanitized
+and `partial`, under the `unparsed` key above; no parser accepts that key, so
+it is evidence only. `kogane.collection-quality.read` does not list it either:
+Mizuho artifacts carry no dataset, and the cell read lists only artifacts with
+a dataset or a parse job.
 Additional authentication stops the run, and scheduled retries are disabled.
 
 The `mizuho-collection-result` record distinguishes six closed login-page

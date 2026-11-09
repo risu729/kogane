@@ -368,13 +368,41 @@ describe("private session boundary", () => {
     );
     expect([...thrown].sort()).toEqual([...MIZUHO_HTML_ERROR_CODES].sort());
   });
-  test("keeps a history page the parser refuses and names the parser's check", async () => {
+  test("stores the observed empty history page as one complete empty page", async () => {
+    // Issue 1145: the account header with no transaction block at all.
     const empty = form(
       "ACCHST_04110B",
-      `${span("txtBrnch", "テスト支店")}${span("txtTransType", "普通")}${span("txtAccNo", "1234567")}`,
+      `<div>${span("txtBrnch", "テスト支店")}</div><div>${span("txtTransType", "普通")}${span("txtAccNo", "1234567")}</div>
+      <div><span class="amount"><small>円</small></span></div>`,
       "history-token",
     );
     const q = queued([html(accountHtml()), html(empty)]);
+    const result = await collectMizuho({ session: session(), fetcher: q.fetcher });
+    expect(result.partial).toBe(false);
+    expect(result.issues).toEqual([]);
+    expect(result.failedUnits).toEqual([]);
+    expect(result.histories).toMatchObject([{ state: "empty", transactions: [] }]);
+    expect(
+      result.artifacts.map((artifact) => [
+        artifact.artifactKey,
+        artifact.unitKey,
+        artifact.partial,
+      ]),
+    ).toEqual([
+      ["account-list.html", "account-list", false],
+      ["ordinary/001-1234567/history/empty.html", "ordinary:001:1234567:page:empty", false],
+    ]);
+    expect(result.artifacts[1]?.body).not.toContain("history-token");
+  });
+  test("keeps a history page the parser refuses and names the parser's check", async () => {
+    // A displayed range with no rows is neither the listed nor the observed empty page.
+    const refused = form(
+      "ACCHST_04110B",
+      `${span("txtBrnch", "テスト支店")}${span("txtTransType", "普通")}${span("txtAccNo", "1234567")}
+      ${span("txtDispDetails", "0&nbsp;-&nbsp;0&nbsp;件")}${span("txtAllDispDetails", "0")}`,
+      "history-token",
+    );
+    const q = queued([html(accountHtml()), html(refused)]);
     const result = await collectMizuho({ session: session(), fetcher: q.fetcher });
     expect(result.partial).toBe(true);
     expect(result.issues).toEqual(["parse-unrecognized-empty-state"]);

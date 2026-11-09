@@ -149,8 +149,8 @@ test("Mizuho terminal registers, publishes exact observations and projects balan
     "SELECT parser_name,parser_version FROM published_parse_runs ORDER BY parser_name",
   ).all<{ parser_name: string; parser_version: string }>();
   expect(publications.results).toEqual([
-    { parser_name: "mizuho-account-list", parser_version: "1.0.1" },
-    { parser_name: "mizuho-ordinary-history", parser_version: "1.0.1" },
+    { parser_name: "mizuho-account-list", parser_version: "1.0.2" },
+    { parser_name: "mizuho-ordinary-history", parser_version: "1.1.0" },
   ]);
   const balances = await env.DB.prepare(
     "SELECT source_account,metric,amount_minor,instrument FROM balance_observations ORDER BY metric",
