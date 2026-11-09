@@ -8,6 +8,8 @@ import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { sbiShinseiExchangeRate } from "../../../packages/parsers/src/parsers/sbi-shinsei-exchange-rate.ts";
 import { sbiShinseiTopBalancesAndActivity } from "../../../packages/parsers/src/parsers/sbi-shinsei-top-balances-and-activity.ts";
 import { sbiShinseiYenDepositAccount } from "../../../packages/parsers/src/parsers/sbi-shinsei-yen-deposit-account.ts";
+import { sbiForeignTradeRecords } from "../../../packages/parsers/src/parsers/sbi-foreign-trade-records.ts";
+import { sbiForeignCashBalances } from "../../../packages/parsers/src/parsers/sbi-foreign-cash-balances.ts";
 import type { ArtifactMeta, Parser } from "../../../packages/parsers/src/types.ts";
 import { myJcbSkipPaymentSchedule } from "../../../packages/parsers/src/parsers/myjcb-skip-payment-schedule.ts";
 import {
@@ -19,6 +21,7 @@ import {
 } from "../../../packages/parsers/test/myjcb-skip-payment-fixture.ts";
 import {
   classifyParserRejection,
+  classifySbiCashIssue,
   classifySbiShinseiMessage,
   globalPassLatestOkSql,
   globalPassReplaySelectionSql,
@@ -78,6 +81,266 @@ function refusal(
 }
 
 const TOP = "top-accounts-balance-and-activity";
+
+describe("SBI Securities closed replay categories", () => {
+  const trade = (): Json =>
+    JSON.parse(
+      readFileSync(
+        new URL(
+          "../../../tests/fixtures/observation-pipeline/sbi-parser-boundaries/foreign-trade-records.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+  const meta = (dataset: string): ArtifactMeta => ({
+    ...artifact(dataset),
+    sourceId: "sbi-securities",
+  });
+  const reject = (body: Json) =>
+    refusal(
+      sbiForeignTradeRecords,
+      "foreign-trade-records",
+      encode(body),
+      meta("foreign-trade-records"),
+    );
+  const record = (body: Json): Json => body.pages[0].listTradeRecords.tradeRecords[0];
+  const rowLabel = "pages[].listTradeRecords.tradeRecords[]";
+
+  test("every object schema is constant-labelled, with arbitrary unknown keys dropped", () => {
+    const paths: [string[], string][] = [
+      [[], "foreign-trade-records"],
+      [["pages", "0"], "pages[]"],
+      [["pages", "0", "checkJrNisaOpen"], "pages[].checkJrNisaOpen"],
+      [["pages", "0", "listTradeRecords"], "pages[].listTradeRecords"],
+      [["pages", "0", "listTradeRecords", "page"], "pages[].listTradeRecords.page"],
+      [["pages", "0", "listTradeRecords", "tradeRecords", "0"], rowLabel],
+      [
+        ["pages", "0", "listTradeRecords", "tradeRecords", "0", "securities"],
+        `${rowLabel}.securities`,
+      ],
+    ];
+    for (const [path, label] of paths) {
+      const at = (body: Json): Json => path.reduce((value, key) => value[key], body);
+      for (const key of [
+        "SENTINEL",
+        "privateProviderText",
+        "USD",
+        "20990101",
+        "x schema drift; unknown SECRET",
+      ]) {
+        const body = trade();
+        at(body)[key] = "SENTINEL";
+        expect(reject(body)).toEqual({ reason: "schema drift", label });
+      }
+      for (const key of Object.keys(at(trade()))) {
+        const body = trade();
+        delete at(body)[key];
+        expect(reject(body)).toEqual({ reason: "schema drift", label });
+      }
+      if (path.length > 0) {
+        const body = trade();
+        const parent = path.slice(0, -1).reduce((value, key) => value[key], body);
+        parent[path.at(-1)!] = "SENTINEL";
+        expect(reject(body)).toEqual({ reason: "must be an object", label });
+      }
+    }
+    expect(
+      refusal(
+        sbiForeignTradeRecords,
+        "foreign-trade-records",
+        encode(null),
+        meta("foreign-trade-records"),
+      ),
+    ).toEqual({ reason: "must be an object", label: "foreign-trade-records" });
+  });
+
+  test("all scalar field labels, strict string checks, and amount/date checks are closed", () => {
+    const strings = [
+      "listedSecuritiesStatus",
+      "marginCloseLimitType",
+      "orderPriceKindCode",
+      "specificAccountCode",
+      "tradeRecordTypeCode",
+      "tradeCurrencyCode",
+      "settlementCurrencyCode",
+      "tradeDate",
+      "valueDate",
+    ];
+    const securities = [
+      "countryCode",
+      "ric",
+      "securitiesCode",
+      "securitiesName",
+      "securitiesShortName",
+    ];
+    for (const [prefix, fields] of [
+      ["", strings],
+      ["securities.", securities],
+    ] as const) {
+      for (const field of fields) {
+        const label = `${rowLabel}.${prefix}${field}`;
+        for (const [value, reason] of [
+          [null, "must be a string"],
+          ["SENTINEL".repeat(100), "is too long"],
+        ] as const) {
+          const body = trade();
+          const target = prefix === "" ? record(body) : record(body).securities;
+          target[field] = value;
+          expect(reject(body)).toEqual({ reason, label });
+        }
+      }
+    }
+    for (const [field, value, reason] of [
+      ["tradeCurrencyCode", "", "is empty"],
+      ["tradeCurrencyCode", "?!", "has an unsupported value"],
+      ["tradeCurrencyCode", "EUR", "has an unsupported currency"],
+      ["amount", "SENTINEL", "must be an exact decimal"],
+      ["price", "SENTINEL", "must be an exact decimal"],
+      ["quantity", "SENTINEL", "must be an exact decimal"],
+      ["amount", "1.001", "is not exactly representable in the currency minor units"],
+      ["tradeDate", "2099-02-31", "is not a calendar date"],
+      ["valueDate", "2099-02-31", "is not a calendar date"],
+    ] as const) {
+      const body = trade();
+      record(body)[field] = value;
+      expect(reject(body)).toEqual({
+        reason,
+        label: reason === "has an unsupported currency" ? rowLabel : `${rowLabel}.${field}`,
+      });
+    }
+    const country = trade();
+    record(country).securities.countryCode = "GB";
+    expect(reject(country)).toEqual({ reason: "has an unsupported countryCode", label: rowLabel });
+  });
+
+  test("array, boolean, pagination and encoding refusals are named", () => {
+    for (const pages of [null, [], Array(1001).fill(null)]) {
+      const body = trade();
+      body.pages = pages;
+      expect(reject(body)).toEqual({ reason: "pages must be a non-empty bounded array" });
+    }
+    for (const records of [null, Array(10001).fill(null)]) {
+      const body = trade();
+      body.pages[0].listTradeRecords.tradeRecords = records;
+      expect(reject(body)).toEqual({
+        reason: "must be a bounded array",
+        label: "pages[].listTradeRecords.tradeRecords",
+      });
+    }
+    for (const field of ["opened", "hasNextPage"]) {
+      const body = trade();
+      const target =
+        field === "opened" ? body.pages[0].checkJrNisaOpen : body.pages[0].listTradeRecords.page;
+      target[field] = "SENTINEL";
+      expect(reject(body)).toEqual({
+        reason: "must be boolean",
+        label:
+          field === "opened"
+            ? "pages[].checkJrNisaOpen.opened"
+            : "pages[].listTradeRecords.page.hasNextPage",
+      });
+    }
+    const body = trade();
+    body.pages[0].listTradeRecords.page.hasNextPage = true;
+    expect(reject(body)).toEqual({
+      reason: "pagination is incomplete or has an extra page",
+      label: "pages[]",
+    });
+    for (const parser of [sbiForeignTradeRecords, sbiForeignCashBalances])
+      expect(refusal(parser, "unused", new Uint8Array([0xff]), meta("unused"))).toEqual({
+        reason: "artifact bytes are not valid UTF-8",
+      });
+    expect(
+      refusal(
+        sbiForeignCashBalances,
+        "foreign-cash-balances",
+        encode({ SENTINEL: 1 }),
+        meta("foreign-cash-balances"),
+      ),
+    ).toEqual({ reason: "not a GetForeignCashBalance data object" });
+  });
+
+  test("cash issue categories use exact metric keys and folded schema locators, never messages", () => {
+    const fields = [
+      "buyPossibleAmount",
+      "keepCash",
+      "transferPossibleAmount",
+      "remainingBuyPossibleAmount",
+      "amountPayValue",
+    ];
+    const root = "json:$.listForeignScheduleCashBalances.foreignCashBalances";
+    const account = `${root}[17]`;
+    const currency = `${account}.currencyCashBalances[23]`;
+    const row = `${currency}.foreignScheduleCashBalances[42]`;
+    for (const field of fields) {
+      const parsed = sbiForeignCashBalances.parse(
+        encode({
+          listForeignScheduleCashBalances: {
+            foreignCashBalances: [
+              {
+                currencyCashBalances: [
+                  {
+                    currencyCode: "USD",
+                    foreignScheduleCashBalances: [{ [field]: "SENTINEL amount" }],
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        meta("foreign-cash-balances"),
+      );
+      const issue = parsed.issues![0]!;
+      expect(issue.message).toContain("SENTINEL");
+      expect(classifySbiCashIssue(issue)).toEqual({
+        reason: "row_unreadable",
+        label: `${root}[].currencyCashBalances[].foreignScheduleCashBalances[]`,
+        field,
+      });
+      expect(classifySbiCashIssue({ code: "row_unreadable", locator: `${row}.${field}` })).toEqual(
+        classifySbiCashIssue(issue),
+      );
+    }
+    for (const locator of [
+      account,
+      `${account}.currencyCashBalances`,
+      currency,
+      `${currency}.foreignScheduleCashBalances`,
+    ])
+      expect(classifySbiCashIssue({ code: "container_unreadable", locator })).toEqual({
+        reason: "container_unreadable",
+        label: locator.replace(/\[\d+\]/gu, "[]"),
+      });
+    expect(classifySbiCashIssue({ code: "row_unreadable", locator: row })).toEqual({
+      reason: "row_unreadable",
+      label: `${root}[].currencyCashBalances[].foreignScheduleCashBalances[]`,
+    });
+    for (const locator of [
+      "SENTINEL",
+      `${row}.SENTINEL`,
+      `${row}.usd`,
+      `${row}.20990101`,
+      `${row}.keepCash SENTINEL`,
+    ])
+      expect(classifySbiCashIssue({ code: "row_unreadable", locator })).toEqual({
+        reason: "unclassified",
+      });
+  });
+
+  test("unrecognized labels and text never reach the output", () => {
+    for (const message of [
+      "SENTINEL must be a string",
+      `${rowLabel}.SENTINEL must be a string`,
+      `${rowLabel}.amount is not exactly representable in SENTINEL minor units`,
+      `${rowLabel} unsupported SENTINEL`,
+    ])
+      expect(classifyParserRejection(sbiForeignTradeRecords.name, new Error(message))).toEqual({
+        reason: "unclassified",
+      });
+  });
+});
+
 const T = `${TOP}`;
 const OVERVIEW_ROWS = "json:$.responseParam.overview.responseParam.savingsDetails[]";
 const ACTIVITY_ROWS = "json:$.responseParam.activity.responseParam.activityDetails[]";
@@ -876,6 +1139,14 @@ describe("replay selection against the migrated CORE schema", () => {
       [14, "global-pass", "globalpass-activity", "6".repeat(64), "activity-2099-01.html"],
       [15, "global-pass", "globalpass-activity", "7".repeat(64), "activity-2099-02.html"],
       [16, "global-pass", "globalpass-activity", "8".repeat(64), "activity-2099-02.html"],
+      [17, "sbi-securities", "foreign-cash-balances", "9".repeat(64)],
+      [18, "sbi-securities", "foreign-cash-balances", "0".repeat(64)],
+      [19, "sbi-securities", "foreign-cash-balances", "9".repeat(64)], // same bytes as 17
+      [20, "sbi-securities", "foreign-cash-balances", "a0".repeat(32)],
+      [21, "sbi-securities", "foreign-cash-balances", "b0".repeat(32)],
+      [22, "sbi-securities", "foreign-trade-records", "c0".repeat(32)],
+      [23, "sbi-securities", "foreign-cash-balances", "d0".repeat(32)],
+      [24, "sbi-securities", "foreign-cash-balances", "e0".repeat(32)],
     ];
     for (const [id, source, dataset, sha, key] of artifacts)
       await db.batch([
@@ -964,6 +1235,29 @@ describe("replay selection against the migrated CORE schema", () => {
       await publishParse(db, Number(published.meta.last_row_id));
     }
     await run(16, gp, "1.2.0", "ok");
+    const cash = "sbi-foreign-cash-balances";
+    for (const id of [17, 18, 19, 20, 21, 23, 24]) {
+      const parsed = await run(id, cash, "0.2.1", "ok");
+      const parseId = Number(parsed.meta.last_row_id);
+      if (id !== 20) await publishParse(db, parseId);
+      if (id !== 23)
+        await db
+          .prepare(
+            "INSERT INTO parse_issues(parse_run_id,code,locator,severity,impact,message) VALUES(?,?,?,'error',?,'SENTINEL')",
+          )
+          .bind(
+            parseId,
+            id === 24 ? "container_unreadable" : "row_unreadable",
+            "json:$.SENTINEL",
+            id === 21 ? "none" : "membership",
+          )
+          .run();
+      if (id === 18) {
+        const complete = await run(id, cash, "0.2.2", "ok");
+        await publishParse(db, Number(complete.meta.last_row_id));
+      }
+    }
+    await run(22, "sbi-foreign-trade-records", "1.0.1", "error");
     // Starting Miniflare and applying every CORE migration in order is a
     // one-time cost that grows with each migration and crossed the 5 s default
     // hook budget; the budget matches every other schema hook in this suite.
@@ -991,12 +1285,29 @@ describe("replay selection against the migrated CORE schema", () => {
   test("a published parse removes its failures; other sources stay out", async () => {
     expect(await select({ parser: "sbi-shinsei-yen-deposit-account" })).toEqual([]);
     expect((await select({})).map((row) => [row["id"], row["parser_name"]])).toEqual([
+      [22, "sbi-foreign-trade-records"],
       [7, "myjcb-skip-payment-schedule"],
       [6, "sbi-shinsei-top-balances-and-activity"],
       [4, "sony-bank-gross-balance"],
       [3, "sbi-shinsei-top-balances-and-activity"],
     ]);
     expect((await select({ substring: "sony" })).map((row) => row["id"])).toEqual([4]);
+  });
+  test("an exact cash parser selection includes published membership issues, newest distinct bytes first", async () => {
+    const found = await select({ parser: "sbi-foreign-cash-balances" });
+    // A later complete publication (18), unpublished parse (20), informational
+    // issue (21), complete parse (23), and repeated older raw object (17) stay out.
+    expect(found.map((row) => row["id"])).toEqual([24, 19]);
+    expect(found[0]).toMatchObject({
+      source_id: "sbi-securities",
+      dataset: "foreign-cash-balances",
+      parser_name: "sbi-foreign-cash-balances",
+      byte_size: 10,
+    });
+    expect(await select({ substring: "sbi-foreign-cash" })).toEqual([]);
+    expect((await select({ parser: "sbi-foreign-trade-records" })).map((row) => row["id"])).toEqual(
+      [22],
+    );
   });
   test("a MyJCB failure is selected with the newest completed projection of the release the processor reads (ADR 0005 amendment i)", async () => {
     const [row] = await select({ parser: "myjcb-skip-payment-schedule" });
