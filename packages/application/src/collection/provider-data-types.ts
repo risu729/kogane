@@ -168,7 +168,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     partial("cash_movement", ["sony-bank-history-json", "sony-bank-history-csv"], 449),
     collected("card_usage", ["sony-bank-wallet-history"]),
     missing("valuation_history", 449),
-    missing("term_deposit", 449),
+    missing("term_deposit", 1243),
     missing("document", 449),
   ],
   // St.George: account balances and the first page of each account's history;
