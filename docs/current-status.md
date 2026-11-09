@@ -140,9 +140,10 @@ the MCP Access application admits applies as itself, over every schedule
 
 Card usage → statement → bank debit with an explainable trail and no double
 expense was done for the representative cases on 2026-11-08 (roadmap Phase 2).
-Coverage, collection requests and cross-source identity were done on
-2026-11-09 (Phase 3). The next product milestone is non-card events and dated
-holdings and balances (Phase 4); then valuation, lots/P&L and tax. Rewards can progress in parallel. See the [roadmap](roadmap.md) for delivery
+Phase 3's done-when (coverage, collection requests and telling resolved from
+unresolved accounts and instruments) held on 2026-11-09; no account is resolved
+across sources yet. The next product milestone is non-card events and dated
+state (Phase 4); then valuation, lots/P&L and tax. Rewards can progress in parallel. See the [roadmap](roadmap.md) for delivery
 order and acceptance criteria. Survey decisions over MCP follow the owner's adoption conditions of
 2026-11-07 ([ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)). The official-site maintenance re-survey is
 implemented as a proposal-only Processor lane

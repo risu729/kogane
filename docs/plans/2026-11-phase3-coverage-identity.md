@@ -113,7 +113,7 @@ Done read-only on 2026-11-08 for mizuho, GLOBAL PASS, St George, V Point and Vpa
 
 Request one collection from the page and one over MCP and follow both to published (and projected); read per-account coverage for the Phase 2 accounts (a Vpass card, the MyJCB root, SMBC, SBI Shinsei) with data types and freshness; read identity and instrument counts. Record the outcome in the roadmap; close or narrow #542 and #545.
 
-**3i outcome (2026-11-09):** both requests over MCP reached `published` and `projected`; the Phase 2 accounts read `same-day` (MyJCB), `human-required` (SMBC) and `stale` (Vpass, SBI Shinsei, whose newest captures are not parse-eligible); `unresolved` is 0 on every source and the 16 SBI pairs are `resolved-by-rule` ([roadmap outcome](../roadmap.md#phase-3-outcome)).
+**3i outcome (2026-11-09):** both requests over MCP reached `published` (stages in the [roadmap outcome](../roadmap.md#phase-3-outcome)); the Phase 2 accounts read `same-day` (the MyJCB root and J-POINT; an older MyJCB aggregate account `stale`), `human-required` (SMBC) and `stale` (Vpass, SBI Shinsei, whose newest captures are not parse-eligible); `unresolved` is 0 among the organized observations of every source while about 21,000 observations were still being organized, and the 16 SBI pairs are `resolved-by-rule`.
 
 Order: 3a, 3c, 3f and 3g now, in parallel threads; 3b after #1071; 3d and 3e after #1112, in one thread since they change the same query; 3i last.
 
