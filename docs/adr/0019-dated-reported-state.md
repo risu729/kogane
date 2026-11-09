@@ -114,7 +114,7 @@ statistics; 398 ms today and 346 ms a year back at `STATEMENT_SCALE` on
 `bun:sqlite`), `services/app/test/reported-state-api.test.ts`, and the web
 contract and browser tests, all on synthetic data.
 
-## Agent read amendment — 2026-11-06 (proposed)
+## Agent read amendment — 2026-11-06
 
 - Status: accepted (merged 2026-11-06 in #953)
 - Date: 2026-11-06
@@ -163,9 +163,9 @@ R0 audit record per served call with a row count and nothing else. The
 pinned tool lists in `services/app/test/agent-api.test.ts` (schema snapshot
 included) and `services/app/test/mcp-client.test.ts`.
 
-## Request rules amendment — 2026-11-08 (proposed)
+## Request rules amendment — 2026-11-08
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1173](https://github.com/risu729/kogane/pull/1173))
 - Date: 2026-11-08
 
 **Context.** The agent read amendment above shared `readReportedState`

@@ -81,7 +81,7 @@ unchanged.
 
 ## Amendment: no next page the grant cannot read (2026-11-08)
 
-Status: proposed.
+Status: accepted (merged 2026-11-08 in [#1173](https://github.com/risu729/kogane/pull/1173)).
 
 **Context.** The decision above lets the grant's `maxRows` bound paging:
 `offset + 50` above it is `413 budget_exceeded`. The answer still carried

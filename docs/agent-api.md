@@ -602,7 +602,7 @@ nothing it lists can be accepted.
 ### Reported state on a date
 
 `kogane.reported-state.read` is `GET /api/v2/reported-state` for an agent
-(plan D5, [ADR 0019](adr/0019-dated-reported-state.md#agent-read-amendment--2026-11-06-proposed)):
+(plan D5, [ADR 0019](adr/0019-dated-reported-state.md#agent-read-amendment--2026-11-06)):
 what each provider last reported on a date, per account, beside the card
 statements due around it ([reported state](reported-state.md)). It is not the
 `reported-state` intent of `kogane.financial.query`, which reads the latest

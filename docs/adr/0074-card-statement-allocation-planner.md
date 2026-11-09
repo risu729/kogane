@@ -276,7 +276,7 @@ and its wire contract as the only files naming the module.
 
 ## Amendment 2026-11-07: a bounded list of allocations
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1100](https://github.com/risu729/kogane/pull/1100))
 - Date: 2026-11-07
 
 ### Context

@@ -459,7 +459,7 @@ triggered run completes).
 
 ## Amendment 2026-11-08: retain failed terminal reasons
 
-Status: proposed, in the same change as migration 0086.
+Status: accepted (merged 2026-11-09 in [#1201](https://github.com/risu729/kogane/pull/1201), with migration 0086).
 
 A registration refusal such as `provider_run_failed` explains why CORE did not
 seal a run, but loses the validated terminal's reason for the provider failure.

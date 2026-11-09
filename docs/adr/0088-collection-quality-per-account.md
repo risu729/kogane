@@ -1,6 +1,6 @@
 # ADR 0088: Regroup one source's collection quality cells by the accounts their captures' observations name
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1112](https://github.com/risu729/kogane/pull/1112))
 - Date: 2026-11-08
 - Issue: [#542](https://github.com/risu729/kogane/issues/542) (TODO 2: source ×
   account/card × data type × period)
@@ -250,7 +250,7 @@ Synthetic data only, no production access:
 
 ## Amendment 2026-11-08: freshness per account, data type and period
 
-- Status: proposed
+- Status: accepted (merged 2026-11-09 in [#1197](https://github.com/risu729/kogane/pull/1197))
 - Date: 2026-11-08
 - Issue: [#1139](https://github.com/risu729/kogane/issues/1139)
 - Builds on: [ADR 0045's freshness amendment](0045-collection-quality-read.md#amendment-2026-11-08-freshness-per-source-and-cell)

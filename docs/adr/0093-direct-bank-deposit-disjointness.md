@@ -1,6 +1,6 @@
 # ADR 0093: Treat listed direct deposit readings at different banks as disjoint
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1195](https://github.com/risu729/kogane/pull/1195))
 - Date: 2026-11-08
 - Decision basis: the owner's allow-list variant of option 2, recorded at
   2026-11-08 06:59 UTC in [issue 1150](https://github.com/risu729/kogane/issues/1150).

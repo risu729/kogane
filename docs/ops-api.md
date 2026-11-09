@@ -618,7 +618,7 @@ requested, and `kogane.ops.operation.get` reads one the operator requested,
 with the same record. The read-route guard
 (`services/app/test/ui-mcp-parity.test.ts`) maps the page's route to that
 tool
-([ADR 0048, amendment of 2026-11-07](adr/0048-operation-collector-dispatch.md#amendment-2026-11-07--the-operators-依頼の経過-page-proposed)).
+([ADR 0048, amendment of 2026-11-07](adr/0048-operation-collector-dispatch.md#amendment-2026-11-07--the-operators-依頼の経過-page)).
 
 ### Projected (READ)
 

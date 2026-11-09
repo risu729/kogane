@@ -2,11 +2,11 @@
 
 - Status: accepted (merged 2026-10-08 in #578); the
   [2026-10-09 amendment](#amendment-2026-10-09-route-and-page-as-implemented)
-  (route, page, agent read tool and cost) is proposed
-- The [server anchor and history amendment](#amendment-2026-10-09-server-anchor-and-history) below is proposed.
+  (route, page, agent read tool and cost) is accepted (#608)
+- The [server anchor and history amendment](#amendment-2026-10-09-server-anchor-and-history) below is accepted (#629).
 - The [2026-11-08 amendment](#amendment-2026-11-08-adopt-sbis-bare-domestic-code-onto-its-listing-by-rule)
   (rule `instrument-auto-v1`: SBI's bare domestic code adopted onto its listing
-  by a recorded rule decision) is proposed.
+  by a recorded rule decision) is accepted (#1123).
 - Date: 2026-10-08
 - Issue: part of #546
 
@@ -1135,7 +1135,7 @@ a temporal command; #546 remains open.
 
 ## Amendment 2026-11-08: adopt SBI's bare domestic code onto its listing by rule
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1123](https://github.com/risu729/kogane/pull/1123))
 - Date: 2026-11-08
 - Issue: part of #546; Phase 3 unit 3g ([plan](../plans/2026-11-phase3-coverage-identity.md))
 - Owner direction, 2026-11-08 03:16 UTC: matches that are almost certainly
@@ -1323,7 +1323,7 @@ over MCP (`kogane.instruments.candidates`, then the change lifecycle).
 
 ## Amendment 2026-11-08: adoption and keeping apart pin the whole pair
 
-- Status: proposed until the PR that carries it merges, then accepted
+- Status: accepted (merged 2026-11-08 in [#1128](https://github.com/risu729/kogane/pull/1128))
 - Date: 2026-11-08
 - Carried by: `packages/application/src/operations/pair-references.ts` and its
   calls in `packages/application/src/operations/targets.ts`,

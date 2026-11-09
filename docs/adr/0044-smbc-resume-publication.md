@@ -82,7 +82,7 @@ that publication and registration retries create no duplicate parses or rows.
 
 ## Amendment 2026-11-08: logout after complete collection
 
-Status: proposed
+Status: accepted (merged 2026-11-08 in [#1185](https://github.com/risu729/kogane/pull/1185))
 Owner decision: 2026-11-08 13:26 UTC
 
 A provider logout or sign-off failure after all planned units were acquired and
@@ -118,7 +118,7 @@ for every page of its complete account unit.
 
 ## Amendment 2026-11-08: closed JST days and frozen resume windows
 
-Status: proposed
+Status: accepted (merged 2026-11-08 in [#1183](https://github.com/risu729/kogane/pull/1183))
 Owner decision: 2026-11-08 13:26 UTC, [issue 1178](https://github.com/risu729/kogane/issues/1178).
 
 Fresh backfills end on the last finished JST day at approval. Resumes keep the

@@ -6,7 +6,7 @@
   [amendment of 2026-11-06](#amendment-2026-11-06-a-registration-that-throws-spends-none-of-the-five)
   is accepted (owner approved 2026-11-07 13:39 UTC); the
   [amendment of 2026-11-08](#amendment-2026-11-08-a-pending-run-whose-terminal-is-missing-spends-no-continuation)
-  is proposed
+  is accepted (#1155)
 - Date: 2026-09-26
 - Amends: [ADR 0010](0010-terminal-registration-budget.md) (how the scan's
   per-tick registration count is spent; the operation budget is unchanged)
@@ -317,7 +317,7 @@ terminals the [roadmap](../roadmap.md) lists, hit this on every walk.
 
 ## Amendment 2026-11-06: a registration that throws spends none of the five
 
-- Status: proposed
+- Status: accepted (merged 2026-11-07 in [#981](https://github.com/risu729/kogane/pull/981))
 - Date: 2026-11-06
 
 ### Context
@@ -412,7 +412,7 @@ suites pass unchanged.
 
 ## Amendment 2026-11-08: a pending run whose terminal is missing spends no continuation
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1155](https://github.com/risu729/kogane/pull/1155))
 - Date: 2026-11-08
 
 ### Context
