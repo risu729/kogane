@@ -228,6 +228,12 @@ Logging in to a provider, running a collector by hand, a hosted Container
 experiment, and reading or changing a secret each need the owner's approval for
 that action. Never ask the owner for passwords, codes or HAR captures.
 
+Codex, run locally by the owner, observes the provider routes and request
+values its issue needs itself, including the provider login that takes
+(owner, 2026-11-09 19:51 UTC). It calls read routes only and keeps request
+shapes (method, path, parameter names and values, response keys), never
+provider values, cookies or tokens, in the repository.
+
 Requesting a collection through `kogane.ops.collection.request` or the
 operations API is not running a collector by hand: agents may request
 collections without a limit, and every healthy connection may be added to
