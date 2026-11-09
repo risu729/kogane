@@ -492,6 +492,7 @@ const TRANSACTIONS_SQL = `WITH ${TRANSACTION_CTES}
                 ) AS rank_in_identity
          FROM ${activeStateProjection.observationChain("transaction_observations", "t")}
          WHERE ${ACTIVE}
+           AND p.parser_name <> 'sony-bank-history-json'
            AND (
              p.parser_name <> 'myjcb-credit-ledger'
              OR ${MYJCB_LEDGER_MEMBER}

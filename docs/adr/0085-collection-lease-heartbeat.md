@@ -1,6 +1,6 @@
 # ADR 0085: A collection execution lease proves its holder alive; the Processor frees a lease whose holder went silent
 
-- Status: proposed
+- Status: accepted (merged 2026-11-07 in [#1037](https://github.com/risu729/kogane/pull/1037))
 - Date: 2026-11-07
 - Decided by: the owner, 2026-11-07 06:01 UTC (option C of the proposal in the
   "Fix stuck collection leases" thread)
@@ -208,7 +208,7 @@ runs and its heartbeat is written.
 
 ## Amendment: only the `processor-tick` alarm frees a lease (2026-11-07)
 
-Status: proposed (accepted when the PR that carries it merges).
+Status: accepted (merged 2026-11-08 in [#1083](https://github.com/risu729/kogane/pull/1083)).
 
 As merged, `expireStaleLeases` ran inside `bootstrapSchedules`, which the
 release workflow's `POST /internal/schedules/bootstrap` also calls. A deployment

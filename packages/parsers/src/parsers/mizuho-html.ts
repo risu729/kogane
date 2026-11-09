@@ -28,16 +28,32 @@ export interface MizuhoTransaction {
   amountYen: string;
   balanceAfterYen: string;
 }
-export interface MizuhoHistory {
+interface MizuhoHistoryAccount {
   source: "mizuho";
   currency: "JPY";
   accountType: "ordinary-deposit";
   branchCode: string;
   accountNumber: string;
+}
+/** A page that lists rows with the provider's displayed range. */
+export interface MizuhoListedHistory extends MizuhoHistoryAccount {
+  state: "listed";
   displayedRange: { from: number; to: number; total: number };
   hasMore: boolean;
   transactions: MizuhoTransaction[];
 }
+/**
+ * The observed empty history (issue 1145, fetch run 1481): the account header
+ * only, with no transaction block at all (no row, amount column, row field or
+ * displayed range). The provider states no range, so none is invented.
+ */
+export interface MizuhoEmptyHistory extends MizuhoHistoryAccount {
+  state: "empty";
+  displayedRange: null;
+  hasMore: false;
+  transactions: [];
+}
+export type MizuhoHistory = MizuhoListedHistory | MizuhoEmptyHistory;
 
 /** All errors are fixed codes; provider text and private values are not copied. */
 export class MizuhoParseError extends Error {
@@ -167,6 +183,8 @@ function date(input: string): string {
     fail("invalid-transaction-date");
   return result.toISOString().slice(0, 10);
 }
+/** The only fields the observed empty history page carries (issue 1145). */
+const EMPTY_PAGE_FIELDS = new Set(["txtBrnch", "txtTransType", "txtAccNo"]);
 function count(input: string): number {
   if (!/^(?:0|[1-9]\d*)$/u.test(input) || !Number.isSafeInteger(Number(input)))
     fail("invalid-count");
@@ -198,7 +216,28 @@ export function parseHistoryPage(html: string, account: MizuhoAccountContext): M
     fail("account-mismatch");
   if (value(page, "txtTransType") !== "普通") fail("unsupported-account-kind");
   const rows = find(page, (n) => classes(n).includes("box-row-tx-ditails"));
-  if (!rows.length) fail("unrecognized-empty-state");
+  const header = {
+    source: "mizuho",
+    currency: "JPY",
+    accountType: "ordinary-deposit",
+    ...expected,
+  } as const;
+  if (!rows.length) {
+    // Only the whole transaction block missing is the observed empty state: the
+    // page keeps the header fields and the header's currency-only amount and
+    // nothing else the sanitizer preserves. A stray row field, amount column,
+    // displayed range, or an amount carrying a figure (rows whose markers
+    // changed) without rows is not.
+    const transactionBlock = find(page, (n) => {
+      const id = attr(n, "id");
+      if (id !== undefined && !EMPTY_PAGE_FIELDS.has(id)) return true;
+      const named = classes(n).filter(Boolean);
+      if (named.some((name) => name !== "amount")) return true;
+      return named.includes("amount") && text(n) !== "円";
+    });
+    if (transactionBlock.length) fail("unrecognized-empty-state");
+    return { ...header, state: "empty", displayedRange: null, hasMore: false, transactions: [] };
+  }
   const transactions = rows.map((row): MizuhoTransaction => {
     const sourceIndex = indexFrom(row, "txtTransCntnt_");
     const amountColumn = one(
@@ -241,10 +280,8 @@ export function parseHistoryPage(html: string, account: MizuhoAccountContext): M
   if (from < 1 || to < from || to > total || to - from + 1 !== transactions.length)
     fail("inconsistent-row-count");
   return {
-    source: "mizuho",
-    currency: "JPY",
-    accountType: "ordinary-deposit",
-    ...expected,
+    ...header,
+    state: "listed",
     displayedRange: { from, to, total },
     hasMore: to < total,
     transactions,

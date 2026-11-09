@@ -6,7 +6,7 @@
   [second](#amendment-2026-11-08-a-pair-plan-pins-every-reference-of-the-pair)
   is accepted (#1128); the
   [third](#amendment-2026-11-08-the-correction-history-of-a-source-account)
-  is proposed
+  is accepted (#1118)
 - Date: 2026-11-06; amended 2026-11-08
 - Issue: part of #545
 - Carried by: `packages/domain/src/account-candidates.ts` (policy
@@ -277,7 +277,7 @@ Synthetic data only, no production access.
 
 ## Amendment 2026-11-08: a later proposal never replaces a pair's decision
 
-- Status: proposed until the PR that carries it merges, then accepted
+- Status: accepted (merged 2026-11-08 in [#1163](https://github.com/risu729/kogane/pull/1163))
 - Date: 2026-11-08
 - Carried by: `ACCOUNT_RELATIONS_SQL` in
   `packages/read-model/src/account-candidates.ts`, [identity](../identity.md#aggregator-to-direct-account-candidates)
@@ -353,7 +353,7 @@ Synthetic data only.
 
 ## Amendment 2026-11-08: a pair plan pins every reference of the pair
 
-- Status: proposed until the PR that carries it merges, then accepted
+- Status: accepted (merged 2026-11-08 in [#1128](https://github.com/risu729/kogane/pull/1128))
 - Date: 2026-11-08
 - Carried by: `packages/application/src/operations/pair-references.ts`
   (`CONNECTION_PAIR_REFS_SQL`, `withPairPins`, `pairStaleRefs`,
@@ -481,13 +481,15 @@ Synthetic data only.
   projection input" shows the projection reading the two orientations apart).
 - `services/app/test/pair-pins-mcp.test.ts` on workerd: over real MCP, a plan
   approved and prepared for commit, then a rejection committed under the other
-  producer's reference, is refused with `stale_context` at confirm and at a
-  new prepare, and a plan made before that decision is refused at approval;
-  nothing is written under the plan's own reference.
+  producer's reference, is refused with `stale_context` at confirm, which
+  marks the plan stale, and with `plan_not_open` at a new prepare (since the
+  [ADR 0081 amendment of 2026-11-08](0081-ui-parity-through-mcp.md#amendment-one-pre-check-for-the-mcp-approve-and-commit-tools-2026-11-08)),
+  and a plan made before that decision is refused at approval; nothing is
+  written under the plan's own reference.
 
 ## Amendment 2026-11-08: the correction history of a source account
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1118](https://github.com/risu729/kogane/pull/1118))
 - Date: 2026-11-08
 - Issue: part of #545; roadmap Phase 3 ("Expose the existing correction
   history in the review flow")

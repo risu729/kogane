@@ -519,6 +519,40 @@ describe("card settlement reads for agents", () => {
     }
   });
 
+  it("refuse a `__proto__` key on the page routes as the agent route refuses it", async () => {
+    for (const [tool, path, query, sent] of [
+      [LIST, "", "?__proto__=x", '{"__proto__":"x"}'],
+      [LIST, "", "?__proto__=x&__proto__=y", '{"__proto__":["x","y"]}'],
+      [STATEMENTS, "/statements", "?__proto__=x", '{"__proto__":"x"}'],
+      [
+        OWNERSHIP,
+        "/ownership",
+        `?proposalId=${ID}&__proto__=x`,
+        `{"proposalId":"${ID}","__proto__":"x"}`,
+      ],
+    ] as const) {
+      const route = await worker.fetch(
+        new Request(`https://fixture.test/api/v2/reconciliation/card-settlements${path}${query}`, {
+          headers: { "cf-access-jwt-assertion": await token(APP_AUD) },
+        }),
+        environment(),
+      );
+      const expected = (await route.json()) as Record<string, unknown>;
+      expect({ query, status: route.status, code: expected["code"] }).toEqual({
+        query,
+        status: 400,
+        code: "invalid_query",
+      });
+      // JSON.parse keeps `__proto__` as an own key, as a client's body does.
+      const viaHttp = await http(tool, JSON.parse(sent));
+      expect({ query, status: viaHttp.status, body: await viaHttp.json() }).toEqual({
+        query,
+        status: 400,
+        body: expected,
+      });
+    }
+  });
+
   // Last: it adds candidates the tests above do not expect.
   it("read one statement's candidates and a review's competitors as the pages do, on both transports", async () => {
     // A recapture of the same statement, paired with another debit.

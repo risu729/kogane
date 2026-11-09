@@ -120,6 +120,12 @@ export {
   type SimulationReport,
 } from "./command/simulate.ts";
 export { commit, type CommitInput, type CommitOutput, getReceipt } from "./command/commit.ts";
+export {
+  previewApproval,
+  previewCommit,
+  type DecisionPreview,
+  type DecisionRefusal,
+} from "./command/decision-preview.ts";
 export { relationMutation } from "./operations/relation-writes.ts";
 export { d1CommandStore, type D1Like } from "./operations/store.ts";
 export {
@@ -306,8 +312,10 @@ export {
   PURCHASES_EXPLAIN_CAPABILITY,
   PURCHASES_EXPLAIN_KEYS,
   PURCHASES_EXPLAIN_MAX_OFFSET,
+  PURCHASES_NEXT_PAGE,
   type PurchasesExplainOutcome,
   type PurchasesExplanation,
+  type PurchasesNextPage,
   withoutReviewAffordances,
 } from "./query/purchases-explain.ts";
 export {
@@ -330,6 +338,18 @@ export {
   reconstructedStateBodyFromQuery,
   reconstructedStateError,
 } from "./query/reconstructed-state-read.ts";
+export {
+  parseReportedStateRequest,
+  readReportedStateRequest,
+  REPORTED_STATE_ACCOUNT,
+  REPORTED_STATE_DATE,
+  REPORTED_STATE_KEYS,
+  REPORTED_STATE_REFUSALS,
+  REPORTED_STATE_SOURCE,
+  type ReportedStateReadOutcome,
+  type ReportedStateRefusal,
+  reportedStateBodyFromQuery,
+} from "./query/reported-state-read.ts";
 export {
   DEFAULT_EXPLAIN_DEPTH,
   explain,

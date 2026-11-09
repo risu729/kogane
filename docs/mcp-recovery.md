@@ -179,6 +179,34 @@ No proven workaround preserving Kogane's policy was found in that evidence.
 The current state remains **reauthentication required**, with no successful
 end-to-end recovery.
 
+## Portal grant lifetime and re-authentication (2026-11-08)
+
+The Portal reaches the origin as a Managed OAuth client of the Access
+application "Kogane MCP origin". Its refresh grant lasts that application's
+grant session duration. When the grant ends or is revoked, the Portal's MCP
+servers page shows Kogane `Sync required` with "Authentication for this MCP
+server did not complete", and every Portal call answers that Kogane requires
+re-authentication.
+
+- Until 2026-11-08 the grant session was 24 hours on both "Kogane MCP origin"
+  and "MCP Portal", so the link dropped a day after each authentication. The
+  owner decided (2026-11-08 14:06 UTC) to match the 730-hour session duration
+  every Access application uses. At 14:11 UTC only
+  `oauth_configuration.grant.session_duration` was changed to `730h` on both
+  applications, through the Access API: the dashboard form offers no
+  5-minute access token lifetime and would reset it to the 15-minute default.
+  The access token lifetime stays 5 minutes, and policies are re-evaluated
+  on every refresh.
+- A grant keeps the lifetime it was issued with, so authenticate once after
+  changing the duration.
+- Removing a user's Access seat revokes that user's sessions and tokens. Two
+  seats were removed on purpose at 13:33 UTC on 2026-11-08, 20 minutes before
+  the drop was reported; the grant may have been revoked then.
+- Recovery: Zero Trust → Access controls → MCP Portals → MCP servers →
+  Kogane → **Authenticate** (owner sign-in), then **Sync capabilities**.
+  Expect `Ready` and the current tool count, then call `kogane.capabilities`
+  through the Portal.
+
 ## Reconnect the same client connection
 
 For the installed ChatGPT/Codex **plugin**, use the host's existing connection

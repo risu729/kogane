@@ -26,6 +26,14 @@ export function japanToday(now = new Date()): string {
   return new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+export function lastFinishedJapanDay(now = new Date()): string {
+  return japanToday(new Date(now.getTime() - 24 * 60 * 60 * 1000));
+}
+
+export function nextJapanMidnight(now = new Date()): number {
+  return Date.parse(`${japanToday(now)}T00:00:00+09:00`) + 24 * 60 * 60 * 1000;
+}
+
 export function monthRanges(from: string, to: string): DateRange[] {
   const first = validateDate(from, "from");
   const last = validateDate(to, "to");

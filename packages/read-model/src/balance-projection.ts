@@ -34,7 +34,7 @@ import {
 } from "../../domain/src/time.ts";
 import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import { canonicalDigest } from "../../domain/src/context.ts";
-import { AUTHORITY_POLICY_RELEASE } from "./authority";
+import { AUTHORITY_POLICY_RELEASE, AUTHORITY_RANKS } from "./authority";
 import type { MeasureView } from "./scope";
 
 export const BALANCE_PROJECTION_RELEASE = "balance-projection-v1";
@@ -47,7 +47,7 @@ export const BALANCE_PROJECTION_RELEASE = "balance-projection-v1";
  */
 export const SCOPE_RELATION_RELEASE = "scope-relations-v2";
 /** The disjointness the policy asserts, and the evidence it rests on. */
-export const DISJOINT_ACCOUNTS_POLICY = "distinct-identified-accounts-v1";
+export const DISJOINT_ACCOUNTS_POLICY = "distinct-identified-accounts-v2";
 
 /**
  * Build budget: distinct measurement scopes considered together for one
@@ -335,7 +335,16 @@ function valueOf(candidate: ProjectionCandidate): ValueState {
 interface Subject {
   status: SubjectStatus;
   sourceId: string;
+  depositInstitution: string | null;
 }
+
+// Only banks whose own deposit readings are in the deposit.balance registry
+// entry qualify. An unknown source stays outside this policy (ADR 0093).
+const DEPOSIT_INSTITUTIONS = new Map([
+  ["sbi-shinsei-bank", "sbi-shinsei"],
+  ["smbc-bank", "smbc"],
+  ["mizuho-bank", "mizuho"],
+]);
 
 /**
  * Which scope pairs the policy declares disjoint, and on what evidence.
@@ -345,9 +354,9 @@ interface Subject {
  * account-list evidence a bank's own screen gives, written as an explicit
  * relation so it can be inspected and revoked.
  *
- * Across sources: only scopes the identity layer resolved to identified
- * accounts, because only then is there evidence that the two are different
- * accounts rather than two views of one.
+ * Across sources: identified accounts, or direct deposit.balance readings
+ * from the metric registry at different listed institutions. The latter
+ * excludes aggregate and unresolved scopes and changes no identity mapping.
  *
  * Everything else is deliberately absent. An aggregate or total scope, an
  * aggregator line with no terminal account, and a provider-local label seen
@@ -364,7 +373,11 @@ function policyDisjointness(subjects: Map<string, Subject>): DerivedScopeRelatio
         sameSource && leftSubject.status !== "aggregate" && rightSubject.status !== "aggregate";
       const bothIdentified =
         leftSubject.status === "identified" && rightSubject.status === "identified";
-      if (!listedApart && !bothIdentified) continue;
+      const differentDepositInstitutions =
+        leftSubject.depositInstitution !== null &&
+        rightSubject.depositInstitution !== null &&
+        leftSubject.depositInstitution !== rightSubject.depositInstitution;
+      if (!listedApart && !bothIdentified && !differentDepositInstitutions) continue;
       relations.push({
         fromScopeKey: left,
         toScopeKey: right,
@@ -389,11 +402,25 @@ function adoptionOutcomes(
 ): { outcomes: Map<string, Outcome>; relations: DerivedScopeRelation[] } {
   const outcomes = new Map<string, Outcome>();
   const subjects = new Map<string, Subject>();
-  for (const candidate of candidates)
+  for (const candidate of candidates) {
+    const institution =
+      target.metricId === "deposit.balance" &&
+      candidate.authorityRank === AUTHORITY_RANKS.direct &&
+      candidate.subjectStatus !== "aggregate" &&
+      candidate.subjectStatus !== "unresolved"
+        ? (DEPOSIT_INSTITUTIONS.get(candidate.sourceId) ?? null)
+        : null;
+    const previous = subjects.get(candidate.subjectScopeKey);
     subjects.set(candidate.subjectScopeKey, {
       status: candidate.subjectStatus,
       sourceId: candidate.sourceId,
+      // Every witness of a scope must qualify at the same institution. A
+      // second unlisted or lower-authority route cannot gain disjointness
+      // merely by appearing before a listed witness in the input.
+      depositInstitution:
+        previous === undefined || previous.depositInstitution === institution ? institution : null,
     });
+  }
   if (subjects.size > ADOPTION_SUBJECT_BOUND) {
     for (const candidate of candidates)
       outcomes.set(candidate.scopeKey, {

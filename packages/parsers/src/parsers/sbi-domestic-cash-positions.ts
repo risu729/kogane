@@ -151,7 +151,7 @@ function issueName(value: string): string {
 
 export const sbiDomesticCashPositions: Parser = {
   name: "sbi-domestic-cash-positions",
-  version: "1.0.1",
+  version: "1.0.2",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "domestic-cash-positions";

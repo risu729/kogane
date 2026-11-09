@@ -43,6 +43,7 @@ interface RunRow {
   fetch_run_id: number | null;
   registered_at: string | null;
   provider_outcome: string | null;
+  provider_failure_code: string | null;
   coverage_status: string | null;
 }
 interface StageRow {
@@ -549,7 +550,11 @@ test("a failed run with no provider bytes is recorded and never sealed", async (
   // What a collector persists when the provider run failed: its own manifest
   // and nothing from the provider (U09). The terminal is valid and complete.
   await persistSyntheticRun(harness, {
-    run: { runId: "run-failed", providerOutcome: "failed", safeErrorCode: "login_failed" },
+    run: {
+      runId: "run-failed",
+      providerOutcome: "failed",
+      safeErrorCode: "login-unrecognized-page",
+    },
     artifacts: [
       await artifact("manifest.json", '{"synthetic":"manifest"}', { role: "collector_manifest" }),
     ],
@@ -563,6 +568,7 @@ test("a failed run with no provider bytes is recorded and never sealed", async (
     run_id: "run-failed",
     provider_outcome: "failed",
     blocked_code: "provider_run_failed",
+    provider_failure_code: "login-unrecognized-page",
     fetch_run_id: null,
   });
   expect(stages(harness, row!.id).map((stage) => `${stage.stage}:${stage.state}`)).toEqual([
@@ -576,6 +582,7 @@ test("a failed run with no provider bytes is recorded and never sealed", async (
     await registerCollectionRun(harness.env, { source: SOURCE, runId: "run-failed" }),
   ).toMatchObject({ outcome: "blocked", code: "provider_run_failed" });
   expect(stages(harness, row!.id)).toHaveLength(2);
+  expect(collectionRuns(harness)[0]!.provider_failure_code).toBe("login-unrecognized-page");
 
   // A failed run that did capture provider bytes registers like any other:
   // the run report says `failed`, and nothing is widened.
@@ -609,11 +616,44 @@ test("a failed run with no provider bytes is recorded and never sealed", async (
   });
   expect(captured).toMatchObject({ outcome: "registered", artifacts: 2 });
   expect(
+    collectionRuns(harness).find((run) => run.run_id === "run-failed-capture")!
+      .provider_failure_code,
+  ).toBe("timeout");
+  expect(
     rows<{ normalized_outcome: string }>(
       harness.db,
       "SELECT normalized_outcome FROM fetch_run_reports WHERE report_kind='terminal'",
     ),
   ).toEqual([{ normalized_outcome: "failed" }]);
+});
+
+test("missing and invalid terminal failure codes never become stored provider text", async () => {
+  for (const code of [undefined, "private provider text", "x".repeat(101), "bad\ncode"]) {
+    const harness = collectionHarness();
+    await persistSyntheticRun(harness, {
+      run: { runId: "failed-code", providerOutcome: "failed", safeErrorCode: "login_failed" },
+      artifacts: [],
+    });
+    const key = terminalKey(SOURCE, "failed-code");
+    const object = await harness.bucket.get(key);
+    const manifest = JSON.parse(new TextDecoder().decode(await object!.arrayBuffer())) as Record<
+      string,
+      unknown
+    >;
+    if (code === undefined) delete manifest["safeErrorCode"];
+    else manifest["safeErrorCode"] = code;
+    harness.bucket.entries.delete(key);
+    await harness.bucket.seed(key, new TextEncoder().encode(JSON.stringify(manifest)), {
+      contentType: "application/json",
+    });
+    const result = await registerCollectionRun(harness.env, {
+      source: SOURCE,
+      runId: "failed-code",
+    });
+    expect(result.outcome).toBe("blocked");
+    expect(collectionRuns(harness)).toHaveLength(1);
+    expect(collectionRuns(harness)[0]!.provider_failure_code).toBeNull();
+  }
 });
 
 test("a terminal's source is a collector id, mapped to the CORE source it registers under", async () => {

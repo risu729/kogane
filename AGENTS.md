@@ -27,6 +27,11 @@ PRs of its own; new text added to a Japanese document is written in English.
 Agents talk with the owner in Japanese outside the repository (chat and
 threads).
 
+Rules, docs and issues say "an agent" and never name the agent product that
+does a piece of work, because the tools in use change (owner, 2026-11-09 20:21
+UTC). Naming a product stays where it is the subject, such as the MCP clients
+in [ADR 0047](docs/adr/0047-mcp-client-connection.md).
+
 ## Continuing the work
 
 - [The roadmap](docs/roadmap.md#work-order) is the work order. A merged PR is not a
@@ -103,9 +108,9 @@ Every merge to `main` releases every Worker the release ledger marks `deploy` to
 [deploy.yml](.github/workflows/deploy.yml) ([CI/CD](docs/ci-cd.md#continuous-deployment)).
 
 Agents act through the owner's GitHub account, which has admin rights and can
-bypass the ruleset. Never use that bypass. An agent's PR is one whose branch
-starts with `claude/` and whose body links the thread that drove it; every
-other PR authored by `risu729` is treated as the owner's.
+bypass the ruleset. Never use that bypass. An agent's PR is one whose body
+links the agent thread that drove it; every other PR authored by `risu729` is
+treated as the owner's.
 
 An agent merges its own PR when all of these hold:
 
@@ -115,8 +120,14 @@ An agent merges its own PR when all of these hold:
    the PR.
 3. `CI Check` is green on the PR's final head commit, and CodeQL reports no
    blocking alert.
-4. The branch contains the latest `main` and `CI Check` ran on that commit. The
-   ruleset does not require an up-to-date branch, so this is the agent's check.
+4. `CI Check` ran on a commit that contains a recent `main`, and every commit
+   that reached `main` since then merges into the branch without a conflict
+   (`git merge-tree --write-tree origin/main <head>` exits 0) and the latest
+   `main` has a green `CI Check` (wait while it is pending). If a newer
+   `main` commit conflicts or its `CI Check` is red, merge `main` into the
+   branch and wait for `CI Check` again. The ruleset does not require an
+   up-to-date branch, so this is the agent's check (owner, 2026-11-08 04:21 UTC;
+   before that the branch had to contain the latest `main`).
 5. The owning docs and any ADR are updated in the same PR.
 
 Merge with squash (the only allowed method). Do not use admin bypass or merge
@@ -126,19 +137,24 @@ Merging needs no owner approval in general. Before merging a large or
 hard-to-undo change, ask the owner, unless the owner already asked for that
 change (owner, 2026-11-06 13:25 UTC). Examples:
 
-- adds or changes a migration (`packages/storage-d1/migrations/`) or a resource in
-  `infra/resources.json`; rollback restores no database
-  ([CI/CD: rollback](docs/ci-cd.md#rollback-plan-11-7));
+- adds or changes a resource in `infra/resources.json`;
 - changes a feature flag, grant, `OPERATOR_SUBJECTS`, Access audience or
-  policy, secret name or binding in a `wrangler.jsonc`;
+  policy, or secret name;
 - adds an agent or MCP operation or capability in
   `packages/application/src/operation-path/catalogue.ts`;
 - changes `.github/workflows/`, the release ledger or the rollback floor;
 - adopts or replaces a major library, framework or provider.
 
+A D1 migration (`packages/storage-d1/migrations/`) or a `wrangler.jsonc`
+configuration or binding change needs no owner approval (owner, 2026-11-09
+00:37 UTC). Rollback restores no database
+([CI/CD: rollback](docs/ci-cd.md#rollback-plan-11-7)), so after merging a
+migration, check that the production deploy applied it.
+
 Renovate PRs: those with native auto-merge on follow the shared preset and
-need no agent. An agent may merge another Renovate PR after green CI and a
-check of the changelog, unless it is one of the changes above (for example a
+need no agent and no owner approval, even when they update a workflow or
+action (owner, 2026-11-09 00:36 UTC). An agent may merge another Renovate PR
+after green CI and a check of the changelog, unless it is one of the changes above (for example a
 workflow or action update). A Renovate PR whose `renovate/stability-days`
 status is still pending is not merged, by an agent or through auto-merge
 enabled by an agent, until the owner says so for that PR (owner, 2026-11-06

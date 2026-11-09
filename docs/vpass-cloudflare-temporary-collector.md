@@ -19,7 +19,9 @@ All disposable resources use the same prefix:
 - R2 binding: `DATA` → `kogane-raw-evidence`, shared by every collector (the
   per-source bucket `kogane-vpass-collector-poc` was deleted on 2026-09-13;
   see [legacy-retirement.md](legacy-retirement.md))
-- Cron: `0 21 * * *` (daily at 21:00 UTC / 06:00 JST)
+- Schedule: the Processor alarm job `vpass` (`config/alarm-jobs.json`,
+  `0 21 * * *` UTC / 06:00 JST); the Worker has no Cron Trigger
+  (`triggers.crons` is empty in `wrangler.jsonc`)
 - Worker secrets: `VPASS_ID`, `VPASS_PASSWORD`, `VPASS_DEVICE_ID`,
   `VPASS_AUTH_PUBLIC_KEY_B64`, and `VPASS_CONFIG_PUBLIC_KEY_B64`
 
@@ -54,8 +56,12 @@ failure surface without providing useful isolation. See Cloudflare's current
 [Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
 and [Cron Trigger documentation](https://developers.cloudflare.com/workers/configuration/cron-triggers/).
 
-Cloudflare Cron Trigger is the only periodic scheduler. Do not add a scheduled
-GitHub Actions workflow for this collector.
+The daily Cron Trigger described above was the scheduler until #430. Today the
+Processor's `ScheduleAlarm` is the only periodic scheduler: it calls
+`ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`), which runs
+the same all-card sequence in one invocation and returns a `failed` result when
+any card failed ([schedules.md](schedules.md)). Do not add a scheduled GitHub
+Actions workflow for this collector.
 
 ## Deploy and inspect
 
@@ -111,18 +117,15 @@ would break the currently deployed Free-plan version.
 npx wrangler delete --name kogane-vpass-collector-poc
 ```
 
-The Worker deletion removes its Cron Trigger and secrets with the Worker. Do
+The Worker deletion removes its secrets with the Worker. It does not touch the
+`vpass` alarm job, which stays enabled until it is disabled on `/schedules`
+([schedules.md](schedules.md)); disable it there as well. Do
 not delete the shared `DATA` bucket: every collector and the Processor use it.
 If the legacy Free-plan Queue still exists, remove it separately with
 `npx wrangler queues delete kogane-vpass-collector-poc`.
 
-## 共通 DATA R2 への切替 (U09)
+<a id="共通-data-r2-への切替-u09"></a>
 
-Collector は常に共通 bucket `kogane-raw-evidence` へ書く。`src/sanitize.ts`
-（旧 importer と同じ `vpass-json-sanitizer` v1）で sanitize した bytes を
-content-addressed に保存し、terminal manifest を最後に書く。card ごとに 1 run
-（`<runId>-card-NNN`、`acquisitionSessionRef` は session の runId）で、raw
-envelope・cookie・card identify key は保存しない。`COLLECTION_TARGET` の切替、
-per-source bucket、importer による中央転送は 2026-09-13 に廃止した
-（[legacy-retirement.md](legacy-retirement.md)）。artifact と role の対応と deploy
-順は `docs/collection.md` の該当節を参照。
+## Switch to shared DATA R2 (U09)
+
+The collector always writes to the shared `kogane-raw-evidence` bucket. It stores bytes sanitized by `src/sanitize.ts` (the former importer's same `vpass-json-sanitizer` v1) under content-addressed keys, then writes the terminal manifest last. Each card is 1 run (`<runId>-card-NNN`, with the session runId as `acquisitionSessionRef`); raw envelopes, cookies and card identify keys are not retained. The `COLLECTION_TARGET` switch, per-source bucket and central transfer by the importer were retired on 2026-09-13 ([legacy-retirement.md](legacy-retirement.md)). See the relevant section of `docs/collection.md` for artifact-to-role mappings and deployment order.

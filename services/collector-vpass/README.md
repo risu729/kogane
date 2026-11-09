@@ -11,9 +11,9 @@ credentials, cookies, or card identifiers to a third party.
 
 ## Runtime profile
 
-- **Browser: なし。** Cloudflare Browser Run、Container Chrome/Chromium、外部browser sessionを使用しない。
-- Worker `fetch`でVpass Androidの認証・card/月列挙・明細JSON protocolを直接実行する。既存browser cookie、JavaScript実行、TLS impersonationも不要である。
-- 調査・検証にbrowserを使った履歴があっても、現在のcollector runtime依存ではない。
+- **Browser: none.** No Cloudflare Browser Run, Container Chrome/Chromium or external browser session is used.
+- Worker `fetch` directly runs the Vpass Android authentication, card/month enumeration and statement-JSON protocol. No existing browser cookie, JavaScript execution or TLS impersonation is needed either.
+- Historical browser use during research/verification is not a current collector-runtime dependency.
 
 Before maintaining a private Vpass client, see the
 [aggregator alternatives](../../docs/vpass-aggregators.md). In particular,
@@ -67,15 +67,18 @@ closed `binding` code. See
 
 The per-source bucket, the import Queue and its dead-letter queue, the private
 importer Service Binding and `scripts/backfill-raw-evidence.sh` were retired on
-2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)). No GitHub
-Actions schedule is used; the existing Worker cron remains the sole scheduled
-trigger.
+2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)). The
+Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`):
+the Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled`
+(`src/schedule-entrypoint.ts`) for the `vpass` job in
+[`config/alarm-jobs.json`](../../config/alarm-jobs.json)
+([schedules.md](../../docs/schedules.md)).
 
 Registration is bounded per invocation by an operation budget, not by the
 number of statement pages (issue #87, [processor.md](../../docs/processor.md)
 §3.3). A card of about twenty pages registers in one invocation; a longer one
-yields with its progress in CORE and is continued on the next Processor cron
-tick, so it is sealed within minutes rather than in one call that could pass a
+yields with its progress in CORE and is continued on the next Processor tick
+(the five-minute `processor-tick` alarm job), so it is sealed within minutes rather than in one call that could pass a
 documented per-invocation limit.
 
 The PoC deliberately does not turn the provider JSON into final ledger rows.

@@ -15,6 +15,7 @@ import {
   logMizuhoPhase,
   logMizuhoRecord,
   mizuhoCoverageDiagnostic,
+  mizuhoLoginDiagnostic,
   type MizuhoPhase,
 } from "./diagnostics";
 import { persistMizuhoRun } from "./storage";
@@ -23,6 +24,7 @@ type Dependencies = {
   login: typeof loginMizuho;
   collect: typeof collectMizuho;
   persist: typeof persistMizuhoRun;
+  monotonicNow: () => number;
 };
 
 /** Module-only executor factory; passwords/sessions never enter DATA or operational results. */
@@ -31,6 +33,7 @@ export function createCollection(overrides: Partial<Dependencies> = {}) {
     login: loginMizuho,
     collect: collectMizuho,
     persist: persistMizuhoRun,
+    monotonicNow: () => performance.now(),
     ...overrides,
   };
   async function execute(env: Env) {
@@ -41,22 +44,40 @@ export function createCollection(overrides: Partial<Dependencies> = {}) {
       let errorCode: string | undefined;
       let phase: MizuhoPhase = "configuration";
       let failurePhase: MizuhoPhase | undefined;
+      let loginDiagnostic: ReturnType<typeof mizuhoLoginDiagnostic> = {};
+      const phaseDurationsMs = { login: 0, "account-list": 0, history: 0, persistence: 0 };
+      let phaseStarted = deps.monotonicNow();
+      const finishPhase = () => {
+        const now = deps.monotonicNow();
+        if (
+          phase === "login" ||
+          phase === "account-list" ||
+          phase === "history" ||
+          phase === "persistence"
+        )
+          phaseDurationsMs[phase] += Math.max(0, Math.round(now - phaseStarted));
+        phaseStarted = now;
+      };
+      const beginPhase = (next: MizuhoPhase) => {
+        finishPhase();
+        phase = next;
+        logMizuhoPhase(runId, phase);
+      };
       logMizuhoPhase(runId, phase);
       try {
         if (!env.MIZUHO_CUSTOMER_NUMBER || !env.MIZUHO_LOGIN_PASSWORD)
           throw new MizuhoClientError("mizuho-credentials-missing");
-        phase = "login";
-        logMizuhoPhase(runId, phase);
+        beginPhase("login");
         const session = await deps.login({
           customerNumber: env.MIZUHO_CUSTOMER_NUMBER,
           password: env.MIZUHO_LOGIN_PASSWORD,
         });
-        phase = "collection";
-        logMizuhoPhase(runId, phase);
-        collection = await deps.collect({ session });
+        beginPhase("collection");
+        collection = await deps.collect({ session, onPhase: beginPhase });
       } catch (error) {
         errorCode = safeMizuhoErrorCode(error);
         failurePhase = phase;
+        loginDiagnostic = mizuhoLoginDiagnostic(error);
       }
       const status =
         collection === undefined ? "failed" : collection.partial ? "partial" : "success";
@@ -67,9 +88,10 @@ export function createCollection(overrides: Partial<Dependencies> = {}) {
         status,
         artifactCount,
         ...mizuhoCoverageDiagnostic(collection),
+        ...loginDiagnostic,
         ...(errorCode ? { errorCode, failurePhase } : {}),
       };
-      logMizuhoPhase(runId, "persistence");
+      beginPhase("persistence");
       try {
         const persisted = await deps.persist(env.DATA, {
           runId,
@@ -85,8 +107,10 @@ export function createCollection(overrides: Partial<Dependencies> = {}) {
         });
         const complete =
           persisted.outcome === "persisted" || persisted.outcome === "already_persisted";
+        finishPhase();
         logMizuhoRecord({
           ...diagnostic,
+          phaseDurationsMs,
           persistence: persisted.outcome,
           ...(!complete ? { persistenceErrorCode: "persistence-incomplete" } : {}),
         });
@@ -101,8 +125,10 @@ export function createCollection(overrides: Partial<Dependencies> = {}) {
           },
         };
       } catch {
+        finishPhase();
         logMizuhoRecord({
           ...diagnostic,
+          phaseDurationsMs,
           persistence: "failed",
           persistenceErrorCode: "persistence-failed",
         });

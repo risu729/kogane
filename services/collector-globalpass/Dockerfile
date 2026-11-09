@@ -6,6 +6,6 @@ WORKDIR /app
 COPY container/package.json container/package-lock.json ./
 RUN npm ci --omit=dev
 RUN npx playwright install chrome
-COPY container/server.mjs container/connect-relay.mjs container/diagnostics.mjs container/failure.mjs container/challenge.mjs ./
+COPY container/server.mjs container/collect.mjs container/connect-relay.mjs container/diagnostics.mjs container/failure.mjs container/challenge.mjs container/logout.mjs ./
 EXPOSE 8080
 CMD ["node", "server.mjs"]

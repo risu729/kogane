@@ -36,9 +36,10 @@
     // session-refresh request may start through the named collector RPC.
     // Empty means none: such requests wait with `collector_dispatch_disabled`
     // and expire after 24 hours without contacting any provider. The owner
-    // allowed dispatch for every healthy connection (2026-11-08); the first
-    // requests are sent one connection at a time (docs/ops-api.md).
-    "OPS_COLLECTOR_DISPATCH_CONNECTIONS": "[\"sony-bank\",\"sbi-securities\",\"mobile-suica\",\"moneyforward-me\",\"myjcb\"]",
+    // allowed dispatch for every healthy connection (2026-11-08) and for
+    // prestia-bank's first production collection (2026-11-09 19:52 UTC); the
+    // first requests are sent one connection at a time (docs/ops-api.md).
+    "OPS_COLLECTOR_DISPATCH_CONNECTIONS": "[\"sony-bank\",\"sbi-securities\",\"mobile-suica\",\"moneyforward-me\",\"myjcb\",\"st-george\",\"sbi-vc-trade\",\"sbi-vc-keepalive\",\"prestia-bank\"]",
     // The shared DATA bucket is the existing central bucket; the name is
     // declared so a notification about another bucket is refused.
     "COLLECTION_DATA_BUCKET": "kogane-raw-evidence",

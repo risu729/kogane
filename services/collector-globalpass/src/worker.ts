@@ -207,6 +207,7 @@ async function collectWithContainer(
   let runtimeRevision: string | undefined;
   let metadataSeen = false;
   let containerErrorSeen = false;
+  let logoutFailed: boolean | undefined;
   let streamStarted = false;
   const attemptedMonths = new Set<string>();
   // The month whose pages are arriving. A month starts with its page 1 and is
@@ -272,6 +273,22 @@ async function collectWithContainer(
     });
     streamStarted = true;
     for await (const record of readNdjson(response.body!)) {
+      if (record.type === "logout") {
+        if (
+          !metadataSeen ||
+          containerErrorSeen ||
+          logoutFailed !== undefined ||
+          attemptedMonths.size !== selectedMonths.length ||
+          !walk ||
+          !walkFinished(walk)
+        )
+          throw new CollectionContractError();
+        finishMonth();
+        logoutFailed = record.failed;
+        continue;
+      }
+      if (logoutFailed !== undefined && record.type !== "error")
+        throw new CollectionContractError();
       if (record.type === "metadata") {
         if (metadataSeen || containerErrorSeen) throw new CollectionContractError();
         try {
@@ -453,6 +470,7 @@ async function collectWithContainer(
     paginationStatus: GLOBALPASS_PAGINATION_STATUS,
     artifacts,
     failures,
+    ...(logoutFailed === undefined ? {} : { logoutFailed }),
   };
   const manifestJson = JSON.stringify(manifest);
   {
@@ -486,6 +504,7 @@ async function collectWithContainer(
         status,
         artifactCount: artifacts.length,
         failureCount: failures.length,
+        logoutFailed: logoutFailed === true,
         coverageStatus: sharedOutcome(manifest).coverageStatus,
         unitCoverageStatus: sharedOutcome(manifest).unitCoverageStatus,
         coverageReason: status === "failed" ? "collection-unavailable" : "rolling-window",
@@ -576,6 +595,13 @@ function parseContainerRecord(line: string): ContainerRecord {
   }
   const record: Record<string, unknown> = value;
   if (
+    record["type"] === "logout" &&
+    exactKeys(record, ["type", "failed"]) &&
+    typeof record["failed"] === "boolean"
+  ) {
+    return { type: "logout", failed: record["failed"] };
+  }
+  if (
     record["type"] === "metadata" &&
     exactKeys(
       record,
@@ -651,7 +677,7 @@ function parseContainerRecord(line: string): ContainerRecord {
   }
   throw new Error("GLOBAL PASS container returned an invalid record shape");
 }
-async function relayTcp(
+export async function relayTcp(
   request: Request,
   env: Env,
   ctx: ExecutionContext,

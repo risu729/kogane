@@ -110,7 +110,9 @@
           "totalCredit": "300000",
           "totalDebit": "0",
           "fxCasaBalance": "0",
-          "yenTDBalance": "0"
+          "yenTDBalance": "0",
+          "hyperDepositBalance": "12345.67",
+          "yenDepositBalance": "89012.34"
         },
         "header": {},
         "errorInfo": {}

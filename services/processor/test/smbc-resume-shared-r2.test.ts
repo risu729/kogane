@@ -187,7 +187,7 @@ const observationCounts = () =>
     published: number;
   }>();
 
-test("partial months remain unparsed until cumulative success; publication retries parse nothing twice", async () => {
+test("partial months remain unparsed until cumulative success even with failed logout; retries parse nothing twice", async () => {
   const bucket = dataBucket(env.EVIDENCE);
   const firstArtifacts = [...(await balance()), ...(await month(1))];
   // Reproduce the immutable terminal written by the previously shipped code.
@@ -218,7 +218,10 @@ test("partial months remain unparsed until cumulative success; publication retri
   ).toEqual({ outcome: "not_eligible", jobs_created: 0 });
   expect(await observationCounts()).toEqual({ transactions: 0, balances: 0, published: 0 });
 
-  const fullInput = input(manifest([...firstArtifacts, ...(await month(2))], true));
+  const fullInput = input({
+    ...manifest([...firstArtifacts, ...(await month(2))], true),
+    logoutSucceeded: false,
+  });
   const published = await persistBackfillRun(bucket, fullInput);
   expect(published.outcome).toBe("persisted");
   const continuationId = published.terminalKey.slice(
@@ -232,6 +235,13 @@ test("partial months remain unparsed until cumulative success; publication retri
     endValue: "2001-02-28",
   });
   expect(read.manifest.acquisitionSessionRef).toBe("synthetic-initial-session");
+  expect(read.manifest.reports).toContainEqual({
+    reportRef: "logout",
+    reportKind: "logout",
+    scope: "run",
+    outcome: "failed",
+    safeErrorCode: "logout_failed",
+  });
   expect(
     await registerCollectionRun(env, { source: "smbc-direct", runId: continuationId }),
   ).toMatchObject({ outcome: "registered", artifacts: 8 });

@@ -1,70 +1,62 @@
-# Sony銀行 read-only Worker PoC
+<a id="sony銀行-read-only-worker-poc"></a>
 
-Sony銀行の現行Web BFFへ毎回新規ログインし、総残高、円・外貨普通預金取引履歴、公式CSV、Sony Bank WALLETの直近15か月明細を共有DATA bucket（`kogane-raw-evidence`）へ保存する独立Workerである。Chrome、Browser Rendering、Container、TLS impersonation、Akamai対策は使用しない。
+# `Sony銀行` (Sony Bank) read-only Worker PoC
+
+This independent Worker logs into the current Sony Bank Web BFF afresh on each run and saves gross balances, yen/foreign-currency ordinary-deposit history, official CSV and the latest 15 months of Sony Bank WALLET details to shared DATA (`kogane-raw-evidence`). It uses no Chrome, Browser Rendering, Container, TLS impersonation or Akamai workaround.
 
 ## Runtime profile
 
-- **Browser: なし。** 認証、Web BFF、WALLET SSO、月切替、HTML/CSV取得をすべてWorker `fetch`で実行する。
-- WALLETのserver-rendered HTMLもHTTP responseとしてparseし、JavaScript navigationやbrowser cookie jarを必要としない。
-- 調査時のChrome captureやbrowser用scriptの存在は、collector runtime依存ではない。
+- **Browser: none.** Authentication, Web BFF, WALLET SSO, month changes and HTML/CSV capture all use Worker `fetch`.
+- WALLET server-rendered HTML is also parsed as an HTTP response; no JavaScript navigation or browser cookie jar is needed.
+- Chrome captures and browser scripts used during investigation are not collector runtime dependencies.
 
-## 検証済みの認証経路
+<a id="検証済みの認証経路"></a>
 
-2026-08-30に本人の実口座で、ChromeのCookieを流用しない新規`.NET HttpClient`から次を確認した。
+## Verified authentication path
 
-1. login pageをGETすると200。
-2. `POST /custom-web00/dbca/csrf-token/get`で`BFF-CSRF`と`FSID`を取得。
-3. `FBaaS-Provider-Key: CustomAuth`、画面/event header、店番号、口座番号、login passwordで`POST /custom-web00/dbca/cust-web/to-customers/login`が200、business error 0。
-4. 同じ新規sessionで総残高APIが200。
-5. 認証済みsessionの残高、履歴、CSVはUA、`sec-*`、Origin、Refererなしの通常HTTPでも200。
+On 2026-08-30, the following were verified with the owner's real account using a fresh `.NET HttpClient`, without reusing Chrome cookies.
 
-`CustomAuth`は公開`core.js`の静的値で、browser fingerprintではない。現行経路ではCloudFrontを観測し、AkamaiのDNS、header、script、cookieは観測していない。Caulis/PhishWall scriptは公開Webに存在するが、上記のread-only loginには必要なかった。
+1. GET the login page: 200.
+2. `POST /custom-web00/dbca/csrf-token/get` returns `BFF-CSRF` and `FSID`.
+3. With `FBaaS-Provider-Key: CustomAuth`, screen/event headers, branch number, account number and login password, `POST /custom-web00/dbca/cust-web/to-customers/login` returns 200 and business error 0.
+4. The gross-balance API returns 200 in the same fresh session.
+5. Authenticated balance, history and CSV requests also return 200 over ordinary HTTP without UA, `sec-*`, Origin or Referer.
 
-## 収集対象
+`CustomAuth` is a static value in public `core.js`, not a browser fingerprint. CloudFront was observed on the current path; no Akamai DNS, header, script or cookie was observed. Caulis/PhishWall scripts exist on the public Web, but the read-only login above did not need them.
 
-- `gross-balance.json`: 総残高BFFのraw JSON
-- `yen-history-page-NNNN.json`: 指定期間の円普通預金履歴raw JSON。3件単位のpagerを最後まで走査
-- `yen-history.csv`: 同じ期間の公式CSV bytes
-- `foreign-history-<ccy>-page-NNNN.json`: USD/EUR/GBP/AUD/NZD/CAD/CHF/HKD/ZAR/SEKの通貨別raw JSON
-- `foreign-history-<ccy>.csv`: 同じ期間・通貨の公式CSV bytes。取引0件なら生成APIを呼ばない
-- `wallet-history-YYYY-MM.html`: Sony Bank WALLETの月別利用明細。直近15か月を10秒間隔で走査
-- `collection-summary.json`: 期間、page数、件数、Cookie名だけを持つ非機密summary
-- `manifest.json`: artifactごとのR2 key、SHA-256、bytes、成功/失敗
+<a id="収集対象"></a>
 
-日次Cronは21:00 UTC（日本時間06:00）に当月1日から実行日までを収集する。通常収集は既存の固定action private RPC／schedule経路を使う。公開 `/trigger` と任意期間指定は廃止（404）し、同等のoverride経路は追加しない。
+## Captured data
 
-収集後、runは`packages/collection`で共有DATA bucketへ書く。上記の各artifactは`objects/<2 hex>/<sha256>`へcontent-addressedで保存し、すべてのobjectの後にterminal manifestを書く。objectとterminalはimmutable conditional putとR2 native SHA-256付きで書き、terminalのないrunは保存完了として扱わない。ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。source専用bucket、中央raw-evidence importerへのService Binding、`deferred`応答と`scripts/backfill-raw-evidence.sh`は2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
+- `gross-balance.json`: raw gross-balance BFF JSON.
+- `yen-history-page-NNNN.json`: raw yen ordinary-deposit history JSON for the requested period; exhausts the 3-record pager.
+- `yen-history.csv`: official CSV bytes for the same period.
+- `foreign-history-<ccy>-page-NNNN.json`: raw JSON per currency: USD/EUR/GBP/AUD/NZD/CAD/CHF/HKD/ZAR/SEK.
+- `foreign-history-<ccy>.csv`: official CSV bytes for the same period/currency; does not call the generation API for 0 transactions.
+- `wallet-history-YYYY-MM.html`: monthly Sony Bank WALLET usage details, scanning the latest 15 months at 10-second intervals.
+- `collection-summary.json`: non-secret summary containing only period, page/record counts and cookie names.
+- `manifest.json`: R2 key, SHA-256, bytes and success/failure per artifact.
+
+The Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`). The Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the `sony-bank` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), daily at 06:00 JST (21:00 UTC). Each run collects from the first day of the JST month that contains yesterday through yesterday (JST): the run on the 1st requests the whole previous month (`defaultWindow`, `src/worker.ts`). Open limit: only the run on the 1st requests the previous month's last day, so a missed or failed run on the 1st leaves that day unrequested. Normal collection uses the existing fixed-action private RPC path. Public `/trigger` and arbitrary-period selection are retired (404); no equivalent override path is added.
+
+After collection, `packages/collection` writes the run to shared DATA. Each artifact above is content-addressed at `objects/<2 hex>/<sha256>`, followed by a terminal manifest after every object. Objects and terminals use immutable conditional puts with R2 native SHA-256; a run without a terminal is not treated as completely stored. The Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). The dedicated source bucket, Service Binding to the central raw-evidence importer, `deferred` responses and `scripts/backfill-raw-evidence.sh` were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)).
 
 ```text
-objects/<2 hex>/<sha256>                 gross-balance.json、yen-history.csv、wallet-history-YYYY-MM.html、manifest.jsonなど各artifact
-runs/sony-bank/<run-id>/terminal.json    最後に書くrunの完了記録（artifact keyとobjectの対応を持つ）
+objects/<2 hex>/<sha256>                 each artifact, such as gross-balance.json, yen-history.csv, wallet-history-YYYY-MM.html and manifest.json
+runs/sony-bank/<run-id>/terminal.json    run completion record written last (artifact key/object mapping)
 ```
 
-login response（氏名を含む）、Cookie値、CSRF、password、WALLETの一時SSO値、JSESSIONID、hidden form値はR2へ保存しない。WALLET HTMLは保存直前にJSESSIONIDとhidden form値を除去する。本文のテキストは除去しない（人名は保存してよい。ADR 0029 の amendment 2）。取得した残高・履歴には個人金融情報が含まれるため、bucketをpublicにしない。
+Login responses (including names), cookie values, CSRF, passwords, temporary WALLET SSO values, JSESSIONID and hidden-form values are not stored in R2. JSESSIONID and hidden-form values are removed from WALLET HTML immediately before storage. Body text is retained (personal names may be stored: ADR 0029, amendment 2). Captured balances/history contain personal financial information, so the bucket must not be public.
 
-WALLETは銀行BFFの`/jada/debit-sso/login-usage-dtl-inq`から毎回一時SSO値を発行し、
-`igw.sonybank.jp`を経由して`dc.sonybank.jp`の月別一覧へ通常HTTPで接続する。明細項目は一覧に
-すべて含まれ、別detail endpointはない。月切替は`RW1313010201`、PDF入口は
-`RW1313010301`である。公式JavaScriptが10秒以内の連続月切替を拒否するため、Workerも
-10.25秒間隔を守る。PDFは現PoCでは保存しない。
+WALLET obtains a temporary SSO value each time from bank BFF `/jada/debit-sso/login-usage-dtl-inq`, then connects over ordinary HTTP through `igw.sonybank.jp` to monthly lists at `dc.sonybank.jp`. The list contains every detail field; there is no separate detail endpoint. Month changes use `RW1313010201`, and the PDF entrypoint is `RW1313010301`. Official JavaScript rejects consecutive month changes within 10 seconds, so the Worker also observes a 10.25-second interval. This PoC does not store PDFs.
 
-2026-08-31のCloudflare本番検証では、2025-09-01〜2026-08-31について円10件、外貨6件・
-11ページ、WALLET 15か月を含む34 artifactを保存し、failure 0だった。取引0件の外貨で
-公式CSVを要求するとSony側がCloudflare egressに500を返す場合があるため、JSONの件数が0なら
-情報量のない空CSVを省略する。残高と0件の履歴JSONは保存する。
+Cloudflare production verification on 2026-08-31 saved 34 artifacts for 2025-09-01 through 2026-08-31: 10 yen transactions, 6 foreign-currency transactions across 11 pages and 15 months of WALLET, with failure 0. Requesting official CSV for a foreign currency with 0 transactions can make Sony return 500 to Cloudflare egress, so empty CSV with no information is omitted when the JSON count is 0. Balances and 0-record history JSON are retained.
 
-2026-09-04に中央raw-evidenceへの既存データ移行を本番確認した。source bucketの全120 listing
-pageを走査して11 manifest（旧v1が2、現行v2が9）を取り込み、D1上の11 runはすべてseal済み、
-未sealは0だった。同じ全件backfillを先頭から再実行してもrun数は11のままであり、seal済みrunの
-exact replayが冪等であることを確認した。さらに旧v1 manifestを1件抽出し、source R2 objectと
-中央content-addressed R2 objectのSHA-256およびbyte数が一致することを確認した。確認では本文や
-金融値を標準出力・documentationへ記録していない。
+Production migration of existing data into central raw-evidence was verified on 2026-09-04. Scanning all 120 source-bucket listing pages imported 11 manifests (2 old v1 and 9 current v2); all 11 D1 runs were sealed, with 0 unsealed. Repeating the entire backfill from the start kept the run count at 11, confirming idempotent exact replay of sealed runs. A further sample of 1 old-v1 manifest confirmed matching SHA-256 and byte counts between the source R2 object and central content-addressed R2 object. No bodies or financial values were recorded in stdout or documentation during verification.
 
-このbackfill scriptとsource bucketは2026-09-13に廃止した。source bucketの全objectは中央DATAへ
-コピーしてSHA-256を検証した後に削除しており、再送するoutboxはない（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
+This backfill script and source bucket were retired on 2026-09-13. Every source-bucket object was copied to central DATA and SHA-256-verified before deletion; no outbox remains to resend ([legacy-retirement.md](../../docs/legacy-retirement.md)).
 
-ローカルで実口座を検証する場合は、認証JSONを標準出力やshell引数へ置かず、600相当で保護した
-ファイルを`SONY_BANK_CREDENTIAL_FILE`に指定する。
+For local real-account verification, keep authentication JSON out of stdout and shell arguments. Point `SONY_BANK_CREDENTIAL_FILE` to a file protected with mode 600 or equivalent.
 
 ```sh
 SONY_BANK_CREDENTIAL_FILE=/secure/path/sony-bank.json \
@@ -73,29 +65,34 @@ SONY_BANK_CREDENTIAL_FILE=/secure/path/sony-bank.json \
 
 ## Secret
 
-- `SONY_BANK_CREDENTIAL_JSON`: `branchNum`、`accountNum`、`loginPwd`だけを持つJSON
+- `SONY_BANK_CREDENTIAL_JSON`: JSON containing only `branchNum`, `accountNum` and `loginPwd`.
 
-このWorkerは中央credentialを持たない。旧importer用のingest client `collector-r2-sony-bank`は2026-09-13に無効化した。
+This Worker holds no central credential. The old importer ingest client `collector-r2-sony-bank` was disabled on 2026-09-13.
 
-Secret値をsource、Wrangler config、shell履歴、標準出力へ置かない。
+Keep secret values out of source, Wrangler configuration, shell history and stdout.
 
 ```sh
-bun install --frozen-lockfile
-bun test
-mise run //services/collector-sony-bank:typecheck
+mise run install                                 # from the repository root
+mise run //services/collector-sony-bank:test
+mise run //services/collector-sony-bank:ci
 mise run //services/collector-sony-bank:dry-run
-wrangler deploy
 wrangler secret put SONY_BANK_CREDENTIAL_JSON
 ```
 
-## 作成するCloudflare resourceとcleanup
+Production deployment is the release workflow's, in the order of
+[`infra/deploy-order.json`](../../infra/deploy-order.json), with a `/health` postcheck.
+
+<a id="作成するcloudflare-resourceとcleanup"></a>
+
+## Created Cloudflare resources and cleanup
 
 - Worker: `kogane-sony-bank-collector-poc`
-- R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。このWorker専用のbucketはない）
-- Cron: `0 21 * * *`
-- Worker secrets: 上記2件
+- R2 binding: `DATA` → `kogane-raw-evidence` (shared by all collectors; no bucket is dedicated to this Worker)
+- Schedule: Processor alarm job `sony-bank` (`config/alarm-jobs.json`, `0 21 * * *` UTC); no Cron Trigger
+- D1 binding: `SCHEDULE_DB` → `kogane-raw-evidence` (the execution lease)
+- Worker secret: `SONY_BANK_CREDENTIAL_JSON` (the one above)
 
-PoCを廃棄するときはWorkerだけを削除する。共有DATA bucketは他のcollectorとProcessorも使うため削除しない。旧source専用bucket `kogane-sony-bank-collector-poc`は2026-09-13に削除済み。
+When retiring the PoC, delete only the Worker. Keep shared DATA because other collectors and the Processor also use it. The former dedicated source bucket `kogane-sony-bank-collector-poc` was deleted on 2026-09-13.
 
 ### Failure diagnostics
 

@@ -1,39 +1,42 @@
-# SBI新生銀行 Worker collector PoC
+<a id="sbi新生銀行-worker-collector-poc"></a>
 
-SBI新生銀行 PowerDirect の read-only collector を Kogane 内で独立実装する PoC です。
-`mnie` は dependency にせず、既存 Kogane collector と同じ R2 raw-store / manifest / daily Cron / authenticated manual trigger の境界だけを採用します。
+# `SBI新生銀行` (SBI Shinsei Bank) Worker collector PoC
 
-## 現在の重要な制限
+A PoC independently implementing an SBI Shinsei Bank PowerDirect read-only collector in Kogane. It does not depend on `mnie`; it adopts only the shared DATA raw-store / terminal-manifest / Processor-alarm-schedule boundaries used by existing Kogane collectors.
 
-**Cloudflare Containers 経路は、TAMIAを明示指定したlive runでunattended収集まで成功しています。**
+<a id="現在の重要な制限"></a>
 
-公開 login bundle と Kuebiko capture から MobileFirst/WLClient 形式の read route、session/CSRF token topology、core response schema を確認しました。ローカルCLIはCAFIS生成、login、Authorization/CSRF、core readsを同一Kuebiko Chrome target内で直列実行し、ブラウザ外へ返すのは4件のvalidated read JSONだけです。
+## Current important limitations
 
-- production Worker は Cloudflare Container を1 runごとに起動し、Container内のChromeでCAFIS生成、login、Authorization/CSRF、core readsを1つのpage内で直列実行する構成です。Workerはschedule、secret受け渡し、strict validation、R2保存だけを担当します。
-- route catalog は exact-origin / exact-path / exact-method です。2026-08-31 の Kuebiko captureとローカル自動実行で成功したbootstrap 2件とcore read 4件だけが `productionEnabled: true` です。公開 bundle だけの候補は到達不能です。
-- direct HTTP transport はproduction routeでも常に拒否します。Workerからpage外へ出るのは4件のraw JSONを包む単一JSON stringだけで、credential、CAFIS `jsc`、cookie、Authorization、CSRF、sessionStorageは出しません。
-- Container/browserは成功・拒否・unknown responseの全経路で終了・破棄し、credential retryを行いません。
-- top read成功後に後続core readが失敗した場合は、成功済みresponseとtop由来normalizedをpartial manifestへ残し、失敗したdatasetと未実行datasetを固定コードで記録します。top自体の失敗は従来どおりartifactなしのfailed manifestです。
-- unknown content type、oversize body、JSON parse failure、未登録 schema は保存・解釈せず停止します。
-- transfer、振込、振替、FX、定期預金作成・解約、memo/settings 等の write route は catalog に存在せず、path denylist でも拒否します。
+**The Cloudflare Containers path has successfully completed unattended collection in a live run explicitly using TAMIA.**
 
-最初のbounded automated loginはHTTP 200 / `CME0001`で停止しました。原因は実装が推測した`langCode=JPN`で、成功captureのexact値は`JAP`でした。credential、mode、postub flag、forward、user agentは一致していました。コードは`JAP`へ修正し、自動再試行は行っていません。これはAkamai拒否の証拠ではありません。
+The public login bundle and Kuebiko captures confirmed MobileFirst/WLClient-style read routes, session/CSRF-token topology and core response schemas. The local CLI serially performs CAFIS generation, login, Authorization/CSRF and core reads within the same Kuebiko Chrome target; only 4 validated read JSON responses leave the browser.
 
-修正後のローカルsame-page実行はlogin、bootstrap、core read 4件をすべてHTTP 200で完了し、strict validation後のraw/normalized artifactをprivate local directoryへ保存しました。これはlocal Chrome経路の実証であり、Cloudflare上のunattended経路の成功証明ではありません。
+- The production Worker starts a Cloudflare Container per 1 run. Chrome inside it serially performs CAFIS generation, login, Authorization/CSRF and core reads within 1 page. The Worker handles only scheduling, secret handoff, strict validation and R2 storage.
+- The route catalog uses exact origins, paths and methods. Only the 2 bootstrap and 4 core-read routes successful in the 2026-08-31 Kuebiko capture and local automated run have `productionEnabled: true`. Candidates based only on the public bundle are unreachable.
+- Direct HTTP transport is always refused, even for production routes. Only a single JSON string wrapping the 4 raw JSON responses leaves the page for the Worker; credentials, CAFIS `jsc`, cookies, Authorization, CSRF and sessionStorage do not leave it.
+- The Container/browser is stopped and discarded after success, refusal or unknown responses, without credential retries.
+- If a later core read fails after a successful top read, successful responses and top-derived normalized data remain in a partial manifest; failed and unattempted datasets use fixed codes. Failure of top itself still produces a failed manifest with no artifacts.
+- Unknown content types, oversized bodies, JSON parse failures and unregistered schemas stop processing without storage or interpretation.
+- Write routes for transfers, remittances, account transfers, FX, time-deposit creation/cancellation and memo/settings are absent from the catalog and also refused by the path denylist.
 
-Cloudflare Browser Run のbounded validationでは、公式入口とlogin直行の両方でCAFISが利用可能になる前にnavigation timeoutとなり、credentialを含むlogin POSTには到達しませんでした。そのためBrowser Run経路は現在のruntimeから外しています。
+The first bounded automated login stopped at HTTP 200 / `CME0001`. The cause was implementation-guessed `langCode=JPN`; the successful capture's exact value was `JAP`. Credentials, mode, postub flag, forward and user agent matched. The code was corrected to `JAP`, without an automatic retry. This is not evidence of Akamai rejection.
 
-Cloudflare Containerでは、最初のimageに`xvfb-run`を起動wrapperとして使ったためNode serverがlistenせず、Workerから接続できませんでした。これはbank側の拒否ではなくcontainer startup bugで、NodeをPID 1にしてserver内からXvfbを起動する形へ修正済みです。
+After correction, local same-page execution completed login, bootstrap and all 4 core reads with HTTP 200, saving raw/normalized artifacts to a private local directory after strict validation. This demonstrates the local Chrome path, not successful unattended execution on Cloudflare.
 
-修正後のlocal Docker検証はstable Google Chrome、native Linux fingerprint、NRT/WARP接続中の日本出口で実施しました。page内direct fetchによるloginはHTTP 403で、Chromeへ遅延CDP接続した後に同じdirect fetchを行っても403でした。Patchright経路はmain-worldの実行差によりCAFIS collectorを利用できませんでした。一方、遅延CDP接続後に実フォームへ連続入力し、そのsubmit controlから銀行ページ自身の`login()`を実行するとloginはHTTP 200でした。画面が自動発行した`securityConnect`の後、login Authorizationと初期CSRFをContainer外へ出さずに同じpage内で受け渡し、`validateToken`とcore read 4件を明示実行して全件成功しました。
+Bounded Cloudflare Browser Run validation timed out in navigation before CAFIS became available through either the official entrypoint or direct login. It never reached a credential-bearing login POST. The Browser Run path is therefore excluded from the current runtime.
 
-したがって、Windows fingerprint必須説はこの成功例で否定され、403を海外IPだけで説明する説も同じ日本出口で403/200が分かれたため否定されます。これは海外出口でも受理されることの証明ではありません。少なくとも現在の実装では、loginをdirect fetchで再構成せず、銀行ページ自身のフォーム/login処理を通すことが必要条件です。
+The initial Cloudflare Container image used `xvfb-run` as its startup wrapper, leaving the Node server unable to listen and the Worker unable to connect. This was a container-startup bug rather than bank rejection; Node is now PID 1 and starts Xvfb inside the server.
+
+Local Docker verification after correction used stable Google Chrome, a native Linux fingerprint and Japanese egress while connected through NRT/WARP. Login through page-internal direct fetch returned HTTP 403; the same direct fetch still returned 403 after delayed CDP attachment to Chrome. The Patchright path could not use the CAFIS collector because of main-world execution differences. In contrast, after delayed CDP attachment, sequentially filling the actual form and invoking the bank page's own `login()` through its submit control returned HTTP 200. After the page automatically issued `securityConnect`, login Authorization and initial CSRF were passed within the same page without leaving the Container; explicit `validateToken` and all 4 core reads succeeded.
+
+This success disproves a mandatory Windows fingerprint. The differing 403/200 results through the same Japanese egress also disprove an explanation of 403 based solely on foreign IPs. It does not prove acceptance through foreign egress. At least in the current implementation, using the bank page's own form/login processing, rather than reconstructing login with direct fetch, is necessary.
 
 ## Cloudflare live validation
 
-APAC placementのdirect Container（TAMIAなし）は、新しいimageの起動後もloginでHTTP 403になりました。そこでGLOBAL PASS PoCの既存方式を再利用し、Container-local HTTP CONNECT proxyから認証済みWebSocket `/tcp`へ接続し、WorkerのVPC bindingからTAMIAの`tunnel_id`を直接指定する経路へ変更しました。これは個人PC向けWARPのhostname routeを変更せず、SBI新生collectorの通信だけをTAMIAへ流します。
+A direct Container with APAC placement (without TAMIA) still received HTTP 403 at login after the new image started. The path was changed to reuse the existing GLOBAL PASS PoC approach: a Container-local HTTP CONNECT proxy connects to authenticated WebSocket `/tcp`, and the Worker's VPC binding specifies TAMIA's `tunnel_id` directly. This sends only SBI Shinsei collector traffic through TAMIA without changing hostname routes for the personal PC's WARP.
 
-relayは宛先portを443に固定し、次のSBI専用allowlist以外を拒否します。
+The relay fixes destination ports to 443 and refuses everything outside this SBI-specific allowlist.
 
 - `bk.web.sbishinseibank.co.jp`
 - `www.sbishinseibank.co.jp`
@@ -41,71 +44,110 @@ relayは宛先portを443に固定し、次のSBI専用allowlist以外を拒否�
 - `diproxy.cafisbrain.com`
 - `platform-websdk.transmitsecurity.io`
 
-TAMIA経路のCloudflare live run `0e999a32-6994-450e-a495-2daff0e7aeb1` は `status=success`、failure 0、artifact 5件（raw 4件 + normalized 1件）でした。全artifactのhashは一致し、sizeは0より大きく、run後のContainer instanceはinactiveでした。確認時にartifact本文、残高、取引、credential、cookie、Authorization、CSRF/tokenは読み取っていません。
+TAMIA-path Cloudflare live run `0e999a32-6994-450e-a495-2daff0e7aeb1` had `status=success`, failure 0 and 5 artifacts (4 raw + 1 normalized). Every artifact hash matched, sizes were greater than 0, and the Container instance was inactive after the run. Verification did not read artifact bodies, balances, transactions, credentials, cookies, Authorization or CSRF/tokens.
 
-先行failure manifestも削除せず検証履歴として残しています。内訳はContainer rollout時のcold/listen failure 2件、direct Containerのlogin 403が1件、TAMIA image rollout中に旧response shapeへ当たったfailure 2件です。
+Earlier failure manifests remain as verification history: 2 cold/listen failures during Container rollout, 1 direct-Container login 403 and 2 failures encountering the old response shape during TAMIA image rollout.
 
-詳細な観測根拠と次の capture 手順は [`INVESTIGATION-2026-08-31.md`](./INVESTIGATION-2026-08-31.md) に記録しています。
+Detailed evidence and next capture steps are recorded in [`INVESTIGATION-2026-08-31.md`](./INVESTIGATION-2026-08-31.md).
+
+## Balance-summary schema drift (2026-11-09)
+
+An authenticated, ordinary Top-page navigation on 2026-11-09 returned HTTP 200
+with `application/json` for the existing bodyless
+`POST /SFC/app/IFTP_TopAdapter/getBalanceSummaryAndStage`. Its
+`responseParam.summary.responseParam` included two previously unregistered string
+fields: `hyperDepositBalance` and `yenDepositBalance`. The collector's strict
+summary validator rejected these keys. A rejected summary is omitted from the
+stored artifacts and records `read:balance-summary-and-stage`,
+`ResponseSchemaError`, `provider_response_invalid`; the other validated responses
+remain evidence, so the run ends `partial`.
+
+The validator now accepts these two optional scalar fields alongside the earlier
+summary shape. Synthetic tests cover the full four-response handoff with the new
+fields, retention in the summary artifact, the earlier shape without them and
+continued rejection of unknown fields or nested values. The fields remain raw
+provider evidence; this change adds no balance interpretation or account mapping.
+The independent `sbi-shinsei-balance-summary-and-stage` parser also accepts the
+fields in version 0.1.2. It still publishes only the existing amount-free stage
+category observation; neither new aggregate becomes a balance observation or
+repeats a balance the top/yen-deposit datasets already report.
+
+A read-only D1/R2 check on 2026-11-09 inspected two persisted production
+manifests, verifying each object's SHA-256 and byte size before reporting only
+counts and closed codes. Both were `partial` with exactly one failure:
+`read:balance-summary-and-stage`, `ResponseSchemaError`,
+`provider_response_invalid`. Both omitted the summary dataset and retained the
+top, exchange-rate and yen-deposit captures. This corroborates the deployed
+schema-validation failure reported in
+[#1215](https://github.com/risu729/kogane/issues/1215). The generic failure code
+does not name the rejected field; the separately observed new fields reproduce
+that rejection in synthetic inputs. This does not establish the cause of every
+earlier partial run. No production collection has been run with this fix.
+After deployment, verify a daily or explicitly authorized
+requested run reaches `success`, follows through publication and shows deposit
+accounts as `same-day` in `kogane.collection-quality.read` (`view: accounts`).
+Until then, production recovery remains pending. The `container-snapshot`
+current-selection rule and success/partial classification are unchanged.
 
 ## Worker surface
 
-| Trigger                           | Behavior                                                                                                                                           |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /health`                     | schema version、source、live-read readiness のみ返す。                                                                                             |
-| Private `ScheduledCollection` RPC | 既存の固定actionで現在snapshotを収集する。公開 `/trigger` は404。                                                                                  |
-| Cron `0 21 * * *`                 | 毎日 06:00 JSTに同じContainer収集を1回実行。全失敗はfailure manifestを保存した上でinvocationを失敗させ、部分取得はpartial evidenceとして保存する。 |
+| Trigger                           | Behavior                                                                                                                                                                                                       |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /health`                     | Returns only schema version, source and live-read readiness.                                                                                                                                                   |
+| Private `ScheduledCollection` RPC | Collects the current snapshot through the existing fixed action. Public `/trigger` returns 404.                                                                                                                |
+| Processor alarm `sbi-shinsei`     | The Processor's `ScheduleAlarm` calls `runScheduled` daily at 06:00 JST (`config/alarm-jobs.json`). Total failure saves a failure terminal and returns `failed`; partial capture is saved as partial evidence. |
 
-R2 key（共有DATA bucket `kogane-raw-evidence`）:
+R2 keys (shared DATA bucket `kogane-raw-evidence`):
 
 ```text
-objects/<2 hex>/<sha256>                    manifest.jsonと各verified artifact
-runs/sbi-shinsei/<run-id>/terminal.json     最後に書くrunの完了記録（artifact keyとobjectの対応を持つ）
+objects/<2 hex>/<sha256>                    manifest.json and each verified artifact
+runs/sbi-shinsei/<run-id>/terminal.json     run completion record written last (artifact key/object mapping)
 ```
 
-unknown response や authentication response body は R2 に保存しません。4件のcore responseはauthenticated captureとローカル実行で検証し、strict schemaを通過した場合だけ保存します。read継続に使うtop-level `header.newToken`は同一page内でrotationした後、Containerから出す前に削除してJSONを再encodeします。
+Unknown responses and authentication-response bodies are not stored in R2. The 4 core responses were verified by authenticated capture and local execution and are stored only after passing strict schemas. Top-level `header.newToken`, used to continue reads, is rotated within the same page, removed before leaving the Container, and the JSON is re-encoded.
 
-現在の4 readはtop page由来のsnapshotです。manifestの`startedAt` / `completedAt`は実行時刻を表し、過去期間を取得済みとは記録しません。期間履歴を追加する場合は、期間を実際に送るread routeと取得範囲を別途検証してから導入します。
+The current 4 reads are top-page snapshots. Manifest `startedAt` / `completedAt` record execution times, without claiming past-period capture. Adding period history requires separate verification of a read route that actually sends a period and of its capture range.
 
-期間指定履歴とCSVはcatalog上で未承認の候補routeで、全execution profileでsession参照・通信前に拒否します。2026-10-10の通常UI観測を基に、`src/local/history-observation.ts`は円普通預金の明示期間request（最大31日というローカル制限）と、取得済みJSON/CSVの**オフライン検証だけ**を提供します。JSONの正常明細・providerが空と報告した応答・未確認errorを区別し、期間/口座contextとCSVの全6列を照合します。CSVは`Shift_JIS`宣言付きのブラウザー復号済みtextであり、元bytesやdownload保存の確認ではありません。全結果は`coverageStatus: unknown`のままです。
+Period-selected history and CSV remain unapproved candidate routes in the catalog; every execution profile refuses them before session access or communication. Based on ordinary UI observation on 2026-10-10, `src/local/history-observation.ts` provides an explicit-period yen ordinary-deposit request (locally limited to 31 days) and **offline validation only** of already captured JSON/CSV. It distinguishes normal JSON details, provider-reported empty responses and unverified errors, checking period/account context and all 6 CSV columns. CSV is browser-decoded text declaring `Shift_JIS`, not confirmation of original bytes or downloaded-file storage. Every result retains `coverageStatus: unknown`.
 
-このmoduleはWorker/Container/既存parserから呼ばれず、通信・保存・採用・本番有効化を行いません。既存4 raw + 1 normalized snapshotは不変です。CSV用session tokenの取得/rotation、原本byte保存、paging/上限/`purgeflag`の意味、電子お取引レポートのroute/schemaは未確認です。[ADR 0070](../../docs/adr/0070-sbi-shinsei-observed-history-boundary.md)と[次の取得sliceの計画](../../docs/plans/2026-10-sbi-shinsei-history-first-slice.md)に、本番の取得拡張までの残条件を記載しています。
+This module is not called by the Worker, Container or existing parser; it neither communicates, stores, adopts nor enables production behavior. The existing 4 raw + 1 normalized snapshot is unchanged. CSV session-token acquisition/rotation, original-byte storage, paging/limits/`purgeflag` meaning and electronic transaction-report routes/schemas remain unverified. [ADR 0070](../../docs/adr/0070-sbi-shinsei-observed-history-boundary.md) and the [next capture-slice plan](../../docs/plans/2026-10-sbi-shinsei-history-first-slice.md) record the conditions remaining before production capture is extended.
 
-runは`packages/collection`で共有DATA bucketへ直接書き、4件のprovider responseとnormalized snapshotはterminalを書くまでmemoryに保持する。ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。private Service Bindingによる中央importer呼出し、`POST /backfill-raw-evidence`、`scripts/backfill-raw-evidence.sh`、source専用bucketは2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
+`packages/collection` writes runs directly to shared DATA, retaining the 4 provider responses and normalized snapshot in memory until the terminal is written. The Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). Private Service Binding calls to the central importer, `POST /backfill-raw-evidence`, `scripts/backfill-raw-evidence.sh` and the dedicated source bucket were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)).
 
-Kuebiko capture で得た core response の field-name topology は synthetic fixture と strict validator に反映済みです。1 sample だけなので known field を optional として扱う箇所がありますが、unknown field、unknown nested item、unknown schema は拒否します。validator実装だけでは route を有効化せず、exact request builder とaccepted browser-contextでの実行成功も必要です。
+Core-response field-name topology from Kuebiko captures is reflected in synthetic fixtures and strict validators. Some known fields are optional because only 1 sample exists; unknown fields, unknown nested items and unknown schemas are refused. A validator implementation alone does not enable a route: an exact request builder and successful execution in an accepted browser context are also required.
 
 ## Secret bindings
 
-Cloudflare secret として設定します。値を repository、`.dev.vars`、log、PR に入れません。
+Configure these as Cloudflare secrets. Keep values out of the repository, `.dev.vars`, logs and PRs.
 
 - `SBI_SHINSEI_CREDENTIAL_JSON`
   - `{ "branchNumber": "...", "accountNumber": "...", "powerDirectPassword": "..." }`
 - `RELAY_TOKEN`
 
-公開admin入口と専用token同期scriptは廃止した。`RELAY_TOKEN` と銀行資格情報は変更しない。
+The public admin entrypoint and dedicated token-synchronization script are retired. `RELAY_TOKEN` and bank credentials are unchanged.
 
-ローカルCLIは次の順でcredentialを読みます。
+The local CLI reads credentials in this order.
 
-1. `--credential-stdin` の標準入力（captureからdiskを介さず引き渡す検証用）
-2. `SBI_SHINSEI_CREDENTIAL_JSON`
-3. mode 0600の `/home/risu/.local/share/kogane/secrets/sbi-shinsei.json`
+1. Standard input with `--credential-stdin` (for verification handoff from capture without disk).
+2. `SBI_SHINSEI_CREDENTIAL_JSON`.
+3. `/home/risu/.local/share/kogane/secrets/sbi-shinsei.json` with mode 0600.
 
-FIDO、SMS、telephone approval の値は collector secret に含めません。CLI引数へcredential値を渡しません。
+FIDO, SMS and telephone-approval values are not collector secrets. Do not pass credential values as CLI arguments.
 
 ## Local verification
 
 ```bash
-bun install --frozen-lockfile
-bun test
-mise run //services/collector-sbi-shinsei:typecheck
+mise run install                                 # from the repository root
+mise run //services/collector-sbi-shinsei:test
+mise run //services/collector-sbi-shinsei:ci       # typecheck, cf-typecheck, test, container
 mise run //services/collector-sbi-shinsei:dry-run
 bun src/local/cli.ts --dry-run
 bun src/local/check-jsc.ts
 ```
 
-`cf:check` は dry-run だけで、deploy しません。
+`dry-run` and `cf-build` only build and validate; neither deploys.
 
-実収集は、専用Kuebiko Chromeを公式login画面に置いた状態で次の形です。stdin JSONは画面やshell historyへ出さないproducerからpipeします。
+For real capture, place dedicated Kuebiko Chrome on the official login screen and use this form. Pipe stdin JSON from a producer that displays it in neither the terminal nor shell history.
 
 ```bash
 credential_producer |
@@ -114,31 +156,31 @@ credential_producer |
     --output-dir /home/risu/.local/share/kogane/raw/sbi-shinsei
 ```
 
-出力directory/fileは0700/0600です。CLI logはstatus、artifact数、balance/transaction件数、保存先だけで、credential、CAFIS material、Authorization、CSRF、account valueを出しません。hybrid WSL-fetch実装は診断用に残しますが、主経路ではありません。
+Output directories/files use 0700/0600. CLI logs contain only status, artifact counts, balance/transaction counts and destination, excluding credentials, CAFIS material, Authorization, CSRF and account values. The hybrid WSL-fetch implementation remains for diagnostics, outside the main path.
 
 ## Enablement checklist
 
-catalog entry を production で有効にするには、同じ commit/PR で以下が必要です。
+Production enablement of a catalog entry requires all of the following in the same commit/PR.
 
-1. 専用 Kuebiko/Chrome profile の authenticated capture で exact method/origin/path/body names を確認。
-2. read-only UI action と request の一対一対応を確認し、write side effect がないことを確認。
-3. response content type、maximum size、required/optional keys、error/login-redirect shapes を sanitized synthetic fixture に落とす。
-4. `newToken` rotation と 401/403/challenge/login redirect の stop behavior を test する。
-5. credential、token、cookie、account number、customer name、real amount を capture note/fixture/log から除外。
-6. same-session で一度だけ replay し、UI/export の行数・意味と一致することを確認。
+1. Confirm exact method/origin/path/body names in an authenticated capture with a dedicated Kuebiko/Chrome profile.
+2. Confirm the one-to-one mapping between a read-only UI action and request, without write side effects.
+3. Represent response content type, maximum size, required/optional keys and error/login-redirect shapes in sanitized synthetic fixtures.
+4. Test `newToken` rotation and stopping on 401/403/challenge/login redirects.
+5. Exclude credentials, tokens, cookies, account numbers, customer names and real amounts from capture notes, fixtures and logs.
+6. Replay only once within the same session and confirm row counts/meaning match the UI/export.
 
-この checklist を満たさない entry は daily/manual trigger から到達できません。
+Entries not meeting this checklist cannot be reached from daily alarms or operations requests.
 
 ## Cleanup inventory
 
-PoCを廃止するときは、次をまとめて削除します。現在はlive検証結果を保持するためactiveのままです。
+When retiring this PoC, remove the following together. It currently remains active to retain live-verification results.
 
-- deployed WorkerとCron `0 21 * * *`;
-- Cloudflare secrets 3件（SBI credential、admin trigger、relay）;
-- （旧source専用R2 bucketは2026-09-13に削除済み。保存先の共有DATA bucketは他のcollectorとProcessorも使うため削除しない）;
-- Container applicationとimage revisions;
-- TAMIAの`tunnel_id`を直接指定するVPC binding設定;
-- local Docker test container/image（検証終了後に削除）。
+- deployed Worker (its schedule is the Processor's `sbi-shinsei` alarm job; the Worker has no Cron Trigger);
+- the two Cloudflare secrets `SBI_SHINSEI_CREDENTIAL_JSON` and `RELAY_TOKEN` (the admin trigger secret is no longer read);
+- (the old dedicated source R2 bucket was deleted on 2026-09-13; keep shared DATA because other collectors and the Processor also use it);
+- Container application and image revisions;
+- VPC binding configuration specifying TAMIA's `tunnel_id` directly;
+- local Docker test container/image (remove after verification).
 
 ### Failure diagnostics
 
@@ -164,9 +206,9 @@ An unknown stage stays `unknown-browser-stage`; a failed read is separate from
 subsequent `NotAttempted` reads. No retries or collection requests are added.
 
 Worker `sbi-shinsei-stage` and Container `sbi-shinsei-container-stage` events provide
-stage start/end durations, including browser login, authenticated reads, storage,
-central import and teardown. A validated partial handoff logs `partial`, and the
-source terminal outcome remains distinct from central import and cleanup. The
+stage start/end durations, including browser login, authenticated reads, storage
+(`shared-persist`) and teardown. A validated partial handoff logs `partial`, and the
+source terminal outcome remains distinct from storage and cleanup. The
 Container image must be rebuilt to include `stage-diagnostics.mjs`; deploying only
 the Worker updates relay cleanup but does not update browser-side stage logging.
 
@@ -203,7 +245,7 @@ Container lifecycle hooks retain bounded exit codes and fixed stop/error reasons
 HTTP 500 diagnostics distinguish the SDK's startup, disconnected-transport and
 proxy-error envelopes using a maximum 2 KiB, one-second read; response text is
 discarded. Unknown or unreadable responses stay unclassified. A 500 alone does
-not prove that the Node process crashed; source completion and central import
+not prove that the Node process crashed; source completion and storage
 remain separate outcomes. These diagnostic changes do not retry collection.
 
 ### Correlate relay activity and unused preconnections
@@ -245,7 +287,7 @@ while that rollout is replacing instances. The platform can then stop that image
 during an authenticated read, producing an SDK HTTP 500 even when the bank login
 succeeded. Do not attribute an unclassified Container HTTP 500 to the bank.
 
-Before manually triggering a smoke run, wait until the latest Container rollout
+Before a smoke run, wait until the latest Container rollout
 is `completed`, its target version/image matches the application's current
 version/image, and any available prewarmed instances match that image. Do not
 deploy another Container revision while the smoke run is in progress. After the

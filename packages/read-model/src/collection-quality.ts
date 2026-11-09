@@ -142,6 +142,7 @@ export interface TerminalQualityRow {
   source: string;
   run_id: string;
   provider_outcome: string | null;
+  provider_failure_code: string | null;
   coverage_status: string | null;
   blocked_code: string | null;
   registered_at: string | null;
@@ -161,7 +162,7 @@ export const TERMINAL_QUALITY_SQL = `WITH wanted(source, run_id) AS (
   SELECT json_extract(pair.value, '$[0]'), json_extract(pair.value, '$[1]')
     FROM json_each(?1) pair
 )
-SELECT r.id, r.source, r.run_id, r.provider_outcome, r.coverage_status, r.blocked_code,
+SELECT r.id, r.source, r.run_id, r.provider_outcome, r.provider_failure_code, r.coverage_status, r.blocked_code,
        r.registered_at,
        CASE WHEN EXISTS (SELECT 1 FROM ${visibleEvidence.fetchRuns} f WHERE f.id = r.fetch_run_id)
             THEN r.fetch_run_id END AS visible_fetch_run_id,
@@ -178,6 +179,7 @@ SELECT r.id, r.source, r.run_id, r.provider_outcome, r.coverage_status, r.blocke
 export interface UnregisteredQualityRow {
   source: string;
   blocked_code: string | null;
+  provider_failure_code: string | null;
   runs: number;
   newest_seen_at: string;
 }
@@ -188,7 +190,7 @@ export interface UnregisteredQualityRow {
  * (no code) or refused with a code. A run that registered under any contract
  * version is not counted.
  */
-export const UNREGISTERED_QUALITY_SQL = `SELECT r.source, r.blocked_code, COUNT(*) AS runs,
+export const UNREGISTERED_QUALITY_SQL = `SELECT r.source, r.blocked_code, r.provider_failure_code, COUNT(*) AS runs,
        MAX(r.first_seen_at) AS newest_seen_at
   FROM json_each(?1) wanted
   CROSS JOIN collection_runs r ON r.source = wanted.value
@@ -198,8 +200,8 @@ export const UNREGISTERED_QUALITY_SQL = `SELECT r.source, r.blocked_code, COUNT(
    AND NOT EXISTS (SELECT 1 FROM collection_runs done
                     WHERE done.source = r.source AND done.run_id = r.run_id
                       AND done.registered_at IS NOT NULL)
- GROUP BY r.source, r.blocked_code
- ORDER BY r.source, r.blocked_code`;
+ GROUP BY r.source, r.blocked_code, r.provider_failure_code
+ ORDER BY r.source, r.blocked_code, r.provider_failure_code`;
 
 // ── sources ───────────────────────────────────────────────────────────────
 

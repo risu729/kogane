@@ -38,21 +38,25 @@ export async function cardSettlementsAvailable(env: Env): Promise<boolean> {
  * repeated key as the list of its values (which the service refuses as it
  * refuses any non-text value), and `offset` as a number when its text is a
  * plain decimal. Any other `offset` text stays text, so the service refuses it
- * as it refuses `{"offset": "1"}` over MCP.
+ * as it refuses `{"offset": "1"}` over MCP. Built from entries, never by
+ * assignment: `request["__proto__"] = value` would set the prototype, and the
+ * service's key check would never see the key.
  */
 function serviceRequest(params: URLSearchParams): Record<string, unknown> {
-  const request: Record<string, unknown> = {};
-  for (const key of new Set(params.keys())) {
-    const values = params.getAll(key);
-    const value = values[0]!;
-    request[key] =
-      values.length !== 1
-        ? values
-        : key === "offset" && /^(0|[1-9]\d*)$/u.test(value)
-          ? Number(value)
-          : value;
-  }
-  return request;
+  return Object.fromEntries(
+    [...new Set(params.keys())].map((key) => {
+      const values = params.getAll(key);
+      const value = values[0]!;
+      return [
+        key,
+        values.length !== 1
+          ? values
+          : key === "offset" && /^(0|[1-9]\d*)$/u.test(value)
+            ? Number(value)
+            : value,
+      ];
+    }),
+  );
 }
 
 /** Operator-only; agents read the same answers through `kogane.card-settlements.*`. */

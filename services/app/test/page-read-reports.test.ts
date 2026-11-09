@@ -110,6 +110,31 @@ beforeAll(async () => {
     .bind(run.artifacts[0]!.id)
     .first<{ id: number }>();
   await publishParse(parse!.id);
+  // One mapped observation makes parity exercise the account's full nested
+  // freshness and reverse catalogue, not just an empty accounts array.
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO source_accounts VALUES('synthetic-quality-ref','sony-bank','evidence-test','[\"synthetic-quality-ref\"]')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO accounts VALUES('synthetic-quality-account','Synthetic quality account','synthetic-role','identified')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO account_mappings VALUES('synthetic-quality-map','synthetic-quality-ref',1,'synthetic-quality-account','rule','synthetic_reason',1,'2026-09-11','Synthetic quality account','identified')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO transaction_observations(id,parse_run_id,source_account,raw_locator,extra_json) VALUES(990001,?,'synthetic-quality-ref','$[0]','{}')",
+    ).bind(parse!.id),
+    env.DB.prepare(
+      "INSERT INTO identity_runs VALUES('synthetic-quality-identity',?,1,'2026-09-11')",
+    ).bind(parse!.id),
+    env.DB.prepare(
+      "INSERT INTO identity_observations VALUES('synthetic-quality-identity-1','synthetic-quality-identity','transaction',990001,'synthetic-quality-ref','synthetic-quality-map','[]')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO identity_run_seals VALUES('synthetic-quality-identity',1,'2026-09-11')",
+    ),
+  ]);
 });
 
 describe("report page reads", () => {
@@ -276,6 +301,35 @@ describe("collection quality page reads", () => {
       const route = await page.route(query);
       expect(route.status, query).toBe(200);
       expect(validApiResponse(query.split("?")[0]!, route.body), query).toBe(true);
+      if ("view" in args && args.view === "accounts") {
+        expect(route.body).toMatchObject({
+          apiVersion: 3,
+          dataTypesVersion: "provider-data-types-v1",
+          dataTypes: expect.arrayContaining([
+            {
+              type: "cash_movement",
+              status: "partial",
+              parsers: ["sony-bank-history-json", "sony-bank-history-csv"],
+              issue: 449,
+            },
+          ]),
+          accounts: [
+            expect.objectContaining({
+              accountId: "synthetic-quality-account",
+              dataTypes: [
+                expect.objectContaining({
+                  providerTypes: ["cash_movement"],
+                  periods: [
+                    expect.objectContaining({
+                      freshness: expect.objectContaining({ ageDays: expect.any(Number) }),
+                    }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+        });
+      }
       const overHttp = await page.http(QUALITY, args);
       expect(overHttp).toEqual({
         status: 200,

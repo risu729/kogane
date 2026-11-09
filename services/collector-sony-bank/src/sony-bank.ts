@@ -1,3 +1,4 @@
+import { decodeUtf8, parseCsv } from "../../../packages/parsers/src/parsers/util";
 import { SonyBankDiagnostics, SonyBankError } from "./diagnostics";
 import type { JsonObject, RawArtifact, SonyBankCredential } from "./types";
 
@@ -157,7 +158,7 @@ export async function collectSonyBank(options: {
     history.transactionCount > 0
       ? await diagnostics.stage(
           "history-csv",
-          () => client.historyCsv("JPY", options.from, options.to),
+          () => client.historyCsv("JPY", options.from, options.to, history.transactionCount),
           { currency: "JPY", transactionCount: history.transactionCount },
         )
       : null;
@@ -178,7 +179,13 @@ export async function collectSonyBank(options: {
       currencyHistory.transactionCount > 0
         ? await diagnostics.stage(
             "history-csv",
-            () => client.historyCsv(currency, options.from, options.to),
+            () =>
+              client.historyCsv(
+                currency,
+                options.from,
+                options.to,
+                currencyHistory.transactionCount,
+              ),
             { currency, transactionCount: currencyHistory.transactionCount },
           )
         : null;
@@ -460,6 +467,7 @@ class SonyBankClient {
     currency: string,
     from: string,
     to: string,
+    expectedCount: number,
   ): Promise<{ body: ArrayBuffer; mediaType: string }> {
     const context: RequestContext = {
       area: "ea",
@@ -485,7 +493,14 @@ class SonyBankClient {
         }),
         redirect: "manual",
       },
-    );
+    ).catch((error: unknown) => {
+      throw new SonyBankError(
+        `${context.eventId}:${currency}`,
+        error instanceof SonyBankError ? error.httpStatus : undefined,
+        0,
+        "history_csv_missing_with_transactions",
+      );
+    });
     this.#cookies.absorb(response.headers);
     const nextCsrf = response.headers.get("bff-csrf");
     if (nextCsrf) this.#csrf = nextCsrf;
@@ -495,11 +510,15 @@ class SonyBankClient {
         `${context.eventId}:${currency}`,
         response.status,
         errorCodeCount(body),
+        "history_csv_missing_with_transactions",
       );
     }
+    const body = await response.arrayBuffer();
+    const mediaType = response.headers.get("content-type") ?? "application/octet-stream";
+    assertHistoryCsvCount(body, mediaType, currency, expectedCount);
     return {
-      body: await response.arrayBuffer(),
-      mediaType: response.headers.get("content-type") ?? "application/octet-stream",
+      body,
+      mediaType,
     };
   }
 
@@ -846,4 +865,50 @@ function escapeRegExp(value: string): string {
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+/** Count logical rows with the parser's quote recovery; retain provider bytes unchanged. */
+function assertHistoryCsvCount(
+  body: ArrayBuffer,
+  mediaType: string,
+  currency: string,
+  expectedCount: number,
+): void {
+  const operation = `EABA0600S1fE12:${currency}`;
+  if (body.byteLength === 0)
+    throw new SonyBankError(operation, undefined, 0, "history_csv_missing_with_transactions");
+  let rows: string[][];
+  try {
+    const charset = /;\s*charset="?([a-z0-9._-]+)"?$/iu
+      .exec(mediaType)?.[1]
+      ?.toLowerCase()
+      .replaceAll("_", "-");
+    const shiftJis = ["shift-jis", "shiftjis", "sjis", "windows-31j", "cp932"];
+    if (charset && !["utf-8", "utf8", ...shiftJis].includes(charset)) throw new Error("charset");
+    let text: string;
+    if (charset && shiftJis.includes(charset)) {
+      text = new TextDecoder("shift-jis", { fatal: true }).decode(body);
+    } else if (charset) {
+      text = decodeUtf8(new Uint8Array(body));
+    } else {
+      try {
+        text = decodeUtf8(new Uint8Array(body));
+      } catch {
+        text = new TextDecoder("shift-jis", { fatal: true }).decode(body);
+      }
+    }
+    rows = parseCsv(text);
+  } catch {
+    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid");
+  }
+  const header = ["取引日", "摘要", "参考情報", "通貨", "預入額", "引出額", "差引残高"];
+  if (currency !== "JPY") header.push("為替レート");
+  if (rows.length === 0)
+    throw new SonyBankError(operation, undefined, 0, "history_csv_missing_with_transactions");
+  if (
+    rows.some((row) => row.length !== header.length) ||
+    header.some((value, index) => rows[0]![index] !== value)
+  )
+    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid");
+  if (rows.length - 1 !== expectedCount)
+    throw new SonyBankError(operation, undefined, 0, "history_csv_count_mismatch");
 }

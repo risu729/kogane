@@ -1,6 +1,7 @@
 # Plan: Phase 3 — coverage, collection requests and cross-source identity
 
 - Status: **accepted** by the owner on 2026-11-08 (03:16 and 03:19 UTC), with the answers in [section 6](#6-owner-decisions-2026-11-08). Each unit is its own pull request; design changes inside a unit still get an ADR.
+- Done: 2026-11-09. The roadmap's done-when holds ([outcome](../roadmap.md#phase-3-outcome), unit 3i, [#1148](https://github.com/risu729/kogane/issues/1148)); the owner chose on 2026-11-09 (11:27 UTC) to verify both requests over MCP instead of one from the page.
 - Written: 2026-11-08 03:00 UTC against main [`2a1b681`](https://github.com/risu729/kogane/commit/2a1b681), revised after an independent subagent review (03:20 UTC).
 - Roadmap: [Phase 3](../roadmap.md#phase-3--coverage-collection-requests-and-cross-source-identity) and [layers 0–5](../roadmap.md#layers-05--coverage-and-cross-source-identity). Issues [#542](https://github.com/risu729/kogane/issues/542), [#545](https://github.com/risu729/kogane/issues/545), the per-source issues #441–#454 under [#440](https://github.com/risu729/kogane/issues/440).
 
@@ -86,6 +87,8 @@ Add every healthy connection to `OPS_COLLECTOR_DISPATCH_CONNECTIONS` (both Proce
 
 Each cell, and #1112's per-account view, gets the age of its current capture and a closed state under a versioned policy: `same-day`, `recent` (1–3 days) and `stale` (more) for daily collectors, the values of `dated-state-freshness-v1`; `human_required` when a person must act (SMBC Direct's manual path, a blocked St George coordinator); `disabled`; `no_capture` without an age when nothing was captured. The answer names its `asOf`.
 
+**3d outcome:** per source and cell in [#1127](https://github.com/risu729/kogane/pull/1127) ([ADR 0045 amendment](../adr/0045-collection-quality-read.md#amendment-2026-11-08-freshness-per-source-and-cell)); per account, data type and period of the account view in [ADR 0088's amendment of 2026-11-08](../adr/0088-collection-quality-per-account.md#amendment-2026-11-08-freshness-per-account-data-type-and-period): each period ages its named capture independently of standing, and a data type and account carry their newest named capture's freshness, as specified by [#1139](https://github.com/risu729/kogane/issues/1139).
+
 ### 3e Data types nobody collects (code + ADR; after #1112)
 
 A checked-in, versioned catalogue per source of what the provider offers for the account kinds the source collects, in the layer 0–5 data types (balances, bank movements, card usage, statements, positions, executions, settlement cash, reward balance, activity and expiry): each `collected` with its datasets, or `not_collected` with its issue. For example, SBI Securities: positions and executions collected; dividends, distributions and interest, asset history and electronic documents `not_collected` ([#446](https://github.com/risu729/kogane/issues/446)). It is filled from the source research ([sources](../sources/README.md), [source research](../source-research.md)) and describes the provider, not the owner's holdings. Shown on the collection quality page, per account and in `kogane.collection-quality.read`.
@@ -109,6 +112,8 @@ Done read-only on 2026-11-08 for mizuho, GLOBAL PASS, St George, V Point and Vpa
 ### 3i Production verification and close-out (docs)
 
 Request one collection from the page and one over MCP and follow both to published (and projected); read per-account coverage for the Phase 2 accounts (a Vpass card, the MyJCB root, SMBC, SBI Shinsei) with data types and freshness; read identity and instrument counts. Record the outcome in the roadmap; close or narrow #542 and #545.
+
+**3i outcome (2026-11-09):** both requests over MCP reached `published` (stages in the [roadmap outcome](../roadmap.md#phase-3-outcome)); the Phase 2 accounts read `same-day` (the MyJCB root and J-POINT; an older MyJCB aggregate account `stale`), `human-required` (SMBC) and `stale` (Vpass, SBI Shinsei, whose newest captures are not parse-eligible); `unresolved` is 0 among the organized observations of every source while about 21,000 observations were still being organized, and the 16 SBI pairs are `resolved-by-rule`.
 
 Order: 3a, 3c, 3f and 3g now, in parallel threads; 3b after #1071; 3d and 3e after #1112, in one thread since they change the same query; 3i last.
 

@@ -23,7 +23,7 @@
     "OPERATOR_SUBJECTS": "[\"2c440753-9011-502c-a22d-bb013593c11a\"]",
     "AGENT_GRANTS": "",
     "OPS_API_ENABLED": "true",
-    "SESSION_REFRESH_POLICY": "",
+    "SESSION_REFRESH_POLICY": "{\"sbi-vc-trade\":\"unattended\"}",
     // U14 postcheck (plan 11 §6, docs/ci-cd.md). The release stamps the
     // deployed commit into this variable before the upload
     // (`.github/scripts/release-sha.mjs`), because the pinned deploy Action

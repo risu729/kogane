@@ -3,19 +3,23 @@
 This collector reads ordinary JPY deposit balances and the first displayed
 transaction page directly from Mizuho Direct. It authenticates with the customer
 number and login password provisioned as Worker secrets on each daily run.
-An operator can also supply an already authenticated session for one request.
 It uses the shared
 DATA bucket, terminal-last persistence, registered Mizuho parsers, and the
 existing balance/transaction projections. No statement upload is involved.
 
-The daily schedule is `25 21 * * *` UTC (06:25 JST), staggered after the other
-daily bank collectors. Each invocation signs in once, collects and persists
-sanitized evidence, and discards its session. Additional authentication or an
-unrecognized login page stops the run; the Worker neither answers challenges
-nor retries password submissions. Scheduled retries are explicitly disabled.
+The Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`).
+The Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled`
+(`src/schedule-entrypoint.ts`) for the `mizuho-bank` job in
+[`config/alarm-jobs.json`](../../config/alarm-jobs.json): daily at 06:25 JST
+(`25 21 * * *` UTC), staggered after the other daily bank collectors. Each
+invocation signs in once, collects and persists sanitized evidence, and
+discards its session. Additional authentication or an unrecognized login page
+stops the run; the Worker neither answers challenges nor retries password
+submissions. The alarm records the occurrence's outcome and does not retry it
+(`services/processor/src/schedule-alarm.ts`).
 `infra/deploy-order.json` includes the Worker in the normal production release,
 with a public health postcheck. Local WSL session-based reads have been verified,
-and the daily cron runs (password login and authenticated cloud collection) have
+and the daily scheduled runs (password login and authenticated cloud collection) have
 registered in production since 2026-09-24. Health success alone does not
 establish successful bank access.
 
@@ -23,8 +27,8 @@ establish successful bank access.
 
 - `GET /health` returns source and schema version, without account information.
 - Public `POST /trigger` is retired (404), including supplied-session injection.
-  Normal collection uses the existing fixed-action private Service Binding and
-  scheduled handler with configured credentials; no replacement HTTP credential
+  Normal collection uses the fixed-action private Service Binding
+  (`ScheduledCollection`) with configured credentials; no replacement HTTP credential
   transport is added. Provision `MIZUHO_CUSTOMER_NUMBER` and
   `MIZUHO_LOGIN_PASSWORD` out of band. CI/CD does not synchronize bank credentials.
 - A login challenge remains human-required; this slice does not invent a new
@@ -36,7 +40,7 @@ establish successful bank access.
   codes. Unknown issue text becomes `unclassified-collection-issue`; neither
   exception text nor private identifiers are logged. Logging is best effort:
   a failed log sink cannot prevent collection, retry a storage write, or turn
-  an already-persisted run into a failure. A login or storage failure fails the scheduled invocation after
+  an already-persisted run into a failure. A login or storage failure returns a `failed` scheduled result after
   recording safe acquisition failure evidence where storage is available.
 - The terminal names the same closed code: each failed unit carries the code
   that stopped it (for example `read-http-error` for a history page, or
@@ -54,6 +58,17 @@ establish successful bank access.
   published from it; it is kept for inspection and as a fixture for a
   parser fix. A page that does not sanitize to itself again is not kept. From 2026-11-01 to 11-06 every daily run's history page
   was refused this way (`read-parse-error` in the Worker log).
+- A refused login page keeps `login-unrecognized-page` and adds closed
+  `loginCheck` (`form-count`, `field-value`, `missing-token`,
+  `credential-controls`, `entry-base`, or `post-login-form`), `httpStatusClass`
+  and the expected form's allow-listed name to `mizuho-collection-result`.
+  These are structural checks, never provider text, URLs, tokens or form values.
+  The result also carries `phaseDurationsMs` for `login`, `account-list`,
+  `history` and `persistence`; repeated phases accumulate, and unvisited phases
+  are zero. Account-list and history starts have their own phase records.
+  Unknown exceptions, including programming errors and unlisted error codes,
+  become `internal-error` on the failed unit/run and in the safe log. Known
+  client and parser refusals retain their existing closed codes.
 
 The configured Processor route is `mizuho-bank` / `collector-mizuho-bank` in
 `config/ingest-clients.json`. The existing idempotent bootstrap must be applied

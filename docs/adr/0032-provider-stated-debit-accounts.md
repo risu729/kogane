@@ -15,7 +15,7 @@
   round-4 observation this decision waited for: MyJCB shows a bank name, a
   branch name and the leading digits; Vpass shows no debit account.
   [2026-11-07](#amendment-2026-11-07-the-review-shows-the-evidence-under-the-current-reader),
-  proposed: the review shows the evidence only under the current reader
+  accepted (#1057): the review shows the evidence only under the current reader
   version, and a refused page as its refusal code.
 
 ## Context
@@ -342,7 +342,7 @@ unobserved.
 
 ## Amendment 2026-11-07: the review shows the evidence under the current reader
 
-- Status: proposed
+- Status: accepted (merged 2026-11-07 in [#1057](https://github.com/risu729/kogane/pull/1057))
 - Date: 2026-11-07
 - Carried by:
   `packages/application/src/query/card-settlements.ts`

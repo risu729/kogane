@@ -1,17 +1,21 @@
 # GLOBAL PASS Cloudflare Browser Run investigation
 
-## 目的
+<a id="目的"></a>
 
-Cloudflare Container ChromiumがGLOBAL PASSのTurnstile tokenを生成できなかったため、Cloudflare Browser Run（旧Browser Rendering）のfull Puppeteer sessionで同じログイン画面を開き、token生成とlogin可否をbounded testする。
+## Purpose
 
-これは2026-08-25に実施したSMBCカード用Vpass Browser Run probeとは別の検証である。前者は`www.smbc-card.com`のAkamai login POSTが403になった。今回は`www.debit.vpass.ne.jp`のCloudflare Turnstileを対象にする。
+Cloudflare Container Chromium could not generate GLOBAL PASS Turnstile tokens. This investigation opens the same login screen through a full Cloudflare Browser Run (formerly Browser Rendering) Puppeteer session for bounded testing of token generation and login.
 
-## 公式仕様から分かる制約
+This is separate from the SMBC-card Vpass Browser Run probe on 2026-08-25. That probe received 403 for the Akamai login POST at `www.smbc-card.com`; this one targets Cloudflare Turnstile at `www.debit.vpass.ne.jp`.
 
-- Browser RunのPuppeteer/CDP sessionはCloudflare egressを使い、TAMIA Tunnelには接続しない。
-- network User-Agentは変更できるが、UA変更はbot protectionを回避しない。
-- Puppeteer/CDPのrequestには`cf-brapi-devtools`、`cf-biso-devtools`、Web Bot Auth署名などの削除不能な識別情報が付く。
-- browserは必ず`finally`でcloseし、利用時間を残さない。
+<a id="公式仕様から分かる制約"></a>
+
+## Constraints from official specifications
+
+- Browser Run Puppeteer/CDP sessions use Cloudflare egress, without connecting to TAMIA Tunnel.
+- Network User-Agent can change, but changing UA does not bypass bot protection.
+- Puppeteer/CDP requests carry non-removable identifiers such as `cf-brapi-devtools`, `cf-biso-devtools` and Web Bot Auth signatures.
+- Always close the browser in `finally`, without leaving billable usage running.
 
 References:
 
@@ -19,91 +23,99 @@ References:
 - [Automatic request headers](https://developers.cloudflare.com/browser-run/reference/automatic-request-headers/)
 - [Browser Run limits and session cleanup](https://developers.cloudflare.com/browser-run/limits/)
 
-## 実装
+<a id="実装"></a>
 
-既存の`kogane-globalpass-collector-poc` Workerへ次を追加した。
+## Implementation
 
-- Browser Run binding `BROWSER`
-- 管理token必須の`POST /browser-probe`
-- Windows Chrome 153相当のnetwork User-Agent、Client Hints、`ja-JP` Accept-Language、1365x768 viewport
-- hostname、正規化済みpath、method、resource type、HTTP statusだけを返すnetwork diagnostic
-- Turnstile tokenが20文字を超えた場合だけID/passwordを入力し、login buttonを1回clickするgate
+The following were added to existing Worker `kogane-globalpass-collector-poc`.
 
-credential、cookie value、request/response body、Turnstileの動的識別子は返さない。challenge pathは`<redacted>`へ正規化する。
+- Browser Run binding `BROWSER`.
+- Admin-token-required `POST /browser-probe`.
+- Windows Chrome 153-equivalent network User-Agent/Client Hints, `ja-JP` Accept-Language and 1365x768 viewport.
+- Network diagnostics returning only hostname, normalized path, method, resource type and HTTP status.
+- A gate entering ID/password and clicking login only 1 time when the Turnstile token exceeds 20 characters.
+
+Credentials, cookie values, request/response bodies and dynamic Turnstile identifiers are not returned. Challenge paths normalize to `<redacted>`.
 
 ## Bounded live result
 
-2026-08-28 AESTに3回実行した。追加診断のためrunを分けたが、全runでTurnstile tokenが未生成だったため、資格情報の入力とGLOBAL PASSへのlogin POSTは0回である。
+Executed 3 times on 2026-08-28 AEST. Separate runs added diagnostics, but no run generated a Turnstile token, so credential entry and login POST to GLOBAL PASS occurred 0 times.
 
-| 項目                                 | 観測値                                   |
-| ------------------------------------ | ---------------------------------------- |
-| GLOBAL PASS login page               | HTTP 200                                 |
-| title / form                         | `ログイン` / formあり                    |
-| Access Denied                        | false                                    |
-| cookies                              | `JSESSIONID`、`TS01dfe944`の名前だけ確認 |
-| page JavaScript UA                   | `Cloudflare-Workers`                     |
-| platform / webdriver / language      | `Linux x86_64` / `true` / `en-US`        |
-| Turnstile API                        | 302からbuild版200                        |
-| challenge document                   | 200                                      |
-| challenge XHR POST                   | 2回、どちらも200                         |
-| challenge image                      | 200                                      |
-| cross-origin challenge frame         | あり                                     |
-| `cf-turnstile-response` after 30s    | 0文字                                    |
-| `brunhild.challenges.cloudflare.com` | requestなし                              |
-| HTTP 4xx/5xx / request failure       | なし                                     |
-| credential POST                      | なし                                     |
+| Item                                 | Observation                                     |
+| ------------------------------------ | ----------------------------------------------- |
+| GLOBAL PASS login page               | HTTP 200                                        |
+| title / form                         | `ログイン` ("login") / form present             |
+| Access Denied                        | false                                           |
+| cookies                              | Only names `JSESSIONID`, `TS01dfe944` confirmed |
+| page JavaScript UA                   | `Cloudflare-Workers`                            |
+| platform / webdriver / language      | `Linux x86_64` / `true` / `en-US`               |
+| Turnstile API                        | 302 to build 200                                |
+| challenge document                   | 200                                             |
+| challenge XHR POST                   | 2, both 200                                     |
+| challenge image                      | 200                                             |
+| cross-origin challenge frame         | Present                                         |
+| `cf-turnstile-response` after 30s    | 0 characters                                    |
+| `brunhild.challenges.cloudflare.com` | No requests                                     |
+| HTTP 4xx/5xx / request failure       | None                                            |
+| credential POST                      | None                                            |
 
-## 通常Chrome/Kuebikoとの比較
+<a id="通常chromekuebikoとの比較"></a>
 
-2026-08-28 AESTに、スタートメニューの`kogane capture`から新規起動したKuebikoプロファイルで同じGLOBAL PASS login URLを開いた。capture runは`2026-08-27T21-46-51`（UTC）で、Kuebiko 1.3.0がnetlog、response metadata、body、storageをローカルに保存した。生captureにはcookie等が含まれ得るためGitには入れず、以下のsanitized観測値だけを残す。資格情報は入力せず、login POSTも行っていない。
+## Comparison with ordinary Chrome/Kuebiko
 
-| 項目                                 | Cloudflare Browser Run | 通常Chrome/Kuebiko                                               |
-| ------------------------------------ | ---------------------- | ---------------------------------------------------------------- |
-| login page                           | HTTP 200 / `ログイン`  | HTTP 200 / `Sign On`                                             |
-| form / Access Denied                 | formあり / false       | form 1件 / false                                                 |
-| page JavaScript UA                   | `Cloudflare-Workers`   | Windows Chrome 153                                               |
-| platform                             | `Linux x86_64`         | `Win32`                                                          |
-| `navigator.webdriver`                | `true`                 | `false`                                                          |
-| language                             | `en-US`                | `en-US`（languagesには`ja`も含む）                               |
-| Turnstile API                        | 302後にbuild版200      | 302後にbuild版200                                                |
-| challenge document                   | 200                    | 200                                                              |
-| `cf-turnstile-response`              | 30秒後も0文字          | 約15秒以内に773文字                                              |
-| challenge frame                      | 30秒後も存在           | token観測時にはiframeなし                                        |
-| `brunhild.challenges.cloudflare.com` | requestなし            | structured CDP/Kuebiko metadata上はrequestなし                   |
-| HTTP 4xx/5xx / request failure       | なし                   | 4xx/5xxなし。未使用CSS 1件が`ERR_ABORTED`、challenge failureなし |
-| credential/login POST                | なし                   | なし                                                             |
+On 2026-08-28 AEST, the same GLOBAL PASS login URL was opened with a Kuebiko profile freshly launched from Start-menu `kogane capture`. Capture run `2026-08-27T21-46-51` (UTC) used Kuebiko 1.3.0 to save netlog, response metadata, bodies and storage locally. Raw captures may contain cookies or similar data and stay out of Git; only sanitized observations below remain. No credentials were entered and no login POST was sent.
 
-Kuebiko側はremote debugging port付きのChrome Betaだが、`--enable-automation`は使わず、pageからは`navigator.webdriver=false`に見えた。つまりCDP接続や通信capture自体がTurnstile token生成を妨げるわけではない。一方Browser Runはnetwork headerのUAをWindows Chrome 153相当にしても、page JavaScript fingerprintとCloudflareが付与する削除不能header/Web Bot Auth署名は通常Chromeにならない。
+| Item                                 | Cloudflare Browser Run              | Ordinary Chrome/Kuebiko                                      |
+| ------------------------------------ | ----------------------------------- | ------------------------------------------------------------ |
+| login page                           | HTTP 200 / `ログイン`               | HTTP 200 / `Sign On`                                         |
+| form / Access Denied                 | Form present / false                | 1 form / false                                               |
+| page JavaScript UA                   | `Cloudflare-Workers`                | Windows Chrome 153                                           |
+| platform                             | `Linux x86_64`                      | `Win32`                                                      |
+| `navigator.webdriver`                | `true`                              | `false`                                                      |
+| language                             | `en-US`                             | `en-US` (languages also includes `ja`)                       |
+| Turnstile API                        | 302 to build 200                    | 302 to build 200                                             |
+| challenge document                   | 200                                 | 200                                                          |
+| `cf-turnstile-response`              | Still 0 characters after 30 seconds | 773 characters within about 15 seconds                       |
+| challenge frame                      | Still present after 30 seconds      | No iframe when token observed                                |
+| `brunhild.challenges.cloudflare.com` | No requests                         | No requests in structured CDP/Kuebiko metadata               |
+| HTTP 4xx/5xx / request failure       | None                                | No 4xx/5xx; 1 unused CSS `ERR_ABORTED`, no challenge failure |
+| credential/login POST                | None                                | None                                                         |
 
-この比較は「Browser Run固有のbrowser identityが失敗要因」という仮説を強くするが、IP/egressは完全には分離していない。clientから確認できた`150.48.6.170`はGLOBAL PASS側の接続先IPであり、Kuebikoの送信元IPではない。KuebikoはローカルWARP/hostname routeの影響を受け得る一方、Browser RunはCloudflare egress固定なので、この1比較だけでbrowser fingerprintを単独原因とは断定しない。
+Kuebiko uses Chrome Beta with a remote-debugging port, without `--enable-automation`; the page saw `navigator.webdriver=false`. Thus CDP attachment/traffic capture itself does not prevent Turnstile token generation. In contrast, setting Browser Run's network-header UA to Windows Chrome 153 does not make its page-JavaScript fingerprint or Cloudflare-added non-removable headers/Web Bot Auth signatures ordinary Chrome.
 
-## Container browserの段階的A/B
+This strengthens the hypothesis of Browser Run-specific browser identity causing failure, but IP/egress is not fully isolated. Client-visible `150.48.6.170` is the GLOBAL PASS destination IP, not Kuebiko's source IP. Kuebiko may be affected by local WARP/hostname routes, whereas Browser Run uses fixed Cloudflare egress; this 1 comparison alone cannot establish browser fingerprint as the sole cause.
 
-同日、Cloudflare ContainerのGLOBAL PASS通信を全runで同じTAMIA Tunnel経路に固定し、browser側だけを1段階ずつ変更した。Turnstileの2 hostはContainerの通常internet egressを使う。各runはログイン画面を1回開き、tokenを最大30秒待つだけで、資格情報の入力、login POST、cookieの再利用、R2への書き込みは行っていない。
+<a id="container-browserの段階的ab"></a>
 
-| variant                                   | 追加した条件                                             | page上の主な観測値                                               | token |
-| ----------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------- | ----- |
-| `baseline`                                | なし                                                     | Linux / HeadlessChrome 151 / `webdriver=true` / `ja-JP`          | 0文字 |
-| `webdriver-false`                         | AutomationControlledを無効化                             | Linux / HeadlessChrome 151 / `webdriver=false` / `ja-JP`         | 0文字 |
-| `windows`                                 | Windows Chrome 153 UA・Client Hints・platform・languages | Win32 / Chrome 153相当 / `webdriver=false` / `en-US`             | 0文字 |
-| `headed-windows`                          | Xvfb上のheaded Chromium                                  | 上記Windows情報、headed                                          | 0文字 |
-| `headed-persistent-windows`               | fresh profileのpersistent context                        | 上記Windows情報、headed、persistent                              | 0文字 |
-| `chrome-stable-headed-persistent-windows` | 実行binaryだけをブランド版Google Chrome Stableへ変更     | Google Chrome 152.0.7977.64、上記Windows情報、headed、persistent | 0文字 |
+## Incremental Container browser A/B
 
-全runでlogin pageはHTTP 200、formあり、`Access Denied`なしだった。Turnstile APIは302からbuild版200、challenge documentは200、XHR POSTは2回とも200、imageも200だった。一方で共通してchallenge fetchが401、`brunhild.challenges.cloudflare.com`が204の直後に`net::ERR_ABORTED`となり、tokenは完成しなかった。最初の5 runはChromium `151.0.7922.34`、6 run目はブランド版Google Chrome `152.0.7977.64`である。Windows variantではいずれもJS/Client Hints上だけChrome 153に見せている。
+The same day, every run fixed GLOBAL PASS traffic through the same TAMIA Tunnel, changing browser conditions 1 step at a time. The 2 Turnstile hosts used ordinary Container internet egress. Each run opened login 1 time and waited at most 30 seconds for a token, without credential entry, login POST, cookie reuse or R2 writes.
 
-このA/Bから、`navigator.webdriver`、表面的なWindows UA/platform/language、headless、fresh persistent context、Playwright同梱Chromiumのいずれか一つを直すだけでは不十分と分かった。ブランド版Chromeでもchallenge fetch 401とBrunhild 204直後の`ERR_ABORTED`は変わらなかった。persistent contextは保存済みの信頼履歴を持つprofileではないため、「過去の正常利用履歴が必要か」は未検証である。また、Linux上のChrome 152にWindows Chrome 153の値を返させているため、TLS、GPU、font、codec、OS固有APIなどとの不整合は残る。
+| variant                                   | Added condition                                               | Main page observations                                                     | token        |
+| ----------------------------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------ |
+| `baseline`                                | None                                                          | Linux / HeadlessChrome 151 / `webdriver=true` / `ja-JP`                    | 0 characters |
+| `webdriver-false`                         | Disable AutomationControlled                                  | Linux / HeadlessChrome 151 / `webdriver=false` / `ja-JP`                   | 0 characters |
+| `windows`                                 | Windows Chrome 153 UA/Client Hints/platform/languages         | Win32 / Chrome 153-equivalent / `webdriver=false` / `en-US`                | 0 characters |
+| `headed-windows`                          | Headed Chromium on Xvfb                                       | Windows information above, headed                                          | 0 characters |
+| `headed-persistent-windows`               | Fresh-profile persistent context                              | Windows information above, headed, persistent                              | 0 characters |
+| `chrome-stable-headed-persistent-windows` | Change only executable binary to branded Google Chrome Stable | Google Chrome 152.0.7977.64, Windows information above, headed, persistent | 0 characters |
 
-次に価値があるのは、JS property patchを増やすことではなく、Kuebiko成功runとContainer失敗runの送信元IPを直接確認してnetwork identityを分離することである。その次に、Windows偽装なしのnative Linux Chrome、Chrome 152と一致させたClient Hints、保存履歴のあるprofileの順で比較する。今回作成したContainer instance `v10`は後にdestroyし、Google Chrome検証用の`v11`は検証後にstopした。
+Every run returned login-page HTTP 200 with a form and no `Access Denied`. Turnstile API redirected with 302 to build 200; challenge documents returned 200, both of 2 XHR POSTs returned 200, and images returned 200. However, all observed challenge-fetch 401 and `net::ERR_ABORTED` immediately after `brunhild.challenges.cloudflare.com` 204; no token completed. The first 5 runs used Chromium `151.0.7922.34`, and run 6 used branded Google Chrome `152.0.7977.64`. Windows variants only presented Chrome 153 through JS/Client Hints.
 
-## 2026-08-29 公式仕様による訂正
+Changing only `navigator.webdriver`, superficial Windows UA/platform/language, headless mode, fresh persistent context or Playwright-bundled Chromium was insufficient. Branded Chrome still had challenge-fetch 401 and `ERR_ABORTED` immediately after Brunhild 204. Persistent contexts were not profiles with saved trusted history, so a requirement for past successful usage remained unverified. Linux Chrome 152 also returned Windows Chrome 153 values, leaving inconsistencies with TLS, GPU, fonts, codecs and OS-specific APIs.
 
-この節は上にある2026-08-28時点の原因推定を上書きする。Cloudflareの一次資料を再確認し、過去の診断を次のように訂正した。
+The next useful comparison directly checks source IPs of successful Kuebiko and failed Container runs to separate network identity, rather than adding JS-property patches. Then compare native Linux Chrome without Windows spoofing, Client Hints matched to Chrome 152 and profiles with saved history, in that order. Container instance `v10` was later destroyed; Google Chrome verification instance `v11` was stopped afterward.
 
-- Private Access Token requestの401は、端末がPATを提示できない場合の通常のfallbackであり、それ自体はchallenge失敗を意味しない。
-- challenges.cloudflare.com配下の一部request failureは、challengeの内部制御として発生し得る。Brunhildの204直後のERR_ABORTEDだけをroot causeにはできない。
-- challengeを取得したIPとsolveを送るIPが変わると、solveが無効になる場合がある。従来PoCはGLOBAL PASSをTAMIA、TurnstileをContainer直通に分けていたため、最初に同一出口化すべきだった。
-- CloudflareはPlaywright、Selenium、Puppeteerなどの自動化browserで本番challengeを解くことを公式サポートしていない。以下のprobeは採用保証ではなく、原因を切り分けるbounded diagnosticである。
+<a id="2026-08-29-公式仕様による訂正"></a>
+
+## 2026-08-29 corrections from official specifications
+
+This section supersedes the cause inferences above as of 2026-08-28. Rechecking Cloudflare primary sources corrected earlier diagnostics as follows.
+
+- Private Access Token request 401 is ordinary fallback when a device cannot present PAT; it alone does not mean challenge failure.
+- Some request failures under challenges.cloudflare.com can occur as internal challenge control. ERR_ABORTED immediately after Brunhild 204 alone cannot be the root cause.
+- Changing IP between challenge retrieval and solve submission may invalidate the solve. The former PoC split GLOBAL PASS through TAMIA and Turnstile through direct Container egress; unifying egress should have come first.
+- Cloudflare does not officially support solving production challenges through automated browsers such as Playwright, Selenium or Puppeteer. The following probes are bounded diagnostics to isolate causes, not a guarantee of adoption.
 
 References:
 
@@ -112,37 +124,41 @@ References:
 - [Supported browsers](https://developers.cloudflare.com/cloudflare-challenges/reference/supported-browsers/)
 - [Turnstile client-side error codes](https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/)
 
-diagnostic path sanitizerも変更し、動的pathを漏らさずにPATだけはcdn-cgi/challenge-platform/redacted/pat/redactedと分類できるようにした。console本文は保存せず、Turnstileの6桁error codeと大分類だけを返す。今回のrunでは明示的な6桁error codeは出なかった。
+The diagnostic-path sanitizer also changed to classify only PAT as cdn-cgi/challenge-platform/redacted/pat/redacted without leaking dynamic paths. Console bodies are not stored; only Turnstile 6-digit error codes and broad classifications return. No explicit 6-digit error code appeared in these runs.
 
-## 2026-08-29 追加A/B
+<a id="2026-08-29-追加ab"></a>
 
-親pageとTurnstileを同一TAMIA出口へ統一した条件、全通信をContainer直通にした条件、従来のsplit条件を比較した。すべてGoogle Chrome Stable 152.0.7977.64、headed、fresh persistent profileである。各runはtokenを最大30秒待つだけで、資格情報入力、login POST、cookie再利用、R2書き込みは0回である。
+## 2026-08-29 additional A/B
 
-| variant                                          | browser側差分                                       | egress                       | token |
-| ------------------------------------------------ | --------------------------------------------------- | ---------------------------- | ----- |
-| chrome-stable-no-ua-all-tamia                    | native Linux、webdriver=false                       | 全通信TAMIA                  | 0     |
-| chrome-stable-no-ua-all-tamia-default-automation | Playwright既定、webdriver=true                      | 全通信TAMIA                  | 0     |
-| patchright-chrome-native-all-tamia               | Patchright 1.62.2                                   | 全通信TAMIA                  | 0     |
-| chrome-direct-process-attach-late-all-tamia      | Chromeを通常process起動、25秒後だけCDP接続          | 全通信TAMIA                  | 0     |
-| chrome-stable-windows-matched-all-tamia          | Windows/Chrome 152 UA・Client Hints・platformを一致 | 全通信TAMIA                  | 0     |
-| chrome-stable-no-ua-direct                       | native Linux、webdriver=false                       | 全通信Container直通          | 0     |
-| patchright-chrome-native-direct                  | Patchright 1.62.2                                   | 全通信Container直通          | 0     |
-| chrome-direct-process-attach-late-direct         | Chromeを通常process起動、25秒後だけCDP接続          | 全通信Container直通          | 0     |
-| chrome-stable-windows-matched-direct             | Windows/Chrome 152 UA・Client Hints・platformを一致 | 全通信Container直通          | 0     |
-| chrome-stable-no-ua-split                        | native Linux、webdriver=false                       | 親page=TAMIA、Turnstile=直通 | 0     |
+The parent page/Turnstile on the same TAMIA egress, all-direct Container traffic and the former split path were compared. All used Google Chrome Stable 152.0.7977.64, headed mode and fresh persistent profiles. Each run waited at most 30 seconds for a token; credential entry, login POST, cookie reuse and R2 writes occurred 0 times.
 
-TAMIA統一runの送信元は223.223.22.214、国JP、Cloudflare colo KIX、ASN 18144、HTTP/2と確認した。Container直通runは国SG、colo SIN、ASN 13335、IPv6のCloudflare egressだった。split runでは親pageの確認endpointはTAMIAを示した一方、Turnstileは直通であり、challenge imageがHTTP 400になったrunがある。これはsplitを避ける根拠になるが、同一出口に直してもtokenは生成されなかった。
+| variant                                          | Browser-side difference                            | egress                         | token |
+| ------------------------------------------------ | -------------------------------------------------- | ------------------------------ | ----- |
+| chrome-stable-no-ua-all-tamia                    | Native Linux, webdriver=false                      | All traffic TAMIA              | 0     |
+| chrome-stable-no-ua-all-tamia-default-automation | Playwright default, webdriver=true                 | All traffic TAMIA              | 0     |
+| patchright-chrome-native-all-tamia               | Patchright 1.62.2                                  | All traffic TAMIA              | 0     |
+| chrome-direct-process-attach-late-all-tamia      | Ordinary Chrome process, CDP only after 25 seconds | All traffic TAMIA              | 0     |
+| chrome-stable-windows-matched-all-tamia          | Match Windows/Chrome 152 UA/Client Hints/platform  | All traffic TAMIA              | 0     |
+| chrome-stable-no-ua-direct                       | Native Linux, webdriver=false                      | All traffic direct Container   | 0     |
+| patchright-chrome-native-direct                  | Patchright 1.62.2                                  | All traffic direct Container   | 0     |
+| chrome-direct-process-attach-late-direct         | Ordinary Chrome process, CDP only after 25 seconds | All traffic direct Container   | 0     |
+| chrome-stable-windows-matched-direct             | Match Windows/Chrome 152 UA/Client Hints/platform  | All traffic direct Container   | 0     |
+| chrome-stable-no-ua-split                        | Native Linux, webdriver=false                      | Parent=TAMIA, Turnstile=direct | 0     |
 
-TAMIA統一ではBrunhildがERR_CONNECTION_CLOSED、Container直通では204後にERR_ABORTEDだった。しかし両経路ともtoken 0であり、公式資料上も後者は単独のfailure signalではない。PAT endpointは全runで401だったが、これも通常fallbackとして扱う。
+All-TAMIA runs confirmed source 223.223.22.214, country JP, Cloudflare colo KIX, ASN 18144, HTTP/2. Direct Container runs used Cloudflare IPv6 egress, country SG, colo SIN, ASN 13335. In split runs, the parent-page check endpoint indicated TAMIA while Turnstile was direct; a run received challenge-image HTTP 400. This supports avoiding split egress, but a single egress still generated no token.
 
-### 既存workaround実装の調査
+All-TAMIA had Brunhild ERR_CONNECTION_CLOSED; direct Container had ERR_ABORTED after 204. Both had token 0, and official material says the latter alone is not a failure signal. Every run had PAT-endpoint 401, also treated as normal fallback.
 
-subagentを分け、Cloudflare一次資料と各実装の公開READMEを相互確認した。
+<a id="既存workaround実装の調査"></a>
 
-1. PatchrightはPlaywright API互換で、Runtime.enableやConsole.enable、既定flagなどautomation signalを減らすと説明している。実際にGoogle Chrome channel、headed、viewport null、UA上書きなしで試したがtoken 0だった。これは第三者実装の主張であり、Cloudflare公式の通過保証ではない。
-2. SeleniumBase Pure CDP Modeは、WebDriver接続を切ってChromeのCDP操作へ寄せる実装である。ただし今回、それより介入の少ない「Chromeを通常processとして25秒動作させ、後からCDP接続」が失敗したため、追加実行の優先度を下げた。
-3. puppeteer-real-browser、rebrowser-patches、puppeteer-extra stealth、undetected-chromedriver、Camoufoxも候補として確認した。いずれも第三者の検知回避実装で、公式サポート外であり、Patchrightと通常Chrome processの双方が失敗した後に依存を増やす根拠は得られなかった。
-4. profile再利用は技術的には可能だが、今回作れるのは失敗challengeを見ただけのfresh profileであり、正常利用履歴の再現にならない。個人Chrome profile/cookieをContainerへ持ち込む方式はsecret管理と失効管理を悪化させるため、このPoCでは採用しない。
+### Investigation of existing workaround implementations
+
+Separate subagents cross-checked Cloudflare primary sources and each implementation's public README.
+
+1. Patchright describes Playwright API compatibility with fewer automation signals from Runtime.enable, Console.enable and default flags. A real trial using Google Chrome channel, headed mode, viewport null and no UA override yielded token 0. These are third-party implementation claims, not a Cloudflare guarantee of passage.
+2. SeleniumBase Pure CDP Mode disconnects WebDriver and shifts toward Chrome CDP control. Its additional execution was deprioritized because the less intrusive approach, ordinary Chrome running 25 seconds before CDP attachment, already failed.
+3. puppeteer-real-browser, rebrowser-patches, puppeteer-extra stealth, undetected-chromedriver and Camoufox were also examined. All are unsupported third-party detection-avoidance implementations; after both Patchright and ordinary Chrome processes failed, no evidence justified adding dependencies.
+4. Profile reuse is technically possible, but available fresh profiles had only seen failed challenges and do not reproduce successful usage history. Moving personal Chrome profiles/cookies into Containers worsens secret/revocation management and is not adopted in this PoC.
 
 References:
 
@@ -153,354 +169,189 @@ References:
 
 ## 2026-08-29 local Windows / WSL profile A/B
 
-「正常利用履歴のあるWindows profileが必要」「Linux Chromeでは通らない」
-という仮説を分けるため、同じ時刻帯のローカルWindowsとWSLで4条件を
-比較した。GLOBAL PASS login URLを1回開き、CDPのread-only
-`Runtime.evaluate`でtokenの**長さだけ**を確認した。資格情報の入力、login
-POST、token値の保存・出力は行っていない。全runをKuebikoでcaptureし、生の
-captureはcookie等を含み得るためGitには入れない。
+To separate the hypotheses that Windows profiles with successful usage history are required and that Linux Chrome cannot pass, 4 local Windows/WSL conditions were compared in the same time window. Each opened GLOBAL PASS login 1 time and used read-only CDP `Runtime.evaluate` to check **token length only**. No credential entry, login POST or token-value storage/output occurred. Every run was captured through Kuebiko; raw captures may contain cookies or similar data and stay out of Git.
 
-計測には[`scripts/probe-local-turnstile.mjs`](../scripts/probe-local-turnstile.mjs)
-を使用した。Node.js 22以降で`node scripts/probe-local-turnstile.mjs <CDP port>`
-として実行する。scriptはtoken本文を返さず、長さと非機密のpage状態だけを出す。
+Measurements used [`scripts/probe-local-turnstile.mjs`](../scripts/probe-local-turnstile.mjs), run on Node.js 22 or later as `node scripts/probe-local-turnstile.mjs <CDP port>`. It returns no token body, only length and non-secret page state.
 
-| OS / Chrome               | profile                                 | token | page上の観測                                                   |
-| ------------------------- | --------------------------------------- | ----: | -------------------------------------------------------------- |
-| Windows / Chrome Beta 153 | 既存Kuebiko profileの同一Windows内copy  |   794 | `Win32`、`webdriver=false`、formあり、Access Deniedなし        |
-| Windows / Chrome Beta 153 | 完全なfresh profile                     |   752 | 同上                                                           |
-| WSL / Google Chrome 152   | Windows Kuebiko profileをWSL ext4へcopy |   773 | `Linux x86_64`、`webdriver=false`、formあり、Access Deniedなし |
-| WSL / Google Chrome 152   | 完全なfresh profile                     |   730 | 同上                                                           |
+| OS / Chrome               | profile                                                  | token | Page observations                                                 |
+| ------------------------- | -------------------------------------------------------- | ----: | ----------------------------------------------------------------- |
+| Windows / Chrome Beta 153 | Copy of existing Kuebiko profile within the same Windows |   794 | `Win32`, `webdriver=false`, form present, no Access Denied        |
+| Windows / Chrome Beta 153 | Completely fresh profile                                 |   752 | Same as above                                                     |
+| WSL / Google Chrome 152   | Windows Kuebiko profile copied to WSL ext4               |   773 | `Linux x86_64`, `webdriver=false`, form present, no Access Denied |
+| WSL / Google Chrome 152   | Completely fresh profile                                 |   730 | Same as above                                                     |
 
-計測時のCloudflare traceはWindowsがIPv6、WSLがIPv4だったが、どちらも
-WARP有効、`loc=JP`、`colo=NRT`だった。これはGLOBAL PASS originが同じ値を
-見たことの証明ではなく、ローカル経路のcontrol情報としてのみ記録する。
+Measured Cloudflare traces used IPv6 for Windows and IPv4 for WSL, both with WARP enabled, `loc=JP`, `colo=NRT`. This does not prove GLOBAL PASS observed the same values; it records only local-path control information.
 
-Windows fresh profileは初回の`chrome://intro/`を表示したため、CDPの
-`/json/new`で対象URLを新規tabに開いた。WSL fresh profileではKuebikoの
-launch wrapperが最初のCDP待機に失敗したが、同じprofileをChromeの通常process
-として起動するとCDPが公開され、Kuebikoを後からattachできた。したがって、
-このwrapper failureはTurnstile rejectionとして数えない。
+The fresh Windows profile initially displayed `chrome://intro/`, so CDP `/json/new` opened the target URL in a new tab. The Kuebiko launch wrapper initially failed to wait for CDP on fresh WSL, but starting ordinary Chrome with the same profile exposed CDP and allowed later Kuebiko attachment. This wrapper failure therefore does not count as Turnstile rejection.
 
-Windows profileをLinuxへcopyしてもtokenは生成されたため、少なくとも
-Turnstile表示までにはWindows DPAPIで復号可能なcookieは必須ではなかった。
-さらにfresh WSLでも成功したため、今回の成功をprofile copyや過去の正常利用
-履歴へ帰属できない。Linux OS、fresh profile、CDP接続のいずれもローカル環境では
-単独blockerではない。Cloudflare Containerでの失敗との差として残るのは、
-Container/browser automation固有のidentity・integrity signal、runtime、network
-経路などであり、Windows偽装や個人profile移送を先にproduction設計へ入れる根拠は
-なくなった。
+Copying a Windows profile to Linux still generated a token, so Windows-DPAPI-decryptable cookies were unnecessary at least through Turnstile display. Fresh WSL also succeeded, excluding profile copying/past successful usage as the explanation. Linux OS, fresh profiles and CDP attachment are each not sole blockers locally. Remaining differences from failed Cloudflare Containers include Container/browser-automation identity/integrity signals, runtime and network paths; Windows spoofing or personal-profile transfer no longer has evidence to enter production design first.
 
-### Fresh WSL profileでの認証POST
+<a id="fresh-wsl-profileでの認証post"></a>
 
-同じfresh WSL profile、Google Chrome 152、WARP JP/NRTの条件で、保存済みの
-GLOBAL PASS資格情報を1回だけ入力した。送信直前のTurnstile token長は730だった。
-`POST /p/login/RW1312010101;jsessionid=<redacted>`はHTTP 200となり、遷移後は
-title `TOP`、login formなし、利用明細導線ありになった。Access Denied、
-Turnstile error、credential errorは観測されなかった。これにより、local WSLでは
-token生成だけでなくserver-side validationと認証POSTまで自動実行できることを
-確認した。明細画面への遷移やデータ取得はこのrunでは行っていない。
+### Authentication POST from a fresh WSL profile
 
-再実行用の[`scripts/probe-local-login.mjs`](../scripts/probe-local-login.mjs)は、
-資格情報をstdinの1行JSONから読み、値を出力しない。結果の動的session IDも
-`<redacted>`へ置換する。raw Kuebiko captureにはcookieやPOST由来の機密情報が
-含まれ得るためGitへ入れない。
+With the same fresh WSL profile, Google Chrome 152 and WARP JP/NRT, saved GLOBAL PASS credentials were entered only 1 time. Turnstile token length immediately before submission was 730. `POST /p/login/RW1312010101;jsessionid=<redacted>` returned HTTP 200; navigation produced title `TOP`, no login form and an activity-detail entrypoint. No Access Denied, Turnstile error or credential error was observed. This confirmed local WSL can automate not only token generation but server-side validation and authentication POST. This run did not navigate to detail screens or capture data.
+
+Rerun script [`scripts/probe-local-login.mjs`](../scripts/probe-local-login.mjs) reads credentials from 1 JSON line on stdin without displaying values. Dynamic session IDs in results also become `<redacted>`. Raw Kuebiko captures may contain cookies or authentication-POST secrets and stay out of Git.
 
 ## 2026-08-30 OCI `bots` official Chrome control
 
-Cloudflare Container固有のruntimeとOCI上の通常Chromeを分けるため、既存SSH host
-`bots`（OCI ARM64）へ公式Google Chrome Stable 152.0.7977.64 ARM64、Xvfb、
-Noto CJK fontとNode.js 24.20.0を導入し、headed Chromeを直接起動した。
-`--enable-automation`、headless、Playwrightはいずれも使用せず、pageからは
-`navigator.webdriver=false`、native `Linux x86_64`として見えた。CDPはtokenの
-長さと非機密なpage状態を読むためだけに使用した。
+To separate Cloudflare Container-specific runtime from ordinary OCI Chrome, official Google Chrome Stable 152.0.7977.64 ARM64, Xvfb, Noto CJK font and Node.js 24.20.0 were installed on existing SSH host `bots` (OCI ARM64), launching headed Chrome directly. No `--enable-automation`, headless mode or Playwright was used; pages saw `navigator.webdriver=false`, native `Linux x86_64`. CDP read only token length and non-secret page state.
 
-OCIの通常internet出口は`138.2.53.208`、`loc=JP`、`colo=KIX`、HTTP/2、
-`warp=off`だった。次の4条件はすべてSign On画面、login form、300x68のTurnstile
-widgetを表示し、Access Deniedではなかったが、最大30秒待ってもtokenは0文字だった。
+Ordinary OCI internet egress was `138.2.53.208`, `loc=JP`, `colo=KIX`, HTTP/2, `warp=off`. All 4 conditions below showed Sign On, a login form and a 300x68 Turnstile widget without Access Denied, but token length remained 0 after at most 30 seconds.
 
-| profile / graphics                                                                    | 結果                                            |
-| ------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| OCI上のfresh persistent profile、Xvfb既定graphics                                     | token 0。Chrome logでWebGL 1/2がblocklistされた |
-| local WSLでtoken生成・認証POSTに成功したprofileのLinux-to-Linux copy                  | login状態は移送されずSign Onへ戻り、token 0     |
-| OCI上の別fresh profile、ANGLE SwiftShader WebGLを明示的に有効化                       | WebGL context生成をlogで確認したがtoken 0       |
-| OCI上の別fresh profile、SwiftShader、全browser通信を既存Worker relay経由でTAMIAへ固定 | token 0                                         |
+| profile / graphics                                                                                       | Result                                                     |
+| -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Fresh persistent profile on OCI, default Xvfb graphics                                                   | Token 0; Chrome logs blocklisted WebGL 1/2                 |
+| Linux-to-Linux copy of local WSL profile successful in token generation/authentication POST              | Login state did not transfer; returned to Sign On, token 0 |
+| Another fresh OCI profile, explicitly enabled ANGLE SwiftShader WebGL                                    | Logs confirmed WebGL context creation, but token 0         |
+| Another fresh OCI profile, SwiftShader, all browser traffic fixed to TAMIA through existing Worker relay | Token 0                                                    |
 
-最後の条件はTailscaleを使用していない。Cloudflare Tunnel経由の`ssh bots`は
-`forward_tcpip`を許可しないため、SSH reverse SOCKSは接続時点で拒否された。
-代わりに既存PoCのhost allowlist付きWebSocket/TCP relayを再利用し、OCI localhostに
-一時SOCKS5 adapterを起動した。browserが使うproxy経路は別の`/egress` requestで
-`223.223.22.214`、JP/KIX、ASN 18144、HTTP/2と確認した。adapterはrelay tokenを
-stdinからmemoryへ読むだけでfileへ保存せず、run後に停止した。script、dependency、
-profileとlogは保持した。
+The last condition did not use Tailscale. `ssh bots` through Cloudflare Tunnel disallows `forward_tcpip`, so SSH reverse SOCKS was refused at connection. Instead, the existing PoC's host-allowlisted WebSocket/TCP relay was reused with a temporary OCI-localhost SOCKS5 adapter. A separate `/egress` request confirmed browser proxy egress `223.223.22.214`, JP/KIX, ASN 18144, HTTP/2. The adapter read the relay token from stdin into memory without file storage and stopped after the run. Scripts, dependencies, profiles and logs were retained.
 
-この比較により、Containerだけの問題、Playwrightだけの問題、Linuxだけの問題、
-profile履歴不足、XvfbでWebGLが無効という各単独仮説は棄却できる。local WSLと
-OCIの差としてnetwork/ASN・host runtime・Cloudflareが観測するintegrity signalは
-まだ分離できない。ただしOCIでprofileを移し、software WebGLを有効化し、さらに
-生OCI出口からTAMIA出口へ変更してもtokenが生成されなかったため、OCI Kubernetesへ
-通常Chromeを移すだけではcollectorを成立させられない。4 runとも資格情報入力と
-login POSTは0回である。
+This comparison rejects each sole-cause hypothesis: Containers alone, Playwright alone, Linux alone, insufficient profile history or WebGL disabled under Xvfb. Network/ASN, host runtime and Cloudflare-observed integrity signals remain inseparable between local WSL and OCI. However, profile transfer, software WebGL and changing ordinary OCI egress to TAMIA still generated no token; moving ordinary Chrome to OCI Kubernetes alone cannot establish the collector. Credential entry/login POST occurred 0 times across all 4 runs.
 
-再実行には[`scripts/run-bots-globalpass.sh`](../scripts/run-bots-globalpass.sh)を使う。
-既定では`/opt/kogane-globalpass-probe`配下のprofileとlogを保持し、終了時にChromeと
-Xvfb processだけを停止する。TAMIA比較用のlocalhost SOCKS adapterは
-[`scripts/run-bots-tamia-socks.mjs`](../scripts/run-bots-tamia-socks.mjs)であり、relay
-tokenをstdinから受け取る。今回のinstall、profile、dependency、logは比較用に削除せず
-保持した。
+Use [`scripts/run-bots-globalpass.sh`](../scripts/run-bots-globalpass.sh) to rerun. By default it retains profiles/logs under `/opt/kogane-globalpass-probe`, stopping only Chrome/Xvfb processes on exit. The TAMIA-comparison localhost SOCKS adapter is [`scripts/run-bots-tamia-socks.mjs`](../scripts/run-bots-tamia-socks.mjs), receiving its relay token through stdin. Installations, profiles, dependencies and logs from this comparison were retained rather than removed.
 
 ## 2026-08-30 local WSL same-runtime network A/B
 
-network reputationとserver runtimeを分離するため、同じ時刻帯、同じlocal WSL、同じ
-Google Chrome Stable 152.0.7977.64、完全なfresh profile、1365x768 windowで、出口だけを
-変えた。どちらもheadless、Playwright、`--enable-automation`を使わず、pageからは
-native `Linux x86_64`、`navigator.webdriver=false`に見えた。CDPはtokenの長さと
-非機密なpage状態を読むためだけに使った。
+To separate network reputation from server runtime, only egress changed within the same time window, local WSL and Google Chrome Stable 152.0.7977.64, using completely fresh profiles and a 1365x768 window. Neither run used headless mode, Playwright or `--enable-automation`; pages saw native `Linux x86_64`, `navigator.webdriver=false`. CDP read only token length and non-secret page state.
 
-| local WSL Chromeの出口                                                         | profile | token | page状態                                    |
-| ------------------------------------------------------------------------------ | ------- | ----: | ------------------------------------------- |
-| local WARP、`104.28.211.106`、JP/NRT                                           | fresh   |   752 | Sign On、form/widgetあり、Access Deniedなし |
-| host allowlist付きWorker relay経由のTAMIA、`223.223.22.214`、JP/KIX、ASN 18144 | fresh   |   794 | 同上                                        |
+| Local WSL Chrome egress                                                          | profile | token | Page state                                     |
+| -------------------------------------------------------------------------------- | ------- | ----: | ---------------------------------------------- |
+| Local WARP, `104.28.211.106`, JP/NRT                                             | fresh   |   752 | Sign On, form/widget present, no Access Denied |
+| TAMIA through host-allowlisted Worker relay, `223.223.22.214`, JP/KIX, ASN 18144 | fresh   |   794 | Same as above                                  |
 
-TAMIA runはTailscaleを使わず、[`scripts/run-bots-tamia-socks.mjs`](../scripts/run-bots-tamia-socks.mjs)
-をWSL localhostで起動し、GLOBAL PASSと2個のTurnstile hostだけを既存Worker relayへ流した。
-別のallowlist済み`/egress` requestでTAMIA IP/ASNを確認してからChromeへ
-`--proxy-server=socks5://127.0.0.1:11080`を渡した。両runともtoken値、資格情報、login POST、
-cookie値を保存・送信していない。Chromeと一時SOCKS processはrun後に停止し、profileと
-Chrome logだけをローカルに保持した。
+The TAMIA run used no Tailscale. [`scripts/run-bots-tamia-socks.mjs`](../scripts/run-bots-tamia-socks.mjs) ran on WSL localhost, sending only GLOBAL PASS and the 2 Turnstile hosts through the existing Worker relay. A separate allowlisted `/egress` request confirmed TAMIA IP/ASN before Chrome received `--proxy-server=socks5://127.0.0.1:11080`. Neither run stored/sent token values, credentials, login POSTs or cookie values. Chrome and temporary SOCKS processes stopped afterward; only profiles/Chrome logs remained locally.
 
-このA/Bにより、TAMIAのIP、ASN、KIX経路またはIPv4であることはtoken未生成の十分条件では
-ない。同じTAMIA出口でlocal WSLは成功し、Cloudflare ContainerとOCI `bots`は失敗したため、
-両server環境の失敗をnetwork reputationだけでは説明できない。少なくともhost/runtimeまたは
-Cloudflareが観測するbrowser/OS integrity signalの差が必要であり、networkとの相互作用が
-残る可能性はあっても「TAMIAだから常に失敗する」という仮説は棄却する。
+TAMIA IP, ASN, KIX routing or IPv4 is therefore not a sufficient condition for missing token generation. Local WSL succeeded while Cloudflare Container and OCI `bots` failed on the same TAMIA egress, so network reputation alone cannot explain both server-environment failures. At least host/runtime or Cloudflare-observed browser/OS integrity signals must differ. Network interactions may remain, but the hypothesis that TAMIA always fails is rejected.
 
 ### Xvfb control
 
-同じlocal WSL、Chrome 152、fresh profile、TAMIA出口を保ち、表示先だけをWSLgから
-`Xvfb :98 -screen 0 1365x768x24 -nolisten tcp`へ変更した。headless、Playwright、
-`--enable-automation`、SwiftShader強制flagは使っていない。結果はtoken 794、Sign On、
-form/widgetあり、Access Deniedなし、native `Linux x86_64`、`navigator.webdriver=false`
-だった。資格情報入力とlogin POSTは0回である。
+Keeping the same local WSL, Chrome 152, fresh profile and TAMIA egress, only display changed from WSLg to `Xvfb :98 -screen 0 1365x768x24 -nolisten tcp`. No headless mode, Playwright, `--enable-automation` or forced SwiftShader flag was used. Results: token 794, Sign On, form/widget present, no Access Denied, native `Linux x86_64`, `navigator.webdriver=false`. Credential entry/login POST occurred 0 times.
 
-Chrome logではWebGL 1/2がblocklistされたが、それでもtokenは生成された。したがって、
-Xvfb、physical displayなし、WebGL unavailableのいずれも単独blockerではない。OCI `bots`
-でも同じXvfb geometryを使い、SwiftShader有効化の有無にかかわらずtoken 0だったため、
-local WSLとserver環境の残差はdisplay serverやWebGLより下のhost/container runtime、
-browser buildの実行環境、Cloudflareが観測するintegrity signalへさらに絞られる。
+Chrome logs blocklisted WebGL 1/2, but a token was still generated. Xvfb, absence of a physical display and unavailable WebGL are each not sole blockers. OCI `bots` used the same Xvfb geometry and yielded token 0 with or without SwiftShader. The local-WSL/server difference narrows beyond display servers/WebGL to host/container runtime, browser-build execution environment and Cloudflare-observed integrity signals.
 
 ### WSL native / local Docker image A/B
 
-Cloudflare Containersのlocal developmentはCloudflare本番Container bindingへのremote接続
-ではなく、local Docker Engine上のsimulationである。このため本番runtimeの同一再現とは
-扱わず、deploy imageのuserlandとDocker境界をWSL host上で分離する比較として実施した。
+Cloudflare Containers local development simulates local Docker Engine rather than remotely connecting to production Container bindings. This comparison therefore isolates deployed-image userland and the Docker boundary on a WSL host rather than reproducing production runtime identically.
 
-再buildによるdriftを避け、Cloudflareへdeploy済みの現行image digest
-`sha256:db2ea4549e95c40114e95648d625b498c6d0ed7095a6d05bbc6d56bd09709f6c`
-（local tag `kogane-globalpass-collector-poc-globalpasscollectorcontainer:cd80a6ee`）をそのまま
-使った。variantはGoogle Chromeを直接spawnし25秒後までCDP attachしない
-`chrome-direct-process-attach-late-all-tamia`で、資格情報入力とlogin POSTは全runで0回である。
+To avoid rebuild drift, the unchanged current Cloudflare-deployed image digest `sha256:db2ea4549e95c40114e95648d625b498c6d0ed7095a6d05bbc6d56bd09709f6c` (local tag `kogane-globalpass-collector-poc-globalpasscollectorcontainer:cd80a6ee`) was used. Variant `chrome-direct-process-attach-late-all-tamia` directly spawns Google Chrome and delays CDP attachment for 25 seconds. Credential entry/login POST occurred 0 times in every run.
 
-| 同一WSL host上の条件                               | token | 解釈                                                 |
-| -------------------------------------------------- | ----: | ---------------------------------------------------- |
-| native Chrome、fresh profile、Xvfb、TAMIA          |   794 | current successful control                           |
-| 上記へ`--no-sandbox --disable-dev-shm-usage`を追加 |   794 | Container用flagは単独blockerではない                 |
-| exact image、0.25 CPU / 1 GiB                      |     0 | Cloudflare `basic`相当                               |
-| exact image、resource制限なし                      |     0 | CPU/memory starvationは単独blockerではない           |
-| exact image、UID/GID 1000                          |     0 | root実行は単独blockerではない                        |
-| exact image、host network                          |     0 | Docker bridge network namespaceは単独blockerではない |
+| Conditions on the same WSL host                  | token | Interpretation                                          |
+| ------------------------------------------------ | ----: | ------------------------------------------------------- |
+| Native Chrome, fresh profile, Xvfb, TAMIA        |   794 | current successful control                              |
+| Add `--no-sandbox --disable-dev-shm-usage` above |   794 | Container flags are not sole blockers                   |
+| Exact image, 0.25 CPU / 1 GiB                    |     0 | Cloudflare `basic` equivalent                           |
+| Exact image, unrestricted resources              |     0 | CPU/memory starvation is not the sole blocker           |
+| Exact image, UID/GID 1000                        |     0 | Root execution is not the sole blocker                  |
+| Exact image, host network                        |     0 | Docker bridge network namespace is not the sole blocker |
 
-hostとimage内のChromeはどちらもGoogle Chrome Stable `152.0.7977.64-1`であり、実体
-`/opt/google/chrome/chrome`のSHA-256は同じ
-`44bd90e776ea03a952242b3536d4a10a2e43c64a227c243af2840f07f1f0ed17`だった。したがって
-表示versionだけでなくChrome executable byte差も除外できる。両者の`LANG`は`C.UTF-8`、
-pageはnative Linux、`navigator.webdriver=false`、Sign On/formあり、Access Deniedなしだった。
+Host/image Chrome were both Google Chrome Stable `152.0.7977.64-1`, with identical `/opt/google/chrome/chrome` SHA-256 `44bd90e776ea03a952242b3536d4a10a2e43c64a227c243af2840f07f1f0ed17`. Thus executable-byte differences, not only displayed version differences, are excluded. Both had `LANG` = `C.UTF-8`, native Linux pages, `navigator.webdriver=false`, Sign On/form present and no Access Denied.
 
-以前の2026-08-27 local Docker試行は旧imageの`/health`到達前後にWSLが
-`Wsl/Service/E_UNEXPECTED`となり、Turnstile `/probe`を一度も呼べていなかったため、この
-A/Bの既実施結果には数えない。今回初めてexact deploy imageでtoken gateまで完了した。
+The earlier local-Docker attempt on 2026-08-27 encountered WSL `Wsl/Service/E_UNEXPECTED` around reaching the old image's `/health`, never calling Turnstile `/probe`; it is not counted as a prior result of this A/B. This was the first completed token-gate test with the exact deployed image.
 
-この結果はCloudflare固有runtimeが原因だと証明するものではない。むしろlocal WSLだけで
-native成功 / Container失敗を再現できたため、次はimage内のfont/fontconfig、speech voices、
-locale data、D-Bus/audio、Chrome同梱外shared libraryを小さく比較する。PID namespaceは
-browser JavaScriptから直接観測しにくいため後順位とする。Cloudflare instance type変更は、
-local unlimited imageも失敗した現時点では優先しない。
+These results do not prove a Cloudflare-specific runtime cause. Instead, native success / Container failure was reproduced using local WSL alone. Next, compare small differences in image fonts/fontconfig, speech voices, locale data, D-Bus/audio and shared libraries outside the Chrome bundle. PID namespaces are lower priority because browser JavaScript cannot easily observe them directly. Changing Cloudflare instance type is not prioritized while the unrestricted local image also fails.
 
-## 2026-08-30 browser-visible環境差分
+<a id="2026-08-30-browser-visible環境差分"></a>
 
-同一WSL host上でtokenを生成できるnative Google Chromeと、tokenを生成できなかったexact
-deploy image内Chromeを、GLOBAL PASSへ接続しないlocalhost診断pageで比較した。両方とも
-Chrome 152、Xvfb `1365x768x24`である。raw font/canvas/audio値はGitへ入れず、差分の
-集計だけを残す。
+## 2026-08-30 browser-visible environment differences
 
-| 項目                                       | WSL native                    | exact image                          | 比較   |
-| ------------------------------------------ | ----------------------------- | ------------------------------------ | ------ |
-| timezone                                   | `Asia/Tokyo`                  | `UTC`                                | 差あり |
-| font files / families                      | 155 / 32                      | 50 / 20                              | 差あり |
-| font metrics                               | baseline                      | Latin 16/20、CJK/emoji 20/20候補で差 | 差あり |
-| `enumerateDevices()`                       | audio input 1 / output 1      | すべて0                              | 差あり |
-| UA / platform / languages                  | Linux Chrome 152 / `en-US,en` | 同一                                 | 一致   |
-| `navigator.webdriver`                      | `false`                       | `false`                              | 一致   |
-| CPU / memory / screen / DPR                | 16 / 16 GiB / 1365x768 / 1    | 同一                                 | 一致   |
-| speech voices / codec / plugins            | baseline                      | 同一                                 | 一致   |
-| standard canvas / OfflineAudioContext hash | private comparison            | 同一                                 | 一致   |
-| WebGL                                      | unavailable                   | unavailable                          | 一致   |
+On the same WSL host, token-generating native Google Chrome and non-generating Chrome inside the exact deployed image were compared on a localhost diagnostic page without GLOBAL PASS access. Both used Chrome 152 and Xvfb `1365x768x24`. Raw font/canvas/audio values stay out of Git; only aggregate differences remain.
 
-hostのfont directoryと`/etc/fonts`をread-only bind mountし、ephemeral cacheを更新すると、
-Containerのfamily数とdefault font matchはhostと一致した。しかし同じChrome/TAMIA条件の
-tokenは0のままだった。font family集合とfontconfig defaultの差は単独root causeではない。
-rendering libraryやmetric差一般を否定する試験ではない。
+| Item                                       | WSL native                    | exact image                                             | Comparison |
+| ------------------------------------------ | ----------------------------- | ------------------------------------------------------- | ---------- |
+| timezone                                   | `Asia/Tokyo`                  | `UTC`                                                   | Different  |
+| font files / families                      | 155 / 32                      | 50 / 20                                                 | Different  |
+| font metrics                               | baseline                      | Differences for Latin 16/20, CJK/emoji 20/20 candidates | Different  |
+| `enumerateDevices()`                       | audio input 1 / output 1      | All 0                                                   | Different  |
+| UA / platform / languages                  | Linux Chrome 152 / `en-US,en` | Identical                                               | Match      |
+| `navigator.webdriver`                      | `false`                       | `false`                                                 | Match      |
+| CPU / memory / screen / DPR                | 16 / 16 GiB / 1365x768 / 1    | Identical                                               | Match      |
+| speech voices / codec / plugins            | baseline                      | Identical                                               | Match      |
+| standard canvas / OfflineAudioContext hash | private comparison            | Identical                                               | Match      |
+| WebGL                                      | unavailable                   | unavailable                                             | Match      |
+
+Read-only bind mounts of host font directories and `/etc/fonts`, followed by ephemeral-cache refresh, made Container family counts/default font matches equal the host. Yet token remained 0 under the same Chrome/TAMIA conditions. Font-family sets and fontconfig-default differences are not the sole root cause; this does not rule out rendering-library or metric differences generally.
 
 ## 2026-08-30 timezone controlled A/B
 
-現行exact image `cd80a6ee`、digest
-`sha256:db2ea4549e95c40114e95648d625b498c6d0ed7095a6d05bbc6d56bd09709f6c`
-を再buildせず、Chrome 152.0.7977.64、Xvfb、fresh profile、25秒後CDP attach、全通信TAMIA
-を固定してtimezoneだけを変更した。各runで資格情報入力とlogin POSTは0回である。
+Without rebuilding current exact image `cd80a6ee`, digest `sha256:db2ea4549e95c40114e95648d625b498c6d0ed7095a6d05bbc6d56bd09709f6c`, only timezone changed while Chrome 152.0.7977.64, Xvfb, fresh profiles, CDP attachment after 25 seconds and all-TAMIA traffic stayed fixed. Credential entry/login POST occurred 0 times in every run.
 
-| timezone条件                             | Chrome Intl timezone | token | 結果                        |
-| ---------------------------------------- | -------------------- | ----: | --------------------------- |
-| image default                            | `UTC`                |     0 | 失敗control                 |
-| `TZ=Asia/Tokyo` + `/etc/localtime` mount | `Asia/Tokyo`         |   794 | formあり、Access Deniedなし |
-| `TZ=Asia/Tokyo` envだけ                  | `Asia/Tokyo`         |   794 | 同上                        |
+| Timezone condition                       | Chrome Intl timezone | token | Result                         |
+| ---------------------------------------- | -------------------- | ----: | ------------------------------ |
+| image default                            | `UTC`                |     0 | Failed control                 |
+| `TZ=Asia/Tokyo` + `/etc/localtime` mount | `Asia/Tokyo`         |   794 | Form present, no Access Denied |
+| Only `TZ=Asia/Tokyo` environment         | `Asia/Tokyo`         |   794 | Same as above                  |
 
-`/etc/localtime` mountは不要で、Container環境変数だけで0文字から794文字へ変化した。同一
-image、Chrome、display、profile種別、TAMIA経路のcontrolled A/Bではtimezone不一致が
-必要十分な失敗要因だった。native Chromeへ`TZ=UTC`を設定する逆向き試験は行っておらず、
-別version/sitekeyを含む全環境へ一般化しない。
+No `/etc/localtime` mount was needed: the Container environment variable alone changed length from 0 to 794 characters. In this controlled A/B with the same image, Chrome, display, profile type and TAMIA path, timezone mismatch was a necessary and sufficient failure factor. No reverse test with native Chrome `TZ=UTC` was performed; do not generalize to every environment, including different versions/sitekeys.
 
-Worker Container classへ`envVars = { TZ: "Asia/Tokyo" }`を設定した本番deployでも、
-`chrome-direct-process-attach-late-all-tamia`とcollector相当の
-`chrome-stable-no-ua-all-tamia`がともにtoken 794を生成した。後者のegressは
-`223.223.22.214`、JP/KIX、ASN 18144、HTTP/2で、Chrome 152.0.7977.64、formあり、
-Access Deniedなしだった。PAT 401とBrunhildの`ERR_CONNECTION_CLOSED`は残ったが、2段階の
-challenge POSTは200でtoken生成に成功したため、これらは単独blockerではない。
+A production deployment setting Worker Container class `envVars = { TZ: "Asia/Tokyo" }` also generated token 794 through both `chrome-direct-process-attach-late-all-tamia` and collector-equivalent `chrome-stable-no-ua-all-tamia`. The latter used egress `223.223.22.214`, JP/KIX, ASN 18144, HTTP/2, Chrome 152.0.7977.64, a form and no Access Denied. PAT 401 and Brunhild `ERR_CONNECTION_CLOSED` remained, but the 2 stages of challenge POST returned 200 and generated a token, so these are not sole blockers.
 
-### timezone修正後のContainer直通A/B
+<a id="timezone修正後のcontainer直通ab"></a>
 
-timezone修正前のdirect失敗には`UTC`という交絡があったため、同じ本番runtime
-`timezone-collector-v5`で出口だけを再比較した。Chrome 152.0.7977.64、Xvfb headed、fresh
-persistent profile、`TZ=Asia/Tokyo`、native Linux情報、`navigator.webdriver=false`は固定した。
-資格情報入力、login POST、cookie再利用、R2書き込みは0回である。
+### Direct Container A/B after timezone correction
 
-| egress        |               回数 | login page                                    | Turnstile token | challenge image  | 出口                                |
-| ------------- | -----------------: | --------------------------------------------- | --------------: | ---------------- | ----------------------------------- |
-| Container直通 |                  2 | いずれもHTTP 200、formあり、Access Deniedなし |           0 / 0 | いずれもHTTP 400 | SG/SIN、ASN 13335、Cloudflare IPv6  |
-| 全通信TAMIA   | 1（同時刻control） | HTTP 200、formあり、Access Deniedなし         |             794 | HTTP 200         | `223.223.22.214`、JP/KIX、ASN 18144 |
+Earlier direct failures were confounded by `UTC`, so only egress was re-compared in the same production runtime `timezone-collector-v5`. Chrome 152.0.7977.64, Xvfb headed mode, fresh persistent profiles, `TZ=Asia/Tokyo`, native Linux information and `navigator.webdriver=false` stayed fixed. Credential entry, login POST, cookie reuse and R2 writes occurred 0 times.
 
-このcontrolled A/Bでは出口だけで結果が再現し、現行ContainerからのCloudflare直通egressは
-Turnstileを通過しなかった。Chromeやtimezoneだけでは十分ではなく、productionはGLOBAL PASS、
-Turnstile、helperを同じTAMIA出口へ固定したままにする。個別hostだけをdirectへ逃がすsplitも
-challenge取得・solve間の出口差を作るため採用しない。direct 2 runの終了後、診断に使った固定
-Container instance `v18`は課金を残さないようdestroyした。Cron、R2、本番relay設定は変更していない。
+| egress            |                   Runs | login page                                    | Turnstile token | challenge image | Egress location                     |
+| ----------------- | ---------------------: | --------------------------------------------- | --------------: | --------------- | ----------------------------------- |
+| Direct Container  |                      2 | Both HTTP 200, form present, no Access Denied |           0 / 0 | Both HTTP 400   | SG/SIN, ASN 13335, Cloudflare IPv6  |
+| All traffic TAMIA | 1 (concurrent control) | HTTP 200, form present, no Access Denied      |             794 | HTTP 200        | `223.223.22.214`, JP/KIX, ASN 18144 |
+
+Changing only egress reproduced the result in this controlled A/B: current Container direct Cloudflare egress did not pass Turnstile. Chrome/timezone alone is insufficient; production keeps GLOBAL PASS, Turnstile and helper fixed to the same TAMIA egress. Splitting individual hosts to direct egress is also rejected because it changes egress between challenge retrieval and solve. Fixed diagnostic Container instance `v18` was destroyed after the 2 direct runs to avoid ongoing charges. Cron, R2 and production relay configuration were unchanged.
 
 ### NRT Cloudflare Gateway egress
 
-Container placement constraintは`APAC`より細かいmetroを指定できない。新しいDurable Object IDへ
-`locationHint: "apac-ne"`を与えたdirect probeはTPEに配置され、login pageはHTTP 200でもtoken 0、
-challenge imageはHTTP 400だった。診断instanceはdestroy済みである。
+Container placement constraints cannot specify a metro finer than `APAC`. A direct probe giving new Durable Object ID `locationHint: "apac-ne"` was placed in TPE; login returned HTTP 200 but token 0 and challenge-image HTTP 400. The diagnostic instance was destroyed.
 
-NRTを実測するため、Workerへ`placement.region: "aws:ap-northeast-1"`を設定し、TAMIA Tunnelの
-`MESH`とは別に`network_id: "cf1:network"`の`CF_EGRESS` bindingを追加した。診断variantでは
-Container ChromeのSOCKSから認証付きWebSocket relayへ渡した暗号化TCPを`CF_EGRESS.connect()`へ
-送り、GLOBAL PASS、Turnstile、helperを同じCloudflare Gateway出口へ固定する。WorkerはTLSを
-終端しないためChromeのTLS handshakeは維持される。通常collectorは引き続き`MESH`だけを使う。
+To measure NRT, Worker `placement.region: "aws:ap-northeast-1"` and a `CF_EGRESS` binding with `network_id: "cf1:network"` were added separately from TAMIA Tunnel `MESH`. The diagnostic variant sends encrypted TCP from Container Chrome SOCKS through an authenticated WebSocket relay to `CF_EGRESS.connect()`, fixing GLOBAL PASS, Turnstile and helper to the same Cloudflare Gateway egress. The Worker does not terminate TLS, preserving Chrome's TLS handshake. Ordinary collection continues to use only `MESH`.
 
-Gateway variantは2回ともJP/NRT、ASN 13335のCloudflare IPv6 egressになり、login page、form、
-challenge imageはHTTP 200、Access Deniedなしだったが、tokenは0 / 0だった。ただし直後の同一
-image・同一ChromeによるTAMIA controlも、それ以前の794文字成功と異なりtoken 0になった。短時間の
-連続challengeによる一時的評価・rate状態またはTurnstile側の時系列変動が交絡しており、NRT出口を
-失敗原因とは断定しない。NRT経路の構築成功とTurnstile通過は分けて扱い、通常collectorをNRTへ
-切り替えない。管理token必須のGateway variantは、十分な間隔を空けた将来のA/B用に残す。
+Both of 2 Gateway runs used JP/NRT, ASN 13335 Cloudflare IPv6 egress; login pages, forms and challenge images returned HTTP 200 without Access Denied, but tokens were 0 / 0. However, an immediately following TAMIA control with the same image/Chrome also had token 0, unlike earlier 794-character successes. Temporary evaluation/rate state from successive challenges over a short interval, or Turnstile time variation, confounds the result; NRT egress is not established as the cause. Treat successful NRT routing separately from Turnstile passage, without switching ordinary collection to NRT. The admin-token-required Gateway variant remains for future sufficiently spaced A/B tests.
 
 ## 2026-08-30 Camoufox control
 
-[Camoufox](https://github.com/daijro/camoufox)の現行構成として
-`cloverlabs-camoufox==0.6.0`、official prerelease Firefox `152.0.4-beta.29`、real Windows
-fingerprint、`ja-JP`、uBlock Originなしを試した。fresh installのPlaywright 1.62.0は
-Jugglerの`Browser.setDefaultViewport` schema errorとなり、[issue #653](https://github.com/daijro/camoufox/issues/653)
-と同じversion skewだったためPlaywright 1.60.0へpinした。
+Current [Camoufox](https://github.com/daijro/camoufox) configuration tried `cloverlabs-camoufox==0.6.0`, official prerelease Firefox `152.0.4-beta.29`, a real Windows fingerprint, `ja-JP` and no uBlock Origin. Fresh-install Playwright 1.62.0 produced a Juggler `Browser.setDefaultViewport` schema error, the version skew in [issue #653](https://github.com/daijro/camoufox/issues/653), so Playwright was pinned to 1.60.0.
 
-WSL nativeと、現行deploy imageをbaseにしたnon-root Docker/Xvfbの両方でHTTP 200、
-login form/widgetあり、Access Deniedなし、`navigator.webdriver=false`となり、tokenは709文字
-だった。出口はいずれもTAMIAで、資格情報入力とlogin POSTは0回である。これはContainer境界
-一般が拒否されたわけではないことを示す独立controlである。ただし通常Chromeもtimezoneだけで
-成功したため、Camoufoxはproduction依存へ追加せず、将来のregression時の第2候補とする。
+Both WSL native and non-root Docker/Xvfb based on the current deployed image returned HTTP 200, login form/widget present, no Access Denied, `navigator.webdriver=false` and a 709-character token. Both used TAMIA egress; credential entry/login POST occurred 0 times. This independent control shows the Container boundary is not categorically refused. Ordinary Chrome also succeeded by changing only timezone, so Camoufox is not added as a production dependency and remains a 2nd candidate for future regression.
 
-Camoufox一時venv/browser/profile、Docker image
-`kogane-camoufox-probe-20260830:one-shot`、container、一時script、relay portは削除・停止済みで、
-registry pushはしていない。共有BuildKit cacheは他buildへ影響するためpruneしていない。
+Temporary Camoufox venv/browser/profiles, Docker image `kogane-camoufox-probe-20260830:one-shot`, containers, temporary scripts and relay ports were removed/stopped, without registry push. Shared BuildKit cache was not pruned because other builds use it.
 
 ## 2026-08-30 production collection progression
 
-最初のreal `daily`はHTTP 502だったが、管理者認証付き`GET /latest-manifest?date=YYYY-MM-DD`
-を追加して、同じloginを再実行せずR2のfailure manifestを回収した。旧collectorがheadless
-bundled Chromium、ephemeral context、GLOBAL PASSだけTAMIA・Turnstileは別出口という古い
-条件を使っており、probeの成功条件と一致していなかったことが原因だった。
+The first real `daily` returned HTTP 502. Admin-authenticated `GET /latest-manifest?date=YYYY-MM-DD` was added to retrieve the R2 failure manifest without repeating the same login. The old collector used outdated conditions—headless bundled Chromium, ephemeral context and GLOBAL PASS-only TAMIA with separate Turnstile egress—rather than the probe's successful conditions.
 
-実collectorをheaded Google Chrome Stable、fresh persistent profile、全通信TAMIAへ統一した。
-固定Container IDはapp image更新後も旧instance/imageを再開し得たため、runtime revisionを応答へ
-付け、新しいDurable Object identityへ切り替えて実行世代を検証する。`timezone-collector-v2`では
-Turnstileとlogin POSTが成功し、失敗点は`GLOBAL PASS activity link was not found after login`まで
-進んだ。これはAkamai/Turnstile/IP rejectionではなく、英語表示のログイン後画面に対して日本語の
-「ご利用明細」だけを探していたselector不一致である。
+The actual collector was aligned to headed Google Chrome Stable, fresh persistent profiles and all-TAMIA traffic. Fixed Container IDs can resume old instances/images even after app-image updates, so responses include a runtime revision and new Durable Object identities verify execution generations. `timezone-collector-v2` passed Turnstile and login POST, progressing to `GLOBAL PASS activity link was not found after login`. This was a selector mismatch searching only Japanese `ご利用明細` ("usage details") on an English post-login screen, rather than Akamai/Turnstile/IP rejection.
 
-保存済みの成功Kuebiko captureを再利用し、値を出力せずDOM routeだけを確認すると、利用明細は
-Nablarchの`/p/statementInquiry/RW...`へPOSTするlinkだった。`timezone-collector-v4`でこの
-read-only path prefixを優先selectorにした。app image rollout完了後、新しいContainer identity
-`v18`でruntime revisionがv4であることとtoken 794を確認してからE2Eを実行した。
+Reusing a saved successful Kuebiko capture and inspecting only DOM routes without emitting values showed the activity link POSTs to Nablarch `/p/statementInquiry/RW...`. `timezone-collector-v4` prioritizes that read-only path prefix. After app-image rollout, new Container identity `v18` confirmed runtime revision v4 and token 794 before E2E execution.
 
-`daily` run `93e226f7-30e3-4c94-9270-5b71536539b6`はHTTP 200、status `success`、
-available months 15、2026-08と2026-07のHTML 2件、failure 0だった。続く初回`backfill` run
-`f218329f-764e-4fe1-938e-abc5accfba1f`もHTTP 200、status `success`で、2025-06から
-2026-08まで15件を約65秒でR2へ保存し、failure 0だった。各HTMLは27,720〜70,958 bytesで
-2 MiB上限内だった。資格情報、cookie、Turnstile token値、HTML本文はlogやGitへ入れていない。
+`daily` run `93e226f7-30e3-4c94-9270-5b71536539b6` returned HTTP 200, status `success`, 15 available months, 2 HTML artifacts for 2026-08/2026-07 and failure 0. Subsequent initial `backfill` run `f218329f-764e-4fe1-938e-abc5accfba1f` also returned HTTP 200, status `success`, saving 15 captures from 2025-06 through 2026-08 to R2 in about 65 seconds with failure 0. HTML sizes were 27,720–70,958 bytes, within the 2 MiB limit. Credentials, cookies, Turnstile token values and HTML bodies entered neither logs nor Git.
 
-bounded dailyとbackfillが成功したため、Workers Cronを`17 18 * * *`（03:17 JST）で1日1回
-有効化する。GitHub Actions scheduleは使わない。固定identity `v18`を通常運用に使い、image更新時は
-appのactive digestが切り替わってから新しいidentityを採番する。
+After bounded daily/backfill success, enable Workers Cron `17 18 * * *` (03:17 JST), 1 time per 1 day. No GitHub Actions schedule is used. Fixed identity `v18` serves normal operation; image updates allocate a new identity after the app's active digest changes.
 
-## 結論
+<a id="結論"></a>
 
-2026-08-29までの失敗は、TAMIAのIP、IPv6不足、Xvfb、WebGL、Linux、Docker、root、
-CPU/memory、Chrome binary、Playwright/CDP、fresh profileのいずれか単独では説明できなかった。
-2026-08-30のcontrolled A/Bで、exact imageのbrowser timezoneが`UTC`であることを特定し、
-`TZ=Asia/Tokyo`だけで通常Chrome Containerのtokenを0から794へ変えられた。Cloudflare本番でも
-同じ結果を再現し、さらに実アカウントのlogin POSTまで成功した。
+## Conclusion
 
-したがって、GLOBAL PASSの第一候補はCloudflare Container + Google Chrome Stable + Xvfb +
-fresh persistent profile + source専用TAMIA allowlistである。Windows偽装、個人profile copy、
-Camoufox、Patchright、Browser Runは現行経路に不要である。CamoufoxはDocker内でもtokenを生成
-できたため、通常Chromeの将来regression時のcontrolとしてのみ残す。
+Failures through 2026-08-29 could not be explained solely by TAMIA IP, missing IPv6, Xvfb, WebGL, Linux, Docker, root, CPU/memory, Chrome binary, Playwright/CDP or fresh profiles. Controlled A/B on 2026-08-30 identified `UTC` browser timezone in the exact image; only `TZ=Asia/Tokyo` changed ordinary Chrome Container token length from 0 to 794. Cloudflare production reproduced the result and also completed a real-account login POST.
 
-PAT 401、Brunhild abort、TAMIAのIPv6不足は、成功runでも観測され得るため単独blockerとして
-扱わない。Browser Run単独もtokenを完成できなかったため採用しない。残る作業はbot回避ではなく、
-英語/日本語のlogin後DOM、月selector、HTMLサイズ、R2保存を確定する通常のcollector実装である。
-dailyとbackfillのend-to-end成功後、Workers Cronを毎日03:17 JSTで有効化した。
+GLOBAL PASS's first candidate is therefore Cloudflare Container + Google Chrome Stable + Xvfb + fresh persistent profile + source-specific TAMIA allowlist. Windows spoofing, personal-profile copies, Camoufox, Patchright and Browser Run are unnecessary on the current path. Camoufox also generated tokens inside Docker and remains only a control for future ordinary-Chrome regression.
 
-## 2026-08-30 最終成功条件でのChromium A/B
+PAT 401, Brunhild abort and missing TAMIA IPv6 may occur even in successful runs and are not sole blockers. Browser Run alone also failed to complete a token and is not adopted. Remaining work is ordinary collector implementation to confirm English/Japanese post-login DOM, month selectors, HTML sizes and R2 storage rather than bot avoidance. Workers Cron was enabled daily at 03:17 JST after end-to-end daily/backfill success.
 
-timezone発見前のChromium比較には`UTC`やsplit egressなどの交絡が残っていたため、runtime
-`timezone-collector-v5`でbrowser binary以外を最終成功条件へ揃え直した。共通条件は
-`TZ=Asia/Tokyo`、Xvfb headed、fresh persistent profile、native Linux情報、
-`navigator.webdriver=false`、GLOBAL PASS・Turnstile・helperの全通信TAMIAである。
+<a id="2026-08-30-最終成功条件でのchromium-ab"></a>
 
-| binary                       | 回数 |            HTTP | Turnstile token | browser version | elapsed              |
-| ---------------------------- | ---: | --------------: | --------------- | --------------- | -------------------- |
-| Playwright同梱Chromium       |    3 | 200 / 200 / 200 | 0 / 0 / 0文字   | 151.0.7922.34   | 38.8 / 40.6 / 41.6秒 |
-| Google Chrome Stable control |    1 |             200 | 794文字         | 152.0.7977.64   | 32.0秒               |
+## 2026-08-30 Chromium A/B under final successful conditions
 
-4 runともTAMIAの同じ日本出口とCloudflare KIXで観測され、Brunhild requestも発生した。
-Chromiumの3 runは各回fresh profileである。tokenが一度も生成されなかったため、Chromium側では
-資格情報入力、login POST、cookie再利用、R2書き込みを行っていない。同時刻帯のChrome controlが
-成功したので、今回はtimezone・egress・headless・profileではなくbrowser binary/version差へ
-失敗要因を絞れる。Chromium 151とChrome 152のversion差は残るためbrandだけの差とは断定しないが、
-現行Playwright同梱Chromiumへ切り替える根拠はなく、productionはE2E実績のあるChromeを維持する。
+Earlier Chromium comparisons retained confounders such as `UTC` and split egress. Runtime `timezone-collector-v5` therefore realigned everything except browser binary to final successful conditions: `TZ=Asia/Tokyo`, Xvfb headed mode, fresh persistent profiles, native Linux information, `navigator.webdriver=false` and all GLOBAL PASS/Turnstile/helper traffic through TAMIA.
 
-専用identity `prestia-globalpass-chromium-timezone-probe-v1`とChrome controlに再作成された`v18`は
-検証後にdestroyし、両方がinactiveになったことを確認した。なお、`sleepAfter=30s`と`stop()` RPC
-成功だけではrelay使用後のinstanceがrunningのまま残ったため、通常収集後も`destroy()`を使う。
+| binary                       | Runs |            HTTP | Turnstile token      | browser version | elapsed                    |
+| ---------------------------- | ---: | --------------: | -------------------- | --------------- | -------------------------- |
+| Playwright-bundled Chromium  |    3 | 200 / 200 / 200 | 0 / 0 / 0 characters | 151.0.7922.34   | 38.8 / 40.6 / 41.6 seconds |
+| Google Chrome Stable control |    1 |             200 | 794 characters       | 152.0.7977.64   | 32.0 seconds               |
 
-`destroy()`実装をdeployした後のdaily run `251bbae4-007c-4d91-b7e5-9b4385656285`はruntime v5、
-status `success`、HTML 2件、failure 0だった。R2 manifest保存後に
-`globalpass-collection-container-destroyed`が記録され、直後のWrangler instance一覧でも`v18`は
-`inactive`だった。したがって、通常収集の成功と実際のscale-to-zeroを同じrunで確認できた。
+All 4 runs were observed through the same TAMIA Japanese egress and Cloudflare KIX, with Brunhild requests. Each of the 3 Chromium runs used a fresh profile. No token was generated, so Chromium performed no credential entry, login POST, cookie reuse or R2 write. The successful concurrent Chrome control narrows the failure factor to browser binary/version rather than timezone, egress, headless mode or profiles. The 2 browsers, Chromium 151 and Chrome 152, still differ in version, so brand alone is not established; however, there is no evidence to switch to current Playwright-bundled Chromium. Production retains Chrome with end-to-end success.
+
+Dedicated identity `prestia-globalpass-chromium-timezone-probe-v1` and `v18`, recreated for Chrome control, were destroyed after verification and confirmed inactive. `sleepAfter=30s` and successful `stop()` RPC alone left instances running after relay use, so normal post-collection cleanup also uses `destroy()`.
+
+Daily run `251bbae4-007c-4d91-b7e5-9b4385656285` after deploying `destroy()` had runtime v5, status `success`, 2 HTML artifacts and failure 0. After R2 manifest storage, `globalpass-collection-container-destroyed` was recorded; Wrangler's immediately following instance list also showed `v18` as `inactive`. This confirmed ordinary collection success and actual scale-to-zero in the same run.

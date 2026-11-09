@@ -147,52 +147,79 @@ export function decimalText(value: unknown): { text: string; scale: number } | u
   return { text, scale: fraction.length };
 }
 
+export interface CsvWarning {
+  /** One-based logical row, excluding empty lines, as in csv:row locators. */
+  row: number;
+  column: number;
+  code: "unclosed_quote" | "text_after_quote";
+}
+
+export function csvWarningText(warning: CsvWarning): string {
+  const reason =
+    warning.code === "unclosed_quote"
+      ? "unclosed CSV quote read literally"
+      : "text after closing CSV quote joined to field";
+  return `row ${warning.row}: column ${warning.column}: ${reason}`;
+}
+
 /**
- * Minimal RFC 4180 CSV: quoted fields, embedded commas/quotes/newlines.
- * A quote only opens a quoted field at the start of a field; elsewhere it is
- * a literal character, so a description containing an inch mark does not
- * swallow the following delimiter.
+ * RFC 4180 fields, with bounded recovery for malformed quotes. An opener
+ * without a closing quote is literal, so its physical line ends the row.
+ * Valid quoted multiline fields retain their CSV meaning. If the first
+ * undoubled closing quote has trailing text on a later physical line, it
+ * cannot close the field: recover at the opening line instead. Same-line
+ * trailing text keeps the historical concatenation, with a warning.
  */
-export function parseCsv(text: string): string[][] {
+export function parseCsv(text: string, warnings: CsvWarning[] = []): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = "";
-  let inQuotes = false;
+  const finishRow = () => {
+    row.push(field);
+    if (!(row.length === 1 && row[0] === "")) rows.push(row);
+    field = "";
+    row = [];
+  };
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index]!;
-    if (inQuotes) {
-      if (character === '"') {
-        if (text[index + 1] === '"') {
-          field += '"';
-          index += 1;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        field += character;
-      }
-      continue;
-    }
     if (character === '"' && field === "") {
-      inQuotes = true;
+      let close = index + 1;
+      let multiline = false;
+      for (; close < text.length; close += 1) {
+        const next = text[close];
+        if (next === "\n" || next === "\r") multiline = true;
+        if (next !== '"') continue;
+        if (text[close + 1] === '"') {
+          close += 1;
+          continue;
+        }
+        break;
+      }
+      const after = text[close + 1];
+      const trailingText = after !== undefined && after !== "," && after !== "\n" && after !== "\r";
+      if (close === text.length || (multiline && trailingText)) {
+        warnings.push({ row: rows.length + 1, column: row.length + 1, code: "unclosed_quote" });
+        field += character;
+      } else {
+        field = text.slice(index + 1, close).replaceAll('""', '"');
+        if (trailingText)
+          warnings.push({ row: rows.length + 1, column: row.length + 1, code: "text_after_quote" });
+        index = close;
+      }
     } else if (character === ",") {
       row.push(field);
       field = "";
     } else if (character === "\n" || character === "\r") {
       if (character === "\r" && text[index + 1] === "\n") index += 1;
-      row.push(field);
-      field = "";
-      rows.push(row);
-      row = [];
+      finishRow();
     } else {
       field += character;
     }
   }
   if (field !== "" || row.length > 0) {
-    row.push(field);
-    rows.push(row);
+    finishRow();
   }
-  return rows.filter((cells) => !(cells.length === 1 && cells[0] === ""));
+  return rows;
 }
 
 export function isObject(value: unknown): value is Record<string, unknown> {

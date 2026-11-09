@@ -45,10 +45,10 @@ const job = (id: number) =>
     .bind(id)
     .first<{ lane: string; status: string; replay_plan_id: number | null }>();
 
-test("harness applies every Layer B migration in order through 0083", () => {
+test("harness applies every Layer B migration in order through 0086", () => {
   const names = layerBMigrations();
   expect(names[0]).toBe("0017_observation_pipeline.sql");
-  expect(names.at(-1)).toBe("0083_parse_runs_pending_index.sql");
+  expect(names.at(-1)).toBe("0086_collection_provider_failure_code.sql");
   expect(names).toEqual([
     "0017_observation_pipeline.sql",
     "0018_identity.sql",
@@ -110,6 +110,9 @@ test("harness applies every Layer B migration in order through 0083", () => {
     "0080_jpoint_program.sql",
     "0082_collection_lease_heartbeat.sql",
     "0083_parse_runs_pending_index.sql",
+    "0084_csv_reader_release_snapshot_policies.sql",
+    "0085_schedule_dispatch_marker.sql",
+    "0086_collection_provider_failure_code.sql",
   ]);
   expect([...names].sort()).toEqual(names);
 });
@@ -192,7 +195,7 @@ test("a replay of 200 artifacts does not block incremental jobs in the same swee
     source: "smbc-bank",
     dataset: "balance-normalized",
     parser: "smbc-direct-balance",
-    version: "1.1.0",
+    version: "1.1.1",
     artifactIdFrom: 999,
     reason: "synthetic backlog",
   });
@@ -247,7 +250,7 @@ test("a dropped notification is recovered by the repair lane", async () => {
   expect(await job(400)).toEqual({ lane: "repair", status: "done", replay_plan_id: null });
 }, 30000);
 
-test("a stored board a retired version rejected gets a 1.0.2 job from the repair lane, with no operator step", async () => {
+test("a stored board a retired version rejected gets a 1.0.3 job from the repair lane, with no operator step", async () => {
   // The stored SBI Shinsei boards (ADR 0028, amended for 1.0.2) each hold a
   // failed 1.0.1 job. Jobs are keyed by (artifact, parser, version), so the
   // cyclic repair scan creates the deployed version's job by itself, and the
@@ -285,18 +288,18 @@ test("a stored board a retired version rejected gets a 1.0.2 job from the repair
   ).results;
   expect(jobs).toEqual([
     { parser_version: "1.0.1", lane: "incremental", status: "failed" },
-    { parser_version: "1.0.2", lane: "repair", status: "done" },
+    { parser_version: "1.0.3", lane: "repair", status: "done" },
   ]);
   expect(
     await count(
-      "SELECT count(*) AS n FROM parse_runs WHERE fetch_artifact_id=410 AND parser_name='sbi-shinsei-exchange-rate' AND parser_version='1.0.2' AND status='ok'",
+      "SELECT count(*) AS n FROM parse_runs WHERE fetch_artifact_id=410 AND parser_name='sbi-shinsei-exchange-rate' AND parser_version='1.0.3' AND status='ok'",
     ),
   ).toBe(1);
   expect(
     await env.DB.prepare(
       "SELECT policy_id,required_parser_version FROM dataset_snapshot_policies WHERE parser_name='sbi-shinsei-exchange-rate' AND dataset='exchange-rate'",
     ).first<{ policy_id: string; required_parser_version: string }>(),
-  ).toEqual({ policy_id: "coverage-v1", required_parser_version: "1.0.2" });
+  ).toEqual({ policy_id: "coverage-v1", required_parser_version: "1.0.3" });
 }, 30000);
 
 test("pause/resume is idempotent, leases are fenced, and nothing publishes twice", async () => {
@@ -317,7 +320,7 @@ test("pause/resume is idempotent, leases are fenced, and nothing publishes twice
       source: "smbc-bank",
       dataset: "transactions-normalized",
       parser: "smbc-direct-transactions",
-      version: "1.1.0",
+      version: "1.1.1",
       reason: "synthetic pause test",
     })
   ).json.plan as { id: number };
@@ -371,7 +374,7 @@ test("pause/resume is idempotent, leases are fenced, and nothing publishes twice
     ).toBe(1);
     await expect(
       env.DB.prepare(
-        "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,'smbc-direct-transactions','1.1.0','2026-09-08T00:00:00.000Z','ok','[]')",
+        "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,'smbc-direct-transactions','1.1.1','2026-09-08T00:00:00.000Z','ok','[]')",
       )
         .bind(id)
         .run(),
@@ -390,7 +393,7 @@ test("the replay high-water is fixed at plan time and later evidence never grows
       source: "smbc-bank",
       dataset: "balance-normalized",
       parser: "smbc-direct-balance",
-      version: "1.1.0",
+      version: "1.1.1",
       artifactIdFrom: 999,
       reason: "synthetic high-water",
     })
@@ -672,7 +675,7 @@ test("replay and sweep commands validate their input and stay off unknown routes
       await post("/replay/plan", {
         source: "SMBC",
         parser: "smbc-direct-balance",
-        version: "1.1.0",
+        version: "1.1.1",
         reason: "x",
       })
     ).status,
@@ -682,7 +685,7 @@ test("replay and sweep commands validate their input and stay off unknown routes
       await post("/replay/plan", {
         source: "smbc-bank",
         parser: "smbc-direct-balance",
-        version: "1.1.0",
+        version: "1.1.1",
         reason: "x",
         fetchedFrom: "yesterday",
       })
@@ -716,7 +719,7 @@ test("operator signals count published parses, not unadopted successes", async (
         source: "smbc-bank",
         dataset: "balance-normalized",
         parser: "smbc-direct-balance",
-        version: "1.1.0",
+        version: "1.1.1",
         artifactIdFrom: 1499,
         reason: "synthetic publication signal",
       })
@@ -726,7 +729,7 @@ test("operator signals count published parses, not unadopted successes", async (
   // What a candidate looks like: a successful run the gate never adopted. It
   // is an execution attempt, not work an operator may consider done.
   const unadopted = await env.DB.prepare(
-    "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(1500,'smbc-direct-balance','1.1.0','2099-01-01T00:00:00.000Z','ok','[]') RETURNING id",
+    "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(1500,'smbc-direct-balance','1.1.1','2099-01-01T00:00:00.000Z','ok','[]') RETURNING id",
   ).first<{ id: number }>();
   expect(await freshness()).toBe(beforeParsedAt);
   expect(await plan()).toMatchObject({ estimated_artifacts: 1, already_parsed: 0 });

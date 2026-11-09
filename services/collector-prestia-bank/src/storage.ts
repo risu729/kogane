@@ -14,6 +14,7 @@ export interface PrestiaBankRun {
   completedAt: string;
   version: string;
   body?: string;
+  signoffFailed?: boolean;
 }
 export const PRESTIA_BANK_SOURCE = "prestia-bank";
 export const PRESTIA_BANK_PRODUCER = "collector-prestia-bank";
@@ -66,6 +67,17 @@ export async function prestiaBankRunPlan(input: PrestiaBankRun): Promise<Persist
       ],
       ranges: [],
       reports: [
+        ...(input.signoffFailed === true
+          ? [
+              {
+                reportRef: "logout",
+                reportKind: "logout",
+                scope: "run" as const,
+                outcome: "failed" as const,
+                safeErrorCode: "logout_failed",
+              },
+            ]
+          : []),
         {
           reportRef: "terminal",
           reportKind: "terminal",

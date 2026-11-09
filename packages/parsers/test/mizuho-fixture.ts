@@ -24,3 +24,12 @@ export function mizuhoHistoryHtml(
     ${span("txtTransType", "普通")}${span("txtAccNo", "1234567")}${rows}
     ${span("txtDispDetails", range)}${span("txtAllDispDetails", total)}</form>`;
 }
+/**
+ * The empty history page as the collector stores it (issue 1145): the account
+ * header and its currency-only amount, and no transaction block at all. The
+ * structure follows the sanitized capture of fetch run 1481; every value is
+ * invented.
+ */
+export function mizuhoEmptyHistoryHtml(): string {
+  return `<!doctype html><html><head><meta charset="utf-8"></head><body><form name="ACCHST_04110B"><div><div><div><div><div>${span("txtBrnch", "テスト支店")}</div><div>${span("txtTransType", "普通")}${span("txtAccNo", "1234567")}</div></div></div><div><div><div><span class="amount"><small>円</small></span></div></div></div></div></div></form></body></html>`;
+}

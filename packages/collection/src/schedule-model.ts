@@ -97,7 +97,7 @@ export interface ScheduleOccurrence {
   nominalAt: string;
   startedAt: string;
   finishedAt: string | null;
-  status: "started" | "completed" | "failed" | "uncertain";
+  status: "started" | "completed" | "failed" | "uncertain" | "not_dispatched";
   runIds: string[];
   runLinks: { runId: string; evidenceId: string | null }[];
   failureCode: string | null;

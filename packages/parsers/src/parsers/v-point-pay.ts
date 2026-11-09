@@ -61,7 +61,7 @@ interface Event {
 
 export const vPointPayNotificationEvent: Parser = {
   name: "v-point-pay-notification-event",
-  version: "1.0.0",
+  version: "1.0.2",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -83,6 +83,9 @@ export const vPointPayNotificationEvent: Parser = {
     const declined = event.eventType === "declined";
     if (!declined && event.amountYen === null) {
       throw new Error("V Point Pay non-declined notification amountYen must not be null");
+    }
+    if (!declined && event.amountYen !== null && event.amountYen < 0) {
+      throw new Error("v_point_pay_negative_notification_amount_unsupported");
     }
     const magnitude = Math.abs(event.amountYen ?? 0);
     const signedAmount = event.eventType === "usage" && magnitude !== 0 ? -magnitude : magnitude;

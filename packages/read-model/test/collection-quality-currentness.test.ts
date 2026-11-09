@@ -21,11 +21,17 @@ const rows = (s: QualityStore, source: string) =>
   s.all<CellQualityRow>(CELL_QUALITY_SQL, [source, 0]);
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 
-test("extraction leaves the complete shipped SQL byte-identical to frozen base 4f3d1b3", () => {
+test("extraction retains the frozen base SQL apart from the explicit Sony current-history gate", () => {
   // Frozen rendered SQL digests taken from the base, before the extraction.
   // Exact bytes prove unchanged predicates/ranking/filtering/output on every
   // input, more strongly than only comparing a handful of selected rows.
-  expect(hash(transactionsSql({}, 0).sql)).toBe(
+  // ADR 0092 intentionally excludes Sony JSON before ranking. Every other byte
+  // remains pinned; sony-csv-history.test.ts separately freezes and proves that delta.
+  const transactions = transactionsSql({}, 0).sql.replace(
+    "           AND p.parser_name <> 'sony-bank-history-json'\n",
+    "",
+  );
+  expect(hash(transactions)).toBe(
     "9876071ea165908299b34c61aad1005b7531fe5a010c213c2bc193f2b1be3ff9",
   );
   expect(hash(latestBalancesSql({}, 0, 501).sql)).toBe(
@@ -221,7 +227,7 @@ test("VPoint three-parser completeness refuses a missing page; a later complete 
   });
   const asOf = freshnessAsOf("2099-03-04T00:00:00.000Z");
   const answer = {
-    apiVersion: 4,
+    apiVersion: 5,
     freshnessAsOf: asOf,
     sourceId: "v-point",
     latestFetchRun: null,

@@ -1,220 +1,239 @@
-# Epos / Epos Visa Prepaid family 調査
+# Epos / Epos Visa Prepaid family research
 
 > Dated source research and implementation notes. Earlier runtime/schedule
 > claims may be superseded by later changes. See the [research scope](README.md),
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-- 調査日: 2026-08-26（Australia/Sydney）
-- 対象: エポスカード、エポスVisaプリペイドカード、エポスNet、エポスアプリ、および同じ明細に入る追加カード
-- 対象外: 他社カード、外部アグリゲーターを初期データ源とする経路、決済代行・加盟店向けサービス
-- 安全条件: 公開情報と受動的な公開ホスト観測のみ。会員ID、カード番号、セキュリティコード、氏名、連絡先、実残高、実利用額、Cookie値、パスワード、OTPを取得・記録していない。支払い、チャージ、返金、リボ・分割変更、ポイント利用、カード設定、個人情報変更等のwrite操作は実施していない。
+- Research date: 2026-08-26 (Australia/Sydney)
+- Scope: エポスカード (Epos Card), エポスVisaプリペイドカード (Epos Visa Prepaid Card), エポスNet (Epos Net), エポスアプリ (Epos app), and additional cards included in the same statements
+- Out of scope: other issuers' cards, external aggregators as initial data sources, payment processor/merchant services
+- Safety conditions: public information and passive public host observations only. Did not obtain/record member IDs, card numbers, security codes, names, contact details, actual balances/usage amounts, cookie values, passwords, or OTPs. Performed no writes such as payments, top-ups, refunds, revolving/installment changes, points use, card settings, or personal information changes.
 
-## 結論
+## Conclusion
 
-クレジットカードの履歴取得は、PC版エポスNetの「月別ご利用履歴照会」が最も情報量と保存期間に優れ、2006年3月以降を月単位でPDF/CSV出力できる。請求書相当の「ご利用代金明細書」はPDF、支払結果は過去12カ月を画面/印刷で確認できる。アプリは未確定通知、月次グラフ、カテゴリ分け、過去24カ月の明細書閲覧に強いが、一括CSV exportの公式記載はない。
+For credit card history, PC Epos Net's `月別ご利用履歴照会` ("monthly usage history inquiry") offers the most
+information and longest retention, exporting monthly PDF/CSV from March 2006 onward. The invoice-equivalent
+`ご利用代金明細書` ("card usage statement") is PDF; payment results are viewable/printable for the past 12 months.
+The app excels at pending notifications, monthly graphs, categorization, and viewing the past 24 months of
+statements, but official material does not describe bulk CSV export.
 
-エポスVisaプリペイドはエポスNet/アプリで現在残高と月指定の利用履歴を確認できるが、公開一次資料には最大保存期間、件数上限、CSV/PDF exportが記載されていない。クレジットと同じCSVに入るとは仮定しない。
+Epos Visa Prepaid current balances and month-selected usage history are available in Epos Net/app, but public
+primary sources do not specify maximum retention, row limits, or CSV/PDF export. Do not assume inclusion
+in the same CSV as credit cards.
 
-初期実装は **E / cost 1–2**（PC版で利用者が手動取得するクレジットCSV/PDF + ローカル解析）。プリペイドとポイントは **E / cost 2** の手動記録を安全な既定とする。公式APIは確認できない。次段階として、公開Web JavaScript・正規入手した公式APKのread-only静的解析、および本人が操作するセッションの通信メタデータ動的観測を **C候補 / cost 3–4** として行う価値がある。取引/write、秘密・PII保存、認証・WAF・証明書ピンニング等のsecurity control bypassは行わない。
+Initial implementation: **E / cost 1–2** (owner-manually-obtained PC credit CSV/PDF + local parsing).
+Safe default for prepaid/points: **E / cost 2** manual recording. No official API established. As a next stage,
+read-only static analysis of public Web JavaScript/legitimately obtained official APKs and dynamic observation
+of communication metadata in owner-operated sessions are worthwhile as **C candidates / cost 3–4**.
+Do not perform transactions/writes, retain secrets/PII, or bypass authentication/WAF/certificate pinning or other security controls.
 
-## 1. familyとデータ所有境界
+## 1. Family and data ownership boundaries
 
-### 本会員のクレジットカード
+### Primary member's credit card
 
-- エポスNetは支払予定額、利用履歴、支払履歴、利用可能額、キャッシング明細、ポイント等を扱う。
-- クレジットカードに「預金残高」はなく、収集対象は利用可能額、請求予定額、利用/支払履歴である。利用可能額は支払日の直後ではなく、金融機関の引落結果をエポスが確認した後に戻る。
+- Epos Net handles expected payments, usage history, payment history, available credit, cash advance statements, points, etc.
+- Credit cards have no deposit balance; collect available credit, expected billing, and usage/payment history. Available credit is restored after Epos confirms the bank's debit result, not immediately after the payment date.
 
-### 家族
+### Family
 
-- エポスファミリーゴールドは一般的な従属型家族カードではない。各人に独立したエポスゴールドカード、利用限度額、明細、引落口座が設定される。
-- 個別利用内容を閲覧できるのはカード名義人本人だけ。代表者が家族個人の明細を取得する経路として扱わない。
-- ファミリー登録者はアプリ/エポスNetで「現在の家族合計利用金額」を確認できるが、これは個別取引明細ではなく集計値である。
+- エポスファミリーゴールド (Epos Family Gold) is not a conventional dependent family card. Each person has an independent Epos Gold Card, credit limit, statements, and debit account.
+- Only the cardholder can view individual usage. Do not treat it as a route for the representative to retrieve family members' personal statements.
+- Family registrants can check `現在の家族合計利用金額` ("current total family usage amount") in app/Epos Net, but this is an aggregate, not individual transaction statements.
 
-### 追加カード
+### Additional cards
 
-- エポスETCカードは親カード1枚につき1枚。利用は親カードのショッピング等と同じ明細へ入り、ETCだけのエポス発行明細書は作れない。データ到着は道路事業者次第で、目安は利用後約3週間。
-- エポスバーチャルカードは親カードへ追加され、利用可能枠を親カードの範囲内で設定し、利用分は親カードと合わせて請求される。
-- エポスVisaプリペイドは会員本人専用で、クレジット明細とは別の残高・利用履歴照会導線を持つ。
+- エポスETCカード (Epos ETC Card): one per parent card. Usage enters the same statements as parent-card shopping, etc.; Epos cannot issue ETC-only statements. Arrival depends on the road operator, roughly three weeks after use.
+- エポスバーチャルカード (Epos Virtual Card) is added to a parent card, with available credit set within its limit; usage is billed together with the parent card.
+- Epos Visa Prepaid is for the member alone, with balance/usage history inquiry paths separate from credit statements.
 
-一次資料:
+Primary sources:
 
-- [エポスNetの機能](https://www.eposcard.co.jp/eposnet/index.html)
-- [照会・登録メニュー](https://www.eposcard.co.jp/eposnetuse/index.html)
-- [ファミリーゴールドの所有・明細境界](https://www.eposcard.co.jp/family_gold/index.html)
-- [家族の個別利用内容は名義人のみ](https://faq.eposcard.co.jp/faq/show/1625)
-- [ETCカード](https://www.eposcard.co.jp/eposcard/etc_use.html)
-- [ETCだけの明細書は発行不可](https://faq.eposcard.co.jp/faq/show/3418)
-- [バーチャルカード](https://www.eposcard.co.jp/virtual/index_01.html)
-- [Visaプリペイド](https://www.eposcard.co.jp/prepaid/index.html)
+- [Epos Net features](https://www.eposcard.co.jp/eposnet/index.html)
+- [Inquiry/registration menu](https://www.eposcard.co.jp/eposnetuse/index.html)
+- [Family Gold ownership/statement boundaries](https://www.eposcard.co.jp/family_gold/index.html)
+- [Only cardholders can view individual family usage](https://faq.eposcard.co.jp/faq/show/1625)
+- [ETC cards](https://www.eposcard.co.jp/eposcard/etc_use.html)
+- [ETC-only statements unavailable](https://faq.eposcard.co.jp/faq/show/3418)
+- [Virtual cards](https://www.eposcard.co.jp/virtual/index_01.html)
+- [Visa Prepaid](https://www.eposcard.co.jp/prepaid/index.html)
 
-## 2. 経路別の粒度・期間・export・trade-off
+## 2. Granularity, periods, exports, and tradeoffs by route
 
-| 経路                          | 粒度・状態                                                                             |                                   公開された期間 | export                            | trade-off                                                      |
-| ----------------------------- | -------------------------------------------------------------------------------------- | -----------------------------------------------: | --------------------------------- | -------------------------------------------------------------- |
-| PCエポスNet「月別ご利用履歴」 | 利用日、利用場所、利用金額、支払区分、支払開始月。返金は元の利用月で取消日と負額を表示 |                                    2006年3月以降 | PDF / CSV                         | 最長・構造化。月選択が必要で、未確定の早期通知とは意味が異なる |
-| エポスNet「ご利用代金明細書」 | 利用日、利用先、利用金額、支払回数、今回支払額、リボ/分割                              | アプリFAQは過去24カ月を案内。Webの別上限は未確認 | PDF                               | 請求書相当で支払回数を含むが、CSVではない                      |
-| エポスNet/アプリ「支払履歴」  | 支払日、支払額、支払方法と、その内訳                                                   |                                       過去12カ月 | PC印刷。CSV/PDFの公式記載なし     | 実際の支払確認に向くが、利用履歴より保持期間が短い             |
-| エポスアプリ「お支払照会」    | 未確定通知、確定明細、月額グラフ、カテゴリ、支払変更導線                               |             明細書は過去24カ月、支払履歴は12カ月 | 画面/PDF閲覧。CSV記載なし         | タイムリーで見やすいがwrite導線が近く、構造化exportに弱い      |
-| Visaプリペイド残高            | 現在の利用可能残高                                                                     |                                           現在値 | 公式export記載なし                | 即時把握に向く。履歴スナップショットではない                   |
-| Visaプリペイド利用履歴        | 年月を指定する利用履歴。加盟店データ反映は通常2–14日                                   |                       最大過去期間・件数は未確認 | CSV/PDFの公式記載なし             | クレジット履歴と分離。手動転記または後段transport調査が必要    |
-| エポスポイント                | 現在残高、期限が近いポイント、利用可能日                                               |                      通常ポイントは付与日から2年 | 公式export/完全履歴期間の記載なし | 期限監視には十分だが、増減台帳の機械取得仕様はない             |
+| Route                                                  | Granularity/state                                                                                                                                     |                                           Published period | Export                                             | Tradeoff                                                                                                |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------: | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| PC Epos Net `月別ご利用履歴` ("monthly usage history") | Usage date, location, amount, payment classification, first payment month. Refunds show cancellation date and negative amount in original usage month |                                          March 2006 onward | PDF / CSV                                          | Longest, structured; requires month selection and differs semantically from early pending notifications |
+| Epos Net `ご利用代金明細書`                            | Usage date, merchant, amount, payment count, current payment amount, revolving/installments                                                           | App FAQ says past 24 months; separate Web limit unverified | PDF                                                | Invoice-equivalent, includes payment count, but not CSV                                                 |
+| Epos Net/app `支払履歴` ("payment history")            | Payment date, amount, method and breakdown                                                                                                            |                                             Past 12 months | PC printing; no official CSV/PDF description       | Good for checking actual payment, shorter retention than usage history                                  |
+| Epos app `お支払照会` ("payment inquiry")              | Pending notifications, confirmed statements, monthly graphs, categories, payment change paths                                                         |            Statements 24 months; payment history 12 months | Screen/PDF viewing; no CSV description             | Timely and readable, but adjacent writes and weak structured export                                     |
+| Visa Prepaid balance                                   | Current available balance                                                                                                                             |                                              Current value | No official export description                     | Good for immediate status, not historical snapshots                                                     |
+| Visa Prepaid usage history                             | History by year/month; merchant data normally reflected in 2–14 days                                                                                  |                       Maximum past period/count unverified | No official CSV/PDF description                    | Separate from credit history; needs manual transcription or later transport research                    |
+| エポスポイント (Epos Points)                           | Current balance, points nearing expiry, availability date                                                                                             |                 Ordinary points: two years from award date | No official export/full-history period description | Enough for expiry monitoring, no machine retrieval specification for changes ledger                     |
 
-PC向けPDF/CSVの項目と形式は、エポスカード自身の個人情報開示案内にも明記される。公開情報からは、各CSVの最大行数、ページサイズ、文字コード、ファイル命名、同月再取得時の安定性、プリペイド履歴の完全な列定義を確定できない。
+PC PDF/CSV fields/formats are also explicit in Epos Card's own personal information disclosure guidance.
+Public information cannot establish maximum CSV rows, page sizes, encoding, filenames, stability of repeat
+retrieval in the same month, or complete prepaid history columns.
 
-一次資料:
+Primary sources:
 
-- [利用明細・履歴の期間と形式](https://faq.eposcard.co.jp/faq/show/90)
-- [公式開示案内にある明細項目・出力形式](https://www.eposcard.co.jp/pdf/release_application.pdf)
-- [アプリで過去24カ月の明細書](https://faq.eposcard.co.jp/faq/show/3607)
-- [支払履歴は過去12カ月](https://faq.eposcard.co.jp/faq/show/3505)
-- [プリペイド履歴の確認経路](https://faq.eposcard.co.jp/faq/show/809)
+- [Usage statement/history periods and formats](https://faq.eposcard.co.jp/faq/show/90)
+- [Statement fields/output formats in official disclosure guidance](https://www.eposcard.co.jp/pdf/release_application.pdf)
+- [Past 24 months of statements in app](https://faq.eposcard.co.jp/faq/show/3607)
+- [Past 12 months of payment history](https://faq.eposcard.co.jp/faq/show/3505)
+- [Prepaid history inquiry route](https://faq.eposcard.co.jp/faq/show/809)
 
-## 3. 未確定・確定・返金・分割
+## 3. Pending, confirmed, refunds, and installments
 
-### クレジット
+### Credit
 
-- アプリの「未確定」は、利用先から正式な利用情報が未着で請求未確定の状態。通知到着後、通常2–14日で正式情報が反映され、未確定表示が消えて利用先名が表示される。
-- 利用通知は利用を試みただけでも届く場合があり、請求確定を意味しない。通知、未確定明細、確定明細を同一イベントとして重複計上してはならない。
-- 27日払いでは前月28日～当月27日分が翌月6日に確定、27日支払。4日払いでは前月5日～当月4日分が当月11日に確定、翌月4日支払。確定後に到着した利用データは次回請求へ入る。
-- 返金/取消データの到着は1～4週間程度かかり得る。月別利用履歴では元の利用月を選ぶと、備考に取消日、利用金額に負額で表示される。締切後到着なら一度引き落とした後に返金され得る。
-- ご利用代金明細書は支払回数、今回支払額、リボ/分割を持つ。あとから分割/リボは正式情報到着後から変更期限まで可能だが、これはwrite操作であり調査対象画面から実行しない。
+- App `未確定` ("pending") means official usage information has not arrived from the merchant and billing is unconfirmed. Normally 2–14 days after notification, official information arrives, the pending display disappears, and the merchant name appears.
+- Usage notifications may arrive even for an attempted use and do not mean billing confirmation. Do not double count notifications, pending statements, and confirmed statements as the same event.
+- For payment on the 27th, usage from the previous month's 28th through current month's 27th is confirmed on the following month's 6th, paid on the 27th. For payment on the 4th, usage from the previous month's 5th through current month's 4th is confirmed on the current month's 11th, paid on the following month's 4th. Usage data arriving after confirmation enters the next bill.
+- Refund/cancellation data may take about 1–4 weeks to arrive. Selecting the original usage month in monthly history displays the cancellation date in remarks and a negative usage amount. Arrival after closing may lead to a refund after an initial debit.
+- Card usage statements include payment count, current payment amount, revolving/installments. Later installment/revolving changes are possible after official data arrives until the change deadline, but are writes; do not execute them from research screens.
 
-### Visaプリペイド
+### Visa Prepaid
 
-- 原則は利用時に残高から即時減算。ただし通販の発送時処理、通信状況、海外為替等で遅延や金額変更があり得る。
-- ホテル/レンタカーのデポジットや有効性確認の少額利用では一時的に二重/余分な減算となり、即時～最長45日後に返金され、最終額だけが残る場合がある。
-- 返品/取消は加盟店から取消データが到着した時点で残高へ反映される。クレジットの「未確定」表示と同じ状態機械とは仮定しない。
-- カード残高の有効期限はカード表面の有効期限で、利用者都合の払戻しはできない。
+- Generally deducted from balance immediately at use, but online shipment processing, communication conditions, foreign exchange, etc. may cause delays/amount changes.
+- Hotel/rental deposits or small validity checks may temporarily cause duplicate/excess deductions, refunded immediately to at most 45 days later, leaving only the final amount.
+- Returns/cancellations affect balance when merchant cancellation data arrives. Do not assume the same state machine as credit pending displays.
+- Card balance expiry is the expiry printed on the card; user-convenience refunds are unavailable.
 
-一次資料:
+Primary sources:
 
-- [アプリの「未確定」](https://faq.eposcard.co.jp/faq/show/2690)
-- [利用通知は請求確定ではない](https://faq.eposcard.co.jp/faq/show/2679)
-- [明細反映と締め・確定日](https://faq.eposcard.co.jp/faq/show/138)
-- [クレジット返金の表示](https://faq.eposcard.co.jp/faq/show/2429)
-- [あとから分割/リボの開始条件](https://faq.eposcard.co.jp/faq/show/3629)
-- [プリペイドの即時減算・デポジット・返金](https://www.eposcard.co.jp/prepaid/index.html)
-- [プリペイド返品時の残高反映](https://faq.eposcard.co.jp/faq/show/828)
+- [App pending display](https://faq.eposcard.co.jp/faq/show/2690)
+- [Usage notification does not mean billing confirmation](https://faq.eposcard.co.jp/faq/show/2679)
+- [Statement reflection, closing/confirmation dates](https://faq.eposcard.co.jp/faq/show/138)
+- [Credit refund displays](https://faq.eposcard.co.jp/faq/show/2429)
+- [Conditions for later installment/revolving changes](https://faq.eposcard.co.jp/faq/show/3629)
+- [Prepaid immediate deduction, deposits, refunds](https://www.eposcard.co.jp/prepaid/index.html)
+- [Prepaid return balance reflection](https://faq.eposcard.co.jp/faq/show/828)
 
-## 4. エポスポイントと有効期限
+## 4. Epos Points and expiry
 
-- 通常ポイントは加算日から2年間で、2年後の加算日の前日まで有効。期限が近いものから使われる。
-- 3カ月以内に失効するポイントがある場合、エポスNet/アプリに延長操作が表示され、全ポイントを24カ月後まで延長できる。ただし延長はwriteなので実施しない。
-- ゴールド/プラチナのエポスポイントは無期限。退会・資格喪失時等の失効条件は残る。
-- 残高と期限間近のポイントはエポスNetで確認できる。ポイントの加算日は支払日により異なり、加盟店売上データ到着が遅いと加算も遅れる。
-- ポイントからVisaプリペイドへ移行できるが、チャージはwriteであり禁止。プリペイド利用額の0.5%は翌月中旬にカード残高へキャッシュバックされる。
+- Ordinary points last two years from accrual, through the day before the accrual date two years later. Those expiring soonest are used first.
+- If points expire within three months, Epos Net/app displays an extension operation allowing all points to be extended to 24 months later. Extension is a write; do not execute it.
+- Gold/Platinum Epos Points have no expiry. Expiry conditions on membership termination/loss of eligibility etc. remain.
+- Epos Net displays balances and points nearing expiry. Accrual dates depend on payment dates; delayed merchant sales data also delays accrual.
+- Points can move to Visa Prepaid, but top-up is a prohibited write. 0.5% of prepaid spending is credited as cashback to card balance in the middle of the following month.
 
-一次資料:
+Primary sources:
 
-- [ポイントの加算日・期限・確認方法](https://www.eposcard.co.jp/point/use.html)
-- [現行ポイント規約](https://www.eposcard.co.jp/rule/rule_point.html)
-- [ポイント期限FAQ](https://faq.eposcard.co.jp/faq/show/53)
+- [Points accrual dates, expiry, and inquiry](https://www.eposcard.co.jp/point/use.html)
+- [Current points terms](https://www.eposcard.co.jp/rule/rule_point.html)
+- [Points expiry FAQ](https://faq.eposcard.co.jp/faq/show/53)
 
-## 5. 認証、MFA、passkey、Bitwarden
+## 5. Authentication, MFA, passkeys, and Bitwarden
 
-### 確認できた事実
+### Established facts
 
-- エポスNetの通常ログイン画面はエポスNet IDとパスワードを要求する。ログインIDはメールアドレスではない。
-- リスクベースの追加確認として、必要に応じカード裏面の3桁セキュリティコードを求める場合がある。これは機密情報であり、自動化へ渡さない。
-- エポスNet/アプリへのログインごとにメール通知する任意サービスがある。公式FAQは家計簿等の連携サービスが不定期にエポスNetへログインする場合にも通知が出ると説明する。
-- エポスアプリは初回にエポスNet ID/パスワードを入力した後、対応端末でFace ID、生体認証、オートログインを利用できる。機種変更後は再インストールし、ログイン時に追加認証を求められる場合がある。
-- Visa Secure 3-D Secure 2.0はオンライン**決済**用で、必要時に登録携帯へ8桁SMS OTPを送り、有効時間は2分。これはエポスNetの通常ログインMFAと混同しない。
+- Ordinary Epos Net login requires Epos Net ID and password. The login ID is not an email address.
+- Risk-based extra checks may require the three-digit security code on the card back. This is secret; do not pass it to automation.
+- An optional service emails on every Epos Net/app login. Official FAQ says notifications also occur when linked household accounting services etc. log in to Epos Net irregularly.
+- After initial Epos Net ID/password entry, the app offers Face ID, biometrics, and automatic login on supported devices. After changing phones, reinstall; extra authentication may be requested at login.
+- Visa Secure 3-D Secure 2.0 is for online **payments**, sending an eight-digit SMS OTP to the registered phone when needed, valid two minutes. Do not conflate this with ordinary Epos Net login MFA.
 
-### passkey / Bitwarden
+### Passkeys / Bitwarden
 
-2026-08-26時点の公式サイト・FAQ・ログイン画面で、エポスNetのWebAuthn/passkey対応を確認できなかった。アプリのFace IDは端末上の便利なログイン方式だが、公開資料だけから同期型passkeyやFIDO2 credentialと同一とは言えない。
+As of 2026-08-26, official sites/FAQs/login screens did not establish Epos Net WebAuthn/passkey support.
+App Face ID is convenient device login, but public material alone does not equate it with synced passkeys/FIDO2 credentials.
 
-BitwardenはID/パスワードのURIベース自動入力とpasskey保存に一般対応する。ただしエポス固有の公式互換性は確認できず、エポス側passkeyも未確認である。利用する場合もURI matchは公式HTTPSホストへ厳密化し、カード番号、セキュリティコード、SMS OTPは保管・自動入力対象にしない。
+Bitwarden generally supports URI-based ID/password autofill and passkey storage. Epos-specific official
+compatibility is unverified, as are Epos passkeys. If used, strictly match official HTTPS hosts; exclude
+card numbers, security codes, and SMS OTPs from storage/autofill.
 
-未確認事項は、通常ログイン時の追加認証判定、session TTL、refresh機構、端末信頼の期限、アプリtokenの保存方式、device attestation、証明書ピンニングである。
+Unverified: ordinary-login extra authentication decisions, session TTL, refresh mechanisms, device trust lifetimes,
+app token storage, device attestation, and certificate pinning.
 
-一次資料:
+Primary sources:
 
-- [公式ログイン画面](https://www.eposcard.co.jp/memberservice/pc/login/login_certify_advertised.do)
-- [ログイン時の追加セキュリティコード](https://faq.eposcard.co.jp/faq/show/1709)
-- [ログイン通知と連携サービス](https://faq.eposcard.co.jp/faq/show/844)
-- [Face ID初回登録](https://faq.eposcard.co.jp/faq/show/2443)
-- [機種変更時の認証](https://faq.eposcard.co.jp/faq/show/2485)
+- [Official login screen](https://www.eposcard.co.jp/memberservice/pc/login/login_certify_advertised.do)
+- [Additional security code at login](https://faq.eposcard.co.jp/faq/show/1709)
+- [Login notifications and linked services](https://faq.eposcard.co.jp/faq/show/844)
+- [Initial Face ID registration](https://faq.eposcard.co.jp/faq/show/2443)
+- [Authentication after changing phones](https://faq.eposcard.co.jp/faq/show/2485)
 - [Visa Secure 3-D Secure 2.0](https://faq.eposcard.co.jp/faq/show/3408)
 - [SMS OTP](https://faq.eposcard.co.jp/faq/show/1547)
 - [Bitwarden URI match](https://bitwarden.com/help/uri-match-detection/)
 - [Bitwarden autofill/passkey](https://bitwarden.com/help/auto-fill-browser/)
 
-## 6. CDN / WAF / anti-bot の受動観測
+## 6. Passive CDN / WAF / anti-bot observations
 
-2026-08-26に公開URLへDNS、HEAD/GETのみを実行した。Cookie値は保存していない。
+Performed only DNS and HEAD/GET on public URLs on 2026-08-26. Did not save cookie values.
 
-- `www.eposcard.co.jp` は `www.eposcard.co.jp.edgekey.net`、さらに `*.akamaiedge.net` へCNAME解決し、Akamai edge配下であることを確認した。
-- 公開トップとログイン画面で `Akamai-GRN`、`_abck`、`ak_bmsc`、`bm_sz` のCookie名を確認した。Akamai公式資料は `edgekey.net` をAkamai edge hostnameとして説明し、Bot Manager関連Cookieが人と自動処理の識別に使われる例を示す。
-- 静的トップの背後にはAmazon S3/CloudFrontを示す応答も見え、ログインはApache/JSESSIONID系だった。これは受動観測であり、origin構成を断定しない。
-- `faq.eposcard.co.jp` は別のFAQ基盤へCNAME解決し、会員サイトと同じ防御・sessionとは仮定しない。
-- Akamai利用とbot対策信号は確認済みだが、Kona Site Defender等の製品名、WAF rule、bot score、rate limit、challenge条件は未確認。公開画面でchallengeが出ないことは認証後も出ない証拠ではない。
+- `www.eposcard.co.jp` CNAMEs resolve to `www.eposcard.co.jp.edgekey.net`, then `*.akamaiedge.net`, establishing Akamai edge delivery.
+- Observed `Akamai-GRN`, `_abck`, `ak_bmsc`, and `bm_sz` cookie names on public home/login pages. Official Akamai material describes `edgekey.net` as an Akamai edge hostname and gives examples of Bot Manager cookies distinguishing humans/automation.
+- Responses behind the static home page also indicated Amazon S3/CloudFront; login was Apache/JSESSIONID-based. These are passive observations, not a definitive origin architecture.
+- `faq.eposcard.co.jp` CNAMEs to a separate FAQ platform; do not assume the same protection/session as the member site.
+- Akamai use and bot-protection signals are established; product names such as Kona Site Defender, WAF rules, bot scores, rate limits, and challenge conditions are unverified. No challenge on public screens does not establish none after authentication.
 
-一次資料:
+Primary sources:
 
-- [Akamai edge hostnameの説明](https://techdocs.akamai.com/property-mgr/docs/key-concepts-terms)
-- [AkamaiのBot Manager cookie説明例](https://techdocs.akamai.com/identity-cloud/docs/hosted-login-cookies-and-local-storage-1)
+- [Akamai edge hostname explanation](https://techdocs.akamai.com/property-mgr/docs/key-concepts-terms)
+- [Akamai Bot Manager cookie example](https://techdocs.akamai.com/identity-cloud/docs/hosted-login-cookies-and-local-storage-1)
 
-## 7. 公式アプリ / APK / Web
+## 7. Official app / APK / Web
 
-- 公式Android packageは `jp.co.eposcard.epossupportapp`、iOS App Store IDは `1489130153`。アプリ利用にはエポスNet登録が必要。
-- Webは長期月別履歴とPDF/CSV、支払/ポイント/プリペイドの照会に強い一方、各種変更手続きも同居する。
-- アプリは即時通知、未確定表示、グラフ、カテゴリ、明細書閲覧、ポイント/プリペイド導線に強い一方、支払方法変更を支援するwrite UIも同居する。
+- Official Android package: `jp.co.eposcard.epossupportapp`; iOS App Store ID: `1489130153`. App use requires Epos Net registration.
+- Web excels at long-term monthly history, PDF/CSV, and payment/points/prepaid inquiries, but also hosts change procedures.
+- The app excels at instant notifications, pending displays, graphs, categories, statements, and points/prepaid paths, but also hosts write UI for payment method changes.
 
-公式経路で不明なtransportを補う次段階として、以下のread-only解析を許容する。
+The following read-only analyses are allowed as a next stage to clarify unknown official transport.
 
-1. 公式ストアから正規に入手したAPKのhashを記録し、Manifest、権限、exported component、network security config、公開文字列、endpoint hostname、schema/model名、証明書ピンニング設定の有無を静的確認する。
-2. 公開Web JavaScript bundleのURL/hash、source map公開有無、endpoint文字列、read/write route名、CSRF/session処理を静的確認する。
-3. 本人が操作するテストセッションでDevToolsまたは端末の標準プロキシ設定を使い、HTTP method、hostname、path template、content type、status、呼出元画面だけを動的観測する。request/response body、Cookie、token、カード/会員番号、実値は保存しない。
-4. TLS/pinning等により観測できない場合はそこで停止し、無効化・hook・root化等のsecurity control bypassは行わない。
+1. Record hashes of APKs legitimately obtained from official stores; statically inspect Manifest, permissions, exported components, network security config, public strings, endpoint hostnames, schema/model names, and certificate pinning configuration presence.
+2. Statically inspect public Web JavaScript bundle URLs/hashes, source map availability, endpoint strings, read/write route names, and CSRF/session processing.
+3. In an owner-operated test session, use DevTools or normal device proxy settings to dynamically observe only HTTP method, hostname, path template, content type, status, and calling screen. Save no request/response bodies, cookies, tokens, card/member numbers, or actual values.
+4. If TLS/pinning etc. prevents observation, stop there; do not disable, hook, root, or otherwise bypass security controls.
 
-一次資料:
+Primary sources:
 
-- [公式アプリ案内](https://www.eposcard.co.jp/appli/index.html)
-- [Google Play公式掲載](https://play.google.com/store/apps/details?id=jp.co.eposcard.epossupportapp)
-- [Apple App Store公式掲載](https://apps.apple.com/jp/app/%E3%82%A8%E3%83%9D%E3%82%B9%E3%82%A2%E3%83%97%E3%83%AA/id1489130153)
+- [Official app guidance](https://www.eposcard.co.jp/appli/index.html)
+- [Official Google Play listing](https://play.google.com/store/apps/details?id=jp.co.eposcard.epossupportapp)
+- [Official Apple App Store listing](https://apps.apple.com/jp/app/%E3%82%A8%E3%83%9D%E3%82%B9%E3%82%A2%E3%83%97%E3%83%AA/id1489130153)
 
-## 8. 公開API / third-party client のtransportとauth
+## 8. Public API / third-party client transport and auth
 
-- 顧客向けに文書化された公開API、API key、OAuth、read-only scopeは公式サイトで確認できなかった。
-- 公式FAQは家計簿等の連携サービスが「不定期にエポスNetにログイン」する場合があると説明する。少なくとも一部連携がログインsession型であることを示すが、credentialの保管主体、MFA処理、endpoint、契約APIの有無は公開していない。
-- GitHubを公式host、login path、Android package、サービス名で検索したが、維持された公開クライアントや具体的な認証実装は確認できなかった。phishing list、bookmark、単なるリンクはclientとして数えていない。
-- よって現時点で再現可能な第三者transport/authはない。上記の静的/動的観測で、first-party Web/appのread transportを特定することが次の実験となる。非公開仕様を特定できても、利用規約、技術的安定性、write分離を別途評価する。
+- No customer-facing documented public API, API key, OAuth, or read-only scope was established on official sites.
+- Official FAQ says linked household accounting services etc. may log in to Epos Net irregularly. This indicates at least some session-login integrations, but does not publish credential custodians, MFA handling, endpoints, or contracted API availability.
+- GitHub searches by official host, login path, Android package, and service names found no maintained public client or concrete authentication implementation. Phishing lists, bookmarks, and mere links were not counted as clients.
+- Thus no reproducible third-party transport/auth currently exists. The next experiment is identifying first-party Web/app read transport through the static/dynamic observations above. Even if private specifications are identified, separately evaluate terms, technical stability, and write isolation.
 
-## 9. read / write隔離
+## 9. Read / write isolation
 
-### 安全な既定
+### Safe default
 
-手動CSV/PDF export後の解析器には認証済みネットワーク機能を持たせない。入力はread-only、外向き通信なし、原本はGit外、ログには列名・件数・期間だけを残し、値は残さない。
+Give parsers no authenticated network capability after manual CSV/PDF export. Inputs read-only, no outbound
+communication, originals outside Git; logs retain only column names, counts, and periods, never values.
 
-### 画面allowlist
+### Screen allowlist
 
-- お支払予定額照会、月別ご利用履歴照会、お支払履歴照会、ご利用代金明細書照会
-- 利用可能額照会、ポイント照会
-- Visaプリペイド残高照会、利用履歴照会
-- ファミリー合計利用金額（個別明細ではない）
+- `お支払予定額照会` ("expected payment inquiry"), `月別ご利用履歴照会`, `お支払履歴照会` ("payment history inquiry"), `ご利用代金明細書照会` ("card usage statement inquiry")
+- `利用可能額照会` ("available credit inquiry"), `ポイント照会` ("points inquiry")
+- Visa Prepaid `残高照会` ("balance inquiry"), `利用履歴照会` ("usage history inquiry")
+- `ファミリー合計利用金額` ("total family usage amount"; not individual statements)
 
 ### denylist
 
-支払、チャージ、ポイント利用/移行/延長、リボ/分割変更、いつでもリボ、キャッシング、返済、カード申込/停止/再発行、利用可能額変更、バーチャルカード設定、プリペイドPIN、通知設定、住所/口座/ID/パスワード変更はwriteとして禁止する。
+Prohibit as writes: payments, top-ups, points use/transfer/extension, revolving/installment changes,
+`いつでもリボ` ("automatic revolving payments"), cash advances, repayment, card applications/suspension/reissuance,
+available credit changes, virtual card settings, prepaid PIN, notification settings, address/account/ID/password changes.
 
-### transport特定後の隔離条件
+### Isolation conditions after transport identification
 
-- UI操作とnetwork callを対応付け、read endpoint候補をhost + method + path templateでallowlist化する。
-- `GET`だけを自動的にsafeとはみなさず、公式動作または合成/空データで副作用なしを確認する。readがPOSTの場合もbodyの操作種別を固定する。
-- 最初は観測だけでreplayしない。replayする場合も1件の明示的read、低頻度、同一利用者、response値非保存から始める。
-- write host/path/actionは明示deny。CSRF tokenやsession credentialをログへ出さず、read-only credential/scopeを発見できない限り強い分離は未達と表示する。
+- Map UI operations to network calls; allowlist read endpoint candidates by host + method + path template.
+- Do not automatically treat `GET` as safe; confirm no side effects from official behavior or synthetic/empty data. Fix the operation type in bodies even when reads use POST.
+- Initially observe without replay. If replaying, start with one explicit read, low frequency, same user, no response value retention.
+- Explicitly deny write hosts/paths/actions. Do not log CSRF tokens/session credentials; label strong isolation unachieved unless read-only credentials/scopes are found.
 
-## 10. Workers / Containers / OCI / Kubernetes適性
+## 10. Workers / Containers / OCI / Kubernetes suitability
 
-- **ローカルCLI / OCI: 適合。** CSV/PDF parserをOCI imageとして固定し、read-only input、network none、non-root、固定digestで実行できる。単一利用者では最も小さい構成。
-- **Cloudflare Workers: export解析には技術上可能、自動取得には時期尚早。** Scheduled handlerはあるが、公式API/read-only credentialがない。金融PIIをクラウドへ送る必要もないため、既定はローカル。将来、文書化されたread-only APIが出れば再評価する。
-- **Cloudflare Containers: 静的解析やブラウザー依存処理を動かせるが、認証・bot・write分離は解決しない。** 公開APK/JSの再現可能な静的解析環境には使えるが、個人の実データは投入しない。
-- **Cloudflare Browser Run: 技術的にはブラウザー操作・CDPが可能。** read-only観測の再現実験には候補だが、Akamai challengeや追加認証で止め、回避しない。認証済み定期取得は安全境界の検証後に限る。
-- **Kubernetes: 単一利用者には過剰。** 組織的な多数exportのオフライン処理ならCronJob、Secret、NetworkPolicyを使えるが、cluster導入はAPI/認証問題を解決しない。
+- **Local CLI / OCI: suitable.** Pin CSV/PDF parsers as OCI images, with read-only input, no network, non-root, fixed digest. Smallest setup for one user.
+- **Cloudflare Workers: technically possible for export parsing; premature for automated retrieval.** Scheduled handlers exist, but no official API/read-only credentials. No need to send financial PII to cloud, so default local. Reassess if a documented read-only API appears.
+- **Cloudflare Containers: can run static analysis/browser-dependent processing, but do not solve authentication/bot/write isolation.** Usable for reproducible public APK/JS static analysis; do not input actual personal data.
+- **Cloudflare Browser Run: technically supports browser operations/CDP.** Candidate for reproducing read-only observations; stop at Akamai challenges/extra authentication without bypassing. Authenticated scheduled retrieval only after safety boundary verification.
+- **Kubernetes: excessive for one user.** CronJob, Secret, NetworkPolicy fit organizational offline processing of many exports, but introducing a cluster does not solve API/authentication problems.
 
-基盤の一次資料:
+Primary infrastructure sources:
 
 - [Cloudflare Workers Scheduled handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/)
 - [Cloudflare Containers](https://developers.cloudflare.com/containers/get-started/)
@@ -222,72 +241,72 @@ BitwardenはID/パスワードのURIベース自動入力とpasskey保存に一�
 - [OCI Image Specification](https://specs.opencontainers.org/image-spec/)
 - [Kubernetes CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/)
 
-## 11. PR #5 共通A–E / cost
+## 11. PR #5 common A–E / cost
 
-[PR #5](https://github.com/risu729/kogane/pull/5) の共通尺度だけを用いる。
+Use only the common scale from [PR #5](https://github.com/risu729/kogane/pull/5).
 
-- A: scheduled headlessに適した文書化済みの直接export/API
-- B: 更新/再利用できるsessionを使う安定したread-only内部API
-- C: browser/app bootstrap後のheadless replayが現実的
-- D: 完全なbrowser/device automationが必要と思われる
-- E: manual captureが安全な既定
-- cost 1: 小さなwrapper ～ cost 5: device-bound/adversarial automation
+- A: direct documented export/API suitable for scheduled headless use
+- B: stable read-only internal API with renewable/reusable sessions
+- C: headless replay after browser/app bootstrap is realistic
+- D: full browser/device automation probably required
+- E: manual capture is the safe default
+- Cost 1: small wrapper through cost 5: device-bound/adversarial automation
 
-| 対象経路                                 |        Level / cost | 判断                                                 |
-| ---------------------------------------- | ------------------: | ---------------------------------------------------- |
-| クレジット月別CSV/PDF手動export          |         **E / 1–2** | 長期・公式・構造化。月単位選択と手動取得が必要       |
-| 請求PDF / 支払履歴印刷                   |           **E / 1** | 容易だがCSVより解析コスト、保持期間に差              |
-| プリペイド残高/履歴、ポイント手動capture |           **E / 2** | 公式export不明、値の手動マスクが必要                 |
-| 公開JS/APK静的解析                       | **C候補の調査 / 3** | endpoint/auth/write境界を具体化できる。実データ不要  |
-| 本人操作sessionの動的観測/replay         |       **C候補 / 4** | Akamai、追加認証、session、write混在。観測から段階化 |
-| アプリ完全自動化                         |           **D / 5** | device-bound。read-only境界を先に証明する必要        |
-| 公式read-only API                        |     未評価（A候補） | 現時点で仕様を確認できない                           |
+| Route                                             |                     Level / cost | Assessment                                                                   |
+| ------------------------------------------------- | -------------------------------: | ---------------------------------------------------------------------------- |
+| Manual monthly credit CSV/PDF export              |                      **E / 1–2** | Long-term, official, structured; monthly selection/manual retrieval required |
+| Billing PDF / payment history printing            |                        **E / 1** | Easy, but parsing cost/retention differ from CSV                             |
+| Manual prepaid balance/history and points capture |                        **E / 2** | Official export unknown; manual value masking needed                         |
+| Public JS/APK static analysis                     | **Research for C candidate / 3** | Can clarify endpoint/auth/write boundaries without actual data               |
+| Dynamic owner-session observation/replay          |              **C candidate / 4** | Akamai, extra authentication, sessions, mixed writes; stage from observation |
+| Full app automation                               |                        **D / 5** | Device-bound; prove read-only boundaries first                               |
+| Official read-only API                            |         Unassessed (A candidate) | Specification currently unverified                                           |
 
-## 12. read-only live検証とstop条件
+## 12. Read-only live verification and stop conditions
 
-### 次の実験
+### Next experiments
 
-1. PC版エポスNetで利用者が手動ログインし、調査者はメニュー名、年月selector、exportボタンだけを確認する。実値は表示・撮影・記録しない。
-2. 利用者が合意した1カ月分のCSV/PDFをGit外一時領域へ手動保存する。値を即時マスクし、header、文字コード、日付形式、支払区分、返金行の表現だけを確認する。原本はcommitしない。
-3. プリペイド画面は年月selectorと履歴列名だけを確認し、残高/明細値を記録しない。CSV/PDFボタンの有無を確認するが、チャージ導線には進まない。
-4. 公式APK/公開JSをhash固定して静的解析し、host/path候補とread/write分類を作る。secret、難読化解除キー、個人データは対象にしない。
-5. 必要なら本人操作中のDevTools/標準プロキシで通信メタデータだけを観測する。生HAR、body、header値、Cookie/tokenを保存せず、画面操作とmethod/path templateの対応だけを残す。
-6. synthetic fixtureでローカルparserとdedupeを検証する。通知、未確定、確定、取消負額を別状態として用意し、実利用を転記しない。
+1. User manually logs in to PC Epos Net; researcher checks only menu names, year/month selectors, and export buttons. Do not display/photograph/record actual values.
+2. User manually saves one agreed month of CSV/PDF outside Git in a temporary area. Mask values immediately; check only headers, encoding, date format, payment classifications, and refund row representation. Do not commit originals.
+3. On prepaid screens, check only year/month selectors and history column names; do not record balance/statement values. Check for CSV/PDF buttons without entering top-up paths.
+4. Statically analyze hash-pinned official APKs/public JS, making candidate host/path and read/write classifications. Secrets, deobfuscation keys, and personal data are out of scope.
+5. If needed, observe only communication metadata in DevTools/normal proxy during owner operation. Save no raw HAR, bodies, header values, cookies/tokens; retain only screen operation → method/path template mappings.
+6. Verify local parsers/deduplication with synthetic fixtures. Prepare notifications, pending, confirmed, cancellation negative amounts as separate states; do not copy actual usage.
 
-### 即時停止条件
+### Immediate stop conditions
 
-- ID、パスワード、カード番号、セキュリティコード、SMS OTP、session/Cookie/token、PII、実値を調査者が入力・保存する必要がある。
-- CAPTCHA、Akamai challenge、403、429、アクセス制限、ログイン失敗/ロック警告が出る。反復試行や回避をしない。
-- TLS interception、証明書ピンニング無効化、root/jailbreak、hook、WAF回避等のsecurity control bypassが必要になる。
-- 支払、チャージ、返金、ポイント利用、リボ/分割、キャッシング、カード/個人/口座/認証/通知設定のwriteが必要になる。
-- readとwriteをtransportで識別できず、副作用なしを確認できない。
-- export/通信captureに実値・秘密が入り、マスク前にログ・Git・クラウドへ残る可能性がある。
+- Researcher needs to enter/store IDs, passwords, card numbers, security codes, SMS OTPs, sessions/cookies/tokens, PII, or actual values.
+- CAPTCHA, Akamai challenges, 403, 429, access restrictions, login failure/lock warnings. No repeated attempts/bypass.
+- Security-control bypass becomes necessary: TLS interception, certificate pinning disablement, root/jailbreak, hooks, WAF bypass, etc.
+- Writes needed for payments, top-ups, refunds, points use, revolving/installments, cash advances, card/personal/account/authentication/notification settings.
+- Reads/writes cannot be distinguished in transport and absence of side effects cannot be confirmed.
+- Actual values/secrets in export/traffic captures might remain in logs/Git/cloud before masking.
 
-stop後は、既に確認済みの手動CSV/PDFまたは画面captureへ戻し、不明点を不明のまま記録する。
+After stopping, return to established manual CSV/PDF or screen capture; record unknowns as unknown.
 
-## 13. 事実・推測・未確認の整理
+## 13. Facts, hypotheses, and unverified items
 
-### 事実
+### Facts
 
-- PC月別履歴は2006年3月以降、PDF/CSV。支払履歴は12カ月、アプリ明細書は24カ月。
-- クレジット未確定、確定、取消負額には公式に説明された異なる表示がある。
-- プリペイド残高/履歴は別導線で、原則即時減算だが遅延・訂正・返金がある。
-- 通常ポイントは2年、ゴールド/プラチナは無期限。
-- WebはID/パスワードと条件付きカードセキュリティコード、アプリは初回後の生体/オートログイン、決済はVisa Secure SMS OTPを使う。
-- Akamai edgeとbot対策Cookie名を受動観測した。
+- PC monthly history: March 2006 onward, PDF/CSV. Payment history: 12 months; app statements: 24 months.
+- Credit pending, confirmed, and cancellation negative amounts have officially described distinct displays.
+- Prepaid balances/history have separate paths; generally immediate deduction, with delays/corrections/refunds.
+- Ordinary points: two years; Gold/Platinum: no expiry.
+- Web uses ID/password and conditional card security codes; app uses biometrics/automatic login after initial login; payments use Visa Secure SMS OTP.
+- Passively observed Akamai edge and bot-protection cookie names.
 
-### 推測
+### Hypotheses
 
-- 公開Web/appは認証済みHTTP transportを持つため、read routeの特定自体は静的/動的解析で可能と思われる。
-- 家計簿連携の公式記述からsession型連携の実在は分かるが、第三者が同じ方式を安全に再現できるとは限らない。
-- 月別CSVが最も安定したcollector入力になりそうだが、schema安定性はlive sampleで未検証。
+- Public Web/app have authenticated HTTP transport, so static/dynamic analysis likely can identify read routes.
+- Official household accounting integration descriptions establish session-based linking, but third parties may not be able to reproduce it safely.
+- Monthly CSV appears the most stable collector input, but schema stability has not been verified on live samples.
 
-### 未確認
+### Unverified
 
-- 公開/契約API、OAuth、read-only scopeの有無。
-- CSVの完全schema、文字コード、最大件数、ページング、同一取引ID、未確定行のCSV収録。
-- プリペイド履歴の最大期間・件数・列、CSV/PDF export、返金行表現。
-- ポイント増減履歴の期間/export。
-- session/token lifecycle、端末binding、passkey、アプリpinning/attestation。
-- family合計値の更新頻度とexport。
-- Akamaiの具体的WAF/Bot Manager設定とrate limit。
+- Public/contracted APIs, OAuth, read-only scopes.
+- Complete CSV schemas, encoding, maximum rows, pagination, common transaction IDs, pending row inclusion.
+- Prepaid history maximum periods/counts/columns, CSV/PDF export, refund representation.
+- Points change history periods/exports.
+- Session/token lifecycle, device binding, passkeys, app pinning/attestation.
+- Family aggregate update frequency/exports.
+- Concrete Akamai WAF/Bot Manager settings and rate limits.

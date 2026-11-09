@@ -193,6 +193,20 @@ shared bytes were checked against, not a path that still runs.
 
 Rules that hold for every collector below:
 
+- A failed provider logout or sign-off after all planned units were collected
+  and stored never lowers the run outcome or its run/unit coverage. The
+  immutable terminal records an auxiliary run report with `reportRef: logout`,
+  `reportKind: logout`, `outcome: failed` and the closed code
+  `safeErrorCode: logout_failed`; it does not put that code on the run or its
+  units. Collection failures before completion and persistence failures retain
+  their existing outcomes. No provider error text is kept. This policy follows
+  the owner decision of 2026-11-08 13:26 UTC
+  ([ADR 0044 amendment](adr/0044-smbc-resume-publication.md#amendment-2026-11-08-logout-after-complete-collection)).
+  SMBC Direct and GLOBAL PASS also log a `logoutFailed` boolean; PRESTIA bank
+  retains its `signoffFailed` boolean in its returned/scheduled run record.
+  The flag remains readable from `readTerminal` after the run; the Processor
+  currently derives only terminal run/unit reports for CORE, so collection
+  quality screens do not yet display the auxiliary flag.
 - The stored bytes are the collector's own sanitizer output, the same bytes
   the retired importer used to receive. A provider response that carries
   credentials, cookies or session material is never stored as it is.
@@ -254,6 +268,31 @@ Rules that hold for every collector below:
   the shared bucket added no cron or scheduler, so it never doubled provider
   access (11 §4).
 
+### Logout audit (2026-11-08)
+
+This audit covers every deployed collector's `src/` and `container/` paths.
+Provider logout is distinct from closing a local browser, relay, HTTP reader or
+container; this decision changes provider sign-off only. Session persistence,
+refresh, approval, acquisition and publication failure handling stay as before.
+
+| Collector      | Previous post-collection behavior                                                                                                                                  | Current behavior                                                                                                                                                                                                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SMBC Direct    | Logout failure appended `logout_failed` and made all completed chunks partial and ineligible for parsing.                                                          | Complete acquisition remains successful, retains `logoutSucceeded: false`, and publishes the auxiliary report. Failure cleanup before completion still appends its failure code.                                                                                                                      |
+| PRESTIA bank   | Sign-off was caught; success and acquired balance survived, but `signoffFailed` was only in the run result/log.                                                    | The same result plus the durable auxiliary terminal report.                                                                                                                                                                                                                                           |
+| GLOBAL PASS    | `signOut` swallowed count, visibility, click and load errors or a missing control. An unexpected escaping error could fail collection.                             | Sign-off detects those failures, emits a closed logout record, and the Worker records the flag without changing acquisition or rolling-window coverage. Its stream still validates month/page completeness, ordering and shape; browser/relay teardown failure remains a separate collection failure. |
+| MyJCB          | No provider logout. The logout control is an authenticated-page check. `login.close()` in `collectConnection` closes the browser in `finally` and can still throw. | No provider logout to change; browser closure behavior retained.                                                                                                                                                                                                                                      |
+| Vpass          | Shared session retained; per-card collection has no provider logout.                                                                                               | Unchanged.                                                                                                                                                                                                                                                                                            |
+| SBI Securities | Domestic/foreign/main-site collection has no provider logout.                                                                                                      | Unchanged.                                                                                                                                                                                                                                                                                            |
+| SBI VC Trade   | Encrypted gateway session retained and refreshed; no provider logout. Passkey bootstrap closes its browser before collection.                                      | Unchanged.                                                                                                                                                                                                                                                                                            |
+| SBI Shinsei    | No provider logout. Container browser/relay cleanup uses `diagnostic.cleanup`, which logs and catches failures.                                                    | Unchanged.                                                                                                                                                                                                                                                                                            |
+| Mizuho         | Per-run login and collection have no provider logout.                                                                                                              | Unchanged.                                                                                                                                                                                                                                                                                            |
+| St George      | No provider logout. Browser/relay close failures are caught by the container cleanup.                                                                              | Unchanged.                                                                                                                                                                                                                                                                                            |
+| Sony Bank      | Per-run authenticated request client has no provider logout.                                                                                                       | Unchanged.                                                                                                                                                                                                                                                                                            |
+| Mobile Suica   | History session retained; no provider logout. Browser bootstrap closes before history collection.                                                                  | Unchanged.                                                                                                                                                                                                                                                                                            |
+| Money Forward  | Session-based collection has no provider logout.                                                                                                                   | Unchanged.                                                                                                                                                                                                                                                                                            |
+| V Point        | Email-code session retained; no provider logout. Email ingestion has no provider session.                                                                          | Unchanged.                                                                                                                                                                                                                                                                                            |
+| V Point Pay    | App API collector is disabled (`email_only`); retained app client has no provider logout.                                                                          | Unchanged.                                                                                                                                                                                                                                                                                            |
+
 ### Terminal `source` ids and CORE source ids
 
 A terminal names the collector's own source id. The Processor maps it to the
@@ -278,6 +317,23 @@ constants against the routes in `config/ingest-clients.json`.
 | `kogane-sbi-vc-session-poc`        | `sbi-vc-trade`                        | `sbi-vc-trade`     |
 | `kogane-smbc-direct-backfill-poc`  | `smbc-direct`                         | `smbc-bank`        |
 | `kogane-mizuho-collector`          | `mizuho-bank`                         | `mizuho-bank`      |
+
+### Failed terminal codes at registration
+
+Migration 0086 adds nullable `collection_runs.provider_failure_code`. Registration
+copies the validated run-level `safeErrorCode` only for `providerOutcome: failed`,
+including both a refusal with `provider_run_failed` when no provider bytes exist
+and a failed run whose captured bytes register. The code must match the manifest
+vocabulary (`^[a-z0-9][a-z0-9_-]{0,99}$`); absent or invalid codes stay NULL.
+Unvalidated terminals, success and partial outcomes never supply this column.
+The value is immutable with the sighting; duplicate delivery cannot replace it.
+Existing rows stay NULL and no historical R2 terminals are backfilled.
+
+Collection quality exposes the reason as `failureCode` beside the registration
+reason, through the existing closed-code normalization: hyphens become
+underscores, and codes outside the display grammar become `unclassified`.
+This read adds no provider call or automatic retry. See
+[collection quality](read-model.md#collection-quality).
 
 ### Artifact datasets at registration (ADR 0022)
 
@@ -308,6 +364,20 @@ carried over unchanged, so no capture is parsed twice.
 | `wallet-history-YYYY-MM.html`                    | `sanitized_provider_capture` |
 | `collection-summary.json`                        | `collector_summary`          |
 | `manifest.json`                                  | `collector_manifest`         |
+
+For each currency/window, the first JSON history page's `countCnt` is the
+expected total, already checked against every walked JSON page. A zero total
+skips CSV; a positive total requires a CSV whose logical data-row count,
+excluding the header and blank lines, equals that total. The collector uses
+the shared CSV reader so quoted multiline cells and quote recovery count as
+in parsing. This check runs before collection returns artifacts, so failures
+end the shared run as `failed`, with no JSON transaction fallback:
+`history_csv_missing_with_transactions` (empty/missing body or failed CSV
+HTTP request), `history_csv_count_mismatch` (short or long CSV), or
+`history_csv_invalid` (invalid encoding/header). The allowlisted code is
+stored at terminal, report and account-unit scope, without provider text or
+amounts. Transport failures likewise fail the run. Existing failed-run
+artifact retention is unchanged. See [ADR 0092](adr/0092-sony-history-csv-only.md).
 
 Sanitizer: the collector's own `sanitizeWalletHtml` (Sony Bank Wallet
 statements), the same pass the retired legacy path applied before the importer
@@ -891,6 +961,7 @@ window, and `full_snapshot` with no range when it did not.
 | ------------------------------------------------------ | ---------------------------- | ---------------------------------------------- |
 | `account-list.html`                                    | `sanitized_provider_capture` | `account-list`                                 |
 | `ordinary/<branch>-<account>/history/<from>-<to>.html` | `sanitized_provider_capture` | `ordinary:<branch>:<account>:page:<from>:<to>` |
+| `ordinary/<branch>-<account>/history/empty.html`       | `sanitized_provider_capture` | `ordinary:<branch>:<account>:page:empty`       |
 | `ordinary/<branch>-<account>/history/unparsed.html`    | `sanitized_provider_capture` | `ordinary:<branch>:<account>:page:unparsed`    |
 
 One daily cron (`25 21 * * *` UTC, 06:25 JST) signs in once with the Worker
@@ -901,9 +972,28 @@ units with no artifact, `coverageStatus: unknown` and the closed code that
 stopped them as `safeErrorCode` (`account-limit`, a client code such as
 `read-http-error`, or the HTML parser's check as `parse-<code>`; anything else
 stays `collection-unit-failed`), which make the run `partial`. A history page
-the parser refuses is still stored, sanitized and `partial`, under the
-`unparsed` key above; no parser accepts that key, so it is evidence only.
+with no transaction block at all (the observed empty state,
+[docs/sources/mizuho-bank.md](sources/mizuho-bank.md#empty-history-page-2026-11-09))
+is one complete page with no rows, stored under the `empty` key above and
+parsed into no transaction and a complete empty page claim; it does not make
+the run `partial`. A history page the parser refuses is still stored, sanitized
+and `partial`, under the `unparsed` key above; no parser accepts that key, so
+it is evidence only. `kogane.collection-quality.read` does not list it either:
+Mizuho artifacts carry no dataset, and the cell read lists only artifacts with
+a dataset or a parse job.
 Additional authentication stops the run, and scheduled retries are disabled.
+
+The `mizuho-collection-result` record distinguishes six closed login-page
+checks under the existing `login-unrecognized-page` code: `form-count`,
+`field-value`, `missing-token`, `credential-controls`, `entry-base`, and
+`post-login-form`. A refused shape also carries `httpStatusClass` and the
+expected form's allow-listed name, never the observed form name or page text.
+`phaseDurationsMs` counts elapsed milliseconds in `login`, `account-list`,
+`history`, and `persistence`, accumulating repeated phases; unvisited phases
+are zero. Unknown exceptions and unlisted error codes use `internal-error`,
+including on failed units, instead of masquerading as `read-parse-error`.
+Known client and parser errors keep their closed codes. These diagnostics
+change no login retry, publication or evidence-retention rule.
 
 The `mizuho-weekly` maintenance rule defers the Sunday run until 08:15 JST
 (Saturday 22:00 to Sunday 08:15). The official window ends at 08:00
@@ -1275,10 +1365,35 @@ format change is needed for that step.
   (the retired importer forwarded this source's provider bytes verbatim after
   a Shift_JIS round-trip check), and that the `manifest.json` object equals the
   bytes `storeManifest` stages.
-- `requestedScope`: `date_range` over `DEFAULT_BACKFILL_FROM`…today,
+- `requestedScope`: `date_range` over `DEFAULT_BACKFILL_FROM` through the last
+  finished JST day at approval (inclusive),
   `unitKeys: ["account"]`; one `account` unit of kind `collection`. `ranges`:
   the requested range plus one `declared_coverage` range per collected month
   (the raw and normalized artifacts of a month share it).
+- **Closed days and resumable windows** (owner decision, 2026-11-08 13:26 UTC;
+  [issue 1178](https://github.com/risu729/kogane/issues/1178)). Fresh runs exclude
+  the current JST day entirely. A stopped run retains its stored `from`, `to`,
+  run identity, completed chunks and artifacts across later approvals, including
+  a changed `DEFAULT_BACKFILL_FROM`; it finishes that frozen window. The next
+  fresh backfill advances the end to the last finished JST day at its approval.
+  Legacy runs whose stored end was their approval day also resume. An alarm
+  defers an unfinished last chunk to the next JST midnight while its end day is
+  still open, rather than replacing the run or shrinking its recorded range.
+  The session can expire while waiting; recovery still needs a fresh approval.
+  Transaction artifacts record their request-start `collectedAt`. Publication
+  declares complete coverage only when every artifact's end day had already
+  finished at acquisition and the requested end had finished at completion.
+  Legacy artifacts without that timestamp use the run start as a conservative
+  lower bound. An old saved success that captured an open day keeps its bytes
+  and provider outcome but publishes `coverageStatus: partial` with
+  `coverage_day_not_finished` on its account unit (the run itself carries no
+  code: the terminal contract refuses one on a `success`; registration records
+  that unit `failed`), even if publication is retried after midnight;
+  stored progress and `/api/status` retain this coverage reason and report
+  `waitingForHuman: true`. The UI explains that a fresh QR approval and backfill
+  are needed, and that retrying shared publication cannot repair coverage. A
+  new run clears this recovery reason. Existing immutable terminals
+  are never rewritten. See [ADR 0044](adr/0044-smbc-resume-publication.md).
 - Media types lose their `charset` parameter in the terminal (`application/json`);
   the Shift_JIS bytes themselves are stored unchanged.
 - `transformations`: one `extracted` step per normalized artifact
@@ -1297,42 +1412,7 @@ format change is needed for that step.
   `waitingForHuman`, and a run that lost its session carries
   `human_required_approval` (G3-10, G3-11). `/api/status` reports
   `waitingForHuman` while the person still has to act.
-- **Open limits (owner decision pending; the code is as described).**
-  - _A failed logout makes a finished backfill partial and unrecoverable._ In
-    the completion branch of `SmbcBackfillSession.alarm()`
-    (`src/session.ts`, `progress.completedChunks >= ranges.length`), a
-    `profile.logout()` that throws adds `logout_failed` to `failureCodes`, so a
-    run whose every chunk was collected and stored ends `partial`, and its
-    terminal says `providerOutcome: partial`, `coverageStatus: partial`,
-    `safeErrorCode: logout_failed`. Under ADR 0044 a partial SMBC account unit
-    is never parsed. The run cannot be resumed: `isResumable`
-    (`src/progress.ts`) requires `completedChunks < totalChunks`, which no
-    longer holds, so the next approval in `finishAndStart` starts a fresh full
-    backfill from `DEFAULT_BACKFILL_FROM`, and that backfill's success is the
-    only way the months are parsed. The publication retry action
-    (`publishStoredRun`) republishes the same partial snapshot. The Prestia bank collector treats a failed
-    sign-off differently: `collectPrestiaBank`
-    (`services/collector-prestia-bank/src/client.ts`) catches it and returns
-    `signoffFailed: true`, the run stays `success`, and `signoffFailed` is
-    reported only in the body the run returns, not in its terminal. Whether a
-    failed logout should cost the run its coverage is not decided.
-    `test/retry-diagnostics.test.ts` ("a completion whose logout fails ends
-    partial with logout_failed and cannot be resumed") pins today's behaviour.
-  - _A successful backfill claims a day still in progress._ `finishAndStart`
-    sets the window's end to `japanToday()` (`src/dates.ts`), the current JST
-    date at approval, so the last month chunk ends on that day, its
-    `declared_coverage` range includes it, and a `success` terminal declares
-    `coverageStatus: complete` over it although the provider can still post
-    transactions on it after the chunk was read. The next backfill requests that
-    day again, because every backfill starts from `DEFAULT_BACKFILL_FROM`.
-    Sony Bank requests only through the last finished JST day
-    (`defaultWindow`, above), so each of its days is requested after it ends. Changing SMBC's end day also
-    changes its resume rule: a stopped run resumes only when `current.to === to`
-    for the `to` computed at the new approval, so today a run resumes only if
-    the person approves on the JST day it started, and after such a change a
-    stopped run stored with the old end day would no longer match and would
-    start a fresh backfill. Both the end day and the resume comparison are
-    undecided.
+
 - Verified with synthetic data only: `test/shared-collection.test.ts` and
   `worker-test/shared-data-bucket.test.ts` and `worker-test/continuation.test.ts`,
   which stage initial and resumed runs into a real

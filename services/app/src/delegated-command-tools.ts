@@ -81,7 +81,14 @@ export async function callDelegatedCommandTool(
       throw new HttpError(503, "command_executor_unavailable");
     const principal = resolution.principal;
     delegatedCan(principal, "commands.plan");
-    const input: unknown = parseRequest<unknown>(schemas[name], body ?? {});
+    const checked: unknown = parseRequest<unknown>(schemas[name], body ?? {});
+    // A plan's payload goes on as sent: a zod record drops a `__proto__` key
+    // without an issue, and the Processor's exact-key check must see it, as it
+    // sees every key the page's `/api/command/v1/plan` forwards.
+    const input =
+      name === "kogane.command.plan"
+        ? { ...(checked as object), payload: (body as { payload: unknown }).payload }
+        : checked;
     if (new TextEncoder().encode(JSON.stringify(input)).byteLength > 16_384)
       throw new HttpError(413, "request_too_large");
     audit.delegate(principal, executionFor(principal));

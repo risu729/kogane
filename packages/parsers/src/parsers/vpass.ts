@@ -78,7 +78,7 @@ interface Scope {
 
 export const vpassStatementPage: Parser = {
   name: "vpass-statement-page",
-  version: "1.2.0",
+  version: "1.2.1",
   accepts(artifact: ArtifactMeta): boolean {
     return (
       artifact.sourceId === SOURCE &&

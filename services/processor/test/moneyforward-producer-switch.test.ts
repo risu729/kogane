@@ -94,6 +94,14 @@ afterEach(async () => {
   mf = undefined;
 });
 
+/**
+ * Later migrations whose columns today's registration writes, applied ahead
+ * of their turn on a store stopped before the rewrite: 0086 adds
+ * `collection_runs.provider_failure_code`. It touches only `collection_runs`,
+ * which neither 0063 nor any migration between them rebuilds.
+ */
+const WRITER_COLUMNS = ["0086_collection_provider_failure_code.sql"];
+
 /** A store with every CORE migration before `before` applied (all by default). */
 async function store(before = "9999"): Promise<Env> {
   mf = new Miniflare(
@@ -108,6 +116,8 @@ async function store(before = "9999"): Promise<Env> {
   const db = await mf.getD1Database("DB");
   const read = await mf.getD1Database("READ");
   for (const file of migrationFiles(CORE_MIGRATIONS_URL).filter((name) => name < before))
+    await applyTestSql(db, migrationSql(CORE_MIGRATIONS_URL, file));
+  for (const file of WRITER_COLUMNS.filter((name) => name >= before))
     await applyTestSql(db, migrationSql(CORE_MIGRATIONS_URL, file));
   const bootstrap = readFileSync(
     new URL("../../../infra/bootstrap/ingest-clients.sql", import.meta.url),

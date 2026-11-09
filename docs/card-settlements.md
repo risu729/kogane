@@ -282,7 +282,8 @@ Limits:
 - **Historical SMBC and SBI Shinsei references remain uncomparable.**
   SMBC's legacy reference carries no account digits. New captures retain the
   successful request's branch, ordinary account type and number in normalized
-  artifacts; parser 1.1.0 preserves this context. Policy v3 compares only the
+  artifacts; parser releases 1.1.0 and 1.1.1 preserve this context, and both
+  qualify for account matching and readiness diagnostics. Policy v3 compares only the
   candidate debit's own published transaction/parse context and cites that
   observation. A later balance or another capture never supplies missing
   historical digits (ADR 0034). Unenriched account lists are cached once per

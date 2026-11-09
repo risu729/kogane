@@ -119,7 +119,7 @@ points; a transaction number beginning with `lp-` identifies a limited-time
 point grant. Consequently, CSV is strong transaction evidence but cannot by
 itself produce a complete balance-type ledger or expiry-lot ledger.
 
-How `paypay-csv` reads these columns today (parser 0.2.2): the direction of
+How `paypay-csv` reads these columns today (parser 0.2.3): the direction of
 a row comes from its column, outgoing as negative and incoming as positive.
 An amount that carries its own sign in either column (`-`, `+`, `△`, `▲` or
 parentheses) is not documented or observed, so the row keeps no amount and
@@ -127,6 +127,10 @@ gets a closed warning; a row stating both amounts is treated the same way.
 The date and time column is read as JST; a date or clock time that does not
 exist gives no instant and a warning. Details are in
 [observations](../observations.md#paypay-csv-a-signed-amount-in-either-amount-column-is-left-empty-parser-022).
+
+The shared CSV reader now warns on malformed quotes and keeps recovered rows
+and their verbatim cells. Well-formed multiline fields are unchanged; see the
+[shared CSV recovery boundary](../observations.md#shared-csv-reader-recover-malformed-quotes-without-losing-following-rows).
 
 ### Multiple paths for the same or related value
 

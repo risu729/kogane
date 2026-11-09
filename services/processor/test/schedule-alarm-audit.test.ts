@@ -180,6 +180,9 @@ test("an occurrence an earlier attempt already claimed is not claimed again and 
   )
     .bind(occurrenceId, nominal, new Date(Date.parse(nominal) + 1000).toISOString())
     .run();
+  const previous = await env.DB.prepare("SELECT * FROM collection_schedule_occurrences WHERE id=?")
+    .bind(occurrenceId)
+    .first();
   const before = (await alarmRecords()).length;
   let calls = 0;
   await new AlarmClass(state("mizuho-bank"), {
@@ -194,11 +197,12 @@ test("an occurrence an earlier attempt already claimed is not claimed again and 
   // The insert was ignored, so the record's guard found no row of this claim.
   expect(calls).toBe(0);
   expect((await alarmRecords()).length).toBe(before);
+  // A losing claimant must preserve the active owner's entire receipt.
   expect(
-    await env.DB.prepare("SELECT status FROM collection_schedule_occurrences WHERE id=?")
+    await env.DB.prepare("SELECT * FROM collection_schedule_occurrences WHERE id=?")
       .bind(occurrenceId)
-      .first<string>("status"),
-  ).toBe("uncertain");
+      .first(),
+  ).toEqual(previous);
 });
 
 test("the processor tick and the keepalive job claim their occurrences and write no audit record", async () => {

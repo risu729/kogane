@@ -5,193 +5,173 @@
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-調査日: 2026-08-31
+Research date: 2026-08-31
 
-VポイントPayは、Vポイント/VマネーMy PageやVpassとは別のプリペイド台帳である。
-公式Google Play packageは`com.smbc_card.vpoint`。候補APK 2.5.0をWSL上でJADX
-1.5.6とapktool 3.0.3により解析し、通常DEXのloaderを再現して8,300-byteの保護DEXを
-復号した。binaryと全解析出力はprivate archiveに置き、Koganeには秘密値・実データ・
-復号鍵・アプリ配布物を含めない。
+VポイントPay (V Point Pay) is a prepaid ledger separate from Vポイント (V Points)/Vマネー (V Money)
+My Page and Vpass. Official Play package: `com.smbc_card.vpoint`. Analyzed candidate APK 2.5.0 in WSL with
+JADX 1.5.6/apktool 3.0.3, reproduced an ordinary DEX loader, decrypted 8,300-byte protected DEX. Binaries/all
+analysis outputs stay in private archive; no secrets/actual data/decryption keys/app distributions in Kogane.
 
-## 結論
+## Conclusion
 
-ブラウザやAndroidを毎回動かす必要はない。初回の正規アプリ登録からrefresh tokenと
-random device UUIDを安全に引き継げれば、標準Cloudflare Workers `fetch()`でtoken更新、
-残高取得、全利用可能月の明細取得を行える構造である。PoCは
-`services/collector-vpoint-pay/`に実装した。
+No need to run browsers/Android each time. If refresh tokens/random device UUIDs can be safely carried from
+initial legitimate app registration, standard Workers `fetch()` can renew tokens/retrieve balances/all available
+monthly statements. PoC in `services/collector-vpoint-pay/`.
 
-確認したAPI:
+Established APIs:
 
-| Method | Path                                                     | 用途                                     |
-| ------ | -------------------------------------------------------- | ---------------------------------------- |
-| POST   | `/vpoint/api/v2/token`                                   | authorization code / refresh token grant |
-| GET    | `/vpoint/api/v2/prepaid/balance`                         | currency、残高、charge limit、最古照会月 |
-| GET    | `/vpoint/api/v1/prepaid/transaction?target_month=yyyyMM` | 月別明細                                 |
+| Method | Path                                                     | Purpose                                              |
+| ------ | -------------------------------------------------------- | ---------------------------------------------------- |
+| POST   | `/vpoint/api/v2/token`                                   | Authorization code / refresh token grant             |
+| GET    | `/vpoint/api/v2/prepaid/balance`                         | Currency/balance/top-up limit/earliest inquiry month |
+| GET    | `/vpoint/api/v1/prepaid/transaction?target_month=yyyyMM` | Monthly statements                                   |
 
-token応答はaccess token、生成時刻、有効秒数、rotated refresh tokenを含む。認証readは
-`X-Vapp-Access-Token`を使う。共通headerはアプリversion、Android OS、WebView系
-User-Agent、no-cache、`device_id`である。
+Token responses include access token, generation time, validity seconds, rotated refresh token.
+Authenticated reads use `X-Vapp-Access-Token`. Shared headers: app version, Android OS, WebView-style
+User-Agent, no-cache, `device_id`.
 
-月別明細は、利用日、説明、元通貨/金額、請求通貨/金額、transaction/ATM/exchange
-fee、為替レート、settlement status、承認番号、remarks、activity type、transaction typeを
-持つ。実際のenum値と原取引・返金のlinkageはlive responseで確認するまで推測しない。
+Monthly statements contain use date/description/original currency-amount/billing currency-amount/transaction-
+ATM-exchange fees/exchange rates/settlement statuses/authorization numbers/remarks/activity-transaction types.
+Do not infer actual enums/original-refund linkage before live responses.
 
-## 保護DEXとdevice header
+## Protected DEX and device headers
 
-APK asset `assets/nhnltyyy`は、asset名のJava hashをmaskにしたAES-128-CBCで暗号化
-されていた。loader内の二つの16-byte arrayを復元し、mask XOR後の第二配列をkey、
-第一配列をIVとしてPKCS#7 paddingを除去するとDalvik DEX 037が得られた。再現script、
-hash、tool version、JADX/apktool outputはprivate archiveに保存した。
+APK asset `assets/nhnltyyy` was AES-128-CBC encrypted with asset-name Java hash as mask. Restore two 16-byte
+loader arrays, mask-XOR second as key/first as IV, remove PKCS#7 padding → Dalvik DEX 037. Reproduction scripts,
+hashes/tool versions/JADX-apktool outputs saved privately.
 
-復号DEXの`EncryptDevice`は、UUIDのhex値、現在epoch秒、重み付きchecksumを用いる
-deterministic変換である。Android Keystore、hardware key、Play Integrity、端末固有の
-署名処理はこのheader生成に使われない。よってUUIDをsecretとして持てばWorkerへ移植できる。
+Decrypted `EncryptDevice` deterministically transforms UUID hex/current epoch seconds/weighted checksums.
+Header generation uses no Android Keystore/hardware keys/Play Integrity/device-specific signing. UUID as
+secret therefore permits Worker porting.
 
-通常Retrofit clientにはcertificate pinningが見つからず、network security configも
-cleartext禁止だけである。ただし、静的解析はproductionでのacceptanceを証明しない。
+No certificate pinning found in ordinary Retrofit clients; network security config only prohibits cleartext.
+Static analysis does not establish production acceptance.
 
-## 取得と保存方針
+## Retrieval and storage policy
 
-残高応答の`inquiry_period`を最古月としてJST当月まで走査する。公開FAQから固定保持期間を
-推測した月数は使わない。raw応答を月単位でprivate R2へ保存し、authorizationからsettlement、
-取消、返金による後日変更をsnapshot差分として保持する。
+Scan from balance `inquiry_period` earliest month through current JST month; do not infer fixed retention
+from FAQs. Save monthly raw responses privately in R2; retain later authorization-settlement/cancellation/
+refund changes as snapshot differences.
 
-refresh tokenはrotationされるため、初期値だけWorker secretに置き、実行後の値は単一
-Durable Objectへ保存する。token/UUID/access tokenをR2やログへ出さない。401等でrefreshが
-拒否された場合は繰り返さず、正規アプリで再認証してsecretを更新する。
+Refresh tokens rotate: only initial value in Worker secrets; subsequent values in one Durable Object. No
+tokens/UUID/access tokens in R2/logs. On refused refresh such as 401, no repetition; reauthenticate through
+legitimate app/update secrets.
 
-## 未完了のlive確認
+## Incomplete live checks
 
-- owner accountでの既存ユーザー登録（電話番号、SMS、6桁app passcode）
-- refresh tokenとRealm device UUIDの安全な一回限りの抽出
-- Workersからのrefresh、balance、全月transaction取得
-- `inquiry_period`の実値、明細enum、空月挙動、refresh token寿命、device revoke挙動
+- Existing user registration on owner account (phone/SMS/six-digit app passcode)
+- Safe one-time refresh token/Realm device UUID extraction
+- Worker refresh/balance/all monthly transactions
+- Actual `inquiry_period`, enums, empty months, refresh lifetime, device revocation behavior
 
-支払、チャージ、ポイント移行、カード設定その他のwrite APIは実装対象外である。
+Payment/top-up/points transfer/card settings/other write APIs out of implementation scope.
 
 ## Cloudflare live probe
 
-2026-08-31に専用Worker/R2をdeployした。Workerの標準`fetch()`から認証不要の
-`/vpoint/api/v2/common_settings`へ、静的解析と同じapp/OS/User-Agent/device headerを
-付けて到達し、HTTP 200 JSONを確認した。応答本文は口座データではなくR2にも保存しない。
+Deployed dedicated Worker/R2 on 2026-08-31. Standard Worker `fetch()` reached unauthenticated
+`/vpoint/api/v2/common_settings` with statically identified app/OS/User-Agent/device headers; HTTP 200 JSON.
+Response not account data, not stored in R2.
 
-この結果はCloudflare edge IPやTLS fingerprintだけでは拒否されないことを示す。一方、
-認証済みAPIのtoken/device bindingを証明しないため、owner app bootstrap後にrefresh、
-balance、transactionを個別に検証する。
+This shows requests are not rejected for the Cloudflare edge IP or TLS fingerprint alone. It does not prove
+authenticated-API token/device binding.
+After owner app bootstrap, verify refresh/balance/transactions individually.
 
-## 通知メールによる補助台帳
+## Supplementary notification email ledger
 
-app sessionがない期間も、公式通知メールから利用・チャージ・残高加算・利用不可eventを
-取得できる。これはapp API明細の代替正本ではなく、欠落期間を補う独立sourceとして扱う。
-`services/collector-vpoint/`の既存Email Workerへ取り込みを追加し、原本EMLと正規化JSONを
-VポイントPay用private R2へ保存する。Gmail転送は原本をinline `message/rfc822`にするため、
-外側のGmail送信者ではなく内側の公式送信者を検証する必要がある。
+Official emails supply usage/top-up/balance addition/decline events even without app sessions. Separate source
+supplementing gaps, not authoritative replacement for app statements. Added ingestion to existing
+`services/collector-vpoint/` Email Worker, saving original EML/normalized JSON to V Point Pay private R2.
+Gmail forwarding wraps originals in inline `message/rfc822`; validate inner official senders, not outer Gmail senders.
 
-VポイントPay側の登録メールを`vpointpay@takuk.me`へ変更した後は、公式からの直接配送を
-保存後にGmailへ転送する。一方、Gmailから`message/rfc822`でbackfillした通知は再転送しない。
-transport形状を明示的に区別し、通常通知を失わずに転送loopを防ぐ。
+After registered email changed to `vpointpay@takuk.me`, save direct official delivery then forward to Gmail.
+Do not reforward Gmail-backfilled `message/rfc822` notifications. Distinguish transport shapes explicitly,
+preventing loops without losing ordinary notices.
 
-2026-08-31に既存通知85通をbackfillし、85件すべてをhash keyで重複なしに保存した。
-Vポイント本体の同時点履歴149件との照合は、明示的なポイント額とJST暦日だけを使った。
-比較可能34件のうち11件一致、23件不一致、候補複数0件、比較対象外51件だった。
-app APIのlive snapshotは存在しないため、email対app明細は未照合である。
+Backfilled 85 existing notices on 2026-08-31, all saved without duplicates by hash keys. Compared same-time
+149 V Points history entries using explicit points amounts/JST calendar dates only. Of 34 comparable entries,
+11 matched/23 mismatched/zero ambiguous; 51 excluded. No live app snapshots, so email/app comparison unperformed.
 
-不一致を理由にsource eventを書き換えない。後日app APIが復旧したら、email、app transaction、
-Vポイント履歴を三つの独立sourceとして照合し、authorization/settlement/refundによる差を
-reportへ追加する。matchできないeventはunknownのまま残す。
+Do not rewrite source events due to mismatches. When app APIs recover, reconcile email/app transactions/
+V Points history independently, adding authorization/settlement/refund differences to reports. Unmatched stays unknown.
 
-## Layer A: 通知メール evidence の中央取り込み
+## Layer A: central ingestion of notification email evidence
 
-この節は2026-09-13に廃止したImporter経路の記録である。Importer（`services/collector-r2-importer`）、
-その監査script、collectorからのService Binding、historical scan routeとbackfill scriptはすでに
-存在しない。旧bucketのpairは中央DATAへコピー・検証済みであり（[legacy-retirement.md](../legacy-retirement.md)）、
-新着通知は`services/collector-vpoint`が`v-point-pay-email` runとして共有DATA bucketへ直接書く
-（[collection.md](../collection.md#v-point-pay-email-email-route-of-servicescollector-vpoint)）。
+Historical Importer route retired on 2026-09-13. Importer (`services/collector-r2-importer`), audit scripts,
+collector Service Binding, historical scan/backfill scripts no longer exist. Old bucket pairs copied/verified
+in central DATA ([legacy-retirement.md](../legacy-retirement.md)); new notices written directly to shared DATA
+by `services/collector-vpoint` as `v-point-pay-email` runs
+([collection.md](../collection.md#v-point-pay-email-email-route-of-servicescollector-vpoint)).
 
-`services/collector-vpoint-pay`のapp pollingはPR #60で停止済みであり、この取り込みでは再有効化しない。
-現存するsourceは`services/collector-vpoint`が保存した公式通知の二つ組だけである。
+App polling in `services/collector-vpoint-pay` stopped in PR #60; this ingestion does not reenable it.
+Existing source only official notice pairs saved by `services/collector-vpoint`.
 
-- `raw/v-point-pay-email/{date}/{message-sha256}.eml`: EmailEventまたは転送RFC822 partから保存したInternet Message Format
-- `raw/v-point-pay-email/{date}/{message-sha256}.json`: legacy `vpoint-pay-email-event-v1`またはenvelope provenance付き`vpoint-pay-email-event-v2`正規化event
+- `raw/v-point-pay-email/{date}/{message-sha256}.eml`: Internet Message Format from EmailEvent/forwarded RFC822 parts
+- `raw/v-point-pay-email/{date}/{message-sha256}.json`: legacy `vpoint-pay-email-event-v1` or envelope-provenance `vpoint-pay-email-event-v2` normalized events
 
-Importerは同じprefixにこの2 objectだけが存在すること、keyの日付とRFC Date、raw bytesの
-SHA-256とkey ID、schema別exact custom metadata、media type、RFC5322 From、対象subject、JSONのstrict
-schemaを検証する。さらにEMLからeventを独立に再計算し、正規化JSONと
-完全一致する場合だけ中央へ複製する。v2はCloudflare EmailEventのSMTP envelope From/To、
-directかforwarded RFC822 partかという保存境界、outer message checksumを固定する。EmailEvent APIは
-信頼済みSPF/DKIM/DMARC結果を公開しないため、RFCヘッダから認証成功を推測せず
-`authenticationProvenance=not-exposed-by-cloudflare-email-event`、
-`sourceVerification=source_unverified`とする。旧v1の85 pairにはenvelope provenanceを補作せず、
-transport `unknown`のlegacy unverifiedとして扱う。
+Importer checks exactly two same-prefix objects, key date/RFC Date, raw SHA-256/key ID, schema-specific exact
+custom metadata/media types/RFC5322 From/target subjects/strict JSON. Independently recomputes EML events,
+replicates centrally only on exact normalized JSON match. v2 pins EmailEvent SMTP envelope From/To,
+direct-versus-forwarded RFC822 storage boundary, outer checksums. EmailEvent exposes no trusted SPF/DKIM/DMARC
+results; infer no authentication from RFC headers. Use
+`authenticationProvenance=not-exposed-by-cloudflare-email-event`, `sourceVerification=source_unverified`.
+Do not fabricate envelope provenance for 85 old v1 pairs; legacy unverified with transport `unknown`.
 
-既存履歴は保存時にR2 native SHA-256を指定していなかったため、bounded bodyから再計算した
-SHA-256をkey・pair・中央object checksumへ厳密に結び付ける。native checksumが存在するobjectは
-再計算値との一致も必須とし、新着保存ではraw/JSON両方にnative SHA-256を指定する。監査は
-native checksumの有無をaggregate件数だけで報告し、欠落を値の不一致として扱わない。
+Old history lacked R2 native SHA-256 on storage; bind recomputed bounded-body SHA-256 strictly to keys/pairs/
+central checksums. Existing native checksums must match recomputation too; new raw/JSON storage sets both.
+Audits report native checksum presence only in aggregate counts, not absence as value mismatch.
 
-中央ではexternal source ID `v-point-pay-email`をcanonical `v-point-pay`へ対応させる。
-rawはprovider由来を主張しない`user_capture / unknown`、JSONはrawへのlineageを持つ
-`collector_derived / transformed`で、1 message unit・2 artifact・`email_batch` inventoryとして
-sealする。`producerVersion`と`sourceRunKey`は固定契約`vpoint-pay-email-r2-v2`に基づくため、
-Importerのdeployment revisionが変わっても同一pairを同じrunへ冪等replayできる。
+Centrally map external `v-point-pay-email` to canonical `v-point-pay`. Raw `user_capture / unknown` claims no
+provider provenance; JSON `collector_derived / transformed` has raw lineage. Seal one message unit/two artifacts/
+`email_batch` inventory. Fixed `vpoint-pay-email-r2-v2` contract governs `producerVersion`/`sourceRunKey`,
+so deployment revision changes still idempotently replay pairs into the same runs.
 
-`derived/v-point-pay-email-reconciliation/...`はVポイント本体の履歴との比較から作った別の
-collector summaryであり、canonical sourceは`v-point`である。今回のメールImporterはこれを
-走査しない。app API snapshotのprefixも対象外であり、emailをapp明細の代替正本とは扱わない。
+`derived/v-point-pay-email-reconciliation/...` is another collector summary comparing V Points history,
+canonical source `v-point`. Email Importer does not scan it, nor app snapshot prefixes; email is not an app statement substitute.
 
-historical scanはHMAC署名付きopaque cursorを用いてR2 objectを1件ずつ走査し、`.json`ごとに
-pairを取り込む。`.eml`は対応JSON側で一緒に検証されるためscan上はskipする。応答とscriptは
-件数と固定failure codeだけを出し、source object key、個別hash、本文、値、tokenを出さない。
-import failure時はcontinuationを返さずcursorを進めないため、同じ入力cursorで同じpairをretryする。
-source R2へのwrite/deleteは行わない。
+Historical scans use HMAC-signed opaque cursors, scanning objects individually, importing per `.json`.
+Skip `.eml` in scans because corresponding JSON validates it. Responses/scripts emit only counts/fixed codes,
+no source keys/individual hashes/bodies/values/tokens. Import failures return no continuations/advance no
+cursors; same input retries same pairs. No source R2 writes/deletes.
 
-当時は新着メール保存後の中央取り込みを`waitUntil`で試行し、失敗pairはsource R2から上記scanで
-再送していた。監査script、backfill script、Service Bindingは2026-09-13にImporterとともに廃止した。
-GitHub Actions cronは使わず、既存collectorのscheduleと廃止済みapp polling設定は変更しない。
+At the time, central ingestion was attempted with `waitUntil` after new email saves; failures rescanned from
+source R2. Audit/backfill scripts/Service Binding retired with Importer on 2026-09-13. No GitHub Actions cron;
+existing collector schedules/retired app polling settings unchanged.
 
-## Layer B: 通知eventからの金融観測
+## Layer B: financial observations from notification events
 
-Layer Bは中央で`v-point-pay`に正規化された`notification-event`の
-`normalized-event.json`だけを読む。対になる`notification-mail`は証拠専用で、parserを登録しない。
-これにより原本メールと正規化eventを同じ取引として二重計上しない。
+Layer B reads only `normalized-event.json` of centrally canonicalized `v-point-pay` `notification-event`.
+Paired `notification-mail` is evidence only, no parser. Avoid double counting original/normalized as one transaction.
 
-通知本文はsettlementや確定売上を主張しないため、非declined eventは
-`v-point-pay:notification-events`に`status=notified`で置く。`usage`はoutflow通知、
-`charge`と`balance-addition`はinflow通知として表示額の符号だけを正規化するが、
-確定prepaid cashflowとは扱わない。`declined`は失敗した試行として`status=declined`を残し、
-試行額をtyped cashflowにせず`extra`だけに保持する。
+Notices do not claim settlement/confirmed sales. Non-declined events go to `v-point-pay:notification-events`
+with `status=notified`: `usage` outflow, `charge`/`balance-addition` inflow, normalizing displayed amount signs
+only, not confirmed prepaid cashflows. `declined` retains `status=declined` as failed attempts; amounts only
+in `extra`, not typed cashflow.
 
-`usedPoints`があっても、通知の利用総額をprepaid円とVポイントの二つのlegへ推測分割しない。
-表示総額とポイント数は`extra`にそのまま残す。`balanceYen`が存在する場合だけ、
-`v-point-pay:prepaid-yen`のbalance snapshotを別に作る。これによりポイント優先払いを
-prepaid円からの確定全額outflowと誤表示せず、後日のapp明細との照合余地を残す。
+Even with `usedPoints`, do not infer two legs splitting total usage into prepaid yen/V Points. Retain total/
+points in `extra`. Create separate `v-point-pay:prepaid-yen` balance snapshots only with `balanceYen`.
+Avoid showing points-first payments as confirmed full prepaid-yen outflows; preserve later app reconciliation.
 
-parserはLayer Aと同じv1/v2 exact schema、event identity、canonical UTC時刻、subjectとevent type、
-v2 envelope provenance、金額の整数境界を検証し、successfulかつfailure-freeなrun以外を拒否する。
-current取引は同じevent identityのreplayをcollapseし、current残高はDB投入順ではなく
-成功runに属する最新event時刻を選ぶ。匿名fixtureは4 event type、二重route拒否、通知statusと符号、
-funding split非推測、declined amount、残高account分離、schema/provenance drift、失敗runを固定する。
+Parser validates same exact v1/v2 schemas as Layer A, event identities/canonical UTC/subject-event types/
+v2 envelopes/integer amount bounds, rejecting non-successful/non-failure-free runs. Current transactions
+collapse identity replays; current balances select latest event time in successful runs, not insertion order.
+Anonymous fixtures pin four types, dual-route refusal, notice status-signs, no funding split inference,
+declined amounts, balance account separation, schema/provenance drift, failed runs.
 
-`services/collector-r2-importer/scripts/audit-v-point-pay-layer-b-r2.sh`は既存のLayer A pair
-validatorを通した後にLayer Bを実行する本番canaryだった（2026-09-13にImporterとともに廃止）。localhost限定Workerとremote read-only
-R2 bindingだけを使い、object key、hash、本文、金額、残高、ポイント、認証情報を返さず、
-object種別とobservation種別のaggregate件数だけを出す。deploy、R2 write、R2 delete経路は持たない。
+`services/collector-r2-importer/scripts/audit-v-point-pay-layer-b-r2.sh` was a production canary running Layer B
+after pair validation (retired with Importer 2026-09-13). Localhost-only Worker/remote read-only R2, returning
+only aggregate object/observation types, no keys/hashes/bodies/amounts/balances/points/authentication.
+No deploy/R2-write/delete paths.
 
-## 追記: 共通DATA R2への切替（U09）
+## Addendum: switch to shared DATA R2 (U09)
 
-`services/collector-vpoint-pay`は`COLLECTION_TARGET`を読まない。保存先は
-binding `DATA`（`kogane-raw-evidence`）だけである。Durable Objectが
-`packages/collection`経由で`objects/<2hex>/<sha256>`へ保存し、
-`runs/v-point-pay/<runId>/terminal.json`を最後に書く。結果の`target`は
-`"shared"`だけである。artifactは
-`balance.json`・`transactions-yyyyMM.json`（role `collector_derived`）と
-`collection-summary.json`（role `collector_summary`）で、bytesは現行と同一である。
-terminalの`requestedScope`は`inquiry_period`から当月までの`month_range`で、
-失敗して月範囲が不明な場合は範囲を推測せず`unspecified`とする。
-refresh token・device UUID・access tokenはartifactにもlogにも出さず、
-失敗は機械codeだけを残す。
+`services/collector-vpoint-pay` ignores `COLLECTION_TARGET`. Only binding `DATA` (`kogane-raw-evidence`).
+Durable Object stores through `packages/collection` at `objects/<2hex>/<sha256>`, writing
+`runs/v-point-pay/<runId>/terminal.json` last. Result `target` only `"shared"`. Artifacts:
+`balance.json`/`transactions-yyyyMM.json` (role `collector_derived`), `collection-summary.json`
+(role `collector_summary`), bytes unchanged. Terminal `requestedScope`: `month_range` from `inquiry_period`
+through current month; if failures leave range unknown, use `unspecified`, no inference. No refresh tokens/
+device UUIDs/access tokens in artifacts/logs; fixed machine failure codes only.
 
-app API collectorは停止したままで、Cronもtriggerも追加しない。Durable Objectの
-二重収集防止（in-flight排他）とclass/tag、Worker名、既存bucket bindingは変更しない。
-VポイントPay通知mailの収集は引き続き`services/collector-vpoint`側の
-`v-point-pay-email` runである。切替順とrollbackは`docs/collection.md`。
+App collector remains stopped; add no Cron/triggers. Durable Object in-flight exclusion/class-tag, Worker names,
+bucket bindings unchanged. Notice collection remains `services/collector-vpoint` `v-point-pay-email` runs.
+Switch order/rollback in `docs/collection.md`.

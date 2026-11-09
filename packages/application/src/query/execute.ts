@@ -229,6 +229,12 @@ interface Collected<T> {
   rows: T[];
   /** A scope pair reached the scan bound before it ran out of rows. */
   scanBound: boolean;
+  /**
+   * Whether every pair that may hold a row of this source was read to its
+   * end. Only then does a source with no row read have none in scope: a pair
+   * that stopped once it had the page has rows past it.
+   */
+  readToEnd(source: string): boolean;
 }
 
 /**
@@ -246,6 +252,7 @@ async function collect<T>(
 ): Promise<Collected<T>> {
   const rows: T[] = [];
   let scanBound = false;
+  const unfinished: (string | undefined)[] = [];
   for (const pair of pairs) {
     // Each pair is read in its own order, which is the merge order restricted
     // to that pair, so its first `need` rows are all the merge can use.
@@ -254,16 +261,26 @@ async function collect<T>(
     for (let index = 0; ; index += 1) {
       if (index >= MAX_READER_PAGES) {
         scanBound = true;
+        unfinished.push(pair.source);
         break;
       }
       const batch = await page(pair, offset);
       rows.push(...batch);
       collected += batch.length;
-      if (batch.length < READER_PAGE || collected >= need) break;
+      if (batch.length < READER_PAGE) break;
+      if (collected >= need) {
+        unfinished.push(pair.source);
+        break;
+      }
       offset += READER_PAGE;
     }
   }
-  return { rows, scanBound };
+  return {
+    rows,
+    scanBound,
+    readToEnd: (source) =>
+      !unfinished.some((pairSource) => pairSource === undefined || pairSource === source),
+  };
 }
 
 function coverageOf(
@@ -312,7 +329,7 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
 
   const limit = requestedLimit(request);
   const digest = await querySpecDigest(opened.resolvedQuery);
-  const resume = resumeOffset(request.cursor, opened.context.contextId, digest);
+  const resume = resumeOffset(request.cursor, opened.pagingBasisRef, digest);
   if (!resume.ok) return fail("stale_context", [opened.context.contextId]);
   const offset = resume.offset;
   const need = offset + limit + 1;
@@ -585,6 +602,7 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
       coveredRef,
       sources: sourceScope.sources ?? visible,
       present: new Set(sorted.map((row) => row.source_id)),
+      readToEnd: collected.readToEnd,
       data: { intent: "reported-state", rows },
       exact: rows.every((row) => row.amountMinor !== null),
       dated: rows.every((row) => row.asOf !== null),
@@ -636,6 +654,7 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
     coveredRef,
     sources: sourceScope.sources ?? visible,
     present: new Set(sorted.map((row) => row.source_id)),
+    readToEnd: collected.readToEnd,
     data: { intent: "activity", rows },
     exact: rows.every((row) => row.amountMinor !== null),
     dated: rows.every((row) => row.asOf !== null),
@@ -655,6 +674,7 @@ function rowResult(input: {
   coveredRef: string;
   sources: readonly string[];
   present: ReadonlySet<string>;
+  readToEnd(source: string): boolean;
   data: QueryData;
   exact: boolean;
   dated: boolean;
@@ -664,12 +684,14 @@ function rowResult(input: {
   limit: number;
   refs: string[];
 }): QueryOutcome {
+  // A source is named as having no rows only when the read reached the end of
+  // every pair that could hold one; past the rows read, nothing is known.
   const gaps = input.sources
-    .filter((source) => !input.present.has(source))
+    .filter((source) => !input.present.has(source) && input.readToEnd(source))
     .map((source) => ({ reasonCode: "no_rows_in_scope", scopeRef: `source:${source}` }));
   const nextCursor = input.more
     ? encodeCursor({
-        contextId: input.opened.context.contextId,
+        basisRef: input.opened.pagingBasisRef,
         queryDigest: input.digest,
         offset: input.offset + input.limit,
       })

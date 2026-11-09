@@ -114,7 +114,7 @@ statistics; 398 ms today and 346 ms a year back at `STATEMENT_SCALE` on
 `bun:sqlite`), `services/app/test/reported-state-api.test.ts`, and the web
 contract and browser tests, all on synthetic data.
 
-## Agent read amendment — 2026-11-06 (proposed)
+## Agent read amendment — 2026-11-06
 
 - Status: accepted (merged 2026-11-06 in #953)
 - Date: 2026-11-06
@@ -162,3 +162,47 @@ MCP; grant refusals before the body is validated; absence without the views; one
 R0 audit record per served call with a row count and nothing else. The
 pinned tool lists in `services/app/test/agent-api.test.ts` (schema snapshot
 included) and `services/app/test/mcp-client.test.ts`.
+
+## Request rules amendment — 2026-11-08
+
+- Status: accepted (merged 2026-11-08 in [#1173](https://github.com/risu729/kogane/pull/1173))
+- Date: 2026-11-08
+
+**Context.** The agent read amendment above shared `readReportedState`
+between the route and the tool, but the tool validated its body against the
+published schema first. A body outside the patterns was therefore
+`400 invalid_request` on both agent paths where the route answered the same
+request differently: `date=20260910` or a missing date was the route's
+`invalid_date`, and a malformed `source` or `account`, an unknown or an empty
+parameter its `invalid_query`. [ADR 0081](0081-ui-parity-through-mcp.md)
+point 2 asks for the service's refusal codes on both adapters.
+
+**Options considered.** (1) Keep the schema check and document the
+divergence: rejected, against ADR 0081. (2) Map the schema's issues to the
+route's codes in the tool: rejected, a second copy of the rules that can
+drift. (3) Move the request rules into `packages/application` and have both
+adapters hand them the same body: chosen.
+
+**Decision.** `readReportedStateRequest`
+(`packages/application/src/query/reported-state-read.ts`) takes an untrusted
+body and answers the state or a closed refusal with its status:
+`invalid_query` (not an object, another key, an empty value; a malformed
+`source` or `account`), `invalid_date` (a missing date or one that is not a
+`YYYY-MM-DD` calendar day), `date_in_future`, and `result_limit_exceeded`
+(413). The route turns its query string into that body
+(`reportedStateBodyFromQuery`, which also refuses a repeated parameter as
+`invalid_query`); the tool passes its arguments unchanged after its grant
+checks. The tool's published schema keeps the service's patterns as a hint.
+
+**Consequences.** The route's answers are unchanged. On both agent paths a
+body outside the patterns now gets the route's code instead of
+`invalid_request`. The grant checks are unchanged (the tool's
+`records.read` over the whole store before the body; the route's reader
+authority).
+
+**Verification.** `packages/application/test/reported-state-read.test.ts`
+(each body and the query string that spells it get one refusal before any
+read; wrong types; the row bound) and
+`services/app/test/reported-state-api.test.ts` ("refuses with the route's
+codes and the same status on the route and both agent paths": the route,
+`POST /api/agent/v1/reported-state.read` and `/mcp` on the same requests).

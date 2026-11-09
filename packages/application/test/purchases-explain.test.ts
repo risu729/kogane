@@ -167,6 +167,8 @@ describe("the agent reads the operator's page", () => {
           offset: "offset" in request ? request.offset : 0,
         },
         decisions: "operator-only",
+        // Two events: no page follows the first, so none is offered.
+        nextPage: "none",
         data: withoutReviewAffordances(page),
       });
       // Nothing but the candidates' affordances differs from the page.
@@ -294,6 +296,57 @@ describe("bounds", () => {
     expect((await run(100, { offset: 50 })).outcome.ok).toBe(true);
     expect((await run(1, { eventId: postedEvent })).outcome.ok).toBe(true);
     expect(ERROR_STATUS.budget_exceeded).toBe(413);
+  });
+
+  test("a next page the same grant would be refused is not offered, and says why", async () => {
+    // Two full pages and one more event: 101 Vpass charges, all synthetic.
+    const w = new PurchaseWorld();
+    worlds.push(w);
+    for (let index = 0; index < 101; index += 1)
+      await w.recognise(
+        w.usage({ externalId: `vpass-web:row-${String(index)}`, amount: -(100 + index) }),
+      );
+    const budget = (maxRows: number) => ({ maxRows, maxProposalTargets: 1, maxExplainDepth: 1 });
+    const read = async (maxRows: number, offset: number) =>
+      explainCardPurchases({
+        grant: grant({ budget: budget(maxRows) }),
+        sql: w.sql,
+        request: { offset },
+      });
+    const page = async (maxRows: number, offset: number) => explained(await read(maxRows, offset));
+
+    // The grant reaches the next page: it is offered, and that request is answered.
+    const first = await page(100, 0);
+    expect(first.data.summary.events).toBe(101);
+    expect([first.data.nextOffset, first.nextPage]).toEqual([50, "offered"]);
+    expect((await read(100, 50)).ok).toBe(true);
+    // It does not: no next offset, the closed reason instead, and the request
+    // the next offset would have named is refused with that code.
+    const bounded = await page(100, 50);
+    expect(bounded.data.items).toHaveLength(50);
+    expect([bounded.data.nextOffset, bounded.nextPage]).toEqual([null, "budget_exceeded"]);
+    expect(await read(100, 100)).toMatchObject({
+      ok: false,
+      error: { code: "budget_exceeded", refs: ["budget:maxRows=100"] },
+    });
+    // The same at the first page of a smaller grant.
+    expect(await page(50, 0)).toMatchObject({
+      nextPage: "budget_exceeded",
+      data: { nextOffset: null },
+    });
+    // A grant that reaches the last page is offered it; past it there is none.
+    const last = await page(150, 100);
+    expect([last.data.items.length, last.data.nextOffset, last.nextPage]).toEqual([
+      1,
+      null,
+      "none",
+    ]);
+    expect((await page(150, 50)).nextPage).toBe("offered");
+    // Everything else is the operator page's own answer.
+    const operator = await queryCardPurchases(w.sql, { offset: 50 });
+    expect(operator.nextOffset).toBe(100);
+    expect(bounded.data).toEqual({ ...withoutReviewAffordances(operator), nextOffset: null });
+    expect(validAgentCardPurchasePage(bounded.data)).toBe(true);
   });
 
   test("a filter past the summary bound is refused, never partially summed", async () => {

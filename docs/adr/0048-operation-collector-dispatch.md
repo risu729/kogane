@@ -1,17 +1,24 @@
 # ADR 0048: Run an accepted collection or session refresh once through the named collector RPC
 
-- Status: accepted (merged 2026-10-08 in #576; production dispatch unverified)
+- Status: accepted (merged 2026-10-08 in #576; production dispatch verified
+  2026-11-08, [below](#amendment-2026-11-08-five-connections-enabled-and-verified-in-production))
 - Date: 2026-10-08
 - Issue: #544
 - Amended: 2026-11-07, the `projected` stage is derived from the READ pointer
   ([below](#amendment-2026-11-07-the-projected-stage-is-derived-from-the-read-pointer);
-  proposed)
+  accepted, #1097)
 - Amended: 2026-11-07, the operator's 依頼の経過 page
-  ([below](#amendment-2026-11-07--the-operators-依頼の経過-page-proposed);
-  proposed)
+  ([below](#amendment-2026-11-07--the-operators-依頼の経過-page);
+  accepted, #1075)
 - Amended: 2026-11-08, a collection with more than 100 runs
   ([below](#amendment-a-collection-with-more-than-100-runs-2026-11-08);
-  proposed)
+  accepted, #1111)
+- Amended: 2026-11-08, five connections enabled and verified in production
+  ([below](#amendment-2026-11-08-five-connections-enabled-and-verified-in-production);
+  accepted, #1179)
+- Amended: 2026-11-08, St George and SBI VC enabled
+  ([below](#amendment-2026-11-08-st-george-and-sbi-vc-enabled);
+  accepted, #1189)
 
 ## Context
 
@@ -98,7 +105,8 @@ would mix acceptance (a core-keep fact) with execution (operational state).
    (`operation_expired`).
 4. The connection is not listed in the new Processor variable
    `OPS_COLLECTOR_DISPATCH_CONNECTIONS` (a JSON array; empty, absent or
-   malformed means none, and the committed value is empty) → waits
+   malformed means none; the committed value was empty until the
+   [2026-11-08 amendment](#amendment-2026-11-08-five-connections-enabled-and-verified-in-production)) → waits
    (`collector_dispatch_disabled`, re-checked hourly) and so expires unless the
    owner enables the connection.
 5. An enabled connection without a binding in this deployment →
@@ -201,10 +209,13 @@ retry/backoff library, because the policy after a start is "never retry".
 
 Open limits, written down rather than guessed:
 
-- Production dispatch has not run: no connection is enabled, and no deployed
-  collector has served `runOperation`.
+- ~~Production dispatch has not run: no connection is enabled, and no deployed
+  collector has served `runOperation`.~~ Closed by the
+  [2026-11-08 amendment](#amendment-2026-11-08-five-connections-enabled-and-verified-in-production).
 - The requested window is not applied by any collector.
-- READ projection of a run is not traced; `projected` stays pending.
+- ~~READ projection of a run is not traced; `projected` stays pending.~~
+  Closed by the
+  [2026-11-07 amendment](#amendment-2026-11-07-the-projected-stage-is-derived-from-the-read-pointer).
 - The operator UI reads one operation's trail on its 依頼の経過 page
   (amendment of 2026-11-07 below); no page lists operations, and the UI sends
   no operations request. `kogane.ops.operation.get` returns the same record to
@@ -251,7 +262,7 @@ production trail to publication are unverified.
 
 ## Amendment 2026-11-07: the `projected` stage is derived from the READ pointer
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1097](https://github.com/risu729/kogane/pull/1097))
 - Date: 2026-11-07
 - Carried by: `packages/application/src/operations/projection-trace.ts`,
   `trackCollectorPublication` (`collector-dispatch.ts`) and `readOperation`
@@ -350,9 +361,10 @@ not keep is the revision at which a given parse was published:
   the stored revision, so its first publication covers it again. Whatever
   else reads `ops_requests.status` directly sees `running`.
 - Only executions recorded `published` after this change carry a revision;
-  an earlier one reads `projection_revision_unrecorded` for good. No
-  production execution was ever published (no connection is enabled), so
-  this affects none today.
+  an earlier one reads `projection_revision_unrecorded` for good. When this
+  amendment was written no production execution had been published; the
+  first one (sony-bank, 2026-11-08) was published before this amendment
+  deployed and so reads `projection_revision_unrecorded`.
 - Coverage is a revision comparison over the whole CORE input, whatever the
   balance projection keeps from the request's parses (a transaction-only
   collection contributes no balance row, and is still covered once the
@@ -385,11 +397,14 @@ not keep is the revision at which a given parse was published:
   stores the requirement when it records `published`; a reader without READ
   reports `read_model_unavailable`.
 
-A production trail to `projected` is unverified: no connection is enabled.
+A production trail to `projected` was unverified when this amendment was
+written; the
+[2026-11-08 amendment](#amendment-2026-11-08-five-connections-enabled-and-verified-in-production)
+followed four to `completed`.
 
-## Amendment 2026-11-07 — the operator's 依頼の経過 page (proposed)
+## Amendment 2026-11-07 — the operator's 依頼の経過 page
 
-Status: proposed (accepted when its pull request merges).
+Status: accepted (merged 2026-11-08 in [#1075](https://github.com/risu729/kogane/pull/1075)).
 
 **Context.** Phase 3 of the [roadmap](../roadmap.md#phase-3--coverage-collection-requests-and-cross-source-identity)
 asks that a collection can be requested and followed to published
@@ -485,7 +500,7 @@ for the MCP client's).
 
 ## Amendment: a collection with more than 100 runs (2026-11-08)
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1111](https://github.com/risu729/kogane/pull/1111))
 - Date: 2026-11-08
 - Carried by: `MAX_RUN_IDS`, `RUN_IDS_OVER_LIMIT`, `scheduledCompletion`,
   `scheduledResult` and `scheduledFailure` in
@@ -567,3 +582,148 @@ first 100 runs. `collectorOperationResult` checks the same `MAX_RUN_IDS`.
 - `packages/application/test/collection-quality-query.test.ts`: an occurrence
   naming 100 runs keeps the collection-quality summary within its contract;
   101 do not.
+
+## Amendment 2026-11-08: five connections enabled and verified in production
+
+Status: accepted (merged 2026-11-08 in [#1179](https://github.com/risu729/kogane/pull/1179)).
+
+### Context
+
+The decision above left every connection disabled until the owner enabled
+one, and its open limits said production dispatch had not run. On 2026-11-08
+03:19 UTC the owner allowed agents to request collections without a limit,
+asked that every healthy connection be enabled, and asked that the request
+tool tell its caller to read the source's history first
+([AGENTS.md](../../AGENTS.md#production-data)).
+
+### Decision
+
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, `sbi-securities`,
+`mobile-suica`, `moneyforward-me` and `myjcb` in both Processor
+configurations (sony-bank in #1119, the other four in #1149). The first
+request per connection was sent one at a time through
+`kogane.ops.collection.request`, after reading the source's collection
+quality, schedule, leases, maintenance windows and earlier requests ([ops-api.md](../ops-api.md#requesting-a-collection-as-an-agent)).
+The gates, the one start per tick and the never-retry policy are unchanged.
+The remaining connections wait for their own fixes
+([ops-api.md](../ops-api.md#enabling-collector-execution-adr-0048); St
+George and SBI VC in #1140).
+
+### Consequences
+
+- Each of the five requests went accepted → started → collected →
+  published, with every parse-selected run published and no reason code.
+  Four reached `projected` and `status: completed`; sony-bank's was
+  published before the READ-tracing amendment deployed and reads
+  `projection_revision_unrecorded`, as that amendment says.
+- The tracker records a publication only when it next checks the execution
+  (`TRACK_INTERVAL_MS`), so the trail shows `published` some minutes after
+  the run was published.
+- The open limit "Production dispatch has not run" is closed. The requested
+  window and unattended session refresh remain open as written above.
+
+### Verification
+
+- The committed list and its parsing: `services/processor/wrangler.jsonc`,
+  `services/processor/cloudflare.config.ts`,
+  `services/processor/test/operation-dispatch.test.ts`, and the resource
+  ledger's digest in `scripts/resource-ledger.test.ts`.
+- Production (2026-11-08, read through Kogane MCP, no provider contacted by
+  hand): one operation per connection read through
+  `kogane.ops.operation.get` to its terminal state, recorded in
+  [current-status.md](../current-status.md) and
+  [ops-api.md](../ops-api.md#enabling-collector-execution-adr-0048) by #1170.
+
+## Amendment 2026-11-08: St George and SBI VC enabled
+
+Status: accepted (merged 2026-11-09 in [#1189](https://github.com/risu729/kogane/pull/1189)).
+
+### Context
+
+The amendment above left `st-george`, `sbi-vc-trade` and `sbi-vc-keepalive`
+waiting for [#1131](https://github.com/risu729/kogane/pull/1131), which
+retired these collectors' admin routes
+([ADR 0069](0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08)).
+Since then an accepted request is the only way to ask them for a login
+outside the alarm: a requested St George collection lifts a login pause at
+most once per 24 hours, and an SBI VC session refresh forces at most one
+passkey login per hour. Both limits are the collectors' own and apply to every
+caller. Neither collector accepts provider terms.
+
+### Decision
+
+Both Processor configurations add the three connections to
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` (eight in all), and the App's
+`SESSION_REFRESH_POLICY` is `{"sbi-vc-trade":"unattended"}`, so an SBI VC
+session-refresh request is dispatched to `sbi-vc-keepalive` instead of being
+stored `waiting_for_human` (owner, 2026-11-08 03:19 and 03:57 UTC;
+[#1140](https://github.com/risu729/kogane/issues/1140)). Every other source's
+refresh still waits for a person.
+
+### Consequences
+
+- A St George request while a pause holds and the day's requested login is
+  spent ends `failed` with `st_george_paused_<code>` and no run; nothing
+  contacts the bank.
+- An SBI VC request while the owner's terms agreement is pending ends `failed`
+  with `manual_agreement_required`; the collector never sends `setAgreement`.
+- The open limit on unattended session refresh is unchanged: SBI VC's
+  keepalive is still the only one.
+- No request to the three connections has yet been followed in production;
+  [ops-api.md](../ops-api.md#enabling-collector-execution-adr-0048) records
+  the first ones when they are made.
+
+### Verification
+
+- The committed values: `services/processor/wrangler.jsonc`,
+  `services/processor/cloudflare.config.ts`, `services/app/wrangler.jsonc`,
+  `services/app/cloudflare.config.ts`, and their digests in
+  `scripts/resource-ledger.test.ts`.
+- The collectors' limits: `services/collector-st-george/test/worker-policy.test.ts`
+  (the requested lift once per 24 hours) and
+  `services/collector-sbi-vc-trade/worker-test/schedule-result.test.ts` (the
+  forced login once per hour, and the login retried while an agreement is
+  pending).
+
+## Amendment 2026-11-09: PRESTIA bank enabled
+
+Status: proposed (accepted when its pull request merges).
+
+### Context
+
+The PRESTIA bank collector is deployed, but its daily alarm (`prestia-bank` in
+`config/alarm-jobs.json`) is seeded disabled until one production collection
+has been followed to publication
+([plan, gate 4](../plans/2026-10-prestia-bank-worker.md#remaining-gates)). It
+has never collected in production. The owner allowed that first collection to
+be requested by an agent (2026-11-09 19:52 UTC), as part of collecting what
+existing collectors' sites offer before any new collector
+([roadmap, New sources](../roadmap.md#new-sources)).
+
+### Decision
+
+Both Processor configurations add `prestia-bank` to
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` (nine in all). The first production
+collection is one `kogane.ops.collection.request` for source `prestia`, after
+the reads the tool description lists. The alarm stays disabled; enabling it is
+a separate step after that request is followed to publication. The connection
+stays listed after the first request, like the other eight, so agents may request
+it again within AGENTS.md's request rules (every healthy connection, owner,
+2026-11-08 03:19 UTC); if the first request does not reach publication, the
+change that records its result removes `prestia-bank` until the cause is fixed.
+
+### Consequences
+
+- The collector logs in with the ID and password stored as Worker secrets. A
+  missing secret ends the request `failed` without contacting the bank; an OTP
+  or other additional authentication stops the run and stays human-required
+  ([ADR 0042](0042-prestia-bank-worker.md)). Neither is retried.
+- `prestia-globalpass` is a separate connection and stays outside the list.
+
+### Verification
+
+- The committed values in `services/processor/wrangler.jsonc` and
+  `services/processor/cloudflare.config.ts`, and the Processor digest in
+  `scripts/resource-ledger.test.ts`.
+- The first request's terminal state through `kogane.ops.operation.get`,
+  recorded in [ops-api.md](../ops-api.md#enabling-collector-execution-adr-0048).

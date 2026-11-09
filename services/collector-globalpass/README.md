@@ -1,16 +1,18 @@
 # PRESTIA GLOBAL PASS read-only Worker PoC
 
-GLOBAL PASS（Vpassデビット専用サイト）のサーバーレンダリングHTMLを、Cloudflare ContainerのPlaywright Google Chromeで取得し、private R2へ保存する独立PoCである。SMBCカード用VpassアプリAPIや`mnie`をruntime依存・設定源・submoduleとして使用しない。
+This independent PoC captures server-rendered HTML from GLOBAL PASS (`Vpassデビット専用サイト`, "Vpass debit-only site") with Playwright Google Chrome in a Cloudflare Container and saves it to private R2. It uses neither the SMBC-card Vpass app API nor `mnie` as a runtime dependency, configuration source or submodule.
 
-2026-08-30に、Cloudflare Containerのtimezoneを`Asia/Tokyo`へ合わせるだけでTurnstile token生成を再現し、実アカウントのlogin、daily、15か月backfillをend-to-endで完了した。HTMLとmanifestはprivate R2へ保存済みで、Workers Cronを1日1回だけ有効化している。GitHub Actionsのscheduleは使わない。2026-10-10の公開admin入口廃止後、通常収集は固定dailyのprivate Service Binding／schedule経路のみ。旧手動backfill・診断・container停止入口は404になる。旧staging bucketを読む`/latest-manifest`は2026-09-13に廃止した。
+On 2026-08-30, setting only the Cloudflare Container timezone to `Asia/Tokyo` reproduced Turnstile token generation and completed real-account login, daily capture and a 15-month backfill end to end. HTML and manifests are saved in private R2. The Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`): the Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) once a day for the `prestia-globalpass` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json) (03:17 JST). No GitHub Actions schedule is used. Since public admin entrypoints were retired on 2026-10-10, normal collection uses only fixed-daily private Service Binding/schedule paths. Former manual-backfill, diagnostic and container-stop entrypoints return 404. `/latest-manifest`, which read the old staging bucket, was retired on 2026-09-13.
 
 ## Runtime profile
 
-- **Browser: 全収集区間。** 通常のdaily/backfillはCloudflare Container内のheaded Google Chrome StableをPlaywrightで起動する。
-- browserの目的はTurnstile token生成、公式JavaScript login、server-rendered明細の表示、利用可能月selectorによる月切替である。login後にWorker `fetch`へ切り替えず、明細HTMLまで同じbrowser sessionで取得する。
-- Worker側のBrowser Run bindingは旧診断用途の未使用bindingであり、公開`/browser-probe`は廃止した。production collectionには使わない。Worker本体はContainer orchestration、TAMIAへのopaque relay、NDJSON受信、R2保存を担当する。
+- **Browser: entire collection.** Ordinary daily/backfill launches headed Google Chrome Stable through Playwright inside a Cloudflare Container.
+- The browser generates Turnstile tokens, executes official JavaScript login, displays server-rendered details and switches months through the available-month selector. It does not hand off to Worker `fetch` after login; detail HTML comes from the same browser session.
+- The Worker-side Browser Run binding is an unused legacy diagnostic binding; public `/browser-probe` is retired. Production collection does not use it. The Worker handles Container orchestration, opaque relay to TAMIA, NDJSON receipt and R2 storage.
 
-## 現在の実行構成
+<a id="現在の実行構成"></a>
+
+## Current execution architecture
 
 ```text
 private ScheduledCollection RPC / scheduled handler
@@ -18,263 +20,220 @@ private ScheduledCollection RPC / scheduled handler
   -> Container Playwright Google Chrome Stable
   -> Container-local HTTP CONNECT proxy
   -> authenticated WebSocket relay on the Worker
-  -> tunnel_idでTAMIA Tunnelを直接指定
+  -> specify TAMIA Tunnel directly by tunnel_id
   -> tamia cloudflared
   -> www.debit.vpass.ne.jp:443
 
 GLOBAL PASS + Turnstile hosts
-  -> 同じTAMIA出口へ固定
+  -> fixed to the same TAMIA egress
 
 ```
 
-WorkerはTLSを終端せず暗号化済みTCPを中継するため、GLOBAL PASSとのTLS handshakeはChromium自身が行う。Container内ではNode.js標準HTTP serverの`connect` eventでChromeのCONNECT要求を受け、`ws.createWebSocketStream()`のbackpressure付きstreamへ接続する。Worker側のVPC relayとContainer側の両方で、次のproduction 3 host（および出口診断用Worker host）の443番だけを許可し、request指定の任意hostや汎用TCP proxyには広げない。
+The Worker relays encrypted TCP without terminating TLS, so Chromium itself performs the GLOBAL PASS TLS handshake. Inside the Container, a standard Node.js HTTP server handles Chrome CONNECT requests through its `connect` event and connects them to a backpressured `ws.createWebSocketStream()`. Both Worker-side VPC relay and Container permit only port 443 on these 3 production hosts (plus the Worker host used for egress diagnostics), without expanding to arbitrary request-specified hosts or a generic TCP proxy.
 
 - `www.debit.vpass.ne.jp`
 - `challenges.cloudflare.com`
 - `brunhild.challenges.cloudflare.com`
 
-Container runtimeはNode.jsを維持する。Bun 1.4.0では`ws.createWebSocketStream()`が`Not supported yet in Bun`となることを境界テストで確認した。Google Chromeが起動時間とresource使用の大半を占めるこのContainerではBunへ替える実利が小さく、Bun native WebSocket/TCP APIへの書き換えは手動のqueue・backpressure制御を再導入するため、現時点では採用しない。Bunはpackage managerと既存test runnerとして引き続き使用する。
+The Container runtime remains Node.js. Boundary testing confirmed that Bun 1.4.0 reports `Not supported yet in Bun` for `ws.createWebSocketStream()`. Google Chrome dominates startup time/resource use in this Container, so switching to Bun has little practical benefit. Rewriting with Bun native WebSocket/TCP APIs would reintroduce manual queues/backpressure control and is not adopted now. Bun remains the package manager and existing test runner.
 
-VPC bindingは`network_id: "cf1:network"`ではなくTAMIAの`tunnel_id`を直接指定する。このWorkerだけがTAMIA Tunnelを使い、Zero Trustアカウントのhostname routeを追加しないため、個人PCのWARP通信には影響しない。Cloudflareの[VPC Network binding](https://developers.cloudflare.com/workers-vpc/configuration/vpc-networks/)と[Cloudflare Tunnel](https://developers.cloudflare.com/workers-vpc/configuration/tunnel/)に沿った構成である。
+The VPC binding specifies TAMIA's `tunnel_id` directly rather than `network_id: "cf1:network"`. Only this Worker uses TAMIA Tunnel, without adding Zero Trust account hostname routes, so personal-PC WARP traffic is unaffected. This follows Cloudflare's [VPC Network binding](https://developers.cloudflare.com/workers-vpc/configuration/vpc-networks/) and [Cloudflare Tunnel](https://developers.cloudflare.com/workers-vpc/configuration/tunnel/) configuration.
 
-## 取得・保存の予定
+<a id="取得保存の予定"></a>
 
-- 手動`mode=daily`: 現在月と直前月を再取得
-- 手動`mode=backfill`: 画面のselectorが提示した全月を1 sessionで取得
-- 共有DATA bucket（`kogane-raw-evidence`）: 各pageを`objects/<2 hex>/<sha256>`へ保存し、最後にterminal `runs/prestia-globalpass/<run-id>/terminal.json`を書く
-- manifest: hash、byte数、提示月、部分失敗を記録
+## Capture and storage plan
 
-HTMLはContainerからNDJSONとしてpageごとにstreamし、Workerはsanitize済みpage（最大15か月×5page）をterminalを書くまでmemoryに保持する。staging用のR2 objectは書かない。pendingから確定への更新を取り込むため、日次相当もrun単位でappendする。15分枠を超える実測が出た場合だけ月単位Queueへ分割する。GitHub Actionsのscheduleは使わない。
+- `daily`: recaptures the current and previous months. Every Worker entry point (`alarmCollection` behind `runScheduled` and `runOperation`, and the unused `scheduled` handler) runs `daily` only (`src/worker.ts`).
+- `backfill` (captures every selector-offered month in 1 session) remains in the container contract (`src/model.ts`, `container/server.mjs`), but no Worker entry point requests it since the manual routes were retired.
+- Shared DATA (`kogane-raw-evidence`): saves each page to `objects/<2 hex>/<sha256>`, writing terminal `runs/prestia-globalpass/<run-id>/terminal.json` last.
+- Manifest: records hashes, byte counts, offered months and partial failures.
 
-WebSocket TCP relayは非hibernating接続である。対応するupstream TCP socketを復元できないため、このopaque tunnelをDurable Object WebSocket Hibernationで休止させない。isolate・network・Tunnelが切れたrunは部分失敗として記録し、次回に再取得する。
+The Container streams HTML page by page as NDJSON. The Worker retains sanitized pages (at most 15 months × 5 pages) in memory until writing the terminal, without R2 staging objects. Daily-equivalent captures also append per run to retain pending-to-confirmed updates. Split into monthly Queues only if measured execution exceeds the 15-minute window. No GitHub Actions schedule is used.
+
+The WebSocket TCP relay is non-hibernating. Its corresponding upstream TCP socket cannot be restored, so this opaque tunnel does not use Durable Object WebSocket Hibernation. Runs interrupted by isolate, network or Tunnel disconnection are recorded as partial failures and recaptured next time.
 
 ### Raw evidence v3 contract
 
-`globalpass-browser-poc-v3`では、ContainerのNDJSONを厳密な契約として扱う。metadataは必ず1回だけ受け取り、`availableMonths`は最大15か月の連続した降順、`selectedMonths`はdailyなら先頭2か月、backfillなら全月との完全一致を要求する。artifact行は`{type: "artifact", month, page, pageCount, html}`で、月ごとにpage 1から`min(pageCount, 5)`まで順に届き、次の月はその後に始まる（それ以外は`container_contract_invalid`）。manifestには`selectedMonths`、`captureComplete`、`paginationStatus: "pages_walked"`、各artifactの`page`、固定形のfailure（`operation`、`errorType`、`errorCode`、`artifactKey`）を記録し、選択月がすべて保存され、どの月も1か月分そろったと証明でき、failureが0件のrunだけを`success`とする。失敗runも、DATAへterminalを書ける限り保存する。
+`globalpass-browser-poc-v3` treats Container NDJSON as a strict contract. Metadata must arrive exactly 1 time; `availableMonths` must be a contiguous descending sequence of at most 15 months. `selectedMonths` must exactly equal the first 2 months for daily or every month for backfill. Artifact rows are `{type: "artifact", month, page, pageCount, html}` and arrive sequentially per month from page 1 through `min(pageCount, 5)`, before the next month begins (otherwise `container_contract_invalid`). The manifest records `selectedMonths`, `captureComplete`, `paginationStatus: "pages_walked"`, each artifact's `page` and fixed-shape failures (`operation`, `errorType`, `errorCode`, `artifactKey`). Only a run with every selected month saved, provably complete capture of each 1-month period and 0 failures is `success`. Failed runs are also saved whenever a DATA terminal can be written.
 
-sanitizerが拒否したpageのfailureは`errorCode`にどの検査で拒否したかを閉じたcodeで記録する（`globalpass_html_contract_invalid`、`globalpass_html_redaction_failed`、`globalpass_html_shape_unreviewed`、`globalpass_html_utf8_invalid`）。同じcodeは`artifact-write`のdiagnostic行の`code`にも出る。providerの文字列や一致した値は出さない。
+After the last month's last page, the Container sends exactly one `{type: "logout", failed}` line (`failed` is a boolean and the line has no other field) from `container/logout.mjs`. The Worker accepts it only after metadata, with every selected month attempted, the last month's walk finished and no container error; any later line other than a container `error` is `container_contract_invalid`. A failed sign-off never lowers the run's status or coverage: the manifest keeps `logoutFailed: true` and the terminal gets the auxiliary run report `reportRef: logout`, `outcome: failed`, `safeErrorCode: logout_failed` ([collection: logout audit](../../docs/collection.md#logout-audit-2026-11-08)).
 
-どの期待（expectation）に反したかは閉じたcode（`src/sanitize.ts`の`GLOBALPASS_SANITIZER_EXPECTATIONS`、例: `forbidden_token`、`activity_heading_missing`、`credential_field`、`hidden_name_unallowed`）として、manifestのfailureの`expectationCode`と、同じdiagnostic行の`shape`に記録する。`shape`は拒否したpageの構造だけを表す: expectation、phase（`input`/`output`）、要素と属性の分類（閉じたcode）、tag数（`table`、`tr`、`th`、`td`、`form`、`input`、`select`、`script`、`a`など）、reviewed variantを決めるform数とhidden input数、landmarkの有無（doctype、明細の見出し（「ご利用明細」「利用明細」または英語の`Account Activities`）、title、`usrId`、password field、`select`、sentinel）、forbidden tokenごとの出現数、byte長とtext長の桁数。page内の文字列、属性値、URL、pageから読んだ数値は含めない。`packages/collector-diagnostics`の`safeShape`が閉じたcode、真偽値、非負整数以外を落とす（ADR 0026の2026-09-28 amendment）。error bannerは観測されたmarkupがないため記録しない。
+Failures for sanitizer-refused pages use closed `errorCode` values to identify the failed check (`globalpass_html_contract_invalid`, `globalpass_html_redaction_failed`, `globalpass_html_shape_unreviewed`, `globalpass_html_utf8_invalid`). The same code appears in `code` on the `artifact-write` diagnostic line. Neither provider strings nor matched values are emitted.
 
-Containerは月を選択した後、上のpager（`div.nablarch_paging`）の`Next`が有効な`a.nablarch_nextSubmit`である間それを押し、同じpath（`/p/statementInquiry/RW1313010201`）へのPOSTを待つ。新しいpageが次のpage番号、同じpage数、同じ件数を示し、明細blockが1つ以上あることを確かめ、どれかが違えばthrowしてcontainer errorにする。POSTが見えないclickは1回だけ再試行する（単なる堅牢化。拡張機能の座標clickで1回目が遷移しなかったことが1度あったが、page内のclick eventでは毎回1回目で遷移したので、サイトの挙動ではない）。1か月の上限は5page（50件。観測した最大は20件）で、それを超える月は先頭5pageを送り`activity_pages_unwalked`になる。pageごとに1行を送り、page 1は`activity-YYYY-MM.html`、page Nは`activity-YYYY-MM-pN.html`として保存する。
+The failed expectation is a closed code (`GLOBALPASS_SANITIZER_EXPECTATIONS` in `src/sanitize.ts`, for example `forbidden_token`, `activity_heading_missing`, `credential_field`, `hidden_name_unallowed`) recorded in manifest-failure `expectationCode` and the same diagnostic line's `shape`. `shape` describes only the refused page's structure: expectation, phase (`input`/`output`), element/attribute classifications (closed codes), tag counts (`table`, `tr`, `th`, `td`, `form`, `input`, `select`, `script`, `a`, etc.), form/hidden-input counts defining the reviewed variant, landmark presence (doctype, detail heading `ご利用明細` ("usage details"), `利用明細` ("usage details") or English `Account Activities`, title, `usrId`, password field, `select`, sentinel), occurrence counts per forbidden token, and digit counts of byte/text lengths. It contains no page strings, attribute values, URLs or numbers read from the page. `safeShape` in `packages/collector-diagnostics` drops everything except closed codes, booleans and non-negative integers (ADR 0026 amendment of 2026-09-28). Error banners are not recorded because no markup has been observed.
 
-Workerは保存前の各page本文から件数（`Found N Result`／「検索結果 N件」）、page番号（`[p/Ppage]`／「[p/Pページ]」）、明細block数（`table.tableStyle4`2個で1件）だけを読み、`globalpass-activity-pages`行（run内の月の位置、`page`、`walkPageCount`、`statedTotal`、`pageIndex`、`pageCount`、`statementBlocks`）に記録する。月ごとに、明細のない月（Found行もpagerもblockもない）か、page 1..Pがすべてそろい、どのpageも同じNとPと自分のpage番号を示し、block数の合計がNに等しい月だけを1か月分とする。そうでない月には`operation: "pagination"`のfailureを1つ付ける: `activity_pages_unwalked`（pageが足りない）、`activity_pager_unreadable`（件数・page数・page番号の食い違い、またはpagerのないpageに明細やFound行がある）、`activity_total_mismatch`（block数の合計がNと違う）。結果は`globalpass-activity-coverage`行（月の位置、`pagesCaptured`、`walkPageCount`、`errorCode`）に記録する。`success`のrunでは`account` unitが`complete`になり、parse対象になる。run自体のcoverageは月の範囲が動くため`partial`のまま（[ADR 0026の2026-10-04 amendment](../../docs/adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-walks-every-page-of-a-month)）。
+After selecting a month, the Container clicks the upper pager's (`div.nablarch_paging`) `Next` while it is an enabled `a.nablarch_nextSubmit`, waiting for POST to the same path (`/p/statementInquiry/RW1313010201`). It verifies that the new page shows the next page number, unchanged page/record counts and at least 1 detail block; any mismatch throws a container error. A click with no observed POST is retried only 1 time (robustness only: an extension's coordinate click failed 1 time to navigate on the 1st attempt, while page-internal click events always navigated on the 1st attempt, so this is not site behavior). The limit per 1 month is 5 pages (50 records; the observed maximum was 20). Months exceeding it send their first 5 pages and become `activity_pages_unwalked`. Each page emits 1 line; page 1 is saved as `activity-YYYY-MM.html` and page N as `activity-YYYY-MM-pN.html`.
 
-日本語表示のpagerは実画面でだけ観察した（2026-10-04、markupは英語と同一）。表示言語はbrowserのcookieで決まり、collectorは毎回新しいbrowserでloginしてcookieを設定しない。サーバー側に言語が保存されるかは未確認。activity parserは英語の表見出しだけを読むため、日本語のpageは保存されてもparseに失敗する。
+Before storage, the Worker reads only record count (`Found N Result` / `検索結果 N件` ("N search results")), page number (`[p/Ppage]` / `[p/Pページ]` ("page p of P")) and detail-block count (2 `table.tableStyle4` elements per 1 record) from each page body. It records these in `globalpass-activity-pages` (month position within the run, `page`, `walkPageCount`, `statedTotal`, `pageIndex`, `pageCount`, `statementBlocks`). A 1-month period is complete only if empty (no Found line, pager or block), or if every page 1..P exists, every page states the same N/P and its own page number, and the sum of blocks equals N. Other months receive 1 `operation: "pagination"` failure: `activity_pages_unwalked` (missing pages), `activity_pager_unreadable` (inconsistent record/page counts or page numbers, or details/Found line without a pager), or `activity_total_mismatch` (block sum differs from N). Results go to `globalpass-activity-coverage` (month position, `pagesCaptured`, `walkPageCount`, `errorCode`). A `success` run's `account` unit is `complete` and eligible for parsing. Run coverage stays `partial` because the month window moves ([ADR 0026 amendment of 2026-10-04](../../docs/adr/0026-collector-unit-coverage.md#amendment-2026-10-04-global-pass-walks-every-page-of-a-month)).
 
-保存前には35件の既存HTML監査で確認した2種類の画面shapeだけを許可する。変動する非空の`nablarch_hidden`だけを`__KOGANE_REDACTED_DYNAMIC_VALUE__`へ置換し、空値は空のまま、明細選択に必要な`W131301.referenceDate`などは保持する。これとは別に、current-document fragmentの`href`は`#`へ、許可された`onclick`/`onchange`の値全体は`return false;`へ固定し、元fragmentやhandler引数をR2へ残さない。hidden field、inputの`id/name/type/value`重複、form action重複、URL-bearing attribute、inline event handlerは監査済みのexact inventoryだけを許可する。query付きURL、未知host/path/scheme、`formaction`、data URL、`srcset`、`ping`、CSSの`url()`/`@import`、meta refresh、SVG URL属性、`base`/`object`/`embed`/`iframe`などの未監査network/navigation sink、未知event属性・関数、ログイン画面、session/token文字列、UTF-8不整合を検出した場合はfail closedとし、そのHTMLをR2へ保存しない。保存したpageはterminalへ`redacted` transformation（`globalpass-activity-sanitizer`）として記録する。
+The Japanese pager was observed only on the real screen (2026-10-04; markup matched English). Browser cookies determine display language; the collector logs in with a fresh browser each time without setting that cookie. Server-side language persistence is unverified. The activity parser reads only English table headers, so saved Japanese pages fail parsing.
 
-runは`packages/collection`で共有DATA bucketへ直接書き、ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。private Service Binding `RAW_EVIDENCE_IMPORTER`、`POST /backfill-raw-evidence`、`scripts/backfill-raw-evidence.sh`、source専用bucketは2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。backfill runも10 artifactずつの転送やdeferはなく、1回でterminalまで書く。
+Before storage, only the 2 screen shapes confirmed by auditing 35 existing HTML captures are allowed. Only varying nonempty `nablarch_hidden` values become `__KOGANE_REDACTED_DYNAMIC_VALUE__`; empty values stay empty, while fields needed for detail selection, such as `W131301.referenceDate`, remain. Separately, current-document-fragment `href` becomes `#`, and entire permitted `onclick`/`onchange` values become `return false;`, keeping original fragments/handler arguments out of R2. Hidden fields, duplicate input `id/name/type/value`, duplicate form actions, URL-bearing attributes and inline event handlers are permitted only within the audited exact inventory. Query-bearing URLs, unknown hosts/paths/schemes, `formaction`, data URLs, `srcset`, `ping`, CSS `url()`/`@import`, meta refresh, SVG URL attributes, unaudited network/navigation sinks such as `base`/`object`/`embed`/`iframe`, unknown event attributes/functions, login screens, session/token strings or invalid UTF-8 fail closed; that HTML is not saved to R2. Saved pages are recorded on the terminal as `redacted` transformations (`globalpass-activity-sanitizer`).
 
-1 runは最大15 HTML + 1 manifestで、実測も15分枠内に収まるためQueueは導入しない。Queue分割するとbrowser loginとTurnstileを月ごとに繰り返し、完全性の境界も複雑になる。時間上限超過が実測された場合にだけ再検討する。
+`packages/collection` writes runs directly to shared DATA, and the Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). Private Service Binding `RAW_EVIDENCE_IMPORTER`, `POST /backfill-raw-evidence`, `scripts/backfill-raw-evidence.sh` and the dedicated source bucket were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)). Backfill runs also write through the terminal in 1 operation, without 10-artifact transfer batches or deferral.
+
+No Queue is introduced: 1 run has at most 15 HTML + 1 manifest, and measurements fit the 15-minute window. Queue splitting would repeat browser login and Turnstile each month and complicate completeness boundaries. Reconsider only after measuring a time-limit overrun.
 
 ## Secret
 
 - `GLOBALPASS_ID`
 - `GLOBALPASS_PASSWORD`
-- `RELAY_TOKEN`: WebSocket relay専用
+- `RELAY_TOKEN`: WebSocket relay only.
 
-session cookie、Turnstile token、Nablarch hidden stateは保存・再利用せず、毎run新しいbrowser contextで取得する。資格情報JSON、secret、実データはGitへ入れない。remote secretは`wrangler.jsonc`にも生成型にも現れないため、`env.d.ts`は上記3 secret名だけをaugmentationする。
+Session cookies, Turnstile tokens and Nablarch hidden state are neither stored nor reused; each run obtains them in a fresh browser context. Keep credential JSON, secrets and real data out of Git. Remote secrets appear in neither `wrangler.jsonc` nor generated types, so `env.d.ts` augments only the 3 secret names above.
 
-ローカルの必要項目だけを同期する例:
+Example synchronizing only necessary local fields:
 
 ```sh
 scripts/sync-local-secrets.sh \
   ~/.local/share/kogane/secrets/globalpass.json
 ```
 
-入力JSONは`{"username":"...","password":"..."}`だけを持ち、スクリプトは値を表示しない。
+Input JSON contains only `{"username":"...","password":"..."}`; the script displays no values.
 
-## デプロイ済みリソース
+<a id="デプロイ済みリソース"></a>
+
+## Deployed resources
 
 - Worker: `kogane-globalpass-collector-poc`
 - URL: `https://kogane-globalpass-collector-poc.takuanimal.workers.dev`
 - Container app: `kogane-globalpass-collector-poc-globalpasscollectorcontainer`
 - Container app ID: `a03ac341-52a7-4e81-9a7c-279a90cc4b0c`
-- Container上限: 2（通常収集は固定ID 1個、image rollout時の旧instance退避用に1枠）
-- R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。旧source専用bucketは2026-09-13に削除済み）
+- Container limit: 2 (1 fixed ID for normal collection, 1 slot to set aside an old instance during image rollout)
+- R2 binding: `DATA` → `kogane-raw-evidence` (shared by all collectors; the old dedicated source bucket was deleted on 2026-09-13)
 - Browser Run binding: `BROWSER`
-- VPC binding: TAMIA Tunnel `6b0ccf30-68b2-494e-baa8-f4f9f3e46b33`を直接指定
-- Cron: `17 18 * * *`（毎日03:17 JST、Workers Cron）
+- VPC binding: directly specifies TAMIA Tunnel `6b0ccf30-68b2-494e-baa8-f4f9f3e46b33`
+- Schedule: the Processor alarm job `prestia-globalpass` (`config/alarm-jobs.json`, daily 03:17 JST, `17 18 * * *` UTC). No Workers Cron Trigger.
 
-現行Containerは`TZ=Asia/Tokyo`を起動環境へ明示し、Google Chrome StableをXvfb上のheaded persistent contextとして起動する。GLOBAL PASS、Turnstile本体、helperを同じTAMIA出口へ固定する。NRT Gateway診断variantを含む現行imageはdigest `sha256:195ebaa959f2676e08e8c6d40335b5984e64e36e905efc957a4061070835e6b1`、runtime revision `timezone-collector-v6`である。v6はContainer-local relayを独自SOCKS5からNode.js HTTP CONNECTへ置換しただけで、通常collectorのbrowser条件はv4から変更していない。
+The current Container explicitly sets startup environment `TZ=Asia/Tokyo` and launches Google Chrome Stable as a headed persistent context on Xvfb. GLOBAL PASS, Turnstile and its helper use the same fixed TAMIA egress. The current image including the NRT Gateway diagnostic variant has digest `sha256:195ebaa959f2676e08e8c6d40335b5984e64e36e905efc957a4061070835e6b1` and runtime revision `timezone-collector-v6`. v6 only replaces the Container-local custom SOCKS5 relay with Node.js HTTP CONNECT; ordinary collector browser conditions are unchanged from v4.
 
-timezone修正後に出口だけを変えたcontrolled A/Bでは、Container直通（SG/SINのCloudflare IPv6 egress）は2回ともlogin pageがHTTP 200でもTurnstile token 0、同時刻の全通信TAMIA controlはtoken 794だった。したがって現行productionはTAMIA固定を維持する。詳細は[`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)に記録した。
+In a controlled A/B changing only egress after the timezone correction, direct Container (Cloudflare IPv6 SG/SIN egress) had Turnstile token length 0 in both of 2 runs despite HTTP 200 login pages; a concurrent all-TAMIA control generated a token of length 794. Current production therefore remains fixed to TAMIA. Details are in [`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md).
 
-追加のCloudflare Gateway診断では、WorkerをTokyo近傍へplacementし、`cf1:network`経由でJP/NRTのCloudflare IPv6 egressを実現した。NRTは2回ともtoken 0だったが、直後のTAMIA controlもtoken 0になったため、短時間の連続challengeまたは時系列変動が交絡している。通常collectorはTAMIAのままとし、NRT variantは十分な間隔を空けた再検証専用に残す。
+Additional Cloudflare Gateway diagnostics placed the Worker near Tokyo, achieving JP/NRT Cloudflare IPv6 egress through `cf1:network`. NRT generated token 0 in both of 2 runs, but the immediately following TAMIA control also generated token 0, confounding the result with successive challenges over a short interval or time variation. Normal collection remains on TAMIA; the NRT variant stays only for sufficiently spaced revalidation.
 
-現行Worker versionは`2abc1133-83db-4c8d-b593-c82ec8ca4dcf`で、deploy出力上もschedule `17 18 * * *`を確認した。
+Deployment output for Worker version `2abc1133-83db-4c8d-b593-c82ec8ca4dcf` on 2026-08-30 also confirmed schedule `17 18 * * *` (a Workers Cron Trigger then; since #430 the Processor alarm calls the Worker instead).
 
-daily/backfillはDATAへの保存を含む処理の成否にかかわらず、最後にephemeralな固定Container instanceへ`destroy()`を送る。破棄要求自体の失敗は収集結果へ混ぜず、構造化logへ記録する。`30s`のidle timeoutも残すが、relay使用後は`stop()` RPCがoutcome `ok`でもinstanceが`running`のまま残ることをlive確認したため、課金停止は`destroy()`で保証する。
+Daily/backfill sends `destroy()` to the ephemeral fixed Container instance last, regardless of success/failure including DATA storage. Destroy-request failures stay separate from collection results and enter structured logs. The `30s` idle timeout remains, but live verification showed an instance still `running` after relay use even with `stop()` RPC outcome `ok`; `destroy()` therefore ensures billing stops.
 
-2026-08-30のdeploy後daily run `8d498b19-dda5-4dfb-84b6-1239c4d9e765`は約52秒でstatus `success`、2026-08と2026-07のHTML 2件、failure 0だった。ただし同runの`stop` RPCがoutcome `ok`、app状態が`assigned: 0`でも、後のinstance一覧では`v18`が`running`だった。Chromium A/B rollout時にこの差を発見して旧`v18`を明示destroyし、収集後処理を`destroy()`へ変更した。
+Post-deploy daily run `8d498b19-dda5-4dfb-84b6-1239c4d9e765` on 2026-08-30 took about 52 seconds, with status `success`, 2 HTML artifacts for 2026-08 and 2026-07, and failure 0. However, despite `stop` RPC outcome `ok` and app state `assigned: 0`, a later instance list showed `v18` as `running`. This difference was discovered during Chromium A/B rollout; old `v18` was explicitly destroyed and post-collection cleanup changed to `destroy()`.
 
-修正後daily run `251bbae4-007c-4d91-b7e5-9b4385656285`もruntime v5、status `success`、HTML 2件、failure 0だった。R2 manifest保存直後に`globalpass-collection-container-destroyed`が記録され、Wranglerのinstance一覧でも`v18`が`inactive`になったことを確認した。
+Corrected daily run `251bbae4-007c-4d91-b7e5-9b4385656285` also had runtime v5, status `success`, 2 HTML artifacts and failure 0. Immediately after R2 manifest storage, `globalpass-collection-container-destroyed` was recorded, and Wrangler's instance list confirmed `v18` became `inactive`.
 
-HTTP CONNECTへ置換したruntime v6は、新しいidentity `v19`でbounded probeを実行し、GLOBAL PASS HTTP 200、Turnstile token 794文字、TAMIA JP/KIX出口を確認した。続くdaily run `8101b4c8-170d-400a-9e27-7823dce9cf28`は約42秒でstatus `success`、利用可能15か月を検出し、2026-08と2026-07のHTML 2件、failure 0だった。`/latest-manifest`から同じmanifestを再取得し、instance一覧でも`v19`が`inactive`になったことを確認した。
+HTTP CONNECT runtime v6 ran a bounded probe with new identity `v19`, confirming GLOBAL PASS HTTP 200, a 794-character Turnstile token and TAMIA JP/KIX egress. Subsequent daily run `8101b4c8-170d-400a-9e27-7823dce9cf28` took about 42 seconds with status `success`, discovered 15 available months, saved 2 HTML artifacts for 2026-08 and 2026-07 and had failure 0. The same manifest was retrieved through `/latest-manifest`, and the instance list confirmed `v19` became `inactive`.
 
-`wrangler deploy`の完了後もContainer appのimage rolloutは非同期で続く。検証時は`wrangler containers info <app-id>`で新image digestとhealthy instanceを確認してから、新しいDurable Object IDで実行する。rollout前に実行すると旧imageを使い、コード不具合のように見えることがある。
+Container-app image rollout continues asynchronously after `wrangler deploy` completes. During verification, confirm the new image digest and healthy instances with `wrangler containers info <app-id>`, then use a fresh Durable Object ID. Running before rollout can use an old image and look like a code defect.
 
 ## 2026-08-27 live verification
 
-実アカウントを用いたbounded runの結果は次の通り。
+Results of the bounded real-account run:
 
-1. `cf1:network`だけでは公開宛先の経路がなく、GLOBAL PASSで`ERR_CONNECTION_CLOSED`になった。
-2. VPC bindingをTAMIAの`tunnel_id`直接指定へ変更すると、GLOBAL PASSのログイン画面、ID欄、Turnstile hidden inputまで正常に取得できた。`Access Denied`ではない。
-3. `cf-turnstile-response`は45秒待っても空のままだった。認証情報の入力・ログインPOSTより前で停止した。
-4. network diagnosticでは`brunhild.challenges.cloudflare.com`への失敗とtoken未生成が同時に観測された。この名前はAAAAだけを返し、検証時のTAMIA/home egressには利用可能なIPv6経路がなかった。
-5. 同hostをTAMIA relayへ含めると`ERR_CONNECTION_CLOSED`、Container通常egressでは`ERR_ABORTED`になった。ただし後述のBrowser Runでは`brunhild`を一度も呼ばず、Turnstile本体との通信が全て200でもtokenが生成されなかったため、IPv6不足を原因とする仮説は棄却した。
-6. Turnstile requestをWorker `fetch()`で代理する案も試したが、helperだけの分離では403、両Turnstile hostの代理でも`/turnstile/v0/api.js`が403になった。browser requestをWorker fetchへ置き換える迂回は採用しない。
-7. R2には各runのfailure manifestだけがあり、`activity-YYYY-MM.html`は0件である。代表runは`1fe39ff7-a382-4786-a200-0908f57928ea`。
+1. `cf1:network` alone had no route to public destinations, producing `ERR_CONNECTION_CLOSED` for GLOBAL PASS.
+2. Changing the VPC binding to directly specify TAMIA's `tunnel_id` successfully captured the GLOBAL PASS login screen, ID field and Turnstile hidden input. It was not `Access Denied`.
+3. `cf-turnstile-response` remained empty after 45 seconds; execution stopped before credential entry or login POST.
+4. Network diagnostics observed failure to reach `brunhild.challenges.cloudflare.com` alongside missing token generation. That name returns only AAAA; TAMIA/home egress had no usable IPv6 route during verification.
+5. Including that host in the TAMIA relay produced `ERR_CONNECTION_CLOSED`; ordinary Container egress produced `ERR_ABORTED`. However, Browser Run below never called `brunhild` and generated no token despite every Turnstile request returning 200, so the missing-IPv6 cause hypothesis was rejected.
+6. Proxying Turnstile requests through Worker `fetch()` was also tried: isolating only the helper returned 403; proxying both Turnstile hosts also returned 403 for `/turnstile/v0/api.js`. Replacing browser requests with Worker fetch is not adopted.
+7. R2 contains only failure manifests per run, with 0 `activity-YYYY-MM.html` artifacts. Representative run: `1fe39ff7-a382-4786-a200-0908f57928ea`.
 
-Cloudflare Containersの[outbound traffic](https://developers.cloudflare.com/containers/platform-details/outbound-traffic/)にはHTTP/HTTPSのallow/deny・Worker handler・通常internet egressがあるが、公開設定と現行Wrangler schemaには一般internet出口をIPv6へ切り替える項目がない。これはContainerの経路上の制約であり、今回のTurnstile失敗原因だとは断定しない。
+Cloudflare Containers [outbound traffic](https://developers.cloudflare.com/containers/platform-details/outbound-traffic/) supports HTTP/HTTPS allow/deny rules, Worker handlers and ordinary internet egress, but public configuration/current Wrangler schemas offer no switch to IPv6 general internet egress. This is a Container routing limitation, not an established cause of this Turnstile failure.
 
 ## 2026-08-28 Browser Run verification
 
-既存WorkerにBrowser Run bindingと管理token必須の`POST /browser-probe`を追加し、GLOBAL PASSに対して3回のbounded diagnosticを実施した。全runでTurnstile tokenが未生成だったため、ID/passwordの入力、GLOBAL PASSへのlogin POSTは一度も行っていない。
+A Browser Run binding and admin-token-required `POST /browser-probe` were added to the existing Worker for 3 bounded GLOBAL PASS diagnostics. No run generated a Turnstile token, so neither ID/password entry nor login POST to GLOBAL PASS occurred.
 
-- ログイン画面はHTTP 200、titleは`ログイン`、formとTurnstile hidden inputが存在し、`Access Denied`ではない。
-- network用User-Agent/Client HintsはWindows Chrome 153相当に設定したが、page JavaScriptからは`Cloudflare-Workers`、`Linux x86_64`、`navigator.webdriver=true`、`en-US`に見えた。
-- `challenges.cloudflare.com/turnstile/v0/api.js`は302後にbuild版が200。challenge document、2回のXHR POST、imageも全て200だった。
-- cross-origin challenge frameは存在したが、30秒後も`cf-turnstile-response`は0文字だった。
-- `brunhild.challenges.cloudflare.com`へのrequest、HTTP 4xx/5xx、request failureはいずれも0件だった。
-- Cloudflare公式仕様上、Browser RunのPuppeteer/CDP通信には削除不能な識別headerとWeb Bot Auth署名が付き、UA変更はbot protectionを回避しない。この環境だけで完全自動loginを実現できるという結果にはならなかった。
+- Login returned HTTP 200 with title `ログイン` ("login"), a form and Turnstile hidden input, rather than `Access Denied`.
+- Network User-Agent/Client Hints matched Windows Chrome 153, but page JavaScript saw `Cloudflare-Workers`, `Linux x86_64`, `navigator.webdriver=true`, `en-US`.
+- `challenges.cloudflare.com/turnstile/v0/api.js` redirected with 302 to a build returning 200. Challenge documents, both of 2 XHR POSTs and images also returned 200.
+- A cross-origin challenge frame existed, but `cf-turnstile-response` still had 0 characters after 30 seconds.
+- There were 0 requests to `brunhild.challenges.cloudflare.com`, HTTP 4xx/5xx responses or request failures.
+- Cloudflare's official specification adds non-removable identifying headers and Web Bot Auth signatures to Browser Run Puppeteer/CDP traffic; changing UA does not bypass bot protection. This environment did not demonstrate fully automated login.
 
-sanitizedな手順、観測値、推論と未確定事項は[`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)に保存する。
+Sanitized steps, observations, inferences and uncertainties are recorded in [`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md).
 
-同日、スタートメニューの`kogane capture`から新規起動した通常Chrome/Kuebikoでも同じlogin URLを比較した。資格情報は入力せず、login POSTも行っていない。
+The same day, the same login URL was compared in ordinary Chrome/Kuebiko freshly launched from Start-menu `kogane capture`. No credentials were entered and no login POST was sent.
 
-- HTTP 200、formあり、`Access Denied`なしはBrowser Runと同じだった。
-- page JavaScriptからはWindows Chrome 153、`Win32`、`navigator.webdriver=false`、`en-US`に見えた。
-- Turnstile APIは302後にbuild版200、challenge documentも200だった。
-- `cf-turnstile-response`は約15秒以内に773文字になった。Browser Runは30秒後も0文字だった。
-- structured CDP/Kuebiko metadata上、`brunhild.challenges.cloudflare.com`と対象hostの4xx/5xxはなかった。未使用CSS 1件だけ`ERR_ABORTED`だが、challenge failureはなかった。
-- Kuebikoの生capture run `2026-08-27T21-46-51`はcookie等を含み得るためローカルだけに残し、Gitにはsanitized結果だけを保存した。
+- HTTP 200, form presence and no `Access Denied` matched Browser Run.
+- Page JavaScript saw Windows Chrome 153, `Win32`, `navigator.webdriver=false`, `en-US`.
+- Turnstile API redirected with 302 to build 200; challenge documents returned 200.
+- `cf-turnstile-response` reached 773 characters within about 15 seconds; Browser Run remained at 0 after 30 seconds.
+- Structured CDP/Kuebiko metadata showed no `brunhild.challenges.cloudflare.com` requests or target-host 4xx/5xx. Only 1 unused CSS request had `ERR_ABORTED`, without challenge failure.
+- Raw Kuebiko capture run `2026-08-27T21-46-51` may contain cookies or similar data and stays local; only sanitized results were saved in Git.
 
-Kuebikoはremote debugging付きでも`navigator.webdriver=false`でtoken生成に成功した。CDP利用そのものより、Browser Runの`Cloudflare-Workers`/Linux/`webdriver=true` fingerprintと削除不能な識別headerが強い差分である。ただしKuebikoとBrowser Runのegressは同一ではないため、fingerprint単独原因とはまだ断定しない。
+Kuebiko generated a token with remote debugging while `navigator.webdriver=false`. Stronger differences than CDP use itself are Browser Run's `Cloudflare-Workers`/Linux/`webdriver=true` fingerprint and non-removable identifying headers. However, Kuebiko and Browser Run egress differed, so fingerprint alone is not yet established as the cause.
 
 ## 2026-08-28 Container browser A/B
 
-GLOBAL PASSを同じTAMIA経路に固定し、Playwright Chromiumを`baseline`、`webdriver=false`、Windows相当fingerprint、headed、fresh persistent profileの順で1項目ずつ近づけた。5条件すべてでlogin pageは200、formあり、`Access Denied`なしだったが、30秒後もTurnstile tokenは0文字だった。共通してchallenge fetch 401、Brunhild 204直後の`ERR_ABORTED`が観測された。
+GLOBAL PASS stayed on the same TAMIA path while Playwright Chromium progressively approached the successful environment: `baseline`, `webdriver=false`, Windows-like fingerprint, headed mode and fresh persistent profile, changing 1 condition at a time. All 5 conditions returned login-page 200, a form and no `Access Denied`, but token length remained 0 after 30 seconds. All observed challenge-fetch 401 and `ERR_ABORTED` immediately after Brunhild 204.
 
-追加で、Playwright公式の`channel: "chrome"`を使い、Containerへ導入したブランド版Google Chrome Stable `152.0.7977.64`でも同じ条件を実行した。login pageは200だったがtokenは0文字で、challenge fetch 401とBrunhild 204直後の`ERR_ABORTED`も変わらなかった。したがってPlaywright同梱Chromiumだけが失敗原因ではない。
+The same conditions were also tried with branded Google Chrome Stable `152.0.7977.64` installed in the Container through official Playwright `channel: "chrome"`. Login returned 200 but token length stayed 0; challenge-fetch 401 and `ERR_ABORTED` immediately after Brunhild 204 were unchanged. Playwright-bundled Chromium alone therefore does not explain failure.
 
-資格情報の入力、login POST、cookie再利用、R2書き込みは行っていない。旧instance `v9`・`v10`はdestroy済み、Google Chrome検証instance `v11`はstop済みである。詳細な比較表は[`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)、削除対象は[`docs/cleanup.md`](docs/cleanup.md)に記録した。
+No credential entry, login POST, cookie reuse or R2 write occurred. Old instances `v9`/`v10` are destroyed; Google Chrome verification instance `v11` is stopped. Detailed comparisons are in [`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md); removal targets are in [`docs/cleanup.md`](docs/cleanup.md).
 
 ## 2026-08-29 same-egress / workaround verification
 
-Cloudflare公式資料を再確認し、PAT endpointの401とBrunhild 204直後のERR_ABORTEDをroot causeとして扱った以前の推論を撤回した。PAT 401は通常fallbackであり、challenge関連subdomainの一部failureも単独では失敗を意味しない。一方、challenge取得とsolve送信のIPが異なると無効になり得るため、従来のsplit経路を最初に再検証した。
+Rechecking Cloudflare's official material withdrew the earlier inference treating PAT-endpoint 401 and ERR_ABORTED immediately after Brunhild 204 as root causes. PAT 401 is normal fallback; some challenge-subdomain failures alone do not imply challenge failure. However, differing IPs between challenge retrieval and solve submission can invalidate solves, so the previous split path was rechecked first.
 
-新しいbounded probeでは、親pageとTurnstileの全通信をTAMIAへ統一したrun、全通信をContainer直通にしたrun、従来のsplit runを実測した。TAMIA統一は223.223.22.214、JP/KIX、ASN 18144、HTTP/2、Container直通はSG/SIN、ASN 13335のIPv6 Cloudflare egressだった。split runではchallenge imageのHTTP 400も観測したためproductionでは避けるべきだが、同一出口に直してもtokenは生成されなかった。
+New bounded probes measured all-parent-page/Turnstile traffic through TAMIA, all-direct Container traffic and the former split path. All-TAMIA egress was 223.223.22.214, JP/KIX, ASN 18144, HTTP/2; direct Container egress was Cloudflare IPv6, SG/SIN, ASN 13335. A split run also observed challenge-image HTTP 400, so production should avoid it; however, using one egress still generated no token.
 
-同時にnative Linux Chrome、webdriver true/false、Patchright 1.62.2、Google Chromeを通常processとして起動して25秒後にだけCDP接続する条件、Chrome 152とversionを一致させたWindows UA・Client Hints・platform・languagesを試した。headed、fresh persistent profile、UA上書きなしも含む全10追加条件でtokenは0だった。資格情報入力、login POST、cookie再利用、R2書き込みは0回である。
+Additional conditions tried native Linux Chrome, webdriver true/false, Patchright 1.62.2, Chrome launched as an ordinary process with CDP attached only after 25 seconds, and Windows UA/Client Hints/platform/languages matched to Chrome 152. All 10 extra conditions, including headed mode, fresh persistent profiles and no UA override, had token 0. Credential entry, login POST, cookie reuse and R2 writes occurred 0 times.
 
 ## 2026-08-30 OCI `bots` Chrome verification
 
-Cloudflare Containerの外でも比較するため、OCI ARM64 host `bots`に公式Google Chrome
-Stable 152を残置し、Xvfb上のheaded ChromeをPlaywrightなしで実行した。通常のfresh
-profile、local WSLで認証成功したprofileのcopy、SwiftShader WebGLを有効化した別fresh
-profile、同じOCI Chromeを既存Worker relayでTAMIA出口へ固定した条件のすべてで、
-Sign On画面とTurnstile widgetは表示されたがtokenは0だった。
-出口は`138.2.53.208`、JP/KIX、WARPなしで、pageからはnative Linux、
-`navigator.webdriver=false`に見えた。TAMIA比較時のbrowser出口は
-`223.223.22.214`、JP/KIX、ASN 18144だったが結果は変わらなかった。token gateにより
-資格情報入力とlogin POSTは0回である。導入物、profile、dependency、logは再検証用に
-削除していない。詳細と再実行scriptは
-[`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)を参照する。
+To compare outside Cloudflare Containers, official Google Chrome Stable 152 was installed and retained on OCI ARM64 host `bots`, running headed on Xvfb without Playwright. Ordinary fresh profile, a copy of the successful local WSL profile, a separate fresh profile with SwiftShader WebGL, and the same OCI Chrome fixed to TAMIA through the existing Worker relay all displayed Sign On and the Turnstile widget but had token 0. Egress was `138.2.53.208`, JP/KIX, without WARP; pages saw native Linux and `navigator.webdriver=false`. TAMIA comparison egress was `223.223.22.214`, JP/KIX, ASN 18144, with the same result. The token gate kept credential entry/login POST at 0. Installations, profiles, dependencies and logs were retained for revalidation. See [`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md) for details and rerun scripts.
 
-続けてlocal WSLの同じGoogle Chrome 152を使い、fresh profileを2個作って出口だけを
-同時刻帯に比較した。WARP JP/NRT (`104.28.211.106`)ではtoken 752、既存Worker relay経由の
-TAMIA JP/KIX (`223.223.22.214`, ASN 18144)ではtoken 794となり、どちらもSign On、form、
-widgetあり、Access Deniedなしだった。資格情報入力とlogin POSTは0回である。同じTAMIA
-出口でlocal WSLは成功し、ContainerとOCIは失敗したため、TAMIAのnetwork reputationは
-単独root causeではない。server host/runtimeまたはbrowser/OS integrity signalを次の
-主要差分として扱う。
+Next, the same local WSL Google Chrome 152 used 2 fresh profiles to compare only egress in the same time window. WARP JP/NRT (`104.28.211.106`) produced token 752; TAMIA JP/KIX (`223.223.22.214`, ASN 18144) through the existing Worker relay produced 794. Both displayed Sign On, form and widget, without Access Denied. Credential entry/login POST occurred 0 times. Local WSL succeeded while Container/OCI failed on the same TAMIA egress, so TAMIA network reputation alone is not the root cause. Server host/runtime or browser/OS integrity signals became the next main differences.
 
-さらにlocal WSLの表示先だけをWSLgからXvfb (`1365x768x24`)へ変更した。TAMIA出口、
-fresh profile、通常Chrome 152、`webdriver=false`のままtoken 794を生成した。Chrome log
-ではWebGL 1/2がblocklistされていたため、XvfbとWebGL unavailableも単独root causeでは
-ない。server環境固有のhost/container runtimeまたは公開されないintegrity signalへ焦点を
-移す。
+Changing only local WSL display from WSLg to Xvfb (`1365x768x24`) still generated token 794 with TAMIA egress, a fresh profile, ordinary Chrome 152 and `webdriver=false`. Chrome logs showed WebGL 1/2 blocklisted, so neither Xvfb nor unavailable WebGL alone explains failure. Focus moved to server-specific host/container runtime or undisclosed integrity signals.
 
-Cloudflareへdeploy済みの現行Container image digest
-`sha256:db2ea4549e95c40114e95648d625b498c6d0ed7095a6d05bbc6d56bd09709f6c`
-を再buildせず、local WSLのDocker Engineでも実行した。通常Chromeを直接起動して25秒後
-までCDP attachしない`chrome-direct-process-attach-late-all-tamia`を使い、Cloudflare
-`basic`相当の0.25 CPU / 1 GiBとresource制限なしの両方でtokenは0だった。対して同じ
-WSL hostでnative Chromeを起動するとtoken 794であり、Containerと同じ
-`--no-sandbox --disable-dev-shm-usage`を追加しても794だった。hostとimage内のChromeは
-version `152.0.7977.64`、package、実体`/opt/google/chrome/chrome`のSHA-256まで一致した。
-さらにimageをUID 1000で実行した条件と`--network=host`条件もtoken 0だった。これにより、
-CPU/memory、2起動flag、Chrome binary、root、Docker bridge networkを各単独root cause
-から除外し、image内のfont・speech/locale・shared libraryなどbrowser-visible userland差を
-次の比較対象とする。local ContainerはCloudflare本番runtimeではなくDocker上のlocal
-simulationなので、この結果をCloudflare固有host signalの再現とは扱わない。
+The current Cloudflare-deployed Container image, digest `sha256:db2ea4549e95c40114e95648d625b498c6d0ed7095a6d05bbc6d56bd09709f6c`, was run unchanged without rebuilding in local WSL Docker Engine. `chrome-direct-process-attach-late-all-tamia` launches ordinary Chrome and delays CDP attachment for 25 seconds; both Cloudflare-`basic`-equivalent 0.25 CPU / 1 GiB and unrestricted resources yielded token 0. Native Chrome on the same WSL host produced token 794, also 794 with Container flags `--no-sandbox --disable-dev-shm-usage`. Host/image Chrome matched version `152.0.7977.64`, package and SHA-256 of `/opt/google/chrome/chrome`. Image runs with UID 1000 and `--network=host` also yielded token 0. CPU/memory, the 2 startup flags, Chrome binary, root and Docker bridge network were each excluded as sole root causes; fonts, speech/locale and shared libraries inside the image became the next browser-visible userland comparisons. Local Containers simulate Docker rather than Cloudflare production runtime, so this does not reproduce a Cloudflare-specific host signal.
 
-同じChrome、Xvfb、TAMIA条件でTurnstileのOOPIFとworkerへCDPでattachし、成功WSLと
-失敗OCIの2段階POST、response body、compile済みscript sourceを比較した。両方とも
-84,236-byte `api.js`は同一だったが、session-specific `rch` runtime、2本目POST、2本目
-responseは異なった。特に2本目responseは成功4,288 bytes、失敗127,724 bytesで、両方
-HTTP 200だった。runtimeは標準WebCryptoではなくcustom bytecode VMとbitwise codecで
-API名とpayloadを実行時に解決している。確認できたAPI語彙、難読化解除手順、safe analyzer、
-targeted breakpointの限界は
-[`docs/turnstile-local-analysis.md`](docs/turnstile-local-analysis.md)に記録した。raw body、
-cookie、challenge IDはGitへ入れていない。
+With the same Chrome/Xvfb/TAMIA conditions, CDP attached to Turnstile OOPIFs and workers to compare successful WSL and failed OCI 2-stage POSTs, response bodies and compiled scripts. Both used identical 84,236-byte `api.js`, but session-specific `rch` runtime, 2nd POST and 2nd response differed. In particular, 2nd responses were 4,288 bytes on success and 127,724 bytes on failure, both HTTP 200. The runtime resolves API names/payloads at execution through a custom bytecode VM and bitwise codec rather than standard WebCrypto. Confirmed API vocabulary, deobfuscation steps, safe analyzers and targeted-breakpoint limits are recorded in [`docs/turnstile-local-analysis.md`](docs/turnstile-local-analysis.md). Raw bodies, cookies and challenge IDs were not committed.
 
-2026-08-30のtimezone A/Bでこの結論は更新した。通常Chrome Containerでもtokenを生成できるため、browser方式をPoCの第一候補として継続する。調査したCamoufox、Patchright、SeleniumBase Pure CDP、その他の第三者workaroundと採否理由はdocs/browser-run-investigation-2026-08-28.mdに集約した。
+The timezone A/B on 2026-08-30 updated this conclusion. Ordinary Chrome Containers can generate tokens, so the browser approach remains the PoC's first candidate. Investigated Camoufox, Patchright, SeleniumBase Pure CDP and other third-party workarounds, with adoption/rejection reasons, are collected in docs/browser-run-investigation-2026-08-28.md.
 
 ## 2026-08-29 local Windows / WSL profile A/B
 
-同じ時刻帯に、ローカルWindows Chrome Beta 153とWSL Google Chrome 152で、
-fresh profileと既存Kuebiko profileのcopyを比較した。4条件すべてで
-`cf-turnstile-response`が生成され、formあり、`Access Denied`なし、
-`navigator.webdriver=false`だった。token長はWindows copy 794、Windows fresh
-752、WSL copy 773、WSL fresh 730である。token値、資格情報、login POSTは保存・
-送信していない。
+In the same time window, local Windows Chrome Beta 153 and WSL Google Chrome 152 compared fresh profiles with copies of existing Kuebiko profiles. All 4 conditions generated `cf-turnstile-response`, had a form, no `Access Denied` and `navigator.webdriver=false`. Token lengths were Windows copy 794, Windows fresh 752, WSL copy 773 and WSL fresh 730. Token values, credentials and login POSTs were neither stored nor sent.
 
-WSLはWindows profileをcopyしても成功したが、fresh profileも成功したため、
-profile copyやDPAPIで保護されたWindows cookieが成功原因とはいえない。native
-Linux Chromeもローカルでは通るので、Container失敗をLinux、fresh profile、
-CDP利用のいずれか一つへ帰属させない。計測時のCloudflare traceはWindows/WSL
-ともWARP有効、JP/NRTだった。詳細な手順と解釈は
-[`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)
-に記録した。
+WSL succeeded with a Windows-profile copy, but also with a fresh profile; profile copying or DPAPI-protected Windows cookies therefore cannot explain success. Native Linux Chrome also works locally, so do not attribute Container failure solely to Linux, fresh profiles or CDP. Measured Cloudflare traces for Windows/WSL both had WARP enabled and JP/NRT. Detailed steps/interpretation are in [`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md).
 
-続けて同じfresh WSL profileから資格情報を1回だけ送信した。Turnstile token長
-730の状態でlogin POSTはHTTP 200となり、title `TOP`、login formなし、利用明細
-導線ありへ遷移した。Access Denied、Turnstile error、credential errorはなかった。
-したがってlocal WSLでは、手動操作やWindows偽装なしでtokenのserver-side
-validationとログインまで自動化できる。明細取得はこのbounded runの対象外とした。
+Next, credentials were submitted only 1 time from the same fresh WSL profile. With token length 730, login POST returned HTTP 200 and navigated to title `TOP`, no login form and an activity-details entrypoint. No Access Denied, Turnstile error or credential error appeared. Local WSL can therefore automate server-side token validation and login without manual actions or Windows spoofing. Detail capture was outside this bounded run's scope.
 
-## 次に試す順序
+<a id="次に試す順序"></a>
 
-1. 英語表示を含むlogin後の利用明細導線と月selectorをbounded live runで確定する。
-2. `daily`で現在月・前月のHTMLとmanifestがR2へ保存されることを確認する。
-3. `backfill`はdaily成功後に1回だけ実行し、提示された15か月を保存する。
-4. split egressは採用せず、GLOBAL PASSとTurnstileを同一TAMIA出口へ固定する。
-5. PAT 401やBrunhild abortを、それ単独でblockerと判断しない。
-6. Cronはtoken生成、login POST、明細画面、月selector、R2保存の順にbounded testが成功するまで有効化しない。
+## Next trial order
 
-いずれもtoken生成、ログインPOST、明細画面、月selectorの順にbounded testし、成功してから初回backfillと日次Cronを有効化する。
+1. Confirm post-login activity-detail navigation and month selectors, including English display, in a bounded live run.
+2. Confirm `daily` saves current/previous-month HTML and manifests in R2.
+3. Run `backfill` only 1 time after daily success, saving the 15 offered months.
+4. Avoid split egress; fix GLOBAL PASS and Turnstile to the same TAMIA egress.
+5. Do not treat PAT 401 or Brunhild abort alone as blockers.
+6. Do not enable Cron until bounded tests pass in order: token generation, login POST, detail screen, month selector, R2 storage.
 
-## ローカル検証
+This order was completed on 2026-08-30 (login, daily and a 15-month backfill end to end, above). Daily collection now runs from the Processor alarm job, not a Workers Cron Trigger.
+
+<a id="ローカル検証"></a>
+
+## Local verification
 
 ```sh
-bun install --frozen-lockfile
-bun test
-mise run //services/collector-globalpass:typecheck
+mise run install                               # from the repository root
+mise run //services/collector-globalpass:test     # bun test, vitest worker tests, node relay test
+mise run //services/collector-globalpass:ci       # typecheck, cf-typecheck, test, container
 mise run //services/collector-globalpass:dry-run
 ```
 
-旧 `scripts/trigger.sh` と公開手動入口は廃止した。任意backfill・probe・container停止に代わる内部APIは追加しない。通常収集要求は既存のAccess保護されたApp操作経路を使う。
+Old `scripts/trigger.sh` and public manual entrypoints are retired. No internal APIs replace arbitrary backfill, probes or container stops. Normal collection requests use the existing Access-protected App operation path.
 
-## 残る検証項目
+<a id="残る検証項目"></a>
 
-- login後の「ご利用明細」リンクと月selectorの現行DOM selector
-- `select`のchange eventだけで月POSTが実行されるか
-- 全月の各HTMLが2 MiB以下か
-- 家族カードlabel、pending/confirmed、authorization numberを正規化する安定key
-- 非hibernating WebSocket relayが全月のbrowser sessionを維持できるか
+## Remaining verification
+
+- Current DOM selectors for the post-login `ご利用明細` link and month selector.
+- Whether a `select` change event alone performs the month POST.
+- Whether every month's HTML stays within 2 MiB.
+- Stable normalization keys for family-card labels, pending/confirmed and authorization numbers.
+- Whether the non-hibernating WebSocket relay sustains the browser session across every month.
 
 ## Operational diagnostics
 
@@ -302,3 +261,22 @@ reviewed hidden inputs, landmarks, forbidden-token occurrences, lengths as digit
 its text, attribute values, URLs or numbers read from it
 ([ADR 0026 amendment of 2026-09-28](../../docs/adr/0026-collector-unit-coverage.md#amendment-2026-09-28-global-pass-sanitizer-refusals-log-a-counts-only-shape)).
 The `terminal` line reports the run's status only and carries no error fields.
+
+Implementation update (2026-11-08 14:56 UTC): `container/collect.mjs` owns the
+collection orchestration and NDJSON error record. `server.mjs` remains the HTTP
+and probe entrypoint and injects the relay, browser launch and existing page
+actions; importing the orchestration starts no HTTP server. Browser and relay
+teardown both run, and their errors cannot replace a primary acquisition error.
+After successful acquisition, the first teardown failure still fails the run,
+including a thrown `undefined` or `null`. A separate failure flag preserves that
+first thrown value; previously an `undefined` teardown could disappear and a
+later error could replace a first nullish value. Provider logout retains the
+auxiliary flag contract above.
+
+`test/container-collection.test.mjs` uses fake pages and resource lifecycles to
+check challenge counts, failure codes/stages, HTTP status bounds, non-Error
+throws, cleanup order and the logout record. `worker-test/relay.test.ts` drives
+the real Worker relay handler in workerd with fake WebSocket endpoints and VPC
+streams: normal/EOF closes, open/read/write failures, queued-write suppression,
+byte counts, and a read error after peer close. These tests use no provider
+connection or browser; the existing Node CONNECT relay suite remains separate.

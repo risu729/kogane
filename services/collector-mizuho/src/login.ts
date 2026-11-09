@@ -7,6 +7,7 @@ import {
   MizuhoClientError,
   parseSession,
   type MizuhoSession,
+  type MizuhoLoginDiagnostic,
 } from "./client";
 
 const ORIGIN = "https://web.ib.mizuhobank.co.jp";
@@ -46,10 +47,29 @@ function tag(node: Node) {
 }
 
 /** Extract fresh hidden state only; no password, preferences or agreement is inherited. */
-function loginForm(html: string, expected: string): Form {
+function loginRefusal(
+  loginCheck: MizuhoLoginDiagnostic["loginCheck"],
+  expectedForm: MizuhoLoginDiagnostic["expectedForm"],
+  status: number,
+): never {
+  // Page-shape checks run only after a successful HTML response. Keep the
+  // diagnostic closed even if a synthetic fetcher returns an unusual status.
+  const httpStatusClass =
+    status < 300 ? "2xx" : status < 400 ? "3xx" : status < 500 ? "4xx" : "5xx";
+  throw new MizuhoClientError("login-unrecognized-page", {
+    loginCheck,
+    expectedForm,
+    httpStatusClass,
+  });
+}
+function loginForm(
+  html: string,
+  expected: MizuhoLoginDiagnostic["expectedForm"],
+  status: number,
+): Form {
   const all = nodes(parse(html));
   const forms = all.filter((node) => tag(node) === "form");
-  if (forms.length !== 1) fail("login-unrecognized-page");
+  if (forms.length !== 1) loginRefusal("form-count", expected, status);
   const form = forms[0]!;
   const name = attr(form, "name") ?? "";
   if (name !== expected) {
@@ -92,7 +112,7 @@ function loginForm(html: string, expected: string): Form {
       value.length > 8192 ||
       /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)
     )
-      fail("login-unrecognized-page");
+      loginRefusal("field-value", expected, status);
     fields[key] = value;
   }
   if (
@@ -102,8 +122,9 @@ function loginForm(html: string, expected: string): Form {
     !fields._TOKEN ||
     !fields.POSTKEY
   )
-    fail("login-unrecognized-page");
-  if (expected !== "LOGCNF_02400B" && credentialControls !== 1) fail("login-unrecognized-page");
+    loginRefusal("missing-token", expected, status);
+  if (expected !== "LOGCNF_02400B" && credentialControls !== 1)
+    loginRefusal("credential-controls", expected, status);
   return { name, fields };
 }
 
@@ -155,6 +176,7 @@ export async function loginMizuho(options: {
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let referer = ORIGIN + ENTRY;
+  let responseStatus = 200;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       controller.abort();
@@ -198,6 +220,7 @@ export async function loginMizuho(options: {
         void response.body?.cancel().catch(() => {});
         fail("login-timeout");
       }
+      responseStatus = response.status;
       try {
         absorbCookies(cookies, response, origin);
       } catch (error) {
@@ -260,9 +283,9 @@ export async function loginMizuho(options: {
   }
   async function authenticate() {
     const entryHtml = await request(ENTRY);
-    const customer = loginForm(entryHtml, "LOGBNK_00000B");
+    const customer = loginForm(entryHtml, "LOGBNK_00000B", responseStatus);
     const bases = nodes(parse(entryHtml)).filter((node) => tag(node) === "base");
-    if (bases.length !== 1) fail("login-unrecognized-page");
+    if (bases.length !== 1) loginRefusal("entry-base", "LOGBNK_00000B", responseStatus);
     let base: URL;
     try {
       base = new URL(attr(bases[0]!, "href") ?? "");
@@ -290,6 +313,7 @@ export async function loginMizuho(options: {
         }),
       ),
       "LOGBNK_00005B",
+      responseStatus,
     );
     // The bank's observed chkInvalidScript sets dsdt to 1 before the password submission.
     let html = await request(
@@ -298,7 +322,7 @@ export async function loginMizuho(options: {
     );
     const forms = nodes(parse(html)).filter((node) => tag(node) === "form");
     if (forms.length === 1 && attr(forms[0]!, "name") === "LOGCNF_02400B") {
-      const notice = loginForm(html, "LOGCNF_02400B");
+      const notice = loginForm(html, "LOGCNF_02400B", responseStatus);
       html = await request(NOTICE, submit(notice));
     }
     let form;
@@ -307,7 +331,8 @@ export async function loginMizuho(options: {
     } catch {
       return fail("login-challenge-required");
     }
-    if (form.name !== "MENTOP_02000B") fail("login-unrecognized-page");
+    if (form.name !== "MENTOP_02000B")
+      loginRefusal("post-login-form", "MENTOP_02000B", responseStatus);
     return parseSession(
       JSON.stringify({ origin, cookies: cookieHeader(), userAgent: USER_AGENT, referer, form }),
     );

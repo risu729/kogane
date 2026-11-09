@@ -1,22 +1,26 @@
 # Money Forward ME Worker collector PoC
 
-Money Forward IDのパスキーを使い、ブラウザなしのCloudflare WorkerからMoney Forward MEを読み取るPoCです。連携先一覧、口座詳細、画面で取得できる直近12か月の明細fragmentを、加工前のHTMLとして非公開の共有DATA bucket（`kogane-raw-evidence`）へ保存します。
+A PoC that reads Money Forward ME from a browserless Cloudflare Worker using a Money Forward ID passkey. Connected-service lists, account details and detail fragments for the latest 12 months available on screen are stored as unmodified HTML in private shared DATA (`kogane-raw-evidence`).
 
-## 収集対象
+<a id="収集対象"></a>
 
-- `/accounts`: 連携先一覧、合計、登録日、最終更新、状態、詳細画面のopaque key
-- 一覧から列挙した全 `/accounts/show/<opaque-id>`
-- 各詳細画面の `account_id_hash`、`service_id`、CSRF tokenを使った `/cf/fetch`
-- 当月を含む直近12か月。送信形式は `from=YYYY/M/1&account_id_hash=...&service_id=...`
-- 実行ごとのmanifest（件数、SHA-256、byte数、R2 key、失敗段階）
+## Captured data
 
-レスポンスHTMLには残高や明細が含まれるため、本文をWorkerログや手動トリガー応答へ返しません。R2 bucketも公開しません。
+- `/accounts`: connected-service list, totals, registration date, last update, status and opaque detail-page keys.
+- Every `/accounts/show/<opaque-id>` enumerated from that list.
+- `/cf/fetch` using each detail page's `account_id_hash`, `service_id` and CSRF token.
+- The latest 12 months, including the current month, sent as `from=YYYY/M/1&account_id_hash=...&service_id=...`.
+- A manifest per run (counts, SHA-256, byte sizes, R2 keys and failure stages).
 
-## 認証
+Response HTML contains balances/details, so its body is returned in neither Worker logs nor HTTP responses (the Worker serves only `GET /health`; every other path is 404, `src/worker.ts`). The R2 bucket is not public either.
 
-Workerへ置くのは、正しいMoney Forward IDに保存済みのパスキー1件だけです。Bitwardenのマスターパスワード、`BW_SESSION`、Money ForwardのCookieは置きません。
+<a id="認証"></a>
 
-同じrpIdのパスキーが複数ある場合、アイテム名や配列の先頭だけでは選びません。`auth:select` はBitwarden内の `id.moneyforward.com` 候補を値を表示せず順番に検証し、実際にMEの口座詳細まで取得できた1件だけをローカルmetadataへ記録します。これはパスワード変更時ではなく、パスキーの追加・削除・保存先変更時に再実行します。
+## Authentication
+
+The Worker holds only 1 passkey stored for the correct Money Forward ID. It holds no Bitwarden master password, `BW_SESSION` or Money Forward cookie.
+
+If multiple passkeys share an rpId, neither the item name nor first array element selects one. `scripts/select-bitwarden-passkey.ts` sequentially verifies Bitwarden candidates for `id.moneyforward.com` without displaying values, recording only the 1 candidate that actually reached ME account details in local metadata. Rerun this after passkey addition/deletion/storage-location changes, not password changes.
 
 ```bash
 export BW_SESSION="$(bw unlock --raw)"
@@ -25,9 +29,9 @@ bun scripts/select-bitwarden-passkey.ts
 unset BW_SESSION
 ```
 
-`moneyforward-bitwarden-match.json` はitem idとcredential indexだけを持ち、認証秘密は持ちません。`sync-local-secrets.sh` はその指定に従ってBitwardenからパスキーを抽出し、`MONEYFORWARD_CREDENTIAL_JSON`へ直接pipeします。中間の秘密JSONは作りません。
+`moneyforward-bitwarden-match.json` holds only item id and credential index, with no authentication secret. `sync-local-secrets.sh` follows that selection to extract the Bitwarden passkey and pipe it directly into `MONEYFORWARD_CREDENTIAL_JSON`. No intermediate secret JSON is created.
 
-ローカル疎通も同じBitwardenパスキーを標準入力で渡します。
+Local connectivity checks also pass the same Bitwarden passkey through stdin.
 
 ```bash
 ./scripts/credential-from-bitwarden.sh | bun scripts/live-smoke.ts
@@ -36,81 +40,89 @@ unset BW_SESSION
 ## Cloudflare
 
 ```bash
-bun install
+mise run install                                   # from the repository root
 mise run //services/collector-moneyforward:test
-mise run //services/collector-moneyforward:typecheck
+mise run //services/collector-moneyforward:ci
 ./scripts/sync-local-secrets.sh
-./node_modules/.bin/wrangler deploy
 ```
 
-Cronは毎日 `21:15 UTC`（日本時間06:15）です。GitHub Actionsはスケジューラに使いません。Money Forward側の銀行・カード更新を要求する処理はなく、最後にMoney Forwardへ同期済みの内容だけを保存します。
+Production deployment is the release workflow's, in the order of
+[`infra/deploy-order.json`](../../infra/deploy-order.json), with a `/health` postcheck.
 
-## 中央raw-evidenceへの保存
+The Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`). The
+Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled`
+(`src/schedule-entrypoint.ts`) for the `moneyforward-me` job in
+[`config/alarm-jobs.json`](../../config/alarm-jobs.json), daily at 06:15 JST (21:15 UTC).
+GitHub Actions is not the scheduler. Nothing requests a bank/card refresh on Money Forward's side; only the contents last synchronized into Money Forward are saved.
 
-runは`packages/collection`で共有DATA bucketへ直接書きます。各pageとmanifestを
-`objects/<2 hex>/<sha256>`へ保存し、最後に`runs/moneyforward-me/<run-id>/terminal.json`を書きます。
-Processorがterminalをin-processで登録します（[processor.md](../../docs/processor.md)）。
-`POST /backfill-raw-evidence`、`kogane-collector-r2-importer`へのService Binding、
-`scripts/backfill-raw-evidence.sh`、source専用bucketは2026-09-13に廃止しました
-（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
+<a id="中央raw-evidenceへの保存"></a>
 
-## 2026-08-31の実データ検証
+## Central raw-evidence storage
 
-- Bitwarden内のMoney Forwardパスキー候補: 2件
-- 署名自体が受理された候補: 2件
-- 実際のME口座へ認可できた候補: 1件
-- ローカル収集: 4詳細、月別48 fragment、合計53成果物、失敗0
-- Worker収集: 4詳細、月別48 fragment、合計53成果物、失敗0
-- R2: manifestの53件すべてにbyte数とSHA-256があり、サンプル本文を再取得してSHA-256一致を確認
-- 当時の検証: `/health`: 200、旧認証付きtrigger: success。公開triggerは2026-10-10に廃止（404）し、既存の固定action private RPCを通常収集経路として維持する。
+`packages/collection` writes runs directly to shared DATA, saving each page and manifest under `objects/<2 hex>/<sha256>` and writing `runs/moneyforward-me/<run-id>/terminal.json` last. The Processor registers terminals in-process ([processor.md](../../docs/processor.md)). `POST /backfill-raw-evidence`, the Service Binding to `kogane-collector-r2-importer`, `scripts/backfill-raw-evidence.sh` and the dedicated source bucket were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)).
 
-切り分け中に正しいMFIDへKogane専用パスキーを一時登録したが、Bitwarden内の正しい既存パスキーを特定した後に登録解除した。登録数が2件から1件へ戻り、credential IDが消えたことを確認済み。専用秘密鍵のWindows/WSLコピーも削除済みで、Worker secretはBitwarden由来のパスキーへ差し替えてある。
+<a id="2026-08-31の実データ検証"></a>
 
-## Money Forwardから取得できない、または意味が弱くなるデータ
+## Real-data verification on 2026-08-31
 
-三井住友銀行について、Money Forwardの表示からは次を完全には復元できません。
+- Money Forward passkey candidates in Bitwarden: 2.
+- Candidates whose signatures were accepted: 2.
+- Candidates actually authorized for the ME account: 1.
+- Local capture: 4 details, 48 monthly fragments, 53 artifacts total, failure 0.
+- Worker capture: 4 details, 48 monthly fragments, 53 artifacts total, failure 0.
+- R2: all 53 manifest entries had byte sizes/SHA-256; rereading sample bodies confirmed matching SHA-256.
+- Verification at that time: `/health`: 200; the old authenticated trigger: success. The public trigger was retired on 2026-10-10 (404); the existing fixed-action private RPC remains the normal collection path.
 
-- 取引後残高、銀行側の取引ID・照会番号、価値日
-- 振込相手を構造化した名義・銀行・支店・口座情報
-- 銀行公式CSVや公式APIのraw response
-- 外貨取引の原通貨額、適用レート、取引後外貨残高
-- 定期預金のロット別明細・満期条件
-- 銀行公式明細との完全一致・完全性の保証
+During diagnosis, a Kogane-specific passkey was temporarily registered for the correct MFID, then removed after identifying the correct existing Bitwarden passkey. The count was confirmed to return from 2 to 1 and the credential ID to disappear. Windows/WSL copies of the dedicated private key were also deleted; the Worker secret now uses the Bitwarden passkey.
 
-Vpassについて、Money Forwardの汎用明細だけでは次を完全には取得できません。
+<a id="money-forwardから取得できないまたは意味が弱くなるデータ"></a>
 
-- 利用・売上確定・請求確定などの状態
-- 1回・分割・リボ、分割回数
-- 請求月、支払日、明細書単位のグルーピング
-- キャンセル・返金と元取引のリンク
-- 海外利用の原通貨額・換算レート
-- 承認番号・売上ID、加盟店国・業種
-- ポイント付与・利用履歴
+## Data Money Forward cannot provide, or whose meaning becomes weaker
 
-Oliveデビットは、銀行連携だけでは加盟店単位の利用履歴を取得できません。Vpass連携の汎用「内容・金額」に現れる場合はあるものの、全件性、確定状態、公式明細固有項目は保証できません。
+For `三井住友銀行` (Sumitomo Mitsui Banking Corporation), Money Forward presentation cannot completely reconstruct:
 
-共通して、Money Forwardがまだ更新していない最新・保留中データ、公式側の過去全期間、取引単位のsource fetch時刻は取得できません。無料プランでは画面上、連携4件、過去1年、更新頻度・一括更新の制限もあります。
+- Post-transaction balances, bank-side transaction IDs/inquiry numbers and value dates.
+- Structured transfer-counterparty name, bank, branch and account information.
+- Official bank CSV or official-API raw responses.
+- Original-currency amounts, applied rates and post-transaction foreign-currency balances.
+- Time-deposit details per lot and maturity conditions.
+- Guaranteed exact agreement/completeness against official bank details.
 
-## 依存箇所と制約
+For Vpass, Money Forward's generic details cannot completely provide:
 
-- 未公開HTMLと `/cf/fetch` に依存するため、画面構造変更時は追従が必要です。
-- 保存が成功しても、後段parserはHTML revisionごとに検証します。
-- パスキー認証後も、MEのOAuth account selectorでactive accountを選択する必要があります。
-- Money ForwardのセッションCookieやChrome profileはWorkerへコピーしません。
+- States such as usage, posted sales and finalized billing.
+- 1-payment, installment/revolving classification and installment counts.
+- Billing month, payment day and statement-level grouping.
+- Links from cancellations/refunds to original transactions.
+- Original-currency amounts/rates for overseas usage.
+- Approval numbers/sales IDs, merchant country and category.
+- Point earning/usage history.
 
-## 検証資源と削除対象
+`Oliveデビット` (Olive Debit) merchant-level usage history is unavailable through bank linking alone. It may appear in Vpass linking's generic `内容・金額` ("description and amount"), but completeness, finalized state and official-statement-specific fields are not guaranteed.
 
-PoCを廃止するときは次をまとめて削除します。
+Across sources, uncaptured data includes the latest/pending items Money Forward has not refreshed, the provider's full historical period and per-transaction source-fetch times. On-screen free-plan limits also include 4 connections, the past 1 year, refresh frequency and bulk refresh.
+
+<a id="依存箇所と制約"></a>
+
+## Dependencies and limits
+
+- Private HTML and `/cf/fetch` dependencies require following screen-structure changes.
+- Even after successful storage, downstream parsers validate each HTML revision.
+- After passkey authentication, the ME OAuth account selector still needs an active-account selection.
+- Money Forward session cookies and Chrome profiles are not copied into the Worker.
+
+<a id="検証資源と削除対象"></a>
+
+## Validation resources and cleanup
+
+When retiring the PoC, remove these together:
 
 - Worker: `kogane-moneyforward-collector-poc`
-- Worker secrets: `MONEYFORWARD_CREDENTIAL_JSON`（account unit の
-  identity は secret なしで導出する、[ADR 0029](../../docs/adr/0029-data-classification-and-unkeyed-identity.md)。
-  以前に設定した `MONEYFORWARD_ACCOUNT_IDENTITY_KEY` は読まれないので
-  `wrangler secret delete MONEYFORWARD_ACCOUNT_IDENTITY_KEY --name kogane-moneyforward-collector-poc` で削除できる）
-- Cron: `15 21 * * *`
-- ローカル照合metadata: `/home/risu/.local/state/kogane/moneyforward-bitwarden-match.json`
+- Worker secrets: `MONEYFORWARD_CREDENTIAL_JSON` (account-unit identity is derived without a secret: [ADR 0029](../../docs/adr/0029-data-classification-and-unkeyed-identity.md). Previously configured `MONEYFORWARD_ACCOUNT_IDENTITY_KEY` is unread and can be deleted with `wrangler secret delete MONEYFORWARD_ACCOUNT_IDENTITY_KEY --name kogane-moneyforward-collector-poc`.)
+- Schedule: Processor alarm job `moneyforward-me` (`config/alarm-jobs.json`, `15 21 * * *` UTC); no Cron Trigger
+- Local matching metadata: `/home/risu/.local/state/kogane/moneyforward-bitwarden-match.json`
 
-共有DATA bucket（`kogane-raw-evidence`）は他のcollectorとProcessorも使うため削除しません。旧source専用bucket `kogane-moneyforward-collector-poc`は2026-09-13に削除済みです。
+Keep shared DATA (`kogane-raw-evidence`) because other collectors and the Processor also use it. The old dedicated source bucket `kogane-moneyforward-collector-poc` was deleted on 2026-09-13.
 
 ## Safe operational diagnostics
 
@@ -125,5 +137,5 @@ when no manifest can be saved. Logging is best effort and cannot stop collection
 Exception messages/stacks, provider response bodies, redirect URLs, cookie names
 or values, CSRF/challenge values, account identifiers and passkey material are
 excluded from diagnostics. Raw evidence storage and collection status semantics
-are unchanged. The central backfill path is separately authenticated, bounded,
-and read-only against the collector R2.
+are unchanged. There is no central backfill path any more; it was retired with
+the per-source bucket on 2026-09-13.

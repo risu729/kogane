@@ -381,6 +381,23 @@ application query over an executor.
 | `CELL_QUALITY_SQL`         | one source's visible artifacts named by a dataset, a job or a recorded parse; their jobs, parses, publications, claims and unit outcomes; current membership | 501 cells from an offset                                                |
 | `ACCOUNT_COVERAGE_SQL`     | the cell read's CTEs unchanged, plus the accounts the newest and current captures' sealed identity observations map to                                       | 2,001 cells, unpaged; more is refused                                   |
 
+The summary and cell contract is version 5. Latest receipt terminals and
+unregistered-run groups expose nullable `failureCode` from the validated failed
+terminal code in `collection_runs.provider_failure_code` (migration 0086).
+It is separate from `blockedCode`, which explains registration. `safeCode` maps
+hyphens to underscores; a code outside the display grammar
+`^[a-z][a-z0-9_]{0,63}$` becomes `unclassified`. Legacy rows remain NULL.
+Unregistered groups distinguish both stored codes, so different provider failures
+are not collapsed into one registration refusal. HTTP, MCP and the quality page
+use the same application result and show the code beside the failed attempt.
+The per-account contract version is independent.
+
+`collection-quality-terminals-legacy-sql.ts` freezes the shipped terminal reads.
+Differential tests on a seeded 180-run store show that aggregating the new groups
+back by collector and registration code preserves counts and newest timestamps,
+and terminal projections differ only by the new field. Plans without statistics
+retain indexed source/run reads.
+
 A cell is (dataset, parser, fetch unit, period, MyJCB statement state,
 currentness rule). Its newest capture is its newest fetch run by capture time;
 its current capture is the newest fetch run with a member of the current set,
@@ -412,12 +429,14 @@ transactions a snapshot parser also emits
 calls not current.
 
 **Freshness** (`collection-freshness-v1`, `packages/domain/src/collection-freshness.ts`)
-is computed by the application query, not in SQL: every summary and cells
-answer counts ages to one instant, `freshnessAsOf` (the route's request time), in Asia/Tokyo civil
+is computed by the application query, not in SQL: every summary, cells and
+account answer counts ages to one instant, `freshnessAsOf` (the route's request time), in Asia/Tokyo civil
 days. A cell's age is its current capture's; a source's is its newest visible
-fetch run's, whatever that run's outcome. The cells read the source's own jobs
-(`SOURCE_JOBS_SQL`) to tell what the source waits on. The account view
-(`ACCOUNT_COVERAGE_SQL`) carries no freshness.
+fetch run's, whatever that run's outcome. The cells and the account view read
+the source's own jobs (`SOURCE_JOBS_SQL`) to tell what the source waits on;
+`ACCOUNT_COVERAGE_SQL` itself is unchanged. In the account view every period
+ages its own named capture independently of standing; a data type and account
+carry their newest named capture's freshness ([ADR 0088, amendment of 2026-11-08](adr/0088-collection-quality-per-account.md#amendment-2026-11-08-freshness-per-account-data-type-and-period)).
 
 ### Cost
 
@@ -526,3 +545,17 @@ statement before it also returned remapped identifiers: about 0.3 ms at 1,000
 mapping rows, 2.3 ms at 10,000 and 11.5 ms at 100,000, linear. The same script
 on the current statement gave 0.2, 2.1–2.2 and 5.5–6.0 ms. D1 reads every
 mapping row on every query.
+
+### Sony Bank history transactions
+
+Since 2026-11-08, `transactionsSql` excludes every release of
+`sony-bank-history-json` before identity ranking. Only the official CSV
+supplies current deposit history transactions; missing CSV produces no JSON
+fallback. HTTP, MCP and reported financial queries share this reader. The
+local experiment's separate reader applies the same exclusion. JSON balances
+and recorded evidence remain unchanged ([ADR 0092](adr/0092-sony-history-csv-only.md)).
+`test/sony-csv-history.test.ts` compares literal frozen shipped SQL on
+scaled/random full CORE stores, including paging and source/account/date/text
+scopes; only JSON transactions differ. Without table statistics, the query
+retains the same access paths and their multiplicity; SQLite may reorder
+indexed seeks.

@@ -1174,6 +1174,29 @@
       "statementCount": 1,
       "insertStatements": [],
       "sha256": "1ef7ff27e5ec9192fc009f8715861c21a28943ff8c173bdfbe1aa45b6a79cc04"
+    },
+    {
+      "file": "0084_csv_reader_release_snapshot_policies.sql",
+      "statementCount": 4,
+      "insertStatements": [],
+      "sha256": "14d293a661d1229c973e51d8813b8908f64f35f29defa35f635b3f01de39be8d"
+    },
+    {
+      "file": "0085_schedule_dispatch_marker.sql",
+      "statementCount": 9,
+      "insertStatements": [
+        {
+          "table": "collection_schedule_occurrences_v2",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "9fc982804c910006eb97dc1bc2d1e3ac51d7dd2e13e314443a4893ebc31c2f47"
+    },
+    {
+      "file": "0086_collection_provider_failure_code.sql",
+      "statementCount": 2,
+      "insertStatements": [],
+      "sha256": "2a8cd46c05723bc8bc8dc08ead0307f13a4b1489bf40d26c97f1a69a21145ee5"
     }
   ],
   "tables": [
@@ -4872,6 +4895,13 @@
           "notNull": false,
           "default": null,
           "pk": 0
+        },
+        {
+          "name": "provider_failure_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
         }
       ],
       "primaryKey": [
@@ -4921,6 +4951,7 @@
         }
       ],
       "triggers": [
+        "collection_runs_failure_code_immutable",
         "collection_runs_no_delete",
         "collection_runs_no_replace",
         "collection_runs_progress_only"
@@ -4930,7 +4961,7 @@
         "collection_runs_no_delete"
       ],
       "appendOnly": false,
-      "sqlSha256": "e7abdd919b5c2975"
+      "sqlSha256": "27da8e3874013b4a"
     },
     {
       "name": "collection_scan_state",
@@ -5069,6 +5100,34 @@
           "notNull": false,
           "default": null,
           "pk": 0
+        },
+        {
+          "name": "dispatch_protocol",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "dispatched_at",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "attempt_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "retry_claimed_at",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
         }
       ],
       "primaryKey": [
@@ -5098,15 +5157,25 @@
           "columns": [
             "started_at"
           ]
+        },
+        {
+          "name": "schedule_occurrences_retry",
+          "unique": false,
+          "partial": true,
+          "columns": [
+            "schedule_id",
+            "nominal_at"
+          ]
         }
       ],
       "triggers": [
+        "schedule_occurrence_dispatch_immutable",
         "schedule_occurrence_identity_immutable"
       ],
       "noUpdateTriggers": [],
       "noDeleteTriggers": [],
       "appendOnly": false,
-      "sqlSha256": "f88e1d4f538999e6"
+      "sqlSha256": "23fd1e4de188d4d2"
     },
     {
       "name": "collection_schedule_revisions",
@@ -18204,6 +18273,13 @@
       "sqlSha256": "d092d7be355b12c7"
     },
     {
+      "name": "collection_runs_failure_code_immutable",
+      "table": "collection_runs",
+      "timing": "BEFORE",
+      "event": "UPDATE OF PROVIDER_FAILURE_CODE",
+      "sqlSha256": "7b4758206ecf972f"
+    },
+    {
       "name": "collection_runs_no_delete",
       "table": "collection_runs",
       "timing": "BEFORE",
@@ -20878,11 +20954,18 @@
       "sqlSha256": "b89de520fa007cb2"
     },
     {
+      "name": "schedule_occurrence_dispatch_immutable",
+      "table": "collection_schedule_occurrences",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "50d7fb6441318ce0"
+    },
+    {
       "name": "schedule_occurrence_identity_immutable",
       "table": "collection_schedule_occurrences",
       "timing": "BEFORE",
       "event": "UPDATE",
-      "sqlSha256": "eb46b05797f8e437"
+      "sqlSha256": "95c6aba210d203af"
     },
     {
       "name": "schedule_revisions_no_delete",
@@ -21735,6 +21818,11 @@
       "sqlSha256": "1b67ec622fdbe126"
     },
     {
+      "name": "schedule_occurrences_retry",
+      "table": "collection_schedule_occurrences",
+      "sqlSha256": "4b1864caf5f50f3c"
+    },
+    {
       "name": "settlement_relations_component",
       "table": "settlement_relations",
       "sqlSha256": "8475ed864d92cb4c"
@@ -21753,8 +21841,8 @@
   "summary": {
     "tableCount": 141,
     "viewCount": 44,
-    "triggerCount": 525,
-    "explicitIndexCount": 146,
+    "triggerCount": 527,
+    "explicitIndexCount": 147,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -22010,8 +22098,9 @@
       "0066_prestia_bank_snapshot_schedule.sql",
       "0070_economic_commit_guard.sql",
       "0071_economic_event_command_kinds.sql",
-      "0080_jpoint_program.sql"
+      "0080_jpoint_program.sql",
+      "0085_schedule_dispatch_marker.sql"
     ],
-    "schemaSha256": "13826bb5bfba82b725beef7e1fac5c64294fecf117ac4c0bacd83ccb2128086a"
+    "schemaSha256": "0b2ddb2a8d7e9b70df8ec4b3937eeef911d2737a1e55ca0d06eb316f47695af9"
   }
 }

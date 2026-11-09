@@ -1,51 +1,59 @@
 # MyJCB read-only Worker PoC
 
-MyJCBの公式WebをCloudflare WorkersのScheduled handlerから読み、取得時の公式HTMLと取得manifestを共有DATA bucket（`kogane-raw-evidence`）へ追記保存する独立PoCである。`mnie`は利用せず、Okuraのコードも取り込んでいない。
+This independent PoC reads the official MyJCB Web through a Cloudflare Worker (the Processor alarm calls its `ScheduledCollection` RPC entrypoint, `src/schedule-entrypoint.ts`) and appends captured official HTML and a capture manifest to shared DATA (`kogane-raw-evidence`). It uses neither `mnie` nor code imported from Okura.
 
-Worker PoCは2026-08-31にdeployし、第一のMyJCB IDで実auth testまで完了した。Bitwardenから一項目だけをlocal syncし、Browser Runの一時virtual authenticatorでpasskey assertionを生成してmypageへ到達した後、cookieとUser-Agentを通常のWorker `fetch`へ移管した。過去月JSONによるavailable月列挙、credit detail取得、private R2への20 artifactとmanifest保存が1 runで成功し、failureは0だった。raw credential、WebAuthn assertion、cookie、明細値、file hashはcommit／logしていない。
+The Worker PoC was deployed on 2026-08-31 and completed a real authentication test with the first MyJCB ID. Only one Bitwarden item was synchronized locally. A temporary Browser Run virtual authenticator generated a passkey assertion and reached mypage, then handed cookies and User-Agent to ordinary Worker `fetch`. Available-month enumeration through past-month JSON, credit-detail capture and private-R2 storage of 20 artifacts plus a manifest succeeded in 1 run with failure 0. Raw credentials, WebAuthn assertions, cookies, detail values and file hashes were neither committed nor logged.
 
 ## Runtime profile
 
-- **Browser: ログインのみ。** Cloudflare Browser Run bindingで公式login pageを開き、動的login protection scriptとNNL Apps SDKのWebAuthn flowを実行する。
-- passkey modeではBitwarden credentialを一時CDP virtual authenticatorへ注入し、password modeでも公式pageの動的field/cookie生成をbrowserへ任せる。目的はsession bootstrapであり、明細renderingではない。
-- mypage到達後に完全なcookie jarとUser-Agentを通常のWorker `fetch`へ渡し、Browser Runを閉じる。menu、月列挙JSON、明細HTML、CSV/PDF/OFX、R2保存はbrowserを使わない。
+- **Browser: login only.** The Cloudflare Browser Run binding opens the official login page and runs dynamic login-protection scripts and the NNL Apps SDK WebAuthn flow.
+- Passkey mode injects the Bitwarden credential into a temporary CDP virtual authenticator. Password mode also lets the browser generate the official page's dynamic fields/cookies. This bootstraps sessions rather than rendering details.
+- After reaching mypage, the complete cookie jar and User-Agent move to ordinary Worker `fetch`, and Browser Run closes. Menus, month-enumeration JSON, detail HTML, CSV/PDF/OFX and R2 storage do not use a browser.
 
-## なぜBrowser Runを使うか
+<a id="なぜbrowser-runを使うか"></a>
 
-`/Login`はloadごとに`/apl/login-prot.js?init`とephemeral seed付き`?async`を読み、公式JavaScriptがlogin formへ動的field/cookieを追加する。Workersは取得した任意JavaScriptを`eval`/`new Function`で実行する環境ではなく、保護scriptを手書きで再実装すると追従性と安全境界が悪化する。このPoCは`src/login-protection.ts`だけでCloudflare Browser Runを起動し、公式page内で公式scriptをそのまま実行する。
+## Why Browser Run is used
 
-login成功後はbrowser cookieとUser-Agentを`CookieJar`へ移し、`src/policy.ts`のmethod/origin/path/query allowlistを通るGETと過去月列挙JSON-RPC POSTだけを通常のWorker `fetch`で取得する。Browserはconnectionごとの`finally`で閉じる。動的script source、credential、protected login POST body、cookie値、mypage HTMLはR2へ保存しない。
+On every load, `/Login` reads `/apl/login-prot.js?init` and `?async` with an ephemeral seed; official JavaScript adds dynamic fields/cookies to the login form. Workers cannot execute arbitrary fetched JavaScript through `eval`/`new Function`; manually reimplementing the protection script would worsen maintainability and the safety boundary. This PoC starts Cloudflare Browser Run only in `src/login-protection.ts`, executing official scripts unchanged in the official page.
 
-### Browser Runを外せるか
+After successful login, browser cookies and User-Agent move into `CookieJar`. Ordinary Worker `fetch` captures only GETs and past-month enumeration JSON-RPC POSTs allowed by the method/origin/path/query allowlist in `src/policy.ts`. The browser closes in each connection's `finally`. Dynamic script source, credentials, protected login POST bodies, cookie values and mypage HTML are not stored in R2.
 
-passkey成功時のsanitized network shapeでは、同一origin内で次の順序を確認した。query、header、cookie、request/response body、challenge、assertion、`result`値は保存していない。
+<a id="browser-runを外せるか"></a>
+
+### Can Browser Run be removed?
+
+The sanitized network shape of a successful passkey login confirmed this same-origin order. Query/header/cookie/request-body/response-body values, challenges, assertions and `result` values were not stored.
 
 1. `POST /iss-pc/member/user_manage/PasskeyLogin`
-2. `POST /iss-pc/member/user_manage/userLoginPasskeyServiceStatusCommunication.html`（field名は`loginRouteId`）
-3. NNL Apps SDK 9.2.0のUI resource取得
-4. `POST /iss-pc/member/user_manage/userLoginPasskeyAuthCheckCommunication.html`（field名は`result`）
+2. `POST /iss-pc/member/user_manage/userLoginPasskeyServiceStatusCommunication.html` (field name: `loginRouteId`)
+3. Fetch NNL Apps SDK 9.2.0 UI resources.
+4. `POST /iss-pc/member/user_manage/userLoginPasskeyAuthCheckCommunication.html` (field name: `result`)
 5. `GET /iss-pc/member/mypage/mypage.html`
 
-これは標準WebAuthn assertionを単一JSON endpointへ直接送る契約ではなく、公式NNL SDKがchallenge／assertionをopaqueな`result`へ組み立てるflowである。P-256署名自体はWorkers Web Cryptoでも可能だが、NNL `result` contractを観測・再実装・追従する必要があるため、現時点のworking implementationではlogin bootstrapだけBrowser Runを使う。Browser Runが原理的に必須と証明されたわけではなく、将来のcost最適化候補としてdirect passkey clientを分離調査する。ログイン後のmenu、過去月JSON、detail、export、R2保存にはBrowser Runを使わないことはlive runで確認済みである。
+This is not a contract for sending a standard WebAuthn assertion directly to a single JSON endpoint: the official NNL SDK assembles the challenge/assertion into opaque `result`. Workers Web Crypto can generate P-256 signatures, but the NNL `result` contract still needs observation, reimplementation and maintenance. The current working implementation therefore uses Browser Run only for login bootstrap. Browser Run has not been proved inherently necessary; a direct passkey client remains a separate investigation for possible future cost optimization. Live execution confirmed that post-login menus, past-month JSON, details, exports and R2 storage do not use Browser Run.
 
-### Browserless passkey clientの実装計画
+<a id="browserless-passkey-clientの実装計画"></a>
 
-Browserless化は明細clientを書き換える作業ではなく、`loginWithBitwardenPasskey`だけをdirect bootstrapへ置き換える作業とする。既存のcookie jar、strict read allowlist、parser、R2保存はそのまま利用する。現時点では`result`の実値を保存していないため、次の順序を飛ばして署名だけを実装しない。
+### Browserless passkey client implementation plan
 
-1. 所有者自身のaccountで成功loginを複数回private captureし、NNL SDK resourceのversion/hash、`navigator.credentials.get()`へ渡る`PublicKeyCredentialRequestOptions`、返る`PublicKeyCredential`、直後の`result`、cookie rotation、relayを同一run内で対応付ける。challenge、assertion、cookie、`result`の値はpublic repo、Worker log、R2へ置かず、必要な解析中だけprivate evidenceとして扱う。
-2. 二つ以上のfresh challengeを比較し、`result`が単なるJSON/Base64か、SDK固有envelope、MAC／暗号化、transaction ID、SDK metadata、risk/device signalを持つかを切り分ける。一標本からfieldを固定仕様と推定せず、NNL assetのversion変更も別caseとして扱う。
-3. 標準WebAuthn部分をWorkers Web Cryptoで生成する。入力はcredential ID、P-256 private key、RP ID、user handle、server challengeで、`clientDataJSON`のorigin/type/challenge、`authenticatorData`のRP ID hash・UP/UV・BE/BS・counter・extensions、`authenticatorData || SHA-256(clientDataJSON)`へのES256署名、必要ならWeb Crypto出力からWebAuthn署名表現への変換をbyte単位でtest vector化する。
-4. 観測で確認したNNL/JCB serializationだけを独立adapterに実装する。`PasskeyLogin`、service-status、auth-check、relayのmethod/origin/path、CSRFまたは動的field、完全なcookie jarをstate machineとして扱い、未知redirect、SDK version、response shape、追加認証では停止する。取得したSDKをWorker内で`eval`／`new Function`して代用しない。
-5. `bootstrapMode: "passkey-direct"`のようにBrowser版と分離して導入し、fresh challengeの一回利用、replay拒否、RP ID/origin不一致拒否、連続run、Cron実行元、session expiry、NNL version driftを検証する。mypage到達後は既存fetch clientへhandoffし、同じaccount・同じ時点でBrowser版とcard/period/artifact種別を照合する。秘密値、明細値、assertionを差分logへ出さない。
-6. direct版が複数回のlive runとversion-drift停止試験を通るまではBrowser版を既定値として残す。失敗時に同一runで自動Browser fallbackして認証を二重送信せず、次回runで明示設定されたbootstrapだけを使う。
+Browserless execution replaces only `loginWithBitwardenPasskey` with direct bootstrap, without rewriting the detail client. Reuse the existing cookie jar, strict read allowlist, parser and R2 storage. Actual `result` values have not been stored, so do not skip this sequence and implement signatures alone.
 
-完了条件は「署名が作れた」ではなく、fresh server stateからauth-checkとrelayを通り、mypage sessionを取得し、既存read-only collectionが同等の範囲を回収でき、古いchallenge／未知SDKではfail closedになることである。Browser Runの削除とbinding除去は、この条件を満たした後の別変更とする。
+1. Privately capture several successful logins with the owner's own account. Within each run, correlate NNL SDK resource version/hash, `PublicKeyCredentialRequestOptions` passed to `navigator.credentials.get()`, the returned `PublicKeyCredential`, the immediately following `result`, cookie rotation and relays. Keep challenge/assertion/cookie/`result` values out of the public repository, Worker logs and R2; treat them as private evidence only during necessary analysis.
+2. Compare at least two fresh challenges to determine whether `result` is plain JSON/Base64 or includes an SDK-specific envelope, MAC/encryption, transaction ID, SDK metadata or risk/device signals. Do not infer fixed fields from one sample; handle NNL asset-version changes as separate cases.
+3. Generate the standard WebAuthn portion with Workers Web Crypto. Inputs are credential ID, P-256 private key, RP ID, user handle and server challenge. Create byte-level test vectors for `clientDataJSON` origin/type/challenge; `authenticatorData` RP ID hash, UP/UV, BE/BS, counter and extensions; ES256 signatures over `authenticatorData || SHA-256(clientDataJSON)`; and any conversion from Web Crypto output to WebAuthn signature representation.
+4. Implement only observed NNL/JCB serialization in a separate adapter. Treat `PasskeyLogin`, service-status, auth-check and relay method/origin/path, CSRF or dynamic fields and the complete cookie jar as a state machine. Stop on unknown redirects, SDK versions, response shapes or additional authentication. Do not substitute `eval`/`new Function` execution of fetched SDK code inside the Worker.
+5. Introduce it separately from the browser version, for example as `bootstrapMode: "passkey-direct"`. Verify single use of fresh challenges, replay refusal, RP ID/origin mismatch refusal, consecutive runs, Cron execution origin, session expiry and NNL version drift. After reaching mypage, hand off to the existing fetch client and compare card/period/artifact types with the browser version for the same account and time. Keep secrets, detail values and assertions out of difference logs.
+6. Keep the browser version as default until the direct version passes several live runs and version-drift stopping tests. Do not automatically fall back to the browser in the same failed run and send authentication twice; the next run uses only its explicitly configured bootstrap.
 
-現段階ではContainerを追加しない。Browser Runで公式scriptを実ブラウザ実行でき、Worker内にR2/Cron/read clientを残せるためである。今後、Browser Runからのpassword loginだけが環境要因で拒否され、同一script/profileでContainer Chromeが再現性を持って成功することがsanitized live testで確認された場合に限り、login bootstrapだけを最小Containerへ移す。
+Completion means passing auth-check and relays from fresh server state, obtaining a mypage session, capturing an equivalent scope through existing read-only collection, and failing closed on old challenges/unknown SDKs, rather than merely generating a signature. Browser Run and binding removal are separate changes after these conditions are met.
 
-## 認証とsecret
+No Container is added at this stage: Browser Run executes official scripts in a real browser while R2/Cron/read clients remain in the Worker. Only if a sanitized live test later shows that environmental factors reject password login through Browser Run while Container Chrome reproducibly succeeds with the same script/profile should login bootstrap alone move to a minimal Container.
 
-小規模PoCではWorker secret `MYJCB_CONNECTIONS_JSON`に1〜16 connectionを置ける。
+<a id="認証とsecret"></a>
+
+## Authentication and secrets
+
+This small PoC can place 1–16 connections in Worker secret `MYJCB_CONNECTIONS_JSON`.
 
 ```json
 [
@@ -72,13 +80,13 @@ Browserless化は明細clientを書き換える作業ではなく、`loginWithBi
 ]
 ```
 
-各array要素は独立したMyJCB ID/session/R2 namespaceである。最初のIDや一つのおまとめloginが他IDを網羅すると仮定しない。`connectionId`はR2 key用の利用者定義pseudonymであり、MyJCB ID、カード番号、氏名を使わない。公開 `POST /trigger` は廃止（404）した。
+Each array element is an independent MyJCB ID/session/R2 namespace. Do not assume the first ID or one consolidated login covers other IDs. `connectionId` is a user-defined R2-key pseudonym; use neither MyJCB ID, card number nor personal name. Public `POST /trigger` is retired (404).
 
-`bootstrapMode=password`は公式password formとlogin protection scriptをBrowser Runで実行する。`bootstrapMode=passkey`はBitwarden JSONの単一`fido2Credentials`からP-256 PKCS#8鍵、credential ID、user handleを一接続一secretへ同期し、Browser RunのCDP virtual authenticatorへ一時注入して公式「パスキーでログイン」を実行する。Browserを閉じるとvirtual authenticatorも消え、鍵、assertion、cookieをR2やmanifestへ保存しない。`bootstrapMode=session`は、本人が別browserで正常loginした後に短命なcookie＋同一User-Agentをsecretとして投入し、mypageを検証してからread-only replayする。
+`bootstrapMode=password` executes the official password form and login-protection script through Browser Run. `bootstrapMode=passkey` synchronizes the P-256 PKCS#8 key, credential ID and user handle from a single Bitwarden JSON `fido2Credentials` entry into one secret per connection, temporarily injects it into Browser Run's CDP virtual authenticator and invokes official `パスキーでログイン` ("log in with a passkey"). Closing the browser removes the virtual authenticator; keys, assertions and cookies are stored in neither R2 nor manifests. `bootstrapMode=session` takes short-lived cookies plus the same User-Agent as secrets after the owner successfully logs in through another browser, validates mypage, then performs read-only replay.
 
-Bitwarden自身の実装は`keyValue`をbase64url PKCS#8、credential IDをUUIDまたは`b64.`形式として扱う。Chrome CDPはPKCS#8とraw credential IDをstandard base64で要求するため、PoCはlocal conversionだけを行い秘密鍵を再生成しない。Bitwarden exportのsignature counterが非zeroの場合は、serverとのcounter同期を壊し得るため拒否する。MyJCBのpasswordless flowに必要なdiscoverable credentialと、RP ID `my.jcb.co.jp`/`jcb.co.jp`以外も拒否する。
+Bitwarden's implementation treats `keyValue` as base64url PKCS#8 and credential IDs as UUID or `b64.` format. Chrome CDP requires PKCS#8 and raw credential IDs in standard base64, so the PoC performs only local conversion, without regenerating private keys. A nonzero signature counter in a Bitwarden export is refused because it could disrupt server counter synchronization. MyJCB passwordless login requires a discoverable credential; other credentials and RP IDs outside `my.jcb.co.jp`/`jcb.co.jp` are also refused.
 
-全vault exportは作らず、unlocked WSL terminalで第一項目だけを取得・検査する。既定はcheck-onlyで、秘密値をstdoutへ出さない。`--put`時だけ生成JSONをstdinでWranglerへ渡す。
+No full-vault export is created. Fetch and inspect only the first item in an unlocked WSL terminal. The default is check-only, without secrets on stdout. Only `--put` sends generated JSON through stdin to Wrangler.
 
 ```sh
 bun scripts/sync-bitwarden-passkey.ts -- \
@@ -97,7 +105,7 @@ bun scripts/sync-bitwarden-passkey.ts -- \
 wrangler secret put MYJCB_CONNECTIONS_JSON
 ```
 
-Cloudflare Workersのenvironment variable/secretは1値5 KB上限である。複数IDやcomplete cookie jarを一つのJSONへ集約すると超過するため、実装は`MYJCB_CONNECTION_SECRET_NAMES`にcomma区切りのsecret binding名を置き、各`MYJCB_ACCOUNT_<NAME>_JSON`へ一接続ずつ分割する経路も持つ。
+Cloudflare Workers environment variables/secrets have a 5 KB limit per 1 value. Combining multiple IDs or complete cookie jars into one JSON can exceed it, so the implementation also supports comma-separated secret binding names in `MYJCB_CONNECTION_SECRET_NAMES`, splitting connections individually into `MYJCB_ACCOUNT_<NAME>_JSON`.
 
 ```sh
 wrangler secret put MYJCB_CONNECTION_SECRET_NAMES
@@ -105,92 +113,92 @@ wrangler secret put MYJCB_ACCOUNT_JCB_W_JSON
 wrangler secret put MYJCB_ACCOUNT_RECRUIT_JSON
 ```
 
-ただし一接続のpasskey session cookie jar自体が5 KBを超える可能性がある。現`session` modeはJSON全体が5 KB以内の場合だけのPoCで、確実に動くとは断言しない。実用案は、local sync CLIがcookie envelopeをclient-side AES-GCMで暗号化してprivate R2へ置き、Worker secretには小さいwrapping keyだけを置く構成である。このencrypted-envelope実装とkey rotationは本PRに含まず、5 KB超sessionはblockerとして停止する。
+Even one connection's passkey-session cookie jar may exceed 5 KB. Current `session` mode is only a PoC for complete JSON within 5 KB; reliable operation is not claimed. A practical proposal is for the local synchronization CLI to encrypt a cookie envelope client-side with AES-GCM in private R2, keeping only a small wrapping key in Worker secrets. This PR includes neither the encrypted-envelope implementation nor key rotation; sessions exceeding 5 KB stop as blockers.
 
-secret値をsource、`wrangler.jsonc`、`.dev.vars`のcommit、shell引数、stdout、manifestへ入れない。passkey登録済みIDは公式仕様上ID/password loginを使えないため`bootstrapMode=password`で試行しない。まず`passkey` modeを使い、exportされたcredentialが非discoverable、counter非zero、RP mismatch、またはMyJCB/Browser Runで拒否された場合だけ本人bootstrap後の`session`へdowngradeする。Android APIはWeb passkey modeとsession modeが成立しない場合だけのfallbackである。
+Keep secrets out of source, `wrangler.jsonc`, committed `.dev.vars`, shell arguments, stdout and manifests. Official specifications prohibit ID/password login for passkey-registered IDs, so do not try `bootstrapMode=password`. Use `passkey` first; downgrade to owner-bootstrapped `session` only if the exported credential is non-discoverable, has a nonzero counter or mismatched RP, or is refused by MyJCB/Browser Run. Android APIs are fallback only when Web passkey and session modes both fail.
 
 ## read-only policy
 
-active allowlistは次だけである。
+The active allowlist contains only these operations.
 
-| operation          | method        | path/query                                                                           | 用途                                            |
-| ------------------ | ------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------- |
-| login page         | GET           | `/Login`                                                                             | protection scriptを含む公式login page bootstrap |
-| login submit       | POST          | `/iss-pc/member/user_manage/Login`                                                   | Browser内でform actionを検査して一回だけsubmit  |
-| mypage             | GET           | `/iss-pc/member/mypage/mypage.html`                                                  | login landing/session確認                       |
-| credit menu        | GET           | `/iss-pc/member/details_inquiry/detailMenu.html?link_id=<observed>`                  | 初期`detailMonth`列挙                           |
-| credit detail      | GET           | `/iss-pc/member/details_inquiry/detail.html?detailMonth=0..17&output=web`            | 確定／未確定HTML snapshot                       |
-| older availability | POST JSON-RPC | `/iss-pc/general_json/member/details_inquiry/detailPastJson.json`                    | hidden discriminatorを使いavailable月だけ列挙   |
-| credit CSV/OFX     | GET           | `detail.html?detailMonth=N&output=csv                                                | money`                                          | 確定月の公式export |
-| credit PDF         | GET           | `detailDbPdf.html?detailMonth=N&output=pdf`                                          | 確定月の公式statement PDF                       |
-| debit menu         | GET           | `/iss-pc/member/debit/details/debitDetailMenu.html?link_id=myj_main_debitDetailMenu` | period列挙                                      |
-| debit detail       | GET           | `/iss-pc/member/debit/details/debitDetail.html?seq=0..14`                            | 通常／差額明細                                  |
+| operation          | method        | path/query                                                                           | Purpose                                                       |
+| ------------------ | ------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| login page         | GET           | `/Login`                                                                             | Official login-page bootstrap including protection scripts    |
+| login submit       | POST          | `/iss-pc/member/user_manage/Login`                                                   | Validate the form action and submit once inside the browser   |
+| mypage             | GET           | `/iss-pc/member/mypage/mypage.html`                                                  | Login landing/session check                                   |
+| credit menu        | GET           | `/iss-pc/member/details_inquiry/detailMenu.html?link_id=<observed>`                  | Initial `detailMonth` enumeration                             |
+| credit detail      | GET           | `/iss-pc/member/details_inquiry/detail.html?detailMonth=0..17&output=web`            | Confirmed/unconfirmed HTML snapshots                          |
+| older availability | POST JSON-RPC | `/iss-pc/general_json/member/details_inquiry/detailPastJson.json`                    | Enumerate only available months with the hidden discriminator |
+| credit CSV/OFX     | GET           | `detail.html?detailMonth=N&output=csv                                                | money`                                                        | Official exports for confirmed months |
+| credit PDF         | GET           | `detailDbPdf.html?detailMonth=N&output=pdf`                                          | Official statement PDFs for confirmed months                  |
+| debit menu         | GET           | `/iss-pc/member/debit/details/debitDetailMenu.html?link_id=myj_main_debitDetailMenu` | Period enumeration                                            |
+| debit detail       | GET           | `/iss-pc/member/debit/details/debitDetail.html?seq=0..14`                            | Ordinary/difference details                                   |
 
-以下はread candidateだが**無効**である。
+These read candidates remain **disabled**.
 
-- 既存おまとめIDの表示切替POST
-- `detailReplaceJson`（read-likeだがledger取得に不要）
-- notice用`detailNewspdf.html`（statement PDFではない）
+- Display-switching POSTs for existing consolidated IDs.
+- `detailReplaceJson` (read-like, but unnecessary for ledger capture).
+- Notice `detailNewspdf.html` (not a statement PDF).
 
-これらはHTTP methodがPOSTだから一律禁止しているのではない。現在のorigin/path、field名と型、CSRF/session token、期待response、redirect、read semanticsが本人操作のsanitized観測で未確認だからである。確認後も個別operationとして固定allowlistへ追加し、未知fieldやredirectでは停止する。
+They are not categorically prohibited just because their HTTP method is POST. Their current origin/path, field names/types, CSRF/session tokens, expected responses, redirects and read semantics have not been verified through sanitized observation of owner actions. Even after verification, add each as a fixed individual operation and stop on unknown fields or redirects.
 
-collectorは、おまとめ設定追加・解除、初期表示変更、支払方法変更、リボ／分割、繰上返済、キャッシング、limit/lock/通知/個人情報変更、カード申込・解約、ポイント交換、campaign登録、passkey登録・解除、password resetを実行しない。
+The collector does not add/remove consolidated-account settings, change initial display or payment methods, perform revolving/installment payments, early repayment or cash advances, change limits/locks/notifications/personal information, apply for/cancel cards, exchange points, register campaigns, register/remove passkeys or reset passwords.
 
 ## stop condition
 
-次を検出したconnectionはretryせずその場で止める。最初のクレジット月より前で止まったconnectionは何も保存せず、`human-required`または`failed`としてmanifestへ記録する。月の取得、状態判定、明細の月、ledger、exportで止まったconnectionは、それより前の月を保存して`partial`になる。どちらもmanifestとterminal unitには閉じた停止code（`CONNECTION_STOP_CODES`）、止まった月の位置、保存した月の数だけを書く（`docs/sources/myjcb.md`の「connectionの停止と取得済みの月」、ADR 0005のamendment）。
+Stop the affected connection immediately without retries when detecting any condition below. A connection stopped before its first credit month stores nothing and records `human-required` or `failed` in the manifest. A connection stopped during month capture, state determination, statement-period determination, ledger or export capture saves earlier months and becomes `partial`. In either case, the manifest and terminal unit record only a closed stop code (`CONNECTION_STOP_CODES`), stopped-month position and saved-month count (the connection-stopping/captured-months section of `docs/sources/myjcb.md`, ADR 0005 amendment).
 
-- passkey、生体/PIN、QR、OTP、秘密の合い言葉、CAPTCHA、本人確認
-- Access Denied、401、403、429、account lock/risk warning
-- login form action、landing origin/path、redirect、response schemaの不一致
-- allowlist外のmethod/path/query、cross-origin遷移
-- password login無効、規約同意、新規登録、端末登録
-- response size上限8 MiB、未知charset、seq範囲外、cookie domain/count/size異常
-- クレジット明細pageの`(確定分)` h1とledger headerの状態が矛盾する、または確定明細でないpageにexport linkがある（`credit-statement-state`、次節）
-- 確定明細pageが支払月を名乗らない、二つ以上名乗る、または過去月APIの`settlementYM`と違う月を名乗る（`credit-statement-period`、次節）
-- 前のpositionで保存したpageとredact後のbytesが同じ月のpageが、違う状態またはperiodになる（`credit-page-repeated`、停止code `credit_page_repeated`。ADR 0005のamendment (h)）
-- token/cookie/credentialを保存しそうな状態
+- Passkey, biometric/PIN, QR, OTP, secret phrase, CAPTCHA or identity verification.
+- Access Denied, 401, 403, 429 or account lock/risk warnings.
+- Mismatched login-form action, landing origin/path, redirects or response schema.
+- Methods/paths/queries outside the allowlist or cross-origin navigation.
+- Disabled password login, terms acceptance, registration or device enrollment.
+- Response-size limit 8 MiB, unknown charset, out-of-range seq or abnormal cookie domain/count/size.
+- Credit-detail `(確定分)` ("confirmed") h1 conflicts with ledger-header state, or a page other than a confirmed statement offers exports (`credit-statement-state`, next section).
+- A confirmed statement names no payment month, names two or more, or names a month differing from past-month API `settlementYM` (`credit-statement-period`, next section).
+- A month's page has the same redacted bytes as a page saved at an earlier position but a different state or period (`credit-page-repeated`, stop code `credit_page_repeated`; ADR 0005 amendment (h)).
+- A state that risks storing tokens/cookies/credentials.
 
-scheduled runは同じconnectionを自動再試行しない。次回の日次runは新規browser/loginで開始する。
+Scheduled runs do not automatically retry the same connection. The next daily run starts with a fresh browser/login.
 
-## card/month/state/export模型
+<a id="cardmonthstateexport模型"></a>
 
-`parseCardInventory`は各独立connectionのmypage内に存在する既存card candidateをcard番号や氏名ではなく`card-001`等のlocal indexと一般商品名allowlistへ正規化する。現PoCは切替を行わないため、current root以外はdiscovery candidateに留まる。複数connection間の同一性やおまとめ関係を推測しない。
+## Card/month/state/export model
 
-デビットはmenuに実在する`seq=0..14`だけを列挙する。parse不能時は停止し、0〜14をblind走査しない。
+`parseCardInventory` normalizes existing card candidates in each independent connection's mypage to local indices such as `card-001` and an allowlist of generic product names, rather than card numbers or names. This PoC does not switch cards, so candidates outside the current root remain discovery candidates. It does not infer identity or consolidated relationships across connections.
 
-クレジット初期menuは各linkの前にある最後の`h2`か`h3`見出しで分ける（ADR 0005のamendment (j)）。`h2`「最新のご利用明細」と「過去の明細」の下が月、`h3`「ボーナス#回払い・ショッピングスキップ払い」の下が支払予定pageで、それ以外の見出し（または見出しの前のlink）は`credit_menu_group_unrecognized`で停止する。支払予定pageは月の後に取得して保存し、manifestの`schedulePages`に記録する。h1が観測済みの「ショッピングスキップ払いご利用明細(未確定分)」ちょうど1つのpageだけを`credit-skip-payment-NN.html`として保存し、登録時にdataset `credit-schedule`が付いて`myjcb-skip-payment-schedule`が読む（ADR 0005のamendment (e)）。それ以外（ボーナス払いpageなど）は`credit-schedule-NN.html`として読まずに保存する。月のcoverageには入らない（ADR 0005のamendment (c)）。月のpositionのpageでも、h1がその見出しちょうど1つなら同じく`credit-skip-payment-NN.html`として保存し、`schedulePages`に記録し、月には数えない（ADR 0005のamendment (h)）。h1が「ボーナス#回払いご利用代金明細(未確定分)」ちょうど1つのpageも、どのpositionでも`credit-schedule-NN.html`として保存して`schedulePages`に記録し、月には数えない（amendment (j)）。観測された月だけを取得し、`detailPastJson`の9〜17候補は`detailAvailableFlag=true`だけを追加する。例ではolder 9候補中10/13だけがavailableだったため、全offset総当たりをしない。API failureやhidden `generalJsonShikibetuId`欠落時は停止する。JSON-RPCは`method=execute`、`params=[{generalJsonShikibetuId}]`、official JSと同じ`0301006`＋2桁counter形のIDを使う。
+Debit enumerates only `seq=0..14` actually present in the menu. Parse failure stops processing rather than blindly scanning 0–14.
 
-`detailMonth=0`はmutable `unconfirmed` snapshotで、exportなしの`.detail-list-01`をHTML＋parsed JSONとして保存する。確定月も同ledger componentを持つ。export link（確定月は`detailMonth`を名乗らない相対hrefで持つ）はdetail page自身のURLに対して解決し、そのpageのCSV/PDF/OFX linkをその月のexportとして数える（別の`detailMonth`を名乗るlinkは数えない）。notice PDFは除外する。Workerはexportを取得せず、manifestの`exportOffers`に記録するだけである（共通bucketがexport datasetを拒否するため。ADR 0005のamendment (b)）。`collectCredit`の`exports: "fetch"`でだけ取得し、CSVはmetadata行の後に現れるexact 12-column headerを探してCP932 bytesをそのまま保存する。ledger headerが`ご利用日 / ご利用先など お支払日 / 今後のお支払い金額`（ショッピングスキップ払いの支払予定pageで観測。live DOMは3 cell）で行があるpositionは、pageだけを`unknown`として保存し、行を読まずに次の月へ進む（`scheduled_payments_page`）。
+The initial credit menu is grouped by the last `h2` or `h3` before each link (ADR 0005 amendment (j)). Under `h2`, `最新のご利用明細` ("latest usage details") and `過去の明細` ("past details") contain months; under `h3`, `ボーナス#回払い・ショッピングスキップ払い` ("bonus # installment / shopping skip payment") contains payment-schedule pages. Other headings (or links preceding any heading) stop with `credit_menu_group_unrecognized`. Payment-schedule pages are captured/saved after months and recorded in manifest `schedulePages`. Only a page with exactly 1 observed h1 `ショッピングスキップ払いご利用明細(未確定分)` ("shopping skip-payment usage details, unconfirmed") is saved as `credit-skip-payment-NN.html`; registration assigns dataset `credit-schedule`, read by `myjcb-skip-payment-schedule` (ADR 0005 amendment (e)). Others, such as bonus-payment pages, are saved unread as `credit-schedule-NN.html`. They do not count toward month coverage (ADR 0005 amendment (c)). Even at a month position, a page with exactly 1 such h1 is likewise saved as `credit-skip-payment-NN.html`, recorded in `schedulePages` and excluded from months (ADR 0005 amendment (h)). A page with exactly 1 h1 `ボーナス#回払いご利用代金明細(未確定分)` ("bonus # installment billing details, unconfirmed") is also saved as `credit-schedule-NN.html` at any position, recorded in `schedulePages` and excluded from months (amendment (j)). Only observed months are captured; among `detailPastJson` candidates 9–17, only `detailAvailableFlag=true` candidates are added. In the example, only offsets 10 and 13 among the 9 older candidates were available, so offsets are not exhaustively tried. API failure or missing hidden `generalJsonShikibetuId` stops processing. JSON-RPC uses `method=execute`, `params=[{generalJsonShikibetuId}]` and IDs matching official JS: `0301006` plus a 2-digit counter.
 
-月の明細状態はexport linkの有無ではなく、page自身から決める（`src/parsers.ts`の`creditStatementState`）。調査したconnectionではexport linkが一度も見つからなかった（相対hrefを解決できないbugで、2026-09-27に修正）ため、以前の「`detailMonth<=1`でexportなしなら`unconfirmed`」という規則は、position 1の締め済み明細を`unconfirmed`と記録していた。
+`detailMonth=0` is a mutable `unconfirmed` snapshot; its export-free `.detail-list-01` is saved as HTML plus parsed JSON. Confirmed months use the same ledger component. Export links (relative hrefs without `detailMonth` on confirmed months) resolve against the detail page's own URL and count as that month's CSV/PDF/OFX offers; links naming a different `detailMonth` do not count. Notice PDFs are excluded. The Worker does not fetch exports, recording them only in manifest `exportOffers` (the shared bucket refuses export datasets; ADR 0005 amendment (b)). Only `collectCredit` with `exports: "fetch"` captures them; CSV searches for the exact 12-column header after metadata lines and retains CP932 bytes unchanged. If a position has rows under ledger header `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額` ("usage date / merchant etc.; payment date / future payment amount", observed on a shopping skip-payment schedule page; live DOM has 3 cells), save only the page as `unknown` and continue to the next month without reading rows (`scheduled_payments_page`).
 
-- `detailMonth=0`: 常に`unconfirmed`。h1があれば停止する
-- `<h1>カードご利用代金明細(確定分)</h1>`がちょうど一つあり、ledger headerの金額labelが`今回のお支払い金額`またはなし: `confirmed`
-- h1がなく、ledgerがない、またはledgerに行がない: `unknown`（ledger artifactは作らない）
-- h1がなく、`ご利用金額`の行がある: position 1は`unconfirmed`、position 2以降は`unknown`
-- h1がなく、`今回のお支払い金額`または金額labelなしの行がある: position 1は停止、position 2以降は`unknown`
-- page自身の矛盾は全positionで`credit-statement-state`停止: h1が2個以上、一つのheaderに両label、ledger間の不一致、h1と`ご利用金額`。確定明細でないpageのexport linkも停止する。
+Monthly statement state comes from the page itself, rather than export-link presence (`creditStatementState` in `src/parsers.ts`). The investigated connection never yielded export links (a relative-href resolution bug fixed on 2026-09-27), so the old rule, "no exports at `detailMonth<=1` means `unconfirmed`", recorded closed position-1 statements as `unconfirmed`.
 
-position 2以降を停止にしないのは、productionのposition 7と8がh1のない行0件のledgerを持つためである（`docs/sources/myjcb.md`の「明細状態の判定」）。停止時と`unknown`時のlog（`myjcb-credit-statement-state`／`myjcb-credit-statement-unstated`）にはh1の個数、ledger数、行数、label codeだけを出す。
+- `detailMonth=0`: always `unconfirmed`; stop if an h1 exists.
+- Exactly one `<h1>カードご利用代金明細(確定分)</h1>` ("card billing statement, confirmed"), with ledger amount label `今回のお支払い金額` ("this payment amount") or none: `confirmed`.
+- No h1, and no ledger or no ledger rows: `unknown` (no ledger artifact).
+- No h1 and rows labeled `ご利用金額` ("usage amount"): position 1 is `unconfirmed`; position 2 onward is `unknown`.
+- No h1 and rows labeled `今回のお支払い金額` or with no amount label: stop at position 1; position 2 onward is `unknown`.
+- Page contradictions stop at `credit-statement-state` at every position: 2 or more h1s, both labels in one header, disagreement between ledgers, or h1 with `ご利用金額`. Export links on a page other than a confirmed statement also stop processing.
 
-月のperiodは明細自身の名前にする（`src/parsers.ts`の`creditStatementPeriod`）。ledger parserはperiodを行のexternal idに入れるので、明細がposition 1から2へ移ってもperiodが変わらなければ行のidも変わらない。
+Positions 2 onward do not stop because production positions 7 and 8 have ledgers without h1 and with 0 rows (statement-state section of `docs/sources/myjcb.md`). Stop/`unknown` logs (`myjcb-credit-statement-state`/`myjcb-credit-statement-unstated`) contain only h1 count, ledger count, row count and label codes.
 
-- 過去月APIがlabelする月: `settlementYM`をそのまま記録する。確定pageが月を名乗るなら同じ月でなければ停止する
-- それ以外の確定page: `<h2>YYYY年M月お支払い分のカードご利用明細</h2>`、または支払日つきの`<h2>YYYY年M月D日(曜)お支払い分のカードご利用明細</h2>`（ADR 0005 amendment (g)）が名乗る月を`YYYY-MM`で記録する。名乗らない、または二つ以上なら`credit-statement-period`で停止する
-- 未確定と`unknown`のpage: `detailMonth-N`（月を名乗らないため）
+A month's period is the statement's own named month (`creditStatementPeriod` in `src/parsers.ts`). The ledger parser includes period in row external IDs, so a statement moving from position 1 to 2 retains row IDs if its period is unchanged.
 
-停止log（`myjcb-credit-statement-period`）には`detailMonth`、名乗った月の個数、API labelの有無だけを出す。詳細は`docs/sources/myjcb.md`の「明細の月」にある。
+- A month labeled by the past-month API: record `settlementYM` unchanged. If a confirmed page names a month, it must match or processing stops.
+- Other confirmed pages: record the month named by `<h2>YYYY年M月お支払い分のカードご利用明細</h2>` ("card usage details payable in YYYY/M") or `<h2>YYYY年M月D日(曜)お支払い分のカードご利用明細</h2>` ("card usage details payable on YYYY/M/D (weekday)", ADR 0005 amendment (g)) as `YYYY-MM`. Missing or multiple named months stop at `credit-statement-period`.
+- Unconfirmed and `unknown` pages: `detailMonth-N` (they name no month).
 
-行を持つledgerは、状態に対応するheader一式（`ご利用日`、`ご利用先など`、`支払区分`、`今回のお支払い金額`または`ご利用金額`）をheadに表示していなければならない（`credit-ledger-headers`）。labelはheadの文字列から空白をすべて除いて比べる。確定月のheadは`今回の<br class="pc-none">お支払い金額`と`br`で分かれているためである（ADR 0005のamendment (f)）。これにより、ledger JSONの`headers`はpageで確認した事実になる。確定ledgerはexpandedの`ご利用金額`を、未確定ledgerは`今回のお支払い金額`を読む。`(確定分)`の見出しの下に`ご利用金額`のheaderを示すpageは、全行が1回払いで行の合計がpageの「お支払い金額合計」と一致する場合だけ`confirmed`とし、ledgerにはpageが示すheader一式（`ご利用金額`）を保存する。一致しなければ従来どおり`credit-statement-state`で停止し、logには閉じた理由code（`usageHeader`）だけを出す（ADR 0005のamendment (d)、`docs/sources/myjcb.md`）。この形のpageは観測されていない（amendment (f)）。
+Stop logs (`myjcb-credit-statement-period`) contain only `detailMonth`, named-month count and API-label presence. See the statement-month section of `docs/sources/myjcb.md`.
 
-既存captureのraw evidenceとmanifestは書き換えない。position-1 pageの確定totalは`myjcb-credit-statement-total@1.1.0`がpageから読み直す。ledger JSONにはpageの証拠がないため、既存のposition-1 ledger行は`unconfirmed`のまま残る。これらの行は修正後の最初の成功runでcurrentでなくなる。詳細は`docs/sources/myjcb.md`の「明細状態の判定」と`docs/observations.md`のrelease noteにある。
+A ledger with rows must display the full state-appropriate header set (`ご利用日` ("usage date"), `ご利用先など` ("merchant etc."), `支払区分` ("payment type"), and `今回のお支払い金額` or `ご利用金額`) in its head (`credit-ledger-headers`). Compare labels after removing every whitespace character from head text: confirmed-month heads split `今回の<br class="pc-none">お支払い金額` ("this payment amount") with `br` (ADR 0005 amendment (f)). Thus ledger JSON `headers` represent facts confirmed on the page. Confirmed ledgers read expanded `ご利用金額`; unconfirmed ledgers read `今回のお支払い金額`. A page showing header `ご利用金額` under `(確定分)` is `confirmed` only if every row is a 1-payment transaction and its sum equals the page's `お支払い金額合計` ("total payment amount"); store the page's displayed header set (`ご利用金額`) in the ledger. Otherwise stop at `credit-statement-state` as before, logging only closed reason code `usageHeader` (ADR 0005 amendment (d), `docs/sources/myjcb.md`). This page shape has not been observed (amendment (f)).
+
+Existing raw evidence and manifests are not rewritten. `myjcb-credit-statement-total@1.1.0` rereads confirmed totals from position-1 pages. Existing position-1 ledger rows remain `unconfirmed` because ledger JSON lacks page evidence. Those rows stop being current after the first successful corrected run. See the statement-state section of `docs/sources/myjcb.md` and release notes in `docs/observations.md`.
 
 ## R2 layout
 
-runは`packages/collection`で共有DATA bucketへ書く。各artifactは`objects/<2 hex>/<sha256>`へ
-content-addressedで保存し、最後にterminal `runs/myjcb/<run-id>/terminal.json`を書く。collectorが
-取得しうるartifact keyは次のlayoutに従い、terminalは保存したartifactごとにkeyとobjectを対応付ける。
+`packages/collection` writes runs to shared DATA. Each artifact is content-addressed at `objects/<2 hex>/<sha256>`, followed last by terminal `runs/myjcb/<run-id>/terminal.json`. Possible collector artifact keys follow this layout; the terminal maps each saved artifact key to its object.
 
 ```text
 <run>/
@@ -212,58 +220,71 @@ content-addressedで保存し、最後にterminal `runs/myjcb/<run-id>/terminal.
     discovery.json
 ```
 
-`debit-*`とCSV/PDF/OFXのdatasetは中央契約で未観測である。これらを含むrunは`artifact_dataset_unobserved`で拒否され、objectもterminalも`DATA`へ書かない。
+`debit-*` and CSV/PDF/OFX datasets remain unobserved in the central contract. Runs containing them are refused with `artifact_dataset_unobserved`; neither objects nor terminals are written to `DATA`.
 
-HTMLは取得時sourceをUTF-8へdecodeし、script/style/metaと埋込み要素、event/data属性、navigation URL、form action、全value/textarea、token/session類似属性、16桁card番号を決定的に除去・置換してから保存する。login/mypage HTMLは保存しない。各objectのR2 metadataは`packages/collection`が書く`sha256`と`byteSize`だけである。manifestにはrun/connection/artifact/failureのmetadataだけを入れ、cookie値や実明細値をlogへ出さない。bucketはpublicにしない。
+Captured HTML source is decoded to UTF-8. Scripts/styles/meta, embedded elements, event/data attributes, navigation URLs, form actions, all value/textarea contents, token/session-like attributes and 16-digit card numbers are deterministically removed/replaced before storage. Login/mypage HTML is not stored. Object R2 metadata contains only `sha256` and `byteSize` written by `packages/collection`. Manifests contain only run/connection/artifact/failure metadata; neither cookie values nor actual detail values enter logs. The bucket must not be public.
 
-## Cronと手動実行
+## Schedule
 
-`wrangler.jsonc`のCron `0 21 * * *`（06:00 JST）からWorkerの`scheduled()`を直接呼ぶ。GitHub Actionsをschedulerとして使わない。
+The Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`). The Processor's
+`ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the
+`myjcb` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), daily at 06:00 JST
+(`0 21 * * *` UTC). GitHub Actions is not used as a scheduler.
 
-通常runは既存の固定action private RPC／schedule経路を使い、公開手動triggerは404になる。`GET /health`はsecret不要でsource/schemaだけを返す。ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。中央Importerへの転送、`POST /backfill-raw-evidence`、source専用bucketは2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
+Normal runs use the existing fixed-action private RPC/schedule path; public manual triggers return 404. `GET /health` needs no secret and returns only source/schema. The Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). Forwarding to the central Importer, `POST /backfill-raw-evidence` and the dedicated source bucket were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)).
 
 ```sh
-bun install --frozen-lockfile
-bun test
-mise run //services/collector-myjcb:typecheck
+mise run install                            # from the repository root
+mise run //services/collector-myjcb:test
+mise run //services/collector-myjcb:ci
 mise run //services/collector-myjcb:dry-run
 ```
 
-live PoCでは`wrangler deploy`、private R2 bucket作成、secret投入、第一connectionの実credential testまで行った。成功runは1 connection、20 artifact、failure 0で、内訳はcredit detail 11、parsed ledger 6、menu 1、過去月JSON 1、discovery 1だった。このrunでは公式CSV/PDF/OFX linkが見つからず、export artifactは0だった（2026-09-27の調査で、確定月はlinkを相対hrefで持ち、collectorがそれを解決できていなかったと分かった）。従ってこのconnectionではHTML ledgerが実データsourceとして必要であり、別IDでexportが存在する場合だけ確定月をCSV中心へ最適化する。manifestとsource-preserving artifactはprivate R2へ保存し、実値やsecretはPRへ含めない。
+The live PoC deployed with `wrangler deploy`, created private R2, installed secrets and tested the first connection's real credentials. The successful run had 1 connection, 20 artifacts and failure 0: 11 credit details, 6 parsed ledgers, 1 menu, 1 past-month JSON and 1 discovery. No official CSV/PDF/OFX links were found, so export artifacts were 0 (investigation on 2026-09-27 showed confirmed-month links used relative hrefs the collector could not resolve). This connection therefore needs HTML ledgers as actual data sources; optimize confirmed months around CSV only for other IDs where exports exist. Manifests and source-preserving artifacts were saved in private R2, without actual values or secrets in the PR.
 
-作成済みpersistent resourceはWorker `kogane-myjcb-collector-poc`、Cron `0 21 * * *`、admin/connection secret群である。保存先は共有DATA bucket `kogane-raw-evidence`で、旧private R2 bucket同名は2026-09-13に中央DATAへコピー・検証した後に削除した。Browser Run sessionはconnection完了時にcloseし、永続profileを作らない。廃棄時はWorkerとsecretだけを削除し、他のcollectorとProcessorも使う共有DATA bucketは削除しない。
+Created persistent resources are Worker `kogane-myjcb-collector-poc` and connection secrets (the schedule is the Processor's `myjcb` alarm job, not a Cron Trigger; the admin routes were retired, #1131). Storage uses shared DATA `kogane-raw-evidence`; the old same-named private R2 bucket was copied to central DATA, verified and deleted on 2026-09-13. Browser Run sessions close after each connection and create no persistent profile. Retirement deletes only the Worker and secrets, retaining shared DATA used by other collectors and the Processor.
 
-Cronとmanual triggerのoverlap lockは未実装である。同一IDの同時login/readを避けるため、Durable Object lockまたはQueueによる一接続一実行の直列化をdeploy/merge前要件とする。本PRのPoCをそのままscheduled運用しない。
+Overlapping runs are prevented by the shared execution lease: every collection takes the
+`myjcb` row of `collection_execution_leases` through `withCollectionLease`
+(`src/worker.ts`, `packages/collection/src/schedule-lease.ts`, binding `SCHEDULE_DB`), and a
+second alarm or operations request while it is held is refused with `collection_busy_or_uncertain`
+before contacting MyJCB, and its scheduled result carries the failure code `collection_busy`
+(`scheduledFailure`, `packages/collection/src/schedule-result.ts`). The lease is per source, not per connection: one run covers every
+configured connection in turn.
 
-Processorの登録の冪等性はこのoverlap問題を解決しない。同じrun IDとterminal digestの再送は同じrunへ収束するが、collectorが別UUIDで二回収集した場合は別の取得事実として両方を保持する。したがって内容hashでrunを潰さず、重複実行の抑止はcollectorの実行lockで行う。raw-evidence導入では既存Cronを変更せず、追加のscheduled triggerやGitHub Actions cronも作らない。
+Processor registration idempotency does not solve overlap. Resending the same run ID and terminal digest converges on the same run, but two collector captures with different UUIDs remain distinct capture facts. Do not collapse runs by content hash; prevent duplicate execution through the collector execution lock. No extra scheduled trigger or GitHub Actions cron is created.
 
 ## synthetic test
 
-`test/fixtures`は架空merchant・架空額・架空token/card番号だけを持つ手書きHTMLであり、MyJCB/Okura/mnieのHTMLをcopyしていない。testはroute allowlist、cross-origin/unknown method拒否、cookie domain/path、card/month parser、token/card番号redactionを検証する。`test/credit-statement-state.test.ts`は、export linkのない`(確定分)` pageを`confirmed`、position 0と未確定header pageを`unconfirmed`とすること、h1とheaderの矛盾で`credit-statement-state`停止になること、h1のない古いpageが停止せず`unknown`になりledgerを作らないことを、架空pageと`collectCredit`の架空clientで検証する。
+`test/fixtures` contains handwritten HTML with only fictional merchants, amounts, tokens and card numbers, copied from neither MyJCB nor Okura nor mnie HTML. Tests cover route allowlists, cross-origin/unknown-method refusal, cookie domains/paths, card/month parsers and token/card-number redaction. `test/credit-statement-state.test.ts` uses fictional pages and a fictional `collectCredit` client to check: `(確定分)` pages without export links become `confirmed`; position 0 and unconfirmed-header pages become `unconfirmed`; h1/header conflicts stop at `credit-statement-state`; old pages without h1 become `unknown` without stopping or producing ledgers.
 
 ## public prior art boundary
 
-公開AGPL-3.0実装[youseiushida/Okura](https://github.com/youseiushida/Okura)は、PR #24の2026-08-26調査時点commit `afc6057fba78b5bfd6364654548fbfd91c76692a`と、PoC実装時の2026-08-31 commit `bbf11e032aba4a380009508e91954361a3f9d658`を区別して記録する。後者をlogin protection、origin/path、cookie＋User-Agent維持、デビット15 cycleの現行性照合にだけ使った。Okuraのvalidatorはlogout link＋`toNaviDebitDetailMenu`を要求するためcredit-only valid sessionを失敗扱いにし得る。またprotection runtimeの`node:vm`は[Cloudflare Workersではnon-functional stub](https://developers.cloudflare.com/workers/runtime-apis/nodejs/#non-functional-stub-modules)なので、plain Workerへ移植せずBrowser Runを使う。source、DOM runtime、parser、test fixtureは転用していない。詳細は`THIRD_PARTY_NOTICES.md`を参照。
+The public AGPL-3.0 implementation [youseiushida/Okura](https://github.com/youseiushida/Okura) is recorded separately at PR #24 investigation commit `afc6057fba78b5bfd6364654548fbfd91c76692a` on 2026-08-26 and PoC implementation commit `bbf11e032aba4a380009508e91954361a3f9d658` on 2026-08-31. The latter was used only to compare current login protection, origins/paths, cookie-plus-User-Agent preservation and 15 debit cycles. Okura's validator requires a logout link plus `toNaviDebitDetailMenu`, so it may reject valid credit-only sessions. Its protection runtime `node:vm` is a [non-functional Cloudflare Workers stub](https://developers.cloudflare.com/workers/runtime-apis/nodejs/#non-functional-stub-modules), so it is not ported to plain Workers; Browser Run is used instead. Source, DOM runtime, parsers and test fixtures were not reused. See `THIRD_PARTY_NOTICES.md`.
 
-## 未確認事項
+<a id="未確認事項"></a>
 
-- Browser Run egress/profileでpassword loginが完了するか
-- 各実IDがpasswordかpasskeyか、秘密の合い言葉/OTPが出る条件
-- 現行mypageのcard enumeration DOMとおまとめ切替contract
-- 複数の実ID/issuerでcredit path、ledger DOM、CSV/PDF/OFX schemaが同一か
-- zero-row CSV/PDF/OFX response、card/subcard列、取消/返金表現
-- debit menu/detailの全issuer互換性、状態label、0件/取消/差額表現
-- session idle/absolute TTLとcookie rotation
-- Browser Runで得たcookieを通常Worker `fetch`へ移した際、TLS/connection/egress差によってsession replayが拒否されないか
-- login protection vendorとchange cadence
-- encrypted R2 session envelope、key rotation、overlap lock/Queue
+## Unverified matters
 
-以上は実値を保存しない一回限りのKuebiko/live observationで更新し、unknown時は実装を推測で拡張しない。
+- Whether password login completes through Browser Run egress/profiles.
+- Whether each actual ID uses password or passkey, and when secret phrases/OTP appear.
+- Current mypage card-enumeration DOM and consolidated-account switching contract.
+- Whether credit paths, ledger DOM and CSV/PDF/OFX schemas match across real IDs/issuers.
+- Zero-row CSV/PDF/OFX responses, card/subcard columns and cancellation/refund representations.
+- Debit-menu/detail compatibility across issuers, state labels and 0-record/cancellation/difference representations.
+- Session idle/absolute TTL and cookie rotation.
+- Whether TLS/connection/egress differences reject replay when Browser Run cookies move to ordinary Worker `fetch`.
+- Login-protection vendor and change cadence.
+- Encrypted R2 session envelopes, key rotation and overlap locks/Queues.
 
-## 2026-08-31 public login observationの反映
+Update these through one-off Kuebiko/live observations without storing actual values; do not expand unknown implementation by guessing.
 
-専用Kuebiko Chromeのlogged-out pageで、`loginForm`のnamed `userId`/`password`に加え、nameのないtext/password decoy candidateが存在することを確認した。このためPoCはinputのtypeや位置でfieldを選ばず、form名とcontrol名を併用する。form actionもsubmit直前にallowlist検査する。
+<a id="2026-08-31-public-login-observationの反映"></a>
 
-初期画面にはpasswordとpasskeyの両方が通常の選択肢として出るため、初回pageに`passkey`という文字があるだけでは停止しない。password submit後に既知mypageへ到達せず、遷移先でpasskey/OTP/秘密の合い言葉等を検出した場合だけ`human-required`にする。
+## Incorporating the 2026-08-31 public login observation
 
-`login-prot.js?async`のseedはloadごとに変わり、passkey/NNL SDK assetにもversion付きscriptがある。PoCはscript source/version/seedをhard-codeせず、raw captureもcommitしない。観測したversionとprivacy境界は`docs/sources/myjcb.md`へ記録した。
+The logged-out page in dedicated Kuebiko Chrome had unnamed text/password decoy candidates as well as named `userId`/`password` in `loginForm`. The PoC therefore selects fields by both form and control names, rather than input type or position. Form actions are also checked against the allowlist immediately before submission.
+
+Both password and passkey appear as ordinary choices on the initial screen, so merely seeing `passkey` on the first page does not stop processing. `human-required` is used only if password submission fails to reach known mypage and the destination reveals passkey/OTP/secret-phrase requirements or similar.
+
+The seed in `login-prot.js?async` changes on every load; passkey/NNL SDK assets also have versioned scripts. The PoC hard-codes neither script source/version/seed nor commits raw captures. Observed versions and privacy boundaries are recorded in `docs/sources/myjcb.md`.

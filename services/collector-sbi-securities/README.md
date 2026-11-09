@@ -1,80 +1,92 @@
-# SBI証券 read-only Worker PoC
+<a id="sbi証券-read-only-worker-poc"></a>
 
-SBI証券の保存済みパスキーから毎回新しいsessionを作り、国内・米国株の残高と履歴を公式のWeb／アプリ通信から取得して共有DATA bucket（`kogane-raw-evidence`）へ保存する独立Workerである。`mnie`をruntime依存、submodule、設定源として使用しない。必要だった認証・復号・read-only通信だけをこのディレクトリへ移植した。
+# `SBI証券` (SBI Securities) read-only Worker PoC
+
+This independent Worker creates a fresh session from a stored `SBI証券` passkey on every run, captures domestic/US stock balances and history through official Web/app communications, and saves them to shared DATA (`kogane-raw-evidence`). It uses `mnie` as neither a runtime dependency, submodule nor configuration source. Only the necessary authentication, decryption and read-only communications were ported into this directory.
 
 ## Runtime profile
 
-- **Browser: なし。** Cloudflare Browser Run、Container Chrome/Chromium、外部browser sessionを使用しない。
-- WebAuthn challenge/assertion、SSO callback、MTS／外国株式／メインサイトsessionをWorker内の暗号処理と`fetch`で直接処理する。
-- HTML endpointを読む場合もbrowser renderingは行わず、read-only HTTP responseとして取得・parseする。
+- **Browser: none.** No Cloudflare Browser Run, Container Chrome/Chromium or external browser session.
+- WebAuthn challenges/assertions, SSO callbacks and MTS/foreign-securities/main-site sessions are handled directly with Worker cryptography and `fetch`.
+- HTML endpoints are also captured/parsed as read-only HTTP responses, without browser rendering.
 
-## 現在の範囲
+<a id="現在の範囲"></a>
 
-- 国内株アプリ: MTS sessionとread-only TR code `F2631`による国内現物・預り金payload
-- メインサイト: My資産の現在評価、円貨入出金明細、国内株の90日以下の履歴。円貨明細はproviderの全page metadataと全fieldをpage bundleに保持し、全件性を検証してからartifact化する
-- 外国株式アプリ: 米国株現物、USD外貨預り金、90日以下の取引履歴
-- 実行: Cloudflare Cron Triggerから毎日21:00 UTC（日本時間06:00）に国内・外国を1 invocationで直列収集、または認証付き手動trigger
-- 保存: `packages/collection`で共有DATA bucketへ直接書き、ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。collector自身はD1を使用しない
+## Current scope
 
-注文、訂正、取消、取引パスワード、端末登録は実装にも設定にも含めない。通信が`POST`でも、許可するhost、path、MTS TR code、GraphQL operationを読み取り用途へ固定している。
+- Domestic-stock app: domestic cash equities/custody-cash payload through an MTS session and read-only TR code `F2631`.
+- Main site: current `My資産` ("My assets") valuation, yen deposit/withdrawal details and domestic-stock history of at most 90 days. Yen details retain every provider page-metadata field and response field in a page bundle, validating completeness before making an artifact.
+- Foreign-stock app: US cash equities, USD custody cash and transaction history of at most 90 days.
+- Execution: the Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the `sbi-securities` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), daily at 06:00 JST (21:00 UTC), and an accepted operations request calls `runOperation` (ADR 0048). Either one collects domestic/foreign data serially in one invocation (`scope=all`). The Worker has no Cron Trigger and no public trigger route.
+- Storage: `packages/collection` writes directly to shared DATA; the Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). The only D1 the collector uses is the execution lease (`withCollectionLease`) in `SCHEDULE_DB` (`kogane-raw-evidence`).
 
-## 公開接続先とsecret
+Neither implementation nor configuration includes orders, amendments, cancellations, trading passwords or device registration. Even for `POST`, allowed hosts, paths, MTS TR codes and GraphQL operations are fixed to read-only purposes.
 
-公式クライアントが使う次の公開接続先はsourceへ固定している。
+<a id="公開接続先とsecret"></a>
+
+## Public endpoints and secrets
+
+The following public endpoints used by official clients are fixed in source.
 
 - passkey: `https://login.sbisec.co.jp/login/entry`
-- 国内MTS: `https://apli.sbisec.co.jp`
-- 外国株式: `https://fstockapp.sbisec.co.jp`
-- メインサイト: `https://www.sbisec.co.jp`
+- Domestic MTS: `https://apli.sbisec.co.jp`
+- Foreign securities: `https://fstockapp.sbisec.co.jp`
+- Main site: `https://www.sbisec.co.jp`
 
-Worker secretは次の2つだけである。
+There are only 2 Worker secrets.
 
-- `SBI_CREDENTIAL_JSON`: `rpId`、`origin`、`credentialId`、`keyValue`、任意の`userHandle`、`counter`だけを持つJSON
-- `SBI_HANDSHAKE_KEY_JSON`: SBIが返す一時tokenを復号するRSA-4096 transport key。口座認証鍵ではなく、ローカルで一度生成する
+- `SBI_CREDENTIAL_JSON`: JSON containing only `rpId`, `origin`, `credentialId`, `keyValue`, optional `userHandle` and `counter`.
+- `SBI_HANDSHAKE_KEY_JSON`: an RSA-4096 transport key decrypting temporary tokens returned by SBI. It is not an account-authentication key and is generated locally once.
 
-中央raw-evidenceのBearerやstorage fingerprint鍵はcollectorに置かない。旧source専用bucket、`kogane-collector-r2-importer`へのService Binding、`scripts/backfill-raw-evidence.sh`は2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
+Neither the central raw-evidence bearer nor a storage-fingerprint key is placed in the collector. The old dedicated source bucket, Service Binding to `kogane-collector-r2-importer` and `scripts/backfill-raw-evidence.sh` were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)).
 
-Bitwarden item全体、ログインID、ログインパスワード、取引パスワード、master password、vault exportはWorkerへ置かない。SBIのpasskey秘密鍵はこのPoCではCloudflare secretへ複製されるため、通常のpasswordより強いsecretとして扱う。transport鍵は口座認証鍵でもsession鍵でもないため一度だけ生成し、各runで再利用する。sessionとpasskey assertionは毎回作り直す。
+The whole Bitwarden item, login ID/password, trading password, master password and vault export stay outside the Worker. This PoC copies the SBI passkey private key into a Cloudflare secret, so it is treated as stronger than an ordinary password. The transport key is neither an account-authentication nor session key: generate it once and reuse it across runs. Sessions and passkey assertions are recreated on every run.
 
-ローカルに作成済みのSBI専用Bitwarden item JSONから、必要項目だけをCloudflareへ同期する。管理用tokenは同じGit管理外secret directoryに初回だけ生成する。
+Sync only required fields from an already-created local SBI-specific Bitwarden item JSON to Cloudflare. The `SBI_HANDSHAKE_KEY_JSON` transport key is generated only on first use, as `sbi-worker-handshake-key.json` in the same Git-excluded secret directory (`scripts/generate-handshake-key.ts`).
 
 ```sh
 scripts/sync-local-secrets.sh \
   ~/.local/share/kogane/secrets/sbi-securities.json
 ```
 
-このスクリプトはsecret値を標準出力へ表示しない。SBIのpasswordを更新してもpasskeyが変わらなければ再同期は不要で、passkeyを再登録・削除した場合にだけ再実行する。
+This script prints no secret values to stdout. Changing the SBI password needs no resync if the passkey is unchanged; rerun it only after re-registering/deleting the passkey.
 
-## 実行と保存形式
+<a id="実行と保存形式"></a>
+
+## Execution and storage format
 
 ```sh
-bun install --frozen-lockfile
-bun test
-mise run //services/collector-sbi-securities:typecheck
+mise run install                                    # from the repository root
+mise run //services/collector-sbi-securities:test
+mise run //services/collector-sbi-securities:ci
 mise run //services/collector-sbi-securities:dry-run
 ```
 
-公開 `/trigger`、scope／任意期間指定、旧 `scripts/trigger.sh` と90日分割 `scripts/backfill.sh` は廃止した。既存のprivate RPCは通常の全scope収集だけを実行し、backfillと同等の機能は持たない。新しい認証経路や範囲overrideは追加しない。
+Public `/trigger`, scope/arbitrary-period selection, old `scripts/trigger.sh` and 90-day split `scripts/backfill.sh` are retired. The existing private RPC runs only normal all-scope collection, without equivalent backfill functionality. No new authentication path or scope override is added.
 
 ```text
-objects/<2 hex>/<sha256>                       <dataset>.jsonごとのcontent-addressed object
-runs/sbi-securities/<run-id>/terminal.json     最後に書くrunの完了記録（artifact keyとobjectの対応を持つ）
+objects/<2 hex>/<sha256>                       content-addressed object per <dataset>.json
+runs/sbi-securities/<run-id>/terminal.json     run completion record written last (artifact key/object mapping)
 ```
 
-terminalには期間、成功・部分成功・失敗、artifactのhashとbyte数、秘密を除いた機械可読な失敗codeを記録する。access token、SID、Cookie、MTSのsession header、口座番号は保存しない。
+The terminal records the period, success/partial success/failure, artifact hashes/byte sizes, machine-readable failure codes with secrets removed, and nothing for access tokens, SIDs, cookies, MTS session headers or account numbers.
 
-`yen-detail-history.json`は`sbi-yen-detail-history-bundle-v1`で、bundle側の件数・完了・上限flagと、`pages[]`内のprovider responseを保持する。連続した`pageNumber`、一定の`pageCount`／`pageSize`／`totalCount`、全row件数、`did`重複、provider／collector上限flagを検証する。現時点で観測済みなのはread-only `GET /banking/api/yen/detail/init`だけで、次page requestのendpoint／parameter契約は未確認である。従ってinitが複数pageまたは未収集rowを示すrunは、推測したrequestを送らず`main-site` failureとして閉じ、欠落した履歴を成功artifactとして保存しない。
+`yen-detail-history.json` uses `sbi-yen-detail-history-bundle-v1`, retaining bundle counts/completion/bound flags and provider responses within `pages[]`. It validates consecutive `pageNumber`, constant `pageCount` / `pageSize` / `totalCount`, total row count, duplicate `did` and provider/collector bound flags. Only read-only `GET /banking/api/yen/detail/init` has been observed; the next-page request endpoint/parameter contract is unconfirmed. Consequently, when init indicates multiple pages or uncaptured rows, the run closes as a `main-site` failure without guessed requests, rather than saving missing history as a successful artifact.
 
-旧source専用bucketの保存済みrunは2026-09-13に中央DATAへコピー・検証済みであり、再送するoutboxはない（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
+Stored runs in the old dedicated source bucket were copied to central DATA and verified on 2026-09-13; no outbox remains to resend ([legacy-retirement.md](../../docs/legacy-retirement.md)).
 
-## Workers Paidでの定期実行
+<a id="workers-paidでの定期実行"></a>
 
-Free planの実測では、個別の`scope=foreign`と`scope=domestic`は成功した一方、両方を同じinvocationで実行するとCloudflare Error 1102になった。Queue分割もFreeのCPU制限を解消しなかったため、一時的に外部schedulerからscope別HTTP requestを呼ぶ案を検証した。
+## Periodic execution on Workers Paid
 
-2026-08-27にWorkers Paidへ移行したため、定期起動はWorker自身のCloudflare Cron Triggerへ統一した。毎日21:00 UTCの`scheduled()`が`scope=all`を直接実行し、国内と外国を同じinvocation内で直列収集する。日次Cronは1時間以上の間隔なので、Cloudflareの現行制限では最大15分のCPU timeと15分のwall timeが使える。このcollectorの実測（外国約7秒、国内約15秒）には十分である。
+Free-plan measurements succeeded for separate `scope=foreign` and `scope=domestic` calls, but running both in the same invocation produced Cloudflare Error 1102. Queue splitting did not resolve the Free CPU limit either, so calling separate scope-specific HTTP requests from an external scheduler was temporarily evaluated.
 
-Queue、dispatcher、GitHub Actions schedule、D1は使わない。Queueは再試行やscope単位の障害隔離が実際に必要になった場合だけ追加し、Paid化そのものを理由には導入しない。公開手動・バックフィル入口は廃止し、通常収集のprivate RPCを維持する。
+After the move to Workers Paid on 2026-08-27, periodic execution was unified under the Worker's Cloudflare Cron Trigger. Daily 21:00 UTC `scheduled()` directly ran `scope=all`, collecting domestic and foreign data serially in the same invocation. Daily Cron intervals exceed 1 hour, so Cloudflare limits at that time allowed up to 15 minutes CPU time and 15 minutes wall time, sufficient for measured foreign collection (about 7 seconds) and domestic collection (about 15 seconds). Since #430 the Cron Trigger is gone (`triggers.crons` is empty): the Processor alarm calls `runScheduled` instead, which still runs `scope=all` in one invocation (`alarmCollection`, `src/worker.ts`).
 
-## 出典
+No Queue, dispatcher or GitHub Actions schedule is used. D1 is used only for the execution lease (`SCHEDULE_DB`). A Queue is added only if retries or scope-specific failure isolation actually become necessary, not merely because the plan became Paid. Public manual/backfill entrypoints are retired; normal collection retains its private RPC.
 
-一部のprotocol理解と最初の実装は`pnsk-lab/mnie`のcommit `c87e65c0a04c03c560962f8ead6e77415fb841f4`を基にしている。Kogane側のコードはCloudflare Workers向けに独立して書き直し、ファイルシステム、OpenSSL process、Mnie session型、注文APIへの依存を除去した。ライセンス表示は[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)を参照する。
+<a id="出典"></a>
+
+## Sources
+
+Some protocol understanding and the first implementation were based on `pnsk-lab/mnie` commit `c87e65c0a04c03c560962f8ead6e77415fb841f4`. Kogane code was independently rewritten for Cloudflare Workers, removing filesystem, OpenSSL-process, Mnie-session-type and order-API dependencies. See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for license attribution.

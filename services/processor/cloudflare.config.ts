@@ -33,7 +33,7 @@ export default defineConfig({
       SHARED_R2_INGEST_ENABLED: bindings.text("true"),
       OPS_DISPATCH_ENABLED: bindings.text("true"),
       OPS_COLLECTOR_DISPATCH_CONNECTIONS: bindings.text(
-        '["sony-bank","sbi-securities","mobile-suica","moneyforward-me","myjcb"]',
+        '["sony-bank","sbi-securities","mobile-suica","moneyforward-me","myjcb","st-george","sbi-vc-trade","sbi-vc-keepalive","prestia-bank"]',
       ),
       COLLECTION_DATA_BUCKET: bindings.text("kogane-raw-evidence"),
       COLLECTION_ACCOUNT_ID: bindings.text("59ea63cc00914b30ca410b062ae2bb7f"),

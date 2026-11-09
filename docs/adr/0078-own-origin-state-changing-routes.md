@@ -1,6 +1,6 @@
 # ADR 0078: Refuse another site's Origin on the command and operations routes
 
-- Status: proposed (accepted when its pull request merges)
+- Status: accepted (merged 2026-11-08 in [#1071](https://github.com/risu729/kogane/pull/1071))
 - Date: 2026-11-06 (rebased onto main 2026-11-07)
 - Related: [ADR 0047](0047-mcp-client-connection.md) (the own-origin rule on
   every agent path), [ADR 0039](0039-alarm-schedule-management.md) (same-origin

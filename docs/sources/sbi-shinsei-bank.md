@@ -860,12 +860,18 @@ remain unreachable. See the PoC's
 [`INVESTIGATION-2026-08-31.md`](../../services/collector-sbi-shinsei/INVESTIGATION-2026-08-31.md)
 for the evidence boundary and enablement checklist.
 
-The deployed schedule is `0 21 * * *`. Teardown inventory is the active Worker,
-the SBI credential and relay secrets (the public admin trigger is retired), the R2 bucket containing the
-success and retained failure manifests/artifacts, the Container application and
-image revisions, and the explicit-tunnel VPC binding configuration. The local
+The schedule is the Processor's alarm job `sbi-shinsei` (06:00 JST,
+`0 21 * * *` in `config/alarm-jobs.json`), which calls the Worker's private
+`ScheduledCollection` entrypoint; the Worker has no Cron trigger since
+[#430](https://github.com/risu729/kogane/pull/430) (2026-10-05). Teardown
+inventory is the active Worker, the SBI credential and relay secrets (the
+public admin trigger is retired), the Container application and image
+revisions, and the explicit-tunnel VPC binding configuration. The collector's
+own R2 bucket was emptied and deleted on 2026-09-13 after its objects were
+copied to `DATA` ([legacy retirement](../legacy-retirement.md)); runs are in
+the shared `DATA` bucket, which is not part of this teardown. The local
 Docker test Container/image should be removed after validation; the cloud
-resources remain active for scheduled collection and evidence retention.
+resources remain active for scheduled collection.
 
 ## Shared DATA bucket (U09, 2026-09-11)
 
@@ -874,8 +880,10 @@ binding to `kogane-raw-evidence` only. The switch and the importer were
 retired on 2026-09-13 (`docs/collection.md`). The Worker persists the run
 itself with `packages/collection` — sanitized provider captures, the
 normalized snapshot and the sanitized collector manifest, then the
-`terminal-v1` manifest last. The daily `0 21 * * *` cron is unchanged, and
-the Container image, relay and tunnel are untouched: the Worker writes the
+`terminal-v1` manifest last. The daily `0 21 * * *` schedule was unchanged by
+this switch (it is a Processor alarm job since
+[#430](https://github.com/risu729/kogane/pull/430), above), and the Container
+image, relay and tunnel are untouched: the Worker writes the
 run, not the container. The run is stored once, in `DATA` (plan 00).
 
 The artifact/role table and what the terminal states are in
@@ -1173,3 +1181,112 @@ the commit that merges it (`deploy.yml` releases every green CI run on main);
 the repair lane then re-parses the stored captures, as it did for 0.1.2
 above, and rows of 0.1.2 runs stay refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead. Production was not
 read for this release.
+
+## Balance-summary parser 0.1.2 (2026-11-09)
+
+Authenticated ordinary Top-page navigation observed the optional string fields
+`hyperDepositBalance` and `yenDepositBalance` in
+`responseParam.summary.responseParam` of the existing
+`getBalanceSummaryAndStage` response. The collector's validator and the parser's
+independent summary validator both rejected these previously unknown fields
+([issue 1215](https://github.com/risu729/kogane/issues/1215)). The collector README
+records the read-only production-manifest corroboration and its limits.
+
+Parser `sbi-shinsei-balance-summary-and-stage` 0.1.2 now validates the two fields
+alongside the earlier summary shape. The sole published observation remains the
+amount-free customer stage category. Neither aggregate is interpreted or emitted
+as an additional balance, and unknown fields or structured summary values still
+fail closed. Synthetic regression tests compare the entire parser output with
+and without the new fields and follow a collector handoff through shared DATA,
+registration and publication. Production recovery remains unverified until a
+post-deploy collection and its publication/freshness checks succeed.
+
+## Deposit-contract holdings observation (2026-11-09 20:47 UTC)
+
+An authenticated ordinary Chrome session inspected the current account's yen
+and foreign-currency deposit holdings through the site's visible navigation.
+This is a dated account observation for
+[issue 1242](https://github.com/risu729/kogane/issues/1242), not a statement that
+these products are unavailable or that other accounts hold none. Only request
+shapes, response keys/types and counts are recorded below.
+
+### Yen deposit holdings
+
+From Yen Deposit TOP, the visible `保有商品の手続き・明細` control opened
+`円預金保有商品照会`. The page issued:
+
+```text
+POST /SFC/app/AIYD_YenDepositAdapter/getYenProductDetails
+requestParam: {
+  moduleCode: "ALL", inquiryType: "F", uniqueRefNo: "",
+  pageNo: "1", sortOrderType: "DDA"
+}
+```
+
+The JSON response had this shape:
+
+- `responseParam.sdBalance`, `fcyCASABalance`: strings.
+- `responseParam.savingsDetails`: 16 objects with string fields `accountNo`,
+  `balance`, `yenEqui`, `currency`, `productCode`.
+- `responseParam.tdDetails`, `sdDetails`, `debuntureDetails`, `loanDetails`:
+  empty arrays; no nonempty item schema was observed.
+- `responseParam.moduleDetails`: two objects with string fields `moduleCode`,
+  `moduleDesc`, `moduleBalance`.
+- `responseParam.systemResponseTime`, `PSU2AvailableTimeFlag`, `recordCount`:
+  strings.
+- `header.adapterResultCode`: the success code `"0"`;
+  `adapterErrorMessageId`, `lastCalledApi`, `lastCalledApiMessage`: strings.
+
+No time-deposit or structured-deposit contract was listed in the inspected
+holdings view. The savings rows are ordinary account information, not evidence
+of a term contract. `recordCount` was present despite empty contract arrays;
+its relationship to contracts and pagination was not established, so it is not
+used as a contract count or proof of completeness.
+
+### Foreign-currency deposit holdings
+
+From Foreign Deposit TOP, the holdings view opened
+`外貨預金保有商品照会`. The page issued:
+
+```text
+POST /SFC/app/AIFD_ForeignCurrencyDepositsAdapter/getForeignCurrencyProductDetails
+requestParam: {
+  moduleCode: "ALL", currencyType: "ALL", inquiryType: "F",
+  pageNo: "1", sortOrderType: "DDA", uniqueRefNo: ""
+}
+```
+
+The JSON response had this shape:
+
+- `responseParam.accountsNewOverview.sdBalance`, `fcyCASABalance`: strings.
+- `responseParam.accountsNewOverview.savingsDetails`: 16 objects with the same
+  five string fields as the yen response's savings rows.
+- `responseParam.accountsNewOverview.tdDetails`, `sdDetails`,
+  `debuntureDetails`, `loanDetails`, `moduleDetails`: empty arrays; no nonempty
+  item schema was observed.
+- `responseParam.recordCount`, `freeTransferCount`, `customerCategory`,
+  `systemResponseTime`, `atmFee`: strings.
+- `header.adapterResultCode`: the success code `"0"`;
+  `adapterErrorMessageId`, `lastCalledApi`, `lastCalledApiMessage`: strings.
+
+The holdings view showed `表示可能な明細はございません。 ( FD0071E )` and listed
+no time-deposit or structured-deposit contract. Neither this empty state nor
+the first-page response establishes a nonempty contract schema, pagination
+semantics or a general collection-completeness rule.
+
+### Outcome and implementation boundary
+
+The inspected account held no time-deposit or structured-deposit contracts in
+either holdings view. Under issue 1242's instruction to stop when none are held,
+this slice records the observation and leaves collection unsupported. The
+provider offers the products, so the provider data-type catalogue continues to
+list `term_deposit` as `not_collected`, now linked to issue 1242. The catalogue
+records provider capabilities rather than live holdings; it gains no new status
+and does not mark these products collected because this account held none.
+
+Neither route becomes production-enabled, and no read allowlist, collector,
+parser, publication policy or collection schedule changes. If holdings change,
+resume issue 1242 with observation of the held contracts: establish their item
+schemas, currency/principal/rate/start/maturity fields, totals and pagination
+before enabling daily capture and publication. This observation does not supply
+those semantics and does not prove a successful production collection.

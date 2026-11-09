@@ -243,7 +243,7 @@ bound and tampered bytes.
 
 ## Amendment: one request rule and one budget for the card settlement reads (2026-11-07)
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1085](https://github.com/risu729/kogane/pull/1085))
 - Date: 2026-11-07
 
 ### Context
@@ -309,7 +309,7 @@ two changes; the existing route tests are unchanged.
 
 ## Amendment: the grouped card settlement list over MCP (2026-11-07)
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1088](https://github.com/risu729/kogane/pull/1088))
 - Date: 2026-11-07
 
 ### Context
@@ -379,6 +379,116 @@ body on all three, and checks the listing, the absence while the route is not
 served, and the R0 audit records. `services/app/test/ui-mcp-parity.test.ts`
 maps the route to the tool. `packages/application/test/card-settlements-read.test.ts`
 covers the service's refusals before any read.
+
+## Amendment: one pre-check for the MCP approve and commit tools (2026-11-08)
+
+- Status: accepted (merged 2026-11-08 in [#1171](https://github.com/risu729/kogane/pull/1171))
+- Date: 2026-11-08
+
+### Context
+
+`kogane.command.approve` and `kogane.command.commit` are R2: a `prepare`
+returns a `cfm_` digest and a `confirm` with it forwards to the Processor's
+command route, which runs `approve` or `commit`, as the page's
+`/api/command/v1/approve` and `/commit` do. Before the Processor was called,
+the tools ran a check of their own in `services/app/src/delegated-decision-tools.ts`,
+at `prepare` and again at `confirm`: plan expiry, plan status, digest,
+`simulate` (refusing a failed or stale report), then the caller's own
+approval. Against point 2 it answered differently from `approve` and
+`commit`:
+
+- with the code alone, never the `refs` the lifecycle gives (`plan_expired`
+  without the plan id, `target_missing` without the subject);
+- in another order: an ended override release with an expired approval was
+  `target_missing` over MCP and `approval_expired` on the page's path, and a
+  wrong digest on an expired plan `plan_expired` against `stale_context`;
+- with other codes: an approval another principal holds was
+  `approval_not_found` (the tool read only the caller's own) against
+  `approval_required`, and an operation id the caller already completed was
+  `plan_not_open` against the completed receipt as a replay;
+- with other writes: a refused `confirm` never reached `approve` or `commit`,
+  so a plan whose pins moved was not marked `stale` as the page's path marks it.
+
+### Options considered
+
+1. **Keep the tool's check and add refs.** Two lists of the same checks to
+   keep in step by hand; the order and the codes would drift again.
+2. **No pre-check: forward every `prepare` and `confirm`.** A `prepare` has
+   no Processor call to make (it issues a digest and writes nothing to the
+   change lifecycle), so it could only refuse what it checks itself.
+3. **One pre-check in packages/application (chosen).** `approve` and `commit`
+   are split into the caller's authority, a pure-read pre-check of the loaded
+   plan and approval (`approvalPrecheck`, `commitPrecheck`, and
+   `reversalCheck` for a delegated reversal), and the write. The tools call
+   `previewApproval` / `previewCommit`, which run those same functions and
+   then the simulation step.
+
+### Decision
+
+Option 3. Both paths run one function for every check of the plan and the
+approval, so a refusal is one code, one set of refs and one order for every
+input, at `prepare` and at `confirm`. A `confirm` checks its confirmation,
+then the pre-check, and leaves every refusal the lifecycle gives to the
+Processor, so its answer and what it records (a moved plan marked `stale`)
+are `approve`'s or `commit`'s own. A `prepare` that finds a completed
+operation answers with its receipt as a replay, as `commit` does. The
+caller's authority stays each path's own (the operator's grant on the page's
+path, the MCP client's capability and confirmation over MCP), as point 3
+keeps it.
+
+The R2 step keeps two differences, both written down in
+[agent API](../agent-api.md#change-lifecycle-decisions):
+
+- **The simulation step.** The confirmation page offers 承認 and 確定 only on
+  a `simulate` report that loaded and is not stale (`Confirm.tsx`); the
+  routes do not re-check it. A `prepare` returns that report as its preview,
+  so the tools refuse, after every lifecycle check, a plan whose simulation
+  fails (with the simulation's code and refs) or whose re-derived plan differs
+  while no pinned revision moved (`stale_context` with the plan id), at
+  `prepare` and at `confirm`. It adds a refusal only where the routes accept.
+- **`prepare` writes nothing to the change lifecycle.** A plan whose pins
+  moved is refused with the same `stale_context` and refs, but `approve`
+  (and `commit` at its batch) also marks it `stale`; a `prepare` does not,
+  as the page's own `simulate` does not. The App is not that table's writer.
+
+### Consequences
+
+- The two limits [agent API](../agent-api.md#change-lifecycle-decisions)
+  recorded (a tool refusal without `refs`, and another order for an input
+  with several refusals) are gone.
+- Answers that change over MCP (the page's path is unchanged): every
+  lifecycle refusal gains its refs; `approve`'s order is pinned, temporal,
+  digest, expiry, status, eligibility, moved pins (was expiry, status,
+  digest, simulation); `commit`'s is pinned, completed receipt, temporal,
+  expiry, status, approval (found, same plan, same principal, expiry, uses,
+  scope), eligibility, reversal (was reversal, expiry, status, simulation,
+  approval); another principal's approval is `approval_required`; an
+  invalid reversal is `stale_context` with the plan id and `revert_invalid`,
+  as `commit` answers it (was `revert_invalid`); `approval_scope_mismatch` is
+  `409`, the lifecycle's status (was `403`); a `confirm` checks its
+  confirmation before the pre-check, since the Processor's delegated route
+  runs `approve` or `commit` only for a verified confirmation, so an invalid,
+  used or expired confirmation is answered with its own code even where the
+  lifecycle would refuse the plan too (was the lifecycle's code first).
+- A `prepare` that answers a completed operation's receipt issues no
+  confirmation and is recorded `replayed` (step `call`, refs
+  `operation:<id>`), which no write budget or audit cap counts.
+- A new lifecycle check is one edit in `approve.ts` or `commit.ts`, and both
+  paths have it.
+
+### Verification
+
+`services/app/test/command-precheck-parity.test.ts` runs, over the real App
+Worker and the Processor's command route, the page's `approve` or `commit`,
+the tool's `prepare` and the tool's `confirm` of a digest prepared while the
+plan could still be decided, on inputs with several refusals: an ended
+release with an expired plan, an expired approval or a spent approval; a
+moved plan with an expired plan or an expired approval; a wrong digest on an
+expired plan; another plan's approval on an ended release; another
+principal's approval; and a completed operation. Every answer has the same
+code and refs, with each path's own plan and approval ids named. Before the
+change all 14 cases failed. A fifteenth case pins the `confirm` order: an
+expired confirmation on an expired plan is `confirmation_expired`.
 
 ## Amendment: no card settlement page offers a next page its budget refuses (2026-11-08)
 

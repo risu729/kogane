@@ -524,8 +524,8 @@ function topActivity(input: Record<string, unknown>): Record<string, unknown> {
 }
 
 describe("SBI Shinsei exchange-rate board", () => {
-  test("parser version 1.0.2 accepts the stored boards' observed shape", () => {
-    expect(sbiShinseiExchangeRate.version).toBe("1.0.2");
+  test("parser version 1.0.3 accepts the stored boards' observed shape", () => {
+    expect(sbiShinseiExchangeRate.version).toBe("1.0.3");
   });
 
   const board = () => value("exchange-rate");
@@ -818,7 +818,7 @@ describe("SBI Shinsei balance summary and stage (ADR 0031)", () => {
       fixture("balance-summary-and-stage"),
       artifact("balance-summary-and-stage"),
     );
-    expect(sbiShinseiBalanceSummaryAndStage.version).toBe("0.1.0");
+    expect(sbiShinseiBalanceSummaryAndStage.version).toBe("0.1.2");
     expect(result.observations).toEqual([
       {
         kind: "valuation",
@@ -841,6 +841,25 @@ describe("SBI Shinsei balance summary and stage (ADR 0031)", () => {
     expect(result.coverage).toEqual([
       expect.objectContaining({ completeness: "complete", observedCount: 1, expectedCount: 1 }),
     ]);
+  });
+
+  test("observed optional deposit summaries preserve the earlier stage-only output", () => {
+    const baseline = parse(value("balance-summary-and-stage"));
+    const input = value("balance-summary-and-stage");
+    const summary = (
+      input["responseParam"] as Record<string, Record<string, Record<string, unknown>>>
+    )["summary"]!["responseParam"]!;
+    summary["hyperDepositBalance"] = "12345.67";
+    summary["yenDepositBalance"] = "89012.34";
+    expect(parse(input)).toEqual(baseline);
+    for (const field of ["hyperDepositBalance", "yenDepositBalance"]) {
+      const scalar = summary[field];
+      for (const invalid of [{ amount: "1" }, ["1"]]) {
+        summary[field] = invalid;
+        expect(() => parse(input)).toThrow(/scalar/u);
+      }
+      summary[field] = scalar;
+    }
   });
 
   test("names, balances, the branch and the other category fields never leave the artifact", () => {
@@ -944,9 +963,9 @@ describe("SBI Shinsei activity rows record the provider-id origin (0.1.3)", () =
     ...overrides,
   });
 
-  test("the release is 0.1.3 under the same name", () => {
+  test("the release is 0.1.4 under the same name", () => {
     expect(sbiShinseiTopBalancesAndActivity.name).toBe("sbi-shinsei-top-balances-and-activity");
-    expect(sbiShinseiTopBalancesAndActivity.version).toBe("0.1.3");
+    expect(sbiShinseiTopBalancesAndActivity.version).toBe("0.1.4");
   });
 
   test("the output is 0.1.2's byte for byte, except the origin on every transaction row", () => {

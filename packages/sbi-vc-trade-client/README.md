@@ -1,17 +1,19 @@
-# SBI VCトレード read-only Web gateway PoC
+<a id="sbi-vcトレード-read-only-web-gateway-poc"></a>
 
-認証済みのVCTRADEシンプルモードsessionから、公開Web clientで確認したread eventだけを呼ぶローカルPoCである。generic event senderを公開せず、同じ`trade` gatewayに存在する注文、取消、入出金、貸コイン申込、認証設定変更を構造的に送信できないようにしている。
+# `SBI VCトレード` (SBI VC Trade) read-only Web gateway PoC
 
-収集対象:
+This local PoC calls only read events confirmed in the public Web client, using an authenticated VCTRADE simple-mode session. It exposes no generic event sender, structurally preventing orders, cancellations, deposits/withdrawals, lending applications and authentication-setting changes available on the same `trade` gateway.
 
-- `cashBalanceList`: 日本円・暗号資産の残高
-- `accountMargin`: 口座詳細
-- `positionSummaryList`: 保有ポジションsummary
-- `executionList`: 約定履歴。page 0で`historical=false`を1回、`historical=true`をpagination
-- `getCashflowList`: 日本円の入出金履歴。現行UIと同じ`historical=true`だけをpagination
-- `tradeReportList`: 報告書metadata一覧。download eventは含めない
+Captured data:
 
-このPoCはloginを実装しない。loginにはpasskeyまたはID/password + MFAが必要で、password経路はCloudflare Turnstileを使う。認証済みsessionの成立とread replayを分離して検証するためである。2026-08-31のlive試験ではCookie + Web clientの`secureKey`をBunへ渡す直接replayに成功した。session fileは実測で必要だった`vct_bff_sid`、`JSESSIONID`、`AWSALBAPP-0..3`、`AWSALB`、`AWSALBCORS`と`secureKey`だけを持ち、Git外・mode 600で用意する。clientは`__cf_bm`を送信しない。値をshell引数や標準出力へ置かない。読み取り時は`O_NOFOLLOW`で一度だけfileを開き、同じdescriptorでregular-file/mode検査とreadを行うため、pathの`stat`と再openの間に差し替えられるTOCTOUを作らない。
+- `cashBalanceList`: JPY/cryptoasset balances.
+- `accountMargin`: account details.
+- `positionSummaryList`: held-position summary.
+- `executionList`: execution history; calls `historical=false` 1 time on page 0, then paginates `historical=true`.
+- `getCashflowList`: JPY deposit/withdrawal history; paginates only `historical=true`, as the current UI does.
+- `tradeReportList`: report metadata list; no download event.
+
+This PoC implements no login. Login needs a passkey or ID/password + MFA; the password path uses Cloudflare Turnstile. Session establishment and read replay are verified separately. A live test on 2026-08-31 successfully replayed directly in Bun with cookies and the Web client's `secureKey`. The session file contains only the cookies found necessary in that test (`vct_bff_sid`, `JSESSIONID`, `AWSALBAPP-0..3`, `AWSALB`, `AWSALBCORS`) and `secureKey`, outside Git with mode 600. The client does not send `__cf_bm`. Values go in neither shell arguments nor stdout. Reading opens the file once with `O_NOFOLLOW`, then checks regular-file status/mode and reads through the same descriptor, avoiding a TOCTOU replacement between path `stat` and reopening.
 
 ```json
 {
@@ -28,16 +30,15 @@
 
 ```sh
 chmod 600 /secure/sbi-vc-session.json
-bun install --frozen-lockfile
-bun test
-mise run //packages/sbi-vc-trade-client:typecheck
+mise run install                                # from the repository root
+mise run //packages/sbi-vc-trade-client:ci        # typecheck and test
 bun src/cli.ts -- \
   --session-file /secure/sbi-vc-session.json \
   --output /secure/sbi-vc-output
 ```
 
-CLIが標準出力・標準エラーへ出すのはJSON 1行だけである。成功時は`{"status":"success","artifactCount":N}`、失敗時は`{"status":"failed","stage":…,"errorType":…}`（gateway errorなら`httpStatus`も）で、例外message、gatewayが返したstatus文字列、response bodyは出さない（`src/run-cli.ts`）。
+The CLI writes only 1 JSON line to stdout/stderr: `{"status":"success","artifactCount":N}` on success, or `{"status":"failed","stage":…,"errorType":…}` on failure (also `httpStatus` for a gateway error). It emits no exception message, gateway-returned status string or response body (`src/run-cli.ts`).
 
-outputは実残高・履歴を含むためprivateであり、commit、CI artifact、stdoutへ送らない。出力directoryはmode 700、各fileは作成時からmode 600とし、既存fileやsymlinkを上書きしない。このlocal client自身はsession更新や再認証を行わない。それらと定期収集は隣接する`services/collector-sbi-vc-trade`へ分離している。公開UIが送らない任意date filterはformatを推測せず実装していない。
+Output contains real balances/history and is private; send it to neither commits, CI artifacts nor stdout. The output directory has mode 700 and every file has mode 600 from creation; existing files and symlinks are never overwritten. This local client neither refreshes sessions nor reauthenticates. Those responsibilities and periodic collection are separate in adjacent `services/collector-sbi-vc-trade`. Arbitrary date filters absent from the public UI are unimplemented rather than assigned a guessed format.
 
-`tradeReportList`はtyped methodだけを用意し、現行UIが使うstatement typeの意味を値なしで検証できていないためdefault collectionへ入れていない。PDF/ZIP payload取得はread statusを更新する可能性が未確認なので実装しない。
+`tradeReportList` has only a typed method; it is excluded from default collection because the meanings of the current UI's statement types have not been verified without values. PDF/ZIP payload capture is unimplemented because whether it updates read status is unconfirmed.

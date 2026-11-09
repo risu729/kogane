@@ -789,6 +789,9 @@ describe.if(runnable)("operator schedule administration", () => {
       await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
       await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
       await card.getByText(`依頼ID op_${"a".repeat(64)}`, { exact: false }).waitFor();
+      expect(await card.getByRole("link", { name: "依頼の経過を見る" }).getAttribute("href")).toBe(
+        `/operations/op_${"a".repeat(64)}`,
+      );
       expect(collections).toHaveLength(1);
       const sent = collections[0]!;
       expect(sent.origin).toBe(origin);
@@ -822,12 +825,14 @@ describe.if(runnable)("operator schedule administration", () => {
       await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
       await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
       await card.getByText("同じ依頼として扱われます", { exact: false }).waitFor();
+      expect(await card.getByRole("link", { name: "依頼の経過を見る" }).count()).toBe(0);
       fail = false;
       await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
       await card.getByText(`依頼ID op_${"b".repeat(64)}`, { exact: false }).waitFor();
       expect(collections).toHaveLength(2);
       expect(collections[1]!.body["idempotencyKey"]).toBe(collections[0]!.body["idempotencyKey"]);
       await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      expect(await card.getByRole("link", { name: "依頼の経過を見る" }).count()).toBe(0);
       await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
       await page.waitForFunction(() => document.body.textContent?.includes("依頼ID"));
       await card.getByRole("button", { name: "収集を依頼", exact: true }).waitFor();
@@ -917,6 +922,9 @@ describe.if(runnable)("operator schedule administration", () => {
       await card.getByRole("button", { name: "設定を保存", exact: true }).click();
       await card.getByText(`依頼ID op_${"c".repeat(64)}`, { exact: false }).waitFor();
       expect(writes.filter((w) => w.path === "/api/ops/v1/schedules/sony-bank")).toHaveLength(2);
+      expect(await card.getByRole("link", { name: "依頼の経過を見る" }).getAttribute("href")).toBe(
+        `/operations/op_${"c".repeat(64)}`,
+      );
     } finally {
       await page.close();
     }
@@ -932,6 +940,44 @@ describe.if(runnable)("operator schedule administration", () => {
       // No target at all (absent, or null): no section.
       const vpass = page.locator(".schedule-card").filter({ hasText: "Vpass" });
       expect(await vpass.getByRole("heading", { name: "収集を依頼" }).count()).toBe(0);
+      expect(collections).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a proven pre-call stop and an uncertain call explain their different replay policies", async () => {
+    const sony = snapshot.schedules.find((job) => job.id === "sony-bank")!;
+    sony.latest = {
+      ...sony.latest!,
+      status: "not_dispatched",
+      finishedAt: null,
+      runIds: [],
+      runLinks: [],
+      failureCode: "not_dispatched",
+    };
+    snapshot.schedules.find((job) => job.id === "vpass")!.latest = {
+      ...sony.latest,
+      id: "synthetic-uncertain",
+      scheduleId: "vpass",
+      status: "uncertain",
+      failureCode: "dispatch_uncertain",
+    };
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const preCall = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await preCall
+        .getByText("収集先は呼び出されていません。自動再実行は一度までです。", { exact: true })
+        .waitFor();
+      expect(await preCall.getByText("収集の呼び出し前に停止", { exact: false }).count()).toBe(1);
+      const uncertain = page.locator(".schedule-card").filter({ hasText: "Vpass" });
+      await uncertain
+        .getByText("同じ予定の自動再実行は行いません。取得履歴を確認してください。", {
+          exact: true,
+        })
+        .waitFor();
+      expect(writes).toEqual([]);
       expect(collections).toEqual([]);
     } finally {
       await page.close();

@@ -11,6 +11,7 @@ import type { ArtifactMeta, Parser } from "../src/types.ts";
 import {
   mizuhoAccountCard,
   mizuhoAccountHtml,
+  mizuhoEmptyHistoryHtml,
   mizuhoHistoryHtml,
   mizuhoHistoryRow,
 } from "./mizuho-fixture.ts";
@@ -31,6 +32,12 @@ function meta(history = false, from = 1, to = 1): ArtifactMeta {
     sha256: "0".repeat(64),
   };
 }
+/** The stored empty page: `ordinary/<branch>-<account>/history/empty.html`, unit `…:page:empty`. */
+const emptyMeta = (): ArtifactMeta => ({
+  ...meta(true),
+  artifactKey: "ordinary/001-1234567/history/empty.html",
+  fetchUnitKey: "ordinary:001:1234567:page:empty",
+});
 const run = (parser: Parser, html: string, artifact = meta()) =>
   parser.parse(new TextEncoder().encode(html), artifact);
 function rejects(fn: () => unknown, code: string): void {
@@ -119,6 +126,57 @@ describe("Mizuho typed HTML readers", () => {
       "unrecognized-empty-state",
     );
   });
+  test("reads the observed empty page as an explicit empty state, not a range", () => {
+    expect(parseHistoryPage(mizuhoEmptyHistoryHtml(), account())).toEqual({
+      source: "mizuho",
+      currency: "JPY",
+      accountType: "ordinary-deposit",
+      branchCode: "001",
+      accountNumber: "1234567",
+      state: "empty",
+      displayedRange: null,
+      hasMore: false,
+      transactions: [],
+    });
+    expect(parseHistoryPage(mizuhoHistoryHtml(), account()).state).toBe("listed");
+    // The collector stores the sanitized page; the empty shape survives it unchanged.
+    expect(sanitizeMizuhoPage(mizuhoEmptyHistoryHtml())).toBe(mizuhoEmptyHistoryHtml());
+  });
+  test("refuses an empty page that still carries part of a transaction block", () => {
+    const withBlock = (fragment: string) =>
+      mizuhoEmptyHistoryHtml().replace("</form>", `${fragment}</form>`);
+    for (const fragment of [
+      '<span id="txtDispDetails">0 - 0 件</span>',
+      '<span id="txtAllDispDetails">0</span>',
+      '<div class="t1-2"><span class="amount">+ 1<small>円</small></span></div>',
+      '<span id="txtTransCntnt_000">テスト入金</span>',
+      '<span id="txtDate_000">2026年9月1日</span>',
+      '<span id="txtEachBal_000">1,234</span>',
+      // Rows whose markers changed still leave a figure in an amount, or another field.
+      '<div><span class="amount">+ 1<small>円</small></span></div>',
+      '<span class="amount">1,234</span>',
+      '<span id="txtAccType_000">普通預金</span>',
+      '<button class="btn-account"><span>x</span></button>',
+    ])
+      rejects(() => parseHistoryPage(withBlock(fragment), account()), "unrecognized-empty-state");
+    // Identity is still checked first, and a page that is neither shape is still refused.
+    rejects(
+      () => parseHistoryPage(mizuhoEmptyHistoryHtml().replace("1234567", "7654321"), account()),
+      "account-mismatch",
+    );
+    rejects(
+      () => parseHistoryPage(mizuhoEmptyHistoryHtml().replace(">普通<", ">貯蓄<"), account()),
+      "unsupported-account-kind",
+    );
+    rejects(
+      () =>
+        parseHistoryPage(
+          mizuhoEmptyHistoryHtml().replace('<span id="txtAccNo">1234567</span>', ""),
+          account(),
+        ),
+      "missing-or-duplicate-field",
+    );
+  });
 });
 
 describe("Mizuho provider-capture sanitization", () => {
@@ -180,6 +238,31 @@ describe("Mizuho registered observation parsers", () => {
     expect(
       mizuhoOrdinaryHistory.accepts({ ...meta(true), fetchUnitKey: "ordinary/001-1234567" }),
     ).toBe(false);
+    expect(PARSERS.filter((p) => p.accepts(emptyMeta())).map((p) => p.name)).toEqual([
+      "mizuho-ordinary-history",
+    ]);
+    // The empty unit and its key go together; the kept unparsed page stays unparsed.
+    expect(
+      mizuhoOrdinaryHistory.accepts({
+        ...emptyMeta(),
+        artifactKey: "ordinary/001-1234567/history/1-1.html",
+      }),
+    ).toBe(false);
+    expect(
+      mizuhoOrdinaryHistory.accepts({
+        ...meta(true),
+        fetchUnitKey: "ordinary:001:1234567:page:1:1",
+      }),
+    ).toBe(true);
+    expect(
+      PARSERS.filter((p) =>
+        p.accepts({
+          ...meta(true),
+          artifactKey: "ordinary/001-1234567/history/unparsed.html",
+          fetchUnitKey: "ordinary:001:1234567:page:unparsed",
+        }),
+      ),
+    ).toEqual([]);
     rejects(
       () =>
         run(mizuhoAccountList, mizuhoAccountHtml(), {
@@ -225,6 +308,39 @@ describe("Mizuho registered observation parsers", () => {
     expect(result.observations[0]?.extra).toMatchObject({
       _kogane: { coverageScope: "observed-page-only", hasMore: true },
     });
+  });
+  test("an empty page publishes no transaction and a complete empty page claim", () => {
+    const result = run(mizuhoOrdinaryHistory, mizuhoEmptyHistoryHtml(), emptyMeta());
+    expect(result.observations).toEqual([]);
+    expect(result.coverage).toHaveLength(1);
+    expect(result.coverage?.[0]).toMatchObject({
+      scopeKey: "mizuho-bank/mizuho-ordinary-history-html/unit=ordinary:001:1234567:page:empty",
+      mode: "complete-container",
+      completeness: "complete",
+      membershipComplete: true,
+      observedCount: 0,
+      expectedCount: null,
+      absenceMeaning: "complete-empty",
+      failureCause: null,
+    });
+    // A listed page under the empty unit, or the empty page under a range, is refused.
+    rejects(
+      () => run(mizuhoOrdinaryHistory, mizuhoHistoryHtml(), emptyMeta()),
+      "artifact-page-range-mismatch",
+    );
+    rejects(
+      () => run(mizuhoOrdinaryHistory, mizuhoEmptyHistoryHtml(), meta(true)),
+      "artifact-page-range-mismatch",
+    );
+    rejects(
+      () =>
+        run(mizuhoOrdinaryHistory, mizuhoEmptyHistoryHtml(), {
+          ...emptyMeta(),
+          runStatus: "partial",
+          runFailureCount: 1,
+        }),
+      "unsuccessful-fetch-unit",
+    );
   });
   test("identity survives row index, page-range and collection timestamp changes", () => {
     const first = run(mizuhoOrdinaryHistory, mizuhoHistoryHtml(), meta(true));

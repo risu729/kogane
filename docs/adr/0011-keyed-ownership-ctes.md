@@ -66,7 +66,7 @@ plan that reads the whole store's owners. Synthetic data only.
 
 ## Amendment 2026-11-06: the CTEs depart from the views in one rule
 
-- Status: proposed until the PR that carries it merges, then accepted
+- Status: accepted (merged 2026-11-07 in [#991](https://github.com/risu729/kogane/pull/991))
 - Date: 2026-11-06
 - Carried by: `cardSettlementOwnershipCtes` in
   `packages/read-model/src/card-settlement-ownership.ts`,

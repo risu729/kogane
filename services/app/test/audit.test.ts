@@ -941,6 +941,218 @@ describe("the operator's read and the never-recorded list", () => {
     }
   });
 
+  it("refuses a `__proto__` filter on the route, the agent route and MCP alike", async () => {
+    const route = await call("/api/v2/audit?__proto__=x");
+    expect(route.response.status).toBe(400);
+    const expected = (await route.response.json()) as Record<string, unknown>;
+    expect(expected).toMatchObject({ error: "invalid_query" });
+    // JSON.parse keeps `__proto__` as an own key, as a client's body does.
+    const sent = '{"filters":{"__proto__":"x"}}';
+    const agent = await call("/api/agent/v1/audit.search", { rawBody: sent });
+    expect(agent.response.status).toBe(400);
+    expect(await agent.response.json()).toMatchObject({ error: "invalid_query" });
+    const tool = await call("/mcp", {
+      via: "mcp",
+      headers: MCP_HEADERS,
+      rawBody: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"kogane.audit.search","arguments":${sent}}}`,
+    });
+    const message = (await tool.response.json()) as {
+      result: { isError?: boolean; structuredContent: unknown };
+    };
+    expect(message.result.isError).toBe(true);
+    expect(message.result.structuredContent).toMatchObject({ error: "invalid_query" });
+  });
+
+  it("refuses a filter key named after an Object.prototype member, never resolving it", async () => {
+    for (const key of ["constructor", "toString", "hasOwnProperty"]) {
+      const route = await call(`/api/v2/audit?${key}=x`);
+      expect({ key, status: route.response.status }).toEqual({ key, status: 400 });
+      expect(await route.response.json()).toMatchObject({ error: "invalid_query" });
+      const sent = `{"filters":{"${key}":"x"}}`;
+      const agent = await call("/api/agent/v1/audit.search", { rawBody: sent });
+      expect({ key, status: agent.response.status }).toEqual({ key, status: 400 });
+      expect(await agent.response.json()).toMatchObject({ error: "invalid_query" });
+      const tool = await call("/mcp", {
+        via: "mcp",
+        headers: MCP_HEADERS,
+        rawBody: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"kogane.audit.search","arguments":${sent}}}`,
+      });
+      const message = (await tool.response.json()) as {
+        result: { isError?: boolean; structuredContent: unknown };
+      };
+      expect({ key, isError: message.result.isError }).toEqual({ key, isError: true });
+      expect(message.result.structuredContent).toMatchObject({ error: "invalid_query" });
+    }
+  });
+
+  // The SDK reads `params.arguments` as a record, which drops a top-level
+  // `__proto__` key; `handleMcp` hands the tool the arguments as sent.
+  it("refuses a top-level `__proto__` argument on /mcp as the agent route and any unknown key", async () => {
+    const message = (id: number, args: string) =>
+      `{"jsonrpc":"2.0","id":${id},"method":"tools/call","params":{"name":"kogane.audit.search","arguments":${args}}}`;
+    const modern = (id: number, args: string) =>
+      `{"jsonrpc":"2.0","id":${id},"method":"tools/call","params":{"name":"kogane.audit.search","arguments":${args},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"synthetic-client","version":"0"},"io.modelcontextprotocol/clientCapabilities":{}}}}`;
+    const MODERN_HEADERS = {
+      ...MCP_CLIENT_HEADERS,
+      "mcp-protocol-version": "2026-07-28",
+      "mcp-method": "tools/call",
+      "mcp-name": "kogane.audit.search",
+    };
+    type Answer = { id: number; result: { isError?: boolean; structuredContent: unknown } };
+    const mcpCall = async (rawBody: string, headers: Record<string, string> = MCP_HEADERS) => {
+      const tool = await call("/mcp", { via: "mcp", headers, rawBody });
+      expect(tool.response.status).toBe(200);
+      return {
+        answer: (await tool.response.json()) as Answer | Answer[],
+        records: (await recordsOf(tool.requestId)).map(brief),
+      };
+    };
+    // Any other unknown key, in each revision: what the tool answers on /mcp,
+    // and what it records.
+    const eras = [
+      [message, MCP_HEADERS],
+      [modern, MODERN_HEADERS],
+    ] as const;
+    const unknown = [];
+    for (const [frame, headers] of eras)
+      unknown.push(await mcpCall(frame(1, '{"unknown":"x"}'), headers));
+    const refused = (unknown[0]!.answer as Answer).result;
+    expect(refused.isError).toBe(true);
+    expect(unknown[0]!.records.length).toBeGreaterThan(0);
+    for (const era of unknown) {
+      expect((era.answer as Answer).result.isError).toBe(true);
+      expect((era.answer as Answer).result.structuredContent).toEqual(refused.structuredContent);
+      expect(era.records).toEqual(unknown[0]!.records);
+    }
+    for (const args of ['{"__proto__":"x"}', '{"__proto__":{"cursor":"x"}}']) {
+      const agent = await call("/api/agent/v1/audit.search", { rawBody: args });
+      expect({ args, status: agent.response.status }).toEqual({ args, status: 400 });
+      expect(refused.structuredContent).toEqual(await agent.response.json());
+      for (const [index, [frame, headers]] of eras.entries()) {
+        const proto = await mcpCall(frame(1, args), headers);
+        expect({ args, headers, answer: proto.answer }).toEqual({
+          args,
+          headers,
+          answer: unknown[index]!.answer,
+        });
+        expect(proto.records).toEqual(unknown[index]!.records);
+      }
+    }
+    // In a batch, the guarded call is refused and its neighbour answered as alone.
+    const alone = ((await mcpCall(message(2, "{}"))).answer as Answer).result;
+    expect(alone.isError).not.toBe(true);
+    const batch = (await mcpCall(`[${message(1, '{"__proto__":"x"}')},${message(2, "{}")}]`))
+      .answer as Answer[];
+    expect(Object.fromEntries(batch.map((answer) => [answer.id, answer.result.isError]))).toEqual({
+      1: true,
+      2: alone.isError,
+    });
+    // A batch repeating the guarded call's id and tool runs neither as if the
+    // key were absent: both are refused, each recorded as any unknown key is.
+    const repeated = await mcpCall(`[${message(3, '{"__proto__":"x"}')},${message(3, "{}")}]`);
+    expect(repeated.records).toEqual([...unknown[0]!.records, ...unknown[0]!.records]);
+    // A call is never run with another call's arguments: a repeated id and
+    // tool whose other arguments differ runs with its own, and a string id
+    // is not the number it spells.
+    const sorted = (records: unknown[]) => records.map((row) => JSON.stringify(row)).sort();
+    const own = await mcpCall(message(5, '{"cursor":null}'));
+    expect(((own.answer as Answer).result as { isError?: boolean }).isError).not.toBe(true);
+    for (const rawBody of [
+      `[${message(5, '{"__proto__":"x"}')},${message(5, '{"cursor":null}')}]`,
+      `[${message(5, '{"cursor":null}')},${message(5, '{"__proto__":"x"}')}]`,
+      `[${message(5, '{"cursor":null}').replace('"id":5', '"id":"5"')},${message(5, '{"__proto__":"x"}')}]`,
+      `[${message(5, '{"__proto__":"x"}').replace('"id":5', '"id":"5"')},${message(5, '{"cursor":null}')}]`,
+    ])
+      expect({ rawBody, records: sorted((await mcpCall(rawBody)).records) }).toEqual({
+        rawBody,
+        records: sorted([...unknown[0]!.records, ...own.records]),
+      });
+    // A prototype member's name was never dropped, and stays refused.
+    for (const key of ["constructor", "toString"])
+      expect({
+        key,
+        result: ((await mcpCall(message(1, `{"${key}":"x"}`))).answer as Answer).result,
+      }).toEqual({ key, result: refused });
+    // The guard compares each call's arguments as JSON text, so a shape that
+    // parses or prints unusually still answers as on the agent route, never
+    // `internal_error`: a nested `__proto__` (the tool judges `filters` as
+    // sent), an escaped top-level one, duplicate keys (the last wins in both
+    // parses), escapes and a lone surrogate, numbers that print otherwise
+    // than sent, an integer-like key (ordered first in both objects), and
+    // nesting as deep as the body bound allows.
+    const deep = `${"[".repeat(32_400)}${"]".repeat(32_400)}`;
+    for (const args of [
+      '{"filters":{"__proto__":"x"}}',
+      '{"filters":{"a":"b","__proto__":{"c":"d"}}}',
+      String.raw`{"\u005f_proto__":"x"}`,
+      '{"cursor":null,"cursor":"a"}',
+      '{"__proto__":"x","__proto__":{"cursor":"y"}}',
+      String.raw`{"cursor":"A\ud800"}`,
+      '{"cursor":1.0}',
+      '{"cursor":12345678901234567890}',
+      '{"cursor":-0}',
+      '{"cursor":null,"1":"x"}',
+      `{"unknown":${deep}}`,
+      `{"__proto__":"x","unknown":${deep}}`,
+    ]) {
+      const agent = await call("/api/agent/v1/audit.search", { rawBody: args });
+      const { result } = (await mcpCall(message(7, args))).answer as Answer;
+      expect({
+        args: args.slice(0, 48),
+        isError: result.isError === true,
+        body: result.structuredContent,
+      }).toEqual({
+        args: args.slice(0, 48),
+        isError: agent.response.status >= 400,
+        body: await agent.response.json(),
+      });
+    }
+  });
+
+  it("answers a top-level `__proto__` argument as any unknown key on every listed tool", async () => {
+    // Every tool this environment lists on /mcp, so a tool added later is
+    // covered without naming it here.
+    const listing = await call("/mcp", {
+      via: "mcp",
+      headers: MCP_HEADERS,
+      body: { jsonrpc: "2.0", id: 1, method: "tools/list" },
+    });
+    const names = (
+      (await listing.response.json()) as { result: { tools: { name: string }[] } }
+    ).result.tools.map((tool) => tool.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "kogane.audit.search",
+        "kogane.accounts.history",
+        "kogane.card-settlements.statements",
+        "kogane.ops.collection.request",
+      ]),
+    );
+    const answer = async (name: string, args: string) => {
+      const tool = await call("/mcp", {
+        via: "mcp",
+        headers: MCP_HEADERS,
+        rawBody: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":${JSON.stringify(name)},"arguments":${args}}}`,
+      });
+      const message = (await tool.response.json()) as {
+        result?: { isError?: boolean; structuredContent: unknown };
+        error?: unknown;
+      };
+      return {
+        status: tool.response.status,
+        message,
+        records: (await recordsOf(tool.requestId)).map(brief),
+      };
+    };
+    for (const name of names) {
+      const unknown = await answer(name, '{"zz_unknown":"x"}');
+      expect({ name, isError: unknown.message.result?.isError }).toEqual({ name, isError: true });
+      // A refusal that names the key names the key sent.
+      const expected = JSON.parse(JSON.stringify(unknown).replaceAll("zz_unknown", "__proto__"));
+      expect({ name, ...(await answer(name, '{"__proto__":"x"}')) }).toEqual({ name, ...expected });
+    }
+  });
+
   it("no record holds provider text, a token-shaped value or an amount", async () => {
     const rows = (await env.DB.prepare("SELECT * FROM audit_records").all()).results;
     expect(rows.length).toBeGreaterThan(10);

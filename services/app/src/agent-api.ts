@@ -429,7 +429,9 @@ export async function sharedQueryApi(
   subject: string,
 ): Promise<Response | null> {
   if (url.pathname !== SHARED_QUERY_PATH) return null;
-  const filters: Record<string, string> = {};
+  // Entries, not assignment: `filters["__proto__"] = value` would set the
+  // prototype, and the filter check below would never see the key.
+  const filters: [string, string][] = [];
   let intent: string | null = null;
   let cursor: string | null = null;
   let limit: number | null = null;
@@ -441,12 +443,12 @@ export async function sharedQueryApi(
     else if (key === "limit") {
       if (!/^[1-9][0-9]{0,3}$/u.test(value)) throw new HttpError(400, "invalid_query");
       limit = Number(value);
-    } else filters[key] = value;
+    } else filters.push([key, value]);
   }
   if (intent === null) throw new HttpError(400, "invalid_query");
   const parsed = parseQueryRequest({
     intent,
-    filters,
+    filters: Object.fromEntries(filters),
     cursor,
     limit: limit ?? DEFAULT_QUERY_LIMIT,
   });

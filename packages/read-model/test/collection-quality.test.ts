@@ -203,10 +203,17 @@ describe("collection quality: attempts, terminals and sources", () => {
       JSON.stringify(["vpass"]),
     ]);
     expect(rows).toEqual([
-      { source: "vpass", blocked_code: null, runs: 1, newest_seen_at: "2099-01-03T00:00:00.000Z" },
+      {
+        source: "vpass",
+        blocked_code: null,
+        provider_failure_code: null,
+        runs: 1,
+        newest_seen_at: "2099-01-03T00:00:00.000Z",
+      },
       {
         source: "vpass",
         blocked_code: "manifest_invalid",
+        provider_failure_code: null,
         runs: 1,
         newest_seen_at: "2099-01-01T00:00:00.000Z",
       },
@@ -450,12 +457,14 @@ describe("collection quality: cells", () => {
     const first = s.run({ source: "st-george", at: "2099-01-01T00:00:00Z", artifacts: snapshot });
     s.parse(first.artifacts[0]!, "st-george-balances", {
       kind: "published",
+      version: "1.0.1",
       claim: { completeness: "complete" },
     });
     s.parse(first.artifacts[0]!, "st-george-transactions", { kind: "published" });
     const second = s.run({ source: "st-george", at: "2099-01-02T00:00:00Z", artifacts: snapshot });
     s.parse(second.artifacts[0]!, "st-george-balances", {
       kind: "published",
+      version: "1.0.1",
       claim: { completeness: "partial", cause: "page_missing" },
     });
     s.parse(second.artifacts[0]!, "st-george-transactions", { kind: "published" });
@@ -817,6 +826,7 @@ describe("collection quality on the complete CORE schema without statistics", ()
       });
       scaled.parse(george.artifacts[0]!, "st-george-balances", {
         kind: "published",
+        version: "1.0.1",
         claim: { completeness: "complete" },
       });
     }

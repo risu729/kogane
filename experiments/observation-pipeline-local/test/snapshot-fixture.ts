@@ -41,9 +41,9 @@ import { openTestStore } from "./test-store.ts";
  * replaces the previous one.
  */
 export const EXPLICIT_COVERAGE: ReadonlyMap<string, string> = new Map([
-  ["st-george-balances", "1.0.0"],
-  ["prestia-bank-balances", "1.0.0"],
-  ["sbi-shinsei-exchange-rate", "1.0.2"],
+  ["st-george-balances", "1.0.1"],
+  ["prestia-bank-balances", "1.0.1"],
+  ["sbi-shinsei-exchange-rate", "1.0.3"],
 ]);
 
 const cleanup: (() => void)[] = [];

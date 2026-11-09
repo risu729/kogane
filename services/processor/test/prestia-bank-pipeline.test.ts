@@ -17,6 +17,11 @@ import { createD1ObservationReader, PAGE_LIMIT } from "../../../packages/read-mo
 import { registerCollectionRun } from "../src/collection/index.ts";
 import { sweep } from "../src/worker.ts";
 import { prestiaBankRunPlan } from "../../collector-prestia-bank/src/storage.ts";
+import { buildSharedRunPlan as globalPassRunPlan } from "../../collector-globalpass/src/shared-collection.ts";
+import {
+  GLOBALPASS_SCHEMA_VERSION,
+  GLOBALPASS_PAGINATION_STATUS,
+} from "../../collector-globalpass/src/model.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -53,7 +58,7 @@ afterAll(async () => {
   await mf?.dispose();
 });
 
-test("PRESTIA sanitized snapshot registers and publishes native, bank-yen and monthly qualification evidence", async () => {
+test("PRESTIA snapshot with failed signoff registers and publishes native, bank-yen and monthly qualification evidence", async () => {
   const clean = sanitizePrestiaBankPage(prestiaBankHtml());
   expect(clean).not.toContain("synthetic-secret");
   expect(clean).not.toContain("synthetic-owner");
@@ -63,6 +68,14 @@ test("PRESTIA sanitized snapshot registers and publishes native, bank-yen and mo
     completedAt: "2026-10-01T00:00:01.000Z",
     version: "prestia-bank-collector-v1",
     body: clean,
+    signoffFailed: true,
+  });
+  expect(plan.run.reports).toContainEqual({
+    reportRef: "logout",
+    reportKind: "logout",
+    scope: "run",
+    outcome: "failed",
+    safeErrorCode: "logout_failed",
   });
   expect(plan.run.requestedScope).toEqual({
     scopeKind: "unspecified",
@@ -108,7 +121,7 @@ test("PRESTIA sanitized snapshot registers and publishes native, bank-yen and mo
   expect(
     (await env.DB.prepare("SELECT parser_name,parser_version FROM published_parse_runs").all())
       .results,
-  ).toEqual([{ parser_name: "prestia-bank-balances", parser_version: "1.0.0" }]);
+  ).toEqual([{ parser_name: "prestia-bank-balances", parser_version: "1.0.1" }]);
   expect(
     (
       await env.DB.prepare(
@@ -241,4 +254,68 @@ test("PRESTIA sanitized snapshot registers and publishes native, bank-yen and mo
     expect(observed?.provenance).toBeDefined();
     expect(observed?.extra).toEqual(JSON.parse(row.extra_json));
   }
+});
+
+test("GLOBAL PASS failed logout keeps complete activity evidence eligible for published parsing", async () => {
+  const html = readFileSync(
+    new URL(
+      "../../../tests/fixtures/observation-pipeline/global-pass/activity-2099-02.html",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const manifest = {
+    schemaVersion: GLOBALPASS_SCHEMA_VERSION,
+    source: "prestia-globalpass" as const,
+    runId: "globalpass-logout-synthetic-1",
+    mode: "backfill" as const,
+    startedAt: "2001-03-01T00:00:00.000Z",
+    completedAt: "2001-03-01T00:00:01.000Z",
+    status: "success" as const,
+    availableMonths: ["2099-02"],
+    selectedMonths: ["2099-02"],
+    captureComplete: true,
+    paginationStatus: GLOBALPASS_PAGINATION_STATUS,
+    artifacts: [
+      {
+        dataset: "globalpass-activity" as const,
+        month: "2099-02",
+        page: 1,
+        key: "activity-2099-02.html",
+        mediaType: "text/html" as const,
+        bytes: new TextEncoder().encode(html).length,
+        sha256: "a".repeat(64),
+      },
+    ],
+    failures: [],
+    logoutFailed: true,
+  };
+  const plan = await globalPassRunPlan({
+    manifest,
+    manifestJson: JSON.stringify(manifest),
+    captures: [{ month: "2099-02", page: 1, sanitizedHtml: html }],
+    identity: { attemptId: "logout-synthetic" },
+  });
+  expect(plan.run.reports).toContainEqual({
+    reportRef: "logout",
+    reportKind: "logout",
+    scope: "run",
+    outcome: "failed",
+    safeErrorCode: "logout_failed",
+  });
+  expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
+  expect(
+    await registerCollectionRun(env, { source: "prestia-globalpass", runId: manifest.runId }),
+  ).toMatchObject({ outcome: "registered", artifacts: 2 });
+  expect(await sweep(env)).toMatchObject({ parsed: 1, error: 0 });
+  expect(
+    await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM published_parse_runs WHERE parser_name='global-pass-activity'",
+    ).first<number>("n"),
+  ).toBe(1);
+  expect(
+    await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM transaction_observations o JOIN parse_runs p ON p.id=o.parse_run_id JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id WHERE a.source_id='global-pass'",
+    ).first<number>("n"),
+  ).toBe(1);
 });
