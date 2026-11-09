@@ -199,8 +199,7 @@ export async function explainCardPurchases(input: {
     request.eventId === undefined
       ? pageBeyondBudget(offset, CARD_PURCHASE_PAGE_SIZE, grant)
       : pageBeyondBudget(0, 1, grant);
-  if (beyond)
-    return fail("budget_exceeded", [`budget:maxRows=${String(grant.budget.maxRows)}`]);
+  if (beyond) return fail("budget_exceeded", [`budget:maxRows=${String(grant.budget.maxRows)}`]);
 
   let page: CardPurchasePage;
   try {
