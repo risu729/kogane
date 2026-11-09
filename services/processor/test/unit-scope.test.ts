@@ -63,7 +63,7 @@ const rescan = async () => {
   await sweep(env);
 };
 
-test("0037 preserves prior run-scoped containers beside the explicit J-POINT unit policy", async () => {
+test("0037 preserves run-scoped containers beside explicit J-POINT and savings-history unit policies", async () => {
   expect(
     await first<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type='view' AND name='observation_fetch_artifact_units'",
@@ -90,6 +90,13 @@ test("0037 preserves prior run-scoped containers beside the explicit J-POINT uni
       source_id: "myjcb",
       parser_name: "myjcb-jpoint-balance",
       dataset: "jpoint-balance",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "sbi-shinsei-bank",
+      parser_name: "sbi-shinsei-savings-activity",
+      dataset: "savings-activity",
       unit_scope: "unit",
       snapshot_selection: 0,
     },
@@ -266,6 +273,13 @@ test("the comparison route reports the eligibility scope of every policy row", a
       source_id: "myjcb",
       parser_name: "myjcb-jpoint-balance",
       dataset: "jpoint-balance",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "sbi-shinsei-bank",
+      parser_name: "sbi-shinsei-savings-activity",
+      dataset: "savings-activity",
       unit_scope: "unit",
       snapshot_selection: 0,
     },
