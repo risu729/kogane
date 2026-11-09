@@ -85,11 +85,12 @@ are separate claims. Historical acceptance records are linked from the
   依頼の経過 page, opened from the audit log or from a request just sent on the schedules page, and `kogane.ops.operation.get`,
   whole-store on both; the browser requests no operation). The committed
   `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, `sbi-securities`, `mobile-suica`,
-  `moneyforward-me`, `myjcb`, `st-george`, `sbi-vc-trade` and `sbi-vc-keepalive`; requests for
+  `moneyforward-me`, `myjcb`, `st-george`, `sbi-vc-trade`, `sbi-vc-keepalive` and `prestia-bank`; requests for
   any other connection wait and expire after 24 hours. Production checks followed one
   request per original connection (`sony-bank`, `sbi-securities`, `mobile-suica`,
-  `moneyforward-me`, `myjcb`) to publication. The three additional connections still
-  need their post-deployment request checks. Collectors run their daily
+  `moneyforward-me`, `myjcb`) to publication. The four additional connections still
+  need their post-deployment request checks; `prestia-bank`'s is also its first
+  production collection. Collectors run their daily
   scope, not a requested window; READ projection of a run is derived from the READ pointer each time the record is read, not stored; only
   SBI VC's keepalive is an unattended session refresh. An accepted operation is
   still not an executed collection. The schedules page's **収集を依頼** sends the
@@ -107,7 +108,7 @@ boolean feature flags, including scheduling, operations, purchase recognition,
 rewards, reports and READ projections. CORE migrations reach 0083 (no
 file uses 0054, 0067, 0073, 0074, 0076 or 0081); READ reaches 0005. The Processor's
 `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, `sbi-securities`, `mobile-suica`,
-`moneyforward-me`, `myjcb`, `st-george`, `sbi-vc-trade` and `sbi-vc-keepalive`, the connections
+`moneyforward-me`, `myjcb`, `st-george`, `sbi-vc-trade`, `sbi-vc-keepalive` and `prestia-bank`, the connections
 the operation dispatch lane calls. The App's `SESSION_REFRESH_POLICY` is
 `{"sbi-vc-trade":"unattended"}`; other sources still require a person for session
 refresh. These are repository facts, not live database/deployment readback.
