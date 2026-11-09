@@ -318,6 +318,23 @@ constants against the routes in `config/ingest-clients.json`.
 | `kogane-smbc-direct-backfill-poc`  | `smbc-direct`                         | `smbc-bank`        |
 | `kogane-mizuho-collector`          | `mizuho-bank`                         | `mizuho-bank`      |
 
+### Failed terminal codes at registration
+
+Migration 0086 adds nullable `collection_runs.provider_failure_code`. Registration
+copies the validated run-level `safeErrorCode` only for `providerOutcome: failed`,
+including both a refusal with `provider_run_failed` when no provider bytes exist
+and a failed run whose captured bytes register. The code must match the manifest
+vocabulary (`^[a-z0-9][a-z0-9_-]{0,99}$`); absent or invalid codes stay NULL.
+Unvalidated terminals, success and partial outcomes never supply this column.
+The value is immutable with the sighting; duplicate delivery cannot replace it.
+Existing rows stay NULL and no historical R2 terminals are backfilled.
+
+Collection quality exposes the reason as `failureCode` beside the registration
+reason, through the existing closed-code normalization: hyphens become
+underscores, and codes outside the display grammar become `unclassified`.
+This read adds no provider call or automatic retry. See
+[collection quality](read-model.md#collection-quality).
+
 ### Artifact datasets at registration (ADR 0022)
 
 A terminal names no parser dataset, and no collector adds one: the Processor

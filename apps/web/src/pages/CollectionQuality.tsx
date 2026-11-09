@@ -217,6 +217,12 @@ function Schedule({ value }: { value: CollectionQualitySchedule }): ReactNode {
               · <code>{terminal.blockedCode}</code>
             </>
           ) : null}
+          {terminal.failureCode ? (
+            <>
+              {" "}
+              · <code>{terminal.failureCode}</code>
+            </>
+          ) : null}
           {terminal.fetchRunId !== null ? (
             <>
               {" "}
@@ -585,10 +591,16 @@ export function CollectionQualityPage(): ReactNode {
                       <p className="panel-body">実行予定の記録なし</p>
                     )}
                   </Panel>
-                  {selected.unregistered.map((item) => (
-                    <p key={`${item.collector}/${item.blockedCode}`}>
+                  {selected.unregistered.map((item, index) => (
+                    <p key={`${item.collector}/${item.blockedCode}/${item.failureCode}/${index}`}>
                       {item.collector}: 未登録 {item.runs} 件 · 最後の確認 {item.newestSeenAt} ·{" "}
                       {item.blockedCode ?? "登録待ち"}
+                      {item.failureCode ? (
+                        <>
+                          {" "}
+                          · <code>{item.failureCode}</code>
+                        </>
+                      ) : null}
                     </p>
                   ))}
                   <nav aria-label="収集品質の表示単位">

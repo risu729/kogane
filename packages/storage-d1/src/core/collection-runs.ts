@@ -28,6 +28,7 @@ export interface CollectionRunRow {
   terminal_digest: string;
   registration_contract_version: string;
   provider_outcome: string | null;
+  provider_failure_code: string | null;
   coverage_status: string | null;
   acquisition_session_ref: string | null;
   first_seen_at: string;
@@ -48,7 +49,7 @@ export interface CollectionStageRow {
 }
 
 const RUN_COLUMNS = `id, source, run_id, terminal_key, terminal_digest,
- registration_contract_version, provider_outcome, coverage_status,
+ registration_contract_version, provider_outcome, provider_failure_code, coverage_status,
  acquisition_session_ref, first_seen_at, blocked_code, fetch_run_id,
  acquisition_session_id, registered_at`;
 
@@ -92,6 +93,7 @@ export function readCollectionRunsFor(
 export interface CollectionRunSighting extends CollectionRunIdentity {
   terminalKey: string;
   providerOutcome: string | null;
+  providerFailureCode?: string | null;
   coverageStatus: string | null;
   acquisitionSessionRef: string | null;
   firstSeenAt: string;
@@ -113,8 +115,9 @@ export async function insertCollectionRunIfAbsent(
     db,
     `INSERT INTO collection_runs (
        source, run_id, terminal_key, terminal_digest, registration_contract_version,
-       provider_outcome, coverage_status, acquisition_session_ref, first_seen_at, blocked_code
-     ) SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
+       provider_outcome, coverage_status, acquisition_session_ref, first_seen_at, blocked_code,
+       provider_failure_code
+     ) SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
        WHERE NOT EXISTS (
          SELECT 1 FROM collection_runs
           WHERE source = ?1 AND run_id = ?2 AND terminal_digest = ?4
@@ -130,6 +133,13 @@ export async function insertCollectionRunIfAbsent(
       sighting.acquisitionSessionRef,
       sighting.firstSeenAt,
       sighting.blockedCode,
+      sighting.providerOutcome === "failed" &&
+      typeof sighting.providerFailureCode === "string" &&
+      sighting.providerFailureCode.length <= 100 &&
+      /^[a-z0-9]/u.test(sighting.providerFailureCode) &&
+      !/[^a-z0-9_-]/u.test(sighting.providerFailureCode)
+        ? sighting.providerFailureCode
+        : null,
     ],
   );
   return result.meta.changes;

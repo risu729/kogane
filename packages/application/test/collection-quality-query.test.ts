@@ -204,6 +204,7 @@ describe("the summary", () => {
         outcome: "success",
         coverage: "complete",
         registration: "registered",
+        failureCode: null,
         blockedCode: null,
         fetchRunId: vpassRun,
       },
@@ -212,6 +213,7 @@ describe("the summary", () => {
         outcome: "partial",
         coverage: "partial",
         registration: "blocked",
+        failureCode: null,
         blockedCode: "registration_refused",
         fetchRunId: null,
       },
@@ -220,6 +222,7 @@ describe("the summary", () => {
         outcome: null,
         coverage: null,
         registration: "unrecorded",
+        failureCode: null,
         blockedCode: null,
         fetchRunId: null,
       },
@@ -227,6 +230,7 @@ describe("the summary", () => {
     expect(vpass.unregistered).toEqual([
       {
         collector: "vpass",
+        failureCode: null,
         blockedCode: "registration_refused",
         runs: 1,
         newestSeenAt: "2099-01-01T00:00:00.000Z",
@@ -255,6 +259,7 @@ describe("the summary", () => {
         outcome: "success",
         coverage: "complete",
         registration: "pending",
+        failureCode: null,
         blockedCode: "operation_budget",
         fetchRunId: null,
       },
@@ -548,7 +553,7 @@ function row(overrides: Partial<CellQualityRow> = {}): CellQualityRow {
 describe("one reason per stored state", () => {
   const valid = (entry: ReturnType<typeof cell>) =>
     validCollectionQualityCells({
-      apiVersion: 4,
+      apiVersion: 5,
       freshnessAsOf: freshnessAsOf(AS_OF),
       sourceId: "vpass",
       latestFetchRun: null,
@@ -871,6 +876,58 @@ test("a proven pre-RPC stop has a distinct reason in the shared UI and MCP wire 
       failureCode: "not_dispatched",
       terminals: [],
     });
+  } finally {
+    store.db.close();
+  }
+});
+
+test("failed terminal codes reach latest attempts and distinct unregistered buckets", async () => {
+  const store = new QualityStore();
+  try {
+    const codes = [
+      "login-unrecognized-page",
+      "authentication-required",
+      "9valid",
+      "x".repeat(65),
+      undefined,
+    ];
+    store.occurrence("vpass", {
+      nominalAt: "2099-01-02T21:00:00.000Z",
+      status: "failed",
+      runIds: codes.map((_, index) => `failure-${index}`),
+    });
+    for (const [index, code] of codes.entries())
+      store.terminal({
+        source: "vpass",
+        runId: `failure-${index}`,
+        outcome: "failed",
+        blockedCode: "provider_run_failed",
+        ...(code === undefined ? {} : { providerFailureCode: code }),
+      });
+    const summary = await queryCollectionQualitySummary(executor(store), { asOf: AS_OF });
+    expect(validApiResponse("/api/collection-quality", summary)).toBe(true);
+    const source = summary.sources.find((row) => row.sourceId === "vpass")!;
+    expect(source.schedules[0]!.latest!.terminals.map((row) => row.failureCode)).toEqual([
+      "login_unrecognized_page",
+      "authentication_required",
+      "unclassified",
+      "unclassified",
+      null,
+    ]);
+    expect(source.unregistered.map((row) => row.failureCode).sort()).toEqual(
+      [
+        "login_unrecognized_page",
+        "authentication_required",
+        "unclassified",
+        "unclassified",
+        null,
+      ].sort(),
+    );
+    expect(
+      source.unregistered.every(
+        (row) => row.runs === 1 && row.blockedCode === "provider_run_failed",
+      ),
+    ).toBe(true);
   } finally {
     store.db.close();
   }

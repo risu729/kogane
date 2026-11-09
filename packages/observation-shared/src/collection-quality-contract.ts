@@ -29,7 +29,7 @@ import {
 import { validInstantText } from "../../domain/src/time.ts";
 
 export const COLLECTION_QUALITY_PATH = "/api/collection-quality";
-export const COLLECTION_QUALITY_API_VERSION = 4;
+export const COLLECTION_QUALITY_API_VERSION = 5;
 /** Cells per page; the read fetches one more to report truncation. */
 export const COLLECTION_QUALITY_PAGE = 500;
 /** More schedules or sources than this in one summary is refused, never cut. */
@@ -281,6 +281,8 @@ const terminal = z
     registration: z.enum(REGISTRATION_STATES),
     /** `collection_runs.blocked_code` or the newest `registered` stage failure code. */
     blockedCode: z.nullable(code),
+    /** The validated failed terminal's own closed code, normalized for display. */
+    failureCode: z.nullable(code),
     /** The visible CORE fetch run it became, for `/runs/...` links. */
     fetchRunId: z.nullable(id),
   })
@@ -289,6 +291,7 @@ const terminal = z
     z.refine((value) => (value.outcome === null) === (value.coverage === null)),
     // Only a registered terminal links a fetch run.
     z.refine((value) => value.fetchRunId === null || value.registration === "registered"),
+    z.refine((value) => value.failureCode === null || value.outcome === "failed"),
   );
 
 const occurrence = z.strictObject({
@@ -363,6 +366,7 @@ const dataTypes = z.nullable(
 const unregistered = z.strictObject({
   collector: sourceId,
   blockedCode: z.nullable(code),
+  failureCode: z.nullable(code),
   runs: id,
   newestSeenAt: instant,
 });

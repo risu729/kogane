@@ -217,6 +217,7 @@ function terminal(
       coverage: null,
       registration: "unrecorded",
       blockedCode: null,
+      failureCode: null,
       fetchRunId: null,
     };
   const stageCode = safeCode(row.registered_stage_failure_code);
@@ -229,6 +230,7 @@ function terminal(
     coverage: row.coverage_status as CoverageStatus | null,
     registration: registered ? "registered" : blocked ? "blocked" : "pending",
     blockedCode: registered ? null : (safeCode(row.blocked_code) ?? stageCode),
+    failureCode: safeCode(row.provider_failure_code),
     fetchRunId: registered ? row.visible_fetch_run_id : null,
   };
 }
@@ -365,6 +367,7 @@ export async function queryCollectionQualitySummary(
         .map((unregistered) => ({
           collector: unregistered.source,
           blockedCode: safeCode(unregistered.blocked_code),
+          failureCode: safeCode(unregistered.provider_failure_code),
           runs: unregistered.runs,
           newestSeenAt: unregistered.newest_seen_at,
         })),

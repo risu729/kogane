@@ -284,6 +284,8 @@ async function registerWithin(context: Registration): Promise<RegisterTerminalOu
     ...identity,
     terminalKey: read.key,
     providerOutcome: manifest.providerOutcome,
+    providerFailureCode:
+      manifest.providerOutcome === "failed" ? (manifest.safeErrorCode ?? null) : null,
     coverageStatus: manifest.coverageStatus,
     acquisitionSessionRef: manifest.acquisitionSessionRef ?? null,
     firstSeenAt: seenAt,

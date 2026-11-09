@@ -35,6 +35,18 @@ describe.if(runnable)("collection quality browser", () => {
       },
       artifacts: [],
     });
+    store.occurrence("vpass", {
+      nominalAt: "2099-01-02T21:00:00.000Z",
+      status: "failed",
+      runIds: ["failed-login"],
+    });
+    store.terminal({
+      source: "vpass",
+      runId: "failed-login",
+      outcome: "failed",
+      blockedCode: "provider_run_failed",
+      providerFailureCode: "login-unrecognized-page",
+    });
     // One GLOBAL PASS month whose observation the identity layer maps to an
     // unresolved account, and one whose parse is still pending.
     const month = store.run({
@@ -137,6 +149,7 @@ describe.if(runnable)("collection quality browser", () => {
       expect(
         await page.getByText("本人による認証・操作が必要です", { exact: false }).count(),
       ).toBeGreaterThan(0);
+      expect(await page.getByText("login_unrecognized_page", { exact: true }).count()).toBe(2);
       // collection-freshness-v1: the chosen source's newest run is two days old
       // (GLOBAL PASS, listed before it, is one day old); the unit with no file
       // waits on a person and has no current capture.

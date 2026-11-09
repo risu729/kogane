@@ -852,9 +852,11 @@ are answered by one reader, `readCollectionQuality`
   under, and every visible source. Per job: enabled, supported, a held
   execution lease, and the newest receipt with each run it names as CORE has
   it (`registered` with its fetch run, `pending`, `blocked` with its code, or
-  `unrecorded`), the run's own outcome and coverage. Per source: its
-  collectors, its newest visible fetch run, its never-registered terminals by
-  code, and its reasons (`schedule_disabled`, `occurrence_failed`,
+  `unrecorded`), the run's own outcome and coverage, and for a failed run the
+  terminal's own closed failure code (`failureCode`, migration 0086; see
+  [collection](collection.md#failed-terminal-codes-at-registration)). Per
+  source: its collectors, its newest visible fetch run, its never-registered
+  terminals by registration code and failure code, and its reasons (`schedule_disabled`, `occurrence_failed`,
   `user_action_required`, `lease_held`, `dataset_withheld`, ...). Jobs whose
   source registers under no CORE source (the Processor tick) are listed apart.
   More than 200 jobs or sources is `413 result_limit_exceeded`, never cut.
