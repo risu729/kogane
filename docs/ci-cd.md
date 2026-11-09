@@ -156,6 +156,16 @@ lifecycle work requires a separate Wrangler rollout. Processor and PRESTIA opt i
 versions strategy: Processor preserves its Queue consumer settings; PRESTIA
 applies its checked-in workersDev:true/previewUrls:false after version upload.
 The three Container full-deploy steps also explicitly consent to synchronization.
+Neither `cf workers versions create` nor `cf workers deployments create`
+carries the non-versioned script settings, so a versions-strategy publication
+left `observability` (Workers Logs, Workers Issues) as it was in the
+dashboard. Since 2026-11-09 the release step "Sync the non-versioned settings
+of version-published Workers" (`tasks/_lib/ci/cf-script-settings.mjs`) runs
+after the alarm reconcile: for each selected versions-strategy Worker it
+`PATCH`es `/workers/scripts/{name}/script-settings` with the `observability`
+object of its `wrangler.jsonc`, as `wrangler versions deploy` does, and reads
+it back. A refusal prints only its closed `cf_settings_…` code. A rollback to
+a commit without the script leaves the live settings unchanged.
 All 17 deployed Workers keep ADR 0039's order and the authenticated
 App/Processor release and schema postcheck.
 

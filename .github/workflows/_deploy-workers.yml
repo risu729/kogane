@@ -1138,6 +1138,20 @@ jobs:
             rollback) mise run --no-deps automation:alarm-bootstrap ;;
             *) echo "schedule_bootstrap_mode_invalid" >&2; exit 1 ;;
           esac
+      - name: Sync the non-versioned settings of version-published Workers
+        # `cf workers versions create` and `deployments create` leave
+        # `observability` (Workers Logs, Issues) unchanged, so it is applied and
+        # read back here. Workers on `cf deploy` already got it. A rollback
+        # target older than this script keeps the live settings as they are.
+        if: ${{ steps.decide.outputs.proceed == 'true' }}
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_SELECTED: ${{ steps.select.outputs.cf-selected }}
+        run: |
+          if [[ -f tasks/_lib/ci/cf-script-settings.mjs ]]; then
+            node tasks/_lib/ci/cf-script-settings.mjs sync
+          fi
       - name: Record what this run deployed
         id: progress
         # The deployment payload was fixed when the deployment was opened, so it

@@ -373,7 +373,7 @@ the first check that refused; the `shape` line is what shows the rest.
 
 ### Workers Issues (error grouping)
 
-Adopted 2026-11-09 (owner decision). Every production Worker under
+Adopted 2026-11-09 21:05 UTC (owner decision). Every production Worker under
 `services/` turns on Cloudflare
 [Workers Issues](https://developers.cloudflare.com/workers/observability/issues/),
 which groups recurring failures of one Worker into issues without an SDK:
@@ -384,26 +384,43 @@ which groups recurring failures of one Worker into issues without an SDK:
 ```
 
 ```ts
-// cloudflare.config.ts (what `cf deploy` reads)
+// cloudflare.config.ts
 observability: { enabled: true, issues: { enabled: true } },
 ```
 
-Both files carry the key: a deploy whose config omits it turns Issues off
-again, and `tasks/_lib/cf-deploy.test.ts` keeps the two `observability` objects
-equal.
+How the setting reaches Cloudflare: the three Container Workers (GlobalPass,
+SBI Shinsei, St.George) publish with `cf deploy`, which applies
+`cloudflare.config.ts`; the other fourteen publish a version, which carries no
+`observability`, and the release then applies the `wrangler.jsonc` object
+through the script-settings API
+([ci-cd.md](ci-cd.md#cf-version-deployment-and-compatible-rollbacks)).
+`tasks/_lib/cf-script-settings.test.ts` requires `issues.enabled` on every
+cf-deployed Worker, and `tasks/_lib/cf-deploy.test.ts` keeps the two files'
+`observability` objects equal for the fourteen. A full deploy or rollback from
+a commit whose config lacks the key turns Issues off for a Container Worker.
 
 What becomes an occurrence: an uncaught exception, a failed invocation, a `5xx`
 response the Worker returns, and a console line at error level or one carrying
-an `Error` object or stack trace. Collector stage failures reach it through the
-`console.error` line of `collector-diagnostics` (`event: "collector-diagnostic"`,
-`outcome: "failed"`, safe error fields only). A collector run that catches its
-failure and reports it only as a `console.log` result line (for example
-`mizuho-collection-result` with `status: "failed"`) does not.
+an `Error` object or stack trace. Today that covers:
+
+- the failed-stage and failed-terminal `console.error` lines of
+  `packages/collector-diagnostics` (`event: "collector-diagnostic"`, safe error
+  fields only), used by GlobalPass, Mobile Suica, MyJCB, SBI Securities, SBI VC
+  Trade, SMBC Direct, St.George and Vpass;
+- the few direct `console.error` calls (schedule lease, SBI Shinsei, SBI VC
+  Trade, SMBC Direct, one in the Processor).
+
+It does not cover a collector run that catches its failure and only returns
+or `console.log`s a result: Mizuho (`mizuho-collection-result`), PRESTIA,
+Sony Bank, Money Forward, V Point and V Point Pay. Every collector runs from
+the Processor's alarm RPC (`crons: []`), and the Processor logs each result as
+the `console.log` line `schedule_dispatch_result`, so those failures are not
+issues either.
 
 Limits: occurrence details are kept seven days (issues stay listed after
-that); only traffic after the deploy is processed; Issues is in open beta and
-free during the beta. The issues are read in the dashboard (Worker > Issues)
-or through the account API under
+that); only traffic after the setting is applied is processed; Issues is in
+open beta and free during the beta. Issues are read in the dashboard
+(Worker > Issues) or through the account API under
 `/accounts/{account_id}/workers/observability/issues` (list, `/{issueId}`,
 `/{issueId}/occurrences`, `PATCH` for the status). The wrangler OAuth token has
 no Workers Observability scope, so it cannot read them.
