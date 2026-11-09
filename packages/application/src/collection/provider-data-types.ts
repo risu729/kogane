@@ -112,7 +112,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // history, fund/bond detail and delivered documents are not collected
   // (docs/sources/sbi-securities.md, #446).
   "sbi-securities": [
-    partial("position", ["sbi-domestic-cash-positions", "sbi-foreign-cash-positions"], 446),
+    partial("position", ["sbi-domestic-cash-positions", "sbi-foreign-cash-positions"], 1237),
     collected("execution", ["sbi-domestic-trade-records", "sbi-foreign-trade-records"]),
     partial("settlement_cash", ["sbi-foreign-cash-balances", "sbi-yen-detail-history"], 446),
     missing("income", 446),
