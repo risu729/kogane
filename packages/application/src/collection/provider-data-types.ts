@@ -1,4 +1,4 @@
-// `provider-data-types-v1` (ADR 0087): per CORE source with a collector, the
+// `provider-data-types-v2` (ADR 0087): per CORE source with a collector, the
 // data types the provider offers for the account kinds the source collects,
 // and whether each is collected. It describes the provider, from the source
 // research (docs/sources/*.md) and the per-source issues (#441–#454 under
@@ -128,7 +128,10 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
       "sbi-shinsei-balance-summary-and-stage",
       "sbi-shinsei-yen-deposit-account",
     ]),
-    partial("cash_movement", ["sbi-shinsei-top-balances-and-activity"], BACKLOG),
+    collected("cash_movement", [
+      "sbi-shinsei-top-balances-and-activity",
+      "sbi-shinsei-savings-activity",
+    ]),
     missing("term_deposit", BACKLOG),
     missing("document", BACKLOG),
     collected("fx_rate", ["sbi-shinsei-exchange-rate"]),

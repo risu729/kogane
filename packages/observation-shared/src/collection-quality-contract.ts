@@ -162,7 +162,7 @@ export const CELL_REASONS = [
 
 /**
  * The data types a provider offers, in the vocabulary of the roadmap's layers
- * 0–5 (`provider-data-types-v1`, ADR 0087). A type names what the data is,
+ * 0–5 (`provider-data-types-v2`, ADR 0087). A type names what the data is,
  * not where it is shown: `balance` (a deposit, cash, stored-value or margin
  * balance), `cash_movement` (bank, wallet or stored-value movements),
  * `card_usage` (card purchases and refunds), `card_statement` (statement and
@@ -201,7 +201,7 @@ export const PROVIDER_DATA_TYPES = [
  * and the rest is tracked by an issue; `not_collected`: an issue tracks it.
  */
 export const DATA_TYPE_STATUSES = ["collected", "partial", "not_collected"] as const;
-export const PROVIDER_DATA_TYPES_VERSION = "provider-data-types-v1";
+export const PROVIDER_DATA_TYPES_VERSION = "provider-data-types-v2";
 export type ProviderDataType = (typeof PROVIDER_DATA_TYPES)[number];
 export type DataTypeStatus = (typeof DATA_TYPE_STATUSES)[number];
 
@@ -382,7 +382,7 @@ const source = z
     reasons: distinct(z.enum(SOURCE_REASONS)),
     /** The age of `latestFetchRun` (whatever its outcome) and what the source waits on. */
     freshness,
-    /** What the provider offers and whether each type is collected (`provider-data-types-v1`). */
+    /** What the provider offers and whether each type is collected (`provider-data-types-v2`). */
     dataTypes,
   })
   .check(

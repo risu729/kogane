@@ -82,6 +82,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "e9d08f2520bd293d5b4bd4656af8bb318fba01143734a1fd01bafb0a5ce5781f",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-exchange-rate.ts":
       "96f8afa71be75794f89aef60a6b56dee310f69442f93ad17cdbb2699db8d721b",
+    "poc/observation-pipeline/src/parsers/sbi-shinsei-savings-activity.ts":
+      "20b11cd373447cdb97ea9127c1c68ff6961a8673adef7bb422b6d5706979d033",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-top-balances-and-activity.ts":
       "09be9df1bab1d5ed7aec8576dec0948ae92cebf95c088a1ac01db4d91e6f5f34",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-yen-deposit-account.ts":
@@ -116,6 +118,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "67e8b851360f2da7046967231407dfe2e0c01ee87e58a670d7a1f355efe2bb7d",
     "poc/observation-pipeline/src/parsers/vpass.ts":
       "5a1ce5cb855a7e2df17e392c957b8337d74273bdaadb074a2b77c48ad88ffa1a",
+    "poc/observation-pipeline/src/sbi-shinsei-period-contract.ts":
+      "4700253c653f928185ec45e38deb598d03b446e4dfad48427ab688c00174cf28",
     "poc/observation-pipeline/src/scheduled-payment.ts":
       "c5780464419276cdaac1f49fa3610011872a1d17320e62718e83cc5acf897c68",
     "poc/observation-pipeline/src/st-george-contract.ts":
@@ -457,6 +461,21 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/parsers/sbi-shinsei-common.ts",
         "poc/observation-pipeline/src/parsers/sbi-shinsei-exchange-rate.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "sbi-shinsei-savings-activity": {
+      version: "0.1.0",
+      codeDigest: "f5167ba170bc6b863ef77303bfb52f9b98834228bd684a69e1dae9cc27079877",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-shinsei-common.ts",
+        "poc/observation-pipeline/src/parsers/sbi-shinsei-savings-activity.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/sbi-shinsei-period-contract.ts",
         "poc/observation-pipeline/src/types.ts",
       ],
     },

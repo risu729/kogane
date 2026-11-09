@@ -1,4 +1,4 @@
-// `provider-data-types-v1` (src/collection/provider-data-types.ts, ADR 0087):
+// `provider-data-types-v2` (src/collection/provider-data-types.ts, ADR 0087):
 // the catalogue names only registered parsers, every collector's parser that
 // publishes observations is in it, and every entry is the wire contract's.
 import { describe, expect, test } from "bun:test";

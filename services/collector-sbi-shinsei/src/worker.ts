@@ -185,11 +185,12 @@ export async function runCollection(
     } finally {
       // Emit before teardown and before central import so a later failure cannot hide the cause.
       for (const entry of failures) {
+        const { historyScope: _historyScope, ...diagnostic } = entry;
         emitDiagnostic("error", {
           event: "sbi-shinsei-collection-failure",
           runId,
           phase: "collection",
-          ...entry,
+          ...diagnostic,
         });
       }
       emitDiagnostic("log", {

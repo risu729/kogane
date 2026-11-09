@@ -12,6 +12,7 @@ const REQUIRED_OPERATIONS = [
   "top.balance-summary-and-stage",
   "common.exchange-rate",
   "yen-deposit.account",
+  "account.casa-activity-specific-period",
 ] as const satisfies readonly ReadOperationId[];
 
 export interface CollectorOutput {

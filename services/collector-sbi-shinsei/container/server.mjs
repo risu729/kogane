@@ -115,7 +115,9 @@ function validateHandoff(value) {
   const envelopeKeys = Object.keys(parsed).sort().join(",");
   if (
     parsed.ok !== true ||
-    (envelopeKeys !== "ok,responses" && envelopeKeys !== "failure,ok,responses") ||
+    (envelopeKeys !== "ok,responses" &&
+      envelopeKeys !== "history,ok,responses" &&
+      envelopeKeys !== "failure,ok,responses") ||
     !parsed.responses ||
     typeof parsed.responses !== "object" ||
     Array.isArray(parsed.responses)
@@ -342,10 +344,53 @@ async function collectAuthenticatedReadsInPage(session) {
       }
       responses[plan.key] = result.raw;
     }
-    return JSON.stringify({
-      ok: true,
-      responses,
-    });
+    const top = JSON.parse(responses.topBalances);
+    const savings = top?.responseParam?.overview?.responseParam?.savingsDetails;
+    if (!Array.isArray(savings) || savings.length > 100) return fail("history-inventory-shape");
+    const date = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Tokyo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+      .format(new Date())
+      .replaceAll("-", "");
+    const fromDate = String(Number(date.slice(0, 4)) - 2) + date.slice(4, 6) + "01";
+    const history = { fromDate, toDate: date, accounts: [] };
+    for (const account of savings) {
+      const scope = {
+        accountNo: account.accountNo,
+        currency: account.currency,
+        productCode: account.productCode,
+      };
+      if (
+        typeof scope.accountNo !== "string" ||
+        !/^\d{15}$/u.test(scope.accountNo) ||
+        typeof scope.currency !== "string" ||
+        !/^[A-Z]{3}$/u.test(scope.currency) ||
+        typeof scope.productCode !== "string"
+      )
+        return fail("history-inventory-shape");
+      try {
+        const result = await read(
+          "/SFC/app/IFAI_AccountAdapter/getCasaAccountActivitySpecificPeriod",
+          {
+            requestParam: {
+              accountNo: scope.accountNo,
+              type: "1",
+              fromDate,
+              toDate: date,
+              eventType: "3",
+            },
+          },
+          "history",
+        );
+        history.accounts.push({ ...scope, raw: result.raw });
+      } catch {
+        history.accounts.push({ ...scope, errorCode: "history_read_failed" });
+      }
+    }
+    return JSON.stringify({ ok: true, responses, history });
   } catch (error) {
     return fail(error?.stage ?? "read-failed");
   } finally {

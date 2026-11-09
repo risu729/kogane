@@ -916,7 +916,7 @@ and age per source in the source list, per cell, and in the account view per
 account, data type and period (当日の取得, N日前の取得, 古い, 本人操作待ち,
 定期実行の停止中, 取得なし).
 
-**Data types the provider offers** (`provider-data-types-v1`,
+**Data types the provider offers** (`provider-data-types-v2`,
 [ADR 0087](adr/0087-provider-data-type-catalogue.md)).
 The account answer is self-contained: API version 3 carries its own
 `dataTypesVersion` and source-level `dataTypes`. Each account parser group

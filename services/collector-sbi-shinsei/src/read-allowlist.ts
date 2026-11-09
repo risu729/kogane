@@ -54,9 +54,10 @@ export const READ_ROUTE_CATALOG = [
     "account.information-others",
     "/SFC/app/IFAI_AccountAdapter/getAccountInformationOthersDisplay",
   ),
-  route(
+  capturedRoute(
     "account.casa-activity-specific-period",
     "/SFC/app/IFAI_AccountAdapter/getCasaAccountActivitySpecificPeriod",
+    "sbi-shinsei-period-activity-v1",
   ),
   route("account.account-list", "/SFC/app/AIAI_AccountInfomationAdapter/getAccountList"),
   capturedRoute("account.inbox-list", "/SFC/app/AIAI_AccountInfomationAdapter/getInboxList"),

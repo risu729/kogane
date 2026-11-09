@@ -46,7 +46,7 @@ const account = (accountId: string, periods: unknown[] = [period]) => ({
 });
 const answer = (overrides: Record<string, unknown> = {}) => ({
   apiVersion: 3,
-  dataTypesVersion: "provider-data-types-v1",
+  dataTypesVersion: "provider-data-types-v2",
   dataTypes: [
     { type: "card_usage", status: "collected", parsers: ["vpass-statement-page"], issue: null },
     { type: "card_statement", status: "collected", parsers: ["vpass-statement-page"], issue: null },

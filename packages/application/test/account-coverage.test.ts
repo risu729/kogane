@@ -304,7 +304,7 @@ describe("account coverage", () => {
           { sourceId, asOf: AS_OF },
         );
         expect(validAccountCoverage(answer)).toBe(true);
-        expect(answer!.dataTypesVersion).toBe("provider-data-types-v1");
+        expect(answer!.dataTypesVersion).toBe("provider-data-types-v2");
         expect(answer!.dataTypes).toEqual([...catalogue]);
         expect(answer!.accounts[0]!.dataTypes[0]!.providerTypes).toEqual(
           catalogue.filter((entry) => entry.parsers.includes(parser)).map((entry) => entry.type),

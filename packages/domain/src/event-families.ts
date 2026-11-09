@@ -23,8 +23,11 @@ import { hasExactKeys, isOneOf, isRecord, isText } from "./guards.ts";
  * settlement writer is back. The admission still reads each stored row: a row
  * a 0.1.2 run stored carries no origin and stays refused
  * (identity_origin_unrecorded, `rowOriginBasis`).
+ *
+ * v4 (ADR 0095): selected-period savings activity records the same provider
+ * reference and origin; both parsers share its existing account-local rule.
  */
-export const TRANSACTION_FAMILY_REGISTRY_VERSION = "transaction-family-registry-v3";
+export const TRANSACTION_FAMILY_REGISTRY_VERSION = "transaction-family-registry-v4";
 
 /**
  * The closed list of economic-event families.
@@ -426,6 +429,21 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     ],
   },
   {
+    // Selected-period rows retain the same provider reference, native sides
+    // and recorded identity origin as top-page activity (ADR 0095).
+    sourceId: "sbi-shinsei-bank",
+    parserName: "sbi-shinsei-savings-activity",
+    observationKinds: ["transaction"],
+    identity: identity("provider_id", "identityOrigin", "provider"),
+    statuses: ABSENT,
+    providerLinks: NO_LINK,
+    families: [
+      unsupported("bank-movement", "counterpart_not_stated"),
+      unsupported("fx-exchange", "counterpart_not_stated", "semantics_unobserved"),
+      supported("card-settlement"),
+    ],
+  },
+  {
     // `txnReferenceNo`, recorded as `identityOrigin: provider-id` from 0.1.3
     // (0.1.2 recorded no origin); no status; debit/credit columns;
     // `tradeTypeCode` kept unmapped; one native currency per account. The card
@@ -444,6 +462,7 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
       supported("card-settlement"),
     ],
   },
+
   {
     // JPY REMITTANCE_DEPOSIT / REMITTANCE_WITHDRAW only; `processStatusType`
     // kept verbatim; no bank-side link.
@@ -664,6 +683,13 @@ export const PROVIDER_IDENTITY_FUNCTIONS: readonly ProviderIdentityFunction[] = 
   {
     sourceId: "sbi-shinsei-bank",
     parserName: "sbi-shinsei-top-balances-and-activity",
+    sourceAccounts: "any",
+    componentFields: ["txnReferenceNo"],
+    ruleVersion: "sbi-shinsei-txn-reference-no-v1",
+  },
+  {
+    sourceId: "sbi-shinsei-bank",
+    parserName: "sbi-shinsei-savings-activity",
     sourceAccounts: "any",
     componentFields: ["txnReferenceNo"],
     ruleVersion: "sbi-shinsei-txn-reference-no-v1",

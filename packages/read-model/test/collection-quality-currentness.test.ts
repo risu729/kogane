@@ -21,16 +21,25 @@ const rows = (s: QualityStore, source: string) =>
   s.all<CellQualityRow>(CELL_QUALITY_SQL, [source, 0]);
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 
-test("extraction retains the frozen base SQL apart from the explicit Sony current-history gate", () => {
+test("extraction retains the frozen base SQL apart from the explicit Sony and Shinsei history additions", () => {
   // Frozen rendered SQL digests taken from the base, before the extraction.
   // Exact bytes prove unchanged predicates/ranking/filtering/output on every
   // input, more strongly than only comparing a handful of selected rows.
   // ADR 0092 intentionally excludes Sony JSON before ranking. Every other byte
-  // remains pinned; sony-csv-history.test.ts separately freezes and proves that delta.
-  const transactions = transactionsSql({}, 0).sql.replace(
-    "           AND p.parser_name <> 'sony-bank-history-json'\n",
-    "",
-  );
+  // remains pinned after removing the explicit ADR 0095 Shinsei identity/witness
+  // additions. Parser/processor mixed-history tests separately prove those deltas.
+  const transactions = transactionsSql({}, 0)
+    .sql.replace("           AND p.parser_name <> 'sony-bank-history-json'\n", "")
+    .replace("                           'sbi-shinsei-savings-activity',\n", "")
+    .replace(
+      ") THEN 'sony-bank-deposit-history'\n                        WHEN p.parser_name = 'sbi-shinsei-savings-activity' THEN 'sbi-shinsei-top-balances-and-activity' ELSE p.parser_name END,",
+      ") THEN 'sony-bank-deposit-history' ELSE p.parser_name END,",
+    )
+    .replace(
+      "                  ORDER BY CASE WHEN p.parser_name IN ('sbi-shinsei-top-balances-and-activity','sbi-shinsei-savings-activity') THEN fa.fetched_at END DESC,\n                  CASE json_extract(t.extra_json, '$._kogane.sourceView')",
+      "                  ORDER BY CASE json_extract(t.extra_json, '$._kogane.sourceView')",
+    );
+
   expect(hash(transactions)).toBe(
     "9876071ea165908299b34c61aad1005b7531fe5a010c213c2bc193f2b1be3ff9",
   );

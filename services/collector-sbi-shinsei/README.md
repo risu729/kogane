@@ -13,8 +13,8 @@ A PoC independently implementing an SBI Shinsei Bank PowerDirect read-only colle
 The public login bundle and Kuebiko captures confirmed MobileFirst/WLClient-style read routes, session/CSRF-token topology and core response schemas. The local CLI serially performs CAFIS generation, login, Authorization/CSRF and core reads within the same Kuebiko Chrome target; only 4 validated read JSON responses leave the browser.
 
 - The production Worker starts a Cloudflare Container per 1 run. Chrome inside it serially performs CAFIS generation, login, Authorization/CSRF and core reads within 1 page. The Worker handles only scheduling, secret handoff, strict validation and R2 storage.
-- The route catalog uses exact origins, paths and methods. Only the 2 bootstrap and 4 core-read routes successful in the 2026-08-31 Kuebiko capture and local automated run have `productionEnabled: true`. Candidates based only on the public bundle are unreachable.
-- Direct HTTP transport is always refused, even for production routes. Only a single JSON string wrapping the 4 raw JSON responses leaves the page for the Worker; credentials, CAFIS `jsc`, cookies, Authorization, CSRF and sessionStorage do not leave it.
+- The route catalog uses exact origins, paths and methods. The 2 bootstrap and 4 core-read routes observed in 2026-08-31 captures, plus the selected-period savings route observed on 2026-11-10, have `productionEnabled: true`. Candidates based only on the public bundle are unreachable.
+- Direct HTTP transport is always refused, even for production routes. A single JSON handoff containing the 4 core responses and each savings account's selected-period response leaves the scheduled container page for the Worker; credentials, CAFIS `jsc`, cookies, Authorization, CSRF and sessionStorage do not leave it.
 - The Container/browser is stopped and discarded after success, refusal or unknown responses, without credential retries.
 - If a later core read fails after a successful top read, successful responses and top-derived normalized data remain in a partial manifest; failed and unattempted datasets use fixed codes. Failure of top itself still produces a failed manifest with no artifacts.
 - Unknown content types, oversized bodies, JSON parse failures and unregistered schemas stop processing without storage or interpretation.
@@ -94,7 +94,7 @@ current-selection rule and success/partial classification are unchanged.
 | Trigger                           | Behavior                                                                                                                                                                                                       |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /health`                     | Returns only schema version, source and live-read readiness.                                                                                                                                                   |
-| Private `ScheduledCollection` RPC | Collects the current snapshot through the existing fixed action. Public `/trigger` returns 404.                                                                                                                |
+| Private `ScheduledCollection` RPC | Collects the core snapshot and retained savings activity through the existing fixed action. Public `/trigger` returns 404.                                                                                     |
 | Processor alarm `sbi-shinsei`     | The Processor's `ScheduleAlarm` calls `runScheduled` daily at 06:00 JST (`config/alarm-jobs.json`). Total failure saves a failure terminal and returns `failed`; partial capture is saved as partial evidence. |
 
 R2 keys (shared DATA bucket `kogane-raw-evidence`):
@@ -106,13 +106,20 @@ runs/sbi-shinsei/<run-id>/terminal.json     run completion record written last (
 
 Unknown responses and authentication-response bodies are not stored in R2. The 4 core responses were verified by authenticated capture and local execution and are stored only after passing strict schemas. Top-level `header.newToken`, used to continue reads, is rotated within the same page, removed before leaving the Container, and the JSON is re-encoded.
 
-The current 4 reads are top-page snapshots. Manifest `startedAt` / `completedAt` record execution times, without claiming past-period capture. Adding period history requires separate verification of a read route that actually sends a period and of its capture range.
+The scheduled container supplements the 4 core reads with the selected-period
+savings activity described below. Execution timestamps remain distinct from
+the requested and declared per-account date ranges. The CSV route remains an
+unapproved candidate, refused before session access or communication.
 
-Period-selected history and CSV remain unapproved candidate routes in the catalog; every execution profile refuses them before session access or communication. Based on ordinary UI observation on 2026-10-10, `src/local/history-observation.ts` provides an explicit-period yen ordinary-deposit request (locally limited to 31 days) and **offline validation only** of already captured JSON/CSV. It distinguishes normal JSON details, provider-reported empty responses and unverified errors, checking period/account context and all 6 CSV columns. CSV is browser-decoded text declaring `Shift_JIS`, not confirmation of original bytes or downloaded-file storage. Every result retains `coverageStatus: unknown`.
+The older `src/local/history-observation.ts` module still provides only an
+explicit-period yen request (locally limited to 31 days) and offline inspection
+of already captured JSON/CSV under its 2026-10-10 contract. It is not used by the
+Worker or Container and retains `coverageStatus: unknown`. Its conservative
+historical contract does not define the new scheduled parser. CSV session-token
+rotation and byte-exact download/storage remain unverified; `purgeflag` business
+semantics are still unverified.
 
-This module is not called by the Worker, Container or existing parser; it neither communicates, stores, adopts nor enables production behavior. The existing 4 raw + 1 normalized snapshot is unchanged. CSV session-token acquisition/rotation, original-byte storage, paging/limits/`purgeflag` meaning and electronic transaction-report routes/schemas remain unverified. [ADR 0070](../../docs/adr/0070-sbi-shinsei-observed-history-boundary.md) and the [next capture-slice plan](../../docs/plans/2026-10-sbi-shinsei-history-first-slice.md) record the conditions remaining before production capture is extended.
-
-`packages/collection` writes runs directly to shared DATA, retaining the 4 provider responses and normalized snapshot in memory until the terminal is written. The Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). Private Service Binding calls to the central importer, `POST /backfill-raw-evidence`, `scripts/backfill-raw-evidence.sh` and the dedicated source bucket were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)).
+`packages/collection` writes runs directly to shared DATA, retaining the validated provider responses, request-bound history views and normalized snapshot in memory until the terminal is written. The Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). Private Service Binding calls to the central importer, `POST /backfill-raw-evidence`, `scripts/backfill-raw-evidence.sh` and the dedicated source bucket were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)).
 
 Core-response field-name topology from Kuebiko captures is reflected in synthetic fixtures and strict validators. Some known fields are optional because only 1 sample exists; unknown fields, unknown nested items and unknown schemas are refused. A validator implementation alone does not enable a route: an exact request builder and successful execution in an accepted browser context are also required.
 
@@ -314,3 +321,33 @@ Memory usage near the instance limit alone does not establish an OOM failure.
 Keep inspection output to version/image, event name/time, health, runtime reason,
 and exit code. Instance responses can also contain environment variables and
 secret configuration: never dump the full response into logs, tickets or fixtures.
+
+## Selected-period savings activity
+
+The scheduled container run collects every top-overview savings account over
+the current Tokyo day back to the first day of the same month two years
+earlier. One initial JSON response contains all money rows; the site's
+thirty-row page requests only enrich descriptions and memos and are not
+replayed. There is no collection-window parameter or continuation state.
+
+Each account retains `raw-period-activity-NNNN.json` and a derived
+`savings-activity-NNNN.json` that binds the response to the requested account,
+native currency, product code and range. Both belong to one stable account
+unit with its own terminal report and ranges. An unsupported response fails
+that account with a closed code while later accounts are still read. Empty
+responses are complete only for the observed explicit empty code and exact
+shape; their missing account/currency/date echoes are supplied by the retained
+request scope. Top-page activity and period history share provider reference
+identity and current reads select the newest witness once, preferring history at the same capture time. Hyper Yokin
+remains its own account stream; row balance semantics remain unverified.
+
+See [the observed contract](../../docs/sources/sbi-shinsei-bank.md#selected-period-savings-history-observed-2026-11-10)
+and [ADR 0095](../../docs/adr/0095-sbi-shinsei-selected-period-history.md).
+Production collection/publication is a separate verification step.
+
+The account-coverage view currently attributes cells from observation rows only.
+A complete-empty savings history has no transaction observation, so this cell
+remains in the view's unattributed list. Its exact account/currency/request
+range remains in the derived artifact, and its hashed account unit, terminal
+report, dated ranges and complete-empty parser claim retain the evidence.
+No amount or synthetic statement observation is created to force attribution.

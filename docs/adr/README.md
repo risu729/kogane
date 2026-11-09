@@ -101,3 +101,5 @@ for current behavior.
 - [ADR 0091: A query cursor is bound to its context's pinned inputs, not to the request's clock](0091-query-cursor-paging-basis.md) — accepted; `financial.query`'s next page is read on a later request (`basisRef` in place of `contextId`), and `no_rows_in_scope` is named only for a source read to its end
 - [ADR 0092: Sony Bank deposit history uses only the official CSV in current transactions](0092-sony-history-csv-only.md) — accepted; JSON remains evidence and balances, collector CSV row count must match JSON `countCnt`, missing or incomplete CSV fails with a closed terminal code
 - [ADR 0093: Treat listed direct deposit readings at different banks as disjoint](0093-direct-bank-deposit-disjointness.md) — accepted; registry-backed deposit allow-list for SBI Shinsei, SMBC and Mizuho, no identity re-run
+
+- [ADR 0095: SBI Shinsei selected-period savings history](0095-sbi-shinsei-selected-period-history.md) - proposed; whole-retention account units, request-bound empty claims and shared transaction identity

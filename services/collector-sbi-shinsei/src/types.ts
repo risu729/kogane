@@ -63,7 +63,8 @@ export type ResponseSchemaId =
   | "sbi-shinsei-top-balances-v1"
   | "sbi-shinsei-balance-summary-v1"
   | "sbi-shinsei-exchange-rate-v1"
-  | "sbi-shinsei-yen-deposit-account-v1";
+  | "sbi-shinsei-yen-deposit-account-v1"
+  | "sbi-shinsei-period-activity-v1";
 
 export interface ReadRequestDescriptor {
   operation: ReadOperationId;
@@ -120,6 +121,7 @@ export interface NormalizedSnapshot {
 }
 
 export interface RawArtifact {
+  historyScope?: import("../../../packages/parsers/src/sbi-shinsei-period-contract.ts").SavingsPeriodScope;
   dataset: string;
   filename: string;
   mediaType: string;
@@ -135,6 +137,8 @@ export interface StoredArtifact {
 }
 
 export interface CollectionFailure {
+  /** In-memory request scope only; excluded from diagnostics and stored manifests. */
+  historyScope?: import("../../../packages/parsers/src/sbi-shinsei-period-contract.ts").SavingsPeriodScope;
   operation: string;
   errorType: string;
   message: string;

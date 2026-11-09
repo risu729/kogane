@@ -1,3 +1,4 @@
+import { parseSavingsHistory } from "../savings-activity";
 import { browserDiagnostics } from "../diagnostics";
 import { fileURLToPath } from "node:url";
 import { JscAcquisitionError, UnknownResponseShapeError } from "../errors";
@@ -130,7 +131,10 @@ export function parseCollectionHandoff(
   const partial = Object.hasOwn(input, "failure");
   const root = exactObject(
     input,
-    partial ? ["ok", "responses", "failure"] : ["ok", "responses"],
+    [
+      ...(partial ? ["ok", "responses", "failure"] : ["ok", "responses"]),
+      ...(Object.hasOwn(input, "history") ? ["history"] : []),
+    ],
     "collector",
   );
   if (root.ok !== true) {
@@ -217,9 +221,25 @@ export function parseCollectionHandoff(
       });
     }
   }
+  let historyArtifacts: RawArtifact[] = [];
+  if (root.history !== undefined) {
+    if (!topBalances || partial) throw new UnknownResponseShapeError("history_handoff_invalid");
+    try {
+      const history = parseSavingsHistory(root.history, topBalances.data, capturedAt);
+      historyArtifacts = history.artifacts;
+      failures.push(...history.failures);
+    } catch {
+      failures.push({
+        operation: "read:history",
+        errorType: "ResponseSchemaError",
+        message: "provider_response_invalid",
+      });
+    }
+  }
   return {
     ...(normalized ? { normalized } : {}),
     artifacts: [
+      ...historyArtifacts,
       ...validated.map(({ plan, response }) => artifact(plan.dataset, plan.filename, response.raw)),
       ...(normalized
         ? [artifact("normalized", "normalized.json", `${JSON.stringify(normalized, null, 2)}\n`)]

@@ -45,6 +45,7 @@ import {
   sonyBankHistoryJson,
   sonyBankWalletHistory,
 } from "../src/parsers/sony-bank.ts";
+import { sbiShinseiSavingsActivity } from "../src/parsers/sbi-shinsei-savings-activity.ts";
 import { sbiShinseiBalanceSummaryAndStage } from "../src/parsers/sbi-shinsei-balance-summary-and-stage.ts";
 import { stGeorgeTransactions } from "../src/parsers/st-george.ts";
 import { vPointBalanceInfo, vPointHistoryPage, vPointSmfgPoint } from "../src/parsers/v-point.ts";
@@ -166,6 +167,12 @@ const contractCases = (parserNames: readonly string[]): Case[] =>
   );
 
 const CASES: Case[] = [
+  one(
+    sbiShinseiSavingsActivity,
+    "savings-period",
+    meta("sbi-shinsei-bank", "savings-activity"),
+    read("sbi-shinsei-parser-boundaries", "savings-activity.json"),
+  ),
   one(
     globalPassActivity,
     "activity",
