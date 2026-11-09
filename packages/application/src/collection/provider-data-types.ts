@@ -122,6 +122,9 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // deposit account, exchange rates; dated history and CSV, term and foreign
   // contracts and the monthly reports are not collected
   // (docs/sources/sbi-shinsei-bank.md; #447 was closed without them).
+  // On 2026-11-09 the inspected account held no time or structured-deposit
+  // contracts in the yen/FX holdings views (#1242). This catalogue describes
+  // offered types, not live holdings, so term_deposit stays not_collected.
   "sbi-shinsei-bank": [
     collected("balance", [
       "sbi-shinsei-top-balances-and-activity",
@@ -129,7 +132,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
       "sbi-shinsei-yen-deposit-account",
     ]),
     partial("cash_movement", ["sbi-shinsei-top-balances-and-activity"], BACKLOG),
-    missing("term_deposit", BACKLOG),
+    missing("term_deposit", 1242),
     missing("document", BACKLOG),
     collected("fx_rate", ["sbi-shinsei-exchange-rate"]),
   ],
