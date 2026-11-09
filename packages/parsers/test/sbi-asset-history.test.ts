@@ -50,6 +50,11 @@ test("listed categories control profiles; native ALL tuples corroborate rather t
   expect(result.observations).toHaveLength(48);
   const rows = result.observations as ValuationObservation[];
   expect(new Set(rows.map(key)).size).toBe(48);
+  expect([...new Set(rows.map((r) => r.metric))].sort()).toEqual([
+    "acquisition_cost",
+    "profit_loss",
+    "valuation",
+  ]);
   const full = rows.filter(
     (r) => r.subject === "portfolio:weekly:full:ALL" && r.metric === "valuation",
   );

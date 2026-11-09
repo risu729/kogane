@@ -49,6 +49,19 @@ There was no production reader selecting portfolio valuation history.
   path and capture time. An unmapped derived inventory records every expected
   year key/hash/count. Its input is the exact source; each year's inputs are
   source and inventory. Registration therefore records linked lineage.
+- Before partitioning, the collector applies the same semantic validator as
+  the parser to the **whole** original response. A cross-year gap, missing
+  year, mismatched profile calendar or extra native tuple cannot disappear
+  during filtering. It creates no derivatives from an invalid source.
+- Financial and native numeric tokens are checked with exact decimal arithmetic
+  before conversion to Number. Their mathematical values must be safe integers;
+  decimal/scientific spellings do not waive exactness. Rates remain finite
+  metadata and are never emitted as monetary metrics. A shape-only audit uses
+  numeric stand-ins solely to check the closed secret-field contract, without
+  changing any key or string. This allows financial-shaped but semantically
+  invalid original bytes to be retained privately; strict derivation reads
+  those bytes again and refuses them with a closed code. Unknown fields and
+  unexpected authentication payloads still fail before raw storage.
 - `sbiRunPlan` recomputes the exhaustive inventory from retained source bytes.
   A missing, duplicate, altered or extra history derivative makes the run and
   existing domestic unit partial with `sbi_asset_history_shard_inventory`.
@@ -109,7 +122,12 @@ unpartitioned observation output exceeds 2 MiB, while every calendar-year
 shard stays below the unchanged cap. All year shards register, publish and
 read back through the production path; an overlapping short run still yields
 312 unique valuation points, and paged metric reads have no duplicate rows.
-Raw source bytes, source hashes and both input edges are checked.
+Raw source bytes, source hashes and both input edges are checked. Regression
+cases require identical direct-source and collector refusals for cross-year
+and missing-year gaps, extra native tuples, fractional tokens that round to
+integers, unsafe integer edges and exponent underflow. Local Worker R2 tests
+retain inexact financial-shaped raw bytes with a closed partial outcome and
+no derivatives while still refusing unknown secret fields.
 
 Synthetic parser tests cover conditional category membership, native tuple
 agreement, nulls, exact money, calendar/schema drift and stable logical keys.

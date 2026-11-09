@@ -10,6 +10,10 @@ import {
 import type { Artifact, DomesticSession } from "./types";
 import { assetHistoryArtifacts } from "./asset-history";
 import {
+  auditAssetHistoryJson,
+  parseAssetHistoryJson,
+} from "../../../packages/parsers/src/parsers/sbi-asset-history-json";
+import {
   assetHistoryError,
   isAssetHistoryError,
   sanitizeAssetHistory,
@@ -233,7 +237,9 @@ async function fetchAssets(auth: MainSiteAuth): Promise<Record<string, unknown>>
 export async function fetchAssetHistory(
   auth: Pick<MainSiteAuth, "assetsUrl" | "cookies">,
 ): Promise<unknown> {
-  return (await fetchAssetHistoryCapture(auth)).body;
+  return parseAssetHistoryJson(
+    new TextDecoder().decode((await fetchAssetHistoryCapture(auth)).bytes),
+  );
 }
 
 async function fetchAssetHistoryCapture(
@@ -255,9 +261,7 @@ async function fetchAssetHistoryCapture(
   });
   if (!response.ok) throw assetHistoryError("sbi_asset_history_fetch_failed");
   const bytes = new Uint8Array(await response.arrayBuffer());
-  const body = sanitizeAssetHistory(
-    parseJsonObject(new TextDecoder().decode(bytes), "SBI asset history"),
-  );
+  const body = sanitizeAssetHistory(auditAssetHistoryJson(new TextDecoder().decode(bytes)));
   return { body, bytes, capturedAt };
 }
 

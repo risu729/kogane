@@ -132,6 +132,14 @@ v5 names only yearly shards as the new dataset and freezes v1–v4 mappings. Eac
 main-site capture is retained immediately, so a later yen/history failure
 keeps these bytes while the run stays partial under the existing policy.
 
+Whole-source calendar, native-series and exact-total validation runs before
+any yearly filtering. The JSON reader proves financial numeric tokens are
+exact safe integers before Number conversion. Inexact or inconsistent
+financial-shaped responses keep their exact audited raw bytes but produce no
+derivatives and leave collection partial. The closed shape/secret-field audit
+still refuses unexpected fields or login payloads before storage. Rates stay
+finite metadata, outside the three monetary metrics.
+
 The parser emits available weekly profiles and listed categories plus ALL,
 corroborates ALL with native tuples and exact category sums, and preserves
 unlisted residual rows. Null metrics/views never become zero facts. The

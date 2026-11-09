@@ -189,12 +189,12 @@ test("a shorter corrected capture updates one point, retains old weeks and does 
 
 test("a newer parser publication keeps logical keys unique and old evidence archived", async () => {
   const reader = createD1ObservationReader(env.DB);
-  await publish(second, "0.1.1");
+  await publish(second, "0.1.2");
   reparsed = await reader.listPortfolioValuationHistory(query);
   expect(reparsed.map((r) => [r.as_of, r.amount_minor])).toEqual(
     after.map((r) => [r.as_of, r.amount_minor]),
   );
-  expect(reparsed[0]!.parser_version).toBe("0.1.1");
+  expect(reparsed[0]!.parser_version).toBe("0.1.2");
   expect(
     new Set(
       reparsed.map((r) =>
@@ -216,7 +216,7 @@ test("a newer parser publication keeps logical keys unique and old evidence arch
 
 test("a newer failed parse cannot displace published history", async () => {
   const reader = createD1ObservationReader(env.DB);
-  const version = "0.1.2";
+  const version = "0.1.3";
   await env.DB.prepare(
     "INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status) VALUES(?,?,?,'pending')",
   )

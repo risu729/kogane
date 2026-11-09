@@ -2,7 +2,6 @@
 // no year parameter; these are local partitions of one audited response.
 import {
   assetHistoryError,
-  assetHistoryViews,
   assetHistoryYear,
   assetHistoryShardKey,
   ASSET_HISTORY_SOURCE_KEY,
@@ -15,13 +14,15 @@ import {
 } from "../../../packages/parsers/src/parsers/sbi-asset-history-schema";
 import { sha256Hex } from "../../../packages/collection/src/digest";
 import type { Artifact } from "./types";
+import { parseAssetHistoryJson } from "../../../packages/parsers/src/parsers/sbi-asset-history-json";
+import { validateAssetHistory } from "../../../packages/parsers/src/parsers/sbi-asset-history-validation";
 
 export async function assetHistoryArtifacts(input: {
   body: unknown;
   bytes: Uint8Array;
   capturedAt: string;
 }): Promise<Artifact[]> {
-  const views = assetHistoryViews(input.body);
+  const views = validateAssetHistory(parseAssetHistoryJson(new TextDecoder().decode(input.bytes)));
   const sourceCapture: AssetHistoryCapture = {
     artifactKey: ASSET_HISTORY_SOURCE_KEY,
     sha256: await sha256Hex(input.bytes),
@@ -112,7 +113,7 @@ export async function assetHistoryInventoryComplete(
   if (typeof candidate.sourceCapture?.capturedAt !== "string") return false;
   try {
     if (
-      JSON.stringify(JSON.parse(new TextDecoder().decode(source.bytes))) !==
+      JSON.stringify(parseAssetHistoryJson(new TextDecoder().decode(source.bytes))) !==
       JSON.stringify(source.body)
     )
       return false;

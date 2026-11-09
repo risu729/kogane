@@ -65,63 +65,78 @@ test("unknown payload fields fail before storage and retain only a closed safe c
   ).toBe("sbi_asset_history_schema");
 });
 
-test("already collected weekly evidence survives a later yen-history failure without becoming a successful run", async () => {
-  const header = Buffer.alloc(70, " ");
-  header.write("F1132", 34);
-  header.write("000000", 45);
-  const responses = [
-    new Response(Buffer.concat([header, Buffer.from("SYNTHETIC_LINK")])),
-    new Response('<form action="/switch"><input name="synthetic" value="fixture"></form>'),
-    new Response(null, { status: 302, headers: { location: "https://site.invalid/sso" } }),
-    new Response(null, { status: 302, headers: { location: "/account/assets" } }),
-    new Response("<html></html>"),
-    Response.json({}),
-    Response.json(fixture),
-    new Response(Buffer.concat([header, Buffer.from("SYNTHETIC_LINK")])),
-    new Response("synthetic failure", { status: 503 }),
-  ];
-  const fetchMock = mock(async () => {
-    const response = responses.shift();
-    if (response === undefined) throw new Error("unexpected synthetic request");
-    return response;
+for (const inexact of [false, true])
+  test(`already collected weekly evidence survives later failure; inexact=${inexact}`, async () => {
+    const historyText = JSON.stringify(fixture).replace(
+      '"profitLoss":10',
+      inexact ? '"profitLoss":0.99999999999999999' : '"profitLoss":10',
+    );
+    const codes: string[] = [];
+    const header = Buffer.alloc(70, " ");
+    header.write("F1132", 34);
+    header.write("000000", 45);
+    const responses = [
+      new Response(Buffer.concat([header, Buffer.from("SYNTHETIC_LINK")])),
+      new Response('<form action="/switch"><input name="synthetic" value="fixture"></form>'),
+      new Response(null, { status: 302, headers: { location: "https://site.invalid/sso" } }),
+      new Response(null, { status: 302, headers: { location: "/account/assets" } }),
+      new Response("<html></html>"),
+      Response.json({}),
+      new Response(historyText),
+      new Response(Buffer.concat([header, Buffer.from("SYNTHETIC_LINK")])),
+      new Response("synthetic failure", { status: 503 }),
+    ];
+    const fetchMock = mock(async () => {
+      const response = responses.shift();
+      if (response === undefined) throw new Error("unexpected synthetic request");
+      return response;
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const retained: Artifact[] = [];
+    await expect(
+      collectMainSiteArtifacts({
+        session: {
+          sessionId: "synthetic",
+          branchCode: "001",
+          accountNumber: "1234567",
+          accountHash: "synthetic",
+          mtsBaseUrl: "https://mts.invalid",
+        },
+        mainSiteBaseUrl: "https://main.invalid",
+        onArtifact: (a) => retained.push(a),
+        onAssetHistoryError: (error) => codes.push(safeFailureCode(error)),
+      }),
+    ).rejects.toThrow("HTTP 503");
+    expect(retained.map((a) => a.dataset)).toEqual(
+      inexact
+        ? ["account-assets-current", "account-assets-history-source"]
+        : [
+            "account-assets-current",
+            "account-assets-history-source",
+            "account-assets-history-inventory",
+            "account-assets-history",
+          ],
+    );
+    expect(codes).toEqual(inexact ? ["sbi_asset_history_money"] : []);
+    expect(retained[1]!.bytes).toEqual(new TextEncoder().encode(historyText));
+    const plan = await sbiRunPlan({
+      runId: "weekly-synthetic-partial",
+      producerVersion: "synthetic-v1",
+      attemptId: "attempt-weekly",
+      startedAt: "2099-01-10T01:00:00Z",
+      completedAt: "2099-01-10T01:01:00Z",
+      scope: "domestic",
+      status: "partial",
+      artifacts: retained,
+      failures: [{ scope: "domestic", code: "provider_http_failed" }],
+    });
+    expect(plan.run.providerOutcome).toBe("partial");
+    expect(plan.run.units[0]?.coverageStatus).toBe("partial");
+    expect(plan.artifacts.some((a) => a.artifactKey === "account-assets-history-2099.json")).toBe(
+      !inexact,
+    );
+    expect(responses).toHaveLength(0);
   });
-  globalThis.fetch = fetchMock as unknown as typeof fetch;
-  const retained: Artifact[] = [];
-  await expect(
-    collectMainSiteArtifacts({
-      session: {
-        sessionId: "synthetic",
-        branchCode: "001",
-        accountNumber: "1234567",
-        accountHash: "synthetic",
-        mtsBaseUrl: "https://mts.invalid",
-      },
-      mainSiteBaseUrl: "https://main.invalid",
-      onArtifact: (a) => retained.push(a),
-    }),
-  ).rejects.toThrow("HTTP 503");
-  expect(retained.map((a) => a.dataset)).toEqual([
-    "account-assets-current",
-    "account-assets-history-source",
-    "account-assets-history-inventory",
-    "account-assets-history",
-  ]);
-  const plan = await sbiRunPlan({
-    runId: "weekly-synthetic-partial",
-    producerVersion: "synthetic-v1",
-    attemptId: "attempt-weekly",
-    startedAt: "2099-01-10T01:00:00Z",
-    completedAt: "2099-01-10T01:01:00Z",
-    scope: "domestic",
-    status: "partial",
-    artifacts: retained,
-    failures: [{ scope: "domestic", code: "provider_http_failed" }],
-  });
-  expect(plan.run.providerOutcome).toBe("partial");
-  expect(plan.run.units[0]?.coverageStatus).toBe("partial");
-  expect(plan.artifacts.map((a) => a.artifactKey)).toContain("account-assets-history-2099.json");
-  expect(responses).toHaveLength(0);
-});
 
 test("year shards keep exact source bytes and an exhaustive hash inventory; missing or altered shards stay partial", async () => {
   const body = structuredClone(fixture);
