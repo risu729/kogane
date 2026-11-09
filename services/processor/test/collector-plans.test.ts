@@ -41,7 +41,11 @@ import { mobileSuicaRunPlan } from "../../collector-mobile-suica/src/shared-run.
 import { moneyForwardRunPlan } from "../../collector-moneyforward/src/shared-collection.ts";
 import { myJcbRunPlan } from "../../collector-myjcb/src/shared-collection.ts";
 import { sbiRunPlan } from "../../collector-sbi-securities/src/shared-run.ts";
-import { collectHistoryArtifacts } from "../../collector-sbi-securities/src/history-windows.ts";
+import {
+  collectHistoryArtifacts,
+  foreignHistoryRange,
+  historyYearStart,
+} from "../../collector-sbi-securities/src/history-windows.ts";
 import { sbiForeignTradeRecords } from "../../../packages/parsers/src/parsers/sbi-foreign-trade-records.ts";
 import { FIXTURES_ROOT } from "../../../packages/parsers/test/fixture-root.ts";
 import { buildSharedRunPlan as sbiShinseiRunPlan } from "../../collector-sbi-shinsei/src/shared-collection.ts";
@@ -428,7 +432,8 @@ test("sbi-securities: every dataset states its extraction and registers", async 
 });
 
 test("sbi-securities: every two-year execution window registers once with its own requested range", async () => {
-  const range = { from: "2097-01-01", to: "2099-01-01" };
+  const to = "2099-12-31";
+  const range = { from: historyYearStart(to), to };
   const domestic = await collectHistoryArtifacts({
     dataset: "domestic-trade-records",
     range,
@@ -436,7 +441,7 @@ test("sbi-securities: every two-year execution window registers once with its ow
   });
   const foreign = await collectHistoryArtifacts({
     dataset: "foreign-trade-records",
-    range,
+    range: foreignHistoryRange(2, to),
     collect: async () => ({
       pages: [
         {
@@ -458,13 +463,13 @@ test("sbi-securities: every two-year execution window registers once with its ow
     artifacts,
     failures: [],
   });
-  const registered = await registerPlan(plan, 18);
+  const registered = await registerPlan(plan, 26);
   expect(registered.units).toEqual([
-    { unit_key: "domestic", artifacts: 9, declared: 9 },
-    { unit_key: "foreign", artifacts: 9, declared: 9 },
+    { unit_key: "domestic", artifacts: 13, declared: 13 },
+    { unit_key: "foreign", artifacts: 13, declared: 13 },
   ]);
   expect(registered.datasets).toEqual(["domestic-trade-records", "foreign-trade-records"]);
-  expect(registered.artifactRanges).toHaveLength(18);
+  expect(registered.artifactRanges).toHaveLength(26);
   for (const artifact of artifacts)
     expect(registered.artifactRanges).toContainEqual({
       artifact_key: artifact.artifactKey ?? `${artifact.dataset}.json`,

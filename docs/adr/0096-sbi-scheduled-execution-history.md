@@ -19,20 +19,28 @@ the walk cannot finish within the existing 13-minute holder limit.
 ## Options considered
 
 1. Add a backfill operation or a cursor. Rejected: the observed two-year
-   interval takes nine windows of at most 90 days per scope; no state is
-   needed to plan them.
-2. Derive both cutoffs from the current clock. Rejected: the foreign UI
-   rejects a start date older than two years before its next business date.
+   interval takes at most thirteen windows per scope of at most 90 days;
+   no state is needed to plan them.
+2. Use the web rolling cutoff for the mobile API. Rejected: the successful
+   historical mobile scan began on January 1 of year minus `pastYears`, so a
+   rolling cutoff could omit earlier supported mobile history.
 3. Walk disjoint windows using the observed boundaries on every run. Chosen.
 
 ## Decision
 
-- Domestic execution history starts two calendar years before the captured
-  JST date. Foreign history starts two calendar years before the observed
-  web init response's `nextBusinessDate`; the end is today, capped below that
-  next business date. The existing GraphQL operation and input fields are
-  unchanged. The web metadata corroborates the boundary; it is not a fresh
-  observation of the mobile protocol.
+- Domestic execution history starts January 1 of year minus two, matching
+  the successful historical domestic scan. Mobile US history uses the historically observed BFF
+  `GetSearchingDuration` read. The observed `pastYears=2` selects January 1
+  of year minus two, through today, exactly as the successful historical
+  probe planned its eleven windows. At year end this needs thirteen windows.
+  The execution query and its input fields are unchanged. Unsupported duration
+  response shapes or `pastYears` values make the scope incomplete; a fresh
+  live-mobile read has not been performed for this change. Web observations
+  are kept as separate evidence and do not determine the mobile lower bound.
+- A domestic response must retain all six requested date-form fields. A
+  cleared or clamped date makes the window incomplete with a closed code.
+  Historical requests succeeding does not mean every requested earlier date
+  contained data or that today's route retains the same maximum period.
 - Windows are newest first, without overlap. The ordinary last-90-days
   request and its artifact key stay first. Older execution artifacts add
   their requested dates to the key. Each window's requested range is recorded
@@ -71,3 +79,8 @@ coverage, unchanged newest-window shape, pagination and cap refusals,
 partial-window retention, stable domestic IDs, unique manifest keys and
 per-artifact ranges through the migrated registration contract. The v4 guard
 checks the earlier mappings remain reproducible and refuses range mismatches.
+The retained probe proves the BFF request shape and January-start rule;
+synthetic tests cover eleven-window historical and thirteen-window year-end
+cases. A scheduled production run must still establish the current mobile
+contract and full retained coverage; the historical count is not a new live
+verification.

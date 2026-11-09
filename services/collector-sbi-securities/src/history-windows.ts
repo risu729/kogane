@@ -9,6 +9,7 @@ export type HistoryFailureCode =
   | "sbi_history_window_invalid"
   | "sbi_domestic_history_window_failed"
   | "sbi_domestic_history_truncated"
+  | "sbi_domestic_history_range_mismatch"
   | "sbi_foreign_history_window_failed"
   | "sbi_foreign_history_page_invalid"
   | "sbi_foreign_history_page_limit"
@@ -48,13 +49,10 @@ export function addDays(value: string, days: number): string {
   return parsed.toISOString().slice(0, 10);
 }
 
-/** Calendar years, clamping a leap day to the target year's last February day. */
-export function twoYearsBefore(value: string): string {
-  const parsed = date(value);
-  const month = parsed.getUTCMonth();
-  parsed.setUTCFullYear(parsed.getUTCFullYear() - 2);
-  if (parsed.getUTCMonth() !== month) parsed.setUTCDate(0);
-  return parsed.toISOString().slice(0, 10);
+/** The earliest request in the successful historical domestic and US scans. */
+export function historyYearStart(today: string): string {
+  const parsed = date(today);
+  return `${parsed.getUTCFullYear() - 2}-01-01`;
 }
 
 /** Newest first: the normal last-90-days request remains the first window. */
@@ -67,18 +65,17 @@ export function historyWindows(range: HistoryWindow): HistoryWindow[] {
     const candidate = addDays(to, -89);
     const from = range.from > candidate ? range.from : candidate;
     windows.push({ from, to });
-    if (windows.length > 9) throw new SbiHistoryError("sbi_history_window_invalid");
+    if (windows.length > 13) throw new SbiHistoryError("sbi_history_window_invalid");
     to = addDays(from, -1);
   }
   return windows;
 }
 
-/** The observed web retention starts two years before its next business date. */
-export function foreignHistoryRange(nextBusinessDate: string, today: string): HistoryWindow {
-  date(nextBusinessDate);
+/** The successful historical mobile scan began January 1 of year - pastYears. */
+export function foreignHistoryRange(pastYears: unknown, today: string): HistoryWindow {
   date(today);
-  const to = today < nextBusinessDate ? today : addDays(nextBusinessDate, -1);
-  const range = { from: twoYearsBefore(nextBusinessDate), to };
+  if (pastYears !== 2) throw new SbiHistoryError("sbi_foreign_history_retention_unavailable");
+  const range = { from: historyYearStart(today), to: today };
   historyWindows(range);
   return range;
 }

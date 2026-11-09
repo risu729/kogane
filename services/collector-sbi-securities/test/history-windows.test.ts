@@ -5,19 +5,23 @@ import {
   historyWindows,
   jstDate,
   SbiHistoryError,
-  twoYearsBefore,
+  historyYearStart,
 } from "../src/history-windows";
-import { collectForeignTradeRecords } from "../src/sbi";
-import { parseDomesticTradeRecords } from "../src/main-site";
+import {
+  collectForeignHistoryArtifacts,
+  collectForeignTradeRecords,
+  fetchForeignHistoryRange,
+} from "../src/sbi";
+import { assertDomesticHistoryRange, parseDomesticTradeRecords } from "../src/main-site";
 import { safeFailureCode, sbiRunPlan } from "../src/shared-run";
 import type { ForeignSession } from "../src/types";
 
 describe("scheduled SBI execution history windows", () => {
-  test("the complete two-year interval is covered exactly once, preserving the normal newest 90 days", () => {
+  test("the January-start retained interval is covered exactly once, preserving the normal newest 90 days", () => {
     for (const to of ["2099-11-10", "2100-03-01", "2096-02-29"]) {
-      const from = twoYearsBefore(to);
+      const from = historyYearStart(to);
       const windows = historyWindows({ from, to });
-      expect(windows).toHaveLength(9);
+      expect(windows.length).toBeLessThanOrEqual(13);
       expect(windows[0]!.to).toBe(to);
       expect(windows.at(-1)!.from).toBe(from);
       const days = new Set<string>();
@@ -34,7 +38,9 @@ describe("scheduled SBI execution history windows", () => {
       }
       expect(days.size).toBe((Date.parse(to) - Date.parse(from)) / 86400000 + 1);
     }
-    expect(twoYearsBefore("2096-02-29")).toBe("2094-02-28");
+    expect(historyYearStart("2096-02-29")).toBe("2094-01-01");
+    expect(() => historyYearStart("2100-02-29")).toThrow("sbi_history_window_invalid");
+    expect(historyYearStart(jstDate(new Date("2099-12-31T15:01:00Z")))).toBe("2098-01-01");
     expect(jstDate(new Date("2099-01-01T15:01:00Z"))).toBe("2099-01-02");
     for (const range of [
       { from: "2099-02-30", to: "2099-03-01" },
@@ -44,17 +50,14 @@ describe("scheduled SBI execution history windows", () => {
       expect(() => historyWindows(range)).toThrow("sbi_history_window_invalid");
   });
 
-  test("foreign retention uses the provider next business date, while the newest window still ends today", () => {
-    expect(foreignHistoryRange("2099-11-12", "2099-11-10")).toEqual({
-      from: "2097-11-12",
-      to: "2099-11-10",
-    });
-    expect(foreignHistoryRange("2099-11-12", "2099-11-13")).toEqual({
-      from: "2097-11-12",
-      to: "2099-11-11",
-    });
-    for (const next of ["", "20991112", "2099/11/12", "2099-02-30"])
-      expect(() => foreignHistoryRange(next, "2099-11-10")).toThrow("sbi_history_window_invalid");
+  test("foreign mobile retention preserves the observed January-start scan, not the web rolling cutoff", () => {
+    expect(foreignHistoryRange(2, "2099-11-10")).toEqual({ from: "2097-01-01", to: "2099-11-10" });
+    expect(historyWindows(foreignHistoryRange(2, "2098-08-26"))).toHaveLength(11);
+    expect(historyWindows(foreignHistoryRange(2, "2099-12-31"))).toHaveLength(13);
+    for (const years of [undefined, null, "2", 1, 3])
+      expect(() => foreignHistoryRange(years, "2099-11-10")).toThrow(
+        "sbi_foreign_history_retention_unavailable",
+      );
   });
 
   test("a failed older window keeps newer evidence and returns a closed partial-unit code", async () => {
@@ -118,6 +121,36 @@ describe("scheduled SBI execution history windows", () => {
       "sbi_domestic_history_truncated",
     );
   });
+  test("a cleared or clamped domestic date form cannot confirm a requested historical window", () => {
+    const range = { from: "2097-01-01", to: "2097-03-31" };
+    const matching = () =>
+      new URLSearchParams({
+        ref_from_yyyy: "2097",
+        ref_from_mm: "1",
+        ref_from_dd: "01",
+        ref_to_yyyy: "2097",
+        ref_to_mm: "03",
+        ref_to_dd: "31",
+      });
+    expect(() => assertDomesticHistoryRange(matching(), range)).not.toThrow();
+    for (const [key, value] of [
+      ["ref_from_yyyy", "2098"],
+      ["ref_from_mm", ""],
+      ["ref_to_dd", "30"],
+      ["ref_to_mm", "3e0"],
+    ]) {
+      const fields = matching();
+      fields.set(key!, value!);
+      expect(() => assertDomesticHistoryRange(fields, range)).toThrow(
+        "sbi_domestic_history_range_mismatch",
+      );
+    }
+    const missing = matching();
+    missing.delete("ref_from_dd");
+    expect(() => assertDomesticHistoryRange(missing, range)).toThrow(
+      "sbi_domestic_history_range_mismatch",
+    );
+  });
 });
 
 describe("foreign history keeps the observed GraphQL request and requires a complete page chain", () => {
@@ -138,6 +171,72 @@ describe("foreign history keeps the observed GraphQL request and requires a comp
   const data = (hasNextPage: unknown) => ({
     checkJrNisaOpen: { opened: false },
     listTradeRecords: { tradeRecords: [], page: { hasNextPage } },
+  });
+  test("uses the historically observed BFF duration query and validates its response", async () => {
+    let request: Record<string, any> | undefined;
+    globalThis.fetch = (async (url, init) => {
+      expect(String(url)).toBe(session.graphqlBffUrl);
+      expect(new Headers(init?.headers).has("hash_token")).toBe(false);
+      request = JSON.parse(String(init?.body));
+      return Response.json({
+        data: {
+          getSearchingDuration: {
+            pastYears: 2,
+            searchDateFrom: "2099-10-01",
+            searchDateTo: "2099-11-01",
+          },
+        },
+      });
+    }) as typeof fetch;
+    expect(await fetchForeignHistoryRange(session, "2099-11-10")).toEqual({
+      from: "2097-01-01",
+      to: "2099-11-10",
+    });
+    expect(request?.operationName).toBe("GetSearchingDuration");
+    expect(request?.variables).toEqual({
+      input: {
+        countryCode: "US",
+        searchFunction: "EXECUTION_HISTORY",
+        searchDateType: "TRADE_DATE_BASE",
+        dateType: "MONTH",
+        quantity: 1,
+      },
+    });
+    expect(request?.query).toContain("pastYears searchDateFrom searchDateTo");
+    for (const duration of [
+      null,
+      { pastYears: 3, searchDateFrom: "", searchDateTo: "" },
+      { pastYears: 2 },
+      { pastYears: 2, searchDateFrom: null, searchDateTo: "" },
+    ]) {
+      globalThis.fetch = (async () =>
+        Response.json({ data: { getSearchingDuration: duration } })) as unknown as typeof fetch;
+      await expect(fetchForeignHistoryRange(session, "2099-11-10")).rejects.toThrow(
+        "sbi_foreign_history_retention_unavailable",
+      );
+    }
+  });
+  test("unsupported mobile retention keeps the ordinary window only as named partial evidence", async () => {
+    const errors: SbiHistoryError[] = [];
+    const operations: string[] = [];
+    globalThis.fetch = (async (_url, init) => {
+      const request = JSON.parse(String(init?.body));
+      operations.push(request.operationName);
+      return Response.json({
+        data:
+          request.operationName === "GetSearchingDuration"
+            ? { getSearchingDuration: { pastYears: 3, searchDateFrom: "", searchDateTo: "" } }
+            : data(false),
+      });
+    }) as typeof fetch;
+    const artifacts = await collectForeignHistoryArtifacts(session, {
+      to: "2099-03-31",
+      onHistoryError: (error) => errors.push(error),
+    });
+    expect(errors.map(safeFailureCode)).toEqual(["sbi_foreign_history_retention_unavailable"]);
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]!.window).toEqual({ from: "2099-01-01", to: "2099-03-31" });
+    expect(operations).toEqual(["GetSearchingDuration", "GetTradeRecordList"]);
   });
   test("passes dates in existing fields, starts each window at page one, and preserves empty pages", async () => {
     const requests: Record<string, any>[] = [];

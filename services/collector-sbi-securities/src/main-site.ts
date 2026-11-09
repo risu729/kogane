@@ -2,10 +2,9 @@ import { createHash } from "node:crypto";
 import { callMts } from "./sbi";
 import {
   collectHistoryArtifacts,
-  foreignHistoryRange,
   jstDate,
   SbiHistoryError,
-  twoYearsBefore,
+  historyYearStart,
   type HistoryWindow,
 } from "./history-windows";
 import type { Artifact, DomesticSession } from "./types";
@@ -76,23 +75,12 @@ export async function collectMainSiteArtifacts(options: {
   mainSiteBaseUrl: string;
   from?: string;
   to?: string;
-  onForeignHistoryRange?: (range: HistoryWindow) => void;
-  onHistoryError?: (scope: "domestic" | "foreign", error: SbiHistoryError) => void;
+  onHistoryError?: (error: SbiHistoryError) => void;
 }): Promise<Artifact[]> {
   const to = options.to ?? jstDate(new Date());
-  const from = options.from ?? twoYearsBefore(to);
+  const from = options.from ?? historyYearStart(to);
   const auth = await createMainSiteAuth(options.session, options.mainSiteBaseUrl);
   const artifacts: Artifact[] = [];
-
-  if (options.onForeignHistoryRange !== undefined) {
-    try {
-      options.onForeignHistoryRange(await fetchForeignHistoryRange(options.session, auth, to));
-    } catch (cause) {
-      const error = new SbiHistoryError("sbi_foreign_history_retention_unavailable", { cause });
-      if (options.onHistoryError === undefined) throw error;
-      options.onHistoryError("foreign", error);
-    }
-  }
 
   const assets = await fetchAssets(auth);
   artifacts.push({
@@ -113,41 +101,10 @@ export async function collectMainSiteArtifacts(options: {
       dataset: "domestic-trade-records",
       range: { from, to },
       collect: (window) => fetchDomesticTradeHistory({ session: options.session, auth, ...window }),
-      ...(options.onHistoryError === undefined
-        ? {}
-        : { onError: (error: SbiHistoryError) => options.onHistoryError!("domestic", error) }),
+      ...(options.onHistoryError === undefined ? {} : { onError: options.onHistoryError }),
     })),
   );
   return artifacts;
-}
-
-async function fetchForeignHistoryRange(
-  session: DomesticSession,
-  auth: MainSiteAuth,
-  today: string,
-): Promise<HistoryWindow> {
-  const page = await fetchMainSiteAuthenticatedPage(
-    session,
-    auth,
-    new URL("/foreign/account/trade-history", MEMBER_SITE_ORIGIN),
-  );
-  if (!page.response.ok) throw new SbiHistoryError("sbi_foreign_history_retention_unavailable");
-  const csrfToken = extractCsrfToken(await page.response.text());
-  if (!csrfToken) throw new SbiHistoryError("sbi_foreign_history_retention_unavailable");
-  const response = await fetch(new URL("/foreign/api/account/trade-history", MEMBER_SITE_ORIGIN), {
-    headers: {
-      accept: "application/json, text/plain, */*",
-      cookie: page.cookieHeader,
-      referer: new URL("/foreign/account/trade-history", MEMBER_SITE_ORIGIN).toString(),
-      "user-agent": MAIN_SITE_USER_AGENT,
-      "x-csrf-token": csrfToken,
-    },
-  });
-  if (!response.ok) throw new SbiHistoryError("sbi_foreign_history_retention_unavailable");
-  const body = parseJsonObject(await response.text(), "SBI foreign history retention");
-  if (Object.keys(body).length !== 1 || typeof body.nextBusinessDate !== "string")
-    throw new SbiHistoryError("sbi_foreign_history_retention_unavailable");
-  return foreignHistoryRange(body.nextBusinessDate, today);
 }
 
 async function createMainSiteAuth(
@@ -530,7 +487,28 @@ async function fetchDomesticTradeHistory(options: {
       { httpStatus: response.status },
     );
   }
+  const returnedForm = parseHtmlFormContaining(html, new URL(response.url), "ACT_search");
+  assertDomesticHistoryRange(new URLSearchParams(returnedForm.fields), options);
   return parseDomesticTradeRecords(html);
+}
+
+/** A server clamp or cleared form must not attest the requested old window. */
+export function assertDomesticHistoryRange(fields: URLSearchParams, window: HistoryWindow): void {
+  for (const [prefix, value] of [
+    ["ref_from_", window.from],
+    ["ref_to_", window.to],
+  ] as const) {
+    const expected = value.split("-");
+    for (const [index, part] of ["yyyy", "mm", "dd"].entries()) {
+      const actual = fields.get(`${prefix}${part}`);
+      if (
+        actual === null ||
+        !(index === 0 ? /^\d{4}$/u : /^\d{1,2}$/u).test(actual) ||
+        Number(actual) !== Number(expected[index])
+      )
+        throw new SbiHistoryError("sbi_domestic_history_range_mismatch");
+    }
+  }
 }
 
 async function fetchMainSiteAuthenticatedPage(

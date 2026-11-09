@@ -931,14 +931,18 @@ of each response, exactly what the retired legacy path wrote to the per-source
 bucket and the importer forwarded centrally. A dataset is attributed to a unit
 by the same rule the importer used (`foreign-` prefix → `foreign`).
 
-Each normal collection walks retained execution history in at most nine
-non-overlapping windows per scope, each at most 90 days, newest first. The
+Each normal collection walks the historically exercised execution-history
+interval in at most thirteen non-overlapping windows per scope, each at most 90 days,
+newest first. The
 newest window retains its original key; older windows use the dated keys.
-Domestic history begins two calendar years before JST today. Foreign history
-uses two years before the observed web init `nextBusinessDate`, through today
-or the day before that business date, whichever is earlier. The main-site
-session reads only the observed foreign web history page and init; the mobile
-GraphQL query fields stay unchanged. No progress cursor or operations window
+Domestic history begins January 1 of year minus two, matching the historical
+successful requests. Returned date controls must retain that requested
+window; a cleared or clamped date is incomplete. Foreign history
+uses the historically observed mobile BFF `GetSearchingDuration` query with
+`pastYears=2` and begins January 1 of year minus two, through today. This
+reproduces the successful historical eleven-window scan and can need thirteen
+windows at year end. Web retention is a different surface and is not used as
+the mobile boundary. The mobile execution query fields stay unchanged. No progress cursor or operations window
 parameter is added ([ADR 0096](adr/0096-sbi-scheduled-execution-history.md)).
 
 Every dataset states one `extracted` step by `collector-sbi-securities` at the

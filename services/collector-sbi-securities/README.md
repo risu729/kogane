@@ -15,8 +15,8 @@ This independent Worker creates a fresh session from a stored `SBI証券` passke
 ## Current scope
 
 - Domestic-stock app: domestic cash equities/custody-cash payload through an MTS session and read-only TR code `F2631`.
-- Main site: current `My資産` ("My assets") valuation, yen deposit/withdrawal details and two years of domestic-stock execution history, split into windows of at most 90 days. Yen details retain every provider page-metadata field and response field in a page bundle, validating completeness before making an artifact.
-- Foreign-stock app: US cash equities, USD custody cash and retained execution history in windows of at most 90 days. The foreign web history init supplies the next-business-date cutoff; its two-year boundary is not derived from today's clock.
+- Main site: current `My資産` ("My assets") valuation, yen deposit/withdrawal details and domestic-stock execution history from January 1 of year minus two, split into windows of at most 90 days as in the successful historical scan. Yen details retain every provider page-metadata field and response field in a page bundle, validating completeness before making an artifact.
+- Foreign-stock app: US cash equities, USD custody cash and retained execution history in windows of at most 90 days. The historically observed mobile BFF duration query supplies `pastYears`; the successful historical scan began January 1 of year minus `pastYears`, rather than at the web rolling cutoff.
 - Execution: the Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the `sbi-securities` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), daily at 06:00 JST (21:00 UTC), and an accepted operations request calls `runOperation` (ADR 0048). Either one collects domestic/foreign data serially in one invocation (`scope=all`). The Worker has no Cron Trigger and no public trigger route.
 - Storage: `packages/collection` writes directly to shared DATA; the Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). The only D1 the collector uses is the execution lease (`withCollectionLease`) in `SCHEDULE_DB` (`kogane-raw-evidence`).
 
@@ -71,16 +71,21 @@ runs/sbi-securities/<run-id>/terminal.json     run completion record written las
 
 The terminal records the period, success/partial success/failure, artifact hashes/byte sizes, machine-readable failure codes with secrets removed, and nothing for access tokens, SIDs, cookies, MTS session headers or account numbers.
 
-Execution windows are newest first and disjoint, with at most nine per scope.
+Execution windows are newest first and disjoint, with at most thirteen per scope.
 The newest ordinary 90-day request keeps `<scope>-trade-records.json`; older
 requests use `<scope>-trade-records-<from>-<to>.json`. Each carries its own
 requested range in the terminal and, under `terminal-registration-v4`, its
 CORE artifact descriptor. Equal empty bodies may share a content-addressed
 object while their separate requested windows remain registered evidence.
-The foreign init is the observed read-only
-`GET /foreign/api/account/trade-history`, using the existing main-site
-session and page CSRF header. The mobile execution query and all row identity
-calculations stay unchanged. No progress cursor or state is stored.
+Foreign retention is the historically observed read-only `GetSearchingDuration`
+query on `/graphql/bff`, using the existing authenticated mobile session.
+Only the observed `pastYears=2` response is supported, and its default-period
+date fields are not substituted for the January-start scan. The execution
+query and all row identity calculations stay unchanged. No progress cursor or
+state is stored. This request and bound have historical provenance, but no
+new live-mobile verification has been performed; a scheduled run still has
+to establish the current contract. The fresh web observations describe a
+different surface and do not set this mobile bound.
 
 A failed window preserves the other windows but makes its scope incomplete
 with a closed code. If foreign retention discovery fails, the foreign scope
@@ -88,7 +93,9 @@ keeps the old 90-day request as partial evidence and names
 `sbi_foreign_history_retention_unavailable`. Missing foreign pagination flags,
 the 20-page bound and a domestic result reaching the unwalked 200-row cap
 also fail closed. A domestic empty window needs both its search form and the
-observed fixed empty-result message. Publication, complete retention counts
+observed fixed empty-result message. All six returned domestic date controls
+must retain the requested range; a server clamp or cleared value is partial,
+not proof of that earlier window. Publication, complete retention counts
 and the 13-minute holder limit still require a scheduled production run to
 verify ([ADR 0096](../../docs/adr/0096-sbi-scheduled-execution-history.md)).
 

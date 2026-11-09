@@ -75,11 +75,31 @@ were retained.
   `exchangeRate`, `countryCode`, `currencyCode`, `name`, `shortName`, `code`,
   `marketCode`, `listedStatus` (strings), and `marginLimitType` (null).
 
-These web observations corroborate retention and the cutoff. They do not
-re-observe the foreign mobile GraphQL protocol. Its unchanged
-`GetTradeRecordList` input fields and 90-day window support come from the
-[actual historical backfill](../research/sbi-securities.md); no new mobile
-operation, retention query or input field is inferred.
+These web observations describe the web retention boundary. They do not
+establish the mobile lower bound or re-observe its GraphQL protocol. The
+[retained successful mobile probe](../research/sbi-securities.md) resolves
+the difference: it actually queried `/graphql/bff` with
+`GetSearchingDuration($input: GetSearchingDurationRequest!)`, input
+`countryCode=US`, `searchFunction=EXECUTION_HISTORY`,
+`searchDateType=TRADE_DATE_BASE`, `dateType=MONTH`, `quantity=1`, and selected
+`getSearchingDuration { pastYears searchDateFrom searchDateTo }`. It used
+January 1 of `year(to) - pastYears`, not a rolling anniversary, as the scan
+start; this explains the eleven successful January-to-August windows for
+`pastYears=2`. The returned default-period dates were not treated as the
+earliest retained dates.
+
+The scheduled collector restores that historically observed BFF read using
+its existing authenticated mobile foreign session, with the same header
+names (`authorization`, `account-id`, `accept`, `content-type`, `user-agent`).
+It supports only the observed `pastYears=2` and expected response shape;
+anything else keeps the scope partial. The January-start policy covers the
+historically scanned interval and may require thirteen windows at year end,
+rather than nine rolling two-year windows. The execution query input fields
+are unchanged. This change has no new live-mobile verification: no mobile
+credentials were obtained, no extra mobile session was created and no manual
+collector was invoked. The authenticated Chrome web session is not a mobile
+session. Current BFF behavior and retained coverage still need a scheduled
+production run; historical success is not presented as new live proof.
 
 A read-only CORE aggregate on 2026-11-09 counted distinct external execution
 IDs across published parses, rather than counting repeated captures as new
@@ -101,7 +121,15 @@ collection. These counts do not prove present two-year completeness; the web
 US total and published execution count still differ, with the independent
 parser refusal tracked in [#1220](https://github.com/risu729/kogane/issues/1220).
 
-The scheduled collector now walks at most nine disjoint windows per scope,
+The domestic historical requests also began January 1 of year minus two.
+The scheduled collector uses that same lower-bound policy for domestic
+history, with all six returned date-form controls checked against the
+requested window. A stricter current form that clears or clamps a date is
+partial, never confirmation of that old window. Those requests historically
+succeeding is not proof that every earlier requested date had data or that
+today's retained period is unchanged.
+
+The scheduled collector now walks at most thirteen disjoint windows per scope,
 newest first, keeping the newest 90-day artifact's prior key and existing row
 identities. Each older window has a dated artifact key and a matching requested
 range in the terminal and CORE descriptor under registration v4
