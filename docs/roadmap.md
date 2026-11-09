@@ -198,7 +198,7 @@ candidate is still undecided.
 
 ### Phase 3 — Coverage, collection requests and cross-source identity
 
-**Status:** current milestone since 2026-11-08.
+**Status:** done on 2026-11-09 ([outcome](#phase-3-outcome)).
 
 Issues: [#542](https://github.com/risu729/kogane/issues/542),
 [#545](https://github.com/risu729/kogane/issues/545), the per-source issues
@@ -220,7 +220,64 @@ SBI listing and SBI's own code for the same Japanese securities code) is adopted
 and the rest decided by an agent over MCP; and that requested windows and replay tracing stay
 out of this phase ([plan, section 6](plans/2026-11-phase3-coverage-identity.md#6-owner-decisions-2026-11-08)).
 
+<a id="phase-3-outcome"></a>**Outcome (2026-11-09, main `d3c7514`):** the done-when holds, so Phase 4 is the
+current milestone. Production was read through the MCP Portal between 11:18 and 11:40 UTC
+(plan unit 3i, [#1148](https://github.com/risu729/kogane/issues/1148)); counts and closed codes only.
+
+- **Request → published.** Two collections were requested with `kogane.ops.collection.request`
+  after reading each source's collection quality, schedule, held leases, maintenance windows
+  and earlier requests: `sbi-securities` and `mobile-suica`, both healthy, dispatch `enabled`,
+  no alarm due and no window on. Both reached `published` with every stage `completed`
+  through `projected` against a READ snapshot (`kogane.ops.operation.get`). The owner chose on
+  2026-11-09 (11:27 UTC) to make the second request over MCP instead of from the
+  `スケジュール` page, so the page path was not exercised for this close-out; its
+  **収集を依頼** posts to the same service (3b, [schedules](schedules.md#収集を依頼-collection-request)).
+  Seven connections dispatch (`enabled`); the rest stay `connection_disabled` until their
+  collectors' fixes land.
+- **Coverage per account and data type** (`kogane.collection-quality.read`, `view: accounts`,
+  `collection-freshness-v1`) for the Phase 2 accounts: the MyJCB root reads `aggregate`,
+  `same-day`, with card statements and card usage, and its J-POINT reward account
+  `provider-local`, `same-day`; a second, older MyJCB `aggregate` account reads `stale`. SMBC's two deposit accounts read `human-required` (the manual
+  path, [#442](https://github.com/risu729/kogane/issues/442)). The seven Vpass card accounts
+  and SBI Shinsei's 62 accounts read `stale`: their newest captures are not parse-eligible
+  (Vpass `run_not_successful` / `unit_failed`: only a successful card run is parsed,
+  [ADR 0083](adr/0083-release-vpass-collector-statement-pages.md),
+  [#445](https://github.com/risu729/kogane/issues/445),
+  [#1142](https://github.com/risu729/kogane/issues/1142); SBI Shinsei's daily runs end
+  `partial`, so its `container-snapshot` cells keep an older capture,
+  [#1215](https://github.com/risu729/kogane/issues/1215)). Every collected
+  source's summary lists its provider data types as `collected`, `partial` or `not_collected`
+  with the issue that tracks the rest.
+- **Accounts** (`kogane.identity.read`, `kogane.accounts.candidates`): `unresolved` is 0 on
+  every source (the baseline's one MyJCB J-POINT reference is now a `provider-local` reward
+  account, [ADR 0089](adr/0089-myjcb-jpoint-identity.md)) and `identified` is 0 everywhere. The
+  MoneyForward connections are unchanged: one `confirmed` with 16 accepted `connection_contains`
+  relations, three `unresolved` with their stored reasons, no `same_account` proposed or
+  recorded. Unlike the baseline, where every eligible observation but five Sony Bank ones was
+  organized, nine sources show observations not yet organized (about 21,000 in all, 未処理 on
+  `/identities`); the identity projection's per-tick budget was draining them during the read.
+- **Instruments** (`kogane.instruments.coverage`): `sbi-securities` 40 identifiers, 32
+  `resolved-by-rule` (`instrument-auto-v1`, 3g) and 8 `no-candidate`; `sbi-vc-trade` 46
+  `no-candidate`. The baseline had 32 in 16 proposed candidates and none decided.
+
+[#542](https://github.com/risu729/kogane/issues/542) (collection quality for every source) is
+closed with this outcome; [#545](https://github.com/risu729/kogane/issues/545) stays open for
+resolving accounts across direct providers and MoneyForward.
+
+Limits carried forward: the done-when asks that resolved and unresolved accounts are told
+apart, not that accounts are resolved across sources, and none is: `identified` is 0, three
+MoneyForward connections stay `unresolved` and no `same_account` exists
+([#545](https://github.com/risu729/kogane/issues/545),
+[#1150](https://github.com/risu729/kogane/issues/1150)). `unresolved` 0 covers the organized
+observations only, so it is read again once the organizing backlog is drained. Vpass and SBI
+Shinsei need parse-eligible captures before their accounts read fresh; SMBC stays manual; the
+page path of a collection request was not exercised in this run; failing collectors stay under
+[#440](https://github.com/risu729/kogane/issues/440) and do not gate the phase; requested
+windows and replay tracing stay out of scope.
+
 ### Phase 4 — Non-card events and dated state
+
+**Status:** current milestone since 2026-11-09.
 
 Issues: [#549](https://github.com/risu729/kogane/issues/549),
 [#550](https://github.com/risu729/kogane/issues/550),
@@ -282,18 +339,18 @@ New collectors (#455–#510) start only when the owner asks, or after Phase 3.
 
 ## Current position
 
-| Original phases                         | Implemented foundation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Work still needed for product completion                                                                                                 |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| 0–3: collection, evidence, observations | Source collectors, shared raw evidence, versioned parsing and publication; operations-API collection requests executed through the named collector RPC and traced to publication, the trail shown read-only on the 依頼の経過 page                                                                                                                                                                                                                                                                               | Coverage by account and data type; request dispatch for the remaining connections (#1140, then those with open fixes), requested windows |
-| 4–5: accounts and instruments           | Provider-local identities, mappings and append-only corrections; instrument candidates on a page and an agent read, decided through the change lifecycle except SBI's bare domestic code onto its listing, adopted by rule `instrument-auto-v1`; per-source counts of their states ([ADR 0055](adr/0055-instrument-candidates.md), [0073](adr/0073-instrument-coverage-per-source.md)); aggregator-to-direct account containment candidates the same way ([ADR 0077](adr/0077-account-connection-candidates.md)) | Evidence-backed resolution across direct providers, aggregators and brokers; review of unresolved identities                             |
-| 6–7: reconciliation and economic events | Candidate matching, decisions, event/leg/allocation/obligation/settlement contracts; own-transfer proposals and unregistered planners, nothing adopts ([ADR 0057](adr/0057-own-transfer-proposals.md))                                                                                                                                                                                                                                                                                                           | More transaction families and continuous event production from adopted observations                                                      |
-| 8: reported state snapshots             | Adopted balance measurements, overlap handling and READ snapshots; reported state on a date (positions, provider valuations, balances, card payables); reported holdings changes between two dates, served by a route and a panel of the `/state` page ([ADR 0075](adr/0075-reported-holdings-change-between-dates.md))                                                                                                                                                                                          | Adoption across sources on a date, dated identity, liabilities beyond provider statements                                                |
-| 9 + 13: prices and valuation            | Price contracts, pure valuation functions, fixed report artifacts with a list route and a read-only page ([ADR 0072](adr/0072-report-artifact-pages.md)); as-of price/FX selection under explicit policies (values not yet decided)                                                                                                                                                                                                                                                                              | Price/FX acquisition, owner-decided selection policy values and portfolio valuation from actual holdings                                 |
-| 10: rewards                             | Bucket claims, expiry and conversion functions, READ projections with displayed and computed expiry apart and their basis                                                                                                                                                                                                                                                                                                                                                                                        | Classified activity history, verified applicable rules, membership and usable conversion offers                                          |
-| 11: derived balances and positions      | Difference contracts and reconciliation readers; a pure fold from a start snapshot and adopted events, a commit-log knowledge selector, a one-account query, its route, agent tool, page ([ADR 0052](adr/0052-reconstructed-state-fold.md), [ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md))                                                                                                                                                                                               | Applying adopted events to a starting snapshot to reconstruct balances and quantities                                                    |
-| 12 + 14: cost basis and P&L             | Input gates, some P&L decomposition functions, a pure lot/disposal-allocation engine over provisional inputs, and an adapter from selected revisions that answers unsupported until a securities writer exists ([ADR 0059](adr/0059-lot-adapter-from-selected-revisions.md))                                                                                                                                                                                                                                     | A securities writer, transfers with carried cost, fee and FX evidence, persisted results, realized and unrealized P&L                    |
-| 15: tax                                 | Refusal when required policy or inputs are missing                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Verified rules and tested outputs for a named jurisdiction, period and asset/account class                                               |
-| 16: AI / MCP                            | Shared query/explanation/proposal service and transports; scoped audit, instrument-history, instrument-coverage, account-candidate, economic-readiness and dated reported-state reads; MCP operations applied by any MCP client Access admits, as itself ([ADR 0063](adr/0063-delegated-ai-operation-path.md), [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md))                                                                                                                                | Complete analysis and correction flows using the same services as the UI                                                                 |
+| Original phases                         | Implemented foundation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Work still needed for product completion                                                                                                                                                                                                                     |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0–3: collection, evidence, observations | Source collectors, shared raw evidence, versioned parsing and publication; operations-API collection requests executed through the named collector RPC and traced to publication, the trail shown read-only on the 依頼の経過 page; coverage per account and data type with freshness ([ADR 0088](adr/0088-collection-quality-per-account.md))                                                                                                                                                                   | Parse-eligible captures for Vpass ([#445](https://github.com/risu729/kogane/issues/445)) and SBI Shinsei ([#1215](https://github.com/risu729/kogane/issues/1215)); request dispatch for the remaining connections (those with open fixes), requested windows |
+| 4–5: accounts and instruments           | Provider-local identities, mappings and append-only corrections; instrument candidates on a page and an agent read, decided through the change lifecycle except SBI's bare domestic code onto its listing, adopted by rule `instrument-auto-v1`; per-source counts of their states ([ADR 0055](adr/0055-instrument-candidates.md), [0073](adr/0073-instrument-coverage-per-source.md)); aggregator-to-direct account containment candidates the same way ([ADR 0077](adr/0077-account-connection-candidates.md)) | Evidence-backed resolution across direct providers, aggregators and brokers; review of unresolved identities                                                                                                                                                 |
+| 6–7: reconciliation and economic events | Candidate matching, decisions, event/leg/allocation/obligation/settlement contracts; own-transfer proposals and unregistered planners, nothing adopts ([ADR 0057](adr/0057-own-transfer-proposals.md))                                                                                                                                                                                                                                                                                                           | More transaction families and continuous event production from adopted observations                                                                                                                                                                          |
+| 8: reported state snapshots             | Adopted balance measurements, overlap handling and READ snapshots; reported state on a date (positions, provider valuations, balances, card payables); reported holdings changes between two dates, served by a route and a panel of the `/state` page ([ADR 0075](adr/0075-reported-holdings-change-between-dates.md))                                                                                                                                                                                          | Adoption across sources on a date, dated identity, liabilities beyond provider statements                                                                                                                                                                    |
+| 9 + 13: prices and valuation            | Price contracts, pure valuation functions, fixed report artifacts with a list route and a read-only page ([ADR 0072](adr/0072-report-artifact-pages.md)); as-of price/FX selection under explicit policies (values not yet decided)                                                                                                                                                                                                                                                                              | Price/FX acquisition, owner-decided selection policy values and portfolio valuation from actual holdings                                                                                                                                                     |
+| 10: rewards                             | Bucket claims, expiry and conversion functions, READ projections with displayed and computed expiry apart and their basis                                                                                                                                                                                                                                                                                                                                                                                        | Classified activity history, verified applicable rules, membership and usable conversion offers                                                                                                                                                              |
+| 11: derived balances and positions      | Difference contracts and reconciliation readers; a pure fold from a start snapshot and adopted events, a commit-log knowledge selector, a one-account query, its route, agent tool, page ([ADR 0052](adr/0052-reconstructed-state-fold.md), [ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md))                                                                                                                                                                                               | Applying adopted events to a starting snapshot to reconstruct balances and quantities                                                                                                                                                                        |
+| 12 + 14: cost basis and P&L             | Input gates, some P&L decomposition functions, a pure lot/disposal-allocation engine over provisional inputs, and an adapter from selected revisions that answers unsupported until a securities writer exists ([ADR 0059](adr/0059-lot-adapter-from-selected-revisions.md))                                                                                                                                                                                                                                     | A securities writer, transfers with carried cost, fee and FX evidence, persisted results, realized and unrealized P&L                                                                                                                                        |
+| 15: tax                                 | Refusal when required policy or inputs are missing                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Verified rules and tested outputs for a named jurisdiction, period and asset/account class                                                                                                                                                                   |
+| 16: AI / MCP                            | Shared query/explanation/proposal service and transports; scoped audit, instrument-history, instrument-coverage, account-candidate, economic-readiness and dated reported-state reads; MCP operations applied by any MCP client Access admits, as itself ([ADR 0063](adr/0063-delegated-ai-operation-path.md), [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md))                                                                                                                                | Complete analysis and correction flows using the same services as the UI                                                                                                                                                                                     |
 
 Current implementation and limits are maintained in [current status](current-status.md).
 The detailed source-by-source fixes and dated rollout observations previously
@@ -318,8 +375,10 @@ Valuation of provider-reported holdings can proceed before all transaction
 history has been reconstructed. Adding every source is not a prerequisite for
 finishing a representative bank, card, broker or rewards flow.
 
-**The current milestone is [Phase 3](#phase-3--coverage-collection-requests-and-cross-source-identity):
-coverage, collection requests and cross-source identity.** [Phase 2](#phase-2--card-usage--statement--bank-debit),
+**The current milestone is [Phase 4](#phase-4--non-card-events-and-dated-state):
+non-card events and dated state.** [Phase 3](#phase-3--coverage-collection-requests-and-cross-source-identity),
+coverage, collection requests and cross-source identity, was done on 2026-11-09
+([outcome](#phase-3-outcome)). [Phase 2](#phase-2--card-usage--statement--bank-debit),
 card usage → statement → bank debit without counting an expense twice, was
 done on 2026-11-08 for the representative cases. The first statement/debit review
 slice is implemented, and so is the first purchase-event writer for supported
@@ -411,7 +470,7 @@ reasons, and apart from them the cells no observation attributes to an
 account ([ADR 0088](adr/0088-collection-quality-per-account.md)). A period no
 capture has is not listed and not claimed missing; an account two sources name
 is shown under each; whether an account is the owner's is not decided there.
-It is not verified against production.
+It was read in production on 2026-11-09 ([Phase 3 outcome](#phase-3-outcome)).
 
 The review flows show the existing correction history on request: an
 instrument candidate its identifier's (`kogane.instruments.history`,
