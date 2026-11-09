@@ -41,6 +41,7 @@ with real data; do not infer product completion from a schema or a pure function
   [dated source evidence](sources/prestia.md#prestia-bank-worker-integration-2026-10-05)
   (implemented; production verification pending)
 - [Collector runtime profiles](collector-runtime-profiles.md)
+- [Adding a new collector](new-collectors.md)
 - [Credential Delivery](credentials.md)
 - [Observation layer](observations.md)
 - [Parser coverage contract (issues, coverage claims, snapshot policies)](parser-coverage.md)
