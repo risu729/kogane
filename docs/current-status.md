@@ -32,9 +32,10 @@ are separate claims. Historical acceptance records are linked from the
   qualification averages are non-additive valuations exposed through existing
   observation details, not added to native balance rows. Synthetic tests cover the
   production run plan through registration, parsing, publication and readback.
-  Local authenticated page evidence is not deployed Worker evidence. Deployment,
-  first production collection/publication and separate schedule activation remain
-  pending; its daily 06:30 JST alarm is disabled. See [ADR 0042](adr/0042-prestia-bank-worker.md),
+  Local authenticated page evidence is not deployed Worker evidence. The Worker is
+  deployed and its connection dispatches collection requests; the first production
+  collection/publication and then the separate schedule activation remain pending;
+  its daily 06:30 JST alarm is disabled. See [ADR 0042](adr/0042-prestia-bank-worker.md),
   the [plan](plans/2026-10-prestia-bank-worker.md) and the
   [dated source update](sources/prestia.md#prestia-bank-worker-integration-2026-10-05).
 

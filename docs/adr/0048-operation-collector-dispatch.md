@@ -706,7 +706,11 @@ Both Processor configurations add `prestia-bank` to
 `OPS_COLLECTOR_DISPATCH_CONNECTIONS` (nine in all). The first production
 collection is one `kogane.ops.collection.request` for source `prestia`, after
 the reads the tool description lists. The alarm stays disabled; enabling it is
-a separate step after that request is followed to publication.
+a separate step after that request is followed to publication. The connection
+stays listed after the first request, like the other eight, so agents may request
+it again within AGENTS.md's request rules (every healthy connection, owner,
+2026-11-08 03:19 UTC); if the first request does not reach publication, the
+change that records its result removes `prestia-bank` until the cause is fixed.
 
 ### Consequences
 
