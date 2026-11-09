@@ -27,6 +27,11 @@ PRs of its own; new text added to a Japanese document is written in English.
 Agents talk with the owner in Japanese outside the repository (chat and
 threads).
 
+Rules, docs and issues say "an agent" and never name the agent product that
+does a piece of work, because the tools in use change (owner, 2026-11-09 20:21
+UTC). Naming a product stays where it is the subject, such as the MCP clients
+in [ADR 0047](docs/adr/0047-mcp-client-connection.md).
+
 ## Continuing the work
 
 - [The roadmap](docs/roadmap.md#work-order) is the work order. A merged PR is not a
@@ -103,9 +108,9 @@ Every merge to `main` releases every Worker the release ledger marks `deploy` to
 [deploy.yml](.github/workflows/deploy.yml) ([CI/CD](docs/ci-cd.md#continuous-deployment)).
 
 Agents act through the owner's GitHub account, which has admin rights and can
-bypass the ruleset. Never use that bypass. An agent's PR is one whose branch
-starts with `claude/` and whose body links the thread that drove it; every
-other PR authored by `risu729` is treated as the owner's.
+bypass the ruleset. Never use that bypass. An agent's PR is one whose body
+links the agent thread that drove it; every other PR authored by `risu729` is
+treated as the owner's.
 
 An agent merges its own PR when all of these hold:
 
@@ -227,12 +232,6 @@ shapes ([ci](docs/ci.md); examples in
 Logging in to a provider, running a collector by hand, a hosted Container
 experiment, and reading or changing a secret each need the owner's approval for
 that action. Never ask the owner for passwords, codes or HAR captures.
-
-Codex, run locally by the owner, observes the provider routes and request
-values its issue needs itself, including the provider login that takes
-(owner, 2026-11-09 19:51 UTC). It calls read routes only and keeps request
-shapes (method, path, parameter names and values, response keys), never
-provider values, cookies or tokens, in the repository.
 
 Requesting a collection through `kogane.ops.collection.request` or the
 operations API is not running a collector by hand: agents may request

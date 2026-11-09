@@ -13,7 +13,7 @@ This follow-up tests a direct bank collector, not a user-export/import workflow.
 Authenticated browser account and ordinary-deposit history reads succeeded.
 The historical research below predates this follow-up.
 
-- The official login page opened successfully in the Codex in-app browser at
+- The official login page opened successfully in an agent's in-app browser at
   approximately 14:47 JST. It displayed the customer-number field `txbCustNo`
   and the disabled Next button before any identifying input.
 - An unauthenticated WSL HTTP client received HTTP 200 with the explicit
