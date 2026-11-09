@@ -6,7 +6,7 @@
 // the parser built from its own constants and the provider's field names, and
 // counts. What never does: a value, a row, an identifier, a currency code the
 // payload carried, or an unfiltered exception message. A label is printed only
-// for the SBI Shinsei parsers, whose every label is proved (by the test) to be
+// for the SBI Shinsei and SBI Securities parsers, whose labels are proved (by the test) to be
 // assembled from constants, array positions and schema keys; row positions
 // are folded to `[]` so a category is closed and does not count rows. For
 // `global-pass-activity` a label is one of three view names and a field one of
@@ -15,6 +15,7 @@ import { parse } from "parse5";
 import { SKIP_PAYMENT_SCHEDULE_HEADING } from "../../../packages/domain/src/myjcb-skip-payment-schedule.ts";
 import type { GlobalPassDomNode } from "../../../packages/parsers/src/parsers/global-pass-activity.ts";
 import { SKIP_PAYMENT_SCHEDULE_PARSER_CODES } from "../../../packages/parsers/src/parsers/myjcb-skip-payment-schedule.ts";
+import type { ParseIssue } from "../../../packages/parsers/src/types.ts";
 
 /**
  * `myjcb-skip-payment-schedule` throws only closed codes (ADR 0005 amendment
@@ -150,11 +151,121 @@ export function classifySbiShinseiMessage(message: string): RejectionCategory {
   return { reason: "unclassified" };
 }
 
+// SBI Securities labels are assembled entirely from these audited schema
+// paths. Unknown provider keys in schema-drift messages are never printed.
+const SBI_TRADE_ROW = "pages[].listTradeRecords.tradeRecords[]";
+const SBI_TRADE_FIELDS = [
+  "amount",
+  "listedSecuritiesStatus",
+  "marginCloseLimitType",
+  "orderPriceKindCode",
+  "price",
+  "quantity",
+  "settlementCurrencyCode",
+  "specificAccountCode",
+  "tradeCurrencyCode",
+  "tradeDate",
+  "tradeRecordTypeCode",
+  "valueDate",
+] as const;
+const SBI_SECURITY_FIELDS = [
+  "countryCode",
+  "ric",
+  "securitiesCode",
+  "securitiesName",
+  "securitiesShortName",
+] as const;
+const SBI_TRADE_LABELS = new Set([
+  "foreign-trade-records",
+  "pages[]",
+  "pages[].checkJrNisaOpen",
+  "pages[].checkJrNisaOpen.opened",
+  "pages[].listTradeRecords",
+  "pages[].listTradeRecords.page",
+  "pages[].listTradeRecords.page.hasNextPage",
+  "pages[].listTradeRecords.tradeRecords",
+  SBI_TRADE_ROW,
+  `${SBI_TRADE_ROW}.securities`,
+  ...SBI_TRADE_FIELDS.map((field) => `${SBI_TRADE_ROW}.${field}`),
+  ...SBI_SECURITY_FIELDS.map((field) => `${SBI_TRADE_ROW}.securities.${field}`),
+]);
+const SBI_TRADE_REASONS = [
+  "must be an object",
+  "must be a string",
+  "is empty",
+  "is too long",
+  "has an unsupported value",
+  "must be boolean",
+  "must be an exact decimal",
+  "is not a calendar date",
+  "pagination is incomplete or has an extra page",
+  "must be a bounded array",
+  "has an unsupported countryCode",
+  "has an unsupported currency",
+] as const;
+const SBI_CASH_ROOT = "json:$.listForeignScheduleCashBalances.foreignCashBalances";
+const SBI_CASH_ACCOUNT = `${SBI_CASH_ROOT}[]`;
+const SBI_CASH_CURRENCY = `${SBI_CASH_ACCOUNT}.currencyCashBalances[]`;
+const SBI_CASH_ROW = `${SBI_CASH_CURRENCY}.foreignScheduleCashBalances[]`;
+const SBI_CASH_FIELDS = [
+  "buyPossibleAmount",
+  "keepCash",
+  "transferPossibleAmount",
+  "remainingBuyPossibleAmount",
+  "amountPayValue",
+] as const;
+
+/** Only fixed text and exact, folded schema paths leave SBI Securities replay. */
+export function classifySbiSecuritiesMessage(parser: string, message: string): RejectionCategory {
+  if (message === UTF8_REFUSAL) return { reason: "artifact bytes are not valid UTF-8" };
+  if (parser === "sbi-foreign-cash-balances") {
+    return /^artifact [a-f0-9]{64} is not a GetForeignCashBalance data object$/u.test(message)
+      ? { reason: "not a GetForeignCashBalance data object" }
+      : { reason: "unclassified" };
+  }
+  if (message === "pages must be a non-empty bounded array") return { reason: message };
+  const folded = message.replace(/\[\d{1,6}\]/gu, "[]");
+  for (const label of SBI_TRADE_LABELS) {
+    if (!folded.startsWith(`${label} `)) continue;
+    const reason = folded.slice(label.length + 1);
+    if (reason === "schema drift" || reason.startsWith("schema drift;"))
+      return { reason: "schema drift", label };
+    for (const known of SBI_TRADE_REASONS) if (reason === known) return { reason: known, label };
+    if (/^is not exactly representable in (?:JPY|USD) minor units$/u.test(reason))
+      return { reason: "is not exactly representable in the currency minor units", label };
+  }
+  return { reason: "unclassified" };
+}
+
+/** Ignore issue messages: cash decimal refusal messages include payload values. */
+export function classifySbiCashIssue(
+  issue: Pick<ParseIssue, "code" | "locator">,
+): RejectionCategory {
+  const label = issue.locator.replace(/\[\d{1,6}\]/gu, "[]");
+  if (issue.code === "row_unreadable") {
+    if (label === SBI_CASH_ROW) return { reason: "row_unreadable", label };
+    for (const field of SBI_CASH_FIELDS)
+      if (label === `${SBI_CASH_ROW}.${field}`)
+        return { reason: "row_unreadable", label: SBI_CASH_ROW, field };
+  }
+  if (
+    issue.code === "container_unreadable" &&
+    [
+      SBI_CASH_ACCOUNT,
+      `${SBI_CASH_ACCOUNT}.currencyCashBalances`,
+      SBI_CASH_CURRENCY,
+      `${SBI_CASH_CURRENCY}.foreignScheduleCashBalances`,
+    ].includes(label)
+  )
+    return { reason: "container_unreadable", label };
+  return { reason: "unclassified" };
+}
+
 /** Error classes a runtime defect (not a parser refusal) would throw. */
 const RUNTIME_ERRORS = new Set(["TypeError", "RangeError", "ReferenceError", "SyntaxError"]);
 
 /**
- * The category of a thrown parser error. A plain `Error` from an SBI Shinsei
+ * The category of a thrown parser error. A plain `Error` from an SBI Shinsei or SBI Securities
  * parser or from `global-pass-activity` maps to its throw site; any other
  * parser keeps the older coarse reasons of `legacySafeReason`. A non-`Error` class is a runtime defect, not
  * a refusal, and is named by its standard class only.
@@ -165,6 +276,8 @@ export function classifyParserRejection(parserName: string, error: unknown): Rej
     return { reason: `runtime_${RUNTIME_ERRORS.has(error.name) ? error.name : "other"}` };
   if ((SBI_SHINSEI_PARSERS as readonly string[]).includes(parserName))
     return classifySbiShinseiMessage(error.message);
+  if (parserName === "sbi-foreign-trade-records" || parserName === "sbi-foreign-cash-balances")
+    return classifySbiSecuritiesMessage(parserName, error.message);
   if (parserName === GLOBAL_PASS_ACTIVITY_PARSER) return classifyGlobalPassMessage(error.message);
   if (parserName === SKIP_PAYMENT_SCHEDULE_PARSER)
     return (SKIP_PAYMENT_SCHEDULE_PARSER_CODES as readonly string[]).includes(error.message)
@@ -692,11 +805,12 @@ export function skipScheduleShape(bytes: Uint8Array): SkipScheduleShape {
 // ── replay selection ─────────────────────────────────────────────────────────
 
 /**
- * Sources whose stored failures `replay-diagnostics.ts` may replay. MyJCB's
+ * Sources whose stored failures `replay-diagnostics.ts` may replay. SBI
+ * Securities' two foreign parsers have closed categories above. MyJCB's
  * parsers throw fixed messages (`legacySafeReason` keeps only closed reasons)
  * or, for `myjcb-skip-payment-schedule`, closed codes (ADR 0005 amendment i).
  */
-export const REPLAY_SOURCES = ["sony-bank", "sbi-shinsei-bank", "myjcb"] as const;
+export const REPLAY_SOURCES = ["sony-bank", "sbi-shinsei-bank", "myjcb", "sbi-securities"] as const;
 
 /**
  * The read-only selection of `replay-diagnostics.ts`: the newest failed parse
@@ -714,7 +828,9 @@ export const REPLAY_SOURCES = ["sony-bank", "sbi-shinsei-bank", "myjcb"] as cons
  * row from a bounded re-extraction is never taken for the parser's input.
  * A failed parse records no `parse_input_references`, so this is the
  * projection a normal (non-candidate) run reads today, not a recorded link;
- * `replayStatementMetadata` uses it for MyJCB.
+ * `replayStatementMetadata` uses it for MyJCB. An exact
+ * `sbi-foreign-cash-balances` filter also selects published parses with
+ * membership issues that no later publication superseded.
  */
 export function replaySelectionSql(filter: { parser?: string; substring?: string } = {}): string {
   const clauses: string[] = [];
@@ -724,6 +840,16 @@ export function replaySelectionSql(filter: { parser?: string; substring?: string
   if (filter.parser !== undefined) clauses.push(`p.parser_name='${filter.parser}'`);
   if (filter.substring !== undefined) clauses.push(`instr(p.parser_name,'${filter.substring}')>0`);
   const sources = REPLAY_SOURCES.map((source) => `'${source}'`).join(",");
+  // Cash balances publish even with unreadable rows. Only an exact parser
+  // selection opts into its latest published incomplete parses; a complete
+  // later publication removes the older incomplete parse from selection.
+  const cash = filter.parser === "sbi-foreign-cash-balances";
+  const status = cash
+    ? `(p.status='error' OR (EXISTS(SELECT 1 FROM published_parse_runs publication WHERE publication.parse_run_id=p.id) AND EXISTS(SELECT 1 FROM parse_issues issue WHERE issue.parse_run_id=p.id AND issue.impact='membership')))`
+    : "p.status='error'";
+  const superseded = cash
+    ? "NOT EXISTS(SELECT 1 FROM published_parse_runs success WHERE success.fetch_artifact_id=p.fetch_artifact_id AND success.parser_name=p.parser_name AND success.parse_run_id>p.id)"
+    : "NOT EXISTS(SELECT 1 FROM published_parse_runs success WHERE success.fetch_artifact_id=p.fetch_artifact_id AND success.parser_name=p.parser_name)";
   return `WITH ranked AS (
  SELECT a.*,o.blob_key,o.byte_size,p.parser_name,
  r.status AS run_status,r.failure_count AS run_failure_count,
@@ -734,8 +860,8 @@ export function replaySelectionSql(filter: { parser?: string; substring?: string
  FROM parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
  JOIN observation_fetch_runs r ON r.id=a.fetch_run_id
  JOIN raw_objects o ON o.sha256=a.sha256
- WHERE p.status='error' AND a.source_id IN (${sources})${clauses.map((clause) => ` AND ${clause}`).join("")}
- AND NOT EXISTS(SELECT 1 FROM published_parse_runs success WHERE success.fetch_artifact_id=p.fetch_artifact_id AND success.parser_name=p.parser_name)
+ WHERE ${status} AND a.source_id IN (${sources})${clauses.map((clause) => ` AND ${clause}`).join("")}
+ AND ${superseded}
 ) SELECT * FROM ranked WHERE rank=1 ORDER BY id DESC LIMIT 50`;
 }
 

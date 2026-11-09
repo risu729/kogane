@@ -7,6 +7,48 @@
 
 Research date: 2026-08-26
 
+## Registered deposit products checked on 2026-11-09 UTC
+
+For [issue 1241](https://github.com/risu729/kogane/issues/1241), ordinary
+read-only navigation in the owner's authenticated Chrome session inspected
+the time/installment, foreign-currency and Global Account balance entries.
+The bank offers these products, but each balance entry returned the registered
+account list containing only the same ordinary-deposit account. No time,
+installment, foreign-currency or Global Account card or placement was displayed.
+This is a dated observation of the accounts registered in this web session;
+it does not establish whether an unregistered account exists elsewhere.
+
+| Visible navigation                                    | Observed servlet path        | Result                                                    |
+| ----------------------------------------------------- | ---------------------------- | --------------------------------------------------------- |
+| `積立・定期預金` (installment/time deposits)          | `/servlet/MENSRV0100101B.do` | Product menu with a time/installment balance-inquiry link |
+| `残高照会` (balance inquiry) from that menu           | `/servlet/MENSRV0120001B.do` | Registered account list, ordinary deposit only            |
+| `外貨預金` (foreign-currency deposits)                | `/servlet/MENSRV0100201B.do` | Product menu with an account-list/balance-inquiry link    |
+| `口座一覧（残高照会）` (account list/balance inquiry) | `/servlet/MENSRV0130001B.do` | Registered account list, ordinary deposit only            |
+| `グローバル口座` (Global Account)                     | `/servlet/MENSRV0100301B.do` | Product menu with a balance-inquiry link                  |
+| `残高照会` (balance inquiry) from that menu           | `/servlet/DDEMEN3000001B.do` | Registered account list, ordinary deposit only            |
+
+The observed navigation handlers use `doTransaction` with the corresponding
+servlet name, a null subindex and the current form. Network observation of the
+foreign balance, Global menu and Global balance reads confirmed a form POST
+followed by a GET to the same path. Those POSTs carry only `_FRAMEID`,
+`_TARGETID`, `_LUID`, `_TOKEN`, `_FORMID`, `_SUBINDEX` and `POSTKEY`.
+Session-specific values are deliberately omitted. The responses are HTML;
+there is no observed JSON contract schema for these products. The returned
+account list had one ordinary-history read control, with the existing
+`/BALINQ0301002B` handler. The product balance entries did not show a dedicated
+"no contracts" message: absence here means no product card in the registered
+account list, not a numeric zero balance or a parsed empty contract array.
+
+The issue's stop-if-none-held branch therefore applies to the inspected
+registered accounts. The catalogue keeps `term_deposit` as `not_collected`,
+linked to the specific issue, with this dated scope limitation. No collector,
+parser, endpoint allowlist or publication policy is added. The catalogue
+version stays unchanged because neither its types nor statuses change. If a
+product appears in the registered account list, first observe its nonempty
+placement fields and pagination before adding collection. No placement,
+enrollment or account-registration action was performed, and no personal
+account identifiers, balances, tokens or captured HTML are retained here.
+
 ## 2026-09-13 direct-collector feasibility check
 
 This follow-up tests a direct bank collector, not a user-export/import workflow.
