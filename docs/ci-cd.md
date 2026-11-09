@@ -168,7 +168,9 @@ plan that publishes a version, it `PATCH`es
 `wrangler.jsonc` `observability` object, as `wrangler versions deploy` does,
 retrying 429/5xx up to three attempts, then reads it back. So settings follow
 the deployed commit for all 17 Workers, including a rollback, and a Worker left
-out of a partial rollback is not touched. A refusal prints only its closed
+out of a partial rollback is not touched. (A config without `observability`
+keeps the live settings, as with `wrangler versions deploy`; every config
+declares it today.) A refusal prints only its closed
 `cf_settings_…` code and fails the release after collection is already
 reconciled; an accepted `PATCH` whose readback does not echo every declared
 value is a warning (`cf_settings_readback_unconfirmed`) in the step summary,

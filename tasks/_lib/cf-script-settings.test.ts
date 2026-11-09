@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   containsSettings,
   scriptSettingsFailureCode,
@@ -76,6 +78,35 @@ describe("scriptSettingsTargets", () => {
     expect(workflow).toContain(
       "printf 'SCRIPT_SETTINGS=%s\\n' \"${guard}/tasks/_lib/ci/cf-script-settings.mjs\"",
     );
+  });
+
+  test("an observability object without a boolean enabled is refused", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cf-settings "));
+    try {
+      writeFileSync(
+        join(dir, "wrangler.jsonc"),
+        '{ "observability": { "issues": { "enabled": true } } }',
+      );
+      expect(() =>
+        scriptSettingsTargets({
+          root: dir,
+          order: {
+            workers: [
+              {
+                name: "w",
+                path: ".",
+                config: "wrangler.jsonc",
+                worker: "kogane-w",
+                deployBackend: "cf",
+              },
+            ],
+          },
+          selected: ["w"],
+        }),
+      ).toThrow("cf_settings_invalid_observability_w");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("a config without observability keeps the live settings", () => {

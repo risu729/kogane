@@ -9,7 +9,8 @@ import { parseJsonc } from "../../../scripts/jsonc.ts";
  * script settings (`observability` among them), so after publication this
  * module applies them the way `wrangler versions deploy` does. Workers on the
  * `deploy` strategy get them from `cf deploy` itself. A Worker whose config
- * declares no `observability` keeps its live settings.
+ * declares no `observability` keeps its live settings, as with
+ * `wrangler versions deploy` (a full deploy would turn it off instead).
  */
 export function scriptSettingsTargets({ root, order, selected }) {
   return order.workers
@@ -29,7 +30,8 @@ export function scriptSettingsTargets({ root, order, selected }) {
       if (
         observability === null ||
         typeof observability !== "object" ||
-        Array.isArray(observability)
+        Array.isArray(observability) ||
+        typeof observability.enabled !== "boolean"
       )
         throw new Error(`cf_settings_invalid_observability_${worker.name}`);
       if (!/^[a-z0-9-]{1,63}$/u.test(worker.worker ?? ""))
