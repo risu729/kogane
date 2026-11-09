@@ -45,8 +45,9 @@ transaction: the account header only, with no row, amount column, row field or
 displayed range ([issue 1145](https://github.com/risu729/kogane/issues/1145)).
 `mizuho-ordinary-history@1.1.0` reads it from the new unit
 `ordinary:<branch>:<account>:page:empty` as no transaction and one complete
-empty page claim; a page with any part of the transaction block but no rows is
-still refused. `mizuho-account-list@1.0.2` changes only its code digest (the
+empty page claim; a page without rows that keeps any part of the transaction
+block, any other preserved field, or an amount holding a figure is still
+refused. `mizuho-account-list@1.0.2` changes only its code digest (the
 shared module). Observed structure and rule:
 [docs/sources/mizuho-bank.md](sources/mizuho-bank.md#empty-history-page-2026-11-09).
 Tests: `packages/parsers/test/mizuho-parser.test.ts` and

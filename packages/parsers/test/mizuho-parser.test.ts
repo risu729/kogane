@@ -152,6 +152,11 @@ describe("Mizuho typed HTML readers", () => {
       '<span id="txtTransCntnt_000">テスト入金</span>',
       '<span id="txtDate_000">2026年9月1日</span>',
       '<span id="txtEachBal_000">1,234</span>',
+      // Rows whose markers changed still leave a figure in an amount, or another field.
+      '<div><span class="amount">+ 1<small>円</small></span></div>',
+      '<span class="amount">1,234</span>',
+      '<span id="txtAccType_000">普通預金</span>',
+      '<button class="btn-account"><span>x</span></button>',
     ])
       rejects(() => parseHistoryPage(withBlock(fragment), account()), "unrecognized-empty-state");
     // Identity is still checked first, and a page that is neither shape is still refused.

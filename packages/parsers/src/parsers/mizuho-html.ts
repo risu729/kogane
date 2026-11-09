@@ -183,6 +183,8 @@ function date(input: string): string {
     fail("invalid-transaction-date");
   return result.toISOString().slice(0, 10);
 }
+/** The only fields the observed empty history page carries (issue 1145). */
+const EMPTY_PAGE_FIELDS = new Set(["txtBrnch", "txtTransType", "txtAccNo"]);
 function count(input: string): number {
   if (!/^(?:0|[1-9]\d*)$/u.test(input) || !Number.isSafeInteger(Number(input)))
     fail("invalid-count");
@@ -221,14 +223,18 @@ export function parseHistoryPage(html: string, account: MizuhoAccountContext): M
     ...expected,
   } as const;
   if (!rows.length) {
-    // Only the whole transaction block missing is the observed empty state; a
-    // stray row field, amount column or displayed range without rows is not.
-    const transactionBlock = find(
-      page,
-      (n) =>
-        classes(n).includes("t1-2") ||
-        /^txt(?:TransCntnt|Date|EachBal)_|^txt(?:All)?DispDetails$/u.test(attr(n, "id") ?? ""),
-    );
+    // Only the whole transaction block missing is the observed empty state: the
+    // page keeps the header fields and the header's currency-only amount and
+    // nothing else the sanitizer preserves. A stray row field, amount column,
+    // displayed range, or an amount carrying a figure (rows whose markers
+    // changed) without rows is not.
+    const transactionBlock = find(page, (n) => {
+      const id = attr(n, "id");
+      if (id !== undefined && !EMPTY_PAGE_FIELDS.has(id)) return true;
+      const named = classes(n).filter(Boolean);
+      if (named.some((name) => name !== "amount")) return true;
+      return named.includes("amount") && text(n) !== "円";
+    });
     if (transactionBlock.length) fail("unrecognized-empty-state");
     return { ...header, state: "empty", displayedRange: null, hasMore: false, transactions: [] };
   }

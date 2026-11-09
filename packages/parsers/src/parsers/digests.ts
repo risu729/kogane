@@ -45,7 +45,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/global-pass-activity.ts":
       "bc7a9474cc01cdd5e11790a69a5a83b8d2a7b559f02a74be166770ece91e2631",
     "poc/observation-pipeline/src/parsers/mizuho-html.ts":
-      "38fbd40649052acdf0c33c473870ba04901d018dc4d60f4e9042bf29323a9eb0",
+      "cb3da7215fe2b22c0bb3168f14c0c482f89a0d8bcd861c1b5f0cd919f27e6e51",
     "poc/observation-pipeline/src/parsers/mizuho.ts":
       "f2833f796bdf748567138dd644d54d061cedb08a8747472bb13165223fcaec41",
     "poc/observation-pipeline/src/parsers/mobile-suica-sf-history.ts":
@@ -140,7 +140,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "mizuho-account-list": {
       version: "1.0.2",
-      codeDigest: "5bfe213a29f2879fcb541e25539e6922c92744092fd578dcaee6fb0233d23ef7",
+      codeDigest: "b485f3b15c03986cc00b4d75fe6d032eebbf7b8584a7a1c8e410a80860357800",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -155,7 +155,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "mizuho-ordinary-history": {
       version: "1.1.0",
-      codeDigest: "5bfe213a29f2879fcb541e25539e6922c92744092fd578dcaee6fb0233d23ef7",
+      codeDigest: "b485f3b15c03986cc00b4d75fe6d032eebbf7b8584a7a1c8e410a80860357800",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
