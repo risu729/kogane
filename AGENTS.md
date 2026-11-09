@@ -143,8 +143,9 @@ change (owner, 2026-11-06 13:25 UTC). Examples:
 - adopts or replaces a major library, framework or provider.
 
 Renovate PRs: those with native auto-merge on follow the shared preset and
-need no agent. An agent may merge another Renovate PR after green CI and a
-check of the changelog, unless it is one of the changes above (for example a
+need no agent and no owner approval, even when they update a workflow or
+action (owner, 2026-11-09 00:36 UTC). An agent may merge another Renovate PR
+after green CI and a check of the changelog, unless it is one of the changes above (for example a
 workflow or action update). A Renovate PR whose `renovate/stability-days`
 status is still pending is not merged, by an agent or through auto-merge
 enabled by an agent, until the owner says so for that PR (owner, 2026-11-06
