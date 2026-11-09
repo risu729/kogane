@@ -221,6 +221,22 @@ const SAMPLES: readonly Sample[] = [
   // services/collector-sbi-shinsei/src/shared-collection.ts (`raw-<dataset>.json`)
   {
     source: "sbi-shinsei",
+    artifactKey: "raw-period-activity-0001.json",
+    role: "sanitized_provider_capture",
+    mediaType: json,
+    dataset: null,
+    unitKey: `savings-${"a".repeat(32)}`,
+  },
+  {
+    source: "sbi-shinsei",
+    artifactKey: "savings-activity-0001.json",
+    role: "collector_derived",
+    mediaType: json,
+    dataset: "savings-activity",
+    unitKey: `savings-${"a".repeat(32)}`,
+  },
+  {
+    source: "sbi-shinsei",
     artifactKey: "raw-top-accounts-balance-and-activity.json",
     role: "sanitized_provider_capture",
     mediaType: json,
@@ -620,6 +636,7 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
     "foreign-trade-records",
   ],
   "sbi-shinsei-bank": [
+    "savings-activity",
     "top-accounts-balance-and-activity",
     "yen-deposit-account",
     "exchange-rate",

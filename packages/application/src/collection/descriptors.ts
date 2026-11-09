@@ -294,12 +294,6 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
   // (ADR 0031).
   "sbi-shinsei": [
     {
-      key: /^raw-period-activity-\d{4}\.json$/u,
-      role: "sanitized_provider_capture",
-      mediaTypes: JSON_TYPE,
-      dataset: "period-activity-capture",
-    },
-    {
       key: /^savings-activity-\d{4}\.json$/u,
       role: "collector_derived",
       mediaTypes: JSON_TYPE,

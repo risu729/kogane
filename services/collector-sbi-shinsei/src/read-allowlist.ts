@@ -10,8 +10,8 @@ import type {
 const ORIGIN = "https://bk.web.sbishinseibank.co.jp" as const;
 
 /**
- * Route names came from the public login JavaScript. Entries observed in the
- * 2026-08-31 authenticated Kuebiko run are marked liveValidated; bundle-only
+ * Route names came from the public login JavaScript. Entries observed in
+ * authenticated browser captures are marked liveValidated; bundle-only
  * candidates are not. Captured entries with a strict response schema are
  * production-enabled for the same-page Browser Run collector only.
  */

@@ -43,6 +43,11 @@ and declared ranges record complete coverage only after validation. Unit-scoped
 eligibility admits a successful account when another account failed. History
 is a union of transaction identities, not a replaceable balance snapshot.
 
+Only the derived artifact receives the `savings-activity` parser dataset. The
+raw capture remains unmapped evidence. These artifact names have never been
+registered before, so the existing `terminal-registration-v3` contract stays
+unchanged; no earlier terminal gains a new interpretation.
+
 Only the currently observed populated success and empty status are supported.
 Unknown fields, codes, mismatched account/currency/period echoes, duplicate
 references, invalid money rows or incomplete first-page enrichment fail closed.
