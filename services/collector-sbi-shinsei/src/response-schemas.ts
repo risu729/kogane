@@ -165,6 +165,8 @@ function validateBalanceSummary(value: unknown): JsonObject {
       "totalDebit",
       "fxCasaBalance",
       "yenTDBalance",
+      "hyperDepositBalance",
+      "yenDepositBalance",
     ],
     [],
   );

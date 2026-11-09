@@ -140,6 +140,34 @@ to the old 90-day request as partial evidence. Deployment, a completed scheduled
 walk within the time limit, publication of every window and provider-count
 equality remain unverified; no manual collector invocation was performed.
 
+### 2026-11-10: foreign trade price precision and empty cash metrics
+
+Read-only in-memory replay of stored evidence for [#1220](https://github.com/risu729/kogane/issues/1220),
+with each object's SHA-256 and byte size verified, named the following
+categories without returning provider values:
+
+- One distinct rejected `foreign-trade-records` object failed at
+  `pages[].listTradeRecords.tradeRecords[].price`: the exact decimal was not
+  representable in the trade currency's minor units. Parser `1.0.2` validates
+  unit prices as exact decimals and preserves them unchanged in `extra`.
+  Settlement `amount` still requires exact currency minor units. The canonical
+  provider-row fingerprint and duplicate occurrence suffix are unchanged, so
+  previously accepted executions retain their `externalId` on replay.
+  A second in-memory replay using `1.0.2` accepted the same object and returned
+  five observations with no rejection; it did not publish them.
+- Among the five newest distinct incomplete `foreign-cash-balances` objects,
+  `transferPossibleAmount` had 25 empty-string cells and `amountPayValue` had
+  five. These remain `row_unreadable` membership issues and keep coverage
+  incomplete. An empty string has not been established to mean zero,
+  unavailable or inapplicable; no replacement value or completeness claim is
+  inferred. The fields and their closed shape class are the named remaining
+  provider limitation.
+
+This was diagnosis of stored evidence, with no collector invocation or SBI
+login. It does not establish deployed parser version, publication of corrected
+observations, or current coverage after the next scheduled run; those remain
+the rollout checks for #1220.
+
 ## Assessment scale
 
 Automation levels are defined as follows.

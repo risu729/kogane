@@ -398,7 +398,7 @@ test("a stage job out of attempts, of another version or of a stopped replay pla
   await env.DB.prepare(
     `INSERT INTO observation_replay_plans(id,created_at_ms,updated_at_ms,source_id,parser_name,
       parser_version,artifact_id_high_water,status,reason)
-     VALUES(?,0,0,'sbi-shinsei-bank','sbi-shinsei-balance-summary-and-stage','0.1.1',?,'paused','synthetic')`,
+     VALUES(?,0,0,'sbi-shinsei-bank','sbi-shinsei-balance-summary-and-stage','0.1.2',?,'paused','synthetic')`,
   )
     .bind(run, run + 1)
     .run();
@@ -408,7 +408,7 @@ test("a stage job out of attempts, of another version or of a stopped replay pla
   await job("status='pending',attempts=0,replay_plan_id=NULL,parser_version='0.0.9'");
   expect(await judge()).toMatchObject({ scanned: 33, stage_unstated: 30, stage_pending: 0 });
   // The same job, runnable again: the board waits.
-  await job("status='pending',attempts=0,replay_plan_id=NULL,parser_version='0.1.1'");
+  await job("status='pending',attempts=0,replay_plan_id=NULL,parser_version='0.1.2'");
   expect(await judge()).toMatchObject({ scanned: 0, stage_pending: 33 });
 }, 60000);
 

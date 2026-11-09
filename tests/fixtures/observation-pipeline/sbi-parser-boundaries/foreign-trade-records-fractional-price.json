@@ -1,0 +1,23 @@
+{
+  "pages": [
+    {
+      "checkJrNisaOpen": { "opened": false },
+      "listTradeRecords": {
+        "page": { "hasNextPage": false },
+        "tradeRecords": [
+          {
+            "securities": {
+              "countryCode": "US", "securitiesCode": "DEM", "securitiesName": "Demo Industries",
+              "securitiesShortName": "Demo", "ric": "DEM.O"
+            },
+            "tradeRecordTypeCode": "BUY", "tradeCurrencyCode": "USD",
+            "listedSecuritiesStatus": "LISTED", "orderPriceKindCode": "LIMIT",
+            "specificAccountCode": "SPECIFIC", "settlementCurrencyCode": "USD",
+            "amount": "111.38", "quantity": "3", "price": "37.125",
+            "tradeDate": "2099-01-12", "valueDate": "2099-01-14", "marginCloseLimitType": ""
+          }
+        ]
+      }
+    }
+  ]
+}
