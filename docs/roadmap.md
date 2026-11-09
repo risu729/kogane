@@ -343,6 +343,8 @@ collect comes first (owner, 2026-11-09 19:06 UTC): the `partial` and `not_collec
 entries of the provider data-type catalogue
 ([ADR 0087](adr/0087-provider-data-type-catalogue.md)), tracked under the per-source
 issues [#441](https://github.com/risu729/kogane/issues/441)–[#454](https://github.com/risu729/kogane/issues/454).
+The [existing-collector gaps plan](plans/2026-11-existing-collector-gaps.md) (accepted
+2026-11-09, 20:21 UTC) orders that work P0 → P3 and names one issue per item.
 Each new-source issue holds its target data, the questions to answer with the owner
 before any code, and its acceptance criteria; [adding a new collector](new-collectors.md)
 holds the order of work, the files a new source touches and the checks common to all
