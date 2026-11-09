@@ -845,3 +845,7 @@ the type packages in the shared `typescript` group. Renovate pull requests use
 The trusted workflow refuses pre-alarm release/rollback targets before checkout
 and before any production mutation. Removing the ScheduleAlarm class requires a
 separate retirement migration; it is not an ordinary old-commit rollback.
+
+## Hostname maintenance
+
+See [hostname maintenance](hostname-maintenance.md) for the separate manual plan/apply workflow and its current permission limits.
