@@ -68,11 +68,18 @@ fields, retention in the summary artifact, the earlier shape without them and
 continued rejection of unknown fields or nested values. The fields remain raw
 provider evidence; this change adds no balance interpretation or account mapping.
 
-This observed schema mismatch reproduces the missing-summary/partial-run pattern
-reported in [#1215](https://github.com/risu729/kogane/issues/1215). Historical failed
-manifests and Worker logs have not yet been independently inspected, so the cause
-of every earlier partial run is not established. No production collection has been
-run with this fix. After deployment, verify a daily or explicitly authorized
+A read-only D1/R2 check on 2026-11-09 inspected two persisted production
+manifests, verifying each object's SHA-256 and byte size before reporting only
+counts and closed codes. Both were `partial` with exactly one failure:
+`read:balance-summary-and-stage`, `ResponseSchemaError`,
+`provider_response_invalid`. Both omitted the summary dataset and retained the
+top, exchange-rate and yen-deposit captures. This corroborates the deployed
+schema-validation failure reported in
+[#1215](https://github.com/risu729/kogane/issues/1215). The generic failure code
+does not name the rejected field; the separately observed new fields reproduce
+that rejection in synthetic inputs. This does not establish the cause of every
+earlier partial run. No production collection has been run with this fix.
+After deployment, verify a daily or explicitly authorized
 requested run reaches `success`, follows through publication and shows deposit
 accounts as `same-day` in `kogane.collection-quality.read` (`view: accounts`).
 Until then, production recovery remains pending. The `container-snapshot`
