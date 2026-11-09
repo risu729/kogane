@@ -323,11 +323,16 @@ observes existing transactions only.
 
 ## Mizuho Points
 
-Mizuho Point Mall is a current official bank service requiring Mizuho Mileage Club membership, Direct app
-use, and service activation.
+Mizuho Point Mall is a bank-operated points service accessed through the bank app.
+The [official service page](https://www.mizuhobank.co.jp/mmc/mizuhopointmall/index.html),
+checked on 2026-11-09 UTC, announces phased access without Mileage Club membership
+from 2026-10-29. A Direct internet-banking contract is the stated prerequisite;
+initial Direct registration is required for access. The documented entry is the
+bank app's `P` mark. This supersedes the membership prerequisite recorded by the
+original August research; it does not establish a browser-only entry.
 
 - App home `P` mark leads to Point Mall.
-- Mileage Club exclusive page shows points balances/accrual/use (Gift top-up timing/counts), Gift balances.
+- The points page shows balances/accrual/use (Gift top-up timing/counts) and Gift balances.
 - Guide describes points accrual/use/expiry breakdowns and Gift accrual/use/expiry history.
 - Points expire at 23:59 month-end 24 months after award month: 25 months including award month under terms,
   carried over when topped up to Gift.
@@ -342,6 +347,30 @@ points deep links/hosts/WebView routes; owner-operated read-only observations re
 methods/path templates/statuses. No queries/cookies/authorization/SSO codes/actual points; call no exchange/top-up endpoints.
 
 Do not navigate to J-Coin, MyJCB, or card company points in this scope.
+
+### Authenticated browser access checked on 2026-11-09 UTC
+
+For [issue 1252](https://github.com/risu729/kogane/issues/1252), ordinary read-only
+navigation in the owner's authenticated Direct Chrome session found no points
+or Point Mall entry in the home/navigation. The `確認する` / `特典内容` path opened
+`/servlet/MENSRV0100009B.do`; selecting the registered ordinary account opened
+`/servlet/INQMBR2700001B.do`. Its HTML headings were `特典内容照会結果確認`,
+`口座情報`, `会員制サービス` and `現在ご利用いただける主な特典`. This membership
+benefits page had no points balance or Point Mall link. Account identifiers,
+session parameters and provider values are not retained here.
+
+The official app-entry guidance above and the inspected browser navigation
+provide no usable browser route for the existing collector. This is a scoped
+access blocker, not proof that an unseen app handoff could never work. No app
+protocol, request values or response schema were inferred. The issue's stop
+branch applies: `reward_balance`, `reward_activity` and `reward_expiry` remain
+`not_collected`, linked to issue 1252. The catalogue version stays unchanged
+because its types and statuses do not change. No collector or parser is added.
+
+Resume only after an owner-authorized read-only observation establishes an
+accessible route and its balance, expiry, activity and completeness contracts.
+No enrollment, points exchange, authentication change or app session operation
+was performed.
 
 ## Authentication and sessions
 
