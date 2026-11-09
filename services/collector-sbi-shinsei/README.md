@@ -67,6 +67,10 @@ summary shape. Synthetic tests cover the full four-response handoff with the new
 fields, retention in the summary artifact, the earlier shape without them and
 continued rejection of unknown fields or nested values. The fields remain raw
 provider evidence; this change adds no balance interpretation or account mapping.
+The independent `sbi-shinsei-balance-summary-and-stage` parser also accepts the
+fields in version 0.1.2. It still publishes only the existing amount-free stage
+category observation; neither new aggregate becomes a balance observation or
+repeats a balance the top/yen-deposit datasets already report.
 
 A read-only D1/R2 check on 2026-11-09 inspected two persisted production
 manifests, verifying each object's SHA-256 and byte size before reporting only
