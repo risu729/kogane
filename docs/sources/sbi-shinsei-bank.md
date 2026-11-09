@@ -1200,3 +1200,36 @@ fail closed. Synthetic regression tests compare the entire parser output with
 and without the new fields and follow a collector handoff through shared DATA,
 registration and publication. Production recovery remains unverified until a
 post-deploy collection and its publication/freshness checks succeed.
+
+## Online monthly PDF report observation (2026-11-09)
+
+Ordinary authenticated Chrome navigation from TOP to `お取引レポート` issued
+`POST /SFC/app/AIAI_AccountInfomationAdapter/getStatementReport` with JSON
+`{requestParam:{}}`. The response had exactly `responseParam` and `header`.
+The response parameters were string fields `postingDate`, `mailID`,
+`eStatementStatus`, `mfReportStatus`, `slPostingDate` and `periodDetails`, an
+array of `{month:string, year:string}`. All eight unique offered periods used
+four ASCII digits for the year and two zero-padded digits for the month. The
+UI initially displayed three PDF links; the response list, rather than that
+visible default or the public 60-month maximum, is the collection inventory.
+
+Clicking a visible PDF issued
+`POST /SFC/app/AIAI_AccountInfomationAdapter/downloadStatement` with JSON
+`{requestParam:{year:string,month:string}}`, selected from that list. The
+response parameters were string fields `postingDate`, `month`, `year`,
+`fileName`, `fileSize`, `fileStream`. Both routes used a string
+`header.adapterResultCode`; the successful download's code was `"0"`.
+The returned year/month exactly matched the request. In-memory base64 decoding
+of `fileStream` produced a `%PDF-` prefix, and its byte length equalled the
+numeric `fileSize`. No filename, personal period, PDF contents, account value,
+registration-setting value, cookie or token is reproduced here.
+
+The scheduled collector now reads the offered inventory in its existing browser
+session, captures missing reports and rechecks the newest offered month. It
+validates the observed shapes and stores private PDF bytes with month/size/hash
+metadata; report content is not parsed. The metadata parser emits only
+`evidence-only` coverage and no financial observations. Existing registered
+months act as the checkpoint, so no new state store or request window is added.
+The limits, revision policy, independent-month eligibility and remaining
+production acceptance are recorded in
+[ADR 0097](../adr/0097-sbi-shinsei-monthly-report-evidence.md).

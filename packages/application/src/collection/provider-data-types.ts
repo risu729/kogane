@@ -120,7 +120,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   ],
   // SBI新生銀行: top accounts with recent activity, balance summary and the yen
   // deposit account, exchange rates; dated history and CSV, term and foreign
-  // contracts and the monthly reports are not collected
+  // contracts are not collected; monthly PDFs have metadata-only coverage
   // (docs/sources/sbi-shinsei-bank.md; #447 was closed without them).
   "sbi-shinsei-bank": [
     collected("balance", [
@@ -130,7 +130,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     ]),
     partial("cash_movement", ["sbi-shinsei-top-balances-and-activity"], BACKLOG),
     missing("term_deposit", BACKLOG),
-    missing("document", BACKLOG),
+    collected("document", ["sbi-shinsei-monthly-report-metadata"]),
     collected("fx_rate", ["sbi-shinsei-exchange-rate"]),
   ],
   // SBI VCトレード (a broker): crypto holdings and leverage positions,
