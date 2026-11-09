@@ -37,10 +37,12 @@ function provider(
     secondPage?: "changed-total" | "short";
     csvBody?: Uint8Array<ArrayBuffer>;
     csvMediaType?: string;
+    retainedOnlyShortCsv?: boolean;
   },
 ) {
   const csvCurrencies: string[] = [];
   const requests: string[] = [];
+  const historyRequests: { path: string; body: Record<string, unknown> }[] = [];
   const historyPages: { currency: string; countCnt: number; rows: number }[] = [];
   const fetcher = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const path = new URL(String(input)).pathname;
@@ -55,15 +57,25 @@ function provider(
     if (path.endsWith("gross-balance/acq")) return Response.json({ privateValue });
     if (path.includes("ordinary-deposit-transaction-histories")) {
       const body = JSON.parse(String(init?.body));
+      historyRequests.push({ path, body });
       const currency = body.currencyCd || body.currencyCdInq;
       const declared = shape?.currencyTotals?.[currency] ?? (currency === "JPY" ? total : 0);
       if (path.endsWith("csv/load")) {
         csvCurrencies.push(currency);
         if (csvStatus === 0) throw new Error(privateValue);
         return csvStatus === 200
-          ? new Response(shape?.csvBody ?? csvBytes(currency, declared), {
-              headers: { "content-type": shape?.csvMediaType ?? "text/csv" },
-            })
+          ? new Response(
+              shape?.csvBody ??
+                csvBytes(
+                  currency,
+                  shape?.retainedOnlyShortCsv && body.inquiryStrtdtCat === undefined
+                    ? declared - 1
+                    : declared,
+                ),
+              {
+                headers: { "content-type": shape?.csvMediaType ?? "text/csv" },
+              },
+            )
           : Response.json({ errors: [{ code: privateValue }] }, { status: csvStatus });
       }
       const start = Number(body.acquisitionStrtCnt);
@@ -95,7 +107,7 @@ function provider(
       );
     throw new Error(`unexpected request ${privateValue}`);
   };
-  return { fetcher, csvCurrencies, requests, historyPages };
+  return { fetcher, csvCurrencies, requests, historyPages, historyRequests };
 }
 
 function collect(mock: ReturnType<typeof provider>) {
@@ -135,7 +147,12 @@ async function expectSecondPageRefused(secondPage: "changed-total" | "short") {
     }
     throw new Error("expected failure");
   });
-  expect(value.errorType).toBe("SonyBankStageError");
+  expect(value.errorType).toBe("SonyBankError");
+  expect(value.diagnostics?.reason).toBe(
+    secondPage === "short"
+      ? "history_pagination_length_mismatch"
+      : "history_pagination_total_changed",
+  );
   expect(value.diagnostics?.stage).toBe("history");
   expect(mock.csvCurrencies).toEqual([]);
   expect(
@@ -516,4 +533,107 @@ test("CSV completeness supports the observed Shift JIS export without modifying 
       ),
     ).toEqual(body);
   }
+});
+
+describe("scheduled retained history", () => {
+  test("one session keeps the monthly requests and exhausts every currency without a guessed start", async () => {
+    const currencies = [
+      "JPY",
+      "USD",
+      "EUR",
+      "GBP",
+      "AUD",
+      "NZD",
+      "CAD",
+      "CHF",
+      "HKD",
+      "ZAR",
+      "SEK",
+    ];
+    const mock = provider(4, 200, false, {
+      currencyTotals: Object.fromEntries(currencies.map((c) => [c, 4])),
+    });
+    const { value } = await capture(() =>
+      collectSonyBank({
+        credential: { branchNum: "001", accountNum: "1234567", loginPwd: privateValue },
+        from: "2099-04-01",
+        to: "2099-04-02",
+        fetcher: mock.fetcher,
+        includeRetainedHistory: true,
+      }),
+    );
+    expect(mock.requests.filter((path) => path.endsWith("to-customers/login"))).toHaveLength(1);
+    for (const currency of currencies) {
+      const requests = mock.historyRequests.filter(
+        ({ body }) => (body.currencyCd || body.currencyCdInq) === currency,
+      );
+      expect(requests).toHaveLength(6);
+      const monthly = requests.filter(({ body }) => body.inquiryStrtdtCat !== undefined);
+      expect(monthly).toHaveLength(3);
+      expect(
+        monthly.every(
+          ({ body }) => body.inquiryStrtdtCat === "2099-04-01" && body.sortSelect === "00001",
+        ),
+      ).toBe(true);
+      const retained = requests.filter(({ body }) => body.inquiryStrtdtCat === undefined);
+      expect(retained.map(({ path }) => path)).toEqual([
+        HISTORY_PATH,
+        HISTORY_PAGER_PATH,
+        "/custom-web00/eaba/ordinary-deposit-transaction-histories/csv/load",
+      ]);
+      expect(
+        retained.every(
+          ({ body }) => body.inquiryEnddtCat === "2099-04-02" && body.sortSelect === "00002",
+        ),
+      ).toBe(true);
+      expect(retained[1]!.body).not.toHaveProperty("currencyCdInq");
+      expect(retained[1]!.body.acquisitionStrtCnt).toBe(4);
+      expect(retained[2]!.body).not.toHaveProperty("acquisitionStrtCnt");
+    }
+    const names = value.artifacts.map((a) => a.filename);
+    expect(names).toContain("monthly-yen-history.csv");
+    expect(names).toContain("yen-history.csv");
+    expect(names).toContain("foreign-history-sek.csv");
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  test("a short retained CSV cannot be hidden by a complete monthly CSV", async () => {
+    const mock = provider(4, 200, false, { retainedOnlyShortCsv: true });
+    const data = new FakeR2Bucket();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mock.fetcher as typeof fetch;
+    try {
+      const { value } = await capture(() =>
+        runSharedCollection(
+          {
+            COLLECTOR_SCHEMA_VERSION: "sony-bank-worker-poc-v2",
+            SONY_BANK_CREDENTIAL_JSON: JSON.stringify({
+              branchNum: "001",
+              accountNum: "1234567",
+              loginPwd: privateValue,
+            }),
+            DATA: data,
+          } as unknown as Env,
+          { from: "2099-04-01", to: "2099-04-02" },
+        ),
+      );
+      expect(value.status).toBe("failed");
+      const terminal = JSON.parse(
+        new TextDecoder().decode(
+          [...data.entries.values()].find((e) =>
+            new TextDecoder().decode(e.bytes).includes('"manifestVersion"'),
+          )!.bytes,
+        ),
+      );
+      expect(terminal.safeErrorCode).toBe("history_csv_count_mismatch");
+      expect(terminal.requestedScope).toMatchObject({
+        scopeKind: "full_snapshot",
+        startValue: null,
+        endValue: "2099-04-02",
+      });
+      expect(terminal.artifacts).toHaveLength(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

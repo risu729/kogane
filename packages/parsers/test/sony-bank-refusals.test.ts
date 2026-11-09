@@ -5,6 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  type SonyBankArtifactMeta,
   sonyBankGrossBalance,
   sonyBankHistoryCsv,
   sonyBankHistoryJson,
@@ -17,7 +18,7 @@ const DIR = join(FIXTURES_ROOT, "sony-bank-parser-boundaries");
 const text = (name: string): string => readFileSync(join(DIR, name), "utf8");
 const encode = (value: string): Uint8Array => new TextEncoder().encode(value);
 
-function meta(dataset: string, overrides: Partial<ArtifactMeta> = {}): ArtifactMeta {
+function meta(dataset: string, overrides: Partial<SonyBankArtifactMeta> = {}): ArtifactMeta {
   return {
     id: 1,
     sourceId: "sony-bank",
@@ -371,4 +372,36 @@ describe("sony-bank WALLET monthly HTML", () => {
       identityOrigin: "date+description+usage-amount+occurrence",
     });
   });
+});
+
+test("retained Sony JSON and CSV accept an omitted start, retain the end bound and reject missing metadata", () => {
+  const json = encode(text("yen-history-page-0001.json"));
+  const csv = encode(text("yen-history.csv"));
+  for (const [parser, bytes, dataset, mime] of [
+    [sonyBankHistoryJson, json, "yen-history-page-0001", "application/json"],
+    [sonyBankHistoryCsv, csv, "yen-history-csv", "text/csv"],
+  ] as const) {
+    const retained = meta(dataset, { mime, retainedHistoryEnd: "2026-09-30" });
+    delete retained.runWindow;
+    expect(parser.parse(bytes, retained).observations.length).toBeGreaterThan(0);
+    const tooEarly = { ...retained, retainedHistoryEnd: "2026-08-31" };
+    for (const retainedHistoryEnd of ["", "invalid", "2026-02-30"]) {
+      expect(() =>
+        parser.parse(bytes, { ...retained, retainedHistoryEnd } as SonyBankArtifactMeta),
+      ).toThrow();
+    }
+    expect(() => parser.parse(bytes, { ...retained, sourceId: "paypay" })).toThrow(
+      "retained history metadata is invalid",
+    );
+    expect(() =>
+      parser.parse(bytes, { ...retained, runWindow: { from: "2026-09-01", to: "2026-09-30" } }),
+    ).toThrow("retained history metadata is invalid");
+    expect(() => parser.parse(bytes, tooEarly)).toThrow("outside the fetch window");
+    const withoutWindow = meta(dataset, { mime });
+    delete withoutWindow.runWindow;
+    expect(() => parser.parse(bytes, withoutWindow)).toThrow("fetch window is missing");
+    expect(() =>
+      parser.parse(bytes, meta(dataset, { mime, runWindow: { from: "", to: "2026-09-30" } })),
+    ).toThrow("window start is empty");
+  }
 });

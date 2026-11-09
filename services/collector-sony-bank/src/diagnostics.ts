@@ -48,6 +48,10 @@ const REASONS = new Set([
   "history_csv_missing_with_transactions",
   "history_csv_count_mismatch",
   "history_csv_invalid",
+  "history_pagination_invalid",
+  "history_pagination_total_changed",
+  "history_pagination_length_mismatch",
+  "history_page_limit_exceeded",
   "unexpected_error",
 ]);
 

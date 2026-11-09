@@ -161,11 +161,12 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   ],
   // ソニー銀行: total balance, yen and ten foreign-currency histories and WALLET
   // statements; the realized FX P&L, term deposit contracts, the delivered
-  // documents and backfill beyond the daily window are not collected
+  // documents are not collected; ordinary deposit history covers everything the
+  // provider retains through yesterday, without an invented opening date
   // (docs/sources/sony-bank.md, #449).
   "sony-bank": [
     collected("balance", ["sony-bank-gross-balance"]),
-    partial("cash_movement", ["sony-bank-history-json", "sony-bank-history-csv"], 449),
+    collected("cash_movement", ["sony-bank-history-json", "sony-bank-history-csv"]),
     collected("card_usage", ["sony-bank-wallet-history"]),
     missing("valuation_history", 449),
     missing("term_deposit", 449),

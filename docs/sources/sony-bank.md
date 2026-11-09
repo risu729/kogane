@@ -576,3 +576,58 @@ from JSON. Zero history still skips CSV and succeeds, avoiding the previously
 observed empty-CSV server failure. Successful JSON and CSV bytes are stored
 unchanged. No provider login or production-data inspection was performed for
 this implementation.
+
+## 2026-11-09: retained ordinary-deposit history without a start date
+
+Read-only observation in the owner's authenticated local Chrome, through the
+normal history controls at `/pages/ea/eaba0600/`. No authentication material,
+account identifiers, provider row values or transaction dates were retained.
+
+The currency combobox lists JPY/USD/EUR/GBP/AUD/NZD/CAD/CHF/HKD/ZAR/SEK.
+Leaving the start date blank and setting the end to the last finished JST day
+(observed request value `2026-11-09`) accepts every currency with HTTP 200 and
+an empty `errors` array. The initial history request is POST
+`/custom-web00/eaba/cust-web/ordinary-deposit-transaction-histories`:
+
+- private `branchNum` and `accountNum` (values not recorded);
+- `currencyCdInq` set to the selected currency;
+- no `inquiryStrtdtCat`; `inquiryEnddtCat=2026-11-09`;
+- `maximumAcqCnt=3`, `acquisitionStrtCnt=1`, `sortSelect=00002`, `detailDispSg=1`.
+
+The next page is POST
+`/custom-web00/eaba/cust-web/ordinary-deposit-transaction-histories-pager`,
+with `currencyCd` instead of `currencyCdInq`, the same omitted start and explicit end,
+`maximumAcqCnt=3`, `acquisitionStrtCnt=4`, `sortSelect=00002`, `detailDispSg=1`.
+JPY, USD and AUD pagination was observed; the remaining currencies each fit
+on their first page. No guessed opening date or early-range probe is needed.
+
+The CSV link sends POST
+`/custom-web00/eaba/ordinary-deposit-transaction-histories/csv/load`, with
+private branch/account identifiers, `currencyCd`, the same omitted start and explicit end,
+`sortSelect=00002` and `detailDispSg=1`, without paging keys. Every currency's
+CSV returned HTTP 200 `application/octet-stream`. Logical data-row counts
+matched the JSON totals for all eleven currencies; quoted framing and field
+counts matched. JPY has the existing seven columns (`取引日`, `摘要`, `参考情報`,
+`通貨`, `預入額`, `引出額`, `差引残高`); all foreign currencies add `為替レート`.
+Only counts and schema were inspected in memory; no private row was copied.
+
+The JSON envelope remains `errors: array`,
+`responseBizCommon: {bizResult: string, exceptionRsn: array}`, `countCnt: number`,
+`returnCnt: number`, `transactionHistInfo: array`, with the existing transaction
+string fields and optional FX fields. `currencyMst` retains 13 entries and
+`ordinaryDepAcInfo` 11 entries with existing string fields. First-page array
+length and `returnCnt` equal the lesser of total and three.
+
+The scheduled collector preserves the prior monthly requests and also walks
+this unbounded-start query for every currency through yesterday. Canonical
+filenames contain full retained history; `monthly-*` files retain the monthly
+responses as evidence without a parser dataset. The production dataset selector
+therefore publishes only the full CSV. Existing external IDs collapse overlap
+with earlier monthly runs and repeated retained runs, while retaining distinct
+occurrences of truly identical rows (ADR 0092). The Processor passes an explicit
+null lower bound only for Sony; its parsers use the Sony-only
+`retainedHistoryEnd` field and continue to enforce the end date. Every page and CSV must pass completeness checks. A mismatch, unavailable CSV,
+or page limit fails the run with a closed code, rather than claiming zero or
+publishing a partial CSV. There is no continuation cursor at the observed size.
+This proves the query's entire provider-retained result, not independent
+account-opening coverage or deployment of this implementation.

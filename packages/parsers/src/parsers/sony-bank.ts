@@ -19,6 +19,11 @@ import {
   strictString,
 } from "./sbi-strict.ts";
 
+/** Sony-only provider query with an intentionally omitted start date. */
+export interface SonyBankArtifactMeta extends ArtifactMeta {
+  retainedHistoryEnd?: string;
+}
+
 const CURRENCIES = [
   "AUD",
   "BRL",
@@ -62,9 +67,8 @@ const CUSTOMER_DISPLAY_ORDER = "customerDispOrdr";
 
 export const sonyBankGrossBalance: Parser = {
   name: "sony-bank-gross-balance",
-  // 1.0.2 refuses an updateDttm whose clock time does not exist in the
-  // zone-less form too; every time that exists reads as in 1.0.1.
-  version: "1.0.3",
+  // Patch release: shared module adds explicit retained-history metadata.
+  version: "1.0.4",
   accepts: (artifact) => artifact.sourceId === "sony-bank" && artifact.dataset === "gross-balance",
   parse(bytes, artifact) {
     requireSuccessfulRun(artifact);
@@ -191,9 +195,8 @@ export const sonyBankGrossBalance: Parser = {
 
 export const sonyBankHistoryJson: Parser = {
   name: "sony-bank-history-json",
-  // 1.0.1 reads every page as 1.0.0: only its digest moved, with the
-  // gross-balance time check in this module (gross balance 1.0.2).
-  version: "1.0.2",
+  // Explicit retained-history end metadata keeps the omitted lower bound.
+  version: "1.0.3",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" &&
     /^(yen-history|foreign-history-[a-z]{3})-page-\d{4}$/u.test(artifact.dataset ?? ""),
@@ -290,9 +293,8 @@ export const sonyBankHistoryJson: Parser = {
 
 export const sonyBankHistoryCsv: Parser = {
   name: "sony-bank-history-csv",
-  // 1.0.2 reads every file as 1.0.1: only its digest moved, with the
-  // gross-balance time check in this module (gross balance 1.0.2).
-  version: "1.0.3",
+  // Explicit retained-history end metadata keeps the omitted lower bound.
+  version: "1.0.4",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" &&
     /^(yen-history|foreign-history-[a-z]{3})-csv$/u.test(artifact.dataset ?? ""),
@@ -415,9 +417,8 @@ const WALLET_HEADERS = [
 
 export const sonyBankWalletHistory: Parser = {
   name: "sony-bank-wallet-history",
-  // 1.0.3 reads every page as 1.0.2: only its digest moved, with the
-  // gross-balance time check in this module (gross balance 1.0.2).
-  version: "1.0.4",
+  // Patch release: shared module adds explicit retained-history metadata.
+  version: "1.0.5",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" && /^wallet-history-\d{6}$/u.test(artifact.dataset ?? ""),
   parse(bytes, artifact) {
@@ -736,19 +737,25 @@ function historyCurrency(dataset: string): string {
   }
   return currency;
 }
-function historyWindow(artifact: ArtifactMeta): { from: string; to: string } {
+function historyWindow(artifact: ArtifactMeta): { from: string | null; to: string } {
+  const retainedEnd = (artifact as SonyBankArtifactMeta).retainedHistoryEnd;
+  if (retainedEnd !== undefined) {
+    if (artifact.sourceId !== "sony-bank" || artifact.runWindow !== undefined)
+      throw new Error("Sony retained history metadata is invalid");
+    return { from: null, to: normalizedDate(retainedEnd, "Sony history window end") };
+  }
   if (!artifact.runWindow) throw new Error("Sony history fetch window is missing");
   const from = normalizedDate(artifact.runWindow.from, "Sony history window start");
   const to = normalizedDate(artifact.runWindow.to, "Sony history window end");
-  if (from > to) throw new Error("Sony history fetch window is reversed");
+  if (from !== null && from > to) throw new Error("Sony history fetch window is reversed");
   return { from, to };
 }
 function requireWithinWindow(
   date: string,
-  window: { from: string; to: string },
+  window: { from: string | null; to: string },
   label: string,
 ): void {
-  if (date < window.from || date > window.to)
+  if ((window.from !== null && date < window.from) || date > window.to)
     throw new Error(`${label} is outside the fetch window`);
 }
 function exactUnsignedMoney(value: unknown, currency: string, label: string) {

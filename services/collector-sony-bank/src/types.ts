@@ -42,7 +42,7 @@ export interface CollectionManifest {
   startedAt: string;
   completedAt: string;
   status: "success" | "partial" | "failed";
-  window: { from: string; to: string };
+  window: { from: string | null; to: string };
   transactionCount: number;
   artifacts: StoredArtifact[];
   failures: CollectionFailure[];

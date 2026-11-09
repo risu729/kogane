@@ -105,7 +105,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/smbc-direct.ts":
       "93a3e72b94400fe1e2fd2afb56b42a9f88bcc1c449b0ab47197377962bb7b511",
     "poc/observation-pipeline/src/parsers/sony-bank.ts":
-      "b114022993854781bb293e40330eca99c04dafab22b12b594dbe35fedb8b679c",
+      "99306fffd2b0444d4b0faecfdf0ba5ef88418ba42418b7f5636c57c25d4fa895",
     "poc/observation-pipeline/src/parsers/st-george.ts":
       "278eeb68604bfd69d6a81fb0ed314a8559ffb90d4da023bc4918321c8cd013b3",
     "poc/observation-pipeline/src/parsers/util.ts":
@@ -600,8 +600,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-gross-balance": {
-      version: "1.0.3",
-      codeDigest: "49e0c58ef3a9a29b9231140ad041714bb33eda78ec3680d77bc2a9318a186f91",
+      version: "1.0.4",
+      codeDigest: "5f39fea3158f9f4e7a71ab3676b2f38fa7ef73f2f94963e25620e2a15a4dd76a",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -614,8 +614,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-history-csv": {
-      version: "1.0.3",
-      codeDigest: "49e0c58ef3a9a29b9231140ad041714bb33eda78ec3680d77bc2a9318a186f91",
+      version: "1.0.4",
+      codeDigest: "5f39fea3158f9f4e7a71ab3676b2f38fa7ef73f2f94963e25620e2a15a4dd76a",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -628,8 +628,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-history-json": {
-      version: "1.0.2",
-      codeDigest: "49e0c58ef3a9a29b9231140ad041714bb33eda78ec3680d77bc2a9318a186f91",
+      version: "1.0.3",
+      codeDigest: "5f39fea3158f9f4e7a71ab3676b2f38fa7ef73f2f94963e25620e2a15a4dd76a",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -642,8 +642,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-wallet-history": {
-      version: "1.0.4",
-      codeDigest: "49e0c58ef3a9a29b9231140ad041714bb33eda78ec3680d77bc2a9318a186f91",
+      version: "1.0.5",
+      codeDigest: "5f39fea3158f9f4e7a71ab3676b2f38fa7ef73f2f94963e25620e2a15a4dd76a",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
