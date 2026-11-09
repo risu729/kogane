@@ -39,7 +39,9 @@ repository and the issue alone.
 4. **Collector and wiring.** Land the collector and every wiring file in
    [section 3](#3-files-a-new-source-touches) in one PR, with the schedule
    seeded disabled.
-5. **Production check.** After the deploy, the owner sets the secrets, the
+5. **Production check.** The owner sets the Worker's secrets (whether a
+   deploy needs them to exist first is not documented; if the deploy refuses
+   the Worker, the owner sets them before it), the
    connection is added to the Processor's dispatch list
    ([section 3.3](#33-collection-schedule-and-dispatch)), one collection is
    requested, and the result is read back over MCP
