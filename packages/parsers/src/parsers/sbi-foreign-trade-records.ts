@@ -41,7 +41,7 @@ const CONTROL_CODE = /^[A-Z0-9_-]*$/u;
 
 export const sbiForeignTradeRecords: Parser = {
   name: "sbi-foreign-trade-records",
-  version: "1.0.1",
+  version: "1.0.2",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "foreign-trade-records";
@@ -144,7 +144,10 @@ export const sbiForeignTradeRecords: Parser = {
         }
         const amount = exactMoney(record["amount"], settlementCurrency, `${label}.amount`);
         const quantity = exactDecimal(record["quantity"], `${label}.quantity`);
-        exactMoney(record["price"], tradeCurrency, `${label}.price`);
+        // A unit price can carry sub-minor-unit precision. Only the settled
+        // amount is converted to currency minor units; the exact price stays
+        // in the provider row used for the transaction's stable identity.
+        exactDecimal(record["price"], `${label}.price`);
         const tradeDate = normalizedDate(record["tradeDate"], `${label}.tradeDate`);
         const valueDate = normalizedDate(record["valueDate"], `${label}.valueDate`);
         const fingerprint = stableFingerprint(record);

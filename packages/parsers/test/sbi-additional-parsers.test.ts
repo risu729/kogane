@@ -396,12 +396,47 @@ describe("sbi-foreign-trade-records", () => {
     expect(first.currency).toBe("USD");
     expect(first.asOf).toBe("2026-08-18");
     expect(first.externalId).not.toBe(second.externalId);
+    // Frozen from parser 1.0.1: accepting additional price precision must not
+    // give previously accepted executions a new identity on versioned replay.
+    expect(first.externalId).toBe("sbi-foreign-trade:6a7036564b9d25ba24bebd081f686686:0");
     expect(first.externalId?.replace(/:0$/u, "")).toBe(second.externalId?.replace(/:1$/u, ""));
     expect(first.extra["_kogane"]).toMatchObject({
       transactionType: "BUY",
       tradeCurrency: "USD",
       quantityText: "10",
     });
+  });
+
+  test("sub-cent unit prices stay exact while settlement amounts still require minor units", () => {
+    const bytes = readFileSync(
+      new URL(
+        "../../../tests/fixtures/observation-pipeline/sbi-parser-boundaries/foreign-trade-records-fractional-price.json",
+        import.meta.url,
+      ),
+    );
+    const body = JSON.parse(bytes.toString()) as Record<string, any>;
+    const result = sbiForeignTradeRecords.parse(bytes, meta);
+    expect(result.observations).toHaveLength(1);
+    const transaction = result.observations[0]!;
+    expect(transaction).toMatchObject({
+      kind: "transaction",
+      status: "posted",
+      amountMinor: 11138,
+      currency: "USD",
+      extra: { price: "37.125" },
+    });
+    const record = body["pages"][0].listTradeRecords.tradeRecords[0];
+    record.amount = "111.375";
+    expect(() => sbiForeignTradeRecords.parse(encoded(body), meta)).toThrow(
+      "not exactly representable",
+    );
+    record.amount = "111.38";
+    for (const price of ["", "SYNTHETIC", null, {}, "1e3"]) {
+      record.price = price;
+      expect(() => sbiForeignTradeRecords.parse(encoded(body), meta)).toThrow(
+        "must be an exact decimal",
+      );
+    }
   });
 
   test("missing pages, broken continuation, schema drift, and precision loss fail closed", () => {
