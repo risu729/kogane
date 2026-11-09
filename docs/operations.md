@@ -371,6 +371,43 @@ most 50 artifacts per run, the parser version replayed is the one in the
 checkout (not necessarily the one that failed), and one category names only
 the first check that refused; the `shape` line is what shows the rest.
 
+### Workers Issues (error grouping)
+
+Adopted 2026-11-09 (owner decision). Every production Worker under
+`services/` turns on Cloudflare
+[Workers Issues](https://developers.cloudflare.com/workers/observability/issues/),
+which groups recurring failures of one Worker into issues without an SDK:
+
+```jsonc
+// wrangler.jsonc
+"observability": { "enabled": true, "issues": { "enabled": true } }
+```
+
+```ts
+// cloudflare.config.ts (what `cf deploy` reads)
+observability: { enabled: true, issues: { enabled: true } },
+```
+
+Both files carry the key: a deploy whose config omits it turns Issues off
+again, and `tasks/_lib/cf-deploy.test.ts` keeps the two `observability` objects
+equal.
+
+What becomes an occurrence: an uncaught exception, a failed invocation, a `5xx`
+response the Worker returns, and a console line at error level or one carrying
+an `Error` object or stack trace. Collector stage failures reach it through the
+`console.error` line of `collector-diagnostics` (`event: "collector-diagnostic"`,
+`outcome: "failed"`, safe error fields only). A collector run that catches its
+failure and reports it only as a `console.log` result line (for example
+`mizuho-collection-result` with `status: "failed"`) does not.
+
+Limits: occurrence details are kept seven days (issues stay listed after
+that); only traffic after the deploy is processed; Issues is in open beta and
+free during the beta. The issues are read in the dashboard (Worker > Issues)
+or through the account API under
+`/accounts/{account_id}/workers/observability/issues` (list, `/{issueId}`,
+`/{issueId}/occurrences`, `PATCH` for the status). The wrangler OAuth token has
+no Workers Observability scope, so it cannot read them.
+
 ## 2. Load budgets and the D1 harness
 
 The review's design load is a shape, not a forecast:
