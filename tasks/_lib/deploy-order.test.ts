@@ -395,7 +395,7 @@ describe("the deploy workflow follows the ledger", () => {
     );
   });
 
-  test("only credential preflight, migrations, deployment, identity/trigger readback and script-settings sync see the Cloudflare token (G5-17)", () => {
+  test("only credential preflight, migrations, deployment and identity/trigger readback see the Cloudflare token (G5-17)", () => {
     const usingToken = workflowSteps(deployWorkflow)
       .filter((step) => step.body.includes("secrets.CLOUDFLARE_API_TOKEN"))
       .map((step) => step.name.replace(/ with cf$/u, ""))
@@ -435,7 +435,6 @@ describe("the deploy workflow follows the ledger", () => {
       "Deploy the App",
       "Verify the existing DO namespaces and lifecycle",
       "Reconcile future schedule alarms",
-      "Sync the non-versioned settings of version-published Workers",
     ]);
   });
 

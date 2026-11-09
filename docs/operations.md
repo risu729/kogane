@@ -388,18 +388,17 @@ which groups recurring failures of one Worker into issues without an SDK:
 observability: { enabled: true, issues: { enabled: true } },
 ```
 
-How the setting reaches Cloudflare: the three Container Workers (GlobalPass,
-SBI Shinsei, St.George) publish with `cf deploy`, which applies
-`cloudflare.config.ts`; the other fourteen publish a version, which carries no
-`observability`, and the release then applies the `wrangler.jsonc` object
-through the script-settings API
-([ci-cd.md](ci-cd.md#cf-version-deployment-and-compatible-rollbacks)). Either
-way the settings follow the deployed commit, so a rollback to a commit before
-2026-11-09 turns Issues off for the Workers it publishes.
-`tasks/_lib/cf-script-settings.test.ts` requires `issues.enabled` in every
-cf-deployed Worker's `wrangler.jsonc` and in the Container Workers'
-`cloudflare.config.ts`; `tasks/_lib/cf-deploy.test.ts` keeps the two files'
-`observability` objects equal for the other fourteen.
+How the setting reaches Cloudflare: only the three Container Workers
+(GlobalPass, SBI Shinsei, St.George) apply it today, because they publish with
+`cf deploy`, which applies `cloudflare.config.ts` including `observability`.
+The other fourteen publish with `cf workers versions create` and
+`cf workers deployments create`, which carry no non-versioned script settings,
+so no `observability` change (this one or any earlier one) has reached them
+since they moved to cf. Moving them to `cf deploy` is the open follow-up; until
+then Issues covers the three Container Workers only. A full deploy or rollback
+from a commit whose config lacks the key turns Issues off for a Container
+Worker. `tasks/_lib/cf-deploy.test.ts` requires `issues.enabled` in both files
+of every cf-deployed Worker.
 
 What becomes an occurrence: an uncaught exception, a failed invocation, a `5xx`
 response the Worker returns, and a console line at error level or one carrying

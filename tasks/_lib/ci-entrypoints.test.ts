@@ -24,7 +24,6 @@ const HELPERS = [
   "alarm-bootstrap.mjs",
   "cf-container-release.mjs",
   "cf-do-identity.mjs",
-  "cf-script-settings.mjs",
   "container-preflight.mjs",
   "release-health.mjs",
   "release-ledger.mjs",
