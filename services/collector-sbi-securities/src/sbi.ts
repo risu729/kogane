@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { requestPasskeyAccessToken } from "./auth";
+import {
+  addDays,
+  collectHistoryArtifacts,
+  jstDate,
+  SbiHistoryError,
+  type HistoryWindow,
+} from "./history-windows";
 import type {
   Artifact,
   DomesticSession,
@@ -58,6 +65,8 @@ export async function collectForeignArtifacts(options: {
   handshakeKey: SbiHandshakeKey;
   from?: string;
   to?: string;
+  historyRange?: HistoryWindow;
+  onHistoryError?: (error: SbiHistoryError) => void;
 }): Promise<Artifact[]> {
   const accessToken = await requestPasskeyAccessToken({
     authEntryUrl: options.endpoints.authEntryUrl,
@@ -67,8 +76,7 @@ export async function collectForeignArtifacts(options: {
   });
   const session = await loginForeign(accessToken, options.endpoints.foreignStockBaseUrl);
   const to = options.to ?? jstDate(new Date());
-  const from = options.from ?? addUtcDays(to, -89);
-  assertDateRange(from, to);
+  const range = options.historyRange ?? { from: options.from ?? addDays(to, -89), to };
 
   const positions = await foreignGraphql(session, "GetSecuritiesBalanceList", SECURITIES_BALANCES, {
     input: {
@@ -84,6 +92,25 @@ export async function collectForeignArtifacts(options: {
       input: { currencyCode: "USD", days: 5 },
     },
   );
+  const history = await collectHistoryArtifacts({
+    dataset: "foreign-trade-records",
+    range,
+    collect: (window) => collectForeignTradeRecords(session, window),
+    ...(options.onHistoryError === undefined ? {} : { onError: options.onHistoryError }),
+  });
+
+  return [
+    { dataset: "foreign-cash-positions", mediaType: "application/json", body: positions },
+    { dataset: "foreign-cash-balances", mediaType: "application/json", body: foreignCash },
+    ...history,
+  ];
+}
+
+export async function collectForeignTradeRecords(
+  session: ForeignSession,
+  window: HistoryWindow,
+): Promise<{ pages: unknown[] }> {
+  assertDateRange(window.from, window.to);
   const historyPages: unknown[] = [];
   for (let pageNum = 1; pageNum <= 20; pageNum += 1) {
     const page = await foreignGraphql(session, "GetTradeRecordList", TRADE_RECORD_LIST, {
@@ -93,36 +120,19 @@ export async function collectForeignArtifacts(options: {
         specificAccountCode: null,
         tradeHistoryType: "TRADE_RECORD",
         searchDateType: "TRADE_DATE_BASE",
-        searchDateFrom: from,
-        searchDateTo: to,
+        searchDateFrom: window.from,
+        searchDateTo: window.to,
         page: { pageNum, pageSize: 999 },
       },
     });
     historyPages.push(page);
     if (!hasNextTradeRecordPage(page)) break;
     if (pageNum === 20) {
-      throw new Error("SBI foreign trade history exceeded 20 pages");
+      throw new SbiHistoryError("sbi_foreign_history_page_limit");
     }
   }
 
-  return [
-    {
-      dataset: "foreign-cash-positions",
-      mediaType: "application/json",
-      body: positions,
-    },
-    {
-      dataset: "foreign-cash-balances",
-      mediaType: "application/json",
-      body: foreignCash,
-    },
-    {
-      dataset: "foreign-trade-records",
-      mediaType: "application/json",
-      window: { from, to },
-      body: { pages: historyPages },
-    },
-  ];
+  return { pages: historyPages };
 }
 
 export async function callMts(
@@ -320,7 +330,9 @@ function foreignHeaders(options: {
 function hasNextTradeRecordPage(data: Record<string, unknown>): boolean {
   const list = objectOrUndefined(data["listTradeRecords"]);
   const page = objectOrUndefined(list?.["page"]);
-  return page?.["hasNextPage"] === true;
+  if (typeof page?.["hasNextPage"] !== "boolean" || !Array.isArray(list?.["tradeRecords"]))
+    throw new SbiHistoryError("sbi_foreign_history_page_invalid");
+  return page["hasNextPage"];
 }
 
 function parseMtsHeader(buffer: Buffer): {
@@ -390,21 +402,6 @@ function assertDateRange(from: string, to: string): void {
   const toDate = Date.parse(`${to}T00:00:00.000Z`);
   const days = Math.floor((toDate - fromDate) / 86_400_000) + 1;
   if (days > 90) throw new Error("SBI history window must not exceed 90 days");
-}
-
-function addUtcDays(value: string, days: number): string {
-  const date = new Date(`${value}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function jstDate(now: Date): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
 }
 
 const SECURITIES_BALANCES = `

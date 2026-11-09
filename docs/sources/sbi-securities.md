@@ -39,6 +39,79 @@ shared `DATA` bucket, not a private one ([below](#addendum-switch-to-shared-data
 
 For the initial backfill, 2024-08-28–2026-05-29 was split into eight non-overlapping intervals of at most 90 days. All runs succeeded, domestic 8/8 and foreign 8/8, with failure 0, and were saved to private R2. The recent 2026-05-30–2026-08-27 interval also succeeded for both domestic and foreign scopes. R2 therefore currently holds about two years of domestic/US equity transaction history, plus raw snapshots at each run of domestic/US equity holdings, yen/USD cash deposits, My Assets, and yen deposit/withdrawal statements.
 
+### 2026-11-09: two-year execution windows
+
+For [#1225](https://github.com/risu729/kogane/issues/1225), the owner's existing
+browser session supplied these read observations. Dates below are search
+parameters, not personal transaction dates; no tokens or provider row values
+were retained.
+
+- Domestic: `POST /ETGate/`, `_PageID=WPLETacR007Rlst10`,
+  `_ControlID=WPLETacR007Control`, `_ActionID=search`, `sec_kbn` two spaces
+  for all products, and `ref_from_yyyy/mm/dd`, `ref_to_yyyy/mm/dd`. The form
+  offers `max_cnt` 50/100/150/200. The 90-day query 2024-11-10 through
+  2025-02-07 was retained and accepted. Its empty response had the search
+  form, no result table, and the fixed message
+  `指定された条件での約定履歴は見つかりませんでした。` (no executions matched
+  the selected conditions).
+- Foreign: the observed read navigation reaches
+  `member.c.sbisec.co.jp/foreign/account/trade-history`.
+  `GET /foreign/api/account/trade-history` returns exactly
+  `{ nextBusinessDate: string }`, in `YYYY-MM-DD` form. The request includes
+  `x-csrf-token`; its page has `meta[name=_csrf]`, with no CSRF input.
+  The two-year button selected 2024-11-12 through 2026-11-11. A manual
+  2024-11-10 start was cleared without a history request, while 2024-11-12
+  through 2025-02-07 was retained and returned HTTP 200. The foreign cutoff
+  therefore comes from the provider's next business date, not JST today.
+- The corroborating web execution query is
+  `GET /foreign/api/account/trade-histories`, with `pageNumber`, `dateFrom`,
+  `dateTo`, `productType=stock`, `countryCode=us`, `stockMarginType=order`.
+  The full two-year search had 11 rows and `totalCount=11`, `pageNum=1`,
+  `pageSize=50`, `firstPage=true`, `lastPage=true`, and both next/previous
+  flags false. No next-page request was observed. The response has
+  `accountTradeHistories` and page metadata; its row schema is
+  `executionDate`, `productType`, `priceType`, `depositType`, `tradeType`,
+  `settlementCurrency`, `quantity`, `price`, `deliveryDate`, `amount`,
+  `exchangeRate`, `countryCode`, `currencyCode`, `name`, `shortName`, `code`,
+  `marketCode`, `listedStatus` (strings), and `marginLimitType` (null).
+
+These web observations corroborate retention and the cutoff. They do not
+re-observe the foreign mobile GraphQL protocol. Its unchanged
+`GetTradeRecordList` input fields and 90-day window support come from the
+[actual historical backfill](../research/sbi-securities.md); no new mobile
+operation, retention query or input field is inferred.
+
+A read-only CORE aggregate on 2026-11-09 counted distinct external execution
+IDs across published parses, rather than counting repeated captures as new
+executions. The cutoff for the last column is the documented start of daily
+collection, 2026-08-27, not a private transaction date:
+
+| Scope    | Trade quarter | Distinct IDs | IDs before daily collection |
+| -------- | ------------- | -----------: | --------------------------: |
+| Domestic | 2026-Q1       |           42 |                          42 |
+| Domestic | 2026-Q2       |           29 |                          29 |
+| Domestic | 2026-Q3       |            1 |                           1 |
+| Domestic | 2026-Q4       |            7 |                           0 |
+| US       | 2026-Q2       |            6 |                           6 |
+| US       | 2026-Q3       |            1 |                           1 |
+
+No counted observation lacked an external ID. The historical backfill had
+therefore already published 72 domestic and seven US executions before daily
+collection. These counts do not prove present two-year completeness; the web
+US total and published execution count still differ, with the independent
+parser refusal tracked in [#1220](https://github.com/risu729/kogane/issues/1220).
+
+The scheduled collector now walks at most nine disjoint windows per scope,
+newest first, keeping the newest 90-day artifact's prior key and existing row
+identities. Each older window has a dated artifact key and a matching requested
+range in the terminal and CORE descriptor under registration v4
+([ADR 0096](../adr/0096-sbi-scheduled-execution-history.md)). Empty domestic
+windows require the observed message. A window failure retains other windows
+but marks the scope incomplete. Foreign retention discovery failure falls back
+to the old 90-day request as partial evidence. Deployment, a completed scheduled
+walk within the time limit, publication of every window and provider-count
+equality remain unverified; no manual collector invocation was performed.
+
 ## Assessment scale
 
 Automation levels are defined as follows.

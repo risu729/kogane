@@ -22,6 +22,7 @@ import type {
   CollectionScope,
   SbiEndpoints,
 } from "./types";
+import { sbiArtifactKey, SbiHistoryError, type HistoryWindow } from "./history-windows";
 const SBI_ENDPOINTS: SbiEndpoints = {
   authEntryUrl: "https://login.sbisec.co.jp/login/entry",
   mtsBaseUrl: "https://apli.sbisec.co.jp",
@@ -87,6 +88,11 @@ async function runCollection(
       const artifacts: Artifact[] = [];
       const failures: CollectionFailure[] = [];
       const safeFailures: SharedFailure[] = [];
+      let foreignHistoryRange: HistoryWindow | undefined;
+      const historyFailure = (scope: "domestic" | "foreign", error: SbiHistoryError) => {
+        failures.push(failure(scope, "trade-history", error));
+        safeFailures.push({ scope, code: safeFailureCode(error) });
+      };
       if (scope === "all" || scope === "domestic") {
         try {
           const domestic = await diagnostic.step("domestic-collection", () =>
@@ -106,6 +112,10 @@ async function runCollection(
                     session: domestic.session,
                     mainSiteBaseUrl,
                     ...(window ?? {}),
+                    onForeignHistoryRange: (range) => {
+                      foreignHistoryRange = range;
+                    },
+                    onHistoryError: historyFailure,
                   }),
                 )),
               );
@@ -120,6 +130,14 @@ async function runCollection(
         }
       }
       if (scope === "all" || scope === "foreign") {
+        if (
+          foreignHistoryRange === undefined &&
+          !safeFailures.some((entry) => entry.scope === "foreign")
+        )
+          historyFailure(
+            "foreign",
+            new SbiHistoryError("sbi_foreign_history_retention_unavailable"),
+          );
         try {
           artifacts.push(
             ...(await diagnostic.step("foreign-collection", () =>
@@ -128,6 +146,8 @@ async function runCollection(
                 credential,
                 handshakeKey,
                 ...(window ?? {}),
+                ...(foreignHistoryRange === undefined ? {} : { historyRange: foreignHistoryRange }),
+                onHistoryError: (error) => historyFailure("foreign", error),
               }),
             )),
           );
@@ -172,7 +192,7 @@ async function runCollection(
           persisted.outcome === "persisted" || persisted.outcome === "already_persisted";
         const objects = persisted.outcome === "conflict" ? [] : persisted.objects;
         const described = new Map<string, Artifact>(
-          artifacts.map((artifact) => [`${artifact.dataset}.json`, artifact]),
+          artifacts.map((artifact) => [sbiArtifactKey(artifact), artifact]),
         );
         const terminal: SharedTerminalSummary = {
           outcome: persisted.outcome,

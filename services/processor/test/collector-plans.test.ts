@@ -41,6 +41,9 @@ import { mobileSuicaRunPlan } from "../../collector-mobile-suica/src/shared-run.
 import { moneyForwardRunPlan } from "../../collector-moneyforward/src/shared-collection.ts";
 import { myJcbRunPlan } from "../../collector-myjcb/src/shared-collection.ts";
 import { sbiRunPlan } from "../../collector-sbi-securities/src/shared-run.ts";
+import { collectHistoryArtifacts } from "../../collector-sbi-securities/src/history-windows.ts";
+import { sbiForeignTradeRecords } from "../../../packages/parsers/src/parsers/sbi-foreign-trade-records.ts";
+import { FIXTURES_ROOT } from "../../../packages/parsers/test/fixture-root.ts";
 import { buildSharedRunPlan as sbiShinseiRunPlan } from "../../collector-sbi-shinsei/src/shared-collection.ts";
 import { buildSharedRunPlan as sbiVcTradeRunPlan } from "../../collector-sbi-vc-trade/src/shared-collection.ts";
 import type { CollectionManifest as SbiVcTradeManifest } from "../../collector-sbi-vc-trade/src/types.ts";
@@ -114,6 +117,7 @@ interface Registered {
   runStatus: string;
   /** Each unit's terminal-report failure code, by unit key (null when none). */
   unitFailureCodes: (string | null)[];
+  artifactRanges: { artifact_key: string; start_value: string; end_value: string }[];
 }
 
 /**
@@ -137,7 +141,11 @@ async function registerPlan(plan: PersistRunPlan, expectedArtifacts: number): Pr
   const h = harness();
   const persisted = await persistRun(h.bucket, plan);
   expect(persisted.outcome).toBe("persisted");
-  const result = await registerCollectionRun(h.env, { source, runId: run.runId });
+  let result = await registerCollectionRun(h.env, { source, runId: run.runId });
+  // Window ranges and their descriptors can require several normal bounded
+  // registration invocations. Resume only `pending`, never a refusal/error.
+  for (let step = 0; result.outcome === "pending" && step < 4; step++)
+    result = await registerCollectionRun(h.env, { source, runId: run.runId });
   expect(result).toMatchObject({ outcome: "registered", artifacts: expectedArtifacts });
   if (result.outcome !== "registered") throw new Error(`unreachable: ${result.outcome}`);
 
@@ -212,7 +220,12 @@ async function registerPlan(plan: PersistRunPlan, expectedArtifacts: number): Pr
       )
       .all(result.fetchRunId) as { code: string | null }[]
   ).map((row) => row.code);
-  return { roles, units, datasets, runStatus, unitFailureCodes };
+  const artifactRanges = h.db
+    .query(
+      "SELECT a.artifact_key,r.start_value,r.end_value FROM artifact_ranges r JOIN fetch_artifacts a ON a.id=r.fetch_artifact_id WHERE a.fetch_run_id=? ORDER BY a.artifact_key",
+    )
+    .all(result.fetchRunId) as Registered["artifactRanges"];
+  return { roles, units, datasets, runStatus, unitFailureCodes, artifactRanges };
 }
 
 // --- Sources that registered before this change -------------------------------
@@ -412,6 +425,104 @@ test("sbi-securities: every dataset states its extraction and registers", async 
     { unit_key: "domestic", artifacts: 4, declared: 4 },
     { unit_key: "foreign", artifacts: 3, declared: 3 },
   ]);
+});
+
+test("sbi-securities: every two-year execution window registers once with its own requested range", async () => {
+  const range = { from: "2097-01-01", to: "2099-01-01" };
+  const domestic = await collectHistoryArtifacts({
+    dataset: "domestic-trade-records",
+    range,
+    collect: async () => ({ records: [], hasMore: false }),
+  });
+  const foreign = await collectHistoryArtifacts({
+    dataset: "foreign-trade-records",
+    range,
+    collect: async () => ({
+      pages: [
+        {
+          checkJrNisaOpen: { opened: false },
+          listTradeRecords: { page: { hasNextPage: false }, tradeRecords: [] },
+        },
+      ],
+    }),
+  });
+  const artifacts = [...domestic, ...foreign];
+  const plan = await sbiRunPlan({
+    runId: RUN_ID,
+    producerVersion: "synthetic-history-v1",
+    attemptId: "attempt-history",
+    startedAt: STARTED_AT,
+    completedAt: COMPLETED_AT,
+    status: "success",
+    scope: "all",
+    artifacts,
+    failures: [],
+  });
+  const registered = await registerPlan(plan, 18);
+  expect(registered.units).toEqual([
+    { unit_key: "domestic", artifacts: 9, declared: 9 },
+    { unit_key: "foreign", artifacts: 9, declared: 9 },
+  ]);
+  expect(registered.datasets).toEqual(["domestic-trade-records", "foreign-trade-records"]);
+  expect(registered.artifactRanges).toHaveLength(18);
+  for (const artifact of artifacts)
+    expect(registered.artifactRanges).toContainEqual({
+      artifact_key: artifact.artifactKey ?? `${artifact.dataset}.json`,
+      start_value: artifact.window!.from,
+      end_value: artifact.window!.to,
+    });
+  // Equal empty response bodies share content-addressed bytes, while each
+  // separate requested window remains its own registered evidence capture.
+  expect(new Set(plan.artifacts.map((artifact) => artifact.sha256)).size).toBe(2);
+});
+
+test("SBI execution IDs remain the same when the retained windows move on the next day", async () => {
+  const body = JSON.parse(
+    readFileSync(`${FIXTURES_ROOT}sbi-parser-boundaries/foreign-trade-records.json`, "utf8"),
+  );
+  const record = body.pages[0].listTradeRecords.tradeRecords[0];
+  const parse = async (to: string) => {
+    const artifacts = await collectHistoryArtifacts({
+      dataset: "foreign-trade-records",
+      range: { from: "2024-08-20", to },
+      collect: async (window) => ({
+        pages: [
+          {
+            checkJrNisaOpen: { opened: false },
+            listTradeRecords: {
+              page: { hasNextPage: false },
+              tradeRecords:
+                record.tradeDate >= window.from && record.tradeDate <= window.to
+                  ? [record, structuredClone(record)]
+                  : [],
+            },
+          },
+        ],
+      }),
+    });
+    return artifacts.flatMap((artifact) =>
+      sbiForeignTradeRecords
+        .parse(new TextEncoder().encode(JSON.stringify(artifact.body)), {
+          id: 1,
+          sourceId: "sbi-securities",
+          dataset: artifact.dataset,
+          runStatus: "success",
+          runFailureCount: 0,
+          url: null,
+          mime: "application/json",
+          fetchedAt: "2099-01-01T00:00:00Z",
+          sha256: "0".repeat(64),
+        })
+        .observations.map((observation) =>
+          observation.kind === "transaction" ? observation.externalId : undefined,
+        ),
+    );
+  };
+  const before = await parse("2026-08-20");
+  const after = await parse("2026-08-21");
+  expect(before).toHaveLength(2);
+  expect(new Set(before).size).toBe(2);
+  expect(after).toEqual(before);
 });
 
 test("sbi-shinsei: redacted captures, the normalized view and the run manifest register", async () => {

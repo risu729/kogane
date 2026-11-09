@@ -15,8 +15,8 @@ This independent Worker creates a fresh session from a stored `SBI証券` passke
 ## Current scope
 
 - Domestic-stock app: domestic cash equities/custody-cash payload through an MTS session and read-only TR code `F2631`.
-- Main site: current `My資産` ("My assets") valuation, yen deposit/withdrawal details and domestic-stock history of at most 90 days. Yen details retain every provider page-metadata field and response field in a page bundle, validating completeness before making an artifact.
-- Foreign-stock app: US cash equities, USD custody cash and transaction history of at most 90 days.
+- Main site: current `My資産` ("My assets") valuation, yen deposit/withdrawal details and two years of domestic-stock execution history, split into windows of at most 90 days. Yen details retain every provider page-metadata field and response field in a page bundle, validating completeness before making an artifact.
+- Foreign-stock app: US cash equities, USD custody cash and retained execution history in windows of at most 90 days. The foreign web history init supplies the next-business-date cutoff; its two-year boundary is not derived from today's clock.
 - Execution: the Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the `sbi-securities` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), daily at 06:00 JST (21:00 UTC), and an accepted operations request calls `runOperation` (ADR 0048). Either one collects domestic/foreign data serially in one invocation (`scope=all`). The Worker has no Cron Trigger and no public trigger route.
 - Storage: `packages/collection` writes directly to shared DATA; the Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). The only D1 the collector uses is the execution lease (`withCollectionLease`) in `SCHEDULE_DB` (`kogane-raw-evidence`).
 
@@ -62,14 +62,35 @@ mise run //services/collector-sbi-securities:ci
 mise run //services/collector-sbi-securities:dry-run
 ```
 
-Public `/trigger`, scope/arbitrary-period selection, old `scripts/trigger.sh` and 90-day split `scripts/backfill.sh` are retired. The existing private RPC runs only normal all-scope collection, without equivalent backfill functionality. No new authentication path or scope override is added.
+Public `/trigger`, scope/arbitrary-period selection, old `scripts/trigger.sh` and 90-day split `scripts/backfill.sh` are retired. The existing private RPC runs normal all-scope collection, including the retained execution-history walk. No window parameter, new authentication path or scope override is added.
 
 ```text
-objects/<2 hex>/<sha256>                       content-addressed object per <dataset>.json
+objects/<2 hex>/<sha256>                       content-addressed object per artifact
 runs/sbi-securities/<run-id>/terminal.json     run completion record written last (artifact key/object mapping)
 ```
 
 The terminal records the period, success/partial success/failure, artifact hashes/byte sizes, machine-readable failure codes with secrets removed, and nothing for access tokens, SIDs, cookies, MTS session headers or account numbers.
+
+Execution windows are newest first and disjoint, with at most nine per scope.
+The newest ordinary 90-day request keeps `<scope>-trade-records.json`; older
+requests use `<scope>-trade-records-<from>-<to>.json`. Each carries its own
+requested range in the terminal and, under `terminal-registration-v4`, its
+CORE artifact descriptor. Equal empty bodies may share a content-addressed
+object while their separate requested windows remain registered evidence.
+The foreign init is the observed read-only
+`GET /foreign/api/account/trade-history`, using the existing main-site
+session and page CSRF header. The mobile execution query and all row identity
+calculations stay unchanged. No progress cursor or state is stored.
+
+A failed window preserves the other windows but makes its scope incomplete
+with a closed code. If foreign retention discovery fails, the foreign scope
+keeps the old 90-day request as partial evidence and names
+`sbi_foreign_history_retention_unavailable`. Missing foreign pagination flags,
+the 20-page bound and a domestic result reaching the unwalked 200-row cap
+also fail closed. A domestic empty window needs both its search form and the
+observed fixed empty-result message. Publication, complete retention counts
+and the 13-minute holder limit still require a scheduled production run to
+verify ([ADR 0096](../../docs/adr/0096-sbi-scheduled-execution-history.md)).
 
 `yen-detail-history.json` uses `sbi-yen-detail-history-bundle-v1`, retaining bundle counts/completion/bound flags and provider responses within `pages[]`. It validates consecutive `pageNumber`, constant `pageCount` / `pageSize` / `totalCount`, total row count, duplicate `did` and provider/collector bound flags. Only read-only `GET /banking/api/yen/detail/init` has been observed; the next-page request endpoint/parameter contract is unconfirmed. Consequently, when init indicates multiple pages or uncaptured rows, the run closes as a `main-site` failure without guessed requests, rather than saving missing history as a successful artifact.
 

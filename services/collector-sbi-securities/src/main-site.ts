@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
 import { callMts } from "./sbi";
+import {
+  collectHistoryArtifacts,
+  foreignHistoryRange,
+  jstDate,
+  SbiHistoryError,
+  twoYearsBefore,
+  type HistoryWindow,
+} from "./history-windows";
 import type { Artifact, DomesticSession } from "./types";
 
 const MAIN_SITE_USER_AGENT =
@@ -68,12 +76,23 @@ export async function collectMainSiteArtifacts(options: {
   mainSiteBaseUrl: string;
   from?: string;
   to?: string;
+  onForeignHistoryRange?: (range: HistoryWindow) => void;
+  onHistoryError?: (scope: "domestic" | "foreign", error: SbiHistoryError) => void;
 }): Promise<Artifact[]> {
   const to = options.to ?? jstDate(new Date());
-  const from = options.from ?? addUtcDays(to, -89);
-  assertDateRange(from, to);
+  const from = options.from ?? twoYearsBefore(to);
   const auth = await createMainSiteAuth(options.session, options.mainSiteBaseUrl);
   const artifacts: Artifact[] = [];
+
+  if (options.onForeignHistoryRange !== undefined) {
+    try {
+      options.onForeignHistoryRange(await fetchForeignHistoryRange(options.session, auth, to));
+    } catch (cause) {
+      const error = new SbiHistoryError("sbi_foreign_history_retention_unavailable", { cause });
+      if (options.onHistoryError === undefined) throw error;
+      options.onHistoryError("foreign", error);
+    }
+  }
 
   const assets = await fetchAssets(auth);
   artifacts.push({
@@ -89,19 +108,46 @@ export async function collectMainSiteArtifacts(options: {
     body: yenHistory,
   });
 
-  const domesticHistory = await fetchDomesticTradeHistory({
-    session: options.session,
-    auth,
-    from,
-    to,
-  });
-  artifacts.push({
-    dataset: "domestic-trade-records",
-    mediaType: "application/json",
-    window: { from, to },
-    body: domesticHistory,
-  });
+  artifacts.push(
+    ...(await collectHistoryArtifacts({
+      dataset: "domestic-trade-records",
+      range: { from, to },
+      collect: (window) => fetchDomesticTradeHistory({ session: options.session, auth, ...window }),
+      ...(options.onHistoryError === undefined
+        ? {}
+        : { onError: (error: SbiHistoryError) => options.onHistoryError!("domestic", error) }),
+    })),
+  );
   return artifacts;
+}
+
+async function fetchForeignHistoryRange(
+  session: DomesticSession,
+  auth: MainSiteAuth,
+  today: string,
+): Promise<HistoryWindow> {
+  const page = await fetchMainSiteAuthenticatedPage(
+    session,
+    auth,
+    new URL("/foreign/account/trade-history", MEMBER_SITE_ORIGIN),
+  );
+  if (!page.response.ok) throw new SbiHistoryError("sbi_foreign_history_retention_unavailable");
+  const csrfToken = extractCsrfToken(await page.response.text());
+  if (!csrfToken) throw new SbiHistoryError("sbi_foreign_history_retention_unavailable");
+  const response = await fetch(new URL("/foreign/api/account/trade-history", MEMBER_SITE_ORIGIN), {
+    headers: {
+      accept: "application/json, text/plain, */*",
+      cookie: page.cookieHeader,
+      referer: new URL("/foreign/account/trade-history", MEMBER_SITE_ORIGIN).toString(),
+      "user-agent": MAIN_SITE_USER_AGENT,
+      "x-csrf-token": csrfToken,
+    },
+  });
+  if (!response.ok) throw new SbiHistoryError("sbi_foreign_history_retention_unavailable");
+  const body = parseJsonObject(await response.text(), "SBI foreign history retention");
+  if (Object.keys(body).length !== 1 || typeof body.nextBusinessDate !== "string")
+    throw new SbiHistoryError("sbi_foreign_history_retention_unavailable");
+  return foreignHistoryRange(body.nextBusinessDate, today);
 }
 
 async function createMainSiteAuth(
@@ -606,7 +652,7 @@ interface DomesticTradeRecord {
   rawCells: string[];
 }
 
-function parseDomesticTradeRecords(html: string): {
+export function parseDomesticTradeRecords(html: string): {
   records: DomesticTradeRecord[];
   hasMore: boolean;
 } {
@@ -617,7 +663,10 @@ function parseDomesticTradeRecords(html: string): {
         htmlText(candidate).includes("約定日") && htmlText(candidate).includes("約定数量"),
     );
   if (!table) {
-    if (/\bname=["']ACT_search["']/iu.test(html)) {
+    if (
+      /\bname=["']ACT_search["']/iu.test(html) &&
+      htmlText(html).includes("指定された条件での約定履歴は見つかりませんでした")
+    ) {
       return { records: [], hasMore: false };
     }
     throw new Error("SBI domestic history response omitted its result table");
@@ -661,7 +710,8 @@ function parseDomesticTradeRecords(html: string): {
         rawCells: cells,
       };
     });
-  return { records, hasMore: records.length >= 200 };
+  if (records.length >= 200) throw new SbiHistoryError("sbi_domestic_history_truncated");
+  return { records, hasMore: false };
 }
 
 function mainSiteAssetLoginParams(siteLinkParam: string): Record<string, string> {
@@ -925,30 +975,4 @@ function parseJsonObject(text: string, label: string): Record<string, unknown> {
     throw new Error(`${label} returned non-object JSON`);
   }
   return parsed as Record<string, unknown>;
-}
-
-function assertDateRange(from: string, to: string): void {
-  if (!/^\d{4}-\d{2}-\d{2}$/u.test(from) || !/^\d{4}-\d{2}-\d{2}$/u.test(to) || from > to) {
-    throw new Error("SBI history window must be a valid YYYY-MM-DD range");
-  }
-  const days =
-    Math.floor(
-      (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) / 86_400_000,
-    ) + 1;
-  if (days > 90) throw new Error("SBI history window must not exceed 90 days");
-}
-
-function addUtcDays(value: string, days: number): string {
-  const date = new Date(`${value}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function jstDate(now: Date): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
 }
