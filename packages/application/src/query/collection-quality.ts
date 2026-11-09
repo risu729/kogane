@@ -37,6 +37,7 @@ import {
   COLLECTION_FRESHNESS_POLICY,
   collectionFreshness,
   tokyoDate,
+  type CollectionFreshness,
   type CollectionWait,
 } from "../../../domain/src/collection-freshness.ts";
 import {
@@ -587,6 +588,25 @@ interface AccountBucket {
 const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
+ * A group uses its newest named capture's freshness, independently of standing.
+ * Equal capture instants retain the response's stable group/period order.
+ */
+function newestCaptureFreshness(periods: readonly AccountCoveragePeriod[]): CollectionFreshness {
+  let freshest = periods[0]!;
+  for (const entry of periods)
+    if (Date.parse(entry.capture.capturedAt) > Date.parse(freshest.capture.capturedAt))
+      freshest = entry;
+  return { ...freshest.freshness };
+}
+
+export interface AccountCoverageInput {
+  /** A CORE source id. */
+  sourceId: string;
+  /** The instant ages are counted to. */
+  asOf: string;
+}
+
+/**
  * `GET /api/collection-quality/<sourceId>/accounts`: every cell of the source,
  * regrouped by the accounts its captures' observations name, then by data
  * type (dataset, parser, observation kind) and period; the cells whose
@@ -601,13 +621,20 @@ const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
  * never read as an account, a period no cell has is not listed (and is
  * neither claimed missing nor covered), and an account whose mapping is not
  * `identified` keeps that status.
+ *
+ * Freshness (`collection-freshness-v1`, ADR 0088's amendment of 2026-11-08):
+ * every period uses the capture it names, even when it is not current. A
+ * data type and account use their newest named capture's freshness.
  */
 export async function queryAccountCoverage(
   executor: SqlExecutor,
-  input: { sourceId: string },
+  input: AccountCoverageInput,
 ): Promise<AccountCoverage | null> {
   const source = await executor.first<SourceQualityRow>(ONE_SOURCE_QUALITY_SQL, [input.sourceId]);
   if (source === null) return null;
+  const asOf = freshnessAsOf(input.asOf);
+  const wait = await waitOfSource(executor, source.source_id);
+  const providerTypes = providerDataTypes(source.source_id);
   const rows = await executor.all<AccountCoverageRow>(ACCOUNT_COVERAGE_SQL, [input.sourceId]);
   if (rows.length > ACCOUNT_COVERAGE_CELL_BOUND) throw new CollectionQualityLimitError();
   const accounts = new Map<string, AccountBucket>();
@@ -657,17 +684,23 @@ export async function queryAccountCoverage(
       const type = JSON.stringify([value.dataset, value.parser, kind]);
       const periods = bucket.types.get(type) ?? [];
       bucket.types.set(type, periods);
+      const capture = inCurrent
+        ? value.current!
+        : { fetchRunId: value.newest.fetchRunId, capturedAt: value.newest.capturedAt };
       periods.push({
         unitKey: value.unitKey,
         period: value.period,
         currentRule: value.currentRule,
         cellState: value.state,
         standing,
-        capture: inCurrent
-          ? value.current!
-          : { fetchRunId: value.newest.fetchRunId, capturedAt: value.newest.capturedAt },
+        capture,
         observations: inCurrent ? seen.current : seen.newest,
         reasons: value.reasons,
+        freshness: collectionFreshness(
+          capture.capturedAt,
+          asOf.date,
+          value.reasons.includes("user_action_required") ? "human-required" : wait,
+        ),
       });
       entries += 1;
     }
@@ -676,31 +709,47 @@ export async function queryAccountCoverage(
   const kindOrder = (kind: ObservationKind): number => OBSERVATION_KINDS.indexOf(kind);
   return {
     apiVersion: ACCOUNT_COVERAGE_API_VERSION,
+    freshnessAsOf: asOf,
+    dataTypesVersion: PROVIDER_DATA_TYPES_VERSION,
+    dataTypes: providerTypes,
     sourceId: source.source_id,
     latestFetchRun: fetchRun(source),
     cells: rows.length,
     accounts: [...accounts.entries()]
       .sort(([a], [b]) => byText(a, b))
-      .map(([accountId, bucket]): AccountCoverageAccount => ({
-        accountId,
-        label: bucket.label,
-        statuses: MAPPING_STATUSES.filter((status) => bucket.statuses.has(status)),
-        dataTypes: [...bucket.types.entries()]
+      .map(([accountId, bucket]): AccountCoverageAccount => {
+        const dataTypes = [...bucket.types.entries()]
           .map(([type, periods]) => {
             const [dataset, parser, kind] = JSON.parse(type) as [
               string | null,
               string,
               ObservationKind,
             ];
-            return { dataset, parser, kind, periods };
+            return {
+              dataset,
+              parser,
+              kind,
+              providerTypes: (providerTypes ?? [])
+                .filter((entry) => entry.parsers.includes(parser))
+                .map((entry) => entry.type),
+              periods,
+              freshness: newestCaptureFreshness(periods),
+            };
           })
           .sort(
             (a, b) =>
               byText(a.dataset ?? "", b.dataset ?? "") ||
               byText(a.parser, b.parser) ||
               kindOrder(a.kind) - kindOrder(b.kind),
-          ),
-      })),
+          );
+        return {
+          accountId,
+          label: bucket.label,
+          statuses: MAPPING_STATUSES.filter((status) => bucket.statuses.has(status)),
+          dataTypes,
+          freshness: newestCaptureFreshness(dataTypes.flatMap((type) => type.periods)),
+        };
+      }),
     unattributed,
   };
 }

@@ -404,7 +404,7 @@ function AccountPeriod({ value }: { value: AccountCoveragePeriod }): ReactNode {
       <p>
         取得時刻 {value.capture.capturedAt} ·{" "}
         <Link to={`/runs/r_${value.capture.fetchRunId}`}>取得記録</Link> · この口座の観測{" "}
-        {value.observations} 件
+        {value.observations} 件 · 新しさ: <Freshness value={value.freshness} />
       </p>
       <Reasons codes={value.reasons} />
     </li>
@@ -429,6 +429,13 @@ function SourceAccounts({ sourceId }: { sourceId: string }): ReactNode {
             この取得元の保存記録 {data.cells}{" "}
             件を、観測が対応付けられた口座ごとに並べます。保存記録のない期間は列挙できず、欠落とも取得済みとも判定しません。別の取得元にある同じ口座は、その取得元で表示します。
           </p>
+          <p>
+            新しさは、各期間に表示する取得の日付から {data.freshnessAsOf.date}
+            （日本時間）までの日数です。口座とデータ種別の新しさは、その中で最も新しい取得のものです。現在の表示への採用状況は、各期間に別に表示します。
+          </p>
+          <Panel title="口座表示の提供元データ種別">
+            <DataTypes entries={data.dataTypes} />
+          </Panel>
           {data.accounts.length === 0 ? (
             <EmptyState>
               口座に対応付けられた観測がありません。取得や取引がないことの証明ではありません。
@@ -443,14 +450,20 @@ function SourceAccounts({ sourceId }: { sourceId: string }): ReactNode {
                 <div className="panel-body">
                   <p>
                     口座 <code>{account.accountId}</code> ·{" "}
-                    {account.statuses.map((status) => MAPPING_STATUS_LABELS[status]).join(" / ")}
+                    {account.statuses.map((status) => MAPPING_STATUS_LABELS[status]).join(" / ")} ·
+                    新しさ: <Freshness value={account.freshness} />
                   </p>
                   {account.dataTypes.map((type) => (
                     <section key={`${type.dataset}/${type.parser}/${type.kind}`}>
                       <h3>
-                        {KIND_LABELS[type.kind]} · {type.dataset ?? "データ種別不明"}
+                        {type.providerTypes.length
+                          ? type.providerTypes.map((value) => DATA_TYPE_LABELS[value]).join(" / ")
+                          : "提供元のデータ種別不明"}{" "}
+                        · {KIND_LABELS[type.kind]} · {type.dataset ?? "データ種別不明"}
                       </h3>
-                      <p>解析: {type.parser}</p>
+                      <p>
+                        解析: {type.parser} · 新しさ: <Freshness value={type.freshness} />
+                      </p>
                       <ul>
                         {type.periods.map((value) => (
                           <AccountPeriod
@@ -558,9 +571,11 @@ export function CollectionQualityPage(): ReactNode {
                     日本時間基準。成否を問わず最新の取得記録の日付。データ種別ごとの新しさは下の一覧）
                   </p>
                   <Reasons codes={selected.reasons} />
-                  <Panel title="取得元が提供するデータ種別">
-                    <DataTypes entries={selected.dataTypes} />
-                  </Panel>
+                  {!byAccount ? (
+                    <Panel title="取得元が提供するデータ種別">
+                      <DataTypes entries={selected.dataTypes} />
+                    </Panel>
+                  ) : null}
                   <Panel title="最後の試行と取得結果">
                     {selected.schedules.length ? (
                       selected.schedules.map((schedule) => (

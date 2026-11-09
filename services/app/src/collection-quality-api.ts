@@ -84,7 +84,7 @@ export async function readCollectionQuality(
       const sourceId = rest.slice(0, -ACCOUNT_COVERAGE_SUFFIX.length);
       if (!SOURCE.test(sourceId)) throw new HttpError(404, "not_found");
       if ([...url.searchParams.keys()].length > 0) throw new HttpError(400, "invalid_query");
-      const coverage = await queryAccountCoverage(d1Executor(env.DB), { sourceId });
+      const coverage = await queryAccountCoverage(d1Executor(env.DB), { sourceId, asOf });
       if (coverage === null) throw new HttpError(404, "not_found");
       return coverage;
     }

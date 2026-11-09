@@ -247,3 +247,76 @@ Synthetic data only, no production access:
   `//packages/observation-shared:ci`, `//services/app:ci`, `//apps/web:ci`,
   `//experiments/observation-pipeline-local:ci`, `mise run ci:root`,
   `mise exec -- hk check --all --no-fail-fast`.
+
+## Amendment 2026-11-08: freshness per account, data type and period
+
+- Status: proposed
+- Date: 2026-11-08
+- Issue: [#1139](https://github.com/risu729/kogane/issues/1139)
+- Builds on: [ADR 0045's freshness amendment](0045-collection-quality-read.md#amendment-2026-11-08-freshness-per-source-and-cell)
+  and [ADR 0087](0087-provider-data-type-catalogue.md).
+- Owner approval: required before merge. The earlier Phase 3 plan approved
+  current-capture ages in principle; this amendment follows the later issue's
+  explicit named-capture rule, including captures that are not current.
+
+### Context and options
+
+The account view already groups saved cells by account, parser, observation
+kind and period. It names the capture that contains that account's observations
+and states its adoption separately. The provider catalogue already describes
+what each source offers, including gaps. Neither belongs in a new table.
+
+Copying the cell's current-capture freshness onto every account period can
+name a capture that does not contain that account. Giving a
+`newest-not-current` period no age conceals the timestamp it actually names.
+The chosen rule ages the named capture and retains `standing` as the separate
+statement about current data. This follows the literal acceptance contract of
+[#1139](https://github.com/risu729/kogane/issues/1139), refining the earlier
+[Phase 3 plan](../plans/2026-11-phase3-coverage-identity.md#3d-freshness-per-cell-code--adr-0045-amendment-after-1112).
+
+### Decision
+
+- One `freshnessAsOf: { policy, at, date }` applies to the whole answer.
+  Every period uses its own `capture.capturedAt` under
+  `collection-freshness-v1`, even with `standing: newest-not-current`.
+  Source wait is read through the cells route's `SOURCE_JOBS_SQL`; the
+  period's `user_action_required` reason has the same precedence as on cells.
+- Each parser group and account carries the freshness of its newest named
+  capture, selected by instant across its periods (and, for an account,
+  across all groups). Equal instants retain the response's stable group/period order;
+  the strict contract accepts either tied newest period's value. A wait on
+  an older period does not replace the newest period's wait state.
+- `ACCOUNT_COVERAGE_API_VERSION` is 3. The answer owns `dataTypesVersion`
+  and source-level `dataTypes`, using the unchanged provider catalogue.
+  Each parser group has `providerTypes: ProviderDataType[]`: reverse parser
+  membership in that source's catalogue, in catalogue order. An unknown
+  parser maps to `[]`; a source without a catalogue has `dataTypes: null`.
+  A parser can describe multiple provider types; observation kind is never
+  used to guess a provider type.
+- The strict wire check requires the version, catalogue and as-of, closed
+  distinct provider types, exact reverse membership, policy-consistent
+  freshness pairs, each period's age from its capture and Tokyo as-of date,
+  and each group's exact freshness from a newest capture.
+- The account page reuses `Freshness`, `DATA_TYPE_LABELS` and `DataTypes`.
+  It shows account, parser and period ages and the account answer's own
+  catalogue with partial/uncollected tracking links. It explains adoption
+  independently. The catalogue remains visible when no account is named.
+- `kogane.collection-quality.read` with `view: accounts` uses the same
+  reader and response on HTTP and MCP; its description states these fields.
+  No grants, tools, tables, migrations or catalogue contents change.
+
+### Consequences and verification
+
+Freshness describes the named evidence's age, not its adoption or history
+completeness. A stale month beside a fresh one remains visible without making
+the account stale. Cell and account-period freshness agree whenever their
+named captures agree; different captures can legitimately have different ages.
+Clients and App deploy together because older account shapes are rejected.
+The MCP description changes and this proposed amendment require owner approval
+before merge under ADR 0081 and AGENTS.md.
+
+Synthetic tests cover all source catalogue/parser reverse memberships, unknown
+parsers, named non-current captures, Tokyo midnight, source/manual/unit wait
+precedence, newest capture selection across types, strict malformed responses,
+matching-capture cell parity, HTTP/MCP equality, and the production browser view
+at 375 px with an accessibility audit. No production collection is exercised.
