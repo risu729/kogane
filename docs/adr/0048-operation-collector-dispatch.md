@@ -630,3 +630,54 @@ George and SBI VC in #1140).
   `kogane.ops.operation.get` to its terminal state, recorded in
   [current-status.md](../current-status.md) and
   [ops-api.md](../ops-api.md#enabling-collector-execution-adr-0048) by #1170.
+
+## Amendment 2026-11-08: St George and SBI VC enabled
+
+Status: proposed (accepted when its pull request merges).
+
+### Context
+
+The amendment above left `st-george`, `sbi-vc-trade` and `sbi-vc-keepalive`
+waiting for [#1131](https://github.com/risu729/kogane/pull/1131), which
+retired these collectors' admin routes
+([ADR 0069](0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08)).
+Since then an accepted request is the only way to ask them for a login
+outside the alarm: a requested St George collection lifts a login pause at
+most once per 24 hours, and an SBI VC session refresh forces at most one
+passkey login per hour. Both limits are the collectors' own and apply to every
+caller. Neither collector accepts provider terms.
+
+### Decision
+
+Both Processor configurations add the three connections to
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` (eight in all), and the App's
+`SESSION_REFRESH_POLICY` is `{"sbi-vc-trade":"unattended"}`, so an SBI VC
+session-refresh request is dispatched to `sbi-vc-keepalive` instead of being
+stored `waiting_for_human` (owner, 2026-11-08 03:19 and 03:57 UTC;
+[#1140](https://github.com/risu729/kogane/issues/1140)). Every other source's
+refresh still waits for a person.
+
+### Consequences
+
+- A St George request while a pause holds and the day's requested login is
+  spent ends `failed` with `st_george_paused_<code>` and no run; nothing
+  contacts the bank.
+- An SBI VC request while the owner's terms agreement is pending ends `failed`
+  with `manual_agreement_required`; the collector never sends `setAgreement`.
+- The open limit on unattended session refresh is unchanged: SBI VC's
+  keepalive is still the only one.
+- No request to the three connections has yet been followed in production;
+  [ops-api.md](../ops-api.md#enabling-collector-execution-adr-0048) records
+  the first ones when they are made.
+
+### Verification
+
+- The committed values: `services/processor/wrangler.jsonc`,
+  `services/processor/cloudflare.config.ts`, `services/app/wrangler.jsonc`,
+  `services/app/cloudflare.config.ts`, and their digests in
+  `scripts/resource-ledger.test.ts`.
+- The collectors' limits: `services/collector-st-george/test/worker-policy.test.ts`
+  (the requested lift once per 24 hours) and
+  `services/collector-sbi-vc-trade/worker-test/schedule-result.test.ts` (the
+  forced login once per hour, and the login retried while an agreement is
+  pending).
