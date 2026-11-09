@@ -276,6 +276,7 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
             transformerVersion: "v1",
             inputArtifactKeys: [
               artifact.filename.replace("savings-activity-", "raw-period-activity-"),
+              TOP_BALANCES_ARTIFACT_KEY,
             ],
             outputArtifactKey: artifact.filename,
           }

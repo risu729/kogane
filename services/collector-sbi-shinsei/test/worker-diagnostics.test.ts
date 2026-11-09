@@ -1,5 +1,6 @@
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { savingsRetention } from "../src/savings-activity";
 
 let handoff = "";
 let destroyFails = false;
@@ -78,6 +79,51 @@ async function trigger(loggingFails = false) {
 }
 
 describe("Shinsei Worker failure logging", () => {
+  test("a failed history scope stays in memory and does not enter logs, manifests or the scheduled result", async () => {
+    const fixtures = await Bun.file(`${import.meta.dir}/fixtures/core-responses.json`).json();
+    const account = {
+      accountNo: "000000000000001",
+      currency: "JPY",
+      productCode: "601",
+      balance: "1000",
+      yenEqui: "1000",
+    };
+    fixtures.topBalances.responseParam.overview.responseParam.savingsDetails = [account];
+    handoff = JSON.stringify({
+      ok: true,
+      responses: Object.fromEntries(
+        ["topBalances", "balanceSummary", "exchangeRate", "yenDeposit"].map((key) => [
+          key,
+          JSON.stringify(fixtures[key]),
+        ]),
+      ),
+      history: {
+        ...savingsRetention(new Date()),
+        accounts: [
+          {
+            accountNo: account.accountNo,
+            currency: account.currency,
+            productCode: account.productCode,
+            errorCode: "history_read_failed",
+          },
+        ],
+      },
+    });
+    const { response, logs, stored } = await trigger();
+    expect(response.status).toBe("partial");
+    const manifest = JSON.parse(new TextDecoder().decode(stored.at(-1)!.body));
+    for (const value of [response, logs, manifest]) {
+      expect(JSON.stringify(value)).not.toContain("historyScope");
+      expect(JSON.stringify(value)).not.toContain(account.accountNo);
+    }
+    expect(response.failures).toMatchObject([
+      {
+        operation: "read:history-0001",
+        errorType: "ProviderReadError",
+        message: "provider_read_failed",
+      },
+    ]);
+  });
   test("logs the failed stage before teardown and correlates its relay without exposing credentials", async () => {
     handoff = JSON.stringify({
       ok: false,

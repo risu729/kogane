@@ -47,7 +47,15 @@ test("binds each provider response to the complete inventory and retains raw/der
     "savings-activity-0001.json",
   ]);
   const plan = await buildSharedRunPlan({
-    artifacts: result.artifacts,
+    artifacts: [
+      ...result.artifacts,
+      {
+        dataset: "top-accounts-balance-and-activity",
+        filename: "raw-top-accounts-balance-and-activity.json",
+        mediaType: "application/json",
+        body: JSON.stringify(inventory(input.scope)),
+      },
+    ],
     manifest: {
       schemaVersion: "synthetic-v1",
       source: "sbi-shinsei",
@@ -71,7 +79,10 @@ test("binds each provider response to the complete inventory and retains raw/der
   expect(plan.artifacts[1]!.role).toBe("collector_derived");
   expect(plan.run.transformations[1]).toMatchObject({
     stepKind: "extracted",
-    inputArtifactKeys: ["raw-period-activity-0001.json"],
+    inputArtifactKeys: [
+      "raw-period-activity-0001.json",
+      "raw-top-accounts-balance-and-activity.json",
+    ],
     outputArtifactKey: "savings-activity-0001.json",
   });
 });

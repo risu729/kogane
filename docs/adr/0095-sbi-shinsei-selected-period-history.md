@@ -36,7 +36,8 @@ or prevent later account reads.
 
 Each successful account produces a sanitized provider capture and a
 `savings-activity` derived artifact containing the exact request scope and the
-sanitized response. The extraction lineage names the provider capture. Both
+sanitized response. The extraction lineage names the provider capture and the
+top overview that supplied the account/currency/product inventory. Both
 artifacts belong to a stable account unit; its terminal report and requested
 and declared ranges record complete coverage only after validation. Unit-scoped
 eligibility admits a successful account when another account failed. History

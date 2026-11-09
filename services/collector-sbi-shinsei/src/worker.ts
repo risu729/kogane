@@ -275,7 +275,11 @@ export async function runCollection(
       collectionTarget: target,
       ...(shared ? { terminalKey: shared.terminalKey, terminalDigest: shared.terminalDigest } : {}),
     });
-    return { ...manifest, manifestKey };
+    return {
+      ...manifest,
+      failures: manifest.failures.map(({ historyScope: _historyScope, ...failure }) => failure),
+      manifestKey,
+    };
   });
 }
 async function readBoundedText(response: Response, maximumBytes: number): Promise<string> {
