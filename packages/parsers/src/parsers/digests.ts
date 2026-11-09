@@ -16,6 +16,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "5b40a5fb92a270668fbc3e9053e84af0d990c16d5873934e125b1e9822aa4fc9",
     "packages/domain/src/myjcb-amounts.ts":
       "072dc5fc2570fc8257343d85d53e93cf9fa9036f61a1648390a8d8845303ea3e",
+    "packages/domain/src/myjcb-debit-page.ts":
+      "6df61bcf418a2c8bc44f56447f5fa752e0b6888ff2e1bb44a7089f156519a9e8",
     "packages/domain/src/myjcb-jpoint-response.ts":
       "2ab195e078255201c9a9d4ce9d44100f505b10cdca430e9801623841bf472c5e",
     "packages/domain/src/myjcb-schedule-page-kind.ts":
@@ -54,6 +56,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "9ff15fc630314c798312a9d39872bbeb88872a03e83a464abf53446eff373108",
     "poc/observation-pipeline/src/parsers/moneyforward.ts":
       "743299901b3f796a7e53ff39db06b8cacf9039136c30fd8daeec66dbed4545aa",
+    "poc/observation-pipeline/src/parsers/myjcb-debit.ts":
+      "b62663bf3ee961e17d26893858615f022d8dcac5dea9f2b8dc2386f5600667d6",
     "poc/observation-pipeline/src/parsers/myjcb-jpoint.ts":
       "f53f9d187aab2027151a01be3d4aae1f3792006583ffb40045b4cfa2020c1bf8",
     "poc/observation-pipeline/src/parsers/myjcb-skip-payment-schedule.ts":
@@ -288,6 +292,42 @@ export const PARSER_DIGESTS: ParserDigests = {
         "packages/observation-shared/src/normalized-decimal.ts",
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/myjcb.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "myjcb-debit-ledger": {
+      version: "1.0.0",
+      codeDigest: "fb2c9aa93a24e0b5fe0c76cd519f6adae454b9fc606f1f48d431480d2e94acc0",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "packages/domain/src/myjcb-amounts.ts",
+        "packages/domain/src/myjcb-debit-page.ts",
+        "packages/domain/src/myjcb-statement-page.ts",
+        "packages/domain/src/values.ts",
+        "packages/observation-shared/src/normalized-decimal.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/myjcb-debit.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "myjcb-debit-other-statement": {
+      version: "1.0.0",
+      codeDigest: "fb2c9aa93a24e0b5fe0c76cd519f6adae454b9fc606f1f48d431480d2e94acc0",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "packages/domain/src/myjcb-amounts.ts",
+        "packages/domain/src/myjcb-debit-page.ts",
+        "packages/domain/src/myjcb-statement-page.ts",
+        "packages/domain/src/values.ts",
+        "packages/observation-shared/src/normalized-decimal.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/myjcb-debit.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",

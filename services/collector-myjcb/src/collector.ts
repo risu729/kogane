@@ -1,4 +1,11 @@
 import { collectJPoint, isObservedJPointProduct } from "./jpoint";
+import { parse } from "parse5";
+import {
+  readMyJcbDebitPage,
+  readMyJcbDebitMenu,
+  myJcbDebitOtherIsEmpty,
+  myJcbDebitSelectedSequence,
+} from "../../../packages/domain/src/myjcb-debit-page";
 import { safeErrorDetails } from "../../../packages/collector-diagnostics/src/index";
 import { decodeMyJcbHtml, MyJcbReadClient, type ReadResponse } from "./client";
 import { CookieJar } from "./cookie-jar";
@@ -14,7 +21,6 @@ import {
   parseCreditLedger,
   parsePastMonthAvailability,
   readCreditMenuGroups,
-  parseStatementPeriods,
   redactedStatementHtml,
   scheduledLedgerRowCount,
   schedulePageKind,
@@ -119,6 +125,7 @@ export async function collectConnection(options: {
     let exportOffers: readonly ExportOffer[] = [];
     let schedulePages: readonly SchedulePage[] = [];
     let stop: CreditStop | undefined;
+    let debitOtherCode: ConnectionSummary["debitOtherCode"];
 
     const creditLinkId = extractCreditMenuLinkId(login.mypageHtml);
     if (creditLinkId) {
@@ -142,6 +149,13 @@ export async function collectConnection(options: {
       const debit = await collectionStage("collect-debit", async () => await collectDebit(client));
       artifacts.push(...debit.artifacts);
       periodCount += debit.periodCount;
+      unreadMonths = [...unreadMonths, ...debit.unreadMonths];
+      stop = debit.stop;
+      if (stop === undefined) {
+        const other = await collectDebitOther(client);
+        artifacts.push(...other.artifacts);
+        debitOtherCode = other.code;
+      }
     }
     if (artifacts.length === 0) {
       throw new StopConditionError(
@@ -168,7 +182,7 @@ export async function collectConnection(options: {
       periodCount,
       cookieCount: login.jar.count(),
       limitations: [
-        "Root-card switching remains discovery-only until its current POST contract is observed.",
+        "Root-card switching remains discovery-only until its relay responses and stable per-card identity are verified.",
         options.credential.bootstrapMode === "passkey"
           ? "Passkey bootstrap uses an imported Bitwarden credential with a zero signature counter."
           : "Passkey renewal remains human-operated; session bootstrap is short-lived.",
@@ -182,6 +196,7 @@ export async function collectConnection(options: {
     });
     return {
       summary: {
+        ...(debitOtherCode === undefined ? {} : { debitOtherCode }),
         jpointCode: point.code,
         connectionId: options.credential.connectionId,
         bootstrapMode: options.credential.bootstrapMode,
@@ -257,23 +272,18 @@ async function collectionStage<T>(code: StopConditionCode, action: () => Promise
   }
 }
 
-async function collectDebit(client: MyJcbReadClient): Promise<{
+export async function collectDebit(client: Pick<MyJcbReadClient, "get">): Promise<{
   readonly periodCount: number;
   readonly artifacts: RawArtifact[];
+  readonly unreadMonths: readonly UnreadMonth[];
+  readonly stop?: CreditStop;
 }> {
   const menu = await client.get(
     "debit-menu",
     new URLSearchParams({ link_id: "myj_main_debitDetailMenu" }),
   );
   const menuHtml = decodeMyJcbHtml(menu.body, menu.contentType);
-  const periods = parseStatementPeriods(menuHtml);
-  const sequences = periods
-    .flatMap((period) => (period.sequence === undefined ? [] : [period.sequence]))
-    .filter((value, index, values) => values.indexOf(value) === index)
-    .sort((left, right) => left - right);
-  if (sequences.length === 0) {
-    throw new Error("MyJCB debit menu did not enumerate statement sequences");
-  }
+  const sequences = readMyJcbDebitMenu(parse(menuHtml), "ordinary");
   const artifacts: RawArtifact[] = [
     {
       dataset: "debit-menu",
@@ -283,19 +293,82 @@ async function collectDebit(client: MyJcbReadClient): Promise<{
       statementState: "debit",
     },
   ];
+  const unreadMonths: UnreadMonth[] = [];
   for (const sequence of sequences) {
-    const detail = await client.get("debit-detail", new URLSearchParams({ seq: String(sequence) }));
-    const detailHtml = decodeMyJcbHtml(detail.body, detail.contentType);
+    let detailHtml: string;
+    try {
+      const detail = await client.get(
+        "debit-detail",
+        new URLSearchParams({ seq: String(sequence) }),
+      );
+      detailHtml = decodeMyJcbHtml(detail.body, detail.contentType);
+    } catch {
+      const captured = artifacts.length - 1;
+      return {
+        artifacts,
+        unreadMonths,
+        periodCount: captured,
+        stop: { code: "debit", position: sequence, capturedMonthCount: captured },
+      };
+    }
+    try {
+      const page = parse(detailHtml);
+      if (myJcbDebitSelectedSequence(page) !== sequence)
+        throw new Error("myjcb_debit_selected_sequence_mismatch");
+      readMyJcbDebitPage(page);
+    } catch {
+      unreadMonths.push({ position: sequence, code: "rows_unstated" });
+    }
     artifacts.push({
       dataset: "debit-detail",
       filename: `debit-detail-${String(sequence).padStart(2, "0")}.html`,
       body: redactedStatementHtml(detailHtml),
       mediaType: "text/html; charset=utf-8",
       statementState: "debit",
-      period: periods.find((period) => period.sequence === sequence)?.label ?? `seq-${sequence}`,
     });
   }
-  return { periodCount: sequences.length, artifacts };
+  return { periodCount: sequences.length, artifacts, unreadMonths };
+}
+
+/** The separately offered other-statement periods never replace ordinary differences. */
+export async function collectDebitOther(client: Pick<MyJcbReadClient, "get">): Promise<{
+  readonly artifacts: RawArtifact[];
+  readonly code: "complete" | "partial";
+}> {
+  const artifacts: RawArtifact[] = [];
+  let code: "complete" | "partial" = "complete";
+  try {
+    const menu = await client.get("debit-other-menu");
+    const html = decodeMyJcbHtml(menu.body, menu.contentType);
+    artifacts.push({
+      dataset: "debit-other-menu",
+      filename: "debit-other-menu.html",
+      body: redactedStatementHtml(html),
+      mediaType: "text/html; charset=utf-8",
+    });
+    const sequences = readMyJcbDebitMenu(parse(html), "other");
+    for (const sequence of sequences) {
+      try {
+        const response = await client.get(
+          "debit-other-detail",
+          new URLSearchParams({ seq: String(sequence), inquiry: "照会" }),
+        );
+        const page = decodeMyJcbHtml(response.body, response.contentType);
+        artifacts.push({
+          dataset: "debit-other-detail",
+          filename: `debit-other-detail-${String(sequence).padStart(2, "0")}.html`,
+          body: redactedStatementHtml(page),
+          mediaType: "text/html; charset=utf-8",
+        });
+        if (!myJcbDebitOtherIsEmpty(parse(page))) code = "partial";
+      } catch {
+        return { artifacts, code: "partial" };
+      }
+    }
+  } catch {
+    code = "partial";
+  }
+  return { artifacts, code };
 }
 
 /** The reads the credit collection makes; the Worker passes a `MyJcbReadClient`. */

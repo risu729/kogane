@@ -79,17 +79,20 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     missing("position", 452),
   ],
   // MyJCB: credit statements and their ledger, J-POINT balance with its
-  // nearest expiry; the bonus-payment schedule (stored, not parsed), debit
-  // statements, the PDF/CSV/OFX statement exports, J-POINT history and expiry
+  // nearest expiry, and observed debit ordinary/difference statements; the
+  // bonus-payment schedule (stored, not parsed), unsupported debit routes and
+  // statuses, PDF/CSV/OFX statement exports, J-POINT history and expiry
   // buckets are not collected (docs/sources/myjcb.md, #444).
   myjcb: [
-    partial("card_usage", ["myjcb-credit-ledger"], 444),
+    partial("card_usage", ["myjcb-credit-ledger", "myjcb-debit-ledger"], 444),
     partial(
       "card_statement",
       [
         "myjcb-credit-statement-total",
         "myjcb-credit-past-month-balances",
         "myjcb-skip-payment-schedule",
+        "myjcb-debit-ledger",
+        "myjcb-debit-other-statement",
       ],
       444,
     ),
