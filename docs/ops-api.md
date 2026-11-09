@@ -12,7 +12,7 @@ session-refresh request reaches a collector only through the named collector RPC
 the alarm uses, and only for a connection the Processor's
 `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names; the committed value names
 `sony-bank`, `sbi-securities`, `mobile-suica`, `moneyforward-me`, `myjcb`,
-`st-george`, `sbi-vc-trade` and `sbi-vc-keepalive` ([collector execution](#collector-execution-adr-0048),
+`st-george`, `sbi-vc-trade`, `sbi-vc-keepalive` and `prestia-bank` ([collector execution](#collector-execution-adr-0048),
 [ADR 0048](adr/0048-operation-collector-dispatch.md)).
 
 The things an operator asks this system to _do_ — collect a source,
@@ -915,12 +915,15 @@ came first; once its first request was followed to publication, the healthy
 connections that wait on no open fix were added together, and their first
 requests were sent one connection at a time, each after the previous one ended.
 The committed value names `sony-bank`, `sbi-securities`, `mobile-suica`,
-`moneyforward-me`, `myjcb`, `st-george`, `sbi-vc-trade` and `sbi-vc-keepalive`.
-The last three are enabled following
-[#1131](https://github.com/risu729/kogane/pull/1131)
-([#1140](https://github.com/risu729/kogane/issues/1140)); the remaining
-connections (`prestia-globalpass`, `sbi-shinsei`, `vpass`, `mizuho-bank`,
-`vpoint`, `prestia-bank`) come after their open fixes. `mobile-suica` and
+`moneyforward-me`, `myjcb`, `st-george`, `sbi-vc-trade`, `sbi-vc-keepalive` and
+`prestia-bank`. `st-george`, `sbi-vc-trade` and `sbi-vc-keepalive` are enabled
+following [#1131](https://github.com/risu729/kogane/pull/1131)
+([#1140](https://github.com/risu729/kogane/issues/1140)). `prestia-bank` is
+enabled so that its first production collection, which its daily alarm has never
+made, is a request (owner, 2026-11-09 19:52 UTC;
+[ADR 0048, amendment 2026-11-09](adr/0048-operation-collector-dispatch.md#amendment-2026-11-09-prestia-bank-enabled)).
+The remaining connections (`prestia-globalpass`, `sbi-shinsei`, `vpass`,
+`mizuho-bank`, `vpoint`) come after their open fixes. `mobile-suica` and
 `myjcb` drive a browser and run far longer than `sony-bank`; the Processor tick
 waits for them; their first requests ended `published`, not `uncertain`.
 The App's committed `SESSION_REFRESH_POLICY` names `sbi-vc-trade` as

@@ -684,3 +684,46 @@ refresh still waits for a person.
   `services/collector-sbi-vc-trade/worker-test/schedule-result.test.ts` (the
   forced login once per hour, and the login retried while an agreement is
   pending).
+
+## Amendment 2026-11-09: PRESTIA bank enabled
+
+Status: proposed (accepted when its pull request merges).
+
+### Context
+
+The PRESTIA bank collector is deployed, but its daily alarm (`prestia-bank` in
+`config/alarm-jobs.json`) is seeded disabled until one production collection
+has been followed to publication
+([plan, gate 4](../plans/2026-10-prestia-bank-worker.md#remaining-gates)). It
+has never collected in production. The owner allowed that first collection to
+be requested by an agent (2026-11-09 19:52 UTC), as part of collecting what
+existing collectors' sites offer before any new collector
+([roadmap, New sources](../roadmap.md#new-sources)).
+
+### Decision
+
+Both Processor configurations add `prestia-bank` to
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` (nine in all). The first production
+collection is one `kogane.ops.collection.request` for source `prestia`, after
+the reads the tool description lists. The alarm stays disabled; enabling it is
+a separate step after that request is followed to publication. The connection
+stays listed after the first request, like the other eight, so agents may request
+it again within AGENTS.md's request rules (every healthy connection, owner,
+2026-11-08 03:19 UTC); if the first request does not reach publication, the
+change that records its result removes `prestia-bank` until the cause is fixed.
+
+### Consequences
+
+- The collector logs in with the ID and password stored as Worker secrets. A
+  missing secret ends the request `failed` without contacting the bank; an OTP
+  or other additional authentication stops the run and stays human-required
+  ([ADR 0042](0042-prestia-bank-worker.md)). Neither is retried.
+- `prestia-globalpass` is a separate connection and stays outside the list.
+
+### Verification
+
+- The committed values in `services/processor/wrangler.jsonc` and
+  `services/processor/cloudflare.config.ts`, and the Processor digest in
+  `scripts/resource-ledger.test.ts`.
+- The first request's terminal state through `kogane.ops.operation.get`,
+  recorded in [ops-api.md](../ops-api.md#enabling-collector-execution-adr-0048).
