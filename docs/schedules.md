@@ -39,6 +39,29 @@ latest unrelated run. `uncertain` means the provider attempt may have occurred a
 is not replayed automatically. The actual collection's partial outcome remains
 visible in its evidence record.
 
+New-protocol alarms durably write `dispatched_at` before collector RPC
+([ADR 0039 amendment](adr/0039-alarm-schedule-management.md#amendment-a-durable-pre-rpc-dispatch-marker-2026-11-08)).
+After one hour, a stopped claim with no marker becomes `not_dispatched`, shown
+as a stop before calling the collector. The next tick's reservation repair or
+job alarm may retry that occurrence once through the normal collection lease,
+while enabled and outside maintenance. While a retry wakeup is earlier than the
+normal next-run reservation, the actual alarm shows that earlier time and the
+normal reservation can briefly read pending. The retry handler reserves the
+normal next run before claiming the retry. The retry keeps the original nominal
+and consumes its single allowance before trying to mark or call. A retry racing
+the next normal alarm cannot overlap provider work. A second pre-call stop is
+still `not_dispatched`, with no further automatic retry. Unknown finish times
+remain unknown. Collection quality and its MCP read distinguish this status
+with `occurrence_not_dispatched`; the schedules MCP read shares the page's
+snapshot.
+
+A present marker always makes abandonment uncertain, even if the call itself
+never started. Historical receipts and claims from older deployed builds have
+no marker protocol; their absent marker proves nothing, so they remain
+uncertain and are never automatically replayed. No historical receipt is
+backfilled as safe to retry. Operations-API dispatch retains its existing
+uncertain/no-replay policy; this recovery applies to scheduled collections.
+
 A running execution proves it is alive
 ([ADR 0085](adr/0085-collection-lease-heartbeat.md)): it writes the lease's
 `heartbeat_at` on D1's clock with its claim and every minute while it runs. If

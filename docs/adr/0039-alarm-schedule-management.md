@@ -148,3 +148,94 @@ writes a heartbeat on D1's clock while it runs and stops itself within 13
 minutes, and the Processor's tick frees a lease whose heartbeat is 10 minutes
 old, with an audit record. Uncertain occurrences are still never replayed, and
 the operator's release is unchanged.
+
+## Amendment: a durable pre-RPC dispatch marker (2026-11-08)
+
+Status: proposed
+Date: 2026-11-08
+
+### Context and options considered
+
+A claimed occurrence advances its next nominal before collector RPC. Previously,
+any stop after that claim became uncertain after one hour, even when the call
+never started. The owner selected option B on 2026-11-08 at 06:59 UTC in
+[issue 1144](https://github.com/risu729/kogane/issues/1144): a durable D1 marker.
+Option A keeps losing a collection day on a pre-call stop. Option C stores a
+marker only in the alarm object, which the tick and shared read side cannot see.
+
+### Decision
+
+CORE migration 0085 adds `dispatch_protocol`, `dispatched_at`, `attempt_ref` and
+`retry_claimed_at` to the operational occurrence table and admits the closed
+`not_dispatched` status. The status CHECK requires replacing that table inside
+the migration; every existing receipt and its outcome is copied unchanged.
+No financial evidence or adopted state changes.
+
+Only a new alarm claim explicitly opts into protocol 1. Historical rows and rows
+claimed by an older deployed Processor default to protocol 0. An absent marker
+on those rows proves nothing: abandonment still makes them `uncertain` with
+`dispatch_uncertain`, never eligible for automatic replay. There is no automatic
+historical proof backfill, even if old logs suggest a call did not happen.
+
+Before any scheduled RPC the alarm awaits a conditional D1 marker UPDATE and
+requires exactly one changed row: status `started`, protocol 1, its own attempt
+reference, and no previous marker. Only after that acknowledgement does it call
+the same collector entrypoint as before. Thus no marker on a protocol 1 attempt
+proves that this attempt made no collector call. A marker can exist without a
+call, including a lost D1 answer or a stop between the marker and RPC; this false
+positive deliberately remains uncertain.
+
+The one-hour abandonment scan uses the retry's claim time, when present. It
+closes an unmarked protocol 1 attempt as `not_dispatched`; the unknown finish
+time remains null. The next processor tick's reservation repair arms that job's
+alarm for a retry, deferred by current maintenance. An alarm also checks for a
+retry before its next normal nominal. Only enabled collection jobs retry.
+The retry conditionally replaces the attempt reference and writes the immutable
+`retry_claimed_at` in the same UPDATE. That UPDATE also requires the enabled
+schedule, revision and next nominal reservation read before the alarm write;
+a concurrent settings or reservation change consumes no retry and makes no call.
+It consumes the single retry even if it
+stops before its own marker. A delayed original cannot mark or dispatch under
+the new reference; two retry handlers cannot both acquire ownership. Completion
+also checks the attempt reference. A claim conflict leaves another owner's row
+alone. Markers and consumed retry timestamps cannot be cleared.
+
+The retry calls the normal collector `runScheduled` RPC with the original
+nominal, hence uses the existing `withCollectionLease`, heartbeat and provider
+limits. A retry racing the next nominal cannot overlap provider work for that
+source. A busy lease or a present marker is never grounds for another replay.
+The normal next reservation is set before retry claiming. A retry is the same
+occurrence, so its existing once-per-occurrence accepted audit record remains
+the claim record; the closed `retry_claimed` log and timestamp name the extra
+attempt without adding provider text.
+
+### Read surfaces and operations API
+
+The schedules page displays `not_dispatched` as a pre-call stop and explains the
+one-retry limit. Collection quality exposes the same status and a distinct
+`occurrence_not_dispatched` reason, through its shared validated UI/MCP contract.
+`kogane.schedules.read` already uses the same snapshot as the page; no new tool,
+authority or operation is added.
+
+Operations-API requests remain conservative under ADR 0048: their durable
+`dispatched` claim already precedes RPC, and ambiguous dispatches become
+uncertain without replay. They do not lose a daily schedule slot and have an
+explicit request/operation history. This amendment adds no automatic request
+retry and changes no operations-API state or permission. Adopting a recoverable
+pre-RPC attempt protocol there would require its own request ownership and
+once-only policy, rather than reusing schedule receipts.
+
+### Consequences and verification
+
+One safe retry can recover a new-protocol pre-call stop. Stops after a marker,
+legacy claims, disabled jobs and a second pre-call stop remain unreplayed.
+Migration rollout must precede code rollout; mixed old/new claims retain their
+own protocol. Reverting code does not restore the old schema CHECK and cannot
+turn an old unmarked claim into proof. The migration still requires the owner's
+per-PR approval before merge. This PR neither deploys nor merges itself.
+
+Synthetic D1/runtime tests cover a failed pre-RPC marker write, a call whose
+completion is lost, an exhausted retry, a delayed original racing a retry and
+the next alarm through the real lease, old-build claims, and an upgrade of an
+existing started receipt. Shared-contract tests verify the distinct closed
+reason with no fabricated terminal or provider payload.
