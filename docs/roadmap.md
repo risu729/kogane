@@ -335,7 +335,14 @@ each later unit of this track closes gaps and shrinks those lists.
 
 ### New sources
 
-New collectors (#455–#510) start only when the owner asks, or after Phase 3.
+New collectors (#455–#510) start only when the owner asks. Before any of them,
+the data that existing collectors' sites already offer but Kogane does not
+collect comes first (owner, 2026-11-09 19:06 UTC): the `partial` and
+`not_collected` entries of the provider data-type catalogue
+([ADR 0087](adr/0087-provider-data-type-catalogue.md)), tracked under the
+per-source issues #441–#454 of [#440](https://github.com/risu729/kogane/issues/440).
+Until 2026-11-09 the rule read "when the owner asks, or after Phase 3"; Phase 3
+is done, and this order replaces the second condition.
 
 ## Current position
 
