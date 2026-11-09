@@ -34,6 +34,7 @@ import { myJcbSkipPaymentSchedule } from "../src/parsers/myjcb-skip-payment-sche
 import { paypayCsv } from "../src/parsers/paypay-csv.ts";
 import { PARSERS } from "../src/parsers/registry.ts";
 import { sbiDomesticTradeRecords } from "../src/parsers/sbi-domestic-trade-records.ts";
+import { sbiAccountAssetsHistory } from "../src/parsers/sbi-account-assets-history.ts";
 import { sbiForeignCashPositions } from "../src/parsers/sbi-foreign-cash-positions.ts";
 import { sbiForeignTradeRecords } from "../src/parsers/sbi-foreign-trade-records.ts";
 import { sbiVcCashflows } from "../src/parsers/sbi-vc-cashflows.ts";
@@ -67,6 +68,7 @@ const NOT_IN_REGISTRY = [
   "myjcb-jpoint-balance",
   "prestia-bank-balances",
   "sbi-account-assets-current",
+  "sbi-account-assets-history",
   "sbi-foreign-cash-balances",
   "sbi-shinsei-balance-summary-and-stage",
   "sbi-shinsei-exchange-rate",
@@ -380,6 +382,12 @@ const CASES: Case[] = [
 const MF_EVIDENCE = { fetchUnitKey: null, statementState: null, period: null, mime: "text/html" };
 const OUTSIDE_CASES: Case[] = [
   one(
+    sbiAccountAssetsHistory,
+    "account-assets-history",
+    meta("sbi-securities", "account-assets-history"),
+    read("sbi-parser-boundaries", "account-assets-history.json"),
+  ),
+  one(
     myJcbJPointBalance,
     "jpoint-balance",
     meta("myjcb", "jpoint-balance", {
@@ -663,7 +671,7 @@ describe("transaction-family registry against PARSERS", () => {
       expect({ parser: parse.parser.name, rows }).toEqual({ parser: parse.parser.name, rows: [] });
       parsed.add(parse.parser.name);
     }
-    // Every one of the 19 was parsed at least once.
+    // Every excluded parser was parsed at least once.
     expect([...parsed].sort()).toEqual([...NOT_IN_REGISTRY].sort());
   });
 

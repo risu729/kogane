@@ -914,22 +914,60 @@ for this artifact, with the CP932 charset a constant of the source.
 
 ### `sbi-securities` (`services/collector-sbi-securities`)
 
-| Artifact key                   | Role                | Unit       |
-| ------------------------------ | ------------------- | ---------- |
-| `domestic-cash-positions.json` | `collector_derived` | `domestic` |
-| `account-assets-current.json`  | `collector_derived` | `domestic` |
-| `yen-detail-history.json`      | `collector_derived` | `domestic` |
-| `domestic-trade-records.json`  | `collector_derived` | `domestic` |
-| `foreign-cash-positions.json`  | `collector_derived` | `foreign`  |
-| `foreign-cash-balances.json`   | `collector_derived` | `foreign`  |
-| `foreign-trade-records.json`   | `collector_derived` | `foreign`  |
+| Artifact key                              | Role                | Unit       |
+| ----------------------------------------- | ------------------- | ---------- |
+| `domestic-cash-positions.json`            | `collector_derived` | `domestic` |
+| `account-assets-current.json`             | `collector_derived` | `domestic` |
+| `account-assets-history-source.json`      | `provider_response` | `domestic` |
+| `account-assets-history-inventory.json`   | `collector_derived` | `domestic` |
+| `account-assets-history-<year>.json`      | `collector_derived` | `domestic` |
+| `yen-detail-history.json`                 | `collector_derived` | `domestic` |
+| `domestic-trade-records.json`             | `collector_derived` | `domestic` |
+| `foreign-cash-positions.json`             | `collector_derived` | `foreign`  |
+| `foreign-cash-balances.json`              | `collector_derived` | `foreign`  |
+| `foreign-trade-records.json`              | `collector_derived` | `foreign`  |
+| `domestic-trade-records-<from>-<to>.json` | `collector_derived` | `domestic` |
+| `foreign-trade-records-<from>-<to>.json`  | `collector_derived` | `foreign`  |
 
-The bytes are `JSON.stringify(artifact.body)` — the collector's re-encoded view
+Weekly asset history comes from the observed no-query/no-body GET
+`/account/api/assets/valuations` in the existing main-site session. The
+collector audits its closed shape and preserves the exact full response bytes.
+A derived inventory records every expected calendar-year shard
+(`account-assets-history-<year>.json`), hash and point count, and the source
+hash/request/capture time. Yearly shards retain all profiles, native tuples
+and residual rows while keeping at most 53 weeks under the unchanged parser
+output budget. Their transformation inputs name both the source and inventory.
+Missing or changed shards make the domestic unit/run partial. Registration v5
+names only yearly derivatives as the history dataset; source/inventory are unparsed;
+v1–v4 stay frozen. The parser separates available window coverage from
+unavailable null profiles and emits no extra points for native ALL tuples.
+The production observation reader chooses one latest witnessed revision per
+point before filtering/paging; old raw and superseded observations remain
+archived. No new read route is added. The catalogue is partial pending
+scheduled publication and account-specific retained-period verification
+([ADR 0098](adr/0098-sbi-weekly-asset-history.md)).
+
+Except for the exact weekly-history source bytes above, the bytes are
+`JSON.stringify(artifact.body)` — the collector's re-encoded view
 of each response, exactly what the retired legacy path wrote to the per-source
 bucket and the importer forwarded centrally. A dataset is attributed to a unit
 by the same rule the importer used (`foreign-` prefix → `foreign`).
 
-Every dataset states one `extracted` step by `collector-sbi-securities` at the
+Each normal collection walks the historically exercised execution-history
+interval in at most thirteen non-overlapping windows per scope, each at most 90 days,
+newest first. The
+newest window retains its original key; older windows use the dated keys.
+Domestic history begins January 1 of year minus two, matching the historical
+successful requests. Returned date controls must retain that requested
+window; a cleared or clamped date is incomplete. Foreign history
+uses the historically observed mobile BFF `GetSearchingDuration` query with
+`pastYears=2` and begins January 1 of year minus two, through today. This
+reproduces the successful historical eleven-window scan and can need thirteen
+windows at year end. Web retention is a different surface and is not used as
+the mobile boundary. The mobile execution query fields stay unchanged. No progress cursor or operations window
+parameter is added ([ADR 0096](adr/0096-sbi-scheduled-execution-history.md)).
+
+Other datasets state one `extracted` step by `collector-sbi-securities` at the
 producer version with no input (ADR 0021): each is the collector's own
 envelope around what it read from provider responses (the MTS payload with its
 result codes, the GraphQL and main-site JSON, the foreign trade history pages
@@ -952,8 +990,16 @@ requested scope (`domestic`, `foreign`, kind `scope`) carrying that scope's own
 artifact count, coverage and error code — a scope that failed does not make the
 other scope's data look incomplete, and a scope that produced nothing is
 `unknown` rather than an observation of zero. `requestedScope` is a
-`date_range` with a matching `requested-window` range when the trigger named a
-window, and `full_snapshot` with no range when it did not.
+`date_range` with a matching `requested-window` range when an internal caller
+named a window, and otherwise `full_snapshot`. Every artifact with a window
+also states `<artifactKey>:requested`, attributed to its scope. Registration
+v4 maps dated execution keys and copies each matching requested range into
+that artifact's descriptor; earlier registration versions retain their prior
+meaning. Empty windows keep separate captures even when their bytes share an
+object. Per-window failures retain other windows but mark their scope
+incomplete using fixed `sbi_*_history_*` codes. If foreign retention cannot be
+read, the old 90-day request remains partial evidence, with
+`sbi_foreign_history_retention_unavailable` rather than a completeness claim.
 
 ### `mizuho-bank` (`services/collector-mizuho`, `kogane-mizuho-collector`)
 

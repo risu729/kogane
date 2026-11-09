@@ -39,6 +39,107 @@ shared `DATA` bucket, not a private one ([below](#addendum-switch-to-shared-data
 
 For the initial backfill, 2024-08-28–2026-05-29 was split into eight non-overlapping intervals of at most 90 days. All runs succeeded, domestic 8/8 and foreign 8/8, with failure 0, and were saved to private R2. The recent 2026-05-30–2026-08-27 interval also succeeded for both domestic and foreign scopes. R2 therefore currently holds about two years of domestic/US equity transaction history, plus raw snapshots at each run of domestic/US equity holdings, yen/USD cash deposits, My Assets, and yen deposit/withdrawal statements.
 
+### 2026-11-09: two-year execution windows
+
+For [#1225](https://github.com/risu729/kogane/issues/1225), the owner's existing
+browser session supplied these read observations. Dates below are search
+parameters, not personal transaction dates; no tokens or provider row values
+were retained.
+
+- Domestic: `POST /ETGate/`, `_PageID=WPLETacR007Rlst10`,
+  `_ControlID=WPLETacR007Control`, `_ActionID=search`, `sec_kbn` two spaces
+  for all products, and `ref_from_yyyy/mm/dd`, `ref_to_yyyy/mm/dd`. The form
+  offers `max_cnt` 50/100/150/200. The 90-day query 2024-11-10 through
+  2025-02-07 was retained and accepted. Its empty response had the search
+  form, no result table, and the fixed message
+  `指定された条件での約定履歴は見つかりませんでした。` (no executions matched
+  the selected conditions).
+- Foreign: the observed read navigation reaches
+  `member.c.sbisec.co.jp/foreign/account/trade-history`.
+  `GET /foreign/api/account/trade-history` returns exactly
+  `{ nextBusinessDate: string }`, in `YYYY-MM-DD` form. The request includes
+  `x-csrf-token`; its page has `meta[name=_csrf]`, with no CSRF input.
+  The two-year button selected 2024-11-12 through 2026-11-11. A manual
+  2024-11-10 start was cleared without a history request, while 2024-11-12
+  through 2025-02-07 was retained and returned HTTP 200. The foreign cutoff
+  therefore comes from the provider's next business date, not JST today.
+- The corroborating web execution query is
+  `GET /foreign/api/account/trade-histories`, with `pageNumber`, `dateFrom`,
+  `dateTo`, `productType=stock`, `countryCode=us`, `stockMarginType=order`.
+  The full two-year search had 11 rows and `totalCount=11`, `pageNum=1`,
+  `pageSize=50`, `firstPage=true`, `lastPage=true`, and both next/previous
+  flags false. No next-page request was observed. The response has
+  `accountTradeHistories` and page metadata; its row schema is
+  `executionDate`, `productType`, `priceType`, `depositType`, `tradeType`,
+  `settlementCurrency`, `quantity`, `price`, `deliveryDate`, `amount`,
+  `exchangeRate`, `countryCode`, `currencyCode`, `name`, `shortName`, `code`,
+  `marketCode`, `listedStatus` (strings), and `marginLimitType` (null).
+
+These web observations describe the web retention boundary. They do not
+establish the mobile lower bound or re-observe its GraphQL protocol. The
+[retained successful mobile probe](../research/sbi-securities.md) resolves
+the difference: it actually queried `/graphql/bff` with
+`GetSearchingDuration($input: GetSearchingDurationRequest!)`, input
+`countryCode=US`, `searchFunction=EXECUTION_HISTORY`,
+`searchDateType=TRADE_DATE_BASE`, `dateType=MONTH`, `quantity=1`, and selected
+`getSearchingDuration { pastYears searchDateFrom searchDateTo }`. It used
+January 1 of `year(to) - pastYears`, not a rolling anniversary, as the scan
+start; this explains the eleven successful January-to-August windows for
+`pastYears=2`. The returned default-period dates were not treated as the
+earliest retained dates.
+
+The scheduled collector restores that historically observed BFF read using
+its existing authenticated mobile foreign session, with the same header
+names (`authorization`, `account-id`, `accept`, `content-type`, `user-agent`).
+It supports only the observed `pastYears=2` and expected response shape;
+anything else keeps the scope partial. The January-start policy covers the
+historically scanned interval and may require thirteen windows at year end,
+rather than nine rolling two-year windows. The execution query input fields
+are unchanged. This change has no new live-mobile verification: no mobile
+credentials were obtained, no extra mobile session was created and no manual
+collector was invoked. The authenticated Chrome web session is not a mobile
+session. Current BFF behavior and retained coverage still need a scheduled
+production run; historical success is not presented as new live proof.
+
+A read-only CORE aggregate on 2026-11-09 counted distinct external execution
+IDs across published parses, rather than counting repeated captures as new
+executions. The cutoff for the last column is the documented start of daily
+collection, 2026-08-27, not a private transaction date:
+
+| Scope    | Trade quarter | Distinct IDs | IDs before daily collection |
+| -------- | ------------- | -----------: | --------------------------: |
+| Domestic | 2026-Q1       |           42 |                          42 |
+| Domestic | 2026-Q2       |           29 |                          29 |
+| Domestic | 2026-Q3       |            1 |                           1 |
+| Domestic | 2026-Q4       |            7 |                           0 |
+| US       | 2026-Q2       |            6 |                           6 |
+| US       | 2026-Q3       |            1 |                           1 |
+
+No counted observation lacked an external ID. The historical backfill had
+therefore already published 72 domestic and seven US executions before daily
+collection. These counts do not prove present two-year completeness; the web
+US total and published execution count still differ, with the independent
+parser refusal tracked in [#1220](https://github.com/risu729/kogane/issues/1220).
+
+The domestic historical requests also began January 1 of year minus two.
+The scheduled collector uses that same lower-bound policy for domestic
+history, with all six returned date-form controls checked against the
+requested window. A stricter current form that clears or clamps a date is
+partial, never confirmation of that old window. Those requests historically
+succeeding is not proof that every earlier requested date had data or that
+today's retained period is unchanged.
+
+The scheduled collector now walks at most thirteen disjoint windows per scope,
+newest first, keeping the newest 90-day artifact's prior key and existing row
+identities. Each older window has a dated artifact key and a matching requested
+range in the terminal and CORE descriptor under registration v4
+([ADR 0096](../adr/0096-sbi-scheduled-execution-history.md)). Empty domestic
+windows require the observed message. A window failure retains other windows
+but marks the scope incomplete. Foreign retention discovery failure falls back
+to the old 90-day request as partial evidence. Deployment, a completed scheduled
+walk within the time limit, publication of every window and provider-count
+equality remain unverified; no manual collector invocation was performed.
+
 ### 2026-11-10: foreign trade price precision and empty cash metrics
 
 Read-only in-memory replay of stored evidence for [#1220](https://github.com/risu729/kogane/issues/1220),
@@ -509,3 +610,52 @@ nor terminals; failures retain only machine codes derived from `safeErrorDetails
 Worker names and secrets are unchanged. The Processor's
 `SHARED_R2_INGEST_ENABLED` gates registration, rather than switching the collector's
 storage destination. See `docs/collection.md` for details.
+
+## 2026-11-09 weekly asset history
+
+Observed read-only in an authenticated ordinary Chrome session, following the
+main site's My Assets link and clicking `資産推移情報を読み込む` (load asset
+trends). `GET /account/api/assets/valuations` returned HTTP 200 without a query
+or body. Request header names included Accept, Referer, User-Agent and browser
+client hints; no CSRF header was present. Selecting `全期間` (all periods)
+issued no additional account API request: it changed the client-side range.
+No new login or collector invocation was performed for this observation.
+
+The full response contained 44 consecutive seven-day points anchored at
+Saturday 00:00 JST. This timestamp labels a weekly point, not its retrieval
+or the provider's background update time. The general August 2021 product
+retention description does not prove this account has points back to that
+month. No actual dates, amounts or account identifiers are recorded here.
+
+The response had exactly 16 root keys: `holdCategories`,
+`valuationsTransitions`, `acquisitionCosts`, `balances`, and the same four
+with suffixes `WithoutDeposit`, `WithoutIdeco`, `WithoutDepositAndIdeco`.
+Transitions were keyed by 13-digit epoch milliseconds. Each category point
+had valuation/acquisitionCost numbers and nullable profitLoss/profitLossRate
+numbers. Native series were timestamp/value pairs. There was no pagination
+or provider count field.
+
+Further value-free comparisons established:
+
+- Full holdCategories listed five categories: DOMESTIC_DEPOSIT,
+  DOMESTIC_STOCK_SPOT, FOREIGN_DEPOSIT, SBI_HYBRID_DEPOSIT, FOREIGN_STOCK_US.
+  The transitions contained those five plus ALL at every point.
+- WithoutDeposit listed only the two stock categories, while every transition
+  still contained all six keys. Excluded deposits included nonzero values.
+  Only the listed categories participate in that profile's aggregate.
+- For both available profiles, every native timestamp set matched the
+  transitions. Native balances/acquisitionCosts matched ALL valuation and
+  acquisitionCost at all 44 points, and sums of the listed categories matched
+  ALL for both monetary fields at every point.
+- Every non-null monetary value examined (660 per available profile) and
+  native monetary tuple value was a safe integer. Deposit profitLoss and
+  profitLossRate were null; stock and ALL values were numeric.
+- Both iDeCo-related profiles had null transitions and empty category/native
+  arrays. This is an unavailable shape, not a zero financial position. Their
+  positive-data shape has not been observed.
+
+[ADR 0098](../adr/0098-sbi-weekly-asset-history.md) implements only this observed
+route and retains the catalogue as partial. Scheduled collection, publication,
+returned earliest/latest keys and count, freshness, execution budget and any
+account-specific earlier history remain unverified. A different retention
+route or positive iDeCo shape requires observation before implementation.

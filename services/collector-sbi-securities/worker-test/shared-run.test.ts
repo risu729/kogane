@@ -16,8 +16,64 @@ import {
 } from "../../../packages/collection/src/index";
 import { persistSbiRun, safeFailureCode, type SbiSharedRun } from "../src/shared-run";
 import type { Artifact } from "../src/types";
+import { assetHistoryArtifacts } from "../src/asset-history";
+import { auditAssetHistoryJson } from "../../../packages/parsers/src/parsers/sbi-asset-history-json";
+import { sanitizeAssetHistory } from "../../../packages/parsers/src/parsers/sbi-asset-history-schema";
 
 const PRODUCER_VERSION = "sbi-worker-poc-v1";
+
+it("keeps financial-shaped inexact raw bytes in DATA while refusing all derivatives", async () => {
+  const body: Record<string, unknown> = {};
+  for (const suffix of ["", "WithoutDeposit", "WithoutIdeco", "WithoutDepositAndIdeco"]) {
+    const absent = suffix.includes("Ideco");
+    const point = { valuation: 7, acquisitionCost: 6, profitLoss: 1, profitLossRate: 0.125 };
+    body[`holdCategories${suffix}`] = absent ? [] : ["DOMESTIC_STOCK_SPOT"];
+    body[`valuationsTransitions${suffix}`] = absent
+      ? null
+      : { "4071049200000": { DOMESTIC_STOCK_SPOT: point, ALL: point } };
+    body[`balances${suffix}`] = absent ? [] : [[4071049200000, 7]];
+    body[`acquisitionCosts${suffix}`] = absent ? [] : [[4071049200000, 6]];
+  }
+  const text = JSON.stringify(body).replace('"profitLoss":1', '"profitLoss":0.99999999999999999');
+  const bytes = new TextEncoder().encode(text);
+  const audited = sanitizeAssetHistory(auditAssetHistoryJson(text));
+  await expect(
+    assetHistoryArtifacts({ body: audited, bytes, capturedAt: "2020-01-01T00:00:00.000Z" }),
+  ).rejects.toThrow("sbi_asset_history_money");
+  const input = run({
+    scope: "domestic",
+    status: "partial",
+    artifacts: [
+      {
+        artifactKey: "account-assets-history-source.json",
+        dataset: "account-assets-history-source",
+        mediaType: "application/json",
+        role: "provider_response",
+        body: audited,
+        bytes,
+      },
+    ],
+    failures: [{ scope: "domestic", code: "sbi_asset_history_money" }],
+  });
+  const saved = await persistSbiRun(env.DATA as unknown as R2BucketLike, input);
+  expect(saved.outcome).toBe("persisted");
+  const read = await readTerminal(
+    env.DATA as unknown as R2BucketLike,
+    "sbi-securities",
+    input.runId,
+  );
+  if (read.outcome !== "found") throw new Error("synthetic_terminal_invalid");
+  expect(read.manifest.providerOutcome).toBe("partial");
+  expect(read.manifest.safeErrorCode).toBe("sbi_asset_history_money");
+  expect(read.manifest.artifacts.map((a) => a.artifactKey)).toEqual([
+    "account-assets-history-source.json",
+  ]);
+  const raw = await env.DATA.get(objectKey(read.manifest.artifacts[0]!.sha256));
+  expect(new Uint8Array(await raw!.arrayBuffer())).toEqual(bytes);
+  expect(() =>
+    sanitizeAssetHistory(auditAssetHistoryJson(text.slice(0, -1) + ',"accessToken":"synthetic"}')),
+  ).toThrow("sbi_asset_history_schema");
+});
 
 function artifact(dataset: string, body: unknown, window?: { from: string; to: string }): Artifact {
   return {
@@ -108,6 +164,15 @@ describe("G1-02/G1-15 the SBI Securities run is written to the shared bucket, te
       { unitKey: "foreign", unitKind: "scope", artifactCount: 1, coverageStatus: "complete" },
     ]);
     expect(manifest.ranges).toEqual([
+      {
+        rangeKey: "domestic-trade-records.json:requested",
+        rangeKind: "requested",
+        precision: "date",
+        basis: "request",
+        startValue: "2026-06-14",
+        endValue: "2026-09-11",
+        unitKey: "domestic",
+      },
       {
         rangeKey: "requested-window",
         rangeKind: "requested",

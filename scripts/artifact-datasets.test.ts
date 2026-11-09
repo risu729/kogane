@@ -205,6 +205,7 @@ const SAMPLES: readonly Sample[] = [
   ...[
     ["domestic-cash-positions", "domestic"],
     ["account-assets-current", "domestic"],
+
     ["yen-detail-history", "domestic"],
     ["domestic-trade-records", "domestic"],
     ["foreign-cash-positions", "foreign"],
@@ -218,7 +219,23 @@ const SAMPLES: readonly Sample[] = [
     dataset: dataset!,
     unitKey: unitKey!,
   })),
+  ...["source", "inventory", "2099"].map((part) => ({
+    source: "sbi-securities",
+    artifactKey: `account-assets-history-${part}.json`,
+    role: part === "source" ? "provider_response" : "collector_derived",
+    mediaType: json,
+    dataset: part === "2099" ? "account-assets-history" : null,
+    unitKey: "domestic",
+  })),
   // services/collector-sbi-shinsei/src/shared-collection.ts (`raw-<dataset>.json`)
+  ...["domestic", "foreign"].map((scope) => ({
+    source: "sbi-securities",
+    artifactKey: `${scope}-trade-records-2098-10-03-2098-12-31.json`,
+    role: "collector_derived",
+    mediaType: json,
+    dataset: `${scope}-trade-records`,
+    unitKey: scope,
+  })),
   {
     source: "sbi-shinsei",
     artifactKey: "raw-top-accounts-balance-and-activity.json",
@@ -613,6 +630,7 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
   "sbi-securities": [
     "domestic-cash-positions",
     "account-assets-current",
+    "account-assets-history",
     "yen-detail-history",
     "domestic-trade-records",
     "foreign-cash-positions",
@@ -715,8 +733,10 @@ describe("the registration dataset table (ADR 0022)", () => {
       "terminal-registration-v1",
       "terminal-registration-v2",
       "terminal-registration-v3",
+      "terminal-registration-v4",
+      "terminal-registration-v5",
     ]);
-    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v3");
+    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v5");
     const vpass = (await allSamples()).filter((sample) => sample.source === "vpass");
     expect(vpass.filter((sample) => sample.dataset === "statement-page").length).toBe(2);
     for (const sample of vpass) {
@@ -735,7 +755,7 @@ describe("the registration dataset table (ADR 0022)", () => {
     // terminal keeps its v2 descriptors and is carried over.
     for (const sample of await allSamples()) {
       const before = artifactDataset(sample.source, sample, "terminal-registration-v2");
-      const after = artifactDataset(sample.source, sample);
+      const after = artifactDataset(sample.source, sample, "terminal-registration-v3");
       if (before === after) continue;
       expect({ artifact: `${sample.source}/${sample.artifactKey}`, before, after }).toEqual({
         artifact: `${sample.source}/${sample.artifactKey}`,
@@ -788,6 +808,97 @@ describe("the registration dataset table (ADR 0022)", () => {
       expect(derived.dataset ?? null).toBeNull();
       expect(derived.formatId ?? null).toBeNull();
     }
+  });
+
+  test("v4 changes dataset mapping only for SBI's dated execution keys; v3 remains reproducible", async () => {
+    for (const sample of await allSamples()) {
+      const before = artifactDataset(sample.source, sample, "terminal-registration-v3");
+      const after = artifactDataset(sample.source, sample, "terminal-registration-v4");
+      if (before === after) continue;
+      expect(sample.source).toBe("sbi-securities");
+      expect(sample.artifactKey).toMatch(
+        /^(domestic|foreign)-trade-records-\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}\.json$/u,
+      );
+      expect(before).toBeNull();
+      expect(after).toBe(sample.dataset);
+    }
+  });
+
+  test("v5 adds only weekly assets while v4 stays reproducible", async () => {
+    for (const sample of await allSamples()) {
+      const before = artifactDataset(sample.source, sample, "terminal-registration-v4");
+      const after = artifactDataset(sample.source, sample);
+      if (before === after) continue;
+      expect(sample.source).toBe("sbi-securities");
+      expect(sample.artifactKey).toBe("account-assets-history-2099.json");
+      expect(before).toBeNull();
+      expect(after).toBe("account-assets-history");
+    }
+  });
+
+  test("SBI v4 copies the exact artifact's requested range and refuses missing or mismatched provenance", () => {
+    const key = "domestic-trade-records-2098-10-03-2098-12-31.json";
+    const artifact = {
+      artifactKey: key,
+      role: "collector_derived",
+      mediaType: json,
+      unitKey: "domestic",
+      sha256: "0".repeat(64),
+      byteSize: 1,
+    };
+    const range = {
+      rangeKey: `${key}:requested`,
+      rangeKind: "requested",
+      precision: "date",
+      basis: "request",
+      startValue: "2098-10-03",
+      endValue: "2098-12-31",
+      unitKey: "domestic",
+    };
+    const derive = (ranges: unknown[], version: string = REGISTRATION_CONTRACT_VERSION) =>
+      artifactRequest(
+        {
+          source: "sbi-securities",
+          completedAt: "2099-01-01T00:00:00Z",
+          artifacts: [artifact],
+          ranges,
+          transformations: [
+            {
+              transformationId: `${key}:extracted`,
+              stepKind: "extracted",
+              transformerId: "collector-sbi-securities",
+              transformerVersion: "synthetic",
+              inputArtifactKeys: [],
+              outputArtifactKey: key,
+            },
+          ],
+        } as never,
+        artifact,
+        new Map([["domestic", 1]]),
+        version,
+      );
+    expect(derive([range])).toMatchObject({
+      dataset: "domestic-trade-records",
+      ranges: [
+        {
+          rangeKey: range.rangeKey,
+          rangeKind: range.rangeKind,
+          precision: range.precision,
+          basis: range.basis,
+          startValue: range.startValue,
+          endValue: range.endValue,
+        },
+      ],
+    });
+    expect(derive([], "terminal-registration-v3").dataset).toBeUndefined();
+    expect(() => derive([])).toThrow("sbi_history_range_missing");
+    for (const change of [
+      { unitKey: "foreign" },
+      { startValue: "2098-10-04" },
+      { endValue: "2098-12-30" },
+      { basis: "provider" },
+    ])
+      expect(() => derive([{ ...range, ...change }])).toThrow("sbi_history_range_invalid");
   });
 
   test("without the table only Mizuho's artifacts are parsed, so no earlier registration was", async () => {
