@@ -63,8 +63,9 @@ existing JPY/debit/status guards and rank the same provider key once. The same
 provider-identity rule produces the same adoption alias across both parsers.
 This extends evidence availability, not automatic economic adoption.
 
-The provider data-type catalogue becomes `provider-data-types-v2`, with savings
-cash movement collected. Runtime failures still make the affected run partial.
+The provider data-type catalogue marks savings cash movement collected. Its
+vocabulary and status meanings are unchanged, so `provider-data-types-v1` is
+retained as defined in ADR 0087. Runtime failures still make the affected run partial.
 
 ## Consequences
 

@@ -1,4 +1,4 @@
-// `provider-data-types-v2` (ADR 0087): per CORE source with a collector, the
+// `provider-data-types-v1` (ADR 0087): per CORE source with a collector, the
 // data types the provider offers for the account kinds the source collects,
 // and whether each is collected. It describes the provider, from the source
 // research (docs/sources/*.md) and the per-source issues (#441–#454 under
@@ -12,7 +12,8 @@
 // that no parser is named under two sources; which source a parser belongs to
 // is this table's word, checked by review. A provider semantic nobody
 // has observed is not listed (ADR 0004); a correction is a pull request that
-// changes this table and, for a new type or status, the version.
+// changes this table. Changing the vocabulary or a status's meaning also needs
+// a new version (ADR 0087).
 import {
   PROVIDER_DATA_TYPES_VERSION,
   type ProviderDataTypeEntry,

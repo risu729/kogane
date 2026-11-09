@@ -306,7 +306,7 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
       "independent of standing",
       "dataTypesVersion",
       "providerTypes",
-      "provider-data-types-v2",
+      "provider-data-types-v1",
     ])
       expect(tool.description).toContain(term);
   });

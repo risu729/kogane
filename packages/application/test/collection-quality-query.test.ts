@@ -313,7 +313,7 @@ describe("the summary", () => {
 
   test("each source with a collector carries the provider's data types; others carry none", async () => {
     const summary = await queryCollectionQualitySummary(executor(store), { asOf: AS_OF });
-    expect(summary.dataTypesVersion).toBe("provider-data-types-v2");
+    expect(summary.dataTypesVersion).toBe("provider-data-types-v1");
     const of = (id: string) => summary.sources.find((source) => source.sourceId === id)!.dataTypes;
     expect(of("sbi-securities")).toContainEqual({
       type: "income",

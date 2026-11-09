@@ -304,7 +304,7 @@ describe("collection quality page reads", () => {
       if ("view" in args && args.view === "accounts") {
         expect(route.body).toMatchObject({
           apiVersion: 3,
-          dataTypesVersion: "provider-data-types-v2",
+          dataTypesVersion: "provider-data-types-v1",
           dataTypes: expect.arrayContaining([
             {
               type: "cash_movement",

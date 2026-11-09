@@ -804,7 +804,7 @@ freshness under `collection-freshness-v1`, counted to the answer's
 in `view: "accounts"` every period ages its own named capture independently
 of standing; each data type and account carries its newest named capture's
 freshness ([ADR 0088, amendment of 2026-11-08](adr/0088-collection-quality-per-account.md#amendment-2026-11-08-freshness-per-account-data-type-and-period)). Each summary source with a collector lists its
-provider's data types under `provider-data-types-v2`
+provider's data types under `provider-data-types-v1`
 ([ADR 0087](adr/0087-provider-data-type-catalogue.md)).
 The account answer (API version 3) independently carries `dataTypesVersion`
 and source-level `dataTypes`. Each parser group's `providerTypes` reverses
