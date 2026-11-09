@@ -23,6 +23,26 @@ describe("SBI Shinsei captured response schemas", () => {
     });
   }
 
+  test("still accepts the earlier summary without the observed deposit fields", async () => {
+    const fixtures = await Bun.file(fixturePath).json();
+    delete fixtures.balanceSummary.responseParam.summary.responseParam.hyperDepositBalance;
+    delete fixtures.balanceSummary.responseParam.summary.responseParam.yenDepositBalance;
+    expect(
+      validateKnownResponse("sbi-shinsei-balance-summary-v1", fixtures.balanceSummary),
+    ).toBeDefined();
+  });
+
+  test.each(["hyperDepositBalance", "yenDepositBalance", "unexpected"])(
+    "rejects an unobserved nested summary shape at %s",
+    async (field) => {
+      const fixtures = await Bun.file(fixturePath).json();
+      fixtures.balanceSummary.responseParam.summary.responseParam[field] = { amount: "1" };
+      expect(() =>
+        validateKnownResponse("sbi-shinsei-balance-summary-v1", fixtures.balanceSummary),
+      ).toThrow(UnknownResponseShapeError);
+    },
+  );
+
   test("rejects an unknown field before data is stored", async () => {
     const fixtures = (await Bun.file(fixturePath).json()) as Record<string, unknown>;
     const source = fixtures.topBalances;

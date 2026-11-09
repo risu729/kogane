@@ -57,7 +57,8 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   "mizuho-bank": [
     collected("balance", ["mizuho-account-list"]),
     partial("cash_movement", ["mizuho-ordinary-history"], 441),
-    missing("term_deposit", 441),
+    // 2026-11-09: registered account lists show no held deposit products; see source notes.
+    missing("term_deposit", 1241),
     missing("document", 441),
     missing("reward_balance", 441),
     missing("reward_activity", 441),

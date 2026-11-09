@@ -1182,6 +1182,25 @@ the repair lane then re-parses the stored captures, as it did for 0.1.2
 above, and rows of 0.1.2 runs stay refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead. Production was not
 read for this release.
 
+## Balance-summary parser 0.1.2 (2026-11-09)
+
+Authenticated ordinary Top-page navigation observed the optional string fields
+`hyperDepositBalance` and `yenDepositBalance` in
+`responseParam.summary.responseParam` of the existing
+`getBalanceSummaryAndStage` response. The collector's validator and the parser's
+independent summary validator both rejected these previously unknown fields
+([issue 1215](https://github.com/risu729/kogane/issues/1215)). The collector README
+records the read-only production-manifest corroboration and its limits.
+
+Parser `sbi-shinsei-balance-summary-and-stage` 0.1.2 now validates the two fields
+alongside the earlier summary shape. The sole published observation remains the
+amount-free customer stage category. Neither aggregate is interpreted or emitted
+as an additional balance, and unknown fields or structured summary values still
+fail closed. Synthetic regression tests compare the entire parser output with
+and without the new fields and follow a collector handoff through shared DATA,
+registration and publication. Production recovery remains unverified until a
+post-deploy collection and its publication/freshness checks succeed.
+
 ## Deposit-contract holdings observation (2026-11-09 20:47 UTC)
 
 An authenticated ordinary Chrome session inspected the current account's yen
