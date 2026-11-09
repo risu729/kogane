@@ -336,18 +336,19 @@ each later unit of this track closes gaps and shrinks those lists.
 ### New sources
 
 New collectors ([#455](https://github.com/risu729/kogane/issues/455)–[#510](https://github.com/risu729/kogane/issues/510)
-under [#440](https://github.com/risu729/kogane/issues/440)) are implemented by Codex
-running on the owner's PC from the issue text, not by this project's Claude threads
-(owner, 2026-11-09 19:06 UTC). They come after the existing collectors collect what
-their sites already offer but they do not collect today (the per-source issues
-[#441](https://github.com/risu729/kogane/issues/441)–[#454](https://github.com/risu729/kogane/issues/454)
-and the `not_collected` and `partial` entries of the provider data-type catalogue,
-[ADR 0087](adr/0087-provider-data-type-catalogue.md)), unless the owner names a new
-source first. Each new-source issue holds its target data, the questions to answer
-with the owner before any code, and its acceptance criteria;
-[adding a new collector](new-collectors.md) holds the order of work, the files a new
-source touches and the checks common to all of them. Before 2026-11-09 the rule was
-that new collectors start only when the owner asks, or after Phase 3.
+under [#440](https://github.com/risu729/kogane/issues/440)) start only when the owner
+asks, and they are implemented by Codex running on the owner's PC from the issue
+text, not by this project's Claude threads (owner, 2026-11-09 19:06 UTC). Before any
+of them, the data that existing collectors' sites already offer but Kogane does not
+collect comes first (owner, 2026-11-09 19:06 UTC): the `partial` and `not_collected`
+entries of the provider data-type catalogue
+([ADR 0087](adr/0087-provider-data-type-catalogue.md)), tracked under the per-source
+issues [#441](https://github.com/risu729/kogane/issues/441)–[#454](https://github.com/risu729/kogane/issues/454).
+Each new-source issue holds its target data, the questions to answer with the owner
+before any code, and its acceptance criteria; [adding a new collector](new-collectors.md)
+holds the order of work, the files a new source touches and the checks common to all
+of them. Until 2026-11-09 the rule read "when the owner asks, or after Phase 3";
+Phase 3 is done, and this order replaces the second condition.
 
 ## Current position
 

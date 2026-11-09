@@ -10,9 +10,10 @@ the repository as it is today. When a step below no longer matches the code,
 fix this page in the same PR.
 
 Who does the work: these issues are implemented by Codex working on the
-owner's PC from the issue text, not by Claude project threads, and they start
-after the coverage work on the existing collectors (owner, 2026-11-09 19:06
-UTC; [roadmap: new sources](roadmap.md#new-sources)).
+owner's PC from the issue text, not by Claude project threads. One starts
+when the owner asks, and only after the coverage work on the existing
+collectors (owner, 2026-11-09 19:06 UTC;
+[roadmap: new sources](roadmap.md#new-sources)).
 
 ## 1. Order of work
 
