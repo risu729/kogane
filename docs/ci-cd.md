@@ -160,12 +160,21 @@ Neither `cf workers versions create` nor `cf workers deployments create`
 carries the non-versioned script settings, so a versions-strategy publication
 left `observability` (Workers Logs, Workers Issues) as it was in the
 dashboard. Since 2026-11-09 the release step "Sync the non-versioned settings
-of version-published Workers" (`tasks/_lib/ci/cf-script-settings.mjs`) runs
-after the alarm reconcile: for each selected versions-strategy Worker it
-`PATCH`es `/workers/scripts/{name}/script-settings` with the `observability`
-object of its `wrangler.jsonc`, as `wrangler versions deploy` does, and reads
-it back. A refusal prints only its closed `cf_settings_…` code. A rollback to
-a commit without the script leaves the live settings unchanged.
+of version-published Workers" runs the trusted helper
+`tasks/_lib/ci/cf-script-settings.mjs` (loaded at the workflow commit like the
+other release helpers) after the alarm reconcile. For each Worker in the run's
+plan that publishes a version, it `PATCH`es
+`/workers/scripts/{name}/script-settings` with the deployed commit's
+`wrangler.jsonc` `observability` object, as `wrangler versions deploy` does,
+retrying 429/5xx up to three attempts, then reads it back. So settings follow
+the deployed commit for all 17 Workers, including a rollback, and a Worker left
+out of a partial rollback is not touched. A refusal prints only its closed
+`cf_settings_…` code and fails the release after collection is already
+reconciled; an accepted `PATCH` whose readback does not echo every declared
+value is a warning (`cf_settings_readback_unconfirmed`) in the step summary,
+since the readback shape is not documented. If an earlier step fails, the sync
+does not run and the published Workers keep their previous settings until the
+next green release.
 All 17 deployed Workers keep ADR 0039's order and the authenticated
 App/Processor release and schema postcheck.
 

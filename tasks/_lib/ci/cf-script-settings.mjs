@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { appendFileSync, readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseJsonc } from "../../../scripts/jsonc.ts";
@@ -8,7 +8,8 @@ import { parseJsonc } from "../../../scripts/jsonc.ts";
  * `cf workers deployments create`. Neither call carries the non-versioned
  * script settings (`observability` among them), so after publication this
  * module applies them the way `wrangler versions deploy` does. Workers on the
- * `deploy` strategy get them from `cf deploy` itself.
+ * `deploy` strategy get them from `cf deploy` itself. A Worker whose config
+ * declares no `observability` keeps its live settings.
  */
 export function scriptSettingsTargets({ root, order, selected }) {
   return order.workers
@@ -18,22 +19,22 @@ export function scriptSettingsTargets({ root, order, selected }) {
         worker.productionStrategy !== "deploy" &&
         selected.includes(worker.name),
     )
-    .map((worker) => {
+    .flatMap((worker) => {
       const config = parseJsonc(
         readFileSync(resolve(root, worker.path, worker.config), "utf8"),
         worker.config,
       );
       const observability = config.observability;
+      if (observability === undefined) return [];
       if (
         observability === null ||
         typeof observability !== "object" ||
-        Array.isArray(observability) ||
-        typeof observability.enabled !== "boolean"
+        Array.isArray(observability)
       )
         throw new Error(`cf_settings_invalid_observability_${worker.name}`);
       if (!/^[a-z0-9-]{1,63}$/u.test(worker.worker ?? ""))
         throw new Error(`cf_settings_invalid_worker_${worker.name}`);
-      return { name: worker.name, worker: worker.worker, settings: { observability } };
+      return [{ name: worker.name, worker: worker.worker, settings: { observability } }];
     });
 }
 
@@ -49,10 +50,20 @@ export function containsSettings(expected, actual) {
   return Object.entries(expected).every(([key, value]) => containsSettings(value, actual[key]));
 }
 
-export async function syncScriptSettings({ targets, accountId, token, fetchImpl = fetch }) {
+/** Transient answers worth one more try; every call here is idempotent. */
+const RETRYABLE = new Set(["cf_settings_unavailable", "cf_settings_http_429"]);
+
+export async function syncScriptSettings({
+  targets,
+  accountId,
+  token,
+  fetchImpl = fetch,
+  attempts = 3,
+  backoffMs = 2000,
+}) {
   if (!/^[a-f0-9]{32}$/u.test(accountId ?? "") || !token)
     throw new Error("cf_settings_credentials_missing");
-  const api = async (worker, init) => {
+  const once = async (worker, init) => {
     let response;
     try {
       response = await fetchImpl(
@@ -70,7 +81,10 @@ export async function syncScriptSettings({ targets, accountId, token, fetchImpl 
     } catch {
       throw new Error("cf_settings_unavailable");
     }
-    if (response.status !== 200) throw new Error(`cf_settings_http_${response.status}`);
+    if (response.status !== 200)
+      throw new Error(
+        response.status >= 500 ? "cf_settings_unavailable" : `cf_settings_http_${response.status}`,
+      );
     let envelope;
     try {
       envelope = await response.json();
@@ -81,15 +95,26 @@ export async function syncScriptSettings({ targets, accountId, token, fetchImpl 
       throw new Error("cf_settings_invalid_response");
     return envelope.result;
   };
+  const api = async (worker, init) => {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await once(worker, init);
+      } catch (error) {
+        if (attempt >= attempts || !RETRYABLE.has(error.message)) throw error;
+        await new Promise((done) => setTimeout(done, backoffMs * attempt));
+      }
+    }
+  };
   const synced = [];
+  const unconfirmed = [];
   for (const target of targets) {
     await api(target.worker, { method: "PATCH", body: JSON.stringify(target.settings) });
     const live = await api(target.worker, { method: "GET" });
-    if (!containsSettings(target.settings, live))
-      throw new Error(`cf_settings_readback_mismatch_${target.name}`);
-    synced.push(target.name);
+    // The PATCH was accepted; a readback that does not echo every declared
+    // value is reported, not failed, because the GET shape is not documented.
+    (containsSettings(target.settings, live) ? synced : unconfirmed).push(target.name);
   }
-  return synced;
+  return { synced, unconfirmed };
 }
 
 /**
@@ -123,7 +148,7 @@ if (invokedDirectly()) {
     if (mode !== "sync") throw new Error("cf_settings_invalid_command");
     let selected;
     try {
-      selected = JSON.parse(process.env.CF_SELECTED ?? "");
+      selected = JSON.parse(process.env.SELECTED ?? "");
     } catch {
       throw new Error("cf_settings_invalid_selection");
     }
@@ -132,14 +157,24 @@ if (invokedDirectly()) {
     const root = process.cwd();
     const order = JSON.parse(readFileSync(resolve(root, "infra/deploy-order.json"), "utf8"));
     const targets = scriptSettingsTargets({ root, order, selected });
-    const synced = await syncScriptSettings({
+    const { synced, unconfirmed } = await syncScriptSettings({
       targets,
       accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
       token: process.env.CLOUDFLARE_API_TOKEN,
     });
-    console.log(`cf_settings_synced ${synced.length === 0 ? "none" : synced.join(",")}`);
+    const lines = [`cf_settings_synced ${synced.length === 0 ? "none" : synced.join(",")}`];
+    if (unconfirmed.length > 0) {
+      lines.push(`cf_settings_readback_unconfirmed ${unconfirmed.join(",")}`);
+      console.log(`::warning::cf_settings_readback_unconfirmed ${unconfirmed.join(",")}`);
+    }
+    for (const line of lines) console.log(line);
+    if (process.env.GITHUB_STEP_SUMMARY)
+      appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n`);
   } catch (error) {
-    console.error(scriptSettingsFailureCode(error));
+    const code = scriptSettingsFailureCode(error);
+    console.error(code);
+    if (process.env.GITHUB_STEP_SUMMARY)
+      appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${code}\n`);
     process.exitCode = 1;
   }
 }

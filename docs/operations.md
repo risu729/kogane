@@ -393,11 +393,13 @@ SBI Shinsei, St.George) publish with `cf deploy`, which applies
 `cloudflare.config.ts`; the other fourteen publish a version, which carries no
 `observability`, and the release then applies the `wrangler.jsonc` object
 through the script-settings API
-([ci-cd.md](ci-cd.md#cf-version-deployment-and-compatible-rollbacks)).
-`tasks/_lib/cf-script-settings.test.ts` requires `issues.enabled` on every
-cf-deployed Worker, and `tasks/_lib/cf-deploy.test.ts` keeps the two files'
-`observability` objects equal for the fourteen. A full deploy or rollback from
-a commit whose config lacks the key turns Issues off for a Container Worker.
+([ci-cd.md](ci-cd.md#cf-version-deployment-and-compatible-rollbacks)). Either
+way the settings follow the deployed commit, so a rollback to a commit before
+2026-11-09 turns Issues off for the Workers it publishes.
+`tasks/_lib/cf-script-settings.test.ts` requires `issues.enabled` in every
+cf-deployed Worker's `wrangler.jsonc` and in the Container Workers'
+`cloudflare.config.ts`; `tasks/_lib/cf-deploy.test.ts` keeps the two files'
+`observability` objects equal for the other fourteen.
 
 What becomes an occurrence: an uncaught exception, a failed invocation, a `5xx`
 response the Worker returns, and a console line at error level or one carrying
@@ -407,12 +409,12 @@ an `Error` object or stack trace. Today that covers:
   `packages/collector-diagnostics` (`event: "collector-diagnostic"`, safe error
   fields only), used by GlobalPass, Mobile Suica, MyJCB, SBI Securities, SBI VC
   Trade, SMBC Direct, St.George and Vpass;
-- the few direct `console.error` calls (schedule lease, SBI Shinsei, SBI VC
-  Trade, SMBC Direct, one in the Processor).
+- the few direct `console.error` calls in Workers (schedule lease, SBI VC
+  Trade, SMBC Direct, one in the Processor's schedule alarm).
 
 It does not cover a collector run that catches its failure and only returns
 or `console.log`s a result: Mizuho (`mizuho-collection-result`), PRESTIA,
-Sony Bank, Money Forward, V Point and V Point Pay. Every collector runs from
+SBI Shinsei, Sony Bank, Money Forward, V Point and V Point Pay. Every collector runs from
 the Processor's alarm RPC (`crons: []`), and the Processor logs each result as
 the `console.log` line `schedule_dispatch_result`, so those failures are not
 issues either.
