@@ -28,7 +28,7 @@ The owner adopted these phases on 2026-11-06 (13:25 UTC) and said their order ma
 ### Phase 1 — Land or close the open work and re-baseline
 
 On 2026-11-06 at 12:45 UTC, 45 pull requests were open: 32 agent PRs opened
-that day (#922–#957), all with a green `CI Check`; 9 older PRs from agent sessions (Codex, Cursor and others) from
+that day (#922–#957), all with a green `CI Check`; 9 older PRs from other agent sessions from
 2026-10-04 to 2026-11-04 (8 of them drafts); and 4 Renovate PRs. 74 branches
 existed. The [status page](current-status.md) was last reviewed on 2026-10-05.
 
