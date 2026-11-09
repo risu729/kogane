@@ -106,6 +106,10 @@ export const PARSER_DIGESTS: ParserDigests = {
       "93a3e72b94400fe1e2fd2afb56b42a9f88bcc1c449b0ab47197377962bb7b511",
     "poc/observation-pipeline/src/parsers/sony-bank.ts":
       "99306fffd2b0444d4b0faecfdf0ba5ef88418ba42418b7f5636c57c25d4fa895",
+    "poc/observation-pipeline/src/parsers/sony-document-metadata.ts":
+      "25d75db64f6a2c00673db4fe1c250af1282196d3021e7e0b0edbe516bf95f027",
+    "poc/observation-pipeline/src/parsers/sony-realised-gains.ts":
+      "b1d9b8d794174e144f919376aa88bb56d4720434aec384141c5f15dc0c00b9a1",
     "poc/observation-pipeline/src/parsers/st-george.ts":
       "278eeb68604bfd69d6a81fb0ed314a8559ffb90d4da023bc4918321c8cd013b3",
     "poc/observation-pipeline/src/parsers/util.ts":
@@ -599,6 +603,19 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/types.ts",
       ],
     },
+    "sony-bank-document-metadata": {
+      version: "1.0.0",
+      codeDigest: "c71fccdb042a165ef7fdbf088fe0551386dd75c43bc92dc436a5c09ce83a0c43",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sony-document-metadata.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
     "sony-bank-gross-balance": {
       version: "1.0.4",
       codeDigest: "5f39fea3158f9f4e7a71ab3676b2f38fa7ef73f2f94963e25620e2a15a4dd76a",
@@ -637,6 +654,20 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/parsers/coverage.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
         "poc/observation-pipeline/src/parsers/sony-bank.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "sony-bank-realised-gains": {
+      version: "1.0.0",
+      codeDigest: "0c6fab689e039a156c814bdae6c8163c477ad1e66279cf15529e3826b88dbe66",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/sony-realised-gains.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],

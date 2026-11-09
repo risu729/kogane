@@ -1197,6 +1197,21 @@
       "statementCount": 2,
       "insertStatements": [],
       "sha256": "2a8cd46c05723bc8bc8dc08ead0307f13a4b1489bf40d26c97f1a69a21145ee5"
+    },
+    {
+      "file": "0089_sony_realised_gains_snapshot.sql",
+      "statementCount": 2,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "5c903d2d39d23233551500b33bad61260f0a34c66fc048b2f05b0441342cf3d2"
     }
   ],
   "tables": [
@@ -22099,7 +22114,8 @@
       "0070_economic_commit_guard.sql",
       "0071_economic_event_command_kinds.sql",
       "0080_jpoint_program.sql",
-      "0085_schedule_dispatch_marker.sql"
+      "0085_schedule_dispatch_marker.sql",
+      "0089_sony_realised_gains_snapshot.sql"
     ],
     "schemaSha256": "0b2ddb2a8d7e9b70df8ec4b3937eeef911d2737a1e55ca0d06eb316f47695af9"
   }

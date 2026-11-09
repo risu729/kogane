@@ -330,6 +330,18 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
   ],
   "sony-bank": [
     {
+      key: /^realised-gains-\d{4}\.json$/u,
+      role: "provider_response",
+      mediaTypes: JSON_TYPE,
+      dataset: "realised-gains",
+    },
+    {
+      key: /^delivered-document-\d{4}\.pdf$/u,
+      role: "provider_export",
+      mediaTypes: ["application/pdf"],
+      dataset: "delivered-document-pdf",
+    },
+    {
       key: "gross-balance.json",
       role: "provider_response",
       mediaTypes: JSON_TYPE,

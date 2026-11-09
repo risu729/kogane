@@ -1,3 +1,4 @@
+import { sonyBankRealisedGains } from "../src/parsers/sony-realised-gains.ts";
 // Synthetic inputs for the parser coverage contract (design review D01).
 //
 // Every case is built here from code, never from data/. The expected
@@ -411,6 +412,21 @@ const BANKS: ContractParser[] = [
 ];
 
 export const CONTRACT_PARSERS: ContractParser[] = [
+  cases(
+    sonyBankRealisedGains,
+    meta("sony-bank", "realised-gains", {
+      artifactKey: "realised-gains-2099.json",
+      fetchUnitKey: "realised-year-2099",
+    }),
+    {
+      "annual-summary": fixture("sony-bank-parser-boundaries", "realised-gains.json"),
+      "year-scope-drift": json({
+        ...fixtureJson("sony-bank-parser-boundaries", "realised-gains.json"),
+        rliztnPrftLsCy: "2100",
+        rliztnPrftLsLy: "2098",
+      }),
+    },
+  ),
   ...SBI_SECURITIES,
   ...SBI_VC,
   ...SBI_SHINSEI,

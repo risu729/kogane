@@ -6,7 +6,7 @@ import {
 } from "../../../packages/collection/src/schedule-result";
 import { atStage, emitDiagnostic, failure } from "./diagnostics";
 import { persistSharedRun, sharedBucket, sharedRunDiagnostic } from "./shared-collection";
-import { collectSonyBank, parseCredential } from "./sony-bank";
+import { collectSonyBank, parseCredential, type Supplement } from "./sony-bank";
 import type { CollectionFailure, CollectionManifest, RawArtifact } from "./types";
 export default {
   async fetch(request, env): Promise<Response> {
@@ -34,6 +34,7 @@ export default {
 } satisfies ExportedHandler<Env>;
 interface SharedResult {
   readonly runId: string;
+  readonly runIds: string[];
   readonly status: CollectionManifest["status"];
   readonly window: {
     from: string | null;
@@ -71,6 +72,7 @@ export async function runSharedCollection(
     const failures: CollectionFailure[] = [];
     let artifacts: readonly RawArtifact[] = [];
     let transactionCount = 0;
+    let supplements: Supplement[] = [];
     try {
       const credential = await atStage("credential", async () =>
         parseCredential(requiredSecret(env.SONY_BANK_CREDENTIAL_JSON, "SONY_BANK_CREDENTIAL_JSON")),
@@ -81,9 +83,11 @@ export async function runSharedCollection(
         to: window.to,
         runId,
         includeRetainedHistory: true,
+        includeSupplementaryData: true,
       });
       transactionCount = collection.transactionCount;
       artifacts = collection.artifacts;
+      supplements = collection.supplements;
     } catch (error) {
       failures.push(failure("collect", error));
     }
@@ -108,6 +112,7 @@ export async function runSharedCollection(
       transactionCount,
       artifacts,
       failures,
+      acquisitionSessionRef: runId,
     } as const;
     const outcome = await persistSharedRun(sharedBucket(env.DATA), input);
     emitDiagnostic(
@@ -116,14 +121,67 @@ export async function runSharedCollection(
         : "error",
       sharedRunDiagnostic(input, outcome),
     );
+    const persisted = [outcome];
+    const runIds =
+      outcome.result.outcome === "persisted" || outcome.result.outcome === "already_persisted"
+        ? [runId]
+        : [];
+    let supplementalPersistenceFailed = false;
+    for (const supplement of supplements) {
+      const supplementalInput = {
+        ...input,
+        runId: crypto.randomUUID(),
+        acquisitionSessionRef: runId,
+        status:
+          supplement.failures.length === 0
+            ? "success"
+            : supplement.artifacts.length === 0
+              ? "failed"
+              : "partial",
+        window: supplement.window,
+        transactionCount: 0,
+        artifacts: supplement.artifacts,
+        failures: supplement.failures,
+      } as const;
+      try {
+        const supplementalOutcome = await persistSharedRun(
+          sharedBucket(env.DATA),
+          supplementalInput,
+        );
+        persisted.push(supplementalOutcome);
+        emitDiagnostic("log", sharedRunDiagnostic(supplementalInput, supplementalOutcome));
+        if (
+          supplementalOutcome.result.outcome === "persisted" ||
+          supplementalOutcome.result.outcome === "already_persisted"
+        )
+          runIds.push(supplementalInput.runId);
+      } catch {
+        supplementalPersistenceFailed = true;
+        emitDiagnostic("error", {
+          event: "sony-bank-supplement-persistence-failed",
+          reason: "persistence_failed",
+        });
+      }
+    }
+    const allPersisted =
+      !supplementalPersistenceFailed &&
+      persisted.every(
+        (entry) =>
+          entry.result.outcome === "persisted" || entry.result.outcome === "already_persisted",
+      );
     return {
       runId,
-      status,
+      runIds,
+      status:
+        status === "success" && supplements.some((entry) => entry.failures.length > 0)
+          ? "partial"
+          : status,
       window: { from: null, to: window.to },
       transactionCount,
-      artifactCount: outcome.artifactCount,
-      failureCount: failures.length,
-      persistence: outcome.result.outcome,
+      artifactCount: persisted.reduce((sum, entry) => sum + entry.artifactCount, 0),
+      failureCount:
+        failures.length + supplements.reduce((sum, entry) => sum + entry.failures.length, 0),
+      persistence: allPersisted ? outcome.result.outcome : "incomplete",
       terminalKey: outcome.result.terminalKey,
     };
   });
@@ -159,7 +217,10 @@ export async function alarmCollection(
 ): Promise<ScheduledResult> {
   try {
     const window = defaultWindow(new Date());
-    return scheduledResult(await runSharedCollection(env, window));
+    const result = await runSharedCollection(env, window);
+    return result.persistence === "incomplete"
+      ? scheduledFailure(new Error("collection_failed"), result.runIds)
+      : scheduledResult(result);
   } catch (error) {
     return scheduledFailure(error);
   }

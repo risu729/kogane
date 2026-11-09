@@ -18,7 +18,7 @@ export default defineConfig({
       },
     },
     env: {
-      COLLECTOR_SCHEMA_VERSION: bindings.text("sony-bank-worker-poc-v2"),
+      COLLECTOR_SCHEMA_VERSION: bindings.text("sony-bank-worker-poc-v3"),
       SCHEDULE_DB: bindings.d1({
         name: "kogane-raw-evidence",
         id: "b335a887-250d-45c9-bd72-af83f35fdc60",

@@ -29,6 +29,7 @@ type Frozen = { observations: Observation[]; warnings: string[] } | { error: tru
 const FROZEN: Record<string, Record<string, Frozen>> = {};
 for (const file of [
   "expected.json",
+  "sony-realised-gains-expected.json",
   "st-george-expected.json",
   "prestia-bank-expected.json",
   "sbi-shinsei-exchange-rate-expected.json",
@@ -108,6 +109,7 @@ const partial = (
 
 /** What each case must claim. A throwing case has no claim and no entry here. */
 const CLAIMS: Record<string, Record<string, Expectation>> = {
+  "sony-bank-realised-gains": { "annual-summary": { ...complete(2), expected: 2 } },
   "sbi-foreign-cash-balances": {
     "complete-empty": complete(0),
     "complete-rows": complete(2),

@@ -1,3 +1,5 @@
+import { sonyBankDocumentMetadata } from "./sony-document-metadata.ts";
+import { sonyBankRealisedGains } from "./sony-realised-gains.ts";
 import type { Parser } from "../types.ts";
 // Build identity of every parser below (design review D03): the registry is
 // what a Worker reads, so the digests travel with it.
@@ -48,6 +50,8 @@ import { vPointPayNotificationEvent } from "./v-point-pay.ts";
 import { vpassStatementPage } from "./vpass.ts";
 
 export const PARSERS: readonly Parser[] = [
+  sonyBankDocumentMetadata,
+  sonyBankRealisedGains,
   prestiaBankBalances,
   globalPassActivity,
   mobileSuicaSfHistory,

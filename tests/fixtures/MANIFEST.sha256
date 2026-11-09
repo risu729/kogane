@@ -2,6 +2,7 @@ b332f41d0232477a7e4902322669f22cd496ae119a7ed1db8d8a17af41466f5d  tests/fixtures
 745305ffa90c669428a5cd209dfc07c9e506415675c599a50d3799afe862f6c3  tests/fixtures/observation-pipeline/coverage-contract/prestia-bank-expected.json
 3bf44df427d4e9e112c4a3b3d430da8d383c75287a79a750ee7da4715d3997ff  tests/fixtures/observation-pipeline/coverage-contract/sbi-shinsei-exchange-rate-expected.json
 10765fa1ff84bf7cb74f51d2b2b72d50b4f8ed9f6f45eca88ad37c471434a205  tests/fixtures/observation-pipeline/coverage-contract/sbi-shinsei-observed-shapes-expected.json
+1c41fb6c96e5d6d69d768a6b78e80c36f1db607fbf6e2b2cf871db04f496bff5  tests/fixtures/observation-pipeline/coverage-contract/sony-realised-gains-expected.json
 84aab7387cf675cfe4c19683ae3c3cfc8861fc6be09bb41329bbbc1b3564123a  tests/fixtures/observation-pipeline/coverage-contract/st-george-expected.json
 4f6421c52e8819ea24d02e227e23d16542ef87a2a1516199fd39664c7cec97e7  tests/fixtures/observation-pipeline/global-pass/activity-2099-02.html
 edf9881f63bdaf552c645c287ac5f2e0856fc9c28b17ba47152d907e07d670f9  tests/fixtures/observation-pipeline/mobile-suica-parser-boundaries/sf-history-more-kinds.json
@@ -10,6 +11,7 @@ d9ed32ef210a7244e69ca42d814aa9347b082914967dae0f3059fedc8e3d7f4a  tests/fixtures
 a2bd2b7a67c6524973fcf9bbaafb8b46cc96fb4bcb84341f609355515b7e9b52  tests/fixtures/observation-pipeline/moneyforward/account-01-month-2099-03-empty.html
 52005e9327ca9ef5ea83726c58c37084c290d69e109bf05103cd52fb7a3ea7b6  tests/fixtures/observation-pipeline/moneyforward/account-detail-01.html
 cc3a5926ee2972ff307c957ca6ffdd4145b3f36293127d8e644f8976e50ee18e  tests/fixtures/observation-pipeline/moneyforward/accounts.html
+3b9443521719688a5e546826a4059b7427e5b18f1fdb4cabc1de2641cbee9841  tests/fixtures/observation-pipeline/myjcb-jpoint/jpoint-balance.json
 3373eea6d4211b0b66381e8e2788adb75e84ddb4b024bca22e5de3f914b424c2  tests/fixtures/observation-pipeline/myjcb/2026-09-07/run-synthetic/connection-a/credit-detail-00.html
 52772892c9b27e4eb530f7987a5a2970275aa66021e4f0058cf41bfa9113f308  tests/fixtures/observation-pipeline/myjcb/2026-09-07/run-synthetic/connection-a/credit-detail-02.html
 fb59479e1a22e801ea995287167a32da91d766d52c168294f71a1b0ca2a88df9  tests/fixtures/observation-pipeline/myjcb/2026-09-07/run-synthetic/connection-a/credit-ledger-00.json
@@ -44,6 +46,7 @@ b6f5e99f146389e3646bb0ae3331336d2f43021b3afdb1a74cf67e0125515b18  tests/fixtures
 e173fab01f81df0c56d419aca93a8e8da7ee70e1e932191f1954fe3b957fe0aa  tests/fixtures/observation-pipeline/smbc-direct-parser-boundaries/balance-normalized.json
 24a777b26fec754321b291e3d2d9f5a57085acfb0ab0c45bb4e6d335dee5ac6b  tests/fixtures/observation-pipeline/smbc-direct-parser-boundaries/transactions-normalized.json
 52bd03b1d0ac80847a4c0ce554f1987d9e3db37df1f2348599a125e6b15c242e  tests/fixtures/observation-pipeline/sony-bank-parser-boundaries/gross-balance.json
+319c9c7ed2b908c8971b54053e5d548b2695ba3f90b6b7ab5a5cafec42d8df95  tests/fixtures/observation-pipeline/sony-bank-parser-boundaries/realised-gains.json
 5641552632077d4362258d2c0fa01de5bc90bfe96d61e7f2a16b9b52eda23e76  tests/fixtures/observation-pipeline/sony-bank-parser-boundaries/wallet-history-2026-09.html
 0ae690bffca13b2f42da0b02f6a59d3d0ac5c2dcf7e821efa42ec9fe938053c9  tests/fixtures/observation-pipeline/sony-bank-parser-boundaries/yen-history-page-0001.json
 5e15d9e380a4ff8bf964221dcac3805195fc4e1bc6110a701cce8d235924ff19  tests/fixtures/observation-pipeline/sony-bank-parser-boundaries/yen-history.csv
@@ -57,4 +60,3 @@ de0518df097bf07d84c76f810d59206deaef20f8821a3c736b25007c0444ce19  tests/fixtures
 58fadc6e52b6a9bbffd316e4808af221c4501d39aef01bc08072e564d96f140c  tests/fixtures/observation-pipeline/v-point/smfg-point.json
 fc7e3d0dfaa0deadb32759a01d8f14db342df7348ae3ed577b7e260fae0747bf  tests/fixtures/observation-pipeline/vpass-parser-boundaries/customized.json
 8040b4672f4ac2d6bfd19218281d5258000f9e10ee819bdf762ed6f2d590f11a  tests/fixtures/observation-pipeline/vpass-parser-boundaries/web.json
-3b9443521719688a5e546826a4059b7427e5b18f1fdb4cabc1de2641cbee9841  tests/fixtures/observation-pipeline/myjcb-jpoint/jpoint-balance.json

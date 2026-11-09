@@ -159,18 +159,16 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     partial("cash_movement", ["smbc-direct-transactions"], 442),
     missing("term_deposit", 442),
   ],
-  // ソニー銀行: total balance, yen and ten foreign-currency histories and WALLET
-  // statements; the realized FX P&L, term deposit contracts, the delivered
-  // documents are not collected; ordinary deposit history covers everything the
-  // provider retains through yesterday, without an invented opening date
-  // (docs/sources/sony-bank.md, #449).
+  // Sony: ordinary retained history, WALLET and the provider's annual realised
+  // FX/after-tax-interest summaries. Foreign delivered PDFs are archived from
+  // the observed five-year query; full retention and fund documents remain unproved.
   "sony-bank": [
     collected("balance", ["sony-bank-gross-balance"]),
     collected("cash_movement", ["sony-bank-history-json", "sony-bank-history-csv"]),
     collected("card_usage", ["sony-bank-wallet-history"]),
-    missing("valuation_history", 449),
+    partial("valuation_history", ["sony-bank-realised-gains"], 1250),
     missing("term_deposit", 449),
-    missing("document", 449),
+    partial("document", ["sony-bank-document-metadata"], 1250),
   ],
   // St.George: account balances and the first page of each account's history;
   // dated history, term deposits, eStatements and other account kinds are not

@@ -1,3 +1,4 @@
+import { sonyBankDocumentMetadata } from "../src/parsers/sony-document-metadata.ts";
 // The transaction-family registry (packages/domain/src/event-families.ts,
 // ADR 0053) against the parsers it describes. Every PARSERS entry whose rows
 // are transactions or positions has exactly one registry entry and no entry is
@@ -58,6 +59,8 @@ import { skipMeta, skipPage } from "./myjcb-skip-payment-fixture.ts";
 
 /** PARSERS entries whose rows are balances, valuations, scheduled payments or none. */
 const NOT_IN_REGISTRY = [
+  "sony-bank-document-metadata",
+  "sony-bank-realised-gains",
   "mizuho-account-list",
   "moneyforward-canonical-evidence-boundary",
   "myjcb-canonical-evidence-boundary",
@@ -379,6 +382,16 @@ const CASES: Case[] = [
  */
 const MF_EVIDENCE = { fetchUnitKey: null, statementState: null, period: null, mime: "text/html" };
 const OUTSIDE_CASES: Case[] = [
+  one(
+    sonyBankDocumentMetadata,
+    "pdf-envelope",
+    meta("sony-bank", "delivered-document-pdf", {
+      artifactKey: "delivered-document-0001.pdf",
+      fetchUnitKey: "delivered-document-0001",
+      mime: "application/pdf",
+    }),
+    encode("%PDF-synthetic"),
+  ),
   one(
     myJcbJPointBalance,
     "jpoint-balance",

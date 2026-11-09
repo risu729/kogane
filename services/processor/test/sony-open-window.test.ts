@@ -25,6 +25,13 @@ test("only Sony receives an explicitly open lower date bound", () => {
   expect(artifactMeta(row)).toMatchObject({ retainedHistoryEnd: "2099-04-02" });
   expect(artifactMeta(row).runWindow).toBeUndefined();
   expect(artifactMeta({ ...row, source_id: "paypay" })).not.toHaveProperty("retainedHistoryEnd");
+  for (const dataset of [
+    "realised-gains",
+    "delivered-documents",
+    "delivered-document-pdf",
+    "gross-balance",
+  ])
+    expect(artifactMeta({ ...row, dataset })).not.toHaveProperty("retainedHistoryEnd");
   expect(artifactMeta({ ...row, source_id: "paypay" }).runWindow).toBeUndefined();
   expect(artifactMeta({ ...row, window_end: null }).runWindow).toBeUndefined();
   expect(artifactMeta({ ...row, window_start: "" })).not.toHaveProperty("retainedHistoryEnd");

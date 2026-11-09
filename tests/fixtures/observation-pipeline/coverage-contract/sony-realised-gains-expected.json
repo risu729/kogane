@@ -1,0 +1,60 @@
+{
+  "sony-bank-realised-gains": {
+    "annual-summary": {
+      "observations": [
+        {
+          "kind": "valuation",
+          "sourceAccount": "sony-bank:deposit:USD",
+          "subject": "sony-bank:realised:2099:USD",
+          "metric": "annual_realised_fx_gain",
+          "amountMinor": -123,
+          "amountText": "-123",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.cyCcySepRliztnPrftLsFcplSi[0].cyRliztnPrftLs",
+          "extra": {
+            "currencyCd": "USD",
+            "cyRliztnPrftLs": "-123",
+            "cyItrAmt": "7",
+            "_kogane": {
+              "sourceView": "official-annual-summary",
+              "period": "2099",
+              "summaryLabel": "Cy",
+              "sourceCurrency": "USD",
+              "periodState": "year-to-date",
+              "incomeRecognition": "evidence-only"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sony-bank:deposit:USD",
+          "subject": "sony-bank:realised:2099:USD",
+          "metric": "annual_after_tax_interest",
+          "amountMinor": 7,
+          "amountText": "7",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.cyCcySepRliztnPrftLsFcplSi[0].cyItrAmt",
+          "extra": {
+            "currencyCd": "USD",
+            "cyRliztnPrftLs": "-123",
+            "cyItrAmt": "7",
+            "_kogane": {
+              "sourceView": "official-annual-summary",
+              "period": "2099",
+              "summaryLabel": "Cy",
+              "sourceCurrency": "USD",
+              "periodState": "year-to-date",
+              "incomeRecognition": "evidence-only"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "year-scope-drift": {
+      "error": true
+    }
+  }
+}

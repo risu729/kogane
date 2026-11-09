@@ -316,6 +316,22 @@ const SAMPLES: readonly Sample[] = [
   // services/collector-sony-bank/src/shared-collection.ts
   {
     source: "sony-bank",
+    artifactKey: "realised-gains-2099.json",
+    role: "provider_response",
+    mediaType: json,
+    dataset: "realised-gains",
+    unitKey: "realised-year-2099",
+  },
+  {
+    source: "sony-bank",
+    artifactKey: "delivered-document-0001.pdf",
+    role: "provider_export",
+    mediaType: "application/pdf",
+    dataset: "delivered-document-pdf",
+    unitKey: "delivered-document-0001",
+  },
+  {
+    source: "sony-bank",
     artifactKey: "gross-balance.json",
     role: "provider_response",
     mediaType: json,
@@ -635,6 +651,8 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
   ],
   "smbc-bank": ["balance-normalized", "transactions-normalized"],
   "sony-bank": [
+    "realised-gains",
+    "delivered-document-pdf",
     "gross-balance",
     "yen-history-page-0001",
     "foreign-history-usd-page-0002",
@@ -840,7 +858,11 @@ describe("the registration dataset table (ADR 0022)", () => {
       if (sample.dataset === null) continue;
       expect(artifactDataset(sample.source, { ...sample, role: "collector_error" })).toBeNull();
       expect(
-        artifactDataset(sample.source, { ...sample, mediaType: "application/pdf" }),
+        artifactDataset(sample.source, {
+          ...sample,
+          mediaType:
+            sample.mediaType === "application/pdf" ? "application/json" : "application/pdf",
+        }),
       ).toBeNull();
       expect(artifactDataset("kogane-synthetic", sample)).toBeNull();
     }
