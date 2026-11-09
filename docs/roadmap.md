@@ -337,8 +337,7 @@ each later unit of this track closes gaps and shrinks those lists.
 
 New collectors ([#455](https://github.com/risu729/kogane/issues/455)–[#510](https://github.com/risu729/kogane/issues/510)
 under [#440](https://github.com/risu729/kogane/issues/440)) start only when the owner
-asks, and they are implemented by Codex running on the owner's PC from the issue
-text, not by this project's Claude threads (owner, 2026-11-09 19:06 UTC). Before any
+asks (owner, 2026-11-09 19:06 UTC). Before any
 of them, the data that existing collectors' sites already offer but Kogane does not
 collect comes first (owner, 2026-11-09 19:06 UTC): the `partial` and `not_collected`
 entries of the provider data-type catalogue
