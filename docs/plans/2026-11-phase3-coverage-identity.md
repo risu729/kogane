@@ -1,6 +1,7 @@
 # Plan: Phase 3 — coverage, collection requests and cross-source identity
 
 - Status: **accepted** by the owner on 2026-11-08 (03:16 and 03:19 UTC), with the answers in [section 6](#6-owner-decisions-2026-11-08). Each unit is its own pull request; design changes inside a unit still get an ADR.
+- Done: 2026-11-09. The roadmap's done-when holds ([outcome](../roadmap.md#phase-3-outcome), unit 3i, [#1148](https://github.com/risu729/kogane/issues/1148)); the owner chose on 2026-11-09 (11:27 UTC) to verify both requests over MCP instead of one from the page.
 - Written: 2026-11-08 03:00 UTC against main [`2a1b681`](https://github.com/risu729/kogane/commit/2a1b681), revised after an independent subagent review (03:20 UTC).
 - Roadmap: [Phase 3](../roadmap.md#phase-3--coverage-collection-requests-and-cross-source-identity) and [layers 0–5](../roadmap.md#layers-05--coverage-and-cross-source-identity). Issues [#542](https://github.com/risu729/kogane/issues/542), [#545](https://github.com/risu729/kogane/issues/545), the per-source issues #441–#454 under [#440](https://github.com/risu729/kogane/issues/440).
 
@@ -111,6 +112,8 @@ Done read-only on 2026-11-08 for mizuho, GLOBAL PASS, St George, V Point and Vpa
 ### 3i Production verification and close-out (docs)
 
 Request one collection from the page and one over MCP and follow both to published (and projected); read per-account coverage for the Phase 2 accounts (a Vpass card, the MyJCB root, SMBC, SBI Shinsei) with data types and freshness; read identity and instrument counts. Record the outcome in the roadmap; close or narrow #542 and #545.
+
+**3i outcome (2026-11-09):** both requests over MCP reached `published` and `projected`; the Phase 2 accounts read `same-day` (MyJCB), `human-required` (SMBC) and `stale` (Vpass, SBI Shinsei, whose newest captures are not parse-eligible); `unresolved` is 0 on every source and the 16 SBI pairs are `resolved-by-rule` ([roadmap outcome](../roadmap.md#phase-3-outcome)).
 
 Order: 3a, 3c, 3f and 3g now, in parallel threads; 3b after #1071; 3d and 3e after #1112, in one thread since they change the same query; 3i last.
 

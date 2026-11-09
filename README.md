@@ -46,9 +46,10 @@ requests run through the alarm's private named collector RPC
 is enabled for that dispatch.
 
 Card usage → statement → bank debit, with an explainable trail and no double
-expense, works for the representative cases (done 2026-11-08). The next
-milestone is **coverage, collection requests and cross-source identity**.
-Dated holdings/liabilities, valuation, lots/P&L and tax follow; rewards can
+expense, works for the representative cases (done 2026-11-08), and so do
+coverage, collection requests and cross-source identity (done 2026-11-09). The
+next milestone is **non-card events and dated state**. Valuation, lots/P&L and
+tax follow; rewards can
 progress in parallel. See
 [current status](docs/current-status.md) for the bounded implementation assessment
 and [roadmap](docs/roadmap.md) for the delivery order and acceptance criteria.
