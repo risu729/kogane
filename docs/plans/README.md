@@ -19,6 +19,10 @@ and limits are in [roadmap](../roadmap.md) and [current status](../current-statu
   with the production baseline of 2026-11-08 and the owner's decisions of that day.
   Done on 2026-11-09: the roadmap's Phase 3 done-when holds.
 
+- [2026-11 collect what existing collectors' sites already offer](2026-11-existing-collector-gaps.md):
+  accepted by the owner on 2026-11-09 (order at 20:21 UTC); P0 → P3, one issue
+  and pull request per item, before any new collector.
+
 - [2026-10 PRESTIA bank Worker integration](2026-10-prestia-bank-worker.md): implemented
   collector/parser integration, merged in #437; deployment and first production
   verification pending. The seeded schedule remains disabled.
