@@ -702,12 +702,22 @@ export async function collectMizuho(options: {
         throw error;
       }
       histories.push(history);
-      const partialPage = history.hasMore || history.displayedRange.from !== 1;
+      // The observed empty page (no transaction block) is one complete page
+      // with no rows; it is stored under `page:empty`, which only the empty
+      // state parses from, never under an invented range.
+      const partialPage =
+        history.state === "listed" && (history.hasMore || history.displayedRange.from !== 1);
       if (partialPage) issues.push("history-pagination-unverified");
-      const { from, to } = history.displayedRange;
+      const page =
+        history.state === "empty"
+          ? { key: "empty", unit: "empty" }
+          : {
+              key: `${history.displayedRange.from}-${history.displayedRange.to}`,
+              unit: `${history.displayedRange.from}:${history.displayedRange.to}`,
+            };
       artifacts.push({
-        artifactKey: `${prefix}/history/${from}-${to}.html`,
-        unitKey: `ordinary:${account.branchCode}:${account.accountNumber}:page:${from}:${to}`,
+        artifactKey: `${prefix}/history/${page.key}.html`,
+        unitKey: `${unit(account)}:page:${page.unit}`,
         dataset: "mizuho-ordinary-history-html",
         body: html,
         mediaType: "text/html",

@@ -103,6 +103,39 @@ below describe the original research. The
 and [login guidance](https://www.mizuhobank.co.jp/retail/products/direct/goriyo/loginout/n00000.html)
 are the current starting references.
 
+## Empty history page (2026-11-09)
+
+Every daily run from 2026-11-01 failed the ordinary-account history unit
+([issue 1145](https://github.com/risu729/kogane/issues/1145)); the first run
+after [PR 1115](https://github.com/risu729/kogane/pull/1115) (fetch run 1481,
+2026-11-08 21:25 UTC) named the check `parse-unrecognized-empty-state` and kept
+the sanitized page. That page is the history form `ACCHST_04110B` with only the
+account header (`txtBrnch`, `txtTransType`, `txtAccNo` and a `span.amount`
+holding only the currency mark, the same header a populated page has) and no
+transaction block at all: no `.box-row-tx-ditails` row, no `.t1-2` amount
+column, no `txtTransCntnt_`, `txtDate_` or `txtEachBal_` field, and neither
+`txtDispDetails` nor `txtAllDispDetails`. The last populated capture (fetch
+run 1258, 2026-10-30) held one row dated 2026-08, so a display window that no
+longer reaches it gives this page. The provider's empty-state wording is not in
+the sanitized capture (the sanitizer keeps only the listed fields), so it is
+not part of the rule: a provider notice that kept the header and dropped the
+block for another reason would read the same. Telling those apart needs a
+structure-only outline of the raw page, which the collector does not keep.
+
+`parseHistoryPage` returns this page as `state: "empty"`,
+`displayedRange: null`, `transactions: []` (a listed page is
+`state: "listed"`). Any part of the transaction block without rows (a
+displayed range such as `0 - 0 件`, an amount column or a row field) is still
+refused as `unrecognized-empty-state`. The collector stores the page as
+`ordinary/<branch>-<account>/history/empty.html`, unit
+`ordinary:<branch>:<account>:page:empty`, not `partial`; the
+`mizuho-ordinary-history` parser (1.1.0) accepts that unit only for the empty
+state and emits no transaction and one complete-container claim with
+`observedCount: 0`, `expectedCount: null` (`complete-empty`). A listed page
+under the empty unit, or the empty page under a range unit, is refused as
+`artifact-page-range-mismatch`. `mizuho-account-list` moves to 1.0.2 only
+because the shared module's code digest changed; its output is unchanged.
+
 ## Conclusion
 
 - **Recommended authoritative source: official Web Mizuho Direct**. Account enumeration/balances use authenticated HTML;

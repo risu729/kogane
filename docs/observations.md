@@ -38,6 +38,20 @@ remains separate evidence. Synthetic read-model tests freeze shipped SQL and
 verify the intended delta on scaled/random CORE stores and plans; collector
 tests verify the actual failed and successful terminal paths.
 
+## Mizuho: read the empty ordinary history page (ordinary-history 1.1.0)
+
+2026-11-09. The history page Mizuho has returned since 2026-11-01 lists no
+transaction: the account header only, with no row, amount column, row field or
+displayed range ([issue 1145](https://github.com/risu729/kogane/issues/1145)).
+`mizuho-ordinary-history@1.1.0` reads it from the new unit
+`ordinary:<branch>:<account>:page:empty` as no transaction and one complete
+empty page claim; a page with any part of the transaction block but no rows is
+still refused. `mizuho-account-list@1.0.2` changes only its code digest (the
+shared module). Observed structure and rule:
+[docs/sources/mizuho-bank.md](sources/mizuho-bank.md#empty-history-page-2026-11-09).
+Tests: `packages/parsers/test/mizuho-parser.test.ts` and
+`services/collector-mizuho/test/client.test.ts`.
+
 ## V Point Pay: refuse negative notification amounts (notification-event 1.0.2)
 
 2026-11-08. Owner decision, 2026-11-08 13:29 UTC: a notification amount
