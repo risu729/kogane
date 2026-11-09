@@ -102,3 +102,5 @@ for current behavior.
 - [ADR 0092: Sony Bank deposit history uses only the official CSV in current transactions](0092-sony-history-csv-only.md) — accepted; JSON remains evidence and balances, collector CSV row count must match JSON `countCnt`, missing or incomplete CSV fails with a closed terminal code
 - [ADR 0093: Treat listed direct deposit readings at different banks as disjoint](0093-direct-bank-deposit-disjointness.md) — accepted; registry-backed deposit allow-list for SBI Shinsei, SMBC and Mizuho, no identity re-run
 - [ADR 0096: Walk SBI's retained execution history in every normal collection](0096-sbi-scheduled-execution-history.md) — proposed; disjoint windows, provider-based foreign cutoff, per-window evidence and registration v4, no persisted progress
+
+- [ADR 0098: Preserve SBI weekly asset history and select one revision per point](0098-sbi-weekly-asset-history.md) — proposed; observed all-period GET, exact raw capture and bounded year shards, conditional category membership, registration v5, production per-point revision selection

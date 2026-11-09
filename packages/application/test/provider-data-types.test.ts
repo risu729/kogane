@@ -28,6 +28,15 @@ const names = PARSERS.map((parser) => parser.name);
 const catalogued = Object.entries(PROVIDER_DATA_TYPE_CATALOGUE);
 
 describe("the provider data-type catalogue", () => {
+  test("SBI weekly history remains partial until scheduled publication proves retained coverage", () => {
+    expect(
+      providerDataTypes("sbi-securities")!.find((entry) => entry.type === "valuation_history"),
+    ).toMatchObject({
+      status: "partial",
+      parsers: ["sbi-account-assets-current", "sbi-account-assets-history"],
+      issue: 1238,
+    });
+  });
   test("describes exactly the CORE sources that have a collector", () => {
     const withCollector = new Set(
       Object.values(COLLECTOR_SOURCE_IDS).filter((source) => source !== "kogane-synthetic"),

@@ -50,6 +50,7 @@ import { ID } from "../../../evidence-contract/src/validate.ts";
  *   collector's statement pages (`statement-page`).
  * - `terminal-registration-v4` (ADR 0096): SBI's dated execution keys and
  *   their matching per-artifact requested ranges; earlier mappings are frozen.
+ * - `terminal-registration-v5` (ADR 0098): SBI weekly asset history.
  *
  * A terminal already registered under an earlier version whose descriptors
  * the current version does not change is not registered again: the new
@@ -57,13 +58,14 @@ import { ID } from "../../../evidence-contract/src/validate.ts";
  * `register-terminal.ts`, ADR 0022). Registering it again would parse the same
  * capture twice, and a Mizuho capture's transactions would be listed twice.
  */
-export const REGISTRATION_CONTRACT_VERSION = "terminal-registration-v4";
+export const REGISTRATION_CONTRACT_VERSION = "terminal-registration-v5";
 
 /** Every version this code can derive, oldest first; each derivation is kept reproducible. */
 export const REGISTRATION_CONTRACT_VERSIONS = [
   "terminal-registration-v1",
   "terminal-registration-v2",
   "terminal-registration-v3",
+  "terminal-registration-v4",
   REGISTRATION_CONTRACT_VERSION,
 ] as const;
 export type RegistrationContractVersion = (typeof REGISTRATION_CONTRACT_VERSIONS)[number];
@@ -298,6 +300,12 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
   "sbi-securities": [
     ...SBI_LEGACY_DATASET_RULES,
     {
+      key: /^account-assets-history-\d{4}\.json$/u,
+      role: "collector_derived",
+      mediaTypes: JSON_TYPE,
+      dataset: "account-assets-history",
+    },
+    {
       key: SBI_WINDOW_KEY,
       role: "collector_derived",
       mediaTypes: JSON_TYPE,
@@ -442,11 +450,19 @@ export function artifactDataset(
   return datasetByRules(table[collectorSource]!, artifact);
 }
 
-/** `terminal-registration-v2`'s table: ADR 0022's, with Vpass withheld. */
+/** v4 keeps the execution-window mapping but predates weekly assets. */
+const V4_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
+  ...ARTIFACT_DATASETS,
+  "sbi-securities": ARTIFACT_DATASETS["sbi-securities"]!.filter(
+    (rule) => rule.dataset !== "account-assets-history",
+  ),
+};
+
 const V3_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
   ...ARTIFACT_DATASETS,
   "sbi-securities": SBI_LEGACY_DATASET_RULES,
 };
+/** `terminal-registration-v2`'s table: ADR 0022's, with Vpass withheld. */
 const V2_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> =
   Object.fromEntries(Object.entries(V3_ARTIFACT_DATASETS).filter(([source]) => source !== "vpass"));
 
@@ -462,7 +478,8 @@ const DATASETS_BY_VERSION: Readonly<
   "terminal-registration-v1": { "st-george": ARTIFACT_DATASETS["st-george"]! },
   "terminal-registration-v2": V2_ARTIFACT_DATASETS,
   "terminal-registration-v3": V3_ARTIFACT_DATASETS,
-  "terminal-registration-v4": ARTIFACT_DATASETS,
+  "terminal-registration-v4": V4_ARTIFACT_DATASETS,
+  "terminal-registration-v5": ARTIFACT_DATASETS,
 };
 
 /** The dataset the first matching rule names, or null. */
@@ -844,7 +861,8 @@ export function artifactRequest(
   // keeps no dataset and so does not inherit financial eligibility.
   const dataset = artifactDataset(manifest.source, artifact, contractVersion);
   const sbiHistory =
-    contractVersion === "terminal-registration-v4" &&
+    (contractVersion === "terminal-registration-v4" ||
+      contractVersion === "terminal-registration-v5") &&
     manifest.source === "sbi-securities" &&
     (dataset === "domestic-trade-records" || dataset === "foreign-trade-records");
   const windowRange = sbiHistory

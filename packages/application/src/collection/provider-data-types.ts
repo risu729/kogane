@@ -115,7 +115,11 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     collected("execution", ["sbi-domestic-trade-records", "sbi-foreign-trade-records"]),
     partial("settlement_cash", ["sbi-foreign-cash-balances", "sbi-yen-detail-history"], 446),
     missing("income", 446),
-    partial("valuation_history", ["sbi-account-assets-current"], 446),
+    partial(
+      "valuation_history",
+      ["sbi-account-assets-current", "sbi-account-assets-history"],
+      1238,
+    ),
     missing("document", 446),
   ],
   // SBI新生銀行: top accounts with recent activity, balance summary and the yen

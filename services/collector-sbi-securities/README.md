@@ -15,7 +15,7 @@ This independent Worker creates a fresh session from a stored `SBI証券` passke
 ## Current scope
 
 - Domestic-stock app: domestic cash equities/custody-cash payload through an MTS session and read-only TR code `F2631`.
-- Main site: current `My資産` ("My assets") valuation, yen deposit/withdrawal details and domestic-stock execution history from January 1 of year minus two, split into windows of at most 90 days as in the successful historical scan. Yen details retain every provider page-metadata field and response field in a page bundle, validating completeness before making an artifact.
+- Main site: current and available weekly `My資産` ("My assets") valuations, yen deposit/withdrawal details and domestic-stock execution history from January 1 of year minus two, split into windows of at most 90 days as in the successful historical scan. Yen details retain every provider page-metadata field and response field in a page bundle, validating completeness before making an artifact.
 - Foreign-stock app: US cash equities, USD custody cash and retained execution history in windows of at most 90 days. The historically observed mobile BFF duration query supplies `pastYears`; the successful historical scan began January 1 of year minus `pastYears`, rather than at the web rolling cutoff.
 - Execution: the Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the `sbi-securities` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), daily at 06:00 JST (21:00 UTC), and an accepted operations request calls `runOperation` (ADR 0048). Either one collects domestic/foreign data serially in one invocation (`scope=all`). The Worker has no Cron Trigger and no public trigger route.
 - Storage: `packages/collection` writes directly to shared DATA; the Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). The only D1 the collector uses is the execution lease (`withCollectionLease`) in `SCHEDULE_DB` (`kogane-raw-evidence`).
@@ -74,7 +74,7 @@ The terminal records the period, success/partial success/failure, artifact hashe
 Execution windows are newest first and disjoint, with at most thirteen per scope.
 The newest ordinary 90-day request keeps `<scope>-trade-records.json`; older
 requests use `<scope>-trade-records-<from>-<to>.json`. Each carries its own
-requested range in the terminal and, under `terminal-registration-v4`, its
+requested range in the terminal and, under `terminal-registration-v4` and later, its
 CORE artifact descriptor. Equal empty bodies may share a content-addressed
 object while their separate requested windows remain registered evidence.
 Foreign retention is the historically observed read-only `GetSearchingDuration`
@@ -118,3 +118,26 @@ No Queue, dispatcher or GitHub Actions schedule is used. D1 is used only for the
 ## Sources
 
 Some protocol understanding and the first implementation were based on `pnsk-lab/mnie` commit `c87e65c0a04c03c560962f8ead6e77415fb841f4`. Kogane code was independently rewritten for Cloudflare Workers, removing filesystem, OpenSSL-process, Mnie-session-type and order-API dependencies. See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for license attribution.
+
+Weekly asset history is requested once through the existing main-site session
+at `/account/api/assets/valuations`, without a period parameter. The closed
+shape audit precedes exact-byte storage as unmapped
+`account-assets-history-source.json`. A derived inventory records every expected
+calendar-year shard/hash/count with the raw hash, GET path and capture time.
+`account-assets-history-<year>.json` retains at most 53 weeks, keeping long
+histories under the existing 2 MiB parser-output limit. Each shard's input
+lineage names source and inventory. Missing or altered inventory members make
+the domestic unit/run partial; available evidence remains stored. Registration
+v5 names only yearly shards as the new dataset and freezes v1–v4 mappings. Each successful
+main-site capture is retained immediately, so a later yen/history failure
+keeps these bytes while the run stays partial under the existing policy.
+
+The parser emits available weekly profiles and listed categories plus ALL,
+corroborates ALL with native tuples and exact category sums, and preserves
+unlisted residual rows. Null metrics/views never become zero facts. The
+production observation reader selects one latest revision per portfolio point,
+keeps older witnessed weeks absent from a shorter response, and separates
+aggregate/profile alternatives. No new UI, public trigger or read operation is
+added. The catalogue remains partial: the observed 44 points do not establish
+August 2021 coverage, the two iDeCo profiles were unavailable, and a scheduled
+production collection/publication is still required ([ADR 0098](../../docs/adr/0098-sbi-weekly-asset-history.md)).
