@@ -109,7 +109,6 @@ The official website and stock-app transport provide at least the following.
 
 The official `取得単価` (acquisition unit price) for domestic equities is a moving-average price including fees, and is not always identical to general-custody `参考単価` (reference unit price) or a specific account's tax acquisition value. Kogane preserves the meaning and source screen and must not collapse `取得単価`, `参考単価`, `平均取得価額` (average acquisition value), and `税務上取得価額` (tax acquisition value) into one field.
 
-
 ### Additional products checked on 2026-11-09 UTC
 
 For [issue 1237](https://github.com/risu729/kogane/issues/1237), read-only
