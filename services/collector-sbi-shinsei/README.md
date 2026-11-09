@@ -50,6 +50,34 @@ Earlier failure manifests remain as verification history: 2 cold/listen failures
 
 Detailed evidence and next capture steps are recorded in [`INVESTIGATION-2026-08-31.md`](./INVESTIGATION-2026-08-31.md).
 
+## Balance-summary schema drift (2026-11-09)
+
+An authenticated, ordinary Top-page navigation on 2026-11-09 returned HTTP 200
+with `application/json` for the existing bodyless
+`POST /SFC/app/IFTP_TopAdapter/getBalanceSummaryAndStage`. Its
+`responseParam.summary.responseParam` included two previously unregistered string
+fields: `hyperDepositBalance` and `yenDepositBalance`. The collector's strict
+summary validator rejected these keys. A rejected summary is omitted from the
+stored artifacts and records `read:balance-summary-and-stage`,
+`ResponseSchemaError`, `provider_response_invalid`; the other validated responses
+remain evidence, so the run ends `partial`.
+
+The validator now accepts these two optional scalar fields alongside the earlier
+summary shape. Synthetic tests cover the full four-response handoff with the new
+fields, retention in the summary artifact, the earlier shape without them and
+continued rejection of unknown fields or nested values. The fields remain raw
+provider evidence; this change adds no balance interpretation or account mapping.
+
+This observed schema mismatch reproduces the missing-summary/partial-run pattern
+reported in [#1215](https://github.com/risu729/kogane/issues/1215). Historical failed
+manifests and Worker logs have not yet been independently inspected, so the cause
+of every earlier partial run is not established. No production collection has been
+run with this fix. After deployment, verify a daily or explicitly authorized
+requested run reaches `success`, follows through publication and shows deposit
+accounts as `same-day` in `kogane.collection-quality.read` (`view: accounts`).
+Until then, production recovery remains pending. The `container-snapshot`
+current-selection rule and success/partial classification are unchanged.
+
 ## Worker surface
 
 | Trigger                           | Behavior                                                                                                                                                                                                       |
