@@ -48,7 +48,8 @@ export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
   }),
   ...SBI_VC_UNIT_POLICIES.map((row) =>
     policy(row.source_id, row.dataset, row.parser_name, {
-      policy_id: row.parser_name === "sbi-vc-document-metadata" ? "coverage-v1" : "legacy-warning-compat-v1",
+      policy_id:
+        row.parser_name === "sbi-vc-document-metadata" ? "coverage-v1" : "legacy-warning-compat-v1",
       required_parser_version: row.parser_name === "sbi-vc-document-metadata" ? "1.0.0" : null,
       snapshot_selection: row.snapshot_selection,
       replaces_previous_on_complete_empty: row.snapshot_selection === 1 ? 1 : 0,
