@@ -23,6 +23,15 @@ See the [dated observation](../../docs/sources/smbc-bank.md#authenticated-aud-ob
 
 Confirming the QR too early yields `approval_not_completed_generate_new_qr`. Generate a new QR, finish app-side approval, then start backfill. If the SMBC session expires mid-period, generating/approving a new QR resumes the same Run from its uncaptured month. `QRを生成` returns the same QR while valid, so generate after expiry.
 
+Foreign HTML is parsed structurally with the existing parse5 8.1.1 library;
+only reviewed fields become JSON. Entities are decoded once and never reparsed
+as markup. Financial context requires the unique visible main/account heading;
+hidden/template/script lookalikes cannot establish it. The explicit-empty
+getData marker is checked with Acorn 8.19.0 syntax nodes, without execution.
+Hidden classic scripts still participate in contradiction checks; duplicate or
+rewritten protected bindings, unknown modules and malformed evidence are refused.
+See the [source contract](../../docs/sources/smbc-bank.md#authenticated-aud-observations-2026-11-10).
+
 Shared storage retains existing partial terminals. Additional captures go to continuation terminals; final success is another completion terminal containing every captured artifact. Yen history, the AUD balance and AUD history are independent units. A complete yen unit publishes new evidence even if AUD history fails. The AUD balance is captured first and publishes even if a later yen request or the unreviewed AUD history fails. Migration 0096 explicitly enables those four datasets through the existing independent-unit policy, preserving operator overrides. An incomplete unit remains ineligible. A continuation includes that unit's earlier partial data when it completes and omits independently completed units already published earlier.
 
 The screen shows `取得完了` ("capture complete") and `共有保存` ("shared storage") separately. If shared storage failed or is unconfirmed, `保存済み明細の取り込みを再試行` ("retry importing saved details") republishes from staging without logging into the bank or capturing again. After shared storage completes, central registration/parsing completion is checked separately.

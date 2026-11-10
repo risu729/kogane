@@ -52,6 +52,26 @@ string in a named `getData` function, followed by
 required. The string is not an empty-row schema and is never interpreted as
 zero on its own.
 
+The extraction implementation uses parse5 8.1.1 DOM nodes rather than regex
+HTML removal. Visible evidence is scoped to a unique main and excludes comments,
+templates, scripts, styles, hidden ancestors and foreign-namespace lookalikes.
+HTML entities are decoded once by the parser; decoded text is never parsed as
+markup again. Quoted attributes, nested definition lists and tag case folding
+therefore retain their structural meaning. Non-doctype HTML parse errors are
+refused rather than repaired into financial evidence.
+
+For the empty marker, Acorn 8.19.0 inspects inline classic-script syntax without
+executing JavaScript. Only the observed empty-string getData return and a unique
+var binding to its zero-argument call qualify. Duplicate definitions, direct
+rewrites, protected-object mutators and dynamic code construction are refused.
+Executable scripts are inspected even under hidden ancestors; template/data
+blocks cannot supply the proof. Module and foreign-namespace scripts remain
+unreviewed and fail closed. These checks describe the bounded static response
+contract, not a general JavaScript interpreter or a new live collector result.
+Script-type classification follows the
+[HTML script model](https://html.spec.whatwg.org/multipage/scripting.html#the-script-element)
+and its [JavaScript MIME essence list](https://mimesniff.spec.whatwg.org/#javascript-mime-type-essence-match).
+
 Implementation scope is the observed AUD balance and this explicit-empty
 history response only. A fresh approved manual run queries each retained
 calendar month through the last finished JST day, preserving the existing

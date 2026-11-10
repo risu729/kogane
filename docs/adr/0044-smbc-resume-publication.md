@@ -174,6 +174,17 @@ selection. AUD uses the standard `dataset_snapshot_policies` and
 `SNAPSHOT_DATASETS` membership, with coverage-v1 and parser 0.1.2. Its parser
 requires the named dataset; the legacy NULL-dataset boundary is unchanged.
 
+The collector uses structural parse5 nodes for HTML extraction, with one-pass
+entity text and explicit visible-main ownership. It does not emit sanitized
+HTML. Acorn checks only the observed inline-script empty marker and binding
+shape without executing provider code; hidden executable scripts are included
+in contradiction checks, while inert templates/data blocks cannot provide
+proof. Ambiguous definitions, protected-binding mutations and unreviewed module
+layouts refuse history. This replaces regex-based removal after hosted CodeQL
+reported seven findings; neither the security checks nor their severity gates
+are suppressed. The normalized financial JSON schema and production policies
+remain unchanged.
+
 AUD HTML contains session fields, so only reviewed financial fields and the
 validated explicit-empty result enter sanitized JSON artifacts. A redaction
 step records that the original HTML was discarded for security. The current

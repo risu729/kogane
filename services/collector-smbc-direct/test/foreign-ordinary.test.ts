@@ -192,3 +192,172 @@ test("a template lookalike cannot let a different account publish empty history"
   );
   expect(requests.some((request) => request.path.endsWith("AIFDDT1meisai.smbc"))).toBe(false);
 });
+
+test("structural extraction respects quoted attributes, case folding and inert ancestors", () => {
+  const expected = mainPage(context()).replace('class="item"', 'class="item" data-note="a > b"');
+  expect(() => assertForeignHistoryContext(expected, "001234", "1234.56")).not.toThrow();
+  expect(() =>
+    assertForeignHistoryContext(
+      expected.replaceAll("<main>", "<MAIN>").replaceAll("</main>", "</MAIN>"),
+      "001234",
+      "1234.56",
+    ),
+  ).not.toThrow();
+  const quoted = balance.replace(
+    'class="price _t-bold"',
+    'class="price _t-bold" data-note="a > b"',
+  );
+  expect(sanitizeForeignBalance(quoted).amount).toBe("1234.56");
+  for (const inert of [
+    `<script>const sample = ${JSON.stringify(accountHeading())};</script>`,
+    `<style>.sample::before { content: ${JSON.stringify(accountHeading())}; }</style>`,
+    `<!-- ${accountHeading()} -->`,
+    `<template>${context()}</template>`,
+    `<div style="visibility: hidden !important">${context()}</div>`,
+    `<div HIDDEN>${context()}</div>`,
+    `<svg><foreignObject>${context()}</foreignObject></svg>`,
+  ]) {
+    expect(() =>
+      assertForeignHistoryContext(mainPage(context("991234") + inert), "001234", "1234.56"),
+    ).toThrow();
+    expect(() =>
+      assertForeignHistoryContext(
+        mainPage(context() + inert.replaceAll("001234", "991234")),
+        "001234",
+        "1234.56",
+      ),
+    ).not.toThrow();
+  }
+});
+
+test("malformed raw-text endings, comments and duplicate attributes never establish evidence", () => {
+  for (const malformed of [
+    mainPage(context("991234")) + `<script>${accountHeading()}</script\t\n bar>`,
+    mainPage(context("991234")) + `<style>${accountHeading()}</style\t\n bar>`,
+    mainPage(context()).replace('class="item"', 'class="item" class="other"'),
+    mainPage(context("991234")) + `<!-- nested <!-- ${accountHeading()} -->`,
+    mainPage(context("991234")) + `<textarea>${accountHeading()}</textarea>`,
+  ])
+    expect(() => assertForeignHistoryContext(malformed, "001234", "1234.56")).toThrow();
+});
+
+test("HTML entities are decoded once as text and never reinterpreted as elements", () => {
+  expect(sanitizeForeignBalance(balance.replace("1,234.56", "1&#44;234.56")).amount).toBe(
+    "1234.56",
+  );
+  expect(() => sanitizeForeignBalance(balance.replace("1,234.56", "1&amp;#44;234.56"))).toThrow();
+  for (const encoded of [
+    balance.replaceAll("<", "&lt;").replaceAll(">", "&gt;"),
+    balance.replaceAll("<", "&amp;lt;").replaceAll(">", "&amp;gt;"),
+  ])
+    expect(() => sanitizeForeignBalance(encoded)).toThrow();
+  expect(() =>
+    assertForeignHistoryContext(
+      mainPage(context().replaceAll("001234", "&amp;#48;&amp;#48;1234")),
+      "001234",
+      "1234.56",
+    ),
+  ).toThrow();
+});
+
+test("only actual inline classic script declarations prove the observed empty payload", () => {
+  const code = emptyDataScript.slice("<script>".length, -"</script>".length);
+  for (const fake of [
+    `<!-- ${emptyDataScript} -->`,
+    `<template>${emptyDataScript}</template>`,
+    `<script>const sample = ${JSON.stringify(code)};</script>`,
+    `<script>/* ${code} */</script>`,
+    `<script>// ${code}\n</script>`,
+    `<script type="text/plain">${code}</script>`,
+    `<script type="module">${code}</script>`,
+    `<script src="/unobserved.js">${code}</script>`,
+    `<script nomodule>${code}</script>`,
+  ])
+    expect(() => sanitizeForeignHistory(history.replace(emptyDataScript, fake), range)).toThrow(
+      "foreign_history_response_unreviewed",
+    );
+  expect(
+    sanitizeForeignHistory(
+      history + `<template>${emptyDataScript}</template><!-- ${emptyDataScript} -->`,
+      range,
+    ).transactions,
+  ).toEqual([]);
+});
+
+test("ambiguous, reassigned or dynamically constructed empty-data bindings are refused", () => {
+  const code = emptyDataScript.slice("<script>".length, -"</script>".length);
+  for (const changed of [
+    code + code,
+    code + "getData = () => [];",
+    code + "meisaiListJSONData = [];",
+    code + "window.getData = () => [];",
+    code + "globalThis['meisaiListJSONData'] = [];",
+    code + "JSON.parse = () => [];",
+    code + "function JSON() {}",
+    code + "Object.defineProperty(window, 'getData', {value: () => []});",
+    code + "eval('getData = () => []');",
+    code + "getData();",
+    code + "meisaiListJSONData.push({unobserved: true});",
+    code + "meisaiListJSONData.splice(0, 1);",
+    code + "Object.assign(JSON, {parse: () => []});",
+    code + "Object.defineProperty(JSON, 'parse', {value: () => []});",
+    code + "getData.call(null);",
+    code.replace("var meisaiListJSONData = getData();", "var meisaiListJSONData = [];"),
+    code.replace("function getData()", "function getData(value)"),
+  ])
+    expect(() =>
+      sanitizeForeignHistory(
+        history.replace(emptyDataScript, `<script>${changed}</script>`),
+        range,
+      ),
+    ).toThrow("foreign_history_response_unreviewed");
+});
+
+test("hidden classic scripts remain executable evidence and cannot conceal a rewrite", () => {
+  expect(
+    sanitizeForeignHistory(history.replace("<script>", "<script hidden>"), range).transactions,
+  ).toEqual([]);
+  for (const rewrite of [
+    "<script hidden>meisaiListJSONData = [];</script>",
+    "<div hidden><script>getData = () => [];</script></div>",
+    '<div aria-hidden="true"><script>meisaiListJSONData.push(1);</script></div>',
+    '<div style="display:none"><script>Object.assign(JSON, {parse: () => []});</script></div>',
+    '<script type="text/jscript">meisaiListJSONData = [];</script>',
+    '<script type="module">globalThis.meisaiListJSONData = [];</script>',
+    "<svg><script>meisaiListJSONData = [];</script></svg>",
+  ])
+    expect(() => sanitizeForeignHistory(history + rewrite, range)).toThrow(
+      "foreign_history_response_unreviewed",
+    );
+});
+
+test("the empty binding can use hoisting only inside the same or an earlier classic script", () => {
+  const binding = "var meisaiListJSONData = getData();";
+  const declaration = emptyDataScript
+    .slice("<script>".length, -"</script>".length)
+    .replace(binding, "");
+  expect(
+    sanitizeForeignHistory(
+      history.replace(emptyDataScript, `<script>${binding}${declaration}</script>`),
+      range,
+    ).transactions,
+  ).toEqual([]);
+  expect(
+    sanitizeForeignHistory(
+      history.replace(
+        emptyDataScript,
+        `<script>${declaration}</script><script>${binding}</script>`,
+      ),
+      range,
+    ).transactions,
+  ).toEqual([]);
+  expect(() =>
+    sanitizeForeignHistory(
+      history.replace(
+        emptyDataScript,
+        `<script>${binding}</script><script>${declaration}</script>`,
+      ),
+      range,
+    ),
+  ).toThrow("foreign_history_response_unreviewed");
+});
