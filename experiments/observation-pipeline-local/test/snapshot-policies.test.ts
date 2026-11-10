@@ -255,7 +255,7 @@ describe("dataset_snapshot_policies seed", () => {
   });
 
   test("legacy datasets retain their policies and the St.George and FX board parsers use explicit coverage", () => {
-    for (const row of policyRows(database())) {
+    for (const row of policyRows(database()).filter((row) => row.snapshot_selection === 1)) {
       const stGeorge = row.parser_name === "st-george-balances";
       const prestia = row.parser_name === "prestia-bank-balances";
       const nonemptyOnly = EXPLICIT_COVERAGE.has(row.parser_name);
@@ -456,7 +456,7 @@ describe("eligibility-only policy rows", () => {
   function enable(store: Store): void {
     store.db
       .query(
-        `INSERT INTO dataset_snapshot_policies
+        `INSERT OR IGNORE INTO dataset_snapshot_policies
            (source_id, dataset, parser_name, policy_id, unit_scope, snapshot_selection, updated_at_ms)
          VALUES (?1, ?2, ?3, 'legacy-warning-compat-v1', 'unit', 0, 1)`,
       )
@@ -487,6 +487,10 @@ describe("eligibility-only policy rows", () => {
         parseStatus: "missing",
         observations: [],
       });
+    // Explicit rollback reproduces the prior run-scoped behavior.
+    store.db
+      .query("DELETE FROM dataset_snapshot_policies WHERE parser_name=? AND dataset=?")
+      .run(MYJCB.parser, MYJCB.dataset);
     // Before the row: no artifact of the partial run is admitted.
     expect(listArtifacts(store).map((a) => a.unitScopeEligibility)).toEqual([null, null]);
     enable(store);
@@ -510,4 +514,50 @@ describe("eligibility-only policy rows", () => {
     // The shadow comparison is unchanged too: it reads the same CTEs.
     expect(compare(store)).toEqual([]);
   });
+});
+
+test("MyJCB credit eligibility seeds exactly four datasets and repairs missing rows without replacing operator choices", () => {
+  const store = database();
+  const expected = [
+    ["myjcb-credit-ledger", "credit-ledger"],
+    ["myjcb-credit-past-month-balances", "credit-past-months"],
+    ["myjcb-credit-statement-total", "credit-detail"],
+    ["myjcb-skip-payment-schedule", "credit-schedule"],
+  ];
+  const seeded = policyRows(store).filter((row) => row.snapshot_selection === 0);
+  expect(seeded.map((row) => [row.parser_name, row.dataset])).toEqual(expected);
+  for (const row of seeded)
+    expect(row).toMatchObject({
+      source_id: "myjcb",
+      unit_scope: "unit",
+      policy_id: "legacy-warning-compat-v1",
+      required_parser_version: null,
+      replaces_previous_on_complete_empty: 1,
+    });
+  store.db.exec(
+    "UPDATE dataset_snapshot_policies SET unit_scope='run', required_parser_version='9.0.0' WHERE parser_name IN ('myjcb-credit-ledger','myjcb-jpoint-history')",
+  );
+  store.db.exec(
+    "DELETE FROM dataset_snapshot_policies WHERE parser_name='myjcb-credit-statement-total'",
+  );
+  for (let count = 0; count < 2; count++) {
+    const reopened = openTestStore(join(store.blobDir, ".."));
+    try {
+      expect(
+        policyRows(reopened)
+          .filter((row) => row.snapshot_selection === 0)
+          .map((row) => [row.parser_name, row.dataset]),
+      ).toEqual(expected);
+      for (const parser of ["myjcb-credit-ledger", "myjcb-jpoint-history"])
+        expect(
+          reopened.db
+            .query(
+              "SELECT unit_scope,required_parser_version FROM dataset_snapshot_policies WHERE parser_name=?",
+            )
+            .get(parser),
+        ).toEqual({ unit_scope: "run", required_parser_version: "9.0.0" });
+    } finally {
+      reopened.db.close();
+    }
+  }
 });

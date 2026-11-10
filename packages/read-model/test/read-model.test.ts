@@ -334,6 +334,27 @@ describe("named concepts in the final SQL", () => {
     ).toEqual([
       {
         source_id: "myjcb",
+        parser_name: "myjcb-credit-ledger",
+        dataset: "credit-ledger",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-credit-past-month-balances",
+        dataset: "credit-past-months",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-credit-statement-total",
+        dataset: "credit-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
         parser_name: "myjcb-debit-ledger",
         dataset: "debit-detail",
         unit_scope: "unit",
@@ -359,6 +380,13 @@ describe("named concepts in the final SQL", () => {
         dataset: "jpoint-history",
         unit_scope: "unit",
         snapshot_selection: 1,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-skip-payment-schedule",
+        dataset: "credit-schedule",
+        unit_scope: "unit",
+        snapshot_selection: 0,
       },
       {
         source_id: "sbi-shinsei-bank",
@@ -469,6 +497,27 @@ describe("named concepts in the final SQL", () => {
     ).toEqual([
       {
         source_id: "myjcb",
+        parser_name: "myjcb-credit-ledger",
+        dataset: "credit-ledger",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-credit-past-month-balances",
+        dataset: "credit-past-months",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-credit-statement-total",
+        dataset: "credit-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
         parser_name: "myjcb-debit-ledger",
         dataset: "debit-detail",
         unit_scope: "unit",
@@ -494,6 +543,13 @@ describe("named concepts in the final SQL", () => {
         dataset: "jpoint-history",
         unit_scope: "unit",
         snapshot_selection: 1,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-skip-payment-schedule",
+        dataset: "credit-schedule",
+        unit_scope: "unit",
+        snapshot_selection: 0,
       },
       {
         source_id: "sbi-shinsei-bank",

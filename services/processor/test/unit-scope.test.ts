@@ -84,6 +84,13 @@ test("prior run-scoped containers coexist with the explicit Vpass credit and eli
   );
   expect(containers.filter((row) => row.unit_scope !== "run")).toEqual([
     {
+      source_id: "myjcb",
+      parser_name: "myjcb-jpoint-history",
+      dataset: "jpoint-history",
+      unit_scope: "unit",
+      snapshot_selection: 1,
+    },
+    {
       source_id: "vpass",
       parser_name: "vpass-credit-snapshot",
       dataset: "credit-snapshot",
@@ -94,6 +101,27 @@ test("prior run-scoped containers coexist with the explicit Vpass credit and eli
   expect(
     policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
   ).toEqual([
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-credit-ledger",
+      dataset: "credit-ledger",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-credit-past-month-balances",
+      dataset: "credit-past-months",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-credit-statement-total",
+      dataset: "credit-detail",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
     {
       source_id: "myjcb",
       parser_name: "myjcb-debit-ledger",
@@ -112,6 +140,20 @@ test("prior run-scoped containers coexist with the explicit Vpass credit and eli
       source_id: "myjcb",
       parser_name: "myjcb-jpoint-balance",
       dataset: "jpoint-balance",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-jpoint-history",
+      dataset: "jpoint-history",
+      unit_scope: "unit",
+      snapshot_selection: 1,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-skip-payment-schedule",
+      dataset: "credit-schedule",
       unit_scope: "unit",
       snapshot_selection: 0,
     },
@@ -300,6 +342,27 @@ test("the comparison route reports the eligibility scope of every policy row", a
   ).toEqual([
     {
       source_id: "myjcb",
+      parser_name: "myjcb-credit-ledger",
+      dataset: "credit-ledger",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-credit-past-month-balances",
+      dataset: "credit-past-months",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-credit-statement-total",
+      dataset: "credit-detail",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
       parser_name: "myjcb-debit-ledger",
       dataset: "debit-detail",
       unit_scope: "unit",
@@ -316,6 +379,20 @@ test("the comparison route reports the eligibility scope of every policy row", a
       source_id: "myjcb",
       parser_name: "myjcb-jpoint-balance",
       dataset: "jpoint-balance",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-jpoint-history",
+      dataset: "jpoint-history",
+      unit_scope: "unit",
+      snapshot_selection: 1,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-skip-payment-schedule",
+      dataset: "credit-schedule",
       unit_scope: "unit",
       snapshot_selection: 0,
     },

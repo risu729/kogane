@@ -91,6 +91,33 @@ the actual v1–v9 derivations. Migration 0094 installs coverage-based history s
 reward unit. Unavailable/empty pages cannot clear prior evidence. The local
 observation store mirrors this policy idempotently.
 
+History failure remains an explicit failed unit, which makes the parent run
+partial. Leaving the existing credit datasets run-scoped would consequently
+hide successful statements, including another connection's successful walk.
+Migration 0094 therefore also opts exactly `credit-ledger`, `credit-detail`,
+`credit-past-months` and `credit-schedule` into eligibility for a successful
+connection unit. The collector proves that unit only after its offered
+statement walk finishes without unread months or a stop. A partial, failed or
+malformed connection remains ineligible even when it retained earlier valid
+pages; an unrelated dataset receives no new permission. Discovery stays
+evidence-only on a partial parent. The opt-in only admits the existing strict
+parsers: a malformed schedule or statement still fails its own parser, and
+no new completeness is inferred.
+
+These four rows are eligibility-only (`snapshot_selection=0`): existing
+statement/transaction membership, empty semantics, parser bytes and versions
+are unchanged. Both production and local readers use the same existing unit
+predicate. The local mirror seeds each missing row after policy-table creation
+and preserves operator overrides when repairing a partially present policy
+set. Hiding the failed history unit or allowing every partial run would remove
+the failure evidence or admit incomplete statements, so neither is used.
+
+The unchanged credit collection functions live in `credit.ts`, beside the
+existing separate `debit.ts`, so the production Worker test can call the real
+read collector without importing browser authentication into its type boundary.
+`collector.ts` preserves its public exports and authentication orchestration;
+the extraction changes no request, parsing or stop-code behavior.
+
 The reward promotion/read release remains unchanged: the added rule admits a
 new parser/metric family and reinterprets no existing claimed quantity.
 
@@ -105,8 +132,8 @@ a different PDF-labelled newsletter does not qualify.
 Files remain unfetched. The sanitized manifest records the closed
 `documentCode: statement_export_bytes_unverified` beside offered kinds.
 Statement HTML and its observed export offers are retained. An unavailable
-document unit would downgrade the statement run and block its frozen readers,
-so the file gap is reported without introducing such a unit. This is uncollected document coverage, not
+file response has not been observed; the file gap is recorded without
+asserting a document acquisition unit. This is uncollected document coverage, not
 proof that PDF/CSV bytes were archived. Root-card switching and unobserved
 accounts remain outside this change.
 

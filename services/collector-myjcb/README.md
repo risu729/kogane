@@ -332,6 +332,10 @@ remain usable. Unknown layouts/statuses, incomplete pages and cross-tab/total
 mismatches never produce zero or empty membership. Current reward holdings use
 the bucket set only when it matches the current total capture completely;
 otherwise the current total is shown with a dated history gap.
+The failed history unit remains recorded. Migration 0094 admits exactly the
+four existing credit datasets from a successful connection unit; partial or
+failed connection units remain ineligible, including valid pages retained
+before a later stop. This changes eligibility only, not snapshot membership.
 
 Credit statement retention still follows provider-offered months and separate
 schedule groups. Export links are recorded only on confirmed statements.

@@ -254,13 +254,16 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
       ),
     )();
   }
-  // Mirror the acquisition-history snapshot contract, preserving operator choices.
+  // Mirror history and its independent credit siblings only after policy creation.
+  // Repair missing rows individually while preserving every operator alternative.
   if (
-    !db
-      .query(
-        "SELECT 1 FROM dataset_snapshot_policies WHERE parser_name='myjcb-jpoint-history' AND dataset='jpoint-history'",
-      )
-      .get()
+    (
+      db
+        .query(
+          "SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE source_id='myjcb' AND ((parser_name='myjcb-jpoint-history' AND dataset='jpoint-history') OR (parser_name='myjcb-credit-ledger' AND dataset='credit-ledger') OR (parser_name='myjcb-credit-statement-total' AND dataset='credit-detail') OR (parser_name='myjcb-credit-past-month-balances' AND dataset='credit-past-months') OR (parser_name='myjcb-skip-payment-schedule' AND dataset='credit-schedule'))",
+        )
+        .get() as { n: number }
+    ).n < 5
   ) {
     db.transaction(() =>
       db.exec(
