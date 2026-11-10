@@ -80,17 +80,21 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     missing("position", 452),
   ],
   // MyJCB: credit statements and their ledger, J-POINT balance with its
-  // nearest expiry; the bonus-payment schedule (stored, not parsed), debit
-  // statements, the PDF/CSV/OFX statement exports, J-POINT history and expiry
-  // buckets are not collected (docs/sources/myjcb.md, #444).
+  // nearest expiry, and observed debit ordinary/difference statements; the
+  // bonus-payment schedule (stored, not parsed), unsupported debit routes and
+  // statuses and actual PDF/CSV/OFX bytes remain unsupported; observed
+  // acquisition-month activity and expiry buckets are collected with the
+  // remaining status gaps recorded below (docs/sources/myjcb.md, #444).
   myjcb: [
-    partial("card_usage", ["myjcb-credit-ledger"], 444),
+    partial("card_usage", ["myjcb-credit-ledger", "myjcb-debit-ledger"], 444),
     partial(
       "card_statement",
       [
         "myjcb-credit-statement-total",
         "myjcb-credit-past-month-balances",
         "myjcb-skip-payment-schedule",
+        "myjcb-debit-ledger",
+        "myjcb-debit-other-statement",
       ],
       444,
     ),
@@ -111,15 +115,24 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     missing("document", 454),
   ],
   // SBI証券: domestic and US positions and trades, cash (the yen history's
-  // first page only) and the My資産 current valuation; dividends, asset
-  // history, fund/bond detail and delivered documents are not collected
+  // first page only), My Assets current/weekly valuations, observed stock
+  // income and domestic gains; other products and delivered documents remain incomplete
   // (docs/sources/sbi-securities.md, #446).
   "sbi-securities": [
     partial("position", ["sbi-domestic-cash-positions", "sbi-foreign-cash-positions"], 1237),
     collected("execution", ["sbi-domestic-trade-records", "sbi-foreign-trade-records"]),
-    partial("settlement_cash", ["sbi-foreign-cash-balances", "sbi-yen-detail-history"], 446),
-    missing("income", 446),
-    partial("valuation_history", ["sbi-account-assets-current"], 446),
+    // USD continuation and scheduled retained-coverage proof remain outstanding (#1226).
+    partial(
+      "settlement_cash",
+      ["sbi-foreign-cash-balances", "sbi-yen-detail-history", "sbi-foreign-cash-history"],
+      1226,
+    ),
+    partial("income", ["sbi-income-payments"], 1236),
+    partial(
+      "valuation_history",
+      ["sbi-account-assets-current", "sbi-account-assets-history", "sbi-realised-gains"],
+      1238,
+    ),
     missing("document", 446),
   ],
   // SBI新生銀行: top accounts with recent activity, balance summary and the yen
@@ -204,6 +217,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // Vpass: card statement pages (purchases and statement amounts)
   // (docs/collection.md "Vpass", #445).
   vpass: [
+    partial("balance", ["vpass-credit-snapshot"], 1256),
     collected("card_usage", ["vpass-statement-page"]),
     collected("card_statement", ["vpass-statement-page"]),
   ],

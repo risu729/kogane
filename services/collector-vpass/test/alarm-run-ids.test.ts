@@ -17,6 +17,9 @@ afterEach(() => {
 });
 
 const SESSION_RUN = "2026-09-05T00-00-00-000Z";
+const creditRun = (n: number) => `${SESSION_RUN}-credit-card-${String(n).padStart(3, "0")}`;
+const runs = (cards: number) =>
+  Array.from({ length: cards }, (_, i) => [creditRun(i + 1), cardRun(i + 1)]).flat();
 const cardRun = (n: number) => `${SESSION_RUN}-card-${String(n).padStart(3, "0")}`;
 
 /**
@@ -67,6 +70,8 @@ async function alarmOver(cards: number, withMonths: boolean) {
         },
       }),
     );
+    for (let snapshotRead = 0; snapshotRead < 4; snapshotRead += 1)
+      responses.push(() => member({}));
     if (withMonths)
       responses.push(() =>
         member({
@@ -103,33 +108,33 @@ async function alarmOver(cards: number, withMonths: boolean) {
   return { result, terminals };
 }
 
-test("a collection of at most 100 cards completes and names every card run once", async () => {
-  const { result, terminals } = await alarmOver(MAX_RUN_IDS, true);
-  const all = Array.from({ length: MAX_RUN_IDS }, (_, i) => cardRun(i + 1));
+test("a collection of at most 100 runs completes and names every card run once", async () => {
+  const { result, terminals } = await alarmOver(MAX_RUN_IDS / 2, true);
+  const all = runs(MAX_RUN_IDS / 2);
   expect(result).toEqual({ status: "completed", runIds: all, failureCode: null });
   expect(collectorOperationResult(result)).toEqual(result);
   expect(terminals).toHaveLength(MAX_RUN_IDS);
 });
 
 test("a collection of more than 100 cards keeps every terminal and reports run_ids_over_limit", async () => {
-  const cards = MAX_RUN_IDS + 3;
+  const cards = MAX_RUN_IDS / 2 + 3;
   const { result, terminals } = await alarmOver(cards, true);
   // Every card's run is persisted: no evidence is dropped at the result cap.
-  expect(terminals).toHaveLength(cards);
+  expect(terminals).toHaveLength(cards * 2);
   expect(terminals.some((key) => key.includes(`/${cardRun(cards)}/`))).toBe(true);
   // The answer is a closed failure with the first 100 runs, which the
   // Processor accepts back, rather than an over-long answer it would refuse
   // (an `uncertain` operation) or a completed one naming a subset.
-  const first = Array.from({ length: MAX_RUN_IDS }, (_, i) => cardRun(i + 1));
+  const first = runs(cards).slice(0, MAX_RUN_IDS);
   expect(result).toEqual({ status: "failed", runIds: first, failureCode: RUN_IDS_OVER_LIMIT });
   expect(collectorOperationResult(result)).toEqual(result);
 });
 
 test("a failed collection of more than 100 cards keeps its code and lists the first 100 runs", async () => {
-  const cards = MAX_RUN_IDS + 3;
+  const cards = MAX_RUN_IDS / 2 + 3;
   const { result, terminals } = await alarmOver(cards, false);
-  expect(terminals).toHaveLength(cards);
-  const first = Array.from({ length: MAX_RUN_IDS }, (_, i) => cardRun(i + 1));
+  expect(terminals).toHaveLength(cards * 2);
+  const first = runs(cards).slice(0, MAX_RUN_IDS);
   expect(result).toEqual({ status: "failed", runIds: first, failureCode: "collection_failed" });
   expect(collectorOperationResult(result)).toEqual(result);
 });

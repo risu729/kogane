@@ -341,7 +341,7 @@ describe("pairing", () => {
       policyVersion: EXACT.policyVersion,
       identityEpoch: INITIAL_IDENTITY_EPOCH,
       aliasRuleVersions: ["smbc-meisai-id-v1"],
-      registryVersion: "transaction-family-registry-v3",
+      registryVersion: "transaction-family-registry-v5",
       ownershipVersion: "synthetic-ownership-1",
       arithmeticVersion: "exact-arith-v1",
       contractVersion: "economic-contract-v1",

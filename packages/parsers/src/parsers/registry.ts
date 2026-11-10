@@ -1,3 +1,5 @@
+import { vpassCreditSnapshot } from "./vpass-credit.ts";
+import { sbiIncomePayments, sbiRealisedGains } from "./sbi-income-history.ts";
 import type { Parser } from "../types.ts";
 // Build identity of every parser below (design review D03): the registry is
 // what a Worker reads, so the digests travel with it.
@@ -18,6 +20,7 @@ import {
 } from "./myjcb.ts";
 import { myJcbJPointBalance } from "./myjcb-jpoint.ts";
 import { myJcbJPointHistory } from "./myjcb-jpoint-history.ts";
+import { myJcbDebitLedger, myJcbDebitOtherStatement } from "./myjcb-debit.ts";
 import { myJcbSkipPaymentSchedule } from "./myjcb-skip-payment-schedule.ts";
 import {
   sonyBankGrossBalance,
@@ -27,9 +30,11 @@ import {
 } from "./sony-bank.ts";
 import { globalPassActivity } from "./global-pass-activity-parser.ts";
 import { sbiAccountAssetsCurrent } from "./sbi-account-assets-current.ts";
+import { sbiAccountAssetsHistory } from "./sbi-account-assets-history.ts";
 import { sbiDomesticCashPositions } from "./sbi-domestic-cash-positions.ts";
 import { sbiDomesticTradeRecords } from "./sbi-domestic-trade-records.ts";
 import { sbiForeignCashBalances } from "./sbi-foreign-cash-balances.ts";
+import { sbiForeignCashHistory } from "./sbi-foreign-cash-history.ts";
 import { sbiForeignCashPositions } from "./sbi-foreign-cash-positions.ts";
 import { sbiForeignTradeRecords } from "./sbi-foreign-trade-records.ts";
 import { sbiYenDetailHistory } from "./sbi-yen-detail-history.ts";
@@ -64,17 +69,23 @@ export const PARSERS: readonly Parser[] = [
   myJcbSkipPaymentSchedule,
   myJcbJPointBalance,
   myJcbJPointHistory,
+  myJcbDebitLedger,
+  myJcbDebitOtherStatement,
   sonyBankGrossBalance,
   sonyBankHistoryJson,
   sonyBankHistoryCsv,
   sonyBankWalletHistory,
   sbiDomesticCashPositions,
   sbiAccountAssetsCurrent,
+  sbiAccountAssetsHistory,
+  sbiIncomePayments,
+  sbiRealisedGains,
   sbiYenDetailHistory,
   sbiDomesticTradeRecords,
   sbiForeignTradeRecords,
   sbiForeignCashPositions,
   sbiForeignCashBalances,
+  sbiForeignCashHistory,
   sbiVcCashBalances,
   sbiVcAccountMargin,
   sbiVcPositionSummary,
@@ -94,5 +105,6 @@ export const PARSERS: readonly Parser[] = [
   vPointHistoryPage,
   vPointPayNotificationEvent,
   vpassStatementPage,
+  vpassCreditSnapshot,
   paypayCsv,
 ];

@@ -1,3 +1,5 @@
+import { vpassCreditSnapshot } from "../src/parsers/vpass-credit.ts";
+import { authori as creditAuthori, revo as creditRevo } from "./fixtures/vpass-credit.ts";
 // Synthetic inputs for the parser coverage contract (design review D01).
 //
 // Every case is built here from code, never from data/. The expected
@@ -12,6 +14,8 @@ import { syntheticJPointHistory } from "./myjcb-jpoint-history-fixture.ts";
 import { join } from "node:path";
 import type { ArtifactMeta, Parser } from "../src/types.ts";
 import { sbiAccountAssetsCurrent } from "../src/parsers/sbi-account-assets-current.ts";
+import { sbiIncomePayments, sbiRealisedGains } from "../src/parsers/sbi-income-history.ts";
+import { incomeBundle } from "./fixtures/sbi-income.ts";
 import { sbiDomesticCashPositions } from "../src/parsers/sbi-domestic-cash-positions.ts";
 import { sbiForeignCashBalances } from "../src/parsers/sbi-foreign-cash-balances.ts";
 import { sbiForeignCashPositions } from "../src/parsers/sbi-foreign-cash-positions.ts";
@@ -412,6 +416,43 @@ const BANKS: ContractParser[] = [
   ),
 ];
 
+const hiddenCredit = creditAuthori();
+const hiddenDisplay =
+  hiddenCredit.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiDisplayVo;
+hiddenDisplay.hyoujiFlg = "1";
+for (const row of hiddenDisplay.autoriShokaiDisplayList) row.hyoujiFlg = "1";
+const unknownCreditFlag = creditAuthori();
+unknownCreditFlag.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiDisplayVo.hyoujiFlg =
+  "future";
+const creditMeta = (key: string) =>
+  meta("vpass", "credit-snapshot", { artifactKey: key, fetchUnitKey: "card-001" });
+const VPASS_CREDIT: ContractParser = {
+  parser: vpassCreditSnapshot,
+  cases: [
+    {
+      name: "authori-visible",
+      artifact: creditMeta("credit/authori.json"),
+      bytes: json(creditAuthori()),
+    },
+    {
+      name: "authori-hidden",
+      artifact: creditMeta("credit/authori.json"),
+      bytes: json(hiddenCredit),
+    },
+    {
+      name: "authori-unknown-flag",
+      artifact: creditMeta("credit/authori.json"),
+      bytes: json(unknownCreditFlag),
+    },
+    { name: "revo-exact", artifact: creditMeta("credit/revo.json"), bytes: json(creditRevo()) },
+    {
+      name: "revo-malformed",
+      artifact: creditMeta("credit/revo.json"),
+      bytes: json(creditRevo("not-an-amount")),
+    },
+  ],
+};
+
 export const CONTRACT_PARSERS: ContractParser[] = [
   cases(myJcbJPointHistory, meta("myjcb", "jpoint-history", {
     artifactKey: "synthetic/jpoint-history.json", fetchUnitKey: "synthetic:j-point-history",
@@ -419,6 +460,13 @@ export const CONTRACT_PARSERS: ContractParser[] = [
     "complete-rows": json(syntheticJPointHistory()),
     "unreadable-container": json({}),
   }),
+  cases(sbiIncomePayments, meta("sbi-securities", "income-payments"), {
+    "complete-payments": json(incomeBundle("income")),
+  }),
+  cases(sbiRealisedGains, meta("sbi-securities", "realised-gains"), {
+    "complete-sales": json(incomeBundle("gains")),
+  }),
+  VPASS_CREDIT,
   ...SBI_SECURITIES,
   ...SBI_VC,
   ...SBI_SHINSEI,

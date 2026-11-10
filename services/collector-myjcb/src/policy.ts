@@ -16,7 +16,9 @@ export type ReadOperation =
   | "jpoint-inquiry"
   | "jpoint-history"
   | "debit-menu"
-  | "debit-detail";
+  | "debit-detail"
+  | "debit-other-menu"
+  | "debit-other-detail";
 
 interface RoutePolicy {
   readonly operation: ReadOperation;
@@ -34,6 +36,17 @@ const ACTIVE_ALLOWLIST: readonly RoutePolicy[] = [
   {
     operation: "jpoint-history", method: "GET",
     pathname: "/iss-pc/member/point/pointHistoryInquiry.html",
+  },
+  {
+    operation: "debit-other-menu",
+    method: "GET",
+    pathname: "/iss-pc/member/debit/od_details/debitOdDetailMenu.html",
+  },
+  {
+    operation: "debit-other-detail",
+    method: "GET",
+    pathname: "/iss-pc/member/debit/od_details/debitOdDetail.html",
+    query: { seq: /^(?:[1-9]|1[0-4])$/u, inquiry: /^[\s\S]*$/u },
   },
   {
     operation: "jpoint-json",
@@ -110,7 +123,8 @@ export const DEFERRED_READ_ROUTES: readonly DeferredRoute[] = [
   {
     capability: "root-card-switch",
     enabled: false,
-    reason: "The current POST action and state fields have not been observed live.",
+    reason:
+      "Selection paths and field names are observed, but relay response validation and stable per-card identity remain unproved.",
   },
 ];
 
@@ -143,9 +157,19 @@ export function assertAllowedRequest(
   }
   for (const [name, pattern] of Object.entries(policy.query ?? {})) {
     const value = url.searchParams.get(name);
-    if (value === null || !pattern.test(value)) {
+    if (value === null || url.searchParams.getAll(name).length !== 1 || !pattern.test(value)) {
       throw new StopConditionError(`Rejected invalid query parameter on ${url.pathname}`);
     }
+  }
+  if (
+    operation === "debit-other-detail" &&
+    url.search
+      .slice(1)
+      .split("&")
+      .filter((part) => part.startsWith("inquiry="))
+      .join("") !== "inquiry=%8F%C6%89%EF"
+  ) {
+    throw new StopConditionError("myjcb_debit_other_query_encoding_invalid");
   }
   return url;
 }
@@ -155,5 +179,8 @@ export function allowedUrl(operation: ReadOperation, query?: URLSearchParams): U
   if (!route) throw new StopConditionError(`Unknown MyJCB operation: ${operation}`);
   const url = new URL(route.pathname, MYJCB_ORIGIN);
   if (query) url.search = query.toString();
+  if (operation === "debit-other-detail" && query?.get("inquiry") === "照会") {
+    url.search = url.search.replace(/inquiry=[^&]*/u, "inquiry=%8F%C6%89%EF");
+  }
   return assertAllowedRequest(operation, route.method, url);
 }

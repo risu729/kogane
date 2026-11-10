@@ -52,6 +52,40 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
     timeBasis: "unknown",
     ...details,
   });
+  if (input.sourceId === "vpass" && input.parserName === "vpass-credit-snapshot") {
+    const scopes = ["overall", "card", "revolving", "installment_twice_bonus"];
+    if (
+      scopes.some((scope) =>
+        ["limit", "available"].some(
+          (measure) => input.metric === `reported_${scope}_${measure}_thousand_yen`,
+        ),
+      )
+    )
+      return result(
+        "other",
+        "Reported credit capacity (1,000 JPY precision)",
+        "Shared provider-reported credit; non-additive.",
+        { measurementKind: "capacity" },
+      );
+    if (
+      scopes.some((scope) => input.metric === `reported_${scope}_outstanding_thousand_yen`) ||
+      input.metric === "reported_revolving_outstanding_yen"
+    )
+      return result(
+        "other",
+        input.metric.endsWith("_thousand_yen")
+          ? "Reported outstanding (1,000 JPY precision)"
+          : "Reported revolving outstanding (JPY)",
+        "Overlapping provider-reported snapshots; non-additive.",
+        { measurementKind: "balance", timeBasis: "reported_snapshot" },
+      );
+    if (input.metric === "reported_revolving_repayment_yen")
+      return result(
+        "other",
+        "Reported revolving repayment (JPY)",
+        "Reported repayment is not an additional debt or bank balance.",
+      );
+  }
   const matches = (source: string, parser: string, metrics: string[]) =>
     input.sourceId === source && input.parserName === parser && metrics.includes(input.metric);
   if (matches("myjcb", "myjcb-jpoint-history", ["jpoint_acquisition_earned", "jpoint_acquisition_used", "jpoint_acquisition_expired"]))

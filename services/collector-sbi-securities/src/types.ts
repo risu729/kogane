@@ -53,6 +53,9 @@ export interface ForeignSession {
 }
 
 export interface Artifact {
+  bytes?: Uint8Array;
+  role?: "provider_response";
+  inputArtifactKeys?: readonly string[];
   artifactKey?: string;
   dataset: string;
   mediaType: "application/json";

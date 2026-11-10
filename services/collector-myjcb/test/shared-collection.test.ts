@@ -213,8 +213,8 @@ describe("G3-08 nothing unredacted or free-text reaches the shared bucket", () =
       artifacts: [
         ...base.artifacts,
         {
-          dataset: "debit-menu",
-          filename: "debit-menu.html",
+          dataset: "credit-pdf",
+          filename: "credit-01.pdf",
           body: statementHtml,
           mediaType: "text/html; charset=utf-8",
           statementState: "debit" as const,

@@ -78,6 +78,8 @@ export const JPOINT_COLLECTION_CODES = [
 export type JPointCollectionCode = (typeof JPOINT_COLLECTION_CODES)[number];
 
 export interface ConnectionSummary {
+  /** Independent separate debit difference/other statement route. */
+  readonly debitOtherCode?: "complete" | "partial";
   /** Independent reward unit: this outcome does not change statement-history coverage. */
   readonly jpointCode?: JPointCollectionCode;
   /** Independent acquisition-month history; never a statement coverage claim. */

@@ -59,13 +59,7 @@ const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
  * their bytes exists yet. Shared mode refuses them the same way rather than
  * storing centrally what the legacy path never let through.
  */
-const UNOBSERVED_DATASETS = new Set([
-  "debit-menu",
-  "debit-detail",
-  "credit-csv",
-  "credit-pdf",
-  "credit-ofx",
-]);
+const UNOBSERVED_DATASETS = new Set(["credit-csv", "credit-pdf", "credit-ofx"]);
 const historyDataset = (dataset: string): boolean =>
   dataset === "jpoint-history" || dataset === "jpoint-history-html" || dataset === "jpoint-inquiry";
 
@@ -166,6 +160,11 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 function coverage(status: ConnectionSummary["status"]): CoverageStatus {
   if (status === "success") return "complete";
   return status === "partial" ? "partial" : "unknown";
+}
+
+function debitOtherCode(code: string): "complete" | "partial" {
+  if (code !== "complete" && code !== "partial") throw new Error("debit_other_code_invalid");
+  return code;
 }
 
 /**
@@ -307,6 +306,9 @@ function manifestBytes(
     status: input.status,
     trigger: input.trigger,
     connections: connections.map((connection) => ({
+      ...(connection.debitOtherCode === undefined
+        ? {}
+        : { debitOtherCode: debitOtherCode(connection.debitOtherCode) }),
       ...(connection.jpointCode === undefined
         ? {}
         : { jpointCode: pointCode(connection.jpointCode) }),
@@ -407,8 +409,12 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
         byteSize: bytes.byteLength,
         mediaType: artifact.mediaType.split(";", 1)[0]!.trim(),
         role,
-        unitKey: historyDataset(artifact.dataset) ? `${unitKey}:j-point-history`
-          : artifact.dataset === "jpoint-balance" ? pointUnitKey(unitKey) : unitKey,
+        unitKey: historyDataset(artifact.dataset) ? `${unitKey}:j-point-history` :
+          artifact.dataset === "jpoint-balance"
+            ? pointUnitKey(unitKey)
+            : artifact.dataset.startsWith("debit-other-")
+              ? `${unitKey}:debit-other`
+              : unitKey,
         body: { kind: "bytes", bytes },
       });
       stored.push({
@@ -468,6 +474,20 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
         ...(!failed && history === "collected" ? {} : { safeErrorCode: failed ? "jpoint_history_stopped" : `jpoint_history_${history}` }),
       });
     } else if (historyArtifacts.length) throw new Error("jpoint_history_outcome_missing");
+    const otherArtifacts = kept.filter((artifact) =>
+      artifact.dataset.startsWith("debit-other-"),
+    ).length;
+    const otherCode = connection.summary.debitOtherCode;
+    if (otherCode !== undefined) {
+      debitOtherCode(otherCode);
+      units.push({
+        unitKey: `${unitKey}:debit-other`,
+        unitKind: "debit-other-statements",
+        artifactCount: otherArtifacts,
+        coverageStatus: !failed && otherCode === "complete" ? "complete" : "partial",
+        ...(!failed && otherCode === "complete" ? {} : { safeErrorCode: "debit_other_unobserved" }),
+      });
+    } else if (otherArtifacts !== 0) throw new Error("debit_other_outcome_missing");
     const pointArtifacts = kept.filter((artifact) => artifact.dataset === "jpoint-balance").length;
     if (point !== undefined && point !== "unsupported") {
       pointCode(point);
@@ -492,7 +512,7 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
     units.push({
       unitKey,
       unitKind: "connection",
-      artifactCount: kept.length - pointArtifacts - historyArtifacts.length,
+      artifactCount: kept.length - pointArtifacts - otherArtifacts - historyArtifacts.length,
       coverageStatus: failed ? "unknown" : coverage(connection.summary.status),
       ...(connectionCode === undefined ? {} : { safeErrorCode: connectionCode }),
     });

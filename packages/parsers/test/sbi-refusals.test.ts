@@ -277,9 +277,7 @@ describe("sbi-yen-detail-history refuses drift at every bundle level", () => {
     expect(mutate((bundle) => (bundle["pageSize"] = 1_001))).toThrow(
       "yen history pageSize is invalid",
     );
-    expect(mutate((bundle) => (bundle["totalCount"] = -1))).toThrow(
-      "yen history totalCount is invalid",
-    );
+    expect(mutate((bundle) => (bundle["totalCount"] = -1))).toThrow("sbi_cash_history_schema");
     expect(mutate((bundle) => (bundle["rowLimitExceeded"] = true))).toThrow(
       "exceeded a collection limit",
     );
@@ -311,9 +309,7 @@ describe("sbi-yen-detail-history refuses drift at every bundle level", () => {
     expect(mutate((_, page) => (page["totalPaymentCount"] = "one"))).toThrow(
       "must be an exact decimal",
     );
-    expect(mutate((_, page) => (page["pageNumber"] = -1))).toThrow(
-      "provider pageNumber is invalid",
-    );
+    expect(mutate((_, page) => (page["pageNumber"] = -1))).toThrow("sbi_cash_history_schema");
   });
 
   test("empty bundles must carry one of the two documented empty page forms", () => {
@@ -361,7 +357,7 @@ describe("sbi-yen-detail-history refuses drift at every bundle level", () => {
       "detailKbn is empty",
     );
     expect(mutate((_, page) => (records(page)[0]!["payAmount"] = 1200.5))).toThrow(
-      "payAmount must be an exact decimal",
+      "sbi_cash_history_schema",
     );
     expect(mutate((_, page) => (records(page)[0]!["payAmount"] = "1,20"))).toThrow(
       "payAmount must be an exact decimal",

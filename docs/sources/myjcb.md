@@ -914,3 +914,60 @@ bypassed. Files remain unfetched. A separate zero-artifact document unit reports
 `statement_export_bytes_unverified`, while confirmed HTML and offered kinds
 are retained. Document coverage remains partial and #1251 stays open for file
 verification/storage and live reader validation.
+
+## Debit statements and registered display alternatives (2026-11-10)
+
+Authenticated owner-machine Chrome observation, read routes only, for
+[#1239](https://github.com/risu729/kogane/issues/1239). The MyPage ID-switch
+modal offered four registered alternatives beside the original credit card:
+one Recruit credit card and three debit cards, including Mizuho. This confirms
+reachable display alternatives; it does not inspect or alter connection secrets.
+
+- List request: `POST /iss-pc/member/common/pluralIdChangeAjaxMypage.html`,
+  no body. Modal `.modal-wrap` contains `a[onclick]` calling
+  `idSwitchLogin('0')` through `idSwitchLogin('3')`.
+- Selection: `POST /iss-pc/member/common/pluralIdChangeRedirect.html` with
+  fields `ajaxResult`, `isListEmpty`, `errorMessage`, `sosalogId`, `smpFlg`,
+  `listNum`; then `POST /iss-pc/member/user_manage/userSwitchingIdLogin.html`
+  with `transitionId`; then `GET /iss-pc/member/user_manage/userLoginForward.html`
+  to MyPage. Field values and card identities remain private. This sequence
+  alone does not establish a durable cross-run card identity or a complete
+  relay response schema.
+- Debit menu: `GET /iss-pc/member/debit/details/debitDetailMenu.html` with
+  `link_id=myj_main_debitDetailMenu` (navigation also offers
+  `myj_nav_debitDetailMenu`). Latest detail is `debitDetail.html?seq=0`;
+  past menu options offer `seq=1..14`, and detail `select#seq[name=seq]`
+  offers `0..14`. The UI states fifteen months, updated around the sixteenth.
+- Ordinary desktop section: `ご利用明細内訳（お振替済分）`, with headers
+  `ご利用者 / お振替日 / ご利用先など / お振替金額 / 摘要 / 承認番号`.
+- Difference desktop section: `ご利用明細内訳（差額・お振替未済分）`, with
+  headers `ご利用者 / 差額発生日 / ご利用先など / 差額 / 摘要 / お取引結果 / 承認番号`.
+  The observed status is `銀行振替済`. Dates use `YYYY/MM/DD`; amounts are
+  signed integer/comma strings. One ordinary row and one negative difference
+  shared their approval number and merchant. Neither row may be dropped or
+  rewritten into a payment. `.pc-disp` and `.sp-disp` repeat the same display;
+  the reader uses desktop tables only.
+- Mizuho's observed empty ordinary page uses `p.comment` with exact pattern
+  `[YYYY年M月D日 ～ YYYY年M月D日分]のご利用代金明細はございません`.
+  The selected option names `YYYY年M月D日～YYYY年M月D日分`. Zero is admitted
+  only when those periods match; absent tables alone establish no zero.
+- Separate difference/other route:
+  `GET /iss-pc/member/debit/od_details/debitOdDetailMenu.html`, then form
+  `GET /iss-pc/member/debit/od_details/debitOdDetail.html` with `seq=1..14`
+  and `inquiry=照会`, encoded by the official form as Shift_JIS
+  `%8F%C6%89%EF`. All fourteen observed responses explicitly said
+  `選択された月のご請求はございません。`. On the observed Mizuho page the
+  marker is `div.main > div.main-header > h1.heading01-01`, with no
+  `p.comment`. This does not erase differences in
+  ordinary detail tables. Nonempty `od_details` schemas remain unobserved.
+  Both menus use `select#seq[name=seq]` with options `1..14` and may include
+  an empty placeholder. The ordinary menu has one real latest-detail href
+  `/iss-pc/member/debit/details/debitDetail.html?seq=0`. No latest `seq=0`
+  link was observed on the empty other-statement menu, so none is invented.
+- Ordinary detail offered `debitDetailPdf.html?seq=N` and
+  `debitDetailCsv.html?seq=N`. The visible CSV click reached Chrome
+  `ERR_BLOCKED_BY_CLIENT`; no export bytes or signatures were verified.
+
+No private dates, amounts, merchant names, account identifiers, session fields,
+credentials or raw provider HTML are recorded here. Synthetic tests mirror
+only these structures. See [ADR 0101](../adr/0101-myjcb-debit-statements.md).

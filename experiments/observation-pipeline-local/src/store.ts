@@ -209,6 +209,27 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
     if (policy === undefined) throw new Error("0066 names no snapshot policy row");
     db.transaction(() => db.exec(policy))();
   }
+  // Mirror the independent Vpass credit snapshot policy once. Reopening
+  // preserves operator choices, including an explicit rollback to run scope.
+  if (
+    !db
+      .query(
+        "SELECT 1 FROM dataset_snapshot_policies WHERE parser_name='vpass-credit-snapshot' AND dataset='credit-snapshot'",
+      )
+      .get()
+  ) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(
+            EXPERIMENT_ROOT,
+            "../../packages/storage-d1/migrations/core/0092_vpass_credit_snapshots.sql",
+          ),
+          "utf8",
+        ),
+      ),
+    )();
+  }
   // Mirror the acquisition-history snapshot contract, preserving operator choices.
   if (!db.query("SELECT 1 FROM dataset_snapshot_policies WHERE parser_name='myjcb-jpoint-history' AND dataset='jpoint-history'").get()) {
     db.transaction(() => db.exec(readFileSync(join(EXPERIMENT_ROOT,
@@ -475,7 +496,7 @@ export function listArtifacts(store: Store): ArtifactMeta[] {
       // D13: the artifact's dataset names the `unit` scope and its own fetch
       // unit reported terminal success, so a parser precondition about "the
       // run succeeded" may be met by the unit instead. Null for every dataset
-      // until an operator changes a policy row.
+      // except independently seeded datasets such as Vpass credit snapshots.
       unitScopeEligibility: row.unit_scope_admitted === 1 ? "unit-independent-v1" : null,
       ...(row.window_start && row.window_end
         ? { runWindow: { from: row.window_start, to: row.window_end } }
