@@ -492,9 +492,10 @@ also works, because both then apply the run scope unconditionally.
 - INV: the 15 seeded container snapshot policies have `snapshot_selection=1`.
   Exactly five use `unit_scope=unit`: the three classic SBI VC snapshots and
   the SMBC yen and AUD balance snapshots; the other ten use `unit_scope=run`.
-  Exactly 205 additional policies are unit-scoped eligibility-only rows:
+  Exactly 207 additional policies are unit-scoped eligibility-only rows:
   J-POINT, SBI Shinsei monthly-report metadata, 201 classic SBI VC transaction
-  paths, SMBC yen transactions and SMBC AUD history (`read-model.test.ts`,
+  paths, SMBC yen transactions, SMBC AUD history and two SBI VC document
+  metadata datasets (`read-model.test.ts`,
   `coverage.test.ts`, `unit-scope.test.ts`).
 - INV: with every existing container snapshot policy on the `run` scope,
   the Worker creates the same jobs, parses the same artifacts and the reader
