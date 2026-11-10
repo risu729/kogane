@@ -11,7 +11,7 @@
     "required": ["PRESTIA_BANK_USER_ID", "PRESTIA_BANK_PASSWORD"]
   },
   "triggers": { "crons": [] },
-  "observability": { "enabled": true },
+  "observability": { "enabled": true, "issues": { "enabled": true } },
   "r2_buckets": [{ "binding": "DATA", "bucket_name": "kogane-raw-evidence" }],
   "d1_databases": [
     {
