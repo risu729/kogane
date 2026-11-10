@@ -1224,6 +1224,22 @@ Processor maps it to the CORE source `global-pass`), producer
   every attempt started, and a teardown failure after another failure is
   logged but never replaces that failure's code or stage. Observed 2026-11-05..07: one token after 25 s, two
   waits that ran out at 45 s.
+- **Observed after `timezone-collector-v8` (#1121, Deploy #802 2026-11-08
+  05:38 UTC), #1134.** The first three scheduled runs (2026-11-08, 11-09 and
+  11-10 at 18:17 UTC) all completed with no failure code, against 2 of 4
+  runs failing (`collection_failed`) from 11-04 to 11-07. Each needed one
+  challenge attempt: `code: token` after 13 993 / 18 347 / 15 209 ms, with
+  one Turnstile frame and `lastHttpStatus: 401` (the Turnstile challenge
+  fetch, which the token still follows). `globalpass-container-relay-summary`:
+  25 / 26 / 26 CONNECT requests, 9 denied each run (browser traffic outside the
+  allowlist, the case that crashed the 11-07 run), 16 / 17 / 17 established,
+  no upstream failure or timeout; the Worker's `globalpass-relay-closed`
+  count matched `established` every run. No `globalpass-container-crash`,
+  `/collect` answered 200, and `logout` failed every run (`logoutFailed:
+  true`, see the logout audit). Container `console.log` lines are in the
+  Workers Observability `containers` dataset of the container application,
+  not in the Worker's own dataset; `runtimeRevision` is in the manifest
+  only, never in a log line.
 - Human-required: **not claimed.** `globalpass_login_rejected` may mean the
   credentials need a person, but it has not been observed, so the terminal
   does not yet say a person must act. The collector still makes exactly one
