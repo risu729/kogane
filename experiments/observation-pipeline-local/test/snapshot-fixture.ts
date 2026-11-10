@@ -36,7 +36,7 @@ import { openTestStore } from "./test-store.ts";
 
 /**
  * Datasets seeded on `coverage-v1` with `replaces_previous_on_complete_empty = 0`
- * (0046 St.George, 0053 SBI Shinsei exchange rates), and the parser version
+ * (including 0096 SMBC AUD snapshot membership), and the parser version
  * their policy requires. They need a claim, and an empty claimed snapshot never
  * replaces the previous one.
  */
@@ -44,6 +44,7 @@ export const EXPLICIT_COVERAGE: ReadonlyMap<string, string> = new Map([
   ["st-george-balances", "1.0.1"],
   ["prestia-bank-balances", "1.0.1"],
   ["sbi-shinsei-exchange-rate", "1.0.3"],
+  ["smbc-foreign-ordinary-balance", "0.1.2"],
 ]);
 
 const cleanup: (() => void)[] = [];

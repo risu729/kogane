@@ -1,6 +1,6 @@
 // Snapshot policy ownership (design review D01, A03): the policy table seed
-// must mirror the SNAPSHOT_DATASETS registry, every dataset must start on the
-// legacy adapter, and the shadow comparison must agree on the synthetic
+// must mirror the SNAPSHOT_DATASETS registry and each declared coverage or
+// legacy policy. The shadow comparison must agree on the synthetic
 // fixture set except where the two policies intentionally disagree.
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -73,6 +73,47 @@ test("reopening upgrades the local exact-version policies and preserves an opera
   }
 });
 
+test("the local AUD snapshot subset is exact and reopening preserves every operator field", () => {
+  const expected = {
+    source_id: "smbc-bank",
+    dataset: "foreign-ordinary-aud-balance",
+    parser_name: "smbc-foreign-ordinary-balance",
+    policy_id: "coverage-v1",
+    policy_version: 1,
+    required_parser_version: "0.1.2",
+    replaces_previous_on_complete_empty: 0,
+    unit_scope: "run",
+    snapshot_selection: 1,
+    updated_at_ms: 1794268800000,
+  };
+  const overrides = {
+    policy_id: "legacy-warning-compat-v1",
+    policy_version: 9,
+    required_parser_version: "9.0.0",
+    replaces_previous_on_complete_empty: 1,
+    unit_scope: "unit",
+    snapshot_selection: 0,
+    updated_at_ms: 42,
+  };
+  for (const [field, value] of Object.entries(overrides)) {
+    const store = database();
+    const select =
+      "SELECT * FROM dataset_snapshot_policies WHERE parser_name='smbc-foreign-ordinary-balance'";
+    expect(store.db.query(select).get()).toEqual(expected);
+    store.db
+      .query(
+        `UPDATE dataset_snapshot_policies SET ${field}=? WHERE parser_name='smbc-foreign-ordinary-balance'`,
+      )
+      .run(value);
+    const reopened = openTestStore(join(store.blobDir, ".."));
+    try {
+      expect(reopened.db.query(select).get()).toEqual({ ...expected, [field]: value });
+    } finally {
+      reopened.db.close();
+    }
+  }
+});
+
 interface PolicyRow {
   source_id: string;
   dataset: string;
@@ -136,6 +177,13 @@ describe("dataset_snapshot_policies seed", () => {
           "../../../packages/storage-d1/migrations/core/0066_prestia_bank_snapshot_schedule.sql",
         ),
         "utf8",
+      ) +
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0096_smbc_foreign_ordinary_unit_eligibility.sql",
+        ),
+        "utf8",
       );
     for (const [parser, dataset] of SNAPSHOT_DATASETS) {
       expect(sql).toContain("'" + dataset + "'");
@@ -143,10 +191,11 @@ describe("dataset_snapshot_policies seed", () => {
     }
   });
 
-  test("legacy datasets retain their policies and the St.George and FX board parsers use explicit coverage", () => {
+  test("legacy datasets retain their policies and explicit-coverage datasets use their exact defaults", () => {
     for (const row of policyRows(database())) {
       const stGeorge = row.parser_name === "st-george-balances";
       const prestia = row.parser_name === "prestia-bank-balances";
+      const smbcAud = row.parser_name === "smbc-foreign-ordinary-balance";
       const explicit = EXPLICIT_COVERAGE.has(row.parser_name);
       expect(row.policy_id).toBe(explicit ? "coverage-v1" : LEGACY_SNAPSHOT_POLICY);
       expect(row.policy_version).toBe(1);
@@ -178,8 +227,11 @@ describe("dataset_snapshot_policies seed", () => {
             ? "balance.html"
             : stGeorge
               ? "account-snapshot.json"
-              : "balance.normalized.json",
+              : smbcAud
+                ? "foreign-ordinary-aud/balance.json"
+                : "balance.normalized.json",
           ...(prestia ? { fetchUnitKey: "balance-summary" } : {}),
+          ...(smbcAud ? { fetchUnitKey: "foreign-ordinary-aud-balance" } : {}),
         }),
         row.parser_name,
       ).toBe(true);

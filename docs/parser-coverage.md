@@ -304,6 +304,17 @@ One definition, `unitScopedEligibilitySql` in
 - `eligible_snapshots` in the snapshot CTEs, so the rescued unit can become the
   current snapshot of _its own_ partition.
 
+The local experiment mirrors snapshot membership policies, not all production
+eligibility defaults (scope decision recorded 2026-11-10, 16:53 UTC). Its AUD
+balance subset of CORE 0096 uses `coverage-v1`, exact version `0.1.2`,
+`snapshot_selection=1` and no empty replacement, while retaining `unit_scope=run`.
+Reopening uses `INSERT OR IGNORE` and preserves every existing operator field.
+It does not import 0096's transaction/history eligibility rows or the production
+unit-default changes. Local `runParsers` still refuses every partial parent;
+its manual unit-policy test controls do not constitute production partial
+publication support. CORE 0080/0088/0095 eligibility opt-ins are likewise not
+bootstrapped by this local snapshot mirror.
+
 ```sql
 f.status = 'success' AND f.failure_count = 0            -- run scope, unchanged
 OR (EXISTS (SELECT 1 FROM dataset_snapshot_policies unit_policy
