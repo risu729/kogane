@@ -63,7 +63,7 @@ test("the current production migration chain preserves legacy policies and adds 
   expect(containers.map(({ parser_name, dataset }) => [parser_name, dataset])).toEqual(
     SNAPSHOT_DATASETS.map(([parserName, dataset]) => [parserName, dataset]).sort(),
   );
-  expect(policies).toHaveLength(SNAPSHOT_DATASETS.length + 1);
+  expect(policies).toHaveLength(SNAPSHOT_DATASETS.length + 2);
   expect(
     policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
   ).toEqual([
@@ -75,6 +75,14 @@ test("the current production migration chain preserves legacy policies and adds 
       unit_scope: "unit",
       snapshot_selection: 0,
     },
+    {
+      source_id: "sbi-shinsei-bank",
+      parser_name: "sbi-shinsei-monthly-report-metadata",
+      dataset: "monthly-report-pdf",
+      policy_id: "coverage-v1",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
   ]);
   expect(
     policies
@@ -82,7 +90,8 @@ test("the current production migration chain preserves legacy policies and adds 
         (row) =>
           row.parser_name !== "st-george-balances" &&
           row.parser_name !== "prestia-bank-balances" &&
-          row.parser_name !== "sbi-shinsei-exchange-rate",
+          row.parser_name !== "sbi-shinsei-exchange-rate" &&
+          row.parser_name !== "sbi-shinsei-monthly-report-metadata",
       )
       .every((row) => row.policy_id === "legacy-warning-compat-v1"),
   ).toBe(true);
@@ -108,6 +117,7 @@ test("the current production migration chain preserves legacy policies and adds 
     "prestia-bank-balances",
     "sbi-foreign-cash-positions",
     "sbi-shinsei-exchange-rate",
+    "sbi-shinsei-monthly-report-metadata",
     "st-george-balances",
   ]);
   for (const row of pinned)
@@ -302,7 +312,7 @@ test("the comparison route reports counts, ids and policies only", async () => {
     }[];
     differingDatasets: number;
   };
-  expect(body.policies).toHaveLength(SNAPSHOT_DATASETS.length + 1);
+  expect(body.policies).toHaveLength(SNAPSHOT_DATASETS.length + 2);
   expect(
     body.policies
       .filter((row) => row.snapshot_selection === 1)
@@ -327,6 +337,18 @@ test("the comparison route reports counts, ids and policies only", async () => {
       unit_scope: "unit",
       snapshot_selection: 0,
       updated_at_ms: 1791590400000,
+    },
+    {
+      source_id: "sbi-shinsei-bank",
+      dataset: "monthly-report-pdf",
+      parser_name: "sbi-shinsei-monthly-report-metadata",
+      policy_id: "coverage-v1",
+      policy_version: 1,
+      required_parser_version: "1.0.0",
+      replaces_previous_on_complete_empty: 0,
+      unit_scope: "unit",
+      snapshot_selection: 0,
+      updated_at_ms: 0,
     },
   ]);
   expect(body.datasets.some((row) => row.parserName === "myjcb-jpoint-balance")).toBe(false);

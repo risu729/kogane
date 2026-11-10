@@ -99,6 +99,19 @@ export function sanitizeProviderCapture(body: string | ArrayBuffer): Uint8Array 
 
 /** Bytes of an artifact as they are stored in DATA. */
 function sharedArtifactBytes(artifact: RawArtifact): Uint8Array {
+  if (artifact.dataset === "monthly-report-pdf") {
+    if (typeof artifact.body === "string") throw new SharedCollectionError("shared_report_invalid");
+    const bytes = new Uint8Array(artifact.body);
+    if (
+      artifact.mediaType !== "application/pdf" ||
+      !/^monthly-report-(?!0000)\d{4}-(?:0[1-9]|1[0-2])\.pdf$/u.test(artifact.filename) ||
+      bytes.length < 5 ||
+      bytes.length > 1024 * 1024 ||
+      new TextDecoder().decode(bytes.subarray(0, 5)) !== "%PDF-"
+    )
+      throw new SharedCollectionError("shared_report_invalid");
+    return bytes;
+  }
   if (artifact.dataset === NORMALIZED_DATASET) {
     return typeof artifact.body === "string"
       ? encoder.encode(artifact.body)
@@ -181,12 +194,13 @@ async function artifactOf(options: {
   artifactKey: string;
   bytes: Uint8Array;
   role: string;
+  mediaType?: string;
 }): Promise<PersistArtifact> {
   return {
     artifactKey: options.artifactKey,
     sha256: await sha256Hex(options.bytes),
     byteSize: options.bytes.byteLength,
-    mediaType: JSON_MEDIA_TYPE,
+    mediaType: options.mediaType ?? JSON_MEDIA_TYPE,
     role: options.role,
     body: { kind: "bytes", bytes: options.bytes },
   };
@@ -225,11 +239,25 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
   const collected = new Set<string>();
   for (const artifact of input.artifacts) {
     const normalized = artifact.dataset === NORMALIZED_DATASET;
-    const entry = await artifactOf({
+    const document = artifact.dataset === "monthly-report-pdf";
+    let entry = await artifactOf({
       artifactKey: artifact.filename,
       bytes: sharedArtifactBytes(artifact),
-      role: normalized ? COLLECTOR_DERIVED_ROLE : PROVIDER_CAPTURE_ROLE,
+      role: document
+        ? "provider_document"
+        : normalized
+          ? COLLECTOR_DERIVED_ROLE
+          : PROVIDER_CAPTURE_ROLE,
+      mediaType: document ? "application/pdf" : JSON_MEDIA_TYPE,
     });
+    if (document) {
+      const period = artifact.filename.slice(15, 22);
+      entry = {
+        ...entry,
+        artifactKey: `monthly-report-${period}-${entry.sha256}.pdf`,
+        unitKey: `monthly-report-${period}`,
+      };
+    }
     artifacts.push(entry);
     stored.push({
       dataset: artifact.dataset,
@@ -240,33 +268,42 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
     });
     collected.add(artifact.filename);
     transformations.push(
-      normalized
+      document
         ? {
-            transformationId: `${artifact.filename}:extracted`,
+            transformationId: `${entry.artifactKey}:decoded`,
             stepKind: "extracted",
-            transformerId: "sbi-shinsei-normalizer",
-            transformerVersion: "sbi-shinsei-v1",
-            // Empty when the source capture failed: the manifest states the
-            // lineage it has rather than inventing a parent.
-            inputArtifactKeys: input.artifacts.some(
-              (candidate) => candidate.filename === TOP_BALANCES_ARTIFACT_KEY,
-            )
-              ? [TOP_BALANCES_ARTIFACT_KEY]
-              : [],
-            outputArtifactKey: artifact.filename,
-          }
-        : {
-            transformationId: `${artifact.filename}:redacted`,
-            stepKind: "redacted",
-            transformerId: "sbi-shinsei-token-sanitizer",
-            // v3: only the token is stripped again; v2 (#333) also replaced
-            // person names, which ADR 0029's amendment 2 withdrew. The version
-            // moves forward so each stored run still says which step wrote it.
-            transformerVersion: "v3",
-            // The provider response is not retained: only its redaction is.
+            transformerId: "sbi-shinsei-report-pdf-extractor",
+            transformerVersion: "v1",
             inputArtifactKeys: [],
-            outputArtifactKey: artifact.filename,
-          },
+            outputArtifactKey: entry.artifactKey,
+          }
+        : normalized
+          ? {
+              transformationId: `${artifact.filename}:extracted`,
+              stepKind: "extracted",
+              transformerId: "sbi-shinsei-normalizer",
+              transformerVersion: "sbi-shinsei-v1",
+              // Empty when the source capture failed: the manifest states the
+              // lineage it has rather than inventing a parent.
+              inputArtifactKeys: input.artifacts.some(
+                (candidate) => candidate.filename === TOP_BALANCES_ARTIFACT_KEY,
+              )
+                ? [TOP_BALANCES_ARTIFACT_KEY]
+                : [],
+              outputArtifactKey: artifact.filename,
+            }
+          : {
+              transformationId: `${artifact.filename}:redacted`,
+              stepKind: "redacted",
+              transformerId: "sbi-shinsei-token-sanitizer",
+              // v3: only the token is stripped again; v2 (#333) also replaced
+              // person names, which ADR 0029's amendment 2 withdrew. The version
+              // moves forward so each stored run still says which step wrote it.
+              transformerVersion: "v3",
+              // The provider response is not retained: only its redaction is.
+              inputArtifactKeys: [],
+              outputArtifactKey: artifact.filename,
+            },
     );
   }
   if (collected.size !== input.artifacts.length) {
@@ -304,9 +341,34 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
     coverageStatus: outcome.coverageStatus,
     persistenceComplete: true,
     ...(outcome.safeErrorCode === undefined ? {} : { safeErrorCode: outcome.safeErrorCode }),
-    units: [],
-    ranges: [],
-    reports: [],
+    units: artifacts
+      .filter((artifact) => artifact.role === "provider_document")
+      .map((artifact) => ({
+        unitKey: artifact.unitKey!,
+        unitKind: "document",
+        artifactCount: 1,
+        coverageStatus: "complete",
+      })),
+    ranges: artifacts
+      .filter((artifact) => artifact.role === "provider_document")
+      .map((artifact) => ({
+        rangeKey: `${artifact.unitKey}:month`,
+        rangeKind: "declared_coverage",
+        precision: "month",
+        basis: "source",
+        startValue: artifact.unitKey!.slice(15),
+        endValue: artifact.unitKey!.slice(15),
+        unitKey: artifact.unitKey!,
+      })),
+    reports: artifacts
+      .filter((artifact) => artifact.role === "provider_document")
+      .map((artifact) => ({
+        reportRef: `${artifact.unitKey}-terminal`,
+        reportKind: "terminal",
+        scope: "unit",
+        outcome: "success",
+        unitKey: artifact.unitKey!,
+      })),
     transformations,
   };
   return { run, artifacts };
