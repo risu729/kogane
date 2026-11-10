@@ -230,6 +230,30 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
       ),
     )();
   }
+  // Income/sale history policies require the additive policy table/columns
+  // above, not schema.sql. Seed missing rows independently without overwriting
+  // an operator alternative when only the other row is absent.
+  if (
+    (
+      db
+        .query(
+          "SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE (parser_name='sbi-income-payments' AND dataset='income-payments') OR (parser_name='sbi-realised-gains' AND dataset='realised-gains')",
+        )
+        .get() as { n: number }
+    ).n < 2
+  ) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(
+            EXPERIMENT_ROOT,
+            "../../packages/storage-d1/migrations/core/0093_sbi_income_complete_containers.sql",
+          ),
+          "utf8",
+        ),
+      ),
+    )();
+  }
   // Mirror the acquisition-history snapshot contract, preserving operator choices.
   if (
     !db
