@@ -27,9 +27,12 @@ export type CashHistoryCode =
   | "sbi_cash_history_source_inventory"
   | "sbi_foreign_cash_pagination_unobserved";
 export class CashHistoryError extends Error {
-  constructor(readonly code: CashHistoryCode) {
+  readonly code: CashHistoryCode;
+
+  constructor(code: CashHistoryCode) {
     // Native decoder causes may contain a provider response fragment.
     super(code);
+    this.code = code;
   }
 }
 export interface CashHistoryBundle {
@@ -81,7 +84,7 @@ export function parseCashHistoryJson(text: string): unknown {
       | { kind: "array" }
     )[] = [];
     for (const token of text.matchAll(
-      /"(?:\\.|[^"\\])*"|[{}\[\],:]|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/gu,
+      /"(?:\\.|[^"\\])*"|[{}[\],:]|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/gu,
     )) {
       const literal = token[0];
       const top = stack.at(-1);
