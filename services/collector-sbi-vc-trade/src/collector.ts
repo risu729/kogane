@@ -18,6 +18,7 @@ export async function collectSbiVcTrade(options: {
   fetcher?: Fetcher;
   onSession: (session: SessionMaterial) => Promise<void>;
   onArtifact: (artifact: CollectorArtifact) => Promise<void>;
+  onClassicComplete?: () => void;
 }): Promise<SessionMaterial> {
   const fetcher = options.fetcher ?? fetch;
   let session = structuredClone(options.session);
@@ -71,6 +72,7 @@ export async function collectSbiVcTrade(options: {
         cashflowType: ["REMITTANCE_DEPOSIT", "REMITTANCE_WITHDRAW"],
       }),
   });
+  options.onClassicComplete?.();
   for (const historical of [false, true]) {
     // Separate evidence datasets: no parser publishes these overlapping rows.
     // The type-specific publishers remain gated on observed response semantics.

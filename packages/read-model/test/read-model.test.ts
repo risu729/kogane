@@ -35,6 +35,47 @@ import {
 import * as sql from "../src/sql";
 
 const MIGRATIONS = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
+/** The bounded classic SBI VC datasets retain snapshot selection independently. */
+const SBI_VC_UNIT_POLICIES = [
+  ...[
+    ["sbi-vc-account-margin", "account-margin"],
+    ["sbi-vc-cash-balances", "cash-balances"],
+    ["sbi-vc-position-summary", "position-summary"],
+  ].map(([parser_name, dataset]) => ({
+    source_id: "sbi-vc-trade",
+    parser_name,
+    dataset,
+    unit_scope: "unit",
+    snapshot_selection: 1,
+  })),
+  {
+    source_id: "sbi-vc-trade",
+    parser_name: "sbi-vc-executions",
+    dataset: "executions-recent-page-0001",
+    unit_scope: "unit",
+    snapshot_selection: 0,
+  },
+  ...Array.from({ length: 100 }, (_, index) => String(index + 1).padStart(4, "0")).flatMap(
+    (suffix) => [
+      {
+        source_id: "sbi-vc-trade",
+        parser_name: "sbi-vc-executions",
+        dataset: `executions-historical-page-${suffix}`,
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "sbi-vc-trade",
+        parser_name: "sbi-vc-cashflows",
+        dataset: `cashflows-historical-page-${suffix}`,
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+    ],
+  ),
+].sort((left, right) =>
+  `${left.parser_name}:${left.dataset}`.localeCompare(`${right.parser_name}:${right.dataset}`),
+);
 
 /** The production schema, views included, on an in-memory SQLite. */
 function migratedDatabase(): Database {
@@ -346,6 +387,7 @@ describe("named concepts in the final SQL", () => {
         unit_scope: "unit",
         snapshot_selection: 0,
       },
+      ...SBI_VC_UNIT_POLICIES,
     ]);
     expect(
       db
@@ -411,8 +453,8 @@ describe("named concepts in the final SQL", () => {
     expect(db.query(`SELECT ${economicallySummable.predicate()} AS summable`).get()).toEqual({
       summable: 0,
     });
-    // Prior snapshot policies keep the run scope. The sole new eligibility-only
-    // J-POINT policy uses the unit scope; this fixture has no reward-unit artifact.
+    // The classic SBI VC snapshots and explicit eligibility-only policies use
+    // unit scope; this empty fixture has no successful unit artifact.
     expect(
       db
         .query(
@@ -428,7 +470,7 @@ describe("named concepts in the final SQL", () => {
           "SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE snapshot_selection=1 AND unit_scope<>'run'",
         )
         .get(),
-    ).toEqual({ n: 0 });
+    ).toEqual({ n: 3 });
     expect(
       db
         .query(
@@ -450,6 +492,7 @@ describe("named concepts in the final SQL", () => {
         unit_scope: "unit",
         snapshot_selection: 0,
       },
+      ...SBI_VC_UNIT_POLICIES,
     ]);
   });
 

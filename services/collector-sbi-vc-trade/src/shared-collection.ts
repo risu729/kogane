@@ -25,7 +25,13 @@ import {
   type TerminalRunFields,
   type TerminalTransformation,
 } from "../../../packages/collection/src/index";
-import type { CollectionFailure, CollectionManifest, HealthState, SharedRunSummary } from "./types";
+import type {
+  CollectionFailure,
+  CollectionManifest,
+  CollectionUnit,
+  HealthState,
+  SharedRunSummary,
+} from "./types";
 
 export type { SharedRunSummary };
 
@@ -34,8 +40,9 @@ export const SHARED_SOURCE = "sbi-vc-trade";
 export const PRODUCER = "collector-sbi-vc-trade";
 const MANIFEST_ARTIFACT_KEY = "manifest.json";
 const JSON_MEDIA_TYPE = "application/json";
-/** The single unit the central descriptors already use for this source. */
+/** The original unit keeps its own completion independent of new evidence. */
 const UNIT_KEY = "account";
+const FULL_CASHFLOW_UNIT_KEY = "full-cashflows";
 const UNIT_KIND = "collection";
 
 const COLLECTOR_DERIVED_ROLE = "collector_derived";
@@ -154,6 +161,27 @@ function safeFailureCode(failure: CollectionFailure | undefined): string {
   return failure?.errorCode ?? "collector_run_incomplete";
 }
 
+function collectionUnits(manifest: CollectionManifest): CollectionUnit[] {
+  return (
+    manifest.units ?? [
+      {
+        unitKey: UNIT_KEY,
+        status: manifest.status,
+        ...(manifest.status === "success"
+          ? {}
+          : { errorCode: safeFailureCode(manifest.failures[0]) }),
+      },
+    ]
+  );
+}
+
+function artifactUnit(dataset: string, manifest: CollectionManifest): string {
+  return dataset.startsWith("cashflows-all-") &&
+    collectionUnits(manifest).some((unit) => unit.unitKey === FULL_CASHFLOW_UNIT_KEY)
+    ? FULL_CASHFLOW_UNIT_KEY
+    : UNIT_KEY;
+}
+
 /**
  * Defence in depth for 12 §1: `collectSbiVcTrade` strips `meta.secureKey`
  * before a body exists, and the importer refuses a staged envelope that still
@@ -178,6 +206,7 @@ function assertNoSessionKey(body: string): void {
 
 function runFields(input: SharedRunInput, transformations: TerminalTransformation[]) {
   const outcome = sharedOutcome(input.manifest);
+  const units = collectionUnits(input.manifest);
   const fields: TerminalRunFields = {
     source: SHARED_SOURCE,
     producer: PRODUCER,
@@ -194,7 +223,7 @@ function runFields(input: SharedRunInput, transformations: TerminalTransformatio
       scopeKind: "full_snapshot",
       startValue: null,
       endValue: null,
-      unitKeys: [UNIT_KEY],
+      unitKeys: units.map((unit) => unit.unitKey),
     },
     startedAt: input.manifest.startedAt,
     completedAt: input.manifest.completedAt,
@@ -202,15 +231,16 @@ function runFields(input: SharedRunInput, transformations: TerminalTransformatio
     coverageStatus: outcome.coverageStatus,
     persistenceComplete: true,
     ...(outcome.safeErrorCode === undefined ? {} : { safeErrorCode: outcome.safeErrorCode }),
-    units: [
-      {
-        unitKey: UNIT_KEY,
-        unitKind: UNIT_KIND,
-        artifactCount: input.manifest.artifacts.length,
-        coverageStatus: outcome.coverageStatus,
-        ...(outcome.safeErrorCode === undefined ? {} : { safeErrorCode: outcome.safeErrorCode }),
-      },
-    ],
+    units: units.map((unit) => ({
+      unitKey: unit.unitKey,
+      unitKind: UNIT_KIND,
+      artifactCount: input.manifest.artifacts.filter(
+        (entry) => artifactUnit(entry.dataset, input.manifest) === unit.unitKey,
+      ).length,
+      coverageStatus:
+        unit.status === "success" ? "complete" : unit.status === "partial" ? "partial" : "unknown",
+      ...(unit.errorCode === undefined ? {} : { safeErrorCode: unit.errorCode }),
+    })),
     ranges: [],
     reports: [],
     transformations,
@@ -238,7 +268,7 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
         artifactKey,
         bytes: encoder.encode(body),
         role: COLLECTOR_DERIVED_ROLE,
-        unitKey: UNIT_KEY,
+        unitKey: artifactUnit(entry.dataset, input.manifest),
       }),
     );
     transformations.push({

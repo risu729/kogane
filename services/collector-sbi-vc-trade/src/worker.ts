@@ -237,6 +237,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
       // memory for the shared-mode terminal.
       const captures: SharedCapture[] = [];
       const failures: CollectionFailure[] = [];
+      let classicComplete = false;
       let operation = "load_session";
       try {
         const session = await diagnostic.step("session-load", () => this.loadSession(startedAt));
@@ -245,6 +246,9 @@ export class SbiVcSessionState extends DurableObject<Env> {
           collectSbiVcTrade({
             session,
             diagnostic,
+            onClassicComplete: () => {
+              classicComplete = true;
+            },
             onSession: async (updated) => {
               operation = "persist_session";
               await diagnostic.step("session-persist", async () =>
@@ -285,6 +289,22 @@ export class SbiVcSessionState extends DurableObject<Env> {
         status,
         artifacts,
         failures,
+        units: [
+          {
+            unitKey: "account",
+            status: classicComplete ? "success" : status,
+            ...(!classicComplete && failures[0] ? { errorCode: failures[0].errorCode } : {}),
+          },
+          ...(classicComplete
+            ? [
+                {
+                  unitKey: "full-cashflows" as const,
+                  status,
+                  ...(failures[0] ? { errorCode: failures[0].errorCode } : {}),
+                },
+              ]
+            : []),
+        ],
       };
       {
         // U09: the run's completion record is the terminal this Durable Object

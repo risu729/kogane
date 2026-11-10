@@ -1208,6 +1208,12 @@
         }
       ],
       "sha256": "393a169b18e4ee6888af7d1d01f143aa9a024f98599e4a95e557311d7546d17b"
+    },
+    {
+      "file": "0095_sbi_vc_classic_unit_eligibility.sql",
+      "statementCount": 2,
+      "insertStatements": [],
+      "sha256": "5cb9b300e1ed17b8b56f27a18164818cccaec856ac5cd01c36cb691ae98875ea"
     }
   ],
   "tables": [

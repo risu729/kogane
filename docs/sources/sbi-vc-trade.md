@@ -800,6 +800,10 @@ both all-type views in `cashflows-all-recent-page-NNNN` and
 are required before the raw collection unit can succeed. These new datasets
 have no publishing parser, so an overlapping JPY row is not published twice and
 an unknown type or status cannot be classified as a fiat movement or income.
+The lists have their own `full-cashflows` unit: a failure there leaves the run
+partial but does not invalidate a completed classic `account` unit. Only the
+exact classic dataset paths opt into unit eligibility; a failed classic unit
+still publishes nothing from that run.
 
 Remaining limits for [the cash-flow issue](https://github.com/risu729/kogane/issues/1227):
 no crypto deposit, crypto withdrawal, staking reward or lending reward response

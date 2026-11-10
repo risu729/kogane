@@ -37,6 +37,11 @@ jobs in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), passing each j
   transfers and staking/lending rewards remain uncollected as typed observations
   until their response semantics are observed. See the [observation and remaining
   limits](../../docs/sources/sbi-vc-trade.md#17-unfiltered-cash-flow-observation-2026-11-10).
+- Classic captures stay in their original `account` unit. The additional lists
+  belong to `full-cashflows`; failure there keeps that unit and the run partial
+  while a completed classic unit remains eligible for its existing publishers.
+  Classic failures still block the original account unit. The exact dataset
+  eligibility policies do not enable publication of the raw lists.
 - After each response, the rotated session is encrypted and saved immediately. Artifacts with `meta.secureKey` removed remain in memory until the terminal is written; no staging R2 objects are written.
 - `packages/collection` writes objects and the final terminal with `etagDoesNotMatch: "*"` and R2-native SHA-256. The terminal follows every object, so a run without a terminal is not considered completely stored.
 - The central importer, its Service Binding and `POST /backfill-raw-evidence` were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)). Even runs with 12 or more data artifacts write through the terminal immediately, without deferral. The Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)).
