@@ -64,6 +64,8 @@ import { skipMeta, skipPage } from "./myjcb-skip-payment-fixture.ts";
 
 /** PARSERS entries whose rows are balances, valuations, scheduled payments or none. */
 const NOT_IN_REGISTRY = [
+  "sbi-income-payments",
+  "sbi-realised-gains",
   "vpass-credit-snapshot",
   "mizuho-account-list",
   "moneyforward-canonical-evidence-boundary",

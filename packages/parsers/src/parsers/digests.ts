@@ -94,6 +94,10 @@ export const PARSER_DIGESTS: ParserDigests = {
       "78cd220292407b31e78c4987491ad12c72ea000cb37213512344a32babd85cc1",
     "poc/observation-pipeline/src/parsers/sbi-foreign-trade-records.ts":
       "dc653e2aca7b42294ef3e6a7c2f674640faa751a769cd9dc0c98dfbb845fec01",
+    "poc/observation-pipeline/src/parsers/sbi-income-history-schema.ts":
+      "0ed5c477ee90c5ab2baade8e08cc5e2a15513a62665adb0a5d0e60569f2af904",
+    "poc/observation-pipeline/src/parsers/sbi-income-history.ts":
+      "e6a9ea6af7f680aef51b3366f02e049babc1f6557e83ae5dd03efd3dd36a4446",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-balance-summary-and-stage.ts":
       "afed75b6bba5c0934a7be8085dda09d3ccb24992ea1dfead6968c7a4489b5be3",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-common.ts":
@@ -519,6 +523,42 @@ export const PARSER_DIGESTS: ParserDigests = {
         "packages/domain/src/guards.ts",
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/sbi-foreign-trade-records.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "sbi-income-payments": {
+      version: "0.1.0",
+      codeDigest: "f3893305c24132f4a963b160e54918a2f0b8700af2d964980e64d323d60b179b",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "packages/domain/src/values.ts",
+        "packages/observation-shared/src/normalized-decimal.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-asset-history-json.ts",
+        "poc/observation-pipeline/src/parsers/sbi-income-history-schema.ts",
+        "poc/observation-pipeline/src/parsers/sbi-income-history.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "sbi-realised-gains": {
+      version: "0.1.0",
+      codeDigest: "f3893305c24132f4a963b160e54918a2f0b8700af2d964980e64d323d60b179b",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "packages/domain/src/values.ts",
+        "packages/observation-shared/src/normalized-decimal.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-asset-history-json.ts",
+        "poc/observation-pipeline/src/parsers/sbi-income-history-schema.ts",
+        "poc/observation-pipeline/src/parsers/sbi-income-history.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",

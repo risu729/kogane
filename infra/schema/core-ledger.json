@@ -1230,6 +1230,17 @@
         }
       ],
       "sha256": "eabc365a76e8b4e3fdec8ad65a1162e7070d1e1e9113b0934c099e68c82a24b3"
+    },
+    {
+      "file": "0093_sbi_income_complete_containers.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "07dd949d2b63bd1805120fe712195b3b98be6a21451050e0d573a76cc5b4d4ac"
     }
   ],
   "tables": [
@@ -22135,7 +22146,8 @@
       "0085_schedule_dispatch_marker.sql",
       "0088_sbi_shinsei_monthly_report_units.sql",
       "0090_myjcb_debit_unit_eligibility.sql",
-      "0092_vpass_credit_snapshots.sql"
+      "0092_vpass_credit_snapshots.sql",
+      "0093_sbi_income_complete_containers.sql"
     ],
     "schemaSha256": "0b2ddb2a8d7e9b70df8ec4b3937eeef911d2737a1e55ca0d06eb316f47695af9"
   }

@@ -17,6 +17,7 @@ import type {
   UnitUpdateSummary,
 } from "../../../packages/observation-shared/src/api-contract";
 import type { MeasureView, PageLimit } from "./scope";
+import type { SbiIncomeHistoryQuery, SbiIncomeHistoryRow } from "./sbi-income-history";
 import type {
   PortfolioValuationHistoryQuery,
   PortfolioValuationHistoryRow,
@@ -142,6 +143,8 @@ export interface ObservationReader {
   listTransactions(query: TransactionQuery): Promise<TransactionRow[]>;
   listLatestBalances(query: LatestBalanceQuery): Promise<BalanceRow[]>;
   listBalanceHistory(query: BalanceHistoryQuery): Promise<BalanceHistoryRow[]>;
+  /** Latest complete full-retention provider payment/sale facts; no economic adoption. */
+  listSbiIncomeHistory(query: SbiIncomeHistoryQuery): Promise<SbiIncomeHistoryRow[]>;
   listPortfolioValuationHistory(
     query: PortfolioValuationHistoryQuery,
   ): Promise<PortfolioValuationHistoryRow[]>;

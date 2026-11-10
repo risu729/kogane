@@ -112,8 +112,8 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     missing("document", 454),
   ],
   // SBI証券: domestic and US positions and trades, cash (the yen history's
-  // first page only) and the My資産 current valuation; dividends, asset
-  // history, fund/bond detail and delivered documents are not collected
+  // first page only), My Assets current/weekly valuations, observed stock
+  // income and domestic gains; other products and delivered documents remain incomplete
   // (docs/sources/sbi-securities.md, #446).
   "sbi-securities": [
     partial("position", ["sbi-domestic-cash-positions", "sbi-foreign-cash-positions"], 1237),
@@ -124,10 +124,10 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
       ["sbi-foreign-cash-balances", "sbi-yen-detail-history", "sbi-foreign-cash-history"],
       1226,
     ),
-    missing("income", 446),
+    partial("income", ["sbi-income-payments"], 1236),
     partial(
       "valuation_history",
-      ["sbi-account-assets-current", "sbi-account-assets-history"],
+      ["sbi-account-assets-current", "sbi-account-assets-history", "sbi-realised-gains"],
       1238,
     ),
     missing("document", 446),

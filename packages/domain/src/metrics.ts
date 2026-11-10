@@ -237,6 +237,70 @@ export const UNKNOWN_METRIC: MetricDefinition = {
 
 // Order matters and mirrors the branch order of classifyBalance / classifyActivity.
 export const METRIC_REGISTRY: readonly RegistryEntry[] = [
+  ...(
+    [
+      "income_gross",
+      "income_tax",
+      "income_income_tax",
+      "income_resident_tax",
+      "income_net",
+    ] as const
+  ).map((metric) =>
+    entry(
+      [
+        {
+          family: "valuation",
+          sourceId: "sbi-securities",
+          parserName: "sbi-income-payments",
+          metrics: [metric],
+        },
+      ],
+      {
+        metricId: `sbi-securities.${metric}`,
+        measurementKind: "flow",
+        subjectKind: "product",
+        unitDimension: "currency",
+        signMeaning: "provider-sign",
+        timeBasis: "event-reported",
+        aggregationRule: "non-additive",
+        overlapGroup: "sbi-securities:income-and-cash",
+        sourceAuthority: "provider-reported",
+      },
+    ),
+  ),
+  ...(
+    [
+      "sale_proceeds",
+      "realised_gain_before_tax",
+      "sale_unit_price",
+      "average_acquisition_unit_cost",
+    ] as const
+  ).map((metric) =>
+    entry(
+      [
+        {
+          family: "valuation",
+          sourceId: "sbi-securities",
+          parserName: "sbi-realised-gains",
+          metrics: [metric],
+        },
+      ],
+      {
+        metricId: `sbi-securities.${metric}`,
+        measurementKind:
+          metric === "sale_unit_price" || metric === "average_acquisition_unit_cost"
+            ? "price"
+            : "flow",
+        subjectKind: "product",
+        unitDimension: "currency",
+        signMeaning: "provider-sign",
+        timeBasis: "event-reported",
+        aggregationRule: "non-additive",
+        overlapGroup: "sbi-securities:gains-and-trades",
+        sourceAuthority: "provider-reported",
+      },
+    ),
+  ),
   ...(["overall", "card", "revolving", "installment_twice_bonus"] as const).flatMap((scope) =>
     (["limit", "outstanding", "available"] as const).map((measure) =>
       entry(

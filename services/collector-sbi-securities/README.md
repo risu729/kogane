@@ -184,3 +184,42 @@ aggregate/profile alternatives. No new UI, public trigger or read operation is
 added. The catalogue remains partial: the observed 44 points do not establish
 August 2021 coverage, the two iDeCo profiles were unavailable, and a scheduled
 production collection/publication is still required ([ADR 0098](../../docs/adr/0098-sbi-weekly-asset-history.md)).
+
+## Reported income and realised gains
+
+Normal domestic main-site collection also reads the observed My Assets income
+and domestic realised-gain routes from `2021/08/01` through the current JST
+date. These five GETs use the observed first-page `offset=1&limit=30`, existing
+cookies and referer; no collection window, cursor or login is added. Summary
+counts, category counts and row counts must agree. More than 30 rows, unknown
+products/accounts/currencies or a missing source makes the domestic unit/run
+partial. Unobserved continuation requests are never guessed.
+
+Exact summary/row bytes stay in unmapped private `provider_response` artifacts.
+Only closed financial schemas reach that storage; duplicate-key secrets,
+unknown fields and malformed syntax are refused. The existing bounded stream
+reader limits each response to 256 KiB before full buffering. Numeric tokens
+are preserved and checked with exact decimal arithmetic before financial
+conversion. Financial-shaped precision failures retain raw evidence without a
+derived artifact. Canonical `income-payments.json` / `realised-gains.json`
+embed the original source texts, their requested range and exhaustive ordered
+source lineage. Persistence rechecks every source hash and derivative.
+
+Payments publish gross/tax/net metrics in original currency: JPY for domestic
+stock, USD `Lc` for US stock. Yen equivalents are metadata, never second income
+payments. Domestic sale metrics are provider-reported proceeds, pre-tax gain,
+unit price and average acquisition **unit** cost. No cash/trade row or economic
+event is emitted. Null metrics stay unavailable; all metrics have explicit
+typed non-additive semantics.
+
+Registration v9 freezes v1–v8 and maps only the new derivatives. Migration
+0093 uses complete-container snapshot membership: a newer fully counted
+since-2021 response replaces old payment/sale identities, including corrections
+and removals, while every original/observation remains archived. Partial runs
+keep the preceding current snapshot. The internal production
+`ObservationReader.listSbiIncomeHistory` reads that membership before filtering
+and paging. It adds no UI, HTTP route or MCP operation.
+
+The catalogue stays partial. Other products, foreign gains, continuation beyond
+30 and scheduled production coverage/publication remain unproved
+([ADR 0106](../../docs/adr/0106-sbi-reported-income-and-gains.md)).
