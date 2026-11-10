@@ -89,9 +89,28 @@ export interface CardSettlementReview extends StoredReview {
   debitAccount: CardSettlementDebitAccountReview;
 }
 
+/**
+ * Why a card settlement page's `nextOffset` is what it is, a closed set:
+ *
+ * - `offered`: `nextOffset` names the next page, and the grant that read this
+ *   page may read it;
+ * - `none`: nothing follows this page (or the read was one review by id);
+ * - `budget_exceeded`: rows follow, but the next page would reach past the
+ *   grant's `maxRows`, so its request would be refused with that code, and
+ *   `nextOffset` is null rather than a page this caller cannot read. The
+ *   list does not end there: it is cut at the grant's bound (INV05).
+ *
+ * The statements without a candidate answer the same codes (ADR 0081,
+ * 2026-11-08 amendment).
+ */
+export const CARD_SETTLEMENT_NEXT_PAGE = ["offered", "none", "budget_exceeded"] as const;
+export type CardSettlementNextPage = (typeof CARD_SETTLEMENT_NEXT_PAGE)[number];
+
 export interface CardSettlementReviewPage {
   items: CardSettlementReview[];
   nextOffset: number | null;
+  /** Why `nextOffset` is what it is (`CARD_SETTLEMENT_NEXT_PAGE`). */
+  nextPage: CardSettlementNextPage;
   coverage: {
     scope: "card-statement-bank-debit-candidates";
     completeTransactionHistory: false;
@@ -142,6 +161,8 @@ export interface CardSettlementStatementGroup {
 export interface CardSettlementStatementPage {
   statements: CardSettlementStatementGroup[];
   nextOffset: number | null;
+  /** Why `nextOffset` is what it is (`CARD_SETTLEMENT_NEXT_PAGE`). */
+  nextPage: CardSettlementNextPage;
   coverage: {
     scope: "card-statement-bank-debit-candidates";
     completeTransactionHistory: false;
