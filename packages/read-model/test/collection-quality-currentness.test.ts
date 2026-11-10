@@ -21,16 +21,19 @@ const rows = (s: QualityStore, source: string) =>
   s.all<CellQualityRow>(CELL_QUALITY_SQL, [source, 0]);
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 
-test("extraction retains the frozen base SQL apart from the explicit Sony current-history gate", () => {
+test("extraction retains the frozen base SQL apart from explicit provider history gates", () => {
   // Frozen rendered SQL digests taken from the base, before the extraction.
   // Exact bytes prove unchanged predicates/ranking/filtering/output on every
   // input, more strongly than only comparing a handful of selected rows.
   // ADR 0092 intentionally excludes Sony JSON before ranking. Every other byte
-  // remains pinned; sony-csv-history.test.ts separately freezes and proves that delta.
-  const transactions = transactionsSql({}, 0).sql.replace(
-    "           AND p.parser_name <> 'sony-bank-history-json'\n",
-    "",
-  );
+  // remains pinned; sony-csv-history.test.ts proves that delta. ADR 0101 adds
+  // MyJCB debit to the event identity allowlist; the production debit pipeline
+  // proves deduplication across windows and runs.
+  const renderedTransactions = transactionsSql({}, 0).sql;
+  expect(renderedTransactions).toContain("                           'myjcb-debit-ledger',\n");
+  const transactions = renderedTransactions
+    .replace("           AND p.parser_name <> 'sony-bank-history-json'\n", "")
+    .replace("                           'myjcb-debit-ledger',\n", "");
   expect(hash(transactions)).toBe(
     "9876071ea165908299b34c61aad1005b7531fe5a010c213c2bc193f2b1be3ff9",
   );
