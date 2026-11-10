@@ -11,6 +11,7 @@ export default defineConfig({
     previewUrls: false,
     observability: {
       enabled: true,
+      issues: { enabled: true },
     },
     env: {
       COLLECTOR_SCHEMA_VERSION: bindings.text("mizuho-collector-v1"),
