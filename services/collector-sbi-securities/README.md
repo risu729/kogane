@@ -35,10 +35,13 @@ downloaded or archived.
 
 The legacy inbox and saved folder showed no rows or document links, but no
 independent zero total or explicit empty message. Complete legacy coverage
-and its download route remain unverified. The cross-origin SSO carrier and
-sessionStorage bootstrap are also unverified; a separate observation profile
-remains at provider authentication. Existing HTTP-only sessions do not prove
-access to that mailbox context.
+and its download route remain unverified. A later read-only DOM observation
+caught the connecting page's form POST to
+`https://plus.e-shishobako.ne.jp/dp-uw/v1/SSO`, with hidden fields
+`sfn,ric,ked,epr,itv,hav,spm`; no values were read or recorded. This establishes
+the carrier and exact destination, but the SSO response and the producer of
+sessionStorage `dp-csrf` and `dp-riyoCd` remain unverified. Existing HTTP-only
+sessions do not prove access to that mailbox context.
 
 The collector still captures no delivered documents, and the catalogue's
 `document` entry stays `not_collected`. No guessed HTTP SSO route,

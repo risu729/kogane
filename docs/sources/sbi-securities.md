@@ -298,6 +298,34 @@ can establish scheduled document coverage. The issue's requirements to store
 all listed documents once, retain metadata and update the catalogue remain
 unfulfilled.
 
+#### 2026-11-10 later follow-up: observed SSO form; bootstrap still unverified
+
+Later normal navigation on 2026-11-10 UTC used the already observed
+`https://m.sbisec.co.jp/edeliv/deisw070.jsp?ePoboxFlag=true` entry. An
+immediate read-only DOM inspection caught the connecting page at
+`https://m.sbisec.co.jp/deisw081` before its ordinary automatic submission.
+The page contained a form with method `POST`, action
+`https://plus.e-shishobako.ne.jp/dp-uw/v1/SSO`, an empty target and seven
+hidden fields: `sfn,ric,ked,epr,itv,hav,spm`. No field value was read or
+recorded. All seven values remain opaque runtime handoff material; their
+names do not establish meanings or reusable constants.
+
+The ordinary navigation subsequently reached `/dp_apl/usr/`. The network
+observation still retained only the final application GET, not the SSO POST
+or its response. The connecting-page form establishes the handoff carrier
+and its exact destination, superseding the earlier lack of carrier evidence.
+It does not establish the response status, redirect sequence, response
+headers, response HTML or script processing that produces `dp-csrf` and
+`dp-riyoCd`. The producer of those sessionStorage values remains the precise
+HTTP-only implementation gap. No token extraction rule can be inferred from
+the final static application page or the downstream API request fields.
+
+No mailbox SSO implementation or scheduled archive was added. A future
+transport must constrain form submission to the observed exact HTTPS SSO
+destination and refuse unobserved handoff or bootstrap shapes. The existing
+66-row list and one PDF observation still do not fulfill the issue's
+scheduled archival, metadata or deduplication acceptance criteria.
+
 ## Assessment scale
 
 Automation levels are defined as follows.
