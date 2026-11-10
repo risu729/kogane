@@ -18,7 +18,15 @@ const PRODUCTION: SnapshotRelations = {
   parseRuns: "parse_runs",
   publishedParseRuns: "published_parse_runs",
 };
-const digest = (text: string): string => createHash("sha256").update(text).digest("hex");
+// Adding a reviewed container changes only this VALUES row. Keep the frozen
+// legacy SQL digests: removing that exact new row must recover every old
+// query byte, including both repeated policy lists in the shadow comparison.
+const AUD_POLICY_ROW =
+  "('smbc-bank', 'smbc-foreign-ordinary-balance', 'foreign-ordinary-aud/balance.json', 'foreign-ordinary-aud', 'foreign-ordinary-aud-balance', 1),\n  ";
+const digest = (text: string): string => {
+  expect(text.includes(AUD_POLICY_ROW)).toBe(true);
+  return createHash("sha256").update(text.replaceAll(AUD_POLICY_ROW, "")).digest("hex");
+};
 
 describe("snapshot CTEs with and without a capture-time cutoff", () => {
   // Digests of the text shipped before `cutoffParam` existed (origin/main

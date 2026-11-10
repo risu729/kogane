@@ -40,6 +40,7 @@ export interface DateRange {
 type BackfillPhase = "idle" | "waiting_for_approval" | "running" | "success" | "partial" | "failed";
 
 export interface BackfillProgress {
+  foreignOrdinary?: ForeignOrdinaryProgress;
   phase: BackfillPhase;
   createdAt: string | null;
   challengeExpiresAt: string | null;
@@ -63,8 +64,20 @@ export interface BackfillProgress {
   coverageErrorCode?: "coverage_day_not_finished" | null;
 }
 
+export interface ForeignOrdinaryProgress {
+  range: DateRange;
+  status: "success" | "partial";
+  failureCode?: string;
+}
+
 export interface StoredArtifact {
-  dataset: "balance-raw" | "balance-normalized" | "transactions-raw" | "transactions-normalized";
+  dataset:
+    | "balance-raw"
+    | "balance-normalized"
+    | "transactions-raw"
+    | "transactions-normalized"
+    | "foreign-ordinary-aud-balance"
+    | "foreign-ordinary-aud-history";
   key: string;
   mediaType: string;
   bytes: number;
@@ -76,6 +89,7 @@ export interface StoredArtifact {
 }
 
 export interface BackfillManifest {
+  foreignOrdinary?: ForeignOrdinaryProgress;
   schemaVersion: string;
   source: "smbc-direct";
   runId: string;

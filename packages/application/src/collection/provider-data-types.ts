@@ -158,12 +158,12 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     missing("valuation_history", 448),
     missing("document", 448),
   ],
-  // SMBC Direct: the yen ordinary account; foreign-currency deposits and term
-  // or installment deposits are not collected (docs/sources/smbc-bank.md,
-  // #442).
+  // SMBC Direct: yen ordinary deposits plus the observed AUD balance and
+  // explicit-empty retained history. Nonempty AUD history is unreviewed;
+  // term and installment deposits remain uncollected (docs/sources/smbc-bank.md).
   "smbc-bank": [
-    partial("balance", ["smbc-direct-balance"], 442),
-    partial("cash_movement", ["smbc-direct-transactions"], 442),
+    partial("balance", ["smbc-direct-balance", "smbc-foreign-ordinary-balance"], 442),
+    partial("cash_movement", ["smbc-direct-transactions", "smbc-foreign-ordinary-history"], 1245),
     missing("term_deposit", 442),
   ],
   // ソニー銀行: total balance, yen and ten foreign-currency histories and WALLET

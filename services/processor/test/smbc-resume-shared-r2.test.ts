@@ -21,6 +21,7 @@ import { runPrefix, sha256Hex } from "../../collector-smbc-direct/src/storage.ts
 import type { BackfillManifest, StoredArtifact } from "../../collector-smbc-direct/src/types.ts";
 import { registerCollectionRun } from "../src/collection/index.ts";
 import { sweep } from "../src/worker.ts";
+import { CURRENT_SNAPSHOT, snapshotCtes } from "../../../packages/parsers/src/snapshot-query.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -88,14 +89,14 @@ async function artifact(
   };
 }
 
-async function balance(): Promise<StoredArtifact[]> {
+async function balance(amount = 1000): Promise<StoredArtifact[]> {
   return [
     await artifact("balance-raw", "balance.raw.json.sjis", { synthetic: "balance-response" }),
     await artifact("balance-normalized", "balance.normalized.json", {
       observedAt: STARTED,
       account: ACCOUNT,
       currency: "JPY",
-      amount: 1000,
+      amount,
     }),
   ];
 }
@@ -282,4 +283,158 @@ test("partial months remain unparsed until cumulative success even with failed l
       .bind(initialFetchRun)
       .first<number>("n"),
   ).toBe(0);
+}, 60000);
+
+async function foreign(complete: boolean): Promise<StoredArtifact[]> {
+  const entries = [
+    await artifact("foreign-ordinary-aud-balance", "foreign-ordinary-aud/balance.json", {
+      currency: "AUD",
+      amount: "123.45",
+      yenEquivalent: "12000",
+      referenceRate: "97.205",
+      observedAt: STARTED,
+    }),
+  ];
+  if (complete)
+    for (const range of [
+      { start: "2001-01-01", end: "2001-01-31" },
+      { start: "2001-02-01", end: "2001-02-28" },
+    ]) {
+      entries.push(
+        await artifact(
+          "foreign-ordinary-aud-history",
+          `foreign-ordinary-aud/history/${range.start.replaceAll("-", "")}-${range.end.replaceAll("-", "")}.json`,
+          { currency: "AUD", range, emptyCode: "PC-AIFDDT1-00134-E", transactions: [] },
+          range,
+        ),
+      );
+    }
+  return entries;
+}
+
+async function currentSmbcBalances() {
+  const ctes = snapshotCtes({
+    fetchArtifacts: "observation_fetch_artifacts",
+    fetchRuns: "observation_fetch_runs",
+    parseRuns: "parse_runs",
+    publishedParseRuns: "published_parse_runs",
+  });
+  return (
+    await env.DB.prepare(`WITH ${ctes}
+    SELECT p.parser_name, b.amount_minor FROM balance_observations b
+    JOIN parse_runs p ON p.id=b.parse_run_id
+    JOIN observation_fetch_artifacts fa ON fa.id=p.fetch_artifact_id
+    WHERE fa.source_id='smbc-bank' AND ${CURRENT_SNAPSHOT}
+      AND EXISTS(SELECT 1 FROM published_parse_runs published WHERE published.parse_run_id=p.id)
+    ORDER BY p.parser_name`).all<{ parser_name: string; amount_minor: number }>()
+  ).results;
+}
+
+test("AUD failure does not block complete NEW yen observations; failed yen stays ineligible and complete AUD remains current", async () => {
+  const bucket = dataBucket(env.EVIDENCE);
+  const completeForeign = {
+    range: { start: "2001-01-01", end: "2001-02-28" },
+    status: "success" as const,
+  };
+  const clean = {
+    ...manifest(
+      [...(await balance()), ...(await month(1)), ...(await month(2)), ...(await foreign(true))],
+      true,
+    ),
+    runId: "00000000-0000-4000-8000-00000000a045",
+    foreignOrdinary: completeForeign,
+  };
+  expect((await persistSharedRun(bucket, input(clean))).outcome).toBe("persisted");
+  expect(
+    await registerCollectionRun(env, { source: "smbc-direct", runId: clean.runId }),
+  ).toMatchObject({ outcome: "registered" });
+  expect(await sweep(env)).toMatchObject({ parsed: 6, error: 0 });
+  expect(await currentSmbcBalances()).toEqual([
+    { parser_name: "smbc-direct-balance", amount_minor: 1000 },
+    { parser_name: "smbc-foreign-ordinary-balance", amount_minor: 12345 },
+  ]);
+
+  const failure = "foreign_nonempty_unreviewed";
+  const partial = {
+    ...manifest(
+      [
+        ...(await balance(2000)),
+        ...(await month(1)),
+        ...(await month(2)),
+        ...(await foreign(false)),
+      ],
+      true,
+    ),
+    runId: "00000000-0000-4000-8000-00000000a046",
+    status: "partial" as const,
+    failureCodes: [failure],
+    foreignOrdinary: { ...completeForeign, status: "partial" as const, failureCode: failure },
+  };
+  expect((await persistSharedRun(bucket, input(partial))).outcome).toBe("persisted");
+  expect(
+    await registerCollectionRun(env, { source: "smbc-direct", runId: partial.runId }),
+  ).toMatchObject({ outcome: "registered" });
+  expect(await sweep(env)).toMatchObject({ parsed: 3, error: 0 });
+  expect(await currentSmbcBalances()).toEqual([
+    { parser_name: "smbc-direct-balance", amount_minor: 2000 },
+    { parser_name: "smbc-foreign-ordinary-balance", amount_minor: 12345 },
+  ]);
+  expect(
+    await registerCollectionRun(env, { source: "smbc-direct", runId: partial.runId }),
+  ).toMatchObject({ outcome: "already_registered" });
+  expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
+
+  const badYen = {
+    ...partial,
+    runId: "00000000-0000-4000-8000-00000000a047",
+    artifacts: [...(await balance(3000)), ...(await month(1)), ...(await foreign(false))],
+    completedChunks: 1,
+    failureCodes: [failure, "transactions_rejected"],
+  };
+  expect((await persistSharedRun(bucket, input(badYen))).outcome).toBe("persisted");
+  expect(
+    await registerCollectionRun(env, { source: "smbc-direct", runId: badYen.runId }),
+  ).toMatchObject({ outcome: "registered" });
+  expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
+  expect(await currentSmbcBalances()).toEqual([
+    { parser_name: "smbc-direct-balance", amount_minor: 2000 },
+    { parser_name: "smbc-foreign-ordinary-balance", amount_minor: 12345 },
+  ]);
+  // A stopped yen backfill with an independently failed AUD unit must carry
+  // its earlier unparsed yen month into the final AUD-partial continuation.
+  const stopped = {
+    ...badYen,
+    runId: "00000000-0000-4000-8000-00000000a048",
+    artifacts: [...(await balance(4000)), ...(await month(1)), ...(await foreign(false))],
+  };
+  expect((await persistSharedRun(bucket, input(stopped))).outcome).toBe("persisted");
+  expect(
+    await registerCollectionRun(env, { source: "smbc-direct", runId: stopped.runId }),
+  ).toMatchObject({ outcome: "registered" });
+  expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
+  const resumed = {
+    ...stopped,
+    artifacts: [...stopped.artifacts, ...(await month(2))],
+    completedChunks: 2,
+    failureCodes: [failure],
+  };
+  const continued = await persistBackfillRun(bucket, input(resumed));
+  expect(continued.outcome).toBe("persisted");
+  const continuationId = continued.terminalKey.slice(
+    "runs/smbc-direct/".length,
+    -"/terminal.json".length,
+  );
+  expect(
+    await registerCollectionRun(env, { source: "smbc-direct", runId: continuationId }),
+  ).toMatchObject({ outcome: "registered" });
+  expect(await sweep(env)).toMatchObject({ parsed: 3, error: 0 });
+  expect(await currentSmbcBalances()).toEqual([
+    { parser_name: "smbc-direct-balance", amount_minor: 4000 },
+    { parser_name: "smbc-foreign-ordinary-balance", amount_minor: 12345 },
+  ]);
+  expect((await persistBackfillRun(bucket, input(resumed))).outcome).toBe("already_persisted");
+  expect(
+    await registerCollectionRun(env, { source: "smbc-direct", runId: continuationId }),
+  ).toMatchObject({ outcome: "already_registered" });
+  expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
 }, 60000);

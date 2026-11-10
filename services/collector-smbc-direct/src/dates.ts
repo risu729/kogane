@@ -30,6 +30,19 @@ export function lastFinishedJapanDay(now = new Date()): string {
   return japanToday(new Date(now.getTime() - 24 * 60 * 60 * 1000));
 }
 
+/** The observed foreign-ordinary history keeps the first day three months
+ * before the current JST month. Open days retain the existing collector's
+ * closed-day boundary. No caller can choose the collection window. */
+export function foreignOrdinaryRange(now = new Date()): DateRange {
+  const today = japanToday(now);
+  const year = Number(today.slice(0, 4));
+  const month = Number(today.slice(5, 7));
+  return {
+    start: new Date(Date.UTC(year, month - 4, 1)).toISOString().slice(0, 10),
+    end: lastFinishedJapanDay(now),
+  };
+}
+
 export function nextJapanMidnight(now = new Date()): number {
   return Date.parse(`${japanToday(now)}T00:00:00+09:00`) + 24 * 60 * 60 * 1000;
 }

@@ -142,3 +142,39 @@ approval of modern and legacy stopped runs, midnight deferral, and publication
 of old open-day successes. The unchanged R2 continuation tests continue to
 verify immutable history and parser eligibility using chronologically valid
 synthetic acquisition times.
+
+## Amendment 2026-11-10: independent AUD retention evidence
+
+Status: proposed.
+
+The approved manual session now reads the observed AUD foreign ordinary
+balance and its retained history as a separate `foreign-ordinary-aud` unit.
+Only an explicit-empty history response has been observed. Nonempty rows,
+their IDs and applied rates remain unsupported; this amendment does not close
+[issue 1245](https://github.com/risu729/kogane/issues/1245).
+
+The alternative of sharing the yen account's unit would attribute AUD's
+four-month retention to the longer yen backfill. Making every yen refresh
+depend on the unreviewed AUD row layout would also stop valid new yen data
+when a foreign movement first appears. The existing unit-independent policy
+provides the narrower boundary without admitting arbitrary partial runs.
+
+The run reports partial if AUD fails. Its yen unit reports complete only when
+the balance and every requested closed month are present, chunk counts match,
+and the only failure code belongs to the AUD unit. Migration 0096 opts the
+two yen normalized datasets into `unit-independent-v1`, preserving operator
+overrides and keeping transaction windows out of snapshot replacement. A
+missing or failed yen chunk remains ineligible. AUD remains run-scoped.
+
+AUD HTML contains session fields, so only reviewed financial fields and the
+validated explicit-empty result enter sanitized JSON artifacts. A redaction
+step records that the original HTML was discarded for security. The current
+reference FX quote remains balance metadata; no transaction rate is inferred.
+The latest complete artifact/unit container selects one AUD balance. A resume
+keeps the captured AUD bytes and its frozen retention window, and cumulative
+success includes earlier partial evidence under the existing terminal rules.
+
+Synthetic transport tests check native Shift_JIS forms, empty named selectors
+and account/currency binding. End-to-end R2/CORE tests check new yen publication
+through AUD failure, failed-yen refusal, AUD snapshot selection and idempotent
+registration. Migration tests preserve customized policy rows.

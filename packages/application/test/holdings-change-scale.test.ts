@@ -11,6 +11,7 @@
 // reads and the keyed unit read. Synthetic values only.
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { beforeAll, describe, expect, test } from "bun:test";
+import { isLiteralRowsScan } from "./literal-row-scan.ts";
 import {
   DATED_POSITION_QUANTITIES_SQL,
   DATED_SNAPSHOT_UNITS_SQL,
@@ -96,6 +97,7 @@ function unboundedScans(steps: readonly PlanStep[], allowed: readonly string[] =
     .filter((detail) => {
       const name = detail.slice(5).split(" ")[0]!;
       return !(
+        isLiteralRowsScan(detail) ||
         BOUNDED.has(name) ||
         allowed.includes(name) ||
         name.startsWith("dated_") ||

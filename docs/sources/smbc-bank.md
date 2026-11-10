@@ -1,5 +1,64 @@
 # 三井住友銀行 (Sumitomo Mitsui Banking Corporation): the bank-account side of SMBCダイレクト (SMBC Direct) / Olive
 
+## Authenticated AUD observations (2026-11-10)
+
+Read-only navigation in the owner's authenticated local browser established
+the following routes. This observation did not run the deployed collector.
+Identifiers, account names and numbers, financial values, dates of financial
+records, cookies and tokens are deliberately omitted. Fixtures use synthetic
+values. Request dates below are described relative to the acquisition day.
+
+| Step                            | Method and path                                        | Observed request shape                                                                                                                                                                                                                                                                                                               |
+| ------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Foreign ordinary detail         | `POST /ib/web/top/TPALTOPaccountGaikaFutsuDetail.smbc` | `_FRAMEID`, `_TARGETID`, `_LUID`, `_TOKEN`, `_FORMID`, `_SUBINDEX`, `moudaiBrNo`, `moudaiAcNo`, `hiddenUserId`, `accountBranchCode`, `accountItemCode`, `accountNo`; the top-page `directib.TPALTOP.accountDetail` link supplies the three opaque account selectors at runtime                                                       |
+| Enter selected-currency history | `POST /ib/web/accountinquiry/AIFDDTLmeisai.smbc`       | `_FRAMEID=root`, `_TARGETID=root`, runtime `_LUID`/`_TOKEN`, `_FORMID=AIFDDTL`, `_SUBINDEX=0`, `accountSelect=0`, `accountBranchCode=''`, `accountItemCode=''`, `accountNo=''`, `selectDateStare`, `selectDateEnd`, `shoriTaibu=''`, `firstEndDate`; copied date-label fields use the native Shift_JIS form encoding                 |
+| Query history                   | `POST /ib/web/accountinquiry/AIFDDT1meisai.smbc`       | `_FRAMEID=root`, `_TARGETID=root`, runtime `_LUID`/`_TOKEN`, `_FORMID=AIFDDT1`, `_SUBINDEX=''`, `accountSelect=0`, the same three empty named account selectors, `selectFromYear`, `selectFromMonth`, `selectFromDay`, `selectToYear`, `selectToMonth`, `selectToDay`, `shoriTaibu=05`; month and day values are zero-padded strings |
+
+The balance response is HTML. One `dl.detail-list03` has `dt.title` text
+`通貨：A$`. Its nested `dl.detail-list07` labels `現在残高`; the value has
+`span.foreignCurrency` text `A$` and `span.price` decimal text. Another nested
+definition list labels `円貨換算金額` and carries its decimal in `span.price`.
+The `現在の参考為替レート(外貨→円)` list has decimal text followed by `円`.
+This rate is a current reference quote, never an applied transaction rate.
+The same AUD section's history link has `id=0` and
+`data-event=/accountinquiry/AIFDDTLmeisai`.
+
+History responses identify the selected foreign account in `dl.item` /
+`dt.title`: the branch label, `外貨`, a line break and the full account number.
+`dl.detail-list07.-flexEnd.-account` labels `通貨・現在残高`; its `dd.detail`
+contains `A$` and a `span.price`. The collector compares that runtime account
+number and currency/balance with the foreign detail it selected. The two
+`accountSelect` radio choices are unrelated to this selected AUD context:
+index zero is the default yen choice in that form, while the other choice is
+foreign. The observed history requests nevertheless send zero and empty
+named account selectors. Those blanks must be preserved, not replaced with
+the top-page selectors or treated as proof of account identity.
+The detail POST's `moudaiAcNo` differs from the clicked foreign `accountNo`;
+both `moudai` fields remain the existing top form's nonempty values. They are
+not replaced with the foreign selectors. No identifier value was recorded.
+
+The site states retention from the first day three months before the current
+month, a maximum four-month query and a 300-row limit. An explicit query over
+the displayed retention returned HTTP 200 with no `table` or `tbody` and a
+`div.card-box03.-alert01` containing `dt.title` text
+`エラーコード:PC-AIFDDT1-00134-E` and `dd.detail` text
+`指定期間の入出金はございません。`. A paragraph states the selected start/end
+dates followed by `の明細`. The page's script attempts to decode an empty JSON
+string in a named `getData` function, followed by
+`var meisaiListJSONData = getData();`. That exact empty-script shape is also
+required. The string is not an empty-row schema and is never interpreted as
+zero on its own.
+
+Implementation scope is the observed AUD balance and this explicit-empty
+history response only. A fresh approved manual run queries each retained
+calendar month through the last finished JST day, preserving the existing
+closed-day rule. Empty history requires the exact code, message, requested
+period, account/currency context and absence of a contradictory table. A
+nonempty or changed response leaves the unit partial with a closed code.
+Nonempty transaction keys, directions, stable IDs and applied rates remain
+unobserved and unsupported; [issue 1245](https://github.com/risu729/kogane/issues/1245)
+therefore remains open. No provider financial value is retained in this note.
+
 > Dated source research and implementation notes. Earlier runtime/schedule
 > claims may be superseded by later changes. See the [research scope](README.md),
 > [current status](../current-status.md) and [schedules](../schedules.md) before

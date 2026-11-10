@@ -1214,6 +1214,17 @@
       "statementCount": 2,
       "insertStatements": [],
       "sha256": "5cb9b300e1ed17b8b56f27a18164818cccaec856ac5cd01c36cb691ae98875ea"
+    },
+    {
+      "file": "0096_smbc_foreign_ordinary_unit_eligibility.sql",
+      "statementCount": 2,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "83928239d3688abc7fe13b7173117da0f4b09ac179bb6ed08ae7a84ca256d34c"
     }
   ],
   "tables": [
@@ -22117,7 +22128,8 @@
       "0071_economic_event_command_kinds.sql",
       "0080_jpoint_program.sql",
       "0085_schedule_dispatch_marker.sql",
-      "0088_sbi_shinsei_monthly_report_units.sql"
+      "0088_sbi_shinsei_monthly_report_units.sql",
+      "0096_smbc_foreign_ordinary_unit_eligibility.sql"
     ],
     "schemaSha256": "0b2ddb2a8d7e9b70df8ec4b3937eeef911d2737a1e55ca0d06eb316f47695af9"
   }

@@ -34,6 +34,13 @@ export const SNAPSHOT_DATASETS = [
  */
 export const ARTIFACT_SNAPSHOT_CONTAINERS = [
   {
+    sourceId: "smbc-bank",
+    parserName: "smbc-foreign-ordinary-balance",
+    artifactKey: "foreign-ordinary-aud/balance.json",
+    fetchUnitKey: "foreign-ordinary-aud",
+    dataset: "foreign-ordinary-aud-balance",
+  },
+  {
     sourceId: "mizuho-bank",
     parserName: "mizuho-account-list",
     artifactKey: "account-list.html",

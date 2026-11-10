@@ -339,6 +339,18 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
   ],
   "smbc-direct": [
     {
+      key: "foreign-ordinary-aud/balance.json",
+      role: "sanitized_provider_capture",
+      mediaTypes: JSON_TYPE,
+      dataset: "foreign-ordinary-aud-balance",
+    },
+    {
+      key: /^foreign-ordinary-aud\/history\/\d{8}-\d{8}\.json$/u,
+      role: "sanitized_provider_capture",
+      mediaTypes: JSON_TYPE,
+      dataset: "foreign-ordinary-aud-history",
+    },
+    {
       key: "balance.normalized.json",
       role: "collector_derived",
       mediaTypes: JSON_TYPE,

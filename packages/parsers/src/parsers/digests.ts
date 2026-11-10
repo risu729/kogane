@@ -106,6 +106,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "d60bf5c5439b33ae07ccbb8f9b6860f52e6984e47ae3c50534f2df044c42980b",
     "poc/observation-pipeline/src/parsers/smbc-direct.ts":
       "93a3e72b94400fe1e2fd2afb56b42a9f88bcc1c449b0ab47197377962bb7b511",
+    "poc/observation-pipeline/src/parsers/smbc-foreign-ordinary.ts":
+      "cc8531edbdc90d189b19cbdd942d6a25a369ec07cfd922e8baa245e85ace6c90",
     "poc/observation-pipeline/src/parsers/sony-bank.ts":
       "b114022993854781bb293e40330eca99c04dafab22b12b594dbe35fedb8b679c",
     "poc/observation-pipeline/src/parsers/st-george.ts":
@@ -611,6 +613,34 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/coverage.ts",
         "poc/observation-pipeline/src/parsers/smbc-direct.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "smbc-foreign-ordinary-balance": {
+      version: "0.1.1",
+      codeDigest: "fd420ca6c927733d614188f5b296b76e74edffce8c4a2d73588fe8b2ab3cb888",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/smbc-foreign-ordinary.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "smbc-foreign-ordinary-history": {
+      version: "0.1.1",
+      codeDigest: "fd420ca6c927733d614188f5b296b76e74edffce8c4a2d73588fe8b2ab3cb888",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/smbc-foreign-ordinary.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],

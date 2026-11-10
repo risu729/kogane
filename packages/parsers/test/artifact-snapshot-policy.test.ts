@@ -5,9 +5,11 @@ import { containerScopeKey } from "../src/parsers/coverage.ts";
 import { PARSERS } from "../src/parsers/registry.ts";
 import type { ArtifactMeta } from "../src/types.ts";
 import { mizuhoAccountHtml } from "./mizuho-fixture.ts";
+import { smbcForeignBalance } from "./smbc-foreign-fixture.ts";
 
 const fixtures: Readonly<Record<string, () => string>> = {
   "mizuho-account-list": mizuhoAccountHtml,
+  "smbc-foreign-ordinary-balance": smbcForeignBalance,
 };
 
 test("artifact-container policies match one registered parser and complete coverage for null and named datasets", () => {
@@ -22,7 +24,7 @@ test("artifact-container policies match one registered parser and complete cover
         artifactKey: entry.artifactKey,
         fetchUnitKey: entry.fetchUnitKey,
         dataset,
-        mime: "text/html",
+        mime: entry.sourceId === "smbc-bank" ? "application/json" : "text/html",
         url: null,
         fetchedAt: "2026-09-13T00:00:00.000Z",
         sha256: "0".repeat(64),
