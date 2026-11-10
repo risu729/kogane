@@ -86,11 +86,11 @@ it("keeps financial-shaped inexact raw bytes in DATA while refusing all derivati
 for (const [name, mutate] of [
   [
     "plain root duplicate",
-    (text: string) => text.replace("{", '{"balances":{"accessToken":"SYNTHETIC_SENTINEL"},'),
+    (text: string) => '{"balances":{"accessToken":"SYNTHETIC_SENTINEL"},' + text.slice(1),
   ],
   [
     "escaped root duplicate",
-    (text: string) => text.replace("{", '{"balanc\\u0065s":{"accessToken":"SYNTHETIC_SENTINEL"},'),
+    (text: string) => '{"balanc\\u0065s":{"accessToken":"SYNTHETIC_SENTINEL"},' + text.slice(1),
   ],
   [
     "nested duplicate",

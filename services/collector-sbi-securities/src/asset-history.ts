@@ -14,8 +14,59 @@ import {
 } from "../../../packages/parsers/src/parsers/sbi-asset-history-schema";
 import { sha256Hex } from "../../../packages/collection/src/digest";
 import type { Artifact } from "./types";
-import { parseAssetHistoryJson } from "../../../packages/parsers/src/parsers/sbi-asset-history-json";
+import {
+  parseAssetHistoryJson,
+  ASSET_HISTORY_JSON_LIMITS,
+} from "../../../packages/parsers/src/parsers/sbi-asset-history-json";
 import { validateAssetHistory } from "../../../packages/parsers/src/parsers/sbi-asset-history-validation";
+
+/** Bound the actual stream before retaining chunks or allocating a full body. */
+export async function readAssetHistoryResponse(response: Response): Promise<Uint8Array> {
+  if (response.body === null) throw assetHistoryError("sbi_asset_history_schema");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  const limit = ASSET_HISTORY_JSON_LIMITS.bytes;
+  let size = 0;
+  const cancel = async () => {
+    try {
+      await reader.cancel();
+    } catch {
+      /* Cancellation cannot replace the closed failure. */
+    }
+  };
+  try {
+    while (true) {
+      let part: Awaited<ReturnType<typeof reader.read>>;
+      try {
+        part = await reader.read();
+      } catch {
+        await cancel();
+        throw assetHistoryError("sbi_asset_history_fetch_failed");
+      }
+      if (part.done) break;
+      const chunk = part.value;
+      if (!(chunk instanceof Uint8Array)) {
+        await cancel();
+        throw assetHistoryError("sbi_asset_history_fetch_failed");
+      }
+      if (chunk.byteLength > limit - size) {
+        await cancel();
+        throw assetHistoryError("sbi_asset_history_bound");
+      }
+      size += chunk.byteLength;
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
 
 export async function assetHistoryArtifacts(input: {
   body: unknown;
