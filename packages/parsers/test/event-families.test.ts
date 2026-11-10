@@ -1,3 +1,5 @@
+import { vpassCreditSnapshot } from "../src/parsers/vpass-credit.ts";
+import { authori as vpassAuthori } from "./fixtures/vpass-credit.ts";
 import { sbiShinseiMonthlyReport } from "../src/parsers/sbi-shinsei-monthly-report.ts";
 // The transaction-family registry (packages/domain/src/event-families.ts,
 // ADR 0053) against the parsers it describes. Every PARSERS entry whose rows
@@ -62,6 +64,7 @@ import { skipMeta, skipPage } from "./myjcb-skip-payment-fixture.ts";
 
 /** PARSERS entries whose rows are balances, valuations, scheduled payments or none. */
 const NOT_IN_REGISTRY = [
+  "vpass-credit-snapshot",
   "mizuho-account-list",
   "moneyforward-canonical-evidence-boundary",
   "myjcb-canonical-evidence-boundary",
@@ -404,6 +407,15 @@ const CASES: Case[] = [
  */
 const MF_EVIDENCE = { fetchUnitKey: null, statementState: null, period: null, mime: "text/html" };
 const OUTSIDE_CASES: Case[] = [
+  one(
+    vpassCreditSnapshot,
+    "reported-credit",
+    meta("vpass", "credit-snapshot", {
+      artifactKey: "credit/authori.json",
+      fetchUnitKey: "card-001",
+    }),
+    encode(JSON.stringify(vpassAuthori())),
+  ),
   one(
     myJcbDebitOtherStatement,
     "other-empty",

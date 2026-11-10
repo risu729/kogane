@@ -134,6 +134,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "d16279ba46c167366bb29a62811517623c518bcaa0c0a8e9fa9a1b7fb60aeb51",
     "poc/observation-pipeline/src/parsers/v-point.ts":
       "67e8b851360f2da7046967231407dfe2e0c01ee87e58a670d7a1f355efe2bb7d",
+    "poc/observation-pipeline/src/parsers/vpass-credit.ts":
+      "9ed6878fad50019729c2d45b4ff879c8616c0b4f45d7608ab7c8d7b107098612",
     "poc/observation-pipeline/src/parsers/vpass.ts":
       "5a1ce5cb855a7e2df17e392c957b8337d74273bdaadb074a2b77c48ad88ffa1a",
     "poc/observation-pipeline/src/scheduled-payment.ts":
@@ -842,6 +844,20 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/parsers/v-point.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "vpass-credit-snapshot": {
+      version: "1.0.0",
+      codeDigest: "dd6c497dee808acff33a19968514dade332b476185f98922136777b7bb691bc1",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/parsers/vpass-credit.ts",
         "poc/observation-pipeline/src/types.ts",
       ],
     },

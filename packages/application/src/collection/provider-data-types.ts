@@ -214,6 +214,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // Vpass: card statement pages (purchases and statement amounts)
   // (docs/collection.md "Vpass", #445).
   vpass: [
+    partial("balance", ["vpass-credit-snapshot"], 1256),
     collected("card_usage", ["vpass-statement-page"]),
     collected("card_statement", ["vpass-statement-page"]),
   ],

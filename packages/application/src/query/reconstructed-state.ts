@@ -275,7 +275,9 @@ function reportedSide(
   for (const entry of state.accounts) {
     if (entry.accountId !== account) continue;
     const captured = new Map(
-      entry.snapshots.map((snapshot) => [snapshot.ref, snapshot.capturedAt]),
+      entry.snapshots
+        .filter((snapshot) => snapshot.parserName !== "vpass-credit-snapshot")
+        .map((snapshot) => [snapshot.ref, snapshot.capturedAt]),
     );
     positions += entry.positions.length;
     for (const balance of entry.balances) {
@@ -391,10 +393,15 @@ export async function queryReconstructedState(
     queryDatedState(sql, { date: input.to, account: input.account }),
     sql.all<{ source_id: string }>(ACCOUNT_SOURCES_SQL, [input.account]),
   ]);
+  // Credit capacity and overlapping outstanding reports establish no cash-basis opening stock.
   const perimeter = new Set(
     [startState, endState].flatMap((state) => [
-      ...state.snapshots.map((snapshot) => snapshot.sourceId),
-      ...state.coverage.containersWithoutSnapshot.map((container) => container.sourceId),
+      ...state.snapshots
+        .filter((snapshot) => snapshot.parserName !== "vpass-credit-snapshot")
+        .map((snapshot) => snapshot.sourceId),
+      ...state.coverage.containersWithoutSnapshot
+        .filter((container) => container.parserName !== "vpass-credit-snapshot")
+        .map((container) => container.sourceId),
     ]),
   );
   const hasContainer = sources.some((row) => perimeter.has(row.source_id));
