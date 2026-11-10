@@ -241,7 +241,13 @@ describe("dataset_snapshot_policies seed", () => {
         ),
         "utf8",
       ) +
-      readFileSync(join(import.meta.dir, "../../../packages/storage-d1/migrations/core/0094_myjcb_jpoint_history.sql"), "utf8");
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0094_myjcb_jpoint_history.sql",
+        ),
+        "utf8",
+      );
     for (const [parser, dataset] of SNAPSHOT_DATASETS) {
       expect(sql).toContain("'" + dataset + "'");
       expect(sql).toContain("'" + parser + "'");
