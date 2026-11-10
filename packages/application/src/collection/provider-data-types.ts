@@ -114,8 +114,8 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     partial("term_deposit", ["prestia-bank-balances"], 454),
     missing("document", 454),
   ],
-  // SBI証券: domestic and US positions and trades, cash (the yen history's
-  // first page only), My Assets current/weekly valuations, observed stock
+  // SBI証券: domestic and US positions and trades, retained yen and observed
+  // USD cash statements, My Assets current/weekly valuations, observed stock
   // income and domestic gains; other products and delivered documents remain incomplete
   // (docs/sources/sbi-securities.md, #446).
   "sbi-securities": [

@@ -84,7 +84,7 @@ test("all-retention collection preserves exact source bytes, ordered lineage and
   altered[1]!.bytes = encode("{}");
   expect(await incomeHistoryInventoryComplete(altered)).toBe(false);
   const wrongMedia = structuredClone(artifacts);
-  wrongMedia[2]!.mediaType = "text/html";
+  Object.assign(wrongMedia[2]!, { mediaType: "text/html" });
   expect(await incomeHistoryInventoryComplete(wrongMedia)).toBe(false);
 });
 

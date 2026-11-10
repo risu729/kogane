@@ -19,7 +19,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "packages/domain/src/myjcb-debit-page.ts":
       "6df61bcf418a2c8bc44f56447f5fa752e0b6888ff2e1bb44a7089f156519a9e8",
     "packages/domain/src/myjcb-jpoint-history.ts":
-      "db97b9ff04501f632411f7f21c67cb241307bb1ddf4306156198fe187299eb6c",
+      "e72557b6821db6dddfa4b7ba4b1605f143eddb6a71366685745c0b74d78d830b",
     "packages/domain/src/myjcb-jpoint-response.ts":
       "2ab195e078255201c9a9d4ce9d44100f505b10cdca430e9801623841bf472c5e",
     "packages/domain/src/myjcb-schedule-page-kind.ts":
@@ -61,9 +61,9 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/myjcb-debit.ts":
       "351cc8786811af43e65b9e8804cb7296442d15bd39c3ec28f00068e6fe3a7e05",
     "poc/observation-pipeline/src/parsers/myjcb-jpoint-history-html.ts":
-      "4946878602dc8cd5094f004067c43f71429331f0b89ca30ef0abcca67e9f8e68",
+      "5718befa9c22a10dddf7c4c0cc7ef931a90620e7436f7873a75b1b44bf2f6099",
     "poc/observation-pipeline/src/parsers/myjcb-jpoint-history.ts":
-      "4e0dfa341016034e1fc2ac3618a14f15bc1b3b334cd852d8ffa0d892178b6d7f",
+      "ac72426c82e750ef9e234456b747e9513c0053fe9066183052d7e4e91c284dd5",
     "poc/observation-pipeline/src/parsers/myjcb-jpoint.ts":
       "f53f9d187aab2027151a01be3d4aae1f3792006583ffb40045b4cfa2020c1bf8",
     "poc/observation-pipeline/src/parsers/myjcb-skip-payment-schedule.ts":
@@ -103,7 +103,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/sbi-income-history-schema.ts":
       "71ab032209c54cd39271dc0fa10771640b3e56d0e6b6a4785cf3bde29d20e850",
     "poc/observation-pipeline/src/parsers/sbi-income-history.ts":
-      "cec255565c9a99588d0450329047a59643c8e873407629d8d7943ea989d31198",
+      "7577cc1e38cebbd1871010020da06e10619c7b290d7a45260558e978d788b486",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-balance-summary-and-stage.ts":
       "afed75b6bba5c0934a7be8085dda09d3ccb24992ea1dfead6968c7a4489b5be3",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-common.ts":
@@ -379,8 +379,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "myjcb-jpoint-history": {
-      version: "1.0.0",
-      codeDigest: "4e213ae30708927554fc46e9a454634ac15291ed48e12026c78b79d9e0eb80fd",
+      version: "1.0.1",
+      codeDigest: "d49b71907da4201404c40b4c561ebcb46ff4d58d6760dc8934f98324e842910d",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -553,8 +553,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-income-payments": {
-      version: "0.1.1",
-      codeDigest: "93c7a3de9fde1df665f1014e78edf574e41e90b9c769b6c0d67c5f4bb880a7d1",
+      version: "0.1.2",
+      codeDigest: "d8e93d5be495f10e3eba170f42e620a38ddaa4f79112b4eaeb765700f970fd2e",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -571,8 +571,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-realised-gains": {
-      version: "0.1.1",
-      codeDigest: "93c7a3de9fde1df665f1014e78edf574e41e90b9c769b6c0d67c5f4bb880a7d1",
+      version: "0.1.2",
+      codeDigest: "d8e93d5be495f10e3eba170f42e620a38ddaa4f79112b4eaeb765700f970fd2e",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

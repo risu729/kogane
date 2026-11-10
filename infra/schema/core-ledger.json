@@ -1240,7 +1240,7 @@
           "kind": "seed-or-backfill"
         }
       ],
-      "sha256": "1b5a5fafa02d7eb65a59496c0e1dc5d860da3a98795ae5a244a795b274355e9e"
+      "sha256": "8cf430f17ebb856a490bccfc4ff17794f616eaaecd05f25203d7d98969e32275"
     },
     {
       "file": "0094_myjcb_jpoint_history.sql",
@@ -1251,7 +1251,7 @@
           "kind": "seed-or-backfill"
         }
       ],
-      "sha256": "ace6333a69db18dc00f55bb9e1a6af4cb892b478cd0bb26966a2f673e11bded8"
+      "sha256": "4e48a5aeae794c352aea59b216d0a1707b11509ad391649f3f4652452850b987"
     }
   ],
   "tables": [

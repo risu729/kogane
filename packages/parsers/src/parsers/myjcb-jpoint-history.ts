@@ -12,7 +12,7 @@ import { monthPeriod } from "../../../domain/src/time.ts";
 const KEY = /^([a-z0-9][a-z0-9-]{0,63})\/jpoint-history\.json$/u;
 export const myJcbJPointHistory: Parser = {
   name: "myjcb-jpoint-history",
-  version: "1.0.0",
+  version: "1.0.1",
   accepts: (a) =>
     a.sourceId === "myjcb" && a.dataset === "jpoint-history" && a.mime === "application/json",
   parse(bytes, artifact) {
