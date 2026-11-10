@@ -16,6 +16,7 @@ export default defineConfig({
         invocationLogs: true,
         headSamplingRate: 1,
       },
+      issues: { enabled: true },
     },
     env: {
       COLLECTOR_SCHEMA_VERSION: bindings.text("vpoint-pay-worker-poc-v1"),

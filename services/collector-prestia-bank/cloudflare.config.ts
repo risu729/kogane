@@ -17,7 +17,7 @@ export default defineConfig({
     entrypoint: "src/schedule-entrypoint.ts",
     workersDev: true,
     previewUrls: false,
-    observability: { enabled: true },
+    observability: { enabled: true, issues: { enabled: true } },
     env: {
       RELEASE_SHA: bindings.text(legacyConfig.vars.RELEASE_SHA),
       COLLECTOR_SCHEMA_VERSION: bindings.text("prestia-bank-collector-v1"),

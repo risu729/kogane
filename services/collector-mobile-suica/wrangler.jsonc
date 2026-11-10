@@ -13,7 +13,8 @@
       "enabled": true,
       "invocation_logs": true,
       "head_sampling_rate": 1
-    }
+    },
+    "issues": { "enabled": true }
   },
   "secrets": {
     "required": ["JRE_ID_CREDENTIAL_JSON"]
