@@ -174,6 +174,28 @@ test("the current production migration chain preserves legacy policies and adds 
     "coverage-v1",
   );
   expect(
+    policies.filter((row) =>
+      ["sbi-income-payments", "sbi-realised-gains"].includes(row.parser_name),
+    ),
+  ).toEqual([
+    {
+      source_id: "sbi-securities",
+      parser_name: "sbi-income-payments",
+      dataset: "income-payments",
+      policy_id: "coverage-v1",
+      unit_scope: "run",
+      snapshot_selection: 1,
+    },
+    {
+      source_id: "sbi-securities",
+      parser_name: "sbi-realised-gains",
+      dataset: "realised-gains",
+      policy_id: "coverage-v1",
+      unit_scope: "run",
+      snapshot_selection: 1,
+    },
+  ]);
+  expect(
     containers
       .filter((row) => !["myjcb-jpoint-history", "vpass-credit-snapshot"].includes(row.parser_name))
       .every((row) => row.unit_scope === "run"),
