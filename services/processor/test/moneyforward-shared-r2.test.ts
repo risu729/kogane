@@ -28,6 +28,14 @@ import type { RawArtifact } from "../../collector-moneyforward/src/types.ts";
 import { registerCollectionRun } from "../src/collection/index.ts";
 import { identitySweep } from "../src/identity-store.ts";
 import { sweep } from "../src/worker.ts";
+import { runBalanceProjection } from "../src/balance-projection-job.ts";
+import {
+  createD1ObservationReader,
+  PAGE_LIMIT,
+  knownAssetMetricIds,
+} from "../../../packages/read-model/src/index.ts";
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
+import { createReadProjectionReader } from "../../../packages/storage-d1/src/read/reader.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -100,7 +108,7 @@ const artifacts: RawArtifact[] = [
     dataset: "account-detail",
     filename: "account-detail-01.html",
     mediaType: HTML,
-    body: fixture("account-detail-01.html"),
+    body: fixture("bank-detail-balances.html"),
   },
   {
     dataset: "monthly-transactions",
@@ -124,16 +132,20 @@ const withoutTuple: RawArtifact[] = artifacts.map((artifact) =>
 );
 
 /** The collector's own plan for one successful run, with or without a tuple. */
-function runPlan(runId: string, tuple: boolean) {
+function runPlan(runId: string, tuple: boolean, detailHtml?: string, day = "20") {
   return moneyForwardRunPlan({
     schemaVersion: "moneyforward-worker-poc-v1",
     runId,
-    startedAt: "2026-09-20T00:00:00.000Z",
-    completedAt: "2026-09-20T00:05:00.000Z",
+    startedAt: `2026-09-${day}T00:00:00.000Z`,
+    completedAt: `2026-09-${day}T00:05:00.000Z`,
     status: "success",
     accountDetailCount: 1,
     monthlyFragmentCount: 2,
-    artifacts: tuple ? artifacts : withoutTuple,
+    artifacts: (tuple ? artifacts : withoutTuple).map((artifact) =>
+      detailHtml !== undefined && artifact.dataset === "account-detail"
+        ? { ...artifact, body: detailHtml }
+        : artifact,
+    ),
     failures: [],
   });
 }
@@ -156,8 +168,8 @@ async function jobs(runId: string) {
   ).results;
 }
 
-async function registerRun(runId: string, tuple: boolean) {
-  const plan = await runPlan(runId, tuple);
+async function registerRun(runId: string, tuple: boolean, detailHtml?: string, day = "20") {
+  const plan = await runPlan(runId, tuple, detailHtml, day);
   expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
   expect(await registerCollectionRun(env, { source: "moneyforward-me", runId })).toMatchObject({
     outcome: "registered",
@@ -197,7 +209,7 @@ async function registerRun(runId: string, tuple: boolean) {
 test("with no secret the run's pages parse with no error under the v2 account identity", async () => {
   const runId = "00000000-0000-4000-8000-00000000a027";
   const fetchRunId = await registerRun(runId, true);
-  expect(await sweep(env)).toMatchObject({ parsed: 4, error: 0 });
+  expect(await sweep(env)).toMatchObject({ parsed: 5, error: 0 });
   expect(await jobs(runId)).toEqual([
     {
       parser_name: "moneyforward-canonical-evidence-boundary",
@@ -205,6 +217,13 @@ test("with no secret the run's pages parse with no error under the v2 account id
       status: "done",
       last_error_code: null,
       n: 2,
+    },
+    {
+      parser_name: "moneyforward-detail-balances",
+      parser_version: "1.0.0",
+      status: "done",
+      last_error_code: null,
+      n: 1,
     },
     {
       parser_name: "moneyforward-monthly-transactions",
@@ -258,12 +277,73 @@ test("with no secret the run's pages parse with no error under the v2 account id
       known_to_importer: 0,
     },
   ]);
+  // The real observation reader and READ projection see the new balance on
+  // the aggregator's own account. Its reported yen valuation is never a
+  // direct deposit or a known-assets subtotal, even with no direct witness.
+  const balances = await createD1ObservationReader(env.DB).listLatestBalances({
+    source: "moneyforward-me",
+    offset: 0,
+    limit: PAGE_LIMIT,
+  });
+  expect(balances).toHaveLength(1);
+  expect(balances[0]).toMatchObject({
+    metric: "reported_account_value_jpy",
+    source_account: `moneyforward-me:${TOKEN}`,
+    amount_text: "1300",
+    instrument: "JPY",
+    as_of: null,
+  });
+  const projection = await runBalanceProjection({ ...env, BALANCE_PROJECTION_ENABLED: "1" } as Env);
+  expect(projection).toMatchObject({ status: "complete", rowCount: 1 });
+  const reader = createReadProjectionReader(d1Executor(env.DB), d1Executor(env.READ));
+  const snapshot = await reader.currentSnapshot();
+  expect(snapshot).not.toBeNull();
+  const page = await reader.latestPage(
+    snapshot!.snapshot_id,
+    { source: "moneyforward-me" },
+    50,
+    -1,
+  );
+  expect(page).toHaveLength(1);
+  expect(page[0]).toMatchObject({
+    metric_id: "moneyforward.reported-account-value",
+    quantity_coefficient: "1300",
+    instrument: "JPY",
+    as_of: null,
+  });
+  expect(await reader.summableQuantities(snapshot!.snapshot_id, {}, knownAssetMetricIds())).toEqual(
+    [],
+  );
+}, 60000);
+
+test("a newer detail snapshot replaces the aggregate once; an unreadable capture retains it", async () => {
+  const reader = createD1ObservationReader(env.DB);
+  const latest = () =>
+    reader.listLatestBalances({ source: "moneyforward-me", offset: 0, limit: PAGE_LIMIT });
+  const original = fixture("bank-detail-balances.html");
+  const updated = original.replaceAll("1,300円", "2,300円").replaceAll("1,100円", "2,100円");
+  await registerRun("00000000-0000-4000-8000-00000000c027", true, updated, "21");
+  expect(await sweep(env)).toMatchObject({ parsed: 5, error: 0 });
+  const rows = await latest();
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ amount_text: "2300", metric: "reported_account_value_jpy" });
+  await registerRun(
+    "00000000-0000-4000-8000-00000000d027",
+    true,
+    updated.replace("資産総額：2,300円", "資産総額：未定"),
+    "22",
+  );
+  expect(await sweep(env)).toMatchObject({ parsed: 4, error: 1 });
+  expect(await latest()).toEqual(rows);
+  expect(
+    await env.DB.prepare("SELECT COUNT(*) AS n FROM balance_observations").first<number>("n"),
+  ).toBe(2);
 }, 60000);
 
 test("without a tuple the units stay positional and every parse is parser_rejected", async () => {
   const runId = "00000000-0000-4000-8000-00000000b027";
   const fetchRunId = await registerRun(runId, false);
-  expect(await sweep(env)).toMatchObject({ parsed: 1, error: 3 });
+  expect(await sweep(env)).toMatchObject({ parsed: 1, error: 4 });
   // The index carries no account, so it parses; every page that names an
   // account is rejected, as in production.
   expect(await jobs(runId)).toEqual([
@@ -277,6 +357,13 @@ test("without a tuple the units stay positional and every parse is parser_reject
     {
       parser_name: "moneyforward-canonical-evidence-boundary",
       parser_version: "1.0.3",
+      status: "failed",
+      last_error_code: "parser_rejected",
+      n: 1,
+    },
+    {
+      parser_name: "moneyforward-detail-balances",
+      parser_version: "1.0.0",
       status: "failed",
       last_error_code: "parser_rejected",
       n: 1,

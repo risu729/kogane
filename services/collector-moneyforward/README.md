@@ -139,3 +139,17 @@ or values, CSRF/challenge values, account identifiers and passkey material are
 excluded from diagnostics. Raw evidence storage and collection status semantics
 are unchanged. There is no central backfill path any more; it was retired with
 the per-source bucket on 2026-09-13.
+
+## Stored detail-page measures
+
+The collector already stores account detail HTML. The central
+`moneyforward-detail-balances@1.0.0` parser now publishes strictly observed
+bank aggregate JPY values and single-row point quantities/current JPY values,
+under the existing MoneyForward account identity. These are non-additive
+reported measures; native product balances, premium-gated card debt and
+unobserved securities holdings remain unavailable with closed diagnostics.
+Capture time is not the underlying provider's balance as-of.
+
+No collection request or registration-contract change is needed. See
+[`docs/sources/moneyforward.md`](../../docs/sources/moneyforward.md) and
+[ADR 0103](../../docs/adr/0103-moneyforward-detail-measures.md).

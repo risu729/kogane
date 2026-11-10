@@ -140,8 +140,10 @@ exclude object keys, individual hashes, bodies, financial values from operationa
 ## Layer B semantic boundary
 
 Only `monthly-transactions` is the canonical transaction route. `account-detail` also shows recent transactions,
-but is a bounded recent view containing the same transactions. Alongside `accounts-index`, validate only surface
-markers with strict evidence-only parsers, generating no financial observations. Do not relabel sources as
+but is a bounded recent view containing the same transactions. Its recent transactions stay evidence-only;
+the observed detail-measure parser below reads only aggregate/point values. The frozen
+evidence boundary still validates `accounts-index` and detail surface markers without
+financial observations. Do not relabel sources as
 underlying banks/cards. Separate source accounts by account units HMAC-ing verified detail account/service JSON
 tuples with a dedicated key. Verify agreement with the same ordinal in sorted accounts index and uniqueness
 within runs; retain ordinals only as provenance. Ordinal changes from link additions/deletions do not change
@@ -165,6 +167,61 @@ Validated all 8,603 tooltip body rows from 480 monthly artifacts, generating onl
 (inflow 1,883 / outflow 4,997). Validated shapes/amount representations of 1,723 adjacent-month rows without
 emitting; accepted 50 accounts index/detail artifacts as evidence-only. Zero Layer A/Layer B failures.
 Output contained only aggregate counts/fixed failure codes, no bodies, keys, hashes, individual financial values.
+
+## Detail measures observed on 2026-11-09 and verified on 2026-11-10
+
+The owner's authenticated Chrome session exposed four linked details: three bank
+and one card. Every accessible detail was observed read-only using
+`GET /accounts/show/{accountId}`; private identifiers were not recorded. Other
+group selection and securities details were unavailable. No refresh, settings,
+payment or premium action was used.
+
+- Bank table: `section.accounts-form > table.table-bordered`, direct
+  `thead > tr > th` / `tbody > tr > td`; headers exactly
+  `名称 / 種類 / 番号 / 残高`, four cells per row. The observed bank TDs
+  contain plain text without child elements. Observed row counts: 4, 2, 2;
+  missing amount counts: 2, 1, 0, displayed as `-`.
+  Root `section.accounts-form > h1.heading-small` reports
+  `資産総額：<integer>円`. In all three details, the exact sum of the
+  available numeric rows matched that aggregate. Missing rows are unavailable,
+  not zero. Foreign product labels do not change the explicit JPY amount unit.
+  No stable subrow identifier or native foreign amount/rate was observed.
+- Deposit table: `section#portfolio_det_depo.bs-detail ... table.table-depo`,
+  headers `種類・名称 / 残高`. It repeats the known main-table values and
+  never becomes another published balance.
+- Card main table has headers `名称 / 種類 / 番号 / 引き落とし予定額`,
+  but five body cells, the last unlabeled. Fifteen rows had `-` amounts and
+  trailing cells; the heading reported `引き落とし予定額：未定`.
+- Two `section#portfolio_det_po.margin-top` sections share an ID and
+  `table.table-bordered.table-pns`. Debt headers are
+  `名称 / 残高 / 取得日`: seven rows, balance TD
+  `.restrict-premium-text` containing a premium link, date TD `.entry-date`.
+  Those gated amounts remain unavailable. The other full header is
+  `名称 / 種類 / ポイント・マイル数 / 換算レート / 現在の価値`.
+  Its single row has five TDs; the last three have class `number` with plain
+  text: integer plus `ポイント`, ASCII rate with two fractional digits,
+  and integer plus `円`. Exact quantity times rate matched the reported
+  JPY value; the parser requires that equality. Header and column shape
+  distinguish it from debt.
+- No independent provider balance/reward as-of was observed.
+  `input#updated-at[name="user_asset_act[updated_at]"]` belongs to manual
+  transaction entry. Debt acquisition dates also do not timestamp balances.
+
+`moneyforward-detail-balances@1.0.0` parses stored matching pages under
+[ADR 0103](../adr/0103-moneyforward-detail-measures.md). It publishes the bank's
+reported JPY aggregate and the observed single point quantity/current JPY value,
+with capture time as `observedAt` and no invented `asOf`.
+All are non-additive MoneyForward measures, outside the direct-deposit allow list.
+The existing descriptor already registers detail HTML; no new request or
+registration-contract version is needed.
+
+Closed diagnostics name `product_balance_missing`, `card_payment_undetermined`,
+`card_debt_premium_gated` and `securities_holdings_unobserved`, prefixed
+`moneyforward_detail_`. Unknown page kinds/headers, malformed units/amounts and
+disagreeing bank totals are rejected with closed parser errors. Securities
+positions remain unimplemented because no securities schema was observed.
+The catalogue is partial; production replay/publication and live-reader
+validation remain outstanding.
 
 ## Runtime feasibility and recommendation
 

@@ -50,6 +50,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "f2833f796bdf748567138dd644d54d061cedb08a8747472bb13165223fcaec41",
     "poc/observation-pipeline/src/parsers/mobile-suica-sf-history.ts":
       "a6130061da1c857b4e88477b53486b653981dcc12e34c0020fc3e28f4d255eb4",
+    "poc/observation-pipeline/src/parsers/moneyforward-detail-balances.ts":
+      "398601a66fb9dba1a3c6b13502cc30e558e75b7309674b0753fa0ef7ee439c4f",
     "poc/observation-pipeline/src/parsers/moneyforward-parser.ts":
       "9ff15fc630314c798312a9d39872bbeb88872a03e83a464abf53446eff373108",
     "poc/observation-pipeline/src/parsers/moneyforward.ts":
@@ -190,6 +192,22 @@ export const PARSER_DIGESTS: ParserDigests = {
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
         "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/moneyforward-parser.ts",
+        "poc/observation-pipeline/src/parsers/moneyforward.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "moneyforward-detail-balances": {
+      version: "1.0.0",
+      codeDigest: "3742340d40cf302aa67e044f7082e852e818b4e3c6f510a70cb30f43f7ac5ae3",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/moneyforward-detail-balances.ts",
         "poc/observation-pipeline/src/parsers/moneyforward-parser.ts",
         "poc/observation-pipeline/src/parsers/moneyforward.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
