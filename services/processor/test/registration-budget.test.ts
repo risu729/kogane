@@ -690,7 +690,7 @@ test("a run the previous release left pending continues under the same identity"
   // version and old progress under the same version is reused as it is. (The
   // version moved later, for ADR 0022's datasets and ADR 0083's Vpass pages;
   // the state below is written under the current one.)
-  expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v7");
+  expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v8");
   const harness = collectionHarness();
   await persistShape(harness, { artifacts: 12 });
   const fetchRunId = await previousReleaseState(harness, 1, true);

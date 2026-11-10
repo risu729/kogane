@@ -33,6 +33,7 @@ for (const file of [
   "prestia-bank-expected.json",
   "sbi-shinsei-exchange-rate-expected.json",
   "sbi-shinsei-observed-shapes-expected.json",
+  "vpass-credit-expected.json",
 ]) {
   const frozen = JSON.parse(
     readFileSync(join(FIXTURES_ROOT, "coverage-contract", file), "utf8"),
@@ -108,6 +109,11 @@ const partial = (
 
 /** What each case must claim. A throwing case has no claim and no entry here. */
 const CLAIMS: Record<string, Record<string, Expectation>> = {
+  "vpass-credit-snapshot": {
+    "authori-visible": complete(12),
+    "authori-hidden": complete(0),
+    "revo-exact": complete(2),
+  },
   "sbi-foreign-cash-balances": {
     "complete-empty": complete(0),
     "complete-rows": complete(2),

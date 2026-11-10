@@ -41,7 +41,7 @@ retain masked limit advisory information.
   JSON, to `credit-snapshot` under `terminal-registration-v8`. Freeze
   v1-v7 mappings. Unchanged descriptors carry over without republishing
   statement transactions.
-- `vpass-credit-snapshot@1.0.0` publishes reported overall/card/revolving/
+- `vpass-credit-snapshot@1.0.1` publishes reported overall/card/revolving/
   installment-twice-bonus limit, outstanding and availability only for visible
   rows. Monetary conversion cross-checks raw thousand-yen integers against
   the observed 万円 display. Metric names explicitly retain thousand-yen
@@ -82,3 +82,12 @@ registration, parsing/publication and the actual dated-balance reader for two
 cards over two runs; it also checks the existing stable binding view and
 non-additive metric definitions. Required workspace/root checks and independent
 review are recorded in the PR after they run.
+
+The container registry includes the new policy. The local pipeline applies
+migration 0092 once, preserves operator overrides on reopen, and admits a
+partial parent only when existing policy/unit metadata proves independence.
+The 1.0.1 reader records the display-container evidence even when all rows
+are hidden; it emits no balance of zero and cannot replace an earlier
+container with an empty claim. Real-parser local tests keep the failed card on its prior snapshot and reject
+a newer paired response set with one unreadable artifact. Production policy
+seed, comparison-route and registration-version assertions remain explicit.

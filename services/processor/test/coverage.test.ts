@@ -99,6 +99,14 @@ test("the current production migration chain preserves legacy policies and adds 
       unit_scope: "unit",
       snapshot_selection: 0,
     },
+    {
+      source_id: "vpass",
+      parser_name: "vpass-credit-snapshot",
+      dataset: "credit-snapshot",
+      policy_id: "coverage-v1",
+      unit_scope: "unit",
+      snapshot_selection: 1,
+    },
   ]);
   expect(
     policies
@@ -107,7 +115,8 @@ test("the current production migration chain preserves legacy policies and adds 
           row.parser_name !== "st-george-balances" &&
           row.parser_name !== "prestia-bank-balances" &&
           row.parser_name !== "sbi-shinsei-exchange-rate" &&
-          row.parser_name !== "sbi-shinsei-monthly-report-metadata",
+          row.parser_name !== "sbi-shinsei-monthly-report-metadata" &&
+          row.parser_name !== "vpass-credit-snapshot",
       )
       .every((row) => row.policy_id === "legacy-warning-compat-v1"),
   ).toBe(true);
@@ -121,7 +130,16 @@ test("the current production migration chain preserves legacy policies and adds 
   expect(policies.find((row) => row.parser_name === "sbi-shinsei-exchange-rate")?.policy_id).toBe(
     "coverage-v1",
   );
-  expect(containers.every((row) => row.unit_scope === "run")).toBe(true);
+  expect(containers.filter((row) => row.unit_scope !== "run")).toEqual([
+    {
+      source_id: "vpass",
+      parser_name: "vpass-credit-snapshot",
+      dataset: "credit-snapshot",
+      policy_id: "coverage-v1",
+      unit_scope: "unit",
+      snapshot_selection: 1,
+    },
+  ]);
   // Every row that pins a version, under either policy, names one this build
   // deploys: the selection matches it exactly, so a stale pin would adopt
   // nothing (0056 moves the SBI Shinsei board to 1.0.1, 0059 to 1.0.2, 0084
@@ -135,6 +153,7 @@ test("the current production migration chain preserves legacy policies and adds 
     "sbi-shinsei-exchange-rate",
     "sbi-shinsei-monthly-report-metadata",
     "st-george-balances",
+    "vpass-credit-snapshot",
   ]);
   for (const row of pinned)
     expect(
@@ -336,9 +355,9 @@ test("the comparison route reports counts, ids and policies only", async () => {
   ).toEqual(SNAPSHOT_DATASETS.map(([parserName, dataset]) => [parserName, dataset]).sort());
   expect(
     body.policies
-      .filter((row) => row.snapshot_selection === 1)
-      .every((row) => row.unit_scope === "run"),
-  ).toBe(true);
+      .filter((row) => row.snapshot_selection === 1 && row.unit_scope !== "run")
+      .map((row) => row.parser_name),
+  ).toEqual(["vpass-credit-snapshot"]);
   expect(
     body.policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
   ).toEqual([
@@ -389,6 +408,18 @@ test("the comparison route reports counts, ids and policies only", async () => {
       unit_scope: "unit",
       snapshot_selection: 0,
       updated_at_ms: 0,
+    },
+    {
+      source_id: "vpass",
+      dataset: "credit-snapshot",
+      parser_name: "vpass-credit-snapshot",
+      policy_id: "coverage-v1",
+      policy_version: 1,
+      required_parser_version: "1.0.1",
+      replaces_previous_on_complete_empty: 0,
+      unit_scope: "unit",
+      snapshot_selection: 1,
+      updated_at_ms: 1794268800000,
     },
   ]);
   expect(body.datasets.some((row) => row.parserName === "myjcb-jpoint-balance")).toBe(false);

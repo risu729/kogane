@@ -134,7 +134,7 @@ function reported(
 }
 export const vpassCreditSnapshot: Parser = {
   name: "vpass-credit-snapshot",
-  version: "1.0.0",
+  version: "1.0.1",
   accepts: (artifact) =>
     artifact.sourceId === "vpass" &&
     artifact.dataset === "credit-snapshot" &&
@@ -248,7 +248,12 @@ export const vpassCreditSnapshot: Parser = {
           artifact,
           issues: [],
           observedCount: observations.length,
-          evidenceRefs: observations.map((row) => row.rawLocator),
+          evidenceRefs: [
+            artifact.artifactKey === "credit/authori.json"
+              ? "json:$.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiDisplayVo"
+              : "json:$.body.content.CustomizedRevoShokaiAnsPcDisplayServiceBean",
+            ...observations.map((row) => row.rawLocator),
+          ],
         }),
       ],
     };
