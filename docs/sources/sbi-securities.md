@@ -238,6 +238,63 @@ The official website and stock-app transport provide at least the following.
 
 The official `取得単価` (acquisition unit price) for domestic equities is a moving-average price including fees, and is not always identical to general-custody `参考単価` (reference unit price) or a specific account's tax acquisition value. Kogane preserves the meaning and source screen and must not collapse `取得単価`, `参考単価`, `平均取得価額` (average acquisition value), and `税務上取得価額` (tax acquisition value) into one field.
 
+### Additional products checked on 2026-11-09 UTC
+
+For [issue 1237](https://github.com/risu729/kogane/issues/1237), read-only
+navigation in the owner's authenticated Chrome session checked the offered
+fund, foreign-currency MMF, bond and domestic-margin holdings pages. None
+displayed a current holding. This is dated evidence for this account, not a
+permanent absence claim or a parser contract for an unseen holding.
+
+- **Foreign-currency MMF:** the ordinary menu led through ETGate to
+  `/fmmf/account/assets`. The `保有銘柄` page displayed
+  `現在、お客さまの預り情報はございません。`. Its GET
+  `/fmmf/holdings-list/api?baseUrl=https://www.sbisec.co.jp` returned
+  `status: SUCCESS`, `messages: null` and `data` with
+  `foreignCurrencyAccountOpened: boolean`, `holdingFundList: []`,
+  `messageCode: null`, `messageParameterList: null`, `warningMessageCode: null`.
+- **Investment funds:** the `保有ファンド` menu led to `/fund/account/assets`,
+  with `口数指定` and `金額指定` sections and the same explicit empty message.
+  GET `/fund/api/account/assets?accountGetType=2` returned `status: SUCCESS`,
+  `messages: []` and `data.totalCount: 0`. Both `amountHoldings` and
+  `unitHoldings` contained null values for `specificDeposit`, `normalDeposit`,
+  `nisaDeposit`, `juniornisaSpecificDeposit`, `juniornisaNormalDeposit`,
+  `juniornisaNisaDeposit`, `tnisaDeposit`, `nisaGrowth`, `nisaReserve` and
+  `juniorNisaContinuous`. Summary amount/cost/profit/change fields were strings,
+  summary rate fields numbers, and account-open/admin flags booleans. The
+  explicit UI empty state and zero total corroborate the null containers;
+  null alone is never a numeric-zero rule.
+- **Bonds:** the holdings menu led to `/bond/account/assets`, with the same
+  explicit empty message. POST `/bond/bond-balance/api` first sent `{}`, then
+  `exchangeRates: [{currencyCode: string, exchangeRate: number}]` and ascending
+  `sortConditions` for `bond.currencyCode`, `bond.remainingPeriod.years`,
+  `bond.remainingPeriod.months`, `specificAccountCode`,
+  `bond.securities.productCode`, `bond.securities.securitiesCode`. Both reads
+  returned `status: SUCCESS`, `messages: null`, `data.bondBalances: null`,
+  `currencyEvaluationProfitLosses: null`, `maintenanceServiceIds: []` and a
+  `page` object: `pageNum`, `pageSize`, `totalCount` were zero; `firstPage`,
+  `lastPage`, `hasPreviousPage`, `hasNextPage` were false. No currency/product
+  filter was applied. The whole displayed list was empty; no nonempty yen or
+  USD bond contract is inferred.
+- **Domestic margin:** the visible `信用建玉` link opened GET `/ETGate/` with
+  `OutSide=on`, `getFlg=on`, `_ControlID=WPLETstT007Control`,
+  `_PageID=DefaultPID`, `_ActionID=DefaultAID`,
+  `_DataStoreID=DSWPLETstT007Control`. The HTML heading was `信用建玉一覧` and
+  the fixed empty text was `現在、お客さまの建玉情報はございません。`.
+
+The issue instructs that products without holdings are recorded as offered but
+empty and no collection is built for them. These observations therefore add
+no collector, sanitizer or parser. Existing domestic/US spot positions remain
+the existing datasets' responsibility. The provider-wide `position` catalogue
+stays `partial`, now linked to issue 1237: a current empty account does not make
+unimplemented product schemas supported. Its version is unchanged because
+neither types nor statuses change. Reobserve a nonempty product before adding
+its fields, price meanings, completeness checks and parser.
+
+Only route/query shapes, closed statuses, types and empty counts are recorded.
+No account IDs, provider amounts, security names, session material or raw
+responses are retained, and no order or account-opening action was submitted.
+
 ## Channel tradeoffs
 
 | Route                                                          | Advantages                                                                                                    | Disadvantages                                                                                    | Cost | Automation prospects |

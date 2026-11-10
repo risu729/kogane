@@ -3,6 +3,7 @@ import type { Quantity } from "../../../packages/domain/src/values.ts";
 import { decimalToString } from "../../../packages/domain/src/values.ts";
 import type { TemporalValue } from "../../../packages/domain/src/time.ts";
 import type { SourceFactRef } from "../../../packages/domain/src/events.ts";
+import type { CardSettlementNextPage } from "../../../packages/domain/src/card-settlement-review.ts";
 import type { CardSettlementReview } from "./reconciliation-api.ts";
 import { Link } from "./router.tsx";
 import { Badge, Kv, KvRow, Notice, Nullable } from "./ui.tsx";
@@ -288,5 +289,28 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
         <p>訂正は新しい判断を追加します。原本や以前の判断は消しません。</p>
       </details>
     </div>
+  );
+}
+
+/**
+ * The end of a list the server cut at the reader's row budget (`nextPage:
+ * "budget_exceeded"`): rows follow that this read may not page to, so the
+ * pager's end is said to be that bound, never the end of the list (INV05).
+ * Nothing is shown for `offered` or `none`.
+ */
+export function PageBudgetNote({
+  nextPage,
+  list,
+}: {
+  nextPage: CardSettlementNextPage;
+  /** What the list holds, as its pager names it. */
+  list: string;
+}): ReactNode {
+  if (nextPage !== "budget_exceeded") return null;
+  return (
+    <p className="footnote" role="note">
+      {list}
+      はこの先にもありますが、一度に先頭から読める件数の上限に達したため、ここより先は表示できません。続きがないという意味ではありません。
+    </p>
   );
 }

@@ -113,6 +113,7 @@ const unmatched = {
     },
   ],
   nextOffset: null,
+  nextPage: "none",
 };
 /** One statement whose window holds 32 equal debits: 4,960 exact sums, the first 50 listed. */
 const truncated = {
@@ -164,6 +165,8 @@ describe.if(runnable)("card settlement review", () => {
   let related: CardSettlementReview[] = [];
   const relatedReads: URLSearchParams[] = [];
   let unmatchedPage: unknown = unmatched;
+  /** Why the grouped list has no next page. */
+  let statementsEnd = "none";
   const posted: { operation: string; body: Record<string, unknown> }[] = [];
   beforeEach(() => {
     review = settlementReview();
@@ -177,6 +180,7 @@ describe.if(runnable)("card settlement review", () => {
     related = [];
     relatedReads.length = 0;
     unmatchedPage = unmatched;
+    statementsEnd = "none";
     posted.length = 0;
   });
   beforeAll(async () => {
@@ -216,6 +220,7 @@ describe.if(runnable)("card settlement review", () => {
                 : []),
             ],
             nextOffset: null,
+            nextPage: statementsEnd,
             coverage: {
               scope: "card-statement-bank-debit-candidates",
               completeTransactionHistory: false,
@@ -235,6 +240,7 @@ describe.if(runnable)("card settlement review", () => {
                 ? second
                 : [review, ...older],
             nextOffset: null,
+            nextPage: "none",
             coverage: {
               scope: "card-statement-bank-debit-candidates",
               completeTransactionHistory: false,
@@ -250,6 +256,7 @@ describe.if(runnable)("card settlement review", () => {
           return Response.json({
             items: related,
             nextOffset: null,
+            nextPage: "none",
             coverage: {
               scope: "card-statement-bank-debit-candidates",
               completeTransactionHistory: false,
@@ -267,6 +274,7 @@ describe.if(runnable)("card settlement review", () => {
               },
             ],
             nextOffset: null,
+            nextPage: "none",
             coverage: {
               scope: "card-statement-bank-debit-candidates",
               completeTransactionHistory: false,
@@ -840,6 +848,39 @@ describe.if(runnable)("card settlement review", () => {
       0,
     );
     await searched.close();
+  });
+
+  test("a list cut at the reader's row budget says so, never that nothing follows", async () => {
+    const BOUND = "一度に先頭から読める件数の上限に達したため";
+    // The last page of each list ends where every page ends: nothing is said.
+    const ended = await open();
+    await ended.getByRole("navigation", { name: "照合候補のページ" }).waitFor();
+    await ended.getByRole("navigation", { name: "照合候補のない請求のページ" }).waitFor();
+    expect(await ended.getByRole("note").filter({ hasText: BOUND }).count()).toBe(0);
+    await ended.close();
+    // Rows follow that the server may not page to: the pager stops, and says why.
+    statementsEnd = "budget_exceeded";
+    unmatchedPage = { ...unmatched, nextPage: "budget_exceeded" };
+    const page = await open();
+    const statements = page.getByRole("note").filter({ hasText: "照合候補の請求はこの先にも" });
+    await statements.waitFor();
+    expect(await statements.innerText()).toContain(BOUND);
+    expect(await statements.innerText()).toContain("続きがないという意味ではありません。");
+    expect(
+      await page
+        .getByRole("navigation", { name: "照合候補のページ" })
+        .getByRole("button", { name: "次の請求" })
+        .isDisabled(),
+    ).toBe(true);
+    const section = page.getByRole("region", { name: "照合候補のない請求" });
+    const unmatchedNote = section
+      .getByRole("note")
+      .filter({ hasText: "照合候補のない請求はこの先にも" });
+    await unmatchedNote.waitFor();
+    expect(await unmatchedNote.innerText()).toContain(BOUND);
+    expect(await section.getByRole("button", { name: "次の請求" }).isDisabled()).toBe(true);
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
   });
 
   test("two statements' full candidate lists are paged under their own names", async () => {

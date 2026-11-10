@@ -13,7 +13,12 @@ import type {
   UnmatchedPlannerAnswer,
 } from "../../../packages/application/src/query/card-statements-unmatched.ts";
 import { CARD_STATEMENTS_UNMATCHED_PATH } from "../../../packages/observation-shared/src/card-statements-unmatched-contract.ts";
-import { bankSourceLabel, DateValue, SettlementQuantity } from "./reconciliation-display.tsx";
+import {
+  bankSourceLabel,
+  DateValue,
+  PageBudgetNote,
+  SettlementQuantity,
+} from "./reconciliation-display.tsx";
 import { Badge, Nullable, QueryBoundary } from "./ui.tsx";
 
 export function useUnmatchedCardStatements(offset: number) {
@@ -185,6 +190,7 @@ export function UnmatchedStatements(): ReactNode {
                   次の請求
                 </button>
               </nav>
+              <PageBudgetNote nextPage={data.nextPage} list="照合候補のない請求" />
             </>
           )}
         </QueryBoundary>

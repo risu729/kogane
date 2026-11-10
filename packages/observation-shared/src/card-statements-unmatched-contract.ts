@@ -14,6 +14,7 @@ import { UNMATCHED_STATEMENT_CODES } from "../../domain/src/card-settlement-unma
 import { validSourceFactRef } from "../../domain/src/events.ts";
 import { validTemporalValue } from "../../domain/src/time.ts";
 import { validQuantity } from "../../domain/src/values.ts";
+import { validNextPage } from "./card-settlement-contract.ts";
 
 /** The path the browser reads the list from. */
 export const CARD_STATEMENTS_UNMATCHED_PATH = "/api/v2/reconciliation/card-statements-unmatched";
@@ -106,7 +107,7 @@ export function validUnmatchedCardStatementsReview(value: unknown): boolean {
     value.manifest.acceptance !== "single-debit-candidates-only" ||
     !Array.isArray(value.items) ||
     value.items.length > PAGE_LIMIT ||
-    !(value.nextOffset === null || count(value.nextOffset))
+    !validNextPage(value, PAGE_LIMIT)
   )
     return false;
   return value.items.every((item: unknown) => {

@@ -181,6 +181,45 @@ under the empty unit, or the empty page under a range unit, is refused as
 `artifact-page-range-mismatch`. `mizuho-account-list` moves to 1.0.2 only
 because the shared module's code digest changed; its output is unchanged.
 
+## Retained-period selection checked on 2026-11-09 UTC
+
+For [issue 1229](https://github.com/risu729/kogane/issues/1229), the owner's
+authenticated Chrome session opened the ordinary-account history through
+`/servlet/BALINQ0301002B.do`. Its date selectors offered the current month and
+the preceding two months. The initial selection was already `期間指定`,
+2026-09-01 through 2026-11-10, with both deposits and withdrawals. These are
+query bounds, not transaction dates. The page showed
+`表示可能な明細がありません。`, with no transaction table or next-page control.
+
+Using `表示条件設定`, selecting that entire available period and clicking
+`この条件で表示` sent POST `/servlet/ACCHST0411009B.do`, followed by GET to the
+same path. The successful controls were the existing private form fields
+`_FRAMEID`, `_TARGETID`, `_LUID`, `_TOKEN`, `_FORMID`, `_SUBINDEX`, `POSTKEY`,
+and `txtThisDay`, `txtLast7Days`, `txtStartOfThisMonth`, `txtStartOfLastMonth`,
+`txtEndOfLastMonth`, `rdoPopDate`, `lstDateFromYear`, `lstDateFromMonth`,
+`lstDateFromDay`, `lstDateToYear`, `lstDateToMonth`, `lstDateToDay`, `rdoPopDaw`,
+`txbSearchWord`. The query values were `rdoPopDate=4`, from `2026/9/1`, to
+`2026/11/10`, `rdoPopDaw=0`, empty search word and empty `_SUBINDEX`. The five
+`txt*` query-date controls used `YYYYMMDD`. Authentication values are omitted.
+The response retained those selectors and the same explicit empty state.
+
+The collector derives the start of the preceding second calendar month and
+the end day from the bank's strict `txtThisDay` query control. It reuses an
+initial page only if its echoed dates, period mode, both-directions selection
+and empty keyword already match. Otherwise it posts the observed period read
+with fresh session/form state and checks the response again. Missing/invalid
+query-day values, clipping, a remaining keyword/direction filter, or a changed
+query day refuse that account with `invalid-history-period`. There is no new
+collection-request window, cursor, login retry or guessed pagination action.
+
+This implements the observed period-selection part only. A nonempty next-page
+request remains unobserved for this account, so additional pages still produce
+`history-pagination-unverified`; catalogue `cash_movement` remains `partial`,
+linked to issue 1229. No all-pages or period-complete publication claim is
+introduced. The parser, identity rule, dataset/status set and catalogue version
+are unchanged. Existing page-local identity remains unproved across pages;
+observe pagination before implementing the remaining part of the issue.
+
 ## Conclusion
 
 - **Recommended authoritative source: official Web Mizuho Direct**. Account enumeration/balances use authenticated HTML;
@@ -323,11 +362,16 @@ observes existing transactions only.
 
 ## Mizuho Points
 
-Mizuho Point Mall is a current official bank service requiring Mizuho Mileage Club membership, Direct app
-use, and service activation.
+Mizuho Point Mall is a bank-operated points service accessed through the bank app.
+The [official service page](https://www.mizuhobank.co.jp/mmc/mizuhopointmall/index.html),
+checked on 2026-11-09 UTC, announces phased access without Mileage Club membership
+from 2026-10-29. A Direct internet-banking contract is the stated prerequisite;
+initial Direct registration is required for access. The documented entry is the
+bank app's `P` mark. This supersedes the membership prerequisite recorded by the
+original August research; it does not establish a browser-only entry.
 
 - App home `P` mark leads to Point Mall.
-- Mileage Club exclusive page shows points balances/accrual/use (Gift top-up timing/counts), Gift balances.
+- The points page shows balances/accrual/use (Gift top-up timing/counts) and Gift balances.
 - Guide describes points accrual/use/expiry breakdowns and Gift accrual/use/expiry history.
 - Points expire at 23:59 month-end 24 months after award month: 25 months including award month under terms,
   carried over when topped up to Gift.
@@ -342,6 +386,30 @@ points deep links/hosts/WebView routes; owner-operated read-only observations re
 methods/path templates/statuses. No queries/cookies/authorization/SSO codes/actual points; call no exchange/top-up endpoints.
 
 Do not navigate to J-Coin, MyJCB, or card company points in this scope.
+
+### Authenticated browser access checked on 2026-11-09 UTC
+
+For [issue 1252](https://github.com/risu729/kogane/issues/1252), ordinary read-only
+navigation in the owner's authenticated Direct Chrome session found no points
+or Point Mall entry in the home/navigation. The `確認する` / `特典内容` path opened
+`/servlet/MENSRV0100009B.do`; selecting the registered ordinary account opened
+`/servlet/INQMBR2700001B.do`. Its HTML headings were `特典内容照会結果確認`,
+`口座情報`, `会員制サービス` and `現在ご利用いただける主な特典`. This membership
+benefits page had no points balance or Point Mall link. Account identifiers,
+session parameters and provider values are not retained here.
+
+The official app-entry guidance above and the inspected browser navigation
+provide no usable browser route for the existing collector. This is a scoped
+access blocker, not proof that an unseen app handoff could never work. No app
+protocol, request values or response schema were inferred. The issue's stop
+branch applies: `reward_balance`, `reward_activity` and `reward_expiry` remain
+`not_collected`, linked to issue 1252. The catalogue version stays unchanged
+because its types and statuses do not change. No collector or parser is added.
+
+Resume only after an owner-authorized read-only observation establishes an
+accessible route and its balance, expiry, activity and completeness contracts.
+No enrollment, points exchange, authentication change or app session operation
+was performed.
 
 ## Authentication and sessions
 

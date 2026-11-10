@@ -56,13 +56,14 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // みずほポイント are not collected (docs/sources/mizuho-bank.md, #441).
   "mizuho-bank": [
     collected("balance", ["mizuho-account-list"]),
-    partial("cash_movement", ["mizuho-ordinary-history"], 441),
+    partial("cash_movement", ["mizuho-ordinary-history"], 1229),
     // 2026-11-09: registered account lists show no held deposit products; see source notes.
     missing("term_deposit", 1241),
     missing("document", 441),
-    missing("reward_balance", 441),
-    missing("reward_activity", 441),
-    missing("reward_expiry", 441),
+    // 2026-11-09: documented app entry; no browser route observed (source notes).
+    missing("reward_balance", 1252),
+    missing("reward_activity", 1252),
+    missing("reward_expiry", 1252),
   ],
   // Mobile Suica: the SF balance and the one history page of at most 100 rows
   // (docs/sources/mobile-suica.md, #451).
@@ -112,7 +113,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // history, fund/bond detail and delivered documents are not collected
   // (docs/sources/sbi-securities.md, #446).
   "sbi-securities": [
-    partial("position", ["sbi-domestic-cash-positions", "sbi-foreign-cash-positions"], 446),
+    partial("position", ["sbi-domestic-cash-positions", "sbi-foreign-cash-positions"], 1237),
     collected("execution", ["sbi-domestic-trade-records", "sbi-foreign-trade-records"]),
     partial("settlement_cash", ["sbi-foreign-cash-balances", "sbi-yen-detail-history"], 446),
     missing("income", 446),
@@ -176,7 +177,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     partial("cash_movement", ["sony-bank-history-json", "sony-bank-history-csv"], 449),
     collected("card_usage", ["sony-bank-wallet-history"]),
     missing("valuation_history", 449),
-    missing("term_deposit", 449),
+    missing("term_deposit", 1243),
     missing("document", 449),
   ],
   // St.George: account balances and the first page of each account's history;

@@ -75,6 +75,23 @@ The configured Processor route is `mizuho-bank` / `collector-mizuho-bank` in
 to CORE as part of operational activation. No database migration is needed:
 Mizuho already exists in the source catalog.
 
+## History period selection
+
+Each scheduled account read verifies the full observed calendar-month window:
+the first day of the month two months before the bank's `txtThisDay` through
+that query day, both deposits and withdrawals, with no keyword filter. If the
+initial page does not already echo those controls, the client posts the observed
+`/servlet/ACCHST0411009B.do` read with fresh form state. It refuses invalid or
+clipped periods as `invalid-history-period` and does not publish the refused
+history. The account-list evidence is retained in the partial run.
+
+The owner-session check for [#1229](https://github.com/risu729/kogane/issues/1229)
+was empty even for the whole available window. Next-page transport therefore
+remains unobserved and is not guessed: a multi-page result still carries
+`history-pagination-unverified`. No request window parameter, persistent cursor,
+parser version change or broader coverage claim is added. See the
+[dated source observation](../../docs/sources/mizuho-bank.md#retained-period-selection-checked-on-2026-11-09-utc).
+
 ## Retained evidence and coverage
 
 Passwords stay in Worker secrets; active cookies and form tokens remain in
