@@ -18,7 +18,7 @@ const iso = (text: unknown) =>
 function parser(kind: IncomeHistoryKind): Parser {
   return {
     name: kind === "income" ? "sbi-income-payments" : "sbi-realised-gains",
-    version: "0.1.0",
+    version: "0.1.1",
     accepts: (artifact) =>
       artifact.sourceId === "sbi-securities" && artifact.dataset === incomeDataset(kind),
     parse(bytes, artifact) {

@@ -98,6 +98,20 @@ test("missing payment money is unavailable, never a zero metric", () => {
   ]);
 });
 
+test("unused domestic Lc numeric metadata does not invent another currency payment", () => {
+  const bundle = incomeBundle("income");
+  bundle.rowsText = bundle.rowsText.replace(
+    '"receivedAmountLc":null',
+    '"receivedAmountLc":0.1234567890123456789',
+  );
+  const result = sbiIncomePayments.parse(bytes(bundle), meta("income-payments"));
+  const domestic = result.observations.filter(
+    (row) => row.kind === "valuation" && row.currency === "JPY",
+  );
+  expect(domestic).toHaveLength(5);
+  expect(domestic[0]!.extra["receivedAmountLc"]).toBe("0.1234567890123456789");
+});
+
 test("duplicate decoded keys, nested secrets, original strings and malformed grammar fail before audit", () => {
   const original = incomeBundle("income").rowsText;
   for (const text of [

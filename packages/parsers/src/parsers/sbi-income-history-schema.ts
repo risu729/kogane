@@ -290,7 +290,10 @@ function checkedSummary(text: string, kind: IncomeHistoryKind) {
       for (const key of ["receivedTotal", "dividendTotal", "taxTotal"])
         incomeMoney(row[key], "JPY");
       for (const key of ["receivedTotalLc", "dividendTotalLc", "taxTotalLc"])
-        if (row[key] !== null) incomeMoney(row[key], "USD");
+        if (row[key] !== null) {
+          if (row["category"] === "FOREIGN_STOCK_US") incomeMoney(row[key], "USD");
+          else incomeDecimal(row[key]);
+        }
     }
   } else {
     const summary = body["profitLossSummary"] as Record<string, unknown>;
@@ -395,7 +398,9 @@ export function validateIncomeHistory(input: unknown, kind: IncomeHistoryKind): 
               "residentTax",
               "receivedAmount",
             ])
-              code(row[`${key}${suffix}`], [null]);
+              // These known nullable numeric fields have no observed domestic
+              // currency semantics. Preserve exact metadata, emit no amount.
+              if (row[`${key}${suffix}`] !== null) incomeDecimal(row[`${key}${suffix}`]);
             continue;
           }
           if (row[`dividendUnitCost${suffix}`] !== null)

@@ -58,7 +58,9 @@ boundary than an invented cross-capture correction match.
   has reported gross, total tax, income tax, resident tax and after-tax net
   metrics. Domestic values are JPY; USD uses `Lc` fields. The corresponding yen
   equivalent stays metadata, not another income payment. Null metrics create an
-  unavailable-field issue and no zero. Interest/fund/bond/other products remain
+  unavailable-field issue and no zero. Unused domestic `Lc` fields remain exact
+  metadata without inferring their currency or publishing another payment.
+  Interest/fund/bond/other products remain
   unsupported; public menu codes alone do not prove their response semantics.
 - Publish domestic `SELL` rows as provider-reported sale proceeds, realised gain
   before tax, unit price and average acquisition unit cost. Use contract date
