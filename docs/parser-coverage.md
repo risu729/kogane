@@ -194,9 +194,12 @@ applies (`0.3.0` for foreign positions), and the newest complete run wins by
 `fetched_at`, then artifact id. Snapshot-selection membership remains unchanged.
 The original snapshot policies default to `unit_scope=run`, except the three
 SBI VC classic snapshots whose exact shipped defaults CORE 0095 advances to
-`unit_scope=unit`. Nondefault operator policy fields are preserved. CORE 0080's
+`unit_scope=unit` and the SMBC yen balance default advanced by CORE 0096.
+CORE 0096 also adds an independent AUD balance snapshot with `unit_scope=unit`.
+Nondefault operator policy fields are preserved. CORE 0080's
 J-POINT policy, CORE 0088's monthly-report metadata policy and CORE 0095's
-201 exact classic SBI VC transaction paths are eligibility-only rows with
+201 exact classic SBI VC transaction paths, plus CORE 0096's SMBC yen
+transactions and AUD history, are eligibility-only rows with
 `unit_scope=unit`, `snapshot_selection=0`; they add no container snapshot.
 `unit` names `unit-independent-v1`, described below.
 
@@ -256,6 +259,12 @@ SBI VC snapshot defaults and its 201 exact transaction paths, preserving
 snapshot selection and every nondefault policy field. This lets a complete
 classic account remain eligible when the new raw cash-flow unit fails
 ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-sbi-vcs-unfiltered-evidence-is-independent-of-its-classic-account-unit-2026-11-10)).
+CORE 0096 gives SMBC yen acquisition, the AUD balance and AUD history separate
+units: the existing yen balance snapshot default and new AUD balance snapshot
+use unit scope, while yen transactions and AUD history have eligibility-only
+policies. A complete balance can publish through a sibling failure; unobserved
+nonempty AUD history remains partial and cannot establish complete history
+([ADR 0044 amendment](adr/0044-smbc-resume-publication.md)).
 
 Before this change one failed range inside a collector run made the whole run
 ineligible: the Worker parsed only artifacts of runs with
@@ -460,11 +469,13 @@ also works, because both then apply the run scope unconditionally.
 
 ### Invariants
 
-- INV: the 14 existing seeded container snapshot policies retain the defaults
-  `unit_scope=run` and `snapshot_selection=1`. The sole additional seeded policy is
-  `myjcb-jpoint-balance` / `jpoint-balance`, with `unit_scope=unit` and
-  `snapshot_selection=0` (`read-model.test.ts`, `coverage.test.ts`,
-  `unit-scope.test.ts`).
+- INV: the 15 seeded container snapshot policies have `snapshot_selection=1`.
+  Exactly five use `unit_scope=unit`: the three classic SBI VC snapshots and
+  the SMBC yen and AUD balance snapshots; the other ten use `unit_scope=run`.
+  Exactly 205 additional policies are unit-scoped eligibility-only rows:
+  J-POINT, SBI Shinsei monthly-report metadata, 201 classic SBI VC transaction
+  paths, SMBC yen transactions and SMBC AUD history (`read-model.test.ts`,
+  `coverage.test.ts`, `unit-scope.test.ts`).
 - INV: with every existing container snapshot policy on the `run` scope,
   the Worker creates the same jobs, parses the same artifacts and the reader
   serves the same rows in that existing dataset domain as before unit-scoped eligibility
