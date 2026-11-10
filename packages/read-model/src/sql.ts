@@ -461,6 +461,7 @@ const TRANSACTIONS_SQL = `WITH ${TRANSACTION_CTES}
                            'sbi-vc-cashflows',
                            'mobile-suica-sf-history',
                            'sbi-yen-detail-history',
+                           'sbi-foreign-cash-history',
                            'sbi-foreign-trade-records',
                            'sbi-domestic-trade-records',
                            'myjcb-credit-ledger',

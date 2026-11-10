@@ -23,8 +23,11 @@ import { hasExactKeys, isOneOf, isRecord, isText } from "./guards.ts";
  * settlement writer is back. The admission still reads each stored row: a row
  * a 0.1.2 run stored carries no origin and stays refused
  * (identity_origin_unrecorded, `rowOriginBasis`).
+ *
+ * v5 (ADR 0102): observed USD cash movements use stable row-occurrence
+ * identities and remain securities settlement cash without an event writer.
  */
-export const TRANSACTION_FAMILY_REGISTRY_VERSION = "transaction-family-registry-v4";
+export const TRANSACTION_FAMILY_REGISTRY_VERSION = "transaction-family-registry-v5";
 
 /**
  * The closed list of economic-event families.
@@ -386,6 +389,21 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
         "identity_fingerprint_only",
         "identity_origin_unrecorded",
         "direction_code_unmapped",
+      ),
+    ],
+  },
+  {
+    sourceId: "sbi-securities",
+    parserName: "sbi-foreign-cash-history",
+    observationKinds: ["transaction"],
+    identity: identity("fingerprint_occurrence", "identityOrigin", "fingerprint"),
+    statuses: POSTED,
+    providerLinks: ["value_date"],
+    families: [
+      unsupported(
+        "securities-settlement-cash",
+        "identity_fingerprint_only",
+        "counterpart_not_stated",
       ),
     ],
   },

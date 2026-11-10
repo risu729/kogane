@@ -33,7 +33,7 @@ const clone = (entry: TransactionFamilyEntry) =>
 
 describe("closed codes", () => {
   test("the lists are exactly the reviewed codes", () => {
-    expect(TRANSACTION_FAMILY_REGISTRY_VERSION).toBe("transaction-family-registry-v4");
+    expect(TRANSACTION_FAMILY_REGISTRY_VERSION).toBe("transaction-family-registry-v5");
     expect(TRANSACTION_FAMILIES).toEqual([
       "bank-movement",
       "stored-value-movement",
@@ -113,7 +113,7 @@ describe("closed codes", () => {
 
 describe("registry entries", () => {
   test("every entry is valid, unique and in source/parser order", () => {
-    expect(TRANSACTION_FAMILY_REGISTRY).toHaveLength(24);
+    expect(TRANSACTION_FAMILY_REGISTRY).toHaveLength(25);
     for (const entry of TRANSACTION_FAMILY_REGISTRY)
       expect(validTransactionFamilyEntry(entry)).toBe(true);
     const keys = TRANSACTION_FAMILY_REGISTRY.map(key);
@@ -137,7 +137,7 @@ describe("registry entries", () => {
         );
         memberships += 1;
       }
-    expect(memberships).toBe(37);
+    expect(memberships).toBe(38);
   });
 
   test("only Vpass/MyJCB card purchases and SMBC and SBI Shinsei card settlement debits have writers", () => {

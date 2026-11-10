@@ -117,7 +117,12 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   "sbi-securities": [
     partial("position", ["sbi-domestic-cash-positions", "sbi-foreign-cash-positions"], 1237),
     collected("execution", ["sbi-domestic-trade-records", "sbi-foreign-trade-records"]),
-    partial("settlement_cash", ["sbi-foreign-cash-balances", "sbi-yen-detail-history"], 446),
+    // USD continuation and scheduled retained-coverage proof remain outstanding (#1226).
+    partial(
+      "settlement_cash",
+      ["sbi-foreign-cash-balances", "sbi-yen-detail-history", "sbi-foreign-cash-history"],
+      1226,
+    ),
     missing("income", 446),
     partial(
       "valuation_history",
