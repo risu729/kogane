@@ -349,7 +349,9 @@
     "services/collector-smbc-direct": {
       "name": "@kogane/poc-smbc-direct-backfill-worker",
       "dependencies": {
+        "acorn": "8.19.0",
         "iconv-lite": "0.7.3",
+        "parse5": "8.1.1",
         "uqr": "0.1.3",
       },
       "devDependencies": {
