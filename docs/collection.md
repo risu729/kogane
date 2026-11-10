@@ -1231,7 +1231,7 @@ Processor maps it to the CORE source `global-pass`), producer
   challenge attempt: `code: token` after 13 993 / 18 347 / 15 209 ms, with
   one Turnstile frame and `lastHttpStatus: 401` (the Turnstile challenge
   fetch, which the token still follows). `globalpass-container-relay-summary`:
-  25 / 26 / 26 CONNECTs, 9 denied each run (browser traffic outside the
+  25 / 26 / 26 CONNECT requests, 9 denied each run (browser traffic outside the
   allowlist, the case that crashed the 11-07 run), 16 / 17 / 17 established,
   no upstream failure or timeout; the Worker's `globalpass-relay-closed`
   count matched `established` every run. No `globalpass-container-crash`,
