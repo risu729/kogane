@@ -19,7 +19,7 @@ export default defineConfig({
     entrypoint: "src/schedule-entrypoint.ts",
     workersDev: false,
     previewUrls: false,
-    observability: { enabled: true, headSamplingRate: 1 },
+    observability: { enabled: true, headSamplingRate: 1, issues: { enabled: true } },
     limits: { cpuMs: 300000 },
     env: {
       SCHEDULES_ENABLED: bindings.text("true"),
