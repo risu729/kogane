@@ -56,13 +56,14 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // みずほポイント are not collected (docs/sources/mizuho-bank.md, #441).
   "mizuho-bank": [
     collected("balance", ["mizuho-account-list"]),
-    partial("cash_movement", ["mizuho-ordinary-history"], 441),
+    partial("cash_movement", ["mizuho-ordinary-history"], 1229),
     // 2026-11-09: registered account lists show no held deposit products; see source notes.
     missing("term_deposit", 1241),
     missing("document", 441),
-    missing("reward_balance", 441),
-    missing("reward_activity", 441),
-    missing("reward_expiry", 441),
+    // 2026-11-09: documented app entry; no browser route observed (source notes).
+    missing("reward_balance", 1252),
+    missing("reward_activity", 1252),
+    missing("reward_expiry", 1252),
   ],
   // Mobile Suica: the SF balance and the one history page of at most 100 rows
   // (docs/sources/mobile-suica.md, #451).
@@ -133,7 +134,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   ],
   // SBI新生銀行: top accounts with recent activity, balance summary and the yen
   // deposit account, exchange rates; dated history and CSV, term and foreign
-  // contracts and the monthly reports are not collected
+  // contracts are not collected; monthly PDFs have metadata-only coverage
   // (docs/sources/sbi-shinsei-bank.md; #447 was closed without them).
   // On 2026-11-09 the inspected account held no time or structured-deposit
   // contracts in the yen/FX holdings views (#1242). This catalogue describes
@@ -146,7 +147,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     ]),
     partial("cash_movement", ["sbi-shinsei-top-balances-and-activity"], BACKLOG),
     missing("term_deposit", 1242),
-    missing("document", BACKLOG),
+    collected("document", ["sbi-shinsei-monthly-report-metadata"]),
     collected("fx_rate", ["sbi-shinsei-exchange-rate"]),
   ],
   // SBI VCトレード (a broker): crypto holdings and leverage positions,

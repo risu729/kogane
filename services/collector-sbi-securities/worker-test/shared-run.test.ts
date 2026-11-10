@@ -9,6 +9,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   objectKey,
+  sha256Hex,
   readTerminal,
   terminalKey,
   verifyReferencedObjects,
@@ -22,7 +23,7 @@ import { sanitizeAssetHistory } from "../../../packages/parsers/src/parsers/sbi-
 
 const PRODUCER_VERSION = "sbi-worker-poc-v1";
 
-it("keeps financial-shaped inexact raw bytes in DATA while refusing all derivatives", async () => {
+function weeklyBody(): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   for (const suffix of ["", "WithoutDeposit", "WithoutIdeco", "WithoutDepositAndIdeco"]) {
     const absent = suffix.includes("Ideco");
@@ -34,7 +35,14 @@ it("keeps financial-shaped inexact raw bytes in DATA while refusing all derivati
     body[`balances${suffix}`] = absent ? [] : [[4071049200000, 7]];
     body[`acquisitionCosts${suffix}`] = absent ? [] : [[4071049200000, 6]];
   }
-  const text = JSON.stringify(body).replace('"profitLoss":1', '"profitLoss":0.99999999999999999');
+  return body;
+}
+
+it("keeps financial-shaped inexact raw bytes in DATA while refusing all derivatives", async () => {
+  const text = JSON.stringify(weeklyBody()).replace(
+    '"profitLoss":1',
+    '"profitLoss":0.99999999999999999',
+  );
   const bytes = new TextEncoder().encode(text);
   const audited = sanitizeAssetHistory(auditAssetHistoryJson(text));
   await expect(
@@ -74,6 +82,74 @@ it("keeps financial-shaped inexact raw bytes in DATA while refusing all derivati
     sanitizeAssetHistory(auditAssetHistoryJson(text.slice(0, -1) + ',"accessToken":"synthetic"}')),
   ).toThrow("sbi_asset_history_schema");
 });
+
+for (const [name, mutate] of [
+  [
+    "plain root duplicate",
+    (text: string) => text.replace("{", '{"balances":{"accessToken":"SYNTHETIC_SENTINEL"},'),
+  ],
+  [
+    "escaped root duplicate",
+    (text: string) => text.replace("{", '{"balanc\\u0065s":{"accessToken":"SYNTHETIC_SENTINEL"},'),
+  ],
+  [
+    "nested duplicate",
+    (text: string) =>
+      text.replace(
+        '"valuation":7',
+        '"valuation":{"accessToken":"SYNTHETIC_SENTINEL"},"valuation":7',
+      ),
+  ],
+  [
+    "escaped nested duplicate",
+    (text: string) =>
+      text.replace(
+        '"valuation":7',
+        '"valua\\u0074ion":{"accessToken":"SYNTHETIC_SENTINEL"},"valuation":7',
+      ),
+  ],
+  ["malformed exponent", (text: string) => text.replace('"profitLoss":1', '"profitLoss":10e0e0')],
+  ["malformed decimal", (text: string) => text.replace('"profitLoss":1', '"profitLoss":10.0.0')],
+  [
+    "malformed secret escape",
+    (text: string) => text.replace('"profitLoss":1', '"profitLoss":"SYNTHETIC_SENTINEL\\x"'),
+  ],
+] as const)
+  it(`rejects ${name} before storing any original response`, async () => {
+    const bytes = new TextEncoder().encode(mutate(JSON.stringify(weeklyBody())));
+    const artifacts: Artifact[] = [];
+    let code: string | undefined;
+    try {
+      const audited = sanitizeAssetHistory(auditAssetHistoryJson(new TextDecoder().decode(bytes)));
+      artifacts.push({
+        artifactKey: "account-assets-history-source.json",
+        dataset: "account-assets-history-source",
+        mediaType: "application/json",
+        role: "provider_response",
+        body: audited,
+        bytes,
+      });
+    } catch (error) {
+      code = safeFailureCode(error);
+      expect(String(error)).not.toContain("SYNTHETIC_SENTINEL");
+      expect(Object.getOwnPropertyDescriptor(error as Error, "cause")).toBeUndefined();
+    }
+    expect(code).toBe("sbi_asset_history_schema");
+    expect(artifacts).toEqual([]);
+    const input = run({
+      scope: "domestic",
+      status: "failed",
+      artifacts,
+      failures: [{ scope: "domestic", code: code! }],
+    });
+    expect((await persistSbiRun(env.DATA, input)).outcome).toBe("persisted");
+    const read = await readTerminal(env.DATA, "sbi-securities", input.runId);
+    if (read.outcome !== "found") throw new Error("synthetic_terminal_invalid");
+    expect(read.manifest.providerOutcome).toBe("failed");
+    expect(read.manifest.safeErrorCode).toBe("sbi_asset_history_schema");
+    expect(read.manifest.artifacts).toEqual([]);
+    expect(await env.DATA.get(objectKey(await sha256Hex(bytes)))).toBeNull();
+  });
 
 function artifact(dataset: string, body: unknown, window?: { from: string; to: string }): Artifact {
   return {

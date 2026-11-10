@@ -164,7 +164,11 @@ main-site capture is retained immediately, so a later yen/history failure
 keeps these bytes while the run stays partial under the existing policy.
 
 Whole-source calendar, native-series and exact-total validation runs before
-any yearly filtering. The JSON reader proves financial numeric tokens are
+any yearly filtering. Before auditing or normalizing numbers, the JSON reader
+validates original syntax and per-object decoded-key uniqueness within fixed
+byte/depth/token budgets. Duplicate keys (including escaped aliases) and
+malformed numeric fragments are rejected before any raw capture is stored.
+The JSON reader then proves financial numeric tokens are
 exact safe integers before Number conversion. Inexact or inconsistent
 financial-shaped responses keep their exact audited raw bytes but produce no
 derivatives and leave collection partial. The closed shape/secret-field audit

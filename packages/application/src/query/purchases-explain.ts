@@ -35,6 +35,7 @@ import type {
   CardPurchaseCandidate,
   CardPurchasePage,
 } from "../../../domain/src/card-purchase-view.ts";
+import { CARD_SETTLEMENT_NEXT_PAGE } from "../../../domain/src/card-settlement-review.ts";
 import { isRecord } from "../../../domain/src/guards.ts";
 import type { FinancialError, FinancialErrorCode } from "../../../domain/src/result.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
@@ -49,6 +50,7 @@ import {
   type CardPurchaseQuery,
   queryCardPurchases,
 } from "./card-purchases.ts";
+import { pageBeyondBudget } from "./page-budget.ts";
 
 /** The capability the explanation needs. */
 export const PURCHASES_EXPLAIN_CAPABILITY: AgentCapability = "records.read";
@@ -82,8 +84,11 @@ export interface PurchasesExplanation {
   data: AgentCardPurchasePage;
 }
 
-/** The closed codes of `PurchasesExplanation.nextPage`. */
-export const PURCHASES_NEXT_PAGE = ["offered", "none", "budget_exceeded"] as const;
+/**
+ * The closed codes of `PurchasesExplanation.nextPage`: the card settlement
+ * reads' list, decided by the same budget rule (ADR 0081, 2026-11-08 amendment).
+ */
+export const PURCHASES_NEXT_PAGE = CARD_SETTLEMENT_NEXT_PAGE;
 export type PurchasesNextPage = (typeof PURCHASES_NEXT_PAGE)[number];
 
 export type PurchasesExplainOutcome =
@@ -188,10 +193,13 @@ export async function explainCardPurchases(input: {
   ];
   if (narrowed.length > 0) return fail("evidence_restricted", narrowed);
   const offset = request.offset ?? 0;
-  // Items this answer reaches: one for an exact read, else the page past the offset.
-  const reach = request.eventId === undefined ? offset + CARD_PURCHASE_PAGE_SIZE : 1;
-  if (reach > grant.budget.maxRows)
-    return fail("budget_exceeded", [`budget:maxRows=${String(grant.budget.maxRows)}`]);
+  // Items this answer reaches: one for an exact read, else the page past the
+  // offset. The same rule withholds the next page below.
+  const beyond =
+    request.eventId === undefined
+      ? pageBeyondBudget(offset, CARD_PURCHASE_PAGE_SIZE, grant)
+      : pageBeyondBudget(0, 1, grant);
+  if (beyond) return fail("budget_exceeded", [`budget:maxRows=${String(grant.budget.maxRows)}`]);
 
   let page: CardPurchasePage;
   try {
@@ -214,7 +222,7 @@ export async function explainCardPurchases(input: {
   const nextPage: PurchasesNextPage =
     page.nextOffset === null
       ? "none"
-      : page.nextOffset + CARD_PURCHASE_PAGE_SIZE > grant.budget.maxRows
+      : pageBeyondBudget(page.nextOffset, CARD_PURCHASE_PAGE_SIZE, grant)
         ? "budget_exceeded"
         : "offered";
   const agentPage = withoutReviewAffordances(page);

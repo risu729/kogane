@@ -65,12 +65,34 @@ test("unknown payload fields fail before storage and retain only a closed safe c
   ).toBe("sbi_asset_history_schema");
 });
 
-for (const inexact of [false, true])
-  test(`already collected weekly evidence survives later failure; inexact=${inexact}`, async () => {
-    const historyText = JSON.stringify(fixture).replace(
-      '"profitLoss":10',
-      inexact ? '"profitLoss":0.99999999999999999' : '"profitLoss":10',
-    );
+for (const kind of [
+  "valid",
+  "precision",
+  "duplicate",
+  "escaped-duplicate",
+  "nested-duplicate",
+  "malformed-exponent",
+  "malformed-decimal",
+] as const)
+  test(`capture preserves eligible raw only; case=${kind}`, async () => {
+    const original = JSON.stringify(fixture);
+    const historyText = {
+      valid: original,
+      precision: original.replace('"profitLoss":10', '"profitLoss":0.99999999999999999'),
+      duplicate: original.replace("{", '{"balances":{"accessToken":"SYNTHETIC_SENTINEL"},'),
+      "escaped-duplicate": original.replace(
+        "{",
+        '{"balanc\\u0065s":{"accessToken":"SYNTHETIC_SENTINEL"},',
+      ),
+      "nested-duplicate": original.replace(
+        '"valuation":10',
+        '"valuation":{"accessToken":"SYNTHETIC_SENTINEL"},"valuation":10',
+      ),
+      "malformed-exponent": original.replace('"profitLoss":10', '"profitLoss":10e0e0'),
+      "malformed-decimal": original.replace('"profitLoss":10', '"profitLoss":10.0.0'),
+    }[kind];
+    const inexact = kind === "precision";
+    const unsafe = kind !== "valid" && !inexact;
     const codes: string[] = [];
     const header = Buffer.alloc(70, " ");
     header.write("F1132", 34);
@@ -108,17 +130,21 @@ for (const inexact of [false, true])
       }),
     ).rejects.toThrow("sbi_cash_history_fetch_failed");
     expect(retained.map((a) => a.dataset)).toEqual(
-      inexact
-        ? ["account-assets-current", "account-assets-history-source"]
-        : [
-            "account-assets-current",
-            "account-assets-history-source",
-            "account-assets-history-inventory",
-            "account-assets-history",
-          ],
+      unsafe
+        ? ["account-assets-current"]
+        : inexact
+          ? ["account-assets-current", "account-assets-history-source"]
+          : [
+              "account-assets-current",
+              "account-assets-history-source",
+              "account-assets-history-inventory",
+              "account-assets-history",
+            ],
     );
-    expect(codes).toEqual(inexact ? ["sbi_asset_history_money"] : []);
-    expect(retained[1]!.bytes).toEqual(new TextEncoder().encode(historyText));
+    expect(codes).toEqual(
+      unsafe ? ["sbi_asset_history_schema"] : inexact ? ["sbi_asset_history_money"] : [],
+    );
+    if (!unsafe) expect(retained[1]!.bytes).toEqual(new TextEncoder().encode(historyText));
     const plan = await sbiRunPlan({
       runId: "weekly-synthetic-partial",
       producerVersion: "synthetic-v1",
@@ -128,12 +154,16 @@ for (const inexact of [false, true])
       scope: "domestic",
       status: "partial",
       artifacts: retained,
-      failures: [{ scope: "domestic", code: "provider_http_failed" }],
+      failures: [
+        ...codes.map((code) => ({ scope: "domestic" as const, code })),
+        { scope: "domestic", code: "provider_http_failed" },
+      ],
     });
     expect(plan.run.providerOutcome).toBe("partial");
     expect(plan.run.units[0]?.coverageStatus).toBe("partial");
+    expect(plan.run.safeErrorCode).toBe(codes[0] ?? "provider_http_failed");
     expect(plan.artifacts.some((a) => a.artifactKey === "account-assets-history-2099.json")).toBe(
-      !inexact,
+      kind === "valid",
     );
     expect(responses).toHaveLength(0);
   });

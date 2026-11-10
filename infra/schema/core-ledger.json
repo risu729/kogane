@@ -1199,6 +1199,17 @@
       "sha256": "2a8cd46c05723bc8bc8dc08ead0307f13a4b1489bf40d26c97f1a69a21145ee5"
     },
     {
+      "file": "0088_sbi_shinsei_monthly_report_units.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "393a169b18e4ee6888af7d1d01f143aa9a024f98599e4a95e557311d7546d17b"
+    },
+    {
       "file": "0090_myjcb_debit_unit_eligibility.sql",
       "statementCount": 1,
       "insertStatements": [
@@ -22111,6 +22122,7 @@
       "0071_economic_event_command_kinds.sql",
       "0080_jpoint_program.sql",
       "0085_schedule_dispatch_marker.sql",
+      "0088_sbi_shinsei_monthly_report_units.sql",
       "0090_myjcb_debit_unit_eligibility.sql"
     ],
     "schemaSha256": "0b2ddb2a8d7e9b70df8ec4b3937eeef911d2737a1e55ca0d06eb316f47695af9"

@@ -413,7 +413,12 @@ Limits:
   statement stays listed with that code until the sweep's cursor reaches it
   (normally within one pass of five-minute ticks).
 - The page is by statement id, 50 per page, and the grant's `maxRows` bounds
-  how deep a caller pages (`budget_exceeded`). `offset` counts the statements
+  how deep a caller pages (`budget_exceeded`). A page never offers a next
+  page past it: `nextPage` is `offered`, `none` (no statement follows) or
+  `budget_exceeded` (statements follow, but `nextOffset + 50` would exceed
+  `maxRows`, so `nextOffset` is null), and the page says so under its pager
+  rather than showing the end of the list. With the reader grant's `maxRows`
+  of 1000 the last page read starts at offset 950. `offset` counts the statements
   without a candidate when each page is read: a statement that gains a
   candidate leaves the list and the later ones move back one place, so paging
   on can pass over one of them until the list is read again from the start.
@@ -709,9 +714,19 @@ page) is `413 budget_exceeded` (`budget:maxRows=<n>`), before the anchor of a
 grant ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md))
 hold the same `maxRows`, 1000 (`GRANT_LIMITS.maxRows`), so the route and the
 tools page equally deep: offset 950 is the last page either reads, and 990
-the last grouped page (statements 991 to 1,000). A page's
-`nextOffset` does not look at the budget, so the page after offset 950 (990
-grouped) is named and then refused. A malformed request (an `offset` that is
+the last grouped page (statements 991 to 1,000). By the same rule, an answer
+never offers a page its grant is refused: each page carries `nextPage`,
+`offered` (`nextOffset` names the next page), `none` (nothing follows, or one
+review was read by `proposalId`) or `budget_exceeded` (rows follow, but
+`nextOffset + 50`, `+ 10` on the grouped list, would exceed `maxRows`, so
+`nextOffset` is null rather than a page the caller cannot read). Under the
+published budget the page at offset 950 (990 grouped) is the last one
+offered and ends with `budget_exceeded` when rows follow it. The rule is one
+function (`withinBudget` and `pageBeyondBudget` in
+`packages/application/src/query/page-budget.ts`) for the refusal and the
+offer, and the codes are a closed list (`CARD_SETTLEMENT_NEXT_PAGE` in
+`packages/domain/src/card-settlement-review.ts`). Until 2026-11-08 `nextOffset` did not look at the budget, so the page after
+offset 950 (990 grouped) was named and then refused. A malformed request (an `offset` that is
 not an integer from 0 to 1,000,000, a key outside the four, or on the grouped
 list any key but `offset`, an empty or repeated value), or more than one of
 `proposalId`, `statementKey` and `relatedTo`, is `400 invalid_query`
@@ -730,12 +745,15 @@ itself does not read the flat list: it reads statements
 (below), and pages a statement's candidates and a review's competitors 50 at a
 time (36 candidates per statement on average on the scaled store of
 [Cost](#cost)). A statement or a competitor list of more than 1,000
-candidates would be readable only to offset 950. The grouped list
+candidates would be readable only to offset 950; its pager then stops there
+and says, under the pager, that candidates follow which the page cannot read
+(`nextPage: "budget_exceeded"`), never that the list ends. The grouped list
 (`/statements`) kept these rules of its own (`offset` only, `400 invalid_offset`
 for a malformed one and `400 invalid_query` as `{error, requestId}` for any
 other key, any `offset` up to 1,000,000 read) until it got its MCP read, also
 on 2026-11-07; it now gives the service's answers above, so more than 1,000
-statements would be readable only to offset 990. Deciding a review or recording ownership stays a plan through the change
+statements would be readable only to offset 990, with the same note under
+its pager. Deciding a review or recording ownership stays a plan through the change
 lifecycle, graded there; on MCP any client the MCP Access application admits
 plans and decides as itself
 ([ADR 0063](adr/0063-delegated-ai-operation-path.md),
@@ -1203,10 +1221,22 @@ candidates, over every offset alone and beside each filter plus a fixed
 sample of 600 combinations of offsets, filters, unknown and repeated keys, on
 the list, `/ownership` and `/statements`, and on every tenth grouped
 offset from 0 to 1,000 over 1,002 statements: every answer is byte-identical
-except the two changes recorded under [Agent reads](#agent-reads), and
-methods and non-operators answer as before
+except the three changes recorded under [Agent reads](#agent-reads) (the
+`400 invalid_query`, the `413 budget_exceeded` past the budget, and the next
+page withheld where the frozen handler named one the route refuses: among the
+compared offsets, 950 and 989 to 990 grouped; in general any page from offset
+941, or 981 grouped), and methods and non-operators answer as before
 (`services/app/test/card-settlements-api-differential.test.ts`,
-`card-settlement-statements-differential.test.ts`). The grouped
+`card-settlement-statements-differential.test.ts`). Every card settlement
+read and the statements without a candidate are walked from offset 0 along
+the next page they offer, under grants of several `maxRows` and on stores of
+0 to 1,101 rows: every page offered is served, the walk reads as deep as the
+budget allows, and it ends with `none` after the last row or
+`budget_exceeded`, whose next page is the one refused
+(`packages/application/test/card-settlement-paging.test.ts`); the tools and
+the page route answer alike under a narrower grant
+(`card-settlements-read-tools.test.ts`), and the `カード照合` page says the
+bound under each pager (`apps/web/test/card-settlement.browser.test.ts`). The grouped
 list's offsets 0, 990, 991, 1,000,000 and malformed ones give one status and
 one body on the route, the agent HTTP route and MCP, and its tool returns the
 page's grouped answer and writes one R0 audit record counting the statements

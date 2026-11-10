@@ -175,6 +175,7 @@ describe("GET /api/v2/reconciliation/card-statements-unmatched", () => {
       schemaVersion: "kogane-card-statements-unmatched-v1",
       query: { offset: 0 },
       nextOffset: null,
+      nextPage: "none",
       items: [
         {
           statement: { sourceId: "myjcb", period: "2099-01" },
