@@ -25,6 +25,9 @@ The same AUD section's history link has `id=0` and
 
 History responses identify the selected foreign account in `dl.item` /
 `dt.title`: the branch label, `外貨`, a line break and the full account number.
+The collector requires that unique account heading to be the first `dt.title`
+in the visible `main`. Hidden ancestors and templates cannot supply its
+evidence; a contradictory or duplicate visible account heading is refused.
 `dl.detail-list07.-flexEnd.-account` labels `通貨・現在残高`; its `dd.detail`
 contains `A$` and a `span.price`. The collector compares that runtime account
 number and currency/balance with the foreign detail it selected. The two

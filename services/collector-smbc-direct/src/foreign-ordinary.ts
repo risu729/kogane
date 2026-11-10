@@ -68,17 +68,19 @@ export function foreignHistoryIndex(html: string): "0" {
 /** Named account radio choices are unrelated to the selected AUD context.
  * Bind the server-selected page to its visible account and AUD heading. */
 export function assertForeignHistoryContext(html: string, accountNo: string, amount: string): void {
-  html = withoutExecutableContent(html);
-  const headers = elements(html, "dl").filter(
-    (element) =>
-      classes(element).includes("item") &&
-      elements(element, "dt").some(
-        (term) =>
-          classes(term).includes("title") &&
-          /外貨([0-9]+)$/u.exec(visibleText(term))?.[1] === accountNo,
-      ),
-  );
+  // The observed heading is unique in the visible main, not an arbitrary
+  // matching account elsewhere in the document or an inert template.
+  html = single(elements(visibleMarkup(html), "main"));
+  const headers = elements(html, "dl").filter((element) => classes(element).includes("item"));
   if (headers.length !== 1) refuse("foreign_history_account_mismatch");
+  const titles = elements(headers[0]!, "dt").filter((term) => classes(term).includes("title"));
+  const firstTitle = elements(html, "dt").find((term) => classes(term).includes("title"));
+  if (
+    titles.length !== 1 ||
+    titles[0] !== firstTitle ||
+    /外貨([0-9]+)$/u.exec(visibleText(titles[0]!))?.[1] !== accountNo
+  )
+    refuse("foreign_history_account_mismatch");
   const heading = single(
     elements(html, "dl").filter((element) => {
       const names = classes(element);
@@ -140,6 +142,42 @@ function withoutExecutableContent(html: string): string {
   return html.replace(/<script\b[\s\S]*?<\/script\s*>|<style\b[\s\S]*?<\/style\s*>/giu, "");
 }
 
+/** Hidden ancestors and templates cannot supply evidence for a visible page. */
+function visibleMarkup(html: string): string {
+  html = withoutExecutableContent(html).replace(/<!--[\s\S]*?-->/gu, "");
+  for (const template of elements(html, "template").sort(
+    (left, right) => right.length - left.length,
+  ))
+    html = html.replace(template, "");
+  for (const opening of [...html.matchAll(/<([a-z][a-z0-9:-]*)(?=[\s>])[^>]*>/giu)]) {
+    const tag = opening[1]!;
+    const attributes = new Map(
+      [
+        ...opening[0]
+          .slice(tag.length + 1, -1)
+          .matchAll(/([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/gu),
+      ].map((attribute) => [
+        attribute[1]!.toLowerCase(),
+        attribute[2] ?? attribute[3] ?? attribute[4] ?? "",
+      ]),
+    );
+    const hidden =
+      attributes.has("hidden") ||
+      attributes.get("aria-hidden")?.toLowerCase() === "true" ||
+      /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\s*(?:!important\s*)?(?:;|$)/iu.test(
+        attributes.get("style") ?? "",
+      );
+    if (!hidden) continue;
+    if (/^(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/iu.test(tag))
+      html = html.replace(opening[0], "");
+    else {
+      const hiddenElement = elements(html, tag).find((element) => element.startsWith(opening[0]));
+      if (hiddenElement) html = html.replace(hiddenElement, "");
+    }
+  }
+  return html;
+}
+
 function price(html: string): string {
   return decimal(
     plainText(single(elements(html, "span").filter((span) => classes(span).includes("price")))),
@@ -175,7 +213,7 @@ function classes(element: string): string[] {
 
 /** Balanced extraction keeps the bank's nested definition lists distinct. */
 function elements(html: string, tag: string): string[] {
-  const pattern = new RegExp(`<(/?)${tag}\\b[^>]*>`, "giu");
+  const pattern = new RegExp(`<(/?)${tag}(?=[\\s>])[^>]*>`, "giu");
   const stack: number[] = [];
   const found: string[] = [];
   for (const match of html.matchAll(pattern)) {

@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 import iconv from "iconv-lite";
-import { sanitizeForeignBalance, sanitizeForeignHistory } from "../src/foreign-ordinary";
+import {
+  assertForeignHistoryContext,
+  sanitizeForeignBalance,
+  sanitizeForeignHistory,
+} from "../src/foreign-ordinary";
 import { DirectProfile } from "../src/smbc";
 
 const balance = `<html><input name="_TOKEN" value="synthetic-session-secret"><script>const session = "synthetic-session-secret";</script>
@@ -59,11 +63,57 @@ const detail = balance.replace(
   "</dd></dl></html>",
   `<a href="javascript:;" id="0" data-event="/accountinquiry/AIFDDTLmeisai">入出金明細</a></dd></dl><form name="AIFDDTL">${fields("AIFDDTL")}<input name="selectDateStare" value="2099年1月1日"><input name="selectDateEnd" value="2099年1月31日"><input name="firstEndDate" value="2099年1月31日"></form></html>`,
 );
+const accountHeading = (accountNo = "001234") =>
+  `<dl class="item"><dt class="title">合成 支店 外貨<br>${accountNo}</dt></dl>`;
 function context(accountNo = "001234"): string {
-  return `<dl class="item"><dt class="title">合成 支店 外貨<br>${accountNo}</dt></dl><dl class="detail-list07 -flexEnd -account"><dt class="title">通貨・現在残高</dt><dd class="detail">A$ <span class="price">1,234.56</span></dd></dl>`;
+  return `${accountHeading(accountNo)}<dl class="detail-list07 -flexEnd -account"><dt class="title">通貨・現在残高</dt><dd class="detail">A$ <span class="price">1,234.56</span></dd></dl>`;
 }
+const mainPage = (contents: string) => `<html><main>${contents}</main></html>`;
+
+test("only the unique visible main account heading establishes the history context", () => {
+  expect(() => assertForeignHistoryContext(mainPage(context()), "001234", "1234.56")).not.toThrow();
+  const expected = context();
+  const wrong = context("991234");
+  for (const lookalike of [
+    `<template>${accountHeading()}</template>`,
+    `<template><template>${accountHeading()}</template></template>`,
+    `<div hidden>${accountHeading()}</div>`,
+    `<div aria-hidden="true">${accountHeading()}</div>`,
+    `<div style="display: none">${accountHeading()}</div>`,
+  ]) {
+    // A hidden lookalike cannot rescue a contradictory visible account,
+    // whether it occurs outside main or inside it.
+    expect(() =>
+      assertForeignHistoryContext(mainPage(wrong) + lookalike, "001234", "1234.56"),
+    ).toThrow("foreign_history_account_mismatch");
+    expect(() =>
+      assertForeignHistoryContext(mainPage(wrong + lookalike), "001234", "1234.56"),
+    ).toThrow("foreign_history_account_mismatch");
+    // Irrelevant hidden markup also cannot make a valid account ambiguous.
+    expect(() =>
+      assertForeignHistoryContext(
+        mainPage(expected + lookalike.replaceAll("001234", "991234")),
+        "001234",
+        "1234.56",
+      ),
+    ).not.toThrow();
+  }
+  expect(() =>
+    assertForeignHistoryContext(mainPage(wrong + expected), "001234", "1234.56"),
+  ).toThrow("foreign_history_account_mismatch");
+  expect(() =>
+    assertForeignHistoryContext(
+      `<main-lookalike>${expected}</main-lookalike>`,
+      "001234",
+      "1234.56",
+    ),
+  ).toThrow();
+  expect(() =>
+    assertForeignHistoryContext(mainPage(expected) + mainPage(wrong), "001234", "1234.56"),
+  ).toThrow();
+});
 const queryForm = `<form name="AIFDDT1">${fields("AIFDDT1")}${["From", "To"].flatMap((side) => ["Year", "Month", "Day"].map((part) => `<select name="select${side}${part}"><option value="01">01</option></select>`)).join("")}</form>`;
-function profile(wrongAccount = false) {
+function profile(wrongAccount = false, hiddenLookalike = false) {
   const requests: Array<{ path: string; body: string }> = [];
   const selected = DirectProfile.import(
     { baseURL: "https://direct3.smbc.co.jp", loginURL: "https://direct.smbc.co.jp" },
@@ -76,13 +126,17 @@ function profile(wrongAccount = false) {
       fetch: async (input, init) => {
         const url = new URL(String(input));
         requests.push({ path: url.pathname, body: String(init?.body) });
-        const page = url.pathname.endsWith("TPALTOPacctList.smbc")
-          ? top
-          : url.pathname.endsWith("TPALTOPaccountGaikaFutsuDetail.smbc")
-            ? detail
-            : url.pathname.endsWith("AIFDDTLmeisai.smbc")
-              ? context(wrongAccount ? "991234" : "001234") + queryForm
-              : context() + history;
+        const page =
+          (url.pathname.endsWith("TPALTOPacctList.smbc")
+            ? top
+            : url.pathname.endsWith("TPALTOPaccountGaikaFutsuDetail.smbc")
+              ? detail
+              : url.pathname.endsWith("AIFDDTLmeisai.smbc")
+                ? mainPage(context(wrongAccount ? "991234" : "001234") + queryForm)
+                : mainPage(
+                    context(wrongAccount ? "991234" : "001234") +
+                      history.replace(/^<html>|<\/html>$/gu, ""),
+                  )) + (hiddenLookalike ? `<template hidden>${accountHeading()}</template>` : "");
         const response = new Response(Uint8Array.from(iconv.encode(page, "Shift_JIS")).buffer, {
           headers: { "content-type": "text/html; charset=Shift_JIS" },
         });
@@ -129,4 +183,12 @@ test("foreign reads preserve observed form blanks and bind the server-selected A
   expect(changed.requests.some((request) => request.path.endsWith("AIFDDT1meisai.smbc"))).toBe(
     false,
   );
+});
+
+test("a template lookalike cannot let a different account publish empty history", async () => {
+  const { selected, requests } = profile(true, true);
+  await expect(selected.getForeignHistory(range)).rejects.toThrow(
+    "foreign_history_account_mismatch",
+  );
+  expect(requests.some((request) => request.path.endsWith("AIFDDT1meisai.smbc"))).toBe(false);
 });
