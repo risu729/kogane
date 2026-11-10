@@ -8,7 +8,7 @@ import {
   type HistoryWindow,
 } from "./history-windows";
 import type { Artifact, DomesticSession } from "./types";
-import { assetHistoryArtifacts } from "./asset-history";
+import { assetHistoryArtifacts, readAssetHistoryResponse } from "./asset-history";
 import { collectCashHistory, readCashHistoryResponse } from "./cash-history";
 import {
   CashHistoryError,
@@ -275,7 +275,7 @@ async function fetchAssetHistoryCapture(
     },
   });
   if (!response.ok) throw assetHistoryError("sbi_asset_history_fetch_failed");
-  const bytes = new Uint8Array(await response.arrayBuffer());
+  const bytes = await readAssetHistoryResponse(response);
   const body = sanitizeAssetHistory(auditAssetHistoryJson(new TextDecoder().decode(bytes)));
   return { body, bytes, capturedAt };
 }
