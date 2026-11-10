@@ -47,6 +47,10 @@ External IDs fingerprint the section and complete row contents, with an
 occurrence suffix for identical rows within one page. Month position and
 capture time do not participate, so a row moving through the rolling selector
 keeps its ID. Approval number alone never identifies a row.
+The production transaction reader ranks `myjcb-debit-ledger` observations by
+source, account, parser and external ID, retaining the newest witness across
+overlapping month pages and later runs. Raw observations remain append-only;
+ordinary and difference sections retain distinct identities.
 
 Zero rows require exactly one observed `p.comment` no-details marker naming
 the exact period selected in `select[name=seq]`. Missing tables or unfamiliar
@@ -96,3 +100,10 @@ explicit empty periods, and refusal of unknown statuses and invalid dates.
 Separate-route tests cover all fourteen offered periods, exact query encoding,
 known-empty terminal coverage, and preservation/refusal of unknown content.
 No provider values are used in fixtures.
+The processor regression runs the real debit collectors through shared R2,
+registration, metadata extraction, publication and the production transaction
+reader. Two overlapping month pages followed by a later capture read as one
+ordinary row and one signed difference, even when the approval number matches.
+The collector's HTTP debit module is separate from browser authentication, so
+the processor test checks its real collection boundary without importing a
+browser runtime or browser DOM globals.

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { collectDebit, collectDebitOther } from "../src/collector";
+import { collectDebit, collectDebitOther } from "../src/debit";
 import { myJcbRunPlan } from "../src/shared-collection";
 import {
   myJcbDebitLedger,

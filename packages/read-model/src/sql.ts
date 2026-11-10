@@ -464,6 +464,7 @@ const TRANSACTIONS_SQL = `WITH ${TRANSACTION_CTES}
                            'sbi-foreign-trade-records',
                            'sbi-domestic-trade-records',
                            'myjcb-credit-ledger',
+                           'myjcb-debit-ledger',
                            'sony-bank-history-json',
                            'sony-bank-history-csv',
                            'sony-bank-wallet-history',
