@@ -50,7 +50,8 @@
   "observability": {
     "enabled": true,
     "redact_query_string": true,
-    "logs": { "enabled": true, "invocation_logs": false, "head_sampling_rate": 1 }
+    "logs": { "enabled": true, "invocation_logs": false, "head_sampling_rate": 1 },
+    "issues": { "enabled": true }
   },
   "d1_databases": [
     {
