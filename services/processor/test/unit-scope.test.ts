@@ -88,8 +88,29 @@ test("0037 preserves prior run-scoped containers beside the explicit J-POINT uni
   ).toEqual([
     {
       source_id: "myjcb",
+      parser_name: "myjcb-debit-ledger",
+      dataset: "debit-detail",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-debit-other-statement",
+      dataset: "debit-other-detail",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
       parser_name: "myjcb-jpoint-balance",
       dataset: "jpoint-balance",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "sbi-shinsei-bank",
+      parser_name: "sbi-shinsei-monthly-report-metadata",
+      dataset: "monthly-report-pdf",
       unit_scope: "unit",
       snapshot_selection: 0,
     },
@@ -264,8 +285,29 @@ test("the comparison route reports the eligibility scope of every policy row", a
   ).toEqual([
     {
       source_id: "myjcb",
+      parser_name: "myjcb-debit-ledger",
+      dataset: "debit-detail",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-debit-other-statement",
+      dataset: "debit-other-detail",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
       parser_name: "myjcb-jpoint-balance",
       dataset: "jpoint-balance",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "sbi-shinsei-bank",
+      parser_name: "sbi-shinsei-monthly-report-metadata",
+      dataset: "monthly-report-pdf",
       unit_scope: "unit",
       snapshot_selection: 0,
     },

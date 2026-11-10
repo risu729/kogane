@@ -97,3 +97,31 @@ test("broken logging cannot change collection handoff or prevent cleanup", async
   });
   expect(cleaned).toBe(true);
 });
+
+test("a failed report extension logs partial without disclosing report context", () => {
+  const records: Record<string, unknown>[] = [];
+  for (const level of ["log", "warn"] as const) {
+    const spy = spyOn(console, level).mockImplementation((value) =>
+      records.push(JSON.parse(String(value))),
+    );
+    restores.push(() => spy.mockRestore());
+  }
+  const diagnostic = createStageDiagnostics("wss://worker.invalid/");
+  diagnostic.begin("authenticated-reads");
+  diagnostic.finish(
+    JSON.stringify({
+      ok: true,
+      responses: { topBalances: "private" },
+      documents: {
+        list: "private-list",
+        downloads: [
+          { year: "private-year", month: "private-month", errorCode: "report_read_failed" },
+        ],
+      },
+    }),
+  );
+  expect(records).toContainEqual(
+    expect.objectContaining({ stage: "terminal", outcome: "partial" }),
+  );
+  expect(JSON.stringify(records)).not.toContain("private");
+});

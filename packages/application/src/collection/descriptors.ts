@@ -329,16 +329,24 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
   // `exchange-rate` is read by `sbi-shinsei-exchange-rate` (ADR 0020) and
   // `balance-summary-and-stage` by `sbi-shinsei-balance-summary-and-stage`
   // (ADR 0031).
-  "sbi-shinsei": jsonByName(
-    [
-      "top-accounts-balance-and-activity",
-      "yen-deposit-account",
-      "exchange-rate",
-      "balance-summary-and-stage",
-    ],
-    "sanitized_provider_capture",
-    "raw-",
-  ),
+  "sbi-shinsei": [
+    ...jsonByName(
+      [
+        "top-accounts-balance-and-activity",
+        "yen-deposit-account",
+        "exchange-rate",
+        "balance-summary-and-stage",
+      ],
+      "sanitized_provider_capture",
+      "raw-",
+    ),
+    {
+      key: /^monthly-report-\d{4}-(?:0[1-9]|1[0-2])-[a-f0-9]{64}\.pdf$/u,
+      role: "provider_document",
+      mediaTypes: ["application/pdf"],
+      dataset: "monthly-report-pdf",
+    },
+  ],
   "sbi-vc-trade": [
     ...jsonByName(
       ["cash-balances", "account-margin", "position-summary", "executions-recent-page-0001"],
