@@ -7,13 +7,55 @@
 
 Research date: 2026-08-26
 
+## Registered deposit products checked on 2026-11-09 UTC
+
+For [issue 1241](https://github.com/risu729/kogane/issues/1241), ordinary
+read-only navigation in the owner's authenticated Chrome session inspected
+the time/installment, foreign-currency and Global Account balance entries.
+The bank offers these products, but each balance entry returned the registered
+account list containing only the same ordinary-deposit account. No time,
+installment, foreign-currency or Global Account card or placement was displayed.
+This is a dated observation of the accounts registered in this web session;
+it does not establish whether an unregistered account exists elsewhere.
+
+| Visible navigation                                    | Observed servlet path        | Result                                                    |
+| ----------------------------------------------------- | ---------------------------- | --------------------------------------------------------- |
+| `積立・定期預金` (installment/time deposits)          | `/servlet/MENSRV0100101B.do` | Product menu with a time/installment balance-inquiry link |
+| `残高照会` (balance inquiry) from that menu           | `/servlet/MENSRV0120001B.do` | Registered account list, ordinary deposit only            |
+| `外貨預金` (foreign-currency deposits)                | `/servlet/MENSRV0100201B.do` | Product menu with an account-list/balance-inquiry link    |
+| `口座一覧（残高照会）` (account list/balance inquiry) | `/servlet/MENSRV0130001B.do` | Registered account list, ordinary deposit only            |
+| `グローバル口座` (Global Account)                     | `/servlet/MENSRV0100301B.do` | Product menu with a balance-inquiry link                  |
+| `残高照会` (balance inquiry) from that menu           | `/servlet/DDEMEN3000001B.do` | Registered account list, ordinary deposit only            |
+
+The observed navigation handlers use `doTransaction` with the corresponding
+servlet name, a null subindex and the current form. Network observation of the
+foreign balance, Global menu and Global balance reads confirmed a form POST
+followed by a GET to the same path. Those POSTs carry only `_FRAMEID`,
+`_TARGETID`, `_LUID`, `_TOKEN`, `_FORMID`, `_SUBINDEX` and `POSTKEY`.
+Session-specific values are deliberately omitted. The responses are HTML;
+there is no observed JSON contract schema for these products. The returned
+account list had one ordinary-history read control, with the existing
+`/BALINQ0301002B` handler. The product balance entries did not show a dedicated
+"no contracts" message: absence here means no product card in the registered
+account list, not a numeric zero balance or a parsed empty contract array.
+
+The issue's stop-if-none-held branch therefore applies to the inspected
+registered accounts. The catalogue keeps `term_deposit` as `not_collected`,
+linked to the specific issue, with this dated scope limitation. No collector,
+parser, endpoint allowlist or publication policy is added. The catalogue
+version stays unchanged because neither its types nor statuses change. If a
+product appears in the registered account list, first observe its nonempty
+placement fields and pagination before adding collection. No placement,
+enrollment or account-registration action was performed, and no personal
+account identifiers, balances, tokens or captured HTML are retained here.
+
 ## 2026-09-13 direct-collector feasibility check
 
 This follow-up tests a direct bank collector, not a user-export/import workflow.
 Authenticated browser account and ordinary-deposit history reads succeeded.
 The historical research below predates this follow-up.
 
-- The official login page opened successfully in the Codex in-app browser at
+- The official login page opened successfully in an agent's in-app browser at
   approximately 14:47 JST. It displayed the customer-number field `txbCustNo`
   and the disabled Next button before any identifying input.
 - An unauthenticated WSL HTTP client received HTTP 200 with the explicit
@@ -138,6 +180,45 @@ state and emits no transaction and one complete-container claim with
 under the empty unit, or the empty page under a range unit, is refused as
 `artifact-page-range-mismatch`. `mizuho-account-list` moves to 1.0.2 only
 because the shared module's code digest changed; its output is unchanged.
+
+## Retained-period selection checked on 2026-11-09 UTC
+
+For [issue 1229](https://github.com/risu729/kogane/issues/1229), the owner's
+authenticated Chrome session opened the ordinary-account history through
+`/servlet/BALINQ0301002B.do`. Its date selectors offered the current month and
+the preceding two months. The initial selection was already `期間指定`,
+2026-09-01 through 2026-11-10, with both deposits and withdrawals. These are
+query bounds, not transaction dates. The page showed
+`表示可能な明細がありません。`, with no transaction table or next-page control.
+
+Using `表示条件設定`, selecting that entire available period and clicking
+`この条件で表示` sent POST `/servlet/ACCHST0411009B.do`, followed by GET to the
+same path. The successful controls were the existing private form fields
+`_FRAMEID`, `_TARGETID`, `_LUID`, `_TOKEN`, `_FORMID`, `_SUBINDEX`, `POSTKEY`,
+and `txtThisDay`, `txtLast7Days`, `txtStartOfThisMonth`, `txtStartOfLastMonth`,
+`txtEndOfLastMonth`, `rdoPopDate`, `lstDateFromYear`, `lstDateFromMonth`,
+`lstDateFromDay`, `lstDateToYear`, `lstDateToMonth`, `lstDateToDay`, `rdoPopDaw`,
+`txbSearchWord`. The query values were `rdoPopDate=4`, from `2026/9/1`, to
+`2026/11/10`, `rdoPopDaw=0`, empty search word and empty `_SUBINDEX`. The five
+`txt*` query-date controls used `YYYYMMDD`. Authentication values are omitted.
+The response retained those selectors and the same explicit empty state.
+
+The collector derives the start of the preceding second calendar month and
+the end day from the bank's strict `txtThisDay` query control. It reuses an
+initial page only if its echoed dates, period mode, both-directions selection
+and empty keyword already match. Otherwise it posts the observed period read
+with fresh session/form state and checks the response again. Missing/invalid
+query-day values, clipping, a remaining keyword/direction filter, or a changed
+query day refuse that account with `invalid-history-period`. There is no new
+collection-request window, cursor, login retry or guessed pagination action.
+
+This implements the observed period-selection part only. A nonempty next-page
+request remains unobserved for this account, so additional pages still produce
+`history-pagination-unverified`; catalogue `cash_movement` remains `partial`,
+linked to issue 1229. No all-pages or period-complete publication claim is
+introduced. The parser, identity rule, dataset/status set and catalogue version
+are unchanged. Existing page-local identity remains unproved across pages;
+observe pagination before implementing the remaining part of the issue.
 
 ## Conclusion
 
@@ -281,11 +362,16 @@ observes existing transactions only.
 
 ## Mizuho Points
 
-Mizuho Point Mall is a current official bank service requiring Mizuho Mileage Club membership, Direct app
-use, and service activation.
+Mizuho Point Mall is a bank-operated points service accessed through the bank app.
+The [official service page](https://www.mizuhobank.co.jp/mmc/mizuhopointmall/index.html),
+checked on 2026-11-09 UTC, announces phased access without Mileage Club membership
+from 2026-10-29. A Direct internet-banking contract is the stated prerequisite;
+initial Direct registration is required for access. The documented entry is the
+bank app's `P` mark. This supersedes the membership prerequisite recorded by the
+original August research; it does not establish a browser-only entry.
 
 - App home `P` mark leads to Point Mall.
-- Mileage Club exclusive page shows points balances/accrual/use (Gift top-up timing/counts), Gift balances.
+- The points page shows balances/accrual/use (Gift top-up timing/counts) and Gift balances.
 - Guide describes points accrual/use/expiry breakdowns and Gift accrual/use/expiry history.
 - Points expire at 23:59 month-end 24 months after award month: 25 months including award month under terms,
   carried over when topped up to Gift.
@@ -300,6 +386,30 @@ points deep links/hosts/WebView routes; owner-operated read-only observations re
 methods/path templates/statuses. No queries/cookies/authorization/SSO codes/actual points; call no exchange/top-up endpoints.
 
 Do not navigate to J-Coin, MyJCB, or card company points in this scope.
+
+### Authenticated browser access checked on 2026-11-09 UTC
+
+For [issue 1252](https://github.com/risu729/kogane/issues/1252), ordinary read-only
+navigation in the owner's authenticated Direct Chrome session found no points
+or Point Mall entry in the home/navigation. The `確認する` / `特典内容` path opened
+`/servlet/MENSRV0100009B.do`; selecting the registered ordinary account opened
+`/servlet/INQMBR2700001B.do`. Its HTML headings were `特典内容照会結果確認`,
+`口座情報`, `会員制サービス` and `現在ご利用いただける主な特典`. This membership
+benefits page had no points balance or Point Mall link. Account identifiers,
+session parameters and provider values are not retained here.
+
+The official app-entry guidance above and the inspected browser navigation
+provide no usable browser route for the existing collector. This is a scoped
+access blocker, not proof that an unseen app handoff could never work. No app
+protocol, request values or response schema were inferred. The issue's stop
+branch applies: `reward_balance`, `reward_activity` and `reward_expiry` remain
+`not_collected`, linked to issue 1252. The catalogue version stays unchanged
+because its types and statuses do not change. No collector or parser is added.
+
+Resume only after an owner-authorized read-only observation establishes an
+accessible route and its balance, expiry, activity and completeness contracts.
+No enrollment, points exchange, authentication change or app session operation
+was performed.
 
 ## Authentication and sessions
 
