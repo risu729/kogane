@@ -1275,6 +1275,13 @@ keep-alive and the daily collection — both unchanged. Terminal source id
 - A successful run declares `coverageStatus: complete`: the collector walks
   every historical execution and cash-flow page to exhaustion and verifies the
   provider's own pagination totals before finishing.
+- The existing JPY cash-flow dataset remains the sole publishing dataset for
+  remittances. Additional `cashflows-all-recent-page-NNNN` and
+  `cashflows-all-historical-page-NNNN` capture unfiltered lists with page size
+  20 and the same total/cardinality checks; no parser publishes these evidence
+  datasets. Crypto transfer and reward observations remain unsupported, and the
+  trader-mode observation has not yet been validated through a scheduled HTTP
+  run ([source observation](sources/sbi-vc-trade.md#17-unfiltered-cash-flow-observation-2026-11-10)).
 - `transformations`: one `redacted` step per dataset (`sbi-vc-trade-worker`);
   the unredacted envelope carried the session key and is not retained.
 - `acquisitionSessionRef`: **yes.** The Durable Object now keeps a session

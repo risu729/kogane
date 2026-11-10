@@ -140,7 +140,9 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   ],
   // SBI VCトレード (a broker): crypto holdings and leverage positions,
   // executions under one filter, and the yen account (balances, margin,
-  // deposits and withdrawals); crypto transfers, staking or lending rewards,
+  // deposits and withdrawals). The unfiltered recent/historical cash-flow
+  // lists are captured as evidence only; crypto transfer and staking/lending
+  // row semantics remain unobserved (#1227). Crypto transfers and rewards,
   // the balance history and annual P&L report, and the PDF reports are not
   // collected (docs/sources/sbi-vc-trade.md, #448).
   "sbi-vc-trade": [
@@ -151,8 +153,8 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
       "sbi-vc-account-margin",
       "sbi-vc-cashflows",
     ]),
-    missing("asset_transfer", 448),
-    missing("income", 448),
+    missing("asset_transfer", 1227),
+    missing("income", 1227),
     missing("valuation_history", 448),
     missing("document", 448),
   ],

@@ -44,9 +44,9 @@ function gateway(_input: string | URL | Request, init?: RequestInit): Promise<Re
       meta: { status: "OK", secureKey: "synthetic-next-secure", timestamp: "synthetic" },
       body: paged
         ? {
-            list: [{ synthetic: request.event }],
+            list: [{ synthetic: request.event, cashflowID: "synthetic-flow" }],
             pageNumber: Number(request.data.pageNumber),
-            pageSize: 30,
+            pageSize: Number(request.data.pageSize),
             totalNumOfPages: 1,
             totalSize: 1,
           }
@@ -105,7 +105,7 @@ describe("the stored collector manifest", () => {
     const planned = read.manifest.artifacts.filter(
       (entry) => entry.artifactKey !== "manifest.json",
     );
-    expect(manifest.artifacts).toHaveLength(6);
+    expect(manifest.artifacts).toHaveLength(8);
     expect(manifest.artifacts).toHaveLength(planned.length);
     for (const entry of manifest.artifacts) {
       const terminalEntry = planned.find(

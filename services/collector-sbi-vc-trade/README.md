@@ -26,8 +26,17 @@ jobs in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), passing each j
 - `sbi-vc-trade` (`5 21 * * *`, daily at 06:05 JST): captures the fixed read allowlist.
 - Manual operations go through the operations API, which reaches this Worker only over the private `ScheduledCollection.runOperation` binding: a `collection` request (source `sbi-vc-trade`) runs the daily collection, and a `session-refresh` request runs the keepalive and, when it fails, a passkey login without the 6-hour cooldown. The former bearer routes `/run`, `/reauth`, `/collect`, `/health` and their `ADMIN_TOKEN` were removed on 2026-11-08 ([ADR 0069 amendment](../../docs/adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08)); session health is in the keepalive alarm history (`kogane.schedules.read`) and the Worker logs (`sbi_vc_keepalive`, `sbi_vc_reauth`). The only public route is `GET /healthz` (CD liveness: status and schema version, no session or provider call); every other path is 404 (`src/worker.ts`).
 - Destination: content-addressed objects in shared DATA (`objects/<2 hex>/<sha256>`), with the terminal manifest (`runs/sbi-vc-trade/<run-id>/terminal.json`) written last.
-- Contents: balances, account details, position summary, recent executions page 0, every historical execution page, every historical JPY deposit/withdrawal page, and manifest.
-- Page size is 30, as in the official Web client, with at most 100 pages. No generic sender can select write events.
+- Contents: balances, account details, position summary, recent executions page 0, every historical execution page, every historical JPY deposit/withdrawal page, both unfiltered cash-flow views, and manifest.
+- Existing pages use size 30. The unfiltered cash-flow views use size 20,
+  empty currency/type arrays and empty date bounds, as observed in the trader
+  UI on 2026-11-10. Each view walks at most 100 pages and checks page numbers,
+  sizes, cardinality and stable totals. No generic sender can select write events.
+- `cashflows-all-recent-page-NNNN` and `cashflows-all-historical-page-NNNN`
+  retain raw sanitized evidence only. No parser accepts them, so the overlapping
+  JPY remittances are published only by the existing filtered dataset. Crypto
+  transfers and staking/lending rewards remain uncollected as typed observations
+  until their response semantics are observed. See the [observation and remaining
+  limits](../../docs/sources/sbi-vc-trade.md#17-unfiltered-cash-flow-observation-2026-11-10).
 - After each response, the rotated session is encrypted and saved immediately. Artifacts with `meta.secureKey` removed remain in memory until the terminal is written; no staging R2 objects are written.
 - `packages/collection` writes objects and the final terminal with `etagDoesNotMatch: "*"` and R2-native SHA-256. The terminal follows every object, so a run without a terminal is not considered completely stored.
 - The central importer, its Service Binding and `POST /backfill-raw-evidence` were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)). Even runs with 12 or more data artifacts write through the terminal immediately, without deferral. The Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)).
