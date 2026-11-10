@@ -227,6 +227,14 @@ const SAMPLES: readonly Sample[] = [
     dataset: part === "2099" ? "account-assets-history" : null,
     unitKey: "domestic",
   })),
+  {
+    source: "sbi-shinsei",
+    artifactKey: `monthly-report-2099-01-${"0".repeat(64)}.pdf`,
+    role: "provider_document",
+    mediaType: "application/pdf",
+    dataset: "monthly-report-pdf",
+    unitKey: "monthly-report-2099-01",
+  },
   // services/collector-sbi-shinsei/src/shared-collection.ts (`raw-<dataset>.json`)
   ...["domestic", "foreign"].map((scope) => ({
     source: "sbi-securities",
@@ -638,6 +646,7 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
     "foreign-trade-records",
   ],
   "sbi-shinsei-bank": [
+    "monthly-report-pdf",
     "top-accounts-balance-and-activity",
     "yen-deposit-account",
     "exchange-rate",
@@ -951,7 +960,11 @@ describe("the registration dataset table (ADR 0022)", () => {
       if (sample.dataset === null) continue;
       expect(artifactDataset(sample.source, { ...sample, role: "collector_error" })).toBeNull();
       expect(
-        artifactDataset(sample.source, { ...sample, mediaType: "application/pdf" }),
+        artifactDataset(sample.source, {
+          ...sample,
+          mediaType:
+            sample.mediaType === "application/pdf" ? "application/json" : "application/pdf",
+        }),
       ).toBeNull();
       expect(artifactDataset("kogane-synthetic", sample)).toBeNull();
     }

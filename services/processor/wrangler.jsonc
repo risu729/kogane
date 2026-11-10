@@ -7,7 +7,7 @@
   "compatibility_flags": ["nodejs_compat", "enable_ctx_exports"],
   "workers_dev": false,
   "preview_urls": false,
-  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "observability": { "enabled": true, "head_sampling_rate": 1, "issues": { "enabled": true } },
   "triggers": { "crons": [] },
   "vars": {
     "SCHEDULES_ENABLED": "true",

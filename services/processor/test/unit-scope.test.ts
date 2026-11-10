@@ -93,6 +93,13 @@ test("0037 preserves prior run-scoped containers beside the explicit J-POINT uni
       unit_scope: "unit",
       snapshot_selection: 0,
     },
+    {
+      source_id: "sbi-shinsei-bank",
+      parser_name: "sbi-shinsei-monthly-report-metadata",
+      dataset: "monthly-report-pdf",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
   ]);
 
   // A partial run under the seeded policy: no job, no parse, for either unit.
@@ -266,6 +273,13 @@ test("the comparison route reports the eligibility scope of every policy row", a
       source_id: "myjcb",
       parser_name: "myjcb-jpoint-balance",
       dataset: "jpoint-balance",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "sbi-shinsei-bank",
+      parser_name: "sbi-shinsei-monthly-report-metadata",
+      dataset: "monthly-report-pdf",
       unit_scope: "unit",
       snapshot_selection: 0,
     },

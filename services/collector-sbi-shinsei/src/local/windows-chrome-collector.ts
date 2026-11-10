@@ -1,3 +1,4 @@
+import { parseMonthlyReports } from "../monthly-reports";
 import { browserDiagnostics } from "../diagnostics";
 import { fileURLToPath } from "node:url";
 import { JscAcquisitionError, UnknownResponseShapeError } from "../errors";
@@ -108,6 +109,7 @@ export class WindowsChromeContextCollector {
 export function parseCollectionResult(
   value: string,
   capturedAt: Date,
+  storedReportPeriods?: readonly string[],
 ): ChromeContextCollectorResult {
   const trimmed = value.trim();
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
@@ -119,18 +121,28 @@ export function parseCollectionResult(
   } catch {
     throw new UnknownResponseShapeError("Chrome-context collector returned invalid JSON");
   }
-  return parseCollectionHandoff(parsed as BrowserCollectionHandoff, capturedAt);
+  return parseCollectionHandoff(
+    parsed as BrowserCollectionHandoff,
+    capturedAt,
+    storedReportPeriods,
+  );
 }
 
 export function parseCollectionHandoff(
   parsed: unknown,
   capturedAt: Date,
+  storedReportPeriods?: readonly string[],
 ): ChromeContextCollectorResult {
   const input = object(parsed, "collector");
   const partial = Object.hasOwn(input, "failure");
   const root = exactObject(
     input,
-    partial ? ["ok", "responses", "failure"] : ["ok", "responses"],
+    [
+      "ok",
+      "responses",
+      ...(partial ? ["failure"] : []),
+      ...(Object.hasOwn(input, "documents") ? ["documents"] : []),
+    ],
     "collector",
   );
   if (root.ok !== true) {
@@ -217,10 +229,27 @@ export function parseCollectionHandoff(
       });
     }
   }
+  const documents = Object.hasOwn(root, "documents")
+    ? parseMonthlyReports(root.documents, storedReportPeriods ?? [])
+    : {
+        artifacts: [],
+        failures:
+          !partial && storedReportPeriods !== undefined
+            ? [
+                {
+                  operation: "read:monthly-reports",
+                  errorType: "NotAttempted",
+                  message: "provider_read_not_attempted",
+                },
+              ]
+            : [],
+      };
+  failures.push(...documents.failures);
   return {
     ...(normalized ? { normalized } : {}),
     artifacts: [
       ...validated.map(({ plan, response }) => artifact(plan.dataset, plan.filename, response.raw)),
+      ...documents.artifacts,
       ...(normalized
         ? [artifact("normalized", "normalized.json", `${JSON.stringify(normalized, null, 2)}\n`)]
         : []),

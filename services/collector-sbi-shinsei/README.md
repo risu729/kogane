@@ -13,8 +13,8 @@ A PoC independently implementing an SBI Shinsei Bank PowerDirect read-only colle
 The public login bundle and Kuebiko captures confirmed MobileFirst/WLClient-style read routes, session/CSRF-token topology and core response schemas. The local CLI serially performs CAFIS generation, login, Authorization/CSRF and core reads within the same Kuebiko Chrome target; only 4 validated read JSON responses leave the browser.
 
 - The production Worker starts a Cloudflare Container per 1 run. Chrome inside it serially performs CAFIS generation, login, Authorization/CSRF and core reads within 1 page. The Worker handles only scheduling, secret handoff, strict validation and R2 storage.
-- The route catalog uses exact origins, paths and methods. Only the 2 bootstrap and 4 core-read routes successful in the 2026-08-31 Kuebiko capture and local automated run have `productionEnabled: true`. Candidates based only on the public bundle are unreachable.
-- Direct HTTP transport is always refused, even for production routes. Only a single JSON string wrapping the 4 raw JSON responses leaves the page for the Worker; credentials, CAFIS `jsc`, cookies, Authorization, CSRF and sessionStorage do not leave it.
+- The route catalog uses exact origins, paths and methods. The 2 bootstrap and 4 core-read routes successful in the 2026-08-31 Kuebiko capture and local automated run, plus the report-list/download routes observed on 2026-11-09, have `productionEnabled: true`. Candidates based only on the public bundle are unreachable.
+- Direct HTTP transport is always refused, even for production routes. A single JSON string containing the 4 core JSON responses and transient report-list/download results leaves the page for the Worker; credentials, CAFIS `jsc`, cookies, Authorization, CSRF and sessionStorage do not leave it.
 - The Container/browser is stopped and discarded after success, refusal or unknown responses, without credential retries.
 - If a later core read fails after a successful top read, successful responses and top-derived normalized data remain in a partial manifest; failed and unattempted datasets use fixed codes. Failure of top itself still produces a failed manifest with no artifacts.
 - Unknown content types, oversized bodies, JSON parse failures and unregistered schemas stop processing without storage or interpretation.
@@ -106,7 +106,7 @@ runs/sbi-shinsei/<run-id>/terminal.json     run completion record written last (
 
 Unknown responses and authentication-response bodies are not stored in R2. The 4 core responses were verified by authenticated capture and local execution and are stored only after passing strict schemas. Top-level `header.newToken`, used to continue reads, is rotated within the same page, removed before leaving the Container, and the JSON is re-encoded.
 
-The current 4 reads are top-page snapshots. Manifest `startedAt` / `completedAt` record execution times, without claiming past-period capture. Adding period history requires separate verification of a read route that actually sends a period and of its capture range.
+The current 4 core reads are top-page snapshots. Manifest `startedAt` / `completedAt` record execution times, without claiming past-period capture. Adding period history requires separate verification of a read route that actually sends a period and of its capture range.
 
 Period-selected history and CSV remain unapproved candidate routes in the catalog; every execution profile refuses them before session access or communication. Based on ordinary UI observation on 2026-10-10, `src/local/history-observation.ts` provides an explicit-period yen ordinary-deposit request (locally limited to 31 days) and **offline validation only** of already captured JSON/CSV. It distinguishes normal JSON details, provider-reported empty responses and unverified errors, checking period/account context and all 6 CSV columns. CSV is browser-decoded text declaring `Shift_JIS`, not confirmation of original bytes or downloaded-file storage. Every result retains `coverageStatus: unknown`.
 
@@ -115,6 +115,31 @@ This module is not called by the Worker, Container or existing parser; it neithe
 `packages/collection` writes runs directly to shared DATA, retaining the 4 provider responses and normalized snapshot in memory until the terminal is written. The Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). Private Service Binding calls to the central importer, `POST /backfill-raw-evidence`, `scripts/backfill-raw-evidence.sh` and the dedicated source bucket were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)).
 
 Core-response field-name topology from Kuebiko captures is reflected in synthetic fixtures and strict validators. Some known fields are optional because only 1 sample exists; unknown fields, unknown nested items and unknown schemas are refused. A validator implementation alone does not enable a route: an exact request builder and successful execution in an accepted browser context are also required.
+
+## Monthly PDF reports
+
+After the four core reads, the scheduled browser session reads the report list,
+then downloads every offered month not yet registered and the newest offered
+month. It uses the list's exact year/month strings; the inspected account offered
+eight periods, so the public 60-month description is not a promised file count.
+
+The Worker validates strict JSON, success/echo, canonical base64, declared size
+and PDF magic. It keeps PDF bytes only, with month/size/hash in existing private
+artifact/unit metadata. Provider filenames, mail identifiers and report settings
+are transient; no report content is parsed or logged. DATA uses content hashes
+and immutable writes, with a month-plus-hash artifact key. Rechecking an unchanged
+newest report reuses its existing object; changed bytes become a new revision.
+Older registered months are skipped, including their potential later revisions.
+
+One PDF is limited to one MiB, the list to 120 months and the aggregate handoff
+to eight MiB. Failed or budget-limited reports make the run partial while valid
+siblings are retained and independently validated by the metadata-only parser.
+The existing registration catalogue is the checkpoint for a later run. Report
+failures also keep run-success-only core snapshots on their previous current
+capture; this boundary is unchanged. A catalogue
+entry of `document: collected` names this implemented capability, not verified
+production retention. No post-deploy collection has been requested in this change.
+See [ADR 0097](../../docs/adr/0097-sbi-shinsei-monthly-report-evidence.md).
 
 ## Secret bindings
 

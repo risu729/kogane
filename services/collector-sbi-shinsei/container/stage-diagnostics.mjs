@@ -66,8 +66,13 @@ export function createStageDiagnostics(relayUrl) {
       try {
         const value = JSON.parse(handoff);
         if (value.ok === true) {
+          const documentsFailed =
+            value.documents !== undefined &&
+            (value.documents?.list === "" ||
+              !Array.isArray(value.documents?.downloads) ||
+              value.documents.downloads.some((entry) => entry?.errorCode !== undefined));
           outcome =
-            value.failure === undefined
+            value.failure === undefined && !documentsFailed
               ? "success"
               : value.responses && Object.keys(value.responses).length > 0
                 ? "partial"

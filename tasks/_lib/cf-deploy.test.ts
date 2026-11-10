@@ -23,6 +23,18 @@ const camel = (value: unknown): any =>
         )
       : value;
 
+test("every cf-deployed Worker turns Workers Issues on in both configurations", async () => {
+  expect(allTargets).toHaveLength(17);
+  for (const target of allTargets) {
+    const canonical = parseJsonc(
+      readFileSync(`${REPO_ROOT}/${target.path}/${target.config}`, "utf8"),
+    );
+    expect(canonical.observability?.issues).toEqual({ enabled: true });
+    const native = (await import(`${REPO_ROOT}/${target.path}/cloudflare.config.ts`)).default;
+    expect(native.worker.observability?.issues).toEqual({ enabled: true });
+  }
+});
+
 describe("cf migration preserves the canonical Wrangler deployment contract", () => {
   test("current cf deployments share one immutable v3 pin and historical rollback retains v1", () => {
     const pins = new Set<string>();
