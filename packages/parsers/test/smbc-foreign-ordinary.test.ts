@@ -28,7 +28,7 @@ function artifact(balance = true): ArtifactMeta {
     artifactKey: balance
       ? "foreign-ordinary-aud/balance.json"
       : "foreign-ordinary-aud/history/20990101-20990131.json",
-    fetchUnitKey: "foreign-ordinary-aud",
+    fetchUnitKey: balance ? "foreign-ordinary-aud-balance" : "foreign-ordinary-aud-history",
     mime: "application/json",
     url: null,
     fetchedAt: "2099-04-02T01:00:00.000Z",
@@ -90,4 +90,13 @@ test("unsupported currencies, drift, inexact cents and incomplete runs never pub
   expect(
     smbcForeignOrdinaryBalance.accepts({ ...artifact(), artifactKey: "balance.normalized.json" }),
   ).toBe(false);
+  expect(smbcForeignOrdinaryBalance.accepts({ ...artifact(), dataset: null })).toBe(false);
+  expect(
+    smbcForeignOrdinaryBalance.parse(bytes(BALANCE), {
+      ...artifact(),
+      runStatus: "partial",
+      runFailureCount: 1,
+      unitScopeEligibility: "unit-independent-v1",
+    }).observations,
+  ).toHaveLength(1);
 });

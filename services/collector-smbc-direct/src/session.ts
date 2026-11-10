@@ -9,6 +9,7 @@ import {
   validateDate,
 } from "./dates";
 import { isResumable } from "./progress";
+import { foreignFailureCodes } from "./foreign-ordinary";
 import {
   dataBucket,
   manifestBytes,
@@ -35,6 +36,7 @@ import type {
   FinishChallengeResult,
   StartChallengeResult,
   StoredArtifact,
+  ForeignOrdinaryProgress,
 } from "./types";
 const INITIAL_PROGRESS: BackfillProgress = {
   phase: "idle",
@@ -162,10 +164,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
       }
       if (resume) {
         const artifacts = (await this.ctx.storage.get<StoredArtifact[]>("artifacts")) ?? [];
-        const retainedForeignFailures =
-          current.foreignOrdinary?.status === "partial"
-            ? [current.foreignOrdinary.failureCode ?? "foreign_collection_failed"]
-            : [];
+        const retainedForeignFailures = foreignFailureCodes(current.foreignOrdinary);
         const resumed: BackfillProgress = {
           ...current,
           phase: "running",
@@ -228,6 +227,15 @@ export class SmbcBackfillSession extends DurableObject<Env> {
       });
       await this.ctx.storage.delete("challenge");
       try {
+        progress.foreignOrdinary = await this.#collectForeign(
+          profile,
+          prefix,
+          startedAt,
+          artifacts,
+          diagnostic,
+        );
+        const foreignFailures = foreignFailureCodes(progress.foreignOrdinary);
+        await profile.continueSession();
         const balance = await diagnostic.step("balance-collection", () => profile.getBalance());
         upsertArtifact(
           artifacts,
@@ -255,65 +263,92 @@ export class SmbcBackfillSession extends DurableObject<Env> {
             artifact: { dataset: "balance-normalized" },
           }),
         );
-        const foreignRange = foreignOrdinaryRange(new Date(startedAt));
-        const foreignFailures: string[] = [];
-        try {
-          const foreignBalance = await diagnostic.step("balance-collection", () =>
-            profile.getForeignBalance(),
-          );
-          upsertArtifact(
-            artifacts,
-            await storeJson({
-              bucket: this.env.DATA,
-              key: `${prefix}/foreign-ordinary-aud/balance.json`,
-              value: { ...foreignBalance, observedAt: new Date().toISOString() },
-              artifact: { dataset: "foreign-ordinary-aud-balance" },
-            }),
-          );
-          for (const range of monthRanges(foreignRange.start, foreignRange.end)) {
-            const collectedAt = new Date().toISOString();
-            const history = await diagnostic.step("transactions-collection", () =>
-              profile.getForeignHistory(range),
-            );
-            const rangeName = `${range.start.replaceAll("-", "")}-${range.end.replaceAll("-", "")}`;
-            upsertArtifact(
-              artifacts,
-              await storeJson({
-                bucket: this.env.DATA,
-                key: `${prefix}/foreign-ordinary-aud/history/${rangeName}.json`,
-                value: history,
-                artifact: {
-                  dataset: "foreign-ordinary-aud-history",
-                  range,
-                  collectedAt,
-                  transactionCount: 0,
-                },
-              }),
-            );
-          }
-          progress.foreignOrdinary = { range: foreignRange, status: "success" };
-        } catch (error) {
-          const classified = classifyError(error);
-          const failureCode = classified.startsWith("foreign_")
-            ? classified
-            : "foreign_collection_failed";
-          foreignFailures.push(failureCode);
-          progress.foreignOrdinary = { range: foreignRange, status: "partial", failureCode };
-        }
         progress.artifactCount = artifacts.length;
         progress.manifestKey = await storeManifest(
           this.env.DATA,
           prefix,
           this.#manifest(progress, artifacts, foreignFailures),
         );
-        await this.ctx.storage.put({ progress, artifacts, failureCodes: foreignFailures });
+        await this.ctx.storage.put({
+          progress,
+          artifacts,
+          failureCodes: foreignFailures,
+          session: await encryptJson(profile.export(), this.env.SESSION_ENCRYPTION_KEY),
+        });
         await this.ctx.storage.setAlarm(Date.now());
         return { phase: progress.phase, progress };
       } catch (error) {
-        await this.#fail(progress, artifacts, [classifyError(error)], profile);
+        await this.#fail(
+          progress,
+          artifacts,
+          [...foreignFailureCodes(progress.foreignOrdinary), classifyError(error)],
+          profile,
+        );
         throw error;
       }
     });
+  }
+  async #collectForeign(
+    profile: DirectProfile,
+    prefix: string,
+    startedAt: string,
+    artifacts: StoredArtifact[],
+    diagnostic: ReturnType<typeof createDiagnostics>,
+  ): Promise<ForeignOrdinaryProgress> {
+    const range = foreignOrdinaryRange(new Date(startedAt));
+    const result: ForeignOrdinaryProgress = {
+      range,
+      history: { status: "partial", failureCode: "foreign_history_not_collected" },
+    };
+    const code = (error: unknown): string => {
+      const classified = classifyError(error);
+      return classified.startsWith("foreign_") ? classified : "foreign_collection_failed";
+    };
+    try {
+      const balance = await diagnostic.step("balance-collection", () =>
+        profile.getForeignBalance(),
+      );
+      upsertArtifact(
+        artifacts,
+        await storeJson({
+          bucket: this.env.DATA,
+          key: `${prefix}/foreign-ordinary-aud/balance.json`,
+          value: { ...balance, observedAt: new Date().toISOString() },
+          artifact: { dataset: "foreign-ordinary-aud-balance" },
+        }),
+      );
+      result.balance = { status: "success" };
+    } catch (error) {
+      result.balance = { status: "partial", failureCode: code(error) };
+      return result;
+    }
+    try {
+      for (const month of monthRanges(range.start, range.end)) {
+        const collectedAt = new Date().toISOString();
+        const history = await diagnostic.step("transactions-collection", () =>
+          profile.getForeignHistory(month),
+        );
+        const name = `${month.start.replaceAll("-", "")}-${month.end.replaceAll("-", "")}`;
+        upsertArtifact(
+          artifacts,
+          await storeJson({
+            bucket: this.env.DATA,
+            key: `${prefix}/foreign-ordinary-aud/history/${name}.json`,
+            value: history,
+            artifact: {
+              dataset: "foreign-ordinary-aud-history",
+              range: month,
+              collectedAt,
+              transactionCount: 0,
+            },
+          }),
+        );
+      }
+      result.history = { status: "success" };
+    } catch (error) {
+      result.history = { status: "partial", failureCode: code(error) };
+    }
+    return result;
   }
   override async alarm(): Promise<void> {
     await this.#exclusive(async () => {
@@ -513,7 +548,11 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     }
     const failed: BackfillProgress = {
       ...progress,
-      phase: artifacts.length > 2 ? "partial" : "failed",
+      phase:
+        artifacts.length > 2 ||
+        artifacts.some((artifact) => artifact.dataset === "foreign-ordinary-aud-balance")
+          ? "partial"
+          : "failed",
       completedAt: new Date().toISOString(),
       nextRange: null,
       artifactCount: artifacts.length,
@@ -681,6 +720,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
 const FIXED_COLLECTION_FAILURE_CODES = new Set([
   "foreign_account_selection_unreviewed",
   "foreign_collection_failed",
+  "foreign_history_not_collected",
   "foreign_history_account_mismatch",
   "foreign_history_currency_mismatch",
   "foreign_currency_unreviewed",

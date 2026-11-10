@@ -1,7 +1,18 @@
-import type { DateRange } from "./types";
+import type { DateRange, ForeignOrdinaryProgress } from "./types";
 
 export const FOREIGN_EMPTY_CODE = "PC-AIFDDT1-00134-E";
-export const FOREIGN_UNIT = "foreign-ordinary-aud";
+export const FOREIGN_BALANCE_UNIT = "foreign-ordinary-aud-balance";
+export const FOREIGN_HISTORY_UNIT = "foreign-ordinary-aud-history";
+
+export function foreignFailureCodes(foreign?: ForeignOrdinaryProgress): string[] {
+  return [
+    ...new Set(
+      [foreign?.balance, foreign?.history].flatMap((unit) =>
+        unit?.status === "partial" ? [unit.failureCode ?? "foreign_collection_failed"] : [],
+      ),
+    ),
+  ];
+}
 
 export interface ForeignOrdinaryBalance {
   currency: "AUD";

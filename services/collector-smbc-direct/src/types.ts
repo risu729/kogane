@@ -66,6 +66,11 @@ export interface BackfillProgress {
 
 export interface ForeignOrdinaryProgress {
   range: DateRange;
+  balance?: ForeignOrdinaryUnitProgress;
+  history?: ForeignOrdinaryUnitProgress;
+}
+
+export interface ForeignOrdinaryUnitProgress {
   status: "success" | "partial";
   failureCode?: string;
 }

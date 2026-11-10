@@ -1217,14 +1217,18 @@
     },
     {
       "file": "0096_smbc_foreign_ordinary_unit_eligibility.sql",
-      "statementCount": 2,
+      "statementCount": 3,
       "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        },
         {
           "table": "dataset_snapshot_policies",
           "kind": "seed-or-backfill"
         }
       ],
-      "sha256": "83928239d3688abc7fe13b7173117da0f4b09ac179bb6ed08ae7a84ca256d34c"
+      "sha256": "5e3a1330519a885fe59b0424d0bc7c7fe0f4c09a9fef5b8b0b239749f36066a9"
     }
   ],
   "tables": [

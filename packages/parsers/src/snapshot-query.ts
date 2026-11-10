@@ -22,6 +22,7 @@ export const SNAPSHOT_DATASETS = [
   ["sbi-shinsei-exchange-rate", "exchange-rate"],
   ["sony-bank-gross-balance", "gross-balance"],
   ["smbc-direct-balance", "balance-normalized"],
+  ["smbc-foreign-ordinary-balance", "foreign-ordinary-aud-balance"],
   ["st-george-balances", "account-snapshot"],
   ["prestia-bank-balances", "prestia-bank-balance-html"],
 ] as const;
@@ -33,13 +34,6 @@ export const SNAPSHOT_DATASETS = [
  * The canonical dataset is also admitted for older/direct parser consumers.
  */
 export const ARTIFACT_SNAPSHOT_CONTAINERS = [
-  {
-    sourceId: "smbc-bank",
-    parserName: "smbc-foreign-ordinary-balance",
-    artifactKey: "foreign-ordinary-aud/balance.json",
-    fetchUnitKey: "foreign-ordinary-aud",
-    dataset: "foreign-ordinary-aud-balance",
-  },
   {
     sourceId: "mizuho-bank",
     parserName: "mizuho-account-list",

@@ -85,7 +85,9 @@ async function artifact(
     bytes: bytes.length,
     sha256: await sha256Hex(bytes),
     mediaType: "application/json",
-    ...(range ? { range, transactionCount: 1 } : {}),
+    ...(range
+      ? { range, transactionCount: dataset === "foreign-ordinary-aud-history" ? 0 : 1 }
+      : {}),
   };
 }
 
@@ -285,11 +287,11 @@ test("partial months remain unparsed until cumulative success even with failed l
   ).toBe(0);
 }, 60000);
 
-async function foreign(complete: boolean): Promise<StoredArtifact[]> {
+async function foreign(complete: boolean, amount = "123.45"): Promise<StoredArtifact[]> {
   const entries = [
     await artifact("foreign-ordinary-aud-balance", "foreign-ordinary-aud/balance.json", {
       currency: "AUD",
-      amount: "123.45",
+      amount,
       yenEquivalent: "12000",
       referenceRate: "97.205",
       observedAt: STARTED,
@@ -330,11 +332,12 @@ async function currentSmbcBalances() {
   ).results;
 }
 
-test("AUD failure does not block complete NEW yen observations; failed yen stays ineligible and complete AUD remains current", async () => {
+test("independent yen, AUD balance and history units publish only complete data through failures and resumes", async () => {
   const bucket = dataBucket(env.EVIDENCE);
   const completeForeign = {
     range: { start: "2001-01-01", end: "2001-02-28" },
-    status: "success" as const,
+    balance: { status: "success" as const },
+    history: { status: "success" as const },
   };
   const clean = {
     ...manifest(
@@ -361,23 +364,26 @@ test("AUD failure does not block complete NEW yen observations; failed yen stays
         ...(await balance(2000)),
         ...(await month(1)),
         ...(await month(2)),
-        ...(await foreign(false)),
+        ...(await foreign(false, "234.56")),
       ],
       true,
     ),
     runId: "00000000-0000-4000-8000-00000000a046",
     status: "partial" as const,
     failureCodes: [failure],
-    foreignOrdinary: { ...completeForeign, status: "partial" as const, failureCode: failure },
+    foreignOrdinary: {
+      ...completeForeign,
+      history: { status: "partial" as const, failureCode: failure },
+    },
   };
   expect((await persistSharedRun(bucket, input(partial))).outcome).toBe("persisted");
   expect(
     await registerCollectionRun(env, { source: "smbc-direct", runId: partial.runId }),
   ).toMatchObject({ outcome: "registered" });
-  expect(await sweep(env)).toMatchObject({ parsed: 3, error: 0 });
+  expect(await sweep(env)).toMatchObject({ parsed: 4, error: 0 });
   expect(await currentSmbcBalances()).toEqual([
     { parser_name: "smbc-direct-balance", amount_minor: 2000 },
-    { parser_name: "smbc-foreign-ordinary-balance", amount_minor: 12345 },
+    { parser_name: "smbc-foreign-ordinary-balance", amount_minor: 23456 },
   ]);
   expect(
     await registerCollectionRun(env, { source: "smbc-direct", runId: partial.runId }),
@@ -387,7 +393,7 @@ test("AUD failure does not block complete NEW yen observations; failed yen stays
   const badYen = {
     ...partial,
     runId: "00000000-0000-4000-8000-00000000a047",
-    artifacts: [...(await balance(3000)), ...(await month(1)), ...(await foreign(false))],
+    artifacts: [...(await balance(3000)), ...(await month(1)), ...(await foreign(false, "345.67"))],
     completedChunks: 1,
     failureCodes: [failure, "transactions_rejected"],
   };
@@ -395,23 +401,45 @@ test("AUD failure does not block complete NEW yen observations; failed yen stays
   expect(
     await registerCollectionRun(env, { source: "smbc-direct", runId: badYen.runId }),
   ).toMatchObject({ outcome: "registered" });
-  expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
+  expect(await sweep(env)).toMatchObject({ parsed: 1, error: 0 });
   expect(await currentSmbcBalances()).toEqual([
     { parser_name: "smbc-direct-balance", amount_minor: 2000 },
-    { parser_name: "smbc-foreign-ordinary-balance", amount_minor: 12345 },
+    { parser_name: "smbc-foreign-ordinary-balance", amount_minor: 34567 },
   ]);
+  const completeAud = {
+    ...badYen,
+    runId: "00000000-0000-4000-8000-00000000a049",
+    artifacts: [...(await balance(3500)), ...(await month(1)), ...(await foreign(true, "456.78"))],
+    failureCodes: ["transactions_rejected"],
+    foreignOrdinary: completeForeign,
+  };
+  expect((await persistSharedRun(bucket, input(completeAud))).outcome).toBe("persisted");
+  expect(
+    await registerCollectionRun(env, { source: "smbc-direct", runId: completeAud.runId }),
+  ).toMatchObject({ outcome: "registered" });
+  expect(await sweep(env)).toMatchObject({ parsed: 3, error: 0 });
+  expect(await currentSmbcBalances()).toEqual([
+    { parser_name: "smbc-direct-balance", amount_minor: 2000 },
+    { parser_name: "smbc-foreign-ordinary-balance", amount_minor: 45678 },
+  ]);
+
   // A stopped yen backfill with an independently failed AUD unit must carry
   // its earlier unparsed yen month into the final AUD-partial continuation.
   const stopped = {
     ...badYen,
     runId: "00000000-0000-4000-8000-00000000a048",
-    artifacts: [...(await balance(4000)), ...(await month(1)), ...(await foreign(false))],
+    artifacts: [...(await balance(4000)), ...(await month(1)), ...(await foreign(false, "567.89"))],
   };
   expect((await persistSharedRun(bucket, input(stopped))).outcome).toBe("persisted");
   expect(
     await registerCollectionRun(env, { source: "smbc-direct", runId: stopped.runId }),
   ).toMatchObject({ outcome: "registered" });
-  expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
+  expect(await sweep(env)).toMatchObject({ parsed: 1, error: 0 });
+  const audPublishedCount = async () =>
+    env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM balance_observations b JOIN parse_runs p ON p.id=b.parse_run_id WHERE p.parser_name='smbc-foreign-ordinary-balance'",
+    ).first<number>("n");
+  const priorAudCount = await audPublishedCount();
   const resumed = {
     ...stopped,
     artifacts: [...stopped.artifacts, ...(await month(2))],
@@ -430,8 +458,9 @@ test("AUD failure does not block complete NEW yen observations; failed yen stays
   expect(await sweep(env)).toMatchObject({ parsed: 3, error: 0 });
   expect(await currentSmbcBalances()).toEqual([
     { parser_name: "smbc-direct-balance", amount_minor: 4000 },
-    { parser_name: "smbc-foreign-ordinary-balance", amount_minor: 12345 },
+    { parser_name: "smbc-foreign-ordinary-balance", amount_minor: 56789 },
   ]);
+  expect(await audPublishedCount()).toBe(priorAudCount);
   expect((await persistBackfillRun(bucket, input(resumed))).outcome).toBe("already_persisted");
   expect(
     await registerCollectionRun(env, { source: "smbc-direct", runId: continuationId }),

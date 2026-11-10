@@ -13,7 +13,6 @@
 // quotes. Synthetic values only.
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { isLiteralRowsScan } from "./literal-row-scan.ts";
 import {
   ACCOUNT_SOURCES_SQL,
   CLAIMS_SQL,
@@ -145,7 +144,6 @@ describe("one read at the route's bounds", () => {
       for (const [sql, args] of statements)
         for (const step of explain(db, sql, args)) {
           if (!step.detail.startsWith("SCAN ") || step.detail.includes("VIRTUAL TABLE")) continue;
-          if (isLiteralRowsScan(step.detail)) continue;
           const name = step.detail.slice(5).split(" ")[0]!;
           if (!accepted(sql, name)) scanned.push(`${step.detail} :: ${sql.slice(0, 60)}`);
         }

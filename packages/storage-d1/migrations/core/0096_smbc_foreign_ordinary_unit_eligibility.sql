@@ -21,3 +21,15 @@ INSERT OR IGNORE INTO dataset_snapshot_policies (
   'smbc-bank', 'transactions-normalized', 'smbc-direct-transactions',
   'coverage-v1', NULL, 0, 'unit', 0, 1794268800000
 );
+
+-- AUD balances are independent of their history's unreviewed nonempty shape
+-- and of yen acquisition. Only complete balance units form snapshots.
+INSERT OR IGNORE INTO dataset_snapshot_policies (
+  source_id, dataset, parser_name, policy_id, required_parser_version,
+  replaces_previous_on_complete_empty, unit_scope, snapshot_selection,
+  updated_at_ms
+) VALUES
+  ('smbc-bank', 'foreign-ordinary-aud-balance', 'smbc-foreign-ordinary-balance',
+   'coverage-v1', '0.1.2', 0, 'unit', 1, 1794268800000),
+  ('smbc-bank', 'foreign-ordinary-aud-history', 'smbc-foreign-ordinary-history',
+   'coverage-v1', NULL, 0, 'unit', 0, 1794268800000);

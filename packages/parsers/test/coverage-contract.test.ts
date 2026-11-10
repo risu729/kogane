@@ -33,6 +33,7 @@ for (const file of [
   "prestia-bank-expected.json",
   "sbi-shinsei-exchange-rate-expected.json",
   "sbi-shinsei-observed-shapes-expected.json",
+  "smbc-foreign-ordinary-expected.json",
 ]) {
   const frozen = JSON.parse(
     readFileSync(join(FIXTURES_ROOT, "coverage-contract", file), "utf8"),
@@ -175,6 +176,7 @@ const CLAIMS: Record<string, Record<string, Expectation>> = {
   },
   "sony-bank-gross-balance": { "complete-rows": { ...complete(17), expected: 17 } },
   "smbc-direct-balance": { "complete-rows": { ...complete(1), expected: 1 } },
+  "smbc-foreign-ordinary-balance": { "complete-rows": { ...complete(1), expected: 1 } },
   "st-george-balances": { "complete-rows": { ...complete(2), expected: 2 } },
   "prestia-bank-balances": {
     "complete-rows": complete(12, [

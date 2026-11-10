@@ -54,7 +54,12 @@ history response only. A fresh approved manual run queries each retained
 calendar month through the last finished JST day, preserving the existing
 closed-day rule. Empty history requires the exact code, message, requested
 period, account/currency context and absence of a contradictory table. A
-nonempty or changed response leaves the unit partial with a closed code.
+nonempty or changed response leaves the history unit partial with a closed
+code. The balance is a separate complete unit and can still publish, as can
+complete yen data. A failed yen capture likewise cannot suppress a complete
+AUD balance or explicit-empty history unit. Standard named-dataset snapshot
+and unit-eligibility policies enforce those boundaries; NULL-dataset legacy
+routing is not widened.
 Nonempty transaction keys, directions, stable IDs and applied rates remain
 unobserved and unsupported; [issue 1245](https://github.com/risu729/kogane/issues/1245)
 therefore remains open. No provider financial value is retained in this note.

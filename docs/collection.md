@@ -1351,7 +1351,8 @@ and explicit-empty retained history in the same session. These sanitized JSON
 artifacts use `foreign-ordinary-aud/balance.json` and
 `foreign-ordinary-aud/history/YYYYMMDD-YYYYMMDD.json`, role
 `sanitized_provider_capture`, a `redacted` transformation with no retained HTML
-input, and their own `foreign-ordinary-aud` unit. Its requested range starts on
+input, and separate `foreign-ordinary-aud-balance` and
+`foreign-ordinary-aud-history` units. The history's requested range starts on
 the first day three months before the run's JST month and ends on the last
 finished JST day. Monthly queries cover that range once. The run's requested
 range is the envelope of its units' ranges; unit-scoped requested and coverage
@@ -1367,15 +1368,20 @@ the single AUD balance. Nonempty history remains unsupported and
 Legacy stopped runs keep their existing scope across a resume; only a fresh
 run adds AUD. AUD captures are retained unchanged across a yen backfill resume.
 The final cumulative success includes earlier partial AUD evidence, under the
-same immutable-terminal rules below. The exact artifact/unit balance policy
-selects one latest complete AUD container; an explicit-empty history parse
-publishes no movements. Migration 0096 opts only the yen balance and
-transaction datasets into existing `unit-independent-v1` eligibility. When
+same immutable-terminal rules below. Standard dataset snapshot membership
+selects one latest complete AUD balance container; an explicit-empty history
+parse publishes no movements. Migration 0096 opts all four named SMBC datasets
+into existing `unit-independent-v1` eligibility. Only balance datasets form
+snapshots; histories carry eligibility-only policy rows. When
 every closed yen chunk and its balance are present and the only failure
 belongs to AUD, the yen unit reports complete and publishes new yen evidence
 despite the partial run. A failed or missing yen chunk still blocks that
-unit. Existing operator policy overrides are preserved. AUD keeps run-scoped
-eligibility, so its partial evidence never replaces a successful AUD balance.
+unit. Conversely, a complete new AUD balance publishes through a yen failure
+or unreviewed nonempty AUD history. AUD is captured first, before the yen
+balance request. Its balance and history units report their own outcomes:
+neither an incomplete history nor a failed balance can declare itself complete.
+Existing operator policy overrides are preserved. The AUD balance parser
+requires its named dataset, coverage-v1 claim and exact 0.1.2 release.
 
 The only human-triggered source: a person signs in behind Cloudflare Access,
 approves a QR challenge, and the backfill then runs across many Durable Object

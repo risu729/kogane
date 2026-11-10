@@ -393,7 +393,7 @@ const OUTSIDE_CASES: Case[] = [
     "foreign-balance",
     meta("smbc-bank", "foreign-ordinary-aud-balance", {
       artifactKey: "foreign-ordinary-aud/balance.json",
-      fetchUnitKey: "foreign-ordinary-aud",
+      fetchUnitKey: "foreign-ordinary-aud-balance",
     }),
     encode(smbcForeignBalance()),
   ),
@@ -402,7 +402,7 @@ const OUTSIDE_CASES: Case[] = [
     "foreign-empty-history",
     meta("smbc-bank", "foreign-ordinary-aud-history", {
       artifactKey: "foreign-ordinary-aud/history/20990101-20990131.json",
-      fetchUnitKey: "foreign-ordinary-aud",
+      fetchUnitKey: "foreign-ordinary-aud-history",
     }),
     encode(smbcForeignHistory()),
   ),

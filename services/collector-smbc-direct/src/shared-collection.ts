@@ -33,7 +33,11 @@ import {
 } from "../../../packages/collection/src/index";
 import { sha256Hex } from "./storage";
 import { lastFinishedJapanDay, monthRanges } from "./dates";
-import { FOREIGN_UNIT } from "./foreign-ordinary";
+import {
+  FOREIGN_BALANCE_UNIT,
+  FOREIGN_HISTORY_UNIT,
+  foreignFailureCodes,
+} from "./foreign-ordinary";
 import type { BackfillManifest, BackfillProgress, StoredArtifact } from "./types";
 
 /** `runs/<source>/…` in DATA. The Processor maps it to the CORE source `smbc-bank`. */
@@ -170,19 +174,24 @@ function foreignArtifact(artifact: StoredArtifact): boolean {
 }
 
 function artifactUnit(artifact: StoredArtifact): string {
-  return foreignArtifact(artifact) ? FOREIGN_UNIT : UNIT_KEY;
+  return artifact.dataset === "foreign-ordinary-aud-balance"
+    ? FOREIGN_BALANCE_UNIT
+    : artifact.dataset === "foreign-ordinary-aud-history"
+      ? FOREIGN_HISTORY_UNIT
+      : UNIT_KEY;
 }
 
 /** Rescue only complete yen acquisition when its sole failure belongs to
  * the newly independent AUD unit. A failed yen chunk remains ineligible. */
 function yenUnitComplete(manifest: BackfillManifest): boolean {
   const foreign = manifest.foreignOrdinary;
+  const foreignFailures = foreignFailureCodes(foreign);
   if (
     manifest.status !== "partial" ||
-    foreign?.status !== "partial" ||
-    !foreign.failureCode?.startsWith("foreign_") ||
+    foreignFailures.length === 0 ||
+    !foreignFailures.every((code) => code.startsWith("foreign_")) ||
     manifest.failureCodes.length === 0 ||
-    !manifest.failureCodes.every((code) => code === foreign.failureCode)
+    !manifest.failureCodes.every((code) => foreignFailures.includes(code))
   )
     return false;
   const expected = monthRanges(manifest.requestedRange.start, manifest.requestedRange.end);
@@ -225,7 +234,7 @@ function ranges(manifest: BackfillManifest): TerminalRange[] {
       unitKey: UNIT_KEY,
     },
   ];
-  if (manifest.foreignOrdinary)
+  if (manifest.foreignOrdinary?.history)
     entries.push({
       rangeKey: "foreign-requested",
       rangeKind: "requested",
@@ -233,7 +242,7 @@ function ranges(manifest: BackfillManifest): TerminalRange[] {
       basis: "request",
       startValue: manifest.foreignOrdinary.range.start,
       endValue: manifest.foreignOrdinary.range.end,
-      unitKey: FOREIGN_UNIT,
+      unitKey: FOREIGN_HISTORY_UNIT,
     });
   const seen = new Set<string>();
   // The raw and normalized artifacts of one month share one declared range.
@@ -303,19 +312,25 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
   const artifacts: PersistArtifact[] = [];
   const transformations: TerminalTransformation[] = [];
   const foreign = input.manifest.foreignOrdinary;
-  if (foreign?.status === "partial" && input.manifest.status === "success")
+  if (
+    [foreign?.balance, foreign?.history].some((unit) => unit?.status === "partial") &&
+    input.manifest.status === "success"
+  )
     throw new SharedCollectionError("foreign_manifest_outcome_inconsistent");
   const foreignArtifacts = input.manifest.artifacts.filter(foreignArtifact);
-  if (!foreign && foreignArtifacts.length > 0)
+  const balances = foreignArtifacts.filter(
+    (artifact) => artifact.dataset === "foreign-ordinary-aud-balance",
+  );
+  const histories = foreignArtifacts.filter(
+    (artifact) => artifact.dataset === "foreign-ordinary-aud-history",
+  );
+  if ((!foreign?.balance && balances.length > 0) || (!foreign?.history && histories.length > 0))
     throw new SharedCollectionError("foreign_manifest_scope_missing");
-  if (foreign?.status === "success") {
+  if (foreign?.balance?.status === "success" && balances.length !== 1)
+    throw new SharedCollectionError("foreign_manifest_inventory_incomplete");
+  if (foreign?.history?.status === "success") {
     const expected = monthRanges(foreign.range.start, foreign.range.end);
-    const histories = foreignArtifacts.filter(
-      (artifact) => artifact.dataset === "foreign-ordinary-aud-history",
-    );
     if (
-      foreignArtifacts.filter((artifact) => artifact.dataset === "foreign-ordinary-aud-balance")
-        .length !== 1 ||
       histories.length !== expected.length ||
       expected.some(
         (range) =>
@@ -326,6 +341,16 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
     ) {
       throw new SharedCollectionError("foreign_manifest_inventory_incomplete");
     }
+    if (
+      foreign.range.end >
+        lastFinishedJapanDay(new Date(input.manifest.completedAt ?? input.manifest.startedAt)) ||
+      histories.some(
+        (artifact) =>
+          artifact.range!.end >
+          lastFinishedJapanDay(new Date(artifact.collectedAt ?? input.manifest.startedAt)),
+      )
+    )
+      throw new SharedCollectionError("foreign_history_window_not_closed");
   }
   for (const [index, entry] of input.manifest.artifacts.entries()) {
     const bytes = input.bytesByKey.get(entry.key);
@@ -397,6 +422,15 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
   }
   const outcome = sharedOutcome(input.manifest);
   const yenComplete = yenUnitComplete(input.manifest);
+  const ownYenFailure = input.manifest.failureCodes.find((code) => !code.startsWith("foreign_"));
+  const yenErrorCode = !foreign
+    ? outcome.safeErrorCode
+    : ownYenFailure === "session_missing"
+      ? HUMAN_REQUIRED_CODE
+      : (ownYenFailure ??
+        (outcome.safeErrorCode === "coverage_day_not_finished"
+          ? outcome.safeErrorCode
+          : "yen_unit_incomplete"));
   const run: TerminalRunFields = {
     source: SHARED_SOURCE,
     producer: PRODUCER,
@@ -419,7 +453,11 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
         foreign && foreign.range.end > input.manifest.requestedRange.end
           ? foreign.range.end
           : input.manifest.requestedRange.end,
-      unitKeys: [UNIT_KEY, ...(foreign ? [FOREIGN_UNIT] : [])],
+      unitKeys: [
+        UNIT_KEY,
+        ...(foreign?.balance ? [FOREIGN_BALANCE_UNIT] : []),
+        ...(foreign?.history ? [FOREIGN_HISTORY_UNIT] : []),
+      ],
     },
     startedAt: input.manifest.startedAt,
     completedAt: input.manifest.completedAt ?? input.manifest.startedAt,
@@ -437,22 +475,29 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
         unitKind: UNIT_KIND,
         artifactCount: input.manifest.artifacts.length - foreignArtifacts.length,
         coverageStatus: yenComplete ? "complete" : outcome.coverageStatus,
-        ...(yenComplete || outcome.safeErrorCode === undefined
+        ...(yenComplete || outcome.coverageStatus === "complete" || yenErrorCode === undefined
           ? {}
-          : { safeErrorCode: outcome.safeErrorCode }),
+          : { safeErrorCode: yenErrorCode }),
       },
-      ...(foreign
-        ? [
-            {
-              unitKey: FOREIGN_UNIT,
-              unitKind: UNIT_KIND,
-              artifactCount: foreignArtifacts.length,
-              coverageStatus:
-                foreign.status === "success" ? ("complete" as const) : ("partial" as const),
-              ...(foreign.failureCode ? { safeErrorCode: foreign.failureCode } : {}),
-            },
-          ]
-        : []),
+      ...(
+        [
+          [foreign?.balance, FOREIGN_BALANCE_UNIT, balances.length],
+          [foreign?.history, FOREIGN_HISTORY_UNIT, histories.length],
+        ] as const
+      ).flatMap(([unit, unitKey, artifactCount]) =>
+        unit
+          ? [
+              {
+                unitKey,
+                unitKind: UNIT_KIND,
+                artifactCount,
+                coverageStatus:
+                  unit.status === "success" ? ("complete" as const) : ("partial" as const),
+                ...(unit.failureCode ? { safeErrorCode: unit.failureCode } : {}),
+              },
+            ]
+          : [],
+      ),
     ],
     ranges: ranges(input.manifest),
     reports:
@@ -562,7 +607,7 @@ export async function persistBackfillRun(
   }
   const published = new Map<string, Set<string>>();
   const parseablePublished = new Map<string, Set<string>>();
-  const independentlyCompleteYenPublished = new Map<string, Set<string>>();
+  const independentlyCompletePublished = new Map<string, Set<string>>();
   for (const read of prior) {
     if (read.manifest.producer !== PRODUCER) {
       throw new SharedCollectionError("shared_prior_terminal_invalid");
@@ -580,21 +625,25 @@ export async function persistBackfillRun(
         read.manifest.units.every(
           (unit) => unit.coverageStatus === "complete" && unit.safeErrorCode === undefined,
         );
-      const independentlyCompleteYen =
+      const independentlyComplete =
         read.manifest.providerOutcome === "partial" &&
-        read.manifest.safeErrorCode?.startsWith("foreign_") &&
-        artifact.unitKey === UNIT_KEY &&
+        [UNIT_KEY, FOREIGN_BALANCE_UNIT, FOREIGN_HISTORY_UNIT].includes(artifact.unitKey ?? "") &&
         read.manifest.units.some(
           (unit) =>
-            unit.unitKey === UNIT_KEY &&
+            unit.unitKey === artifact.unitKey &&
             unit.coverageStatus === "complete" &&
             unit.safeErrorCode === undefined,
+        ) &&
+        !read.manifest.artifacts.some(
+          (candidate) =>
+            candidate.role === "collector_error" &&
+            (candidate.unitKey === undefined || candidate.unitKey === artifact.unitKey),
         );
-      if (independentlyCompleteYen) {
+      if (independentlyComplete) {
         const hashes =
-          independentlyCompleteYenPublished.get(artifact.artifactKey) ?? new Set<string>();
+          independentlyCompletePublished.get(artifact.artifactKey) ?? new Set<string>();
         hashes.add(artifact.sha256);
-        independentlyCompleteYenPublished.set(artifact.artifactKey, hashes);
+        independentlyCompletePublished.set(artifact.artifactKey, hashes);
       }
       if (
         successfulRun &&
@@ -619,18 +668,24 @@ export async function persistBackfillRun(
   }
   // A later whole-run success still includes partial-run evidence: an
   // operator may have deliberately kept its eligibility run-scoped. Within
-  // an AUD-partial continuation, an already complete yen unit cannot gain a
-  // new month, so avoid publishing that same completed unit a second time.
-  const priorInventory =
-    input.manifest.status === "success"
-      ? parseablePublished
-      : yenUnitComplete(input.manifest)
-        ? new Map([...parseablePublished, ...independentlyCompleteYenPublished])
-        : published;
-  const added = input.manifest.artifacts.filter(
-    (artifact) =>
-      !priorInventory.get(relativeArtifactKey(artifact.key, input.prefix))?.has(artifact.sha256),
-  );
+  // a partial continuation, include earlier ineligible chunks of a newly
+  // completed unit, but do not republish a unit already declared complete.
+  const completedPublished = new Map([...parseablePublished, ...independentlyCompletePublished]);
+  const added = input.manifest.artifacts.filter((artifact) => {
+    const complete =
+      artifactUnit(artifact) === UNIT_KEY
+        ? yenUnitComplete(input.manifest)
+        : artifactUnit(artifact) === FOREIGN_BALANCE_UNIT
+          ? input.manifest.foreignOrdinary?.balance?.status === "success"
+          : input.manifest.foreignOrdinary?.history?.status === "success";
+    const inventory =
+      input.manifest.status === "success"
+        ? parseablePublished
+        : complete
+          ? completedPublished
+          : published;
+    return !inventory.get(relativeArtifactKey(artifact.key, input.prefix))?.has(artifact.sha256);
+  });
   const identical = prior.find((read) =>
     read.manifest.artifacts.some(
       (artifact) => artifact.role === COLLECTOR_MANIFEST_ROLE && artifact.sha256 === digest,
@@ -669,10 +724,28 @@ export async function persistBackfillRun(
   )[input.manifest.completedChunks];
   const start = starts.sort()[0] ?? remaining?.start ?? input.manifest.requestedRange.start;
   const { foreignOrdinary: foreignProgress, ...priorManifest } = input.manifest;
+  const balanceProgress =
+    foreignProgress?.balance &&
+    (foreignProgress.balance.status === "partial" ||
+      artifacts.some((artifact) => artifact.dataset === "foreign-ordinary-aud-balance"))
+      ? foreignProgress.balance
+      : undefined;
+  const historyProgress =
+    foreignProgress?.history &&
+    (foreignProgress.history.status === "partial" ||
+      artifacts.some((artifact) => artifact.dataset === "foreign-ordinary-aud-history"))
+      ? foreignProgress.history
+      : undefined;
   const manifest: BackfillManifest = {
     ...priorManifest,
-    ...(artifacts.some(foreignArtifact) && foreignProgress
-      ? { foreignOrdinary: foreignProgress }
+    ...(foreignProgress && (balanceProgress || historyProgress)
+      ? {
+          foreignOrdinary: {
+            range: foreignProgress.range,
+            ...(balanceProgress ? { balance: balanceProgress } : {}),
+            ...(historyProgress ? { history: historyProgress } : {}),
+          },
+        }
       : {}),
     runId: input.manifest.runId + "-continuation-" + digest,
     status: added.length === 0 ? "failed" : input.manifest.status,

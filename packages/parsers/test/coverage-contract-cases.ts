@@ -20,6 +20,8 @@ import { sbiVcAccountMargin } from "../src/parsers/sbi-vc-account-margin.ts";
 import { sbiVcCashBalances } from "../src/parsers/sbi-vc-cash-balances.ts";
 import { sbiVcPositionSummary } from "../src/parsers/sbi-vc-position-summary.ts";
 import { smbcDirectBalance } from "../src/parsers/smbc-direct.ts";
+import { smbcForeignOrdinaryBalance } from "../src/parsers/smbc-foreign-ordinary.ts";
+import { smbcForeignBalance } from "./smbc-foreign-fixture.ts";
 import { stGeorgeBalances } from "../src/parsers/st-george.ts";
 import { prestiaBankBalances, sanitizePrestiaBankPage } from "../src/parsers/prestia-bank-html.ts";
 import { prestiaBankHtml } from "./prestia-bank-fixture.ts";
@@ -369,6 +371,19 @@ const stGeorgeSnapshot = {
 };
 
 const BANKS: ContractParser[] = [
+  cases(
+    smbcForeignOrdinaryBalance,
+    meta("smbc-bank", "foreign-ordinary-aud-balance", {
+      artifactKey: "foreign-ordinary-aud/balance.json",
+      fetchUnitKey: "foreign-ordinary-aud-balance",
+      fetchedAt: "2099-04-02T01:00:00.000Z",
+    }),
+    {
+      "complete-rows": new TextEncoder().encode(smbcForeignBalance()),
+      "unreadable-container": json({}),
+      "unknown-fields": json({ ...JSON.parse(smbcForeignBalance()), unexpected: true }),
+    },
+  ),
   cases(
     prestiaBankBalances,
     meta("prestia", "prestia-bank-balance-html", {

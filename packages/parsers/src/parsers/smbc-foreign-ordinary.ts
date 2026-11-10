@@ -1,7 +1,7 @@
 import type { ArtifactMeta, Parser } from "../types.ts";
 import { containerClaim } from "./coverage.ts";
 import { exactDecimal, exactKeys, exactMoney, normalizedDate, strictObject } from "./sbi-strict.ts";
-import { decodeUtf8 } from "./util.ts";
+import { decodeUtf8, unitScopeAdmitted } from "./util.ts";
 
 const SOURCE = "smbc-bank";
 const SOURCE_ACCOUNT = "smbc-bank:ordinary-foreign-aud";
@@ -9,7 +9,7 @@ const EMPTY_CODE = "PC-AIFDDT1-00134-E";
 
 export const smbcForeignOrdinaryBalance: Parser = {
   name: "smbc-foreign-ordinary-balance",
-  version: "0.1.1",
+  version: "0.1.2",
   accepts: (artifact) =>
     accepts(artifact, "foreign-ordinary-aud-balance", "foreign-ordinary-aud/balance.json"),
   parse(bytes, artifact) {
@@ -69,10 +69,11 @@ export const smbcForeignOrdinaryBalance: Parser = {
  * transaction shape has not been observed and cannot publish guessed rows. */
 export const smbcForeignOrdinaryHistory: Parser = {
   name: "smbc-foreign-ordinary-history",
-  version: "0.1.1",
+  version: "0.1.2",
   accepts: (artifact) =>
     artifact.sourceId === SOURCE &&
     artifact.dataset === "foreign-ordinary-aud-history" &&
+    artifact.fetchUnitKey === "foreign-ordinary-aud-history" &&
     artifact.mime === "application/json" &&
     /^foreign-ordinary-aud\/history\/\d{8}-\d{8}\.json$/u.test(artifact.artifactKey ?? ""),
   parse(bytes, artifact) {
@@ -115,15 +116,18 @@ export const smbcForeignOrdinaryHistory: Parser = {
 function accepts(artifact: ArtifactMeta, dataset: string, key: string): boolean {
   return (
     artifact.sourceId === SOURCE &&
-    (artifact.dataset === dataset || artifact.dataset === null) &&
-    artifact.fetchUnitKey === "foreign-ordinary-aud" &&
+    artifact.dataset === dataset &&
+    artifact.fetchUnitKey === "foreign-ordinary-aud-balance" &&
     artifact.artifactKey === key &&
     artifact.mime === "application/json"
   );
 }
 
 function read(bytes: Uint8Array, artifact: ArtifactMeta): Record<string, unknown> {
-  if (artifact.runStatus !== "success" || artifact.runFailureCount !== 0)
+  if (
+    (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) &&
+    !unitScopeAdmitted(artifact)
+  )
     throw new Error("smbc_foreign_run_incomplete");
   return strictObject(JSON.parse(decodeUtf8(bytes)), "foreign ordinary capture");
 }

@@ -8,7 +8,7 @@ const policies = (db: ReturnType<typeof coreDatabase>) =>
     .query("SELECT * FROM dataset_snapshot_policies WHERE source_id='smbc-bank' ORDER BY dataset")
     .all();
 
-test("SMBC defaults opt only yen datasets into independent-unit eligibility and transaction windows never become snapshots", () => {
+test("SMBC defaults name each independent unit and only balances form snapshots", () => {
   const db = coreDatabase("0017", "0096");
   try {
     db.exec(sql);
@@ -20,6 +20,8 @@ test("SMBC defaults opt only yen datasets into independent-unit eligibility and 
         .all(),
     ).toEqual([
       { dataset: "balance-normalized", unit_scope: "unit", snapshot_selection: 1 },
+      { dataset: "foreign-ordinary-aud-balance", unit_scope: "unit", snapshot_selection: 1 },
+      { dataset: "foreign-ordinary-aud-history", unit_scope: "unit", snapshot_selection: 0 },
       { dataset: "transactions-normalized", unit_scope: "unit", snapshot_selection: 0 },
     ]);
     const once = policies(db);
@@ -38,6 +40,9 @@ test("operator overrides survive the guarded balance update and transaction defa
     );
     db.exec(
       "INSERT INTO dataset_snapshot_policies(source_id,dataset,parser_name,policy_id,required_parser_version,unit_scope,snapshot_selection,updated_at_ms) VALUES('smbc-bank','transactions-normalized','smbc-direct-transactions','coverage-v1','operator-version','run',0,1)",
+    );
+    db.exec(
+      "INSERT INTO dataset_snapshot_policies(source_id,dataset,parser_name,policy_id,required_parser_version,unit_scope,snapshot_selection,updated_at_ms) VALUES('smbc-bank','foreign-ordinary-aud-balance','smbc-foreign-ordinary-balance','coverage-v1','operator-version','run',1,1),('smbc-bank','foreign-ordinary-aud-history','smbc-foreign-ordinary-history','coverage-v1','operator-version','run',0,1)",
     );
     const before = policies(db);
     db.exec(sql);
