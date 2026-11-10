@@ -121,6 +121,35 @@ the extraction changes no request, parsing or stop-code behavior.
 The reward promotion/read release remains unchanged: the added rule admits a
 new parser/metric family and reinterprets no existing claimed quantity.
 
+### Candidate query plan verification
+
+The promotion query keeps the existing outer balance scan and indexed
+publication/claim/unit probes. Its new history and total window results are
+derived relations, not additional full scans of persistent balance tables.
+SQLite builds exactly two temporary partial covering indexes: history by
+`(parse_run_id, history_rank)` and totals by
+`(total_rank, reported_total, fetch_run_id, holding_account)`. The candidate
+join probes those results instead of repeating the history input per candidate.
+The plan test checks their coroutine/materialization ancestry, their exact
+index keys and the persistent artifact/parse/publication/balance indexes.
+It permits no other automatic index or persistent scan beyond the existing
+outer balance scan and the explicitly counted small policy scans. The prior
+frozen query and its original scan expectation remain unchanged.
+
+Read-only diagnostics on full synthetic CORE stores, without `ANALYZE`, used
+Bun's SQLite 3.53.4 `sqlite3_stmt_status(SQLITE_STMTSTATUS_VM_STEP)` on the
+original SQL. Five captures for one connection (65 facts) took 7,719 VM steps;
+ten for one (130 facts), 14,754; ten for four (520 facts), 58,371; twenty for
+eight (2,080 facts), 229,087. This is near-linear growth for these measured
+sizes, not a universal bound for every future engine or workload. The native
+diagnostic extension stayed outside the repository; CI adds no native build
+dependency. Deterministic identity probes in the test also bound evaluated
+history facts and rank inputs by the number of seeded captures, with exact
+result equality against the unmodified query. Scaled and randomized real
+parser histories cover complete/partial/failed/mismatched captures, bounded
+drains and unchanged frozen legacy candidates. This justifies the derived
+plan expectations without changing production SQL for plan cosmetics.
+
 ### Statement files
 
 The scheduled credit walk still reads every provider-offered statement
