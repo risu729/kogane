@@ -146,6 +146,11 @@ export function otherIdentity(input: IdentityInput): IdentityPlan {
         account("reward-account", "provider-connection-jpoint-total");
         plan.account.label = "MyJCB J-POINT";
       }
+      else if (/^myjcb:[a-z0-9][a-z0-9-]{0,63}:j-point:acquired:\d{4}-\d{2}-\d{2}$/u.test(a)) {
+        account("reward-account", "provider-jpoint-acquisition-bucket");
+        plan.account.key = [a.replace(/:acquired:\d{4}-\d{2}-\d{2}$/u, ":total")];
+        plan.account.label = "MyJCB J-POINT";
+      }
       break;
     case "smbc-bank":
       if (a === "smbc-bank:ordinary-yen") account("deposit", "audited-ordinary-yen-scope");

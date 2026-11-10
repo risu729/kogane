@@ -10,6 +10,7 @@
 // when the two disagree, so a new snapshot parser cannot ship without a
 // policy row.
 export const SNAPSHOT_DATASETS = [
+  ["myjcb-jpoint-history", "jpoint-history"],
   ["sbi-domestic-cash-positions", "domestic-cash-positions"],
   ["sbi-foreign-cash-positions", "foreign-cash-positions"],
   ["sbi-account-assets-current", "account-assets-current"],

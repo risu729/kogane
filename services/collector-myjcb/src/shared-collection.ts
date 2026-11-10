@@ -1,4 +1,5 @@
 import { readMyJcbJPointResponse } from "../../../packages/domain/src/myjcb-jpoint-response";
+import { readJPointHistory } from "../../../packages/domain/src/myjcb-jpoint-history";
 // MyJCB → the shared DATA bucket (unified plan 03, U09).
 //
 // The collector already redacts every statement page it keeps
@@ -65,6 +66,8 @@ const UNOBSERVED_DATASETS = new Set([
   "credit-pdf",
   "credit-ofx",
 ]);
+const historyDataset = (dataset: string): boolean =>
+  dataset === "jpoint-history" || dataset === "jpoint-history-html" || dataset === "jpoint-inquiry";
 
 /** One connection's finished collection, as the worker saw it. */
 export interface SharedConnectionRun {
@@ -307,6 +310,7 @@ function manifestBytes(
       ...(connection.jpointCode === undefined
         ? {}
         : { jpointCode: pointCode(connection.jpointCode) }),
+      ...(connection.jpointHistoryCode === undefined ? {} : { jpointHistoryCode: pointCode(connection.jpointHistoryCode) }),
       connectionId: connection.connectionId,
       bootstrapMode: connection.bootstrapMode,
       status: connection.status,
@@ -383,6 +387,12 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
           JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),
         );
       }
+      if (artifact.dataset === "jpoint-history") {
+        if (artifact.filename !== "jpoint-history.json" || artifact.mediaType !== "application/json" ||
+          connection.summary.jpointHistoryCode !== "collected")
+          throw new Error("jpoint_history_artifact_metadata_invalid");
+        readJPointHistory(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
+      }
       if (role === "sanitized_provider_capture") {
         // The redaction the collector applied is re-checked here, against the
         // same invariants the central path enforces, before the bytes leave
@@ -397,7 +407,8 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
         byteSize: bytes.byteLength,
         mediaType: artifact.mediaType.split(";", 1)[0]!.trim(),
         role,
-        unitKey: artifact.dataset === "jpoint-balance" ? pointUnitKey(unitKey) : unitKey,
+        unitKey: historyDataset(artifact.dataset) ? `${unitKey}:j-point-history`
+          : artifact.dataset === "jpoint-balance" ? pointUnitKey(unitKey) : unitKey,
         body: { kind: "bytes", bytes },
       });
       stored.push({
@@ -443,6 +454,20 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
       }
     }
     const point = connection.summary.jpointCode;
+    const history = connection.summary.jpointHistoryCode;
+    const historyArtifacts = kept.filter((a) => historyDataset(a.dataset));
+    if (history !== undefined && history !== "unsupported") {
+      pointCode(history);
+      const normalized = historyArtifacts.filter((a) => a.dataset === "jpoint-history").length;
+      if (!failed && ((history === "collected" && (normalized !== 1 || historyArtifacts.length !== 3)) ||
+        (history !== "collected" && normalized !== 0)))
+        throw new Error("jpoint_history_artifact_count_invalid");
+      units.push({ unitKey: `${unitKey}:j-point-history`, unitKind: "reward-history",
+        artifactCount: historyArtifacts.length,
+        coverageStatus: !failed && history === "collected" ? "complete" : "unknown",
+        ...(!failed && history === "collected" ? {} : { safeErrorCode: failed ? "jpoint_history_stopped" : `jpoint_history_${history}` }),
+      });
+    } else if (historyArtifacts.length) throw new Error("jpoint_history_outcome_missing");
     const pointArtifacts = kept.filter((artifact) => artifact.dataset === "jpoint-balance").length;
     if (point !== undefined && point !== "unsupported") {
       pointCode(point);
@@ -467,10 +492,15 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
     units.push({
       unitKey,
       unitKind: "connection",
-      artifactCount: kept.length - pointArtifacts,
+      artifactCount: kept.length - pointArtifacts - historyArtifacts.length,
       coverageStatus: failed ? "unknown" : coverage(connection.summary.status),
       ...(connectionCode === undefined ? {} : { safeErrorCode: connectionCode }),
     });
+    if ((connection.summary.exportOffers?.length ?? 0) > 0) {
+      units.push({ unitKey: `${unitKey}:statement-documents`, unitKind: "statement-documents",
+        artifactCount: 0, coverageStatus: "unknown",
+        safeErrorCode: failed ? "collector_failed" : "statement_export_bytes_unverified" });
+    }
   }
 
   const summaries = input.connections.map((connection) => connection.summary);

@@ -340,6 +340,10 @@ describe("named concepts in the final SQL", () => {
         snapshot_selection: 0,
       },
       {
+        source_id: "myjcb", parser_name: "myjcb-jpoint-history", dataset: "jpoint-history",
+        unit_scope: "unit", snapshot_selection: 1,
+      },
+      {
         source_id: "sbi-shinsei-bank",
         parser_name: "sbi-shinsei-monthly-report-metadata",
         dataset: "monthly-report-pdf",
@@ -350,7 +354,7 @@ describe("named concepts in the final SQL", () => {
     expect(
       db
         .query(
-          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata')",
+          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'myjcb-jpoint-history')",
         )
         .get(),
     ).toEqual({ n: 0 });
@@ -425,10 +429,10 @@ describe("named concepts in the final SQL", () => {
     expect(
       db
         .query(
-          "SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE snapshot_selection=1 AND unit_scope<>'run'",
+          "SELECT parser_name,dataset,unit_scope FROM dataset_snapshot_policies WHERE snapshot_selection=1 AND unit_scope<>'run'",
         )
-        .get(),
-    ).toEqual({ n: 0 });
+        .all(),
+    ).toEqual([{ parser_name: "myjcb-jpoint-history", dataset: "jpoint-history", unit_scope: "unit" }]);
     expect(
       db
         .query(
@@ -442,6 +446,10 @@ describe("named concepts in the final SQL", () => {
         dataset: "jpoint-balance",
         unit_scope: "unit",
         snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb", parser_name: "myjcb-jpoint-history", dataset: "jpoint-history",
+        unit_scope: "unit", snapshot_selection: 1,
       },
       {
         source_id: "sbi-shinsei-bank",

@@ -76,6 +76,10 @@ test("the current production migration chain preserves legacy policies and adds 
       snapshot_selection: 0,
     },
     {
+      source_id: "myjcb", parser_name: "myjcb-jpoint-history", dataset: "jpoint-history",
+      policy_id: "coverage-v1", unit_scope: "unit", snapshot_selection: 1,
+    },
+    {
       source_id: "sbi-shinsei-bank",
       parser_name: "sbi-shinsei-monthly-report-metadata",
       dataset: "monthly-report-pdf",
@@ -91,7 +95,8 @@ test("the current production migration chain preserves legacy policies and adds 
           row.parser_name !== "st-george-balances" &&
           row.parser_name !== "prestia-bank-balances" &&
           row.parser_name !== "sbi-shinsei-exchange-rate" &&
-          row.parser_name !== "sbi-shinsei-monthly-report-metadata",
+          row.parser_name !== "sbi-shinsei-monthly-report-metadata" &&
+          row.parser_name !== "myjcb-jpoint-history",
       )
       .every((row) => row.policy_id === "legacy-warning-compat-v1"),
   ).toBe(true);
@@ -105,7 +110,8 @@ test("the current production migration chain preserves legacy policies and adds 
   expect(policies.find((row) => row.parser_name === "sbi-shinsei-exchange-rate")?.policy_id).toBe(
     "coverage-v1",
   );
-  expect(containers.every((row) => row.unit_scope === "run")).toBe(true);
+  expect(containers.filter((row) => row.parser_name !== "myjcb-jpoint-history").every((row) => row.unit_scope === "run")).toBe(true);
+  expect(containers.find((row) => row.parser_name === "myjcb-jpoint-history")).toMatchObject({ unit_scope: "unit", policy_id: "coverage-v1" });
   // Every row that pins a version, under either policy, names one this build
   // deploys: the selection matches it exactly, so a stale pin would adopt
   // nothing (0056 moves the SBI Shinsei board to 1.0.1, 0059 to 1.0.2, 0084
@@ -114,6 +120,7 @@ test("the current production migration chain preserves legacy policies and adds 
     "SELECT parser_name,required_parser_version FROM dataset_snapshot_policies WHERE required_parser_version IS NOT NULL ORDER BY parser_name",
   );
   expect(pinned.map((row) => row.parser_name)).toEqual([
+    "myjcb-jpoint-history",
     "prestia-bank-balances",
     "sbi-foreign-cash-positions",
     "sbi-shinsei-exchange-rate",

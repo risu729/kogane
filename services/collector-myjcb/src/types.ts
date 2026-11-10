@@ -80,6 +80,8 @@ export type JPointCollectionCode = (typeof JPOINT_COLLECTION_CODES)[number];
 export interface ConnectionSummary {
   /** Independent reward unit: this outcome does not change statement-history coverage. */
   readonly jpointCode?: JPointCollectionCode;
+  /** Independent acquisition-month history; never a statement coverage claim. */
+  readonly jpointHistoryCode?: JPointCollectionCode;
   readonly connectionId: string;
   readonly bootstrapMode: MyJcbCredential["bootstrapMode"];
   readonly status: "success" | "partial" | "failed" | "human-required";

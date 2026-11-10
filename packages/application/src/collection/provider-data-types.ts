@@ -94,10 +94,12 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
       ],
       444,
     ),
-    missing("document", 444),
-    collected("reward_balance", ["myjcb-jpoint-balance"]),
-    missing("reward_activity", 444),
-    partial("reward_expiry", ["myjcb-jpoint-balance"], 444),
+    // Finalised statement HTML and export offers are retained. Actual PDF/CSV
+    // bytes remain unverified after the browser blocked the observed download.
+    partial("document", ["myjcb-credit-statement-total"], 1251),
+    collected("reward_balance", ["myjcb-jpoint-balance", "myjcb-jpoint-history"]),
+    collected("reward_activity", ["myjcb-jpoint-history"]),
+    partial("reward_expiry", ["myjcb-jpoint-balance", "myjcb-jpoint-history"], 1251),
   ],
   // PRESTIA bank: account summary (native balances, term principal); deposit
   // activity, product details and the statement PDFs are not collected

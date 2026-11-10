@@ -7,6 +7,8 @@
 // that the converted parsers still produce exactly those observations and
 // warning strings, and additionally the typed issues and coverage claims.
 import { readFileSync } from "node:fs";
+import { myJcbJPointHistory } from "../src/parsers/myjcb-jpoint-history.ts";
+import { syntheticJPointHistory } from "./myjcb-jpoint-history-fixture.ts";
 import { join } from "node:path";
 import type { ArtifactMeta, Parser } from "../src/types.ts";
 import { sbiAccountAssetsCurrent } from "../src/parsers/sbi-account-assets-current.ts";
@@ -411,6 +413,12 @@ const BANKS: ContractParser[] = [
 ];
 
 export const CONTRACT_PARSERS: ContractParser[] = [
+  cases(myJcbJPointHistory, meta("myjcb", "jpoint-history", {
+    artifactKey: "synthetic/jpoint-history.json", fetchUnitKey: "synthetic:j-point-history",
+  }), {
+    "complete-rows": json(syntheticJPointHistory()),
+    "unreadable-container": json({}),
+  }),
   ...SBI_SECURITIES,
   ...SBI_VC,
   ...SBI_SHINSEI,

@@ -13,6 +13,8 @@ export type ReadOperation =
   | "credit-pdf"
   | "credit-past-json"
   | "jpoint-json"
+  | "jpoint-inquiry"
+  | "jpoint-history"
   | "debit-menu"
   | "debit-detail";
 
@@ -24,6 +26,15 @@ interface RoutePolicy {
 }
 
 const ACTIVE_ALLOWLIST: readonly RoutePolicy[] = [
+  {
+    operation: "jpoint-inquiry", method: "GET",
+    pathname: "/iss-pc/member/point/pointInquiry.html",
+    query: { link_id: /^myj_main_pointInquiry$/u },
+  },
+  {
+    operation: "jpoint-history", method: "GET",
+    pathname: "/iss-pc/member/point/pointHistoryInquiry.html",
+  },
   {
     operation: "jpoint-json",
     method: "POST",

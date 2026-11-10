@@ -288,3 +288,25 @@ The logged-out page in dedicated Kuebiko Chrome had unnamed text/password decoy 
 Both password and passkey appear as ordinary choices on the initial screen, so merely seeing `passkey` on the first page does not stop processing. `human-required` is used only if password submission fails to reach known mypage and the destination reveals passkey/OTP/secret-phrase requirements or similar.
 
 The seed in `login-prot.js?async` changes on every load; passkey/NNL SDK assets also have versioned scripts. The PoC hard-codes neither script source/version/seed nor commits raw captures. Observed versions and privacy boundaries are recorded in `docs/sources/myjcb.md`.
+## Acquisition-month point history and document gap
+
+Eligible J-POINT connections reuse the already collected total response, then
+follow the observed point-inquiry/history GET routes. The collector validates
+all three raw server-rendered tables once, keeps sanitized HTML and normalized
+JSON, and seals a separate `<connection>:j-point-history` unit. Monthly
+earned/used/expired period measures are distinct from acquisition-bucket
+remaining quantities; payment text and month-only expiry retain their precision.
+
+The history unit can be unavailable while the existing total/statement units
+remain usable. Unknown layouts/statuses, incomplete pages and cross-tab/total
+mismatches never produce zero or empty membership. Current reward holdings use
+the bucket set only when it matches the current total capture completely;
+otherwise the current total is shown with a dated history gap.
+
+Credit statement retention still follows provider-offered months and separate
+schedule groups. Export links are recorded only on confirmed statements.
+PDF/CSV/OFX bytes remain unverified and unfetched; a zero-artifact
+`statement-documents` unit records `statement_export_bytes_unverified`.
+No new file HTTP contract, root-card switch or authentication action is enabled.
+See [the source observation](../../docs/sources/myjcb.md) and
+[ADR 0107](../../docs/adr/0107-myjcb-point-history-and-document-boundary.md).
