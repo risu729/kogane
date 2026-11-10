@@ -79,11 +79,9 @@ for (const kind of [
     const historyText = {
       valid: original,
       precision: original.replace('"profitLoss":10', '"profitLoss":0.99999999999999999'),
-      duplicate: original.replace("{", '{"balances":{"accessToken":"SYNTHETIC_SENTINEL"},'),
-      "escaped-duplicate": original.replace(
-        "{",
-        '{"balanc\\u0065s":{"accessToken":"SYNTHETIC_SENTINEL"},',
-      ),
+      duplicate: '{"balances":{"accessToken":"SYNTHETIC_SENTINEL"},' + original.slice(1),
+      "escaped-duplicate":
+        '{"balanc\\u0065s":{"accessToken":"SYNTHETIC_SENTINEL"},' + original.slice(1),
       "nested-duplicate": original.replace(
         '"valuation":10',
         '"valuation":{"accessToken":"SYNTHETIC_SENTINEL"},"valuation":10',

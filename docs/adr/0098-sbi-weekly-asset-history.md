@@ -37,6 +37,9 @@ There was no production reader selecting portfolio valuation history.
 - Normal scheduled main-site collection makes the observed read-only
   `GET /account/api/assets/valuations`, using its existing cookies and referer.
   It adds no query, body, CSRF header, login or collection operation parameter.
+  Read the response stream under the same 16 MiB byte ceiling before assembling
+  the full body. Count actual chunks independently of Content-Length and cancel
+  on overflow; transport and cancellation errors retain closed codes only.
   A closed shape audit precedes storage; unknown fields/categories, unsupported
   positive iDeCo shapes or excessive point counts fail closed with static codes.
 - Preserve the audited full response's exact bytes as unmapped
@@ -139,6 +142,9 @@ root/nested duplicate-key cases and malformed decimal/exponent fragments are
 refused by both readers, the main-site acquisition path and the local Worker
 before storing any original response. Structural boundary tests cover byte,
 depth, numeric-token and node budgets.
+Transport tests accept an exact-limit body unchanged and cancel a 32 MiB stream
+after the first chunk beyond 16 MiB, including absent or understated
+Content-Length. Read/cancellation failures cannot expose provider error text.
 
 Synthetic parser tests cover conditional category membership, native tuple
 agreement, nulls, exact money, calendar/schema drift and stable logical keys.
