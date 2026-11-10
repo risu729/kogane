@@ -9,6 +9,7 @@ import { sbiShinseiMonthlyReport } from "../src/parsers/sbi-shinsei-monthly-repo
 // compared, never an id or a provider value.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import {
   TRANSACTION_FAMILY_REGISTRY,
@@ -38,6 +39,7 @@ import { sbiDomesticTradeRecords } from "../src/parsers/sbi-domestic-trade-recor
 import { sbiForeignCashPositions } from "../src/parsers/sbi-foreign-cash-positions.ts";
 import { sbiForeignTradeRecords } from "../src/parsers/sbi-foreign-trade-records.ts";
 import { sbiVcCashflows } from "../src/parsers/sbi-vc-cashflows.ts";
+import { sbiVcDocuments } from "../src/parsers/sbi-vc-documents.ts";
 import { sbiVcExecutions } from "../src/parsers/sbi-vc-executions.ts";
 import { sbiYenDetailHistory } from "../src/parsers/sbi-yen-detail-history.ts";
 import { smbcDirectTransactions } from "../src/parsers/smbc-direct.ts";
@@ -388,7 +390,21 @@ const CASES: Case[] = [
  * `NOT_IN_REGISTRY` is run at least once.
  */
 const MF_EVIDENCE = { fetchUnitKey: null, statementState: null, period: null, mime: "text/html" };
+const sbiVcDocumentBytes = encode("%PDF-1.7\nSynthetic private report\n%%EOF\n");
+const sbiVcDocumentHash = createHash("sha256").update(sbiVcDocumentBytes).digest("hex");
 const OUTSIDE_CASES: Case[] = [
+  one(
+    sbiVcDocuments,
+    "monthly-report-evidence",
+    meta("sbi-vc-trade", "monthly-report-pdf", {
+      mime: "application/pdf",
+      artifactKey: `monthly-report-20260930-${sbiVcDocumentHash}.pdf`,
+      fetchUnitKey: "monthly-report-20260930",
+      sha256: sbiVcDocumentHash,
+      fetchedAt: "2026-11-10T00:00:00Z",
+    }),
+    sbiVcDocumentBytes,
+  ),
   one(
     smbcForeignOrdinaryBalance,
     "foreign-balance",

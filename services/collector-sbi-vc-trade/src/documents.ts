@@ -394,10 +394,17 @@ const SAFE_REPORT_ERRORS = new Set([
   "invalid_artifact_dataset",
 ]);
 function safeError(error: unknown): string {
-  return error instanceof Error &&
-    (SAFE_REPORT_ERRORS.has(error.message) || /^collector_http_[1-5]\d{2}$/u.test(error.message))
-    ? error.message
-    : "report_collection_failed";
+  try {
+    const message: unknown = error instanceof Error ? error.message : undefined;
+    if (
+      typeof message === "string" &&
+      (SAFE_REPORT_ERRORS.has(message) || /^collector_http_[1-5]\d{2}$/u.test(message))
+    )
+      return message;
+  } catch {
+    // An exception accessor cannot escape the closed-code boundary.
+  }
+  return "report_collection_failed";
 }
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

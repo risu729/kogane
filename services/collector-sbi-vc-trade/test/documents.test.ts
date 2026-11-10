@@ -60,6 +60,7 @@ const apiCaptures: SharedCapture[] = [
 async function run(
   options: {
     badIndex?: boolean;
+    transportError?: unknown;
     annualOffered?: boolean;
     wrongMime?: boolean;
     zip?: Uint8Array;
@@ -81,6 +82,7 @@ async function run(
       artifacts.push(artifact);
     },
     fetcher: async (_input, init) => {
+      if (options.transportError !== undefined) throw options.transportError;
       const request = JSON.parse(String(init?.body)) as {
         event: string;
         data: Record<string, unknown>;
@@ -204,6 +206,40 @@ describe("SBI VC observed document reads", () => {
       expect(output.artifacts.some((artifact) => artifact.dataset === "pnl-data-zip")).toBe(true);
     }
   });
+  test("changing, throwing and nonstring exception accessors cannot escape closed report codes", async () => {
+    const privateText = "synthetic-private-provider-text";
+    const fallback = "report_collection_failed";
+    for (const scenario of [
+      {
+        value: (read: number) => (read === 1 ? "collector_http_503" : privateText),
+        expected: ["collector_http_503", fallback, fallback],
+      },
+      {
+        value: () => {
+          throw new Error(privateText);
+        },
+        expected: [fallback, fallback, fallback],
+      },
+      {
+        value: () => ({
+          toString: () => {
+            throw new Error(privateText);
+          },
+        }),
+        expected: [fallback, fallback, fallback],
+      },
+    ]) {
+      let reads = 0;
+      const error = Object.defineProperty(new Error(), "message", {
+        get: () => scenario.value(++reads),
+      });
+      const output = await run({ now: new Date("2018-11-10T00:00:00Z"), transportError: error });
+      expect(reads).toBe(3);
+      expect(output.failures.map((failure) => failure.errorCode)).toEqual(scenario.expected);
+      expect(JSON.stringify(output)).not.toContain(privateText);
+    }
+  });
+
   test("an offered annual report stays raw and partial without guessing its download", async () => {
     const output = await run({ annualOffered: true });
     expect(output.units.find((unit) => unit.unitKey === "report-annual-index")).toMatchObject({
