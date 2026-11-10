@@ -30,6 +30,7 @@ import {
   queryCardSettlements,
   queryRelatedCardSettlements,
 } from "./card-settlements.ts";
+import { pageBeyondBudget, withinBudget } from "./page-budget.ts";
 
 /** A proposal id, as the pages and the tools name a candidate. */
 export const CARD_SETTLEMENT_PROPOSAL_ID = /^[A-Za-z0-9_-]{1,128}$/u;
@@ -70,9 +71,11 @@ function refusal(
  * malformed request, an `offset` that is not an integer from 0 to
  * `CARD_SETTLEMENTS_MAX_OFFSET` included, is `invalid_query`. The grant's
  * `maxRows` bounds how deep a caller pages: `offset + 50` (one for a
- * `proposalId` read) above it is `budget_exceeded`, before any read. The page
- * route's reader grant and every MCP client's grant hold the same
- * `maxRows` (`GRANT_LIMITS.maxRows`), so both refuse alike. A `proposalId` or
+ * `proposalId` read) above it is `budget_exceeded`, before any read, and by
+ * the same rule an answer never offers such a page: its `nextOffset` is then
+ * null and `nextPage` says `budget_exceeded`. The page route's reader grant
+ * and every MCP client's grant hold the same `maxRows`
+ * (`GRANT_LIMITS.maxRows`), so both refuse and offer alike. A `proposalId` or
  * `relatedTo` that names no candidate is `not_found`.
  */
 export async function readCardSettlementsForGrant(input: {
@@ -120,8 +123,11 @@ export async function readCardSettlementsForGrant(input: {
     (relatedTo !== undefined && !CARD_SETTLEMENT_PROPOSAL_ID.test(relatedTo))
   )
     return invalid;
-  const reach = proposalId === undefined ? (offset ?? 0) + CARD_SETTLEMENT_PAGE_SIZE : 1;
-  if (reach > input.grant.budget.maxRows)
+  if (
+    proposalId === undefined
+      ? pageBeyondBudget(offset ?? 0, CARD_SETTLEMENT_PAGE_SIZE, input.grant)
+      : pageBeyondBudget(0, 1, input.grant)
+  )
     return {
       status: "refused",
       error: financialError("budget_exceeded", "card-settlements.read", [
@@ -132,7 +138,9 @@ export async function readCardSettlementsForGrant(input: {
     const related = await queryRelatedCardSettlements(input.sql, relatedTo, {
       offset: offset ?? 0,
     });
-    return related ? { status: "ok", answer: related } : { status: "not_found" };
+    return related
+      ? { status: "ok", answer: withinBudget(related, CARD_SETTLEMENT_PAGE_SIZE, input.grant) }
+      : { status: "not_found" };
   }
   const page = await queryCardSettlements(input.sql, {
     offset: offset ?? 0,
@@ -140,7 +148,7 @@ export async function readCardSettlementsForGrant(input: {
     ...(statementKey === undefined ? {} : { statementKey }),
   });
   if (proposalId !== undefined && page.items.length === 0) return { status: "not_found" };
-  return { status: "ok", answer: page };
+  return { status: "ok", answer: withinBudget(page, CARD_SETTLEMENT_PAGE_SIZE, input.grant) };
 }
 
 /**
@@ -149,7 +157,8 @@ export async function readCardSettlementsForGrant(input: {
  * Every malformed request, an `offset` that is not an integer from 0 to
  * `CARD_SETTLEMENTS_MAX_OFFSET` included, is `invalid_query`. The grant's
  * `maxRows` bounds how deep a caller pages: `offset + 10` (the statements a
- * page holds) above it is `budget_exceeded`, before any read. A page past the
+ * page holds) above it is `budget_exceeded`, before any read, and an answer
+ * never offers such a page (`nextPage: "budget_exceeded"`). A page past the
  * last statement is an empty page, never `not_found`.
  */
 export async function readCardSettlementStatementsForGrant(input: {
@@ -177,14 +186,21 @@ export async function readCardSettlementStatementsForGrant(input: {
       status: "refused",
       error: financialError("invalid_query", "card-settlements.statements", ["request"]),
     };
-  if (offset + CARD_SETTLEMENT_STATEMENT_PAGE_SIZE > input.grant.budget.maxRows)
+  if (pageBeyondBudget(offset, CARD_SETTLEMENT_STATEMENT_PAGE_SIZE, input.grant))
     return {
       status: "refused",
       error: financialError("budget_exceeded", "card-settlements.statements", [
         `budget:maxRows=${String(input.grant.budget.maxRows)}`,
       ]),
     };
-  return { status: "ok", answer: await queryCardSettlementStatements(input.sql, { offset }) };
+  return {
+    status: "ok",
+    answer: withinBudget(
+      await queryCardSettlementStatements(input.sql, { offset }),
+      CARD_SETTLEMENT_STATEMENT_PAGE_SIZE,
+      input.grant,
+    ),
+  };
 }
 
 /** The ownership review of one candidate, as `口座の保有者と根拠を確認` reads it. */

@@ -53,6 +53,7 @@ export interface ForeignSession {
 }
 
 export interface Artifact {
+  artifactKey?: string;
   dataset: string;
   mediaType: "application/json";
   body: unknown;

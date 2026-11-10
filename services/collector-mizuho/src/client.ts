@@ -13,6 +13,7 @@ type History = ReturnType<typeof parseHistoryPage>;
 type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
 const ACCOUNT_ROUTE = "/servlet/MENSRV0100002B.do";
 const HISTORY_ROUTE = "/servlet/BALINQ0301002B.do";
+const HISTORY_PERIOD_ROUTE = "/servlet/ACCHST0411009B.do";
 const CORE = ["_FRAMEID", "_TARGETID", "_LUID", "_TOKEN", "_FORMID", "_SUBINDEX", "POSTKEY"];
 const FIELDS = new Set([
   ...CORE,
@@ -105,6 +106,7 @@ export const MIZUHO_CLIENT_ERROR_CODES = [
   "invalid-session-json",
   "collection-timeout",
   "invalid-history-transition",
+  "invalid-history-period",
   "read-network-error",
   "read-http-error",
   "unexpected-response-type",
@@ -475,6 +477,40 @@ function redirectUrl(location: string | null, target: string, origin: string): s
   return next.href;
 }
 
+/** Use the bank's query-day control, never a transaction date or caller-supplied window. */
+function retainedHistoryFields(form: MizuhoFormState): Record<string, string> {
+  const value = form.fields.txtThisDay;
+  if (form.name !== "ACCHST_04110B" || !value || !/^\d{8}$/u.test(value))
+    fail("invalid-history-period");
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(4, 6));
+  const day = Number(value.slice(6, 8));
+  const end = new Date(Date.UTC(year, month - 1, day));
+  if (
+    year < 2000 ||
+    end.getUTCFullYear() !== year ||
+    end.getUTCMonth() + 1 !== month ||
+    end.getUTCDate() !== day
+  )
+    fail("invalid-history-period");
+  // The observed selector exposes this month and the preceding two calendar months.
+  const start = new Date(Date.UTC(year, month - 3, 1));
+  return {
+    rdoPopDate: "4",
+    rdoPopDaw: "0",
+    txbSearchWord: "",
+    lstDateFromYear: String(start.getUTCFullYear()),
+    lstDateFromMonth: String(start.getUTCMonth() + 1),
+    lstDateFromDay: "1",
+    lstDateToYear: String(year),
+    lstDateToMonth: String(month),
+    lstDateToDay: String(day),
+  };
+}
+function matchesHistoryPeriod(form: MizuhoFormState, fields: Record<string, string>): boolean {
+  return Object.entries(fields).every(([key, value]) => form.fields[key] === value);
+}
+
 /** No login, retries, export/download, guessed pagination, or bank-write endpoints. */
 export async function collectMizuho(options: {
   session: MizuhoSession;
@@ -521,8 +557,9 @@ export async function collectMizuho(options: {
   });
   const cookieHeader = () => [...cookies].map(([key, value]) => `${key}=${value}`).join("; ");
   async function request(
-    route: typeof ACCOUNT_ROUTE | typeof HISTORY_ROUTE,
+    route: typeof ACCOUNT_ROUTE | typeof HISTORY_ROUTE | typeof HISTORY_PERIOD_ROUTE,
     index = "",
+    periodFields?: Record<string, string>,
   ): Promise<string> {
     if (controller.signal.aborted) fail("collection-timeout");
     if (
@@ -530,7 +567,17 @@ export async function collectMizuho(options: {
       (state.name !== "BALINQ_03010B" || !/^(0|[1-9]\d{0,2})$/u.test(index))
     )
       fail("invalid-history-transition");
-    const fields = { ...state.fields, _SUBINDEX: index, _TARGETID: state.fields._FRAMEID! };
+    if (
+      route === HISTORY_PERIOD_ROUTE &&
+      (state.name !== "ACCHST_04110B" || index !== "" || !periodFields)
+    )
+      fail("invalid-history-transition");
+    const fields = {
+      ...state.fields,
+      ...(route === HISTORY_PERIOD_ROUTE ? periodFields : {}),
+      _SUBINDEX: index,
+      _TARGETID: state.fields._FRAMEID!,
+    };
     const target = origin + route;
     let url = target;
     let body: string | undefined = encodeForm(fields);
@@ -678,7 +725,19 @@ export async function collectMizuho(options: {
       const readIndex = readIndexes.get(account.sourceIndex);
       if (readIndex === undefined) fail("invalid-account-read-event");
       options.onPhase?.("history");
-      const html = sanitizeMizuhoPage(await request(HISTORY_ROUTE, readIndex));
+      let rawHistory = await request(HISTORY_ROUTE, readIndex);
+      const periodFields = retainedHistoryFields(state);
+      // Reuse a page only when its echoed controls already cover the entire observed window.
+      if (!matchesHistoryPeriod(state, periodFields))
+        rawHistory = await request(HISTORY_PERIOD_ROUTE, "", periodFields);
+      if (
+        !matchesHistoryPeriod(state, periodFields) ||
+        !Object.entries(retainedHistoryFields(state)).every(
+          ([key, value]) => periodFields[key] === value,
+        )
+      )
+        fail("invalid-history-period");
+      const html = sanitizeMizuhoPage(rawHistory);
       const prefix = `ordinary/${account.branchCode}-${account.accountNumber}`;
       let history: History;
       try {

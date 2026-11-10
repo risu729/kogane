@@ -2,11 +2,14 @@
 // an adapter over `readCardSettlementStatementsForGrant`, against the handler
 // it replaced (`card-settlements-api-frozen.ts`), on a store of 1,002
 // statements: every page the reader grant's budget reaches (offsets 0 to 990)
-// is byte-identical, and the pages past it, which the frozen handler served,
-// are `413 budget_exceeded` (docs/card-settlements.md, Agent reads). The
+// is byte-identical but for the last pages, which withhold a next page past
+// the budget (`nextOffset: null`, `nextPage: "budget_exceeded"`) where the
+// frozen handler named it, and the pages past it, which the frozen handler
+// served, are `413 budget_exceeded` (docs/card-settlements.md, Agent reads). The
 // malformed requests are compared in `card-settlements-api-differential.test.ts`.
 // Native Worker/D1 only; no production data.
 import { beforeAll, describe, expect, it } from "vitest";
+import { cardSettlementsApi } from "../src/card-settlements-api";
 import { frozenCardSettlementsApi } from "./card-settlements-api-frozen";
 import { answer, compare, PATH, seedCandidates } from "./card-settlements-differential-store";
 
@@ -52,13 +55,35 @@ describe("the grouped card settlement list as an adapter over the shared service
         page(1),
         page(489),
       ]),
-    ).toEqual({ same: 53, invalid: 0, budget: 0, groupedBudget: 0, groupedPages: 53 });
+    ).toEqual({
+      same: 53,
+      invalid: 0,
+      budget: 0,
+      groupedBudget: 0,
+      groupedPages: 53,
+      withheld: 0,
+    });
   });
 
   it("serves the rest up to offset 990 as the frozen handler did, and refuses past it", async () => {
+    // Offsets 989 and 990 named a next page (999, 1000) the budget refuses;
+    // they withhold it now. Offset 980 still offers 990, the last page read.
     expect(
       await compare([...Array.from({ length: 50 }, (_, n) => page(500 + n * 10)), page(989)]),
-    ).toEqual({ same: 51, invalid: 0, budget: 0, groupedBudget: 0, groupedPages: 51 });
+    ).toEqual({
+      same: 51,
+      invalid: 0,
+      budget: 0,
+      groupedBudget: 0,
+      groupedPages: 51,
+      withheld: 2,
+    });
+    const last = (await answer(cardSettlementsApi, page(990)))!;
+    expect(JSON.parse(last.body)).toMatchObject({ nextOffset: null, nextPage: "budget_exceeded" });
+    expect(JSON.parse((await answer(cardSettlementsApi, page(980)))!.body)).toMatchObject({
+      nextOffset: 990,
+      nextPage: "offered",
+    });
     // Every page past the budget held statements before and is refused now.
     const deep = [991, 995, 1000];
     for (const offset of deep) {
@@ -71,6 +96,7 @@ describe("the grouped card settlement list as an adapter over the shared service
       budget: 5,
       groupedBudget: 5,
       groupedPages: 0,
+      withheld: 0,
     });
   });
 });

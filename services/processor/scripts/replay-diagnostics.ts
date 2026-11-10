@@ -21,6 +21,7 @@ import { parseCsv } from "../../../packages/parsers/src/parsers/util.ts";
 import { decimalText } from "../../../packages/parsers/src/parsers/util.ts";
 import {
   classifyParserRejection,
+  classifySbiCashIssue,
   GLOBAL_PASS_ACTIVITY_PARSER,
   GLOBAL_PASS_SELECTION,
   globalPassActivityShape,
@@ -144,6 +145,13 @@ for (const row of rows) {
         parser: parser.name,
         result: "ok",
         observations: parsed.observations.length,
+        ...(parser.name === "sbi-foreign-cash-balances"
+          ? {
+              issues: (parsed.issues ?? [])
+                .filter((issue) => issue.impact === "membership")
+                .map(classifySbiCashIssue),
+            }
+          : {}),
       }),
     );
     parsedCount++;

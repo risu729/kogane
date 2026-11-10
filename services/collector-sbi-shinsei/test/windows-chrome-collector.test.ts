@@ -23,6 +23,14 @@ describe("SBI Shinsei same-Chrome-context handoff", () => {
     expect(result.normalized?.balances).toHaveLength(2);
     expect(result.normalized?.transactions).toHaveLength(1);
     expect(result.failures).toEqual([]);
+    const summary = result.artifacts.find(
+      (artifact) => artifact.dataset === "balance-summary-and-stage",
+    );
+    expect(typeof summary?.body).toBe("string");
+    expect(JSON.parse(summary!.body as string).responseParam.summary.responseParam).toMatchObject({
+      hyperDepositBalance: "12345.67",
+      yenDepositBalance: "89012.34",
+    });
   });
 
   test("preserves a validated prefix when a later provider read fails", async () => {
