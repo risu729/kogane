@@ -862,7 +862,8 @@ buttons are JavaScript additions and are not parser selectors.
   `div.js-toggle-content > dl.detail` with DT/DD pairs for
   `通常獲得ポイント / 優遇ポイント / ボーナスポイント`.
   All 27 totals and 81 component DDs were plain signed ASCII integer text,
-  without commas, suffixes or empty values. The raw third
+  without commas, suffixes or empty values. All 27 displayed totals matched
+  the exact sum of their three displayed components. The raw third
   `td.js-toggle-item` contains `開く` as text, not a generated button.
 - Expiry headers: `獲得月（支払月） / 失効予定ポイント / 失効予定月 /
   ステータス`. Quantity, month and status cells are plain text. Every

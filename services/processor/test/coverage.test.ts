@@ -412,6 +412,18 @@ test("the comparison route reports counts, ids and policies only", async () => {
       updated_at_ms: 1791590400000,
     },
     {
+      source_id: "myjcb",
+      dataset: "jpoint-history",
+      parser_name: "myjcb-jpoint-history",
+      policy_id: "coverage-v1",
+      policy_version: 1,
+      required_parser_version: "1.0.1",
+      replaces_previous_on_complete_empty: 0,
+      unit_scope: "unit",
+      snapshot_selection: 1,
+      updated_at_ms: 1794268800000,
+    },
+    {
       source_id: "sbi-shinsei-bank",
       dataset: "monthly-report-pdf",
       parser_name: "sbi-shinsei-monthly-report-metadata",

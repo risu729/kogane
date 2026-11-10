@@ -46,6 +46,7 @@ function captured(
     kind: "published",
     version: "1.0.1",
   });
+  if (totalParse === null) throw new Error("synthetic_total_parse_missing");
   const sourceAccount = `myjcb:${conn}:j-point:total`;
   const insert = (parse: number, account: string, metric: string, amount: string, extra = "{}") =>
     (
@@ -76,11 +77,13 @@ function captured(
   const remaining: { fact: number; amount: string; account: string }[] = [];
   let historyParse: number | undefined;
   if (history) {
-    historyParse = s.parse(r.artifacts[1]!, myJcbJPointHistory.name, {
+    const publishedHistory = s.parse(r.artifacts[1]!, myJcbJPointHistory.name, {
       kind: "published",
       version: myJcbJPointHistory.version,
       claim: { completeness: "complete", observed: history.rows.length * 4 },
     });
+    if (publishedHistory === null) throw new Error("synthetic_history_parse_missing");
+    historyParse = publishedHistory;
     const parsed = myJcbJPointHistory.parse(new TextEncoder().encode(JSON.stringify(history)), {
       id: r.artifacts[1]!,
       sourceId: "myjcb",
@@ -97,7 +100,7 @@ function captured(
     for (const observation of parsed.observations) {
       if (observation.kind !== "balance") throw new Error("synthetic balance expected");
       const fact = insert(
-        historyParse,
+        publishedHistory,
         observation.sourceAccount,
         observation.metric,
         observation.amountText!,
