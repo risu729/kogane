@@ -25,6 +25,8 @@ Persist the core, realised and document results as separate terminal runs sharin
 
 The existing parser output cap stays unchanged and long detail history cannot enlarge annual output. Annual summaries remain revisioned evidence without inventing a transaction ID or cash income. Optional document limitations cannot block independent core publication. Generic standalone valuation-history API exposure is a separate integration boundary; these observations are published and inspectable through artifact evidence.
 
+The local SQLite evidence experiment installs the same annual-container and PDF eligibility policies from migration 0089 only when their rows are absent; reopening preserves explicit operator choices. Its current-valuation queries verify year-scoped replacement, rollover retention, rejected revisions and independently empty years.
+
 ## Verification
 
 Synthetic fixtures check exact annual values, year/unit identity, schema/count refusal, bounded parse output, scheduled multi-run results, PDF magic and document completeness limits. Shared DATA persistence and publication tests exercise production code and the actual snapshot selector, including repeated runs and rollover. No production collection, login, deployment or private-data query is part of this change.

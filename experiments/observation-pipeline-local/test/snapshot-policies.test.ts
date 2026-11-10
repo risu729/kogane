@@ -25,6 +25,7 @@ import {
   closeStores,
   database,
   EXPLICIT_COVERAGE,
+  RETAIN_ON_EMPTY,
   facts,
   snapshot,
 } from "./snapshot-fixture.ts";
@@ -136,6 +137,13 @@ describe("dataset_snapshot_policies seed", () => {
           "../../../packages/storage-d1/migrations/core/0066_prestia_bank_snapshot_schedule.sql",
         ),
         "utf8",
+      ) +
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0089_sony_realised_gains_snapshot.sql",
+        ),
+        "utf8",
       );
     for (const [parser, dataset] of SNAPSHOT_DATASETS) {
       expect(sql).toContain("'" + dataset + "'");
@@ -147,19 +155,23 @@ describe("dataset_snapshot_policies seed", () => {
     for (const row of policyRows(database())) {
       const stGeorge = row.parser_name === "st-george-balances";
       const prestia = row.parser_name === "prestia-bank-balances";
-      const explicit = EXPLICIT_COVERAGE.has(row.parser_name);
+      const metadata = row.parser_name === "sony-bank-document-metadata";
+      const explicit = metadata || EXPLICIT_COVERAGE.has(row.parser_name);
       expect(row.policy_id).toBe(explicit ? "coverage-v1" : LEGACY_SNAPSHOT_POLICY);
       expect(row.policy_version).toBe(1);
-      // D13/PR-14: every seeded dataset stays on the run scope and stays a
-      // container-snapshot dataset. Enabling `unit-independent-v1` is an
-      // operator write, never a deploy.
-      expect(row.unit_scope).toBe("run");
-      expect(row.snapshot_selection).toBe(1);
-      expect(row.replaces_previous_on_complete_empty).toBe(explicit ? 0 : 1);
+      // Sony PDF metadata alone is eligibility-only and unit scoped; annual
+      // summaries remain run-scoped complete containers, partitioned by year.
+      expect(row.unit_scope).toBe(metadata ? "unit" : "run");
+      expect(row.snapshot_selection).toBe(metadata ? 0 : 1);
+      expect(row.replaces_previous_on_complete_empty).toBe(
+        RETAIN_ON_EMPTY.has(row.parser_name) ? 0 : 1,
+      );
       expect(row.required_parser_version).toBe(
         row.parser_name === "sbi-foreign-cash-positions"
           ? FOREIGN_POSITION_SNAPSHOT_VERSION
-          : (EXPLICIT_COVERAGE.get(row.parser_name) ?? null),
+          : metadata
+            ? "1.0.0"
+            : (EXPLICIT_COVERAGE.get(row.parser_name) ?? null),
       );
       // The declared owner source is the one the parser accepts.
       const parser = PARSERS.find((candidate) => candidate.name === row.parser_name)!;
@@ -171,7 +183,7 @@ describe("dataset_snapshot_policies seed", () => {
           runFailureCount: 0,
           dataset: row.dataset,
           url: null,
-          mime: prestia ? "text/html" : "application/json",
+          mime: metadata ? "application/pdf" : prestia ? "text/html" : "application/json",
           fetchedAt: "2026-09-07T00:00:00.000Z",
           sha256: "0".repeat(64),
           artifactKey: prestia
@@ -222,7 +234,7 @@ describe("shadow comparison of legacy-warning-compat-v1 and coverage-v1", () => 
       snapshot(store, { parser, dataset, observations: facts(parser, "NEW"), coverage: {} });
       // St.George has no verified empty portfolio state and the FX board is
       // never empty, so neither replaces membership from an empty projection.
-      if (!EXPLICIT_COVERAGE.has(parser))
+      if (!RETAIN_ON_EMPTY.has(parser))
         snapshot(store, { parser, dataset, unit: "u", observations: [], coverage: {} });
     }
     // Harmless warnings on the tolerant parsers: both policies keep the parse.
@@ -259,7 +271,7 @@ describe("shadow comparison of legacy-warning-compat-v1 and coverage-v1", () => 
       coverage: parsed.coverage![0]!,
     });
     const rows = compare(store);
-    expect(rows.length).toBe(SNAPSHOT_DATASETS.length * 2 - EXPLICIT_COVERAGE.size);
+    expect(rows.length).toBe(SNAPSHOT_DATASETS.length * 2 - RETAIN_ON_EMPTY.size);
     expect(differing(rows)).toEqual([]);
     expect(rows.every((row) => row.legacy_artifact_id !== null)).toBe(true);
   }, 30_000);
@@ -390,8 +402,59 @@ describe("eligibility-only policy rows", () => {
       )
       .all() as { parser_name: string }[];
     expect(registry.map((row) => row.parser_name)).not.toContain(MYJCB.parser);
+    expect(registry.map((row) => row.parser_name)).not.toContain("sony-bank-document-metadata");
     expect(registry).toHaveLength(SNAPSHOT_DATASETS.length);
     // The shadow comparison is unchanged too: it reads the same CTEs.
     expect(compare(store)).toEqual([]);
   });
+});
+
+test("reopening installs Sony policies once and preserves explicit operator alternatives", () => {
+  const store = database();
+  const sony = () =>
+    store.db
+      .query(
+        "SELECT parser_name,policy_id,required_parser_version,unit_scope,snapshot_selection,replaces_previous_on_complete_empty FROM dataset_snapshot_policies WHERE source_id='sony-bank' AND parser_name IN ('sony-bank-realised-gains','sony-bank-document-metadata') ORDER BY parser_name",
+      )
+      .all();
+  expect(sony()).toEqual([
+    {
+      parser_name: "sony-bank-document-metadata",
+      policy_id: "coverage-v1",
+      required_parser_version: "1.0.0",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+      replaces_previous_on_complete_empty: 1,
+    },
+    {
+      parser_name: "sony-bank-realised-gains",
+      policy_id: "coverage-v1",
+      required_parser_version: "1.0.0",
+      unit_scope: "run",
+      snapshot_selection: 1,
+      replaces_previous_on_complete_empty: 1,
+    },
+  ]);
+  store.db.exec(
+    "UPDATE dataset_snapshot_policies SET required_parser_version='9.0.0' WHERE parser_name='sony-bank-realised-gains'; UPDATE dataset_snapshot_policies SET unit_scope='run' WHERE parser_name='sony-bank-document-metadata'",
+  );
+  const reopened = openTestStore(join(store.blobDir, ".."));
+  try {
+    expect(
+      reopened.db
+        .query(
+          "SELECT required_parser_version FROM dataset_snapshot_policies WHERE parser_name='sony-bank-realised-gains'",
+        )
+        .get(),
+    ).toEqual({ required_parser_version: "9.0.0" });
+    expect(
+      reopened.db
+        .query(
+          "SELECT unit_scope,snapshot_selection FROM dataset_snapshot_policies WHERE parser_name='sony-bank-document-metadata'",
+        )
+        .get(),
+    ).toEqual({ unit_scope: "run", snapshot_selection: 0 });
+  } finally {
+    reopened.db.close();
+  }
 });
