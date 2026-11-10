@@ -189,3 +189,20 @@ test("schema, unknown codes, numeric rounding, totals, dates and pagination fail
     ).toThrow(/sbi_cash_history_/u);
   }
 });
+
+test("malformed private JSON fragments are absent from the closed error and its causes", () => {
+  for (const raw of [
+    '{"synthetic-private-token":"\\uQQQQ"}',
+    '{"synthetic-private-token":"unterminated}',
+  ]) {
+    try {
+      parseCashHistoryJson(raw);
+      throw new Error("invalid input unexpectedly accepted");
+    } catch (error) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe("sbi_cash_history_schema");
+      expect((error as Error).cause).toBeUndefined();
+      expect(String(error)).not.toContain("synthetic-private-token");
+    }
+  }
+});

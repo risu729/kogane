@@ -142,7 +142,7 @@ export async function collectMainSiteArtifacts(options: {
       const error =
         cause instanceof CashHistoryError
           ? cause
-          : new CashHistoryError("sbi_cash_history_fetch_failed", { cause });
+          : new CashHistoryError("sbi_cash_history_fetch_failed");
       if (options.onCashHistoryError === undefined) throw error;
       options.onCashHistoryError(error);
     }

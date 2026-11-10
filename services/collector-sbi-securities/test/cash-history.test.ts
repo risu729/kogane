@@ -149,13 +149,9 @@ test("unobserved USD continuation fails closed after keeping only the known-sche
   expect(calls).toEqual([1]);
   expect(retained).toHaveLength(1);
   expect(retained[0]!.role).toBe("provider_response");
-  expect(
-    safeFailureCode(
-      new CashHistoryError("sbi_foreign_cash_pagination_unobserved", {
-        cause: new Error("synthetic-private"),
-      }),
-    ),
-  ).toBe("sbi_foreign_cash_pagination_unobserved");
+  expect(safeFailureCode(new CashHistoryError("sbi_foreign_cash_pagination_unobserved"))).toBe(
+    "sbi_foreign_cash_pagination_unobserved",
+  );
 });
 
 test("unknown fields and private error envelopes never enter raw financial storage", async () => {

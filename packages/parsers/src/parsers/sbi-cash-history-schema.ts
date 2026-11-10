@@ -27,11 +27,9 @@ export type CashHistoryCode =
   | "sbi_cash_history_source_inventory"
   | "sbi_foreign_cash_pagination_unobserved";
 export class CashHistoryError extends Error {
-  constructor(
-    readonly code: CashHistoryCode,
-    options?: ErrorOptions,
-  ) {
-    super(code, options);
+  constructor(readonly code: CashHistoryCode) {
+    // Native decoder causes may contain a provider response fragment.
+    super(code);
   }
 }
 export interface CashHistoryBundle {
@@ -103,8 +101,8 @@ export function parseCashHistoryJson(text: string): unknown {
         throw new CashHistoryError("sbi_cash_history_schema");
     }
     return parsed;
-  } catch (cause) {
-    throw new CashHistoryError("sbi_cash_history_schema", { cause });
+  } catch {
+    throw new CashHistoryError("sbi_cash_history_schema");
   }
 }
 
@@ -126,8 +124,8 @@ function object(value: unknown, keys: readonly string[]): Record<string, unknown
     const result = strictObject(value, "cash history");
     exactKeys(result, keys, "cash history");
     return result;
-  } catch (cause) {
-    throw new CashHistoryError("sbi_cash_history_schema", { cause });
+  } catch {
+    throw new CashHistoryError("sbi_cash_history_schema");
   }
 }
 function integer(value: unknown, minimum = 0, maximum = 20_000): number {
@@ -331,6 +329,6 @@ export function validateCashHistory(value: unknown, kind: CashHistoryKind): Cash
     return bundle as unknown as CashHistoryBundle;
   } catch (cause) {
     if (cause instanceof CashHistoryError) throw cause;
-    throw new CashHistoryError("sbi_cash_history_schema", { cause });
+    throw new CashHistoryError("sbi_cash_history_schema");
   }
 }

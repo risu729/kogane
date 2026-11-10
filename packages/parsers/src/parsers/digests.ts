@@ -79,7 +79,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/sbi-asset-history-validation.ts":
       "9a9dec469cd4a4d7d70b8bc9b9b52d9ef9dae5e965b036e1d89be5138101a86a",
     "poc/observation-pipeline/src/parsers/sbi-cash-history-schema.ts":
-      "3f5e80cb944ff03b9b3f52d2d2ece88bfc27eb4f41c803360871e45f66bc96cd",
+      "4be6f5ef746b5974167b8743527982db37e067d473b5e63c9b089ffdd68da62f",
     "poc/observation-pipeline/src/parsers/sbi-cash-history.ts":
       "060c7284831cf117010cf1dfbf9424478f78ad70a63940d1c44d3cb16bf4bfc8",
     "poc/observation-pipeline/src/parsers/sbi-domestic-cash-positions.ts":
@@ -89,7 +89,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/sbi-foreign-cash-balances.ts":
       "fd209ca769992b05d77a4c18b12b1626806e765f08bb7842314a20372c6ea9b8",
     "poc/observation-pipeline/src/parsers/sbi-foreign-cash-history.ts":
-      "ba9ac0c7bf6ff04fb76fd47c21a08782a6f73880cce4e46be2363c9e45659d1e",
+      "125a48f1e9fa8a4198f051d06de99122c977a1bfcf7833b43fa35f7c391bc827",
     "poc/observation-pipeline/src/parsers/sbi-foreign-cash-positions.ts":
       "78cd220292407b31e78c4987491ad12c72ea000cb37213512344a32babd85cc1",
     "poc/observation-pipeline/src/parsers/sbi-foreign-trade-records.ts":
@@ -121,7 +121,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/sbi-vc-position-summary.ts":
       "09b08a920f3e35f3814e2ddafff46b8f54b8e5ed1fffbdc41614f6e0d87a6ca2",
     "poc/observation-pipeline/src/parsers/sbi-yen-detail-history.ts":
-      "54178fc546aeff72deef6b133f8c307aaedc47bd01804741c74763c0a8e09a5b",
+      "a02fb0a186a314472cdeae1b34e6fcc65be6676b5cfc99a6e7a7d3d8430142f9",
     "poc/observation-pipeline/src/parsers/smbc-direct.ts":
       "93a3e72b94400fe1e2fd2afb56b42a9f88bcc1c449b0ab47197377962bb7b511",
     "poc/observation-pipeline/src/parsers/sony-bank.ts":
@@ -479,8 +479,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-foreign-cash-history": {
-      version: "0.1.0",
-      codeDigest: "615d0cf8b30a5672f510ce360e70a6937100e9db03258df46ede20f16a569e63",
+      version: "0.1.1",
+      codeDigest: "4bf62de3f0c11dc9346fa0a6dbff83ca61d2ecea7c5c1509325f08e36f6904ac",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -663,8 +663,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-yen-detail-history": {
-      version: "1.1.0",
-      codeDigest: "c7b5cf5492c4fd0e2eaecbd54b0cbed4a7652c22516c93e8583decf157028692",
+      version: "1.1.1",
+      codeDigest: "8888f30231c7275b22c8e2741d9146c6c9d268ba6f1b14d64602498539a55d48",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

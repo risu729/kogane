@@ -61,7 +61,7 @@ const RECORD_KEYS = [
 
 export const sbiYenDetailHistory: Parser = {
   name: "sbi-yen-detail-history",
-  version: "1.1.0",
+  version: "1.1.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "yen-detail-history";
