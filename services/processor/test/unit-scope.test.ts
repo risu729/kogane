@@ -1,6 +1,6 @@
 // Unit-scoped partial-run eligibility in the production Worker (design review
 // D13, PR-14, policy `unit-independent-v1`). Migration 0037 applies on top of
-// 0017-0036; the seeded state is unchanged run-scope behaviour; a policy row on
+// 0017-0036; later explicit opt-ins leave other sources run-scoped. A policy row on
 // the `unit` scope lets a proven fetch unit of a partial run be parsed and
 // adopted while its failed sibling keeps its previous evidence; a gap inside
 // one unit still blocks adoption; and setting the row back to `run` restores
@@ -10,6 +10,7 @@ import type { Miniflare } from "miniflare";
 import { sweep } from "../src/worker.ts";
 import { publishParse, seedUnitRun, setUnitScope, startPipeline } from "./harness.ts";
 import { SNAPSHOT_DATASETS, snapshotCtes } from "../../../packages/parsers/src/snapshot-query.ts";
+import { SBI_VC_UNIT_POLICIES } from "./sbi-vc-policy-fixture.ts";
 
 // The reader's relations on the production schema (packages/read-model concepts).
 const RELATIONS = {
@@ -63,7 +64,7 @@ const rescan = async () => {
   await sweep(env);
 };
 
-test("0037 preserves prior run-scoped containers beside the explicit J-POINT unit policy", async () => {
+test("explicit unit policies preserve other run-scoped containers and strict partial-run exclusion", async () => {
   expect(
     await first<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type='view' AND name='observation_fetch_artifact_units'",
@@ -82,7 +83,11 @@ test("0037 preserves prior run-scoped containers beside the explicit J-POINT uni
   expect(containers.map(({ parser_name, dataset }) => [parser_name, dataset])).toEqual(
     SNAPSHOT_DATASETS.map(([parserName, dataset]) => [parserName, dataset]).sort(),
   );
-  expect(containers.every((row) => row.unit_scope === "run")).toBe(true);
+  expect(
+    containers
+      .filter((row) => row.source_id !== "sbi-vc-trade")
+      .every((row) => row.unit_scope === "run"),
+  ).toBe(true);
   expect(
     policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
   ).toEqual([
@@ -100,6 +105,7 @@ test("0037 preserves prior run-scoped containers beside the explicit J-POINT uni
       unit_scope: "unit",
       snapshot_selection: 0,
     },
+    ...SBI_VC_UNIT_POLICIES,
   ]);
 
   // A partial run under the seeded policy: no job, no parse, for either unit.
@@ -283,6 +289,7 @@ test("the comparison route reports the eligibility scope of every policy row", a
       unit_scope: "unit",
       snapshot_selection: 0,
     },
+    ...SBI_VC_UNIT_POLICIES,
     {
       source_id: SOURCE,
       parser_name: PARSER,
