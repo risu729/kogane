@@ -2,9 +2,9 @@
 // the Processor's runtime. Every response and persisted byte is synthetic.
 import { mock } from "bun:test";
 import { readFileSync } from "node:fs";
-import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket.ts";
-import { readTerminal } from "../../../packages/collection/src/reader.ts";
-import { encryptSession } from "../src/crypto.ts";
+import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
+import { readTerminal } from "../../../packages/collection/src/reader";
+import { encryptSession } from "../src/crypto";
 import type { SessionMaterial } from "../src/types.ts";
 
 mock.module("cloudflare:workers", () => ({
@@ -15,7 +15,7 @@ mock.module("cloudflare:workers", () => ({
     ) {}
   },
 }));
-const { SbiVcSessionState } = await import("../src/worker.ts");
+const { SbiVcSessionState } = await import("../src/worker");
 
 async function capture() {
   const scenario = process.argv[2];

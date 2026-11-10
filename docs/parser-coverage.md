@@ -185,17 +185,20 @@ has no contract cases.
 | `legacy-warning-compat-v1` | `legacyWarningCompatMembership`: the pre-A03 rule, unchanged and confined to one function. The two tolerant SBI parsers are excluded when any warning is outside the two allow-listed texts; other parsers' warnings are ignored. Seeded for every dataset.                                          |
 | `coverage-v1`              | `coverageV1Membership`: the parse has a `complete-container` claim whose `scope_key` equals the artifact's container scope, `completeness = 'complete'`, `membership_complete = 1`, no `failure_cause`; a zero-row claim participates unless the row sets `replaces_previous_on_complete_empty = 0`. |
 
-Both variants keep the existing rules: the parent run must be `success` with
-`failure_count = 0`, the parse must be named by the publication projection
+Both variants require a successful parent run with `failure_count = 0`, or an
+explicitly opted-in dataset's complete independent unit. The parse must be named by the publication projection
 `published_parse_runs` (migration 0026, `docs/publication-gate.md`; before that
 gate the rule was `ok` and not superseded), every artifact
 of the run's dataset/unit must have such a parse, `required_parser_version`
 applies (`0.3.0` for foreign positions), and the newest complete run wins by
-`fetched_at`, then artifact id. The existing seeded snapshot-selection policies retain the defaults
-`unit_scope=run` and `snapshot_selection=1`. CORE 0080 adds only the J-POINT
-`jpoint-balance` eligibility policy with `unit_scope=unit` and
-`snapshot_selection=0`; it does not add a container snapshot dataset. `unit` names `unit-independent-v1` and is described under "Unit-scoped
-eligibility" below.
+`fetched_at`, then artifact id. Snapshot-selection membership remains unchanged.
+The original snapshot policies default to `unit_scope=run`, except the three
+SBI VC classic snapshots whose exact shipped defaults CORE 0095 advances to
+`unit_scope=unit`. Nondefault operator policy fields are preserved. CORE 0080's
+J-POINT policy, CORE 0088's monthly-report metadata policy and CORE 0095's
+201 exact classic SBI VC transaction paths are eligibility-only rows with
+`unit_scope=unit`, `snapshot_selection=0`; they add no container snapshot.
+`unit` names `unit-independent-v1`, described below.
 
 ### D13 predicates (`packages/read-model/src/concepts.ts`)
 
@@ -246,9 +249,13 @@ policy reads as before.
 Migration `0037_unit_scope_eligibility.sql` introduced this predicate without
 switching any policy row; its original served result set was unchanged
 (`read-model-parity.test.ts`, `unit-scope-api.test.ts` first case). CORE 0080
-now adds the independently sealed J-POINT reward unit as an eligibility-only
-policy. Existing seeded statement/container snapshot policies keep their default run scope
-([ADR 0068](adr/0068-provider-reward-expiry-subsets.md)).
+adds the independently sealed J-POINT reward unit as an eligibility-only
+policy ([ADR 0068](adr/0068-provider-reward-expiry-subsets.md)); CORE 0088 does
+the same for SBI Shinsei report metadata. CORE 0095 opts in the three classic
+SBI VC snapshot defaults and its 201 exact transaction paths, preserving
+snapshot selection and every nondefault policy field. This lets a complete
+classic account remain eligible when the new raw cash-flow unit fails
+([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-sbi-vcs-unfiltered-evidence-is-independent-of-its-classic-account-unit-2026-11-10)).
 
 Before this change one failed range inside a collector run made the whole run
 ineligible: the Worker parsed only artifacts of runs with
