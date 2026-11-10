@@ -22,6 +22,31 @@ This independent Worker creates a fresh session from a stored `SBI証券` passke
 
 Neither implementation nor configuration includes orders, amendments, cancellations, trading passwords or device registration. Even for `POST`, allowed hosts, paths, MTS TR codes and GraphQL operations are fixed to read-only purposes.
 
+## 2026-11-10: delivered-document observation boundary
+
+Normal authenticated browser observations on 2026-11-09 and 2026-11-10 UTC for
+[issue 1248](https://github.com/risu729/kogane/issues/1248) reached the new
+electronic mailbox and the legacy mailbox. The new mailbox returned 66 list
+rows, matching its stated total, visible total and separately requested
+issued-document summary count. One selected detail/PDF request returned
+`application/pdf` with verified `%PDF-` magic. This proves the observed
+current list and one PDF response, without proving that all listed files were
+downloaded or archived.
+
+The legacy inbox and saved folder showed no rows or document links, but no
+independent zero total or explicit empty message. Complete legacy coverage
+and its download route remain unverified. The cross-origin SSO carrier and
+sessionStorage bootstrap are also unverified; a separate observation profile
+remains at provider authentication. Existing HTTP-only sessions do not prove
+access to that mailbox context.
+
+The collector still captures no delivered documents, and the catalogue's
+`document` entry stays `not_collected`. No guessed HTTP SSO route,
+collector behavior, secret, feature flag or deployment was added. See the
+[dated source notes](../../docs/sources/sbi-securities.md#2026-11-09-and-2026-11-10-delivered-document-observations)
+for request/response shapes, mark-read behavior allowed by the issue,
+session-material boundaries and remaining evidence gaps.
+
 <a id="公開接続先とsecret"></a>
 
 ## Public endpoints and secrets

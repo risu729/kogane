@@ -168,6 +168,136 @@ login. It does not establish deployed parser version, publication of corrected
 observations, or current coverage after the next scheduled run; those remain
 the rollout checks for #1220.
 
+### 2026-11-09 and 2026-11-10: delivered-document observations
+
+Dates in this section are UTC. For
+[issue 1248](https://github.com/risu729/kogane/issues/1248), normal read
+navigation in the owner's authenticated browser reached the new electronic
+mailbox and the legacy mailbox. The current HTTP-only collector does not
+collect either mailbox. The `document` catalogue entry remains
+`not_collected`; these observations do not establish a scheduled archive.
+
+#### New electronic mailbox: one current list and one PDF response
+
+The main-site `取引報告書等(電子交付)` entry uses ETGate
+`sw_page=Edeliv`, then `m.sbisec.co.jp/switchnaviMain`.
+The first report group covers domestic stocks, investment trusts, bonds,
+foreign stocks and SBI Wrap in specific/general custody. Its normal button
+opened `https://m.sbisec.co.jp/edeliv/deisw070.jsp?ePoboxFlag=true`,
+then `/deisw081`, and finally the
+[electronic mailbox](https://plus.e-shishobako.ne.jp/dp_apl/usr/),
+titled `電子ポスト`. The futures/options report button used the same entry
+route. Other derivatives, FX, CFD and metals have separate entries and were
+not established as supported document routes.
+
+An ordinary mailbox reload made the following form POST requests on
+`plus.e-shishobako.ne.jp`. Common response keys are
+`ctt:null,code:string,message:string`. No opaque form value, identifier,
+document date, title, notification prose or document bytes are recorded here.
+
+| Path                      | Form fields    | Additional response shape                                                                  |
+| ------------------------- | -------------- | ------------------------------------------------------------------------------------------ |
+| `/dp-uw/v1/DPAW010501030` | `_csrf,riyoCd` | `summaryList:[{busiSys:string,userTokuteiId:string,kofuKensu:number,mikaifuKensu:number}]` |
+| `/dp-uw/v1/DPAW010601020` | `_csrf,riyoCd` | `doiFlg:string`; consent/status only, with no acceptance action performed                  |
+| `/dp-uw/v1/DPAW010501010` | `_csrf,riyoCd` | `outlist:object[],allCountKen:number`                                                      |
+
+The list returned **66 rows**. Its `allCountKen=66` matched the visible
+`全66件` and the separately requested issued-document summary count of 66.
+There was no initial pagination parameter; the current list arrived at once.
+These equalities establish the captured current list's row count, not the
+number of PDF files, complete historical retention or completed archival.
+
+Each `outlist` row has these observed fields and types:
+
+- Strings: `readSts,sBaseDate,sName,sType,kofuInfoKtitle,busiSys,kofuHms,
+  etsuranKigen,sIntFileId,sOriFileId,sCount,sCd,sCdSeq,userTokuteiId,sTypeCd,
+  starSts,sDoiyoKbn,rDoiyoKbn`. `sBaseDate` has the `YYYYMMDD` shape.
+- Nulls: `kofuInfoKinfo,kofuDetailList,kakuninFlg`.
+- `sType` included the literal string `"NULL"`; that is not JSON null.
+
+Expanding one visible `投資信託取引報告書（特定投信等）` item sent
+POST `/dp-uw/v1/DPAW010501080` with form fields
+`_csrf,riyoCd,userTokuteiId,sCd,sBaseDate,sCdSeq`. In addition to the common
+response keys, the detail response contains:
+
+- Strings: `kofuInfoKinfo,kofuInfo,readSts,readHms,tsuchiInfo,tsuchiInfoKinfo,
+  torizanKbn,sDoiyoKbn,rDoiyoKbn,sTypeCd`.
+- `kofuDetailList:[{sOriFileId:string,sIntFileId:string}]`.
+- Nulls: `doiHms,doiCreateSts,doiHonbun,doiComment,kakuninFlg`.
+
+The normal UI also sent the mark-read POST
+`/dp-uw/v1/DPAW010501040`, with
+`_csrf,userTokuteiId,sCd,sBaseDate,sCdSeq,updateFlag`, and refreshed the
+summary. Opening a document with this side effect is explicitly allowed by
+issue 1248. No consent, agreement, enrollment or authentication setting was
+changed.
+
+Clicking the expanded item's PDF control sent POST
+`/dp-uw/v1/DPAW010501020` with form fields
+`_csrf,sCd,sTypeCd,sBaseDate,sCdSeq,userTokuteiId,sIntFileIds,xmlPreviewFlg,
+riyoCd`. The observed literal is `xmlPreviewFlg="0"`;
+`sIntFileIds` is a string, not a JSON array. Other values came from the
+selected list/detail rows and authenticated session. The response was HTTP
+200 with `application/pdf`, and its decoded body began with `%PDF-`.
+Only the response type and magic were verified in memory. No PDF content,
+raw bytes, identifiers or private document dates were persisted. Multiple
+document types, multiple detail files and any concatenation semantics remain
+unverified; identifier splitting or a one-row/one-file rule must not be
+inferred.
+
+#### Legacy mailbox: empty visible folders without a proved zero total
+
+The visible `2022年4月22日以前の取引報告書等` link opened
+`https://m.sbisec.co.jp/edeliv/deisw070.jsp` without `ePoboxFlag`,
+then the [legacy mailbox](https://sbisec.postub.mypot.jp/web/DocumentListInitAction.do),
+titled `POSTUB`. The default `電子ポスト` view showed no rows or document
+links, and month selectors offered only `すべて=-1`. The visible status
+options were all `-1`, unread `10`, needs consent `50`, consented `60`
+and read `30`.
+
+The `保存箱` link advertised
+`goNext('/web/TrashDisplayAction.do',document.f_sub03)` and reached the same
+final `DocumentListInitAction.do` path. It likewise showed no rows, document
+links or selection checkboxes, with only the all-month option.
+Neither view showed an explicit zero total or empty-result message.
+This is a scoped observation of two empty-looking views, not independent
+evidence of zero retained documents or complete legacy coverage.
+
+Forms advertised POST `DocumentListSearchAction.do` and the paging action
+`ChangePageDisplayAction.do`. Their visible field names were
+`rcpt_month_sel_from,rcpt_month_sel_to,rcpt_sts_sel,subjectText,ACT_doRefresh,
+cur_page_sel,msg_folder_type_cur,line_per_page_sel,rcpt_month_sel,company_sel,
+category_sel,category_gp_sel,search_order,searchFlg,_csrf`.
+No nonempty result, continuation request or legacy download route was
+observed.
+
+#### 2026-11-10 follow-up: SSO and session bootstrap remain unverified
+
+Normal navigation in the existing authenticated browser again reached
+`/deisw081` and the new mailbox. Across the origin changes, the observation
+retained only the initial `deisw070.jsp` GET and final application GET,
+both HTTP 200. The intermediate SSO request chain and secret carrier were
+not retained or established. A separate browser profile intended for further
+handoff observation remains at provider authentication; it has not verified
+an alternative handoff. This is an authentication/observation blocker, not
+evidence of a mailbox service outage.
+
+The new mailbox DOM had no CSRF meta element or hidden input. Its publicly
+loaded `/dp_apl/usr/main.js` reads sessionStorage keys `dp-csrf` and
+`dp-riyoCd` to supply form `_csrf` and `riyoCd`, and updates
+`dp-csrf` from response header `x-csrf-token`. It also reads
+`urlParamMap`, whose bootstrap producer was not observed. No sessionStorage
+value was read or recorded. Public mock-mode code was visible but was not
+used; it is not evidence of the authenticated provider protocol.
+
+The existing collector's HTTP sessions do not establish how to bootstrap this
+separate mailbox context. No HTTP-only SSO implementation, hardcoded token,
+new secret, collector route, feature flag or publication was added. The
+handoff/bootstrap and target allowlists need evidence before implementation
+can establish scheduled document coverage. The issue's requirements to store
+all listed documents once, retain metadata and update the catalogue remain
+unfulfilled.
+
 ## Assessment scale
 
 Automation levels are defined as follows.
