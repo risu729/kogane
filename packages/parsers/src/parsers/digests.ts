@@ -71,9 +71,9 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts":
       "5c3fac4fdb4b0af4b1cafc6580790e45c212b095089764e8240d8ad064058c58",
     "poc/observation-pipeline/src/parsers/sbi-account-assets-history.ts":
-      "ba5a8b55fe945eeb3ca34e5939ba25c722d4662a19825acf6dfa1fedea7662c4",
+      "f8061e4def8cd5e01ccdce3d6eb53e0c470369ac14c4ac6e8b18de9d5579a00b",
     "poc/observation-pipeline/src/parsers/sbi-asset-history-json.ts":
-      "f7374001b53ab2248f65cb4c1778ae19dbf02c8b1931149d4f167993fc01ba68",
+      "4ebc8ee80f122423a0855b89d92b503ba972342072beb9afbfa643ad3f0d1e80",
     "poc/observation-pipeline/src/parsers/sbi-asset-history-schema.ts":
       "f6244707d0d6a15b2c8e27074b57dbdc3e36862182940572c193f252b64e35a1",
     "poc/observation-pipeline/src/parsers/sbi-asset-history-validation.ts":
@@ -416,8 +416,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-account-assets-history": {
-      version: "0.1.1",
-      codeDigest: "ab525dfe8cdc86cf18b9e2db574b987d91200094a807c44581b71297f41d558d",
+      version: "0.1.2",
+      codeDigest: "d345231e64132547383c8dec20ecbb5cec6d6af94df1b391a2c73bb647f16158",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

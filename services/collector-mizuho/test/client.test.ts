@@ -15,6 +15,7 @@ import { MIZUHO_HTML_ERROR_CODES } from "../src/client";
 const ORIGIN = "https://web1.ib.mizuhobank.co.jp";
 const ACCOUNT = "/servlet/MENSRV0100002B.do";
 const HISTORY = "/servlet/BALINQ0301002B.do";
+const PERIOD = "/servlet/ACCHST0411009B.do";
 const fields = (name: string, token = "private-token") => ({
   _FRAMEID: "frame",
   _TARGETID: "old-target",
@@ -45,10 +46,28 @@ function card(index = "000", number = "001-1234567"): string {
 }
 const accountHtml = (cards = card(), token = "account-token") =>
   form("BALINQ_03010B", cards, token);
-function historyHtml(total = 1, number = "1234567"): string {
+function periodControls(overrides: Record<string, string> = {}): string {
+  const values = {
+    txtThisDay: "20261110",
+    rdoPopDate: "4",
+    rdoPopDaw: "0",
+    txbSearchWord: "",
+    lstDateFromYear: "2026",
+    lstDateFromMonth: "9",
+    lstDateFromDay: "1",
+    lstDateToYear: "2026",
+    lstDateToMonth: "11",
+    lstDateToDay: "10",
+    ...overrides,
+  };
+  return Object.entries(values)
+    .map(([name, value]) => `<input name="${name}" value="${value}">`)
+    .join("");
+}
+function historyHtml(total = 1, number = "1234567", period: Record<string, string> = {}): string {
   return form(
     "ACCHST_04110B",
-    `${span("txtBrnch", "テスト支店")}${span("txtTransType", "普通")}${span("txtAccNo", number)}
+    `${periodControls(period)}${span("txtBrnch", "テスト支店")}${span("txtTransType", "普通")}${span("txtAccNo", number)}
     <div class="box-row-tx-ditails"><div class="t1-1">${span("txtTransCntnt_000", "テスト入金")}
     ${span("txtDate_000", "2026年9月1日")}</div><div class="t1-2"><span class="amount">+ 1<small>円</small></span>
     ${span("txtEachBal_000", "1,234")}</div><div class="t1-3">${span("txtEachBal_000", "1,234")}</div></div>
@@ -118,6 +137,109 @@ describe("direct Mizuho read transport", () => {
     expect(JSON.stringify(result.artifacts)).not.toContain("private-cookie");
     expect(result.session.form.fields._TOKEN).toBe("history-token");
     expect(initial.form.fields._TOKEN).toBe("private-token");
+  });
+  test("selects the whole retained period with fresh state and clears narrower filters", async () => {
+    const q = queued([
+      html(accountHtml()),
+      html(
+        historyHtml(1, "1234567", {
+          lstDateFromMonth: "11",
+          rdoPopDate: "2",
+          rdoPopDaw: "1",
+          txbSearchWord: "検索",
+        }),
+      ),
+      redirect(PERIOD),
+      html(historyHtml()),
+    ]);
+    const result = await collectMizuho({ session: session(), fetcher: q.fetcher });
+    expect(result.partial).toBe(false);
+    expect(result.histories).toHaveLength(1);
+    expect(q.calls.map((call) => [new URL(call.url).pathname, call.init.method])).toEqual([
+      [ACCOUNT, "POST"],
+      [HISTORY, "POST"],
+      [PERIOD, "POST"],
+      [PERIOD, "GET"],
+    ]);
+    const body = new URLSearchParams(String(q.calls[2]!.init.body));
+    expect(Object.fromEntries(body)).toMatchObject({
+      _FORMID: "ACCHST_04110B",
+      _TOKEN: "history-token",
+      _SUBINDEX: "",
+      rdoPopDate: "4",
+      rdoPopDaw: "0",
+      txbSearchWord: "",
+      lstDateFromYear: "2026",
+      lstDateFromMonth: "9",
+      lstDateFromDay: "1",
+      lstDateToYear: "2026",
+      lstDateToMonth: "11",
+      lstDateToDay: "10",
+    });
+    expect(result.artifacts).toHaveLength(2);
+    expect(JSON.stringify(result.artifacts)).not.toContain("history-token");
+  });
+  test.each([
+    ["20260110", "2025", "11", "2026", "1", "10"],
+    ["20240301", "2024", "1", "2024", "3", "1"],
+    ["20240229", "2023", "12", "2024", "2", "29"],
+  ])(
+    "uses calendar months and the bank query day %s",
+    async (today, fromYear, fromMonth, toYear, toMonth, toDay) => {
+      const echo = {
+        txtThisDay: today,
+        lstDateFromYear: fromYear,
+        lstDateFromMonth: fromMonth,
+        lstDateToYear: toYear,
+        lstDateToMonth: toMonth,
+        lstDateToDay: toDay,
+      };
+      const q = queued([
+        html(accountHtml()),
+        html(historyHtml(1, "1234567", { ...echo, rdoPopDate: "0" })),
+        html(historyHtml(1, "1234567", echo)),
+      ]);
+      const result = await collectMizuho({ session: session(), fetcher: q.fetcher });
+      expect(result.partial).toBe(false);
+      expect(Object.fromEntries(new URLSearchParams(String(q.calls[2]!.init.body)))).toMatchObject({
+        lstDateFromYear: fromYear,
+        lstDateFromMonth: fromMonth,
+        lstDateFromDay: "1",
+        lstDateToYear: toYear,
+        lstDateToMonth: toMonth,
+        lstDateToDay: toDay,
+      });
+    },
+  );
+  test.each(["", "private-token", "20260229", "20261301", "20260431"])(
+    "refuses an absent or invalid bank query day without guessing: %s",
+    async (txtThisDay) => {
+      const q = queued([html(accountHtml()), html(historyHtml(1, "1234567", { txtThisDay }))]);
+      const result = await collectMizuho({ session: session(), fetcher: q.fetcher });
+      expect(result.partial).toBe(true);
+      expect(result.issues).toEqual(["invalid-history-period"]);
+      expect(result.failedUnits).toEqual(["ordinary:001:1234567"]);
+      expect(result.artifacts).toHaveLength(1);
+      expect(q.calls).toHaveLength(2);
+    },
+  );
+  test.each([
+    { lstDateFromDay: "2" },
+    { rdoPopDaw: "1" },
+    { txbSearchWord: "検索" },
+    { txtThisDay: "20261111" },
+  ])("withholds a clipped or changed filtered response", async (changed) => {
+    const q = queued([
+      html(accountHtml()),
+      html(historyHtml(1, "1234567", { rdoPopDate: "0" })),
+      html(historyHtml(1, "1234567", changed)),
+    ]);
+    const result = await collectMizuho({ session: session(), fetcher: q.fetcher });
+    expect(result.partial).toBe(true);
+    expect(result.histories).toHaveLength(0);
+    expect(result.artifacts).toHaveLength(1);
+    expect(result.issues).toEqual(["invalid-history-period"]);
+    expect(q.calls).toHaveLength(3);
   });
   test("flags unobserved pagination without inventing a next-page request", async () => {
     const q = queued([html(accountHtml()), html(historyHtml(2))]);
@@ -372,7 +494,7 @@ describe("private session boundary", () => {
     // Issue 1145: the account header with no transaction block at all.
     const empty = form(
       "ACCHST_04110B",
-      `<div>${span("txtBrnch", "テスト支店")}</div><div>${span("txtTransType", "普通")}${span("txtAccNo", "1234567")}</div>
+      `${periodControls()}<div>${span("txtBrnch", "テスト支店")}</div><div>${span("txtTransType", "普通")}${span("txtAccNo", "1234567")}</div>
       <div><span class="amount"><small>円</small></span></div>`,
       "history-token",
     );
@@ -398,7 +520,7 @@ describe("private session boundary", () => {
     // A displayed range with no rows is neither the listed nor the observed empty page.
     const refused = form(
       "ACCHST_04110B",
-      `${span("txtBrnch", "テスト支店")}${span("txtTransType", "普通")}${span("txtAccNo", "1234567")}
+      `${periodControls()}${span("txtBrnch", "テスト支店")}${span("txtTransType", "普通")}${span("txtAccNo", "1234567")}
       ${span("txtDispDetails", "0&nbsp;-&nbsp;0&nbsp;件")}${span("txtAllDispDetails", "0")}`,
       "history-token",
     );

@@ -12,6 +12,7 @@ const path = "/api/v2/reconciliation/card-settlements";
 const page = () => ({
   items: [settlementReview()],
   nextOffset: null,
+  nextPage: "none",
   coverage: {
     scope: "card-statement-bank-debit-candidates",
     completeTransactionHistory: false,
@@ -114,6 +115,7 @@ describe("card settlement HTTP contract", () => {
         },
       ],
       nextOffset: null,
+      nextPage: "none",
       coverage: {
         ...page().coverage,
         limit: 10,
@@ -145,6 +147,28 @@ describe("card settlement HTTP contract", () => {
     // The flat list's shape is not a grouped page, and the other way round.
     expect(validApiResponse(grouped, page())).toBe(false);
     expect(validApiResponse(path, statements())).toBe(false);
+    // A page's end carries its closed reason, on either list.
+    for (const [target, size, value] of [
+      [path, 50, page()],
+      [grouped, 10, statements()],
+    ] as const)
+      for (const [nextOffset, nextPage, valid] of [
+        [null, "none", true],
+        [null, "budget_exceeded", true],
+        [size, "offered", true],
+        [null, undefined, false],
+        [null, "end", false],
+        [null, "offered", false],
+        [size, "none", false],
+        [size, "budget_exceeded", false],
+        [size - 1, "offered", false],
+      ] as const)
+        expect({
+          target,
+          nextOffset,
+          nextPage,
+          valid: validApiResponse(target, { ...value, nextOffset, nextPage }),
+        }).toEqual({ target, nextOffset, nextPage, valid });
   });
   test("old metadata does not imply the feature and a nonboolean capability is rejected", () => {
     expect(clientFeatures(CENTRAL_STORE_CAPABILITIES).cardSettlementReconciliation).toBe(false);

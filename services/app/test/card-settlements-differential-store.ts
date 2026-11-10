@@ -150,7 +150,26 @@ function expected(
     offset + 50 > 1000
   )
     return { budget: "card-settlements.read" };
-  return before;
+  return withinReaderBudget(query, before);
+}
+
+/**
+ * The frozen page as the reader grant may follow it (ADR 0081, 2026-11-08
+ * amendment): a `nextOffset` whose page would reach past `maxRows` 1000 is
+ * withheld and said (`nextOffset: null`, `nextPage: "budget_exceeded"`), every
+ * other byte unchanged. The frozen handler named that page, which the route
+ * then refused.
+ */
+export function withinReaderBudget(query: string, before: Answer): Answer {
+  const url = new URL(`https://fixture.test${query}`);
+  const size = url.pathname === PATH ? 50 : url.pathname === `${PATH}/statements` ? 10 : undefined;
+  if (before.status !== 200 || size === undefined || before.body === "") return before;
+  const body = JSON.parse(before.body) as { nextOffset: number | null };
+  if (body.nextOffset === null || body.nextOffset + size <= 1000) return before;
+  return {
+    ...before,
+    body: JSON.stringify({ ...body, nextOffset: null, nextPage: "budget_exceeded" }),
+  };
 }
 
 export interface Seen {
@@ -159,10 +178,12 @@ export interface Seen {
   budget: number;
   groupedBudget: number;
   groupedPages: number;
+  /** Of `same`, the pages whose next page the reader grant may not read, withheld. */
+  withheld: number;
 }
 /** Runs each request on both handlers and checks the shipped answer against `expected`. */
 export async function compare(all: readonly string[]): Promise<Seen> {
-  const seen = { same: 0, invalid: 0, budget: 0, groupedBudget: 0, groupedPages: 0 };
+  const seen = { same: 0, invalid: 0, budget: 0, groupedBudget: 0, groupedPages: 0, withheld: 0 };
   for (const request of all) {
     const before = (await answer(frozenCardSettlementsApi, request))!;
     const after = (await answer(cardSettlementsApi, request))!;
@@ -192,6 +213,7 @@ export async function compare(all: readonly string[]): Promise<Seen> {
     } else {
       seen.same++;
       if (request.startsWith(`${PATH}/statements`) && after.status === 200) seen.groupedPages++;
+      if (want !== before) seen.withheld++;
       expect({ request, ...after }).toEqual({ request, ...want });
     }
   }

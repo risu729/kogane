@@ -24,7 +24,8 @@
 //   at most `CARD_STATEMENT_ALLOCATION_LISTED_MAX` (50) allocations, with
 //   their count and `allocationsTruncated` (ADR 0074, amendment 2026-11-07,
 //   "a bounded list of allocations"). The grant's `maxRows` bounds how deep
-//   a caller pages (`budget_exceeded`).
+//   a caller pages (`budget_exceeded`), and by the same rule a page never
+//   offers a next page past it (`nextPage`, ./page-budget.ts).
 import {
   cardSettlementCandidate,
   type CardBankDebitFact,
@@ -49,6 +50,7 @@ import {
   type UnmatchedStatementCode,
 } from "../../../domain/src/card-settlement-unmatched.ts";
 import { aliasClassText } from "../../../domain/src/economic-contract.ts";
+import type { CardSettlementNextPage } from "../../../domain/src/card-settlement-review.ts";
 import type { SourceFactRef } from "../../../domain/src/events.ts";
 import type { FinancialError } from "../../../domain/src/result.ts";
 import { humanAdoptedRowIdentity } from "../../../domain/src/row-identity.ts";
@@ -67,6 +69,7 @@ import { cardSettlementOwnershipCtes } from "../../../read-model/src/card-settle
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
 import { type Grant, grantAllows } from "../grants.ts";
+import { pageBeyondBudget, withinBudget } from "./page-budget.ts";
 
 const REQUEST_ID = "card-settlements.unmatched";
 /** Statements one page holds. */
@@ -159,6 +162,13 @@ export interface UnmatchedCardStatementsReview {
   };
   items: UnmatchedCardStatement[];
   nextOffset: number | null;
+  /**
+   * Why `nextOffset` is what it is: `offered`, `none` (no statement follows)
+   * or `budget_exceeded` (statements follow, but the next page would reach
+   * past the grant's `maxRows`, so `nextOffset` is null rather than a page
+   * this caller is refused). The codes of `CARD_SETTLEMENT_NEXT_PAGE`.
+   */
+  nextPage: CardSettlementNextPage;
 }
 
 export type UnmatchedCardStatementsOutcome =
@@ -452,7 +462,7 @@ export async function reviewUnmatchedCardStatements(input: {
   if (narrowed.length > 0)
     return { ok: false, error: financialError("evidence_restricted", REQUEST_ID, narrowed) };
   // The grant's row budget bounds how deep a caller pages.
-  if (request.offset + UNMATCHED_PAGE_SIZE > grant.budget.maxRows)
+  if (pageBeyondBudget(request.offset, UNMATCHED_PAGE_SIZE, grant))
     return {
       ok: false,
       error: financialError("budget_exceeded", REQUEST_ID, [
@@ -530,6 +540,15 @@ export async function reviewUnmatchedCardStatements(input: {
       const item = items.get(id);
       if (item) item.planner = answer;
     }
+  const following = rows.length > UNMATCHED_PAGE_SIZE;
+  const next = withinBudget(
+    {
+      nextOffset: following ? request.offset + UNMATCHED_PAGE_SIZE : null,
+      nextPage: following ? ("offered" as const) : ("none" as const),
+    },
+    UNMATCHED_PAGE_SIZE,
+    grant,
+  );
   return {
     ok: true,
     review: {
@@ -551,7 +570,8 @@ export async function reviewUnmatchedCardStatements(input: {
         acceptance: "single-debit-candidates-only",
       },
       items: page.map((row) => items.get(row.id)!),
-      nextOffset: rows.length > UNMATCHED_PAGE_SIZE ? request.offset + UNMATCHED_PAGE_SIZE : null,
+      nextOffset: next.nextOffset,
+      nextPage: next.nextPage,
     },
   };
 }
