@@ -8,7 +8,7 @@ const FULL_CASHFLOW_PAGE_SIZE = 20;
 const MAX_PAGES = 100;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
-type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+export type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export async function collectSbiVcTrade(options: {
   diagnostic?: ReturnType<
@@ -153,11 +153,12 @@ async function collectPages(options: {
   throw new Error(`${options.prefix}_page_limit_exceeded`);
 }
 
-async function readGateway(
+export async function readGateway(
   fetcher: Fetcher,
   session: SessionMaterial,
   event: ReadEvent,
   data: Record<string, unknown>,
+  mediaType: "application/json" | "application/pdf" | "application/zip" = "application/json",
 ): Promise<{ session: SessionMaterial; body: unknown; sanitizedBody: string }> {
   const response = await fetcher(TRADE_URL, {
     method: "POST",
@@ -172,7 +173,7 @@ async function readGateway(
     body: JSON.stringify({ event, data }),
   });
   if (!response.ok) throw new Error(`collector_http_${response.status}`);
-  if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
+  if (!response.headers.get("content-type")?.toLowerCase().includes(mediaType)) {
     throw new Error("collector_non_json_response");
   }
   const text = await readBoundedText(response, MAX_RESPONSE_BYTES);

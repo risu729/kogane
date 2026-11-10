@@ -335,6 +335,17 @@ each later unit of this track closes gaps and shrinks those lists.
 
 ### New sources
 
+SBI VC's 2026-11-10 document/API comparison confirms that its existing spot
+execution filter covers both retail and exchange venues: five CSV rows joined
+one-to-one by the composite execution ID, including one retail and four exchange
+rows. Leverage opening/closing filters remain unobserved under
+[#1228](https://github.com/risu729/kogane/issues/1228); a duplicate venue endpoint
+is unnecessary. [#1249](https://github.com/risu729/kogane/issues/1249) adds monthly
+PDF/P&L ZIP evidence and explicit empty annual-index capture, with no second
+financial publication. Annual downloads, daily reports and valuation history
+remain gaps. This records implementation/observation scope, not deployed
+acceptance; see [the dated source evidence](sources/sbi-vc-trade.md#18-simple-mode-documents-and-spot-execution-correspondence-2026-11-10).
+
 New collectors ([#455](https://github.com/risu729/kogane/issues/455)–[#510](https://github.com/risu729/kogane/issues/510)
 under [#440](https://github.com/risu729/kogane/issues/440)) start only when the owner
 asks (owner, 2026-11-09 19:06 UTC). Before any

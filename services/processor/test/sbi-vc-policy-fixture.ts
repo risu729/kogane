@@ -39,6 +39,13 @@ export const SBI_VC_UNIT_POLICIES = [
       },
     ],
   ),
+  ...(["monthly-report-pdf", "pnl-data-zip"] as const).map((dataset) => ({
+    source_id: "sbi-vc-trade",
+    parser_name: "sbi-vc-document-metadata",
+    dataset,
+    unit_scope: "unit",
+    snapshot_selection: 0,
+  })),
 ].sort((left, right) =>
   `${left.parser_name}:${left.dataset}`.localeCompare(`${right.parser_name}:${right.dataset}`),
 );

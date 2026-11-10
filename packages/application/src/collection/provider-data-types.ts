@@ -143,11 +143,11 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // deposits and withdrawals). The unfiltered recent/historical cash-flow
   // lists are captured as evidence only; crypto transfer and staking/lending
   // row semantics remain unobserved (#1227). Crypto transfers and rewards,
-  // the balance history and annual P&L report, and the PDF reports are not
-  // collected (docs/sources/sbi-vc-trade.md, #448).
+  // the balance history and annual/daily reports remain uncollected. Monthly
+  // PDFs and P&L ZIPs are archived as evidence only (#1249).
   "sbi-vc-trade": [
     collected("position", ["sbi-vc-cash-balances", "sbi-vc-position-summary"]),
-    partial("execution", ["sbi-vc-executions"], 448),
+    partial("execution", ["sbi-vc-executions"], 1228),
     collected("settlement_cash", [
       "sbi-vc-cash-balances",
       "sbi-vc-account-margin",
@@ -155,8 +155,8 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     ]),
     missing("asset_transfer", 1227),
     missing("income", 1227),
-    missing("valuation_history", 448),
-    missing("document", 448),
+    missing("valuation_history", 1249),
+    partial("document", ["sbi-vc-document-metadata"], 1249),
   ],
   // SMBC Direct: yen ordinary deposits plus the observed AUD balance and
   // explicit-empty retained history. Nonempty AUD history is unreviewed;

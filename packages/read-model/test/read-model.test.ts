@@ -73,6 +73,13 @@ const SBI_VC_UNIT_POLICIES = [
       },
     ],
   ),
+  ...(["monthly-report-pdf", "pnl-data-zip"] as const).map((dataset) => ({
+    source_id: "sbi-vc-trade",
+    parser_name: "sbi-vc-document-metadata",
+    dataset,
+    unit_scope: "unit",
+    snapshot_selection: 0,
+  })),
 ].sort((left, right) =>
   `${left.parser_name}:${left.dataset}`.localeCompare(`${right.parser_name}:${right.dataset}`),
 );
@@ -408,7 +415,7 @@ describe("named concepts in the final SQL", () => {
     expect(
       db
         .query(
-          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'smbc-direct-transactions', 'smbc-foreign-ordinary-balance', 'smbc-foreign-ordinary-history')",
+          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'sbi-vc-document-metadata', 'smbc-direct-transactions', 'smbc-foreign-ordinary-balance', 'smbc-foreign-ordinary-history')",
         )
         .get(),
     ).toEqual({ n: 0 });

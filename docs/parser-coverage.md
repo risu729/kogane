@@ -198,8 +198,9 @@ SBI VC classic snapshots whose exact shipped defaults CORE 0095 advances to
 CORE 0096 also adds an independent AUD balance snapshot with `unit_scope=unit`.
 Nondefault operator policy fields are preserved. CORE 0080's
 J-POINT policy, CORE 0088's monthly-report metadata policy and CORE 0095's
-201 exact classic SBI VC transaction paths, plus CORE 0096's SMBC yen
-transactions and AUD history, are eligibility-only rows with
+201 exact classic SBI VC transaction paths, CORE 0096's SMBC yen
+transactions and AUD history, and CORE 0097's two SBI VC document metadata
+datasets are eligibility-only rows with
 `unit_scope=unit`, `snapshot_selection=0`; they add no container snapshot.
 `unit` names `unit-independent-v1`, described below.
 
@@ -265,6 +266,14 @@ use unit scope, while yen transactions and AUD history have eligibility-only
 policies. A complete balance can publish through a sibling failure; unobserved
 nonempty AUD history remains partial and cannot establish complete history
 ([ADR 0044 amendment](adr/0044-smbc-resume-publication.md)).
+
+CORE 0097 additionally opts in only `monthly-report-pdf` and `pnl-data-zip`
+for `sbi-vc-document-metadata` 1.0.0, with `coverage-v1`,
+`replaces_previous_on_complete_empty=0` and `snapshot_selection=0`. These rows
+admit evidence-only metadata from the document's own successful unit in a
+partial run. They emit no economic observations and select no container.
+Raw artifact listing/retrieval itself needs no parser policy. Existing operator
+rows are preserved by `INSERT OR IGNORE`.
 
 Before this change one failed range inside a collector run made the whole run
 ineligible: the Worker parsed only artifacts of runs with

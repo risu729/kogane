@@ -32,7 +32,7 @@ const policy = (
   ...extra,
 });
 
-// The closed default opt-ins of migrations 0080, 0088, 0095 and 0096.
+// The closed default opt-ins of migrations 0080, 0088, 0095, 0096 and 0097.
 // This expected catalogue is independent of the SQL read under test: an extra
 // source, page, parser, scope, snapshot membership or policy still fails.
 export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
@@ -48,6 +48,8 @@ export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
   }),
   ...SBI_VC_UNIT_POLICIES.map((row) =>
     policy(row.source_id, row.dataset, row.parser_name, {
+      policy_id: row.parser_name === "sbi-vc-document-metadata" ? "coverage-v1" : "legacy-warning-compat-v1",
+      required_parser_version: row.parser_name === "sbi-vc-document-metadata" ? "1.0.0" : null,
       snapshot_selection: row.snapshot_selection,
       replaces_previous_on_complete_empty: row.snapshot_selection === 1 ? 1 : 0,
     }),

@@ -80,6 +80,7 @@ const NOT_IN_REGISTRY = [
   "sbi-shinsei-yen-deposit-account",
   "sbi-vc-account-margin",
   "sbi-vc-cash-balances",
+  "sbi-vc-document-metadata",
   "smbc-direct-balance",
   "smbc-foreign-ordinary-balance",
   "smbc-foreign-ordinary-history",

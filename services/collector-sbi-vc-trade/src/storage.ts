@@ -19,11 +19,41 @@ export async function describeArtifact(options: {
   artifact: CollectorArtifact;
 }): Promise<{ record: StoredArtifact; encoded: Uint8Array }> {
   if (!/^[a-z0-9-]+$/u.test(options.artifact.dataset)) throw new Error("invalid_artifact_dataset");
-  const encoded = new TextEncoder().encode(options.artifact.body);
+  const document = options.artifact.document;
+  if (
+    document !== undefined &&
+    (!/^\d{8}$/u.test(document.basisDate) || typeof options.artifact.body === "string")
+  )
+    throw new Error("invalid_document_artifact");
+  if (
+    document !== undefined &&
+    (document.kind === "monthly-report"
+      ? document.mediaType !== "application/pdf" ||
+        options.artifact.dataset !== "monthly-report-pdf"
+      : document.mediaType !== "application/zip" || options.artifact.dataset !== "pnl-data-zip")
+  )
+    throw new Error("invalid_document_artifact");
+  if (document === undefined && typeof options.artifact.body !== "string")
+    throw new Error("invalid_json_artifact");
+  const encoded =
+    typeof options.artifact.body === "string"
+      ? new TextEncoder().encode(options.artifact.body)
+      : options.artifact.body;
   const sha256 = await sha256Hex(encoded);
-  const key = `${options.prefix}/${options.artifact.dataset}.json`;
+  const artifactKey =
+    document === undefined
+      ? undefined
+      : `${document.kind}-${document.basisDate}-${sha256}.${document.mediaType === "application/pdf" ? "pdf" : "zip"}`;
+  const key = `${options.prefix}/${artifactKey ?? `${options.artifact.dataset}.json`}`;
   return {
-    record: { dataset: options.artifact.dataset, key, sha256, bytes: encoded.byteLength },
+    record: {
+      dataset: options.artifact.dataset,
+      key,
+      sha256,
+      bytes: encoded.byteLength,
+      ...(artifactKey === undefined ? {} : { artifactKey }),
+      ...(document === undefined ? {} : { document }),
+    },
     encoded,
   };
 }
@@ -38,7 +68,7 @@ export async function storeArtifact(options: {
   const stored = await options.bucket.put(record.key, encoded, {
     onlyIf: { etagDoesNotMatch: "*" },
     sha256: record.sha256,
-    httpMetadata: { contentType: "application/json" },
+    httpMetadata: { contentType: options.artifact.document?.mediaType ?? "application/json" },
     customMetadata: {
       source: "sbi-vc-trade",
       runId: options.runId,

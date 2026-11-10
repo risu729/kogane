@@ -48,12 +48,12 @@ describe("Worker collector", () => {
       "cashflows-all-historical-page-0001",
       "cashflows-all-historical-page-0002",
     ]);
-    expect(JSON.parse(full[2]!.body).body.list[0]).toMatchObject({
+    expect(JSON.parse(jsonBody(full[2]!)).body.list[0]).toMatchObject({
       cashflowType: "UNOBSERVED_SYNTHETIC_TYPE",
       processStatusType: "UNOBSERVED_SYNTHETIC_STATUS",
       cashflowAmount: "0.00000001",
     });
-    expect(full.every((artifact) => !artifact.body.includes("next-secure"))).toBe(true);
+    expect(full.every((artifact) => !jsonBody(artifact).includes("next-secure"))).toBe(true);
   });
 
   test("retains the anomalous full-list page and refuses inconsistent metadata", async () => {
@@ -183,7 +183,7 @@ describe("Worker collector", () => {
       "cashflows-all-recent-page-0001",
       "cashflows-all-historical-page-0001",
     ]);
-    expect(artifacts.every((artifact) => !artifact.body.includes("next-secure"))).toBe(true);
+    expect(artifacts.every((artifact) => !jsonBody(artifact).includes("next-secure"))).toBe(true);
     expect(sessions).toHaveLength(8);
     expect(finalSession.secureKey).toBe("next-secure");
     expect(finalSession.cookies.awsAlb).toBe("rotated");
@@ -381,4 +381,9 @@ function fullCashflowGateway(
           : {},
     });
   }) as typeof fetch;
+}
+
+function jsonBody(artifact: CollectorArtifact): string {
+  if (typeof artifact.body !== "string") throw new Error("expected JSON artifact");
+  return artifact.body;
 }
