@@ -1,11 +1,13 @@
 // Frozen bounds of the classic collector: three snapshots, one recent page
 // and two historical chains of at most 100 pages. No raw all-type dataset.
 export const SBI_VC_UNIT_POLICIES = [
-  ...[
-    ["sbi-vc-account-margin", "account-margin"],
-    ["sbi-vc-cash-balances", "cash-balances"],
-    ["sbi-vc-position-summary", "position-summary"],
-  ].map(([parser_name, dataset]) => ({
+  ...(
+    [
+      ["sbi-vc-account-margin", "account-margin"],
+      ["sbi-vc-cash-balances", "cash-balances"],
+      ["sbi-vc-position-summary", "position-summary"],
+    ] as const
+  ).map(([parser_name, dataset]) => ({
     source_id: "sbi-vc-trade",
     parser_name,
     dataset,
