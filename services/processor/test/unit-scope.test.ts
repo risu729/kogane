@@ -63,7 +63,7 @@ const rescan = async () => {
   await sweep(env);
 };
 
-test("0037 preserves prior run-scoped containers beside the explicit J-POINT unit policy", async () => {
+test("prior run-scoped containers coexist with the explicit Vpass credit and eligibility-only unit policies", async () => {
   expect(
     await first<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type='view' AND name='observation_fetch_artifact_units'",
@@ -82,7 +82,15 @@ test("0037 preserves prior run-scoped containers beside the explicit J-POINT uni
   expect(containers.map(({ parser_name, dataset }) => [parser_name, dataset])).toEqual(
     SNAPSHOT_DATASETS.map(([parserName, dataset]) => [parserName, dataset]).sort(),
   );
-  expect(containers.every((row) => row.unit_scope === "run")).toBe(true);
+  expect(containers.filter((row) => row.unit_scope !== "run")).toEqual([
+    {
+      source_id: "vpass",
+      parser_name: "vpass-credit-snapshot",
+      dataset: "credit-snapshot",
+      unit_scope: "unit",
+      snapshot_selection: 1,
+    },
+  ]);
   expect(
     policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
   ).toEqual([
@@ -113,6 +121,13 @@ test("0037 preserves prior run-scoped containers beside the explicit J-POINT uni
       dataset: "monthly-report-pdf",
       unit_scope: "unit",
       snapshot_selection: 0,
+    },
+    {
+      source_id: "vpass",
+      parser_name: "vpass-credit-snapshot",
+      dataset: "credit-snapshot",
+      unit_scope: "unit",
+      snapshot_selection: 1,
     },
   ]);
 
@@ -315,6 +330,13 @@ test("the comparison route reports the eligibility scope of every policy row", a
       source_id: SOURCE,
       parser_name: PARSER,
       dataset: DATASET,
+      unit_scope: "unit",
+      snapshot_selection: 1,
+    },
+    {
+      source_id: "vpass",
+      parser_name: "vpass-credit-snapshot",
+      dataset: "credit-snapshot",
       unit_scope: "unit",
       snapshot_selection: 1,
     },

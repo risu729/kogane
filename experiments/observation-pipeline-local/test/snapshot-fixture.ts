@@ -36,11 +36,12 @@ import { openTestStore } from "./test-store.ts";
 
 /**
  * Datasets seeded on `coverage-v1` with `replaces_previous_on_complete_empty = 0`
- * (0046 St.George, 0053 SBI Shinsei exchange rates), and the parser version
+ * (including 0092 Vpass credit snapshots), and the parser version
  * their policy requires. They need a claim, and an empty claimed snapshot never
  * replaces the previous one.
  */
 export const EXPLICIT_COVERAGE: ReadonlyMap<string, string> = new Map([
+  ["vpass-credit-snapshot", "1.0.1"],
   ["st-george-balances", "1.0.1"],
   ["prestia-bank-balances", "1.0.1"],
   ["sbi-shinsei-exchange-rate", "1.0.3"],
@@ -170,7 +171,7 @@ export function snapshot(store: Store, options: Snapshot) {
 
 /**
  * Switch one dataset to the `unit` eligibility scope (`unit-independent-v1`).
- * Seeded rows are all `run`; this is the operator step, and passing `run`
+ * Existing rows default to `run`; Vpass credit snapshots seed `unit`. Passing `run`
  * again is the rollback.
  */
 export function activateUnitScope(store: Store, parser: string, scope: "run" | "unit"): void {

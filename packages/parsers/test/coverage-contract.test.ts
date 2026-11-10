@@ -34,6 +34,7 @@ for (const file of [
   "sbi-shinsei-exchange-rate-expected.json",
   "sbi-shinsei-observed-shapes-expected.json",
   "sbi-income-expected.json",
+  "vpass-credit-expected.json",
 ]) {
   const frozen = JSON.parse(
     readFileSync(join(FIXTURES_ROOT, "coverage-contract", file), "utf8"),
@@ -111,6 +112,11 @@ const partial = (
 const CLAIMS: Record<string, Record<string, Expectation>> = {
   "sbi-income-payments": { "complete-payments": { ...complete(15), expected: 15 } },
   "sbi-realised-gains": { "complete-sales": { ...complete(4), expected: 4 } },
+  "vpass-credit-snapshot": {
+    "authori-visible": complete(12),
+    "authori-hidden": complete(0),
+    "revo-exact": complete(2),
+  },
   "sbi-foreign-cash-balances": {
     "complete-empty": complete(0),
     "complete-rows": complete(2),
