@@ -241,9 +241,9 @@ describe.if(runnable)("collection quality browser", () => {
       expect(
         await page
           .locator('li[data-status="not_collected"]', { hasText: "term_deposit" })
-          .getByRole("link", { name: "残りの対応 #449" })
+          .getByRole("link", { name: "残りの対応 #1243" })
           .getAttribute("href"),
-      ).toBe("https://github.com/risu729/kogane/issues/449");
+      ).toBe("https://github.com/risu729/kogane/issues/1243");
       expect(await page.getByText(/未収集・一部のみのデータ種別 \d+ 件/).count()).toBeGreaterThan(
         0,
       );
@@ -372,7 +372,7 @@ describe.if(runnable)("collection quality browser", () => {
       expect(await catalogue.getByText("一部のみ", { exact: false }).count()).toBe(0);
       expect(await catalogue.getByText("未収集", { exact: false }).count()).toBeGreaterThan(0);
       expect(
-        await catalogue.locator('a[href="https://github.com/risu729/kogane/issues/449"]').count(),
+        await catalogue.locator('a[href="https://github.com/risu729/kogane/issues/1243"]').count(),
       ).toBeGreaterThan(0);
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
