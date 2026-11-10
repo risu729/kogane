@@ -82,6 +82,9 @@ boundary than an invented cross-capture correction match.
   membership, including corrected or removed identities. An explicitly counted
   complete-empty response replaces old rows. Failed/partial captures preserve
   the last complete current snapshot; raw objects and observations stay append-only.
+  Local bootstrap applies the same idempotent migration after creating the
+  additive policy table and columns. It seeds missing rows without overwriting
+  an existing operator alternative, including when only one policy is missing.
 - `ObservationReader.listSbiIncomeHistory` is an internal typed production read
   over that existing snapshot selection. It returns per-payment/sale facts with
   provenance and exact amounts, filtering/paging after membership selection.
@@ -116,3 +119,7 @@ evidence and the preceding current snapshot. A complete-empty payment response
 retires payments without removing gains. The cash transaction reader remains
 empty. Metric tests prove typed non-additivity; frozen registration checks keep
 versions 1–8 unchanged.
+Local-store regressions cover fresh initialization, repeated reopening, repair
+of one missing policy while preserving an operator alternative, and the two
+histories' complete-empty replacement. Their coverage fixtures keep this
+behavior separate from existing coverage policies that retain old rows on empty.

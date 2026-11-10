@@ -20,11 +20,13 @@ import {
 } from "../../../packages/parsers/src/snapshot-query.ts";
 import { insertFetchRun, listArtifacts, upsertSource, type Store } from "../src/store.ts";
 import { openTestStore } from "./test-store.ts";
+import { currentValuations } from "../src/queries.ts";
 import {
   balance,
   closeStores,
   database,
   EXPLICIT_COVERAGE,
+  REPLACING_EMPTY_COVERAGE,
   facts,
   snapshot,
 } from "./snapshot-fixture.ts";
@@ -90,6 +92,94 @@ function policyRows(store: Store): PolicyRow[] {
     .all() as PolicyRow[];
 }
 
+test("fresh and repeated local bootstrap seeds both retained-history policies after creating their table", () => {
+  const store = database();
+  const expected = policyRows(store).filter((row) => REPLACING_EMPTY_COVERAGE.has(row.parser_name));
+  expect(expected).toHaveLength(2);
+  for (const row of expected)
+    expect(row).toMatchObject({
+      source_id: "sbi-securities",
+      policy_id: "coverage-v1",
+      required_parser_version: "0.1.2",
+      replaces_previous_on_complete_empty: 1,
+      unit_scope: "run",
+      snapshot_selection: 1,
+    });
+  const reopened = openTestStore(join(store.blobDir, ".."));
+  try {
+    expect(
+      policyRows(reopened).filter((row) => REPLACING_EMPTY_COVERAGE.has(row.parser_name)),
+    ).toEqual(expected);
+  } finally {
+    reopened.db.close();
+  }
+});
+
+test("reopening repairs one missing retained-history row while preserving an operator alternative", () => {
+  const store = database();
+  store.db.exec(
+    "UPDATE dataset_snapshot_policies SET policy_id='legacy-warning-compat-v1', required_parser_version='9.0.0', replaces_previous_on_complete_empty=0, unit_scope='unit', snapshot_selection=0, updated_at_ms=99 WHERE parser_name='sbi-income-payments'",
+  );
+  const alternative = policyRows(store).find((row) => row.parser_name === "sbi-income-payments")!;
+  const gains = policyRows(store).find((row) => row.parser_name === "sbi-realised-gains")!;
+  store.db.exec("DELETE FROM dataset_snapshot_policies WHERE parser_name='sbi-realised-gains'");
+  const reopened = openTestStore(join(store.blobDir, ".."));
+  try {
+    expect(policyRows(reopened).find((row) => row.parser_name === "sbi-income-payments")).toEqual(
+      alternative,
+    );
+    expect(policyRows(reopened).find((row) => row.parser_name === "sbi-realised-gains")).toEqual(
+      gains,
+    );
+  } finally {
+    reopened.db.close();
+  }
+  const again = openTestStore(join(store.blobDir, ".."));
+  try {
+    expect(policyRows(again).find((row) => row.parser_name === "sbi-income-payments")).toEqual(
+      alternative,
+    );
+  } finally {
+    again.db.close();
+  }
+});
+
+for (const [parser, version] of REPLACING_EMPTY_COVERAGE) {
+  test(`${parser} requires complete coverage and replaces previous history on verified complete empty`, () => {
+    const store = database();
+    const base = {
+      parser,
+      parserVersion: version,
+      source: "sbi-securities",
+      dataset: parser === "sbi-income-payments" ? "income-payments" : "realised-gains",
+    };
+    snapshot(store, { ...base, observations: facts(parser, "CLAIMLESS") });
+    expect(currentValuations(store)).toEqual([]);
+    snapshot(store, {
+      ...base,
+      time: "2026-09-02T00:00:00Z",
+      observations: facts(parser, "OLD"),
+      coverage: {},
+    });
+    expect(currentValuations(store)).toHaveLength(1);
+    snapshot(store, {
+      ...base,
+      time: "2026-09-03T00:00:00Z",
+      observations: [],
+      coverage: {
+        completeness: "partial",
+        membershipComplete: false,
+        failureCause: "container_unreadable",
+        absenceMeaning: "not-observed",
+      },
+    });
+    expect(currentValuations(store)).toHaveLength(1);
+    snapshot(store, { ...base, time: "2026-09-04T00:00:00Z", observations: [], coverage: {} });
+    expect(currentValuations(store)).toEqual([]);
+    expect(store.db.query("SELECT COUNT(*) AS n FROM parse_runs").get()).toEqual({ n: 4 });
+  });
+}
+
 describe("dataset_snapshot_policies seed", () => {
   test("mirrors SNAPSHOT_DATASETS exactly, so a new snapshot parser without a policy row fails CI", () => {
     const rows = policyRows(database());
@@ -143,6 +233,13 @@ describe("dataset_snapshot_policies seed", () => {
           "../../../packages/storage-d1/migrations/core/0092_vpass_credit_snapshots.sql",
         ),
         "utf8",
+      ) +
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0093_sbi_income_complete_containers.sql",
+        ),
+        "utf8",
       );
     for (const [parser, dataset] of SNAPSHOT_DATASETS) {
       expect(sql).toContain("'" + dataset + "'");
@@ -154,18 +251,21 @@ describe("dataset_snapshot_policies seed", () => {
     for (const row of policyRows(database())) {
       const stGeorge = row.parser_name === "st-george-balances";
       const prestia = row.parser_name === "prestia-bank-balances";
-      const explicit = EXPLICIT_COVERAGE.has(row.parser_name);
+      const nonemptyOnly = EXPLICIT_COVERAGE.has(row.parser_name);
+      const explicit = nonemptyOnly || REPLACING_EMPTY_COVERAGE.has(row.parser_name);
       expect(row.policy_id).toBe(explicit ? "coverage-v1" : LEGACY_SNAPSHOT_POLICY);
       expect(row.policy_version).toBe(1);
       // Existing policies remain run-scoped. ADR 0105 explicitly seeds only
       // Vpass credit snapshots as independent selecting card units.
       expect(row.unit_scope).toBe(row.parser_name === "vpass-credit-snapshot" ? "unit" : "run");
       expect(row.snapshot_selection).toBe(1);
-      expect(row.replaces_previous_on_complete_empty).toBe(explicit ? 0 : 1);
+      expect(row.replaces_previous_on_complete_empty).toBe(nonemptyOnly ? 0 : 1);
       expect(row.required_parser_version).toBe(
         row.parser_name === "sbi-foreign-cash-positions"
           ? FOREIGN_POSITION_SNAPSHOT_VERSION
-          : (EXPLICIT_COVERAGE.get(row.parser_name) ?? null),
+          : (EXPLICIT_COVERAGE.get(row.parser_name) ??
+              REPLACING_EMPTY_COVERAGE.get(row.parser_name) ??
+              null),
       );
       // The declared owner source is the one the parser accepts.
       const parser = PARSERS.find((candidate) => candidate.name === row.parser_name)!;
