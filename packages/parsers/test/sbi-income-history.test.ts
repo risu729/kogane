@@ -88,6 +88,16 @@ test("exact numeric tokens survive notation and binary rounding edges", () => {
   expect(() => incomeDecimal("1e-100000")).toThrow("sbi_income_history_money");
 });
 
+test("malformed UTF-8 in a derived source text is rejected without replacement characters", () => {
+  const original = bytes(incomeBundle("income"));
+  const index = Buffer.from(original).indexOf("Synthetic security");
+  expect(index).toBeGreaterThan(0);
+  original[index] = 255;
+  expect(() => sbiIncomePayments.parse(original, meta("income-payments"))).toThrow(
+    "sbi_income_history_schema",
+  );
+});
+
 test("missing payment money is unavailable, never a zero metric", () => {
   const bundle = incomeBundle("income");
   bundle.rowsText = bundle.rowsText.replace('"taxTotal":6', '"taxTotal":null');

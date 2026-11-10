@@ -1,6 +1,6 @@
 import type { Observation, Parser, ValuationObservation } from "../types.ts";
 import { containerClaim, ParseDiagnostics } from "./coverage.ts";
-import { decodeUtf8, unitScopeAdmitted } from "./util.ts";
+import { unitScopeAdmitted } from "./util.ts";
 import { stableFingerprint, exactDecimal } from "./sbi-strict.ts";
 import {
   incomeDecimal,
@@ -18,7 +18,7 @@ const iso = (text: unknown) =>
 function parser(kind: IncomeHistoryKind): Parser {
   return {
     name: kind === "income" ? "sbi-income-payments" : "sbi-realised-gains",
-    version: "0.1.1",
+    version: "0.1.2",
     accepts: (artifact) =>
       artifact.sourceId === "sbi-securities" && artifact.dataset === incomeDataset(kind),
     parse(bytes, artifact) {
@@ -30,7 +30,13 @@ function parser(kind: IncomeHistoryKind): Parser {
         throw new Error("sbi_income_history_run_incomplete");
       // Outer fields are text/metadata; the shared reader rejects duplicate keys
       // and original source texts are validated again inside the bundle.
-      const body = readIncomeJson(decodeUtf8(bytes)).exact;
+      let text: string;
+      try {
+        text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch {
+        throw new Error("sbi_income_history_schema");
+      }
+      const body = readIncomeJson(text).exact;
       const { records } = validateIncomeHistory(body, kind);
       const observations: Observation[] = [];
       const diagnostics = new ParseDiagnostics();
