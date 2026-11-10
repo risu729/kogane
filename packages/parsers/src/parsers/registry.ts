@@ -41,6 +41,7 @@ import { sbiVcExecutions } from "./sbi-vc-executions.ts";
 import { sbiVcPositionSummary } from "./sbi-vc-position-summary.ts";
 import { smbcDirectBalance, smbcDirectTransactions } from "./smbc-direct.ts";
 import { stGeorgeBalances, stGeorgeTransactions } from "./st-george.ts";
+import { sbiShinseiMonthlyReport } from "./sbi-shinsei-monthly-report.ts";
 import { sbiShinseiBalanceSummaryAndStage } from "./sbi-shinsei-balance-summary-and-stage.ts";
 import { sbiShinseiExchangeRate } from "./sbi-shinsei-exchange-rate.ts";
 import { sbiShinseiTopBalancesAndActivity } from "./sbi-shinsei-top-balances-and-activity.ts";
@@ -89,6 +90,7 @@ export const PARSERS: readonly Parser[] = [
   sbiShinseiYenDepositAccount,
   sbiShinseiExchangeRate,
   sbiShinseiBalanceSummaryAndStage,
+  sbiShinseiMonthlyReport,
   vPointBalanceInfo,
   vPointSmfgPoint,
   vPointHistoryPage,

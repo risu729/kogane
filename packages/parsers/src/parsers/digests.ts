@@ -82,6 +82,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "e9d08f2520bd293d5b4bd4656af8bb318fba01143734a1fd01bafb0a5ce5781f",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-exchange-rate.ts":
       "96f8afa71be75794f89aef60a6b56dee310f69442f93ad17cdbb2699db8d721b",
+    "poc/observation-pipeline/src/parsers/sbi-shinsei-monthly-report.ts":
+      "c2e459ad22ca534bc5a143d98092e1e58d5d889c95006159d46bac28a5e2d34b",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-top-balances-and-activity.ts":
       "09be9df1bab1d5ed7aec8576dec0948ae92cebf95c088a1ac01db4d91e6f5f34",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-yen-deposit-account.ts":
@@ -460,6 +462,20 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/parsers/coverage.ts",
         "poc/observation-pipeline/src/parsers/sbi-shinsei-common.ts",
         "poc/observation-pipeline/src/parsers/sbi-shinsei-exchange-rate.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "sbi-shinsei-monthly-report-metadata": {
+      version: "1.0.0",
+      codeDigest: "100048f8bf1c9b69a9fc4a57975fbf1371cda647298dae825cfc3b0b727bd665",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-shinsei-common.ts",
+        "poc/observation-pipeline/src/parsers/sbi-shinsei-monthly-report.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],

@@ -113,6 +113,7 @@ test("harness applies every Layer B migration in order through 0089", () => {
     "0084_csv_reader_release_snapshot_policies.sql",
     "0085_schedule_dispatch_marker.sql",
     "0086_collection_provider_failure_code.sql",
+    "0088_sbi_shinsei_monthly_report_units.sql",
     "0089_sony_realised_gains_snapshot.sql",
   ]);
   expect([...names].sort()).toEqual(names);

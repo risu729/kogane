@@ -1,3 +1,4 @@
+import { emptyReportHandoff, inventoryDatabase } from "./monthly-report-fixtures";
 // U09 (G1-01, G1-02, G1-08, G1-09, G1-15, G3-07, G3-08, G3-11): the shared
 // DATA-bucket write path of the SBI Shinsei collector.
 //
@@ -309,7 +310,9 @@ async function trigger(target: string | undefined) {
     spyOn(console, "log").mockImplementation((...args: unknown[]) => void logged.push(args)),
   ];
   try {
+    handoff = emptyReportHandoff(handoff);
     const response = await runCollection({
+      SCHEDULE_DB: inventoryDatabase,
       SBI_SHINSEI_CREDENTIAL_JSON: JSON.stringify({
         branchNumber: "012",
         accountNumber: "0345678",
@@ -481,4 +484,25 @@ describe("G1-15 the collector writes the run where COLLECTION_TARGET says", () =
         .map((step) => [step.transformerId, step.transformerVersion]),
     ).toEqual(Array.from({ length: 4 }, () => ["sbi-shinsei-token-sanitizer", "v3"]));
   });
+});
+
+test("report persistence refuses binary text re-encoding and an invalid report month", async () => {
+  for (const artifact of [
+    {
+      dataset: "monthly-report-pdf",
+      filename: "monthly-report-2099-01.pdf",
+      mediaType: "application/pdf",
+      body: "%PDF-\u00ff",
+    },
+    {
+      dataset: "monthly-report-pdf",
+      filename: "monthly-report-0000-01.pdf",
+      mediaType: "application/pdf",
+      body: new TextEncoder().encode("%PDF-synthetic").buffer,
+    },
+  ]) {
+    await expect(
+      buildSharedRunPlan({ manifest: manifestOf(), artifacts: [artifact], identity: IDENTITY }),
+    ).rejects.toThrow("shared_report_invalid");
+  }
 });

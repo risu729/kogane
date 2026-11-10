@@ -1,3 +1,4 @@
+import { sbiShinseiMonthlyReport } from "../src/parsers/sbi-shinsei-monthly-report.ts";
 import { sonyBankDocumentMetadata } from "../src/parsers/sony-document-metadata.ts";
 // The transaction-family registry (packages/domain/src/event-families.ts,
 // ADR 0053) against the parsers it describes. Every PARSERS entry whose rows
@@ -73,6 +74,7 @@ const NOT_IN_REGISTRY = [
   "sbi-foreign-cash-balances",
   "sbi-shinsei-balance-summary-and-stage",
   "sbi-shinsei-exchange-rate",
+  "sbi-shinsei-monthly-report-metadata",
   "sbi-shinsei-yen-deposit-account",
   "sbi-vc-account-margin",
   "sbi-vc-cash-balances",
@@ -383,6 +385,17 @@ const CASES: Case[] = [
 const MF_EVIDENCE = { fetchUnitKey: null, statementState: null, period: null, mime: "text/html" };
 const OUTSIDE_CASES: Case[] = [
   one(
+    sbiShinseiMonthlyReport,
+    "monthly-report",
+    meta("sbi-shinsei-bank", "monthly-report-pdf", {
+      mime: "application/pdf",
+      artifactKey: `monthly-report-2099-01-${"a".repeat(64)}.pdf`,
+      fetchUnitKey: "monthly-report-2099-01",
+      sha256: "a".repeat(64),
+    }),
+    encode("%PDF-1.7\nsynthetic\n%%EOF"),
+  ),
+  one(
     sonyBankDocumentMetadata,
     "pdf-envelope",
     meta("sony-bank", "delivered-document-pdf", {
@@ -676,7 +689,7 @@ describe("transaction-family registry against PARSERS", () => {
       expect({ parser: parse.parser.name, rows }).toEqual({ parser: parse.parser.name, rows: [] });
       parsed.add(parse.parser.name);
     }
-    // Every one of the 19 was parsed at least once.
+    // Every excluded parser was exercised at least once.
     expect([...parsed].sort()).toEqual([...NOT_IN_REGISTRY].sort());
   });
 

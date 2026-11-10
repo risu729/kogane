@@ -54,7 +54,7 @@ describe("SBI Shinsei read allowlist", () => {
   });
 
   test("only captured routes with strict schemas are production-enabled", () => {
-    expect(READ_ROUTE_CATALOG.length).toBe(17);
+    expect(READ_ROUTE_CATALOG.length).toBe(19);
     expect(liveReadsEnabled()).toBeTrue();
     for (const route of READ_ROUTE_CATALOG) {
       expect(route.productionEnabled).toBe(
@@ -64,7 +64,7 @@ describe("SBI Shinsei read allowlist", () => {
       expect(route.origin).toBe("https://bk.web.sbishinseibank.co.jp");
     }
     expect(READ_ROUTE_CATALOG.filter((route) => route.responseSchema !== "unknown")).toHaveLength(
-      6,
+      8,
     );
   });
 
