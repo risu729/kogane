@@ -59,8 +59,8 @@ test("a year boundary cannot hide a missing week or a completely missing year", 
 test("duplicate secrets and malformed number fragments cannot reach audit, derivation or observations", async () => {
   const original = JSON.stringify(fixture());
   const cases = [
-    original.replace("{", '{"balances":{"accessToken":"SYNTHETIC_SENTINEL"},'),
-    original.replace("{", '{"balanc\\u0065s":{"accessToken":"SYNTHETIC_SENTINEL"},'),
+    '{"balances":{"accessToken":"SYNTHETIC_SENTINEL"},' + original.slice(1),
+    '{"balanc\\u0065s":{"accessToken":"SYNTHETIC_SENTINEL"},' + original.slice(1),
     original.replace(
       '"valuation":10',
       '"valuation":{"accessToken":"SYNTHETIC_SENTINEL"},"valuation":10',
