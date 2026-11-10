@@ -835,6 +835,7 @@ This is a supported response contract for one confirmed current connection, not 
 Acquisition is limited to the active card whose public `JCBカードW` (JCB Card W) token appears in one `SPAN.txt` immediately under `P.user-stage`. Private label adornments are excluded from the gate. Browser inspection verified the token/tag structure and adornment lengths; a separate boundary-category inspection timed out. Changed or unsupported boundaries therefore fail closed and can remain unsupported. No card switch is attempted.
 
 The collector reads points only after statement-history collection finishes without a stop outcome. It makes one fixed POST to the observed pointJson route, without query parameters, redirects or retries. It bounds the request at 30 seconds and the response stream at 1 MiB and validates JSON-RPC schema and echoed request ID before retaining private R2 evidence. The closed `jpointCode` distinguishes collected, unsupported, stopped and unavailable; the independent reward unit exists only for eligible products. Unavailable/stopped remain unknown and do not alter history coverage. Authentication structure and synthetic tests establish this implementation's basis; they do not prove a collector run against the provider or a post-deployment live capture.
+
 ## J-POINT history and statement-file observation, 2026-11-09/10
 
 An owner-authenticated, read-only session exposed
@@ -910,9 +911,9 @@ statement hrefs qualify.
 
 The browser blocked the observed download before an HTTP response. No file
 bytes, media type or CSV/PDF/OFX schema is verified; the restriction was not
-bypassed. Files remain unfetched. A separate zero-artifact document unit reports
-`statement_export_bytes_unverified`, while confirmed HTML and offered kinds
-are retained. Document coverage remains partial and #1251 stays open for file
+bypassed. Files remain unfetched. The sanitized manifest records the closed
+`documentCode: statement_export_bytes_unverified`, while confirmed HTML and offered kinds
+are retained. Document coverage remains not collected and #1251 stays open for file
 verification/storage and live reader validation.
 
 ## Debit statements and registered display alternatives (2026-11-10)

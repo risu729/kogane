@@ -84,6 +84,8 @@ export interface ConnectionSummary {
   readonly jpointCode?: JPointCollectionCode;
   /** Independent acquisition-month history; never a statement coverage claim. */
   readonly jpointHistoryCode?: JPointCollectionCode;
+  /** Offered file bytes remain outside observed acquisition. */
+  readonly documentCode?: "statement_export_bytes_unverified";
   readonly connectionId: string;
   readonly bootstrapMode: MyJcbCredential["bootstrapMode"];
   readonly status: "success" | "partial" | "failed" | "human-required";

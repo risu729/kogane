@@ -169,9 +169,15 @@ export async function collectConnection(options: {
             artifacts: [],
           };
     artifacts.push(...point.artifacts);
-    const pointHistory = stop === undefined
-      ? await collectJPointHistory(client, login.mypageHtml, point.artifacts)
-      : { code: isObservedJPointProduct(login.mypageHtml) ? "stopped" as const : "unsupported" as const, artifacts: [] };
+    const pointHistory =
+      stop === undefined
+        ? await collectJPointHistory(client, login.mypageHtml, point.artifacts)
+        : {
+            code: isObservedJPointProduct(login.mypageHtml)
+              ? ("stopped" as const)
+              : ("unsupported" as const),
+            artifacts: [],
+          };
     artifacts.push(...pointHistory.artifacts);
 
     const discovery = {

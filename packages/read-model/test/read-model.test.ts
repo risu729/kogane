@@ -354,8 +354,11 @@ describe("named concepts in the final SQL", () => {
         snapshot_selection: 0,
       },
       {
-        source_id: "myjcb", parser_name: "myjcb-jpoint-history", dataset: "jpoint-history",
-        unit_scope: "unit", snapshot_selection: 1,
+        source_id: "myjcb",
+        parser_name: "myjcb-jpoint-history",
+        dataset: "jpoint-history",
+        unit_scope: "unit",
+        snapshot_selection: 1,
       },
       {
         source_id: "sbi-shinsei-bank",
@@ -453,7 +456,10 @@ describe("named concepts in the final SQL", () => {
           "SELECT parser_name,dataset,unit_scope FROM dataset_snapshot_policies WHERE snapshot_selection=1 AND unit_scope<>'run' ORDER BY parser_name",
         )
         .all(),
-    ).toEqual([{ parser_name: "myjcb-jpoint-history", dataset: "jpoint-history", unit_scope: "unit" }, { parser_name: "vpass-credit-snapshot", dataset: "credit-snapshot", unit_scope: "unit" }]);
+    ).toEqual([
+      { parser_name: "myjcb-jpoint-history", dataset: "jpoint-history", unit_scope: "unit" },
+      { parser_name: "vpass-credit-snapshot", dataset: "credit-snapshot", unit_scope: "unit" },
+    ]);
     expect(
       db
         .query(
@@ -483,8 +489,11 @@ describe("named concepts in the final SQL", () => {
         snapshot_selection: 0,
       },
       {
-        source_id: "myjcb", parser_name: "myjcb-jpoint-history", dataset: "jpoint-history",
-        unit_scope: "unit", snapshot_selection: 1,
+        source_id: "myjcb",
+        parser_name: "myjcb-jpoint-history",
+        dataset: "jpoint-history",
+        unit_scope: "unit",
+        snapshot_selection: 1,
       },
       {
         source_id: "sbi-shinsei-bank",

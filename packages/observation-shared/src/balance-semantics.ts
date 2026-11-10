@@ -88,14 +88,26 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
   }
   const matches = (source: string, parser: string, metrics: string[]) =>
     input.sourceId === source && input.parserName === parser && metrics.includes(input.metric);
-  if (matches("myjcb", "myjcb-jpoint-history", ["jpoint_acquisition_earned", "jpoint_acquisition_used", "jpoint_acquisition_expired"]))
-    return result("period_total", "獲得月のポイント活動集計",
+  if (
+    matches("myjcb", "myjcb-jpoint-history", [
+      "jpoint_acquisition_earned",
+      "jpoint_acquisition_used",
+      "jpoint_acquisition_expired",
+    ])
+  )
+    return result(
+      "period_total",
+      "獲得月のポイント活動集計",
       "取得元が月ごとに示した獲得・使用・失効の集計です。獲得日別の保有残高とは別の値で、保有額へ加算しません。",
-      { assetClass: "reward" });
+      { assetClass: "reward" },
+    );
   if (matches("myjcb", "myjcb-jpoint-history", ["jpoint_acquisition_remaining"]))
-    return result("asset", "獲得日別のポイント残高",
+    return result(
+      "asset",
+      "獲得日別のポイント残高",
       "取得元が示す獲得日別の残高です。プログラムの合計表示や別の取得時点と重複加算しません。",
-      { assetClass: "reward", timeBasis: "reported_snapshot" });
+      { assetClass: "reward", timeBasis: "reported_snapshot" },
+    );
   if (
     matches("myjcb", "myjcb-credit-past-month-balances", ["credit_statement_payment_amount"]) ||
     matches("myjcb", "myjcb-credit-statement-total", ["credit_statement_payment_amount"]) ||

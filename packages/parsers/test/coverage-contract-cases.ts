@@ -454,12 +454,17 @@ const VPASS_CREDIT: ContractParser = {
 };
 
 export const CONTRACT_PARSERS: ContractParser[] = [
-  cases(myJcbJPointHistory, meta("myjcb", "jpoint-history", {
-    artifactKey: "synthetic/jpoint-history.json", fetchUnitKey: "synthetic:j-point-history",
-  }), {
-    "complete-rows": json(syntheticJPointHistory()),
-    "unreadable-container": json({}),
-  }),
+  cases(
+    myJcbJPointHistory,
+    meta("myjcb", "jpoint-history", {
+      artifactKey: "synthetic/jpoint-history.json",
+      fetchUnitKey: "synthetic:j-point-history",
+    }),
+    {
+      "complete-rows": json(syntheticJPointHistory()),
+      "unreadable-container": json({}),
+    },
+  ),
   cases(sbiIncomePayments, meta("sbi-securities", "income-payments"), {
     "complete-payments": json(incomeBundle("income")),
   }),

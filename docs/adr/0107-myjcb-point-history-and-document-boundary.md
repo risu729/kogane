@@ -43,7 +43,7 @@ The raw history has three `.tab-panel > .js-scrollable-tbl > table` elements,
 each with THEAD/TBODY. Scroll-head/body wrappers and toggle buttons are inserted
 by JavaScript and are not raw response contracts. Exact headers, complete
 document/section/table structure, unique acquisition dates, matching row
-membership, earned totals and remaining quantities are checked across the
+membership, earned totals, their observed three-component exact sum and remaining quantities are checked across the
 three tabs. The exact sum of overview remaining quantities must equal the
 same run's existing total. Detail components are retained without publishing
 them again. There is no fixed observed row-count assumption.
@@ -86,7 +86,8 @@ current. The reader prefers the current total and reports a stale/unavailable
 history gap, preserving the previous history capture time and a source-fact
 reference. Older observations and claims remain append-only dated evidence.
 
-Migration 0094 installs coverage-based history snapshots under the independent
+Registration v10 maps only the new normalized history artifact, preserving
+the actual v1–v9 derivations. Migration 0094 installs coverage-based history snapshots under the independent
 reward unit. Unavailable/empty pages cannot clear prior evidence. The local
 observation store mirrors this policy idempotently.
 
@@ -101,9 +102,11 @@ months. The existing h2 month / h3 schedule distinction is unchanged.
 Finalised markers and the actual same-month statement hrefs determine offers;
 a different PDF-labelled newsletter does not qualify.
 
-Files remain unfetched. Offered files have a separate zero-artifact document
-unit with `statement_export_bytes_unverified`, while statement HTML and its
-observed export offers are retained. This is partial document coverage, not
+Files remain unfetched. The sanitized manifest records the closed
+`documentCode: statement_export_bytes_unverified` beside offered kinds.
+Statement HTML and its observed export offers are retained. An unavailable
+document unit would downgrade the statement run and block its frozen readers,
+so the file gap is reported without introducing such a unit. This is uncollected document coverage, not
 proof that PDF/CSV bytes were archived. Root-card switching and unobserved
 accounts remain outside this change.
 
@@ -111,8 +114,9 @@ accounts remain outside this change.
 
 Reward activity becomes available for the observed J-POINT product. Expiry
 coverage remains partial for unobserved row statuses; document coverage remains
-partial until the offered file responses can be observed and validated. #1251
-remains open for those acceptance gaps and production validation.
+not collected until the offered file responses can be observed and validated. #1251
+remains open for those acceptance gaps and production validation. Existing statement HTML is catalogued under
+`card_statement`; offered links alone do not promote the `document` type.
 
 Only sanitized provider evidence and financial observations carry quantities,
 dates and provider text. Operational records contain counts and closed codes.

@@ -312,7 +312,9 @@ function manifestBytes(
       ...(connection.jpointCode === undefined
         ? {}
         : { jpointCode: pointCode(connection.jpointCode) }),
-      ...(connection.jpointHistoryCode === undefined ? {} : { jpointHistoryCode: pointCode(connection.jpointHistoryCode) }),
+      ...(connection.jpointHistoryCode === undefined
+        ? {}
+        : { jpointHistoryCode: pointCode(connection.jpointHistoryCode) }),
       connectionId: connection.connectionId,
       bootstrapMode: connection.bootstrapMode,
       status: connection.status,
@@ -333,7 +335,10 @@ function manifestBytes(
         : { unreadMonths: unreadMonths(connection.unreadMonths) }),
       ...(connection.exportOffers === undefined || connection.exportOffers.length === 0
         ? {}
-        : { exportOffers: exportOffers(connection.exportOffers) }),
+        : {
+            exportOffers: exportOffers(connection.exportOffers),
+            documentCode: "statement_export_bytes_unverified" as const,
+          }),
       ...(connection.schedulePages === undefined || connection.schedulePages.length === 0
         ? noSchedulePages(connection.schedulePageCount)
         : {
@@ -390,8 +395,11 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
         );
       }
       if (artifact.dataset === "jpoint-history") {
-        if (artifact.filename !== "jpoint-history.json" || artifact.mediaType !== "application/json" ||
-          connection.summary.jpointHistoryCode !== "collected")
+        if (
+          artifact.filename !== "jpoint-history.json" ||
+          artifact.mediaType !== "application/json" ||
+          connection.summary.jpointHistoryCode !== "collected"
+        )
           throw new Error("jpoint_history_artifact_metadata_invalid");
         readJPointHistory(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
       }
@@ -409,8 +417,9 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
         byteSize: bytes.byteLength,
         mediaType: artifact.mediaType.split(";", 1)[0]!.trim(),
         role,
-        unitKey: historyDataset(artifact.dataset) ? `${unitKey}:j-point-history` :
-          artifact.dataset === "jpoint-balance"
+        unitKey: historyDataset(artifact.dataset)
+          ? `${unitKey}:j-point-history`
+          : artifact.dataset === "jpoint-balance"
             ? pointUnitKey(unitKey)
             : artifact.dataset.startsWith("debit-other-")
               ? `${unitKey}:debit-other`
@@ -465,13 +474,20 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
     if (history !== undefined && history !== "unsupported") {
       pointCode(history);
       const normalized = historyArtifacts.filter((a) => a.dataset === "jpoint-history").length;
-      if (!failed && ((history === "collected" && (normalized !== 1 || historyArtifacts.length !== 3)) ||
-        (history !== "collected" && normalized !== 0)))
+      if (
+        !failed &&
+        ((history === "collected" && (normalized !== 1 || historyArtifacts.length !== 3)) ||
+          (history !== "collected" && normalized !== 0))
+      )
         throw new Error("jpoint_history_artifact_count_invalid");
-      units.push({ unitKey: `${unitKey}:j-point-history`, unitKind: "reward-history",
+      units.push({
+        unitKey: `${unitKey}:j-point-history`,
+        unitKind: "reward-history",
         artifactCount: historyArtifacts.length,
         coverageStatus: !failed && history === "collected" ? "complete" : "unknown",
-        ...(!failed && history === "collected" ? {} : { safeErrorCode: failed ? "jpoint_history_stopped" : `jpoint_history_${history}` }),
+        ...(!failed && history === "collected"
+          ? {}
+          : { safeErrorCode: failed ? "jpoint_history_stopped" : `jpoint_history_${history}` }),
       });
     } else if (historyArtifacts.length) throw new Error("jpoint_history_outcome_missing");
     const otherArtifacts = kept.filter((artifact) =>
@@ -516,11 +532,6 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
       coverageStatus: failed ? "unknown" : coverage(connection.summary.status),
       ...(connectionCode === undefined ? {} : { safeErrorCode: connectionCode }),
     });
-    if ((connection.summary.exportOffers?.length ?? 0) > 0) {
-      units.push({ unitKey: `${unitKey}:statement-documents`, unitKind: "statement-documents",
-        artifactCount: 0, coverageStatus: "unknown",
-        safeErrorCode: failed ? "collector_failed" : "statement_export_bytes_unverified" });
-    }
   }
 
   const summaries = input.connections.map((connection) => connection.summary);

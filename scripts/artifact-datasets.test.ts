@@ -54,8 +54,22 @@ const html = "text/html";
 
 /** Artifacts as the collectors write them. */
 const SAMPLES: readonly Sample[] = [
-  { source: "myjcb", artifactKey: "conn-a/jpoint-history.json", role: "collector_derived", mediaType: json, dataset: "jpoint-history", unitKey: "conn-a:j-point-history" },
-  ...["jpoint-inquiry.html", "jpoint-history.html"].map((filename) => ({ source: "myjcb", artifactKey: `conn-a/${filename}`, role: "sanitized_provider_capture", mediaType: html, dataset: null, unitKey: "conn-a:j-point-history" })),
+  {
+    source: "myjcb",
+    artifactKey: "conn-a/jpoint-history.json",
+    role: "collector_derived",
+    mediaType: json,
+    dataset: "jpoint-history",
+    unitKey: "conn-a:j-point-history",
+  },
+  ...["jpoint-inquiry.html", "jpoint-history.html"].map((filename) => ({
+    source: "myjcb",
+    artifactKey: `conn-a/${filename}`,
+    role: "sanitized_provider_capture",
+    mediaType: html,
+    dataset: null,
+    unitKey: "conn-a:j-point-history",
+  })),
   ...["income-payments", "realised-gains"].flatMap((dataset) => [
     {
       source: "sbi-securities",
@@ -797,8 +811,9 @@ describe("the registration dataset table (ADR 0022)", () => {
       "terminal-registration-v7",
       "terminal-registration-v8",
       "terminal-registration-v9",
+      "terminal-registration-v10",
     ]);
-    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v9");
+    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v10");
     const vpass = (await allSamples()).filter((sample) => sample.source === "vpass");
     expect(vpass.filter((sample) => sample.dataset === "statement-page").length).toBe(2);
     for (const sample of vpass) {
@@ -1203,5 +1218,17 @@ test("SBI payment/sale derivatives map only under v9 and private originals stay 
           mediaType: "application/json",
         }),
       ).toBeNull();
+  }
+});
+
+test("v10 changes only J-POINT history; earlier registration meanings stay frozen", () => {
+  for (const sample of SAMPLES) {
+    const old = artifactDataset(sample.source, sample, "terminal-registration-v9");
+    const current = artifactDataset(sample.source, sample, "terminal-registration-v10");
+    if (sample.dataset === "jpoint-history") {
+      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, -1))
+        expect(artifactDataset(sample.source, sample, version)).toBeNull();
+      expect(current).toBe("jpoint-history");
+    } else expect(current).toBe(old);
   }
 });

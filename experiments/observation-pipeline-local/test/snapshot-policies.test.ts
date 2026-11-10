@@ -143,7 +143,14 @@ describe("dataset_snapshot_policies seed", () => {
           "../../../packages/storage-d1/migrations/core/0092_vpass_credit_snapshots.sql",
         ),
         "utf8",
-      ) + readFileSync(join(import.meta.dir, "../../../packages/storage-d1/migrations/core/0094_myjcb_jpoint_history.sql"), "utf8");
+      ) +
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0094_myjcb_jpoint_history.sql",
+        ),
+        "utf8",
+      );
     for (const [parser, dataset] of SNAPSHOT_DATASETS) {
       expect(sql).toContain("'" + dataset + "'");
       expect(sql).toContain("'" + parser + "'");
@@ -158,7 +165,11 @@ describe("dataset_snapshot_policies seed", () => {
       expect(row.policy_id).toBe(explicit ? "coverage-v1" : LEGACY_SNAPSHOT_POLICY);
       expect(row.policy_version).toBe(1);
       // Only explicitly enabled independent snapshot families use unit scope.
-      expect(row.unit_scope).toBe(["vpass-credit-snapshot", "myjcb-jpoint-history"].includes(row.parser_name) ? "unit" : "run");
+      expect(row.unit_scope).toBe(
+        ["vpass-credit-snapshot", "myjcb-jpoint-history"].includes(row.parser_name)
+          ? "unit"
+          : "run",
+      );
       expect(row.snapshot_selection).toBe(1);
       expect(row.replaces_previous_on_complete_empty).toBe(explicit ? 0 : 1);
       expect(row.required_parser_version).toBe(

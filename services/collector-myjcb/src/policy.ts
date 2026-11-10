@@ -29,12 +29,14 @@ interface RoutePolicy {
 
 const ACTIVE_ALLOWLIST: readonly RoutePolicy[] = [
   {
-    operation: "jpoint-inquiry", method: "GET",
+    operation: "jpoint-inquiry",
+    method: "GET",
     pathname: "/iss-pc/member/point/pointInquiry.html",
     query: { link_id: /^myj_main_pointInquiry$/u },
   },
   {
-    operation: "jpoint-history", method: "GET",
+    operation: "jpoint-history",
+    method: "GET",
     pathname: "/iss-pc/member/point/pointHistoryInquiry.html",
   },
   {

@@ -231,9 +231,24 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
     )();
   }
   // Mirror the acquisition-history snapshot contract, preserving operator choices.
-  if (!db.query("SELECT 1 FROM dataset_snapshot_policies WHERE parser_name='myjcb-jpoint-history' AND dataset='jpoint-history'").get()) {
-    db.transaction(() => db.exec(readFileSync(join(EXPERIMENT_ROOT,
-      "../../packages/storage-d1/migrations/core/0094_myjcb_jpoint_history.sql"), "utf8")))();
+  if (
+    !db
+      .query(
+        "SELECT 1 FROM dataset_snapshot_policies WHERE parser_name='myjcb-jpoint-history' AND dataset='jpoint-history'",
+      )
+      .get()
+  ) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(
+            EXPERIMENT_ROOT,
+            "../../packages/storage-d1/migrations/core/0094_myjcb_jpoint_history.sql",
+          ),
+          "utf8",
+        ),
+      ),
+    )();
   }
   // 0056/0059 advance the board reader (ADR 0028 and its amendment). 0084
   // follows the shared CSV release for all four exact-version policies.

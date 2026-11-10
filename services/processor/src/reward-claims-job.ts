@@ -14,7 +14,10 @@
 //     reference and the promotion release, and the insert ignores a conflict.
 //     Re-running it, or running it while another sweep runs, adds nothing new.
 import { unitScopedEligibilitySql } from "../../../packages/parsers/src/snapshot-query.ts";
-import { JPOINT_PUBLISHED_COHORT_CTES, JPOINT_COHORT_MATCH } from "../../../packages/read-model/src/jpoint-history-cohort.ts";
+import {
+  JPOINT_PUBLISHED_COHORT_CTES,
+  JPOINT_COHORT_MATCH,
+} from "../../../packages/read-model/src/jpoint-history-cohort.ts";
 import type { D1Like as RewardReadD1 } from "../../../packages/storage-d1/src/d1.ts";
 import type { BucketKind } from "../../../packages/domain/src/rewards.ts";
 import { validTemporalValue, type TemporalValue } from "../../../packages/domain/src/time.ts";
@@ -56,10 +59,16 @@ interface PromotionRule {
  */
 export const PROMOTION_RULES: readonly PromotionRule[] = [
   {
-    sourceId: "myjcb", parserName: "myjcb-jpoint-history", metric: "jpoint_acquisition_remaining",
-    sourceAccountPrefix: "myjcb:", programId: "program:j-point",
-    holdingRef: (sourceAccount) => `program:j-point:${sourceAccount.replace(/:acquired:\d{4}-\d{2}-\d{2}$/u, ":total")}`,
-    unitRef: "points:j-point", bucketKind: "time-limited", restrictionRefs: [],
+    sourceId: "myjcb",
+    parserName: "myjcb-jpoint-history",
+    metric: "jpoint_acquisition_remaining",
+    sourceAccountPrefix: "myjcb:",
+    programId: "program:j-point",
+    holdingRef: (sourceAccount) =>
+      `program:j-point:${sourceAccount.replace(/:acquired:\d{4}-\d{2}-\d{2}$/u, ":total")}`,
+    unitRef: "points:j-point",
+    bucketKind: "time-limited",
+    restrictionRefs: [],
   },
   {
     sourceId: "myjcb",
@@ -183,7 +192,7 @@ const candidateScope = PROMOTION_RULES.map((rule) => {
     } else {
       clauses.push(`b.source_account GLOB ${parameter("myjcb:*:j-point:total")}`);
       clauses.push(
-      `length(b.source_account) BETWEEN 21 AND 84 AND substr(b.source_account,7,length(b.source_account)-20) NOT GLOB '*[^a-z0-9-]*' AND substr(b.source_account,7,1) GLOB '[a-z0-9]'`,
+        `length(b.source_account) BETWEEN 21 AND 84 AND substr(b.source_account,7,length(b.source_account)-20) NOT GLOB '*[^a-z0-9-]*' AND substr(b.source_account,7,1) GLOB '[a-z0-9]'`,
       );
     }
   }
@@ -234,9 +243,11 @@ function matches(rule: PromotionRule, row: CandidateRow): boolean {
   if (rule.sourceAccountEquals && row.source_account !== rule.sourceAccountEquals) return false;
   if (
     rule.programId === "program:j-point" &&
-    (!(rule.parserName === "myjcb-jpoint-history"
-      ? /^myjcb:[a-z0-9][a-z0-9-]{0,63}:j-point:acquired:\d{4}-\d{2}-\d{2}$/u
-      : /^myjcb:[a-z0-9][a-z0-9-]{0,63}:j-point:total$/u).test(row.source_account) ||
+    (!(
+      rule.parserName === "myjcb-jpoint-history"
+        ? /^myjcb:[a-z0-9][a-z0-9-]{0,63}:j-point:acquired:\d{4}-\d{2}-\d{2}$/u
+        : /^myjcb:[a-z0-9][a-z0-9-]{0,63}:j-point:total$/u
+    ).test(row.source_account) ||
       row.instrument !== "J_POINT")
   )
     return false;
@@ -355,12 +366,14 @@ export async function promoteRewardClaims(
       continue;
     }
     const historyExpiry = koganeField(row.extra_json, "observedExpiry");
-    const expiry = rule.parserName === "myjcb-jpoint-history"
-      ? validTemporalValue(historyExpiry) ? historyExpiry : { kind: "unknown" as const, reasonCode: "provider_expiry_unparsed" }
-      :
-      rule.sourceId === "v-point"
-        ? observedExpiry(koganeField(row.extra_json, "expiration"), "Asia/Tokyo")
-        : null;
+    const expiry =
+      rule.parserName === "myjcb-jpoint-history"
+        ? validTemporalValue(historyExpiry)
+          ? historyExpiry
+          : { kind: "unknown" as const, reasonCode: "provider_expiry_unparsed" }
+        : rule.sourceId === "v-point"
+          ? observedExpiry(koganeField(row.extra_json, "expiration"), "Asia/Tokyo")
+          : null;
     const bucketKind: BucketKind = rule.bucketKind;
     const status = row.decimal_status ?? "unparsed";
     const claimDigest = await digest(

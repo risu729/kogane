@@ -963,7 +963,8 @@ export function artifactRequest(
     manifest.source === "sbi-securities" &&
     (dataset === "yen-detail-history" || dataset === "foreign-cash-history");
   const sbiIncome =
-    (contractVersion === "terminal-registration-v9" || contractVersion === "terminal-registration-v10") &&
+    (contractVersion === "terminal-registration-v9" ||
+      contractVersion === "terminal-registration-v10") &&
     manifest.source === "sbi-securities" &&
     (dataset === "income-payments" || dataset === "realised-gains");
   const windowRange =

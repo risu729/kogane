@@ -1,17 +1,26 @@
 import { parse, type DefaultTreeAdapterMap } from "parse5";
-import { JPOINT_HISTORY_SCHEMA, JPOINT_HISTORY_MAX_ROWS, jpointHistoryFailure as fail,
-  readJPointHistory, type JPointAcquisitionRow, type JPointHistory } from "../../../domain/src/myjcb-jpoint-history.ts";
+import {
+  JPOINT_HISTORY_SCHEMA,
+  JPOINT_HISTORY_MAX_ROWS,
+  jpointHistoryFailure as fail,
+  readJPointHistory,
+  type JPointAcquisitionRow,
+  type JPointHistory,
+} from "../../../domain/src/myjcb-jpoint-history.ts";
 import { parseLocalDate } from "../../../domain/src/time.ts";
 
 export const JPOINT_HISTORY_HTML_VERSION = "myjcb-jpoint-history-html-v1";
 type Node = DefaultTreeAdapterMap["node"];
 type Element = DefaultTreeAdapterMap["element"];
-const kids = (node: Node): Node[] => "childNodes" in node ? node.childNodes : [];
+const kids = (node: Node): Node[] => ("childNodes" in node ? node.childNodes : []);
 const elements = (node: Node): Element[] => kids(node).filter((n): n is Element => "tagName" in n);
-const all = (node: Node): Element[] => [...("tagName" in node ? [node as Element] : []), ...kids(node).flatMap(all)];
+const all = (node: Node): Element[] => [
+  ...("tagName" in node ? [node as Element] : []),
+  ...kids(node).flatMap(all),
+];
 const cls = (node: Element, name: string): boolean =>
   (node.attrs.find((a) => a.name === "class")?.value ?? "").split(/\s+/u).includes(name);
-const text = (node: Node): string => "value" in node ? node.value : kids(node).map(text).join("");
+const text = (node: Node): string => ("value" in node ? node.value : kids(node).map(text).join(""));
 const plain = (node: Element): string => {
   if (elements(node).length) return fail("cell_shape_unsupported");
   return text(node).trim();
@@ -26,13 +35,20 @@ const HEADERS = [
   ["獲得月（支払月）", "当月獲得ポイント合計", "詳細"],
   ["獲得月（支払月）", "失効予定ポイント", "失効予定月", "ステータス"],
 ] as const;
-const headerKey = (values: readonly string[]): string => values.map((v) => v.normalize("NFKC")).join("|");
+const headerKey = (values: readonly string[]): string =>
+  values.map((v) => v.normalize("NFKC")).join("|");
 function acquisition(cell: Element): { acquiredOn: string; paymentText: string } {
   if (!cls(cell, "sp-fnt10px")) return fail("date_cell_unsupported");
   const nodes = kids(cell).filter((n) => !("value" in n && n.value.trim() === ""));
-  if (nodes.length !== 3 || !("value" in nodes[0]!) ||
-    !("tagName" in nodes[1]!) || nodes[1].tagName !== "br" || !cls(nodes[1] as Element, "sp-block") ||
-    !("tagName" in nodes[2]!) || nodes[2].tagName !== "span")
+  if (
+    nodes.length !== 3 ||
+    !("value" in nodes[0]!) ||
+    !("tagName" in nodes[1]!) ||
+    nodes[1].tagName !== "br" ||
+    !cls(nodes[1] as Element, "sp-block") ||
+    !("tagName" in nodes[2]!) ||
+    nodes[2].tagName !== "span"
+  )
     return fail("date_cell_unsupported");
   const date = (nodes[0] as DefaultTreeAdapterMap["textNode"]).value.trim();
   if (!/^\d{4}\/\d{2}\/\d{2}$/u.test(date)) return fail("acquisition_date_unparsed");
@@ -49,7 +65,8 @@ function tableRows(table: Element, width: number): Element[][] {
   if (sections.length !== 2 || sections[0]?.tagName !== "thead" || sections[1]?.tagName !== "tbody")
     return fail("table_shape_unsupported");
   const rows = elements(sections[1]!);
-  if (rows.length < 1 || rows.length > JPOINT_HISTORY_MAX_ROWS) return fail("row_count_unsupported");
+  if (rows.length < 1 || rows.length > JPOINT_HISTORY_MAX_ROWS)
+    return fail("row_count_unsupported");
   return rows.map((row) => {
     const cells = elements(row);
     if (row.tagName !== "tr" || cells.length !== width || cells.some((n) => n.tagName !== "td"))
@@ -57,10 +74,20 @@ function tableRows(table: Element, width: number): Element[][] {
     return cells;
   });
 }
-function detail(cell: Element): { total: string; normal: string; preferential: string; bonus: string } {
+function detail(cell: Element): {
+  total: string;
+  normal: string;
+  preferential: string;
+  bonus: string;
+} {
   const parts = elements(cell);
-  if (parts.length !== 2 || parts.some((n) => n.tagName !== "div") || !cls(parts[0]!, "inner") ||
-    !cls(parts[1]!, "js-toggle-content")) return fail("detail_shape_unsupported");
+  if (
+    parts.length !== 2 ||
+    parts.some((n) => n.tagName !== "div") ||
+    !cls(parts[0]!, "inner") ||
+    !cls(parts[1]!, "js-toggle-content")
+  )
+    return fail("detail_shape_unsupported");
   const lists = elements(parts[1]!);
   if (lists.length !== 1 || lists[0]?.tagName !== "dl" || !cls(lists[0], "detail"))
     return fail("detail_shape_unsupported");
@@ -68,11 +95,20 @@ function detail(cell: Element): { total: string; normal: string; preferential: s
   const labels = ["通常獲得ポイント", "優遇ポイント", "ボーナスポイント"];
   if (entries.length !== 6) return fail("detail_shape_unsupported");
   const values = labels.map((label, i) => {
-    if (entries[i * 2]?.tagName !== "dt" || entries[i * 2 + 1]?.tagName !== "dd" ||
-      plain(entries[i * 2]!) !== label) return fail("detail_label_unsupported");
+    if (
+      entries[i * 2]?.tagName !== "dt" ||
+      entries[i * 2 + 1]?.tagName !== "dd" ||
+      plain(entries[i * 2]!) !== label
+    )
+      return fail("detail_label_unsupported");
     return quantity(entries[i * 2 + 1]!);
   });
-  return { total: quantity(parts[0]!), normal: values[0]!, preferential: values[1]!, bonus: values[2]! };
+  return {
+    total: quantity(parts[0]!),
+    normal: values[0]!,
+    preferential: values[1]!,
+    bonus: values[2]!,
+  };
 }
 /** Raw HTTP HTML, before the site's JavaScript inserts scrolling wrappers and
  * toggle buttons. Never parse browser-generated duplicate header tables. */
@@ -83,7 +119,8 @@ export function normalizeJPointHistoryHtml(html: string, reportedTotal: string):
   const nodes = all(document);
   for (const tag of ["html", "body"]) {
     const roots = nodes.filter((n) => n.tagName === tag);
-    if (roots.length !== 1 || !roots[0]!.sourceCodeLocation?.endTag) return fail("document_incomplete");
+    if (roots.length !== 1 || !roots[0]!.sourceCodeLocation?.endTag)
+      return fail("document_incomplete");
   }
   const panels = nodes.filter((n) => cls(n, "tab-panel"));
   if (panels.length !== 3) return fail("tab_count_unsupported");
@@ -110,14 +147,19 @@ export function normalizeJPointHistoryHtml(html: string, reportedTotal: string):
     if (kind < 0 || tables.has(kind)) return fail("header_unsupported");
     tables.set(kind, table);
   }
-  const overview = tableRows(tables.get(0)!, 5), details = tableRows(tables.get(1)!, 3),
+  const overview = tableRows(tables.get(0)!, 5),
+    details = tableRows(tables.get(1)!, 3),
     expiry = tableRows(tables.get(2)!, 4);
   if (overview.length !== details.length || overview.length !== expiry.length)
     return fail("tab_membership_mismatch");
   const rows = overview.map((cells, i): JPointAcquisitionRow => {
     const date = acquisition(cells[0]!);
-    const detailDate = acquisition(details[i]![0]!), expiryDate = acquisition(expiry[i]![0]!);
-    if (JSON.stringify(date) !== JSON.stringify(detailDate) || JSON.stringify(date) !== JSON.stringify(expiryDate))
+    const detailDate = acquisition(details[i]![0]!),
+      expiryDate = acquisition(expiry[i]![0]!);
+    if (
+      JSON.stringify(date) !== JSON.stringify(detailDate) ||
+      JSON.stringify(date) !== JSON.stringify(expiryDate)
+    )
       return fail("tab_acquisition_mismatch");
     const values = cells.slice(1).map((cell) => {
       if (!cls(cell, "num") || !cls(cell, "sp-fnt10px")) return fail("numeric_cell_unsupported");
@@ -132,9 +174,18 @@ export function normalizeJPointHistoryHtml(html: string, reportedTotal: string):
       return fail("expiry_month_unparsed");
     const status = plain(expiry[i]![3]!);
     if (status !== "-" && status !== "有効") return fail("status_unobserved");
-    return { ...date, earned: values[0]!, used: values[1]!, expired: values[2]!, remaining: values[3]!,
-      normal: components.normal, preferential: components.preferential, bonus: components.bonus,
-      expiryMonth: expiryText === "-" ? null : expiryText.replace("/", "-"), status };
+    return {
+      ...date,
+      earned: values[0]!,
+      used: values[1]!,
+      expired: values[2]!,
+      remaining: values[3]!,
+      normal: components.normal,
+      preferential: components.preferential,
+      bonus: components.bonus,
+      expiryMonth: expiryText === "-" ? null : expiryText.replace("/", "-"),
+      status,
+    };
   });
   return readJPointHistory({ schemaVersion: JPOINT_HISTORY_SCHEMA, reportedTotal, rows });
 }

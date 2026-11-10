@@ -852,8 +852,6 @@ describe("ADR 0005 second amendment: unread months and export offers in the mani
         coverageStatus: "partial",
         safeErrorCode: "scheduled_payments_page",
       },
-      { unitKey: "account-one:statement-documents", unitKind: "statement-documents",
-        artifactCount: 0, coverageStatus: "unknown", safeErrorCode: "statement_export_bytes_unverified" },
     ]);
     expect(plan.run.safeErrorCode).toBe("scheduled_payments_page");
     const manifest = await storedManifest(plan);
@@ -866,6 +864,7 @@ describe("ADR 0005 second amendment: unread months and export offers in the mani
       artifactCount: 3,
       unreadMonths: [{ position: 2, code: "scheduled_payments_page" }],
       exportOffers: [{ position: 1, kinds: ["pdf", "csv", "ofx"] }],
+      documentCode: "statement_export_bytes_unverified",
     });
     // Not a stop: nothing is recorded as a failure.
     expect(manifest.failures).toEqual([]);

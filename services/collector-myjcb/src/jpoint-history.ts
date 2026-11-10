@@ -15,12 +15,21 @@ function html(response: ReadResponse): string {
 function offersHistory(input: string): boolean {
   const document = parse(input);
   const target = allowedUrl("jpoint-history").href;
-  const base = allowedUrl("jpoint-inquiry", new URLSearchParams({ link_id: "myj_main_pointInquiry" }));
+  const base = allowedUrl(
+    "jpoint-inquiry",
+    new URLSearchParams({ link_id: "myj_main_pointInquiry" }),
+  );
   let found = 0;
   const visit = (node: (typeof document)["childNodes"][number]): void => {
     if ("tagName" in node && node.tagName === "a") {
       const href = node.attrs.find((a) => a.name === "href")?.value;
-      if (href) { try { if (new URL(href, base).href === target) found++; } catch { /* Not an offered read route. */ } }
+      if (href) {
+        try {
+          if (new URL(href, base).href === target) found++;
+        } catch {
+          /* Not an offered read route. */
+        }
+      }
     }
     if ("childNodes" in node) for (const child of node.childNodes) visit(child);
   };
@@ -38,25 +47,49 @@ export async function collectJPointHistory(
   try {
     const balance = pointArtifacts.find((a) => a.dataset === "jpoint-balance");
     if (!balance) return { code: "unavailable", artifacts };
-    const value = JSON.parse(typeof balance.body === "string" ? balance.body : new TextDecoder("utf-8", { fatal: true }).decode(balance.body));
+    const value = JSON.parse(
+      typeof balance.body === "string"
+        ? balance.body
+        : new TextDecoder("utf-8", { fatal: true }).decode(balance.body),
+    );
     const total = readMyJcbJPointResponse(value).result.pointJsonInfo.totalPointInfo;
     if (!total.pointDispFlag || !/^(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)$/u.test(total.point))
       return { code: "unavailable", artifacts };
-    const inquiry = html(await client.get("jpoint-inquiry", new URLSearchParams({ link_id: "myj_main_pointInquiry" })));
-    artifacts.push({ dataset: "jpoint-inquiry", filename: "jpoint-inquiry.html",
-      mediaType: "text/html; charset=utf-8", body: redactedStatementHtml(inquiry) });
+    const inquiry = html(
+      await client.get("jpoint-inquiry", new URLSearchParams({ link_id: "myj_main_pointInquiry" })),
+    );
+    artifacts.push({
+      dataset: "jpoint-inquiry",
+      filename: "jpoint-inquiry.html",
+      mediaType: "text/html; charset=utf-8",
+      body: redactedStatementHtml(inquiry),
+    });
     if (!offersHistory(inquiry)) return { code: "unavailable", artifacts };
     const raw = html(await client.get("jpoint-history"));
     const sanitized = redactedStatementHtml(raw);
-    artifacts.push({ dataset: "jpoint-history-html", filename: "jpoint-history.html",
-      mediaType: "text/html; charset=utf-8", body: sanitized });
+    artifacts.push({
+      dataset: "jpoint-history-html",
+      filename: "jpoint-history.html",
+      mediaType: "text/html; charset=utf-8",
+      body: sanitized,
+    });
     // Validate original closures before the sanitizer serializes a repaired
     // DOM. The retained, sanitized bytes must describe the identical measures.
-    const normalized = normalizeJPointHistoryHtml(raw, BigInt(total.point.replaceAll(",", "")).toString());
-    if (JSON.stringify(normalizeJPointHistoryHtml(sanitized, normalized.reportedTotal)) !== JSON.stringify(normalized))
+    const normalized = normalizeJPointHistoryHtml(
+      raw,
+      BigInt(total.point.replaceAll(",", "")).toString(),
+    );
+    if (
+      JSON.stringify(normalizeJPointHistoryHtml(sanitized, normalized.reportedTotal)) !==
+      JSON.stringify(normalized)
+    )
       return { code: "unavailable", artifacts };
-    artifacts.push({ dataset: "jpoint-history", filename: "jpoint-history.json",
-      mediaType: "application/json", body: JSON.stringify(normalized) });
+    artifacts.push({
+      dataset: "jpoint-history",
+      filename: "jpoint-history.json",
+      mediaType: "application/json",
+      body: JSON.stringify(normalized),
+    });
     return { code: "collected", artifacts };
   } catch {
     return { code: "unavailable", artifacts };

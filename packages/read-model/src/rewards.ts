@@ -33,7 +33,11 @@ import type { Quantity, RoundingMode, ValueStatus } from "../../domain/src/value
 import type { SqlExecutor } from "./reader";
 import { ELIGIBLE_VPOINT_RUNS, VPOINT_MEMBER } from "./current-captures";
 import { activeStateProjection } from "./concepts";
-import { JPOINT_CURRENT_COHORT_CTES, JPOINT_REWARD_MEMBERSHIP, JPOINT_HISTORY_COLUMNS } from "./jpoint-history-cohort";
+import {
+  JPOINT_CURRENT_COHORT_CTES,
+  JPOINT_REWARD_MEMBERSHIP,
+  JPOINT_HISTORY_COLUMNS,
+} from "./jpoint-history-cohort";
 
 /** Promotion release the read side treats as current (docs/rewards.md). */
 export const REWARD_READ_RELEASE = "reward-promotion-v2";
@@ -536,12 +540,15 @@ export function createRewardReader(sql: SqlExecutor, release = REWARD_READ_RELEA
           };
           views.set(key, view);
         }
-        if (row.jpoint_history_state) view.pointHistoryCoverage = {
-          state: row.jpoint_history_state,
-          reasonCode: row.jpoint_history_state === "current" ? null : "history_not_current",
-          observedAt: row.jpoint_history_observed_at ?? null,
-          sourceFactRefs: row.jpoint_history_fact_id ? [`balance:${row.jpoint_history_fact_id}`] : [],
-        };
+        if (row.jpoint_history_state)
+          view.pointHistoryCoverage = {
+            state: row.jpoint_history_state,
+            reasonCode: row.jpoint_history_state === "current" ? null : "history_not_current",
+            observedAt: row.jpoint_history_observed_at ?? null,
+            sourceFactRefs: row.jpoint_history_fact_id
+              ? [`balance:${row.jpoint_history_fact_id}`]
+              : [],
+          };
         const bucket = rewardBucket(row);
         view.observedAt[bucket.bucketRef] = row.observed_at;
         // A qualification bucket is reported beside the holding, never inside
