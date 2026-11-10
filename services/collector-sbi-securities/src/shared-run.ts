@@ -28,6 +28,7 @@ import {
   type TerminalUnit,
 } from "../../../packages/collection/src/index";
 import type { Artifact, CollectionScope } from "./types";
+import { sbiArtifactKey, SbiHistoryError } from "./history-windows";
 
 export const SBI_SECURITIES_SOURCE = "sbi-securities";
 export const SHARED_PRODUCER = "collector-sbi-securities";
@@ -81,6 +82,7 @@ function scopesFor(scope: CollectionScope): UnitScope[] {
  * stable code, so no free-text ever reaches the manifest.
  */
 export function safeFailureCode(error: unknown): string {
+  if (error instanceof SbiHistoryError) return error.code;
   const details = safeErrorDetails(error);
   if (details.code !== undefined && SAFE_CODE.test(details.code)) return details.code;
   switch (details.category) {
@@ -141,6 +143,18 @@ export async function sbiRunPlan(run: SbiSharedRun): Promise<PersistRunPlan> {
             endValue: run.window.to,
           },
         ];
+  for (const artifact of run.artifacts) {
+    if (artifact.window === undefined) continue;
+    ranges.push({
+      rangeKey: `${sbiArtifactKey(artifact)}:requested`,
+      rangeKind: "requested",
+      precision: "date",
+      basis: "request",
+      startValue: artifact.window.from,
+      endValue: artifact.window.to,
+      unitKey: datasetScope(artifact.dataset),
+    });
+  }
   const fields: TerminalRunFields = {
     source: SBI_SECURITIES_SOURCE,
     producer: SHARED_PRODUCER,
@@ -211,7 +225,7 @@ function failureCode(codes: readonly string[]): string {
 async function plannedArtifact(artifact: Artifact): Promise<PersistArtifact> {
   const bytes = new TextEncoder().encode(JSON.stringify(artifact.body));
   return {
-    artifactKey: `${artifact.dataset}.json`,
+    artifactKey: sbiArtifactKey(artifact),
     sha256: await sha256Hex(bytes),
     byteSize: bytes.byteLength,
     mediaType: artifact.mediaType,

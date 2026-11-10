@@ -56,12 +56,14 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // みずほポイント are not collected (docs/sources/mizuho-bank.md, #441).
   "mizuho-bank": [
     collected("balance", ["mizuho-account-list"]),
-    partial("cash_movement", ["mizuho-ordinary-history"], 441),
-    missing("term_deposit", 441),
+    partial("cash_movement", ["mizuho-ordinary-history"], 1229),
+    // 2026-11-09: registered account lists show no held deposit products; see source notes.
+    missing("term_deposit", 1241),
     missing("document", 441),
-    missing("reward_balance", 441),
-    missing("reward_activity", 441),
-    missing("reward_expiry", 441),
+    // 2026-11-09: documented app entry; no browser route observed (source notes).
+    missing("reward_balance", 1252),
+    missing("reward_activity", 1252),
+    missing("reward_expiry", 1252),
   ],
   // Mobile Suica: the SF balance and the one history page of at most 100 rows
   // (docs/sources/mobile-suica.md, #451).
@@ -111,7 +113,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // history, fund/bond detail and delivered documents are not collected
   // (docs/sources/sbi-securities.md, #446).
   "sbi-securities": [
-    partial("position", ["sbi-domestic-cash-positions", "sbi-foreign-cash-positions"], 446),
+    partial("position", ["sbi-domestic-cash-positions", "sbi-foreign-cash-positions"], 1237),
     collected("execution", ["sbi-domestic-trade-records", "sbi-foreign-trade-records"]),
     partial("settlement_cash", ["sbi-foreign-cash-balances", "sbi-yen-detail-history"], 446),
     missing("income", 446),
@@ -122,6 +124,9 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // deposit account, exchange rates; dated history and CSV, term and foreign
   // contracts and the monthly reports are not collected
   // (docs/sources/sbi-shinsei-bank.md; #447 was closed without them).
+  // On 2026-11-09 the inspected account held no time or structured-deposit
+  // contracts in the yen/FX holdings views (#1242). This catalogue describes
+  // offered types, not live holdings, so term_deposit stays not_collected.
   "sbi-shinsei-bank": [
     collected("balance", [
       "sbi-shinsei-top-balances-and-activity",
@@ -129,7 +134,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
       "sbi-shinsei-yen-deposit-account",
     ]),
     partial("cash_movement", ["sbi-shinsei-top-balances-and-activity"], BACKLOG),
-    missing("term_deposit", BACKLOG),
+    missing("term_deposit", 1242),
     missing("document", BACKLOG),
     collected("fx_rate", ["sbi-shinsei-exchange-rate"]),
   ],
@@ -167,7 +172,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     collected("cash_movement", ["sony-bank-history-json", "sony-bank-history-csv"]),
     collected("card_usage", ["sony-bank-wallet-history"]),
     partial("valuation_history", ["sony-bank-realised-gains"], 1250),
-    missing("term_deposit", 449),
+    missing("term_deposit", 1243),
     partial("document", ["sony-bank-document-metadata"], 1250),
   ],
   // St.George: account balances and the first page of each account's history;

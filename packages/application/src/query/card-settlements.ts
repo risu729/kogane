@@ -495,6 +495,9 @@ async function reviewPage(
   return {
     items,
     nextOffset: rows.length > CARD_SETTLEMENT_PAGE_SIZE ? offset + CARD_SETTLEMENT_PAGE_SIZE : null,
+    // Whether a row follows. The grant's bound is applied where the grant is
+    // known (`readCardSettlementsForGrant`).
+    nextPage: rows.length > CARD_SETTLEMENT_PAGE_SIZE ? "offered" : "none",
     coverage: {
       scope: "card-statement-bank-debit-candidates",
       completeTransactionHistory: false,
@@ -664,6 +667,9 @@ export async function queryCardSettlementStatements(
       statements.length > CARD_SETTLEMENT_STATEMENT_PAGE_SIZE
         ? offset + CARD_SETTLEMENT_STATEMENT_PAGE_SIZE
         : null,
+    // As above: the grant's bound is applied by
+    // `readCardSettlementStatementsForGrant`.
+    nextPage: statements.length > CARD_SETTLEMENT_STATEMENT_PAGE_SIZE ? "offered" : "none",
     coverage: {
       scope: "card-statement-bank-debit-candidates",
       completeTransactionHistory: false,

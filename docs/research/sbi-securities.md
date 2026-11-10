@@ -44,6 +44,23 @@ Two findings that the collector inherits as policy rather than code:
   2026-08-26 split into 11 windows: 11/11 succeeded, the same 72 records as the
   single search, 0 duplicates, no cap reached. An empty window returns the
   search form without a result table and is a normal zero, not an error.
+
+The retained probe makes the US lower bound explicit: it used January 1 of
+`year(to) - pastYears`, not a rolling two-year anniversary. See
+[`defaultScanFrom` at the retained commit](https://github.com/risu729/kogane/blob/5fb143e0f77a492ae9cfdbe0266fe77774b8bd30/poc/sbi-securities/scripts/verify-sbi-bitwarden-cli-passkey.ts#L402).
+This explains the eleven January-to-August windows, rather than nine rolling
+two-year windows. Its
+[`GetSearchingDuration` read](https://github.com/risu729/kogane/blob/5fb143e0f77a492ae9cfdbe0266fe77774b8bd30/poc/sbi-securities/scripts/verify-sbi-bitwarden-cli-passkey.ts#L144)
+used the authenticated foreign-stock session's BFF endpoint with input
+`countryCode=US`, `searchFunction=EXECUTION_HISTORY`,
+`searchDateType=TRADE_DATE_BASE`, `dateType=MONTH`, `quantity=1`, selecting
+`pastYears`, `searchDateFrom` and `searchDateTo`. The last two fields describe
+that default period; the successful full scan used the January-start client
+rule above. This is historical mobile evidence, not proof that today's
+browser cookies or web retention boundary apply to the mobile API. The
+scheduled collector must still verify the current response and fail closed
+on an unsupported shape.
+
 - **The yen cash-movement statement cannot identify an instrument by code.** All
   five dividend rows carried a description specific enough for a human, but no
   four-digit code; only two matched a currently held instrument by name. Exact

@@ -1,6 +1,7 @@
 import {
   CARD_SETTLEMENT_DEBIT_ACCOUNT_ABSENCES,
   CARD_SETTLEMENT_LEAD_SEARCHES,
+  CARD_SETTLEMENT_NEXT_PAGE,
   type CardSettlementReviewPage,
   type CardSettlementStatementPage,
 } from "../../domain/src/card-settlement-review.ts";
@@ -18,6 +19,19 @@ const revision = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 const status = (value: unknown) =>
   ["proposed", "accepted", "rejected", "withdrawn"].includes(String(value));
+
+/**
+ * A card settlement page's next page: a closed `nextPage`, and a `nextOffset`
+ * exactly when it is `offered` (at least one page in). A null offset always
+ * carries its reason, so the end of the list and the grant's bound are never
+ * read as one another (INV05).
+ */
+export function validNextPage(value: Record<string, unknown>, pageSize: number): boolean {
+  if (!(CARD_SETTLEMENT_NEXT_PAGE as readonly unknown[]).includes(value.nextPage)) return false;
+  return value.nextPage === "offered"
+    ? revision(value.nextOffset) && value.nextOffset >= pageSize
+    : value.nextOffset === null;
+}
 
 /** The provider-stated debit-account evidence: read-only, never a blocker. */
 function validDebitAccount(value: unknown): boolean {
@@ -58,7 +72,7 @@ export function validCardSettlementReviewPage(value: unknown): value is CardSett
     !record(value) ||
     !Array.isArray(value.items) ||
     value.items.length > 50 ||
-    !(value.nextOffset === null || revision(value.nextOffset)) ||
+    !validNextPage(value, 50) ||
     !record(value.coverage) ||
     value.coverage.scope !== "card-statement-bank-debit-candidates" ||
     value.coverage.completeTransactionHistory !== false ||
@@ -81,7 +95,7 @@ export function validCardSettlementStatementPage(
     !record(value) ||
     !Array.isArray(value.statements) ||
     value.statements.length > 10 ||
-    !(value.nextOffset === null || revision(value.nextOffset)) ||
+    !validNextPage(value, 10) ||
     !record(value.coverage) ||
     value.coverage.scope !== "card-statement-bank-debit-candidates" ||
     value.coverage.completeTransactionHistory !== false ||

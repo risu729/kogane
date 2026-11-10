@@ -661,3 +661,49 @@ The scheduled session reads the official current/previous-year summary and valid
 The foreign-deposit document read uses the observed five-year query and downloads the single observed page only when its stated total equals its unique list rows and is at most ten. Larger totals are partial with `document_list_incomplete`; the next-page request has not been observed. PDF bytes must start `%PDF-` and fit the one-MiB bound. The shared DATA writer stores content-addressed objects once; an identical PDF offered in another run references the same bytes, and a changed PDF creates a new hash revision. The private provider list preserves document identities/dates and maps list order to generated ordinal PDF artifact names. No provider filenames or financial fields enter operational metadata. Full foreign-document retention remains unconfirmed, so that separate run is always partial with `document_retention_unconfirmed` after a successful observed query. Fund report schemas remain unsupported after the observed account-unavailable response; no empty fund report list is inferred.
 
 Core deposits/WALLET, realised evidence and documents persist as three terminal runs sharing an acquisition-session reference. Every persisted run ID is returned to the scheduler. An optional failure cannot demote the independently complete core run or annual summary. No public collection window or user control is added.
+
+## Deposit contract observations on 2026-11-09 UTC
+
+Read-only checks for [issue 1243](https://github.com/risu729/kogane/issues/1243)
+used the owner's authenticated Chrome session. No deposit, cancellation,
+enrollment or other transaction was submitted.
+
+The yen time-deposit list at `/pages/fa/facb0100/` sent POST
+`/custom-web00/faca/cust-web/timedeposit/initialdisplay-acquisition` with
+private `branchNum` and `accountNum`, plus the observed fixed controls:
+`otherPartyCcyCd=JPY`, `acqStrtCnt=1`, `acquisitionCnt=10`,
+`tmSavsDtlStat=1`, `infAcqStat=0`, `afPrdDtlNUSg=1`,
+`rglarMakeApblSg=0`, `effAcAst=4`, `offerTypEffSg=1`, `pryYenNuSg=1`.
+The response has `errors: [{code: string, title: string, sources: []}]`
+and `responseBizCommon: {bizResult: string, exceptionRsn: []}`. The observed
+code was `EFA00005`, business result `8`, matching the visible
+`該当する定期預金はありません。` (no matching time deposits). This establishes
+an empty current yen contract list, not a nonempty contract schema.
+
+FX-linked deposit detail links lead to
+`/pages/fa/facb080a/reference/?tmSavsPdChrctCd=001` (yen start) and the same
+path with `002` (foreign-currency start). Each sent POST
+`/custom-web00/faca/cust-web/principalcurrency-fluctuationtype-product/detail-acquisition`.
+The body keys are private `branchNum`, `accountNum`, plus `accountTyp`,
+`tmSavsPdChrctCd`, `acquisitionCnt`, `acquisitionStartCount`. The observed
+fixed pairs were `accountTyp=05, tmSavsPdChrctCd=001` and
+`accountTyp=06, tmSavsPdChrctCd=002`, with count `10`, start `1` in both.
+Both responses had the same empty shape, `EFA00005` and business result `8`,
+with the same explicit no-contract screen. No current FX-linked contracts
+were returned for either start type.
+
+The foreign-deposit public page's `定期預金明細` (time-deposit details) link
+also opened `/pages/fa/facb0100/`, but the observed request still selected
+`otherPartyCcyCd=JPY`. Its empty response is therefore **not** evidence that
+all foreign-currency time deposits are absent. No currency selector appeared
+on that error screen. The overall balance page displayed ordinary-deposit
+categories only; that is not a substitute for a foreign contract-list
+request. Foreign time-deposit contract coverage remains unconfirmed.
+
+`term_deposit` remains `not_collected`, linked to issue 1243. The source offers
+these products, but current yen and FX-linked lists were empty, and the
+foreign-time list route/selection still needs observation. No parser, status
+promotion, catalogue-version bump or guessed currency parameter is added.
+Resume implementation when a held contract provides an observed schema; first
+resolve the foreign-time selection boundary. The existing movement collector
+is unchanged, and transfers into or out of deposits are not classified as income.

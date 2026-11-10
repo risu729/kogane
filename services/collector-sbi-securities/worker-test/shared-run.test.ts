@@ -109,6 +109,15 @@ describe("G1-02/G1-15 the SBI Securities run is written to the shared bucket, te
     ]);
     expect(manifest.ranges).toEqual([
       {
+        rangeKey: "domestic-trade-records.json:requested",
+        rangeKind: "requested",
+        precision: "date",
+        basis: "request",
+        startValue: "2026-06-14",
+        endValue: "2026-09-11",
+        unitKey: "domestic",
+      },
+      {
         rangeKey: "requested-window",
         rangeKind: "requested",
         precision: "date",

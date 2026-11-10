@@ -39,6 +39,135 @@ shared `DATA` bucket, not a private one ([below](#addendum-switch-to-shared-data
 
 For the initial backfill, 2024-08-28–2026-05-29 was split into eight non-overlapping intervals of at most 90 days. All runs succeeded, domestic 8/8 and foreign 8/8, with failure 0, and were saved to private R2. The recent 2026-05-30–2026-08-27 interval also succeeded for both domestic and foreign scopes. R2 therefore currently holds about two years of domestic/US equity transaction history, plus raw snapshots at each run of domestic/US equity holdings, yen/USD cash deposits, My Assets, and yen deposit/withdrawal statements.
 
+### 2026-11-09: two-year execution windows
+
+For [#1225](https://github.com/risu729/kogane/issues/1225), the owner's existing
+browser session supplied these read observations. Dates below are search
+parameters, not personal transaction dates; no tokens or provider row values
+were retained.
+
+- Domestic: `POST /ETGate/`, `_PageID=WPLETacR007Rlst10`,
+  `_ControlID=WPLETacR007Control`, `_ActionID=search`, `sec_kbn` two spaces
+  for all products, and `ref_from_yyyy/mm/dd`, `ref_to_yyyy/mm/dd`. The form
+  offers `max_cnt` 50/100/150/200. The 90-day query 2024-11-10 through
+  2025-02-07 was retained and accepted. Its empty response had the search
+  form, no result table, and the fixed message
+  `指定された条件での約定履歴は見つかりませんでした。` (no executions matched
+  the selected conditions).
+- Foreign: the observed read navigation reaches
+  `member.c.sbisec.co.jp/foreign/account/trade-history`.
+  `GET /foreign/api/account/trade-history` returns exactly
+  `{ nextBusinessDate: string }`, in `YYYY-MM-DD` form. The request includes
+  `x-csrf-token`; its page has `meta[name=_csrf]`, with no CSRF input.
+  The two-year button selected 2024-11-12 through 2026-11-11. A manual
+  2024-11-10 start was cleared without a history request, while 2024-11-12
+  through 2025-02-07 was retained and returned HTTP 200. The foreign cutoff
+  therefore comes from the provider's next business date, not JST today.
+- The corroborating web execution query is
+  `GET /foreign/api/account/trade-histories`, with `pageNumber`, `dateFrom`,
+  `dateTo`, `productType=stock`, `countryCode=us`, `stockMarginType=order`.
+  The full two-year search had 11 rows and `totalCount=11`, `pageNum=1`,
+  `pageSize=50`, `firstPage=true`, `lastPage=true`, and both next/previous
+  flags false. No next-page request was observed. The response has
+  `accountTradeHistories` and page metadata; its row schema is
+  `executionDate`, `productType`, `priceType`, `depositType`, `tradeType`,
+  `settlementCurrency`, `quantity`, `price`, `deliveryDate`, `amount`,
+  `exchangeRate`, `countryCode`, `currencyCode`, `name`, `shortName`, `code`,
+  `marketCode`, `listedStatus` (strings), and `marginLimitType` (null).
+
+These web observations describe the web retention boundary. They do not
+establish the mobile lower bound or re-observe its GraphQL protocol. The
+[retained successful mobile probe](../research/sbi-securities.md) resolves
+the difference: it actually queried `/graphql/bff` with
+`GetSearchingDuration($input: GetSearchingDurationRequest!)`, input
+`countryCode=US`, `searchFunction=EXECUTION_HISTORY`,
+`searchDateType=TRADE_DATE_BASE`, `dateType=MONTH`, `quantity=1`, and selected
+`getSearchingDuration { pastYears searchDateFrom searchDateTo }`. It used
+January 1 of `year(to) - pastYears`, not a rolling anniversary, as the scan
+start; this explains the eleven successful January-to-August windows for
+`pastYears=2`. The returned default-period dates were not treated as the
+earliest retained dates.
+
+The scheduled collector restores that historically observed BFF read using
+its existing authenticated mobile foreign session, with the same header
+names (`authorization`, `account-id`, `accept`, `content-type`, `user-agent`).
+It supports only the observed `pastYears=2` and expected response shape;
+anything else keeps the scope partial. The January-start policy covers the
+historically scanned interval and may require thirteen windows at year end,
+rather than nine rolling two-year windows. The execution query input fields
+are unchanged. This change has no new live-mobile verification: no mobile
+credentials were obtained, no extra mobile session was created and no manual
+collector was invoked. The authenticated Chrome web session is not a mobile
+session. Current BFF behavior and retained coverage still need a scheduled
+production run; historical success is not presented as new live proof.
+
+A read-only CORE aggregate on 2026-11-09 counted distinct external execution
+IDs across published parses, rather than counting repeated captures as new
+executions. The cutoff for the last column is the documented start of daily
+collection, 2026-08-27, not a private transaction date:
+
+| Scope    | Trade quarter | Distinct IDs | IDs before daily collection |
+| -------- | ------------- | -----------: | --------------------------: |
+| Domestic | 2026-Q1       |           42 |                          42 |
+| Domestic | 2026-Q2       |           29 |                          29 |
+| Domestic | 2026-Q3       |            1 |                           1 |
+| Domestic | 2026-Q4       |            7 |                           0 |
+| US       | 2026-Q2       |            6 |                           6 |
+| US       | 2026-Q3       |            1 |                           1 |
+
+No counted observation lacked an external ID. The historical backfill had
+therefore already published 72 domestic and seven US executions before daily
+collection. These counts do not prove present two-year completeness; the web
+US total and published execution count still differ, with the independent
+parser refusal tracked in [#1220](https://github.com/risu729/kogane/issues/1220).
+
+The domestic historical requests also began January 1 of year minus two.
+The scheduled collector uses that same lower-bound policy for domestic
+history, with all six returned date-form controls checked against the
+requested window. A stricter current form that clears or clamps a date is
+partial, never confirmation of that old window. Those requests historically
+succeeding is not proof that every earlier requested date had data or that
+today's retained period is unchanged.
+
+The scheduled collector now walks at most thirteen disjoint windows per scope,
+newest first, keeping the newest 90-day artifact's prior key and existing row
+identities. Each older window has a dated artifact key and a matching requested
+range in the terminal and CORE descriptor under registration v4
+([ADR 0096](../adr/0096-sbi-scheduled-execution-history.md)). Empty domestic
+windows require the observed message. A window failure retains other windows
+but marks the scope incomplete. Foreign retention discovery failure falls back
+to the old 90-day request as partial evidence. Deployment, a completed scheduled
+walk within the time limit, publication of every window and provider-count
+equality remain unverified; no manual collector invocation was performed.
+
+### 2026-11-10: foreign trade price precision and empty cash metrics
+
+Read-only in-memory replay of stored evidence for [#1220](https://github.com/risu729/kogane/issues/1220),
+with each object's SHA-256 and byte size verified, named the following
+categories without returning provider values:
+
+- One distinct rejected `foreign-trade-records` object failed at
+  `pages[].listTradeRecords.tradeRecords[].price`: the exact decimal was not
+  representable in the trade currency's minor units. Parser `1.0.2` validates
+  unit prices as exact decimals and preserves them unchanged in `extra`.
+  Settlement `amount` still requires exact currency minor units. The canonical
+  provider-row fingerprint and duplicate occurrence suffix are unchanged, so
+  previously accepted executions retain their `externalId` on replay.
+  A second in-memory replay using `1.0.2` accepted the same object and returned
+  five observations with no rejection; it did not publish them.
+- Among the five newest distinct incomplete `foreign-cash-balances` objects,
+  `transferPossibleAmount` had 25 empty-string cells and `amountPayValue` had
+  five. These remain `row_unreadable` membership issues and keep coverage
+  incomplete. An empty string has not been established to mean zero,
+  unavailable or inapplicable; no replacement value or completeness claim is
+  inferred. The fields and their closed shape class are the named remaining
+  provider limitation.
+
+This was diagnosis of stored evidence, with no collector invocation or SBI
+login. It does not establish deployed parser version, publication of corrected
+observations, or current coverage after the next scheduled run; those remain
+the rollout checks for #1220.
+
 ## Assessment scale
 
 Automation levels are defined as follows.
@@ -108,6 +237,63 @@ The official website and stock-app transport provide at least the following.
 - US equities: security/ticker, quantity, acquisition amount/valuation/gains and losses in local currency and yen equivalents
 
 The official `取得単価` (acquisition unit price) for domestic equities is a moving-average price including fees, and is not always identical to general-custody `参考単価` (reference unit price) or a specific account's tax acquisition value. Kogane preserves the meaning and source screen and must not collapse `取得単価`, `参考単価`, `平均取得価額` (average acquisition value), and `税務上取得価額` (tax acquisition value) into one field.
+
+### Additional products checked on 2026-11-09 UTC
+
+For [issue 1237](https://github.com/risu729/kogane/issues/1237), read-only
+navigation in the owner's authenticated Chrome session checked the offered
+fund, foreign-currency MMF, bond and domestic-margin holdings pages. None
+displayed a current holding. This is dated evidence for this account, not a
+permanent absence claim or a parser contract for an unseen holding.
+
+- **Foreign-currency MMF:** the ordinary menu led through ETGate to
+  `/fmmf/account/assets`. The `保有銘柄` page displayed
+  `現在、お客さまの預り情報はございません。`. Its GET
+  `/fmmf/holdings-list/api?baseUrl=https://www.sbisec.co.jp` returned
+  `status: SUCCESS`, `messages: null` and `data` with
+  `foreignCurrencyAccountOpened: boolean`, `holdingFundList: []`,
+  `messageCode: null`, `messageParameterList: null`, `warningMessageCode: null`.
+- **Investment funds:** the `保有ファンド` menu led to `/fund/account/assets`,
+  with `口数指定` and `金額指定` sections and the same explicit empty message.
+  GET `/fund/api/account/assets?accountGetType=2` returned `status: SUCCESS`,
+  `messages: []` and `data.totalCount: 0`. Both `amountHoldings` and
+  `unitHoldings` contained null values for `specificDeposit`, `normalDeposit`,
+  `nisaDeposit`, `juniornisaSpecificDeposit`, `juniornisaNormalDeposit`,
+  `juniornisaNisaDeposit`, `tnisaDeposit`, `nisaGrowth`, `nisaReserve` and
+  `juniorNisaContinuous`. Summary amount/cost/profit/change fields were strings,
+  summary rate fields numbers, and account-open/admin flags booleans. The
+  explicit UI empty state and zero total corroborate the null containers;
+  null alone is never a numeric-zero rule.
+- **Bonds:** the holdings menu led to `/bond/account/assets`, with the same
+  explicit empty message. POST `/bond/bond-balance/api` first sent `{}`, then
+  `exchangeRates: [{currencyCode: string, exchangeRate: number}]` and ascending
+  `sortConditions` for `bond.currencyCode`, `bond.remainingPeriod.years`,
+  `bond.remainingPeriod.months`, `specificAccountCode`,
+  `bond.securities.productCode`, `bond.securities.securitiesCode`. Both reads
+  returned `status: SUCCESS`, `messages: null`, `data.bondBalances: null`,
+  `currencyEvaluationProfitLosses: null`, `maintenanceServiceIds: []` and a
+  `page` object: `pageNum`, `pageSize`, `totalCount` were zero; `firstPage`,
+  `lastPage`, `hasPreviousPage`, `hasNextPage` were false. No currency/product
+  filter was applied. The whole displayed list was empty; no nonempty yen or
+  USD bond contract is inferred.
+- **Domestic margin:** the visible `信用建玉` link opened GET `/ETGate/` with
+  `OutSide=on`, `getFlg=on`, `_ControlID=WPLETstT007Control`,
+  `_PageID=DefaultPID`, `_ActionID=DefaultAID`,
+  `_DataStoreID=DSWPLETstT007Control`. The HTML heading was `信用建玉一覧` and
+  the fixed empty text was `現在、お客さまの建玉情報はございません。`.
+
+The issue instructs that products without holdings are recorded as offered but
+empty and no collection is built for them. These observations therefore add
+no collector, sanitizer or parser. Existing domestic/US spot positions remain
+the existing datasets' responsibility. The provider-wide `position` catalogue
+stays `partial`, now linked to issue 1237: a current empty account does not make
+unimplemented product schemas supported. Its version is unchanged because
+neither types nor statuses change. Reobserve a nonempty product before adding
+its fields, price meanings, completeness checks and parser.
+
+Only route/query shapes, closed statuses, types and empty counts are recorded.
+No account IDs, provider amounts, security names, session material or raw
+responses are retained, and no order or account-opening action was submitted.
 
 ## Channel tradeoffs
 

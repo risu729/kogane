@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { requestPasskeyAccessToken } from "./auth";
+import {
+  addDays,
+  collectHistoryArtifacts,
+  foreignHistoryRange,
+  jstDate,
+  SbiHistoryError,
+  type HistoryWindow,
+} from "./history-windows";
 import type {
   Artifact,
   DomesticSession,
@@ -58,6 +66,7 @@ export async function collectForeignArtifacts(options: {
   handshakeKey: SbiHandshakeKey;
   from?: string;
   to?: string;
+  onHistoryError?: (error: SbiHistoryError) => void;
 }): Promise<Artifact[]> {
   const accessToken = await requestPasskeyAccessToken({
     authEntryUrl: options.endpoints.authEntryUrl,
@@ -67,8 +76,6 @@ export async function collectForeignArtifacts(options: {
   });
   const session = await loginForeign(accessToken, options.endpoints.foreignStockBaseUrl);
   const to = options.to ?? jstDate(new Date());
-  const from = options.from ?? addUtcDays(to, -89);
-  assertDateRange(from, to);
 
   const positions = await foreignGraphql(session, "GetSecuritiesBalanceList", SECURITIES_BALANCES, {
     input: {
@@ -84,6 +91,79 @@ export async function collectForeignArtifacts(options: {
       input: { currencyCode: "USD", days: 5 },
     },
   );
+  const history = await collectForeignHistoryArtifacts(session, {
+    to,
+    ...(options.from === undefined ? {} : { from: options.from }),
+    ...(options.onHistoryError === undefined ? {} : { onHistoryError: options.onHistoryError }),
+  });
+  return [
+    { dataset: "foreign-cash-positions", mediaType: "application/json", body: positions },
+    { dataset: "foreign-cash-balances", mediaType: "application/json", body: foreignCash },
+    ...history,
+  ];
+}
+
+export async function collectForeignHistoryArtifacts(
+  session: ForeignSession,
+  options: {
+    to: string;
+    from?: string;
+    onHistoryError?: (error: SbiHistoryError) => void;
+  },
+): Promise<Artifact[]> {
+  let range = { from: options.from ?? addDays(options.to, -89), to: options.to };
+  if (options.from === undefined) {
+    try {
+      range = await fetchForeignHistoryRange(session, options.to);
+    } catch (cause) {
+      const error = new SbiHistoryError("sbi_foreign_history_retention_unavailable", { cause });
+      if (options.onHistoryError === undefined) throw error;
+      options.onHistoryError(error);
+    }
+  }
+  return collectHistoryArtifacts({
+    dataset: "foreign-trade-records",
+    range,
+    collect: (window) => collectForeignTradeRecords(session, window),
+    ...(options.onHistoryError === undefined ? {} : { onError: options.onHistoryError }),
+  });
+}
+
+export async function fetchForeignHistoryRange(
+  session: ForeignSession,
+  today: string,
+): Promise<HistoryWindow> {
+  const data = await foreignGraphql(
+    session,
+    "GetSearchingDuration",
+    SEARCHING_DURATION,
+    {
+      input: {
+        countryCode: "US",
+        searchFunction: "EXECUTION_HISTORY",
+        searchDateType: "TRADE_DATE_BASE",
+        dateType: "MONTH",
+        quantity: 1,
+      },
+    },
+    "bff",
+  );
+  const duration = objectOrUndefined(data["getSearchingDuration"]);
+  if (
+    duration === undefined ||
+    Object.keys(duration).sort().join(",") !== "pastYears,searchDateFrom,searchDateTo" ||
+    typeof duration["searchDateFrom"] !== "string" ||
+    typeof duration["searchDateTo"] !== "string"
+  )
+    throw new SbiHistoryError("sbi_foreign_history_retention_unavailable");
+  return foreignHistoryRange(duration["pastYears"], today);
+}
+
+export async function collectForeignTradeRecords(
+  session: ForeignSession,
+  window: HistoryWindow,
+): Promise<{ pages: unknown[] }> {
+  assertDateRange(window.from, window.to);
   const historyPages: unknown[] = [];
   for (let pageNum = 1; pageNum <= 20; pageNum += 1) {
     const page = await foreignGraphql(session, "GetTradeRecordList", TRADE_RECORD_LIST, {
@@ -93,36 +173,19 @@ export async function collectForeignArtifacts(options: {
         specificAccountCode: null,
         tradeHistoryType: "TRADE_RECORD",
         searchDateType: "TRADE_DATE_BASE",
-        searchDateFrom: from,
-        searchDateTo: to,
+        searchDateFrom: window.from,
+        searchDateTo: window.to,
         page: { pageNum, pageSize: 999 },
       },
     });
     historyPages.push(page);
     if (!hasNextTradeRecordPage(page)) break;
     if (pageNum === 20) {
-      throw new Error("SBI foreign trade history exceeded 20 pages");
+      throw new SbiHistoryError("sbi_foreign_history_page_limit");
     }
   }
 
-  return [
-    {
-      dataset: "foreign-cash-positions",
-      mediaType: "application/json",
-      body: positions,
-    },
-    {
-      dataset: "foreign-cash-balances",
-      mediaType: "application/json",
-      body: foreignCash,
-    },
-    {
-      dataset: "foreign-trade-records",
-      mediaType: "application/json",
-      window: { from, to },
-      body: { pages: historyPages },
-    },
-  ];
+  return { pages: historyPages };
 }
 
 export async function callMts(
@@ -279,13 +342,14 @@ async function foreignGraphql(
   operationName: string,
   query: string,
   variables: Record<string, unknown>,
+  endpoint: "bff" | "int" = "int",
 ): Promise<Record<string, unknown>> {
-  const response = await fetch(session.graphqlIntUrl, {
+  const response = await fetch(endpoint === "bff" ? session.graphqlBffUrl : session.graphqlIntUrl, {
     method: "POST",
     headers: {
       ...foreignHeaders(session),
       "content-type": "application/json",
-      hash_token: session.marketPriceHash,
+      ...(endpoint === "int" ? { hash_token: session.marketPriceHash } : {}),
     },
     body: JSON.stringify({ operationName, query, variables }),
   });
@@ -320,7 +384,9 @@ function foreignHeaders(options: {
 function hasNextTradeRecordPage(data: Record<string, unknown>): boolean {
   const list = objectOrUndefined(data["listTradeRecords"]);
   const page = objectOrUndefined(list?.["page"]);
-  return page?.["hasNextPage"] === true;
+  if (typeof page?.["hasNextPage"] !== "boolean" || !Array.isArray(list?.["tradeRecords"]))
+    throw new SbiHistoryError("sbi_foreign_history_page_invalid");
+  return page["hasNextPage"];
 }
 
 function parseMtsHeader(buffer: Buffer): {
@@ -392,21 +458,6 @@ function assertDateRange(from: string, to: string): void {
   if (days > 90) throw new Error("SBI history window must not exceed 90 days");
 }
 
-function addUtcDays(value: string, days: number): string {
-  const date = new Date(`${value}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function jstDate(now: Date): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-}
-
 const SECURITIES_BALANCES = `
 query GetSecuritiesBalanceList($input: Input_account_balance_ListSecuritiesBalancesRequest) {
   listSecuritiesBalances(input: $input) {
@@ -437,6 +488,15 @@ query GetForeignCashBalance($input: Input_account_balance_ListForeignScheduleCas
         }
       }
     }
+  }
+}`;
+
+// Retained observation: 5fb143e0:poc/sbi-securities/scripts/
+// verify-sbi-bitwarden-cli-passkey.ts, fetchUsHistorySearchDuration.
+const SEARCHING_DURATION = `
+query GetSearchingDuration($input: GetSearchingDurationRequest!) {
+  getSearchingDuration(input: $input) {
+    pastYears searchDateFrom searchDateTo
   }
 }`;
 

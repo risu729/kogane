@@ -184,6 +184,16 @@ export async function auditedRoute(
   return answer.response;
 }
 
+/**
+ * Whether rows follow a card settlement page: its next page is offered, or
+ * withheld because the row budget refuses it (`nextPage: "budget_exceeded"`,
+ * `nextOffset: null`).
+ */
+export function rowsFollow(value: Record<string, unknown>): boolean {
+  if (typeof value["nextPage"] === "string") return value["nextPage"] !== "none";
+  return typeof value["nextOffset"] === "number";
+}
+
 /** How many rows an agent tool's answer carried, and whether more exist: a count, never data. */
 function toolRows(operation: OperationName, body: unknown): { rows: number; truncated: boolean } {
   const value = (body ?? {}) as Record<string, unknown>;
@@ -195,19 +205,20 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
   // One row per source the coverage answer counts; never the counts themselves.
   if (operation === "instruments.coverage")
     return { rows: Array.isArray(value["rows"]) ? value["rows"].length : 0, truncated: false };
-  // Reviews on the page; truncated when another page follows. An ownership
-  // review is one candidate.
+  // Reviews on the page; truncated when rows follow, whether the next page is
+  // offered or withheld by the budget (ADR 0081, 2026-11-08 amendment). An
+  // ownership review is one candidate.
   if (operation === "card-settlements.read")
     return {
       rows: Array.isArray(value["items"]) ? value["items"].length : 0,
-      truncated: value["nextOffset"] !== null && value["nextOffset"] !== undefined,
+      truncated: rowsFollow(value),
     };
   // Statements on the grouped page, never their candidates; truncated when
-  // another page follows.
+  // rows follow.
   if (operation === "card-settlements.statements")
     return {
       rows: Array.isArray(value["statements"]) ? value["statements"].length : 0,
-      truncated: value["nextOffset"] !== null && value["nextOffset"] !== undefined,
+      truncated: rowsFollow(value),
     };
   if (operation === "card-settlements.ownership") return { rows: 1, truncated: false };
   if (operation === "economic-readiness.read") {
@@ -310,11 +321,12 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
         typeof data["nextCursor"] === "string",
     };
   }
-  // A page of statements; a named next page means more remain.
+  // A page of statements; more remain when a next page is offered or withheld
+  // by the budget.
   if (operation === "card-settlements.unmatched")
     return {
       rows: Array.isArray(value["items"]) ? value["items"].length : 0,
-      truncated: typeof value["nextOffset"] === "number",
+      truncated: rowsFollow(value),
     };
   if (operation === "instruments.candidates" || operation === "accounts.candidates") {
     const items = Array.isArray(value["items"]) ? value["items"].length : 0;
