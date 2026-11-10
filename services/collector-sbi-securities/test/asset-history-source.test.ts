@@ -4,6 +4,8 @@ import { assetHistoryArtifacts } from "../src/asset-history";
 import { assetHistoryViews } from "../../../packages/parsers/src/parsers/sbi-asset-history-schema";
 import { sbiAccountAssetsHistory as parser } from "../../../packages/parsers/src/parsers/sbi-account-assets-history";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types";
+import { auditAssetHistoryJson } from "../../../packages/parsers/src/parsers/sbi-asset-history-json";
+import { sanitizeAssetHistory } from "../../../packages/parsers/src/parsers/sbi-asset-history-schema";
 
 const fixture = () =>
   JSON.parse(
@@ -51,6 +53,34 @@ test("a year boundary cannot hide a missing week or a completely missing year", 
       view.acquisitionCosts[0]![0] = Number(next);
     }
     await sameRefusal(body, "weekly_gap");
+  }
+});
+
+test("duplicate secrets and malformed number fragments cannot reach audit, derivation or observations", async () => {
+  const original = JSON.stringify(fixture());
+  const cases = [
+    original.replace("{", '{"balances":{"accessToken":"SYNTHETIC_SENTINEL"},'),
+    original.replace("{", '{"balanc\\u0065s":{"accessToken":"SYNTHETIC_SENTINEL"},'),
+    original.replace(
+      '"valuation":10',
+      '"valuation":{"accessToken":"SYNTHETIC_SENTINEL"},"valuation":10',
+    ),
+    original.replace(
+      '"valuation":10',
+      '"valua\\u0074ion":{"accessToken":"SYNTHETIC_SENTINEL"},"valuation":10',
+    ),
+    original.replace('"profitLoss":10', '"profitLoss":10e0e0'),
+    original.replace('"profitLoss":10', '"profitLoss":10.0.0'),
+  ];
+  for (const text of cases) {
+    const bytes = new TextEncoder().encode(text);
+    expect(() => sanitizeAssetHistory(auditAssetHistoryJson(text))).toThrow(
+      "sbi_asset_history_schema",
+    );
+    expect(() => parser.parse(bytes, meta)).toThrow("sbi_asset_history_schema");
+    await expect(
+      assetHistoryArtifacts({ body: fixture(), bytes, capturedAt: "2020-01-01T00:00:00.000Z" }),
+    ).rejects.toThrow("sbi_asset_history_schema");
   }
 });
 

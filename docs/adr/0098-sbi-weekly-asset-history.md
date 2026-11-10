@@ -53,6 +53,13 @@ There was no production reader selecting portfolio valuation history.
   the parser to the **whole** original response. A cross-year gap, missing
   year, mismatched profile calendar or extra native tuple cannot disappear
   during filtering. It creates no derivatives from an invalid source.
+- Before any numeric replacement or closed-shape audit, an AST-free structural
+  JSON walk validates the entire original grammar and rejects duplicate decoded
+  property keys in every object. Escaped aliases cannot hide an overwritten
+  secret, and malformed numeric fragments cannot be repaired into valid input.
+  The walk records only complete numeric-token spans. It is bounded by 16 MiB
+  (the existing Processor input ceiling), depth 64, 262,144 numeric tokens and
+  1,048,576 nodes; the existing point and output caps remain unchanged.
 - Financial and native numeric tokens are checked with exact decimal arithmetic
   before conversion to Number. Their mathematical values must be safe integers;
   decimal/scientific spellings do not waive exactness. Rates remain finite
@@ -127,7 +134,11 @@ cases require identical direct-source and collector refusals for cross-year
 and missing-year gaps, extra native tuples, fractional tokens that round to
 integers, unsafe integer edges and exponent underflow. Local Worker R2 tests
 retain inexact financial-shaped raw bytes with a closed partial outcome and
-no derivatives while still refusing unknown secret fields.
+no derivatives while still refusing unknown secret fields. Plain and escaped
+root/nested duplicate-key cases and malformed decimal/exponent fragments are
+refused by both readers, the main-site acquisition path and the local Worker
+before storing any original response. Structural boundary tests cover byte,
+depth, numeric-token and node budgets.
 
 Synthetic parser tests cover conditional category membership, native tuple
 agreement, nulls, exact money, calendar/schema drift and stable logical keys.

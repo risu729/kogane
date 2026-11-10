@@ -15,7 +15,7 @@ const MONEY_FIELDS = [
 
 export const sbiAccountAssetsHistory: Parser = {
   name: "sbi-account-assets-history",
-  version: "0.1.1",
+  version: "0.1.2",
   accepts: (artifact) =>
     artifact.sourceId === "sbi-securities" && artifact.dataset === "account-assets-history",
   parse(bytes, artifact) {
