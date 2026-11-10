@@ -29,11 +29,10 @@ export const MOBILE_SUICA_SOURCE = "mobile-suica";
 export const SHARED_PRODUCER = "collector-mobile-suica";
 const UNIT_KEY = "account";
 const UNIT_KIND = "collection";
-const HTML_ARTIFACT = "sf-history-page-0001.html";
 const NORMALIZED_ARTIFACT = "sf-history.json";
 const SANITIZER_ID = "mobile-suica-history-sanitizer";
 const NORMALIZER_ID = "mobile-suica-history-normalizer";
-const TRANSFORMER_VERSION = "v1";
+const TRANSFORMER_VERSION = "v2";
 const FALLBACK_ERROR_CODE = "collector_failed";
 /** The manifest's own machine-code charset; a code that fails it is replaced. */
 const SAFE_CODE = /^[a-z0-9][a-z0-9_-]{0,99}$/u;
@@ -64,16 +63,38 @@ export async function mobileSuicaRunPlan(run: MobileSuicaSharedRun): Promise<Per
   const coverageStatus = coverageFor(providerOutcome, run.complete);
   const safeErrorCode = providerOutcome === "success" ? undefined : failureCode(run.failureCodes);
   const transformations: TerminalTransformation[] = [];
-  if (stored.has(HTML_ARTIFACT)) {
+  const htmlArtifacts = [...stored]
+    .filter((key) => /^sf-history-page-\d{4}\.html$/u.test(key))
+    .sort();
+  const normalized = run.artifacts.find((artifact) => artifact.filename === NORMALIZED_ARTIFACT);
+  if (normalized && run.status === "success") {
+    const body: unknown = JSON.parse(
+      typeof normalized.body === "string"
+        ? normalized.body
+        : new TextDecoder().decode(normalized.body),
+    );
+    if (typeof body === "object" && body !== null && "pages" in body) {
+      const pages = body.pages;
+      if (
+        !Array.isArray(pages) ||
+        pages.length !== htmlArtifacts.length ||
+        htmlArtifacts.some(
+          (key, index) => key !== `sf-history-page-${String(index + 1).padStart(4, "0")}.html`,
+        )
+      )
+        throw new Error("history_page_inventory_invalid");
+    }
+  }
+  for (const htmlArtifact of htmlArtifacts) {
     transformations.push({
-      transformationId: "sf-history-html-redacted",
+      transformationId: `sf-history-html-redacted-${htmlArtifact}`,
       stepKind: "redacted",
       transformerId: SANITIZER_ID,
       transformerVersion: TRANSFORMER_VERSION,
       // The unredacted page carried the session's `baseVariable` and is
       // deliberately not retained, so this step has no stored input.
       inputArtifactKeys: [],
-      outputArtifactKey: HTML_ARTIFACT,
+      outputArtifactKey: htmlArtifact,
     });
   }
   if (stored.has(NORMALIZED_ARTIFACT)) {
@@ -82,7 +103,7 @@ export async function mobileSuicaRunPlan(run: MobileSuicaSharedRun): Promise<Per
       stepKind: "extracted",
       transformerId: NORMALIZER_ID,
       transformerVersion: TRANSFORMER_VERSION,
-      inputArtifactKeys: stored.has(HTML_ARTIFACT) ? [HTML_ARTIFACT] : [],
+      inputArtifactKeys: htmlArtifacts,
       outputArtifactKey: NORMALIZED_ARTIFACT,
     });
   }

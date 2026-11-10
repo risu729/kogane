@@ -49,7 +49,9 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/mizuho.ts":
       "f2833f796bdf748567138dd644d54d061cedb08a8747472bb13165223fcaec41",
     "poc/observation-pipeline/src/parsers/mobile-suica-sf-history.ts":
-      "a6130061da1c857b4e88477b53486b653981dcc12e34c0020fc3e28f4d255eb4",
+      "76291aa8005a695a510bbe262ca30db82ef846bda2d2a5a44f51273724893233",
+    "poc/observation-pipeline/src/parsers/mobile-suica-walk.ts":
+      "0b2ffd213da408eefe29b8cf94937c4657e4e29579cf80029f028b2556eae415",
     "poc/observation-pipeline/src/parsers/moneyforward-parser.ts":
       "9ff15fc630314c798312a9d39872bbeb88872a03e83a464abf53446eff373108",
     "poc/observation-pipeline/src/parsers/moneyforward.ts":
@@ -169,13 +171,14 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "mobile-suica-sf-history": {
-      version: "1.0.1",
-      codeDigest: "1b3abc05774aab35c9ff596af73e41ef5c079d367970dc1ee05ad59608ecd24e",
+      version: "1.1.0",
+      codeDigest: "a1ab5cb51ba18991ff2073b3aa23a186fa1252dd152e52a1b8f7d6a73812e2b9",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/mobile-suica-sf-history.ts",
+        "poc/observation-pipeline/src/parsers/mobile-suica-walk.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
