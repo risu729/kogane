@@ -26,13 +26,15 @@ to manual transaction entry; it is not the provider's retrieval timestamp.
 
 ## Decision
 
-Choose option 2. Add `moneyforward-detail-balances@1.0.0` alongside the frozen
+Choose option 2. Add `moneyforward-detail-balances@1.0.1` alongside the frozen
 evidence boundary. The existing `account-detail` descriptor already routes the
 same stored bytes; neither registration contracts nor collection routes change.
 
 - Validate the existing run/account/document boundary first. Match exact
   observed headers, direct table structure and bounded row shapes; reject
-  unknown structures with closed errors.
+  unknown structures with closed errors. Require explicit closing tags for
+  HTML, body and every selected account/portfolio section; a repaired DOM
+  cannot prove complete membership after a truncated capture.
 - Emit one `reported_account_value_jpy` balance for the bank's root aggregate.
   Verify it equals the exact sum of the available numeric main-table rows.
   Missing rows remain unavailable; this check does not assign them zero.
@@ -59,6 +61,8 @@ same stored bytes; neither registration contracts nor collection routes change.
   aggregate/point measures, not every product or holding the provider offers.
   A parse with no available measure is partial and cannot erase an older
   snapshot. A valid newer observed-measure container replaces the older one.
+  The local observation store mirrors this policy idempotently and preserves
+  an existing operator policy choice.
 
 ## Consequences
 

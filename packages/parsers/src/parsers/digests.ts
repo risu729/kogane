@@ -51,7 +51,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/mobile-suica-sf-history.ts":
       "a6130061da1c857b4e88477b53486b653981dcc12e34c0020fc3e28f4d255eb4",
     "poc/observation-pipeline/src/parsers/moneyforward-detail-balances.ts":
-      "398601a66fb9dba1a3c6b13502cc30e558e75b7309674b0753fa0ef7ee439c4f",
+      "fae42407867416bb82c8f3f608ceabe9ab5cec30f6b9651733c16da897ba8c3f",
     "poc/observation-pipeline/src/parsers/moneyforward-parser.ts":
       "9ff15fc630314c798312a9d39872bbeb88872a03e83a464abf53446eff373108",
     "poc/observation-pipeline/src/parsers/moneyforward.ts":
@@ -200,8 +200,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "moneyforward-detail-balances": {
-      version: "1.0.0",
-      codeDigest: "3742340d40cf302aa67e044f7082e852e818b4e3c6f510a70cb30f43f7ac5ae3",
+      version: "1.0.1",
+      codeDigest: "0f8d2f4a4dc82e1c2d326146668cfb9a2824ed7ab005f2c9f01f8c3a9e5ab2b1",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

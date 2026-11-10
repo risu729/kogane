@@ -220,7 +220,7 @@ test("with no secret the run's pages parse with no error under the v2 account id
     },
     {
       parser_name: "moneyforward-detail-balances",
-      parser_version: "1.0.0",
+      parser_version: "1.0.1",
       status: "done",
       last_error_code: null,
       n: 1,
@@ -316,28 +316,34 @@ test("with no secret the run's pages parse with no error under the v2 account id
   );
 }, 60000);
 
-test("a newer detail snapshot replaces the aggregate once; an unreadable capture retains it", async () => {
+test("a newer detail snapshot replaces measures once; a truncated capture retains all members", async () => {
   const reader = createD1ObservationReader(env.DB);
   const latest = () =>
     reader.listLatestBalances({ source: "moneyforward-me", offset: 0, limit: PAGE_LIMIT });
-  const original = fixture("bank-detail-balances.html");
+  const points = `<section id="portfolio_det_po" class="margin-top"><table class="table-bordered table-pns">
+<thead><tr><th>名称</th><th>種類</th><th>ポイント・マイル数</th><th>換算レート</th><th>現在の価値</th></tr></thead>
+<tbody><tr><td>Synthetic reward</td><td>Synthetic</td><td class="number">2,400ポイント</td><td class="number">0.50</td><td class="number">1,200円</td></tr></tbody></table></section>`;
+  const original = fixture("bank-detail-balances.html").replace("</body>", `${points}</body>`);
   const updated = original.replaceAll("1,300円", "2,300円").replaceAll("1,100円", "2,100円");
   await registerRun("00000000-0000-4000-8000-00000000c027", true, updated, "21");
   expect(await sweep(env)).toMatchObject({ parsed: 5, error: 0 });
   const rows = await latest();
-  expect(rows).toHaveLength(1);
-  expect(rows[0]).toMatchObject({ amount_text: "2300", metric: "reported_account_value_jpy" });
+  expect(rows).toHaveLength(3);
+  expect(rows.find((row) => row.metric === "reported_account_value_jpy")).toMatchObject({
+    amount_text: "2300",
+  });
+  const recentTableStart = '<table id="cf-detail-table">';
   await registerRun(
     "00000000-0000-4000-8000-00000000d027",
     true,
-    updated.replace("資産総額：2,300円", "資産総額：未定"),
+    updated.slice(0, updated.indexOf(recentTableStart) + recentTableStart.length),
     "22",
   );
   expect(await sweep(env)).toMatchObject({ parsed: 4, error: 1 });
   expect(await latest()).toEqual(rows);
   expect(
     await env.DB.prepare("SELECT COUNT(*) AS n FROM balance_observations").first<number>("n"),
-  ).toBe(2);
+  ).toBe(4);
 }, 60000);
 
 test("without a tuple the units stay positional and every parse is parser_rejected", async () => {
@@ -363,7 +369,7 @@ test("without a tuple the units stay positional and every parse is parser_reject
     },
     {
       parser_name: "moneyforward-detail-balances",
-      parser_version: "1.0.0",
+      parser_version: "1.0.1",
       status: "failed",
       last_error_code: "parser_rejected",
       n: 1,

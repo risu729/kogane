@@ -143,7 +143,7 @@ the per-source bucket on 2026-09-13.
 ## Stored detail-page measures
 
 The collector already stores account detail HTML. The central
-`moneyforward-detail-balances@1.0.0` parser now publishes strictly observed
+`moneyforward-detail-balances@1.0.1` parser now publishes strictly observed
 bank aggregate JPY values and single-row point quantities/current JPY values,
 under the existing MoneyForward account identity. These are non-additive
 reported measures; native product balances, premium-gated card debt and

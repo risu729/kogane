@@ -136,6 +136,13 @@ describe("dataset_snapshot_policies seed", () => {
           "../../../packages/storage-d1/migrations/core/0066_prestia_bank_snapshot_schedule.sql",
         ),
         "utf8",
+      ) +
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0091_moneyforward_detail_balance_snapshots.sql",
+        ),
+        "utf8",
       );
     for (const [parser, dataset] of SNAPSHOT_DATASETS) {
       expect(sql).toContain("'" + dataset + "'");
@@ -171,7 +178,10 @@ describe("dataset_snapshot_policies seed", () => {
           runFailureCount: 0,
           dataset: row.dataset,
           url: null,
-          mime: prestia ? "text/html" : "application/json",
+          mime:
+            prestia || row.parser_name === "moneyforward-detail-balances"
+              ? "text/html"
+              : "application/json",
           fetchedAt: "2026-09-07T00:00:00.000Z",
           sha256: "0".repeat(64),
           artifactKey: prestia

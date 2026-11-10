@@ -123,4 +123,25 @@ describe("MoneyForward observed detail measures", () => {
       parse(bank, { fetchUnitKey: `moneyforward-account-v1-${"b".repeat(64)}` }).observations,
     ).toHaveLength(1);
   });
+  test("requires explicit document and target-section closures before claiming membership", () => {
+    const bankWithPoints = bank.replace("</body>", `${points}</body>`);
+    expect(parse(bankWithPoints).observations).toHaveLength(3);
+    const recentTableStart = '<table id="cf-detail-table">';
+    const truncated = bankWithPoints.slice(
+      0,
+      bankWithPoints.indexOf(recentTableStart) + recentTableStart.length,
+    );
+    for (const html of [
+      truncated,
+      bankWithPoints.replace("</html>", ""),
+      bankWithPoints.replace("</body>", ""),
+    ])
+      expect(() => parse(html)).toThrow("moneyforward_detail_document_incomplete");
+    expect(() => parse(bank.replace("</tbody></table></section>", "</tbody></table>"))).toThrow(
+      "moneyforward_detail_account_section_incomplete",
+    );
+    expect(() => parse(bankWithPoints.replace(points, points.replace("</section>", "")))).toThrow(
+      "moneyforward_detail_portfolio_section_incomplete",
+    );
+  });
 });

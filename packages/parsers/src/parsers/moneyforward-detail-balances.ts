@@ -62,7 +62,7 @@ const header = (table: Node): string =>
 
 export const moneyForwardDetailBalances: Parser = {
   name: "moneyforward-detail-balances",
-  version: "1.0.0",
+  version: "1.0.1",
   accepts: (a: ArtifactMeta) =>
     a.sourceId === "moneyforward-me" &&
     a.dataset === "account-detail" &&
@@ -74,11 +74,17 @@ export const moneyForwardDetailBalances: Parser = {
     const document = parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes), {
       sourceCodeLocationInfo: true,
     }) as unknown as Node;
-    const sections = all(document).filter(
+    const elements = all(document);
+    for (const tag of ["html", "body"]) {
+      const roots = elements.filter((node) => node.tagName === tag);
+      if (roots.length !== 1 || !roots[0]!.sourceCodeLocation?.endTag) fail("document_incomplete");
+    }
+    const sections = elements.filter(
       (n) => n.tagName === "section" && hasClass(n, "accounts-form"),
     );
     if (sections.length !== 1) fail("account_surface_unsupported");
     const section = sections[0]!;
+    if (!section.sourceCodeLocation?.endTag) fail("account_section_incomplete");
     const main = children(section).filter(
       (n) => n.tagName === "table" && hasClass(n, "table-bordered"),
     );
@@ -150,11 +156,12 @@ export const moneyForwardDetailBalances: Parser = {
         fail("card_payment_shape_unobserved");
       unavailable.push("card_payment_undetermined");
     } else fail("account_kind_unobserved");
-    const portfolios = all(document).filter(
+    const portfolios = elements.filter(
       (n) => n.tagName === "section" && attr(n, "id") === "portfolio_det_po",
     );
     const seen = new Set<string>();
     for (const portfolio of portfolios) {
+      if (!portfolio.sourceCodeLocation?.endTag) fail("portfolio_section_incomplete");
       const tables = all(portfolio).filter(
         (n) => n.tagName === "table" && hasClass(n, "table-pns"),
       );

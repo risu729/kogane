@@ -7,4 +7,4 @@ INSERT INTO dataset_snapshot_policies
    replaces_previous_on_complete_empty, updated_at_ms)
 VALUES
   ('moneyforward-me', 'account-detail', 'moneyforward-detail-balances',
-   'coverage-v1', '1.0.0', 0, 1794268800000);
+   'coverage-v1', '1.0.1', 0, 1794268800000);

@@ -207,7 +207,7 @@ payment or premium action was used.
   `input#updated-at[name="user_asset_act[updated_at]"]` belongs to manual
   transaction entry. Debt acquisition dates also do not timestamp balances.
 
-`moneyforward-detail-balances@1.0.0` parses stored matching pages under
+`moneyforward-detail-balances@1.0.1` parses stored matching pages under
 [ADR 0103](../adr/0103-moneyforward-detail-measures.md). It publishes the bank's
 reported JPY aggregate and the observed single point quantity/current JPY value,
 with capture time as `observedAt` and no invented `asOf`.
@@ -218,8 +218,10 @@ registration-contract version is needed.
 Closed diagnostics name `product_balance_missing`, `card_payment_undetermined`,
 `card_debt_premium_gated` and `securities_holdings_unobserved`, prefixed
 `moneyforward_detail_`. Unknown page kinds/headers, malformed units/amounts and
-disagreeing bank totals are rejected with closed parser errors. Securities
-positions remain unimplemented because no securities schema was observed.
+disagreeing bank totals are rejected with closed parser errors.
+Document HTML/body and selected section closing tags must be present, so a
+truncated capture cannot replace complete membership through DOM repair.
+Securities positions remain unimplemented because no securities schema was observed.
 The catalogue is partial; production replay/publication and live-reader
 validation remain outstanding.
 
