@@ -370,6 +370,18 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
     },
   ],
   "sbi-vc-trade": [
+    {
+      key: /^monthly-report-\d{8}-[a-f0-9]{64}\.pdf$/u,
+      role: "provider_document",
+      mediaTypes: ["application/pdf"],
+      dataset: "monthly-report-pdf",
+    },
+    {
+      key: /^pnl-data-\d{8}-[a-f0-9]{64}\.zip$/u,
+      role: "provider_document",
+      mediaTypes: ["application/zip"],
+      dataset: "pnl-data-zip",
+    },
     ...jsonByName(
       ["cash-balances", "account-margin", "position-summary", "executions-recent-page-0001"],
       "collector_derived",
@@ -382,6 +394,18 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
     },
   ],
   "smbc-direct": [
+    {
+      key: "foreign-ordinary-aud/balance.json",
+      role: "sanitized_provider_capture",
+      mediaTypes: JSON_TYPE,
+      dataset: "foreign-ordinary-aud-balance",
+    },
+    {
+      key: /^foreign-ordinary-aud\/history\/\d{8}-\d{8}\.json$/u,
+      role: "sanitized_provider_capture",
+      mediaTypes: JSON_TYPE,
+      dataset: "foreign-ordinary-aud-history",
+    },
     {
       key: "balance.normalized.json",
       role: "collector_derived",

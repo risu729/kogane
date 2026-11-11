@@ -8,6 +8,7 @@ import type { Miniflare } from "miniflare";
 import { parseJob, sweep } from "../src/worker.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 import { SNAPSHOT_DATASETS, snapshotCtes } from "../../../packages/parsers/src/snapshot-query.ts";
+import { EXPECTED_UNIT_POLICIES } from "./expected-unit-policies.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import { smbcDirectBalance } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
@@ -40,7 +41,7 @@ const all = <T>(sql: string, ...args: unknown[]) =>
     .all<T>()
     .then((result) => result.results);
 
-test("the current production migration chain preserves legacy policies and adds explicit St.George coverage", async () => {
+test("the migration chain names every explicit policy and preserves other run-scoped containers", async () => {
   const tables = await all<{ name: string }>(
     "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('parse_issues','parse_coverage_claims','dataset_snapshot_policies') ORDER BY name",
   );
@@ -63,103 +64,29 @@ test("the current production migration chain preserves legacy policies and adds 
   expect(containers.map(({ parser_name, dataset }) => [parser_name, dataset])).toEqual(
     SNAPSHOT_DATASETS.map(([parserName, dataset]) => [parserName, dataset]).sort(),
   );
-  expect(policies).toHaveLength(SNAPSHOT_DATASETS.length + 9);
+  expect(policies).toHaveLength(
+    SNAPSHOT_DATASETS.length +
+      EXPECTED_UNIT_POLICIES.filter((row) => row.snapshot_selection === 0).length,
+  );
   expect(
     policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
-  ).toEqual([
-    {
-      source_id: "myjcb",
-      parser_name: "myjcb-credit-ledger",
-      dataset: "credit-ledger",
-      policy_id: "legacy-warning-compat-v1",
-      unit_scope: "unit",
-      snapshot_selection: 0,
-    },
-    {
-      source_id: "myjcb",
-      parser_name: "myjcb-credit-past-month-balances",
-      dataset: "credit-past-months",
-      policy_id: "legacy-warning-compat-v1",
-      unit_scope: "unit",
-      snapshot_selection: 0,
-    },
-    {
-      source_id: "myjcb",
-      parser_name: "myjcb-credit-statement-total",
-      dataset: "credit-detail",
-      policy_id: "legacy-warning-compat-v1",
-      unit_scope: "unit",
-      snapshot_selection: 0,
-    },
-    {
-      source_id: "myjcb",
-      parser_name: "myjcb-debit-ledger",
-      dataset: "debit-detail",
-      policy_id: "legacy-warning-compat-v1",
-      unit_scope: "unit",
-      snapshot_selection: 0,
-    },
-    {
-      source_id: "myjcb",
-      parser_name: "myjcb-debit-other-statement",
-      dataset: "debit-other-detail",
-      policy_id: "legacy-warning-compat-v1",
-      unit_scope: "unit",
-      snapshot_selection: 0,
-    },
-    {
-      source_id: "myjcb",
-      parser_name: "myjcb-jpoint-balance",
-      dataset: "jpoint-balance",
-      policy_id: "legacy-warning-compat-v1",
-      unit_scope: "unit",
-      snapshot_selection: 0,
-    },
-    {
-      source_id: "myjcb",
-      parser_name: "myjcb-jpoint-history",
-      dataset: "jpoint-history",
-      policy_id: "coverage-v1",
-      unit_scope: "unit",
-      snapshot_selection: 1,
-    },
-    {
-      source_id: "myjcb",
-      parser_name: "myjcb-skip-payment-schedule",
-      dataset: "credit-schedule",
-      policy_id: "legacy-warning-compat-v1",
-      unit_scope: "unit",
-      snapshot_selection: 0,
-    },
-    {
-      source_id: "sbi-shinsei-bank",
-      parser_name: "sbi-shinsei-monthly-report-metadata",
-      dataset: "monthly-report-pdf",
-      policy_id: "coverage-v1",
-      unit_scope: "unit",
-      snapshot_selection: 0,
-    },
-    {
-      source_id: "sbi-shinsei-bank",
-      parser_name: "sbi-shinsei-savings-activity",
-      dataset: "savings-activity",
-      policy_id: "coverage-v1",
-      unit_scope: "unit",
-      snapshot_selection: 0,
-    },
-    {
-      source_id: "vpass",
-      parser_name: "vpass-credit-snapshot",
-      dataset: "credit-snapshot",
-      policy_id: "coverage-v1",
-      unit_scope: "unit",
-      snapshot_selection: 1,
-    },
-  ]);
+  ).toEqual(
+    EXPECTED_UNIT_POLICIES.map(
+      ({ source_id, parser_name, dataset, policy_id, unit_scope, snapshot_selection }) => ({
+        source_id,
+        parser_name,
+        dataset,
+        policy_id,
+        unit_scope,
+        snapshot_selection,
+      }),
+    ),
+  );
   expect(
     policies
       .filter(
         (row) =>
+          row.unit_scope === "run" &&
           row.parser_name !== "st-george-balances" &&
           row.parser_name !== "prestia-bank-balances" &&
           row.parser_name !== "sbi-shinsei-exchange-rate" &&
@@ -216,16 +143,18 @@ test("the current production migration chain preserves legacy policies and adds 
       snapshot_selection: 1,
     },
   ]);
-  expect(
-    containers
-      .filter((row) => !["myjcb-jpoint-history", "vpass-credit-snapshot"].includes(row.parser_name))
-      .every((row) => row.unit_scope === "run"),
-  ).toBe(true);
-  for (const parser_name of ["myjcb-jpoint-history", "vpass-credit-snapshot"])
-    expect(containers.find((row) => row.parser_name === parser_name)).toMatchObject({
-      unit_scope: "unit",
-      policy_id: "coverage-v1",
-    });
+  expect(containers.filter((row) => row.unit_scope === "unit")).toEqual(
+    EXPECTED_UNIT_POLICIES.filter((row) => row.snapshot_selection === 1).map(
+      ({ source_id, parser_name, dataset, policy_id, unit_scope, snapshot_selection }) => ({
+        source_id,
+        parser_name,
+        dataset,
+        policy_id,
+        unit_scope,
+        snapshot_selection,
+      }),
+    ),
+  );
   // Every row that pins a version, under either policy, names one this build
   // deploys: the selection matches it exactly, so a stale pin would adopt
   // nothing (0056 moves the SBI Shinsei board to 1.0.1, 0059 to 1.0.2, 0084
@@ -242,6 +171,9 @@ test("the current production migration chain preserves legacy policies and adds 
     "sbi-realised-gains",
     "sbi-shinsei-exchange-rate",
     "sbi-shinsei-monthly-report-metadata",
+    "sbi-vc-document-metadata",
+    "sbi-vc-document-metadata",
+    "smbc-foreign-ordinary-balance",
     "st-george-balances",
     "vpass-credit-snapshot",
   ]);
@@ -437,7 +369,10 @@ test("the comparison route reports counts, ids and policies only", async () => {
     }[];
     differingDatasets: number;
   };
-  expect(body.policies).toHaveLength(SNAPSHOT_DATASETS.length + 9);
+  expect(body.policies).toHaveLength(
+    SNAPSHOT_DATASETS.length +
+      EXPECTED_UNIT_POLICIES.filter((row) => row.snapshot_selection === 0).length,
+  );
   expect(
     body.policies
       .filter((row) => row.snapshot_selection === 1)
@@ -445,145 +380,16 @@ test("the comparison route reports counts, ids and policies only", async () => {
   ).toEqual(SNAPSHOT_DATASETS.map(([parserName, dataset]) => [parserName, dataset]).sort());
   expect(
     body.policies
-      .filter((row) => row.snapshot_selection === 1 && row.unit_scope !== "run")
+      .filter((row) => row.snapshot_selection === 1 && row.unit_scope === "unit")
       .map((row) => row.parser_name),
-  ).toEqual(["myjcb-jpoint-history", "vpass-credit-snapshot"]);
+  ).toEqual(
+    EXPECTED_UNIT_POLICIES.filter((row) => row.snapshot_selection === 1).map(
+      (row) => row.parser_name,
+    ),
+  );
   expect(
     body.policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
-  ).toEqual([
-    {
-      source_id: "myjcb",
-      dataset: "credit-ledger",
-      parser_name: "myjcb-credit-ledger",
-      policy_id: "legacy-warning-compat-v1",
-      policy_version: 1,
-      required_parser_version: null,
-      replaces_previous_on_complete_empty: 1,
-      unit_scope: "unit",
-      snapshot_selection: 0,
-      updated_at_ms: 1794268800000,
-    },
-    {
-      source_id: "myjcb",
-      dataset: "credit-past-months",
-      parser_name: "myjcb-credit-past-month-balances",
-      policy_id: "legacy-warning-compat-v1",
-      policy_version: 1,
-      required_parser_version: null,
-      replaces_previous_on_complete_empty: 1,
-      unit_scope: "unit",
-      snapshot_selection: 0,
-      updated_at_ms: 1794268800000,
-    },
-    {
-      source_id: "myjcb",
-      dataset: "credit-detail",
-      parser_name: "myjcb-credit-statement-total",
-      policy_id: "legacy-warning-compat-v1",
-      policy_version: 1,
-      required_parser_version: null,
-      replaces_previous_on_complete_empty: 1,
-      unit_scope: "unit",
-      snapshot_selection: 0,
-      updated_at_ms: 1794268800000,
-    },
-    {
-      source_id: "myjcb",
-      dataset: "debit-detail",
-      parser_name: "myjcb-debit-ledger",
-      policy_id: "legacy-warning-compat-v1",
-      policy_version: 1,
-      required_parser_version: null,
-      replaces_previous_on_complete_empty: 1,
-      unit_scope: "unit",
-      snapshot_selection: 0,
-      updated_at_ms: 1794268800000,
-    },
-    {
-      source_id: "myjcb",
-      dataset: "debit-other-detail",
-      parser_name: "myjcb-debit-other-statement",
-      policy_id: "legacy-warning-compat-v1",
-      policy_version: 1,
-      required_parser_version: null,
-      replaces_previous_on_complete_empty: 1,
-      unit_scope: "unit",
-      snapshot_selection: 0,
-      updated_at_ms: 1794268800000,
-    },
-    {
-      source_id: "myjcb",
-      dataset: "jpoint-balance",
-      parser_name: "myjcb-jpoint-balance",
-      policy_id: "legacy-warning-compat-v1",
-      policy_version: 1,
-      required_parser_version: null,
-      replaces_previous_on_complete_empty: 1,
-      unit_scope: "unit",
-      snapshot_selection: 0,
-      updated_at_ms: 1791590400000,
-    },
-    {
-      source_id: "myjcb",
-      dataset: "jpoint-history",
-      parser_name: "myjcb-jpoint-history",
-      policy_id: "coverage-v1",
-      policy_version: 1,
-      required_parser_version: "1.0.1",
-      replaces_previous_on_complete_empty: 0,
-      unit_scope: "unit",
-      snapshot_selection: 1,
-      updated_at_ms: 1794268800000,
-    },
-    {
-      source_id: "myjcb",
-      dataset: "credit-schedule",
-      parser_name: "myjcb-skip-payment-schedule",
-      policy_id: "legacy-warning-compat-v1",
-      policy_version: 1,
-      required_parser_version: null,
-      replaces_previous_on_complete_empty: 1,
-      unit_scope: "unit",
-      snapshot_selection: 0,
-      updated_at_ms: 1794268800000,
-    },
-    {
-      source_id: "sbi-shinsei-bank",
-      dataset: "monthly-report-pdf",
-      parser_name: "sbi-shinsei-monthly-report-metadata",
-      policy_id: "coverage-v1",
-      policy_version: 1,
-      required_parser_version: "1.0.0",
-      replaces_previous_on_complete_empty: 0,
-      unit_scope: "unit",
-      snapshot_selection: 0,
-      updated_at_ms: 0,
-    },
-    {
-      source_id: "sbi-shinsei-bank",
-      dataset: "savings-activity",
-      parser_name: "sbi-shinsei-savings-activity",
-      policy_id: "coverage-v1",
-      policy_version: 1,
-      required_parser_version: null,
-      replaces_previous_on_complete_empty: 1,
-      unit_scope: "unit",
-      snapshot_selection: 0,
-      updated_at_ms: 0,
-    },
-    {
-      source_id: "vpass",
-      dataset: "credit-snapshot",
-      parser_name: "vpass-credit-snapshot",
-      policy_id: "coverage-v1",
-      policy_version: 1,
-      required_parser_version: "1.0.1",
-      replaces_previous_on_complete_empty: 0,
-      unit_scope: "unit",
-      snapshot_selection: 1,
-      updated_at_ms: 1794268800000,
-    },
-  ]);
+  ).toEqual([...EXPECTED_UNIT_POLICIES]);
   expect(body.datasets.some((row) => row.parserName === "myjcb-jpoint-balance")).toBe(false);
   expect(body.datasets.some((row) => row.parserName === "sbi-shinsei-savings-activity")).toBe(
     false,

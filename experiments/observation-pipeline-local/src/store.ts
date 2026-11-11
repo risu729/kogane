@@ -209,6 +209,17 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
     if (policy === undefined) throw new Error("0066 names no snapshot policy row");
     db.transaction(() => db.exec(policy))();
   }
+  // Snapshot membership subset of CORE 0096 only. The local parser still
+  // rejects every partial parent, so retain its run scope instead of importing
+  // production's independent-unit/transaction eligibility rows. Never replace
+  // an existing operator policy when reopening a store.
+  db.exec(`INSERT OR IGNORE INTO dataset_snapshot_policies (
+    source_id,dataset,parser_name,policy_id,required_parser_version,
+    replaces_previous_on_complete_empty,unit_scope,snapshot_selection,updated_at_ms
+  ) VALUES (
+    'smbc-bank','foreign-ordinary-aud-balance','smbc-foreign-ordinary-balance',
+    'coverage-v1','0.1.2',0,'run',1,1794268800000
+  )`);
   // Mirror the MoneyForward detail policy once; preserve operator choices.
   if (
     !db

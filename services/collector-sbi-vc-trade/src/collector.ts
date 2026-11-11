@@ -4,10 +4,11 @@ import type { CollectorArtifact, ReadEvent, SessionMaterial } from "./types";
 const ORIGIN = "https://simple.sbivc.co.jp";
 const TRADE_URL = `${ORIGIN}/api/cccmdipresen/gw/trade`;
 const PAGE_SIZE = 30;
+const FULL_CASHFLOW_PAGE_SIZE = 20;
 const MAX_PAGES = 100;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
-type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+export type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export async function collectSbiVcTrade(options: {
   diagnostic?: ReturnType<
@@ -17,6 +18,7 @@ export async function collectSbiVcTrade(options: {
   fetcher?: Fetcher;
   onSession: (session: SessionMaterial) => Promise<void>;
   onArtifact: (artifact: CollectorArtifact) => Promise<void>;
+  onClassicComplete?: () => void;
 }): Promise<SessionMaterial> {
   const fetcher = options.fetcher ?? fetch;
   let session = structuredClone(options.session);
@@ -70,6 +72,29 @@ export async function collectSbiVcTrade(options: {
         cashflowType: ["REMITTANCE_DEPOSIT", "REMITTANCE_WITHDRAW"],
       }),
   });
+  options.onClassicComplete?.();
+  for (const historical of [false, true]) {
+    // Separate evidence datasets: no parser publishes these overlapping rows.
+    // The type-specific publishers remain gated on observed response semantics.
+    await collectPages({
+      prefix: `cashflows-all-${historical ? "historical" : "recent"}`,
+      pageSize: FULL_CASHFLOW_PAGE_SIZE,
+      identityField: "cashflowID",
+      collect: (dataset, pageNumber) =>
+        collect(dataset, "getCashflowList", {
+          secureKey: session.secureKey,
+          pageNumber: String(pageNumber),
+          pageSize: String(FULL_CASHFLOW_PAGE_SIZE),
+          historical: String(historical),
+          currency: [],
+          cashflowType: [],
+          eventDateFrom: "",
+          eventDateTo: "",
+          sortKey: "cashflowDatetime",
+          sortAsc: "false",
+        }),
+    });
+  }
   return session;
 }
 
@@ -92,33 +117,48 @@ function executionData(
 
 async function collectPages(options: {
   prefix: string;
+  pageSize?: number;
+  identityField?: string;
   collect: (dataset: string, pageNumber: number) => Promise<unknown>;
 }): Promise<void> {
+  const pageSize = options.pageSize ?? PAGE_SIZE;
+  const identities = new Set<string>();
   let expectedTotal: number | null = null;
   for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber += 1) {
     const dataset = `${options.prefix}-page-${String(pageNumber + 1).padStart(4, "0")}`;
     const body = await options.collect(dataset, pageNumber);
-    const page = pageInfo(body, pageNumber);
+    const page = pageInfo(body, pageNumber, pageSize);
     if (page === null) throw new Error(`${options.prefix}_invalid_pagination`);
     expectedTotal ??= page.totalSize;
     if (page.totalSize !== expectedTotal) {
       throw new Error(`${options.prefix}_pagination_total_changed`);
     }
-    const offset = pageNumber * PAGE_SIZE;
-    const expectedLength = Math.min(PAGE_SIZE, Math.max(expectedTotal - offset, 0));
+    const offset = pageNumber * pageSize;
+    const expectedLength = Math.min(pageSize, Math.max(expectedTotal - offset, 0));
     if (page.listLength !== expectedLength) {
       throw new Error(`${options.prefix}_pagination_length_mismatch`);
+    }
+    if (options.identityField !== undefined) {
+      for (const row of page.list) {
+        const identity = isRecord(row) ? row[options.identityField] : undefined;
+        if (typeof identity !== "string" || identity.trim() === "") {
+          throw new Error(`${options.prefix}_invalid_identity`);
+        }
+        if (identities.has(identity)) throw new Error(`${options.prefix}_duplicate_identity`);
+        identities.add(identity);
+      }
     }
     if (offset + page.listLength >= expectedTotal) return;
   }
   throw new Error(`${options.prefix}_page_limit_exceeded`);
 }
 
-async function readGateway(
+export async function readGateway(
   fetcher: Fetcher,
   session: SessionMaterial,
   event: ReadEvent,
   data: Record<string, unknown>,
+  mediaType: "application/json" | "application/pdf" | "application/zip" = "application/json",
 ): Promise<{ session: SessionMaterial; body: unknown; sanitizedBody: string }> {
   const response = await fetcher(TRADE_URL, {
     method: "POST",
@@ -133,7 +173,7 @@ async function readGateway(
     body: JSON.stringify({ event, data }),
   });
   if (!response.ok) throw new Error(`collector_http_${response.status}`);
-  if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
+  if (!response.headers.get("content-type")?.toLowerCase().includes(mediaType)) {
     throw new Error("collector_non_json_response");
   }
   const text = await readBoundedText(response, MAX_RESPONSE_BYTES);
@@ -156,9 +196,10 @@ function sanitizeEnvelope(value: unknown): { meta: Record<string, unknown>; body
 function pageInfo(
   body: unknown,
   expectedPageNumber: number,
-): { listLength: number; totalSize: number } | null {
+  expectedPageSize = PAGE_SIZE,
+): { list: unknown[]; listLength: number; totalSize: number } | null {
   if (!isRecord(body) || !Array.isArray(body.list)) return null;
-  if (body.list.length > PAGE_SIZE) return null;
+  if (body.list.length > expectedPageSize) return null;
   const totalSize = toNonNegativeInteger(body.totalSize);
   const pageNumber = toNonNegativeInteger(body.pageNumber);
   const pageSize = toNonNegativeInteger(body.pageSize);
@@ -166,12 +207,12 @@ function pageInfo(
   if (
     totalSize === null ||
     pageNumber !== expectedPageNumber ||
-    pageSize !== PAGE_SIZE ||
-    totalNumOfPages !== Math.ceil(totalSize / PAGE_SIZE)
+    pageSize !== expectedPageSize ||
+    totalNumOfPages !== Math.ceil(totalSize / expectedPageSize)
   ) {
     return null;
   }
-  return { listLength: body.list.length, totalSize };
+  return { list: body.list, listLength: body.list.length, totalSize };
 }
 
 function toNonNegativeInteger(value: unknown): number | null {

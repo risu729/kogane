@@ -219,7 +219,14 @@ describe("coverage", () => {
     });
     expect(bySource.filters).toEqual({ source: "smbc-bank", account: null });
     expect(new Set(bySource.accounts.map((a) => a.sourceId))).toEqual(new Set(["smbc-bank"]));
-    expect(bySource.coverage.containersWithoutSnapshot).toEqual([]);
+    expect(bySource.coverage.containersWithoutSnapshot).toEqual([
+      {
+        sourceId: "smbc-bank",
+        dataset: "foreign-ordinary-aud-balance",
+        parserName: "smbc-foreign-ordinary-balance",
+        reasonCode: "no_complete_snapshot_before_cutoff",
+      },
+    ]);
     expect(bySource.coverage.staleSnapshots).toEqual([]);
     const byAccount = await queryDatedState(executorFor, {
       date: "2026-09-10",

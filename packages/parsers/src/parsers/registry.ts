@@ -42,9 +42,11 @@ import { sbiYenDetailHistory } from "./sbi-yen-detail-history.ts";
 import { sbiVcAccountMargin } from "./sbi-vc-account-margin.ts";
 import { sbiVcCashBalances } from "./sbi-vc-cash-balances.ts";
 import { sbiVcCashflows } from "./sbi-vc-cashflows.ts";
+import { sbiVcDocuments } from "./sbi-vc-documents.ts";
 import { sbiVcExecutions } from "./sbi-vc-executions.ts";
 import { sbiVcPositionSummary } from "./sbi-vc-position-summary.ts";
 import { smbcDirectBalance, smbcDirectTransactions } from "./smbc-direct.ts";
+import { smbcForeignOrdinaryBalance, smbcForeignOrdinaryHistory } from "./smbc-foreign-ordinary.ts";
 import { stGeorgeBalances, stGeorgeTransactions } from "./st-george.ts";
 import { sbiShinseiMonthlyReport } from "./sbi-shinsei-monthly-report.ts";
 import { sbiShinseiBalanceSummaryAndStage } from "./sbi-shinsei-balance-summary-and-stage.ts";
@@ -94,8 +96,11 @@ export const PARSERS: readonly Parser[] = [
   sbiVcPositionSummary,
   sbiVcExecutions,
   sbiVcCashflows,
+  sbiVcDocuments,
   smbcDirectBalance,
   smbcDirectTransactions,
+  smbcForeignOrdinaryBalance,
+  smbcForeignOrdinaryHistory,
   stGeorgeBalances,
   stGeorgeTransactions,
   sbiShinseiTopBalancesAndActivity,

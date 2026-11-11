@@ -42,6 +42,7 @@ import {
   facts,
   position,
   snapshot,
+  type Snapshot,
   valuation,
 } from "./snapshot-fixture.ts";
 
@@ -157,6 +158,60 @@ describe("complete container snapshots", () => {
       expect(store.db.query("SELECT COUNT(*) AS n FROM parse_runs").get()).toEqual({ n: 3 });
     });
   }
+
+  test("SMBC AUD requires its exact coverage version and retains prior membership through refused or empty captures", () => {
+    const store = database();
+    const base = {
+      parser: "smbc-foreign-ordinary-balance",
+      dataset: "foreign-ordinary-aud-balance",
+      source: "smbc-bank",
+      unit: "foreign-ordinary-aud-balance",
+    };
+    snapshot(store, {
+      ...base,
+      observations: [{ ...balance("AUD"), amountMinor: 100 }],
+      coverage: {},
+    });
+    const old = latestBalances(store);
+    expect(old).toHaveLength(1);
+    snapshot(store, {
+      ...base,
+      observations: [{ ...balance("AUD"), amountMinor: 200 }],
+      coverage: {},
+    });
+    const current = latestBalances(store);
+    expect(current).toHaveLength(1);
+    expect(current).not.toEqual(old);
+    const refused: Partial<Snapshot>[] = [
+      {},
+      { observations: [], coverage: {} },
+      { status: "partial", unitOutcome: "success", coverage: {} },
+      { status: "failed", unitOutcome: "success", coverage: {} },
+      {
+        observations: [],
+        coverage: { completeness: "unknown", membershipComplete: false, absenceMeaning: "unknown" },
+      },
+      {
+        coverage: {
+          completeness: "partial",
+          membershipComplete: false,
+          failureCause: "row_unreadable",
+        },
+      },
+      { parserVersion: "0.1.1", coverage: {} },
+    ];
+    for (const refusal of refused) {
+      snapshot(store, {
+        ...base,
+        observations: [{ ...balance("AUD"), amountMinor: 300 }],
+        ...refusal,
+      });
+      expect(latestBalances(store)).toEqual(current);
+    }
+    expect(store.db.query("SELECT COUNT(*) AS n FROM parse_runs").get()).toEqual({
+      n: refused.length + 2,
+    });
+  });
 
   test("St.George requires a coverage claim and retains previous membership on an unverified empty portfolio", () => {
     const store = database();

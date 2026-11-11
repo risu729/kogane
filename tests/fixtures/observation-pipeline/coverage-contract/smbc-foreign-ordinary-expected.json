@@ -1,0 +1,36 @@
+{
+  "smbc-foreign-ordinary-balance": {
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "smbc-bank:ordinary-foreign-aud",
+          "metric": "account_balance",
+          "amountMinor": 12345,
+          "amountText": "123.45",
+          "amountScale": 2,
+          "instrument": "AUD",
+          "asOf": "2099-04-02T01:00:00.000Z",
+          "observedAt": "2099-04-02T01:00:00.000Z",
+          "rawLocator": "json:$.amount",
+          "extra": {
+            "yenEquivalent": "12000",
+            "referenceRate": "97.205",
+            "_kogane": {
+              "balanceScope": "ordinary_foreign_aud_account",
+              "rateMeaning": "current_reference_foreign_to_yen",
+              "canonicalDataset": "foreign-ordinary-aud-balance"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "unreadable-container": {
+      "error": true
+    },
+    "unknown-fields": {
+      "error": true
+    }
+  }
+}

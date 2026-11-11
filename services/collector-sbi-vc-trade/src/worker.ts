@@ -12,6 +12,7 @@ import { DurableObject } from "cloudflare:workers";
 import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import { objectKey } from "../../../packages/collection/src/index";
 import { collectSbiVcTrade } from "./collector";
+import { collectSbiVcDocuments } from "./documents";
 import { decryptSession, encryptSession } from "./crypto";
 import { createPasskeySession, parsePasskeyCredential } from "./passkey";
 import { applySessionUpdates, cookieHeader, parseGatewayMeta, parseSession } from "./session";
@@ -38,6 +39,8 @@ import type {
   CollectionFailure,
   CollectionManifest,
   CollectionSummary,
+  CollectionUnit,
+  CollectorArtifact,
   EncryptedSession,
   HealthState,
   SessionMaterial,
@@ -237,41 +240,91 @@ export class SbiVcSessionState extends DurableObject<Env> {
       // memory for the shared-mode terminal.
       const captures: SharedCapture[] = [];
       const failures: CollectionFailure[] = [];
+      let classicComplete = false;
+      let liveSession: SessionMaterial | undefined;
       let operation = "load_session";
+      const onSession = async (updated: SessionMaterial) => {
+        operation = "persist_session";
+        await diagnostic.step("session-persist", async () =>
+          this.ctx.storage.put(
+            "session",
+            await encryptSession(updated, this.env.SESSION_ENCRYPTION_KEY),
+          ),
+        );
+        liveSession = updated;
+        operation = "collect";
+      };
+      const onArtifact = async (artifact: CollectorArtifact) => {
+        operation =
+          artifact.document !== undefined ||
+          artifact.dataset.startsWith("report-") ||
+          artifact.dataset.startsWith("pnl-")
+            ? "r2_document_evidence"
+            : `r2_${artifact.dataset}`;
+        const { record } = await describeArtifact({ prefix, artifact });
+        artifacts.push({ ...record, key: objectKey(record.sha256) });
+        captures.push({
+          dataset: artifact.dataset,
+          body: artifact.body,
+          ...(record.artifactKey === undefined ? {} : { artifactKey: record.artifactKey }),
+          ...(artifact.document === undefined ? {} : { document: artifact.document }),
+        });
+        operation = "collect";
+      };
       try {
         const session = await diagnostic.step("session-load", () => this.loadSession(startedAt));
+        liveSession = session;
         operation = "collect";
         await diagnostic.step("collection", () =>
           collectSbiVcTrade({
             session,
             diagnostic,
-            onSession: async (updated) => {
-              operation = "persist_session";
-              await diagnostic.step("session-persist", async () =>
-                this.ctx.storage.put(
-                  "session",
-                  await encryptSession(updated, this.env.SESSION_ENCRYPTION_KEY),
-                ),
-              );
-              operation = "collect";
+            onClassicComplete: () => {
+              classicComplete = true;
             },
-            onArtifact: async (artifact) => {
-              operation = `r2_${artifact.dataset}`;
-              const { record } = await describeArtifact({ prefix, artifact });
-              // The manifest entry only: the bytes reach DATA
-              // content-addressed when the terminal is written, and nothing
-              // is staged. So the entry names that object, the key the
-              // terminal's `storageRef` gives the same bytes, rather than the
-              // run-prefix staging key `describeArtifact` returns, which
-              // shared mode never writes.
-              artifacts.push({ ...record, key: objectKey(record.sha256) });
-              captures.push({ dataset: artifact.dataset, body: artifact.body });
-              operation = "collect";
-            },
+            onSession,
+            onArtifact,
           }),
         );
       } catch (error) {
         failures.push({ operation, errorCode: classifyError(error) });
+      }
+      const baseStatus: CollectionManifest["status"] =
+        failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
+      const units: CollectionUnit[] = [
+        {
+          unitKey: "account",
+          status: classicComplete ? "success" : baseStatus,
+          ...(!classicComplete && failures[0] ? { errorCode: failures[0].errorCode } : {}),
+        },
+        ...(classicComplete
+          ? [
+              {
+                unitKey: "full-cashflows" as const,
+                status: baseStatus,
+                ...(failures[0] ? { errorCode: failures[0].errorCode } : {}),
+              },
+            ]
+          : []),
+      ];
+      if (classicComplete && liveSession !== undefined) {
+        try {
+          const documents = await collectSbiVcDocuments({
+            session: liveSession,
+            captures,
+            cashflowsComplete: baseStatus === "success",
+            onSession,
+            onArtifact,
+            diagnostic,
+            now: new Date(startedAt),
+          });
+          units.push(...documents.units);
+          failures.push(...documents.failures);
+        } catch (error) {
+          const errorCode = classifyError(error);
+          failures.push({ operation: "reports", errorCode });
+          units.push({ unitKey: "report-year-range", status: "failed", errorCode });
+        }
       }
       const completedAt = new Date().toISOString();
       const status: CollectionManifest["status"] =
@@ -285,6 +338,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
         status,
         artifacts,
         failures,
+        units,
       };
       {
         // U09: the run's completion record is the terminal this Durable Object

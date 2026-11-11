@@ -43,7 +43,6 @@ const missing = (type: ProviderDataTypeEntry["type"], issue: number): ProviderDa
  * history, the electronic reports and product details are still not
  * collected; docs/sources/sbi-shinsei-bank.md and #447's body).
  */
-const BACKLOG = 440;
 
 /** CORE source id → its provider-offered data types, in `PROVIDER_DATA_TYPES` order. */
 export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
@@ -160,28 +159,30 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   ],
   // SBI VCトレード (a broker): crypto holdings and leverage positions,
   // executions under one filter, and the yen account (balances, margin,
-  // deposits and withdrawals); crypto transfers, staking or lending rewards,
-  // the balance history and annual P&L report, and the PDF reports are not
-  // collected (docs/sources/sbi-vc-trade.md, #448).
+  // deposits and withdrawals). The unfiltered recent/historical cash-flow
+  // lists are captured as evidence only; crypto transfer and staking/lending
+  // row semantics remain unobserved (#1227). Crypto transfers and rewards,
+  // the balance history and annual/daily reports remain uncollected. Monthly
+  // PDFs and P&L ZIPs are archived as evidence only (#1249).
   "sbi-vc-trade": [
     collected("position", ["sbi-vc-cash-balances", "sbi-vc-position-summary"]),
-    partial("execution", ["sbi-vc-executions"], 448),
+    partial("execution", ["sbi-vc-executions"], 1228),
     collected("settlement_cash", [
       "sbi-vc-cash-balances",
       "sbi-vc-account-margin",
       "sbi-vc-cashflows",
     ]),
-    missing("asset_transfer", 448),
-    missing("income", 448),
-    missing("valuation_history", 448),
-    missing("document", 448),
+    missing("asset_transfer", 1227),
+    missing("income", 1227),
+    missing("valuation_history", 1249),
+    partial("document", ["sbi-vc-document-metadata"], 1249),
   ],
-  // SMBC Direct: the yen ordinary account; foreign-currency deposits and term
-  // or installment deposits are not collected (docs/sources/smbc-bank.md,
-  // #442).
+  // SMBC Direct: yen ordinary deposits plus the observed AUD balance and
+  // explicit-empty retained history. Nonempty AUD history is unreviewed;
+  // term and installment deposits remain uncollected (docs/sources/smbc-bank.md).
   "smbc-bank": [
-    partial("balance", ["smbc-direct-balance"], 442),
-    partial("cash_movement", ["smbc-direct-transactions"], 442),
+    partial("balance", ["smbc-direct-balance", "smbc-foreign-ordinary-balance"], 442),
+    partial("cash_movement", ["smbc-direct-transactions", "smbc-foreign-ordinary-history"], 1245),
     missing("term_deposit", 442),
   ],
   // ソニー銀行: total balance, yen and ten foreign-currency histories and WALLET

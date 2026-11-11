@@ -27,6 +27,7 @@ export const SNAPSHOT_DATASETS = [
   ["sbi-shinsei-exchange-rate", "exchange-rate"],
   ["sony-bank-gross-balance", "gross-balance"],
   ["smbc-direct-balance", "balance-normalized"],
+  ["smbc-foreign-ordinary-balance", "foreign-ordinary-aud-balance"],
   ["st-george-balances", "account-snapshot"],
   ["prestia-bank-balances", "prestia-bank-balance-html"],
 ] as const;

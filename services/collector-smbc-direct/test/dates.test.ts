@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   compactDate,
+  foreignOrdinaryRange,
   japanToday,
   lastFinishedJapanDay,
   monthRanges,
@@ -24,6 +25,16 @@ describe("monthRanges", () => {
   });
 });
 describe("date helpers", () => {
+  test("foreign ordinary retention follows the JST month and includes only closed days", () => {
+    expect(foreignOrdinaryRange(new Date("2099-01-01T01:00:00.000Z"))).toEqual({
+      start: "2098-10-01",
+      end: "2098-12-31",
+    });
+    expect(foreignOrdinaryRange(new Date("2099-03-31T15:00:00.000Z"))).toEqual({
+      start: "2099-01-01",
+      end: "2099-03-31",
+    });
+  });
   test("uses the Japan calendar date", () => {
     expect(japanToday(new Date("2026-08-31T21:15:00Z"))).toBe("2026-09-01");
   });

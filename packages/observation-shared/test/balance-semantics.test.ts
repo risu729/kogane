@@ -86,6 +86,7 @@ test("source audit separates explicit deposits, gross totals, rewards, limits an
   const cases = [
     ["sbi-shinsei-bank", "sbi-shinsei-yen-deposit-account", "yen_deposit_account_balance", "asset"],
     ["smbc-bank", "smbc-direct-balance", "account_balance", "asset"],
+    ["smbc-bank", "smbc-foreign-ordinary-balance", "account_balance", "asset"],
     ["sony-bank", "sony-bank-history-json", "available_after_transaction", "asset"],
     ["sony-bank", "sony-bank-gross-balance", "gross_asset_balance", "aggregate"],
     ["sony-bank", "sony-bank-gross-balance", "gross_loan_balance", "aggregate"],

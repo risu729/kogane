@@ -1352,22 +1352,55 @@ A session Durable Object (`SbiVcSessionState`) with two crons — the 15-minute
 keep-alive and the daily collection — both unchanged. Terminal source id
 `sbi-vc-trade`, the same id CORE uses.
 
-| Artifact         | Role                 | Bytes                                                       |
-| ---------------- | -------------------- | ----------------------------------------------------------- |
-| `<dataset>.json` | `collector_derived`  | the gateway envelope with `meta.secureKey` already stripped |
-| `manifest.json`  | `collector_manifest` | the collector manifest; each entry names a stored object    |
+| Artifact                           | Role                 | Bytes                                                                        |
+| ---------------------------------- | -------------------- | ---------------------------------------------------------------------------- |
+| `<dataset>.json`                   | `collector_derived`  | the gateway envelope with `meta.secureKey` already stripped                  |
+| `manifest.json`                    | `collector_manifest` | the collector manifest; each entry names a stored object                     |
+| `<kind>-<basis8>-<sha256>.pdf/zip` | `provider_document`  | validated native PDF / P&L ZIP bytes extracted from the JSON Buffer response |
 
-- `requestedScope`: `full_snapshot`, `unitKeys: ["account"]`; one `account` unit
-  of kind `collection`, the same unit the central descriptors use, counting the
-  datasets; `manifest.json` names no unit (ADR 0021 — it named the unit
+- `requestedScope`: `full_snapshot`; `account` holds the classic datasets,
+  and `full-cashflows` holds the additional all-type lists after the classic
+  reads finish. Both are kind `collection`; each counts only its own datasets.
+  `manifest.json` names no unit (ADR 0021 — it named the unit
   without being counted, so every run failed its seal with
   `run_inventory_incomplete` and was retried each tick until the ADR 0024
   amendment of 2026-09-26 made that refusal a block). No ranges.
 - A successful run declares `coverageStatus: complete`: the collector walks
   every historical execution and cash-flow page to exhaustion and verifies the
   provider's own pagination totals before finishing.
+- The existing JPY cash-flow dataset remains the sole publishing dataset for
+  remittances. Additional `cashflows-all-recent-page-NNNN` and
+  `cashflows-all-historical-page-NNNN` capture unfiltered lists with page size
+  20 and the same total/cardinality checks; no parser publishes these evidence
+  datasets. Crypto transfer and reward observations remain unsupported, and the
+  trader-mode observation has not yet been validated through a scheduled HTTP
+  run ([source observation](sources/sbi-vc-trade.md#17-unfiltered-cash-flow-observation-2026-11-10)).
+- A failed full-list request makes its own unit and the overall run partial.
+  A completed classic `account` unit stays complete and is admitted by the
+  explicit classic-dataset `unit-independent-v1` policies. A classic failure
+  still excludes that whole account unit. Neither another run's successful
+  unit nor the raw lists can rescue it
+  ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-sbi-vcs-unfiltered-evidence-is-independent-of-its-classic-account-unit-2026-11-10)).
 - `transformations`: one `redacted` step per dataset (`sbi-vc-trade-worker`);
   the unredacted envelope carried the session key and is not retained.
+- Report evidence adds independent year-index, annual-index, per-document and
+  CSV-check units. Monthly and P&L indices cover 2018 through the capture's Tokyo
+  year; annual zero is explicit complete-empty index evidence. Unknown annual
+  downloads, daily reports and valuation history remain partial/uncollected.
+  `report-month-list-YYYY-page-NNNN`, `report-pnl-list-YYYY`,
+  `report-annual-list-page-0001` and the P&L comparison JSON stay raw evidence.
+  The document datasets are `monthly-report-pdf` and `pnl-data-zip`, with
+  eight-digit period and hash keys. Native bytes are an `extracted`
+  transformation, never a JSON object mislabeled as PDF/ZIP. Shared CAS objects
+  have MIME-neutral physical storage; terminal and CORE references retain the
+  document MIME. Reacquiring identical period/hash bytes adds no physical object.
+- Raw artifact listing/retrieval works without parsing policy. CORE 0097's two
+  exact `unit_scope=unit`, `snapshot_selection=0` policies additionally admit
+  successful document metadata in partial runs. They add evidence-only coverage,
+  no economic observations and no container snapshot. A failed document or
+  comparison cannot borrow another acquisition session's successful unit, and
+  neither invalidates a completed classic account. See
+  [the observed protocol and limits](sources/sbi-vc-trade.md#18-simple-mode-documents-and-spot-execution-correspondence-2026-11-10).
 - `acquisitionSessionRef`: **yes.** The Durable Object now keeps a session
   generation id under the storage key `sessionRef`, minted when a session is
   seeded and rotated when re-authentication replaces it, in the same storage
@@ -1423,6 +1456,43 @@ keep-alive and the daily collection — both unchanged. Terminal source id
 
 ### smbc-direct (`kogane-smbc-direct-backfill-poc`)
 
+Fresh approved runs also acquire the observed AUD foreign ordinary balance
+and explicit-empty retained history in the same session. These sanitized JSON
+artifacts use `foreign-ordinary-aud/balance.json` and
+`foreign-ordinary-aud/history/YYYYMMDD-YYYYMMDD.json`, role
+`sanitized_provider_capture`, a `redacted` transformation with no retained HTML
+input, and separate `foreign-ordinary-aud-balance` and
+`foreign-ordinary-aud-history` units. The history's requested range starts on
+the first day three months before the run's JST month and ends on the last
+finished JST day. Monthly queries cover that range once. The run's requested
+range is the envelope of its units' ranges; unit-scoped requested and coverage
+ranges distinguish AUD retention from the longer yen history.
+
+Only the observed empty code/message, exact requested dates, selected account,
+AUD current-balance heading and absence of tables prove an empty AUD month.
+Unknown or nonempty responses leave the run partial with a closed code;
+earlier views remain unchanged. No transaction row or applied rate is invented.
+The displayed current FX reference quote and yen equivalent stay metadata of
+the single AUD balance. Nonempty history remains unsupported and
+[issue 1245](https://github.com/risu729/kogane/issues/1245) stays open.
+Legacy stopped runs keep their existing scope across a resume; only a fresh
+run adds AUD. AUD captures are retained unchanged across a yen backfill resume.
+The final cumulative success includes earlier partial AUD evidence, under the
+same immutable-terminal rules below. Standard dataset snapshot membership
+selects one latest complete AUD balance container; an explicit-empty history
+parse publishes no movements. Migration 0096 opts all four named SMBC datasets
+into existing `unit-independent-v1` eligibility. Only balance datasets form
+snapshots; histories carry eligibility-only policy rows. When
+every closed yen chunk and its balance are present and the only failure
+belongs to AUD, the yen unit reports complete and publishes new yen evidence
+despite the partial run. A failed or missing yen chunk still blocks that
+unit. Conversely, a complete new AUD balance publishes through a yen failure
+or unreviewed nonempty AUD history. AUD is captured first, before the yen
+balance request. Its balance and history units report their own outcomes:
+neither an incomplete history nor a failed balance can declare itself complete.
+Existing operator policy overrides are preserved. The AUD balance parser
+requires its named dataset, coverage-v1 claim and exact 0.1.2 release.
+
 The only human-triggered source: a person signs in behind Cloudflare Access,
 approves a QR challenge, and the backfill then runs across many Durable Object
 alarms, one month chunk at a time. **No cron**, before or after this change.
@@ -1435,8 +1505,9 @@ Terminal source id `smbc-direct` (the Processor maps it to the CORE source
 | `balance.normalized.json`, `transactions/*.normalized.json` | `collector_derived`  | the collector's normalized counterparts     |
 | `manifest.json`                                             | `collector_manifest` | the exact manifest bytes written to staging |
 
-One `account` unit counts the stored responses and their normalized
-counterparts; `manifest.json` names no unit (ADR 0021). Until then it named
+The `account` unit counts the yen responses and their normalized
+counterparts; AUD artifacts belong to the separate unit above, and
+`manifest.json` names no unit (ADR 0021). Until then it named
 the unit without being counted, so a finished backfill would have failed its
 seal with `run_inventory_incomplete`; the run-plan registration test found it.
 
@@ -1484,11 +1555,12 @@ format change is needed for that step.
   (the retired importer forwarded this source's provider bytes verbatim after
   a Shift_JIS round-trip check), and that the `manifest.json` object equals the
   bytes `storeManifest` stages.
-- `requestedScope`: `date_range` over `DEFAULT_BACKFILL_FROM` through the last
-  finished JST day at approval (inclusive),
-  `unitKeys: ["account"]`; one `account` unit of kind `collection`. `ranges`:
-  the requested range plus one `declared_coverage` range per collected month
-  (the raw and normalized artifacts of a month share it).
+- `requestedScope`: `date_range` over the envelope of the yen and AUD scopes.
+  The yen `account` unit requests `DEFAULT_BACKFILL_FROM` through the last
+  finished JST day at approval (inclusive); fresh runs also name the AUD unit
+  described above. Legacy runs name only `account`. `ranges` records each
+  unit's requested range and a separate `declared_coverage` range per captured
+  month (the raw and normalized yen artifacts of a month share it).
 - **Closed days and resumable windows** (owner decision, 2026-11-08 13:26 UTC;
   [issue 1178](https://github.com/risu729/kogane/issues/1178)). Fresh runs exclude
   the current JST day entirely. A stopped run retains its stored `from`, `to`,

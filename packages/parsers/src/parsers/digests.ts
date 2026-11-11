@@ -132,6 +132,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "a2906d66cf2be2785a8644007962ccf62e68d4cbdf90632de7e9613e3488911e",
     "poc/observation-pipeline/src/parsers/sbi-vc-common.ts":
       "6a3ea6520c1ebab0689aee143c0f55cc9f86094bf9ad129e9b9af2bb3d2932f1",
+    "poc/observation-pipeline/src/parsers/sbi-vc-documents.ts":
+      "d4d3ed503c99bcfe3ce9cee8c1362c9a0a8f93a29912da833a354df30aabf8de",
     "poc/observation-pipeline/src/parsers/sbi-vc-executions.ts":
       "cafbd219c21c71c7284342664e553c5e031037ce79669e03e5ec411966f961e5",
     "poc/observation-pipeline/src/parsers/sbi-vc-position-summary.ts":
@@ -140,6 +142,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "496bf82d7abd740ab9c34d18bb6739bb5adc5a91208abc0775c4749e2ccd41cd",
     "poc/observation-pipeline/src/parsers/smbc-direct.ts":
       "93a3e72b94400fe1e2fd2afb56b42a9f88bcc1c449b0ab47197377962bb7b511",
+    "poc/observation-pipeline/src/parsers/smbc-foreign-ordinary.ts":
+      "f27648c71d5b6b70045f5742c87c3778af6d5079ec3a515f644e980850a3892f",
     "poc/observation-pipeline/src/parsers/sony-bank.ts":
       "b114022993854781bb293e40330eca99c04dafab22b12b594dbe35fedb8b679c",
     "poc/observation-pipeline/src/parsers/st-george.ts":
@@ -740,6 +744,19 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/types.ts",
       ],
     },
+    "sbi-vc-document-metadata": {
+      version: "1.0.0",
+      codeDigest: "461e4e5670209e096ab7baa5d73d03f66f2f6701d96f79c5e86142f3da87538a",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-vc-documents.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
     "sbi-vc-executions": {
       version: "0.2.2",
       codeDigest: "095df643a07f50e75329158c95fe451bf807aa4cd8c693a353829f887d7c0304",
@@ -810,6 +827,34 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/coverage.ts",
         "poc/observation-pipeline/src/parsers/smbc-direct.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "smbc-foreign-ordinary-balance": {
+      version: "0.1.2",
+      codeDigest: "e6633043b3bef1ee13c6bef907791b03cee66a0a9b6305e1ad29d4e023eb5fdb",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/smbc-foreign-ordinary.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "smbc-foreign-ordinary-history": {
+      version: "0.1.2",
+      codeDigest: "e6633043b3bef1ee13c6bef907791b03cee66a0a9b6305e1ad29d4e023eb5fdb",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/smbc-foreign-ordinary.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],

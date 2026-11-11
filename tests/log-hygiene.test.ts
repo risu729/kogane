@@ -118,6 +118,11 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
       "local operator CLI on the operator's own terminal: the collector's own literal messages, " +
       "credential-shaped values redacted and bounded; nothing from the provider is thrown with text",
   },
+  "services/collector-sbi-vc-trade/src/documents.ts": {
+    count: 1,
+    reason:
+      "safeError reads once under catch, requires a string, and retains only the closed report codes or bounded HTTP status code",
+  },
   "services/collector-sbi-vc-trade/src/worker.ts": {
     count: 2,
     reason: "classifyError keeps a message only when it is already a code-shaped token",

@@ -35,6 +35,69 @@ import {
 import * as sql from "../src/sql";
 
 const MIGRATIONS = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
+/** The bounded classic SBI VC datasets retain snapshot selection independently. */
+const SBI_VC_UNIT_POLICIES = [
+  ...[
+    ["sbi-vc-account-margin", "account-margin"],
+    ["sbi-vc-cash-balances", "cash-balances"],
+    ["sbi-vc-position-summary", "position-summary"],
+  ].map(([parser_name, dataset]) => ({
+    source_id: "sbi-vc-trade",
+    parser_name,
+    dataset,
+    unit_scope: "unit",
+    snapshot_selection: 1,
+  })),
+  {
+    source_id: "sbi-vc-trade",
+    parser_name: "sbi-vc-executions",
+    dataset: "executions-recent-page-0001",
+    unit_scope: "unit",
+    snapshot_selection: 0,
+  },
+  ...Array.from({ length: 100 }, (_, index) => String(index + 1).padStart(4, "0")).flatMap(
+    (suffix) => [
+      {
+        source_id: "sbi-vc-trade",
+        parser_name: "sbi-vc-executions",
+        dataset: `executions-historical-page-${suffix}`,
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "sbi-vc-trade",
+        parser_name: "sbi-vc-cashflows",
+        dataset: `cashflows-historical-page-${suffix}`,
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+    ],
+  ),
+  ...(["monthly-report-pdf", "pnl-data-zip"] as const).map((dataset) => ({
+    source_id: "sbi-vc-trade",
+    parser_name: "sbi-vc-document-metadata",
+    dataset,
+    unit_scope: "unit",
+    snapshot_selection: 0,
+  })),
+].sort((left, right) =>
+  `${left.parser_name}:${left.dataset}`.localeCompare(`${right.parser_name}:${right.dataset}`),
+);
+
+/** The four closed SMBC default unit opt-ins added by CORE 0096. */
+const SMBC_UNIT_POLICIES = [
+  ["smbc-direct-balance", "balance-normalized", 1],
+  ["smbc-direct-transactions", "transactions-normalized", 0],
+  ["smbc-foreign-ordinary-balance", "foreign-ordinary-aud-balance", 1],
+  ["smbc-foreign-ordinary-history", "foreign-ordinary-aud-history", 0],
+] as const;
+const smbcUnitPolicies = SMBC_UNIT_POLICIES.map(([parser_name, dataset, snapshot_selection]) => ({
+  source_id: "smbc-bank",
+  parser_name,
+  dataset,
+  unit_scope: "unit",
+  snapshot_selection,
+}));
 
 /** The production schema, views included, on an in-memory SQLite. */
 function migratedDatabase(): Database {
@@ -402,6 +465,8 @@ describe("named concepts in the final SQL", () => {
         unit_scope: "unit",
         snapshot_selection: 0,
       },
+      ...SBI_VC_UNIT_POLICIES,
+      ...smbcUnitPolicies,
       {
         source_id: "vpass",
         parser_name: "vpass-credit-snapshot",
@@ -413,7 +478,7 @@ describe("named concepts in the final SQL", () => {
     expect(
       db
         .query(
-          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'moneyforward-detail-balances', 'sbi-income-payments', 'sbi-realised-gains', 'vpass-credit-snapshot', 'myjcb-jpoint-history', 'sbi-shinsei-savings-activity')",
+          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'moneyforward-detail-balances', 'sbi-income-payments', 'sbi-realised-gains', 'vpass-credit-snapshot', 'myjcb-jpoint-history', 'sbi-vc-document-metadata', 'smbc-direct-transactions', 'smbc-foreign-ordinary-balance', 'smbc-foreign-ordinary-history', 'sbi-shinsei-savings-activity')",
         )
         .get(),
     ).toEqual({ n: 0 });
@@ -486,8 +551,9 @@ describe("named concepts in the final SQL", () => {
     expect(db.query(`SELECT ${economicallySummable.predicate()} AS summable`).get()).toEqual({
       summable: 0,
     });
-    // Prior snapshots keep run scope. Vpass credit is the one independently
-    // selecting unit policy; this fixture has no Vpass or reward-unit artifact.
+    // The classic SBI VC and SMBC snapshots, the Vpass credit snapshot and the
+    // J-POINT history use unit scope, alongside eligibility-only policies; this
+    // fixture has no successful unit artifact.
     expect(
       db
         .query(
@@ -505,6 +571,15 @@ describe("named concepts in the final SQL", () => {
         .all(),
     ).toEqual([
       { parser_name: "myjcb-jpoint-history", dataset: "jpoint-history", unit_scope: "unit" },
+      { parser_name: "sbi-vc-account-margin", dataset: "account-margin", unit_scope: "unit" },
+      { parser_name: "sbi-vc-cash-balances", dataset: "cash-balances", unit_scope: "unit" },
+      { parser_name: "sbi-vc-position-summary", dataset: "position-summary", unit_scope: "unit" },
+      { parser_name: "smbc-direct-balance", dataset: "balance-normalized", unit_scope: "unit" },
+      {
+        parser_name: "smbc-foreign-ordinary-balance",
+        dataset: "foreign-ordinary-aud-balance",
+        unit_scope: "unit",
+      },
       { parser_name: "vpass-credit-snapshot", dataset: "credit-snapshot", unit_scope: "unit" },
     ]);
     expect(
@@ -584,6 +659,8 @@ describe("named concepts in the final SQL", () => {
         unit_scope: "unit",
         snapshot_selection: 0,
       },
+      ...SBI_VC_UNIT_POLICIES,
+      ...smbcUnitPolicies,
       {
         source_id: "vpass",
         parser_name: "vpass-credit-snapshot",
