@@ -51,6 +51,7 @@ import {
   type SqlExecutor,
 } from "./reader";
 import { CANDIDATE_LIMIT, GLOBAL_PASS_NOTICE_LIMIT, RESULT_BOUND } from "./scope";
+import { sbiIncomeHistorySql, type SbiIncomeHistoryRow } from "./sbi-income-history";
 import {
   portfolioValuationHistorySql,
   type PortfolioValuationHistoryRow,
@@ -216,6 +217,10 @@ export function createObservationReader(
       return (await list<BalanceHistorySqlRow>(page.sql, page.args)).map(balanceHistoryRow);
     },
 
+    async listSbiIncomeHistory(query) {
+      const page = sbiIncomeHistorySql(query);
+      return list<SbiIncomeHistoryRow>(page.sql, page.args);
+    },
     async listPortfolioValuationHistory(query) {
       const page = portfolioValuationHistorySql(query);
       return list<PortfolioValuationHistoryRow>(page.sql, page.args);

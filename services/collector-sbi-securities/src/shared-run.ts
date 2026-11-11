@@ -33,6 +33,8 @@ import { isAssetHistoryError } from "../../../packages/parsers/src/parsers/sbi-a
 import { assetHistoryInventoryComplete } from "./asset-history";
 import { cashHistoryInventoryComplete } from "./cash-history";
 import { CashHistoryError } from "../../../packages/parsers/src/parsers/sbi-cash-history-schema";
+import { IncomeHistoryError } from "../../../packages/parsers/src/parsers/sbi-income-history-schema";
+import { incomeHistoryInventoryComplete } from "./income-history";
 
 export const SBI_SECURITIES_SOURCE = "sbi-securities";
 export const SHARED_PRODUCER = "collector-sbi-securities";
@@ -89,6 +91,7 @@ function scopesFor(scope: CollectionScope): UnitScope[] {
  * stable code, so no free-text ever reaches the manifest.
  */
 export function safeFailureCode(error: unknown): string {
+  if (error instanceof IncomeHistoryError) return error.code;
   if (error instanceof CashHistoryError) return error.code;
   if (isAssetHistoryError(error)) return error.code;
   if (error instanceof SbiHistoryError) return error.code;
@@ -114,6 +117,16 @@ export function safeFailureCode(error: unknown): string {
 
 /** Builds the plan without writing anything, so a test can read the manifest. */
 export async function sbiRunPlan(run: SbiSharedRun): Promise<PersistRunPlan> {
+  if (!(await incomeHistoryInventoryComplete(run.artifacts))) {
+    run = {
+      ...run,
+      status: run.status === "failed" ? "failed" : "partial",
+      failures: [
+        ...run.failures,
+        { scope: "domestic", code: "sbi_income_history_source_inventory" },
+      ],
+    };
+  }
   if (!(await cashHistoryInventoryComplete(run.artifacts))) {
     run = {
       ...run,

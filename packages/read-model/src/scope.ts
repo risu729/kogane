@@ -35,7 +35,7 @@ const TEXT_SEARCH_COLUMNS = [
 
 /** Exact audited source/parser/metric families that are period totals rather than balances. */
 export function periodMeasureSql(source: string, parser: string, metric: string): string {
-  return `((${source} = 'myjcb' AND ${parser} LIKE 'myjcb-credit-past-month-balances@%' AND ${metric} = 'credit_statement_payment_amount') OR (${source} = 'v-point' AND ${parser} LIKE 'v-point-smfg-point@%' AND ${metric} = 'displayed_point_balance'))`;
+  return `((${source} = 'myjcb' AND ${parser} LIKE 'myjcb-credit-past-month-balances@%' AND ${metric} = 'credit_statement_payment_amount') OR (${source} = 'v-point' AND ${parser} LIKE 'v-point-smfg-point@%' AND ${metric} = 'displayed_point_balance') OR (${source} = 'myjcb' AND ${parser} LIKE 'myjcb-jpoint-history@%' AND ${metric} IN ('jpoint_acquisition_earned','jpoint_acquisition_used','jpoint_acquisition_expired')))`;
 }
 
 export interface Predicates {

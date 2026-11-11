@@ -1232,6 +1232,39 @@
       "sha256": "91d8014b75ce05e6e4d9e16a036b91a445d6a39a2afc8e2354de6fc996505a82"
     },
     {
+      "file": "0092_vpass_credit_snapshots.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "f094d558e7c0eed5acf67d36f364692ad92e388f4aaa3227a3ae89a40c69a235"
+    },
+    {
+      "file": "0093_sbi_income_complete_containers.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "e4d9508be4a914875cc09858802bc74397c623d502f2e5508861b78b71496736"
+    },
+    {
+      "file": "0094_myjcb_jpoint_history.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "3028c44db7108434495552c533b004da67c340fae0b52d0647678dc9ec95f32e"
+    },
+    {
       "file": "0095_sbi_vc_classic_unit_eligibility.sql",
       "statementCount": 2,
       "insertStatements": [],
@@ -22141,7 +22174,10 @@
       "0085_schedule_dispatch_marker.sql",
       "0088_sbi_shinsei_monthly_report_units.sql",
       "0090_myjcb_debit_unit_eligibility.sql",
-      "0091_moneyforward_detail_balance_snapshots.sql"
+      "0091_moneyforward_detail_balance_snapshots.sql",
+      "0092_vpass_credit_snapshots.sql",
+      "0093_sbi_income_complete_containers.sql",
+      "0094_myjcb_jpoint_history.sql"
     ],
     "schemaSha256": "0b2ddb2a8d7e9b70df8ec4b3937eeef911d2737a1e55ca0d06eb316f47695af9"
   }

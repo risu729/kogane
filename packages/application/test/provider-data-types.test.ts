@@ -33,7 +33,7 @@ describe("the provider data-type catalogue", () => {
       providerDataTypes("sbi-securities")!.find((entry) => entry.type === "valuation_history"),
     ).toMatchObject({
       status: "partial",
-      parsers: ["sbi-account-assets-current", "sbi-account-assets-history"],
+      parsers: ["sbi-account-assets-current", "sbi-account-assets-history", "sbi-realised-gains"],
       issue: 1238,
     });
   });

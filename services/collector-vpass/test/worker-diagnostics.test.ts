@@ -51,6 +51,10 @@ test.each(["vpass-shared-collection", "vpass-daily-collection-complete", "all"])
       }),
       member({ MultiCardUpdateBean: { cardIdentifyKey: "synthetic-card" } }),
       member({ WebMeisaiTopDisplayServiceBean: { seikyuYMList: [{ value: "209901" }] } }),
+      member({}),
+      member({}),
+      member({}),
+      member({}),
       member({
         WebMeisaiTopDisplayServiceBean: {
           meisaiList: [],
@@ -81,15 +85,15 @@ test.each(["vpass-shared-collection", "vpass-daily-collection-complete", "all"])
     const result = await alarmCollection(env, "0 21 * * *", Date.parse("2026-09-05T00:00:00Z"));
     expect(result, JSON.stringify({ requests: fetcher.mock.calls.length, records })).toEqual({
       status: "completed",
-      runIds: ["2026-09-05T00-00-00-000Z-card-001"],
+      runIds: ["2026-09-05T00-00-00-000Z-credit-card-001", "2026-09-05T00-00-00-000Z-card-001"],
       failureCode: null,
     });
-    expect(fetcher).toHaveBeenCalledTimes(6);
+    expect(fetcher).toHaveBeenCalledTimes(10);
     expect(thrownLogs).toBeGreaterThan(0);
     expect(responses).toHaveLength(0);
     expect(data.putKeys).toHaveLength(data.entries.size);
     const terminals = [...data.entries].filter(([key]) => key.endsWith("/terminal.json"));
-    expect(terminals).toHaveLength(1);
+    expect(terminals).toHaveLength(2);
     expect(JSON.parse(new TextDecoder().decode(terminals[0]![1].bytes)).providerOutcome).toBe(
       "success",
     );

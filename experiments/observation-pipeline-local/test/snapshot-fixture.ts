@@ -36,15 +36,23 @@ import { openTestStore } from "./test-store.ts";
 
 /**
  * Datasets seeded on `coverage-v1` with `replaces_previous_on_complete_empty = 0`
- * (0046 St.George, 0053 SBI Shinsei exchange rates), and the parser version
+ * (including 0092 Vpass credit snapshots), and the parser version
  * their policy requires. They need a claim, and an empty claimed snapshot never
  * replaces the previous one.
  */
 export const EXPLICIT_COVERAGE: ReadonlyMap<string, string> = new Map([
+  ["myjcb-jpoint-history", "1.0.1"],
+  ["vpass-credit-snapshot", "1.0.1"],
   ["moneyforward-detail-balances", "1.0.1"],
   ["st-george-balances", "1.0.1"],
   ["prestia-bank-balances", "1.0.1"],
   ["sbi-shinsei-exchange-rate", "1.0.3"],
+]);
+
+/** Fully counted retained histories replace old membership on complete empty. */
+export const REPLACING_EMPTY_COVERAGE: ReadonlyMap<string, string> = new Map([
+  ["sbi-income-payments", "0.1.2"],
+  ["sbi-realised-gains", "0.1.2"],
 ]);
 
 const cleanup: (() => void)[] = [];
@@ -137,7 +145,9 @@ export function snapshot(store: Store, options: Snapshot) {
       options.parserVersion ??
       (options.parser === "sbi-foreign-cash-positions"
         ? FOREIGN_POSITION_SNAPSHOT_VERSION
-        : (EXPLICIT_COVERAGE.get(options.parser) ?? "0.1.0")),
+        : (EXPLICIT_COVERAGE.get(options.parser) ??
+          REPLACING_EMPTY_COVERAGE.get(options.parser) ??
+          "0.1.0")),
     parsedAt: time,
     status: options.parseStatus ?? "ok",
     warnings: options.warnings ?? [],
@@ -171,7 +181,7 @@ export function snapshot(store: Store, options: Snapshot) {
 
 /**
  * Switch one dataset to the `unit` eligibility scope (`unit-independent-v1`).
- * Seeded rows are all `run`; this is the operator step, and passing `run`
+ * Existing rows default to `run`; Vpass credit snapshots seed `unit`. Passing `run`
  * again is the rollback.
  */
 export function activateUnitScope(store: Store, parser: string, scope: "run" | "unit"): void {
@@ -225,7 +235,11 @@ export const balance = (instrument = "JPY", account = "synthetic-account"): Bala
 export function facts(parser: string, label: string): Observation[] {
   if (parser.includes("positions")) return [position(label), valuation(label)];
   if (parser === "sbi-vc-position-summary") return [position(label)];
-  if (parser === "sbi-account-assets-current" || parser === "sbi-shinsei-exchange-rate")
+  if (
+    parser === "sbi-account-assets-current" ||
+    parser === "sbi-shinsei-exchange-rate" ||
+    REPLACING_EMPTY_COVERAGE.has(parser)
+  )
     return [valuation(label)];
   if (parser === "sony-bank-gross-balance" || parser.endsWith("top-balances-and-activity")) {
     return [balance(label), valuation(label)];

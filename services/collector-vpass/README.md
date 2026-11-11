@@ -21,6 +21,27 @@ freee offers a self-service official JSON API for synchronized credit-card
 statements, and Zaim has a cheap validation path whose one remaining question
 is whether its public API exposes auto-imported rows.
 
+## Daily credit snapshots
+
+The normal hosted card visit also captures the observed authori/revolving
+read routes in the same selected-card session. It stores an independent
+daily `<session>-credit-card-NNN` run, so a statement failure cannot discard
+a successful card snapshot. The `credit/authori.json` and `credit/revo.json`
+artifacts register under v8 and publish through `vpass-credit-snapshot`;
+the existing card ordinal plus durable v2 binding shape is reused.
+
+Authori integer values represent thousands of JPY, checked against the
+display in 万円; they are explicitly reported at 1,000 JPY precision.
+Separate revolving `revoZan`/`hensaiAmount` are signed reported yen.
+Shared overall/card/component/available figures are non-additive and outside
+assets or canonical liabilities. Hidden rows are unavailable, never zero.
+The new credit sanitizer retains observed Authori financial fields while
+removing session/authentication/card-reference material; statement sanitizer
+v1 bytes are unchanged. Exact installment precision remains unsupported and
+the catalogue stays partial. No V Point data is collected again.
+See [ADR 0105](../../docs/adr/0105-vpass-reported-credit-snapshots.md) and the
+[dated observation](../../docs/sources/vpass.md).
+
 ## What it does
 
 1. Creates a fresh in-memory cookie jar and reproduces the Vpass Android 5.12.0

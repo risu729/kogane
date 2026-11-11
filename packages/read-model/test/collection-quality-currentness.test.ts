@@ -45,7 +45,13 @@ test("extraction retains the frozen base SQL apart from explicit provider histor
   expect(hash(latestBalancesSql({}, 0, 501).sql)).toBe(
     "8c260635f19d6028616e96fc1bc300ef3a96a5990468a3d86f60acfd2f598ba9",
   );
-  expect(hash(latestBalancesSql({ source: "myjcb", measureView: "summaries" }, 0, 501).sql)).toBe(
+  // ADR 0107 adds only the three acquisition-month activity measures to
+  // summaries. Strip that audited clause to retain the original SQL hash.
+  const summaries = latestBalancesSql({ source: "myjcb", measureView: "summaries" }, 0, 501).sql;
+  const historySummary =
+    " OR (source_id = 'myjcb' AND parser LIKE 'myjcb-jpoint-history@%' AND metric IN ('jpoint_acquisition_earned','jpoint_acquisition_used','jpoint_acquisition_expired'))";
+  expect(summaries.split(historySummary)).toHaveLength(2);
+  expect(hash(summaries.replace(historySummary, ""))).toBe(
     "023d01804a87ae85f6bad1550b18e675f33015d02c5ea9534d8a672e3fb6811a",
   );
 });
@@ -402,7 +408,7 @@ test("balance-only cells retain Balances' dataset policy gate without imposing i
     ["myjcb", "credit-past-months", "myjcb-credit-past-month-balances"],
   ])
     s.db.run(
-      "INSERT INTO dataset_snapshot_policies(source_id,dataset,parser_name,policy_id,required_parser_version) VALUES(?,?,?,'coverage-v1','9.0.0')",
+      "INSERT INTO dataset_snapshot_policies(source_id,dataset,parser_name,policy_id,required_parser_version) VALUES(?,?,?,'coverage-v1','9.0.0') ON CONFLICT(parser_name,dataset) DO UPDATE SET policy_id='coverage-v1', required_parser_version='9.0.0', unit_scope='run', snapshot_selection=1",
       [source!, dataset!, parser!],
     );
   const pointRows = rows(s, "v-point");
