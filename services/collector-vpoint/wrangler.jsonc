@@ -1,7 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "kogane-vpoint-collector-poc",
-  // Named ScheduledCollection/FumiOffer RPC is private; default fetch stays health-only.
   "main": "src/schedule-entrypoint.ts",
   "compatibility_date": "2026-08-30",
   "compatibility_flags": ["nodejs_compat"],
