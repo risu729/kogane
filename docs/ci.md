@@ -170,6 +170,10 @@ Explicit upgrade tests still choose the migration subset and apply later files
 at their own boundary. Production migrations, statement text and existing hook deadlines are not
 changed.
 
+The Vpass credit-snapshot pipeline fixture fixes the clock separately for each
+collection and restores it afterward. Its captured timestamps must precede the
+fixed dated-state query cutoff, independent of the day CI runs.
+
 `ci:root` owns manifest/task coverage, repository tests, import-boundary checks
 and Knip, including hosted partition coverage. Root `bundle` and `dry-run` compose workspace tasks. Deployable
 Workers' bundle locations stay aligned with `infra/deploy-order.json`.
