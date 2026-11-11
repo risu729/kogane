@@ -914,20 +914,23 @@ for this artifact, with the CP932 charset a constant of the source.
 
 ### `sbi-securities` (`services/collector-sbi-securities`)
 
-| Artifact key                              | Role                | Unit       |
-| ----------------------------------------- | ------------------- | ---------- |
-| `domestic-cash-positions.json`            | `collector_derived` | `domestic` |
-| `account-assets-current.json`             | `collector_derived` | `domestic` |
-| `account-assets-history-source.json`      | `provider_response` | `domestic` |
-| `account-assets-history-inventory.json`   | `collector_derived` | `domestic` |
-| `account-assets-history-<year>.json`      | `collector_derived` | `domestic` |
-| `yen-detail-history.json`                 | `collector_derived` | `domestic` |
-| `domestic-trade-records.json`             | `collector_derived` | `domestic` |
-| `foreign-cash-positions.json`             | `collector_derived` | `foreign`  |
-| `foreign-cash-balances.json`              | `collector_derived` | `foreign`  |
-| `foreign-trade-records.json`              | `collector_derived` | `foreign`  |
-| `domestic-trade-records-<from>-<to>.json` | `collector_derived` | `domestic` |
-| `foreign-trade-records-<from>-<to>.json`  | `collector_derived` | `foreign`  |
+| Artifact key                                 | Role                | Unit       |
+| -------------------------------------------- | ------------------- | ---------- |
+| `domestic-cash-positions.json`               | `collector_derived` | `domestic` |
+| `account-assets-current.json`                | `collector_derived` | `domestic` |
+| `account-assets-history-source.json`         | `provider_response` | `domestic` |
+| `account-assets-history-inventory.json`      | `collector_derived` | `domestic` |
+| `account-assets-history-<year>.json`         | `collector_derived` | `domestic` |
+| `yen-detail-history.json`                    | `collector_derived` | `domestic` |
+| `yen-detail-history-page-NNNN-source.json`   | `provider_response` | `domestic` |
+| `foreign-cash-history.json`                  | `collector_derived` | `domestic` |
+| `foreign-cash-history-page-NNNN-source.json` | `provider_response` | `domestic` |
+| `domestic-trade-records.json`                | `collector_derived` | `domestic` |
+| `foreign-cash-positions.json`                | `collector_derived` | `foreign`  |
+| `foreign-cash-balances.json`                 | `collector_derived` | `foreign`  |
+| `foreign-trade-records.json`                 | `collector_derived` | `foreign`  |
+| `domestic-trade-records-<from>-<to>.json`    | `collector_derived` | `domestic` |
+| `foreign-trade-records-<from>-<to>.json`     | `collector_derived` | `foreign`  |
 
 Weekly asset history comes from the observed no-query/no-body GET
 `/account/api/assets/valuations` in the existing main-site session. The
@@ -947,11 +950,28 @@ archived. No new read route is added. The catalogue is partial pending
 scheduled publication and account-specific retained-period verification
 ([ADR 0098](adr/0098-sbi-weekly-asset-history.md)).
 
-Except for the exact weekly-history source bytes above, the bytes are
+Retained cash statements use the observed two-year yen / five-year foreign
+presets through JST today, without an operation window or cursor. The yen
+query walks its declared pages at size 10; unobserved foreign continuation
+fails closed. Original JSON grammar, duplicate keys, exact numeric tokens and
+closed fields are audited before raw page storage. Derived bundles name every
+source page, preserve the full requested range and check contiguous metadata,
+totals, dates, known codes, exact amounts and unique yen ids. Yen direction
+counts and exact sums match their controls; positive transfer controls stay
+unsupported until observed. USD duplicates retain occurrence identities, and
+the production reader chooses one revision per logical id across overlapping
+runs. Both statements use the domestic main-site session/unit. Registration
+v7 adds only the new USD derivative; raw pages stay unmapped and earlier
+mappings stay frozen. Catalogue status remains partial under #1226 pending
+unobserved semantics and scheduled proof
+([ADR 0102](adr/0102-sbi-retained-cash-history.md)).
+
+Except for the exact weekly/cash-history source bytes above, the bytes are
 `JSON.stringify(artifact.body)` — the collector's re-encoded view
 of each response, exactly what the retired legacy path wrote to the per-source
 bucket and the importer forwarded centrally. A dataset is attributed to a unit
-by the same rule the importer used (`foreign-` prefix → `foreign`).
+by the same rule the importer used (`foreign-` prefix → `foreign`), except the
+new main-site foreign cash statement and its raw inputs, which are domestic.
 
 Each normal collection walks the historically exercised execution-history
 interval in at most thirteen non-overlapping windows per scope, each at most 90 days,

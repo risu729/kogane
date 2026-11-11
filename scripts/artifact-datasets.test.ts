@@ -223,6 +223,7 @@ const SAMPLES: readonly Sample[] = [
     ["account-assets-current", "domestic"],
 
     ["yen-detail-history", "domestic"],
+    ["foreign-cash-history", "domestic"],
     ["domestic-trade-records", "domestic"],
     ["foreign-cash-positions", "foreign"],
     ["foreign-cash-balances", "foreign"],
@@ -656,6 +657,7 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
     "account-assets-current",
     "account-assets-history",
     "yen-detail-history",
+    "foreign-cash-history",
     "domestic-trade-records",
     "foreign-cash-positions",
     "foreign-cash-balances",
@@ -761,8 +763,9 @@ describe("the registration dataset table (ADR 0022)", () => {
       "terminal-registration-v4",
       "terminal-registration-v5",
       "terminal-registration-v6",
+      "terminal-registration-v7",
     ]);
-    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v6");
+    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v7");
     const vpass = (await allSamples()).filter((sample) => sample.source === "vpass");
     expect(vpass.filter((sample) => sample.dataset === "statement-page").length).toBe(2);
     for (const sample of vpass) {
@@ -866,13 +869,13 @@ describe("the registration dataset table (ADR 0022)", () => {
     let changed = 0;
     for (const sample of await allSamples()) {
       const before = artifactDataset(sample.source, sample, "terminal-registration-v5");
-      const after = artifactDataset(sample.source, sample);
+      const after = artifactDataset(sample.source, sample, "terminal-registration-v6");
       if (before === after) continue;
       changed += 1;
       expect(sample.source).toBe("myjcb");
       expect(["debit-detail", "debit-other-detail"]).toContain(after!);
       expect(before).toBeNull();
-      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, -1))
+      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, 5))
         expect(artifactDataset(sample.source, sample, version)).toBeNull();
     }
     expect(changed).toBe(2);
@@ -892,6 +895,30 @@ describe("the registration dataset table (ADR 0022)", () => {
     ).toBeNull();
   });
 
+  test("v7 adds only retained USD cash, preserving every earlier dataset mapping", async () => {
+    let changed = 0;
+    for (const sample of await allSamples()) {
+      const before = artifactDataset(sample.source, sample, "terminal-registration-v6");
+      const after = artifactDataset(sample.source, sample, "terminal-registration-v7");
+      if (before === after) continue;
+      changed += 1;
+      expect(sample.source).toBe("sbi-securities");
+      expect(sample.artifactKey).toBe("foreign-cash-history.json");
+      expect(before).toBeNull();
+      expect(after).toBe("foreign-cash-history");
+      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, -1))
+        expect(artifactDataset(sample.source, sample, version)).toBeNull();
+    }
+    expect(changed).toBe(1);
+    expect(
+      artifactDataset("sbi-securities", {
+        artifactKey: "foreign-cash-history-page-0001-source.json",
+        role: "provider_response",
+        mediaType: json,
+      }),
+    ).toBeNull();
+  });
+
   test("main's adopted Shinsei document mapping remains intact beside the new debit datasets", () => {
     const report = SAMPLES.find(
       (sample) => sample.source === "sbi-shinsei" && sample.dataset === "monthly-report-pdf",
@@ -899,7 +926,7 @@ describe("the registration dataset table (ADR 0022)", () => {
     expect(artifactDataset(report.source, report, "terminal-registration-v1")).toBeNull();
     for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(1))
       expect(artifactDataset(report.source, report, version)).toBe("monthly-report-pdf");
-    for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, -1)) {
+    for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, 5)) {
       for (const sample of SAMPLES.filter(
         (entry) =>
           entry.source === "myjcb" &&

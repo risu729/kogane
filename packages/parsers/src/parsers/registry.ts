@@ -32,6 +32,7 @@ import { sbiAccountAssetsHistory } from "./sbi-account-assets-history.ts";
 import { sbiDomesticCashPositions } from "./sbi-domestic-cash-positions.ts";
 import { sbiDomesticTradeRecords } from "./sbi-domestic-trade-records.ts";
 import { sbiForeignCashBalances } from "./sbi-foreign-cash-balances.ts";
+import { sbiForeignCashHistory } from "./sbi-foreign-cash-history.ts";
 import { sbiForeignCashPositions } from "./sbi-foreign-cash-positions.ts";
 import { sbiForeignTradeRecords } from "./sbi-foreign-trade-records.ts";
 import { sbiYenDetailHistory } from "./sbi-yen-detail-history.ts";
@@ -80,6 +81,7 @@ export const PARSERS: readonly Parser[] = [
   sbiForeignTradeRecords,
   sbiForeignCashPositions,
   sbiForeignCashBalances,
+  sbiForeignCashHistory,
   sbiVcCashBalances,
   sbiVcAccountMargin,
   sbiVcPositionSummary,

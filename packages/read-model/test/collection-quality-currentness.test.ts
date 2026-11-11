@@ -28,12 +28,17 @@ test("extraction retains the frozen base SQL apart from explicit provider histor
   // ADR 0092 intentionally excludes Sony JSON before ranking. Every other byte
   // remains pinned; sony-csv-history.test.ts proves that delta. ADR 0101 adds
   // MyJCB debit to the event identity allowlist; the production debit pipeline
-  // proves deduplication across windows and runs.
+  // proves deduplication across windows and runs. ADR 0102 adds the USD cash
+  // parser to the same event allowlist, covered by the cash production pipeline.
   const renderedTransactions = transactionsSql({}, 0).sql;
   expect(renderedTransactions).toContain("                           'myjcb-debit-ledger',\n");
+  expect(renderedTransactions).toContain(
+    "                           'sbi-foreign-cash-history',\n",
+  );
   const transactions = renderedTransactions
     .replace("           AND p.parser_name <> 'sony-bank-history-json'\n", "")
-    .replace("                           'myjcb-debit-ledger',\n", "");
+    .replace("                           'myjcb-debit-ledger',\n", "")
+    .replace("                           'sbi-foreign-cash-history',\n", "");
   expect(hash(transactions)).toBe(
     "9876071ea165908299b34c61aad1005b7531fe5a010c213c2bc193f2b1be3ff9",
   );

@@ -126,7 +126,7 @@ for (const kind of [
         onArtifact: (a) => retained.push(a),
         onAssetHistoryError: (error) => codes.push(safeFailureCode(error)),
       }),
-    ).rejects.toThrow("HTTP 503");
+    ).rejects.toThrow("sbi_cash_history_fetch_failed");
     expect(retained.map((a) => a.dataset)).toEqual(
       unsafe
         ? ["account-assets-current"]
