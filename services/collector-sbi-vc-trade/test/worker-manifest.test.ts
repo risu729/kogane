@@ -191,3 +191,79 @@ test("a prior rejected gateway suppresses all leverage requests without harming 
     ),
   ).toBe(true);
 });
+
+test.each(["cashflow-prefixed-unknown", "document-rejected", "document-unknown"])(
+  "a prior %s stops leverage without guessing from an error prefix",
+  async (scenario) => {
+    let leverageRequests = 0;
+    const { summary, data } = await collect(async (input, init) => {
+      const request = JSON.parse(String(init?.body)) as {
+        event: string;
+        data: Record<string, unknown>;
+      };
+      if (
+        scenario === "cashflow-prefixed-unknown" &&
+        request.event === "getCashflowList" &&
+        request.data.pageSize === "20"
+      )
+        throw new Error("cashflows_all_transport_failed");
+      if (scenario.startsWith("document-") && request.event === "tradeReportList") {
+        if (scenario === "document-rejected")
+          return new Response("synthetic private rejection", { status: 403 });
+        throw new Error("report_transport_failed");
+      }
+      if (request.event === "executionList" && request.data.isExOrder === "false")
+        leverageRequests++;
+      return gateway(input, init);
+    });
+    expect(leverageRequests).toBe(0);
+    const read = await readTerminal(data, "sbi-vc-trade", summary.runId);
+    if (read.outcome !== "found") throw new Error("terminal missing");
+    expect(read.manifest.units.find((unit) => unit.unitKey === "account")?.coverageStatus).toBe(
+      "complete",
+    );
+    const leverage = read.manifest.units.filter((unit) =>
+      unit.unitKey.startsWith("executions-leverage-"),
+    );
+    expect(leverage).toHaveLength(4);
+    expect(
+      leverage.every(
+        (unit) =>
+          unit.coverageStatus === "partial" &&
+          unit.artifactCount === 0 &&
+          unit.safeErrorCode === "leverage_execution_session_stopped",
+      ),
+    ).toBe(true);
+  },
+);
+
+test("a known local cashflow refusal still permits the four independent leverage captures", async () => {
+  let leverageRequests = 0;
+  const { summary, data } = await collect(async (input, init) => {
+    const request = JSON.parse(String(init?.body)) as {
+      event: string;
+      data: Record<string, unknown>;
+    };
+    if (request.event === "getCashflowList" && request.data.pageSize === "20")
+      return Response.json({
+        meta: { status: "OK" },
+        body: { list: [], pageSize: 20, pageNumber: 0, totalSize: 1, totalNumOfPages: 1 },
+      });
+    if (request.event === "executionList" && request.data.isExOrder === "false") leverageRequests++;
+    return gateway(input, init);
+  });
+  expect(leverageRequests).toBe(4);
+  const read = await readTerminal(data, "sbi-vc-trade", summary.runId);
+  if (read.outcome !== "found") throw new Error("terminal missing");
+  const leverage = read.manifest.units.filter((unit) =>
+    unit.unitKey.startsWith("executions-leverage-"),
+  );
+  expect(
+    leverage.every(
+      (unit) =>
+        unit.coverageStatus === "partial" &&
+        unit.artifactCount === 1 &&
+        unit.safeErrorCode === "leverage_execution_transport_unverified",
+    ),
+  ).toBe(true);
+});

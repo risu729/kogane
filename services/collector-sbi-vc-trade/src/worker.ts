@@ -11,8 +11,8 @@ import {
 import { DurableObject } from "cloudflare:workers";
 import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import { objectKey } from "../../../packages/collection/src/index";
-import { collectSbiVcTrade } from "./collector";
-import { collectSbiVcDocuments } from "./documents";
+import { collectSbiVcTrade, isLocalSbiVcCashflowFailure } from "./collector";
+import { collectSbiVcDocuments, isLocalSbiVcReportFailure } from "./documents";
 import { collectSbiVcLeverageExecutions } from "./leverage-executions";
 import { decryptSession, encryptSession } from "./crypto";
 import { createPasskeySession, parsePasskeyCredential } from "./passkey";
@@ -332,12 +332,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
         // Only closed local-data refusals permit new reads after a prior failure.
         const sessionStopped = failures.some(
           ({ errorCode }) =>
-            errorCode === "report_collection_failed" ||
-            !(
-              errorCode.startsWith("cashflows_all_") ||
-              errorCode.startsWith("report_") ||
-              errorCode.startsWith("pnl_")
-            ),
+            !isLocalSbiVcCashflowFailure(errorCode) && !isLocalSbiVcReportFailure(errorCode),
         );
         const leverage = await collectSbiVcLeverageExecutions({
           sessionStopped,
