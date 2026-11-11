@@ -643,7 +643,7 @@ test("local document policy repair preserves every operator alternative", () => 
     ["credit-csv", "credit-ofx", "credit-pdf"].map((dataset) => ({
       dataset,
       unit_scope: "unit",
-      required_parser_version: "1.0.0",
+      required_parser_version: "1.0.1",
       snapshot_selection: 0,
       replaces_previous_on_complete_empty: 0,
     })),
@@ -660,7 +660,7 @@ test("local document policy repair preserves every operator alternative", () => 
       ["credit-csv", "credit-ofx", "credit-pdf"].map((dataset) => ({
         dataset,
         unit_scope: dataset === "credit-csv" ? "run" : "unit",
-        required_parser_version: dataset === "credit-csv" ? "9.0.0" : "1.0.0",
+        required_parser_version: dataset === "credit-csv" ? "9.0.0" : "1.0.1",
         snapshot_selection: 0,
         replaces_previous_on_complete_empty: 0,
       })),

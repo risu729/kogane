@@ -132,7 +132,7 @@ test("session-wide export denial stops subsequent reads while preserving the val
 });
 test("active export offers require exact observed query membership", () => {
   const link = (href: string) => `<a href="${href}">PDF</a>`;
-  expect(creditDocumentOffers(link("detail.html?detailMonth=2&amp;output=csv"), 2)).toEqual([
+  expect(creditDocumentOffers(link("detail.html?detailMonth=2&amp;output=csv"), 2).kinds).toEqual([
     "csv",
   ]);
   for (const href of [
@@ -141,8 +141,11 @@ test("active export offers require exact observed query membership", () => {
     "detail.html?detailMonth=2&amp;output=csv&amp;token=synthetic",
     "https://example.invalid/iss-pc/member/details_inquiry/detail.html?detailMonth=2&amp;output=csv",
   ])
-    expect(() => creditDocumentOffers(link(href), 2)).toThrow();
-  expect(creditDocumentOffers(link("detailNewspdf.html"), 2)).toEqual([]);
+    expect(creditDocumentOffers(link(href), 2).unavailableKinds).toEqual(["csv"]);
+  expect(creditDocumentOffers(link("detailNewspdf.html"), 2)).toEqual({
+    kinds: [],
+    unavailableKinds: [],
+  });
 });
 
 test("one shared run budget admits an exact-boundary original and skips exports across later connections", async () => {
@@ -167,4 +170,80 @@ test("one shared run budget admits an exact-boundary original and skips exports 
   expect(second.reads.filter((read) => /^credit-(?:csv|pdf|ofx):/u.test(read))).toEqual([]);
   expect(later.artifacts.filter((a) => a.dataset === "credit-detail")).toHaveLength(4);
   expect(later.documentResults.every((doc) => doc.code === "budget_exhausted")).toBe(true);
+});
+
+test("an API-labelled past position cannot supply a missing document page month", async () => {
+  const reads: string[] = [];
+  const result = await collectCredit(
+    {
+      get: async (operation) => {
+        reads.push(operation);
+        if (operation === "credit-menu") return response(creditMenu([12]));
+        if (operation !== "credit-detail") throw new Error("unproven export fetch");
+        return response(
+          '<html><body><h1>カードご利用代金明細(確定分)</h1><input name="generalJsonShikibetuId" value="synthetic"><a href="detailDbPdf.html?detailMonth=12&amp;output=pdf">PDF</a><div class="detail-list-01"><div class="head">ご利用日 ご利用先など 支払区分 今回のお支払い金額</div></div></body></html>',
+        );
+      },
+      postCreditPastJson: async () =>
+        response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "030100601",
+            result: {
+              errId: "0",
+              errMessage: "",
+              detailPastJsonInfo: [
+                { detailMonth: "12", detailAvailableFlag: true, settlementYM: "209801" },
+              ],
+            },
+          }),
+        ),
+    },
+    "synthetic",
+    { exports: "fetch" },
+  );
+  expect(result.stop).toBeUndefined();
+  expect(result.unreadMonths).toEqual([]);
+  expect(result.documentCode).toBe("partial");
+  expect(result.documentResults).toEqual([]);
+  expect(result.artifacts.find((a) => a.dataset === "credit-ledger")).toMatchObject({
+    period: "209801",
+  });
+  expect(result.artifacts.find((a) => a.dataset === "credit-detail")).toMatchObject({
+    period: "209801",
+  });
+  expect(reads).not.toContain("credit-pdf");
+});
+
+test("a malformed CSV offer preserves independently valid PDF and OFX offers", async () => {
+  const { client, reads } = syntheticClient();
+  const result = await collectCredit(
+    {
+      ...client,
+      get: async (operation, query, options) => {
+        const value = await client.get(operation, query, options);
+        if (operation !== "credit-detail" || query?.get("detailMonth") !== "1") return value;
+        const html = new TextDecoder()
+          .decode(value.body)
+          .replace(
+            "detailMonth=1&amp;output=csv",
+            "detailMonth=1&amp;output=csv&amp;token=synthetic",
+          );
+        return response(html);
+      },
+    },
+    "synthetic",
+    { exports: "fetch" },
+  );
+  expect(result.stop).toBeUndefined();
+  expect(result.documentCode).toBe("partial");
+  expect(result.documentResults.filter((doc) => doc.period === "2098-02")).toEqual([
+    { period: "2098-02", kind: "csv", code: "unavailable" },
+    { period: "2098-02", kind: "pdf", code: "collected" },
+    { period: "2098-02", kind: "ofx", code: "collected" },
+  ]);
+  expect(reads).not.toContain("credit-csv:1");
+  expect(reads).toContain("credit-pdf:1");
+  expect(reads).toContain("credit-ofx:1");
+  expect(reads).toContain("credit-detail:15");
 });

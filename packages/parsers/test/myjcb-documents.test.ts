@@ -60,3 +60,11 @@ test("file HTML, missing PDF EOF, changed OFX envelope and malformed CSV remain 
   // UTF-8 bytes are not accepted as the observed Windows-31j export.
   expect(() => validateMyJcbCreditExport("csv", text(csv))).toThrow();
 });
+
+test("CSV requires the observed nonempty opaque preamble before its header", () => {
+  const bytes = creditExportBytes("csv");
+  const firstLineEnd = bytes.indexOf(10) + 1;
+  expect(() => validateMyJcbCreditExport("csv", bytes.subarray(firstLineEnd))).toThrow();
+  const blankPreamble = new Uint8Array([13, 10, ...bytes.subarray(firstLineEnd)]);
+  expect(() => validateMyJcbCreditExport("csv", blankPreamble)).toThrow();
+});

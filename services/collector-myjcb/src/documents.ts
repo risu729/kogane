@@ -27,8 +27,15 @@ export function documentUnitKey(connection: string, period: string, kind: MyJcbE
 }
 
 /** Only exact observed hrefs authorize requests; unrelated PDF labels do not. */
-export function creditDocumentOffers(html: string, position: number): MyJcbExportKind[] {
+export function creditDocumentOffers(
+  html: string,
+  position: number,
+): {
+  readonly kinds: readonly MyJcbExportKind[];
+  readonly unavailableKinds: readonly MyJcbExportKind[];
+} {
   const found = new Set<MyJcbExportKind>();
+  const unavailable = new Set<MyJcbExportKind>();
   const visit = (node: DefaultTreeAdapterMap["node"]): void => {
     if ("tagName" in node && node.tagName === "a") {
       const href = node.attrs.find((attr) => attr.name === "href")?.value;
@@ -52,22 +59,29 @@ export function creditDocumentOffers(html: string, position: number): MyJcbExpor
         if (kind !== undefined) {
           const operation =
             kind === "csv" ? "credit-csv" : kind === "pdf" ? "credit-pdf" : "credit-ofx";
-          if (
-            url.hash ||
-            url.username ||
-            url.password ||
-            url.searchParams.get("detailMonth") !== String(position)
-          )
-            throw new Error("myjcb_document_offer_unsupported");
-          assertAllowedRequest(operation, "GET", url);
-          found.add(kind);
+          try {
+            if (
+              url.hash ||
+              url.username ||
+              url.password ||
+              url.searchParams.get("detailMonth") !== String(position)
+            )
+              throw new Error("myjcb_document_offer_unsupported");
+            assertAllowedRequest(operation, "GET", url);
+            found.add(kind);
+          } catch {
+            unavailable.add(kind);
+          }
         }
       }
     }
     if ("childNodes" in node) for (const child of node.childNodes) visit(child);
   };
   visit(parse(html));
-  return [...found];
+  return {
+    kinds: [...found].filter((kind) => !unavailable.has(kind)),
+    unavailableKinds: [...unavailable],
+  };
 }
 
 export async function fetchCreditDocument(

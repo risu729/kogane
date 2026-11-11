@@ -9,7 +9,7 @@ import { unitScopeAdmitted } from "./util.ts";
 /** Original exports are evidence; their CSV/OFX rows never duplicate HTML observations. */
 export const myJcbDocuments: Parser = {
   name: "myjcb-statement-document-metadata",
-  version: "1.0.0",
+  version: "1.0.1",
   accepts: (artifact: ArtifactMeta) =>
     artifact.sourceId === "myjcb" &&
     ((artifact.dataset === "credit-csv" && artifact.mime === "text/csv") ||

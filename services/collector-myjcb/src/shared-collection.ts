@@ -138,8 +138,8 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
  * A connection's coverage of what the run set out to collect (ADR 0026). A
  * `success` connection enumerated its credit months from the menu and the
  * past-months response and kept every one of them: the page and the ledger
- * the collector derives from a page that states its state. Export links are
- * recorded as offers and not fetched (ADR 0005's second amendment).
+ * the collector derives from a page that states its state. Credit files use
+ * independent document units and never decide this financial connection's coverage.
  * `collectConnection` reports `partial` when a month is kept unread: its page
  * shows rows but no stated state, or rows under the observed third ledger
  * header (the rows were kept as HTML only), and when

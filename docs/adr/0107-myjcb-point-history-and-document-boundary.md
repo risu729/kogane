@@ -239,7 +239,7 @@ offer shapes have a separate failed discovery unit. Manifests contain only
 closed results and page-period provenance, never provider error text.
 
 Registration v12 adds exactly the three credit export datasets while v1–v11
-remain reproducible. `myjcb-statement-document-metadata@1.0.0` revalidates file
+remain reproducible. `myjcb-statement-document-metadata@1.0.1` revalidates file
 bytes and exact page-period/artifact/unit metadata, publishing zero financial
 observations and one evidence-only coverage claim. Migration 0101 opts only
 these datasets into per-file success eligibility (`snapshot_selection=0`,

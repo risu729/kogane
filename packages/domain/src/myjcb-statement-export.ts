@@ -17,10 +17,12 @@ export const MYJCB_CREDIT_CSV_HEADERS = [
 
 export function validateMyJcbCreditCsvText(csv: string): void {
   if (csv.includes("\0") || csv.charCodeAt(0) === 0xfeff || /(?<!\r)\n|\r(?!\n)/u.test(csv)) fail();
-  const headers = csv
-    .split("\r\n")
-    .filter((line) => columns(line)?.join("\0") === MYJCB_CREDIT_CSV_HEADERS.join("\0"));
-  if (headers.length !== 1) fail();
+  const lines = csv.split("\r\n");
+  const headers = lines.flatMap((line, index) =>
+    columns(line)?.join("\0") === MYJCB_CREDIT_CSV_HEADERS.join("\0") ? [index] : [],
+  );
+  if (headers.length !== 1 || !lines.slice(0, headers[0]!).some((line) => line.trim() !== ""))
+    fail();
 }
 function columns(line: string): string[] | null {
   const result: string[] = [];

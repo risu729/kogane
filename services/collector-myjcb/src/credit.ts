@@ -24,6 +24,7 @@ import {
   scheduledLedgerRowCount,
   schedulePageKind,
   settlementMonth,
+  statedPaymentMonths,
   type MyJcbSchedulePageKind,
 } from "./parsers";
 import type {
@@ -407,14 +408,17 @@ export async function collectCredit(
       // Files are independent evidence: a bad file never drops the valid page,
       // ledger, sibling file or later statement. Session denial still stops reads.
       if (exportMode === "fetch" && unread === undefined && state === "confirmed") {
-        const canonicalPeriod = settlementMonth(period);
-        let actualOffers: readonly CreditExportKind[] = [];
-        try {
-          actualOffers = creditDocumentOffers(html, detailMonth);
-        } catch {
+        const pagePeriods = statedPaymentMonths(html);
+        const labelledPeriod = settlementMonth(period);
+        const canonicalPeriod =
+          pagePeriods.length === 1 && (labelledPeriod === null || labelledPeriod === pagePeriods[0])
+            ? pagePeriods[0]!
+            : null;
+        const actualOffers = creditDocumentOffers(html, detailMonth);
+        if (actualOffers.unavailableKinds.length) {
           documentCode = "partial";
           if (canonicalPeriod !== null)
-            for (const kind of offered) {
+            for (const kind of actualOffers.unavailableKinds) {
               const identity = `${canonicalPeriod}:${kind}`;
               if (!capturedDocuments.has(identity)) {
                 capturedDocuments.add(identity);
@@ -422,7 +426,7 @@ export async function collectCredit(
               }
             }
         }
-        for (const kind of actualOffers) {
+        for (const kind of actualOffers.kinds) {
           if (canonicalPeriod === null) {
             documentCode = "partial";
             continue;
