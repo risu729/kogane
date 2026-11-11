@@ -11,6 +11,7 @@ import { authori as creditAuthori, revo as creditRevo } from "./fixtures/vpass-c
 import { readFileSync } from "node:fs";
 import { myJcbJPointHistory } from "../src/parsers/myjcb-jpoint-history.ts";
 import { syntheticJPointHistory } from "./myjcb-jpoint-history-fixture.ts";
+import { moneyForwardDetailBalances } from "../src/parsers/moneyforward-detail-balances.ts";
 import { join } from "node:path";
 import type { ArtifactMeta, Parser } from "../src/types.ts";
 import { sbiAccountAssetsCurrent } from "../src/parsers/sbi-account-assets-current.ts";
@@ -472,6 +473,22 @@ export const CONTRACT_PARSERS: ContractParser[] = [
     "complete-sales": json(incomeBundle("gains")),
   }),
   VPASS_CREDIT,
+  cases(
+    moneyForwardDetailBalances,
+    meta("moneyforward-me", "account-detail", {
+      mime: "text/html",
+      artifactKey: "account-detail-01.html",
+      fetchUnitKey: `moneyforward-account-v2-${"a".repeat(64)}`,
+      statementState: null,
+      period: null,
+    }),
+    {
+      "complete-rows": fixture("moneyforward", "bank-detail-balances.html"),
+      "unreadable-container": new TextEncoder().encode(
+        "<html><body>synthetic unsupported detail</body></html>",
+      ),
+    },
+  ),
   ...SBI_SECURITIES,
   ...SBI_VC,
   ...SBI_SHINSEI,

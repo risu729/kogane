@@ -14,6 +14,7 @@ export const SNAPSHOT_DATASETS = [
   ["sbi-income-payments", "income-payments"],
   ["sbi-realised-gains", "realised-gains"],
   ["vpass-credit-snapshot", "credit-snapshot"],
+  ["moneyforward-detail-balances", "account-detail"],
   ["sbi-domestic-cash-positions", "domestic-cash-positions"],
   ["sbi-foreign-cash-positions", "foreign-cash-positions"],
   ["sbi-account-assets-current", "account-assets-current"],

@@ -14,7 +14,7 @@ Schema digest: `0b2ddb2a8d7e9b70df8ec4b3937eeef911d2737a1e55ca0d06eb316f47695af9
 
 ## Summary
 
-- Migrations applied: 85
+- Migrations applied: 86
 - Tables: 141 (all `STRICT`: yes)
 - Views: 44
 - Triggers: 527
@@ -284,6 +284,7 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0085_schedule_dispatch_marker.sql` | 9 | collection_schedule_occurrences_v2 |
 | `0088_sbi_shinsei_monthly_report_units.sql` | 1 | dataset_snapshot_policies |
 | `0090_myjcb_debit_unit_eligibility.sql` | 1 | dataset_snapshot_policies |
+| `0091_moneyforward_detail_balance_snapshots.sql` | 1 | dataset_snapshot_policies |
 | `0092_vpass_credit_snapshots.sql` | 1 | dataset_snapshot_policies |
 | `0093_sbi_income_complete_containers.sql` | 1 | dataset_snapshot_policies |
 | `0094_myjcb_jpoint_history.sql` | 1 | dataset_snapshot_policies |

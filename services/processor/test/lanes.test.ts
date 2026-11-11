@@ -115,6 +115,7 @@ test("harness applies every Layer B migration in order through 0094", () => {
     "0086_collection_provider_failure_code.sql",
     "0088_sbi_shinsei_monthly_report_units.sql",
     "0090_myjcb_debit_unit_eligibility.sql",
+    "0091_moneyforward_detail_balance_snapshots.sql",
     "0092_vpass_credit_snapshots.sql",
     "0093_sbi_income_complete_containers.sql",
     "0094_myjcb_jpoint_history.sql",
