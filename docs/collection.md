@@ -940,6 +940,24 @@ for this artifact, with the CP932 charset a constant of the source.
 
 ### `sbi-securities` (`services/collector-sbi-securities`)
 
+Delivered reports additionally use the exact new-mailbox handoff observed on
+2026-11-11. After ordinary domestic and foreign work, the collector uses the
+remaining shared eleven-minute budget to corroborate the current list and
+archive supported single-file PDFs. The private inventory and per-document
+metadata retain provider fields; no handoff material is persisted. Each original
+PDF has its own `provider_document` artifact/unit and kind/date/identity/hash
+locator, while identical bytes reuse one content-addressed DATA object.
+The financial terminal is stored before this archive starts; a separate
+`<financial-run-id>-mailbox` terminal shares its acquisition reference/start
+but carries only mailbox artifacts, failures and units. Its failure cannot
+alter the existing financial terminal's publication eligibility.
+Registration v11 maps `delivered-document-pdf` only, freezing v1–v10 mappings;
+the metadata parser emits evidence-only coverage with independent unit
+eligibility on partial runs. A bounded round-robin hash cursor commits only
+after durable terminal persistence. Legacy and unsupported document formats,
+HTTP-only session readiness and scheduled production coverage remain unproved
+or unsupported ([ADR 0108](adr/0108-sbi-delivered-documents.md)).
+
 | Artifact key                                 | Role                | Unit       |
 | -------------------------------------------- | ------------------- | ---------- |
 | `domestic-cash-positions.json`               | `collector_derived` | `domestic` |
@@ -1612,3 +1630,15 @@ format change is needed for that step.
 - A bare `bun test` also discovers `worker-test/shared-data-bucket.test.ts`,
   whose `cloudflare:test` import resolves only under Vitest. The test task runs
   `vitest run` and `bun test ./test` separately, and both pass under bun 1.4.0.
+
+### SBI supplementary publication boundaries
+
+SBI financial collection keeps `domestic` and `foreign` as dependent core units.
+Retained yen cash, retained foreign cash, income, realised gains and weekly
+assets have independent units containing all of their retained inputs and
+outputs. A refused supplement keeps the overall run partial while complete
+siblings remain eligible. A partial core still blocks its own dependent
+datasets. The document mailbox remains a separate terminal. Migration 0100
+preserves operator policies and snapshot membership; the exact legacy income/
+gains `domestic` partition aliases its successor only during snapshot ranking.
+See [ADR 0109](adr/0109-sbi-supplemental-unit-eligibility.md).

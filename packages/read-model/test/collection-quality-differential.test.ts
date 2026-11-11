@@ -24,6 +24,7 @@ import {
   LEGACY_CELL_QUALITY_SQL_SHA256,
 } from "./collection-quality-cells-legacy-sql";
 import { type ArtifactSpec, type ParseSpec, QualityStore } from "./collection-quality-fixture";
+import { withoutSbiLegacySnapshotPartition } from "../../parsers/test/snapshot-partition-compatibility";
 
 beforeAll(() => {
   fullCoreSchema().close();
@@ -291,10 +292,12 @@ function cellsOf(rows: readonly AccountCoverageRow[]): CellQualityRow[] {
   return rows.map(({ accounts_json: _accounts, ...cell }) => cell);
 }
 
-test("the frozen text is the shipped cell page, byte for byte", () => {
+test("the frozen cell page differs only in the explicit SBI legacy snapshot partition", () => {
   const hash = (text: string) => createHash("sha256").update(text).digest("hex");
   expect(hash(LEGACY_CELL_QUALITY_SQL)).toBe(LEGACY_CELL_QUALITY_SQL_SHA256);
-  expect(hash(CELL_QUALITY_SQL)).toBe(LEGACY_CELL_QUALITY_SQL_SHA256);
+  expect(hash(withoutSbiLegacySnapshotPartition(CELL_QUALITY_SQL))).toBe(
+    LEGACY_CELL_QUALITY_SQL_SHA256,
+  );
 });
 
 describe("the cell page and the account read equal the shipped cell page on random stores", () => {

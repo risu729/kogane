@@ -214,7 +214,7 @@ test("real registration selects same-capture history once, falls back on a faile
   ).toEqual({ n: 4 });
   expect(
     await env.DB.prepare(
-      "SELECT COUNT(*) AS n FROM collection_runs WHERE registration_contract_version='terminal-registration-v10' AND registered_at IS NOT NULL",
+      "SELECT COUNT(*) AS n FROM collection_runs WHERE registration_contract_version='terminal-registration-v11' AND registered_at IS NOT NULL",
     ).first(),
   ).toEqual({ n: 3 });
 }, 60000);

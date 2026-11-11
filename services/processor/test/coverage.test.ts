@@ -131,7 +131,7 @@ test("the migration chain names every explicit policy and preserves other run-sc
       parser_name: "sbi-income-payments",
       dataset: "income-payments",
       policy_id: "coverage-v1",
-      unit_scope: "run",
+      unit_scope: "unit",
       snapshot_selection: 1,
     },
     {
@@ -139,7 +139,7 @@ test("the migration chain names every explicit policy and preserves other run-sc
       parser_name: "sbi-realised-gains",
       dataset: "realised-gains",
       policy_id: "coverage-v1",
-      unit_scope: "run",
+      unit_scope: "unit",
       snapshot_selection: 1,
     },
   ]);
@@ -166,6 +166,7 @@ test("the migration chain names every explicit policy and preserves other run-sc
     "moneyforward-detail-balances",
     "myjcb-jpoint-history",
     "prestia-bank-balances",
+    "sbi-delivered-document-metadata",
     "sbi-foreign-cash-positions",
     "sbi-income-payments",
     "sbi-realised-gains",

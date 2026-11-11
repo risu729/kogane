@@ -45,6 +45,8 @@ import { sbiForeignCashHistory } from "../src/parsers/sbi-foreign-cash-history.t
 import { sbiForeignTradeRecords } from "../src/parsers/sbi-foreign-trade-records.ts";
 import { sbiVcCashflows } from "../src/parsers/sbi-vc-cashflows.ts";
 import { sbiVcDocuments } from "../src/parsers/sbi-vc-documents.ts";
+import { sbiDocuments } from "../src/parsers/sbi-documents.ts";
+import { sbiDocumentFixture } from "./sbi-documents-fixture.ts";
 import { sbiVcExecutions } from "../src/parsers/sbi-vc-executions.ts";
 import { sbiYenDetailHistory } from "../src/parsers/sbi-yen-detail-history.ts";
 import { smbcDirectTransactions } from "../src/parsers/smbc-direct.ts";
@@ -72,6 +74,7 @@ import { skipMeta, skipPage } from "./myjcb-skip-payment-fixture.ts";
 
 /** PARSERS entries whose rows are balances, valuations, scheduled payments or none. */
 const NOT_IN_REGISTRY = [
+  "sbi-delivered-document-metadata",
   "sbi-income-payments",
   "sbi-realised-gains",
   "vpass-credit-snapshot",
@@ -430,6 +433,12 @@ const MF_EVIDENCE = { fetchUnitKey: null, statementState: null, period: null, mi
 const sbiVcDocumentBytes = encode("%PDF-1.7\nSynthetic private report\n%%EOF\n");
 const sbiVcDocumentHash = createHash("sha256").update(sbiVcDocumentBytes).digest("hex");
 const OUTSIDE_CASES: Case[] = [
+  one(
+    sbiDocuments,
+    "delivered-report-evidence",
+    sbiDocumentFixture().meta,
+    sbiDocumentFixture().bytes,
+  ),
   one(
     sbiVcDocuments,
     "monthly-report-evidence",
