@@ -677,3 +677,50 @@ promotion, catalogue-version bump or guessed currency parameter is added.
 Resume implementation when a held contract provides an observed schema; first
 resolve the foreign-time selection boundary. The existing movement collector
 is unchanged, and transfers into or out of deposits are not classified as income.
+
+
+## 2026-11-11: retained history row order and CSV encoding
+
+Read-only owner-browser observation at `/pages/ea/eaba0600/`, with the start
+omitted, the end set to the last finished JST day, and JPY selected. The normal
+history and CSV requests both sent `sortSelect=00002`. JSON and CSV dates were
+newest-first. Within a day, CSV after-transaction balances followed the reverse
+transaction chain: reversing the rows restores the chronological chain. No
+transaction dates, amounts, account identifiers or account-specific counts are
+recorded here. This observation did not recheck monthly `00001` or foreign CSVs.
+
+The official CSV download returned HTTP 200 with
+`application/octet-stream;charset=utf-8`. Its bytes failed strict UTF-8 decoding
+and passed strict Shift-JIS/CP932 decoding. The seven JPY headers were exactly
+`取引日,摘要,参考情報,通貨,預入額,引出額,差引残高`; every logical row had the
+header's column count. No BOM, blank record or embedded field newline was
+observed. The bytes remain private evidence and are never transcoded on storage.
+
+Both collection validation and parsing use the same Sony-specific decoder.
+For this octet-stream UTF-8 declaration only, failed strict UTF-8 decoding may
+fall back to strict Shift-JIS; unsupported charsets, invalid bytes, changed
+headers and inconsistent row widths still fail closed. Other declared UTF-8
+media types remain strict. Validation reports only a closed rejection branch
+and column counts, without header text or row values. Retained CSV parsing emits
+oldest-first while keeping original logical CSV row locators, so same-day
+balance insertion ties select the final transaction. Closed monthly-window
+parsing keeps its existing order. Scheduled production completion is not
+established by this read-only observation or the synthetic regressions.
+
+
+Same-day latest-balance ties prefer the complete official CSV to JSON. A JSON
+page can finish publication after the CSV or split a day across pages, so
+reversing each JSON page cannot establish a global transaction order. The
+reader's date ordering stays first: a newer JSON date remains newer, and
+JSON-only evidence keeps its previous behavior. Synthetic regressions publish
+same-day JSON across pages before and after the CSV, preserve monthly CSV
+behavior, and compare the amended query to frozen SQL on a scaled random store
+with unrelated-source, JSON-only and older-CSV controls and unchanged plans.
+
+
+For Sony history only, same-day ties first select the newer capture cohort
+(`fetch_run.started_at`, then its run id), then prefer CSV within that cohort.
+An older CSV replay cannot displace a newer JSON-only correction. JSON-only
+retained history keeps the legacy same-day/page-order limitation; it is not a
+substitute for the complete official CSV and is not guaranteed to identify a
+day's final transaction. Unrelated sources keep their existing ordering.

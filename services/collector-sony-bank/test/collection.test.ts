@@ -522,7 +522,11 @@ test("CSV completeness supports the observed Shift JIS export without modifying 
       "base64",
     ),
   );
-  for (const csvMediaType of ["text/csv", "text/csv; charset=Shift_JIS"]) {
+  for (const csvMediaType of [
+    "text/csv",
+    "text/csv; charset=Shift_JIS",
+    "application/octet-stream;charset=utf-8",
+  ]) {
     const { value } = await capture(() =>
       collect(provider(2, 200, false, { csvBody: body, csvMediaType })),
     );
@@ -636,4 +640,57 @@ describe("scheduled retained history", () => {
       globalThis.fetch = originalFetch;
     }
   });
+});
+
+describe("Sony CSV refusal diagnostics retain only closed branches and counts", () => {
+  const header = "取引日,摘要,参考情報,通貨,預入額,引出額,差引残高\n";
+  for (const [name, csvBody, csvMediaType, csvFailure, shape] of [
+    ["charset", csvBytes("JPY", 1), "text/csv;charset=latin1", "charset", {}],
+    ["decode", new Uint8Array([0x81]), "application/octet-stream;charset=utf-8", "decode", {}],
+    [
+      "header",
+      new TextEncoder().encode("synthetic-private-financial-value,a,b,c,d,e,f\n"),
+      "text/csv",
+      "header",
+      {
+        csvExpectedColumnCount: 7,
+        csvHeaderColumnCount: 7,
+        csvMinColumnCount: 7,
+        csvMaxColumnCount: 7,
+        csvInvalidRowCount: 0,
+      },
+    ],
+    [
+      "columns",
+      new TextEncoder().encode(header + "synthetic-private-financial-value,short\n"),
+      "text/csv",
+      "columns",
+      {
+        csvExpectedColumnCount: 7,
+        csvHeaderColumnCount: 7,
+        csvMinColumnCount: 2,
+        csvMaxColumnCount: 7,
+        csvInvalidRowCount: 1,
+      },
+    ],
+  ] as const)
+    test(name, async () => {
+      const { value, records } = await capture(async () => {
+        try {
+          await collect(provider(1, 200, false, { csvBody, csvMediaType }));
+        } catch (error) {
+          return failure("collect", error);
+        }
+        throw new Error("expected refusal");
+      });
+      expect(value.diagnostics).toMatchObject({
+        reason: "history_csv_invalid",
+        csvFailure,
+        ...shape,
+      });
+      expect(records).toContainEqual(
+        expect.objectContaining({ stage: "history-csv", outcome: "failed", csvFailure, ...shape }),
+      );
+      expect(JSON.stringify({ value, records })).not.toContain(privateValue);
+    });
 });

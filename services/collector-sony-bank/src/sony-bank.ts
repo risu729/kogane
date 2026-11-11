@@ -1,4 +1,5 @@
-import { decodeUtf8, parseCsv } from "../../../packages/parsers/src/parsers/util";
+import { decodeSonyCsv, SonyCsvDecodeError } from "../../../packages/parsers/src/parsers/sony-csv";
+import { parseCsv } from "../../../packages/parsers/src/parsers/util";
 import { SonyBankDiagnostics, SonyBankError } from "./diagnostics";
 import type { JsonObject, RawArtifact, SonyBankCredential } from "./types";
 
@@ -910,37 +911,33 @@ function assertHistoryCsvCount(
     throw new SonyBankError(operation, undefined, 0, "history_csv_missing_with_transactions");
   let rows: string[][];
   try {
-    const charset = /;\s*charset="?([a-z0-9._-]+)"?$/iu
-      .exec(mediaType)?.[1]
-      ?.toLowerCase()
-      .replaceAll("_", "-");
-    const shiftJis = ["shift-jis", "shiftjis", "sjis", "windows-31j", "cp932"];
-    if (charset && !["utf-8", "utf8", ...shiftJis].includes(charset)) throw new Error("charset");
-    let text: string;
-    if (charset && shiftJis.includes(charset)) {
-      text = new TextDecoder("shift-jis", { fatal: true }).decode(body);
-    } else if (charset) {
-      text = decodeUtf8(new Uint8Array(body));
-    } else {
-      try {
-        text = decodeUtf8(new Uint8Array(body));
-      } catch {
-        text = new TextDecoder("shift-jis", { fatal: true }).decode(body);
-      }
-    }
-    rows = parseCsv(text);
-  } catch {
-    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid");
+    rows = parseCsv(decodeSonyCsv(new Uint8Array(body), mediaType));
+  } catch (error) {
+    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid", {
+      csvFailure: error instanceof SonyCsvDecodeError ? error.category : "parse",
+    });
   }
   const header = ["取引日", "摘要", "参考情報", "通貨", "預入額", "引出額", "差引残高"];
   if (currency !== "JPY") header.push("為替レート");
   if (rows.length === 0)
     throw new SonyBankError(operation, undefined, 0, "history_csv_missing_with_transactions");
-  if (
-    rows.some((row) => row.length !== header.length) ||
-    header.some((value, index) => rows[0]![index] !== value)
-  )
-    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid");
+  const shape = {
+    csvExpectedColumnCount: header.length,
+    csvHeaderColumnCount: rows[0]!.length,
+    csvMinColumnCount: rows.reduce((minimum, row) => Math.min(minimum, row.length), Infinity),
+    csvMaxColumnCount: rows.reduce((maximum, row) => Math.max(maximum, row.length), 0),
+    csvInvalidRowCount: rows.filter((row) => row.length !== header.length).length,
+  };
+  if (header.some((value, index) => rows[0]![index] !== value))
+    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid", {
+      ...shape,
+      csvFailure: "header",
+    });
+  if (shape.csvInvalidRowCount > 0)
+    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid", {
+      ...shape,
+      csvFailure: "columns",
+    });
   if (rows.length - 1 !== expectedCount)
     throw new SonyBankError(operation, undefined, 0, "history_csv_count_mismatch");
 }

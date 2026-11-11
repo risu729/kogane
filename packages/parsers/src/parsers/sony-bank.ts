@@ -1,4 +1,5 @@
 import type { ArtifactMeta, Observation, Parser } from "../types.ts";
+import { decodeSonyCsv } from "./sony-csv.ts";
 import { containerClaim } from "./coverage.ts";
 import {
   amountToMinorUnits,
@@ -67,8 +68,8 @@ const CUSTOMER_DISPLAY_ORDER = "customerDispOrdr";
 
 export const sonyBankGrossBalance: Parser = {
   name: "sony-bank-gross-balance",
-  // Patch release: shared module adds explicit retained-history metadata.
-  version: "1.0.4",
+  // Patch release: shared Sony module normalizes observed retained CSV exports.
+  version: "1.0.5",
   accepts: (artifact) => artifact.sourceId === "sony-bank" && artifact.dataset === "gross-balance",
   parse(bytes, artifact) {
     requireSuccessfulRun(artifact);
@@ -195,8 +196,8 @@ export const sonyBankGrossBalance: Parser = {
 
 export const sonyBankHistoryJson: Parser = {
   name: "sony-bank-history-json",
-  // Explicit retained-history end metadata keeps the omitted lower bound.
-  version: "1.0.3",
+  // Observed retained CSV order and strict provider-encoding exception.
+  version: "1.0.4",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" &&
     /^(yen-history|foreign-history-[a-z]{3})-page-\d{4}$/u.test(artifact.dataset ?? ""),
@@ -293,8 +294,8 @@ export const sonyBankHistoryJson: Parser = {
 
 export const sonyBankHistoryCsv: Parser = {
   name: "sony-bank-history-csv",
-  // Explicit retained-history end metadata keeps the omitted lower bound.
-  version: "1.0.4",
+  // Observed retained CSV order and strict provider-encoding exception.
+  version: "1.0.5",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" &&
     /^(yen-history|foreign-history-[a-z]{3})-csv$/u.test(artifact.dataset ?? ""),
@@ -314,7 +315,12 @@ export const sonyBankHistoryCsv: Parser = {
       throw new Error("Sony history CSV header drift");
     const observations: Observation[] = [];
     const occurrences = new Map<string, number>();
-    for (let index = 1; index < rows.length; index += 1) {
+    // sortSelect=00002 is newest-first, including transactions on one day.
+    // Emit oldest-first so insertion-order balance ties choose the final row;
+    // preserve original CSV row numbers for evidence and damaged-row recovery.
+    const indices = Array.from({ length: rows.length - 1 }, (_, index) => index + 1);
+    if ((artifact as SonyBankArtifactMeta).retainedHistoryEnd !== undefined) indices.reverse();
+    for (const index of indices) {
       const row = rows[index]!;
       if (row.length !== header.length) throw new Error("Sony history CSV cardinality drift");
       try {
@@ -417,8 +423,8 @@ const WALLET_HEADERS = [
 
 export const sonyBankWalletHistory: Parser = {
   name: "sony-bank-wallet-history",
-  // Patch release: shared module adds explicit retained-history metadata.
-  version: "1.0.5",
+  // Patch release: shared Sony module normalizes observed retained CSV exports.
+  version: "1.0.6",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" && /^wallet-history-\d{6}$/u.test(artifact.dataset ?? ""),
   parse(bytes, artifact) {
@@ -654,40 +660,6 @@ function balance(
   };
 }
 
-function decodeSonyCsv(bytes: Uint8Array, mediaType: string): string {
-  const match =
-    /^([a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+)(?:\s*;\s*charset=(?:"([a-z0-9._-]+)"|([a-z0-9._-]+)))?$/iu.exec(
-      mediaType,
-    );
-  const bases = new Set([
-    "text/csv",
-    "application/csv",
-    "application/x-csv",
-    "text/plain",
-    "application/octet-stream",
-  ]);
-  if (!match || !bases.has(match[1]!.toLowerCase())) {
-    throw new Error("Sony history CSV media type drift");
-  }
-  const charset = (match[2] ?? match[3])?.toLowerCase().replaceAll("_", "-");
-  if (charset === "utf-8" || charset === "utf8") return decodeUtf8(bytes);
-  if (charset && !["shift-jis", "shiftjis", "sjis", "windows-31j", "cp932"].includes(charset)) {
-    throw new Error("Sony history CSV charset drift");
-  }
-  if (charset) return decodeShiftJis(bytes);
-  try {
-    return decodeUtf8(bytes);
-  } catch {
-    return decodeShiftJis(bytes);
-  }
-}
-function decodeShiftJis(bytes: Uint8Array): string {
-  try {
-    return new TextDecoder("shift-jis", { fatal: true }).decode(bytes);
-  } catch {
-    throw new Error("Sony history CSV bytes do not match the declared charset");
-  }
-}
 function exactArray(value: unknown, length: number, label: string): unknown[] {
   if (!Array.isArray(value) || value.length !== length)
     throw new Error(`${label} cardinality drift`);

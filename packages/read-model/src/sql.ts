@@ -569,6 +569,19 @@ function latestBalancesInner(measureView: MeasureView | undefined): string {
                     CASE WHEN p.parser_name <> 'myjcb-credit-past-month-balances'
                       THEN COALESCE(b.as_of, b.observed_at, '')
                     END DESC,
+                    -- Keep newer Sony captures ahead of older replays, then
+                    -- prefer the complete CSV within the same capture cohort.
+                    CASE WHEN fa.source_id = 'sony-bank' AND p.parser_name IN (
+                        'sony-bank-history-json', 'sony-bank-history-csv'
+                      ) THEN f.started_at END DESC,
+                    CASE WHEN fa.source_id = 'sony-bank' AND p.parser_name IN (
+                        'sony-bank-history-json', 'sony-bank-history-csv'
+                      ) THEN f.id END DESC,
+                    -- The complete official CSV has one chronological row order.
+                    -- JSON pages may publish later and split a day's history.
+                    CASE WHEN fa.source_id = 'sony-bank'
+                           AND p.parser_name = 'sony-bank-history-csv'
+                      THEN 1 ELSE 0 END DESC,
                     b.id DESC
                 ) AS rank_in_group
          FROM ${activeStateProjection.observationChain("balance_observations", "b")}
