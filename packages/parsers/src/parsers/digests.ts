@@ -18,6 +18,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "072dc5fc2570fc8257343d85d53e93cf9fa9036f61a1648390a8d8845303ea3e",
     "packages/domain/src/myjcb-debit-page.ts":
       "6df61bcf418a2c8bc44f56447f5fa752e0b6888ff2e1bb44a7089f156519a9e8",
+    "packages/domain/src/myjcb-jpoint-history.ts":
+      "e72557b6821db6dddfa4b7ba4b1605f143eddb6a71366685745c0b74d78d830b",
     "packages/domain/src/myjcb-jpoint-response.ts":
       "2ab195e078255201c9a9d4ce9d44100f505b10cdca430e9801623841bf472c5e",
     "packages/domain/src/myjcb-schedule-page-kind.ts":
@@ -62,6 +64,10 @@ export const PARSER_DIGESTS: ParserDigests = {
       "743299901b3f796a7e53ff39db06b8cacf9039136c30fd8daeec66dbed4545aa",
     "poc/observation-pipeline/src/parsers/myjcb-debit.ts":
       "351cc8786811af43e65b9e8804cb7296442d15bd39c3ec28f00068e6fe3a7e05",
+    "poc/observation-pipeline/src/parsers/myjcb-jpoint-history-html.ts":
+      "5718befa9c22a10dddf7c4c0cc7ef931a90620e7436f7873a75b1b44bf2f6099",
+    "poc/observation-pipeline/src/parsers/myjcb-jpoint-history.ts":
+      "ac72426c82e750ef9e234456b747e9513c0053fe9066183052d7e4e91c284dd5",
     "poc/observation-pipeline/src/parsers/myjcb-jpoint.ts":
       "f53f9d187aab2027151a01be3d4aae1f3792006583ffb40045b4cfa2020c1bf8",
     "poc/observation-pipeline/src/parsers/myjcb-skip-payment-schedule.ts":
@@ -389,6 +395,24 @@ export const PARSER_DIGESTS: ParserDigests = {
         "packages/observation-shared/src/normalized-decimal.ts",
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/myjcb-jpoint.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "myjcb-jpoint-history": {
+      version: "1.0.1",
+      codeDigest: "d49b71907da4201404c40b4c561ebcb46ff4d58d6760dc8934f98324e842910d",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "packages/domain/src/myjcb-jpoint-history.ts",
+        "packages/domain/src/time.ts",
+        "packages/domain/src/values.ts",
+        "packages/observation-shared/src/normalized-decimal.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/myjcb-jpoint-history-html.ts",
+        "poc/observation-pipeline/src/parsers/myjcb-jpoint-history.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],

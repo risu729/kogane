@@ -39,6 +39,7 @@ const OBSERVED_SHAPES = new Set([
   "sbi-shinsei-exchange-rate/tier-duplicate",
 ]);
 function fileOf(parser: string, name: string): string {
+  if (parser === "myjcb-jpoint-history") return "myjcb-jpoint-history-expected.json";
   if (parser === "vpass-credit-snapshot") return "vpass-credit-expected.json";
   if (parser === "moneyforward-detail-balances") return "moneyforward-detail-expected.json";
   if (OBSERVED_SHAPES.has(`${parser}/${name}`)) return "sbi-shinsei-observed-shapes-expected.json";

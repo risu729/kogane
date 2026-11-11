@@ -20,6 +20,7 @@ import {
   myJcbPastMonthBalances,
 } from "./myjcb.ts";
 import { myJcbJPointBalance } from "./myjcb-jpoint.ts";
+import { myJcbJPointHistory } from "./myjcb-jpoint-history.ts";
 import { myJcbDebitLedger, myJcbDebitOtherStatement } from "./myjcb-debit.ts";
 import { myJcbSkipPaymentSchedule } from "./myjcb-skip-payment-schedule.ts";
 import {
@@ -69,6 +70,7 @@ export const PARSERS: readonly Parser[] = [
   myJcbEvidenceOnly,
   myJcbSkipPaymentSchedule,
   myJcbJPointBalance,
+  myJcbJPointHistory,
   myJcbDebitLedger,
   myJcbDebitOtherStatement,
   sonyBankGrossBalance,

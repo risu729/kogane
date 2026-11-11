@@ -237,6 +237,42 @@ export const UNKNOWN_METRIC: MetricDefinition = {
 
 // Order matters and mirrors the branch order of classifyBalance / classifyActivity.
 export const METRIC_REGISTRY: readonly RegistryEntry[] = [
+  ...(["earned", "used", "expired"] as const).map((kind) =>
+    entry([balance("myjcb", "myjcb-jpoint-history", [`jpoint_acquisition_${kind}`])], {
+      metricId: `jpoint.monthly-${kind}`,
+      measurementKind: "period-total",
+      subjectKind: "program",
+      unitDimension: "reward",
+      signMeaning: "provider-sign",
+      timeBasis: "period",
+      aggregationRule: "non-additive",
+      overlapGroup: "myjcb:jpoint-period-activity",
+      sourceAuthority: "provider-reported",
+      legacyBalance: {
+        kind: "period_total",
+        measurementKind: "period_total",
+        assetClass: "reward",
+        timeBasis: "unknown",
+      },
+    }),
+  ),
+  entry([balance("myjcb", "myjcb-jpoint-history", ["jpoint_acquisition_remaining"])], {
+    metricId: "jpoint.acquisition-balance",
+    measurementKind: "stock",
+    subjectKind: "pocket",
+    unitDimension: "reward",
+    signMeaning: "asset-positive",
+    timeBasis: "point-in-time",
+    aggregationRule: "non-additive",
+    overlapGroup: "myjcb:jpoint-total-vs-acquisition",
+    sourceAuthority: "provider-reported",
+    legacyBalance: {
+      kind: "asset",
+      measurementKind: "balance",
+      assetClass: "reward",
+      timeBasis: "reported_snapshot",
+    },
+  }),
   ...(
     [
       "income_gross",

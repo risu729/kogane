@@ -83,8 +83,9 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // MyJCB: credit statements and their ledger, J-POINT balance with its
   // nearest expiry, and observed debit ordinary/difference statements; the
   // bonus-payment schedule (stored, not parsed), unsupported debit routes and
-  // statuses, PDF/CSV/OFX statement exports, J-POINT history and expiry
-  // buckets are not collected (docs/sources/myjcb.md, #444).
+  // statuses and actual PDF/CSV/OFX bytes remain unsupported; observed
+  // acquisition-month activity and expiry buckets are collected with the
+  // remaining status gaps recorded below (docs/sources/myjcb.md, #444).
   myjcb: [
     partial("card_usage", ["myjcb-credit-ledger", "myjcb-debit-ledger"], 444),
     partial(
@@ -98,10 +99,12 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
       ],
       444,
     ),
-    missing("document", 444),
-    collected("reward_balance", ["myjcb-jpoint-balance"]),
-    missing("reward_activity", 444),
-    partial("reward_expiry", ["myjcb-jpoint-balance"], 444),
+    // Finalised statement HTML and export offers are retained. Actual PDF/CSV
+    // bytes remain unverified after the browser blocked the observed download.
+    missing("document", 1251),
+    collected("reward_balance", ["myjcb-jpoint-balance", "myjcb-jpoint-history"]),
+    collected("reward_activity", ["myjcb-jpoint-history"]),
+    partial("reward_expiry", ["myjcb-jpoint-balance", "myjcb-jpoint-history"], 1251),
   ],
   // PRESTIA bank: account summary (native balances, term principal); deposit
   // activity, product details and the statement PDFs are not collected
@@ -112,8 +115,8 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     partial("term_deposit", ["prestia-bank-balances"], 454),
     missing("document", 454),
   ],
-  // SBI証券: domestic and US positions and trades, cash (the yen history's
-  // first page only), My Assets current/weekly valuations, observed stock
+  // SBI証券: domestic and US positions and trades, retained yen and observed
+  // USD cash statements, My Assets current/weekly valuations, observed stock
   // income and domestic gains; other products and delivered documents remain incomplete
   // (docs/sources/sbi-securities.md, #446).
   "sbi-securities": [

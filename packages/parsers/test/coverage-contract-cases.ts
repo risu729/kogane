@@ -9,6 +9,8 @@ import { authori as creditAuthori, revo as creditRevo } from "./fixtures/vpass-c
 // that the converted parsers still produce exactly those observations and
 // warning strings, and additionally the typed issues and coverage claims.
 import { readFileSync } from "node:fs";
+import { myJcbJPointHistory } from "../src/parsers/myjcb-jpoint-history.ts";
+import { syntheticJPointHistory } from "./myjcb-jpoint-history-fixture.ts";
 import { moneyForwardDetailBalances } from "../src/parsers/moneyforward-detail-balances.ts";
 import { join } from "node:path";
 import type { ArtifactMeta, Parser } from "../src/types.ts";
@@ -453,6 +455,17 @@ const VPASS_CREDIT: ContractParser = {
 };
 
 export const CONTRACT_PARSERS: ContractParser[] = [
+  cases(
+    myJcbJPointHistory,
+    meta("myjcb", "jpoint-history", {
+      artifactKey: "synthetic/jpoint-history.json",
+      fetchUnitKey: "synthetic:j-point-history",
+    }),
+    {
+      "complete-rows": json(syntheticJPointHistory()),
+      "unreadable-container": json({}),
+    },
+  ),
   cases(sbiIncomePayments, meta("sbi-securities", "income-payments"), {
     "complete-payments": json(incomeBundle("income")),
   }),

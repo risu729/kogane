@@ -75,6 +75,7 @@ const NOT_IN_REGISTRY = [
   "myjcb-credit-statement-total",
   "myjcb-skip-payment-schedule",
   "myjcb-jpoint-balance",
+  "myjcb-jpoint-history",
   "myjcb-debit-other-statement",
   "prestia-bank-balances",
   "sbi-account-assets-current",

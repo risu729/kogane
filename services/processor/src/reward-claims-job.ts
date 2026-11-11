@@ -14,6 +14,10 @@
 //     reference and the promotion release, and the insert ignores a conflict.
 //     Re-running it, or running it while another sweep runs, adds nothing new.
 import { unitScopedEligibilitySql } from "../../../packages/parsers/src/snapshot-query.ts";
+import {
+  JPOINT_PUBLISHED_COHORT_CTES,
+  JPOINT_COHORT_MATCH,
+} from "../../../packages/read-model/src/jpoint-history-cohort.ts";
 import type { D1Like as RewardReadD1 } from "../../../packages/storage-d1/src/d1.ts";
 import type { BucketKind } from "../../../packages/domain/src/rewards.ts";
 import { validTemporalValue, type TemporalValue } from "../../../packages/domain/src/time.ts";
@@ -54,6 +58,18 @@ interface PromotionRule {
  * the general V Point bucket rule, exactly as `classifyBalance` does today.
  */
 export const PROMOTION_RULES: readonly PromotionRule[] = [
+  {
+    sourceId: "myjcb",
+    parserName: "myjcb-jpoint-history",
+    metric: "jpoint_acquisition_remaining",
+    sourceAccountPrefix: "myjcb:",
+    programId: "program:j-point",
+    holdingRef: (sourceAccount) =>
+      `program:j-point:${sourceAccount.replace(/:acquired:\d{4}-\d{2}-\d{2}$/u, ":total")}`,
+    unitRef: "points:j-point",
+    bucketKind: "time-limited",
+    restrictionRefs: [],
+  },
   {
     sourceId: "myjcb",
     parserName: "myjcb-jpoint-balance",
@@ -167,15 +183,24 @@ const candidateScope = PROMOTION_RULES.map((rule) => {
     clauses.push(`b.instrument=${parameter("J_POINT")}`);
     // GLOB, not LIKE: LIKE ignores ASCII case, and a row this read selects but
     // `matches` skips is never claimed, so it would head every page for good.
-    clauses.push(`b.source_account GLOB ${parameter("myjcb:*:j-point:total")}`);
-    clauses.push(
-      `length(b.source_account) BETWEEN 21 AND 84 AND substr(b.source_account,7,length(b.source_account)-20) NOT GLOB '*[^a-z0-9-]*' AND substr(b.source_account,7,1) GLOB '[a-z0-9]'`,
-    );
+    if (rule.parserName === "myjcb-jpoint-history") {
+      clauses.push(`b.source_account GLOB ${parameter("myjcb:*:j-point:acquired:????-??-??")}`);
+      clauses.push(`EXISTS (SELECT 1 FROM parse_coverage_claims hc WHERE hc.parse_run_id=p.id
+        AND hc.completeness='complete' AND hc.membership_complete=1 AND hc.failure_cause IS NULL)`);
+      clauses.push(`EXISTS (SELECT 1 FROM jpoint_histories h JOIN jpoint_totals t ON ${JPOINT_COHORT_MATCH}
+        WHERE h.parse_run_id=p.id)`);
+    } else {
+      clauses.push(`b.source_account GLOB ${parameter("myjcb:*:j-point:total")}`);
+      clauses.push(
+        `length(b.source_account) BETWEEN 21 AND 84 AND substr(b.source_account,7,length(b.source_account)-20) NOT GLOB '*[^a-z0-9-]*' AND substr(b.source_account,7,1) GLOB '[a-z0-9]'`,
+      );
+    }
   }
   return `(${clauses.join(" AND ")})`;
 }).join(" OR ");
 
-const CANDIDATE_SQL = `SELECT b.id,b.parse_run_id,a.source_id,p.parser_name,b.source_account,b.metric,
+const CANDIDATE_SQL = `WITH ${JPOINT_PUBLISHED_COHORT_CTES}
+ SELECT b.id,b.parse_run_id,a.source_id,p.parser_name,b.source_account,b.metric,
  b.instrument,b.observed_at,b.as_of,b.extra_json,
  d.status AS decimal_status,d.coefficient,d.scale
  FROM balance_observations b
@@ -185,7 +210,7 @@ const CANDIDATE_SQL = `SELECT b.id,b.parse_run_id,a.source_id,p.parser_name,b.so
  JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
  LEFT JOIN observation_decimal_values d
    ON d.kind='balance' AND d.observation_id=b.id AND d.policy_version='decimal-v1'
- WHERE ((f.status='success' AND f.failure_count=0) OR (a.source_id='myjcb' AND p.parser_name='myjcb-jpoint-balance' AND a.dataset='jpoint-balance' AND ${unitScopedEligibilitySql("f", "a")})) AND (${candidateScope})
+ WHERE ((f.status='success' AND f.failure_count=0) OR (a.source_id='myjcb' AND p.parser_name IN ('myjcb-jpoint-balance','myjcb-jpoint-history') AND a.dataset IN ('jpoint-balance','jpoint-history') AND ${unitScopedEligibilitySql("f", "a")})) AND (${candidateScope})
  AND NOT EXISTS (
    SELECT 1 FROM reward_bucket_claims_v2 claimed
    WHERE claimed.source_fact_kind='balance' AND claimed.source_fact_id=b.id
@@ -218,7 +243,11 @@ function matches(rule: PromotionRule, row: CandidateRow): boolean {
   if (rule.sourceAccountEquals && row.source_account !== rule.sourceAccountEquals) return false;
   if (
     rule.programId === "program:j-point" &&
-    (!/^myjcb:[a-z0-9][a-z0-9-]{0,63}:j-point:total$/u.test(row.source_account) ||
+    (!(
+      rule.parserName === "myjcb-jpoint-history"
+        ? /^myjcb:[a-z0-9][a-z0-9-]{0,63}:j-point:acquired:\d{4}-\d{2}-\d{2}$/u
+        : /^myjcb:[a-z0-9][a-z0-9-]{0,63}:j-point:total$/u
+    ).test(row.source_account) ||
       row.instrument !== "J_POINT")
   )
     return false;
@@ -336,10 +365,15 @@ export async function promoteRewardClaims(
       skipped += 1;
       continue;
     }
+    const historyExpiry = koganeField(row.extra_json, "observedExpiry");
     const expiry =
-      rule.sourceId === "v-point"
-        ? observedExpiry(koganeField(row.extra_json, "expiration"), "Asia/Tokyo")
-        : null;
+      rule.parserName === "myjcb-jpoint-history"
+        ? validTemporalValue(historyExpiry)
+          ? historyExpiry
+          : { kind: "unknown" as const, reasonCode: "provider_expiry_unparsed" }
+        : rule.sourceId === "v-point"
+          ? observedExpiry(koganeField(row.extra_json, "expiration"), "Asia/Tokyo")
+          : null;
     const bucketKind: BucketKind = rule.bucketKind;
     const status = row.decimal_status ?? "unparsed";
     const claimDigest = await digest(

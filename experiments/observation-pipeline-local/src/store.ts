@@ -274,6 +274,29 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
       ),
     )();
   }
+  // Mirror history and its independent credit siblings only after policy creation.
+  // Repair missing rows individually while preserving every operator alternative.
+  if (
+    (
+      db
+        .query(
+          "SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE source_id='myjcb' AND ((parser_name='myjcb-jpoint-history' AND dataset='jpoint-history') OR (parser_name='myjcb-credit-ledger' AND dataset='credit-ledger') OR (parser_name='myjcb-credit-statement-total' AND dataset='credit-detail') OR (parser_name='myjcb-credit-past-month-balances' AND dataset='credit-past-months') OR (parser_name='myjcb-skip-payment-schedule' AND dataset='credit-schedule'))",
+        )
+        .get() as { n: number }
+    ).n < 5
+  ) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(
+            EXPERIMENT_ROOT,
+            "../../packages/storage-d1/migrations/core/0094_myjcb_jpoint_history.sql",
+          ),
+          "utf8",
+        ),
+      ),
+    )();
+  }
   // 0056/0059 advance the board reader (ADR 0028 and its amendment). 0084
   // follows the shared CSV release for all four exact-version policies.
   // Each UPDATE names its previous value, so reopening preserves later pins
