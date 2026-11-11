@@ -59,7 +59,7 @@ dividend-labelled receipts, without authorizing a second income publication.
   reproducible. Raw pages stay unmapped. Requested cash ranges are attached
   to v7 descriptors when present. Both cash datasets belong to the domestic
   main-site unit, including USD, because that session acquires them.
-- `sbi-yen-detail-history@1.1.1` and `sbi-foreign-cash-history@0.1.1` publish
+- `sbi-yen-detail-history@1.1.2` and `sbi-foreign-cash-history@0.1.2` publish
   transaction observations with complete-container claims only after these
   checks. Transaction-family registry v5 records the latter as securities
   settlement cash with fingerprint identity; it enables no economic-event writer.

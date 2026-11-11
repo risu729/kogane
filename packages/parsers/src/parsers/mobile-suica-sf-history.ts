@@ -1,3 +1,4 @@
+import { mergeHistoryPage, MAX_HISTORY_PAGES } from "./mobile-suica-walk.ts";
 import type {
   ArtifactMeta,
   BalanceObservation,
@@ -60,11 +61,12 @@ interface IndexedRow {
   row: HistoryRow;
   occurrence: number;
   fingerprint: string;
+  page?: { artifactKey: string; rowIndex: number };
 }
 
 export const mobileSuicaSfHistory: Parser = {
   name: "mobile-suica-sf-history",
-  version: "1.0.1",
+  version: "1.1.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -80,34 +82,75 @@ export const mobileSuicaSfHistory: Parser = {
     }
     const body = strictObject(JSON.parse(decodeUtf8(bytes)), "sf-history");
     const current = Object.hasOwn(body, "complete");
-    exactKeys(body, current ? CURRENT_ROOT_KEYS : LEGACY_ROOT_KEYS, "sf-history");
+    const walked = Object.hasOwn(body, "pages");
+    exactKeys(
+      body,
+      walked ? [...CURRENT_ROOT_KEYS, "pages"] : current ? CURRENT_ROOT_KEYS : LEGACY_ROOT_KEYS,
+      "sf-history",
+    );
 
     const asOfDateJst = normalizedDate(body["asOfDateJst"], "sf-history.asOfDateJst");
     const pageCount = strictSafeInteger(body["pageCount"], "sf-history.pageCount", {
       minimum: 1,
-      maximum: 1,
+      maximum: MAX_HISTORY_PAGES,
     });
-    if (pageCount !== 1) throw new Error("sf-history.pageCount must be 1");
+    if (!walked && pageCount !== 1) throw new Error("sf-history.pageCount requires pages");
     const rowsValue = body["rows"];
-    if (!Array.isArray(rowsValue) || rowsValue.length > MAX_HISTORY_ROWS) {
+    if (
+      !Array.isArray(rowsValue) ||
+      rowsValue.length > (walked ? MAX_HISTORY_PAGES * MAX_HISTORY_ROWS : MAX_HISTORY_ROWS)
+    ) {
       throw new Error("sf-history.rows must be an array with at most 100 entries");
     }
     const transactionCount = strictSafeInteger(
       body["transactionCount"],
       "sf-history.transactionCount",
-      { minimum: 0, maximum: MAX_HISTORY_ROWS },
+      { minimum: 0, maximum: MAX_HISTORY_PAGES * MAX_HISTORY_ROWS },
     );
     if (transactionCount !== rowsValue.length) {
       throw new Error("sf-history.transactionCount does not match rows.length");
     }
     if (current) {
       const complete = strictBoolean(body["complete"], "sf-history.complete");
-      if (complete !== rowsValue.length < MAX_HISTORY_ROWS) {
+      if (!walked && complete !== rowsValue.length < MAX_HISTORY_ROWS) {
         throw new Error("sf-history.complete contradicts the 100-row boundary");
       }
       if (!complete) throw new Error("sf-history is not a complete provider snapshot");
     } else if (rowsValue.length === MAX_HISTORY_ROWS) {
       throw new Error("legacy sf-history cannot prove completeness at the 100-row boundary");
+    }
+
+    const provenance: NonNullable<IndexedRow["page"]>[] = [];
+    if (walked) {
+      const pages = body["pages"];
+      if (!Array.isArray(pages) || pages.length !== pageCount || pageCount < 2)
+        throw new Error("sf-history.pages count invalid");
+      let merged: HistoryRow[] = [];
+      let cursor = asOfDateJst;
+      pages.forEach((value, index) => {
+        const page = strictObject(value, "sf-history.page");
+        exactKeys(page, ["cursorDate", "rows"], "sf-history.page");
+        if (page["cursorDate"] !== cursor || !Array.isArray(page["rows"]))
+          throw new Error("sf-history.page cursor invalid");
+        const rows = page["rows"].map((row, offset) => parseRow(row, offset));
+        if (index < pages.length - 1 && rows.length !== MAX_HISTORY_ROWS)
+          throw new Error("sf-history.page premature boundary");
+        if (index === pages.length - 1 && rows.length >= MAX_HISTORY_ROWS)
+          throw new Error("sf-history.page boundary unproven");
+        const retained = index === 0 ? 0 : merged.filter((row) => row.date > cursor).length;
+        merged = mergeHistoryPage(merged, rows, cursor, asOfDateJst, index);
+        provenance.splice(
+          retained,
+          provenance.length - retained,
+          ...rows.map((_row, rowIndex) => ({
+            artifactKey: `sf-history-page-${String(index + 1).padStart(4, "0")}.html`,
+            rowIndex,
+          })),
+        );
+        cursor = rows.at(-1)?.date ?? cursor;
+      });
+      if (JSON.stringify(merged) !== JSON.stringify(rowsValue))
+        throw new Error("sf-history.pages do not reproduce rows");
     }
 
     const warnings: string[] = [];
@@ -132,7 +175,13 @@ export const mobileSuicaSfHistory: Parser = {
       const fingerprint = stableFingerprint(row);
       const occurrence = occurrences.get(fingerprint) ?? 0;
       occurrences.set(fingerprint, occurrence + 1);
-      indexedRows.push({ index, row, occurrence, fingerprint });
+      indexedRows.push({
+        index,
+        row,
+        occurrence,
+        fingerprint,
+        ...(provenance[index] ? { page: provenance[index] } : {}),
+      });
     });
 
     // The provider orders newest first. Emit oldest first so an append-only
@@ -214,6 +263,7 @@ function observationsForRow(
     identityOrigin: "canonical-normalized-row+occurrence",
     officialHistoryLimit: { weeks: 26, rows: 100 },
     currentBalanceCandidate: index === 0,
+    ...(indexed.page ? { sourcePage: indexed.page } : {}),
   };
   const extra = { ...row, _kogane: lineage };
   const observations: Observation[] = [];

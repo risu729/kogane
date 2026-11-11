@@ -40,6 +40,7 @@ const OBSERVED_SHAPES = new Set([
 ]);
 function fileOf(parser: string, name: string): string {
   if (parser === "vpass-credit-snapshot") return "vpass-credit-expected.json";
+  if (parser === "moneyforward-detail-balances") return "moneyforward-detail-expected.json";
   if (OBSERVED_SHAPES.has(`${parser}/${name}`)) return "sbi-shinsei-observed-shapes-expected.json";
   if (parser === "st-george-balances") return "st-george-expected.json";
   if (parser === "sbi-shinsei-exchange-rate") return "sbi-shinsei-exchange-rate-expected.json";

@@ -116,6 +116,7 @@ test("the current production migration chain preserves legacy policies and adds 
           row.parser_name !== "prestia-bank-balances" &&
           row.parser_name !== "sbi-shinsei-exchange-rate" &&
           row.parser_name !== "sbi-shinsei-monthly-report-metadata" &&
+          row.parser_name !== "moneyforward-detail-balances" &&
           row.parser_name !== "sbi-income-payments" &&
           row.parser_name !== "sbi-realised-gains" &&
           row.parser_name !== "vpass-credit-snapshot",
@@ -128,6 +129,17 @@ test("the current production migration chain preserves legacy policies and adds 
   expect(policies.find((row) => row.parser_name === "prestia-bank-balances")?.policy_id).toBe(
     "coverage-v1",
   );
+  expect(
+    await all(
+      "SELECT policy_id,required_parser_version,replaces_previous_on_complete_empty FROM dataset_snapshot_policies WHERE parser_name='moneyforward-detail-balances'",
+    ),
+  ).toEqual([
+    {
+      policy_id: "coverage-v1",
+      required_parser_version: "1.0.1",
+      replaces_previous_on_complete_empty: 0,
+    },
+  ]);
   // 0053: the SBI Shinsei exchange-rate board is chosen by its coverage claim.
   expect(policies.find((row) => row.parser_name === "sbi-shinsei-exchange-rate")?.policy_id).toBe(
     "coverage-v1",
@@ -172,6 +184,7 @@ test("the current production migration chain preserves legacy policies and adds 
     "SELECT parser_name,required_parser_version FROM dataset_snapshot_policies WHERE required_parser_version IS NOT NULL ORDER BY parser_name",
   );
   expect(pinned.map((row) => row.parser_name)).toEqual([
+    "moneyforward-detail-balances",
     "prestia-bank-balances",
     "sbi-foreign-cash-positions",
     "sbi-income-payments",

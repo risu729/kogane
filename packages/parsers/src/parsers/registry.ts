@@ -1,6 +1,7 @@
 import { vpassCreditSnapshot } from "./vpass-credit.ts";
 import { sbiIncomePayments, sbiRealisedGains } from "./sbi-income-history.ts";
 import type { Parser } from "../types.ts";
+import { moneyForwardDetailBalances } from "./moneyforward-detail-balances.ts";
 // Build identity of every parser below (design review D03): the registry is
 // what a Worker reads, so the digests travel with it.
 export { PARSER_CODE_DIGESTS, PARSER_DIGESTS } from "./digests.ts";
@@ -61,6 +62,7 @@ export const PARSERS: readonly Parser[] = [
   mizuhoOrdinaryHistory,
   moneyForwardMonthlyTransactions,
   moneyForwardEvidenceOnly,
+  moneyForwardDetailBalances,
   myJcbCreditLedger,
   myJcbCreditStatement,
   myJcbPastMonthBalances,

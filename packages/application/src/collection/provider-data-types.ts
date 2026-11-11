@@ -65,19 +65,20 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     missing("reward_activity", 1252),
     missing("reward_expiry", 1252),
   ],
-  // Mobile Suica: the SF balance and the one history page of at most 100 rows
-  // (docs/sources/mobile-suica.md, #451).
+  // Mobile Suica: SF balance and the retained 26-week history via verified
+  // inclusive date searches (docs/sources/mobile-suica.md, ADR 0104).
   "mobile-suica": [
     collected("balance", ["mobile-suica-sf-history"]),
-    partial("cash_movement", ["mobile-suica-sf-history"], 451),
+    collected("cash_movement", ["mobile-suica-sf-history"]),
   ],
   // Money Forward ME (aggregator): monthly transactions of the current and 11
-  // past months are parsed; the account pages (balances, holdings) are kept
-  // as evidence only (docs/sources/moneyforward.md, #452).
+  // past months and observed detail-page aggregates/points are parsed.
+  // Native product balances, gated card debt and securities remain unavailable.
   "moneyforward-me": [
-    missing("balance", 452),
+    partial("balance", ["moneyforward-detail-balances"], 1240),
     partial("cash_movement", ["moneyforward-monthly-transactions"], 452),
-    missing("position", 452),
+    partial("position", ["moneyforward-detail-balances"], 1240),
+    partial("reward_balance", ["moneyforward-detail-balances"], 1240),
   ],
   // MyJCB: credit statements and their ledger, J-POINT balance with its
   // nearest expiry, and observed debit ordinary/difference statements; the

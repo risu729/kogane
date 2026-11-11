@@ -209,6 +209,26 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
     if (policy === undefined) throw new Error("0066 names no snapshot policy row");
     db.transaction(() => db.exec(policy))();
   }
+  // Mirror the MoneyForward detail policy once; preserve operator choices.
+  if (
+    !db
+      .query(
+        "SELECT 1 FROM dataset_snapshot_policies WHERE parser_name='moneyforward-detail-balances' AND dataset='account-detail'",
+      )
+      .get()
+  ) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(
+            EXPERIMENT_ROOT,
+            "../../packages/storage-d1/migrations/core/0091_moneyforward_detail_balance_snapshots.sql",
+          ),
+          "utf8",
+        ),
+      ),
+    )();
+  }
   // Mirror the independent Vpass credit snapshot policy once. Reopening
   // preserves operator choices, including an explicit rollback to run scope.
   if (
