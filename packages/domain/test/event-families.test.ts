@@ -33,7 +33,7 @@ const clone = (entry: TransactionFamilyEntry) =>
 
 describe("closed codes", () => {
   test("the lists are exactly the reviewed codes", () => {
-    expect(TRANSACTION_FAMILY_REGISTRY_VERSION).toBe("transaction-family-registry-v3");
+    expect(TRANSACTION_FAMILY_REGISTRY_VERSION).toBe("transaction-family-registry-v4");
     expect(TRANSACTION_FAMILIES).toEqual([
       "bank-movement",
       "stored-value-movement",
@@ -113,7 +113,7 @@ describe("closed codes", () => {
 
 describe("registry entries", () => {
   test("every entry is valid, unique and in source/parser order", () => {
-    expect(TRANSACTION_FAMILY_REGISTRY).toHaveLength(23);
+    expect(TRANSACTION_FAMILY_REGISTRY).toHaveLength(24);
     for (const entry of TRANSACTION_FAMILY_REGISTRY)
       expect(validTransactionFamilyEntry(entry)).toBe(true);
     const keys = TRANSACTION_FAMILY_REGISTRY.map(key);
@@ -137,7 +137,7 @@ describe("registry entries", () => {
         );
         memberships += 1;
       }
-    expect(memberships).toBe(36);
+    expect(memberships).toBe(37);
   });
 
   test("only Vpass/MyJCB card purchases and SMBC and SBI Shinsei card settlement debits have writers", () => {
@@ -394,6 +394,7 @@ const ACTIVITY_KINDS: Record<TransactionFamily, readonly ActivityMeaning["kind"]
 /** Transaction parsers `classifyActivity` does not classify yet (kind `unknown`). */
 const UNCLASSIFIED = [
   "moneyforward-me/moneyforward-monthly-transactions",
+  "myjcb/myjcb-debit-ledger",
   "paypay/paypay-csv",
   "st-george/st-george-transactions",
   "v-point/v-point-history-page",

@@ -1,4 +1,5 @@
 import { collectJPoint, isObservedJPointProduct } from "./jpoint";
+import { collectDebit, collectDebitOther } from "./debit";
 import { safeErrorDetails } from "../../../packages/collector-diagnostics/src/index";
 import { decodeMyJcbHtml, MyJcbReadClient, type ReadResponse } from "./client";
 import { CookieJar } from "./cookie-jar";
@@ -14,7 +15,6 @@ import {
   parseCreditLedger,
   parsePastMonthAvailability,
   readCreditMenuGroups,
-  parseStatementPeriods,
   redactedStatementHtml,
   scheduledLedgerRowCount,
   schedulePageKind,
@@ -119,6 +119,7 @@ export async function collectConnection(options: {
     let exportOffers: readonly ExportOffer[] = [];
     let schedulePages: readonly SchedulePage[] = [];
     let stop: CreditStop | undefined;
+    let debitOtherCode: ConnectionSummary["debitOtherCode"];
 
     const creditLinkId = extractCreditMenuLinkId(login.mypageHtml);
     if (creditLinkId) {
@@ -142,6 +143,13 @@ export async function collectConnection(options: {
       const debit = await collectionStage("collect-debit", async () => await collectDebit(client));
       artifacts.push(...debit.artifacts);
       periodCount += debit.periodCount;
+      unreadMonths = [...unreadMonths, ...debit.unreadMonths];
+      stop = debit.stop;
+      if (stop === undefined) {
+        const other = await collectDebitOther(client);
+        artifacts.push(...other.artifacts);
+        debitOtherCode = other.code;
+      }
     }
     if (artifacts.length === 0) {
       throw new StopConditionError(
@@ -168,7 +176,7 @@ export async function collectConnection(options: {
       periodCount,
       cookieCount: login.jar.count(),
       limitations: [
-        "Root-card switching remains discovery-only until its current POST contract is observed.",
+        "Root-card switching remains discovery-only until its relay responses and stable per-card identity are verified.",
         options.credential.bootstrapMode === "passkey"
           ? "Passkey bootstrap uses an imported Bitwarden credential with a zero signature counter."
           : "Passkey renewal remains human-operated; session bootstrap is short-lived.",
@@ -182,6 +190,7 @@ export async function collectConnection(options: {
     });
     return {
       summary: {
+        ...(debitOtherCode === undefined ? {} : { debitOtherCode }),
         jpointCode: point.code,
         connectionId: options.credential.connectionId,
         bootstrapMode: options.credential.bootstrapMode,
@@ -255,47 +264,6 @@ async function collectionStage<T>(code: StopConditionCode, action: () => Promise
       httpStatus: safeErrorDetails(error).httpStatus,
     });
   }
-}
-
-async function collectDebit(client: MyJcbReadClient): Promise<{
-  readonly periodCount: number;
-  readonly artifacts: RawArtifact[];
-}> {
-  const menu = await client.get(
-    "debit-menu",
-    new URLSearchParams({ link_id: "myj_main_debitDetailMenu" }),
-  );
-  const menuHtml = decodeMyJcbHtml(menu.body, menu.contentType);
-  const periods = parseStatementPeriods(menuHtml);
-  const sequences = periods
-    .flatMap((period) => (period.sequence === undefined ? [] : [period.sequence]))
-    .filter((value, index, values) => values.indexOf(value) === index)
-    .sort((left, right) => left - right);
-  if (sequences.length === 0) {
-    throw new Error("MyJCB debit menu did not enumerate statement sequences");
-  }
-  const artifacts: RawArtifact[] = [
-    {
-      dataset: "debit-menu",
-      filename: "debit-menu.html",
-      body: redactedStatementHtml(menuHtml),
-      mediaType: "text/html; charset=utf-8",
-      statementState: "debit",
-    },
-  ];
-  for (const sequence of sequences) {
-    const detail = await client.get("debit-detail", new URLSearchParams({ seq: String(sequence) }));
-    const detailHtml = decodeMyJcbHtml(detail.body, detail.contentType);
-    artifacts.push({
-      dataset: "debit-detail",
-      filename: `debit-detail-${String(sequence).padStart(2, "0")}.html`,
-      body: redactedStatementHtml(detailHtml),
-      mediaType: "text/html; charset=utf-8",
-      statementState: "debit",
-      period: periods.find((period) => period.sequence === sequence)?.label ?? `seq-${sequence}`,
-    });
-  }
-  return { periodCount: sequences.length, artifacts };
 }
 
 /** The reads the credit collection makes; the Worker passes a `MyJcbReadClient`. */

@@ -31,6 +31,7 @@ import {
   myJcbPastMonthBalances,
 } from "../src/parsers/myjcb.ts";
 import { myJcbJPointBalance } from "../src/parsers/myjcb-jpoint.ts";
+import { myJcbDebitLedger, myJcbDebitOtherStatement } from "../src/parsers/myjcb-debit.ts";
 import { myJcbSkipPaymentSchedule } from "../src/parsers/myjcb-skip-payment-schedule.ts";
 import { paypayCsv } from "../src/parsers/paypay-csv.ts";
 import { PARSERS } from "../src/parsers/registry.ts";
@@ -67,6 +68,7 @@ const NOT_IN_REGISTRY = [
   "myjcb-credit-statement-total",
   "myjcb-skip-payment-schedule",
   "myjcb-jpoint-balance",
+  "myjcb-debit-other-statement",
   "prestia-bank-balances",
   "sbi-account-assets-current",
   "sbi-account-assets-history",
@@ -229,6 +231,18 @@ const CASES: Case[] = [
     );
   }),
   one(
+    myJcbDebitLedger,
+    "debit-sections",
+    meta("myjcb", "debit-detail", {
+      artifactKey: "connection-a/debit-detail-01.html",
+      mime: "text/html",
+      statementState: "debit",
+    }),
+    encode(
+      '<div class="pc-disp"><table><tr><th>ご利用者</th><th>お振替日</th><th>ご利用先など</th><th>お振替金額</th><th>摘要</th><th>承認番号</th></tr><tr><td>本人</td><td>2030/01/01</td><td>架空店舗</td><td>100</td><td></td><td>000001</td></tr></table><table><tr><th>ご利用者</th><th>差額発生日</th><th>ご利用先など</th><th>差額</th><th>摘要</th><th>お取引結果</th><th>承認番号</th></tr><tr><td>本人</td><td>2030/01/02</td><td>架空店舗</td><td>-20</td><td></td><td>銀行振替済</td><td>000001</td></tr></table></div>',
+    ),
+  ),
+  one(
     paypayCsv,
     "csv",
     meta("paypay", null, { mime: "text/csv" }),
@@ -383,6 +397,15 @@ const CASES: Case[] = [
  */
 const MF_EVIDENCE = { fetchUnitKey: null, statementState: null, period: null, mime: "text/html" };
 const OUTSIDE_CASES: Case[] = [
+  one(
+    myJcbDebitOtherStatement,
+    "other-empty",
+    meta("myjcb", "debit-other-detail", {
+      artifactKey: "connection-a/debit-other-detail-01.html",
+      mime: "text/html",
+    }),
+    encode('<h1 class="heading01-01">選択された月のご請求はございません。</h1>'),
+  ),
   one(
     sbiAccountAssetsHistory,
     "account-assets-history",

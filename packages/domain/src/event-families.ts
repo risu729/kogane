@@ -24,7 +24,7 @@ import { hasExactKeys, isOneOf, isRecord, isText } from "./guards.ts";
  * a 0.1.2 run stored carries no origin and stays refused
  * (identity_origin_unrecorded, `rowOriginBasis`).
  */
-export const TRANSACTION_FAMILY_REGISTRY_VERSION = "transaction-family-registry-v3";
+export const TRANSACTION_FAMILY_REGISTRY_VERSION = "transaction-family-registry-v4";
 
 /**
  * The closed list of economic-event families.
@@ -334,6 +334,15 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     statuses: { kind: "closed", values: ["confirmed", "unconfirmed"] },
     providerLinks: NO_LINK,
     families: [supported("card-purchase")],
+  },
+  {
+    sourceId: "myjcb",
+    parserName: "myjcb-debit-ledger",
+    observationKinds: ["transaction"],
+    identity: identity("fingerprint_occurrence", "identityOrigin", "fingerprint"),
+    statuses: { kind: "closed", values: ["transferred", "bank-transferred"] },
+    providerLinks: NO_LINK,
+    families: [unsupported("card-purchase", "identity_fingerprint_only", "semantics_unobserved")],
   },
   {
     // `transactionNumber` is a provider row id, but the parser records no
