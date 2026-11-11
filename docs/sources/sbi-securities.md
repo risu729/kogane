@@ -659,3 +659,63 @@ route and retains the catalogue as partial. Scheduled collection, publication,
 returned earliest/latest keys and count, freshness, execution budget and any
 account-specific earlier history remain unverified. A different retention
 route or positive iDeCo shape requires observation before implementation.
+
+## 2026-11-10 retained cash statements
+
+Read-only observations used the owner's ordinary Chrome session and official
+statement links. Search dates below are UI request parameters, never personal
+transaction dates. No provider amounts, row ids, names, accounts, cookies or
+tokens were recorded. These reads did not run a collector or modify an account.
+
+The yen statement is `/banking/yen/detail-history` on the member site. Selecting
+the two-year preset issued `GET /banking/api/yen/detail/query` with
+`depositDateFrom=20241111`, `depositDateTo=20261110`,
+`payDepKbnList=1,2,5`, `detailKbnList=11,12,13,14,15,16,17,18,21,22,23,24`,
+`sortDateType=1`, `pageNumber=1`, `pageSize=10`, `totalCountKbn=1`.
+The UI offers page sizes 10/20/50/100/150/200 and sort types 0 ascending /
+1 descending. Clicking page 2 issued the same query with only `pageNumber=2`.
+
+Each response had exactly these fields:
+
+- `totalDepositAmount`, `totalDepositCount`, `totalPaymentAmount`,
+  `totalPaymentCount`, `totalTransDepositAmount`, `totalTransDepositCount`,
+  `totalTransPaymentAmount`, `totalTransPaymentCount`: strings.
+- `totalCount`, `pageCount`, `pageNumber`, `pageSize`: numbers.
+- `detailsConditions`: the fixed filter labels `['入金：すべて','出金：すべて']`.
+- `exceededMaxCount`, `isExceededMaxCount`: booleans, both false.
+- `depositRecordList`: rows with exactly `payDepDate`, `payDepKbn`, `detailKbn`,
+  `dispAbstract`, `payAmount` strings and numeric `did`.
+
+There was no `nextBusinessDate` field in this query response; historical init
+artifacts have a different shape. Both pages declared total 20, two pages and
+size 10, each returned ten rows, and all twenty `did` values were distinct.
+The controls stayed identical across pages. Direction strings were `入金` and
+`出金`; the observed detail labels were `その他`, `利金・配当金`,
+`金融機関への出金`, `金融機関からの入金`. Exact value-free checks established that
+each direction's count and sum of unsigned amounts matched its deposit/payment
+controls. Both transfer counts were zero, so their relationship to the other
+controls was not established.
+
+The official foreign-cash link reaches `/banking/fc/detail-history`. Selecting
+the five-year preset issued `GET /banking/api/fc/detail-history/search` with
+`startDate=2021/11/11`, `endDate=2026/11/10`, `tradeKind=''`,
+`currencyCode=''`, `pageNumber=1`, `pageSize=10`, `termKind=1`, `sortType=1`.
+Opening detailed conditions, selecting the USD radio and querying issued the
+same request with `currencyCode=011`. Both returned HTTP 200 and exactly
+`{pageCount:number,totalCount:number,items:array,businessErrorMessage:null}`.
+The observed filtered response had one page, total ten and ten rows, all code
+`011`, whose fixed currency name was `米ドル`. Each row had exactly
+`valueDate`, `tradeType`, `cometCurrencyCode`, `cometCurrencyName`, `description`,
+`amount` strings and nullable/string `cashType`. Trade types were `入金` and
+`出金`; cash types were null, `分配金`, `配当金`; all amount text was unsigned
+decimal. No stable row-id field was present. A foreign second-page request
+was not observable with the current one-page data and remains unsupported.
+
+[ADR 0102](../adr/0102-sbi-retained-cash-history.md) uses only these request
+shapes and exact labels. The normal collector requests all retained yen pages
+and the retained USD statement, preserving per-page raw inputs. Unknown labels,
+positive transfer controls, unknown currencies, changed totals or missing pages
+keep coverage partial. The catalogue remains partial under #1226 until foreign
+continuation/transfer semantics and actual scheduled retained publication,
+freshness and the execution budget are verified. Dividend-labelled cash rows
+publish settlement cash only; they establish no separate income dataset.

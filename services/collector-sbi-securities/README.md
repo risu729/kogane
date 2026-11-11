@@ -99,7 +99,38 @@ not proof of that earlier window. Publication, complete retention counts
 and the 13-minute holder limit still require a scheduled production run to
 verify ([ADR 0096](../../docs/adr/0096-sbi-scheduled-execution-history.md)).
 
-`yen-detail-history.json` uses `sbi-yen-detail-history-bundle-v1`, retaining bundle counts/completion/bound flags and provider responses within `pages[]`. It validates consecutive `pageNumber`, constant `pageCount` / `pageSize` / `totalCount`, total row count, duplicate `did` and provider/collector bound flags. Only read-only `GET /banking/api/yen/detail/init` has been observed; the next-page request endpoint/parameter contract is unconfirmed. Consequently, when init indicates multiple pages or uncaptured rows, the run closes as a `main-site` failure without guessed requests, rather than saving missing history as a successful artifact.
+`yen-detail-history.json` and `foreign-cash-history.json` use
+`sbi-retained-cash-history-v1`. Every main-site run selects the observed two-year
+yen / five-year foreign preset through JST today, independently of execution
+window arguments. `GET /banking/api/yen/detail/query` walks every declared page
+with observed size 10, all directions/details and descending dates. The foreign
+statement uses `GET /banking/api/fc/detail-history/search`, all trade kinds and
+the observed USD filter `currencyCode=011`, with the same page size and descending sort. Only USD code `011`
+is supported; other currencies and an unobserved foreign second page stop
+with a closed failure code.
+
+After original-JSON, duplicate-key, exact-number and closed-field audits, each
+raw page is retained as `<dataset>-page-NNNN-source.json`. The derived bundle
+names all raw inputs; shared persistence checks its exhaustive inventory.
+Both statements belong to the domestic main-site unit. Bounds are 2,000 pages /
+20,000 rows. Page metadata, each page's expected rows, total rows, descending
+calendar dates and requested-range membership are checked, as are known codes,
+unsigned exact amounts and duplicate yen `did`. Yen deposit/payment counts and
+domain exact sums must match the unchanged controls. Positive transfer controls
+remain unsupported until their semantics are observed. Unknown fields/private
+error envelopes are rejected before storage; coverage failures retain audited
+financial evidence and keep the unit partial.
+
+Registration v7 maps only the new USD derivative and attaches cash requested
+ranges; earlier mappings stay frozen and raw pages remain unparsed. The yen
+parser retains legacy single-page/v1 bundles and stable provider ids. USD uses
+normalized row fingerprints with occurrence ordinals, preserving identical
+receipts and stable ids across full-range runs; the production reader selects
+one witnessed revision per id. These are settlement-cash observations, never
+a second income publication. Catalogue status remains partial under #1226 until
+foreign continuation/transfer semantics and scheduled publication, retained
+coverage, freshness and the 13-minute execution budget are verified
+([ADR 0102](../../docs/adr/0102-sbi-retained-cash-history.md)).
 
 Stored runs in the old dedicated source bucket were copied to central DATA and verified on 2026-09-13; no outbox remains to resend ([legacy-retirement.md](../../docs/legacy-retirement.md)).
 

@@ -31,6 +31,8 @@ import type { Artifact, CollectionScope } from "./types";
 import { sbiArtifactKey, SbiHistoryError } from "./history-windows";
 import { isAssetHistoryError } from "../../../packages/parsers/src/parsers/sbi-asset-history-schema";
 import { assetHistoryInventoryComplete } from "./asset-history";
+import { cashHistoryInventoryComplete } from "./cash-history";
+import { CashHistoryError } from "../../../packages/parsers/src/parsers/sbi-cash-history-schema";
 
 export const SBI_SECURITIES_SOURCE = "sbi-securities";
 export const SHARED_PRODUCER = "collector-sbi-securities";
@@ -71,6 +73,9 @@ export interface SbiSharedRun {
 
 /** The same split the central importer uses to attribute an artifact. */
 function datasetScope(dataset: string): UnitScope {
+  // The foreign-cash statement is read through the domestic main-site session.
+  if (dataset === "foreign-cash-history" || dataset === "foreign-cash-history-page-source")
+    return "domestic";
   return dataset.startsWith("foreign-") ? "foreign" : "domestic";
 }
 
@@ -84,6 +89,7 @@ function scopesFor(scope: CollectionScope): UnitScope[] {
  * stable code, so no free-text ever reaches the manifest.
  */
 export function safeFailureCode(error: unknown): string {
+  if (error instanceof CashHistoryError) return error.code;
   if (isAssetHistoryError(error)) return error.code;
   if (error instanceof SbiHistoryError) return error.code;
   const details = safeErrorDetails(error);
@@ -108,6 +114,13 @@ export function safeFailureCode(error: unknown): string {
 
 /** Builds the plan without writing anything, so a test can read the manifest. */
 export async function sbiRunPlan(run: SbiSharedRun): Promise<PersistRunPlan> {
+  if (!(await cashHistoryInventoryComplete(run.artifacts))) {
+    run = {
+      ...run,
+      status: run.status === "failed" ? "failed" : "partial",
+      failures: [...run.failures, { scope: "domestic", code: "sbi_cash_history_source_inventory" }],
+    };
+  }
   if (!(await assetHistoryInventoryComplete(run.artifacts))) {
     run = {
       ...run,

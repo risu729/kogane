@@ -38,6 +38,7 @@ import { PARSERS } from "../src/parsers/registry.ts";
 import { sbiDomesticTradeRecords } from "../src/parsers/sbi-domestic-trade-records.ts";
 import { sbiAccountAssetsHistory } from "../src/parsers/sbi-account-assets-history.ts";
 import { sbiForeignCashPositions } from "../src/parsers/sbi-foreign-cash-positions.ts";
+import { sbiForeignCashHistory } from "../src/parsers/sbi-foreign-cash-history.ts";
 import { sbiForeignTradeRecords } from "../src/parsers/sbi-foreign-trade-records.ts";
 import { sbiVcCashflows } from "../src/parsers/sbi-vc-cashflows.ts";
 import { sbiVcExecutions } from "../src/parsers/sbi-vc-executions.ts";
@@ -271,6 +272,12 @@ const CASES: Case[] = [
     "boundary",
     meta("sbi-securities", "foreign-trade-records"),
     read("sbi-parser-boundaries", "foreign-trade-records.json"),
+  ),
+  one(
+    sbiForeignCashHistory,
+    "cash-history",
+    meta("sbi-securities", "foreign-cash-history"),
+    read("sbi-parser-boundaries", "foreign-cash-history.json"),
   ),
   one(
     sbiYenDetailHistory,
@@ -555,6 +562,7 @@ const LINK_FIELDS: Record<
     exchange_rate_stated: [["overseas", "conversionRateJpy"]],
   },
   "sbi-securities/sbi-domestic-trade-records": { value_date: [["valueDate"]] },
+  "sbi-securities/sbi-foreign-cash-history": { value_date: [["valueDate"]] },
   "sbi-securities/sbi-foreign-trade-records": {
     value_date: [["_kogane", "valueDate"], ["valueDate"]],
     settlement_amount: [["settlementCurrencyCode"]],

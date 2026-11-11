@@ -80,12 +80,18 @@ export const PARSER_DIGESTS: ParserDigests = {
       "f6244707d0d6a15b2c8e27074b57dbdc3e36862182940572c193f252b64e35a1",
     "poc/observation-pipeline/src/parsers/sbi-asset-history-validation.ts":
       "9a9dec469cd4a4d7d70b8bc9b9b52d9ef9dae5e965b036e1d89be5138101a86a",
+    "poc/observation-pipeline/src/parsers/sbi-cash-history-schema.ts":
+      "0e2a58d6475a480a08fb81017c139c32130309e2fb1186d93234a051e46f2d55",
+    "poc/observation-pipeline/src/parsers/sbi-cash-history.ts":
+      "060c7284831cf117010cf1dfbf9424478f78ad70a63940d1c44d3cb16bf4bfc8",
     "poc/observation-pipeline/src/parsers/sbi-domestic-cash-positions.ts":
       "c9dbf90ce8e391a8880ec019bd346ca9647470a346403f1414a7636ca70fb064",
     "poc/observation-pipeline/src/parsers/sbi-domestic-trade-records.ts":
       "b1b18a54e94ffc72b3e1e2d01592c35a887b1e193fcb7d532191904d235e1ba4",
     "poc/observation-pipeline/src/parsers/sbi-foreign-cash-balances.ts":
       "fd209ca769992b05d77a4c18b12b1626806e765f08bb7842314a20372c6ea9b8",
+    "poc/observation-pipeline/src/parsers/sbi-foreign-cash-history.ts":
+      "e12c50cb003a52b263c95daedee415e98cdd88672f1bf9d7478e97dafb64ac16",
     "poc/observation-pipeline/src/parsers/sbi-foreign-cash-positions.ts":
       "78cd220292407b31e78c4987491ad12c72ea000cb37213512344a32babd85cc1",
     "poc/observation-pipeline/src/parsers/sbi-foreign-trade-records.ts":
@@ -117,7 +123,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/sbi-vc-position-summary.ts":
       "09b08a920f3e35f3814e2ddafff46b8f54b8e5ed1fffbdc41614f6e0d87a6ca2",
     "poc/observation-pipeline/src/parsers/sbi-yen-detail-history.ts":
-      "d60bf5c5439b33ae07ccbb8f9b6860f52e6984e47ae3c50534f2df044c42980b",
+      "496bf82d7abd740ab9c34d18bb6739bb5adc5a91208abc0775c4749e2ccd41cd",
     "poc/observation-pipeline/src/parsers/smbc-direct.ts":
       "93a3e72b94400fe1e2fd2afb56b42a9f88bcc1c449b0ab47197377962bb7b511",
     "poc/observation-pipeline/src/parsers/sony-bank.ts":
@@ -475,6 +481,24 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/types.ts",
       ],
     },
+    "sbi-foreign-cash-history": {
+      version: "0.1.2",
+      codeDigest: "0433891dae1a166fd4ea71c4b4f9eb980e6d816f4d1dc5f5f03f5774aeb3ec5a",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "packages/domain/src/values.ts",
+        "packages/observation-shared/src/normalized-decimal.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-cash-history-schema.ts",
+        "poc/observation-pipeline/src/parsers/sbi-cash-history.ts",
+        "poc/observation-pipeline/src/parsers/sbi-foreign-cash-history.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
     "sbi-foreign-cash-positions": {
       version: "0.3.1",
       codeDigest: "4c8e8606e02c90ef50dcb2bb53a8a744b7b9861b7b3aa6cd47dfcd27752a5dc9",
@@ -642,12 +666,17 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-yen-detail-history": {
-      version: "1.0.3",
-      codeDigest: "75d65e2a1426bd5146929a4b2d5763083cf58482f15acd9eee4caab8a3bc4af2",
+      version: "1.1.2",
+      codeDigest: "e01b61ebee9c25a19c985ca9e1c25d3be783ae690782b9d6faaa07c415a2406e",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
+        "packages/domain/src/values.ts",
+        "packages/observation-shared/src/normalized-decimal.ts",
         "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-cash-history-schema.ts",
+        "poc/observation-pipeline/src/parsers/sbi-cash-history.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
         "poc/observation-pipeline/src/parsers/sbi-yen-detail-history.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
