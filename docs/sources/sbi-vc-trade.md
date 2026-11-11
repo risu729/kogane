@@ -812,3 +812,99 @@ and `income` stay `not_collected` in the provider catalogue. Full-list capture i
 not proof that those typed data are collected. Counts per type matching a new
 scheduled collection, full-retention coverage and the additional parameters on
 the deployed HTTP transport remain unverified.
+
+## 18. Simple-mode documents and spot execution correspondence (2026-11-10)
+
+Normal navigation of the authenticated official simple-mode `/trade-report`
+screen confirmed the same HTTP gateway host and session mode used by this
+Worker: `POST https://simple.sbivc.co.jp/api/cccmdipresen/gw/trade`, JSON
+`{event, data}`, with the runtime `secureKey` in `data`. These document calls
+were observed over HTTP; they are not an inferred port of trader Socket.IO.
+No new hosted collector run was made as part of this observation.
+
+| Event / statement type           | Observed request fields beyond `secureKey`                                                                                                                  | Response shape                                                                            |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `tradeReportList` / `MONTH`      | `statementType: "MONTH"`, `fromBasisYmdDate: "YYYY0101"`, `toBasisYmdDate: "YYYY1231"`, `getUnreadReportOnly: "false"`, `pageSize: "30"`, `pageNumber: "0"` | `body` has string `pageNumber`, `totalSize`, `totalNumOfPages`, and `list`; no `pageSize` |
+| `tradeReportList` / `TRADE_DATA` | Same year bounds and paging fields, `statementType: "TRADE_DATA"`                                                                                           | `body` has only `list`; no totals or pagination metadata                                  |
+| `tradeReportList` / `YEAR`       | `statementType: "YEAR"`, unread/paging fields as above; no date bounds                                                                                      | String pagination metadata and an explicitly empty `list`                                 |
+| `monthlyTradeReport`             | `basisYmDate` copied unchanged from the selected row's eight-digit `basisYmdDate`                                                                           | PDF download described below                                                              |
+| `plCalcData`                     | The same unchanged eight-digit row identity                                                                                                                 | ZIP download described below                                                              |
+
+MONTH rows have string `readStatus`, `readStatusString`, `statementType`,
+`reportTitle`, `basisYmdDate`. TRADE_DATA rows have only the last three fields.
+Opening a monthly PDF changes its server-side read status from `0` to `1`
+(`閲覧済`); no separate write event was sent. This read receipt is an intrinsic
+side effect of the document collection authorized by the owner. The allowlist
+does not add a status-update event.
+
+Both download responses were HTTP 200 with `application/pdf` or
+`application/zip`, but their HTTP bodies were JSON, not native file bytes:
+`{body: {type: "Buffer", data: number[]}, meta: {status: "OK"}}`. The top keys
+were `body` and `meta`; the download metadata had only `status`. The collector
+bounds the envelope, requires integer bytes in 0..255 and the native signature,
+then stores the decoded bytes. It never saves the JSON wrapper as a PDF/ZIP.
+The full eight-digit `basisYmdDate` is the download identity even though the
+request field is named `basisYmDate`; reducing it to six digits is unsupported.
+
+The UI offered years 2018..2026. Each of 2018..2025 returned empty MONTH and
+TRADE_DATA lists; 2026 offered ten of each. This is a selectable window, not a
+provider retention guarantee. The collector's operational window is 2018
+through the capture's Asia/Tokyo calendar year, bounded to fewer than 100 years.
+That is our collection policy, not a claim to have inspected the UI's year
+calculation script. MONTH walks at most 100 size-30 pages with stable totals,
+cardinality and unique report identities. TRADE_DATA has no pagination proof:
+a list reaching 30 rows is retained but refused as potentially truncated.
+Unknown response shapes fail closed. YEAR is requested once without bounds;
+its explicit zero is recorded as complete-empty raw index evidence. A future
+nonempty annual index is retained as partial; no annual download event is
+inferred. Daily reports and valuation history remain unobserved.
+
+The ordinary ZIP has two deflated UTF-8 CSV entries, named with
+`TRADE_RECORD_LIST` and `CASHFLOW` prefixes. CSV parsing handles quoted fields,
+escaped quotes and CRLF. The execution CSV has these exact 14 headers:
+
+```text
+約定日時,取引番号,取引区分,銘柄,注文先（自己または委託の別）,売買,数量,約定レート,建玉損益,建玉損益（円）,取引手数料,ファンディングレート（円）,決済損益（円）,円転レート
+```
+
+Two valid cash-flow header versions were observed, with 47 and 53 columns.
+Their first six headers are `日時,入出金の種別,暗号資産/通貨,数量,評価レート,入出金額（円）`,
+the last is `備考`, and the intervening unique `残高_*` columns vary in count
+and order. The latest version added assets including JPYSC and POL and omitted
+MATIC. The validator accepts 1..128 unique uppercase alphanumeric balance
+column suffixes; it does not interpret balances or publish unknown assets.
+Both CSVs were also observed as header-only files with zero data rows. Every
+row must match its own file's header width, with valid `YYYY/MM/DD HH:mm:ss`
+dates within the selected identity's first-six-digit month. No timezone
+conversion is inferred from these offset-free provider strings.
+
+For the populated observed month, all five execution CSV rows matched API
+`CExecutionId + "-" + CExecutionIdSubNo` one-to-one; the bare execution ID
+matched none. Each CSV `約定日時` equalled its matched `executionDatetime`
+exactly. API `executionYmdDate` uses `YYYY/MM/DD`. All five CSV rows said
+`現物`: one `販売所（自己）` row matched `isAuction: false`, and four
+`取引所（委託）` rows matched `isAuction: true`. All had API
+`isExOrder: {attribute: "EX", value: "true"}` and
+`isCloseOrder: {attribute: "new", value: "false"}`. Thus the existing spot
+filter includes both retail and exchange executions; another venue endpoint
+would duplicate them. This resolves that distinction for
+[#1228](https://github.com/risu729/kogane/issues/1228), while leverage opening
+and closing filters remain unobserved. The full historical API list had six
+executions; the same-month CSV contained five. The cash-flow CSV's sixteen
+rows matched the all-type API count within that month. Individual financial
+values and identities are not included here.
+
+The implementation archives native PDF/ZIP files as immutable private
+`provider_document` evidence, with period and content hash in their keys.
+The metadata parser emits evidence-only coverage and zero economic
+observations. CSV validation and comparison emit a separate count-check
+artifact; they never issue a second execution or cash-flow publication.
+Comparison requires all four recent/historical API views and a completed
+full-cashflow unit: missing data is not treated as zero. A failed comparison
+keeps the valid ZIP, while a failed download cannot borrow a previous run's
+unit. CORE 0097 opts only the two document datasets into independent-unit
+metadata parsing; raw evidence listing does not require those policy rows.
+
+[#1249](https://github.com/risu729/kogane/issues/1249) remains partial: annual
+PDF downloads, daily reports, balance/valuation history, provider retention
+limits, and a deployed scheduled run with these document calls are unverified.

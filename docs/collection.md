@@ -1352,10 +1352,11 @@ A session Durable Object (`SbiVcSessionState`) with two crons — the 15-minute
 keep-alive and the daily collection — both unchanged. Terminal source id
 `sbi-vc-trade`, the same id CORE uses.
 
-| Artifact         | Role                 | Bytes                                                       |
-| ---------------- | -------------------- | ----------------------------------------------------------- |
-| `<dataset>.json` | `collector_derived`  | the gateway envelope with `meta.secureKey` already stripped |
-| `manifest.json`  | `collector_manifest` | the collector manifest; each entry names a stored object    |
+| Artifact                           | Role                 | Bytes                                                                        |
+| ---------------------------------- | -------------------- | ---------------------------------------------------------------------------- |
+| `<dataset>.json`                   | `collector_derived`  | the gateway envelope with `meta.secureKey` already stripped                  |
+| `manifest.json`                    | `collector_manifest` | the collector manifest; each entry names a stored object                     |
+| `<kind>-<basis8>-<sha256>.pdf/zip` | `provider_document`  | validated native PDF / P&L ZIP bytes extracted from the JSON Buffer response |
 
 - `requestedScope`: `full_snapshot`; `account` holds the classic datasets,
   and `full-cashflows` holds the additional all-type lists after the classic
@@ -1382,6 +1383,24 @@ keep-alive and the daily collection — both unchanged. Terminal source id
   ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-sbi-vcs-unfiltered-evidence-is-independent-of-its-classic-account-unit-2026-11-10)).
 - `transformations`: one `redacted` step per dataset (`sbi-vc-trade-worker`);
   the unredacted envelope carried the session key and is not retained.
+- Report evidence adds independent year-index, annual-index, per-document and
+  CSV-check units. Monthly and P&L indices cover 2018 through the capture's Tokyo
+  year; annual zero is explicit complete-empty index evidence. Unknown annual
+  downloads, daily reports and valuation history remain partial/uncollected.
+  `report-month-list-YYYY-page-NNNN`, `report-pnl-list-YYYY`,
+  `report-annual-list-page-0001` and the P&L comparison JSON stay raw evidence.
+  The document datasets are `monthly-report-pdf` and `pnl-data-zip`, with
+  eight-digit period and hash keys. Native bytes are an `extracted`
+  transformation, never a JSON object mislabeled as PDF/ZIP. Shared CAS objects
+  have MIME-neutral physical storage; terminal and CORE references retain the
+  document MIME. Reacquiring identical period/hash bytes adds no physical object.
+- Raw artifact listing/retrieval works without parsing policy. CORE 0097's two
+  exact `unit_scope=unit`, `snapshot_selection=0` policies additionally admit
+  successful document metadata in partial runs. They add evidence-only coverage,
+  no economic observations and no container snapshot. A failed document or
+  comparison cannot borrow another acquisition session's successful unit, and
+  neither invalidates a completed classic account. See
+  [the observed protocol and limits](sources/sbi-vc-trade.md#18-simple-mode-documents-and-spot-execution-correspondence-2026-11-10).
 - `acquisitionSessionRef`: **yes.** The Durable Object now keeps a session
   generation id under the storage key `sessionRef`, minted when a session is
   seeded and rotated when re-authentication replaces it, in the same storage

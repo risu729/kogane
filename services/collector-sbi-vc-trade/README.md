@@ -26,7 +26,7 @@ jobs in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), passing each j
 - `sbi-vc-trade` (`5 21 * * *`, daily at 06:05 JST): captures the fixed read allowlist.
 - Manual operations go through the operations API, which reaches this Worker only over the private `ScheduledCollection.runOperation` binding: a `collection` request (source `sbi-vc-trade`) runs the daily collection, and a `session-refresh` request runs the keepalive and, when it fails, a passkey login without the 6-hour cooldown. The former bearer routes `/run`, `/reauth`, `/collect`, `/health` and their `ADMIN_TOKEN` were removed on 2026-11-08 ([ADR 0069 amendment](../../docs/adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08)); session health is in the keepalive alarm history (`kogane.schedules.read`) and the Worker logs (`sbi_vc_keepalive`, `sbi_vc_reauth`). The only public route is `GET /healthz` (CD liveness: status and schema version, no session or provider call); every other path is 404 (`src/worker.ts`).
 - Destination: content-addressed objects in shared DATA (`objects/<2 hex>/<sha256>`), with the terminal manifest (`runs/sbi-vc-trade/<run-id>/terminal.json`) written last.
-- Contents: balances, account details, position summary, recent executions page 0, every historical execution page, every historical JPY deposit/withdrawal page, both unfiltered cash-flow views, and manifest.
+- Contents: balances, account details, position summary, recent executions page 0, every historical execution page, every historical JPY deposit/withdrawal page, both unfiltered cash-flow views, monthly PDF/P&L ZIP documents, report indices, CSV checks, and manifest.
 - Existing pages use size 30. The unfiltered cash-flow views use size 20,
   empty currency/type arrays and empty date bounds, as observed in the trader
   UI on 2026-11-10. Each view walks at most 100 pages and checks page numbers,
@@ -42,6 +42,22 @@ jobs in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), passing each j
   while a completed classic unit remains eligible for its existing publishers.
   Classic failures still block the original account unit. The exact dataset
   eligibility policies do not enable publication of the raw lists.
+- The observed simple-mode report events are `tradeReportList`, `monthlyTradeReport`
+  and `plCalcData`. The collector walks MONTH and TRADE_DATA indices for 2018
+  through the capture's Tokyo calendar year, and captures the unbounded YEAR
+  index once. An empty annual index is explicit complete-empty evidence;
+  offered annual files stay partial because their download event is unobserved.
+- PDF/ZIP replies use JSON Buffer envelopes despite their MIME headers. Decode
+  and validate native bytes before private content-addressed storage; keys carry
+  the complete eight-digit report identity and SHA-256. Monthly PDF retrieval
+  marks the provider's report as read as an intrinsic download side effect.
+- Every document has its own unit. A failed index, download or separate CSV
+  comparison keeps other successful documents and the classic account eligible.
+  CORE 0097 enables only evidence metadata for the two canonical document
+  datasets, with no economic rows. CSVs are checked against the existing API
+  captures, not published again. Missing API views never mean zero rows.
+  Annual downloads, daily reports and valuation history remain unsupported;
+  see [the dated protocol evidence](../../docs/sources/sbi-vc-trade.md#18-simple-mode-documents-and-spot-execution-correspondence-2026-11-10).
 - After each response, the rotated session is encrypted and saved immediately. Artifacts with `meta.secureKey` removed remain in memory until the terminal is written; no staging R2 objects are written.
 - `packages/collection` writes objects and the final terminal with `etagDoesNotMatch: "*"` and R2-native SHA-256. The terminal follows every object, so a run without a terminal is not considered completely stored.
 - The central importer, its Service Binding and `POST /backfill-raw-evidence` were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)). Even runs with 12 or more data artifacts write through the terminal immediately, without deferral. The Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)).

@@ -1284,6 +1284,17 @@
         }
       ],
       "sha256": "5e3a1330519a885fe59b0424d0bc7c7fe0f4c09a9fef5b8b0b239749f36066a9"
+    },
+    {
+      "file": "0097_sbi_vc_document_unit_eligibility.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "a05f2d36adb6a816f96281ead37891c3d0c3fba7ad6e364abfc478067641cacb"
     }
   ],
   "tables": [
@@ -22193,7 +22204,8 @@
       "0092_vpass_credit_snapshots.sql",
       "0093_sbi_income_complete_containers.sql",
       "0094_myjcb_jpoint_history.sql",
-      "0096_smbc_foreign_ordinary_unit_eligibility.sql"
+      "0096_smbc_foreign_ordinary_unit_eligibility.sql",
+      "0097_sbi_vc_document_unit_eligibility.sql"
     ],
     "schemaSha256": "0b2ddb2a8d7e9b70df8ec4b3937eeef911d2737a1e55ca0d06eb316f47695af9"
   }

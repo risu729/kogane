@@ -88,12 +88,25 @@ async function capture(
         : { httpMetadata: { contentType: object.contentType } }),
       ...(object.customMetadata === undefined ? {} : { customMetadata: object.customMetadata }),
     });
-  const registered = await registerCollectionRun(env, {
-    source: "sbi-vc-trade",
-    runId: result.summary.runId,
-  });
+  const registration = { source: "sbi-vc-trade", runId: result.summary.runId };
+  let registered = await registerCollectionRun(env, registration);
+  // Yearly report indices exceed one production registration budget. Resume
+  // its persisted progress as the ordinary shared-R2 scan does on later ticks.
+  for (
+    let continuation = 0;
+    registered.outcome === "pending" && continuation < result.terminal.artifacts.length + 1;
+    continuation += 1
+  )
+    registered = await registerCollectionRun(env, registration);
   expect(registered).toMatchObject({ outcome: "registered" });
   if (registered.outcome !== "registered") throw new Error("synthetic_registration_failed");
+  expect(
+    await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM observation_fetch_artifacts WHERE fetch_run_id=?",
+    )
+      .bind(registered.fetchRunId)
+      .first(),
+  ).toEqual({ count: result.terminal.artifacts.length });
   return { ...result, fetchRunId: registered.fetchRunId };
 }
 async function publishedFor(run: number): Promise<string[]> {

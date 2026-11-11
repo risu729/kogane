@@ -364,6 +364,18 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
     },
   ],
   "sbi-vc-trade": [
+    {
+      key: /^monthly-report-\d{8}-[a-f0-9]{64}\.pdf$/u,
+      role: "provider_document",
+      mediaTypes: ["application/pdf"],
+      dataset: "monthly-report-pdf",
+    },
+    {
+      key: /^pnl-data-\d{8}-[a-f0-9]{64}\.zip$/u,
+      role: "provider_document",
+      mediaTypes: ["application/zip"],
+      dataset: "pnl-data-zip",
+    },
     ...jsonByName(
       ["cash-balances", "account-margin", "position-summary", "executions-recent-page-0001"],
       "collector_derived",

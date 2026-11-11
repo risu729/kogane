@@ -39,6 +39,16 @@ function gateway(_input: string | URL | Request, init?: RequestInit): Promise<Re
     data: Record<string, unknown>;
   };
   const paged = request.event === "executionList" || request.event === "getCashflowList";
+  if (request.event === "tradeReportList")
+    return Promise.resolve(
+      Response.json({
+        meta: { status: "OK" },
+        body:
+          request.data.statementType === "MONTH" || request.data.statementType === "YEAR"
+            ? { list: [], pageNumber: "0", totalSize: "0", totalNumOfPages: "0" }
+            : { list: [] },
+      }),
+    );
   return Promise.resolve(
     Response.json({
       meta: { status: "OK", secureKey: "synthetic-next-secure", timestamp: "synthetic" },
@@ -105,7 +115,12 @@ describe("the stored collector manifest", () => {
     const planned = read.manifest.artifacts.filter(
       (entry) => entry.artifactKey !== "manifest.json",
     );
-    expect(manifest.artifacts).toHaveLength(8);
+    const year = Number(
+      new Intl.DateTimeFormat("en-US", { year: "numeric", timeZone: "Asia/Tokyo" }).format(
+        new Date(),
+      ),
+    );
+    expect(manifest.artifacts).toHaveLength(9 + 2 * (year - 2018 + 1));
     expect(manifest.artifacts).toHaveLength(planned.length);
     for (const entry of manifest.artifacts) {
       const terminalEntry = planned.find(

@@ -130,6 +130,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "a2906d66cf2be2785a8644007962ccf62e68d4cbdf90632de7e9613e3488911e",
     "poc/observation-pipeline/src/parsers/sbi-vc-common.ts":
       "6a3ea6520c1ebab0689aee143c0f55cc9f86094bf9ad129e9b9af2bb3d2932f1",
+    "poc/observation-pipeline/src/parsers/sbi-vc-documents.ts":
+      "d4d3ed503c99bcfe3ce9cee8c1362c9a0a8f93a29912da833a354df30aabf8de",
     "poc/observation-pipeline/src/parsers/sbi-vc-executions.ts":
       "cafbd219c21c71c7284342664e553c5e031037ce79669e03e5ec411966f961e5",
     "poc/observation-pipeline/src/parsers/sbi-vc-position-summary.ts":
@@ -719,6 +721,19 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/parsers/coverage.ts",
         "poc/observation-pipeline/src/parsers/sbi-vc-cashflows.ts",
         "poc/observation-pipeline/src/parsers/sbi-vc-common.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "sbi-vc-document-metadata": {
+      version: "1.0.0",
+      codeDigest: "461e4e5670209e096ab7baa5d73d03f66f2f6701d96f79c5e86142f3da87538a",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-vc-documents.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],

@@ -31,6 +31,7 @@ import type {
   CollectionUnit,
   HealthState,
   SharedRunSummary,
+  ProviderDocument,
 } from "./types";
 
 export type { SharedRunSummary };
@@ -61,7 +62,9 @@ export class TerminalPersistenceError extends Error {}
 /** One already-sanitized gateway response, as it was staged. */
 export interface SharedCapture {
   readonly dataset: string;
-  readonly body: string;
+  readonly body: string | Uint8Array;
+  readonly artifactKey?: string;
+  readonly document?: ProviderDocument;
 }
 
 /** Where the ops API's operation and this attempt enter the terminal (03 §3). */
@@ -103,12 +106,13 @@ async function artifactOf(options: {
   bytes: Uint8Array;
   role: string;
   unitKey?: string;
+  mediaType?: string;
 }): Promise<PersistArtifact> {
   return {
     artifactKey: options.artifactKey,
     sha256: await sha256Hex(options.bytes),
     byteSize: options.bytes.byteLength,
-    mediaType: JSON_MEDIA_TYPE,
+    mediaType: options.mediaType ?? JSON_MEDIA_TYPE,
     role: options.role,
     ...(options.unitKey === undefined ? {} : { unitKey: options.unitKey }),
     body: { kind: "bytes", bytes: options.bytes },
@@ -175,7 +179,16 @@ function collectionUnits(manifest: CollectionManifest): CollectionUnit[] {
   );
 }
 
-function artifactUnit(dataset: string, manifest: CollectionManifest): string {
+function artifactUnit(
+  dataset: string,
+  manifest: CollectionManifest,
+  document?: ProviderDocument,
+): string {
+  if (document !== undefined) return `${document.kind}-${document.basisDate}`;
+  if (dataset === "report-annual-list-page-0001") return "report-annual-index";
+  const index = /^report-(?:month|pnl)-list-(\d{4})(?:-page-\d{4})?$/u.exec(dataset);
+  if (index) return `report-index-${index[1]}`;
+  if (/^pnl-check-\d{8}$/u.test(dataset)) return dataset;
   return dataset.startsWith("cashflows-all-") &&
     collectionUnits(manifest).some((unit) => unit.unitKey === FULL_CASHFLOW_UNIT_KEY)
     ? FULL_CASHFLOW_UNIT_KEY
@@ -235,7 +248,7 @@ function runFields(input: SharedRunInput, transformations: TerminalTransformatio
       unitKey: unit.unitKey,
       unitKind: UNIT_KIND,
       artifactCount: input.manifest.artifacts.filter(
-        (entry) => artifactUnit(entry.dataset, input.manifest) === unit.unitKey,
+        (entry) => artifactUnit(entry.dataset, input.manifest, entry.document) === unit.unitKey,
       ).length,
       coverageStatus:
         unit.status === "success" ? "complete" : unit.status === "partial" ? "partial" : "unknown",
@@ -255,25 +268,30 @@ function runFields(input: SharedRunInput, transformations: TerminalTransformatio
  * complete observation of an empty account (G1-09).
  */
 export async function buildSharedRunPlan(input: SharedRunInput): Promise<PersistRunPlan> {
-  const staged = new Map(input.captures.map((capture) => [capture.dataset, capture.body]));
+  const staged = new Map(
+    input.captures.map((capture) => [capture.artifactKey ?? capture.dataset, capture]),
+  );
   const artifacts: PersistArtifact[] = [];
   const transformations: TerminalTransformation[] = [];
   for (const entry of input.manifest.artifacts) {
-    const body = staged.get(entry.dataset);
-    if (body === undefined) throw new Error("shared_capture_missing");
-    assertNoSessionKey(body);
-    const artifactKey = `${entry.dataset}.json`;
+    const capture = staged.get(entry.artifactKey ?? entry.dataset);
+    if (capture === undefined) throw new Error("shared_capture_missing");
+    const body = capture.body;
+    if (typeof body === "string") assertNoSessionKey(body);
+    else if (entry.document === undefined) throw new Error("shared_binary_document_missing");
+    const artifactKey = entry.artifactKey ?? `${entry.dataset}.json`;
     artifacts.push(
       await artifactOf({
         artifactKey,
-        bytes: encoder.encode(body),
-        role: COLLECTOR_DERIVED_ROLE,
-        unitKey: artifactUnit(entry.dataset, input.manifest),
+        bytes: typeof body === "string" ? encoder.encode(body) : body,
+        role: entry.document === undefined ? COLLECTOR_DERIVED_ROLE : "provider_document",
+        unitKey: artifactUnit(entry.dataset, input.manifest, entry.document),
+        ...(entry.document === undefined ? {} : { mediaType: entry.document.mediaType }),
       }),
     );
     transformations.push({
-      transformationId: `${artifactKey}:redacted`,
-      stepKind: "redacted",
+      transformationId: `${artifactKey}:${entry.document === undefined ? "redacted" : "extracted"}`,
+      stepKind: entry.document === undefined ? "redacted" : "extracted",
       transformerId: "sbi-vc-trade-worker",
       transformerVersion: input.manifest.schemaVersion,
       // The unredacted gateway envelope carried the session `secureKey` and is

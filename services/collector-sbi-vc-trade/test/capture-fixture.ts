@@ -68,6 +68,14 @@ async function capture() {
       event: string;
       data: Record<string, unknown>;
     };
+    if (event === "tradeReportList")
+      return Response.json({
+        meta: { status: "OK" },
+        body:
+          data.statementType === "MONTH" || data.statementType === "YEAR"
+            ? { list: [], pageNumber: "0", totalSize: "0", totalNumOfPages: "0" }
+            : { list: [] },
+      });
     if (event === "getCashflowList" && data.pageSize === "20") {
       if (scenario === "raw-error") return new Response("synthetic unavailable", { status: 503 });
       return Response.json({

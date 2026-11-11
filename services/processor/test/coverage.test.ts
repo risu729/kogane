@@ -170,6 +170,8 @@ test("the migration chain names every explicit policy and preserves other run-sc
     "sbi-realised-gains",
     "sbi-shinsei-exchange-rate",
     "sbi-shinsei-monthly-report-metadata",
+    "sbi-vc-document-metadata",
+    "sbi-vc-document-metadata",
     "smbc-foreign-ordinary-balance",
     "st-george-balances",
     "vpass-credit-snapshot",

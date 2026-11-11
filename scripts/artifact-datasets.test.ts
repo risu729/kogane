@@ -348,6 +348,22 @@ const SAMPLES: readonly Sample[] = [
     dataset: null,
   },
   // services/collector-sbi-vc-trade/src/shared-collection.ts (`<dataset>.json`)
+  {
+    source: "sbi-vc-trade",
+    artifactKey: `monthly-report-20260930-${"a".repeat(64)}.pdf`,
+    role: "provider_document",
+    mediaType: "application/pdf",
+    dataset: "monthly-report-pdf",
+    unitKey: "monthly-report-20260930",
+  },
+  {
+    source: "sbi-vc-trade",
+    artifactKey: `pnl-data-20260930-${"b".repeat(64)}.zip`,
+    role: "provider_document",
+    mediaType: "application/zip",
+    dataset: "pnl-data-zip",
+    unitKey: "pnl-data-20260930",
+  },
   ...[
     "cash-balances",
     "account-margin",
@@ -732,6 +748,8 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
     "balance-summary-and-stage",
   ],
   "sbi-vc-trade": [
+    "monthly-report-pdf",
+    "pnl-data-zip",
     "cash-balances",
     "account-margin",
     "position-summary",
