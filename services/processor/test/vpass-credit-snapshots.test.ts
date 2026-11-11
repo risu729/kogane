@@ -18,7 +18,7 @@ import { registerCollectionRun } from "../src/collection/index.ts";
 import { sweep } from "../src/worker.ts";
 import { DATED_BALANCES_SQL } from "../../../packages/read-model/src/dated-state.ts";
 import { resolveMetric } from "../../../packages/domain/src/metrics.ts";
-import { reportedStateCutoff } from "../../../packages/domain/src/reported-state.ts";
+import { captureDate, reportedStateCutoff } from "../../../packages/domain/src/reported-state.ts";
 let mf: Miniflare;
 let env: Env;
 beforeAll(async () => {
@@ -160,8 +160,19 @@ test("daily collector → R2 → registration → publication → real reader se
       ).first<{ n: number }>()
     )?.n,
   ).toBe(8);
+  // The collector stamps completion with its real clock. Ask for the date of
+  // the last published synthetic capture so this fixture never ages past its cutoff.
+  const latestCapture = await env.DB.prepare(
+    `SELECT MAX(fa.fetched_at) AS captured_at
+     FROM observation_fetch_artifacts fa
+     JOIN published_parse_runs pub ON pub.fetch_artifact_id=fa.id
+     JOIN parse_runs p ON p.id=pub.parse_run_id
+     WHERE p.parser_name='vpass-credit-snapshot'`,
+  ).first<{ captured_at: string | null }>();
+  const reportedDate = captureDate(latestCapture?.captured_at ?? "");
+  expect(reportedDate).not.toBeNull();
   const { results } = await env.DB.prepare(DATED_BALANCES_SQL)
-    .bind(reportedStateCutoff("2026-11-11"))
+    .bind(reportedStateCutoff(reportedDate!))
     .all<{
       source_account: string;
       metric: string;
@@ -220,7 +231,7 @@ test("daily collector → R2 → registration → publication → real reader se
         .first<T>();
     },
   };
-  const reported = await queryDatedState(sql, { date: "2026-11-11", source: "vpass" });
+  const reported = await queryDatedState(sql, { date: reportedDate!, source: "vpass" });
   expect(reported.accounts).toHaveLength(2);
   expect(reported.accounts.flatMap((account) => account.balances)).toHaveLength(28);
   expect(
