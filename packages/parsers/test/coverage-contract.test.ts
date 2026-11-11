@@ -34,6 +34,7 @@ for (const file of [
   "sbi-shinsei-exchange-rate-expected.json",
   "sbi-shinsei-observed-shapes-expected.json",
   "vpass-credit-expected.json",
+  "moneyforward-detail-expected.json",
 ]) {
   const frozen = JSON.parse(
     readFileSync(join(FIXTURES_ROOT, "coverage-contract", file), "utf8"),
@@ -113,6 +114,9 @@ const CLAIMS: Record<string, Record<string, Expectation>> = {
     "authori-visible": complete(12),
     "authori-hidden": complete(0),
     "revo-exact": complete(2),
+  },
+  "moneyforward-detail-balances": {
+    "complete-rows": { ...complete(1, ["row_unreadable", "row_unreadable"]), expected: 1 },
   },
   "sbi-foreign-cash-balances": {
     "complete-empty": complete(0),
@@ -273,7 +277,9 @@ for (const { parser, cases } of CONTRACT_PARSERS) {
         expect(coverage.observedCount).toBe(result.observations.length);
         expect(coverage.evidenceRefs.length).toBeGreaterThan(0);
         // Evidence references are locators and page markers, never provider values.
-        if (parser.name === "prestia-bank-balances")
+        if (parser.name === "moneyforward-detail-balances")
+          expect(coverage.evidenceRefs).toEqual(["html:section.accounts-form"]);
+        else if (parser.name === "prestia-bank-balances")
           expect(coverage.evidenceRefs).toEqual([
             "html:form[name=ACKZDSP]",
             "html:section=balance-summary",

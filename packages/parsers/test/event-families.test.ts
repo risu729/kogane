@@ -67,6 +67,7 @@ const NOT_IN_REGISTRY = [
   "vpass-credit-snapshot",
   "mizuho-account-list",
   "moneyforward-canonical-evidence-boundary",
+  "moneyforward-detail-balances",
   "myjcb-canonical-evidence-boundary",
   "myjcb-credit-past-month-balances",
   "myjcb-credit-statement-total",

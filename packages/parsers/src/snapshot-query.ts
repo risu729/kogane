@@ -11,6 +11,7 @@
 // policy row.
 export const SNAPSHOT_DATASETS = [
   ["vpass-credit-snapshot", "credit-snapshot"],
+  ["moneyforward-detail-balances", "account-detail"],
   ["sbi-domestic-cash-positions", "domestic-cash-positions"],
   ["sbi-foreign-cash-positions", "foreign-cash-positions"],
   ["sbi-account-assets-current", "account-assets-current"],
