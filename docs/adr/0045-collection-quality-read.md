@@ -481,3 +481,49 @@ registration tests cover refused and registered failed terminals, absent and
 invalid codes, and redelivery. Query tests check normalization and distinct
 buckets, frozen SQL differential tests preserve old counts and selection, and
 the browser renders both views with the existing accessibility checks.
+
+## Amendment: V Point recovery is current state, while failed receipts remain history (2026-11-11)
+
+Status: proposed. Related: [#1301](https://github.com/risu729/kogane/issues/1301).
+
+Context. Both observed daily expired-session reads completed automatic email
+login and a separate successful post-auth collection. The original scheduled
+receipt intentionally remained failed. Treating it as permanently requiring a
+person would misstate recovery; omitting any session-refresh reason would leave
+an unresolved expiry as a generic failure.
+
+Options considered: rewrite the original receipt as successful; treat every
+pending receipt as a permanent owner action; leave expiry generic; or derive
+current waiting state from the existing failed receipt and newest registered
+fetch. The last option is selected. Receipts and raw evidence remain immutable.
+
+Decision. Only V Point's `reauthentication_pending` and
+`human_required_session_refresh` receipt codes are a current session-refresh
+action while unresolved. A registered successful newest fetch clears that
+current action only when its completion is strictly later than the actual
+failed occurrence's finish time, falling back to its start. Nominal time does
+not establish recovery. Equal, invalid or absent times and partial/failed later
+fetches leave recovery unresolved. The scheduled receipt, its failure code and
+failed acquisition reasons remain in the read after recovery. V Point Pay and
+unrelated authentication codes retain their existing interpretation.
+
+The cell and account readers reuse the existing bounded schedule-quality SQL
+for V Point so they have the same actual failure anchor as the summary. They
+refuse more than 200 configured jobs rather than silently truncating that read.
+Other sources keep their source-keyed waiting-state query. SQL text, authority,
+credential flow and provider behavior are unchanged.
+
+Consequences. The UI/MCP wire contract's existing `user_action_required` reason
+exposes the owner's existing session-refresh option during unresolved recovery.
+The automatic email flow remains the first path, and this reason does not prove
+a person must intervene immediately. A later registered success clears current
+waiting state without hiding the failed attempt. A successful but unregistered
+terminal alone cannot establish recovery in this read.
+
+Verification. Synthetic SQLite tests exercise actual-time versus nominal-time
+ordering, equal and missing/invalid anchors, failed/partial later runs, a newer
+failure after yesterday's success, source isolation, summary/cell/account
+agreement and the shared job bound. Native collector tests exercise expired
+read, challenge, email and successful separate persistence while retaining the
+original failed terminal. The [dated source note](../sources/v-point.md#2026-11-11-scheduled-session-refusal-and-automatic-email-recovery)
+records production evidence and the unproven scheduled-success acceptance.
