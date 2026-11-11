@@ -150,7 +150,7 @@ parser histories cover complete/partial/failed/mismatched captures, bounded
 drains and unchanged frozen legacy candidates. This justifies the derived
 plan expectations without changing production SQL for plan cosmetics.
 
-### Statement files
+### Statement files (original 2026-11-10 boundary)
 
 The scheduled credit walk still reads every provider-offered statement
 position, including sparse past-JSON positions, without generating missing
@@ -158,7 +158,7 @@ months. The existing h2 month / h3 schedule distinction is unchanged.
 Finalised markers and the actual same-month statement hrefs determine offers;
 a different PDF-labelled newsletter does not qualify.
 
-Files remain unfetched. The sanitized manifest records the closed
+At this original boundary, files remained unfetched. The sanitized manifest records the closed
 `documentCode: statement_export_bytes_unverified` beside offered kinds.
 Statement HTML and its observed export offers are retained. An unavailable
 file response has not been observed; the file gap is recorded without
@@ -192,3 +192,63 @@ gaps, shrinking sets and partial promotion. A frozen prior SQL read is compared
 on seeded scaled captures, and query plans are checked without statistics.
 The collector-plan/registration/parser/promotion/reader path is checked with
 synthetic evidence before the PR is ready. No live publication is claimed.
+
+## Amendment 2026-11-12: retain observed original credit files
+
+The source observation now witnesses normal-browser CSV/PDF/OFX downloads on
+two credit displays, and exact linked-credit GET requests, attachment headers
+and byte envelopes. It supersedes this ADR's earlier unverified-file boundary
+for those credit formats. Debit export bytes and durable card switching remain
+unverified. No credentials, auth changes or live collector run are introduced.
+
+Production explicitly selects the file-fetch mode after the existing menu and
+statement walk. Only exact same-month observed statement hrefs authorize reads:
+`detailMonth` plus `output=csv|pdf|money` on the established allowlisted paths,
+with no duplicate or additional query fields. Missing-month historical links,
+newsletters, cross-origin links and conflicting selectors authorize no request.
+Confirmed readable pages supply payment-month provenance; positional selectors
+never become calendar identity. Every currently offered position is walked,
+including sparse past-JSON positions, without a window or continuation cursor.
+
+The read client requires the observed attachment/media headers, refuses
+redirects and retries, and bounds each export to 30 seconds and 8 MiB while
+streaming. One request-scoped 32 MiB export budget is shared across all
+configured connections. The remaining allowance caps each response stream
+before decoding; retained validated originals consume it. Failed files retain
+no bytes and release their temporary allowance. Once exhausted, later file
+requests are skipped with the closed `budget_exhausted` result, while later
+financial pages still run. This is an operational memory guard, not a provider
+retention limit. A full offered archive remains conditional on fitting it. Shared validation checks the observed CP932/CRLF CSV header anywhere
+after its unclassified preamble, PDF 1.4 signature and EOF, and UTF-8 OFX 1.02
+SGML envelope. These checks establish file envelopes only. They neither prove
+file financial contents nor extract dates, amounts, rows or account identity.
+The collector retains original bytes without redaction or transcoding in the
+private evidence bucket; original provider filenames and response/session
+headers are not stored. Existing content addressing writes a repeated hash once
+and retains changed-byte revisions. Stable artifact keys are
+`<connection>/credit-document-YYYY-MM.<kind>`; the period is the page's validated
+provenance. Conflicting same-byte manifest period metadata remains refused by
+the existing metadata extractor, without choosing a witness.
+
+Each file has its own `connection:document:credit:YYYY-MM:kind` unit. A malformed
+file cannot discard its valid financial page/ledger, healthy sibling or later
+month. Its closed result is unavailable and the parent is partial. A session-wide
+401/403/429 or redirect stops further provider reads and preserves the valid
+current financial artifacts, without asserting complete history. Unknown export
+offer shapes have a separate failed discovery unit. Manifests contain only
+closed results and page-period provenance, never provider error text.
+
+Registration v12 adds exactly the three credit export datasets while v1–v11
+remain reproducible. `myjcb-statement-document-metadata@1.0.0` revalidates file
+bytes and exact page-period/artifact/unit metadata, publishing zero financial
+observations and one evidence-only coverage claim. Migration 0101 opts only
+these datasets into per-file success eligibility (`snapshot_selection=0`,
+no empty replacement). Successful files can therefore parse on a partial
+parent without changing monetary snapshot selection. The local store seeds
+missing policy rows individually and preserves operator alternatives.
+
+The document catalogue becomes partial. Retention is whatever the provider
+actually offered, not a promise that all fifteen calendar months or debit files
+were obtained. Unobserved debit formats, J-POINT row statuses, full production
+archival and live reader validation keep issue 1251 open. Deployment is outside
+this change.

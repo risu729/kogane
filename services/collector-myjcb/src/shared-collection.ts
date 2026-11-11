@@ -1,3 +1,8 @@
+import { documentFilename, documentUnitKey } from "./documents";
+import {
+  validateMyJcbCreditExport,
+  type MyJcbExportKind,
+} from "../../../packages/domain/src/myjcb-statement-export";
 import { readMyJcbJPointResponse } from "../../../packages/domain/src/myjcb-jpoint-response";
 import { readJPointHistory } from "../../../packages/domain/src/myjcb-jpoint-history";
 // MyJCB → the shared DATA bucket (unified plan 03, U09).
@@ -53,13 +58,8 @@ export const PRODUCER = "collector-myjcb";
  */
 const TRANSFORMER_ID = PRODUCER;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
-/**
- * Datasets the central path has never accepted: the importer refuses a run
- * that names one (`manifest_dataset_unobserved`) because no validator for
- * their bytes exists yet. Shared mode refuses them the same way rather than
- * storing centrally what the legacy path never let through.
- */
-const UNOBSERVED_DATASETS = new Set(["credit-csv", "credit-pdf", "credit-ofx"]);
+/** Only the observed credit export datasets are admitted as original documents. */
+const documentDataset = (dataset: string): boolean => /^credit-(?:csv|pdf|ofx)$/u.test(dataset);
 const historyDataset = (dataset: string): boolean =>
   dataset === "jpoint-history" || dataset === "jpoint-history-html" || dataset === "jpoint-inquiry";
 
@@ -315,6 +315,16 @@ function manifestBytes(
       ...(connection.jpointHistoryCode === undefined
         ? {}
         : { jpointHistoryCode: pointCode(connection.jpointHistoryCode) }),
+      ...(connection.documentCode === "partial" ? { documentCode: "partial" as const } : {}),
+      ...(connection.documentResults === undefined
+        ? {}
+        : {
+            documentResults: connection.documentResults.map(({ period, kind, code }) => ({
+              period,
+              kind,
+              code,
+            })),
+          }),
       connectionId: connection.connectionId,
       bootstrapMode: connection.bootstrapMode,
       status: connection.status,
@@ -337,7 +347,14 @@ function manifestBytes(
         ? {}
         : {
             exportOffers: exportOffers(connection.exportOffers),
-            documentCode: "statement_export_bytes_unverified" as const,
+            documentCode:
+              connection.documentCode === "partial"
+                ? ("partial" as const)
+                : connection.documentResults === undefined
+                  ? ("statement_export_bytes_unverified" as const)
+                  : connection.documentResults.every((doc) => doc.code === "collected")
+                    ? ("collected" as const)
+                    : ("partial" as const),
           }),
       ...(connection.schedulePages === undefined || connection.schedulePages.length === 0
         ? noSchedulePages(connection.schedulePageCount)
@@ -362,6 +379,15 @@ function manifestBytes(
 
 /** Build the persist plan for a finished run. Pure apart from hashing. */
 export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPlan> {
+  if (
+    input.status === "success" &&
+    input.connections.some(
+      ({ summary }) =>
+        summary.documentCode === "partial" ||
+        (summary.documentResults ?? []).some((doc) => doc.code !== "collected"),
+    )
+  )
+    input = { ...input, status: "partial" };
   const outcome: ProviderOutcome = input.status;
   const errorCode = runErrorCode(input);
   // A failed run keeps no artifact: there is nothing whose persistence could
@@ -378,11 +404,30 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
     const unitKey = connection.summary.connectionId;
     const kept = failed ? [] : connection.artifacts;
     for (const artifact of kept) {
-      if (UNOBSERVED_DATASETS.has(artifact.dataset)) {
-        throw new Error("artifact_dataset_unobserved");
-      }
       const bytes = bodyBytes(artifact.body);
       const role = artifactRole(artifact);
+      if (documentDataset(artifact.dataset)) {
+        const kind = artifact.dataset.slice(7) as MyJcbExportKind;
+        const result = connection.summary.documentResults?.filter(
+          (doc) => doc.period === artifact.period && doc.kind === kind && doc.code === "collected",
+        );
+        const mediaType =
+          kind === "csv"
+            ? "text/csv; charset=windows-31j"
+            : kind === "pdf"
+              ? "application/pdf"
+              : "application/x-ofx; charset=utf-8";
+        if (
+          typeof artifact.body === "string" ||
+          result?.length !== 1 ||
+          artifact.statementState !== "confirmed" ||
+          artifact.period === undefined ||
+          artifact.filename !== documentFilename(artifact.period, kind) ||
+          artifact.mediaType !== mediaType
+        )
+          throw new Error("myjcb_document_metadata_invalid");
+        validateMyJcbCreditExport(kind, bytes);
+      }
       if (artifact.dataset === "jpoint-balance") {
         if (
           artifact.filename !== "jpoint-balance.json" ||
@@ -417,13 +462,15 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
         byteSize: bytes.byteLength,
         mediaType: artifact.mediaType.split(";", 1)[0]!.trim(),
         role,
-        unitKey: historyDataset(artifact.dataset)
-          ? `${unitKey}:j-point-history`
-          : artifact.dataset === "jpoint-balance"
-            ? pointUnitKey(unitKey)
-            : artifact.dataset.startsWith("debit-other-")
-              ? `${unitKey}:debit-other`
-              : unitKey,
+        unitKey: documentDataset(artifact.dataset)
+          ? documentUnitKey(unitKey, artifact.period!, artifact.dataset.slice(7) as MyJcbExportKind)
+          : historyDataset(artifact.dataset)
+            ? `${unitKey}:j-point-history`
+            : artifact.dataset === "jpoint-balance"
+              ? pointUnitKey(unitKey)
+              : artifact.dataset.startsWith("debit-other-")
+                ? `${unitKey}:debit-other`
+                : unitKey,
         body: { kind: "bytes", bytes },
       });
       stored.push({
@@ -468,6 +515,48 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
         });
       }
     }
+    if (connection.summary.documentCode === "partial")
+      units.push({
+        unitKey: `${unitKey}:document-discovery`,
+        unitKind: "statement-document-discovery",
+        artifactCount: 0,
+        coverageStatus: "unknown",
+        safeErrorCode: "statement_export_offer_unsupported",
+      });
+    const documentResults = connection.summary.documentResults;
+    const documentArtifacts = kept.filter((artifact) => documentDataset(artifact.dataset));
+    const documentKeys = new Set<string>();
+    for (const doc of documentResults ?? []) {
+      if (
+        !["collected", "unavailable", "budget_exhausted"].includes(doc.code) ||
+        !EXPORT_KINDS.has(doc.kind)
+      )
+        throw new Error("myjcb_document_outcome_invalid");
+      const key = documentUnitKey(unitKey, doc.period, doc.kind);
+      if (documentKeys.has(key)) throw new Error("myjcb_document_outcome_duplicate");
+      documentKeys.add(key);
+      const count = documentArtifacts.filter(
+        (artifact) => artifact.filename === documentFilename(doc.period, doc.kind),
+      ).length;
+      if (!failed && count !== (doc.code === "collected" ? 1 : 0))
+        throw new Error("myjcb_document_artifact_count_invalid");
+      units.push({
+        unitKey: key,
+        unitKind: "statement-document",
+        artifactCount: count,
+        coverageStatus: !failed && doc.code === "collected" ? "complete" : "unknown",
+        ...(!failed && doc.code === "collected"
+          ? {}
+          : {
+              safeErrorCode:
+                doc.code === "budget_exhausted"
+                  ? "statement_export_budget_exhausted"
+                  : "statement_export_unavailable",
+            }),
+      });
+    }
+    if (documentResults === undefined && documentArtifacts.length)
+      throw new Error("myjcb_document_outcome_missing");
     const point = connection.summary.jpointCode;
     const history = connection.summary.jpointHistoryCode;
     const historyArtifacts = kept.filter((a) => historyDataset(a.dataset));
@@ -528,7 +617,12 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
     units.push({
       unitKey,
       unitKind: "connection",
-      artifactCount: kept.length - pointArtifacts - otherArtifacts - historyArtifacts.length,
+      artifactCount:
+        kept.length -
+        pointArtifacts -
+        otherArtifacts -
+        historyArtifacts.length -
+        documentArtifacts.length,
       coverageStatus: failed ? "unknown" : coverage(connection.summary.status),
       ...(connectionCode === undefined ? {} : { safeErrorCode: connectionCode }),
     });

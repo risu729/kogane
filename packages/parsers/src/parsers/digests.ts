@@ -26,6 +26,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "89fba9fd5860dbabc0c1e15e97a5318bb69e8d0ecd6409c504e7c73d25e0f3d1",
     "packages/domain/src/myjcb-skip-payment-schedule.ts":
       "73f68bde3baede21b9c3826eb1c42c04fc315d684e927aec0bf28932e6548d48",
+    "packages/domain/src/myjcb-statement-export.ts":
+      "1695e71fa23bd50423d68b363a0bf16bc3857d01f1536268db0e6adb3881bcef",
     "packages/domain/src/myjcb-statement-heading.ts":
       "cc3b16e3df6274bb2cbaf86275a30ec2fa836fc8160052115a2ee5b1b12248ca",
     "packages/domain/src/myjcb-statement-page.ts":
@@ -64,6 +66,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "743299901b3f796a7e53ff39db06b8cacf9039136c30fd8daeec66dbed4545aa",
     "poc/observation-pipeline/src/parsers/myjcb-debit.ts":
       "351cc8786811af43e65b9e8804cb7296442d15bd39c3ec28f00068e6fe3a7e05",
+    "poc/observation-pipeline/src/parsers/myjcb-documents.ts":
+      "ca1efcabc682f347ed4d24ac2b4d9252b2f357c6ed759782765d30dee6ffafd3",
     "poc/observation-pipeline/src/parsers/myjcb-jpoint-history-html.ts":
       "5718befa9c22a10dddf7c4c0cc7ef931a90620e7436f7873a75b1b44bf2f6099",
     "poc/observation-pipeline/src/parsers/myjcb-jpoint-history.ts":
@@ -442,6 +446,20 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/scheduled-payment.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "myjcb-statement-document-metadata": {
+      version: "1.0.0",
+      codeDigest: "b2560f34f54400bf9d380b94fc22615b177a128018d49da25aaa1d8b6c23ae8b",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "packages/domain/src/myjcb-statement-export.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/myjcb-documents.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],
     },

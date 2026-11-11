@@ -33,6 +33,8 @@ import {
   myJcbEvidenceOnly,
   myJcbPastMonthBalances,
 } from "../src/parsers/myjcb.ts";
+import { myJcbDocuments } from "../src/parsers/myjcb-documents.ts";
+import { creditExportBytes } from "./myjcb-document-fixture.ts";
 import { myJcbJPointBalance } from "../src/parsers/myjcb-jpoint.ts";
 import { myJcbDebitLedger, myJcbDebitOtherStatement } from "../src/parsers/myjcb-debit.ts";
 import { myJcbSkipPaymentSchedule } from "../src/parsers/myjcb-skip-payment-schedule.ts";
@@ -74,6 +76,7 @@ import { skipMeta, skipPage } from "./myjcb-skip-payment-fixture.ts";
 
 /** PARSERS entries whose rows are balances, valuations, scheduled payments or none. */
 const NOT_IN_REGISTRY = [
+  "myjcb-statement-document-metadata",
   "sbi-delivered-document-metadata",
   "sbi-income-payments",
   "sbi-realised-gains",
@@ -433,6 +436,18 @@ const MF_EVIDENCE = { fetchUnitKey: null, statementState: null, period: null, mi
 const sbiVcDocumentBytes = encode("%PDF-1.7\nSynthetic private report\n%%EOF\n");
 const sbiVcDocumentHash = createHash("sha256").update(sbiVcDocumentBytes).digest("hex");
 const OUTSIDE_CASES: Case[] = [
+  one(
+    myJcbDocuments,
+    "original-credit-export",
+    meta("myjcb", "credit-pdf", {
+      mime: "application/pdf",
+      artifactKey: "synthetic/credit-document-2098-01.pdf",
+      period: "2098-01",
+      statementState: "confirmed",
+      fetchUnitKey: "synthetic:document:credit:2098-01:pdf",
+    }),
+    creditExportBytes("pdf"),
+  ),
   one(
     sbiDocuments,
     "delivered-report-evidence",

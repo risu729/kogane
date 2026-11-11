@@ -480,7 +480,7 @@ provider was contacted and no production bucket was read or written.
 | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------ |
 | `<connectionId>/credit-menu.html`, `…/credit-detail-NN.html`, `…/credit-schedule-NN.html`, `…/credit-skip-payment-NN.html`, `…/debit-*.html` | `sanitized_provider_capture` | `redacted` by `myjcb-sanitizer`, no input  |
 | `<connectionId>/credit-past-months.json`                                                                                                     | `provider_response`          | none                                       |
-| `<connectionId>/credit-{csv,pdf,ofx}` exports                                                                                                | `provider_export`            | none                                       |
+| `<connectionId>/credit-document-YYYY-MM.{csv,pdf,ofx}`                                                                                       | `provider_export`            | none                                       |
 | `<connectionId>/credit-ledger-NN.json`                                                                                                       | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
 | `<connectionId>/discovery.json`                                                                                                              | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
 | `manifest.json`                                                                                                                              | `collector_manifest`         | none; names no unit                        |
@@ -506,12 +506,10 @@ v2 runs also replaced the 口座名義 cell with `[redacted:name]`, which
 enforced, checked on the bytes about to leave the Worker: a redaction
 regression throws `artifact_html_redaction_invalid` and the run writes no
 terminal rather than publishing the page. With the importer's second sanitizer
-pass retired, this is the last check before `DATA`. Datasets the importer
-never accepted (`debit-menu`, `debit-detail`, `credit-csv`, `credit-pdf`,
-`credit-ofx` — it refused a manifest naming one with
-`manifest_dataset_unobserved`) are refused here the same way
-(`artifact_dataset_unobserved`): `DATA` holds nothing the legacy path never
-let through. The collector manifest rebuilds each connection and each failure
+pass retired, this is the last check before `DATA`. The retired importer refused unobserved datasets. Current debit HTML and
+credit original exports instead use the observed contracts in ADRs 0101 and
+0107; invalid document metadata or envelopes refuse persistence.
+The collector manifest rebuilds each connection and each failure
 from closed fields: a status, counts, and for a connection that stopped, a
 stop code from `CONNECTION_STOP_CODES`, the month position it stopped at and
 the number of months it kept (failure entries are
@@ -541,10 +539,9 @@ and registration only records it. Each unit states its own coverage
 successful connection, which enumerated its credit months from the menu and
 the past-months response and kept every month's page and the ledger of every
 page that states its state. Export links a page offers for its own month are
-recorded in the manifest (`exportOffers: [{ position, kinds }]`) and not
-fetched: the datasets are refused here (above), so a fetched export would fail
-the run's plan
-([ADR 0005's amendment (b)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-b-export-links-the-third-ledger-header-and-the-stop-page)).
+recorded in the manifest (`exportOffers: [{ position, kinds }]`). Exact observed
+same-month credit links also authorize original file capture under ADR 0107's
+2026-11-12 amendment; each file has an independent unit and closed result.
 A menu link belongs to the last `h2` or `h3` before it. The months are the
 credit menu's links under the `h2` headings 「最新のご利用明細」 and
 「過去の明細」 and the past-months response's available positions; the links
@@ -596,7 +593,7 @@ it keeps the credit menu, the past-months response, the months before it and
 `credit_statement_state`, `credit_statement_period`, `credit_page_repeated`
 (the same page bytes as an earlier position's page read as another state or
 period, [ADR 0005's amendment (h)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-29-h-a-stored-page-states-only-what-the-page-states)),
-`ledger_parse`, and `export_fetch` only on the fetch path the Worker does not use), and its
+`ledger_parse`, and `export_fetch` for session-wide export denial), and its
 manifest entry records the code, the position and the count of months kept.
 On `credit_statement_state`, `credit_statement_period` and `ledger_parse` the
 page it stopped on is also kept, redacted, as an `unknown` `credit-detail`
@@ -633,6 +630,23 @@ G1-08, G1-09, G1-15, G1-16, G3-08, G3-11) and
 `services/collector-myjcb/test/shared-parity.test.ts` (the shared plan stores
 the collector's redacted pages unchanged and keeps the manifest facts). No
 provider was contacted and no production bucket was read or written.
+
+The 2026-11-12 amendment to [ADR 0107](adr/0107-myjcb-point-history-and-document-boundary.md)
+supersedes the earlier credit export failure boundary above. Production now
+fetches exact same-month confirmed CSV/PDF/OFX offers and validates the observed
+attachment headers and byte envelopes, with an 8 MiB file limit and a shared
+32 MiB run export budget enforced while streaming. Budget exhaustion is an
+explicit incomplete file result and skips later exports while financial
+pages continue. Original bytes remain private and
+content-addressed; stable artifact keys name connection, page payment month
+and format. A malformed file has an independent failed unit and makes the
+parent partial while preserving healthy financial pages, sibling files and
+later months. Session-wide redirect/auth/rate-limit denial still stops reads.
+Registration v12 adds only these file datasets; v1–v11 mappings stay frozen.
+The document parser emits evidence-only claims and no financial rows, with
+migration 0101 per-file eligibility and no monetary snapshot selection.
+Debit export bytes, root-card switching and complete production archival remain
+unverified. The document catalogue stays partial.
 
 ### Vpass (`services/collector-vpass`, `kogane-vpass-collector-poc`)
 

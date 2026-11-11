@@ -98,6 +98,15 @@ const SAMPLES: readonly Sample[] = [
     dataset: "credit-snapshot",
     unitKey: "card-001",
   })),
+  ...(["csv", "pdf", "ofx"] as const).map((kind) => ({
+    source: "myjcb",
+    artifactKey: `conn-a/credit-document-2098-01.${kind}`,
+    role: "provider_export",
+    mediaType:
+      kind === "csv" ? "text/csv" : kind === "pdf" ? "application/pdf" : "application/x-ofx",
+    dataset: `credit-${kind}`,
+    unitKey: `conn-a:document:credit:2098-01:${kind}`,
+  })),
   {
     source: "myjcb",
     artifactKey: "conn-a/debit-detail-01.html",
@@ -877,8 +886,9 @@ describe("the registration dataset table (ADR 0022)", () => {
       "terminal-registration-v9",
       "terminal-registration-v10",
       "terminal-registration-v11",
+      "terminal-registration-v12",
     ]);
-    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v11");
+    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v12");
     const vpass = (await allSamples()).filter((sample) => sample.source === "vpass");
     expect(vpass.filter((sample) => sample.dataset === "statement-page").length).toBe(2);
     for (const sample of vpass) {
@@ -1306,9 +1316,25 @@ test("v11 adds only independently covered SBI PDF documents and preserves every 
     const prior = artifactDataset(sample.source, sample, "terminal-registration-v10");
     const current = artifactDataset(sample.source, sample, "terminal-registration-v11");
     if (sample.dataset === "delivered-document-pdf") {
-      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, -1))
+      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(
+        0,
+        REGISTRATION_CONTRACT_VERSIONS.indexOf("terminal-registration-v11"),
+      ))
         expect(artifactDataset(sample.source, sample, version)).toBeNull();
       expect(current).toBe("delivered-document-pdf");
+    } else expect(current).toBe(prior);
+  }
+});
+
+test("v12 maps only original MyJCB exports and leaves prior versions unchanged", () => {
+  for (const sample of SAMPLES) {
+    const prior = artifactDataset(sample.source, sample, "terminal-registration-v11");
+    const current = artifactDataset(sample.source, sample, "terminal-registration-v12");
+    if (sample.source === "myjcb" && /^credit-(csv|pdf|ofx)$/u.test(sample.dataset ?? "")) {
+      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, -1))
+        expect(artifactDataset(sample.source, sample, version)).toBeNull();
+      expect(current).toBe(sample.dataset);
+      expect(artifactDataset(sample.source, { ...sample, role: "collector_derived" })).toBeNull();
     } else expect(current).toBe(prior);
   }
 });
