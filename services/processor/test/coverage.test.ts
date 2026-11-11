@@ -95,7 +95,8 @@ test("the migration chain names every explicit policy and preserves other run-sc
           row.parser_name !== "sbi-income-payments" &&
           row.parser_name !== "sbi-realised-gains" &&
           row.parser_name !== "myjcb-jpoint-history" &&
-          row.parser_name !== "vpass-credit-snapshot",
+          row.parser_name !== "vpass-credit-snapshot" &&
+          row.parser_name !== "sbi-shinsei-savings-activity",
       )
       .every((row) => row.policy_id === "legacy-warning-compat-v1"),
   ).toBe(true);
@@ -390,6 +391,9 @@ test("the comparison route reports counts, ids and policies only", async () => {
     body.policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
   ).toEqual([...EXPECTED_UNIT_POLICIES]);
   expect(body.datasets.some((row) => row.parserName === "myjcb-jpoint-balance")).toBe(false);
+  expect(body.datasets.some((row) => row.parserName === "sbi-shinsei-savings-activity")).toBe(
+    false,
+  );
   expect(body.datasets.find((d) => d.parserName === "smbc-direct-balance")).toMatchObject({
     sourceId: "smbc-bank",
     legacy: { count: 1 },

@@ -212,7 +212,7 @@ export function cardSettlementReadinessCtes(): string {
  AND json_extract(extra_json,'$._kogane.amountSignSource')='direction'
  AND coefficient LIKE '-%'
  UNION ALL
- SELECT * FROM (${debitBranch("a.source_id='sbi-shinsei-bank' AND p.parser_name='sbi-shinsei-top-balances-and-activity'")}
+ SELECT * FROM (${debitBranch("a.source_id='sbi-shinsei-bank' AND p.parser_name IN ('sbi-shinsei-top-balances-and-activity','sbi-shinsei-savings-activity')")}
  ) WHERE position=1 AND status IS NULL AND unit_ref='JPY' AND json_valid(extra_json)
  AND json_extract(extra_json,'$._kogane.amountSignSource')='debit'
  AND coefficient LIKE '-%'

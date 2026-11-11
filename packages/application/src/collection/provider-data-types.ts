@@ -12,7 +12,8 @@
 // that no parser is named under two sources; which source a parser belongs to
 // is this table's word, checked by review. A provider semantic nobody
 // has observed is not listed (ADR 0004); a correction is a pull request that
-// changes this table and, for a new type or status, the version.
+// changes this table. Changing the vocabulary or a status's meaning also needs
+// a new version (ADR 0087).
 import {
   PROVIDER_DATA_TYPES_VERSION,
   type ProviderDataTypeEntry,
@@ -42,7 +43,6 @@ const missing = (type: ProviderDataTypeEntry["type"], issue: number): ProviderDa
  * history, the electronic reports and product details are still not
  * collected; docs/sources/sbi-shinsei-bank.md and #447's body).
  */
-const BACKLOG = 440;
 
 /** CORE source id → its provider-offered data types, in `PROVIDER_DATA_TYPES` order. */
 export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
@@ -149,7 +149,10 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
       "sbi-shinsei-balance-summary-and-stage",
       "sbi-shinsei-yen-deposit-account",
     ]),
-    partial("cash_movement", ["sbi-shinsei-top-balances-and-activity"], BACKLOG),
+    collected("cash_movement", [
+      "sbi-shinsei-top-balances-and-activity",
+      "sbi-shinsei-savings-activity",
+    ]),
     missing("term_deposit", 1242),
     collected("document", ["sbi-shinsei-monthly-report-metadata"]),
     collected("fx_rate", ["sbi-shinsei-exchange-rate"]),

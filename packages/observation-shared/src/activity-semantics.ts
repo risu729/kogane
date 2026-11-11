@@ -141,6 +141,7 @@ export function classifyActivity(input: {
       "smbc-bank/smbc-direct-transactions",
       "mizuho-bank/mizuho-ordinary-history",
       "sbi-shinsei-bank/sbi-shinsei-top-balances-and-activity",
+      "sbi-shinsei-bank/sbi-shinsei-savings-activity",
       "sbi-vc-trade/sbi-vc-cashflows",
       "mobile-suica/mobile-suica-sf-history",
     ].includes(key)

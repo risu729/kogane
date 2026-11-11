@@ -307,6 +307,22 @@ const SAMPLES: readonly Sample[] = [
   })),
   {
     source: "sbi-shinsei",
+    artifactKey: "raw-period-activity-0001.json",
+    role: "sanitized_provider_capture",
+    mediaType: json,
+    dataset: null,
+    unitKey: `savings-${"a".repeat(32)}`,
+  },
+  {
+    source: "sbi-shinsei",
+    artifactKey: "savings-activity-0001.json",
+    role: "collector_derived",
+    mediaType: json,
+    dataset: "savings-activity",
+    unitKey: `savings-${"a".repeat(32)}`,
+  },
+  {
+    source: "sbi-shinsei",
     artifactKey: "raw-top-accounts-balance-and-activity.json",
     role: "sanitized_provider_capture",
     mediaType: json,
@@ -741,6 +757,7 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
     "foreign-trade-records",
   ],
   "sbi-shinsei-bank": [
+    "savings-activity",
     "monthly-report-pdf",
     "top-accounts-balance-and-activity",
     "yen-deposit-account",

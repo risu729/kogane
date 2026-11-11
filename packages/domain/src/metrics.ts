@@ -896,6 +896,7 @@ export const METRIC_REGISTRY: readonly RegistryEntry[] = [
       transaction("smbc-bank", "smbc-direct-transactions"),
       transaction("mizuho-bank", "mizuho-ordinary-history"),
       transaction("sbi-shinsei-bank", "sbi-shinsei-top-balances-and-activity"),
+      transaction("sbi-shinsei-bank", "sbi-shinsei-savings-activity"),
       transaction("sbi-vc-trade", "sbi-vc-cashflows"),
       transaction("mobile-suica", "mobile-suica-sf-history"),
     ],

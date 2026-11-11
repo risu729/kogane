@@ -346,6 +346,12 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
   // `balance-summary-and-stage` by `sbi-shinsei-balance-summary-and-stage`
   // (ADR 0031).
   "sbi-shinsei": [
+    {
+      key: /^savings-activity-\d{4}\.json$/u,
+      role: "collector_derived",
+      mediaTypes: JSON_TYPE,
+      dataset: "savings-activity",
+    },
     ...jsonByName(
       [
         "top-accounts-balance-and-activity",

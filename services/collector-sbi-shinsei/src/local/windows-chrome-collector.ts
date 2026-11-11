@@ -1,3 +1,4 @@
+import { parseSavingsHistory } from "../savings-activity";
 import { parseMonthlyReports } from "../monthly-reports";
 import { browserDiagnostics } from "../diagnostics";
 import { fileURLToPath } from "node:url";
@@ -141,6 +142,7 @@ export function parseCollectionHandoff(
       "ok",
       "responses",
       ...(partial ? ["failure"] : []),
+      ...(Object.hasOwn(input, "history") ? ["history"] : []),
       ...(Object.hasOwn(input, "documents") ? ["documents"] : []),
     ],
     "collector",
@@ -229,6 +231,21 @@ export function parseCollectionHandoff(
       });
     }
   }
+  let historyArtifacts: RawArtifact[] = [];
+  if (root.history !== undefined) {
+    if (!topBalances || partial) throw new UnknownResponseShapeError("history_handoff_invalid");
+    try {
+      const history = parseSavingsHistory(root.history, topBalances.data, capturedAt);
+      historyArtifacts = history.artifacts;
+      failures.push(...history.failures);
+    } catch {
+      failures.push({
+        operation: "read:history",
+        errorType: "ResponseSchemaError",
+        message: "provider_response_invalid",
+      });
+    }
+  }
   const documents = Object.hasOwn(root, "documents")
     ? parseMonthlyReports(root.documents, storedReportPeriods ?? [])
     : {
@@ -248,6 +265,7 @@ export function parseCollectionHandoff(
   return {
     ...(normalized ? { normalized } : {}),
     artifacts: [
+      ...historyArtifacts,
       ...validated.map(({ plan, response }) => artifact(plan.dataset, plan.filename, response.raw)),
       ...documents.artifacts,
       ...(normalized

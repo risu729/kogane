@@ -51,6 +51,7 @@ import { stGeorgeBalances, stGeorgeTransactions } from "./st-george.ts";
 import { sbiShinseiMonthlyReport } from "./sbi-shinsei-monthly-report.ts";
 import { sbiShinseiBalanceSummaryAndStage } from "./sbi-shinsei-balance-summary-and-stage.ts";
 import { sbiShinseiExchangeRate } from "./sbi-shinsei-exchange-rate.ts";
+import { sbiShinseiSavingsActivity } from "./sbi-shinsei-savings-activity.ts";
 import { sbiShinseiTopBalancesAndActivity } from "./sbi-shinsei-top-balances-and-activity.ts";
 import { sbiShinseiYenDepositAccount } from "./sbi-shinsei-yen-deposit-account.ts";
 import { vPointBalanceInfo, vPointHistoryPage, vPointSmfgPoint } from "./v-point.ts";
@@ -103,6 +104,7 @@ export const PARSERS: readonly Parser[] = [
   stGeorgeBalances,
   stGeorgeTransactions,
   sbiShinseiTopBalancesAndActivity,
+  sbiShinseiSavingsActivity,
   sbiShinseiYenDepositAccount,
   sbiShinseiExchangeRate,
   sbiShinseiBalanceSummaryAndStage,

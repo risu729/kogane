@@ -1295,6 +1295,17 @@
         }
       ],
       "sha256": "a05f2d36adb6a816f96281ead37891c3d0c3fba7ad6e364abfc478067641cacb"
+    },
+    {
+      "file": "0098_sbi_shinsei_savings_activity.sql",
+      "statementCount": 3,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "d8adf648466879986bba5d1f6255989c7949e624ca509f422b0704e3a122753f"
     }
   ],
   "tables": [
@@ -16938,7 +16949,7 @@
         "debit_date",
         "adapter"
       ],
-      "sqlSha256": "0fc6645b375107c9"
+      "sqlSha256": "65753a00c433855b"
     },
     {
       "name": "card_settlement_fact_ownership",
@@ -22205,8 +22216,9 @@
       "0093_sbi_income_complete_containers.sql",
       "0094_myjcb_jpoint_history.sql",
       "0096_smbc_foreign_ordinary_unit_eligibility.sql",
-      "0097_sbi_vc_document_unit_eligibility.sql"
+      "0097_sbi_vc_document_unit_eligibility.sql",
+      "0098_sbi_shinsei_savings_activity.sql"
     ],
-    "schemaSha256": "0b2ddb2a8d7e9b70df8ec4b3937eeef911d2737a1e55ca0d06eb316f47695af9"
+    "schemaSha256": "1c795f338cbef0b839998f0dadeb61807e95553ea92a187f101afb27997f4563"
   }
 }

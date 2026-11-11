@@ -33,7 +33,7 @@ const clone = (entry: TransactionFamilyEntry) =>
 
 describe("closed codes", () => {
   test("the lists are exactly the reviewed codes", () => {
-    expect(TRANSACTION_FAMILY_REGISTRY_VERSION).toBe("transaction-family-registry-v5");
+    expect(TRANSACTION_FAMILY_REGISTRY_VERSION).toBe("transaction-family-registry-v6");
     expect(TRANSACTION_FAMILIES).toEqual([
       "bank-movement",
       "stored-value-movement",
@@ -113,7 +113,7 @@ describe("closed codes", () => {
 
 describe("registry entries", () => {
   test("every entry is valid, unique and in source/parser order", () => {
-    expect(TRANSACTION_FAMILY_REGISTRY).toHaveLength(25);
+    expect(TRANSACTION_FAMILY_REGISTRY).toHaveLength(26);
     for (const entry of TRANSACTION_FAMILY_REGISTRY)
       expect(validTransactionFamilyEntry(entry)).toBe(true);
     const keys = TRANSACTION_FAMILY_REGISTRY.map(key);
@@ -137,7 +137,7 @@ describe("registry entries", () => {
         );
         memberships += 1;
       }
-    expect(memberships).toBe(38);
+    expect(memberships).toBe(41);
   });
 
   test("only Vpass/MyJCB card purchases and SMBC and SBI Shinsei card settlement debits have writers", () => {
@@ -151,6 +151,7 @@ describe("registry entries", () => {
       // SBI Shinsei debits: the writer admits a row only when the row records
       // the id's origin, which the parser does from 0.1.3 (ADR 0054 rule 2,
       // ADR 0018); a row a 0.1.2 run stored is refused per row.
+      "sbi-shinsei-bank/sbi-shinsei-savings-activity:card-settlement",
       "sbi-shinsei-bank/sbi-shinsei-top-balances-and-activity:card-settlement",
       "smbc-bank/smbc-direct-transactions:card-settlement",
       "vpass/vpass-statement-page:card-purchase",
@@ -188,6 +189,7 @@ describe("registry entries", () => {
       "sbi-securities/sbi-domestic-trade-records",
     ]);
     expect(by((entry) => entry.identity.stageAReads === "provider")).toEqual([
+      "sbi-shinsei-bank/sbi-shinsei-savings-activity",
       "sbi-shinsei-bank/sbi-shinsei-top-balances-and-activity",
       "smbc-bank/smbc-direct-transactions",
       "v-point-pay/v-point-pay-notification-event",
@@ -301,6 +303,7 @@ describe("lookups", () => {
   test("by family", () => {
     const keysOf = (family: TransactionFamily) => transactionFamilyEntries(family).map(key);
     expect(keysOf("card-settlement")).toEqual([
+      "sbi-shinsei-bank/sbi-shinsei-savings-activity",
       "sbi-shinsei-bank/sbi-shinsei-top-balances-and-activity",
       "smbc-bank/smbc-direct-transactions",
     ]);
@@ -313,6 +316,7 @@ describe("lookups", () => {
     expect(keysOf("fx-exchange")).toEqual([
       "global-pass/global-pass-activity",
       "paypay/paypay-csv",
+      "sbi-shinsei-bank/sbi-shinsei-savings-activity",
       "sbi-shinsei-bank/sbi-shinsei-top-balances-and-activity",
       "sony-bank/sony-bank-history-csv",
       "sony-bank/sony-bank-history-json",

@@ -30,6 +30,8 @@ test("extraction retains the frozen base SQL apart from explicit provider histor
   // MyJCB debit to the event identity allowlist; the production debit pipeline
   // proves deduplication across windows and runs. ADR 0102 adds the USD cash
   // parser to the same event allowlist, covered by the cash production pipeline.
+  // ADR 0095's Shinsei identity/witness additions are removed explicitly too;
+  // parser/processor mixed-history tests separately prove those deltas.
   const renderedTransactions = transactionsSql({}, 0).sql;
   expect(renderedTransactions).toContain("                           'myjcb-debit-ledger',\n");
   expect(renderedTransactions).toContain(
@@ -38,7 +40,16 @@ test("extraction retains the frozen base SQL apart from explicit provider histor
   const transactions = renderedTransactions
     .replace("           AND p.parser_name <> 'sony-bank-history-json'\n", "")
     .replace("                           'myjcb-debit-ledger',\n", "")
-    .replace("                           'sbi-foreign-cash-history',\n", "");
+    .replace("                           'sbi-foreign-cash-history',\n", "")
+    .replace("                           'sbi-shinsei-savings-activity',\n", "")
+    .replace(
+      ") THEN 'sony-bank-deposit-history'\n                        WHEN p.parser_name = 'sbi-shinsei-savings-activity' THEN 'sbi-shinsei-top-balances-and-activity' ELSE p.parser_name END,",
+      ") THEN 'sony-bank-deposit-history' ELSE p.parser_name END,",
+    )
+    .replace(
+      "                  ORDER BY CASE WHEN p.parser_name IN ('sbi-shinsei-top-balances-and-activity','sbi-shinsei-savings-activity') THEN fa.fetched_at END DESC,\n                  CASE json_extract(t.extra_json, '$._kogane.sourceView')",
+      "                  ORDER BY CASE json_extract(t.extra_json, '$._kogane.sourceView')",
+    );
   expect(hash(transactions)).toBe(
     "9876071ea165908299b34c61aad1005b7531fe5a010c213c2bc193f2b1be3ff9",
   );

@@ -32,8 +32,8 @@ const policy = (
   ...extra,
 });
 
-// The closed default opt-ins of migrations 0080, 0088, 0090, 0092, 0094, 0095, 0096
-// and 0097.
+// The closed default opt-ins of migrations 0080, 0088, 0090, 0092, 0094, 0095, 0096,
+// 0097 and 0098.
 // This expected catalogue is independent of the SQL read under test: an extra
 // source, page, parser, scope, snapshot membership or policy still fails.
 export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
@@ -75,6 +75,10 @@ export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
     policy_id: "coverage-v1",
     required_parser_version: "1.0.0",
     replaces_previous_on_complete_empty: 0,
+    snapshot_selection: 0,
+  }),
+  policy("sbi-shinsei-bank", "savings-activity", "sbi-shinsei-savings-activity", {
+    policy_id: "coverage-v1",
     snapshot_selection: 0,
   }),
   ...SBI_VC_UNIT_POLICIES.map((row) =>
