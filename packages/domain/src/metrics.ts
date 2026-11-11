@@ -237,6 +237,145 @@ export const UNKNOWN_METRIC: MetricDefinition = {
 
 // Order matters and mirrors the branch order of classifyBalance / classifyActivity.
 export const METRIC_REGISTRY: readonly RegistryEntry[] = [
+  ...(["earned", "used", "expired"] as const).map((kind) =>
+    entry([balance("myjcb", "myjcb-jpoint-history", [`jpoint_acquisition_${kind}`])], {
+      metricId: `jpoint.monthly-${kind}`,
+      measurementKind: "period-total",
+      subjectKind: "program",
+      unitDimension: "reward",
+      signMeaning: "provider-sign",
+      timeBasis: "period",
+      aggregationRule: "non-additive",
+      overlapGroup: "myjcb:jpoint-period-activity",
+      sourceAuthority: "provider-reported",
+      legacyBalance: {
+        kind: "period_total",
+        measurementKind: "period_total",
+        assetClass: "reward",
+        timeBasis: "unknown",
+      },
+    }),
+  ),
+  entry([balance("myjcb", "myjcb-jpoint-history", ["jpoint_acquisition_remaining"])], {
+    metricId: "jpoint.acquisition-balance",
+    measurementKind: "stock",
+    subjectKind: "pocket",
+    unitDimension: "reward",
+    signMeaning: "asset-positive",
+    timeBasis: "point-in-time",
+    aggregationRule: "non-additive",
+    overlapGroup: "myjcb:jpoint-total-vs-acquisition",
+    sourceAuthority: "provider-reported",
+    legacyBalance: {
+      kind: "asset",
+      measurementKind: "balance",
+      assetClass: "reward",
+      timeBasis: "reported_snapshot",
+    },
+  }),
+  ...(
+    [
+      "income_gross",
+      "income_tax",
+      "income_income_tax",
+      "income_resident_tax",
+      "income_net",
+    ] as const
+  ).map((metric) =>
+    entry(
+      [
+        {
+          family: "valuation",
+          sourceId: "sbi-securities",
+          parserName: "sbi-income-payments",
+          metrics: [metric],
+        },
+      ],
+      {
+        metricId: `sbi-securities.${metric}`,
+        measurementKind: "flow",
+        subjectKind: "product",
+        unitDimension: "currency",
+        signMeaning: "provider-sign",
+        timeBasis: "event-reported",
+        aggregationRule: "non-additive",
+        overlapGroup: "sbi-securities:income-and-cash",
+        sourceAuthority: "provider-reported",
+      },
+    ),
+  ),
+  ...(
+    [
+      "sale_proceeds",
+      "realised_gain_before_tax",
+      "sale_unit_price",
+      "average_acquisition_unit_cost",
+    ] as const
+  ).map((metric) =>
+    entry(
+      [
+        {
+          family: "valuation",
+          sourceId: "sbi-securities",
+          parserName: "sbi-realised-gains",
+          metrics: [metric],
+        },
+      ],
+      {
+        metricId: `sbi-securities.${metric}`,
+        measurementKind:
+          metric === "sale_unit_price" || metric === "average_acquisition_unit_cost"
+            ? "price"
+            : "flow",
+        subjectKind: "product",
+        unitDimension: "currency",
+        signMeaning: "provider-sign",
+        timeBasis: "event-reported",
+        aggregationRule: "non-additive",
+        overlapGroup: "sbi-securities:gains-and-trades",
+        sourceAuthority: "provider-reported",
+      },
+    ),
+  ),
+  ...(["overall", "card", "revolving", "installment_twice_bonus"] as const).flatMap((scope) =>
+    (["limit", "outstanding", "available"] as const).map((measure) =>
+      entry(
+        [balance("vpass", "vpass-credit-snapshot", [`reported_${scope}_${measure}_thousand_yen`])],
+        {
+          metricId: `vpass.reported-${scope}-${measure}-thousand-yen`,
+          measurementKind: measure === "outstanding" ? "stock" : "capacity",
+          subjectKind: scope === "overall" ? "connection" : "account",
+          unitDimension: "currency",
+          signMeaning: "provider-sign",
+          timeBasis: "point-in-time",
+          aggregationRule: "non-additive",
+          overlapGroup: "vpass:shared-card-credit",
+          sourceAuthority: "provider-reported",
+          legacyBalance:
+            measure === "outstanding"
+              ? { ...LEGACY_UNKNOWN, measurementKind: "balance", timeBasis: "reported_snapshot" }
+              : LEGACY_CAPACITY,
+        },
+      ),
+    ),
+  ),
+  ...(["outstanding", "repayment"] as const).map((measure) =>
+    entry([balance("vpass", "vpass-credit-snapshot", [`reported_revolving_${measure}_yen`])], {
+      metricId: `vpass.reported-revolving-${measure}-yen`,
+      measurementKind: measure === "outstanding" ? "stock" : "obligation",
+      subjectKind: "account",
+      unitDimension: "currency",
+      signMeaning: "provider-sign",
+      timeBasis: "point-in-time",
+      aggregationRule: "non-additive",
+      overlapGroup: "vpass:shared-card-credit",
+      sourceAuthority: "provider-reported",
+      legacyBalance:
+        measure === "outstanding"
+          ? { ...LEGACY_UNKNOWN, measurementKind: "balance", timeBasis: "reported_snapshot" }
+          : LEGACY_UNKNOWN,
+    }),
+  ),
   ...(
     [
       [

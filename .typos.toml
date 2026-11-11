@@ -35,6 +35,8 @@ regist = "regist"
 Metrix = "Metrix"
 Infomation = "Infomation"
 Ordr = "Ordr"
+# Literal Vpass response key: chengeCourseExplanation.
+chenge = "chenge"
 # SQLite resolves a column's affinity by looking for these exact substrings in
 # its declared type (sqlite.org/datatype3 §3.1); "DOUB" is one of them.
 DOUB = "DOUB"

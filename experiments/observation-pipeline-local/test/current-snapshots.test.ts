@@ -38,6 +38,7 @@ import {
   currentText,
   database,
   EXPLICIT_COVERAGE,
+  REPLACING_EMPTY_COVERAGE,
   facts,
   position,
   snapshot,
@@ -142,7 +143,7 @@ describe("complete container snapshots", () => {
   });
 
   for (const [parser, dataset] of SNAPSHOT_DATASETS.filter(
-    ([name]) => !EXPLICIT_COVERAGE.has(name),
+    ([name]) => !EXPLICIT_COVERAGE.has(name) && !REPLACING_EMPTY_COVERAGE.has(name),
   )) {
     test(`${parser}: repeated, removed instrument/account, and empty snapshots replace old rows`, () => {
       const store = database();

@@ -1,3 +1,4 @@
+import { persistCreditRun } from "./shared-collection";
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
 import {
   scheduledCompletion,
@@ -294,6 +295,7 @@ async function captureCard(
   const { cookies, cardList, cards } = session;
   const diagnostic = createDiagnostics("vpass", runId);
   let stage = "card-selection";
+  let creditFailed = false;
   try {
     const selectedCard = cards[selectedCardZeroBased];
     if (!selectedCard) {
@@ -306,6 +308,44 @@ async function captureCard(
     });
     stage = "statement-discovery";
     const top = await memberPost(cookies, MEISAI_TOP_PATH, {});
+    // Capture the independent daily credit snapshot while this card is selected.
+    // A snapshot failure does not discard the card's statement evidence.
+    try {
+      await memberPost(cookies, "/memapi/jaxrs/authori/xt_authori_shokai/v1", {});
+      await memberPost(cookies, "/memapi/jaxrs/authori/authori_shokai_cvv2_input/v1", {});
+      const authori = await memberPost(cookies, "/memapi/jaxrs/authori/authori_shokai/v1", {});
+      const revo = await memberPost(cookies, "/memapi/jaxrs/revo/xt_revo_shokai/v1", {});
+      const persisted = await persistCreditRun(
+        sharedBucket(env.DATA),
+        {
+          sessionRunId: runId,
+          cardLabel,
+          startedAt: started.toISOString(),
+          completedAt: new Date().toISOString(),
+          cardListRawJson: cardList.rawText,
+          selectCardRawJson: selection.rawText,
+          webMeisaiTopRawJson: top.rawText,
+          months: {},
+        },
+        { authori: authori.rawText, revo: revo.rawText },
+      );
+      if (persisted.outcome !== "persisted" && persisted.outcome !== "already_persisted")
+        throw new Error("credit_persist_incomplete");
+      onPersisted?.(`${runId}-credit-${cardLabel}`);
+    } catch (error) {
+      creditFailed = true;
+      const persisted = await persistFailedCard(env, `${runId}-credit`, cardLabel, started).catch(
+        () => false,
+      );
+      if (persisted) onPersisted?.(`${runId}-credit-${cardLabel}`);
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "httpStatus" in error &&
+        (error.httpStatus === 401 || error.httpStatus === 403)
+      )
+        throw error;
+    }
     const months = availableMonths(top.json);
     if (months.length === 0) throw new Error(`${cardLabel} returned no available statement months`);
     let pageCount = 0;
@@ -362,6 +402,7 @@ async function captureCard(
       // A run whose terminal was not written is not a finished run (G1-01).
       if (!sharedRunPersisted(outcome)) throw new Error("shared_persist_incomplete");
       onPersisted?.(`${runId}-${cardLabel}`);
+      if (creditFailed) throw new Error("credit_snapshot_failed");
       return summary;
     }
   } catch (error) {

@@ -116,6 +116,10 @@ async function runCollection(
                     failures.push(failure("domestic", "cash-history", error));
                     safeFailures.push({ scope: "domestic", code: safeFailureCode(error) });
                   },
+                  onIncomeHistoryError: (error) => {
+                    failures.push(failure("domestic", "income-history", error));
+                    safeFailures.push({ scope: "domestic", code: safeFailureCode(error) });
+                  },
                   onAssetHistoryError: (error) => {
                     failures.push(failure("domestic", "asset-history", error));
                     safeFailures.push({ scope: "domestic", code: safeFailureCode(error) });

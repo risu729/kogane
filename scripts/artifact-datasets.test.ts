@@ -56,6 +56,50 @@ const html = "text/html";
 const SAMPLES: readonly Sample[] = [
   {
     source: "myjcb",
+    artifactKey: "conn-a/jpoint-history.json",
+    role: "collector_derived",
+    mediaType: json,
+    dataset: "jpoint-history",
+    unitKey: "conn-a:j-point-history",
+  },
+  ...["jpoint-inquiry.html", "jpoint-history.html"].map((filename) => ({
+    source: "myjcb",
+    artifactKey: `conn-a/${filename}`,
+    role: "sanitized_provider_capture",
+    mediaType: html,
+    dataset: null,
+    unitKey: "conn-a:j-point-history",
+  })),
+  ...["income-payments", "realised-gains"].flatMap((dataset) => [
+    {
+      source: "sbi-securities",
+      artifactKey: `${dataset}.json`,
+      role: "collector_derived",
+      mediaType: json,
+      dataset,
+      unitKey: "domestic",
+    },
+    ...["summary", "rows", ...(dataset === "realised-gains" ? ["all-summary"] : [])].map(
+      (role) => ({
+        source: "sbi-securities",
+        artifactKey: `${dataset}-${role}-source.json`,
+        role: "provider_response",
+        mediaType: json,
+        dataset: null,
+        unitKey: "domestic",
+      }),
+    ),
+  ]),
+  ...["authori", "revo"].map((kind) => ({
+    source: "vpass",
+    artifactKey: `credit/${kind}.json`,
+    role: "sanitized_provider_capture",
+    mediaType: json,
+    dataset: "credit-snapshot",
+    unitKey: "card-001",
+  })),
+  {
+    source: "myjcb",
     artifactKey: "conn-a/debit-detail-01.html",
     role: "sanitized_provider_capture",
     mediaType: html,
@@ -660,6 +704,7 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
   "mobile-suica": ["sf-history"],
   "moneyforward-me": ["accounts-index", "account-detail", "monthly-transactions"],
   myjcb: [
+    "jpoint-history",
     "jpoint-balance",
     "credit-ledger",
     "credit-past-months",
@@ -711,7 +756,7 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
   "st-george": ["account-snapshot"],
   "v-point": ["balance-info", "smfg-point", "history-page-0001"],
   "v-point-pay": ["notification-event"],
-  vpass: ["statement-page"],
+  vpass: ["statement-page", "credit-snapshot"],
 };
 
 /** Parsers of sources no shared-R2 collector writes. */
@@ -785,8 +830,11 @@ describe("the registration dataset table (ADR 0022)", () => {
       "terminal-registration-v5",
       "terminal-registration-v6",
       "terminal-registration-v7",
+      "terminal-registration-v8",
+      "terminal-registration-v9",
+      "terminal-registration-v10",
     ]);
-    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v7");
+    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v10");
     const vpass = (await allSamples()).filter((sample) => sample.source === "vpass");
     expect(vpass.filter((sample) => sample.dataset === "statement-page").length).toBe(2);
     for (const sample of vpass) {
@@ -927,7 +975,9 @@ describe("the registration dataset table (ADR 0022)", () => {
       expect(sample.artifactKey).toBe("foreign-cash-history.json");
       expect(before).toBeNull();
       expect(after).toBe("foreign-cash-history");
-      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, -1))
+      for (const version of REGISTRATION_CONTRACT_VERSIONS.filter(
+        (version) => Number(version.split("-v")[1]) < 7,
+      ))
         expect(artifactDataset(sample.source, sample, version)).toBeNull();
     }
     expect(changed).toBe(1);
@@ -1155,4 +1205,51 @@ describe("the registration dataset table (ADR 0022)", () => {
       "myjcb-canonical-evidence-boundary",
     ]);
   });
+});
+
+test("Vpass credit routes map only under v8; statement and binding descriptors retain their earlier meanings", () => {
+  for (const kind of ["authori", "revo"]) {
+    const artifact = {
+      artifactKey: `credit/${kind}.json`,
+      role: "sanitized_provider_capture",
+      mediaType: "application/json",
+    };
+    for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, 7))
+      expect(artifactDataset("vpass", artifact, version)).toBeNull();
+    expect(artifactDataset("vpass", artifact)).toBe("credit-snapshot");
+    expect(artifactDataset("vpass", { ...artifact, role: "provider_response" })).toBeNull();
+  }
+});
+
+test("SBI payment/sale derivatives map only under v9 and private originals stay unmapped", () => {
+  for (const dataset of ["income-payments", "realised-gains"]) {
+    const artifact = {
+      artifactKey: `${dataset}.json`,
+      role: "collector_derived",
+      mediaType: "application/json",
+    };
+    for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, 8))
+      expect(artifactDataset("sbi-securities", artifact, version)).toBeNull();
+    expect(artifactDataset("sbi-securities", artifact)).toBe(dataset);
+    for (const role of ["summary", "rows", "all-summary"])
+      expect(
+        artifactDataset("sbi-securities", {
+          artifactKey: `${dataset}-${role}-source.json`,
+          role: "provider_response",
+          mediaType: "application/json",
+        }),
+      ).toBeNull();
+  }
+});
+
+test("v10 changes only J-POINT history; earlier registration meanings stay frozen", () => {
+  for (const sample of SAMPLES) {
+    const old = artifactDataset(sample.source, sample, "terminal-registration-v9");
+    const current = artifactDataset(sample.source, sample, "terminal-registration-v10");
+    if (sample.dataset === "jpoint-history") {
+      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, -1))
+        expect(artifactDataset(sample.source, sample, version)).toBeNull();
+      expect(current).toBe("jpoint-history");
+    } else expect(current).toBe(old);
+  }
 });

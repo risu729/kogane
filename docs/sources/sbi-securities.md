@@ -719,3 +719,72 @@ keep coverage partial. The catalogue remains partial under #1226 until foreign
 continuation/transfer semantics and actual scheduled retained publication,
 freshness and the execution budget are verified. Dividend-labelled cash rows
 publish settlement cash only; they establish no separate income dataset.
+
+## 2026-11-10: My Assets income and realised gains
+
+Normal signed-in UI reads on 2026-11-09/10 established the following request
+shapes. Only schema, counts and in-memory equality predicates were retained;
+no provider amounts, personal dates, security names, account identifiers or
+authentication material were copied.
+
+The visible `/account/assets/dividends` page states retention since August 2021. Setting the normal date inputs to `2021/08/01`–`2026/11/10` made:
+
+- `GET /account/api/assets/dividends` with `category=''`, `accountType=''`,
+  `dispositionDateFrom=2021/08/01`, `dispositionDateTo=2026/11/10`, `offset=1`,
+  `limit=30`.
+- `GET /account/api/assets/dividends/category/summary` with the same filters
+  and dates, without offset or limit.
+
+Rows are `{dividends:[...]}`. Each row has string `category`, `dispositionDate`
+(`YYYYMMDD`), `accountType`, `productCode`, `productName`; numeric `quantity`
+and `receivedAmount`; nullable numeric `interestAmount`, `dividendUnitCost`,
+`dividendTotal`, `specialDividend`, `taxTotal`, `incomeTax`, `residentTax` and
+their `Lc` counterparts, plus `receivedAmountLc`; `currencyCode` is string/null.
+Observed categories were `DOMESTIC_STOCK_SPOT` and `FOREIGN_STOCK_US`, accounts
+`SPECIFIC_NORMAL` and `NISA_GROWTH`, and currency codes null/domestic or USD/US.
+
+Summary keys are `dividendsSummaries`, numeric `receivedTotal` and `countTotal`.
+Each category has numeric `receivedTotal`, `dividendTotal`, `taxTotal`, `count`,
+nullable numeric `receivedTotalLc`, `dividendTotalLc`, `taxTotalLc`, and
+string/null `currencyCode` plus string `category`. The summary count of 14
+matched all 14 rows and the visible total; category counts were 11 domestic
+and 3 US rows. No row response count/header or continuation control was observed.
+
+Expanded US detail's six USD-labelled values matched `dividendUnitCostLc`,
+`dividendTotalLc`, `taxTotalLc`, `incomeTaxLc`, `residentTaxLc`, `receivedAmountLc`
+exactly. Expanded domestic detail's six JPY-labelled values matched the same
+unsuffixed fields; all 11 domestic rows had numeric values there and null
+`interestAmount`, `specialDividend`, `currencyCode`. The final label is
+`受取額(税引後)` (after-tax received amount); preceding detail labels establish
+dividend per unit, gross dividend, total tax, income tax and resident tax.
+The main table shows received amounts in yen. A US payment's `Lc` amount and
+its unsuffixed yen equivalent are two representations of one payment.
+Null gross/tax domestic semantics and a universal precision bound were not observed.
+
+The visible realised-gains detail leads to `/account/assets/profits`, also
+stating retention since August 2021. The same date inputs made
+`GET /account/api/assets/profit-loss/summary` with `baseDateFrom=2021/08/01`,
+`baseDateTo=2026/11/10`, `baseDateType=CONTRACT`, `accountType=''`, `product=ALL`,
+`domesticCategory=''`, `countryCode=''`, `bondCategory=''`, `fundCategory=''`.
+Its response is `{profitLossSummary,profitLossSummaryDetails:[...]}`. The
+aggregate has null `assetsErrorType` and numeric `total`, `profitLoss`, `profit`,
+`loss`, `profitLossLc`, `profitLc`, `lossLc`. Details have null `assetsErrorType`,
+string `assetsBalanceCategory`, numeric `total`, `profitLoss`, `profit`, `loss`,
+and null `profitLossLc`, `profitLc`, `lossLc`, `currencyCode`.
+
+The domestic detail link uses `product=DOMESTIC_STOCK&category=SPOT`. Opening it
+made the summary request with `product=DOMESTIC_STOCK&domesticCategory=SPOT`
+and `GET /account/api/assets/profit-loss` with those same filters plus
+`offset=1&limit=30`. Rows are `{profitLosses:[...]}` with string `category`,
+`contractDate`, `dispositionDate` (dates `YYYYMMDD`), `accountType`, `productCode`,
+`productName`, `transactionType`, and numeric `quantity`, `amount`, `price`,
+`acquisitionCost`, `profitLoss`. Observed codes were `DOMESTIC_STOCK_SPOT`,
+`NISA_GROWTH`, `SELL`. The one row matched summary total 1 and the visible total.
+Headers establish contract date, account/transaction, security, quantity,
+sale/settlement proceeds, unit price, **average acquisition unit cost**, and
+realised gain/loss **before tax**. Do not treat the acquisition unit cost as
+total cost or calculate a gain from trades.
+
+Other menu product/account codes do not prove response semantics. Foreign
+gains, interest/fund/bond income, offset values beyond 1 and totals over 30
+remain unobserved. Production collection/publication was not performed.
