@@ -18,11 +18,14 @@ This independent Worker creates a fresh session from a stored `SBI証券` passke
 - Main site: current and available weekly `My資産` ("My assets") valuations, yen deposit/withdrawal details and domestic-stock execution history from January 1 of year minus two, split into windows of at most 90 days as in the successful historical scan. Yen details retain every provider page-metadata field and response field in a page bundle, validating completeness before making an artifact.
 - Foreign-stock app: US cash equities, USD custody cash and retained execution history in windows of at most 90 days. The historically observed mobile BFF duration query supplies `pastYears`; the successful historical scan began January 1 of year minus `pastYears`, rather than at the web rolling cutoff.
 - Execution: the Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the `sbi-securities` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), daily at 06:00 JST (21:00 UTC), and an accepted operations request calls `runOperation` (ADR 0048). Either one collects domestic/foreign data serially in one invocation (`scope=all`). The Worker has no Cron Trigger and no public trigger route.
-- Storage: `packages/collection` writes directly to shared DATA; the Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). The only D1 the collector uses is the execution lease (`withCollectionLease`) in `SCHEDULE_DB` (`kogane-raw-evidence`).
+- Storage: `packages/collection` writes directly to shared DATA; the Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). `SCHEDULE_DB` (`kogane-raw-evidence`) holds the execution lease and the operational mailbox continuation cursor.
 
 Neither implementation nor configuration includes orders, amendments, cancellations, trading passwords or device registration. Even for `POST`, allowed hosts, paths, MTS TR codes and GraphQL operations are fixed to read-only purposes.
 
 ## 2026-11-10: delivered-document observation boundary
+
+This section preserves the boundary at that date; the later implementation
+and evidence are described below.
 
 Normal authenticated browser observations on 2026-11-09 and 2026-11-10 UTC for
 [issue 1248](https://github.com/risu729/kogane/issues/1248) reached the new
@@ -49,6 +52,58 @@ collector behavior, secret, feature flag or deployment was added. See the
 [dated source notes](../../docs/sources/sbi-securities.md#2026-11-09-and-2026-11-10-delivered-document-observations)
 for request/response shapes, mark-read behavior allowed by the issue,
 session-material boundaries and remaining evidence gaps.
+
+## 2026-11-11: delivered-document collection
+
+Normal domestic collection attempts the observed authenticated site4 ETGate
+report link, mobile entry, two exact POST forms and the new mailbox bootstrap.
+DOM and AST parsing extract the witnessed literal grammar without executing
+provider JavaScript. SBI and mailbox cookies retain separate host/domain/path
+scopes; invalid-domain cookies and unobserved transitions fail closed. Forms,
+bootstrap HTML, session values and free-text error envelopes are never stored.
+
+The current list must match its declared total and independent issued summary,
+including conservative per-group count agreement. Private list metadata stays
+in `mailbox-inventory.json`. Each supported single-PDF detail uses its own
+closed unit; an unknown kind, multiple files or non-PDF detail leaves that
+unit partial while verified siblings survive. Detail type `sTypeCd=" "`
+is preserved verbatim. Original PDF artifacts are
+`document-<kind-sha256>-<YYYYMMDD>-<stable-row-sha256>-<content-sha256>.pdf`;
+their private metadata retains title, original filename and lineage. Identical
+bytes share one DATA object while distinct document identities keep distinct
+references. Changed bytes retain a new immutable revision.
+
+Responses are bounded before buffering (256 KiB HTML, 2 MiB JSON and 4 MiB
+per PDF). A run retains at most 48 MiB of PDFs and stops mailbox work before
+the shared collection start plus eleven minutes. If it cannot finish, the
+next stable identity is stored in operational `sbi_mailbox_progress` only after
+terminal persistence, with a previous-run comparison. The next run resumes
+at that identity, wraps once and later refetches earlier documents; no identity
+is assumed to have immutable bytes. A persistence failure does not advance
+the pointer. The existing source lease remains the concurrency boundary.
+Its original abort signal gates every mailbox request and loop, cancels body
+streaming and prevents cursor commits after lease loss.
+The financial terminal is stored before mailbox work starts. Mailbox data has
+a separate `<financial-run-id>-mailbox` terminal with the same acquisition
+reference/start time and no financial units or ranges. Its refusal cannot make
+the financial run partial. The cursor references only its durable mailbox run;
+operations retain both known durable run IDs even if a later cursor/lease
+failure makes the operation fail. Existing supplementary financial refusals
+remain governed by the existing run-scope policies under
+[issue 1296](https://github.com/risu729/kogane/issues/1296).
+
+Registration v11 maps only the new PDF dataset and preserves v1–v10 meanings.
+`sbi-delivered-document-metadata` emits evidence-only coverage, with independently
+complete document units eligible on partial runs. It emits no financial facts.
+No public route, secret, feature flag or operation is added.
+
+The browser currently corroborated 67 list rows and one representative detail
+for each of eight kinds. Only selected native PDF responses were verified;
+the browser did not archive every listed file. The HTTP-only transport and
+scheduled production archive have not been run or verified. Legacy mailbox
+coverage, multiple files, other formats and multiple-group behavior remain
+unsupported or unproved; catalogue `document` stays `partial`. See the
+[dated source evidence](../../docs/sources/sbi-securities.md#2026-11-11-observed-bootstrap-producer-and-current-mailbox-contract).
 
 <a id="公開接続先とsecret"></a>
 

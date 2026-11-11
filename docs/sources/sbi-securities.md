@@ -326,6 +326,113 @@ destination and refuse unobserved handoff or bootstrap shapes. The existing
 66-row list and one PDF observation still do not fulfill the issue's
 scheduled archival, metadata or deduplication acceptance criteria.
 
+### 2026-11-11: observed bootstrap producer and current mailbox contract
+
+This dated follow-up supersedes the earlier lack of bootstrap-producer evidence,
+not the earlier observations themselves. Owner-authorized ordinary Chrome
+navigation and read-only DOM/response inspection established the following
+shapes. No token, provider identifier, account value, private document date or
+document bytes were retained in these notes or synthetic fixtures.
+
+The authenticated main page was `https://site4.sbisec.co.jp/ETGate/`; opening
+the `www` landing page alone did not prove an authenticated session. Its
+visible delivered-report link was
+`https://site4.sbisec.co.jp/ETGate/?_ControlID=WPLETsmR001Control&_DataStoreID=DSWPLETsmR001Control&sw_page=Edeliv&cat1=home&cat2=none&getFlg=on`.
+Ordinary navigation reached `https://m.sbisec.co.jp/switchnaviMain`.
+Two ordinary report buttons opened the previously observed
+`/edeliv/deisw070.jsp?ePoboxFlag=true` entry. That entry contained one POST
+form to the exact `https://m.sbisec.co.jp/deisw081`, with the sole field
+`ePoboxFlag`. Its value was not read or recorded; the collector forwards the
+runtime form value rather than assuming that it equals the query literal.
+The connecting page then supplied the already observed seven-field POST
+carrier to the exact mailbox SSO destination.
+The connecting page's observed doctype was HTML 4.01 Transitional, with
+public ID `-//W3C//DTD HTML 4.01 Transitional//EN` and system ID
+`http://www.w3.org/TR/html4/loose.dtd`. Only that exact known legacy doctype
+is admitted beside ordinary HTML5 or absent doctypes; other parse errors,
+including duplicate attributes, still refuse the carrier. The initial entry's
+doctype was not separately established.
+
+The transient DOM at
+`https://plus.e-shishobako.ne.jp/dp-uw/v1/DPAW010501000` had no forms and
+one inline classic script. Its complete observed executable structure was
+`window.onload = function() { ...; autoRedirect(); };` followed by
+`function autoRedirect() { window.location.href = <origin literal> + <path literal>; }`.
+The handler contained eight `sessionStorage.setItem` calls, each with a
+literal key and nonempty string literal value: `dp-csrf`, `dp-riyoCd`,
+`dp-dId`, `dp-userName`, `dp-lastLoginTime`, `dp-sentakukino`,
+`dp-hyoujiseigyo`, and `dp-sfn`. The concatenated destination was the exact
+`https://plus.e-shishobako.ne.jp/dp_apl/usr/`. This establishes the producer
+of the two required runtime values. The collector parses DOM and the entire
+JavaScript AST without executing it, validates all eight setters, and keeps
+only the two required values in request-local memory.
+The same DOM had no meta/base elements or script attributes. It also contained
+a fallback `a` element with `href="#"`, `onclick="autoRedirect()"` and
+the visible provider text `こちら` ("here"). Only this exact inert fallback
+handler is admitted; it is not executed. Unrelated injected embedded elements
+outside the transition forms do not supply fields and are not fetched.
+
+The main-to-mobile and SSO-to-bootstrap HTTP status/redirect-header sequences
+were not retained across origin changes. Neither was the bootstrap response
+charset header. The implementation uses bounded manual redirects only to
+the observed exact destinations, applies HTTP/meta charset declarations, and
+refuses other paths, forms or bootstrap grammars. A particular redirect
+status is not represented as observed evidence. The final application GET
+was HTTP 200, `text/html`, with no forms and the expected static application
+scripts. No application JavaScript is executed by the collector.
+
+The current list, list total, visible total and issued summary each reported
+**67** documents, compared with the historical 66-row observation. Both list
+and summary returned HTTP 200 with success `code="200000"`. One
+`(busiSys,userTokuteiId)` group appeared in each, its counts agreed, and all
+groups were represented. Multiple-group live behavior remains unverified.
+List field types matched the earlier closed shape. `sType` was the literal
+`"NULL"`; `sTypeCd` was the exact single-space string `" "`.
+
+The observed `sCd` kind codes were `FR81011D02`, `STWHAB019P`,
+`STWHAB001P`, `STWHZB120P`, `STWHAB202P`, `FR00011M01`,
+`FR81011D03`, and `STWHAB240P`. One representative detail from each kind
+returned HTTP 200, `code="200000"`, and exactly one
+`{sOriFileId:string,sIntFileId:string}` PDF detail. Filename extensions
+included both `.pdf` and `.PDF`. The prior detail shape remains applicable
+with two observed nullable variants: `torizanKbn` was null for the sampled
+`FR00011M01`, and `tsuchiInfoKinfo` was null for the sampled `FR81011D03`;
+each was a string on the other sampled kinds. The detail `sTypeCd` remained
+the exact single space. These fields have no inferred financial meaning.
+
+A native PDF response was newly verified for `FR81011D02`; the earlier fund
+PDF observation remains preserved. The nine PDF form keys were unchanged,
+`xmlPreviewFlg="0"`, `sIntFileIds` exactly equalled the sole detail's
+`sIntFileId`, and `sTypeCd` exactly equalled the detail value. The response
+was HTTP 200, `application/pdf`, with `%PDF-` magic. This does **not** claim
+that all eight kinds' PDF bytes were fetched. The publicly loaded `main.js`
+groups each PDF detail separately with its single identifier, and groups
+non-PDF details by extension. That client code does not establish live
+multiple-file behavior or support for other formats.
+
+Scheduled collection now attempts the witnessed new-mailbox current list,
+retains validated private metadata and original single-file PDFs, and reports
+unsupported siblings individually. Original PDFs use kind/date/stable-row/hash
+artifact locators and content-addressed DATA objects; titles and provider IDs
+stay in private metadata. A bounded round-robin cursor resumes work when a
+run's shared deadline or memory allowance prevents a full walk. Earlier
+documents are fetched again on later cycles so byte corrections remain new
+immutable evidence. Registration and metadata parsing produce evidence-only
+coverage, never financial observations.
+The existing financial terminal is persisted first. Mailbox evidence and its
+failures are written into a separate `<financial-run-id>-mailbox` terminal,
+sharing the acquisition reference and start time but no financial units or
+ranges. A refused mailbox therefore cannot suppress otherwise healthy
+financial publication. Other supplementary financial isolation remains open
+under [issue 1296](https://github.com/risu729/kogane/issues/1296).
+
+HTTP-only session establishment, actual scheduled archival, complete current
+PDF coverage and the production execution budget remain unverified. Legacy
+retention/download routes, multiple files, non-PDF formats and multiple-group
+behavior remain limits. The catalogue therefore changes only to `partial`,
+not complete. The 67-row browser proof establishes the list contract, not a
+stored production archive.
+
 ## Assessment scale
 
 Automation levels are defined as follows.
