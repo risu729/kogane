@@ -10,7 +10,7 @@ import {
   safeErrorDetails,
 } from "../../../packages/collector-diagnostics/src/index";
 import { bootstrapMobileSuicaSessionWithBrowser } from "./browser-bootstrap";
-import { collectMobileSuica, parseSessionEnvelope } from "./mobile-suica";
+import { collectMobileSuica, HistoryCollectionError, parseSessionEnvelope } from "./mobile-suica";
 import { persistMobileSuicaRun } from "./shared-run";
 import type { CollectionFailure, CollectionManifest, RawArtifact, StoredArtifact } from "./types";
 import { parseStoredJreCredential } from "./webauthn";
@@ -102,7 +102,17 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionO
           collected.push(...collection.artifacts);
         }
       } catch (error) {
-        failures.push(failure("collect", error, "collection_failed"));
+        if (error instanceof HistoryCollectionError) {
+          collected.push(...error.artifacts);
+          pageCount = error.artifacts.length;
+        }
+        failures.push(
+          failure(
+            pageCount > 0 ? "pagination" : "collect",
+            error,
+            pageCount > 0 ? "history_boundary_unproven" : "collection_failed",
+          ),
+        );
       }
       const completedAt = new Date().toISOString();
       const storedCount = collected.length;

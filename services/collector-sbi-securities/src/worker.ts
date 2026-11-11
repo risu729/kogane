@@ -105,15 +105,26 @@ async function runCollection(
           const mainSiteBaseUrl = endpoints.mainSiteBaseUrl;
           if (mainSiteBaseUrl) {
             try {
-              artifacts.push(
-                ...(await diagnostic.step("main-site-collection", () =>
-                  collectMainSiteArtifacts({
-                    session: domestic.session,
-                    mainSiteBaseUrl,
-                    ...(window ?? {}),
-                    onHistoryError: (error) => historyFailure("domestic", error),
-                  }),
-                )),
+              await diagnostic.step("main-site-collection", () =>
+                collectMainSiteArtifacts({
+                  session: domestic.session,
+                  mainSiteBaseUrl,
+                  ...(window ?? {}),
+                  onArtifact: (artifact) => artifacts.push(artifact),
+                  onHistoryError: (error) => historyFailure("domestic", error),
+                  onCashHistoryError: (error) => {
+                    failures.push(failure("domestic", "cash-history", error));
+                    safeFailures.push({ scope: "domestic", code: safeFailureCode(error) });
+                  },
+                  onIncomeHistoryError: (error) => {
+                    failures.push(failure("domestic", "income-history", error));
+                    safeFailures.push({ scope: "domestic", code: safeFailureCode(error) });
+                  },
+                  onAssetHistoryError: (error) => {
+                    failures.push(failure("domestic", "asset-history", error));
+                    safeFailures.push({ scope: "domestic", code: safeFailureCode(error) });
+                  },
+                }),
               );
             } catch (error) {
               failures.push(failure("domestic", "main-site", error));

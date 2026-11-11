@@ -82,7 +82,7 @@ const MUTATIONS: [string, string, string][] = [
   ],
   [
     "an SBI Shinsei row of another parser",
-    " AND p.parser_name='sbi-shinsei-top-balances-and-activity'",
+    " AND p.parser_name IN ('sbi-shinsei-top-balances-and-activity','sbi-shinsei-savings-activity')",
     "",
   ],
   ["an SBI Shinsei row in another currency", " AND unit_ref='JPY'", ""],
@@ -341,7 +341,11 @@ describe("claim_available on random stores (ADR 0054, G1b)", () => {
     // The current text is the frozen text with one column added at its end,
     // and the embedded ownership CTEs' one change of ADR 0017's amendment of
     // 2026-11-06 (proved in card-settlement-ownership.test.ts).
-    const current = cardSettlementReadinessCtes();
+    // ADR 0095 additionally admits the period parser under the same debit guards.
+    const current = cardSettlementReadinessCtes().replace(
+      "p.parser_name IN ('sbi-shinsei-top-balances-and-activity','sbi-shinsei-savings-activity')",
+      "p.parser_name='sbi-shinsei-top-balances-and-activity'",
+    );
     const head = withProposalRule(
       LEGACY_CARD_SETTLEMENT_READINESS_CTES.slice(
         0,

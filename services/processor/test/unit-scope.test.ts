@@ -1,15 +1,17 @@
 // Unit-scoped partial-run eligibility in the production Worker (design review
 // D13, PR-14, policy `unit-independent-v1`). Migration 0037 applies on top of
-// 0017-0036; the seeded state is unchanged run-scope behaviour; a policy row on
+// 0017-0036; later migrations name each explicit unit opt-in. Each case uses
+// its own store and states its policy, so no earlier test supplies its seed. A policy row on
 // the `unit` scope lets a proven fetch unit of a partial run be parsed and
 // adopted while its failed sibling keeps its previous evidence; a gap inside
 // one unit still blocks adoption; and setting the row back to `run` restores
 // the strict rule exactly.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { sweep } from "../src/worker.ts";
 import { publishParse, seedUnitRun, setUnitScope, startPipeline } from "./harness.ts";
 import { SNAPSHOT_DATASETS, snapshotCtes } from "../../../packages/parsers/src/snapshot-query.ts";
+import { EXPECTED_UNIT_POLICIES } from "./expected-unit-policies.ts";
 
 // The reader's relations on the production schema (packages/read-model concepts).
 const RELATIONS = {
@@ -30,10 +32,10 @@ const balance = (amount: number) => ({
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
+beforeEach(async () => {
   ({ mf, env } = await startPipeline());
 }, 30000);
-afterAll(async () => {
+afterEach(async () => {
   await mf?.dispose();
 });
 
@@ -63,46 +65,7 @@ const rescan = async () => {
   await sweep(env);
 };
 
-test("0037 preserves prior run-scoped containers beside the explicit J-POINT unit policy", async () => {
-  expect(
-    await first<{ name: string }>(
-      "SELECT name FROM sqlite_master WHERE type='view' AND name='observation_fetch_artifact_units'",
-    ),
-  ).toEqual({ name: "observation_fetch_artifact_units" });
-  const policies = await all<{
-    source_id: string;
-    parser_name: string;
-    dataset: string;
-    unit_scope: string;
-    snapshot_selection: number;
-  }>(
-    "SELECT source_id,parser_name,dataset,unit_scope,snapshot_selection FROM dataset_snapshot_policies ORDER BY parser_name,dataset",
-  );
-  const containers = policies.filter((row) => row.snapshot_selection === 1);
-  expect(containers.map(({ parser_name, dataset }) => [parser_name, dataset])).toEqual(
-    SNAPSHOT_DATASETS.map(([parserName, dataset]) => [parserName, dataset]).sort(),
-  );
-  expect(containers.every((row) => row.unit_scope === "run")).toBe(true);
-  expect(
-    policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
-  ).toEqual([
-    {
-      source_id: "myjcb",
-      parser_name: "myjcb-jpoint-balance",
-      dataset: "jpoint-balance",
-      unit_scope: "unit",
-      snapshot_selection: 0,
-    },
-    {
-      source_id: "sbi-shinsei-bank",
-      parser_name: "sbi-shinsei-monthly-report-metadata",
-      dataset: "monthly-report-pdf",
-      unit_scope: "unit",
-      snapshot_selection: 0,
-    },
-  ]);
-
-  // A partial run under the seeded policy: no job, no parse, for either unit.
+async function seedPartialRun(): Promise<void> {
   await seedUnitRun(env, {
     id: 400,
     source: SOURCE,
@@ -125,22 +88,9 @@ test("0037 preserves prior run-scoped containers beside the explicit J-POINT uni
       },
     ],
   });
-  expect(
-    await first<{ status: string; failure_count: number }>(
-      "SELECT status,failure_count FROM observation_fetch_runs WHERE id=400",
-    ),
-  ).toEqual({ status: "partial", failure_count: 1 });
-  await rescan();
-  expect(await parsedArtifacts([401, 402])).toEqual([]);
-  expect(
-    await all(
-      "SELECT fetch_artifact_id FROM observation_parse_jobs WHERE fetch_artifact_id IN (401,402)",
-    ),
-  ).toEqual([]);
-}, 30000);
+}
 
-test("card A succeeds and card B fails: only A is parsed, and only A adopts", async () => {
-  // A clean earlier run gives both cards a previous snapshot to keep or lose.
+async function seedCleanRun(): Promise<void> {
   await seedUnitRun(env, {
     id: 410,
     source: SOURCE,
@@ -162,6 +112,70 @@ test("card A succeeds and card B fails: only A is parsed, and only A adopts", as
       },
     ],
   });
+}
+
+test("explicit unit policies preserve other run-scoped containers and strict partial-run exclusion", async () => {
+  expect(
+    await first<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='view' AND name='observation_fetch_artifact_units'",
+    ),
+  ).toEqual({ name: "observation_fetch_artifact_units" });
+  const policies = await all<{
+    source_id: string;
+    parser_name: string;
+    dataset: string;
+    unit_scope: string;
+    snapshot_selection: number;
+  }>(
+    "SELECT source_id,parser_name,dataset,unit_scope,snapshot_selection FROM dataset_snapshot_policies ORDER BY parser_name,dataset",
+  );
+  const containers = policies.filter((row) => row.snapshot_selection === 1);
+  expect(containers.map(({ parser_name, dataset }) => [parser_name, dataset])).toEqual(
+    SNAPSHOT_DATASETS.map(([parserName, dataset]) => [parserName, dataset]).sort(),
+  );
+  expect(
+    containers.filter((row) => row.unit_scope === "unit").map((row) => row.parser_name),
+  ).toEqual(
+    EXPECTED_UNIT_POLICIES.filter((row) => row.snapshot_selection === 1).map(
+      (row) => row.parser_name,
+    ),
+  );
+  expect(
+    policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
+  ).toEqual(
+    EXPECTED_UNIT_POLICIES.map(
+      ({ source_id, parser_name, dataset, unit_scope, snapshot_selection }) => ({
+        source_id,
+        parser_name,
+        dataset,
+        unit_scope,
+        snapshot_selection,
+      }),
+    ),
+  );
+
+  // An explicit run-scoped policy still creates no job for either partial-run unit.
+  await setUnitScope(env, { sourceId: SOURCE, dataset: DATASET, parserName: PARSER, scope: "run" });
+  await seedPartialRun();
+  expect(
+    await first<{ status: string; failure_count: number }>(
+      "SELECT status,failure_count FROM observation_fetch_runs WHERE id=400",
+    ),
+  ).toEqual({ status: "partial", failure_count: 1 });
+  await rescan();
+  expect(await parsedArtifacts([401, 402])).toEqual([]);
+  expect(
+    await all(
+      "SELECT fetch_artifact_id FROM observation_parse_jobs WHERE fetch_artifact_id IN (401,402)",
+    ),
+  ).toEqual([]);
+}, 30000);
+
+test("card A succeeds and card B fails: only A is parsed, and only A adopts", async () => {
+  // A clean earlier run gives both cards a previous snapshot to keep or lose.
+  await setUnitScope(env, { sourceId: SOURCE, dataset: DATASET, parserName: PARSER, scope: "run" });
+  await seedPartialRun();
+  await seedCleanRun();
   await rescan();
   expect((await parsedArtifacts([411, 412])).map((row) => row.status)).toEqual(["ok", "ok"]);
   expect(await currentSnapshot("card-a")).toBe(411);
@@ -204,6 +218,12 @@ test("card A succeeds and card B fails: only A is parsed, and only A adopts", as
 }, 30000);
 
 test("one page of a two-page unit is not a complete container", async () => {
+  await setUnitScope(env, {
+    sourceId: SOURCE,
+    dataset: DATASET,
+    parserName: PARSER,
+    scope: "unit",
+  });
   await seedUnitRun(env, {
     id: 420,
     source: SOURCE,
@@ -268,32 +288,31 @@ test("the comparison route reports the eligibility scope of every policy row", a
         unit_scope,
         snapshot_selection,
       })),
-  ).toEqual([
-    {
-      source_id: "myjcb",
-      parser_name: "myjcb-jpoint-balance",
-      dataset: "jpoint-balance",
-      unit_scope: "unit",
-      snapshot_selection: 0,
-    },
-    {
-      source_id: "sbi-shinsei-bank",
-      parser_name: "sbi-shinsei-monthly-report-metadata",
-      dataset: "monthly-report-pdf",
-      unit_scope: "unit",
-      snapshot_selection: 0,
-    },
-    {
-      source_id: SOURCE,
-      parser_name: PARSER,
-      dataset: DATASET,
-      unit_scope: "unit",
-      snapshot_selection: 1,
-    },
-  ]);
+  ).toEqual(
+    EXPECTED_UNIT_POLICIES.map(
+      ({ source_id, parser_name, dataset, unit_scope, snapshot_selection }) => ({
+        source_id,
+        parser_name,
+        dataset,
+        unit_scope,
+        snapshot_selection,
+      }),
+    ),
+  );
 }, 30000);
 
 test("setting the policy row back to `run` restores the strict rule", async () => {
+  await setUnitScope(env, { sourceId: SOURCE, dataset: DATASET, parserName: PARSER, scope: "run" });
+  await seedPartialRun();
+  await seedCleanRun();
+  await rescan();
+  await setUnitScope(env, {
+    sourceId: SOURCE,
+    dataset: DATASET,
+    parserName: PARSER,
+    scope: "unit",
+  });
+  await rescan();
   await setUnitScope(env, {
     sourceId: SOURCE,
     dataset: DATASET,

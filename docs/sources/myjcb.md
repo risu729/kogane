@@ -835,3 +835,141 @@ This is a supported response contract for one confirmed current connection, not 
 Acquisition is limited to the active card whose public `JCBカードW` (JCB Card W) token appears in one `SPAN.txt` immediately under `P.user-stage`. Private label adornments are excluded from the gate. Browser inspection verified the token/tag structure and adornment lengths; a separate boundary-category inspection timed out. Changed or unsupported boundaries therefore fail closed and can remain unsupported. No card switch is attempted.
 
 The collector reads points only after statement-history collection finishes without a stop outcome. It makes one fixed POST to the observed pointJson route, without query parameters, redirects or retries. It bounds the request at 30 seconds and the response stream at 1 MiB and validates JSON-RPC schema and echoed request ID before retaining private R2 evidence. The closed `jpointCode` distinguishes collected, unsupported, stopped and unavailable; the independent reward unit exists only for eligible products. Unavailable/stopped remain unknown and do not alter history coverage. Authentication structure and synthetic tests establish this implementation's basis; they do not prove a collector run against the provider or a post-deployment live capture.
+
+## J-POINT history and statement-file observation, 2026-11-09/10
+
+An owner-authenticated, read-only session exposed
+`GET /iss-pc/member/point/pointInquiry.html?link_id=myj_main_pointInquiry`,
+which linked `GET /iss-pc/member/point/pointHistoryInquiry.html`.
+The inquiry/history pages were server-rendered HTML; no history JSON request
+or pagination control was observed. Recruit's point-inquiry links went to the
+error page and are not treated as J-POINT support. Root-card switching remains
+outside this collector path.
+
+The **raw HTTP response** contains three
+`.tab-panel > .js-scrollable-tbl > table` elements, each with THEAD/TBODY
+and the same 27 acquisition rows. This count is an observation, not a retention
+constant. The live DOM's `.js-scrollable-tbl-head/body` wrappers and toggle
+buttons are JavaScript additions and are not parser selectors.
+
+- Overview headers: `獲得月（支払月） / 獲得ポイント / 使用済ポイント /
+  失効ポイント / ポイント残高`. Date TD `.sp-fnt10px` contains direct
+  YYYY/MM/DD text, `br.sp-block`, then a SPAN with payment M/D or a dash.
+  The four numeric TDs are plain text with `num sp-fnt10px`; the last also
+  carries the provider's point-history balance classes.
+- Detail headers: `獲得月（支払月） / 当月獲得ポイント合計 / 詳細`.
+  The second TD contains `div.inner` with the total and
+  `div.js-toggle-content > dl.detail` with DT/DD pairs for
+  `通常獲得ポイント / 優遇ポイント / ボーナスポイント`.
+  All 27 totals and 81 component DDs were plain signed ASCII integer text,
+  without commas, suffixes or empty values. All 27 displayed totals matched
+  the exact sum of their three displayed components. The raw third
+  `td.js-toggle-item` contains `開く` as text, not a generated button.
+- Expiry headers: `獲得月（支払月） / 失効予定ポイント / 失効予定月 /
+  ステータス`. Quantity, month and status cells are plain text. Every
+  quantity matched the corresponding overview remaining quantity. Expiry was
+  YYYY/MM or `-`; missing months had explicitly zero remaining points.
+  Observed row statuses were `-` and `有効`. The same UI documents
+  `集計中 / 期限迫る / 当月失効`, but populated rows in those states were
+  not observed. No independent grand-total marker was found on this page.
+
+The UI explains that used points are displayed as a monthly negative activity,
+while deductions consume the earliest-expiry acquisition buckets. Consequently
+monthly earned/used/expired quantities do not reconstruct a row's remaining
+quantity. They are retained separately. Acquisition YYYY/MM/DD, payment M/D,
+expiry YYYY/MM and capture time have distinct roles.
+
+The collector reuses the existing run's J-POINT JSON total, validates the exact
+sum of remaining quantities and cross-checks all three tabs before publishing
+`myjcb-jpoint-history` measures. It keeps sanitized inquiry/history HTML and
+normalized JSON under an independently sealed history unit. Month-only expiry
+stays month-granularity; no expiry day or usage year is invented. Unknown
+shapes/statuses or mismatched values leave that unit unavailable, preserving
+its captured evidence.
+
+Current reward holdings select complete acquisition membership only when its
+total and the newest total revision belong to the same capture and every
+bucket has been promoted. A newer total with missing/failed history selects
+that current total and reports a stale/unavailable history gap. Older history
+remains dated evidence. The total and acquisition buckets are never added.
+See [ADR 0107](../adr/0107-myjcb-point-history-and-document-boundary.md).
+
+The credit menu offered positions in the existing month/schedule groups.
+Its past-month POST, JSON-RPC `execute` with
+`params: [{ generalJsonShikibetuId }]`, offered additional sparse positions
+12 and 15. The existing h2 month / h3 bonus-skip schedule distinction is
+unchanged: positions 7/8 are not reinterpreted as statement months. The walk
+reads the union of provider-offered month positions; missing indices are not
+invented or mapped to calendar months.
+
+An explicitly confirmed detail at `detail.html?detailMonth=1&output=web`
+offered same-month relative PDF, CSV and OFX links:
+`detailDbPdf.html?detailMonth=1&output=pdf`,
+`detail.html?detailMonth=1&output=csv` and
+`detail.html?detailMonth=1&output=money`. The unconfirmed position 0 offered
+none. A separate newsletter also had PDF-labelled text, so only actual
+statement hrefs qualify.
+
+The browser blocked the observed download before an HTTP response. No file
+bytes, media type or CSV/PDF/OFX schema is verified; the restriction was not
+bypassed. Files remain unfetched. The sanitized manifest records the closed
+`documentCode: statement_export_bytes_unverified`, while confirmed HTML and offered kinds
+are retained. Document coverage remains not collected and #1251 stays open for file
+verification/storage and live reader validation.
+
+## Debit statements and registered display alternatives (2026-11-10)
+
+Authenticated owner-machine Chrome observation, read routes only, for
+[#1239](https://github.com/risu729/kogane/issues/1239). The MyPage ID-switch
+modal offered four registered alternatives beside the original credit card:
+one Recruit credit card and three debit cards, including Mizuho. This confirms
+reachable display alternatives; it does not inspect or alter connection secrets.
+
+- List request: `POST /iss-pc/member/common/pluralIdChangeAjaxMypage.html`,
+  no body. Modal `.modal-wrap` contains `a[onclick]` calling
+  `idSwitchLogin('0')` through `idSwitchLogin('3')`.
+- Selection: `POST /iss-pc/member/common/pluralIdChangeRedirect.html` with
+  fields `ajaxResult`, `isListEmpty`, `errorMessage`, `sosalogId`, `smpFlg`,
+  `listNum`; then `POST /iss-pc/member/user_manage/userSwitchingIdLogin.html`
+  with `transitionId`; then `GET /iss-pc/member/user_manage/userLoginForward.html`
+  to MyPage. Field values and card identities remain private. This sequence
+  alone does not establish a durable cross-run card identity or a complete
+  relay response schema.
+- Debit menu: `GET /iss-pc/member/debit/details/debitDetailMenu.html` with
+  `link_id=myj_main_debitDetailMenu` (navigation also offers
+  `myj_nav_debitDetailMenu`). Latest detail is `debitDetail.html?seq=0`;
+  past menu options offer `seq=1..14`, and detail `select#seq[name=seq]`
+  offers `0..14`. The UI states fifteen months, updated around the sixteenth.
+- Ordinary desktop section: `ご利用明細内訳（お振替済分）`, with headers
+  `ご利用者 / お振替日 / ご利用先など / お振替金額 / 摘要 / 承認番号`.
+- Difference desktop section: `ご利用明細内訳（差額・お振替未済分）`, with
+  headers `ご利用者 / 差額発生日 / ご利用先など / 差額 / 摘要 / お取引結果 / 承認番号`.
+  The observed status is `銀行振替済`. Dates use `YYYY/MM/DD`; amounts are
+  signed integer/comma strings. One ordinary row and one negative difference
+  shared their approval number and merchant. Neither row may be dropped or
+  rewritten into a payment. `.pc-disp` and `.sp-disp` repeat the same display;
+  the reader uses desktop tables only.
+- Mizuho's observed empty ordinary page uses `p.comment` with exact pattern
+  `[YYYY年M月D日 ～ YYYY年M月D日分]のご利用代金明細はございません`.
+  The selected option names `YYYY年M月D日～YYYY年M月D日分`. Zero is admitted
+  only when those periods match; absent tables alone establish no zero.
+- Separate difference/other route:
+  `GET /iss-pc/member/debit/od_details/debitOdDetailMenu.html`, then form
+  `GET /iss-pc/member/debit/od_details/debitOdDetail.html` with `seq=1..14`
+  and `inquiry=照会`, encoded by the official form as Shift_JIS
+  `%8F%C6%89%EF`. All fourteen observed responses explicitly said
+  `選択された月のご請求はございません。`. On the observed Mizuho page the
+  marker is `div.main > div.main-header > h1.heading01-01`, with no
+  `p.comment`. This does not erase differences in
+  ordinary detail tables. Nonempty `od_details` schemas remain unobserved.
+  Both menus use `select#seq[name=seq]` with options `1..14` and may include
+  an empty placeholder. The ordinary menu has one real latest-detail href
+  `/iss-pc/member/debit/details/debitDetail.html?seq=0`. No latest `seq=0`
+  link was observed on the empty other-statement menu, so none is invented.
+- Ordinary detail offered `debitDetailPdf.html?seq=N` and
+  `debitDetailCsv.html?seq=N`. The visible CSV click reached Chrome
+  `ERR_BLOCKED_BY_CLIENT`; no export bytes or signatures were verified.
+
+No private dates, amounts, merchant names, account identifiers, session fields,
+credentials or raw provider HTML are recorded here. Synthetic tests mirror
+only these structures. See [ADR 0101](../adr/0101-myjcb-debit-statements.md).

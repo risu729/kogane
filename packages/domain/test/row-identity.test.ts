@@ -51,6 +51,7 @@ describe("provider identity functions", () => {
     ).toEqual([
       "smbc-bank/smbc-direct-transactions",
       "sbi-shinsei-bank/sbi-shinsei-top-balances-and-activity",
+      "sbi-shinsei-bank/sbi-shinsei-savings-activity",
     ]);
     expect(domain.humanAdoptedRowIdentity).toBe(humanAdoptedRowIdentity);
     expect(domain.PROVIDER_IDENTITY_FUNCTIONS).toBe(PROVIDER_IDENTITY_FUNCTIONS);
@@ -82,6 +83,19 @@ describe("provider identity functions", () => {
 });
 
 describe("humanAdoptedRowIdentity", () => {
+  test("top activity and period history share the same adoption alias for one provider reference", () => {
+    const input = shinsei({
+      extra: {
+        txnReferenceNo: "synthetic-ref-1",
+        _kogane: { identityOrigin: "provider-id", amountSignSource: "debit" },
+      },
+    });
+    const top = humanAdoptedRowIdentity(input);
+    expect(top.admitted).toBe(true);
+    expect(
+      humanAdoptedRowIdentity({ ...input, parserName: "sbi-shinsei-savings-activity" }),
+    ).toEqual(top);
+  });
   test("an SMBC row whose origin is recorded is admitted with its alias class", () => {
     const admitted = humanAdoptedRowIdentity(smbc());
     expect(admitted).toEqual({

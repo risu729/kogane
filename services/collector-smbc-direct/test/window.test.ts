@@ -26,11 +26,16 @@ afterEach(() => {
 const KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 const encoder = new TextEncoder();
 
-async function harness(saved?: Partial<BackfillProgress>) {
+async function harness(
+  saved?: Partial<BackfillProgress>,
+  foreignFailure?: string,
+  yenBalanceFailure?: string,
+) {
   const bucket = new FakeR2Bucket();
   const values = new Map<string, unknown>();
   const alarms: number[] = [];
   const requested: DateRange[] = [];
+  const foreignRequested: DateRange[] = [];
   const artifacts: StoredArtifact[] = [];
   if (saved) {
     const prefix = runPrefix(saved.startedAt!, saved.runId!);
@@ -59,12 +64,16 @@ async function harness(saved?: Partial<BackfillProgress>) {
   const challenge = await encryptJson({ expiresAt: "2099-04-01T00:00:00Z" }, KEY);
   values.set("challenge", challenge);
   const profile = {
-    getBalance: async () => ({
-      rawBytes: encoder.encode('{"balance":0}'),
-      rawContentType: "application/json",
-      currency: "JPY",
-      amount: 0,
-    }),
+    continueSession: async () => undefined,
+    getBalance: async () => {
+      if (yenBalanceFailure) throw new Error(yenBalanceFailure);
+      return {
+        rawBytes: encoder.encode('{"balance":0}'),
+        rawContentType: "application/json",
+        currency: "JPY",
+        amount: 0,
+      };
+    },
     getTransactions: async (range: DateRange) => {
       requested.push(range);
       return {
@@ -74,6 +83,17 @@ async function harness(saved?: Partial<BackfillProgress>) {
         depositsTotal: 0,
         withdrawalsTotal: 0,
       };
+    },
+    getForeignBalance: async () => ({
+      currency: "AUD",
+      amount: "123.45",
+      yenEquivalent: "12000",
+      referenceRate: "97.205",
+    }),
+    getForeignHistory: async (range: DateRange) => {
+      foreignRequested.push(range);
+      if (foreignFailure) throw new Error(foreignFailure);
+      return { currency: "AUD", range, emptyCode: "PC-AIFDDT1-00134-E", transactions: [] };
     },
     export: () => ({}),
     logout: async () => undefined,
@@ -105,7 +125,7 @@ async function harness(saved?: Partial<BackfillProgress>) {
     COLLECTOR_SCHEMA_VERSION: "smbc-direct-backfill-worker-poc-v2",
     DATA: bucket,
   } as unknown as Env);
-  return { session, values, bucket, requested, artifacts, alarms, challenge };
+  return { session, values, bucket, requested, foreignRequested, artifacts, alarms, challenge };
 }
 
 test("10:00 JST approval completes only closed days, then the next backfill includes the newly closed day", async () => {
@@ -113,6 +133,12 @@ test("10:00 JST approval completes only closed days, then the next backfill incl
   const h = await harness();
   const first = await h.session.finishAndStart();
   expect(first.progress).toMatchObject({ to: "2099-03-01", totalChunks: 1 });
+  expect(h.foreignRequested).toEqual([
+    { start: "2098-12-01", end: "2098-12-31" },
+    { start: "2099-01-01", end: "2099-01-31" },
+    { start: "2099-02-01", end: "2099-02-28" },
+    { start: "2099-03-01", end: "2099-03-01" },
+  ]);
   await h.session.alarm();
   expect(h.requested).toEqual([{ start: "2099-03-01", end: "2099-03-01" }]);
   const read = await readTerminal(h.bucket, "smbc-direct", first.progress.runId!);
@@ -121,7 +147,7 @@ test("10:00 JST approval completes only closed days, then the next backfill incl
   expect(read.manifest.requestedScope.endValue).toBe("2099-03-01");
   expect(
     read.manifest.ranges
-      .filter((range) => range.rangeKind === "declared_coverage")
+      .filter((range) => range.rangeKind === "declared_coverage" && range.unitKey === "account")
       .map((range) => range.endValue),
   ).toEqual(["2099-03-01"]);
   expect(await h.session.getStatus()).toMatchObject({
@@ -140,6 +166,56 @@ test("10:00 JST approval completes only closed days, then the next backfill incl
   if (next.outcome !== "found") throw new Error("missing synthetic terminal");
   expect(next.manifest.coverageStatus).toBe("complete");
   expect(next.manifest.requestedScope.endValue).toBe("2099-03-02");
+});
+
+test("an unreviewed nonempty AUD response keeps the run partial and never turns missing movements into zero", async () => {
+  setSystemTime(new Date("2099-03-02T01:00:00.000Z"));
+  const h = await harness(undefined, "foreign_nonempty_unreviewed");
+  const started = await h.session.finishAndStart();
+  await h.session.alarm();
+  expect(await h.session.getStatus()).toMatchObject({
+    phase: "partial",
+    lastErrorCode: "foreign_nonempty_unreviewed",
+    foreignOrdinary: {
+      balance: { status: "success" },
+      history: { status: "partial", failureCode: "foreign_nonempty_unreviewed" },
+    },
+  });
+  const terminal = await readTerminal(h.bucket, "smbc-direct", started.progress.runId!);
+  if (terminal.outcome !== "found") throw new Error("missing synthetic terminal");
+  expect(terminal.manifest.units).toContainEqual(
+    expect.objectContaining({
+      unitKey: "foreign-ordinary-aud-history",
+      coverageStatus: "partial",
+      safeErrorCode: "foreign_nonempty_unreviewed",
+    }),
+  );
+  expect(
+    terminal.manifest.artifacts.filter((artifact) =>
+      artifact.artifactKey.startsWith("foreign-ordinary-aud/history/"),
+    ),
+  ).toHaveLength(0);
+});
+
+test("a yen balance failure preserves independently complete AUD balance and history units", async () => {
+  setSystemTime(new Date("2099-03-02T01:00:00.000Z"));
+  const h = await harness(undefined, undefined, "balance_value_missing");
+  await expect(h.session.finishAndStart()).rejects.toThrow("balance_value_missing");
+  const progress = await h.session.getStatus();
+  expect(progress.phase).toBe("partial");
+  const terminal = await readTerminal(h.bucket, "smbc-direct", progress.runId!);
+  if (terminal.outcome !== "found") throw new Error("missing synthetic terminal");
+  expect(terminal.manifest.units).toContainEqual(
+    expect.objectContaining({
+      unitKey: "account",
+      coverageStatus: "partial",
+      safeErrorCode: "balance_value_missing",
+    }),
+  );
+  for (const unitKey of ["foreign-ordinary-aud-balance", "foreign-ordinary-aud-history"])
+    expect(terminal.manifest.units).toContainEqual(
+      expect.objectContaining({ unitKey, coverageStatus: "complete" }),
+    );
 });
 
 for (const [name, end, total] of [

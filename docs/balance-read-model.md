@@ -101,11 +101,14 @@ writer fencing and captured CORE references; the contract is in
    only decides which side of an unproven overlap stays adopted, and equal
    ranks leave both sides unresolved. A test refuses a policy id that the
    CORE migrations do not seed and a collector source that ranks
-   `unreviewed`. MoneyForward has no balance parser today (its parsers emit
-   monthly transactions and evidence-only captures), so it is never a
-   candidate and never competes with a direct source for one target; its rank
-   takes effect only once a MoneyForward balance metric shares a target with
-   one ([audit](account-connections.md#double-counting-audit-2026-11-08)).
+   `unreviewed`. MoneyForward's only balance parser,
+   `moneyforward-detail-balances`
+   ([ADR 0103](adr/0103-moneyforward-detail-measures.md)), emits non-additive
+   `moneyforward.reported-*` metrics that no direct source shares, so its
+   candidates never compete with a direct source for one target and never join
+   the known-assets subtotal; its rank takes effect only once a MoneyForward
+   balance metric shares a target with one
+   ([audit](account-connections.md#double-counting-audit-2026-11-08)).
 
 ### States and reason codes
 

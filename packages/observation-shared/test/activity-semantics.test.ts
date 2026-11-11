@@ -16,6 +16,14 @@ test("withdrawal direction is evidence, not the positive raw amount", () => {
   expect(validActivityMeaning(value)).toBe(true);
   expect(
     classifyActivity({
+      sourceId: "sbi-securities",
+      parserName: "sbi-foreign-cash-history",
+      status: "posted",
+      extra: { _kogane: { direction: "debit" } },
+    }),
+  ).toMatchObject({ kind: "cash_movement", direction: "debit", dateLabel: "入出金日" });
+  expect(
+    classifyActivity({
       sourceId: "other",
       parserName: "sbi-yen-detail-history",
       status: "posted",

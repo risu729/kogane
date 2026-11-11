@@ -461,25 +461,30 @@ const TRANSACTIONS_SQL = `WITH ${TRANSACTION_CTES}
                            'sbi-vc-cashflows',
                            'mobile-suica-sf-history',
                            'sbi-yen-detail-history',
+                           'sbi-foreign-cash-history',
                            'sbi-foreign-trade-records',
                            'sbi-domestic-trade-records',
                            'myjcb-credit-ledger',
+                           'myjcb-debit-ledger',
                            'sony-bank-history-json',
                            'sony-bank-history-csv',
                            'sony-bank-wallet-history',
                            'smbc-direct-transactions',
                            'st-george-transactions',
                            'sbi-shinsei-top-balances-and-activity',
+                           'sbi-shinsei-savings-activity',
                            'v-point-pay-notification-event'
                          ) AND t.external_id IS NOT NULL
                       THEN json_array(fa.source_id, t.source_account,
                         CASE WHEN p.parser_name IN (
                           'sony-bank-history-json', 'sony-bank-history-csv'
-                        ) THEN 'sony-bank-deposit-history' ELSE p.parser_name END,
+                        ) THEN 'sony-bank-deposit-history'
+                        WHEN p.parser_name = 'sbi-shinsei-savings-activity' THEN 'sbi-shinsei-top-balances-and-activity' ELSE p.parser_name END,
                         t.external_id)
                     ELSE json_array('observation-row', t.id)
                   END
-                  ORDER BY CASE json_extract(t.extra_json, '$._kogane.sourceView')
+                  ORDER BY CASE WHEN p.parser_name IN ('sbi-shinsei-top-balances-and-activity','sbi-shinsei-savings-activity') THEN fa.fetched_at END DESC,
+                  CASE json_extract(t.extra_json, '$._kogane.sourceView')
                     WHEN 'historical' THEN 0
                     WHEN 'official-csv' THEN 0
                     WHEN 'wallet-monthly-html' THEN 0

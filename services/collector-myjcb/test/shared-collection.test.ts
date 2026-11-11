@@ -213,8 +213,8 @@ describe("G3-08 nothing unredacted or free-text reaches the shared bucket", () =
       artifacts: [
         ...base.artifacts,
         {
-          dataset: "debit-menu",
-          filename: "debit-menu.html",
+          dataset: "credit-pdf",
+          filename: "credit-01.pdf",
           body: statementHtml,
           mediaType: "text/html; charset=utf-8",
           statementState: "debit" as const,
@@ -864,6 +864,7 @@ describe("ADR 0005 second amendment: unread months and export offers in the mani
       artifactCount: 3,
       unreadMonths: [{ position: 2, code: "scheduled_payments_page" }],
       exportOffers: [{ position: 1, kinds: ["pdf", "csv", "ofx"] }],
+      documentCode: "statement_export_bytes_unverified",
     });
     // Not a stop: nothing is recorded as a failure.
     expect(manifest.failures).toEqual([]);

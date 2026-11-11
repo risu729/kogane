@@ -23,8 +23,14 @@ import { hasExactKeys, isOneOf, isRecord, isText } from "./guards.ts";
  * settlement writer is back. The admission still reads each stored row: a row
  * a 0.1.2 run stored carries no origin and stays refused
  * (identity_origin_unrecorded, `rowOriginBasis`).
+ *
+ * v5 (ADR 0102): observed USD cash movements use stable row-occurrence
+ * identities and remain securities settlement cash without an event writer.
+ *
+ * v6 (ADR 0095): selected-period savings activity records the same provider
+ * reference and origin; both parsers share its existing account-local rule.
  */
-export const TRANSACTION_FAMILY_REGISTRY_VERSION = "transaction-family-registry-v3";
+export const TRANSACTION_FAMILY_REGISTRY_VERSION = "transaction-family-registry-v6";
 
 /**
  * The closed list of economic-event families.
@@ -336,6 +342,15 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     families: [supported("card-purchase")],
   },
   {
+    sourceId: "myjcb",
+    parserName: "myjcb-debit-ledger",
+    observationKinds: ["transaction"],
+    identity: identity("fingerprint_occurrence", "identityOrigin", "fingerprint"),
+    statuses: { kind: "closed", values: ["transferred", "bank-transferred"] },
+    providerLinks: NO_LINK,
+    families: [unsupported("card-purchase", "identity_fingerprint_only", "semantics_unobserved")],
+  },
+  {
     // `transactionNumber` is a provider row id, but the parser records no
     // `_kogane` at all; a row whose number is blank has no external id, so the
     // basis holds only when it is filled. The method column names the funding
@@ -377,6 +392,21 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
         "identity_fingerprint_only",
         "identity_origin_unrecorded",
         "direction_code_unmapped",
+      ),
+    ],
+  },
+  {
+    sourceId: "sbi-securities",
+    parserName: "sbi-foreign-cash-history",
+    observationKinds: ["transaction"],
+    identity: identity("fingerprint_occurrence", "identityOrigin", "fingerprint"),
+    statuses: POSTED,
+    providerLinks: ["value_date"],
+    families: [
+      unsupported(
+        "securities-settlement-cash",
+        "identity_fingerprint_only",
+        "counterpart_not_stated",
       ),
     ],
   },
@@ -426,6 +456,21 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     ],
   },
   {
+    // Selected-period rows retain the same provider reference, native sides
+    // and recorded identity origin as top-page activity (ADR 0095).
+    sourceId: "sbi-shinsei-bank",
+    parserName: "sbi-shinsei-savings-activity",
+    observationKinds: ["transaction"],
+    identity: identity("provider_id", "identityOrigin", "provider"),
+    statuses: ABSENT,
+    providerLinks: NO_LINK,
+    families: [
+      unsupported("bank-movement", "counterpart_not_stated"),
+      unsupported("fx-exchange", "counterpart_not_stated", "semantics_unobserved"),
+      supported("card-settlement"),
+    ],
+  },
+  {
     // `txnReferenceNo`, recorded as `identityOrigin: provider-id` from 0.1.3
     // (0.1.2 recorded no origin); no status; debit/credit columns;
     // `tradeTypeCode` kept unmapped; one native currency per account. The card
@@ -444,6 +489,7 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
       supported("card-settlement"),
     ],
   },
+
   {
     // JPY REMITTANCE_DEPOSIT / REMITTANCE_WITHDRAW only; `processStatusType`
     // kept verbatim; no bank-side link.
@@ -664,6 +710,13 @@ export const PROVIDER_IDENTITY_FUNCTIONS: readonly ProviderIdentityFunction[] = 
   {
     sourceId: "sbi-shinsei-bank",
     parserName: "sbi-shinsei-top-balances-and-activity",
+    sourceAccounts: "any",
+    componentFields: ["txnReferenceNo"],
+    ruleVersion: "sbi-shinsei-txn-reference-no-v1",
+  },
+  {
+    sourceId: "sbi-shinsei-bank",
+    parserName: "sbi-shinsei-savings-activity",
     sourceAccounts: "any",
     componentFields: ["txnReferenceNo"],
     ruleVersion: "sbi-shinsei-txn-reference-no-v1",

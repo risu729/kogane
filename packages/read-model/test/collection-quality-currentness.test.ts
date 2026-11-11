@@ -21,23 +21,48 @@ const rows = (s: QualityStore, source: string) =>
   s.all<CellQualityRow>(CELL_QUALITY_SQL, [source, 0]);
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 
-test("extraction retains the frozen base SQL apart from the explicit Sony current-history gate", () => {
+test("extraction retains the frozen base SQL apart from explicit provider history gates", () => {
   // Frozen rendered SQL digests taken from the base, before the extraction.
   // Exact bytes prove unchanged predicates/ranking/filtering/output on every
   // input, more strongly than only comparing a handful of selected rows.
   // ADR 0092 intentionally excludes Sony JSON before ranking. Every other byte
-  // remains pinned; sony-csv-history.test.ts separately freezes and proves that delta.
-  const transactions = transactionsSql({}, 0).sql.replace(
-    "           AND p.parser_name <> 'sony-bank-history-json'\n",
-    "",
+  // remains pinned; sony-csv-history.test.ts proves that delta. ADR 0101 adds
+  // MyJCB debit to the event identity allowlist; the production debit pipeline
+  // proves deduplication across windows and runs. ADR 0102 adds the USD cash
+  // parser to the same event allowlist, covered by the cash production pipeline.
+  // ADR 0095's Shinsei identity/witness additions are removed explicitly too;
+  // parser/processor mixed-history tests separately prove those deltas.
+  const renderedTransactions = transactionsSql({}, 0).sql;
+  expect(renderedTransactions).toContain("                           'myjcb-debit-ledger',\n");
+  expect(renderedTransactions).toContain(
+    "                           'sbi-foreign-cash-history',\n",
   );
+  const transactions = renderedTransactions
+    .replace("           AND p.parser_name <> 'sony-bank-history-json'\n", "")
+    .replace("                           'myjcb-debit-ledger',\n", "")
+    .replace("                           'sbi-foreign-cash-history',\n", "")
+    .replace("                           'sbi-shinsei-savings-activity',\n", "")
+    .replace(
+      ") THEN 'sony-bank-deposit-history'\n                        WHEN p.parser_name = 'sbi-shinsei-savings-activity' THEN 'sbi-shinsei-top-balances-and-activity' ELSE p.parser_name END,",
+      ") THEN 'sony-bank-deposit-history' ELSE p.parser_name END,",
+    )
+    .replace(
+      "                  ORDER BY CASE WHEN p.parser_name IN ('sbi-shinsei-top-balances-and-activity','sbi-shinsei-savings-activity') THEN fa.fetched_at END DESC,\n                  CASE json_extract(t.extra_json, '$._kogane.sourceView')",
+      "                  ORDER BY CASE json_extract(t.extra_json, '$._kogane.sourceView')",
+    );
   expect(hash(transactions)).toBe(
     "9876071ea165908299b34c61aad1005b7531fe5a010c213c2bc193f2b1be3ff9",
   );
   expect(hash(latestBalancesSql({}, 0, 501).sql)).toBe(
     "8c260635f19d6028616e96fc1bc300ef3a96a5990468a3d86f60acfd2f598ba9",
   );
-  expect(hash(latestBalancesSql({ source: "myjcb", measureView: "summaries" }, 0, 501).sql)).toBe(
+  // ADR 0107 adds only the three acquisition-month activity measures to
+  // summaries. Strip that audited clause to retain the original SQL hash.
+  const summaries = latestBalancesSql({ source: "myjcb", measureView: "summaries" }, 0, 501).sql;
+  const historySummary =
+    " OR (source_id = 'myjcb' AND parser LIKE 'myjcb-jpoint-history@%' AND metric IN ('jpoint_acquisition_earned','jpoint_acquisition_used','jpoint_acquisition_expired'))";
+  expect(summaries.split(historySummary)).toHaveLength(2);
+  expect(hash(summaries.replace(historySummary, ""))).toBe(
     "023d01804a87ae85f6bad1550b18e675f33015d02c5ea9534d8a672e3fb6811a",
   );
 });
@@ -394,7 +419,7 @@ test("balance-only cells retain Balances' dataset policy gate without imposing i
     ["myjcb", "credit-past-months", "myjcb-credit-past-month-balances"],
   ])
     s.db.run(
-      "INSERT INTO dataset_snapshot_policies(source_id,dataset,parser_name,policy_id,required_parser_version) VALUES(?,?,?,'coverage-v1','9.0.0')",
+      "INSERT INTO dataset_snapshot_policies(source_id,dataset,parser_name,policy_id,required_parser_version) VALUES(?,?,?,'coverage-v1','9.0.0') ON CONFLICT(parser_name,dataset) DO UPDATE SET policy_id='coverage-v1', required_parser_version='9.0.0', unit_scope='run', snapshot_selection=1",
       [source!, dataset!, parser!],
     );
   const pointRows = rows(s, "v-point");

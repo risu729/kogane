@@ -14,6 +14,92 @@ const seed: SessionMaterial = {
 };
 
 describe("Worker collector", () => {
+  test("captures both unfiltered views to exhaustion without interpreting their rows", async () => {
+    const artifacts: CollectorArtifact[] = [];
+    const fetcher = fullCashflowGateway((request) => {
+      const historical = request.historical === "true";
+      const pageNumber = Number(request.pageNumber);
+      const count = historical ? 21 : 0;
+      return {
+        pageNumber,
+        pageSize: 20,
+        totalSize: count,
+        totalNumOfPages: historical ? 2 : 0,
+        list: Array.from({ length: historical ? (pageNumber === 0 ? 20 : 1) : 0 }, (_, i) => ({
+          cashflowID: `synthetic-${pageNumber}-${i}`,
+          cashflowType: "UNOBSERVED_SYNTHETIC_TYPE",
+          processStatusType: "UNOBSERVED_SYNTHETIC_STATUS",
+          cashflowAmount: "0.00000001",
+          currency: "BTC",
+        })),
+      };
+    });
+    await collectSbiVcTrade({
+      session: seed,
+      fetcher,
+      onSession: async () => undefined,
+      onArtifact: async (artifact) => {
+        artifacts.push(artifact);
+      },
+    });
+    const full = artifacts.filter((artifact) => artifact.dataset.startsWith("cashflows-all-"));
+    expect(full.map((artifact) => artifact.dataset)).toEqual([
+      "cashflows-all-recent-page-0001",
+      "cashflows-all-historical-page-0001",
+      "cashflows-all-historical-page-0002",
+    ]);
+    expect(JSON.parse(jsonBody(full[2]!)).body.list[0]).toMatchObject({
+      cashflowType: "UNOBSERVED_SYNTHETIC_TYPE",
+      processStatusType: "UNOBSERVED_SYNTHETIC_STATUS",
+      cashflowAmount: "0.00000001",
+    });
+    expect(full.every((artifact) => !jsonBody(artifact).includes("next-secure"))).toBe(true);
+  });
+
+  test("retains the anomalous full-list page and refuses inconsistent metadata", async () => {
+    for (const failure of [
+      "total_changed",
+      "length_mismatch",
+      "invalid_pagination",
+      "duplicate_identity",
+    ] as const) {
+      const artifacts: CollectorArtifact[] = [];
+      const fetcher = fullCashflowGateway((request) => {
+        const pageNumber = Number(request.pageNumber);
+        const later = pageNumber === 1;
+        const totalSize = later && failure === "total_changed" ? 22 : 21;
+        return {
+          pageNumber,
+          pageSize: later && failure === "invalid_pagination" ? 30 : 20,
+          totalSize,
+          totalNumOfPages: 2,
+          list: Array.from(
+            { length: later ? (failure === "length_mismatch" ? 0 : 1) : 20 },
+            (_, index) => ({
+              cashflowID: `synthetic-${failure === "duplicate_identity" ? 0 : pageNumber}-${index}`,
+            }),
+          ),
+        };
+      });
+      await expect(
+        collectSbiVcTrade({
+          session: seed,
+          fetcher,
+          onSession: async () => undefined,
+          onArtifact: async (artifact) => {
+            artifacts.push(artifact);
+          },
+        }),
+      ).rejects.toThrow(
+        `cashflows-all-recent_${failure === "invalid_pagination" || failure === "duplicate_identity" ? failure : `pagination_${failure}`}`,
+      );
+      expect(artifacts.at(-1)?.dataset).toBe("cashflows-all-recent-page-0002");
+      expect(
+        artifacts.some((artifact) => artifact.dataset.startsWith("cashflows-all-historical")),
+      ).toBe(false);
+    }
+  });
+
   test("runs only the fixed read sequence, paginates, rotates session, and redacts secureKey", async () => {
     const requests: Array<{ event: string; data: Record<string, unknown> }> = [];
     const artifacts: CollectorArtifact[] = [];
@@ -33,9 +119,9 @@ describe("Worker collector", () => {
           meta: { status: "OK", secureKey: "next-secure", timestamp: "synthetic" },
           body: paged
             ? {
-                list: [{ synthetic: true }],
+                list: [{ synthetic: true, cashflowID: "synthetic-flow" }],
                 pageNumber: Number(request.data.pageNumber),
-                pageSize: 30,
+                pageSize: Number(request.data.pageSize),
                 totalNumOfPages: 1,
                 totalSize: 1,
               }
@@ -63,6 +149,8 @@ describe("Worker collector", () => {
       "executionList",
       "executionList",
       "getCashflowList",
+      "getCashflowList",
+      "getCashflowList",
     ]);
     expect(requests[3]?.data.historical).toBe("false");
     expect(requests[4]?.data.historical).toBe("true");
@@ -71,6 +159,20 @@ describe("Worker collector", () => {
       currency: ["JPY"],
       cashflowType: ["REMITTANCE_DEPOSIT", "REMITTANCE_WITHDRAW"],
     });
+    for (const [offset, historical] of ["false", "true"].entries()) {
+      expect(requests[6 + offset]?.data).toEqual({
+        secureKey: "next-secure",
+        pageNumber: "0",
+        pageSize: "20",
+        historical,
+        currency: [],
+        cashflowType: [],
+        eventDateFrom: "",
+        eventDateTo: "",
+        sortKey: "cashflowDatetime",
+        sortAsc: "false",
+      });
+    }
     expect(artifacts.map((artifact) => artifact.dataset)).toEqual([
       "cash-balances",
       "account-margin",
@@ -78,9 +180,11 @@ describe("Worker collector", () => {
       "executions-recent-page-0001",
       "executions-historical-page-0001",
       "cashflows-historical-page-0001",
+      "cashflows-all-recent-page-0001",
+      "cashflows-all-historical-page-0001",
     ]);
-    expect(artifacts.every((artifact) => !artifact.body.includes("next-secure"))).toBe(true);
-    expect(sessions).toHaveLength(6);
+    expect(artifacts.every((artifact) => !jsonBody(artifact).includes("next-secure"))).toBe(true);
+    expect(sessions).toHaveLength(8);
     expect(finalSession.secureKey).toBe("next-secure");
     expect(finalSession.cookies.awsAlb).toBe("rotated");
   });
@@ -251,3 +355,35 @@ describe("Worker collector", () => {
     expect(requests.some((request) => request.event === "getCashflowList")).toBe(false);
   });
 });
+
+function fullCashflowGateway(
+  fullPage: (request: Record<string, unknown>) => unknown,
+): typeof fetch {
+  return (async (_input: string | URL | Request, init?: RequestInit) => {
+    const request = JSON.parse(String(init?.body)) as {
+      event: string;
+      data: Record<string, unknown>;
+    };
+    const paged = request.event === "executionList" || request.event === "getCashflowList";
+    const full = request.event === "getCashflowList" && request.data.pageSize === "20";
+    return Response.json({
+      meta: { status: "OK", secureKey: "next-secure" },
+      body: full
+        ? fullPage(request.data)
+        : paged
+          ? {
+              list: [],
+              pageNumber: 0,
+              pageSize: 30,
+              totalNumOfPages: 0,
+              totalSize: 0,
+            }
+          : {},
+    });
+  }) as typeof fetch;
+}
+
+function jsonBody(artifact: CollectorArtifact): string {
+  if (typeof artifact.body !== "string") throw new Error("expected JSON artifact");
+  return artifact.body;
+}
