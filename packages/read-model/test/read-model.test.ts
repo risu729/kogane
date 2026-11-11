@@ -397,6 +397,20 @@ describe("named concepts in the final SQL", () => {
     ).toEqual([
       {
         source_id: "myjcb",
+        parser_name: "myjcb-debit-ledger",
+        dataset: "debit-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-debit-other-statement",
+        dataset: "debit-other-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
         parser_name: "myjcb-jpoint-balance",
         dataset: "jpoint-balance",
         unit_scope: "unit",
@@ -415,7 +429,7 @@ describe("named concepts in the final SQL", () => {
     expect(
       db
         .query(
-          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'sbi-vc-document-metadata', 'smbc-direct-transactions', 'smbc-foreign-ordinary-balance', 'smbc-foreign-ordinary-history')",
+          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'moneyforward-detail-balances', 'sbi-vc-document-metadata', 'smbc-direct-transactions', 'smbc-foreign-ordinary-balance', 'smbc-foreign-ordinary-history')",
         )
         .get(),
     ).toEqual({ n: 0 });
@@ -426,6 +440,18 @@ describe("named concepts in the final SQL", () => {
         )
         .get(),
     ).toEqual({ policy_id: "coverage-v1" });
+    expect(
+      db
+        .query(
+          "SELECT policy_id,required_parser_version,replaces_previous_on_complete_empty,unit_scope FROM dataset_snapshot_policies WHERE parser_name='moneyforward-detail-balances'",
+        )
+        .get(),
+    ).toEqual({
+      policy_id: "coverage-v1",
+      required_parser_version: "1.0.1",
+      replaces_previous_on_complete_empty: 0,
+      unit_scope: "run",
+    });
     expect(
       db
         .query(
@@ -501,6 +527,20 @@ describe("named concepts in the final SQL", () => {
         )
         .all(),
     ).toEqual([
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-debit-ledger",
+        dataset: "debit-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-debit-other-statement",
+        dataset: "debit-other-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
       {
         source_id: "myjcb",
         parser_name: "myjcb-jpoint-balance",

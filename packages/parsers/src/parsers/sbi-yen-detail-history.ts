@@ -5,6 +5,8 @@
 
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
 import { decodeUtf8, isObject } from "./util.ts";
+import { CASH_HISTORY_SCHEMA, parseCashHistoryJson } from "./sbi-cash-history-schema.ts";
+import { parseRetainedCashHistory } from "./sbi-cash-history.ts";
 import {
   exactDecimal,
   exactMoney,
@@ -59,14 +61,16 @@ const RECORD_KEYS = [
 
 export const sbiYenDetailHistory: Parser = {
   name: "sbi-yen-detail-history",
-  version: "1.0.3",
+  version: "1.1.2",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "yen-detail-history";
   },
 
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
-    const body: unknown = JSON.parse(decodeUtf8(bytes));
+    const body: unknown = parseCashHistoryJson(decodeUtf8(bytes));
+    if (isObject(body) && body["schemaVersion"] === CASH_HISTORY_SCHEMA)
+      return parseRetainedCashHistory(bytes, artifact, "yen");
     const legacy =
       isObject(body) &&
       !Object.hasOwn(body, "schemaVersion") &&

@@ -105,3 +105,16 @@ No admin bearer is needed. A registered admin secret is deleted only after the m
 - Secrets: `JRE_ID_CREDENTIAL_JSON`
 
 The former `MOBILE_SUICA_SESSION_JSON`, `JRE_ID_FINGERPRINT` and TAMIA VPC binding are unnecessary for execution. Cleanup deletes only the Worker. Keep shared DATA because other collectors and the Processor also use it.
+
+### Retained SF history
+
+The normal scheduled run acquires the site's whole 26-week retention. A 100-row
+response is followed by an inclusive search on its oldest date; verified overlap
+is replaced by the newly returned complete boundary-day suffix. Equal rows retain
+their occurrence counts and a blank oldest-row amount stays unknown unless a later
+page supplies it. A capped single day, missing/changed overlap, invalid response or
+resource limit refuses publication. Sub-100 first pages still use one request and
+the existing normalized envelope. Multi-page bundles include all cursor/page rows
+for parser revalidation and row provenance; every sanitized page remains private
+R2 evidence. No request window or checkpoint is added. See
+[ADR 0104](../../docs/adr/0104-mobile-suica-retained-history.md).

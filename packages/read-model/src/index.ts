@@ -252,3 +252,9 @@ export {
   type SettlementView,
   storedQuantity,
 } from "./events";
+
+export {
+  type PortfolioValuationHistoryQuery,
+  type PortfolioValuationHistoryRow,
+  portfolioValuationHistorySql,
+} from "./portfolio-valuation-history";

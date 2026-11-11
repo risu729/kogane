@@ -1210,6 +1210,28 @@
       "sha256": "393a169b18e4ee6888af7d1d01f143aa9a024f98599e4a95e557311d7546d17b"
     },
     {
+      "file": "0090_myjcb_debit_unit_eligibility.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "aa3ec5a4b80b0d51bbc89fba530107cf2dd3c41accf977eb478daae441d0b938"
+    },
+    {
+      "file": "0091_moneyforward_detail_balance_snapshots.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "91d8014b75ce05e6e4d9e16a036b91a445d6a39a2afc8e2354de6fc996505a82"
+    },
+    {
       "file": "0095_sbi_vc_classic_unit_eligibility.sql",
       "statementCount": 2,
       "insertStatements": [],
@@ -22144,6 +22166,8 @@
       "0080_jpoint_program.sql",
       "0085_schedule_dispatch_marker.sql",
       "0088_sbi_shinsei_monthly_report_units.sql",
+      "0090_myjcb_debit_unit_eligibility.sql",
+      "0091_moneyforward_detail_balance_snapshots.sql",
       "0096_smbc_foreign_ordinary_unit_eligibility.sql",
       "0097_sbi_vc_document_unit_eligibility.sql"
     ],

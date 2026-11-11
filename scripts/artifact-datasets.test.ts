@@ -55,6 +55,22 @@ const html = "text/html";
 /** Artifacts as the collectors write them. */
 const SAMPLES: readonly Sample[] = [
   {
+    source: "myjcb",
+    artifactKey: "conn-a/debit-detail-01.html",
+    role: "sanitized_provider_capture",
+    mediaType: html,
+    dataset: "debit-detail",
+    unitKey: "conn-a",
+  },
+  {
+    source: "myjcb",
+    artifactKey: "conn-a/debit-other-detail-01.html",
+    role: "sanitized_provider_capture",
+    mediaType: html,
+    dataset: "debit-other-detail",
+    unitKey: "conn-a:debit-other",
+  },
+  {
     source: "prestia-bank",
     artifactKey: "balance.html",
     role: "sanitized_provider_capture",
@@ -205,7 +221,9 @@ const SAMPLES: readonly Sample[] = [
   ...[
     ["domestic-cash-positions", "domestic"],
     ["account-assets-current", "domestic"],
+
     ["yen-detail-history", "domestic"],
+    ["foreign-cash-history", "domestic"],
     ["domestic-trade-records", "domestic"],
     ["foreign-cash-positions", "foreign"],
     ["foreign-cash-balances", "foreign"],
@@ -217,6 +235,14 @@ const SAMPLES: readonly Sample[] = [
     mediaType: json,
     dataset: dataset!,
     unitKey: unitKey!,
+  })),
+  ...["source", "inventory", "2099"].map((part) => ({
+    source: "sbi-securities",
+    artifactKey: `account-assets-history-${part}.json`,
+    role: part === "source" ? "provider_response" : "collector_derived",
+    mediaType: json,
+    dataset: part === "2099" ? "account-assets-history" : null,
+    unitKey: "domestic",
   })),
   {
     source: "sbi-shinsei",
@@ -661,7 +687,9 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
   "sbi-securities": [
     "domestic-cash-positions",
     "account-assets-current",
+    "account-assets-history",
     "yen-detail-history",
+    "foreign-cash-history",
     "domestic-trade-records",
     "foreign-cash-positions",
     "foreign-cash-balances",
@@ -772,8 +800,11 @@ describe("the registration dataset table (ADR 0022)", () => {
       "terminal-registration-v2",
       "terminal-registration-v3",
       "terminal-registration-v4",
+      "terminal-registration-v5",
+      "terminal-registration-v6",
+      "terminal-registration-v7",
     ]);
-    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v4");
+    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v7");
     const vpass = (await allSamples()).filter((sample) => sample.source === "vpass");
     expect(vpass.filter((sample) => sample.dataset === "statement-page").length).toBe(2);
     for (const sample of vpass) {
@@ -850,7 +881,7 @@ describe("the registration dataset table (ADR 0022)", () => {
   test("v4 changes dataset mapping only for SBI's dated execution keys; v3 remains reproducible", async () => {
     for (const sample of await allSamples()) {
       const before = artifactDataset(sample.source, sample, "terminal-registration-v3");
-      const after = artifactDataset(sample.source, sample);
+      const after = artifactDataset(sample.source, sample, "terminal-registration-v4");
       if (before === after) continue;
       expect(sample.source).toBe("sbi-securities");
       expect(sample.artifactKey).toMatch(
@@ -858,6 +889,89 @@ describe("the registration dataset table (ADR 0022)", () => {
       );
       expect(before).toBeNull();
       expect(after).toBe(sample.dataset);
+    }
+  });
+
+  test("v5 adds only weekly assets while v4 stays reproducible", async () => {
+    for (const sample of await allSamples()) {
+      const before = artifactDataset(sample.source, sample, "terminal-registration-v4");
+      const after = artifactDataset(sample.source, sample, "terminal-registration-v5");
+      if (before === after) continue;
+      expect(sample.source).toBe("sbi-securities");
+      expect(sample.artifactKey).toBe("account-assets-history-2099.json");
+      expect(before).toBeNull();
+      expect(after).toBe("account-assets-history");
+    }
+  });
+
+  test("v6 adds only observed MyJCB debit pages while all earlier mappings stay frozen", async () => {
+    let changed = 0;
+    for (const sample of await allSamples()) {
+      const before = artifactDataset(sample.source, sample, "terminal-registration-v5");
+      const after = artifactDataset(sample.source, sample, "terminal-registration-v6");
+      if (before === after) continue;
+      changed += 1;
+      expect(sample.source).toBe("myjcb");
+      expect(["debit-detail", "debit-other-detail"]).toContain(after!);
+      expect(before).toBeNull();
+      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, 5))
+        expect(artifactDataset(sample.source, sample, version)).toBeNull();
+    }
+    expect(changed).toBe(2);
+    expect(
+      artifactDataset("myjcb", {
+        artifactKey: "conn-a/debit-other-detail-00.html",
+        role: "sanitized_provider_capture",
+        mediaType: html,
+      }),
+    ).toBeNull();
+    expect(
+      artifactDataset("myjcb", {
+        artifactKey: "conn-a/debit-detail-15.html",
+        role: "sanitized_provider_capture",
+        mediaType: html,
+      }),
+    ).toBeNull();
+  });
+
+  test("v7 adds only retained USD cash, preserving every earlier dataset mapping", async () => {
+    let changed = 0;
+    for (const sample of await allSamples()) {
+      const before = artifactDataset(sample.source, sample, "terminal-registration-v6");
+      const after = artifactDataset(sample.source, sample, "terminal-registration-v7");
+      if (before === after) continue;
+      changed += 1;
+      expect(sample.source).toBe("sbi-securities");
+      expect(sample.artifactKey).toBe("foreign-cash-history.json");
+      expect(before).toBeNull();
+      expect(after).toBe("foreign-cash-history");
+      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, -1))
+        expect(artifactDataset(sample.source, sample, version)).toBeNull();
+    }
+    expect(changed).toBe(1);
+    expect(
+      artifactDataset("sbi-securities", {
+        artifactKey: "foreign-cash-history-page-0001-source.json",
+        role: "provider_response",
+        mediaType: json,
+      }),
+    ).toBeNull();
+  });
+
+  test("main's adopted Shinsei document mapping remains intact beside the new debit datasets", () => {
+    const report = SAMPLES.find(
+      (sample) => sample.source === "sbi-shinsei" && sample.dataset === "monthly-report-pdf",
+    )!;
+    expect(artifactDataset(report.source, report, "terminal-registration-v1")).toBeNull();
+    for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(1))
+      expect(artifactDataset(report.source, report, version)).toBe("monthly-report-pdf");
+    for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, 5)) {
+      for (const sample of SAMPLES.filter(
+        (entry) =>
+          entry.source === "myjcb" &&
+          ["debit-detail", "debit-other-detail"].includes(entry.dataset ?? ""),
+      ))
+        expect(artifactDataset(sample.source, sample, version)).toBeNull();
     }
   });
 

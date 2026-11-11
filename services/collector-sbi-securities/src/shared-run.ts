@@ -29,6 +29,10 @@ import {
 } from "../../../packages/collection/src/index";
 import type { Artifact, CollectionScope } from "./types";
 import { sbiArtifactKey, SbiHistoryError } from "./history-windows";
+import { isAssetHistoryError } from "../../../packages/parsers/src/parsers/sbi-asset-history-schema";
+import { assetHistoryInventoryComplete } from "./asset-history";
+import { cashHistoryInventoryComplete } from "./cash-history";
+import { CashHistoryError } from "../../../packages/parsers/src/parsers/sbi-cash-history-schema";
 
 export const SBI_SECURITIES_SOURCE = "sbi-securities";
 export const SHARED_PRODUCER = "collector-sbi-securities";
@@ -69,6 +73,9 @@ export interface SbiSharedRun {
 
 /** The same split the central importer uses to attribute an artifact. */
 function datasetScope(dataset: string): UnitScope {
+  // The foreign-cash statement is read through the domestic main-site session.
+  if (dataset === "foreign-cash-history" || dataset === "foreign-cash-history-page-source")
+    return "domestic";
   return dataset.startsWith("foreign-") ? "foreign" : "domestic";
 }
 
@@ -82,6 +89,8 @@ function scopesFor(scope: CollectionScope): UnitScope[] {
  * stable code, so no free-text ever reaches the manifest.
  */
 export function safeFailureCode(error: unknown): string {
+  if (error instanceof CashHistoryError) return error.code;
+  if (isAssetHistoryError(error)) return error.code;
   if (error instanceof SbiHistoryError) return error.code;
   const details = safeErrorDetails(error);
   if (details.code !== undefined && SAFE_CODE.test(details.code)) return details.code;
@@ -105,6 +114,20 @@ export function safeFailureCode(error: unknown): string {
 
 /** Builds the plan without writing anything, so a test can read the manifest. */
 export async function sbiRunPlan(run: SbiSharedRun): Promise<PersistRunPlan> {
+  if (!(await cashHistoryInventoryComplete(run.artifacts))) {
+    run = {
+      ...run,
+      status: run.status === "failed" ? "failed" : "partial",
+      failures: [...run.failures, { scope: "domestic", code: "sbi_cash_history_source_inventory" }],
+    };
+  }
+  if (!(await assetHistoryInventoryComplete(run.artifacts))) {
+    run = {
+      ...run,
+      status: run.status === "failed" ? "failed" : "partial",
+      failures: [...run.failures, { scope: "domestic", code: "sbi_asset_history_shard_inventory" }],
+    };
+  }
   const artifacts = await Promise.all(run.artifacts.map((artifact) => plannedArtifact(artifact)));
   const scopes = scopesFor(run.scope);
   const providerOutcome: ProviderOutcome = run.status;
@@ -183,7 +206,19 @@ export async function sbiRunPlan(run: SbiSharedRun): Promise<PersistRunPlan> {
     units,
     ranges,
     reports: [],
-    transformations: artifacts.map((artifact) => extraction(artifact, run.producerVersion)),
+    transformations: artifacts.flatMap((artifact, index) =>
+      artifact.role === "provider_response"
+        ? []
+        : [
+            extraction(
+              artifact,
+              run.producerVersion,
+              (run.artifacts[index]!.inputArtifactKeys ?? []).filter((key) =>
+                artifacts.some((parent) => parent.artifactKey === key),
+              ),
+            ),
+          ],
+    ),
   };
   return { run: fields, artifacts };
 }
@@ -201,15 +236,21 @@ export async function persistSbiRun(
  * MTS payload with its result codes, the GraphQL and main-site JSON, the trade
  * history pages bundled into one object — and none of those responses is
  * stored, so the step names no input artifact; the Processor records that as
- * `source_bytes_not_available` rather than inventing a parent.
+ * `source_bytes_not_available` rather than inventing a parent. Weekly history
+ * is the exception: its exact source bytes are retained, and its inventory
+ * and year shards name their kept inputs.
  */
-function extraction(artifact: PersistArtifact, producerVersion: string): TerminalTransformation {
+function extraction(
+  artifact: PersistArtifact,
+  producerVersion: string,
+  inputs: readonly string[],
+): TerminalTransformation {
   return {
     transformationId: `${artifact.artifactKey}:extracted`,
     stepKind: "extracted",
     transformerId: TRANSFORMER_ID,
     transformerVersion: producerVersion,
-    inputArtifactKeys: [],
+    inputArtifactKeys: [...inputs],
     outputArtifactKey: artifact.artifactKey,
   };
 }
@@ -223,7 +264,7 @@ function failureCode(codes: readonly string[]): string {
 }
 
 async function plannedArtifact(artifact: Artifact): Promise<PersistArtifact> {
-  const bytes = new TextEncoder().encode(JSON.stringify(artifact.body));
+  const bytes = artifact.bytes ?? new TextEncoder().encode(JSON.stringify(artifact.body));
   return {
     artifactKey: sbiArtifactKey(artifact),
     sha256: await sha256Hex(bytes),
@@ -233,7 +274,7 @@ async function plannedArtifact(artifact: Artifact): Promise<PersistArtifact> {
     // GraphQL `data`, the main-site JSON parsed and bundled, the MTS payload
     // in an envelope), which is the role the central descriptor gave them; the
     // terminal's `extracted` step says so (ADR 0021).
-    role: "collector_derived",
+    role: artifact.role ?? "collector_derived",
     unitKey: datasetScope(artifact.dataset),
     body: { kind: "bytes", bytes },
   };

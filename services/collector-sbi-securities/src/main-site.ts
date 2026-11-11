@@ -8,6 +8,24 @@ import {
   type HistoryWindow,
 } from "./history-windows";
 import type { Artifact, DomesticSession } from "./types";
+import { assetHistoryArtifacts, readAssetHistoryResponse } from "./asset-history";
+import { collectCashHistory, readCashHistoryResponse } from "./cash-history";
+import {
+  CashHistoryError,
+  CASH_HISTORY_PAGE_SIZE,
+  type CashHistoryKind,
+} from "../../../packages/parsers/src/parsers/sbi-cash-history-schema";
+import {
+  auditAssetHistoryJson,
+  parseAssetHistoryJson,
+} from "../../../packages/parsers/src/parsers/sbi-asset-history-json";
+import {
+  assetHistoryError,
+  isAssetHistoryError,
+  sanitizeAssetHistory,
+  type AssetHistoryError,
+  ASSET_HISTORY_SOURCE_KEY,
+} from "../../../packages/parsers/src/parsers/sbi-asset-history-schema";
 
 const MAIN_SITE_USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
@@ -76,34 +94,67 @@ export async function collectMainSiteArtifacts(options: {
   from?: string;
   to?: string;
   onHistoryError?: (error: SbiHistoryError) => void;
+  onAssetHistoryError?: (error: AssetHistoryError) => void;
+  onCashHistoryError?: (error: CashHistoryError) => void;
+  onArtifact?: (artifact: Artifact) => void;
 }): Promise<Artifact[]> {
   const to = options.to ?? jstDate(new Date());
   const from = options.from ?? historyYearStart(to);
   const auth = await createMainSiteAuth(options.session, options.mainSiteBaseUrl);
   const artifacts: Artifact[] = [];
+  const retain = (artifact: Artifact) => {
+    artifacts.push(artifact);
+    options.onArtifact?.(artifact);
+  };
 
   const assets = await fetchAssets(auth);
-  artifacts.push({
+  retain({
     dataset: "account-assets-current",
     mediaType: "application/json",
     body: assets,
   });
 
-  const yenHistory = await fetchYenHistory(options.session, auth);
-  artifacts.push({
-    dataset: "yen-detail-history",
-    mediaType: "application/json",
-    body: yenHistory,
-  });
+  try {
+    const history = await fetchAssetHistoryCapture(auth);
+    retain({
+      artifactKey: ASSET_HISTORY_SOURCE_KEY,
+      dataset: "account-assets-history-source",
+      mediaType: "application/json",
+      role: "provider_response",
+      body: history.body,
+      bytes: history.bytes,
+    });
+    for (const artifact of await assetHistoryArtifacts(history)) retain(artifact);
+  } catch (cause) {
+    const error = isAssetHistoryError(cause)
+      ? cause
+      : assetHistoryError("sbi_asset_history_fetch_failed", { cause });
+    if (options.onAssetHistoryError === undefined) throw error;
+    options.onAssetHistoryError(error);
+  }
 
-  artifacts.push(
-    ...(await collectHistoryArtifacts({
-      dataset: "domestic-trade-records",
-      range: { from, to },
-      collect: (window) => fetchDomesticTradeHistory({ session: options.session, auth, ...window }),
-      ...(options.onHistoryError === undefined ? {} : { onError: options.onHistoryError }),
-    })),
-  );
+  // Cash presets always cover all retained history, independently of the
+  // legacy execution-only window arguments.
+  for (const kind of ["yen", "foreign"] as const) {
+    try {
+      await fetchCashHistory(options.session, auth, kind, retain);
+    } catch (cause) {
+      const error =
+        cause instanceof CashHistoryError
+          ? cause
+          : new CashHistoryError("sbi_cash_history_fetch_failed");
+      if (options.onCashHistoryError === undefined) throw error;
+      options.onCashHistoryError(error);
+    }
+  }
+
+  for (const artifact of await collectHistoryArtifacts({
+    dataset: "domestic-trade-records",
+    range: { from, to },
+    collect: (window) => fetchDomesticTradeHistory({ session: options.session, auth, ...window }),
+    ...(options.onHistoryError === undefined ? {} : { onError: options.onHistoryError }),
+  }))
+    retain(artifact);
   return artifacts;
 }
 
@@ -197,10 +248,44 @@ async function fetchAssets(auth: MainSiteAuth): Promise<Record<string, unknown>>
   return parseJsonObject(text, "SBI account assets");
 }
 
-async function fetchYenHistory(
+/** The observed all-period endpoint has no period query or pagination. */
+export async function fetchAssetHistory(
+  auth: Pick<MainSiteAuth, "assetsUrl" | "cookies">,
+): Promise<unknown> {
+  return parseAssetHistoryJson(
+    new TextDecoder().decode((await fetchAssetHistoryCapture(auth)).bytes),
+  );
+}
+
+async function fetchAssetHistoryCapture(
+  auth: Pick<MainSiteAuth, "assetsUrl" | "cookies">,
+): Promise<{
+  body: unknown;
+  bytes: Uint8Array;
+  capturedAt: string;
+}> {
+  const capturedAt = new Date().toISOString();
+  const requestUrl = new URL("/account/api/assets/valuations", auth.assetsUrl);
+  const response = await fetch(requestUrl, {
+    headers: {
+      accept: "application/json, text/plain, */*",
+      cookie: cookieHeader(auth.cookies, requestUrl),
+      referer: auth.assetsUrl,
+      "user-agent": MAIN_SITE_USER_AGENT,
+    },
+  });
+  if (!response.ok) throw assetHistoryError("sbi_asset_history_fetch_failed");
+  const bytes = await readAssetHistoryResponse(response);
+  const body = sanitizeAssetHistory(auditAssetHistoryJson(new TextDecoder().decode(bytes)));
+  return { body, bytes, capturedAt };
+}
+
+async function fetchCashHistory(
   session: DomesticSession,
   auth: MainSiteAuth,
-): Promise<YenHistoryBundle> {
+  kind: CashHistoryKind,
+  retain: (artifact: Artifact) => void,
+): Promise<void> {
   const entryUrl = new URL("/ETGate/", auth.baseUrl);
   entryUrl.search = new URLSearchParams({
     _ControlID: "WPLETsmR001Control",
@@ -209,7 +294,7 @@ async function fetchYenHistory(
     _DataStoreID: "DSWPLETsmR001Control",
     OutSide: "on",
     getFlg: "on",
-    path: "banking/yen/detail-history",
+    path: `banking/${kind === "yen" ? "yen" : "fc"}/detail-history`,
   }).toString();
   const page = await fetchMainSiteAuthenticatedPage(session, auth, entryUrl);
   const html = await page.response.text();
@@ -224,27 +309,66 @@ async function fetchYenHistory(
   }
   const csrfToken = extractCsrfToken(html);
   if (!csrfToken) throw new Error("SBI yen history page omitted CSRF token");
-  const requestUrl = new URL("/banking/api/yen/detail/init", MEMBER_SITE_ORIGIN);
-  const response = await fetch(requestUrl, {
-    headers: {
-      accept: "application/json, text/plain, */*",
-      cookie: page.cookieHeader,
-      referer: new URL("/banking/yen/detail-history", MEMBER_SITE_ORIGIN).toString(),
-      "user-agent": MAIN_SITE_USER_AGENT,
-      "x-csrf-token": csrfToken,
+  await collectCashHistory({
+    kind,
+    today: jstDate(new Date()),
+    retain,
+    fetchPage: async (range, pageNumber) => {
+      const requestUrl = cashHistoryRequestUrl(kind, range, pageNumber);
+      const response = await fetch(requestUrl, {
+        headers: {
+          accept: "application/json, text/plain, */*",
+          cookie: page.cookieHeader,
+          referer: new URL(
+            `/banking/${kind === "yen" ? "yen" : "fc"}/detail-history`,
+            MEMBER_SITE_ORIGIN,
+          ).toString(),
+          "user-agent": MAIN_SITE_USER_AGENT,
+          "x-csrf-token": csrfToken,
+        },
+      });
+      if (!response.ok) throw new CashHistoryError("sbi_cash_history_fetch_failed");
+      return readCashHistoryResponse(response);
     },
   });
-  const text = await response.text();
-  if (!response.ok) {
-    throw Object.assign(new Error(`SBI yen history API failed with HTTP ${response.status}`), {
-      httpStatus: response.status,
-    });
-  }
-  const initialPage = parseJsonObject(text, "SBI yen history API");
-  // Only the init request has been observed. Do not guess a request shape for
-  // later pages: fail the collection instead of sealing a silently truncated
-  // two-year history as complete evidence.
-  return bundleYenHistoryPages([initialPage]);
+}
+
+/** Only the request values observed in the official statement UI. */
+export function cashHistoryRequestUrl(
+  kind: CashHistoryKind,
+  range: { from: string; to: string },
+  pageNumber: number,
+): URL {
+  if (kind === "foreign" && pageNumber !== 1)
+    throw new CashHistoryError("sbi_foreign_cash_pagination_unobserved");
+  const url = new URL(
+    kind === "yen" ? "/banking/api/yen/detail/query" : "/banking/api/fc/detail-history/search",
+    MEMBER_SITE_ORIGIN,
+  );
+  url.search = new URLSearchParams(
+    kind === "yen"
+      ? {
+          depositDateFrom: range.from.replaceAll("-", ""),
+          depositDateTo: range.to.replaceAll("-", ""),
+          payDepKbnList: "1,2,5",
+          detailKbnList: "11,12,13,14,15,16,17,18,21,22,23,24",
+          sortDateType: "1",
+          pageNumber: String(pageNumber),
+          pageSize: String(CASH_HISTORY_PAGE_SIZE),
+          totalCountKbn: "1",
+        }
+      : {
+          startDate: range.from.replaceAll("-", "/"),
+          endDate: range.to.replaceAll("-", "/"),
+          tradeKind: "",
+          currencyCode: "011",
+          pageNumber: String(pageNumber),
+          pageSize: String(CASH_HISTORY_PAGE_SIZE),
+          termKind: "1",
+          sortType: "1",
+        },
+  ).toString();
+  return url;
 }
 
 export function bundleYenHistoryPages(pages: Record<string, unknown>[]): YenHistoryBundle {

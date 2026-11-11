@@ -1,4 +1,5 @@
 import type { Parser } from "../types.ts";
+import { moneyForwardDetailBalances } from "./moneyforward-detail-balances.ts";
 // Build identity of every parser below (design review D03): the registry is
 // what a Worker reads, so the digests travel with it.
 export { PARSER_CODE_DIGESTS, PARSER_DIGESTS } from "./digests.ts";
@@ -17,6 +18,7 @@ import {
   myJcbPastMonthBalances,
 } from "./myjcb.ts";
 import { myJcbJPointBalance } from "./myjcb-jpoint.ts";
+import { myJcbDebitLedger, myJcbDebitOtherStatement } from "./myjcb-debit.ts";
 import { myJcbSkipPaymentSchedule } from "./myjcb-skip-payment-schedule.ts";
 import {
   sonyBankGrossBalance,
@@ -26,9 +28,11 @@ import {
 } from "./sony-bank.ts";
 import { globalPassActivity } from "./global-pass-activity-parser.ts";
 import { sbiAccountAssetsCurrent } from "./sbi-account-assets-current.ts";
+import { sbiAccountAssetsHistory } from "./sbi-account-assets-history.ts";
 import { sbiDomesticCashPositions } from "./sbi-domestic-cash-positions.ts";
 import { sbiDomesticTradeRecords } from "./sbi-domestic-trade-records.ts";
 import { sbiForeignCashBalances } from "./sbi-foreign-cash-balances.ts";
+import { sbiForeignCashHistory } from "./sbi-foreign-cash-history.ts";
 import { sbiForeignCashPositions } from "./sbi-foreign-cash-positions.ts";
 import { sbiForeignTradeRecords } from "./sbi-foreign-trade-records.ts";
 import { sbiYenDetailHistory } from "./sbi-yen-detail-history.ts";
@@ -58,23 +62,28 @@ export const PARSERS: readonly Parser[] = [
   mizuhoOrdinaryHistory,
   moneyForwardMonthlyTransactions,
   moneyForwardEvidenceOnly,
+  moneyForwardDetailBalances,
   myJcbCreditLedger,
   myJcbCreditStatement,
   myJcbPastMonthBalances,
   myJcbEvidenceOnly,
   myJcbSkipPaymentSchedule,
   myJcbJPointBalance,
+  myJcbDebitLedger,
+  myJcbDebitOtherStatement,
   sonyBankGrossBalance,
   sonyBankHistoryJson,
   sonyBankHistoryCsv,
   sonyBankWalletHistory,
   sbiDomesticCashPositions,
   sbiAccountAssetsCurrent,
+  sbiAccountAssetsHistory,
   sbiYenDetailHistory,
   sbiDomesticTradeRecords,
   sbiForeignTradeRecords,
   sbiForeignCashPositions,
   sbiForeignCashBalances,
+  sbiForeignCashHistory,
   sbiVcCashBalances,
   sbiVcAccountMargin,
   sbiVcPositionSummary,
