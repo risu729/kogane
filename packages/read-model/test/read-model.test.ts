@@ -334,8 +334,64 @@ describe("named concepts in the final SQL", () => {
     ).toEqual([
       {
         source_id: "myjcb",
+        parser_name: "myjcb-credit-ledger",
+        dataset: "credit-ledger",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-credit-past-month-balances",
+        dataset: "credit-past-months",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-credit-statement-total",
+        dataset: "credit-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-debit-ledger",
+        dataset: "debit-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-debit-other-statement",
+        dataset: "debit-other-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
         parser_name: "myjcb-jpoint-balance",
         dataset: "jpoint-balance",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-jpoint-history",
+        dataset: "jpoint-history",
+        unit_scope: "unit",
+        snapshot_selection: 1,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-skip-payment-schedule",
+        dataset: "credit-schedule",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "sbi-shinsei-bank",
+        parser_name: "sbi-shinsei-monthly-report-metadata",
+        dataset: "monthly-report-pdf",
         unit_scope: "unit",
         snapshot_selection: 0,
       },
@@ -346,11 +402,18 @@ describe("named concepts in the final SQL", () => {
         unit_scope: "unit",
         snapshot_selection: 0,
       },
+      {
+        source_id: "vpass",
+        parser_name: "vpass-credit-snapshot",
+        dataset: "credit-snapshot",
+        unit_scope: "unit",
+        snapshot_selection: 1,
+      },
     ]);
     expect(
       db
         .query(
-          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-savings-activity')",
+          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'moneyforward-detail-balances', 'sbi-income-payments', 'sbi-realised-gains', 'vpass-credit-snapshot', 'myjcb-jpoint-history', 'sbi-shinsei-savings-activity')",
         )
         .get(),
     ).toEqual({ n: 0 });
@@ -361,6 +424,18 @@ describe("named concepts in the final SQL", () => {
         )
         .get(),
     ).toEqual({ policy_id: "coverage-v1" });
+    expect(
+      db
+        .query(
+          "SELECT policy_id,required_parser_version,replaces_previous_on_complete_empty,unit_scope FROM dataset_snapshot_policies WHERE parser_name='moneyforward-detail-balances'",
+        )
+        .get(),
+    ).toEqual({
+      policy_id: "coverage-v1",
+      required_parser_version: "1.0.1",
+      replaces_previous_on_complete_empty: 0,
+      unit_scope: "run",
+    });
     expect(
       db
         .query(
@@ -411,8 +486,8 @@ describe("named concepts in the final SQL", () => {
     expect(db.query(`SELECT ${economicallySummable.predicate()} AS summable`).get()).toEqual({
       summable: 0,
     });
-    // Prior snapshot policies keep the run scope. The sole new eligibility-only
-    // J-POINT policy uses the unit scope; this fixture has no reward-unit artifact.
+    // Prior snapshots keep run scope. Vpass credit is the one independently
+    // selecting unit policy; this fixture has no Vpass or reward-unit artifact.
     expect(
       db
         .query(
@@ -425,10 +500,13 @@ describe("named concepts in the final SQL", () => {
     expect(
       db
         .query(
-          "SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE snapshot_selection=1 AND unit_scope<>'run'",
+          "SELECT parser_name,dataset,unit_scope FROM dataset_snapshot_policies WHERE snapshot_selection=1 AND unit_scope<>'run' ORDER BY parser_name",
         )
-        .get(),
-    ).toEqual({ n: 0 });
+        .all(),
+    ).toEqual([
+      { parser_name: "myjcb-jpoint-history", dataset: "jpoint-history", unit_scope: "unit" },
+      { parser_name: "vpass-credit-snapshot", dataset: "credit-snapshot", unit_scope: "unit" },
+    ]);
     expect(
       db
         .query(
@@ -438,8 +516,64 @@ describe("named concepts in the final SQL", () => {
     ).toEqual([
       {
         source_id: "myjcb",
+        parser_name: "myjcb-credit-ledger",
+        dataset: "credit-ledger",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-credit-past-month-balances",
+        dataset: "credit-past-months",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-credit-statement-total",
+        dataset: "credit-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-debit-ledger",
+        dataset: "debit-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-debit-other-statement",
+        dataset: "debit-other-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
         parser_name: "myjcb-jpoint-balance",
         dataset: "jpoint-balance",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-jpoint-history",
+        dataset: "jpoint-history",
+        unit_scope: "unit",
+        snapshot_selection: 1,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-skip-payment-schedule",
+        dataset: "credit-schedule",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "sbi-shinsei-bank",
+        parser_name: "sbi-shinsei-monthly-report-metadata",
+        dataset: "monthly-report-pdf",
         unit_scope: "unit",
         snapshot_selection: 0,
       },
@@ -449,6 +583,13 @@ describe("named concepts in the final SQL", () => {
         dataset: "savings-activity",
         unit_scope: "unit",
         snapshot_selection: 0,
+      },
+      {
+        source_id: "vpass",
+        parser_name: "vpass-credit-snapshot",
+        dataset: "credit-snapshot",
+        unit_scope: "unit",
+        snapshot_selection: 1,
       },
     ]);
   });

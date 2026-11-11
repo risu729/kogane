@@ -72,7 +72,12 @@ export function parseSavingsHistory(
     seen.add(scope.accountNo);
     const ordinal = String(index + 1).padStart(4, "0");
     if (account.errorCode !== undefined) {
-      if (account.errorCode !== "history_read_failed") return fail();
+      // A read failure and a stop at the shared time/byte budget are both closed per-account failures.
+      if (
+        account.errorCode !== "history_read_failed" &&
+        account.errorCode !== "history_budget_exceeded"
+      )
+        return fail();
       failures.push({
         historyScope: scope,
         operation: `read:history-${ordinal}`,

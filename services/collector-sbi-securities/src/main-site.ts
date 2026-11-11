@@ -1,6 +1,33 @@
 import { createHash } from "node:crypto";
 import { callMts } from "./sbi";
+import {
+  collectHistoryArtifacts,
+  jstDate,
+  SbiHistoryError,
+  historyYearStart,
+  type HistoryWindow,
+} from "./history-windows";
 import type { Artifact, DomesticSession } from "./types";
+import { assetHistoryArtifacts, readAssetHistoryResponse } from "./asset-history";
+import { collectCashHistory, readCashHistoryResponse } from "./cash-history";
+import { collectIncomeHistory, incomeHistoryUrl } from "./income-history";
+import { IncomeHistoryError } from "../../../packages/parsers/src/parsers/sbi-income-history-schema";
+import {
+  CashHistoryError,
+  CASH_HISTORY_PAGE_SIZE,
+  type CashHistoryKind,
+} from "../../../packages/parsers/src/parsers/sbi-cash-history-schema";
+import {
+  auditAssetHistoryJson,
+  parseAssetHistoryJson,
+} from "../../../packages/parsers/src/parsers/sbi-asset-history-json";
+import {
+  assetHistoryError,
+  isAssetHistoryError,
+  sanitizeAssetHistory,
+  type AssetHistoryError,
+  ASSET_HISTORY_SOURCE_KEY,
+} from "../../../packages/parsers/src/parsers/sbi-asset-history-schema";
 
 const MAIN_SITE_USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
@@ -68,39 +95,101 @@ export async function collectMainSiteArtifacts(options: {
   mainSiteBaseUrl: string;
   from?: string;
   to?: string;
+  onHistoryError?: (error: SbiHistoryError) => void;
+  onAssetHistoryError?: (error: AssetHistoryError) => void;
+  onCashHistoryError?: (error: CashHistoryError) => void;
+  onIncomeHistoryError?: (error: IncomeHistoryError) => void;
+  onArtifact?: (artifact: Artifact) => void;
 }): Promise<Artifact[]> {
   const to = options.to ?? jstDate(new Date());
-  const from = options.from ?? addUtcDays(to, -89);
-  assertDateRange(from, to);
+  const from = options.from ?? historyYearStart(to);
   const auth = await createMainSiteAuth(options.session, options.mainSiteBaseUrl);
   const artifacts: Artifact[] = [];
+  const retain = (artifact: Artifact) => {
+    artifacts.push(artifact);
+    options.onArtifact?.(artifact);
+  };
 
   const assets = await fetchAssets(auth);
-  artifacts.push({
+  retain({
     dataset: "account-assets-current",
     mediaType: "application/json",
     body: assets,
   });
 
-  const yenHistory = await fetchYenHistory(options.session, auth);
-  artifacts.push({
-    dataset: "yen-detail-history",
-    mediaType: "application/json",
-    body: yenHistory,
-  });
+  try {
+    const history = await fetchAssetHistoryCapture(auth);
+    retain({
+      artifactKey: ASSET_HISTORY_SOURCE_KEY,
+      dataset: "account-assets-history-source",
+      mediaType: "application/json",
+      role: "provider_response",
+      body: history.body,
+      bytes: history.bytes,
+    });
+    for (const artifact of await assetHistoryArtifacts(history)) retain(artifact);
+  } catch (cause) {
+    const error = isAssetHistoryError(cause)
+      ? cause
+      : assetHistoryError("sbi_asset_history_fetch_failed", { cause });
+    if (options.onAssetHistoryError === undefined) throw error;
+    options.onAssetHistoryError(error);
+  }
 
-  const domesticHistory = await fetchDomesticTradeHistory({
-    session: options.session,
-    auth,
-    from,
-    to,
-  });
-  artifacts.push({
+  for (const kind of ["income", "gains"] as const) {
+    try {
+      await collectIncomeHistory({
+        kind,
+        today: jstDate(new Date()),
+        retain,
+        fetch: async (role, range) => {
+          const url = incomeHistoryUrl(auth.assetsUrl, kind, role, range);
+          const response = await fetch(url, {
+            headers: {
+              accept: "application/json, text/plain, */*",
+              cookie: cookieHeader(auth.cookies, url),
+              referer: auth.assetsUrl,
+              "user-agent": MAIN_SITE_USER_AGENT,
+            },
+          });
+          if (!response.ok) throw new IncomeHistoryError("sbi_income_history_fetch_failed");
+          // Cash's bounded reader also counts the actual stream independently
+          // of Content-Length; its transport failures are closed below.
+          return readCashHistoryResponse(response);
+        },
+      });
+    } catch (cause) {
+      const error =
+        cause instanceof IncomeHistoryError
+          ? cause
+          : new IncomeHistoryError("sbi_income_history_fetch_failed");
+      if (options.onIncomeHistoryError === undefined) throw error;
+      options.onIncomeHistoryError(error);
+    }
+  }
+
+  // Cash presets always cover all retained history, independently of the
+  // legacy execution-only window arguments.
+  for (const kind of ["yen", "foreign"] as const) {
+    try {
+      await fetchCashHistory(options.session, auth, kind, retain);
+    } catch (cause) {
+      const error =
+        cause instanceof CashHistoryError
+          ? cause
+          : new CashHistoryError("sbi_cash_history_fetch_failed");
+      if (options.onCashHistoryError === undefined) throw error;
+      options.onCashHistoryError(error);
+    }
+  }
+
+  for (const artifact of await collectHistoryArtifacts({
     dataset: "domestic-trade-records",
-    mediaType: "application/json",
-    window: { from, to },
-    body: domesticHistory,
-  });
+    range: { from, to },
+    collect: (window) => fetchDomesticTradeHistory({ session: options.session, auth, ...window }),
+    ...(options.onHistoryError === undefined ? {} : { onError: options.onHistoryError }),
+  }))
+    retain(artifact);
   return artifacts;
 }
 
@@ -194,10 +283,44 @@ async function fetchAssets(auth: MainSiteAuth): Promise<Record<string, unknown>>
   return parseJsonObject(text, "SBI account assets");
 }
 
-async function fetchYenHistory(
+/** The observed all-period endpoint has no period query or pagination. */
+export async function fetchAssetHistory(
+  auth: Pick<MainSiteAuth, "assetsUrl" | "cookies">,
+): Promise<unknown> {
+  return parseAssetHistoryJson(
+    new TextDecoder().decode((await fetchAssetHistoryCapture(auth)).bytes),
+  );
+}
+
+async function fetchAssetHistoryCapture(
+  auth: Pick<MainSiteAuth, "assetsUrl" | "cookies">,
+): Promise<{
+  body: unknown;
+  bytes: Uint8Array;
+  capturedAt: string;
+}> {
+  const capturedAt = new Date().toISOString();
+  const requestUrl = new URL("/account/api/assets/valuations", auth.assetsUrl);
+  const response = await fetch(requestUrl, {
+    headers: {
+      accept: "application/json, text/plain, */*",
+      cookie: cookieHeader(auth.cookies, requestUrl),
+      referer: auth.assetsUrl,
+      "user-agent": MAIN_SITE_USER_AGENT,
+    },
+  });
+  if (!response.ok) throw assetHistoryError("sbi_asset_history_fetch_failed");
+  const bytes = await readAssetHistoryResponse(response);
+  const body = sanitizeAssetHistory(auditAssetHistoryJson(new TextDecoder().decode(bytes)));
+  return { body, bytes, capturedAt };
+}
+
+async function fetchCashHistory(
   session: DomesticSession,
   auth: MainSiteAuth,
-): Promise<YenHistoryBundle> {
+  kind: CashHistoryKind,
+  retain: (artifact: Artifact) => void,
+): Promise<void> {
   const entryUrl = new URL("/ETGate/", auth.baseUrl);
   entryUrl.search = new URLSearchParams({
     _ControlID: "WPLETsmR001Control",
@@ -206,7 +329,7 @@ async function fetchYenHistory(
     _DataStoreID: "DSWPLETsmR001Control",
     OutSide: "on",
     getFlg: "on",
-    path: "banking/yen/detail-history",
+    path: `banking/${kind === "yen" ? "yen" : "fc"}/detail-history`,
   }).toString();
   const page = await fetchMainSiteAuthenticatedPage(session, auth, entryUrl);
   const html = await page.response.text();
@@ -221,27 +344,66 @@ async function fetchYenHistory(
   }
   const csrfToken = extractCsrfToken(html);
   if (!csrfToken) throw new Error("SBI yen history page omitted CSRF token");
-  const requestUrl = new URL("/banking/api/yen/detail/init", MEMBER_SITE_ORIGIN);
-  const response = await fetch(requestUrl, {
-    headers: {
-      accept: "application/json, text/plain, */*",
-      cookie: page.cookieHeader,
-      referer: new URL("/banking/yen/detail-history", MEMBER_SITE_ORIGIN).toString(),
-      "user-agent": MAIN_SITE_USER_AGENT,
-      "x-csrf-token": csrfToken,
+  await collectCashHistory({
+    kind,
+    today: jstDate(new Date()),
+    retain,
+    fetchPage: async (range, pageNumber) => {
+      const requestUrl = cashHistoryRequestUrl(kind, range, pageNumber);
+      const response = await fetch(requestUrl, {
+        headers: {
+          accept: "application/json, text/plain, */*",
+          cookie: page.cookieHeader,
+          referer: new URL(
+            `/banking/${kind === "yen" ? "yen" : "fc"}/detail-history`,
+            MEMBER_SITE_ORIGIN,
+          ).toString(),
+          "user-agent": MAIN_SITE_USER_AGENT,
+          "x-csrf-token": csrfToken,
+        },
+      });
+      if (!response.ok) throw new CashHistoryError("sbi_cash_history_fetch_failed");
+      return readCashHistoryResponse(response);
     },
   });
-  const text = await response.text();
-  if (!response.ok) {
-    throw Object.assign(new Error(`SBI yen history API failed with HTTP ${response.status}`), {
-      httpStatus: response.status,
-    });
-  }
-  const initialPage = parseJsonObject(text, "SBI yen history API");
-  // Only the init request has been observed. Do not guess a request shape for
-  // later pages: fail the collection instead of sealing a silently truncated
-  // two-year history as complete evidence.
-  return bundleYenHistoryPages([initialPage]);
+}
+
+/** Only the request values observed in the official statement UI. */
+export function cashHistoryRequestUrl(
+  kind: CashHistoryKind,
+  range: { from: string; to: string },
+  pageNumber: number,
+): URL {
+  if (kind === "foreign" && pageNumber !== 1)
+    throw new CashHistoryError("sbi_foreign_cash_pagination_unobserved");
+  const url = new URL(
+    kind === "yen" ? "/banking/api/yen/detail/query" : "/banking/api/fc/detail-history/search",
+    MEMBER_SITE_ORIGIN,
+  );
+  url.search = new URLSearchParams(
+    kind === "yen"
+      ? {
+          depositDateFrom: range.from.replaceAll("-", ""),
+          depositDateTo: range.to.replaceAll("-", ""),
+          payDepKbnList: "1,2,5",
+          detailKbnList: "11,12,13,14,15,16,17,18,21,22,23,24",
+          sortDateType: "1",
+          pageNumber: String(pageNumber),
+          pageSize: String(CASH_HISTORY_PAGE_SIZE),
+          totalCountKbn: "1",
+        }
+      : {
+          startDate: range.from.replaceAll("-", "/"),
+          endDate: range.to.replaceAll("-", "/"),
+          tradeKind: "",
+          currencyCode: "011",
+          pageNumber: String(pageNumber),
+          pageSize: String(CASH_HISTORY_PAGE_SIZE),
+          termKind: "1",
+          sortType: "1",
+        },
+  ).toString();
+  return url;
 }
 
 export function bundleYenHistoryPages(pages: Record<string, unknown>[]): YenHistoryBundle {
@@ -484,7 +646,28 @@ async function fetchDomesticTradeHistory(options: {
       { httpStatus: response.status },
     );
   }
+  const returnedForm = parseHtmlFormContaining(html, new URL(response.url), "ACT_search");
+  assertDomesticHistoryRange(new URLSearchParams(returnedForm.fields), options);
   return parseDomesticTradeRecords(html);
+}
+
+/** A server clamp or cleared form must not attest the requested old window. */
+export function assertDomesticHistoryRange(fields: URLSearchParams, window: HistoryWindow): void {
+  for (const [prefix, value] of [
+    ["ref_from_", window.from],
+    ["ref_to_", window.to],
+  ] as const) {
+    const expected = value.split("-");
+    for (const [index, part] of ["yyyy", "mm", "dd"].entries()) {
+      const actual = fields.get(`${prefix}${part}`);
+      if (
+        actual === null ||
+        !(index === 0 ? /^\d{4}$/u : /^\d{1,2}$/u).test(actual) ||
+        Number(actual) !== Number(expected[index])
+      )
+        throw new SbiHistoryError("sbi_domestic_history_range_mismatch");
+    }
+  }
 }
 
 async function fetchMainSiteAuthenticatedPage(
@@ -606,7 +789,7 @@ interface DomesticTradeRecord {
   rawCells: string[];
 }
 
-function parseDomesticTradeRecords(html: string): {
+export function parseDomesticTradeRecords(html: string): {
   records: DomesticTradeRecord[];
   hasMore: boolean;
 } {
@@ -617,7 +800,10 @@ function parseDomesticTradeRecords(html: string): {
         htmlText(candidate).includes("約定日") && htmlText(candidate).includes("約定数量"),
     );
   if (!table) {
-    if (/\bname=["']ACT_search["']/iu.test(html)) {
+    if (
+      /\bname=["']ACT_search["']/iu.test(html) &&
+      htmlText(html).includes("指定された条件での約定履歴は見つかりませんでした")
+    ) {
       return { records: [], hasMore: false };
     }
     throw new Error("SBI domestic history response omitted its result table");
@@ -661,7 +847,8 @@ function parseDomesticTradeRecords(html: string): {
         rawCells: cells,
       };
     });
-  return { records, hasMore: records.length >= 200 };
+  if (records.length >= 200) throw new SbiHistoryError("sbi_domestic_history_truncated");
+  return { records, hasMore: false };
 }
 
 function mainSiteAssetLoginParams(siteLinkParam: string): Record<string, string> {
@@ -925,30 +1112,4 @@ function parseJsonObject(text: string, label: string): Record<string, unknown> {
     throw new Error(`${label} returned non-object JSON`);
   }
   return parsed as Record<string, unknown>;
-}
-
-function assertDateRange(from: string, to: string): void {
-  if (!/^\d{4}-\d{2}-\d{2}$/u.test(from) || !/^\d{4}-\d{2}-\d{2}$/u.test(to) || from > to) {
-    throw new Error("SBI history window must be a valid YYYY-MM-DD range");
-  }
-  const days =
-    Math.floor(
-      (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) / 86_400_000,
-    ) + 1;
-  if (days > 90) throw new Error("SBI history window must not exceed 90 days");
-}
-
-function addUtcDays(value: string, days: number): string {
-  const date = new Date(`${value}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function jstDate(now: Date): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
 }

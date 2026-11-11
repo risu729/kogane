@@ -1,4 +1,7 @@
+import { vpassCreditSnapshot } from "./vpass-credit.ts";
+import { sbiIncomePayments, sbiRealisedGains } from "./sbi-income-history.ts";
 import type { Parser } from "../types.ts";
+import { moneyForwardDetailBalances } from "./moneyforward-detail-balances.ts";
 // Build identity of every parser below (design review D03): the registry is
 // what a Worker reads, so the digests travel with it.
 export { PARSER_CODE_DIGESTS, PARSER_DIGESTS } from "./digests.ts";
@@ -17,6 +20,8 @@ import {
   myJcbPastMonthBalances,
 } from "./myjcb.ts";
 import { myJcbJPointBalance } from "./myjcb-jpoint.ts";
+import { myJcbJPointHistory } from "./myjcb-jpoint-history.ts";
+import { myJcbDebitLedger, myJcbDebitOtherStatement } from "./myjcb-debit.ts";
 import { myJcbSkipPaymentSchedule } from "./myjcb-skip-payment-schedule.ts";
 import {
   sonyBankGrossBalance,
@@ -26,9 +31,11 @@ import {
 } from "./sony-bank.ts";
 import { globalPassActivity } from "./global-pass-activity-parser.ts";
 import { sbiAccountAssetsCurrent } from "./sbi-account-assets-current.ts";
+import { sbiAccountAssetsHistory } from "./sbi-account-assets-history.ts";
 import { sbiDomesticCashPositions } from "./sbi-domestic-cash-positions.ts";
 import { sbiDomesticTradeRecords } from "./sbi-domestic-trade-records.ts";
 import { sbiForeignCashBalances } from "./sbi-foreign-cash-balances.ts";
+import { sbiForeignCashHistory } from "./sbi-foreign-cash-history.ts";
 import { sbiForeignCashPositions } from "./sbi-foreign-cash-positions.ts";
 import { sbiForeignTradeRecords } from "./sbi-foreign-trade-records.ts";
 import { sbiYenDetailHistory } from "./sbi-yen-detail-history.ts";
@@ -39,6 +46,7 @@ import { sbiVcExecutions } from "./sbi-vc-executions.ts";
 import { sbiVcPositionSummary } from "./sbi-vc-position-summary.ts";
 import { smbcDirectBalance, smbcDirectTransactions } from "./smbc-direct.ts";
 import { stGeorgeBalances, stGeorgeTransactions } from "./st-george.ts";
+import { sbiShinseiMonthlyReport } from "./sbi-shinsei-monthly-report.ts";
 import { sbiShinseiBalanceSummaryAndStage } from "./sbi-shinsei-balance-summary-and-stage.ts";
 import { sbiShinseiExchangeRate } from "./sbi-shinsei-exchange-rate.ts";
 import { sbiShinseiSavingsActivity } from "./sbi-shinsei-savings-activity.ts";
@@ -56,23 +64,31 @@ export const PARSERS: readonly Parser[] = [
   mizuhoOrdinaryHistory,
   moneyForwardMonthlyTransactions,
   moneyForwardEvidenceOnly,
+  moneyForwardDetailBalances,
   myJcbCreditLedger,
   myJcbCreditStatement,
   myJcbPastMonthBalances,
   myJcbEvidenceOnly,
   myJcbSkipPaymentSchedule,
   myJcbJPointBalance,
+  myJcbJPointHistory,
+  myJcbDebitLedger,
+  myJcbDebitOtherStatement,
   sonyBankGrossBalance,
   sonyBankHistoryJson,
   sonyBankHistoryCsv,
   sonyBankWalletHistory,
   sbiDomesticCashPositions,
   sbiAccountAssetsCurrent,
+  sbiAccountAssetsHistory,
+  sbiIncomePayments,
+  sbiRealisedGains,
   sbiYenDetailHistory,
   sbiDomesticTradeRecords,
   sbiForeignTradeRecords,
   sbiForeignCashPositions,
   sbiForeignCashBalances,
+  sbiForeignCashHistory,
   sbiVcCashBalances,
   sbiVcAccountMargin,
   sbiVcPositionSummary,
@@ -87,10 +103,12 @@ export const PARSERS: readonly Parser[] = [
   sbiShinseiYenDepositAccount,
   sbiShinseiExchangeRate,
   sbiShinseiBalanceSummaryAndStage,
+  sbiShinseiMonthlyReport,
   vPointBalanceInfo,
   vPointSmfgPoint,
   vPointHistoryPage,
   vPointPayNotificationEvent,
   vpassStatementPage,
+  vpassCreditSnapshot,
   paypayCsv,
 ];

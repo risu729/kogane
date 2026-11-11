@@ -39,7 +39,28 @@ export function sanitizeHistoryHtmlText(html: string): {
   const sanitizedTag = `${tag.slice(0, valueMatch.index)}${replacement}${tag.slice(
     valueMatch.index + valueMatch[0].length,
   )}`;
-  const sanitized = `${html.slice(0, match.index)}${sanitizedTag}${html.slice(match.index + tag.length)}`;
+  let sanitized = `${html.slice(0, match.index)}${sanitizedTag}${html.slice(match.index + tag.length)}`;
+  // The observed known-empty form also carries navigation/session state.
+  // Refuse unknown hidden fields rather than silently archiving new secrets.
+  for (const input of [...sanitized.matchAll(/<input\b[^>]*>/giu)]) {
+    if (
+      !attributeMatches(input[0], "type").some(
+        (value) => attributeValue(value).toLowerCase() === "hidden",
+      )
+    )
+      continue;
+    const names = attributeMatches(input[0], "name");
+    const name = attributeValue(names[0]);
+    if (name.toLowerCase() === "basevariable") continue;
+    if (names.length !== 1 || !["returnUrlList", "checkScreenTransfer"].includes(name))
+      throw new Error("history_hidden_field_unknown");
+    const values = attributeMatches(input[0], "value");
+    if (values.length !== 1) throw new Error("history_hidden_field_invalid");
+    const value = attributeValue(values[0]);
+    const redacted = input[0].replace(values[0]![0], `value="__KOGANE_REDACTED_NAVIGATION__"`);
+    sanitized = sanitized.replace(input[0], redacted);
+    if (value && sanitized.includes(value)) throw new Error("history_hidden_redaction_incomplete");
+  }
   if (sanitized.includes(originalValue))
     throw new Error("history_base_variable_redaction_incomplete");
   return { sanitized, originalValue };

@@ -13,8 +13,8 @@ A PoC independently implementing an SBI Shinsei Bank PowerDirect read-only colle
 The public login bundle and Kuebiko captures confirmed MobileFirst/WLClient-style read routes, session/CSRF-token topology and core response schemas. The local CLI serially performs CAFIS generation, login, Authorization/CSRF and core reads within the same Kuebiko Chrome target; only 4 validated read JSON responses leave the browser.
 
 - The production Worker starts a Cloudflare Container per 1 run. Chrome inside it serially performs CAFIS generation, login, Authorization/CSRF and core reads within 1 page. The Worker handles only scheduling, secret handoff, strict validation and R2 storage.
-- The route catalog uses exact origins, paths and methods. The 2 bootstrap and 4 core-read routes observed in 2026-08-31 captures, plus the selected-period savings route observed on 2026-11-10, have `productionEnabled: true`. Candidates based only on the public bundle are unreachable.
-- Direct HTTP transport is always refused, even for production routes. A single JSON handoff containing the 4 core responses and each savings account's selected-period response leaves the scheduled container page for the Worker; credentials, CAFIS `jsc`, cookies, Authorization, CSRF and sessionStorage do not leave it.
+- The route catalog uses exact origins, paths and methods. The 2 bootstrap and 4 core-read routes observed in 2026-08-31 captures, plus the report-list/download routes observed on 2026-11-09 and the selected-period savings route observed on 2026-11-10, have `productionEnabled: true`. Candidates based only on the public bundle are unreachable.
+- Direct HTTP transport is always refused, even for production routes. A single JSON handoff containing the 4 core responses, each savings account's selected-period response and transient report-list/download results leaves the scheduled container page for the Worker; credentials, CAFIS `jsc`, cookies, Authorization, CSRF and sessionStorage do not leave it.
 - The Container/browser is stopped and discarded after success, refusal or unknown responses, without credential retries.
 - If a later core read fails after a successful top read, successful responses and top-derived normalized data remain in a partial manifest; failed and unattempted datasets use fixed codes. Failure of top itself still produces a failed manifest with no artifacts.
 - Unknown content types, oversized bodies, JSON parse failures and unregistered schemas stop processing without storage or interpretation.
@@ -122,6 +122,31 @@ semantics are still unverified.
 `packages/collection` writes runs directly to shared DATA, retaining the validated provider responses, request-bound history views and normalized snapshot in memory until the terminal is written. The Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). Private Service Binding calls to the central importer, `POST /backfill-raw-evidence`, `scripts/backfill-raw-evidence.sh` and the dedicated source bucket were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)).
 
 Core-response field-name topology from Kuebiko captures is reflected in synthetic fixtures and strict validators. Some known fields are optional because only 1 sample exists; unknown fields, unknown nested items and unknown schemas are refused. A validator implementation alone does not enable a route: an exact request builder and successful execution in an accepted browser context are also required.
+
+## Monthly PDF reports
+
+After the four core reads and the savings history below, the scheduled browser session reads the report list,
+then downloads every offered month not yet registered and the newest offered
+month. It uses the list's exact year/month strings; the inspected account offered
+eight periods, so the public 60-month description is not a promised file count.
+
+The Worker validates strict JSON, success/echo, canonical base64, declared size
+and PDF magic. It keeps PDF bytes only, with month/size/hash in existing private
+artifact/unit metadata. Provider filenames, mail identifiers and report settings
+are transient; no report content is parsed or logged. DATA uses content hashes
+and immutable writes, with a month-plus-hash artifact key. Rechecking an unchanged
+newest report reuses its existing object; changed bytes become a new revision.
+Older registered months are skipped, including their potential later revisions.
+
+One PDF is limited to one MiB, the list to 120 months and the aggregate handoff,
+including the savings history already held, to eight MiB. Failed or budget-limited reports make the run partial while valid
+siblings are retained and independently validated by the metadata-only parser.
+The existing registration catalogue is the checkpoint for a later run. Report
+failures also keep run-success-only core snapshots on their previous current
+capture; this boundary is unchanged. A catalogue
+entry of `document: collected` names this implemented capability, not verified
+production retention. No post-deploy collection has been requested in this change.
+See [ADR 0097](../../docs/adr/0097-sbi-shinsei-monthly-report-evidence.md).
 
 ## Secret bindings
 
@@ -334,7 +359,10 @@ Each account retains `raw-period-activity-NNNN.json` and a derived
 `savings-activity-NNNN.json` that binds the response to the requested account,
 native currency, product code and range. Both belong to one stable account
 unit with its own terminal report and ranges. An unsupported response fails
-that account with a closed code while later accounts are still read. Empty
+that account with a closed code while later accounts are still read. Each
+history read has a 30-second timeout; history and reports share one ten-minute
+deadline, and history may hold at most six MiB of the handoff. An account
+past the deadline or over that budget fails with `history_budget_exceeded`. Empty
 responses are complete only for the observed explicit empty code and exact
 shape; their missing account/currency/date echoes are supplied by the retained
 request scope. Top-page activity and period history share provider reference

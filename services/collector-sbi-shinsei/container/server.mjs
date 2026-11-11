@@ -51,7 +51,10 @@ function parseCredentialRequest(value) {
     !value ||
     typeof value !== "object" ||
     Array.isArray(value) ||
-    Object.keys(value).sort().join(",") !== "credentialJson,relayToken,relayUrl" ||
+    ![
+      "credentialJson,relayToken,relayUrl",
+      "credentialJson,relayToken,relayUrl,storedReportPeriods",
+    ].includes(Object.keys(value).sort().join(",")) ||
     typeof value.credentialJson !== "string" ||
     typeof value.relayToken !== "string" ||
     value.relayToken.length < 32 ||
@@ -60,6 +63,17 @@ function parseCredentialRequest(value) {
   ) {
     throw new Error("request-shape");
   }
+  const storedReportPeriods =
+    value.storedReportPeriods === undefined ? [] : value.storedReportPeriods;
+  if (
+    !Array.isArray(storedReportPeriods) ||
+    storedReportPeriods.length > 1200 ||
+    new Set(storedReportPeriods).size !== storedReportPeriods.length ||
+    storedReportPeriods.some(
+      (period) => typeof period !== "string" || !/^\d{4}-(?:0[1-9]|1[0-2])$/u.test(period),
+    )
+  )
+    throw new Error("request-shape");
   const credential = JSON.parse(value.credentialJson);
   if (
     !credential ||
@@ -78,6 +92,7 @@ function parseCredentialRequest(value) {
   }
   return {
     credential,
+    storedReportPeriods,
     relayToken: value.relayToken,
     relayUrl: value.relayUrl,
   };
@@ -116,8 +131,10 @@ function validateHandoff(value) {
   if (
     parsed.ok !== true ||
     (envelopeKeys !== "ok,responses" &&
+      envelopeKeys !== "failure,ok,responses" &&
+      envelopeKeys !== "documents,ok,responses" &&
       envelopeKeys !== "history,ok,responses" &&
-      envelopeKeys !== "failure,ok,responses") ||
+      envelopeKeys !== "documents,history,ok,responses") ||
     !parsed.responses ||
     typeof parsed.responses !== "object" ||
     Array.isArray(parsed.responses)
@@ -226,6 +243,9 @@ async function collectAuthenticatedReadsInPage(session) {
         credentials: "include",
         cache: "no-store",
         redirect: "manual",
+        ...(stage === "history" || stage.startsWith("report-")
+          ? { signal: AbortSignal.timeout(30_000) }
+          : {}),
         headers: {
           Accept: "application/json, text/plain, */*",
           Authorization: session.authorization,
@@ -248,10 +268,31 @@ async function collectAuthenticatedReadsInPage(session) {
     if (mediaType !== "application/json") {
       throw { stage: `${stage}-content-type` };
     }
-    const raw = await response.text();
-    if (new TextEncoder().encode(raw).byteLength > maximumBytes) {
-      throw { stage: `${stage}-oversize` };
+    if (!response.body) throw { stage: `${stage}-json` };
+    const reader = response.body.getReader();
+    const chunks = [];
+    let size = 0;
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > maximumBytes) {
+          await reader.cancel();
+          throw { stage: `${stage}-oversize` };
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
     }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const raw = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     let data;
     try {
       data = JSON.parse(raw);
@@ -344,9 +385,12 @@ async function collectAuthenticatedReadsInPage(session) {
       }
       responses[plan.key] = result.raw;
     }
+    // History and reports share one deadline inside the 13-minute holder
+    // (ADR 0085) and one handoff budget below the 10 MiB handoff limit.
+    const deadline = Date.now() + 10 * 60 * 1000;
+    const handoffBytes = (value) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
     const top = JSON.parse(responses.topBalances);
     const savings = top?.responseParam?.overview?.responseParam?.savingsDetails;
-    if (!Array.isArray(savings) || savings.length > 100) return fail("history-inventory-shape");
     const date = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Tokyo",
       year: "numeric",
@@ -357,20 +401,35 @@ async function collectAuthenticatedReadsInPage(session) {
       .replaceAll("-", "");
     const fromDate = String(Number(date.slice(0, 4)) - 2) + date.slice(4, 6) + "01";
     const history = { fromDate, toDate: date, accounts: [] };
-    for (const account of savings) {
+    // An unexpected inventory reads no history. The Worker then refuses the
+    // account-count mismatch as one closed history failure and keeps the core
+    // reads and reports instead of losing the whole run.
+    const inventory =
+      Array.isArray(savings) &&
+      savings.length <= 100 &&
+      savings.every(
+        (account) =>
+          account &&
+          typeof account.accountNo === "string" &&
+          /^\d{15}$/u.test(account.accountNo) &&
+          typeof account.currency === "string" &&
+          /^[A-Z]{3}$/u.test(account.currency) &&
+          typeof account.productCode === "string",
+      )
+        ? savings
+        : [];
+    let historyStopped = false;
+    for (const account of inventory) {
       const scope = {
         accountNo: account.accountNo,
         currency: account.currency,
         productCode: account.productCode,
       };
-      if (
-        typeof scope.accountNo !== "string" ||
-        !/^\d{15}$/u.test(scope.accountNo) ||
-        typeof scope.currency !== "string" ||
-        !/^[A-Z]{3}$/u.test(scope.currency) ||
-        typeof scope.productCode !== "string"
-      )
-        return fail("history-inventory-shape");
+      if (historyStopped || Date.now() >= deadline) {
+        historyStopped = true;
+        history.accounts.push({ ...scope, errorCode: "history_budget_exceeded" });
+        continue;
+      }
       try {
         const result = await read(
           "/SFC/app/IFAI_AccountAdapter/getCasaAccountActivitySpecificPeriod",
@@ -385,12 +444,154 @@ async function collectAuthenticatedReadsInPage(session) {
           },
           "history",
         );
-        history.accounts.push({ ...scope, raw: result.raw });
+        const candidate = { ...scope, raw: result.raw };
+        // History keeps at most six MiB of the envelope; reports get the rest of eight.
+        if (
+          handoffBytes({
+            ok: true,
+            responses,
+            history: { ...history, accounts: [...history.accounts, candidate] },
+          }) >
+          6 * 1024 * 1024
+        )
+          history.accounts.push({ ...scope, errorCode: "history_budget_exceeded" });
+        else history.accounts.push(candidate);
       } catch {
         history.accounts.push({ ...scope, errorCode: "history_read_failed" });
       }
     }
-    return JSON.stringify({ ok: true, responses, history });
+    const documents = { list: "", downloads: [] };
+    try {
+      const list = await read(
+        "/SFC/app/AIAI_AccountInfomationAdapter/getStatementReport",
+        { requestParam: {} },
+        "report-list",
+      );
+      documents.list = list.raw;
+      const rootKeys = Object.keys(list.data).sort().join(",");
+      const params = list.data.responseParam;
+      if (
+        rootKeys !== "header,responseParam" ||
+        list.data.header?.adapterResultCode !== "0" ||
+        Object.keys(list.data.header).some(
+          (key) => !["adapterResultCode", "newToken"].includes(key),
+        ) ||
+        !params ||
+        typeof params !== "object" ||
+        Array.isArray(params) ||
+        Object.keys(params).sort().join(",") !==
+          "eStatementStatus,mailID,mfReportStatus,periodDetails,postingDate,slPostingDate" ||
+        !Array.isArray(params.periodDetails) ||
+        params.periodDetails.length > 120
+      )
+        throw new Error("report-list-shape");
+      for (const field of [
+        "postingDate",
+        "mailID",
+        "eStatementStatus",
+        "mfReportStatus",
+        "slPostingDate",
+      ]) {
+        if (typeof params[field] !== "string" || params[field].length > 4096)
+          throw new Error("report-list-shape");
+      }
+      const periods = params.periodDetails
+        .map((value) => {
+          if (
+            !value ||
+            typeof value !== "object" ||
+            Array.isArray(value) ||
+            Object.keys(value).sort().join(",") !== "month,year" ||
+            typeof value.year !== "string" ||
+            !/^\d{4}$/u.test(value.year) ||
+            value.year === "0000" ||
+            typeof value.month !== "string" ||
+            !/^(?:0[1-9]|1[0-2])$/u.test(value.month)
+          )
+            throw new Error("report-list-shape");
+          return `${value.year}-${value.month}`;
+        })
+        .sort()
+        .reverse();
+      if (new Set(periods).size !== periods.length) throw new Error("report-list-shape");
+      const known = new Set(session.storedReportPeriods ?? []);
+      const selected = periods.filter((period, index) => index === 0 || !known.has(period));
+      let stopped = false;
+      let stopCode = "report_budget_exceeded";
+      for (const period of selected) {
+        const [year, month] = period.split("-");
+        const entry = { year, month };
+        if (stopped || Date.now() >= deadline) {
+          stopped = true;
+          documents.downloads.push({ ...entry, errorCode: stopCode });
+          continue;
+        }
+        try {
+          const result = await read(
+            "/SFC/app/AIAI_AccountInfomationAdapter/downloadStatement",
+            { requestParam: { year, month } },
+            "report-download",
+          );
+          const response = result.data.responseParam;
+          if (
+            result.data.header?.adapterResultCode !== "0" ||
+            !response ||
+            typeof response !== "object" ||
+            Array.isArray(response) ||
+            Object.keys(response).sort().join(",") !==
+              "fileName,fileSize,fileStream,month,postingDate,year" ||
+            response.year !== year ||
+            response.month !== month ||
+            typeof response.fileSize !== "string" ||
+            !/^[1-9]\d{0,6}$/u.test(response.fileSize) ||
+            Number(response.fileSize) > 1024 * 1024 ||
+            typeof response.fileStream !== "string" ||
+            response.fileStream.length > 1398104
+          )
+            throw new Error("report-download-shape");
+          if (
+            Object.keys(result.data).sort().join(",") !== "header,responseParam" ||
+            Object.keys(result.data.header).some(
+              (key) => !["adapterResultCode", "newToken"].includes(key),
+            ) ||
+            typeof response.postingDate !== "string" ||
+            response.postingDate.length > 4096 ||
+            typeof response.fileName !== "string" ||
+            response.fileName.length > 4096 ||
+            !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(
+              response.fileStream,
+            )
+          )
+            throw new Error("report-download-shape");
+          const decoded = atob(response.fileStream);
+          if (
+            btoa(decoded) !== response.fileStream ||
+            decoded.length !== Number(response.fileSize) ||
+            !decoded.startsWith("%PDF-")
+          )
+            throw new Error("report-download-shape");
+          const candidate = { ...entry, raw: result.raw };
+          const candidateSize = handoffBytes({
+            ok: true,
+            responses,
+            history,
+            documents: { list: documents.list, downloads: [...documents.downloads, candidate] },
+          });
+          if (candidateSize > 8 * 1024 * 1024) {
+            stopped = true;
+            documents.downloads.push({ ...entry, errorCode: "report_budget_exceeded" });
+          } else documents.downloads.push(candidate);
+        } catch {
+          stopped = true;
+          stopCode = "report_read_failed";
+          documents.downloads.push({ ...entry, errorCode: "report_read_failed" });
+        }
+      }
+    } catch {
+      documents.list = "";
+      documents.downloads = [];
+    }
+    return JSON.stringify({ ok: true, responses, history, documents });
   } catch (error) {
     return fail(error?.stage ?? "read-failed");
   } finally {
@@ -400,7 +601,7 @@ async function collectAuthenticatedReadsInPage(session) {
   }
 }
 
-async function collect({ credential, relayToken, relayUrl }) {
+async function collect({ credential, relayToken, relayUrl, storedReportPeriods }) {
   const profileDirectory = await mkdtemp(path.join(os.tmpdir(), "kogane-sbi-shinsei-profile-"));
   const debuggingPort = await availableLocalPort();
   const endpoint = `http://127.0.0.1:${debuggingPort}`;
@@ -588,6 +789,7 @@ async function collect({ credential, relayToken, relayUrl }) {
     const handoff = await page.evaluate(collectAuthenticatedReadsInPage, {
       authorization,
       csrfToken,
+      storedReportPeriods,
     });
     authorization = "";
     csrfToken = "";

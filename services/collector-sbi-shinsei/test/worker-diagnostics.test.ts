@@ -1,8 +1,10 @@
+import { emptyReportHandoff, inventoryDatabase } from "./monthly-report-fixtures";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { savingsRetention } from "../src/savings-activity";
 
 let handoff = "";
+let fetchCalls = 0;
 let destroyFails = false;
 let relayUrl = "";
 let fetchFails = false;
@@ -13,6 +15,7 @@ mock.module("@cloudflare/containers", () => ({
   getContainer: () => ({
     startAndWaitForPorts: async () => {},
     fetch: async (request: Request) => {
+      fetchCalls++;
       relayUrl = ((await request.json()) as { relayUrl: string }).relayUrl;
       if (fetchFails) throw new Error("Bearer synthetic-secret");
       return new Response(handoff, { status: responseStatus });
@@ -26,12 +29,13 @@ mock.module("@cloudflare/containers", () => ({
 const { runCollection } = await import("../src/worker");
 afterEach(() => {
   destroyFails = false;
+  fetchCalls = 0;
   fetchFails = false;
   destroyCalls = 0;
   responseStatus = 200;
 });
 
-async function trigger(loggingFails = false) {
+async function trigger(loggingFails = false, inventoryFails = false) {
   const logs: Record<string, unknown>[] = [];
   const capture = (value: string) => {
     if (loggingFails) throw new Error("logger unavailable");
@@ -44,7 +48,18 @@ async function trigger(loggingFails = false) {
   ];
   const data = new FakeR2Bucket();
   try {
+    handoff = emptyReportHandoff(handoff);
     const response = await runCollection({
+      SCHEDULE_DB: inventoryFails
+        ? {
+            prepare: () => ({
+              ...inventoryDatabase.prepare(),
+              all: async () => {
+                throw new Error("private-database-message");
+              },
+            }),
+          }
+        : inventoryDatabase,
       SBI_SHINSEI_CREDENTIAL_JSON: JSON.stringify({
         branchNumber: "012",
         accountNumber: "0345678",
@@ -123,6 +138,18 @@ describe("Shinsei Worker failure logging", () => {
         message: "provider_read_failed",
       },
     ]);
+  });
+  test("unavailable document inventory stops before a provider request and logs no private error", async () => {
+    const { result, logs } = await trigger(false, true);
+    expect(result.status).toBe("failed");
+    expect(fetchCalls).toBe(0);
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        event: "sbi-shinsei-collection-failure",
+        diagnostics: expect.objectContaining({ stage: "report-inventory" }),
+      }),
+    );
+    expect(JSON.stringify(logs)).not.toContain("private-database-message");
   });
   test("logs the failed stage before teardown and correlates its relay without exposing credentials", async () => {
     handoff = JSON.stringify({

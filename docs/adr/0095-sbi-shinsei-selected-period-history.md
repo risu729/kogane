@@ -45,8 +45,9 @@ is a union of transaction identities, not a replaceable balance snapshot.
 
 Only the derived artifact receives the `savings-activity` parser dataset. The
 raw capture remains unmapped evidence. These artifact names have never been
-registered before, so the existing `terminal-registration-v3` contract stays
-unchanged; no earlier terminal gains a new interpretation.
+registered before, so the current registration contract
+(`terminal-registration-v10` when this merged) is not bumped; no earlier
+terminal gains a new interpretation.
 
 Only the currently observed populated success and empty status are supported.
 Unknown fields, codes, mismatched account/currency/period echoes, duplicate
@@ -75,7 +76,16 @@ retained as defined in ADR 0087. Runtime failures still make the affected run pa
 ## Consequences
 
 Each run makes one read per savings account in addition to the existing core
-reads. It stores the provider capture and the request-bound derived view for
+reads. History is read after the core reads and before the monthly reports
+(ADR 0097). Each history read has the same 30-second timeout as a report read,
+and history and reports share one ten-minute deadline inside the holder's
+thirteen minutes (ADR 0085). History may use at most six MiB of the handoff;
+the reports' eight MiB budget counts the history already held, so the handoff
+stays below its 10 MiB limit. An account read after the deadline or over the
+history budget fails closed with `history_budget_exceeded` and a partial unit.
+Any history failure makes the run partial, so the run-scoped core snapshots
+keep their previous current capture for that run, as ADR 0097 states for
+reports. It stores the provider capture and the request-bound derived view for
 each supported account. The CSV route remains disabled. The older local
 single-month inspection helper keeps its historical conservative contract; it
 does not collect this scheduled history.

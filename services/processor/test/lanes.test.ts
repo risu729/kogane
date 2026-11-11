@@ -45,10 +45,10 @@ const job = (id: number) =>
     .bind(id)
     .first<{ lane: string; status: string; replay_plan_id: number | null }>();
 
-test("harness applies every Layer B migration in order through 0087", () => {
+test("harness applies every Layer B migration in order through 0098", () => {
   const names = layerBMigrations();
   expect(names[0]).toBe("0017_observation_pipeline.sql");
-  expect(names.at(-1)).toBe("0087_sbi_shinsei_savings_activity.sql");
+  expect(names.at(-1)).toBe("0098_sbi_shinsei_savings_activity.sql");
   expect(names).toEqual([
     "0017_observation_pipeline.sql",
     "0018_identity.sql",
@@ -113,7 +113,13 @@ test("harness applies every Layer B migration in order through 0087", () => {
     "0084_csv_reader_release_snapshot_policies.sql",
     "0085_schedule_dispatch_marker.sql",
     "0086_collection_provider_failure_code.sql",
-    "0087_sbi_shinsei_savings_activity.sql",
+    "0088_sbi_shinsei_monthly_report_units.sql",
+    "0090_myjcb_debit_unit_eligibility.sql",
+    "0091_moneyforward_detail_balance_snapshots.sql",
+    "0092_vpass_credit_snapshots.sql",
+    "0093_sbi_income_complete_containers.sql",
+    "0094_myjcb_jpoint_history.sql",
+    "0098_sbi_shinsei_savings_activity.sql",
   ]);
   expect([...names].sort()).toEqual(names);
 });

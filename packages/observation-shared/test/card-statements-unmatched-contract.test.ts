@@ -61,6 +61,7 @@ function page(planner: unknown) {
       },
     ],
     nextOffset: null,
+    nextPage: "none",
   };
 }
 const review = (listed: number, count: number, truncated: boolean) =>
@@ -158,4 +159,35 @@ test("refuses a list past the bound, a hidden remainder, a false marker or no co
     }),
   ])
     expect(validUnmatchedCardStatementsReview(value)).toBe(false);
+});
+
+test("a page's end carries its reason: the last statement, or the reader's budget", () => {
+  const base = review(2, 2, false);
+  for (const [nextOffset, nextPage, valid] of [
+    [null, "none", true],
+    [null, "budget_exceeded", true],
+    [50, "offered", true],
+    [1000, "offered", true],
+    // No reason, or a reason the page does not know.
+    [null, undefined, false],
+    [null, "end", false],
+    [50, undefined, false],
+    // An offset beside a reason that withholds it, or none where one is offered.
+    [50, "none", false],
+    [1000, "budget_exceeded", false],
+    [null, "offered", false],
+    // Not one page in, or not a count.
+    [0, "offered", false],
+    [49, "offered", false],
+    [50.5, "offered", false],
+    ["50", "offered", false],
+  ] as const) {
+    const value = { ...base, nextOffset, nextPage };
+    expect({ nextOffset, nextPage, valid: validUnmatchedCardStatementsReview(value) }).toEqual({
+      nextOffset,
+      nextPage,
+      valid,
+    });
+    expect(validApiResponse(CARD_STATEMENTS_UNMATCHED_PATH, value)).toBe(valid);
+  }
 });

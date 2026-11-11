@@ -1,4 +1,5 @@
 import { inspectSavingsPeriod } from "../../../packages/parsers/src/sbi-shinsei-period-contract.ts";
+import { validateReportResponse } from "./monthly-reports";
 import { UnknownResponseShapeError } from "./errors";
 import type { JsonObject, ResponseSchemaId } from "./types";
 
@@ -19,6 +20,10 @@ export function validateKnownResponse(schema: ResponseSchemaId, value: unknown):
     case "sbi-shinsei-period-activity-v1":
       inspectSavingsPeriod(value);
       return value as JsonObject;
+    case "sbi-shinsei-report-list-v1":
+      return validateReportResponse("list", value);
+    case "sbi-shinsei-report-download-v1":
+      return validateReportResponse("download", value);
     case "unknown":
       throw unknown("No validator is registered for this response");
   }

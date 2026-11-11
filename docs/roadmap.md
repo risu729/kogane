@@ -28,7 +28,7 @@ The owner adopted these phases on 2026-11-06 (13:25 UTC) and said their order ma
 ### Phase 1 — Land or close the open work and re-baseline
 
 On 2026-11-06 at 12:45 UTC, 45 pull requests were open: 32 agent PRs opened
-that day (#922–#957), all with a green `CI Check`; 9 older PRs from agent sessions (Codex, Cursor and others) from
+that day (#922–#957), all with a green `CI Check`; 9 older PRs from other agent sessions from
 2026-10-04 to 2026-11-04 (8 of them drafts); and 4 Renovate PRs. 74 branches
 existed. The [status page](current-status.md) was last reviewed on 2026-10-05.
 
@@ -248,6 +248,13 @@ current milestone. Production was read through the MCP Portal between 11:18 and 
   [#1215](https://github.com/risu729/kogane/issues/1215)). Every collected
   source's summary lists its provider data types as `collected`, `partial` or `not_collected`
   with the issue that tracks the rest.
+  A read-only follow-up on 2026-11-10 placed Vpass's November 9 silent stop
+  inside its open scheduled RPC: lease heartbeats continued for 120.606 s,
+  and deployments overlapped, but the terminating outcome was not retained.
+  [The UTC evidence and remaining discriminator](schedules.md#vpass-recurrence-on-2026-11-09)
+  keep [issue 1142](https://github.com/risu729/kogane/issues/1142) open for a
+  demonstrated fix and three consecutive post-fix scheduled days; this does
+  not remeasure the account-coverage baseline above.
 - **Accounts** (`kogane.identity.read`, `kogane.accounts.candidates`): `unresolved` is 0 on
   every source (the baseline's one MyJCB J-POINT reference is now a `provider-local` reward
   account, [ADR 0089](adr/0089-myjcb-jpoint-identity.md)) and `identified` is 0 everywhere. The
@@ -343,6 +350,8 @@ collect comes first (owner, 2026-11-09 19:06 UTC): the `partial` and `not_collec
 entries of the provider data-type catalogue
 ([ADR 0087](adr/0087-provider-data-type-catalogue.md)), tracked under the per-source
 issues [#441](https://github.com/risu729/kogane/issues/441)–[#454](https://github.com/risu729/kogane/issues/454).
+The [existing-collector gaps plan](plans/2026-11-existing-collector-gaps.md) (accepted
+2026-11-09, 20:21 UTC) orders that work P0 → P3 and names one issue per item.
 Each new-source issue holds its target data, the questions to answer with the owner
 before any code, and its acceptance criteria; [adding a new collector](new-collectors.md)
 holds the order of work, the files a new source touches and the checks common to all

@@ -69,6 +69,16 @@ export const READ_ROUTE_CATALOG = [
     "/SFC/app/AIYD_YenDepositAdapter/getYenDepositAccount",
     "sbi-shinsei-yen-deposit-account-v1",
   ),
+  capturedRoute(
+    "reports.list",
+    "/SFC/app/AIAI_AccountInfomationAdapter/getStatementReport",
+    "sbi-shinsei-report-list-v1",
+  ),
+  capturedRoute(
+    "reports.download",
+    "/SFC/app/AIAI_AccountInfomationAdapter/downloadStatement",
+    "sbi-shinsei-report-download-v1",
+  ),
   route("csv.download", "/SFC/adapters/IFAI_CsvDownloadAdapter/csvDownload/getCsv"),
 ] as const satisfies readonly ReadRoute[];
 

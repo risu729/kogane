@@ -63,7 +63,7 @@ const rescan = async () => {
   await sweep(env);
 };
 
-test("0037 preserves run-scoped containers beside explicit J-POINT and savings-history unit policies", async () => {
+test("prior run-scoped containers coexist with the explicit Vpass credit, savings-history and eligibility-only unit policies", async () => {
   expect(
     await first<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type='view' AND name='observation_fetch_artifact_units'",
@@ -82,14 +82,85 @@ test("0037 preserves run-scoped containers beside explicit J-POINT and savings-h
   expect(containers.map(({ parser_name, dataset }) => [parser_name, dataset])).toEqual(
     SNAPSHOT_DATASETS.map(([parserName, dataset]) => [parserName, dataset]).sort(),
   );
-  expect(containers.every((row) => row.unit_scope === "run")).toBe(true);
+  expect(containers.filter((row) => row.unit_scope !== "run")).toEqual([
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-jpoint-history",
+      dataset: "jpoint-history",
+      unit_scope: "unit",
+      snapshot_selection: 1,
+    },
+    {
+      source_id: "vpass",
+      parser_name: "vpass-credit-snapshot",
+      dataset: "credit-snapshot",
+      unit_scope: "unit",
+      snapshot_selection: 1,
+    },
+  ]);
   expect(
     policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
   ).toEqual([
     {
       source_id: "myjcb",
+      parser_name: "myjcb-credit-ledger",
+      dataset: "credit-ledger",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-credit-past-month-balances",
+      dataset: "credit-past-months",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-credit-statement-total",
+      dataset: "credit-detail",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-debit-ledger",
+      dataset: "debit-detail",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-debit-other-statement",
+      dataset: "debit-other-detail",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
       parser_name: "myjcb-jpoint-balance",
       dataset: "jpoint-balance",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-jpoint-history",
+      dataset: "jpoint-history",
+      unit_scope: "unit",
+      snapshot_selection: 1,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-skip-payment-schedule",
+      dataset: "credit-schedule",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "sbi-shinsei-bank",
+      parser_name: "sbi-shinsei-monthly-report-metadata",
+      dataset: "monthly-report-pdf",
       unit_scope: "unit",
       snapshot_selection: 0,
     },
@@ -99,6 +170,13 @@ test("0037 preserves run-scoped containers beside explicit J-POINT and savings-h
       dataset: "savings-activity",
       unit_scope: "unit",
       snapshot_selection: 0,
+    },
+    {
+      source_id: "vpass",
+      parser_name: "vpass-credit-snapshot",
+      dataset: "credit-snapshot",
+      unit_scope: "unit",
+      snapshot_selection: 1,
     },
   ]);
 
@@ -271,8 +349,64 @@ test("the comparison route reports the eligibility scope of every policy row", a
   ).toEqual([
     {
       source_id: "myjcb",
+      parser_name: "myjcb-credit-ledger",
+      dataset: "credit-ledger",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-credit-past-month-balances",
+      dataset: "credit-past-months",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-credit-statement-total",
+      dataset: "credit-detail",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-debit-ledger",
+      dataset: "debit-detail",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-debit-other-statement",
+      dataset: "debit-other-detail",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
       parser_name: "myjcb-jpoint-balance",
       dataset: "jpoint-balance",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-jpoint-history",
+      dataset: "jpoint-history",
+      unit_scope: "unit",
+      snapshot_selection: 1,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-skip-payment-schedule",
+      dataset: "credit-schedule",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "sbi-shinsei-bank",
+      parser_name: "sbi-shinsei-monthly-report-metadata",
+      dataset: "monthly-report-pdf",
       unit_scope: "unit",
       snapshot_selection: 0,
     },
@@ -287,6 +421,13 @@ test("the comparison route reports the eligibility scope of every policy row", a
       source_id: SOURCE,
       parser_name: PARSER,
       dataset: DATASET,
+      unit_scope: "unit",
+      snapshot_selection: 1,
+    },
+    {
+      source_id: "vpass",
+      parser_name: "vpass-credit-snapshot",
+      dataset: "credit-snapshot",
       unit_scope: "unit",
       snapshot_selection: 1,
     },

@@ -57,46 +57,55 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // みずほポイント are not collected (docs/sources/mizuho-bank.md, #441).
   "mizuho-bank": [
     collected("balance", ["mizuho-account-list"]),
-    partial("cash_movement", ["mizuho-ordinary-history"], 441),
-    missing("term_deposit", 441),
+    partial("cash_movement", ["mizuho-ordinary-history"], 1229),
+    // 2026-11-09: registered account lists show no held deposit products; see source notes.
+    missing("term_deposit", 1241),
     missing("document", 441),
-    missing("reward_balance", 441),
-    missing("reward_activity", 441),
-    missing("reward_expiry", 441),
+    // 2026-11-09: documented app entry; no browser route observed (source notes).
+    missing("reward_balance", 1252),
+    missing("reward_activity", 1252),
+    missing("reward_expiry", 1252),
   ],
-  // Mobile Suica: the SF balance and the one history page of at most 100 rows
-  // (docs/sources/mobile-suica.md, #451).
+  // Mobile Suica: SF balance and the retained 26-week history via verified
+  // inclusive date searches (docs/sources/mobile-suica.md, ADR 0104).
   "mobile-suica": [
     collected("balance", ["mobile-suica-sf-history"]),
-    partial("cash_movement", ["mobile-suica-sf-history"], 451),
+    collected("cash_movement", ["mobile-suica-sf-history"]),
   ],
   // Money Forward ME (aggregator): monthly transactions of the current and 11
-  // past months are parsed; the account pages (balances, holdings) are kept
-  // as evidence only (docs/sources/moneyforward.md, #452).
+  // past months and observed detail-page aggregates/points are parsed.
+  // Native product balances, gated card debt and securities remain unavailable.
   "moneyforward-me": [
-    missing("balance", 452),
+    partial("balance", ["moneyforward-detail-balances"], 1240),
     partial("cash_movement", ["moneyforward-monthly-transactions"], 452),
-    missing("position", 452),
+    partial("position", ["moneyforward-detail-balances"], 1240),
+    partial("reward_balance", ["moneyforward-detail-balances"], 1240),
   ],
   // MyJCB: credit statements and their ledger, J-POINT balance with its
-  // nearest expiry; the bonus-payment schedule (stored, not parsed), debit
-  // statements, the PDF/CSV/OFX statement exports, J-POINT history and expiry
-  // buckets are not collected (docs/sources/myjcb.md, #444).
+  // nearest expiry, and observed debit ordinary/difference statements; the
+  // bonus-payment schedule (stored, not parsed), unsupported debit routes and
+  // statuses and actual PDF/CSV/OFX bytes remain unsupported; observed
+  // acquisition-month activity and expiry buckets are collected with the
+  // remaining status gaps recorded below (docs/sources/myjcb.md, #444).
   myjcb: [
-    partial("card_usage", ["myjcb-credit-ledger"], 444),
+    partial("card_usage", ["myjcb-credit-ledger", "myjcb-debit-ledger"], 444),
     partial(
       "card_statement",
       [
         "myjcb-credit-statement-total",
         "myjcb-credit-past-month-balances",
         "myjcb-skip-payment-schedule",
+        "myjcb-debit-ledger",
+        "myjcb-debit-other-statement",
       ],
       444,
     ),
-    missing("document", 444),
-    collected("reward_balance", ["myjcb-jpoint-balance"]),
-    missing("reward_activity", 444),
-    partial("reward_expiry", ["myjcb-jpoint-balance"], 444),
+    // Finalised statement HTML and export offers are retained. Actual PDF/CSV
+    // bytes remain unverified after the browser blocked the observed download.
+    missing("document", 1251),
+    collected("reward_balance", ["myjcb-jpoint-balance", "myjcb-jpoint-history"]),
+    collected("reward_activity", ["myjcb-jpoint-history"]),
+    partial("reward_expiry", ["myjcb-jpoint-balance", "myjcb-jpoint-history"], 1251),
   ],
   // PRESTIA bank: account summary (native balances, term principal); deposit
   // activity, product details and the statement PDFs are not collected
@@ -107,22 +116,34 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     partial("term_deposit", ["prestia-bank-balances"], 454),
     missing("document", 454),
   ],
-  // SBI証券: domestic and US positions and trades, cash (the yen history's
-  // first page only) and the My資産 current valuation; dividends, asset
-  // history, fund/bond detail and delivered documents are not collected
+  // SBI証券: domestic and US positions and trades, retained yen and observed
+  // USD cash statements, My Assets current/weekly valuations, observed stock
+  // income and domestic gains; other products and delivered documents remain incomplete
   // (docs/sources/sbi-securities.md, #446).
   "sbi-securities": [
-    partial("position", ["sbi-domestic-cash-positions", "sbi-foreign-cash-positions"], 446),
+    partial("position", ["sbi-domestic-cash-positions", "sbi-foreign-cash-positions"], 1237),
     collected("execution", ["sbi-domestic-trade-records", "sbi-foreign-trade-records"]),
-    partial("settlement_cash", ["sbi-foreign-cash-balances", "sbi-yen-detail-history"], 446),
-    missing("income", 446),
-    partial("valuation_history", ["sbi-account-assets-current"], 446),
+    // USD continuation and scheduled retained-coverage proof remain outstanding (#1226).
+    partial(
+      "settlement_cash",
+      ["sbi-foreign-cash-balances", "sbi-yen-detail-history", "sbi-foreign-cash-history"],
+      1226,
+    ),
+    partial("income", ["sbi-income-payments"], 1236),
+    partial(
+      "valuation_history",
+      ["sbi-account-assets-current", "sbi-account-assets-history", "sbi-realised-gains"],
+      1238,
+    ),
     missing("document", 446),
   ],
   // SBI新生銀行: top accounts with recent activity, balance summary and the yen
   // deposit account, exchange rates; dated history and CSV, term and foreign
-  // contracts and the monthly reports are not collected
+  // contracts are not collected; monthly PDFs have metadata-only coverage
   // (docs/sources/sbi-shinsei-bank.md; #447 was closed without them).
+  // On 2026-11-09 the inspected account held no time or structured-deposit
+  // contracts in the yen/FX holdings views (#1242). This catalogue describes
+  // offered types, not live holdings, so term_deposit stays not_collected.
   "sbi-shinsei-bank": [
     collected("balance", [
       "sbi-shinsei-top-balances-and-activity",
@@ -133,8 +154,8 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
       "sbi-shinsei-top-balances-and-activity",
       "sbi-shinsei-savings-activity",
     ]),
-    missing("term_deposit", BACKLOG),
-    missing("document", BACKLOG),
+    missing("term_deposit", 1242),
+    collected("document", ["sbi-shinsei-monthly-report-metadata"]),
     collected("fx_rate", ["sbi-shinsei-exchange-rate"]),
   ],
   // SBI VCトレード (a broker): crypto holdings and leverage positions,
@@ -172,7 +193,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     partial("cash_movement", ["sony-bank-history-json", "sony-bank-history-csv"], 449),
     collected("card_usage", ["sony-bank-wallet-history"]),
     missing("valuation_history", 449),
-    missing("term_deposit", 449),
+    missing("term_deposit", 1243),
     missing("document", 449),
   ],
   // St.George: account balances and the first page of each account's history;
@@ -201,6 +222,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   // Vpass: card statement pages (purchases and statement amounts)
   // (docs/collection.md "Vpass", #445).
   vpass: [
+    partial("balance", ["vpass-credit-snapshot"], 1256),
     collected("card_usage", ["vpass-statement-page"]),
     collected("card_statement", ["vpass-statement-page"]),
   ],

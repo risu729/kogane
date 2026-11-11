@@ -13,6 +13,7 @@ import {
   bankSourceLabel,
   CardSettlementDetails,
   DateValue,
+  PageBudgetNote,
   SETTLEMENT_STATUS,
   SettlementQuantity,
   settlementReason,
@@ -270,6 +271,7 @@ function OlderCandidates({
               次の候補
             </button>
           </nav>
+          <PageBudgetNote nextPage={data.nextPage} list={`${statement}の候補`} />
         </>
       )}
     </QueryBoundary>
@@ -382,6 +384,7 @@ export function ReconciliationPage(): ReactNode {
                   次の請求
                 </button>
               </nav>
+              <PageBudgetNote nextPage={data.nextPage} list="照合候補の請求" />
             </>
           )}
         </QueryBoundary>
@@ -459,7 +462,7 @@ function RelatedSettlements({ proposalId }: { proposalId: string }): ReactNode {
                   <RelatedSettlement key={item.proposalId} review={item} />
                 ))}
               </ul>
-              {offset > 0 || data.nextOffset !== null ? (
+              {offset > 0 || data.nextPage !== "none" ? (
                 <nav className="pagination" aria-label="他の候補のページ">
                   <span role="status" aria-live="polite">
                     {offset + 1}–{offset + data.items.length} 件目
@@ -484,6 +487,7 @@ function RelatedSettlements({ proposalId }: { proposalId: string }): ReactNode {
                   </button>
                 </nav>
               ) : null}
+              <PageBudgetNote nextPage={data.nextPage} list="他の候補" />
             </>
           )}
         </QueryBoundary>

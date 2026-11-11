@@ -53,6 +53,7 @@ const READ_FAILURE = new RegExp(
   "u",
 );
 const WORKER_STAGES = new Set([
+  "report-inventory",
   "credential-validation",
   "container-start",
   "container-request",

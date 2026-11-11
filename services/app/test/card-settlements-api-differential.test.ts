@@ -2,18 +2,26 @@
 // `/ownership` and `/statements` reads) as an adapter over the shared service,
 // against the handler it replaced (`card-settlements-api-frozen.ts`), on the
 // same synthetic store and the same requests. They must answer byte for byte
-// alike except for the two changes docs/card-settlements.md records (ADR 0081
-// point 2): a malformed list, grouped list or ownership request is the
-// service's `400 invalid_query` (`financial-error-v1`) where the route said
-// `invalid_offset` or `invalid_query`, and a list or grouped list read deeper
-// than the reader grant's `maxRows` is `413 budget_exceeded` where the route
-// read on. Every grouped page is compared on a store of 1,002 statements in
+// alike except for the three changes docs/card-settlements.md records (ADR 0081
+// point 2 and its 2026-11-08 amendment): a malformed list, grouped list or
+// ownership request is the service's `400 invalid_query` (`financial-error-v1`)
+// where the route said `invalid_offset` or `invalid_query`, a list or grouped
+// list read deeper than the reader grant's `maxRows` is `413 budget_exceeded`
+// where the route read on, and a page whose next page would be so refused
+// withholds it (`nextOffset: null`, `nextPage: "budget_exceeded"`) where the
+// route named it. Every grouped page is compared on a store of 1,002 statements in
 // `card-settlement-statements-differential.test.ts`.
 // Native Worker/D1 only; no production data.
 import { beforeAll, describe, expect, it } from "vitest";
 import { cardSettlementsApi } from "../src/card-settlements-api";
 import { frozenCardSettlementsApi } from "./card-settlements-api-frozen";
-import { answer, compare, PATH, seedCandidates } from "./card-settlements-differential-store";
+import {
+  answer,
+  compare,
+  PATH,
+  seedCandidates,
+  withinReaderBudget,
+} from "./card-settlements-differential-store";
 
 /** Past one page at the reader grant's budget, so deep pages hold rows. */
 const BULK = 1_100;
@@ -121,7 +129,7 @@ function requests(): string[] {
 }
 
 describe("the card settlement page route as an adapter over the shared service", () => {
-  it("answers as the frozen handler did, except the two recorded changes", async () => {
+  it("answers as the frozen handler did, except the three recorded changes", async () => {
     // The request set is deterministic, so each class is pinned exactly: a
     // request that changes class fails here, not only one that changes body.
     // `same`: 25 list reads (19 pages, 6 not found), 1 ownership review and 8
@@ -129,19 +137,56 @@ describe("the card settlement page route as an adapter over the shared service",
     // requests the frozen handler refused as `invalid_offset` or
     // `invalid_query`; `budget`: 24 list and 4 grouped reads past offset 950
     // and 990. The 289 grouped refusals and the 4 grouped deep pages were
-    // `same` while the grouped list kept its own rules.
+    // `same` while the grouped list kept its own rules. `withheld`: of
+    // `same`, the 3 pages at offset 950 (alone, of `statement-bulk` and the
+    // competitors of `cs-0000`) that named offset 1000, which is refused.
     expect(await compare(requests())).toEqual({
       same: 34,
       invalid: 868,
       budget: 28,
       groupedBudget: 4,
       groupedPages: 8,
+      withheld: 3,
     });
     const deep = (await answer(frozenCardSettlementsApi, `${PATH}?offset=951`))!;
     expect((JSON.parse(deep.body) as { items: unknown[] }).items).toHaveLength(50);
   });
 
+  it("offers no next page the reader grant is refused, and says why", async () => {
+    const page = async (handler: typeof cardSettlementsApi, query: string) =>
+      JSON.parse((await answer(handler, query))!.body) as {
+        items: unknown[];
+        nextOffset: number | null;
+        nextPage: string;
+      };
+    for (const filter of ["", "&statementKey=statement-bulk", "&relatedTo=cs-0000"]) {
+      // The frozen handler named offset 1000, which the route refuses.
+      expect((await page(frozenCardSettlementsApi, `${PATH}?offset=950${filter}`)).nextOffset).toBe(
+        1000,
+      );
+      expect((await answer(cardSettlementsApi, `${PATH}?offset=1000${filter}`))!.status).toBe(413);
+      // The route now serves the last page it reads and withholds the next.
+      const last = await page(cardSettlementsApi, `${PATH}?offset=950${filter}`);
+      expect([last.items.length, last.nextOffset, last.nextPage]).toEqual([
+        50,
+        null,
+        "budget_exceeded",
+      ]);
+      const before = await page(cardSettlementsApi, `${PATH}?offset=900${filter}`);
+      expect([before.nextOffset, before.nextPage]).toEqual([950, "offered"]);
+    }
+    // One candidate of a statement of its own: the last page, nothing withheld.
+    expect(await page(cardSettlementsApi, `${PATH}?statementKey=statement-alone`)).toMatchObject({
+      nextOffset: null,
+      nextPage: "none",
+    });
+  });
+
   it("keeps the transport's own answers: methods, non-operators and other paths", async () => {
+    const frozen = async (path: string, method: string, subject?: string) => {
+      const before = await answer(frozenCardSettlementsApi, path, method, subject);
+      return before === null ? null : withinReaderBudget(path, before);
+    };
     for (const path of [
       PATH,
       `${PATH}?offset=950`,
@@ -152,7 +197,7 @@ describe("the card settlement page route as an adapter over the shared service",
         expect({ path, method, after: await answer(cardSettlementsApi, path, method) }).toEqual({
           path,
           method,
-          after: await answer(frozenCardSettlementsApi, path, method),
+          after: await frozen(path, method),
         });
       for (const subject of ["ungranted", "synthetic-agent", "mcp-client:synthetic-operator"])
         expect({
@@ -162,7 +207,7 @@ describe("the card settlement page route as an adapter over the shared service",
         }).toEqual({
           path,
           subject,
-          after: await answer(frozenCardSettlementsApi, path, "GET", subject),
+          after: await frozen(path, "GET", subject),
         });
     }
     for (const path of ["/api/v2/other", `${PATH}/other`, `${PATH}s`])

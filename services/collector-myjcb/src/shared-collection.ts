@@ -1,4 +1,5 @@
 import { readMyJcbJPointResponse } from "../../../packages/domain/src/myjcb-jpoint-response";
+import { readJPointHistory } from "../../../packages/domain/src/myjcb-jpoint-history";
 // MyJCB → the shared DATA bucket (unified plan 03, U09).
 //
 // The collector already redacts every statement page it keeps
@@ -58,13 +59,9 @@ const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
  * their bytes exists yet. Shared mode refuses them the same way rather than
  * storing centrally what the legacy path never let through.
  */
-const UNOBSERVED_DATASETS = new Set([
-  "debit-menu",
-  "debit-detail",
-  "credit-csv",
-  "credit-pdf",
-  "credit-ofx",
-]);
+const UNOBSERVED_DATASETS = new Set(["credit-csv", "credit-pdf", "credit-ofx"]);
+const historyDataset = (dataset: string): boolean =>
+  dataset === "jpoint-history" || dataset === "jpoint-history-html" || dataset === "jpoint-inquiry";
 
 /** One connection's finished collection, as the worker saw it. */
 export interface SharedConnectionRun {
@@ -163,6 +160,11 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 function coverage(status: ConnectionSummary["status"]): CoverageStatus {
   if (status === "success") return "complete";
   return status === "partial" ? "partial" : "unknown";
+}
+
+function debitOtherCode(code: string): "complete" | "partial" {
+  if (code !== "complete" && code !== "partial") throw new Error("debit_other_code_invalid");
+  return code;
 }
 
 /**
@@ -304,9 +306,15 @@ function manifestBytes(
     status: input.status,
     trigger: input.trigger,
     connections: connections.map((connection) => ({
+      ...(connection.debitOtherCode === undefined
+        ? {}
+        : { debitOtherCode: debitOtherCode(connection.debitOtherCode) }),
       ...(connection.jpointCode === undefined
         ? {}
         : { jpointCode: pointCode(connection.jpointCode) }),
+      ...(connection.jpointHistoryCode === undefined
+        ? {}
+        : { jpointHistoryCode: pointCode(connection.jpointHistoryCode) }),
       connectionId: connection.connectionId,
       bootstrapMode: connection.bootstrapMode,
       status: connection.status,
@@ -327,7 +335,10 @@ function manifestBytes(
         : { unreadMonths: unreadMonths(connection.unreadMonths) }),
       ...(connection.exportOffers === undefined || connection.exportOffers.length === 0
         ? {}
-        : { exportOffers: exportOffers(connection.exportOffers) }),
+        : {
+            exportOffers: exportOffers(connection.exportOffers),
+            documentCode: "statement_export_bytes_unverified" as const,
+          }),
       ...(connection.schedulePages === undefined || connection.schedulePages.length === 0
         ? noSchedulePages(connection.schedulePageCount)
         : {
@@ -383,6 +394,15 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
           JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),
         );
       }
+      if (artifact.dataset === "jpoint-history") {
+        if (
+          artifact.filename !== "jpoint-history.json" ||
+          artifact.mediaType !== "application/json" ||
+          connection.summary.jpointHistoryCode !== "collected"
+        )
+          throw new Error("jpoint_history_artifact_metadata_invalid");
+        readJPointHistory(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
+      }
       if (role === "sanitized_provider_capture") {
         // The redaction the collector applied is re-checked here, against the
         // same invariants the central path enforces, before the bytes leave
@@ -397,7 +417,13 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
         byteSize: bytes.byteLength,
         mediaType: artifact.mediaType.split(";", 1)[0]!.trim(),
         role,
-        unitKey: artifact.dataset === "jpoint-balance" ? pointUnitKey(unitKey) : unitKey,
+        unitKey: historyDataset(artifact.dataset)
+          ? `${unitKey}:j-point-history`
+          : artifact.dataset === "jpoint-balance"
+            ? pointUnitKey(unitKey)
+            : artifact.dataset.startsWith("debit-other-")
+              ? `${unitKey}:debit-other`
+              : unitKey,
         body: { kind: "bytes", bytes },
       });
       stored.push({
@@ -443,6 +469,41 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
       }
     }
     const point = connection.summary.jpointCode;
+    const history = connection.summary.jpointHistoryCode;
+    const historyArtifacts = kept.filter((a) => historyDataset(a.dataset));
+    if (history !== undefined && history !== "unsupported") {
+      pointCode(history);
+      const normalized = historyArtifacts.filter((a) => a.dataset === "jpoint-history").length;
+      if (
+        !failed &&
+        ((history === "collected" && (normalized !== 1 || historyArtifacts.length !== 3)) ||
+          (history !== "collected" && normalized !== 0))
+      )
+        throw new Error("jpoint_history_artifact_count_invalid");
+      units.push({
+        unitKey: `${unitKey}:j-point-history`,
+        unitKind: "reward-history",
+        artifactCount: historyArtifacts.length,
+        coverageStatus: !failed && history === "collected" ? "complete" : "unknown",
+        ...(!failed && history === "collected"
+          ? {}
+          : { safeErrorCode: failed ? "jpoint_history_stopped" : `jpoint_history_${history}` }),
+      });
+    } else if (historyArtifacts.length) throw new Error("jpoint_history_outcome_missing");
+    const otherArtifacts = kept.filter((artifact) =>
+      artifact.dataset.startsWith("debit-other-"),
+    ).length;
+    const otherCode = connection.summary.debitOtherCode;
+    if (otherCode !== undefined) {
+      debitOtherCode(otherCode);
+      units.push({
+        unitKey: `${unitKey}:debit-other`,
+        unitKind: "debit-other-statements",
+        artifactCount: otherArtifacts,
+        coverageStatus: !failed && otherCode === "complete" ? "complete" : "partial",
+        ...(!failed && otherCode === "complete" ? {} : { safeErrorCode: "debit_other_unobserved" }),
+      });
+    } else if (otherArtifacts !== 0) throw new Error("debit_other_outcome_missing");
     const pointArtifacts = kept.filter((artifact) => artifact.dataset === "jpoint-balance").length;
     if (point !== undefined && point !== "unsupported") {
       pointCode(point);
@@ -467,7 +528,7 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
     units.push({
       unitKey,
       unitKind: "connection",
-      artifactCount: kept.length - pointArtifacts,
+      artifactCount: kept.length - pointArtifacts - otherArtifacts - historyArtifacts.length,
       coverageStatus: failed ? "unknown" : coverage(connection.summary.status),
       ...(connectionCode === undefined ? {} : { safeErrorCode: connectionCode }),
     });

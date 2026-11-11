@@ -13,6 +13,8 @@ const REQUIRED_OPERATIONS = [
   "common.exchange-rate",
   "yen-deposit.account",
   "account.casa-activity-specific-period",
+  "reports.list",
+  "reports.download",
 ] as const satisfies readonly ReadOperationId[];
 
 export interface CollectorOutput {
@@ -24,6 +26,7 @@ export async function collectSbiShinsei(options: {
   credentialJson: string;
   collectHandoff: (credentialJson: string) => Promise<string>;
   now?: () => Date;
+  storedReportPeriods?: readonly string[];
 }): Promise<CollectorOutput> {
   assertProductionRoutes();
   const credential = parseCredential(options.credentialJson);
@@ -34,7 +37,11 @@ export async function collectSbiShinsei(options: {
     if (handoff.ok !== true) {
       throw new BrowserCollectionError(handoff.stage, handoff.authenticationAttempted);
     }
-    const result = parseCollectionResult(handoffJson, options.now?.() ?? new Date());
+    const result = parseCollectionResult(
+      handoffJson,
+      options.now?.() ?? new Date(),
+      options.storedReportPeriods,
+    );
     return { artifacts: result.artifacts, failures: result.failures };
   } finally {
     credential.powerDirectPassword = "";

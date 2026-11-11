@@ -38,6 +38,7 @@ import {
   currentText,
   database,
   EXPLICIT_COVERAGE,
+  REPLACING_EMPTY_COVERAGE,
   facts,
   position,
   snapshot,
@@ -141,7 +142,7 @@ describe("complete container snapshots", () => {
   });
 
   for (const [parser, dataset] of SNAPSHOT_DATASETS.filter(
-    ([name]) => !EXPLICIT_COVERAGE.has(name),
+    ([name]) => !EXPLICIT_COVERAGE.has(name) && !REPLACING_EMPTY_COVERAGE.has(name),
   )) {
     test(`${parser}: repeated, removed instrument/account, and empty snapshots replace old rows`, () => {
       const store = database();
@@ -170,6 +171,27 @@ describe("complete container snapshots", () => {
     snapshot(store, { ...base, observations: [], coverage: {} });
     expect(latestBalances(store).map((row) => row.instrument)).toEqual(["NEW"]);
     expect(store.db.query("SELECT COUNT(*) AS n FROM parse_runs").get()).toEqual({ n: 4 });
+  });
+  test("MoneyForward observed measures require complete coverage and retain membership on an unavailable capture", () => {
+    const store = database();
+    const base = {
+      parser: "moneyforward-detail-balances",
+      dataset: "account-detail",
+      source: "moneyforward-me",
+    };
+    snapshot(store, { ...base, observations: [balance("CLAIMLESS")] });
+    expect(latestBalances(store)).toEqual([]);
+    snapshot(store, { ...base, observations: [balance("OLD")], coverage: {} });
+    snapshot(store, { ...base, observations: [balance("NEW")], coverage: {} });
+    expect(latestBalances(store).map((row) => row.instrument)).toEqual(["NEW"]);
+    snapshot(store, {
+      ...base,
+      observations: [],
+      coverage: { completeness: "partial", membershipComplete: false },
+    });
+    expect(latestBalances(store).map((row) => row.instrument)).toEqual(["NEW"]);
+    snapshot(store, { ...base, observations: [], coverage: {} });
+    expect(latestBalances(store).map((row) => row.instrument)).toEqual(["NEW"]);
   });
 
   test("the SBI Shinsei exchange-rate board requires a claim and an empty board never replaces one", () => {

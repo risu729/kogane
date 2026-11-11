@@ -147,6 +147,7 @@ describe("unmatched statement planner allocations", () => {
       },
     ],
     nextOffset: null,
+    nextPage: "none",
   });
 
   test("the count's bound is every allocation one run can find", () => {

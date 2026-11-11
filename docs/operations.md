@@ -268,7 +268,7 @@ artifacts through the current parser registry in memory and print which
 check it was, as a closed category:
 
 - `services/processor/scripts/replay-diagnostics.ts` selects failed parses
-  (`sony-bank`, `sbi-shinsei-bank` and `myjcb` only, or GLOBAL PASS activity
+  (`sony-bank`, `sbi-shinsei-bank`, `sbi-securities` and `myjcb` only, or GLOBAL PASS activity
   pages with the `globalpass-activity` selection) with one D1 `SELECT`
   and reads each raw object from R2 into memory. For each refused GLOBAL PASS
   page it also selects the newest other artifact of the same key with a
@@ -292,6 +292,8 @@ services/processor/node_modules/wrangler/bin/wrangler.js login`, or a
 
 ```sh
 mise exec -- bun services/processor/scripts/replay-diagnostics.ts sbi-shinsei-top-balances-and-activity 50
+mise exec -- bun services/processor/scripts/replay-diagnostics.ts sbi-foreign-trade-records 5
+mise exec -- bun services/processor/scripts/replay-diagnostics.ts sbi-foreign-cash-balances 5
 mise exec -- bun services/processor/scripts/replay-diagnostics.ts myjcb-skip-payment-schedule 1
 mise exec -- bun services/processor/scripts/replay-diagnostics.ts globalpass-activity 2
 ```
@@ -306,6 +308,27 @@ same parser has published since, and the parent run's status as the processor
 reads it (`observation_fetch_runs`), so the replay meets the same precondition
 the lane did. The bytes are checked against the stored SHA-256 and size before
 parsing.
+
+An exact `sbi-foreign-cash-balances` selection also takes published parses
+with membership issues, since a cash parse may publish while its container
+is incomplete. A later publication of that artifact supersedes the older
+parse; otherwise selection keeps the newest eligible parse per distinct raw
+object. A substring or unfiltered selection still takes failed parses only.
+The successful replay line includes `issues`, restricted to membership
+issues classified from their locators: a fixed `row_unreadable` or
+`container_unreadable` reason, an allowlisted schema path with row positions
+folded to `[]`, and the metric field when applicable. Issue messages contain
+provider values and are never read by the classifier or printed.
+
+The two SBI Securities foreign parsers use fixed rejection text and exact
+allowlisted schema paths. A trade `schema drift` category drops all missing
+and unknown keys from the message; an inexact-money category drops the
+currency code. The cash wrapper refusal drops the artifact hash. Unknown
+messages or paths are `unclassified`. Invalid JSON is reported only as the
+runtime error class. The diagnostics themselves do not publish observations;
+correcting a parser still requires a versioned re-parse and current-coverage
+verification. The observed SBI precision and missing-metric shapes are
+recorded in [the source notes](sources/sbi-securities.md#2026-11-10-foreign-trade-price-precision-and-empty-cash-metrics).
 
 `globalpass-activity` is a selection, not a parser name. It takes the stored
 `globalpass-activity` artifacts of `global-pass` whose latest
@@ -370,6 +393,61 @@ exception message. Limits: at
 most 50 artifacts per run, the parser version replayed is the one in the
 checkout (not necessarily the one that failed), and one category names only
 the first check that refused; the `shape` line is what shows the rest.
+
+### Workers Issues (error grouping)
+
+Adopted 2026-11-09 21:05 UTC (owner decision). Every production Worker under
+`services/` turns on Cloudflare
+[Workers Issues](https://developers.cloudflare.com/workers/observability/issues/),
+which groups recurring failures of one Worker into issues without an SDK:
+
+```jsonc
+// wrangler.jsonc
+"observability": { "enabled": true, "issues": { "enabled": true } }
+```
+
+```ts
+// cloudflare.config.ts
+observability: { enabled: true, issues: { enabled: true } },
+```
+
+How the setting reaches Cloudflare: only the three Container Workers
+(GlobalPass, SBI Shinsei, St.George) apply it today, because they publish with
+`cf deploy`, which applies `cloudflare.config.ts` including `observability`.
+The other fourteen publish with `cf workers versions create` and
+`cf workers deployments create`, which carry no non-versioned script settings,
+so no `observability` change (this one or any earlier one) has reached them
+since they moved to cf. Moving them to `cf deploy` is the open follow-up; until
+then Issues covers the three Container Workers only. A full deploy or rollback
+from a commit whose config lacks the key turns Issues off for a Container
+Worker. `tasks/_lib/cf-deploy.test.ts` requires `issues.enabled` in both files
+of every cf-deployed Worker.
+
+What becomes an occurrence: an uncaught exception, a failed invocation, a `5xx`
+response the Worker returns, and a console line at error level or one carrying
+an `Error` object or stack trace. Today that covers:
+
+- the failed-stage and failed-terminal `console.error` lines of
+  `packages/collector-diagnostics` (`event: "collector-diagnostic"`, safe error
+  fields only), used by GlobalPass, Mobile Suica, MyJCB, SBI Securities, SBI VC
+  Trade, SMBC Direct, St.George and Vpass;
+- the few direct `console.error` calls in Workers (schedule lease, SBI VC
+  Trade, SMBC Direct, one in the Processor's schedule alarm).
+
+It does not cover a collector run that catches its failure and only returns
+or `console.log`s a result: Mizuho (`mizuho-collection-result`), PRESTIA,
+SBI Shinsei, Sony Bank, Money Forward, V Point and V Point Pay. Every collector runs from
+the Processor's alarm RPC (`crons: []`), and the Processor logs each result as
+the `console.log` line `schedule_dispatch_result`, so those failures are not
+issues either.
+
+Limits: occurrence details are kept seven days (issues stay listed after
+that); only traffic after the setting is applied is processed; Issues is in
+open beta and free during the beta. Issues are read in the dashboard
+(Worker > Issues) or through the account API under
+`/accounts/{account_id}/workers/observability/issues` (list, `/{issueId}`,
+`/{issueId}/occurrences`, `PATCH` for the status). The wrangler OAuth token has
+no Workers Observability scope, so it cannot read them.
 
 ## 2. Load budgets and the D1 harness
 

@@ -636,6 +636,32 @@ provider was contacted and no production bucket was read or written.
 
 ### Vpass (`services/collector-vpass`, `kogane-vpass-collector-poc`)
 
+Daily reported credit snapshots (ADR 0105) are independent
+`<session>-credit-card-NNN` runs. They reuse the existing authenticated
+card selection and durable binding. Alongside sanitized card inventory,
+selection and statement discovery, they store `credit/authori.json` and
+`credit/revo.json` in the existing `card-NNN` unit, plus the existing
+binding unit when derivable. The new credit sanitizer explicitly keeps
+observed Authori financial keys while removing authentication/card references;
+statement sanitizer v1 output remains unchanged. Registration v8 maps only
+these two new JSON keys to `credit-snapshot`; versions v1-v7 keep their
+old meaning.
+
+The `vpass-credit-snapshot` parser publishes visible overall/card/revolving/
+installment-twice-bonus reported limit, outstanding and availability at
+1,000 JPY precision, cross-checked against the 万円 display, plus exact
+reported revolving outstanding/repayment yen. The metric names and
+`extra._kogane.reportedPrecisionJPY` state precision. Hidden zero rows are
+unavailable. Metrics are non-additive shared-credit reports, outside assets
+and canonical liabilities; availability is not recomputed. The selecting
+`coverage-v1` policy keeps the newest complete card snapshot, while raw
+history and prior publications remain append-only. Statement failures do
+not discard a successful card snapshot. Exact installment precision remains
+unobserved, so the existing `balance` catalogue entry stays partial under
+[#1256](https://github.com/risu729/kogane/issues/1256).
+See the [dated source observation](sources/vpass.md).
+The table below describes statement runs.
+
 | Artifact key                             | Role                         | Unit                  |
 | ---------------------------------------- | ---------------------------- | --------------------- |
 | `card-list.json`                         | `sanitized_provider_capture` | `card-NNN`            |
@@ -914,22 +940,87 @@ for this artifact, with the CP932 charset a constant of the source.
 
 ### `sbi-securities` (`services/collector-sbi-securities`)
 
-| Artifact key                   | Role                | Unit       |
-| ------------------------------ | ------------------- | ---------- |
-| `domestic-cash-positions.json` | `collector_derived` | `domestic` |
-| `account-assets-current.json`  | `collector_derived` | `domestic` |
-| `yen-detail-history.json`      | `collector_derived` | `domestic` |
-| `domestic-trade-records.json`  | `collector_derived` | `domestic` |
-| `foreign-cash-positions.json`  | `collector_derived` | `foreign`  |
-| `foreign-cash-balances.json`   | `collector_derived` | `foreign`  |
-| `foreign-trade-records.json`   | `collector_derived` | `foreign`  |
+| Artifact key                                 | Role                | Unit       |
+| -------------------------------------------- | ------------------- | ---------- |
+| `domestic-cash-positions.json`               | `collector_derived` | `domestic` |
+| `account-assets-current.json`                | `collector_derived` | `domestic` |
+| `account-assets-history-source.json`         | `provider_response` | `domestic` |
+| `account-assets-history-inventory.json`      | `collector_derived` | `domestic` |
+| `account-assets-history-<year>.json`         | `collector_derived` | `domestic` |
+| `income-payments-summary-source.json`        | `provider_response` | `domestic` |
+| `income-payments-rows-source.json`           | `provider_response` | `domestic` |
+| `income-payments.json`                       | `collector_derived` | `domestic` |
+| `realised-gains-all-summary-source.json`     | `provider_response` | `domestic` |
+| `realised-gains-summary-source.json`         | `provider_response` | `domestic` |
+| `realised-gains-rows-source.json`            | `provider_response` | `domestic` |
+| `realised-gains.json`                        | `collector_derived` | `domestic` |
+| `yen-detail-history.json`                    | `collector_derived` | `domestic` |
+| `yen-detail-history-page-NNNN-source.json`   | `provider_response` | `domestic` |
+| `foreign-cash-history.json`                  | `collector_derived` | `domestic` |
+| `foreign-cash-history-page-NNNN-source.json` | `provider_response` | `domestic` |
+| `domestic-trade-records.json`                | `collector_derived` | `domestic` |
+| `foreign-cash-positions.json`                | `collector_derived` | `foreign`  |
+| `foreign-cash-balances.json`                 | `collector_derived` | `foreign`  |
+| `foreign-trade-records.json`                 | `collector_derived` | `foreign`  |
+| `domestic-trade-records-<from>-<to>.json`    | `collector_derived` | `domestic` |
+| `foreign-trade-records-<from>-<to>.json`     | `collector_derived` | `foreign`  |
 
-The bytes are `JSON.stringify(artifact.body)` — the collector's re-encoded view
+Weekly asset history comes from the observed no-query/no-body GET
+`/account/api/assets/valuations` in the existing main-site session. The
+collector audits its closed shape and preserves the exact full response bytes.
+A derived inventory records every expected calendar-year shard
+(`account-assets-history-<year>.json`), hash and point count, and the source
+hash/request/capture time. Yearly shards retain all profiles, native tuples
+and residual rows while keeping at most 53 weeks under the unchanged parser
+output budget. Their transformation inputs name both the source and inventory.
+Missing or changed shards make the domestic unit/run partial. Registration v5
+names only yearly derivatives as the history dataset; source/inventory are unparsed;
+v1–v4 stay frozen. The parser separates available window coverage from
+unavailable null profiles and emits no extra points for native ALL tuples.
+The production observation reader chooses one latest witnessed revision per
+point before filtering/paging; old raw and superseded observations remain
+archived. No new read route is added. The catalogue is partial pending
+scheduled publication and account-specific retained-period verification
+([ADR 0098](adr/0098-sbi-weekly-asset-history.md)).
+
+Retained cash statements use the observed two-year yen / five-year foreign
+presets through JST today, without an operation window or cursor. The yen
+query walks its declared pages at size 10; unobserved foreign continuation
+fails closed. Original JSON grammar, duplicate keys, exact numeric tokens and
+closed fields are audited before raw page storage. Derived bundles name every
+source page, preserve the full requested range and check contiguous metadata,
+totals, dates, known codes, exact amounts and unique yen ids. Yen direction
+counts and exact sums match their controls; positive transfer controls stay
+unsupported until observed. USD duplicates retain occurrence identities, and
+the production reader chooses one revision per logical id across overlapping
+runs. Both statements use the domestic main-site session/unit. Registration
+v7 adds only the new USD derivative; raw pages stay unmapped and earlier
+mappings stay frozen. Catalogue status remains partial under #1226 pending
+unobserved semantics and scheduled proof
+([ADR 0102](adr/0102-sbi-retained-cash-history.md)).
+
+Except for the exact weekly/cash-history source bytes above, the bytes are
+`JSON.stringify(artifact.body)` — the collector's re-encoded view
 of each response, exactly what the retired legacy path wrote to the per-source
 bucket and the importer forwarded centrally. A dataset is attributed to a unit
-by the same rule the importer used (`foreign-` prefix → `foreign`).
+by the same rule the importer used (`foreign-` prefix → `foreign`), except the
+new main-site foreign cash statement and its raw inputs, which are domestic.
 
-Every dataset states one `extracted` step by `collector-sbi-securities` at the
+Each normal collection walks the historically exercised execution-history
+interval in at most thirteen non-overlapping windows per scope, each at most 90 days,
+newest first. The
+newest window retains its original key; older windows use the dated keys.
+Domestic history begins January 1 of year minus two, matching the historical
+successful requests. Returned date controls must retain that requested
+window; a cleared or clamped date is incomplete. Foreign history
+uses the historically observed mobile BFF `GetSearchingDuration` query with
+`pastYears=2` and begins January 1 of year minus two, through today. This
+reproduces the successful historical eleven-window scan and can need thirteen
+windows at year end. Web retention is a different surface and is not used as
+the mobile boundary. The mobile execution query fields stay unchanged. No progress cursor or operations window
+parameter is added ([ADR 0096](adr/0096-sbi-scheduled-execution-history.md)).
+
+Other datasets state one `extracted` step by `collector-sbi-securities` at the
 producer version with no input (ADR 0021): each is the collector's own
 envelope around what it read from provider responses (the MTS payload with its
 result codes, the GraphQL and main-site JSON, the foreign trade history pages
@@ -952,8 +1043,16 @@ requested scope (`domestic`, `foreign`, kind `scope`) carrying that scope's own
 artifact count, coverage and error code — a scope that failed does not make the
 other scope's data look incomplete, and a scope that produced nothing is
 `unknown` rather than an observation of zero. `requestedScope` is a
-`date_range` with a matching `requested-window` range when the trigger named a
-window, and `full_snapshot` with no range when it did not.
+`date_range` with a matching `requested-window` range when an internal caller
+named a window, and otherwise `full_snapshot`. Every artifact with a window
+also states `<artifactKey>:requested`, attributed to its scope. Registration
+v4 maps dated execution keys and copies each matching requested range into
+that artifact's descriptor; earlier registration versions retain their prior
+meaning. Empty windows keep separate captures even when their bytes share an
+object. Per-window failures retain other windows but mark their scope
+incomplete using fixed `sbi_*_history_*` codes. If foreign retention cannot be
+read, the old 90-day request remains partial evidence, with
+`sbi_foreign_history_retention_unavailable` rather than a completeness claim.
 
 ### `mizuho-bank` (`services/collector-mizuho`, `kogane-mizuho-collector`)
 
@@ -967,7 +1066,11 @@ window, and `full_snapshot` with no range when it did not.
 One daily cron (`25 21 * * *` UTC, 06:25 JST) signs in once with the Worker
 secrets and reads the account list, then the first displayed history page of
 each ordinary JPY account, at most ten accounts: a run holds up to 11
-artifacts. Accounts past the limit, and accounts whose read failed, are
+artifacts. The client verifies the bank query day's full current-and-two-prior-
+month period, both directions and an empty keyword; a narrower initial page
+is replaced by the observed period-selection read. Invalid or clipped echoed
+controls fail the account as `invalid-history-period`. Page traversal remains
+unobserved, so this does not assert complete all-page coverage. Accounts past the limit, and accounts whose read failed, are
 units with no artifact, `coverageStatus: unknown` and the closed code that
 stopped them as `safeErrorCode` (`account-limit`, a client code such as
 `read-http-error`, or the HTML parser's check as `parse-<code>`; anything else
@@ -1196,6 +1299,22 @@ Processor maps it to the CORE source `global-pass`), producer
   every attempt started, and a teardown failure after another failure is
   logged but never replaces that failure's code or stage. Observed 2026-11-05..07: one token after 25 s, two
   waits that ran out at 45 s.
+- **Observed after `timezone-collector-v8` (#1121, Deploy #802 2026-11-08
+  05:38 UTC), #1134.** The first three scheduled runs (2026-11-08, 11-09 and
+  11-10 at 18:17 UTC) all completed with no failure code, against 2 of 4
+  runs failing (`collection_failed`) from 11-04 to 11-07. Each needed one
+  challenge attempt: `code: token` after 13 993 / 18 347 / 15 209 ms, with
+  one Turnstile frame and `lastHttpStatus: 401` (the Turnstile challenge
+  fetch, which the token still follows). `globalpass-container-relay-summary`:
+  25 / 26 / 26 CONNECT requests, 9 denied each run (browser traffic outside the
+  allowlist, the case that crashed the 11-07 run), 16 / 17 / 17 established,
+  no upstream failure or timeout; the Worker's `globalpass-relay-closed`
+  count matched `established` every run. No `globalpass-container-crash`,
+  `/collect` answered 200, and `logout` failed every run (`logoutFailed:
+  true`, see the logout audit). Container `console.log` lines are in the
+  Workers Observability `containers` dataset of the container application,
+  not in the Worker's own dataset; `runtimeRevision` is in the manifest
+  only, never in a log line.
 - Human-required: **not claimed.** `globalpass_login_rejected` may mean the
   credentials need a person, but it has not been observed, so the terminal
   does not yet say a person must act. The collector still makes exactly one

@@ -78,10 +78,10 @@ The owner's elaboration, as briefed:
   activity change an in-scope count).
 - The existing audit, decision and commit logs are inventoried and reused; no
   duplicate implementation.
-- The new design gets an Opus/Codex fresh review; the initial implementation is
-  not handed to Cursor. #565's P1/P2 fixes (P1: scope before the `LIMIT 501`
-  window; P2: a grant built from the verified key, never from its body; both
-  written out in section 8, S2) stay mandatory and are in progress separately.
+- The new design gets an independent fresh review. #565's P1/P2 fixes (P1:
+  scope before the `LIMIT 501` window; P2: a grant built from the verified key,
+  never from its body; both written out in section 8, S2) stay mandatory and
+  are in progress separately.
 
 ## 1. Facts this plan starts from
 
@@ -915,9 +915,8 @@ preview:
 
 ## 8. Implementation slices, in dependency order
 
-Each slice is one pull request with an independent fresh review (Opus or
-Codex; the initial implementation is not handed to Cursor), and each states in
-its body what the review checked.
+Each slice is one pull request with an independent fresh review, and each
+states in its body what the review checked.
 
 Order and what is independent now: **S1 can start now** and needs nothing
 else; **S2 is in progress** separately; S3 needs S1 and S2 merged; S4 and S6
@@ -947,7 +946,7 @@ need S3; S5 needs S2 (and S1 for its read records); S7 and S8 need S1.
   leaves no `applied` record, only the adapter's `refused` one), refusal and
   replay records, no echo of a refused value (G3-08); a deep scan of the stored
   records after seeding provider text with a token-shaped string and an amount.
-- Review gate: fresh Opus or Codex reviewer; the review checks the batch
+- Review gate: independent fresh reviewer; the review checks the batch
   atomicity on every wired writer and the never-recorded list.
 
 **S2 — #565's P1/P2 fixes, then #565 merges** (in progress).
@@ -1016,7 +1015,7 @@ itself does not expose or duplicate that history reader.
 - ADR: 0063. Migration: none (S1's table).
 - Tests: the delegation matrix below, items 1–10, 12 and 13, on a synthetic
   catalogue operation per risk class.
-- Review gate: fresh Opus or Codex reviewer; the review re-runs #565's matrix
+- Review gate: independent fresh reviewer; the review re-runs #565's matrix
   1–9 to show the attenuation still holds.
 
 **S3 execution integration (2026-10-10, in progress):** the branch connects

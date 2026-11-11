@@ -275,7 +275,18 @@ test("without array disappearance the snapshot selection matches the frozen ship
   const s = new QualityStore();
   capture(s, 1, [10, 20]);
   capture(s, 2, [30, 40]);
-  expect(current(s)).toEqual(current(s, LEGACY_REWARD_BUCKETS_SQL));
+  const rows = current(s);
+  expect(rows.every((row) => row.jpoint_history_state === null)).toBe(true);
+  expect(
+    rows.map(
+      ({
+        jpoint_history_state: _state,
+        jpoint_history_observed_at: _at,
+        jpoint_history_fact_id: _fact,
+        ...row
+      }) => row,
+    ),
+  ).toEqual(current(s, LEGACY_REWARD_BUCKETS_SQL));
   s.db.close();
 });
 
