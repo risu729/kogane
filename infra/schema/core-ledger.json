@@ -1219,6 +1219,17 @@
         }
       ],
       "sha256": "aa3ec5a4b80b0d51bbc89fba530107cf2dd3c41accf977eb478daae441d0b938"
+    },
+    {
+      "file": "0091_moneyforward_detail_balance_snapshots.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "91d8014b75ce05e6e4d9e16a036b91a445d6a39a2afc8e2354de6fc996505a82"
     }
   ],
   "tables": [
@@ -22123,7 +22134,8 @@
       "0080_jpoint_program.sql",
       "0085_schedule_dispatch_marker.sql",
       "0088_sbi_shinsei_monthly_report_units.sql",
-      "0090_myjcb_debit_unit_eligibility.sql"
+      "0090_myjcb_debit_unit_eligibility.sql",
+      "0091_moneyforward_detail_balance_snapshots.sql"
     ],
     "schemaSha256": "0b2ddb2a8d7e9b70df8ec4b3937eeef911d2737a1e55ca0d06eb316f47695af9"
   }

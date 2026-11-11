@@ -72,12 +72,13 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     collected("cash_movement", ["mobile-suica-sf-history"]),
   ],
   // Money Forward ME (aggregator): monthly transactions of the current and 11
-  // past months are parsed; the account pages (balances, holdings) are kept
-  // as evidence only (docs/sources/moneyforward.md, #452).
+  // past months and observed detail-page aggregates/points are parsed.
+  // Native product balances, gated card debt and securities remain unavailable.
   "moneyforward-me": [
-    missing("balance", 452),
+    partial("balance", ["moneyforward-detail-balances"], 1240),
     partial("cash_movement", ["moneyforward-monthly-transactions"], 452),
-    missing("position", 452),
+    partial("position", ["moneyforward-detail-balances"], 1240),
+    partial("reward_balance", ["moneyforward-detail-balances"], 1240),
   ],
   // MyJCB: credit statements and their ledger, J-POINT balance with its
   // nearest expiry, and observed debit ordinary/difference statements; the

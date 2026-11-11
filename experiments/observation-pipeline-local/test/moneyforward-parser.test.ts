@@ -6,6 +6,7 @@ import {
   moneyForwardMonthlyTransactions,
 } from "../../../packages/parsers/src/parsers/moneyforward-parser.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
+import { moneyForwardDetailBalances } from "../../../packages/parsers/src/parsers/moneyforward-detail-balances.ts";
 import { currentTransactions, observationDetail } from "../src/queries.ts";
 import {
   insertFetchArtifact,
@@ -124,7 +125,7 @@ describe("moneyforward Layer B parsers", () => {
       ).toThrow();
     }
   });
-  test("registers exactly one parser for each MoneyForward provider artifact", () => {
+  test("registers canonical monthly observations and additive detail measures beside evidence validation", () => {
     const monthly = meta();
     const accounts = meta({ dataset: "accounts-index", artifactKey: "accounts.html" });
     const detail = meta({ dataset: "account-detail", artifactKey: "account-detail-01.html" });
@@ -134,7 +135,10 @@ describe("moneyforward Layer B parsers", () => {
     expect(PARSERS.filter((parser) => parser.accepts(accounts))).toEqual([
       moneyForwardEvidenceOnly,
     ]);
-    expect(PARSERS.filter((parser) => parser.accepts(detail))).toEqual([moneyForwardEvidenceOnly]);
+    expect(PARSERS.filter((parser) => parser.accepts(detail))).toEqual([
+      moneyForwardEvidenceOnly,
+      moneyForwardDetailBalances,
+    ]);
   });
 
   test("emits only the selected month from the canonical monthly view", () => {

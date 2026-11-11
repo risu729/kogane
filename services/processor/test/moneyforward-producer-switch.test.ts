@@ -298,6 +298,25 @@ const MAPPINGS = `SELECT s.producer_id,s.reference_json,m.account_id,m.status
   FROM source_accounts s JOIN current_account_mappings m ON m.source_account_id=s.id
  WHERE s.source_id='moneyforward-me' ORDER BY s.producer_id`;
 
+/** Historical evidence-only details intentionally lack the observed balance
+ * surface. The additive reader rejects that page with a closed code while
+ * the original index/detail boundary and transaction reads remain unchanged. */
+async function sweepHistorical(env: Env, parsed: number): Promise<void> {
+  expect(await sweep(env)).toMatchObject({ parsed, error: 1 });
+  const failures = await all<{ parser_name: string; last_error_code: string }>(
+    env,
+    "SELECT parser_name,last_error_code FROM observation_parse_jobs WHERE status='failed'",
+  );
+  expect(failures.length).toBeGreaterThan(0);
+  expect(
+    failures.every(
+      (row) =>
+        row.parser_name === "moneyforward-detail-balances" &&
+        row.last_error_code === "parser_rejected",
+    ),
+  ).toBe(true);
+}
+
 test.each([
   ["v1", V1],
   ["v2", V2],
@@ -307,7 +326,7 @@ test.each([
     const env = await store();
     const account = `moneyforward-me:${identity}`;
     const importerFetchRun = await importerRun(env, identity);
-    expect(await sweep(env)).toMatchObject({ parsed: 4, error: 0 });
+    await sweepHistorical(env, 4);
     await identitySweep(env.DB, resolveIdentity, 40);
     const importerEra = [
       { producer: IMPORTER, source_account: account, as_of: "2099-01-03", amount_minor: "-1234" },
@@ -319,7 +338,7 @@ test.each([
     const [importerMapping] = await all<{ account_id: string }>(env, MAPPINGS);
 
     await collectorRun(env, identity);
-    expect(await sweep(env)).toMatchObject({ parsed: 3, error: 0 });
+    await sweepHistorical(env, 3);
     await identitySweep(env.DB, resolveIdentity, 40);
 
     // February, captured by both, is read once, from the collector's newer
@@ -368,9 +387,9 @@ test("the importer's v1 and the collector's v2 identity of one account differ un
   const importer = `moneyforward-me:${V1}`;
   const collector = `moneyforward-me:${V2}`;
   await importerRun(env, V1);
-  expect(await sweep(env)).toMatchObject({ parsed: 4, error: 0 });
+  await sweepHistorical(env, 4);
   await collectorRun(env, V2);
-  expect(await sweep(env)).toMatchObject({ parsed: 3, error: 0 });
+  await sweepHistorical(env, 3);
   await identitySweep(env.DB, resolveIdentity, 40);
 
   // Nothing merges a different identity: February shows once per identity.
@@ -421,9 +440,9 @@ async function migrate(env: Env, file: string): Promise<void> {
 async function rewritten() {
   const env = await store(REWRITE);
   await importerRun(env, V1);
-  expect(await sweep(env)).toMatchObject({ parsed: 4, error: 0 });
+  await sweepHistorical(env, 4);
   await collectorRun(env, V2);
-  expect(await sweep(env)).toMatchObject({ parsed: 3, error: 0 });
+  await sweepHistorical(env, 3);
   await identitySweep(env.DB, resolveIdentity, 40);
   const staging = splitSqlStatements(
     migrationSql(CORE_MIGRATIONS_URL, "0062_identity_value_rewrite_staging.sql"),
@@ -502,7 +521,7 @@ test("after the rewrite a new collector capture maps to the importer-era entity 
     all(env, "SELECT id,revision,account_id FROM account_mappings ORDER BY id");
   const mappings = await revisions();
   await collectorRun(env, V2, "00000000-0000-4000-8000-00000000c028", "2026-09-27T00:00:00.000Z");
-  expect(await sweep(env)).toMatchObject({ parsed: 3, error: 0 });
+  await sweepHistorical(env, 3);
   await identitySweep(env.DB, resolveIdentity, 40);
   expect(await revisions()).toEqual(mappings);
   expect(
@@ -594,7 +613,7 @@ test("after the rewrite a v2 value that was not staged keeps its own entity", as
     "00000000-0000-4000-8000-00000000c029",
     "2026-09-28T00:00:00.000Z",
   );
-  expect(await sweep(env)).toMatchObject({ parsed: 3, error: 0 });
+  await sweepHistorical(env, 3);
   await identitySweep(env.DB, resolveIdentity, 40);
   const [unpaired] = await all<{ account_id: string }>(
     env,

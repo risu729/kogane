@@ -1,0 +1,32 @@
+{
+  "moneyforward-detail-balances": {
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "moneyforward-me:moneyforward-account-v2-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "metric": "reported_account_value_jpy",
+          "amountText": "1300",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "html:section.accounts-form>h1.heading-small",
+          "extra": {
+            "cells": [
+              "資産総額：1,300円"
+            ],
+            "_kogane": {
+              "sourceView": "account-detail",
+              "amountBasis": "provider-reported",
+              "providerAsOf": "not-observed"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "unreadable-container": {
+      "error": true
+    }
+  }
+}
