@@ -70,13 +70,17 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       "app",
     ]);
   });
-  test("only Processor and PRESTIA opt into version-strategy trigger synchronization", async () => {
+  test("App, Processor and PRESTIA opt into version-strategy trigger synchronization", async () => {
     const opted = targets.filter((target) =>
       steps
         .find((step) => step.body.includes(`id: cf-deploy-${target.name}\n`))
         ?.body.includes("deploy-triggers: 'true'"),
     );
-    expect(opted.map((target) => target.name).sort()).toEqual(["prestia-bank-worker", "processor"]);
+    expect(opted.map((target) => target.name).sort()).toEqual([
+      "app",
+      "prestia-bank-worker",
+      "processor",
+    ]);
     const prestia = opted.find((target) => target.name === "prestia-bank-worker")!;
     const worker = (await import(`${REPO_ROOT}/${prestia.path}/cloudflare.config.ts`)).default
       .worker;
@@ -228,7 +232,7 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       expect(cf?.body).toContain("mode: production");
       expect(cf?.body).toContain(`worker: ${target.worker}`);
       expect(cf?.body).toContain(
-        `deploy-triggers: '${["processor", "prestia-bank-worker"].includes(target.name) ? "true" : "false"}'`,
+        `deploy-triggers: '${["app", "processor", "prestia-bank-worker"].includes(target.name) ? "true" : "false"}'`,
       );
       expect(steps.indexOf(cf!)).toBe(steps.indexOf(legacy!) + 1);
     });
