@@ -22,3 +22,7 @@ run = "./node_modules/.bin/wrangler deploy --dry-run"
 
 [tasks.ci]
 depends = ["//experiments/d1-conformance:typecheck", "//experiments/d1-conformance:test"]
+
+[tasks.runtime-compatibility]
+description = "Probe the installed Wrangler runtime against flat CTEs, immutable CORE migrations and settlement reads."
+run = "node scripts/runtime-compatibility.mjs"

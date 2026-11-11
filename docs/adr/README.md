@@ -111,3 +111,5 @@ for current behavior.
 
 - [ADR 0105: Preserve Vpass credit snapshots as overlapping provider reports](0105-vpass-reported-credit-snapshots.md) — proposed; independent daily card snapshots, explicit thousand-yen precision and exact revolving yen, shared non-additive metrics, registration v8
 - [ADR 0106: Preserve reported SBI payments and sales as complete retained containers](0106-sbi-reported-income-and-gains.md) — proposed; observed JPY/USD payments and domestic sales, exact raw numeric tokens, checked full-retention counts, complete-container current membership and registration v9
+
+- [ADR 0110: Keep the coherent Workers stack while the upstream CTE expansion regression is unresolved](0110-workers-cte-regression.md) — proposed; exact local reproduction, bounded known-release exclusions and a future-upgrade gate; no migration or runtime override
