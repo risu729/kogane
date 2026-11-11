@@ -99,6 +99,11 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     count: 1,
     reason: "a page error is reduced to a category and numeric challenge codes",
   },
+  "services/collector-mobile-suica/src/mobile-suica.ts": {
+    count: 2,
+    reason:
+      "keeps only history_* machine codes; other exception text is replaced with history_collection_failed",
+  },
   "services/collector-moneyforward/src/shared-collection.ts": {
     count: 1,
     reason: "a failure's message field, which the collector already sets to its failure code",
