@@ -79,6 +79,12 @@ export interface CollectionFailure {
   errorCode: string;
 }
 
+export interface CollectionUnit {
+  unitKey: "account" | "full-cashflows";
+  status: "success" | "partial" | "failed";
+  errorCode?: string;
+}
+
 export interface CollectionManifest {
   schemaVersion: string;
   source: "sbi-vc-trade";
@@ -88,6 +94,8 @@ export interface CollectionManifest {
   status: "success" | "partial" | "failed";
   artifacts: StoredArtifact[];
   failures: CollectionFailure[];
+  /** Absent on legacy manifests, whose whole run was one account unit. */
+  units?: CollectionUnit[];
 }
 
 export interface CollectionSummary {

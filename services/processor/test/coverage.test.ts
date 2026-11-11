@@ -8,6 +8,7 @@ import type { Miniflare } from "miniflare";
 import { parseJob, sweep } from "../src/worker.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 import { SNAPSHOT_DATASETS, snapshotCtes } from "../../../packages/parsers/src/snapshot-query.ts";
+import { SBI_VC_UNIT_POLICIES } from "./sbi-vc-policy-fixture.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import { smbcDirectBalance } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
@@ -63,7 +64,7 @@ test("the current production migration chain preserves legacy policies and adds 
   expect(containers.map(({ parser_name, dataset }) => [parser_name, dataset])).toEqual(
     SNAPSHOT_DATASETS.map(([parserName, dataset]) => [parserName, dataset]).sort(),
   );
-  expect(policies).toHaveLength(SNAPSHOT_DATASETS.length + 8);
+  expect(policies).toHaveLength(SNAPSHOT_DATASETS.length + 8 + 201);
   expect(
     policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
   ).toEqual([
@@ -139,6 +140,7 @@ test("the current production migration chain preserves legacy policies and adds 
       unit_scope: "unit",
       snapshot_selection: 0,
     },
+    ...SBI_VC_UNIT_POLICIES.map((row) => ({ ...row, policy_id: "legacy-warning-compat-v1" })),
     {
       source_id: "vpass",
       parser_name: "vpass-credit-snapshot",
@@ -209,7 +211,11 @@ test("the current production migration chain preserves legacy policies and adds 
   ]);
   expect(
     containers
-      .filter((row) => !["myjcb-jpoint-history", "vpass-credit-snapshot"].includes(row.parser_name))
+      .filter(
+        (row) =>
+          row.source_id !== "sbi-vc-trade" &&
+          !["myjcb-jpoint-history", "vpass-credit-snapshot"].includes(row.parser_name),
+      )
       .every((row) => row.unit_scope === "run"),
   ).toBe(true);
   for (const parser_name of ["myjcb-jpoint-history", "vpass-credit-snapshot"])
@@ -217,6 +223,12 @@ test("the current production migration chain preserves legacy policies and adds 
       unit_scope: "unit",
       policy_id: "coverage-v1",
     });
+  expect(containers.filter((row) => row.source_id === "sbi-vc-trade")).toEqual(
+    SBI_VC_UNIT_POLICIES.filter((row) => row.snapshot_selection === 1).map((row) => ({
+      ...row,
+      policy_id: "legacy-warning-compat-v1",
+    })),
+  );
   // Every row that pins a version, under either policy, names one this build
   // deploys: the selection matches it exactly, so a stale pin would adopt
   // nothing (0056 moves the SBI Shinsei board to 1.0.1, 0059 to 1.0.2, 0084
@@ -428,7 +440,7 @@ test("the comparison route reports counts, ids and policies only", async () => {
     }[];
     differingDatasets: number;
   };
-  expect(body.policies).toHaveLength(SNAPSHOT_DATASETS.length + 8);
+  expect(body.policies).toHaveLength(SNAPSHOT_DATASETS.length + 8 + 201);
   expect(
     body.policies
       .filter((row) => row.snapshot_selection === 1)
@@ -438,7 +450,13 @@ test("the comparison route reports counts, ids and policies only", async () => {
     body.policies
       .filter((row) => row.snapshot_selection === 1 && row.unit_scope !== "run")
       .map((row) => row.parser_name),
-  ).toEqual(["myjcb-jpoint-history", "vpass-credit-snapshot"]);
+  ).toEqual([
+    "myjcb-jpoint-history",
+    ...SBI_VC_UNIT_POLICIES.filter((row) => row.snapshot_selection === 1).map(
+      (row) => row.parser_name,
+    ),
+    "vpass-credit-snapshot",
+  ]);
   expect(
     body.policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
   ).toEqual([
@@ -550,6 +568,14 @@ test("the comparison route reports counts, ids and policies only", async () => {
       snapshot_selection: 0,
       updated_at_ms: 0,
     },
+    ...SBI_VC_UNIT_POLICIES.map((row) => ({
+      ...row,
+      policy_id: "legacy-warning-compat-v1",
+      policy_version: 1,
+      required_parser_version: null,
+      replaces_previous_on_complete_empty: row.snapshot_selection === 1 ? 1 : 0,
+      updated_at_ms: 0,
+    })),
     {
       source_id: "vpass",
       dataset: "credit-snapshot",

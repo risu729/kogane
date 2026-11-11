@@ -1357,15 +1357,29 @@ keep-alive and the daily collection — both unchanged. Terminal source id
 | `<dataset>.json` | `collector_derived`  | the gateway envelope with `meta.secureKey` already stripped |
 | `manifest.json`  | `collector_manifest` | the collector manifest; each entry names a stored object    |
 
-- `requestedScope`: `full_snapshot`, `unitKeys: ["account"]`; one `account` unit
-  of kind `collection`, the same unit the central descriptors use, counting the
-  datasets; `manifest.json` names no unit (ADR 0021 — it named the unit
+- `requestedScope`: `full_snapshot`; `account` holds the classic datasets,
+  and `full-cashflows` holds the additional all-type lists after the classic
+  reads finish. Both are kind `collection`; each counts only its own datasets.
+  `manifest.json` names no unit (ADR 0021 — it named the unit
   without being counted, so every run failed its seal with
   `run_inventory_incomplete` and was retried each tick until the ADR 0024
   amendment of 2026-09-26 made that refusal a block). No ranges.
 - A successful run declares `coverageStatus: complete`: the collector walks
   every historical execution and cash-flow page to exhaustion and verifies the
   provider's own pagination totals before finishing.
+- The existing JPY cash-flow dataset remains the sole publishing dataset for
+  remittances. Additional `cashflows-all-recent-page-NNNN` and
+  `cashflows-all-historical-page-NNNN` capture unfiltered lists with page size
+  20 and the same total/cardinality checks; no parser publishes these evidence
+  datasets. Crypto transfer and reward observations remain unsupported, and the
+  trader-mode observation has not yet been validated through a scheduled HTTP
+  run ([source observation](sources/sbi-vc-trade.md#17-unfiltered-cash-flow-observation-2026-11-10)).
+- A failed full-list request makes its own unit and the overall run partial.
+  A completed classic `account` unit stays complete and is admitted by the
+  explicit classic-dataset `unit-independent-v1` policies. A classic failure
+  still excludes that whole account unit. Neither another run's successful
+  unit nor the raw lists can rescue it
+  ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-sbi-vcs-unfiltered-evidence-is-independent-of-its-classic-account-unit-2026-11-10)).
 - `transformations`: one `redacted` step per dataset (`sbi-vc-trade-worker`);
   the unredacted envelope carried the session key and is not retained.
 - `acquisitionSessionRef`: **yes.** The Durable Object now keeps a session

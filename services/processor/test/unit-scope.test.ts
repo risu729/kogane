@@ -1,6 +1,6 @@
 // Unit-scoped partial-run eligibility in the production Worker (design review
 // D13, PR-14, policy `unit-independent-v1`). Migration 0037 applies on top of
-// 0017-0036; the seeded state is unchanged run-scope behaviour; a policy row on
+// 0017-0036; later explicit opt-ins leave other sources run-scoped. A policy row on
 // the `unit` scope lets a proven fetch unit of a partial run be parsed and
 // adopted while its failed sibling keeps its previous evidence; a gap inside
 // one unit still blocks adoption; and setting the row back to `run` restores
@@ -10,6 +10,7 @@ import type { Miniflare } from "miniflare";
 import { sweep } from "../src/worker.ts";
 import { publishParse, seedUnitRun, setUnitScope, startPipeline } from "./harness.ts";
 import { SNAPSHOT_DATASETS, snapshotCtes } from "../../../packages/parsers/src/snapshot-query.ts";
+import { SBI_VC_UNIT_POLICIES } from "./sbi-vc-policy-fixture.ts";
 
 // The reader's relations on the production schema (packages/read-model concepts).
 const RELATIONS = {
@@ -90,6 +91,7 @@ test("prior run-scoped containers coexist with the explicit Vpass credit and eli
       unit_scope: "unit",
       snapshot_selection: 1,
     },
+    ...SBI_VC_UNIT_POLICIES.filter((row) => row.snapshot_selection === 1),
     {
       source_id: "vpass",
       parser_name: "vpass-credit-snapshot",
@@ -164,6 +166,7 @@ test("prior run-scoped containers coexist with the explicit Vpass credit and eli
       unit_scope: "unit",
       snapshot_selection: 0,
     },
+    ...SBI_VC_UNIT_POLICIES,
     {
       source_id: "vpass",
       parser_name: "vpass-credit-snapshot",
@@ -403,6 +406,7 @@ test("the comparison route reports the eligibility scope of every policy row", a
       unit_scope: "unit",
       snapshot_selection: 0,
     },
+    ...SBI_VC_UNIT_POLICIES,
     {
       source_id: SOURCE,
       parser_name: PARSER,

@@ -752,3 +752,63 @@ one and the occurrence carries `human_required_reauth` (also flagged as
 3xx a trigger, so logins continue at the usual 6-hour spacing. When a retry is
 refused for the agreement again, the hourly spacing returns only inside the
 original 72-hour window, which is not reopened.
+
+## 17. Unfiltered cash-flow observation (2026-11-10)
+
+The owner authenticated the local Chrome session. Observation of the official
+trader-mode cash-flow history used read-only screen controls. Its transport was
+Socket.IO: an event frame names `getCashflowList` and an argument carries the
+gateway-shaped `meta` / `body` response. This is distinct from the simple-mode
+HTTP gateway already used by the collector (§12–§13). No manual HTTP replay,
+new collector run or hosted validation of these additional parameters was done.
+Normal navigation of the current simple-mode JPY history also confirmed
+`POST https://simple.sbivc.co.jp/api/cccmdipresen/gw/trade`, with an
+`event: "getCashflowList"` / `data` JSON request. That screen sends the existing
+size-30, `historical: "true"`, JPY/remittance filter and the runtime
+`secureKey`; it offers no all-type selector. The common event and envelope are
+observed on both transports, while the unfiltered parameters on HTTP remain
+unverified.
+
+The screen's all-currency/all-type request carries these fields:
+
+| Field                          | Type and value                                                               |
+| ------------------------------ | ---------------------------------------------------------------------------- |
+| `historical`                   | string `"false"` for `最新` (latest), `"true"` for `過去履歴` (past history) |
+| `currency`, `cashflowType`     | empty arrays                                                                 |
+| `eventDateFrom`, `eventDateTo` | empty strings                                                                |
+| `sortKey`, `sortAsc`           | strings `"cashflowDatetime"`, `"false"`                                      |
+| `pageNumber`, `pageSize`       | strings `"0"`, `"20"` on the first page                                      |
+
+Responses carry `list`, `pageNumber`, `pageSize`, `totalSize` and
+`totalNumOfPages`. The latest view had an empty list with page number 0,
+page size 20, total size 0 and total pages 0. The past view's list length
+matched its stated total and its cash-flow identities were distinct. Its rows
+had string fields `cashflowAmount`, `valueYmdDate`, `publicMemo`, `cashflowID`,
+`cashflowType`, `eventDatetime`, `processStatusType`, `currency` and
+`cashbalance`. Observed closed type codes were `WITHDRAW_COMMISSION`,
+`REMITTANCE_WITHDRAW`, `EXCHANGE`, `COMMISSION` and `REMITTANCE_DEPOSIT`;
+the observed status code was `PROCESSED`. These codes are recorded as protocol
+evidence, without inferring a fee, exchange, transfer or income publication rule.
+Selecting the trader UI's staking option sent `cashflowType: ["STAKING"]`
+and returned an empty list. This establishes a selectable code, not a reward
+row's schema or a positive collection result.
+
+The collector retains the existing filtered JPY dataset and additionally walks
+both all-type views in `cashflows-all-recent-page-NNNN` and
+`cashflows-all-historical-page-NNNN`, using the existing HTTP
+`getCashflowList` event. Stable totals, exact page sizes and list cardinality
+are required before the raw collection unit can succeed. These new datasets
+have no publishing parser, so an overlapping JPY row is not published twice and
+an unknown type or status cannot be classified as a fiat movement or income.
+The lists have their own `full-cashflows` unit: a failure there leaves the run
+partial but does not invalidate a completed classic `account` unit. Only the
+exact classic dataset paths opt into unit eligibility; a failed classic unit
+still publishes nothing from that run.
+
+Remaining limits for [the cash-flow issue](https://github.com/risu729/kogane/issues/1227):
+no crypto deposit, crypto withdrawal, staking reward or lending reward response
+row was observed. Their codes and semantics remain unsupported; `asset_transfer`
+and `income` stay `not_collected` in the provider catalogue. Full-list capture is
+not proof that those typed data are collected. Counts per type matching a new
+scheduled collection, full-retention coverage and the additional parameters on
+the deployed HTTP transport remain unverified.
