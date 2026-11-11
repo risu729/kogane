@@ -908,3 +908,55 @@ metadata parsing; raw evidence listing does not require those policy rows.
 [#1249](https://github.com/risu729/kogane/issues/1249) remains partial: annual
 PDF downloads, daily reports, balance/valuation history, provider retention
 limits, and a deployed scheduled run with these document calls are unverified.
+
+## 19. Intermittent keepalive refusals and recovery (2026-11-11)
+
+A read-only Workers Logs review on 2026-11-11 contradicts the continuous
+outage suggested by [#1300](https://github.com/risu729/kogane/issues/1300).
+HTTP 403 keepalive failures occurred between 2026-11-09 23:00 UTC and
+2026-11-11 05:00 UTC, with successful HTTP 200 keepalives between them.
+Error-level logs alone cannot establish that every keepalive failed.
+
+Two unsampled boundary traces establish the recovery path:
+
+- 2026-11-10 17:30:03.126 UTC: HTTP 403; 17:30:04.094: passkey
+  reauthentication succeeded; 17:30:04.240: keepalive HTTP 200.
+- 2026-11-11 05:00:01.338 UTC: HTTP 403; 05:00:03.092: passkey
+  reauthentication succeeded; 05:00:03.248: keepalive HTTP 200;
+  05:15:01.300: another keepalive HTTP 200.
+
+The disappearance of the observed errors after 05:00 is therefore consistent
+with successful automatic session replacement, not an alarm stopping. The
+read-only operations snapshot also showed a completed 14:45 keepalive and an
+armed 15:00 occurrence. The 2026-11-10 21:05 scheduled collection was completed
+and its fetch was registered. These observations establish recovery at those
+instants, not a guarantee of future health or of every dataset's publication.
+
+The rejected responses' bodies were not inspected. Whether the original 403
+was caused by expiry, invalidation, a notice, routing or request blocking
+remains unknown; a 403 alone cannot distinguish them. No new provider login,
+credential access or collection was performed for this investigation.
+
+The collector now records `sessionRefreshRequired: true` with a keepalive
+refusal that calls for reauthentication: HTTP 401/403, gateway rejection,
+missing seed, or the existing pending-agreement redirect case. Further
+keepalive calls return that stored failure without contacting the gateway,
+updating the failure timestamp/count, or seeding the rejected session again.
+A successful passkey login stores the replacement session and clears the flag
+atomically. The next keepalive validates it before collection can proceed.
+A health record from before this field defaults to false; its next refusal
+sets the flag. Ordinary server/network failures retain their retry behavior.
+
+Processor alarms remain enabled and keep the existing unforced login cooldown:
+six hours normally, or one hour for the bounded pending-agreement window in
+section 16. The owner session-refresh operation keeps its existing one-hour
+forced-login spacing. No provider terms are accepted automatically. A failed
+login leaves the flag and stored failure intact. Synthetic Workers-runtime
+tests cover refused-session suppression, failed login, successful passkey
+replacement and resumed keepalive, plus retry after a server error.
+
+No owner session action was indicated by the verified recovery snapshot. If a
+later login reports `manual_agreement_required`, the owner must agree at the
+provider; another human-required reauthentication failure needs the existing
+operations recovery path. The underlying cause of the intermittent 403s is
+still unverified and this issue must not claim it has been diagnosed.

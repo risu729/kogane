@@ -38,6 +38,8 @@ export interface HealthState {
    * after a successful login.
    */
   manualAgreementPendingSince: string | null;
+  /** A refused gateway session waits for a successful login before another keepalive. */
+  sessionRefreshRequired: boolean;
 }
 
 export interface GatewayMeta {
