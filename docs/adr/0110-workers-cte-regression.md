@@ -15,8 +15,8 @@ an earlier Wrangler 4.159.0 head.
 The failure is not explained by a lower limit on actual view nesting alone.
 The upstream [CTE expansion regression](https://github.com/cloudflare/workers-sdk/issues/16786)
 describes a cumulative cursor-count check when resolving CTE references.
-Our independent local reproduction accepts a flat list of 90 or 98 references
-to `WITH q AS (SELECT 1 x)` and rejects 99, 100 and 110 references on the affected
+Our independent local reproduction accepts a flat list of 90, 98 or 99 references
+to `WITH q AS (SELECT 1 x)` and rejects 100 and 110 references on the affected
 runtime. The flat query has no growing nesting depth. Replacing view boundaries
 with CTEs, including `MATERIALIZED` CTEs, does not remove the failing condition.
 
