@@ -284,6 +284,15 @@ export interface RegistrationBacklog {
   pending: number;
   /** When the oldest pending run was first seen, or null when none is pending. */
   oldest_pending_first_seen_at: string | null;
+  /** Latest `registered` stage is a retryable refusal, not a staged continuation. */
+  retryable: number;
+  /** Stored registration attempts across retryable runs. */
+  retryable_attempts: number;
+  oldest_retryable_first_seen_at: string | null;
+  latest_retryable_at: string | null;
+  /** Bounded, closed-code breakdown of the retryable rows. */
+  retryable_codes: { code: string; count: number; attempts: number; latest_at: string | null }[];
+  retryable_codes_truncated: boolean;
 }
 
 /** Counts only: how many terminals are still short of registration. */
@@ -291,19 +300,69 @@ export async function readRegistrationBacklog(
   db: D1Like,
   registrationContractVersion: string,
 ): Promise<RegistrationBacklog> {
-  const row = await first<RegistrationBacklog>(
+  const row = await first<
+    Omit<RegistrationBacklog, "retryable_codes" | "retryable_codes_truncated">
+  >(
     db,
-    `SELECT
-       (SELECT count(*) FROM collection_runs
-         WHERE blocked_code IS NULL AND registered_at IS NULL
-           AND registration_contract_version = ?1) AS unregistered,
-       count(*) AS pending,
-       min(r.first_seen_at) AS oldest_pending_first_seen_at
-       FROM collection_runs r
-      WHERE ${PENDING_REGISTRATION}`,
+    `WITH open_runs AS (
+       SELECT r.id, r.first_seen_at, s.state, s.recorded_at
+         FROM collection_runs r
+         LEFT JOIN collection_run_stages s ON s.id=(
+           SELECT x.id FROM collection_run_stages x
+            WHERE x.collection_run_id=r.id AND x.stage='registered'
+            ORDER BY x.id DESC LIMIT 1)
+        WHERE r.blocked_code IS NULL AND r.registered_at IS NULL
+          AND r.registration_contract_version=?1)
+     SELECT count(*) AS unregistered,
+       coalesce(sum(state='pending'),0) AS pending,
+       min(CASE WHEN state='pending' THEN first_seen_at END) AS oldest_pending_first_seen_at,
+       coalesce(sum(state='retryable'),0) AS retryable,
+       coalesce(sum(CASE WHEN state='retryable' THEN
+         (SELECT count(*) FROM collection_run_stages a
+           WHERE a.collection_run_id=open_runs.id AND a.stage='registered') ELSE 0 END),0)
+         AS retryable_attempts,
+       min(CASE WHEN state='retryable' THEN first_seen_at END) AS oldest_retryable_first_seen_at,
+       max(CASE WHEN state='retryable' THEN recorded_at END) AS latest_retryable_at
+      FROM open_runs`,
     [registrationContractVersion],
   );
-  return row ?? { unregistered: 0, pending: 0, oldest_pending_first_seen_at: null };
+  const codes = await all<{
+    code: string;
+    count: number;
+    attempts: number;
+    latest_at: string | null;
+  }>(
+    db,
+    `SELECT CASE WHEN length(s.failure_code) BETWEEN 1 AND 64
+       AND s.failure_code NOT GLOB '*[^a-z0-9_]*'
+       THEN s.failure_code ELSE 'unclassified' END AS code,
+       count(*) AS count,
+       sum((SELECT count(*) FROM collection_run_stages a
+         WHERE a.collection_run_id=r.id AND a.stage='registered')) AS attempts,
+       max(s.recorded_at) AS latest_at
+     FROM collection_runs r
+     JOIN collection_run_stages s ON s.id=(
+       SELECT x.id FROM collection_run_stages x
+        WHERE x.collection_run_id=r.id AND x.stage='registered'
+        ORDER BY x.id DESC LIMIT 1)
+     WHERE r.blocked_code IS NULL AND r.registered_at IS NULL
+       AND r.registration_contract_version=?1 AND s.state='retryable'
+     GROUP BY code ORDER BY count DESC, code LIMIT 33`,
+    [registrationContractVersion],
+  );
+  return {
+    ...(row ?? {
+      unregistered: 0,
+      pending: 0,
+      oldest_pending_first_seen_at: null,
+      retryable: 0,
+      retryable_attempts: 0,
+      oldest_retryable_first_seen_at: null,
+      latest_retryable_at: null,
+    }),
+    retryable_codes: codes.slice(0, 32),
+    retryable_codes_truncated: codes.length > 32,
+  };
 }
 
 // ── the bounded scan's cursor ───────────────────────────────────────────
