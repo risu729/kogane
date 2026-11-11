@@ -248,6 +248,13 @@ current milestone. Production was read through the MCP Portal between 11:18 and 
   [#1215](https://github.com/risu729/kogane/issues/1215)). Every collected
   source's summary lists its provider data types as `collected`, `partial` or `not_collected`
   with the issue that tracks the rest.
+  A read-only follow-up on 2026-11-10 placed Vpass's November 9 silent stop
+  inside its open scheduled RPC: lease heartbeats continued for 120.606 s,
+  and deployments overlapped, but the terminating outcome was not retained.
+  [The UTC evidence and remaining discriminator](schedules.md#vpass-recurrence-on-2026-11-09)
+  keep [issue 1142](https://github.com/risu729/kogane/issues/1142) open for a
+  demonstrated fix and three consecutive post-fix scheduled days; this does
+  not remeasure the account-coverage baseline above.
 - **Accounts** (`kogane.identity.read`, `kogane.accounts.candidates`): `unresolved` is 0 on
   every source (the baseline's one MyJCB J-POINT reference is now a `provider-local` reward
   account, [ADR 0089](adr/0089-myjcb-jpoint-identity.md)) and `identified` is 0 everywhere. The
@@ -334,6 +341,17 @@ known gaps ([agent API: parity guards](agent-api.md#ui-and-mcp-parity-guards-adr
 each later unit of this track closes gaps and shrinks those lists.
 
 ### New sources
+
+SBI VC's 2026-11-10 document/API comparison confirms that its existing spot
+execution filter covers both retail and exchange venues: five CSV rows joined
+one-to-one by the composite execution ID, including one retail and four exchange
+rows. Leverage opening/closing filters remain unobserved under
+[#1228](https://github.com/risu729/kogane/issues/1228); a duplicate venue endpoint
+is unnecessary. [#1249](https://github.com/risu729/kogane/issues/1249) adds monthly
+PDF/P&L ZIP evidence and explicit empty annual-index capture, with no second
+financial publication. Annual downloads, daily reports and valuation history
+remain gaps. This records implementation/observation scope, not deployed
+acceptance; see [the dated source evidence](sources/sbi-vc-trade.md#18-simple-mode-documents-and-spot-execution-correspondence-2026-11-10).
 
 New collectors ([#455](https://github.com/risu729/kogane/issues/455)–[#510](https://github.com/risu729/kogane/issues/510)
 under [#440](https://github.com/risu729/kogane/issues/440)) start only when the owner

@@ -70,9 +70,10 @@ export function parseCardInventory(html: string): DiscoveredCard[] {
   for (const [index, match] of candidates.entries()) {
     const text = normalizeText(stripTags(match[2] ?? ""));
     if (!/(?:カード|JCB|デビット)/u.test(text)) continue;
+    const hint = productHint(text);
     cards.push({
       localId: `card-${String(index + 1).padStart(3, "0")}`,
-      ...(productHint(text) ? { productHint: productHint(text) } : {}),
+      ...(hint === undefined ? {} : { productHint: hint }),
       switchCandidate: /(?:切替|おまとめ|card)/iu.test(`${match[1] ?? ""} ${text}`),
     });
   }

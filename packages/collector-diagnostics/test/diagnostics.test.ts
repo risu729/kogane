@@ -18,6 +18,22 @@ function capture() {
 }
 
 describe("safe collector diagnostics", () => {
+  test("unfiltered cash-flow failures retain their closed stage without provider data", async () => {
+    const records = capture();
+    for (const stage of ["gateway-cashflows-all-recent", "gateway-cashflows-all-historical"]) {
+      await expect(
+        createDiagnostics("sbi-vc-trade", runId).step(stage, async () => {
+          throw new Error("collector_http_503");
+        }),
+      ).rejects.toThrow("collector_http_503");
+      expect(records.at(-1)).toMatchObject({
+        stage,
+        outcome: "failed",
+        category: "http",
+        httpStatus: 503,
+      });
+    }
+  });
   test("a GLOBAL PASS step code names its category instead of unknown", () => {
     const failure = (code: string, name = "Error") =>
       safeErrorDetails(Object.assign(new Error(code), { name, code }));

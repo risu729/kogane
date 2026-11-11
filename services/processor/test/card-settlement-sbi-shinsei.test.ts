@@ -1,3 +1,4 @@
+import { transactionsSql } from "../../../packages/read-model/src/sql.ts";
 // SBI Shinsei as the second bank adapter of card settlement review (migration
 // 0052, ADR 0018). Every bank capture is the synthetic parser-boundary fixture
 // (tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries), or a
@@ -125,13 +126,19 @@ function foreignActivity(): Fixture {
 }
 
 /** Store one capture and parse it through the processor's incremental lane; returns the parse run. */
-async function capture(id: number, payload: unknown, fetchedAtMs: number): Promise<number> {
+async function capture(
+  id: number,
+  payload: unknown,
+  fetchedAtMs: number,
+  dataset = DATASET,
+  parser = PARSER,
+): Promise<number> {
   await seedArtifact(
     env,
     id,
     "sbi-shinsei-bank",
-    DATASET,
-    `${DATASET}.json`,
+    dataset,
+    `${dataset}.json`,
     payload,
     true,
     fetchedAtMs,
@@ -145,7 +152,7 @@ async function capture(id: number, payload: unknown, fetchedAtMs: number): Promi
     )
     .bind(id)
     .first<{ id: number; parser_name: string }>();
-  expect(parse?.parser_name).toBe(PARSER);
+  expect(parse?.parser_name).toBe(parser);
   await identifyParse(
     db,
     {
@@ -550,3 +557,69 @@ test("another allocation of the SBI Shinsei provider id blocks its review", asyn
     command("card-settlement.accept", { proposalId: sbi!.id, reason: "already allocated" }),
   ).rejects.toThrow();
 }, 60000);
+
+test("period history and latest-ten publish one current transaction per provider reference and preserve bank-debit eligibility", async () => {
+  const history = JSON.parse(
+    readFileSync(
+      new URL(
+        "../../../tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/savings-activity.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+  const top = fixture();
+  Object.assign(
+    top.responseParam.activity.responseParam,
+    history.response.responseParam.activity.responseParam,
+  );
+  top.responseParam.activity.responseParam.activityDetails =
+    history.response.responseParam.activity.responseParam.activityDetails.slice(0, 2);
+  const ids = [8901, 8902];
+  await capture(ids[0]!, top, Date.parse("2099-01-15T03:00:00Z"));
+  await capture(
+    ids[1]!,
+    history,
+    Date.parse("2099-01-15T03:01:00Z"),
+    "savings-activity",
+    "sbi-shinsei-savings-activity",
+  );
+  const query = transactionsSql(
+    { source: "sbi-shinsei-bank", account: "sbi-shinsei:" + history.scope.accountNo },
+    0,
+  );
+  const rows = await db
+    .prepare(query.sql)
+    .bind(...query.args)
+    .all<{ external_id: string; parser: string }>();
+  expect(rows.results).toHaveLength(31);
+  expect(new Set(rows.results.map((row) => row.external_id)).size).toBe(31);
+  expect(rows.results.every((row) => row.parser.startsWith("sbi-shinsei-savings-activity@"))).toBe(
+    true,
+  );
+  const debit = await db
+    .prepare("SELECT bank_key,adapter FROM card_bank_debit_facts WHERE source_account=?")
+    .bind("sbi-shinsei:" + history.scope.accountNo)
+    .all<{ bank_key: string; adapter: string }>();
+  expect(debit.results).toHaveLength(15);
+  expect(new Set(debit.results.map((row) => row.bank_key)).size).toBe(15);
+  expect(debit.results.every((row) => row.adapter === "sbi-shinsei-bank")).toBe(true);
+  // A later successful top capture remains a fallback when that day's history fails.
+  await capture(8903, top, Date.parse("2099-01-16T03:00:00Z"));
+  const fallback = await db
+    .prepare(query.sql)
+    .bind(...query.args)
+    .all<{ external_id: string; parser: string }>();
+  expect(fallback.results).toHaveLength(31);
+  expect(
+    fallback.results.filter((row) =>
+      row.parser.startsWith("sbi-shinsei-top-balances-and-activity@"),
+    ),
+  ).toHaveLength(2);
+  const fallbackDebits = await db
+    .prepare("SELECT bank_key FROM card_bank_debit_facts WHERE source_account=?")
+    .bind("sbi-shinsei:" + history.scope.accountNo)
+    .all<{ bank_key: string }>();
+  expect(fallbackDebits.results).toHaveLength(15);
+  expect(new Set(fallbackDebits.results.map((row) => row.bank_key)).size).toBe(15);
+});

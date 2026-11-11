@@ -53,6 +53,11 @@ const STAGES = new Set([
   "gateway-executions-recent",
   "gateway-executions-historical",
   "gateway-cashflows-historical",
+  "gateway-cashflows-all-recent",
+  "gateway-cashflows-all-historical",
+  "gateway-report-list",
+  "gateway-monthly-report",
+  "gateway-pnl-data",
 ]);
 const ERROR_TYPES = new Set([
   "Error",

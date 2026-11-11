@@ -6,7 +6,6 @@ import {
   inspectObservedHistoryResponse,
 } from "../src/local/history-observation";
 import { assertReadAllowed, getReadRoute } from "../src/read-allowlist";
-import { UnverifiedReadRouteError } from "../src/errors";
 
 const scope = { accountNo: "111111111111111", fromDate: "20300101", toDate: "20300131" };
 const syntheticRows = [
@@ -108,7 +107,7 @@ const csvResponse = (decodedText = csv) => ({
 });
 
 describe("offline observed yen period contracts", () => {
-  test("builds only the observed explicit-period request and does not enable its route", () => {
+  test("keeps the earlier bounded request builder beside the newly validated production route", () => {
     expect(buildObservedYenPeriodRequest(scope)).toEqual({
       operation: "account.casa-activity-specific-period",
       body: { requestParam: { ...scope, type: "1", eventType: "3" } },
@@ -120,7 +119,7 @@ describe("offline observed yen period contracts", () => {
         method: route.method,
         url: `${route.origin}${route.path}`,
       }),
-    ).toThrow(UnverifiedReadRouteError);
+    ).not.toThrow();
   });
 
   test.each([

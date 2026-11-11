@@ -1,0 +1,286 @@
+{
+  "vpass-credit-snapshot": {
+    "authori-visible": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "vpass:card-001",
+          "metric": "reported_overall_limit_thousand_yen",
+          "amountText": "700000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2099-01-01T10:00:00.000Z",
+          "rawLocator": "json:$.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo.allLimit",
+          "extra": {
+            "providerField": "allLimit",
+            "providerDisplay": "70.0",
+            "_kogane": {
+              "reportedPrecisionJPY": 1000,
+              "nonAdditive": true,
+              "sharedCredit": true
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "vpass:card-001",
+          "metric": "reported_overall_outstanding_thousand_yen",
+          "amountText": "123000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2099-01-01T10:00:00.000Z",
+          "rawLocator": "json:$.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo.allBalance",
+          "extra": {
+            "providerField": "allBalance",
+            "providerDisplay": "12.3",
+            "_kogane": {
+              "reportedPrecisionJPY": 1000,
+              "nonAdditive": true,
+              "sharedCredit": true
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "vpass:card-001",
+          "metric": "reported_overall_available_thousand_yen",
+          "amountText": "555000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2099-01-01T10:00:00.000Z",
+          "rawLocator": "json:$.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo.allPossible",
+          "extra": {
+            "providerField": "allPossible",
+            "providerDisplay": "55.5",
+            "_kogane": {
+              "reportedPrecisionJPY": 1000,
+              "nonAdditive": true,
+              "sharedCredit": true
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "vpass:card-001",
+          "metric": "reported_card_limit_thousand_yen",
+          "amountText": "700000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2099-01-01T10:00:00.000Z",
+          "rawLocator": "json:$.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo.cardLimit",
+          "extra": {
+            "providerField": "cardLimit",
+            "providerDisplay": "70.0",
+            "_kogane": {
+              "reportedPrecisionJPY": 1000,
+              "nonAdditive": true,
+              "sharedCredit": true
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "vpass:card-001",
+          "metric": "reported_card_outstanding_thousand_yen",
+          "amountText": "123000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2099-01-01T10:00:00.000Z",
+          "rawLocator": "json:$.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo.cardBalance",
+          "extra": {
+            "providerField": "cardBalance",
+            "providerDisplay": "12.3",
+            "_kogane": {
+              "reportedPrecisionJPY": 1000,
+              "nonAdditive": true,
+              "sharedCredit": true
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "vpass:card-001",
+          "metric": "reported_card_available_thousand_yen",
+          "amountText": "555000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2099-01-01T10:00:00.000Z",
+          "rawLocator": "json:$.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo.cardPossible",
+          "extra": {
+            "providerField": "cardPossible",
+            "providerDisplay": "55.5",
+            "_kogane": {
+              "reportedPrecisionJPY": 1000,
+              "nonAdditive": true,
+              "sharedCredit": true
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "vpass:card-001",
+          "metric": "reported_revolving_limit_thousand_yen",
+          "amountText": "700000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2099-01-01T10:00:00.000Z",
+          "rawLocator": "json:$.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo.revoLimit",
+          "extra": {
+            "providerField": "revoLimit",
+            "providerDisplay": "70.0",
+            "_kogane": {
+              "reportedPrecisionJPY": 1000,
+              "nonAdditive": true,
+              "sharedCredit": true
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "vpass:card-001",
+          "metric": "reported_revolving_outstanding_thousand_yen",
+          "amountText": "123000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2099-01-01T10:00:00.000Z",
+          "rawLocator": "json:$.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo.revoBalance",
+          "extra": {
+            "providerField": "revoBalance",
+            "providerDisplay": "12.3",
+            "_kogane": {
+              "reportedPrecisionJPY": 1000,
+              "nonAdditive": true,
+              "sharedCredit": true
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "vpass:card-001",
+          "metric": "reported_revolving_available_thousand_yen",
+          "amountText": "555000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2099-01-01T10:00:00.000Z",
+          "rawLocator": "json:$.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo.revoPossible",
+          "extra": {
+            "providerField": "revoPossible",
+            "providerDisplay": "55.5",
+            "_kogane": {
+              "reportedPrecisionJPY": 1000,
+              "nonAdditive": true,
+              "sharedCredit": true
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "vpass:card-001",
+          "metric": "reported_installment_twice_bonus_limit_thousand_yen",
+          "amountText": "700000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2099-01-01T10:00:00.000Z",
+          "rawLocator": "json:$.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo.divisionLimit",
+          "extra": {
+            "providerField": "divisionLimit",
+            "providerDisplay": "70.0",
+            "_kogane": {
+              "reportedPrecisionJPY": 1000,
+              "nonAdditive": true,
+              "sharedCredit": true
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "vpass:card-001",
+          "metric": "reported_installment_twice_bonus_outstanding_thousand_yen",
+          "amountText": "123000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2099-01-01T10:00:00.000Z",
+          "rawLocator": "json:$.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo.divisionBalance",
+          "extra": {
+            "providerField": "divisionBalance",
+            "providerDisplay": "12.3",
+            "_kogane": {
+              "reportedPrecisionJPY": 1000,
+              "nonAdditive": true,
+              "sharedCredit": true
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "vpass:card-001",
+          "metric": "reported_installment_twice_bonus_available_thousand_yen",
+          "amountText": "555000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2099-01-01T10:00:00.000Z",
+          "rawLocator": "json:$.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo.divisionPossible",
+          "extra": {
+            "providerField": "divisionPossible",
+            "providerDisplay": "55.5",
+            "_kogane": {
+              "reportedPrecisionJPY": 1000,
+              "nonAdditive": true,
+              "sharedCredit": true
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "authori-hidden": {
+      "observations": [],
+      "warnings": []
+    },
+    "authori-unknown-flag": {
+      "error": true
+    },
+    "revo-exact": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "vpass:card-001",
+          "metric": "reported_revolving_outstanding_yen",
+          "amountText": "123456",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "rawLocator": "json:$.body.content.CustomizedRevoShokaiAnsPcDisplayServiceBean.revoZan",
+          "extra": {
+            "providerField": "revoZan",
+            "_kogane": {
+              "reportedPrecisionJPY": 1,
+              "nonAdditive": true,
+              "sharedCredit": true
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "vpass:card-001",
+          "metric": "reported_revolving_repayment_yen",
+          "amountText": "10000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "rawLocator": "json:$.body.content.CustomizedRevoShokaiAnsPcDisplayServiceBean.hensaiAmount",
+          "extra": {
+            "providerField": "hensaiAmount",
+            "_kogane": {
+              "reportedPrecisionJPY": 1,
+              "nonAdditive": true,
+              "sharedCredit": true
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "revo-malformed": {
+      "error": true
+    }
+  }
+}

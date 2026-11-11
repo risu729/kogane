@@ -16,6 +16,7 @@ export default defineConfig({
         invocationLogs: true,
         headSamplingRate: 1,
       },
+      issues: { enabled: true },
     },
     env: {
       SCHEDULE_DB: bindings.d1({

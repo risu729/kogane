@@ -461,25 +461,30 @@ const TRANSACTIONS_SQL = `WITH ${TRANSACTION_CTES}
                            'sbi-vc-cashflows',
                            'mobile-suica-sf-history',
                            'sbi-yen-detail-history',
+                           'sbi-foreign-cash-history',
                            'sbi-foreign-trade-records',
                            'sbi-domestic-trade-records',
                            'myjcb-credit-ledger',
+                           'myjcb-debit-ledger',
                            'sony-bank-history-json',
                            'sony-bank-history-csv',
                            'sony-bank-wallet-history',
                            'smbc-direct-transactions',
                            'st-george-transactions',
                            'sbi-shinsei-top-balances-and-activity',
+                           'sbi-shinsei-savings-activity',
                            'v-point-pay-notification-event'
                          ) AND t.external_id IS NOT NULL
                       THEN json_array(fa.source_id, t.source_account,
                         CASE WHEN p.parser_name IN (
                           'sony-bank-history-json', 'sony-bank-history-csv'
-                        ) THEN 'sony-bank-deposit-history' ELSE p.parser_name END,
+                        ) THEN 'sony-bank-deposit-history'
+                        WHEN p.parser_name = 'sbi-shinsei-savings-activity' THEN 'sbi-shinsei-top-balances-and-activity' ELSE p.parser_name END,
                         t.external_id)
                     ELSE json_array('observation-row', t.id)
                   END
-                  ORDER BY CASE json_extract(t.extra_json, '$._kogane.sourceView')
+                  ORDER BY CASE WHEN p.parser_name IN ('sbi-shinsei-top-balances-and-activity','sbi-shinsei-savings-activity') THEN fa.fetched_at END DESC,
+                  CASE json_extract(t.extra_json, '$._kogane.sourceView')
                     WHEN 'historical' THEN 0
                     WHEN 'official-csv' THEN 0
                     WHEN 'wallet-monthly-html' THEN 0
@@ -569,6 +574,19 @@ function latestBalancesInner(measureView: MeasureView | undefined): string {
                     CASE WHEN p.parser_name <> 'myjcb-credit-past-month-balances'
                       THEN COALESCE(b.as_of, b.observed_at, '')
                     END DESC,
+                    -- Keep newer Sony captures ahead of older replays, then
+                    -- prefer the complete CSV within the same capture cohort.
+                    CASE WHEN fa.source_id = 'sony-bank' AND p.parser_name IN (
+                        'sony-bank-history-json', 'sony-bank-history-csv'
+                      ) THEN f.started_at END DESC,
+                    CASE WHEN fa.source_id = 'sony-bank' AND p.parser_name IN (
+                        'sony-bank-history-json', 'sony-bank-history-csv'
+                      ) THEN f.id END DESC,
+                    -- The complete official CSV has one chronological row order.
+                    -- JSON pages may publish later and split a day's history.
+                    CASE WHEN fa.source_id = 'sony-bank'
+                           AND p.parser_name = 'sony-bank-history-csv'
+                      THEN 1 ELSE 0 END DESC,
                     b.id DESC
                 ) AS rank_in_group
          FROM ${activeStateProjection.observationChain("balance_observations", "b")}

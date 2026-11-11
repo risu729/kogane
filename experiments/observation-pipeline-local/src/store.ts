@@ -234,6 +234,105 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
     if (policy === undefined) throw new Error("0089 names no snapshot policy row");
     db.transaction(() => db.exec(policy))();
   }
+  // Snapshot membership subset of CORE 0096 only. The local parser still
+  // rejects every partial parent, so retain its run scope instead of importing
+  // production's independent-unit/transaction eligibility rows. Never replace
+  // an existing operator policy when reopening a store.
+  db.exec(`INSERT OR IGNORE INTO dataset_snapshot_policies (
+    source_id,dataset,parser_name,policy_id,required_parser_version,
+    replaces_previous_on_complete_empty,unit_scope,snapshot_selection,updated_at_ms
+  ) VALUES (
+    'smbc-bank','foreign-ordinary-aud-balance','smbc-foreign-ordinary-balance',
+    'coverage-v1','0.1.2',0,'run',1,1794268800000
+  )`);
+  // Mirror the MoneyForward detail policy once; preserve operator choices.
+  if (
+    !db
+      .query(
+        "SELECT 1 FROM dataset_snapshot_policies WHERE parser_name='moneyforward-detail-balances' AND dataset='account-detail'",
+      )
+      .get()
+  ) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(
+            EXPERIMENT_ROOT,
+            "../../packages/storage-d1/migrations/core/0091_moneyforward_detail_balance_snapshots.sql",
+          ),
+          "utf8",
+        ),
+      ),
+    )();
+  }
+  // Mirror the independent Vpass credit snapshot policy once. Reopening
+  // preserves operator choices, including an explicit rollback to run scope.
+  if (
+    !db
+      .query(
+        "SELECT 1 FROM dataset_snapshot_policies WHERE parser_name='vpass-credit-snapshot' AND dataset='credit-snapshot'",
+      )
+      .get()
+  ) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(
+            EXPERIMENT_ROOT,
+            "../../packages/storage-d1/migrations/core/0092_vpass_credit_snapshots.sql",
+          ),
+          "utf8",
+        ),
+      ),
+    )();
+  }
+  // Income/sale history policies require the additive policy table/columns
+  // above, not schema.sql. Seed missing rows independently without overwriting
+  // an operator alternative when only the other row is absent.
+  if (
+    (
+      db
+        .query(
+          "SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE (parser_name='sbi-income-payments' AND dataset='income-payments') OR (parser_name='sbi-realised-gains' AND dataset='realised-gains')",
+        )
+        .get() as { n: number }
+    ).n < 2
+  ) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(
+            EXPERIMENT_ROOT,
+            "../../packages/storage-d1/migrations/core/0093_sbi_income_complete_containers.sql",
+          ),
+          "utf8",
+        ),
+      ),
+    )();
+  }
+  // Mirror history and its independent credit siblings only after policy creation.
+  // Repair missing rows individually while preserving every operator alternative.
+  if (
+    (
+      db
+        .query(
+          "SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE source_id='myjcb' AND ((parser_name='myjcb-jpoint-history' AND dataset='jpoint-history') OR (parser_name='myjcb-credit-ledger' AND dataset='credit-ledger') OR (parser_name='myjcb-credit-statement-total' AND dataset='credit-detail') OR (parser_name='myjcb-credit-past-month-balances' AND dataset='credit-past-months') OR (parser_name='myjcb-skip-payment-schedule' AND dataset='credit-schedule'))",
+        )
+        .get() as { n: number }
+    ).n < 5
+  ) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(
+            EXPERIMENT_ROOT,
+            "../../packages/storage-d1/migrations/core/0094_myjcb_jpoint_history.sql",
+          ),
+          "utf8",
+        ),
+      ),
+    )();
+  }
   // 0056/0059 advance the board reader (ADR 0028 and its amendment). 0084
   // follows the shared CSV release for all four exact-version policies.
   // Each UPDATE names its previous value, so reopening preserves later pins
@@ -495,7 +594,7 @@ export function listArtifacts(store: Store): ArtifactMeta[] {
       // D13: the artifact's dataset names the `unit` scope and its own fetch
       // unit reported terminal success, so a parser precondition about "the
       // run succeeded" may be met by the unit instead. Null for every dataset
-      // until an operator changes a policy row.
+      // except independently seeded datasets such as Vpass credit snapshots.
       unitScopeEligibility: row.unit_scope_admitted === 1 ? "unit-independent-v1" : null,
       ...(row.window_start && row.window_end
         ? { runWindow: { from: row.window_start, to: row.window_end } }

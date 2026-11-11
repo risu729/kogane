@@ -636,23 +636,23 @@ account-opening coverage or deployment of this implementation.
 
 ### Read-only route evidence
 
-Authenticated local Chrome, read routes only. Public https://sonybank.jp/tool/fc/40.html links 外貨損益状況照会 to `/pages/ea/eada110a/`. Initial POST `/custom-web00/eada/eada110as1g/e10` body private branchNum/accountNum only. HTTP200 JSON response has errors[],responseBizCommon{bizResult:string,exceptionRsn:[]}, returnCnt:number (11), ordinaryDepAcInfo11{accountStat,currencyCd strings}, currencyMst13{currencyNm,currencyCd strings}; assPrftLsAgr:string, assPrftLsInfoCnt:number(0),assPrftLsInfoFcplSi:[] (nonempty unobserved); rliztnPrftLsCy:string,current-year label; cyAgrRliztnPrftLs,cyAgrItrAmt strings; cyCcySepRliztnPrftLsCnt:number(1),cyCcySepRliztnPrftLsFcplSi[{currencyCd,cyRliztnPrftLs,cyItrAmt strings}]; analogous Ly/ly keys for previousyear. totalDtlStartYr/totalDtlEndYr:string are query years2025/2026; totalDtlCnt:number10,totalDtlGrsCnt:number119,totalDtlFcplSi10[{transactionDt,currencyCd,productTpy,abridgmentObj,transactionAmt,applicationExchRt,transactionAfBal,traAvgPurRt,traExchProfLos,interestYenAmt allstrings}]. No actual amounts or transaction dates retained.
+Authenticated local Chrome, read routes only. Public https://sonybank.jp/tool/fc/40.html links 外貨損益状況照会 to `/pages/ea/eada110a/`. Initial POST `/custom-web00/eada/eada110as1g/e10` body private branchNum/accountNum only. HTTP200 JSON response has errors[],responseBizCommon{bizResult:string,exceptionRsn:[]}, returnCnt:number matching ordinaryDepAcInfo length, ordinaryDepAcInfo[]{accountStat,currencyCd strings}, currencyMst[]{currencyNm,currencyCd strings}; assPrftLsAgr:string, assPrftLsInfoCnt:number(0),assPrftLsInfoFcplSi:[] (nonempty unobserved); rliztnPrftLsCy:string,current-year label; cyAgrRliztnPrftLs,cyAgrItrAmt strings; cyCcySepRliztnPrftLsCnt:number matching cyCcySepRliztnPrftLsFcplSi length, cyCcySepRliztnPrftLsFcplSi[{currencyCd,cyRliztnPrftLs,cyItrAmt strings}]; analogous Ly/ly keys for previousyear. totalDtlStartYr/totalDtlEndYr:string are query years2025/2026; totalDtlCnt:number matching this page's totalDtlFcplSi length, totalDtlGrsCnt:number naming the full detail count, totalDtlFcplSi[{transactionDt,currencyCd,productTpy,abridgmentObj,transactionAmt,applicationExchRt,transactionAfBal,traAvgPurRt,traExchProfLos,interestYenAmt allstrings}]. No actual amounts or transaction dates retained.
 
-UI labels 評価損益/実現損益/集計明細. Realised section states last2years and per-currency 為替差損益/利息など（税引後）/合計. Detail section explicitly says from start of foreign deposit trading through latest; default last2years. Yearqueryinputs totalDtlStartYr_year/totalDtlEndYr_year. UI first page119total,1/12. Nextbutton sends POST `/custom-web00/eada/cust-web/foreign-currency-profit-loss/situation-inquiry/pager-inquiry`, private branchNum/accountNum + totalDtlStartYr=2025,totalDtlEndYr=2026,maxCnt=10,startCnt=11; UI then2/12.
+UI labels 評価損益/実現損益/集計明細. Realised section states last2years and per-currency 為替差損益/利息など（税引後）/合計. Detail section explicitly says from start of foreign deposit trading through latest; default last2years. Yearqueryinputs totalDtlStartYr_year/totalDtlEndYr_year. The UI total matches totalDtlGrsCnt, and its page count is the ceiling of that total divided by the requested maxCnt. Nextbutton sends POST `/custom-web00/eada/cust-web/foreign-currency-profit-loss/situation-inquiry/pager-inquiry`, private branchNum/accountNum + totalDtlStartYr=2025,totalDtlEndYr=2026,maxCnt=10,startCnt=11; The UI advances to the next page and the returned detail count matches the array length.
 
-集計明細CSVダウンロード sends POST `/custom-web00/eada/cust-web/foreign-currency-profit-loss/situation-inquiry/download`, private branchNum/accountNum +totalDtlStartYr=2025,totalDtlEndYr=2026. HTTP200octet-stream,119data rows exactly match totalDtlGrsCnt, balancedquotes15cells each. Header: お取り引き日,商品,契約番号,明細番号,通貨,摘要,入金額,出金額,残高,適用レート,取引円換算額,特約レート,為替差損益,平均購入レート,利息円貨額. Do not re-emit cashmovements or recompute profit: parse official profit/interest separately with stable source row identity. Values remain browsermemory only.
+集計明細CSVダウンロード sends POST `/custom-web00/eada/cust-web/foreign-currency-profit-loss/situation-inquiry/download`, private branchNum/accountNum +totalDtlStartYr=2025,totalDtlEndYr=2026. HTTP200octet-stream,data-row count exactly matches totalDtlGrsCnt, balancedquotes15cells each. Header: お取り引き日,商品,契約番号,明細番号,通貨,摘要,入金額,出金額,残高,適用レート,取引円換算額,特約レート,為替差損益,平均購入レート,利息円貨額. Do not re-emit cashmovements or recompute profit: parse official profit/interest separately with stable source row identity. Values remain browsermemory only.
 
 Foreign deposit sidebar sideMenu_fc_9_5 電子交付一覧 leads `/pages/aa/dbba1800/`. POST `/custom-web00/dbba/dbba1800s1f/e01` body{} initialresponse errors[],responseBizCommon and searchStartDt/searchEndDt strings (query default1year). Both dates required; blank UI validation refuses without request. Observed fiveyear query2021-11-10→2026-11-10 via ordinary inputs.
 
-POST `/custom-web00/dbba/delive-doc/inquiry/cust` body private branchNum/accountNum +productTyp=01,browseTyp=0,searchStartDt=2021-11-10,searchEndDt=2026-11-10,maxCnt10,startCnt1. Optional deliveryDocTyp=20,deliveryDocItem=000 when explicitly choosing all-products/contract-document; omitting both (default dropdown blank) returned same10. UI count10/page1of1; response extractionAgrCnt10,returnCnt10,deliveryDocInfo10 unique deliveryDocNum numeric IDs, currencyMst13; errors[],responseBizCommon. Each doc row {deliveryDocTyp:string,currencyNm:string,acquisitionDt:string,deliveryDocItem:string,contractDttm:string,depositAmt:string,browseTyp:string,deliveryDocNum:number}. Fixed docType20 matches UI契約締結時交付書面. No nonempty other docType observed. Dropdown product values000all,001foreignordinary,002foreigninstallment,003foreigntime,004foreigntime maturitychange,005BRL opening,006yenplus,007FXlinkedYen,008FXlinkedforeign,009ANA-mileforeigntimeopening,010ANA-milematuritychange,012foreigntimeautoreinvest. Another dropdown only20 available. No nextpage because count=10; pagination>10 not observed.
+POST `/custom-web00/dbba/delive-doc/inquiry/cust` body private branchNum/accountNum +productTyp=01,browseTyp=0,searchStartDt=2021-11-10,searchEndDt=2026-11-10,maxCnt10,startCnt1. Optional deliveryDocTyp=20,deliveryDocItem=000 when explicitly choosing all-products/contract-document; omitting both (default dropdown blank) returned the same list. UI count matches extractionAgrCnt and fits one page; returnCnt and deliveryDocInfo length match that total, with unique deliveryDocNum numeric IDs; currencyMst is an array; errors[],responseBizCommon. Each doc row {deliveryDocTyp:string,currencyNm:string,acquisitionDt:string,deliveryDocItem:string,contractDttm:string,depositAmt:string,browseTyp:string,deliveryDocNum:number}. Fixed docType20 matches UI契約締結時交付書面. No nonempty other docType observed. Dropdown product values000all,001foreignordinary,002foreigninstallment,003foreigntime,004foreigntime maturitychange,005BRL opening,006yenplus,007FXlinkedYen,008FXlinkedforeign,009ANA-mileforeigntimeopening,010ANA-milematuritychange,012foreigntimeautoreinvest. Another dropdown only20 available. No next page was offered because the complete list fit the requested maxCnt; pagination beyond one page was not observed.
 
-Click PDFファイル sends POST `/custom-web00/dbba/delivery-documents/pdf-download` {branchNumber:string,accountNumber:string,deliveryDocNum:number}. HTTP200octet-stream,bytes4817 with%PDF- prefix verified inbrowsermemory only. Do not carry depositAmt/private labels into operational metadata. Document identity and bytes must remain privateDATA. No enrollment/settings changes.
+Click PDFファイル sends POST `/custom-web00/dbba/delivery-documents/pdf-download` {branchNumber:string,accountNumber:string,deliveryDocNum:number}. HTTP200octet-stream with a %PDF- prefix verified in browser memory only; byte length is not recorded. Do not carry depositAmt/private labels into operational metadata. Document identity and bytes must remain privateDATA. No enrollment/settings changes.
 
-Fund public guide https://sonybank.jp/products/fund/24.html says viewing last5years, links read-only電子交付書面閲覧 `/pages/aa/iaca300a/` separately from switch/enrollment link (not clicked). POST `/custom-web00/iaca/iaca300as1f/e01` {accountNum:string,branchNum:string,activityAccountConfFlg:'0'} returned errors[{code:'EIA20107',title:string,sources:[]}],responseBizCommon{bizResult:'8',exceptionRsn:[]}. Visible 投信総合口座を開設していないお客さまはお取引できません。 (fund account not opened). Do not invent fund report schema or equate unavailability to emptyreportlist. Fund-specific5year official guide is not independent proof of foreign-doc retention; currentforeign fiveyear queryaccepted/count10 only.
+Fund public guide https://sonybank.jp/products/fund/24.html says viewing last5years, links read-only電子交付書面閲覧 `/pages/aa/iaca300a/` separately from switch/enrollment link (not clicked). POST `/custom-web00/iaca/iaca300as1f/e01` {accountNum:string,branchNum:string,activityAccountConfFlg:'0'} returned errors[{code:'EIA20107',title:string,sources:[]}],responseBizCommon{bizResult:'8',exceptionRsn:[]}. Visible 投信総合口座を開設していないお客さまはお取引できません。 (fund account not opened). Do not invent fund report schema or equate unavailability to emptyreportlist. Fund-specific5year official guide is not independent proof of foreign-doc retention; only the accepted foreign five-year query and its complete single-page list were observed.
 
 Follow-up 2026-11-09 23:12 UTC: e10 `rliztnPrftLsCy` and `rliztnPrftLsLy` are plain YYYY strings. The observed detail productTpy code is `1`. currencyMst codes are JPY/USD/EUR/GBP/AUD/NZD/CAD/CHF/HKD/BRL/CNH/ZAR/SEK. Current/previous currency gain and interest fields are plain signed decimal strings (no comma or blank observed); no amounts are recorded. e10 FBaaS-Request-Biz-Hd-Common={screenId:EADA110AS1f,eventId:EADA110AS1fE01}, FBaaS-URI=https://sonybank.jp/pages/ea/eada110a/. Docs inquiry header screenId DBBA1800S1f,eventId DBBA1800S1fE11; PDF eventId DBBA1800S1fE12; URI https://sonybank.jp/pages/aa/dbba1800/. The common header has only screenId/eventId, no area key.
 
-CSV follow-up: download common header screenId EADA110AS1f, eventId EADA110AS1fE12. FBaaS-SS=ea, revision-739 observed. Docs SS=aa/revision-872; public GET https://sonybank.jp/pages/config/revisions/aa/revision.json showed numeric text872. Docs initial e01 common header screenId DBBA1800S1f,eventId DBBA1800S1fE01. Live CSV again119 rows, balancedquotes15cells, Shift_JIS, product label ordinary deposit, alphabetic currency codes. Blank cells occur in deposits/withdrawals/special contract rate; signed gain and comma-formatted yen conversion observed; no private values saved.
+CSV follow-up: download common header screenId EADA110AS1f, eventId EADA110AS1fE12. FBaaS-SS=ea, revision-739 observed. Docs SS=aa/revision-872; public GET https://sonybank.jp/pages/config/revisions/aa/revision.json showed numeric text872. Docs initial e01 common header screenId DBBA1800S1f,eventId DBBA1800S1fE01. A repeated CSV read again matched totalDtlGrsCnt, with balanced quotes and 15 cells, Shift_JIS, product label ordinary deposit, alphabetic currency codes. Blank cells occur in deposits/withdrawals/special contract rate; signed gain and comma-formatted yen conversion observed; no private values saved.
 
 ### Implemented scope
 
@@ -707,3 +707,50 @@ promotion, catalogue-version bump or guessed currency parameter is added.
 Resume implementation when a held contract provides an observed schema; first
 resolve the foreign-time selection boundary. The existing movement collector
 is unchanged, and transfers into or out of deposits are not classified as income.
+
+
+## 2026-11-11: retained history row order and CSV encoding
+
+Read-only owner-browser observation at `/pages/ea/eaba0600/`, with the start
+omitted, the end set to the last finished JST day, and JPY selected. The normal
+history and CSV requests both sent `sortSelect=00002`. JSON and CSV dates were
+newest-first. Within a day, CSV after-transaction balances followed the reverse
+transaction chain: reversing the rows restores the chronological chain. No
+transaction dates, amounts, account identifiers or account-specific counts are
+recorded here. This observation did not recheck monthly `00001` or foreign CSVs.
+
+The official CSV download returned HTTP 200 with
+`application/octet-stream;charset=utf-8`. Its bytes failed strict UTF-8 decoding
+and passed strict Shift-JIS/CP932 decoding. The seven JPY headers were exactly
+`取引日,摘要,参考情報,通貨,預入額,引出額,差引残高`; every logical row had the
+header's column count. No BOM, blank record or embedded field newline was
+observed. The bytes remain private evidence and are never transcoded on storage.
+
+Both collection validation and parsing use the same Sony-specific decoder.
+For this octet-stream UTF-8 declaration only, failed strict UTF-8 decoding may
+fall back to strict Shift-JIS; unsupported charsets, invalid bytes, changed
+headers and inconsistent row widths still fail closed. Other declared UTF-8
+media types remain strict. Validation reports only a closed rejection branch
+and column counts, without header text or row values. Retained CSV parsing emits
+oldest-first while keeping original logical CSV row locators, so same-day
+balance insertion ties select the final transaction. Closed monthly-window
+parsing keeps its existing order. Scheduled production completion is not
+established by this read-only observation or the synthetic regressions.
+
+
+Same-day latest-balance ties prefer the complete official CSV to JSON. A JSON
+page can finish publication after the CSV or split a day across pages, so
+reversing each JSON page cannot establish a global transaction order. The
+reader's date ordering stays first: a newer JSON date remains newer, and
+JSON-only evidence keeps its previous behavior. Synthetic regressions publish
+same-day JSON across pages before and after the CSV, preserve monthly CSV
+behavior, and compare the amended query to frozen SQL on a scaled random store
+with unrelated-source, JSON-only and older-CSV controls and unchanged plans.
+
+
+For Sony history only, same-day ties first select the newer capture cohort
+(`fetch_run.started_at`, then its run id), then prefer CSV within that cohort.
+An older CSV replay cannot displace a newer JSON-only correction. JSON-only
+retained history keeps the legacy same-day/page-order limitation; it is not a
+substitute for the complete official CSV and is not guaranteed to identify a
+day's final transaction. Unrelated sources keep their existing ordering.

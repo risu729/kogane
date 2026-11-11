@@ -132,7 +132,9 @@ function validateHandoff(value) {
     parsed.ok !== true ||
     (envelopeKeys !== "ok,responses" &&
       envelopeKeys !== "failure,ok,responses" &&
-      envelopeKeys !== "documents,ok,responses") ||
+      envelopeKeys !== "documents,ok,responses" &&
+      envelopeKeys !== "history,ok,responses" &&
+      envelopeKeys !== "documents,history,ok,responses") ||
     !parsed.responses ||
     typeof parsed.responses !== "object" ||
     Array.isArray(parsed.responses)
@@ -241,7 +243,9 @@ async function collectAuthenticatedReadsInPage(session) {
         credentials: "include",
         cache: "no-store",
         redirect: "manual",
-        ...(stage.startsWith("report-") ? { signal: AbortSignal.timeout(30_000) } : {}),
+        ...(stage === "history" || stage.startsWith("report-")
+          ? { signal: AbortSignal.timeout(30_000) }
+          : {}),
         headers: {
           Accept: "application/json, text/plain, */*",
           Authorization: session.authorization,
@@ -381,6 +385,81 @@ async function collectAuthenticatedReadsInPage(session) {
       }
       responses[plan.key] = result.raw;
     }
+    // History and reports share one deadline inside the 13-minute holder
+    // (ADR 0085) and one handoff budget below the 10 MiB handoff limit.
+    const deadline = Date.now() + 10 * 60 * 1000;
+    const handoffBytes = (value) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+    const top = JSON.parse(responses.topBalances);
+    const savings = top?.responseParam?.overview?.responseParam?.savingsDetails;
+    const date = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Tokyo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+      .format(new Date())
+      .replaceAll("-", "");
+    const fromDate = String(Number(date.slice(0, 4)) - 2) + date.slice(4, 6) + "01";
+    const history = { fromDate, toDate: date, accounts: [] };
+    // An unexpected inventory reads no history. The Worker then refuses the
+    // account-count mismatch as one closed history failure and keeps the core
+    // reads and reports instead of losing the whole run.
+    const inventory =
+      Array.isArray(savings) &&
+      savings.length <= 100 &&
+      savings.every(
+        (account) =>
+          account &&
+          typeof account.accountNo === "string" &&
+          /^\d{15}$/u.test(account.accountNo) &&
+          typeof account.currency === "string" &&
+          /^[A-Z]{3}$/u.test(account.currency) &&
+          typeof account.productCode === "string",
+      )
+        ? savings
+        : [];
+    let historyStopped = false;
+    for (const account of inventory) {
+      const scope = {
+        accountNo: account.accountNo,
+        currency: account.currency,
+        productCode: account.productCode,
+      };
+      if (historyStopped || Date.now() >= deadline) {
+        historyStopped = true;
+        history.accounts.push({ ...scope, errorCode: "history_budget_exceeded" });
+        continue;
+      }
+      try {
+        const result = await read(
+          "/SFC/app/IFAI_AccountAdapter/getCasaAccountActivitySpecificPeriod",
+          {
+            requestParam: {
+              accountNo: scope.accountNo,
+              type: "1",
+              fromDate,
+              toDate: date,
+              eventType: "3",
+            },
+          },
+          "history",
+        );
+        const candidate = { ...scope, raw: result.raw };
+        // History keeps at most six MiB of the envelope; reports get the rest of eight.
+        if (
+          handoffBytes({
+            ok: true,
+            responses,
+            history: { ...history, accounts: [...history.accounts, candidate] },
+          }) >
+          6 * 1024 * 1024
+        )
+          history.accounts.push({ ...scope, errorCode: "history_budget_exceeded" });
+        else history.accounts.push(candidate);
+      } catch {
+        history.accounts.push({ ...scope, errorCode: "history_read_failed" });
+      }
+    }
     const documents = { list: "", downloads: [] };
     try {
       const list = await read(
@@ -439,7 +518,6 @@ async function collectAuthenticatedReadsInPage(session) {
       const selected = periods.filter((period, index) => index === 0 || !known.has(period));
       let stopped = false;
       let stopCode = "report_budget_exceeded";
-      const deadline = Date.now() + 10 * 60 * 1000;
       for (const period of selected) {
         const [year, month] = period.split("-");
         const entry = { year, month };
@@ -493,13 +571,12 @@ async function collectAuthenticatedReadsInPage(session) {
           )
             throw new Error("report-download-shape");
           const candidate = { ...entry, raw: result.raw };
-          const candidateSize = new TextEncoder().encode(
-            JSON.stringify({
-              ok: true,
-              responses,
-              documents: { list: documents.list, downloads: [...documents.downloads, candidate] },
-            }),
-          ).byteLength;
+          const candidateSize = handoffBytes({
+            ok: true,
+            responses,
+            history,
+            documents: { list: documents.list, downloads: [...documents.downloads, candidate] },
+          });
           if (candidateSize > 8 * 1024 * 1024) {
             stopped = true;
             documents.downloads.push({ ...entry, errorCode: "report_budget_exceeded" });
@@ -514,7 +591,7 @@ async function collectAuthenticatedReadsInPage(session) {
       documents.list = "";
       documents.downloads = [];
     }
-    return JSON.stringify({ ok: true, responses, documents });
+    return JSON.stringify({ ok: true, responses, history, documents });
   } catch (error) {
     return fail(error?.stage ?? "read-failed");
   } finally {

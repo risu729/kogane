@@ -397,7 +397,7 @@ test("smbc-direct: responses, their extractions and the run manifest register an
 
 // --- Sources blocked from 2026-09-12 until ADR 0021 ---------------------------
 
-test("sbi-securities: every dataset states its extraction and registers", async () => {
+test("sbi-securities: original datasets state their extraction and register", async () => {
   const dataset = (name: string) => ({
     dataset: name,
     mediaType: "application/json" as const,

@@ -1222,7 +1222,105 @@
           "kind": "seed-or-backfill"
         }
       ],
-      "sha256": "5c903d2d39d23233551500b33bad61260f0a34c66fc048b2f05b0441342cf3d2"
+      "sha256": "14eb0f332b6f318fe117a00ba7d083606cbe2778864f0b1bc3bdeb402107d05b"
+    },
+    {
+      "file": "0090_myjcb_debit_unit_eligibility.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "aa3ec5a4b80b0d51bbc89fba530107cf2dd3c41accf977eb478daae441d0b938"
+    },
+    {
+      "file": "0091_moneyforward_detail_balance_snapshots.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "91d8014b75ce05e6e4d9e16a036b91a445d6a39a2afc8e2354de6fc996505a82"
+    },
+    {
+      "file": "0092_vpass_credit_snapshots.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "f094d558e7c0eed5acf67d36f364692ad92e388f4aaa3227a3ae89a40c69a235"
+    },
+    {
+      "file": "0093_sbi_income_complete_containers.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "e4d9508be4a914875cc09858802bc74397c623d502f2e5508861b78b71496736"
+    },
+    {
+      "file": "0094_myjcb_jpoint_history.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "3028c44db7108434495552c533b004da67c340fae0b52d0647678dc9ec95f32e"
+    },
+    {
+      "file": "0095_sbi_vc_classic_unit_eligibility.sql",
+      "statementCount": 2,
+      "insertStatements": [],
+      "sha256": "5cb9b300e1ed17b8b56f27a18164818cccaec856ac5cd01c36cb691ae98875ea"
+    },
+    {
+      "file": "0096_smbc_foreign_ordinary_unit_eligibility.sql",
+      "statementCount": 3,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "5e3a1330519a885fe59b0424d0bc7c7fe0f4c09a9fef5b8b0b239749f36066a9"
+    },
+    {
+      "file": "0097_sbi_vc_document_unit_eligibility.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "a05f2d36adb6a816f96281ead37891c3d0c3fba7ad6e364abfc478067641cacb"
+    },
+    {
+      "file": "0098_sbi_shinsei_savings_activity.sql",
+      "statementCount": 3,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "d8adf648466879986bba5d1f6255989c7949e624ca509f422b0704e3a122753f"
     }
   ],
   "tables": [
@@ -16866,7 +16964,7 @@
         "debit_date",
         "adapter"
       ],
-      "sqlSha256": "0fc6645b375107c9"
+      "sqlSha256": "65753a00c433855b"
     },
     {
       "name": "card_settlement_fact_ownership",
@@ -22127,8 +22225,16 @@
       "0080_jpoint_program.sql",
       "0085_schedule_dispatch_marker.sql",
       "0088_sbi_shinsei_monthly_report_units.sql",
-      "0089_sony_realised_gains_snapshot.sql"
+      "0089_sony_realised_gains_snapshot.sql",
+      "0090_myjcb_debit_unit_eligibility.sql",
+      "0091_moneyforward_detail_balance_snapshots.sql",
+      "0092_vpass_credit_snapshots.sql",
+      "0093_sbi_income_complete_containers.sql",
+      "0094_myjcb_jpoint_history.sql",
+      "0096_smbc_foreign_ordinary_unit_eligibility.sql",
+      "0097_sbi_vc_document_unit_eligibility.sql",
+      "0098_sbi_shinsei_savings_activity.sql"
     ],
-    "schemaSha256": "0b2ddb2a8d7e9b70df8ec4b3937eeef911d2737a1e55ca0d06eb316f47695af9"
+    "schemaSha256": "1c795f338cbef0b839998f0dadeb61807e95553ea92a187f101afb27997f4563"
   }
 }

@@ -27,6 +27,13 @@ export interface RewardBucketRow {
   sourceFactRefs: string[];
 }
 export interface RewardHoldingRow {
+  /** Dated coverage of the acquisition-month breakdown, separate from the total. */
+  pointHistoryCoverage?: {
+    state: "current" | "stale" | "unavailable";
+    reasonCode: "history_not_current" | null;
+    observedAt: string | null;
+    sourceFactRefs: string[];
+  };
   programId: string;
   programRef: string;
   institutionRef: string;

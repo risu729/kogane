@@ -1,4 +1,4 @@
--- A complete two-year summary replaces the previous summary as one container.
+-- Each complete annual summary replaces only the previous summary for that year.
 -- Evidence and historical publications remain append-only.
 INSERT INTO dataset_snapshot_policies
   (source_id,dataset,parser_name,policy_id,required_parser_version)

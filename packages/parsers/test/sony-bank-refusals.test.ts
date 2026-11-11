@@ -174,7 +174,7 @@ describe("sony-bank history CSV", () => {
     for (const mime of ["text/html", "text/csv; charset=latin1", "text/csv;"]) {
       expect(() => parse(csv, mime)).toThrow(/media type drift|charset drift/u);
     }
-    // A declared UTF-8 charset never falls back to Shift-JIS.
+    // UTF-8 remains strict outside the observed Sony octet-stream exception.
     const sjisHeader = new Uint8Array([0x8e, 0xe6]);
     expect(() => parse(sjisHeader, "text/csv; charset=utf-8")).toThrow("not valid UTF-8");
     // A declared Shift-JIS charset must decode as Shift-JIS.
@@ -404,4 +404,63 @@ test("retained Sony JSON and CSV accept an omitted start, retain the end bound a
       parser.parse(bytes, meta(dataset, { mime, runWindow: { from: "", to: "2026-09-30" } })),
     ).toThrow("window start is empty");
   }
+});
+
+test("observed Sony octet-stream charset mismatch keeps strict decoding, row identity and oldest-first retained balances", () => {
+  // Synthetic CP932 bytes: the observed export claims UTF-8 but is Shift-JIS.
+  const bytes = new Uint8Array(
+    Buffer.from(
+      "juaI+JP6LJNFl3YsjlGNbI/ulfEsksqJ3SyXYZP8inosiPiPb4p6LI23iPiOY42CDQoyMDk5LzA0LzAyLHN5bnRoZXRpYy1sYXN0LCxKUFksLDMwLDEyMA0KMjA5OS8wNC8wMixzeW50aGV0aWMtZmlyc3QsLEpQWSw1MCwsMTUwDQoyMDk5LzA0LzAxLHN5bnRoZXRpYy1vbGRlciwsSlBZLDEwMCwsMTAwDQo=",
+      "base64",
+    ),
+  );
+  const retained: SonyBankArtifactMeta = {
+    ...meta("yen-history-csv", { mime: "application/octet-stream;charset=utf-8" }),
+    retainedHistoryEnd: "2099-04-02",
+  };
+  delete retained.runWindow;
+  const result = sonyBankHistoryCsv.parse(bytes, retained);
+  expect(result.warnings).toEqual([]);
+  const transactions = result.observations.filter((row) => row.kind === "transaction");
+  expect(transactions.map((row) => row.description)).toEqual([
+    "synthetic-older",
+    "synthetic-first",
+    "synthetic-last",
+  ]);
+  expect(transactions.map((row) => row.rawLocator)).toEqual([
+    "csv:row=4",
+    "csv:row=3",
+    "csv:row=2",
+  ]);
+  expect(
+    result.observations.filter((row) => row.kind === "balance").map((row) => row.amountMinor),
+  ).toEqual([100, 150, 120]);
+  const utf8 = new TextEncoder().encode(
+    "取引日,摘要,参考情報,通貨,預入額,引出額,差引残高\r\n2099/04/02,synthetic-last,,JPY,,30,120\r\n2099/04/02,synthetic-first,,JPY,50,,150\r\n2099/04/01,synthetic-older,,JPY,100,,100\r\n",
+  );
+  expect(sonyBankHistoryCsv.parse(utf8, retained)).toEqual(result);
+  // Valid decoding never admits a changed header, a truncated row or bad bytes.
+  expect(() => sonyBankHistoryCsv.parse(new Uint8Array([0x81]), retained)).toThrow(
+    "bytes do not match",
+  );
+  expect(() =>
+    sonyBankHistoryCsv.parse(
+      new TextEncoder().encode(
+        "取引日,摘要,参考情報,通貨,預入額,引出額,差引残高\r\n2099/04/02,synthetic-last,,JPY,,30,120\r\n2099/04/02,synthetic-first,,JPY,50,,150\r\n2099/04/01,synthetic-older,,JPY,100,,100\r\n".replace(
+          "差引残高",
+          "残高",
+        ),
+      ),
+      retained,
+    ),
+  ).toThrow("header drift");
+  expect(() =>
+    sonyBankHistoryCsv.parse(
+      new TextEncoder().encode(
+        "取引日,摘要,参考情報,通貨,預入額,引出額,差引残高\r\n2099/04/02,synthetic-last,,JPY,,30,120\r\n2099/04/02,synthetic-first,,JPY,50,,150\r\n2099/04/01,synthetic-older,,JPY,100,,100\r\n" +
+          "2099/04/02,short\r\n",
+      ),
+      retained,
+    ),
+  ).toThrow("cardinality drift");
 });

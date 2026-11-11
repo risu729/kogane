@@ -33,6 +33,11 @@ import type { Quantity, RoundingMode, ValueStatus } from "../../domain/src/value
 import type { SqlExecutor } from "./reader";
 import { ELIGIBLE_VPOINT_RUNS, VPOINT_MEMBER } from "./current-captures";
 import { activeStateProjection } from "./concepts";
+import {
+  JPOINT_CURRENT_COHORT_CTES,
+  JPOINT_REWARD_MEMBERSHIP,
+  JPOINT_HISTORY_COLUMNS,
+} from "./jpoint-history-cohort";
 
 /** Promotion release the read side treats as current (docs/rewards.md). */
 export const REWARD_READ_RELEASE = "reward-promotion-v2";
@@ -62,7 +67,7 @@ export function page<T>(rows: T[], offset: number, limit = REWARD_PAGE_LIMIT): P
  * run still has a published claim. Empty snapshots need no sentinel claim. `?1` is the
  * promotion release, `?2` an optional programme filter, `?3` the offset.
  */
-export const CURRENT_REWARD_BUCKETS_SQL = `WITH ${ELIGIBLE_VPOINT_RUNS}, ranked AS (
+export const CURRENT_REWARD_BUCKETS_SQL = `WITH ${ELIGIBLE_VPOINT_RUNS}, ${JPOINT_CURRENT_COHORT_CTES}, ranked AS (
   SELECT c.id,c.program_id,c.holding_ref,c.bucket_ref,c.bucket_kind,c.restriction_refs_json,
     c.unit_ref,c.quantity_coefficient,c.quantity_scale,c.quantity_status,c.observed_expiry_json,
     c.observed_at,c.parse_run_id,c.source_fact_kind,c.source_fact_id,
@@ -71,6 +76,7 @@ export const CURRENT_REWARD_BUCKETS_SQL = `WITH ${ELIGIBLE_VPOINT_RUNS}, ranked 
   FROM reward_bucket_claims_v2 c
   JOIN published_parse_runs pub ON pub.parse_run_id=c.parse_run_id
   WHERE c.promotion_release=?1 AND (?2 IS NULL OR c.program_id=?2)
+    AND ${JPOINT_REWARD_MEMBERSHIP}
     AND (c.program_id <> 'program:v-point' OR EXISTS (
       SELECT 1 FROM ${activeStateProjection.parseChain}
       WHERE p.id=c.parse_run_id AND fa.source_id='v-point' AND ${VPOINT_MEMBER}
@@ -80,7 +86,7 @@ SELECT r.id,r.program_id,r.holding_ref,r.bucket_ref,r.bucket_kind,r.restriction_
   r.unit_ref,r.quantity_coefficient,r.quantity_scale,r.quantity_status,r.observed_expiry_json,
   r.observed_at,r.parse_run_id,r.source_fact_kind,r.source_fact_id,
   p.institution_ref,p.program_ref,p.source_id,p.unit_ref AS program_unit_ref,p.holding_kind,
-  p.terms_evidence_refs_json,p.release_id
+  p.terms_evidence_refs_json,p.release_id,${JPOINT_HISTORY_COLUMNS}
 FROM ranked r JOIN reward_programs p ON p.program_id=r.program_id
 WHERE r.rank=1
 ORDER BY r.program_id,r.holding_ref,r.bucket_ref
@@ -111,6 +117,9 @@ export const CONVERSION_OFFERS_SQL = `SELECT offer_id,version,source_program_ref
 // ── row shapes ───────────────────────────────────────────────────────
 
 export interface RewardBucketSqlRow {
+  jpoint_history_state?: "current" | "stale" | "unavailable" | null;
+  jpoint_history_observed_at?: string | null;
+  jpoint_history_fact_id?: number | null;
   id: number;
   program_id: string;
   holding_ref: string;
@@ -476,6 +485,12 @@ export function conversionOffer(row: ConversionOfferSqlRow): ConversionOffer {
 // ── reader ───────────────────────────────────────────────────────────
 
 export interface RewardHoldingView {
+  pointHistoryCoverage?: {
+    state: "current" | "stale" | "unavailable";
+    reasonCode: "history_not_current" | null;
+    observedAt: string | null;
+    sourceFactRefs: string[];
+  };
   program: RewardProgram;
   holding: RewardHolding;
   holdingKind: "reward-points" | "prepaid-balance";
@@ -525,6 +540,15 @@ export function createRewardReader(sql: SqlExecutor, release = REWARD_READ_RELEA
           };
           views.set(key, view);
         }
+        if (row.jpoint_history_state)
+          view.pointHistoryCoverage = {
+            state: row.jpoint_history_state,
+            reasonCode: row.jpoint_history_state === "current" ? null : "history_not_current",
+            observedAt: row.jpoint_history_observed_at ?? null,
+            sourceFactRefs: row.jpoint_history_fact_id
+              ? [`balance:${row.jpoint_history_fact_id}`]
+              : [],
+          };
         const bucket = rewardBucket(row);
         view.observedAt[bucket.bucketRef] = row.observed_at;
         // A qualification bucket is reported beside the holding, never inside

@@ -529,6 +529,22 @@ describe("provider-only expiry companion on the READ route", () => {
     const { promoteRewardClaims } = await import("../../processor/src/reward-claims-job.ts");
     const promotion = await promoteRewardClaims(env.DB as never);
     expect(promotion).toMatchObject({ scanned: 1, promoted: 1, skipped: 0 });
+    const holdings = await call("/api/v2/rewards/holdings?program=program%3Aj-point");
+    expect(holdings.status).toBe(200);
+    const holdingBody = await holdings.json();
+    expect(validApiResponse("/api/v2/rewards/holdings", holdingBody)).toBe(true);
+    expect(holdingBody).toMatchObject({
+      rows: [
+        {
+          pointHistoryCoverage: {
+            state: "unavailable",
+            reasonCode: "history_not_current",
+            observedAt: null,
+            sourceFactRefs: [],
+          },
+        },
+      ],
+    });
     const admitted = await env.DB.prepare(
       `SELECT parse_run_id,source_fact_id,program_id,holding_ref,bucket_kind,quantity_status,observed_expiry_json
        FROM reward_bucket_claims_v2 WHERE source_fact_kind='balance' AND source_fact_id=? AND promotion_release='reward-promotion-v2'`,

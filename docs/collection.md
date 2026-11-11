@@ -636,6 +636,32 @@ provider was contacted and no production bucket was read or written.
 
 ### Vpass (`services/collector-vpass`, `kogane-vpass-collector-poc`)
 
+Daily reported credit snapshots (ADR 0105) are independent
+`<session>-credit-card-NNN` runs. They reuse the existing authenticated
+card selection and durable binding. Alongside sanitized card inventory,
+selection and statement discovery, they store `credit/authori.json` and
+`credit/revo.json` in the existing `card-NNN` unit, plus the existing
+binding unit when derivable. The new credit sanitizer explicitly keeps
+observed Authori financial keys while removing authentication/card references;
+statement sanitizer v1 output remains unchanged. Registration v8 maps only
+these two new JSON keys to `credit-snapshot`; versions v1-v7 keep their
+old meaning.
+
+The `vpass-credit-snapshot` parser publishes visible overall/card/revolving/
+installment-twice-bonus reported limit, outstanding and availability at
+1,000 JPY precision, cross-checked against the 万円 display, plus exact
+reported revolving outstanding/repayment yen. The metric names and
+`extra._kogane.reportedPrecisionJPY` state precision. Hidden zero rows are
+unavailable. Metrics are non-additive shared-credit reports, outside assets
+and canonical liabilities; availability is not recomputed. The selecting
+`coverage-v1` policy keeps the newest complete card snapshot, while raw
+history and prior publications remain append-only. Statement failures do
+not discard a successful card snapshot. Exact installment precision remains
+unobserved, so the existing `balance` catalogue entry stays partial under
+[#1256](https://github.com/risu729/kogane/issues/1256).
+See the [dated source observation](sources/vpass.md).
+The table below describes statement runs.
+
 | Artifact key                             | Role                         | Unit                  |
 | ---------------------------------------- | ---------------------------- | --------------------- |
 | `card-list.json`                         | `sanitized_provider_capture` | `card-NNN`            |
@@ -914,22 +940,71 @@ for this artifact, with the CP932 charset a constant of the source.
 
 ### `sbi-securities` (`services/collector-sbi-securities`)
 
-| Artifact key                              | Role                | Unit       |
-| ----------------------------------------- | ------------------- | ---------- |
-| `domestic-cash-positions.json`            | `collector_derived` | `domestic` |
-| `account-assets-current.json`             | `collector_derived` | `domestic` |
-| `yen-detail-history.json`                 | `collector_derived` | `domestic` |
-| `domestic-trade-records.json`             | `collector_derived` | `domestic` |
-| `foreign-cash-positions.json`             | `collector_derived` | `foreign`  |
-| `foreign-cash-balances.json`              | `collector_derived` | `foreign`  |
-| `foreign-trade-records.json`              | `collector_derived` | `foreign`  |
-| `domestic-trade-records-<from>-<to>.json` | `collector_derived` | `domestic` |
-| `foreign-trade-records-<from>-<to>.json`  | `collector_derived` | `foreign`  |
+| Artifact key                                 | Role                | Unit       |
+| -------------------------------------------- | ------------------- | ---------- |
+| `domestic-cash-positions.json`               | `collector_derived` | `domestic` |
+| `account-assets-current.json`                | `collector_derived` | `domestic` |
+| `account-assets-history-source.json`         | `provider_response` | `domestic` |
+| `account-assets-history-inventory.json`      | `collector_derived` | `domestic` |
+| `account-assets-history-<year>.json`         | `collector_derived` | `domestic` |
+| `income-payments-summary-source.json`        | `provider_response` | `domestic` |
+| `income-payments-rows-source.json`           | `provider_response` | `domestic` |
+| `income-payments.json`                       | `collector_derived` | `domestic` |
+| `realised-gains-all-summary-source.json`     | `provider_response` | `domestic` |
+| `realised-gains-summary-source.json`         | `provider_response` | `domestic` |
+| `realised-gains-rows-source.json`            | `provider_response` | `domestic` |
+| `realised-gains.json`                        | `collector_derived` | `domestic` |
+| `yen-detail-history.json`                    | `collector_derived` | `domestic` |
+| `yen-detail-history-page-NNNN-source.json`   | `provider_response` | `domestic` |
+| `foreign-cash-history.json`                  | `collector_derived` | `domestic` |
+| `foreign-cash-history-page-NNNN-source.json` | `provider_response` | `domestic` |
+| `domestic-trade-records.json`                | `collector_derived` | `domestic` |
+| `foreign-cash-positions.json`                | `collector_derived` | `foreign`  |
+| `foreign-cash-balances.json`                 | `collector_derived` | `foreign`  |
+| `foreign-trade-records.json`                 | `collector_derived` | `foreign`  |
+| `domestic-trade-records-<from>-<to>.json`    | `collector_derived` | `domestic` |
+| `foreign-trade-records-<from>-<to>.json`     | `collector_derived` | `foreign`  |
 
-The bytes are `JSON.stringify(artifact.body)` — the collector's re-encoded view
+Weekly asset history comes from the observed no-query/no-body GET
+`/account/api/assets/valuations` in the existing main-site session. The
+collector audits its closed shape and preserves the exact full response bytes.
+A derived inventory records every expected calendar-year shard
+(`account-assets-history-<year>.json`), hash and point count, and the source
+hash/request/capture time. Yearly shards retain all profiles, native tuples
+and residual rows while keeping at most 53 weeks under the unchanged parser
+output budget. Their transformation inputs name both the source and inventory.
+Missing or changed shards make the domestic unit/run partial. Registration v5
+names only yearly derivatives as the history dataset; source/inventory are unparsed;
+v1–v4 stay frozen. The parser separates available window coverage from
+unavailable null profiles and emits no extra points for native ALL tuples.
+The production observation reader chooses one latest witnessed revision per
+point before filtering/paging; old raw and superseded observations remain
+archived. No new read route is added. The catalogue is partial pending
+scheduled publication and account-specific retained-period verification
+([ADR 0098](adr/0098-sbi-weekly-asset-history.md)).
+
+Retained cash statements use the observed two-year yen / five-year foreign
+presets through JST today, without an operation window or cursor. The yen
+query walks its declared pages at size 10; unobserved foreign continuation
+fails closed. Original JSON grammar, duplicate keys, exact numeric tokens and
+closed fields are audited before raw page storage. Derived bundles name every
+source page, preserve the full requested range and check contiguous metadata,
+totals, dates, known codes, exact amounts and unique yen ids. Yen direction
+counts and exact sums match their controls; positive transfer controls stay
+unsupported until observed. USD duplicates retain occurrence identities, and
+the production reader chooses one revision per logical id across overlapping
+runs. Both statements use the domestic main-site session/unit. Registration
+v7 adds only the new USD derivative; raw pages stay unmapped and earlier
+mappings stay frozen. Catalogue status remains partial under #1226 pending
+unobserved semantics and scheduled proof
+([ADR 0102](adr/0102-sbi-retained-cash-history.md)).
+
+Except for the exact weekly/cash-history source bytes above, the bytes are
+`JSON.stringify(artifact.body)` — the collector's re-encoded view
 of each response, exactly what the retired legacy path wrote to the per-source
 bucket and the importer forwarded centrally. A dataset is attributed to a unit
-by the same rule the importer used (`foreign-` prefix → `foreign`).
+by the same rule the importer used (`foreign-` prefix → `foreign`), except the
+new main-site foreign cash statement and its raw inputs, which are domestic.
 
 Each normal collection walks the historically exercised execution-history
 interval in at most thirteen non-overlapping windows per scope, each at most 90 days,
@@ -945,7 +1020,7 @@ windows at year end. Web retention is a different surface and is not used as
 the mobile boundary. The mobile execution query fields stay unchanged. No progress cursor or operations window
 parameter is added ([ADR 0096](adr/0096-sbi-scheduled-execution-history.md)).
 
-Every dataset states one `extracted` step by `collector-sbi-securities` at the
+Other datasets state one `extracted` step by `collector-sbi-securities` at the
 producer version with no input (ADR 0021): each is the collector's own
 envelope around what it read from provider responses (the MTS payload with its
 result codes, the GraphQL and main-site JSON, the foreign trade history pages
@@ -1224,6 +1299,22 @@ Processor maps it to the CORE source `global-pass`), producer
   every attempt started, and a teardown failure after another failure is
   logged but never replaces that failure's code or stage. Observed 2026-11-05..07: one token after 25 s, two
   waits that ran out at 45 s.
+- **Observed after `timezone-collector-v8` (#1121, Deploy #802 2026-11-08
+  05:38 UTC), #1134.** The first three scheduled runs (2026-11-08, 11-09 and
+  11-10 at 18:17 UTC) all completed with no failure code, against 2 of 4
+  runs failing (`collection_failed`) from 11-04 to 11-07. Each needed one
+  challenge attempt: `code: token` after 13 993 / 18 347 / 15 209 ms, with
+  one Turnstile frame and `lastHttpStatus: 401` (the Turnstile challenge
+  fetch, which the token still follows). `globalpass-container-relay-summary`:
+  25 / 26 / 26 CONNECT requests, 9 denied each run (browser traffic outside the
+  allowlist, the case that crashed the 11-07 run), 16 / 17 / 17 established,
+  no upstream failure or timeout; the Worker's `globalpass-relay-closed`
+  count matched `established` every run. No `globalpass-container-crash`,
+  `/collect` answered 200, and `logout` failed every run (`logoutFailed:
+  true`, see the logout audit). Container `console.log` lines are in the
+  Workers Observability `containers` dataset of the container application,
+  not in the Worker's own dataset; `runtimeRevision` is in the manifest
+  only, never in a log line.
 - Human-required: **not claimed.** `globalpass_login_rejected` may mean the
   credentials need a person, but it has not been observed, so the terminal
   does not yet say a person must act. The collector still makes exactly one
@@ -1261,22 +1352,55 @@ A session Durable Object (`SbiVcSessionState`) with two crons — the 15-minute
 keep-alive and the daily collection — both unchanged. Terminal source id
 `sbi-vc-trade`, the same id CORE uses.
 
-| Artifact         | Role                 | Bytes                                                       |
-| ---------------- | -------------------- | ----------------------------------------------------------- |
-| `<dataset>.json` | `collector_derived`  | the gateway envelope with `meta.secureKey` already stripped |
-| `manifest.json`  | `collector_manifest` | the collector manifest; each entry names a stored object    |
+| Artifact                           | Role                 | Bytes                                                                        |
+| ---------------------------------- | -------------------- | ---------------------------------------------------------------------------- |
+| `<dataset>.json`                   | `collector_derived`  | the gateway envelope with `meta.secureKey` already stripped                  |
+| `manifest.json`                    | `collector_manifest` | the collector manifest; each entry names a stored object                     |
+| `<kind>-<basis8>-<sha256>.pdf/zip` | `provider_document`  | validated native PDF / P&L ZIP bytes extracted from the JSON Buffer response |
 
-- `requestedScope`: `full_snapshot`, `unitKeys: ["account"]`; one `account` unit
-  of kind `collection`, the same unit the central descriptors use, counting the
-  datasets; `manifest.json` names no unit (ADR 0021 — it named the unit
+- `requestedScope`: `full_snapshot`; `account` holds the classic datasets,
+  and `full-cashflows` holds the additional all-type lists after the classic
+  reads finish. Both are kind `collection`; each counts only its own datasets.
+  `manifest.json` names no unit (ADR 0021 — it named the unit
   without being counted, so every run failed its seal with
   `run_inventory_incomplete` and was retried each tick until the ADR 0024
   amendment of 2026-09-26 made that refusal a block). No ranges.
 - A successful run declares `coverageStatus: complete`: the collector walks
   every historical execution and cash-flow page to exhaustion and verifies the
   provider's own pagination totals before finishing.
+- The existing JPY cash-flow dataset remains the sole publishing dataset for
+  remittances. Additional `cashflows-all-recent-page-NNNN` and
+  `cashflows-all-historical-page-NNNN` capture unfiltered lists with page size
+  20 and the same total/cardinality checks; no parser publishes these evidence
+  datasets. Crypto transfer and reward observations remain unsupported, and the
+  trader-mode observation has not yet been validated through a scheduled HTTP
+  run ([source observation](sources/sbi-vc-trade.md#17-unfiltered-cash-flow-observation-2026-11-10)).
+- A failed full-list request makes its own unit and the overall run partial.
+  A completed classic `account` unit stays complete and is admitted by the
+  explicit classic-dataset `unit-independent-v1` policies. A classic failure
+  still excludes that whole account unit. Neither another run's successful
+  unit nor the raw lists can rescue it
+  ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-sbi-vcs-unfiltered-evidence-is-independent-of-its-classic-account-unit-2026-11-10)).
 - `transformations`: one `redacted` step per dataset (`sbi-vc-trade-worker`);
   the unredacted envelope carried the session key and is not retained.
+- Report evidence adds independent year-index, annual-index, per-document and
+  CSV-check units. Monthly and P&L indices cover 2018 through the capture's Tokyo
+  year; annual zero is explicit complete-empty index evidence. Unknown annual
+  downloads, daily reports and valuation history remain partial/uncollected.
+  `report-month-list-YYYY-page-NNNN`, `report-pnl-list-YYYY`,
+  `report-annual-list-page-0001` and the P&L comparison JSON stay raw evidence.
+  The document datasets are `monthly-report-pdf` and `pnl-data-zip`, with
+  eight-digit period and hash keys. Native bytes are an `extracted`
+  transformation, never a JSON object mislabeled as PDF/ZIP. Shared CAS objects
+  have MIME-neutral physical storage; terminal and CORE references retain the
+  document MIME. Reacquiring identical period/hash bytes adds no physical object.
+- Raw artifact listing/retrieval works without parsing policy. CORE 0097's two
+  exact `unit_scope=unit`, `snapshot_selection=0` policies additionally admit
+  successful document metadata in partial runs. They add evidence-only coverage,
+  no economic observations and no container snapshot. A failed document or
+  comparison cannot borrow another acquisition session's successful unit, and
+  neither invalidates a completed classic account. See
+  [the observed protocol and limits](sources/sbi-vc-trade.md#18-simple-mode-documents-and-spot-execution-correspondence-2026-11-10).
 - `acquisitionSessionRef`: **yes.** The Durable Object now keeps a session
   generation id under the storage key `sessionRef`, minted when a session is
   seeded and rotated when re-authentication replaces it, in the same storage
@@ -1332,6 +1456,43 @@ keep-alive and the daily collection — both unchanged. Terminal source id
 
 ### smbc-direct (`kogane-smbc-direct-backfill-poc`)
 
+Fresh approved runs also acquire the observed AUD foreign ordinary balance
+and explicit-empty retained history in the same session. These sanitized JSON
+artifacts use `foreign-ordinary-aud/balance.json` and
+`foreign-ordinary-aud/history/YYYYMMDD-YYYYMMDD.json`, role
+`sanitized_provider_capture`, a `redacted` transformation with no retained HTML
+input, and separate `foreign-ordinary-aud-balance` and
+`foreign-ordinary-aud-history` units. The history's requested range starts on
+the first day three months before the run's JST month and ends on the last
+finished JST day. Monthly queries cover that range once. The run's requested
+range is the envelope of its units' ranges; unit-scoped requested and coverage
+ranges distinguish AUD retention from the longer yen history.
+
+Only the observed empty code/message, exact requested dates, selected account,
+AUD current-balance heading and absence of tables prove an empty AUD month.
+Unknown or nonempty responses leave the run partial with a closed code;
+earlier views remain unchanged. No transaction row or applied rate is invented.
+The displayed current FX reference quote and yen equivalent stay metadata of
+the single AUD balance. Nonempty history remains unsupported and
+[issue 1245](https://github.com/risu729/kogane/issues/1245) stays open.
+Legacy stopped runs keep their existing scope across a resume; only a fresh
+run adds AUD. AUD captures are retained unchanged across a yen backfill resume.
+The final cumulative success includes earlier partial AUD evidence, under the
+same immutable-terminal rules below. Standard dataset snapshot membership
+selects one latest complete AUD balance container; an explicit-empty history
+parse publishes no movements. Migration 0096 opts all four named SMBC datasets
+into existing `unit-independent-v1` eligibility. Only balance datasets form
+snapshots; histories carry eligibility-only policy rows. When
+every closed yen chunk and its balance are present and the only failure
+belongs to AUD, the yen unit reports complete and publishes new yen evidence
+despite the partial run. A failed or missing yen chunk still blocks that
+unit. Conversely, a complete new AUD balance publishes through a yen failure
+or unreviewed nonempty AUD history. AUD is captured first, before the yen
+balance request. Its balance and history units report their own outcomes:
+neither an incomplete history nor a failed balance can declare itself complete.
+Existing operator policy overrides are preserved. The AUD balance parser
+requires its named dataset, coverage-v1 claim and exact 0.1.2 release.
+
 The only human-triggered source: a person signs in behind Cloudflare Access,
 approves a QR challenge, and the backfill then runs across many Durable Object
 alarms, one month chunk at a time. **No cron**, before or after this change.
@@ -1344,8 +1505,9 @@ Terminal source id `smbc-direct` (the Processor maps it to the CORE source
 | `balance.normalized.json`, `transactions/*.normalized.json` | `collector_derived`  | the collector's normalized counterparts     |
 | `manifest.json`                                             | `collector_manifest` | the exact manifest bytes written to staging |
 
-One `account` unit counts the stored responses and their normalized
-counterparts; `manifest.json` names no unit (ADR 0021). Until then it named
+The `account` unit counts the yen responses and their normalized
+counterparts; AUD artifacts belong to the separate unit above, and
+`manifest.json` names no unit (ADR 0021). Until then it named
 the unit without being counted, so a finished backfill would have failed its
 seal with `run_inventory_incomplete`; the run-plan registration test found it.
 
@@ -1393,11 +1555,12 @@ format change is needed for that step.
   (the retired importer forwarded this source's provider bytes verbatim after
   a Shift_JIS round-trip check), and that the `manifest.json` object equals the
   bytes `storeManifest` stages.
-- `requestedScope`: `date_range` over `DEFAULT_BACKFILL_FROM` through the last
-  finished JST day at approval (inclusive),
-  `unitKeys: ["account"]`; one `account` unit of kind `collection`. `ranges`:
-  the requested range plus one `declared_coverage` range per collected month
-  (the raw and normalized artifacts of a month share it).
+- `requestedScope`: `date_range` over the envelope of the yen and AUD scopes.
+  The yen `account` unit requests `DEFAULT_BACKFILL_FROM` through the last
+  finished JST day at approval (inclusive); fresh runs also name the AUD unit
+  described above. Legacy runs name only `account`. `ranges` records each
+  unit's requested range and a separate `declared_coverage` range per captured
+  month (the raw and normalized yen artifacts of a month share it).
 - **Closed days and resumable windows** (owner decision, 2026-11-08 13:26 UTC;
   [issue 1178](https://github.com/risu729/kogane/issues/1178)). Fresh runs exclude
   the current JST day entirely. A stopped run retains its stored `from`, `to`,

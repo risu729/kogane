@@ -75,7 +75,11 @@ export function classifyActivity(input: {
     result.period = text(facts.period);
     result.reason =
       "利用日・請求月・口座引落日は別です。今回の支払額は、分割払い等では利用総額と異なります。請求確定は支払い完了を意味しません。";
-  } else if (key === "sbi-securities/sbi-yen-detail-history") {
+  } else if (
+    ["sbi-securities/sbi-yen-detail-history", "sbi-securities/sbi-foreign-cash-history"].includes(
+      key,
+    )
+  ) {
     result.kind = "cash_movement";
     result.label = "預り金の入出金";
     result.dateLabel = "入出金日";
@@ -137,6 +141,7 @@ export function classifyActivity(input: {
       "smbc-bank/smbc-direct-transactions",
       "mizuho-bank/mizuho-ordinary-history",
       "sbi-shinsei-bank/sbi-shinsei-top-balances-and-activity",
+      "sbi-shinsei-bank/sbi-shinsei-savings-activity",
       "sbi-vc-trade/sbi-vc-cashflows",
       "mobile-suica/mobile-suica-sf-history",
     ].includes(key)

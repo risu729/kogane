@@ -22,11 +22,20 @@ export interface StoredArtifact {
   bytes: number;
 }
 
+export interface CsvValidationDiagnostics {
+  csvFailure?: "media_type" | "charset" | "decode" | "parse" | "header" | "columns";
+  csvExpectedColumnCount?: number;
+  csvHeaderColumnCount?: number;
+  csvMinColumnCount?: number;
+  csvMaxColumnCount?: number;
+  csvInvalidRowCount?: number;
+}
+
 export interface CollectionFailure {
   operation: string;
   errorType: string;
   message: string;
-  diagnostics?: {
+  diagnostics?: CsvValidationDiagnostics & {
     stage: string;
     reason: string;
     providerOperation?: string;

@@ -38,9 +38,11 @@ import {
   currentText,
   database,
   EXPLICIT_COVERAGE,
+  REPLACING_EMPTY_COVERAGE,
   facts,
   position,
   snapshot,
+  type Snapshot,
   valuation,
 } from "./snapshot-fixture.ts";
 
@@ -141,7 +143,7 @@ describe("complete container snapshots", () => {
   });
 
   for (const [parser, dataset] of SNAPSHOT_DATASETS.filter(
-    ([name]) => !EXPLICIT_COVERAGE.has(name),
+    ([name]) => !EXPLICIT_COVERAGE.has(name) && !REPLACING_EMPTY_COVERAGE.has(name),
   )) {
     test(`${parser}: repeated, removed instrument/account, and empty snapshots replace old rows`, () => {
       const store = database();
@@ -157,6 +159,60 @@ describe("complete container snapshots", () => {
     });
   }
 
+  test("SMBC AUD requires its exact coverage version and retains prior membership through refused or empty captures", () => {
+    const store = database();
+    const base = {
+      parser: "smbc-foreign-ordinary-balance",
+      dataset: "foreign-ordinary-aud-balance",
+      source: "smbc-bank",
+      unit: "foreign-ordinary-aud-balance",
+    };
+    snapshot(store, {
+      ...base,
+      observations: [{ ...balance("AUD"), amountMinor: 100 }],
+      coverage: {},
+    });
+    const old = latestBalances(store);
+    expect(old).toHaveLength(1);
+    snapshot(store, {
+      ...base,
+      observations: [{ ...balance("AUD"), amountMinor: 200 }],
+      coverage: {},
+    });
+    const current = latestBalances(store);
+    expect(current).toHaveLength(1);
+    expect(current).not.toEqual(old);
+    const refused: Partial<Snapshot>[] = [
+      {},
+      { observations: [], coverage: {} },
+      { status: "partial", unitOutcome: "success", coverage: {} },
+      { status: "failed", unitOutcome: "success", coverage: {} },
+      {
+        observations: [],
+        coverage: { completeness: "unknown", membershipComplete: false, absenceMeaning: "unknown" },
+      },
+      {
+        coverage: {
+          completeness: "partial",
+          membershipComplete: false,
+          failureCause: "row_unreadable",
+        },
+      },
+      { parserVersion: "0.1.1", coverage: {} },
+    ];
+    for (const refusal of refused) {
+      snapshot(store, {
+        ...base,
+        observations: [{ ...balance("AUD"), amountMinor: 300 }],
+        ...refusal,
+      });
+      expect(latestBalances(store)).toEqual(current);
+    }
+    expect(store.db.query("SELECT COUNT(*) AS n FROM parse_runs").get()).toEqual({
+      n: refused.length + 2,
+    });
+  });
+
   test("St.George requires a coverage claim and retains previous membership on an unverified empty portfolio", () => {
     const store = database();
     const base = { parser: "st-george-balances", dataset: "account-snapshot", source: "st-george" };
@@ -170,6 +226,27 @@ describe("complete container snapshots", () => {
     snapshot(store, { ...base, observations: [], coverage: {} });
     expect(latestBalances(store).map((row) => row.instrument)).toEqual(["NEW"]);
     expect(store.db.query("SELECT COUNT(*) AS n FROM parse_runs").get()).toEqual({ n: 4 });
+  });
+  test("MoneyForward observed measures require complete coverage and retain membership on an unavailable capture", () => {
+    const store = database();
+    const base = {
+      parser: "moneyforward-detail-balances",
+      dataset: "account-detail",
+      source: "moneyforward-me",
+    };
+    snapshot(store, { ...base, observations: [balance("CLAIMLESS")] });
+    expect(latestBalances(store)).toEqual([]);
+    snapshot(store, { ...base, observations: [balance("OLD")], coverage: {} });
+    snapshot(store, { ...base, observations: [balance("NEW")], coverage: {} });
+    expect(latestBalances(store).map((row) => row.instrument)).toEqual(["NEW"]);
+    snapshot(store, {
+      ...base,
+      observations: [],
+      coverage: { completeness: "partial", membershipComplete: false },
+    });
+    expect(latestBalances(store).map((row) => row.instrument)).toEqual(["NEW"]);
+    snapshot(store, { ...base, observations: [], coverage: {} });
+    expect(latestBalances(store).map((row) => row.instrument)).toEqual(["NEW"]);
   });
 
   test("the SBI Shinsei exchange-rate board requires a claim and an empty board never replaces one", () => {

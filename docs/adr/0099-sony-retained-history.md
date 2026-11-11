@@ -39,14 +39,13 @@ field, which participates in the parser input fingerprint. The common closed
 while still requiring valid metadata and enforcing the upper date bound.
 Missing metadata and empty, invalid or reversed dates still fail. All four
 parsers in the shared Sony module receive patch releases and refreshed digests;
-only the history window interpretation changes.
+the shared Sony decoder and retained CSV row order are described below.
 
 Every JSON page must match the stable declared total, its expected page size,
 and `returnCnt` when supplied; CSV logical row counts must match the JSON total.
 Missing or inconsistent pages/CSV and the 1,000-page cap fail closed with
 allowlisted codes. No JSON transaction fallback, cursor, manual range parameter
-or remote operation is introduced. At the observed account size the retained
-walk is bounded by fewer than one hundred history/CSV requests.
+or remote operation is introduced. The retained walk is bounded by the per-currency page cap.
 
 ## Consequences
 
@@ -69,3 +68,43 @@ repeated runs and preservation of identical-row occurrences. Parser tests
 cover open-start JSON/CSV with end-date rejection, and Processor tests pin the
 Sony-only metadata boundary. All tests use synthetic data; deployment and
 production ingestion are not claimed.
+
+
+## Amendment 2026-11-11: observed encoding and retained row order
+
+Read-only owner-browser checks for [1295](https://github.com/risu729/kogane/issues/1295)
+and [1302](https://github.com/risu729/kogane/issues/1302) establish that `00002`
+returns newest-first dates and reverses the within-day transaction chain.
+Retained CSV parsing therefore emits oldest-first, retaining original row
+locators and occurrence-qualified identities. Monthly parsing is unchanged.
+The source document records the shape without account-specific counts.
+
+The observed JPY octet-stream CSV declares UTF-8 but contains strict Shift-JIS
+bytes. One shared Sony decoder permits strict Shift-JIS fallback only after
+strict UTF-8 failure for that octet-stream declaration (or the already supported
+absent charset). A strict UTF-8 success is never retried merely because the
+schema differs. Exact headers, row widths and JSON-total agreement remain
+mandatory; no replacement decoding or general charset guessing is added.
+Collector failures carry a closed validation branch and allowlisted column
+counts only. Diagnostic replays preserve Sony's explicit retained end exactly
+as the Processor does. Synthetic parser/collector and native read-model cases
+cover the mislabeled bytes, refusals, original row locators and final same-day
+balance. No deployment or successful scheduled run is claimed.
+
+
+Same-day latest-balance ties prefer the complete official CSV to JSON. A JSON
+page can finish publication after the CSV or split a day across pages, so
+reversing each JSON page cannot establish a global transaction order. The
+reader's date ordering stays first: a newer JSON date remains newer, and
+JSON-only evidence keeps its previous behavior. Synthetic regressions publish
+same-day JSON across pages before and after the CSV, preserve monthly CSV
+behavior, and compare the amended query to frozen SQL on a scaled random store
+with unrelated-source, JSON-only and older-CSV controls and unchanged plans.
+
+
+For Sony history only, same-day ties first select the newer capture cohort
+(`fetch_run.started_at`, then its run id), then prefer CSV within that cohort.
+An older CSV replay cannot displace a newer JSON-only correction. JSON-only
+retained history keeps the legacy same-day/page-order limitation; it is not a
+substitute for the complete official CSV and is not guaranteed to identify a
+day's final transaction. Unrelated sources keep their existing ordering.

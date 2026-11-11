@@ -1,0 +1,601 @@
+{
+  "schema": "sbi-shinsei-savings-activity-v1",
+  "scope": {
+    "accountNo": "000000000000001",
+    "currency": "JPY",
+    "productCode": "601",
+    "fromDate": "20970101",
+    "toDate": "20990115"
+  },
+  "response": {
+    "requestParam": {
+      "accountActivityDetails": []
+    },
+    "responseParam": {
+      "activity": {
+        "requestParam": {
+          "nationalid": "synthetic-national-id"
+        },
+        "responseParam": {
+          "type": "1",
+          "fromDate": "2097/01/01",
+          "toDate": "2099/01/15",
+          "purgeflag": "Y",
+          "currentBalance": "1000",
+          "accountNo": "000000000000001",
+          "currency": "JPY",
+          "activityDetails": [
+            {
+              "txnReferenceNo": "synthetic-ref-0",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-1",
+              "description": "Synthetic activity",
+              "credit": "",
+              "debit": "200",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-2",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-3",
+              "description": "Synthetic activity",
+              "credit": "",
+              "debit": "200",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-4",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-5",
+              "description": "Synthetic activity",
+              "credit": "",
+              "debit": "200",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-6",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-7",
+              "description": "Synthetic activity",
+              "credit": "",
+              "debit": "200",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-8",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-9",
+              "description": "Synthetic activity",
+              "credit": "",
+              "debit": "200",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-10",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-11",
+              "description": "Synthetic activity",
+              "credit": "",
+              "debit": "200",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-12",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-13",
+              "description": "Synthetic activity",
+              "credit": "",
+              "debit": "200",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-14",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-15",
+              "description": "Synthetic activity",
+              "credit": "",
+              "debit": "200",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-16",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-17",
+              "description": "Synthetic activity",
+              "credit": "",
+              "debit": "200",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-18",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-19",
+              "description": "Synthetic activity",
+              "credit": "",
+              "debit": "200",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-20",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-21",
+              "description": "Synthetic activity",
+              "credit": "",
+              "debit": "200",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-22",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-23",
+              "description": "Synthetic activity",
+              "credit": "",
+              "debit": "200",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-24",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-25",
+              "description": "Synthetic activity",
+              "credit": "",
+              "debit": "200",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-26",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-27",
+              "description": "Synthetic activity",
+              "credit": "",
+              "debit": "200",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-28",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-29",
+              "description": "Synthetic activity",
+              "credit": "",
+              "debit": "200",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-30",
+              "description": "Synthetic activity",
+              "credit": "100",
+              "debit": "",
+              "postingDate": "2098/12/01",
+              "balance": "1000",
+              "tradeTypeCode": "synthetic-trade"
+            }
+          ]
+        },
+        "header": {
+          "referenceNo": "synthetic-reference",
+          "systemCode": "SYNTHETIC",
+          "langCode": "JAP"
+        },
+        "errorInfo": {
+          "statusID": "00000",
+          "statusMessage": "Success"
+        }
+      },
+      "memoInquiry": {
+        "requestParam": {
+          "nationalid": "synthetic-national-id"
+        },
+        "responseParam": {
+          "memoInquiryDetails": [
+            {
+              "txnReferenceNo": "synthetic-ref-0",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-1",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-2",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-3",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-4",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-5",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-6",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-7",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-8",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-9",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-10",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-11",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-12",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-13",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-14",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-15",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-16",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-17",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-18",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-19",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-20",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-21",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-22",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-23",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-24",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-25",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-26",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-27",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-28",
+              "memo": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-29",
+              "memo": ""
+            }
+          ]
+        },
+        "header": {
+          "referenceNo": "synthetic-reference",
+          "systemCode": "SYNTHETIC",
+          "langCode": "JAP"
+        },
+        "errorInfo": {
+          "statusID": "00000",
+          "statusMessage": "Success"
+        }
+      },
+      "summaryColumnTransformation": {
+        "requestParam": {
+          "nationalid": "synthetic-national-id"
+        },
+        "responseParam": {
+          "descriptionTransformDetails": [
+            {
+              "txnReferenceNo": "synthetic-ref-0",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-1",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-2",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-3",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-4",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-5",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-6",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-7",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-8",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-9",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-10",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-11",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-12",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-13",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-14",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-15",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-16",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-17",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-18",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-19",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-20",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-21",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-22",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-23",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-24",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-25",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-26",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-27",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-28",
+              "descriptionTransform": ""
+            },
+            {
+              "txnReferenceNo": "synthetic-ref-29",
+              "descriptionTransform": ""
+            }
+          ]
+        },
+        "header": {
+          "referenceNo": "synthetic-reference",
+          "systemCode": "SYNTHETIC",
+          "langCode": "JAP"
+        },
+        "errorInfo": {
+          "statusID": "00000",
+          "statusMessage": "Success"
+        }
+      },
+      "sysTimeForCsvDownload": "20990115120000"
+    },
+    "header": {
+      "adapterResultCode": "0"
+    }
+  }
+}

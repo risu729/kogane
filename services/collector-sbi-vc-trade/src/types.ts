@@ -60,11 +60,22 @@ export type ReadEvent =
   | "accountMargin"
   | "positionSummaryList"
   | "executionList"
-  | "getCashflowList";
+  | "getCashflowList"
+  | "tradeReportList"
+  | "monthlyTradeReport"
+  | "plCalcData";
+
+export interface ProviderDocument {
+  kind: "monthly-report" | "pnl-data";
+  /** The provider's complete basisYmdDate, passed unchanged to downloads. */
+  basisDate: string;
+  mediaType: "application/pdf" | "application/zip";
+}
 
 export interface CollectorArtifact {
   dataset: string;
-  body: string;
+  body: string | Uint8Array;
+  document?: ProviderDocument;
 }
 
 export interface StoredArtifact {
@@ -72,11 +83,30 @@ export interface StoredArtifact {
   key: string;
   sha256: string;
   bytes: number;
+  artifactKey?: string;
+  document?: ProviderDocument;
 }
 
 export interface CollectionFailure {
   operation: string;
   errorCode: string;
+}
+
+export interface CollectionUnit {
+  unitKey:
+    | "account"
+    | "full-cashflows"
+    | "report-annual-index"
+    | `report-index-${number}`
+    | `monthly-report-${string}`
+    | `pnl-data-${string}`
+    | `pnl-check-${string}`
+    | "report-year-range";
+  status: "success" | "partial" | "failed";
+  errorCode?: string;
+  observedCount?: number;
+  expectedCount?: number;
+  absenceMeaning?: "complete-empty" | "not-applicable";
 }
 
 export interface CollectionManifest {
@@ -88,6 +118,8 @@ export interface CollectionManifest {
   status: "success" | "partial" | "failed";
   artifacts: StoredArtifact[];
   failures: CollectionFailure[];
+  /** Absent on legacy manifests, whose whole run was one account unit. */
+  units?: CollectionUnit[];
 }
 
 export interface CollectionSummary {
