@@ -1,0 +1,584 @@
+{
+  "myjcb-jpoint-history": {
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "myjcb:synthetic:j-point:acquired:2099-01-15",
+          "metric": "jpoint_acquisition_earned",
+          "amountText": "90",
+          "amountScale": 0,
+          "instrument": "J_POINT",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "json:$.rows[0].earned",
+          "extra": {
+            "row": {
+              "acquiredOn": "2099-01-15",
+              "paymentText": "(2/10)",
+              "earned": "90",
+              "used": "-70",
+              "expired": "0",
+              "remaining": "60",
+              "normal": "60",
+              "preferential": "10",
+              "bonus": "20",
+              "expiryMonth": "2099-06",
+              "status": "有効"
+            },
+            "_kogane": {
+              "sourceView": "point-history-acquisition-month",
+              "normalizerVersion": "myjcb-jpoint-history-html-v1",
+              "acquisitionDate": "2099-01-15",
+              "paymentMonthText": "(2/10)",
+              "amountBasis": "provider-monthly-activity-total",
+              "reportedHistoryTotal": "100",
+              "historyBucketCount": 3,
+              "jpointHoldingSourceAccount": "myjcb:synthetic:j-point:total",
+              "observedExpiry": {
+                "kind": "period",
+                "start": "2099-06",
+                "end": "2099-06",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              },
+              "activityPeriod": {
+                "kind": "period",
+                "start": "2099-01",
+                "end": "2099-01",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              }
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "myjcb:synthetic:j-point:acquired:2099-01-15",
+          "metric": "jpoint_acquisition_used",
+          "amountText": "-70",
+          "amountScale": 0,
+          "instrument": "J_POINT",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "json:$.rows[0].used",
+          "extra": {
+            "row": {
+              "acquiredOn": "2099-01-15",
+              "paymentText": "(2/10)",
+              "earned": "90",
+              "used": "-70",
+              "expired": "0",
+              "remaining": "60",
+              "normal": "60",
+              "preferential": "10",
+              "bonus": "20",
+              "expiryMonth": "2099-06",
+              "status": "有効"
+            },
+            "_kogane": {
+              "sourceView": "point-history-acquisition-month",
+              "normalizerVersion": "myjcb-jpoint-history-html-v1",
+              "acquisitionDate": "2099-01-15",
+              "paymentMonthText": "(2/10)",
+              "amountBasis": "provider-monthly-activity-total",
+              "reportedHistoryTotal": "100",
+              "historyBucketCount": 3,
+              "jpointHoldingSourceAccount": "myjcb:synthetic:j-point:total",
+              "observedExpiry": {
+                "kind": "period",
+                "start": "2099-06",
+                "end": "2099-06",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              },
+              "activityPeriod": {
+                "kind": "period",
+                "start": "2099-01",
+                "end": "2099-01",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              }
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "myjcb:synthetic:j-point:acquired:2099-01-15",
+          "metric": "jpoint_acquisition_expired",
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "J_POINT",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "json:$.rows[0].expired",
+          "extra": {
+            "row": {
+              "acquiredOn": "2099-01-15",
+              "paymentText": "(2/10)",
+              "earned": "90",
+              "used": "-70",
+              "expired": "0",
+              "remaining": "60",
+              "normal": "60",
+              "preferential": "10",
+              "bonus": "20",
+              "expiryMonth": "2099-06",
+              "status": "有効"
+            },
+            "_kogane": {
+              "sourceView": "point-history-acquisition-month",
+              "normalizerVersion": "myjcb-jpoint-history-html-v1",
+              "acquisitionDate": "2099-01-15",
+              "paymentMonthText": "(2/10)",
+              "amountBasis": "provider-monthly-activity-total",
+              "reportedHistoryTotal": "100",
+              "historyBucketCount": 3,
+              "jpointHoldingSourceAccount": "myjcb:synthetic:j-point:total",
+              "observedExpiry": {
+                "kind": "period",
+                "start": "2099-06",
+                "end": "2099-06",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              },
+              "activityPeriod": {
+                "kind": "period",
+                "start": "2099-01",
+                "end": "2099-01",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              }
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "myjcb:synthetic:j-point:acquired:2099-01-15",
+          "metric": "jpoint_acquisition_remaining",
+          "amountText": "60",
+          "amountScale": 0,
+          "instrument": "J_POINT",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "json:$.rows[0].remaining",
+          "extra": {
+            "row": {
+              "acquiredOn": "2099-01-15",
+              "paymentText": "(2/10)",
+              "earned": "90",
+              "used": "-70",
+              "expired": "0",
+              "remaining": "60",
+              "normal": "60",
+              "preferential": "10",
+              "bonus": "20",
+              "expiryMonth": "2099-06",
+              "status": "有効"
+            },
+            "_kogane": {
+              "sourceView": "point-history-acquisition-month",
+              "normalizerVersion": "myjcb-jpoint-history-html-v1",
+              "acquisitionDate": "2099-01-15",
+              "paymentMonthText": "(2/10)",
+              "amountBasis": "acquisition-bucket-stock",
+              "reportedHistoryTotal": "100",
+              "historyBucketCount": 3,
+              "jpointHoldingSourceAccount": "myjcb:synthetic:j-point:total",
+              "observedExpiry": {
+                "kind": "period",
+                "start": "2099-06",
+                "end": "2099-06",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              }
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "myjcb:synthetic:j-point:acquired:2098-12-15",
+          "metric": "jpoint_acquisition_earned",
+          "amountText": "80",
+          "amountScale": 0,
+          "instrument": "J_POINT",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "json:$.rows[1].earned",
+          "extra": {
+            "row": {
+              "acquiredOn": "2098-12-15",
+              "paymentText": "(1/10)",
+              "earned": "80",
+              "used": "-20",
+              "expired": "-10",
+              "remaining": "40",
+              "normal": "50",
+              "preferential": "10",
+              "bonus": "20",
+              "expiryMonth": "2099-05",
+              "status": "有効"
+            },
+            "_kogane": {
+              "sourceView": "point-history-acquisition-month",
+              "normalizerVersion": "myjcb-jpoint-history-html-v1",
+              "acquisitionDate": "2098-12-15",
+              "paymentMonthText": "(1/10)",
+              "amountBasis": "provider-monthly-activity-total",
+              "reportedHistoryTotal": "100",
+              "historyBucketCount": 3,
+              "jpointHoldingSourceAccount": "myjcb:synthetic:j-point:total",
+              "observedExpiry": {
+                "kind": "period",
+                "start": "2099-05",
+                "end": "2099-05",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              },
+              "activityPeriod": {
+                "kind": "period",
+                "start": "2098-12",
+                "end": "2098-12",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              }
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "myjcb:synthetic:j-point:acquired:2098-12-15",
+          "metric": "jpoint_acquisition_used",
+          "amountText": "-20",
+          "amountScale": 0,
+          "instrument": "J_POINT",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "json:$.rows[1].used",
+          "extra": {
+            "row": {
+              "acquiredOn": "2098-12-15",
+              "paymentText": "(1/10)",
+              "earned": "80",
+              "used": "-20",
+              "expired": "-10",
+              "remaining": "40",
+              "normal": "50",
+              "preferential": "10",
+              "bonus": "20",
+              "expiryMonth": "2099-05",
+              "status": "有効"
+            },
+            "_kogane": {
+              "sourceView": "point-history-acquisition-month",
+              "normalizerVersion": "myjcb-jpoint-history-html-v1",
+              "acquisitionDate": "2098-12-15",
+              "paymentMonthText": "(1/10)",
+              "amountBasis": "provider-monthly-activity-total",
+              "reportedHistoryTotal": "100",
+              "historyBucketCount": 3,
+              "jpointHoldingSourceAccount": "myjcb:synthetic:j-point:total",
+              "observedExpiry": {
+                "kind": "period",
+                "start": "2099-05",
+                "end": "2099-05",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              },
+              "activityPeriod": {
+                "kind": "period",
+                "start": "2098-12",
+                "end": "2098-12",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              }
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "myjcb:synthetic:j-point:acquired:2098-12-15",
+          "metric": "jpoint_acquisition_expired",
+          "amountText": "-10",
+          "amountScale": 0,
+          "instrument": "J_POINT",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "json:$.rows[1].expired",
+          "extra": {
+            "row": {
+              "acquiredOn": "2098-12-15",
+              "paymentText": "(1/10)",
+              "earned": "80",
+              "used": "-20",
+              "expired": "-10",
+              "remaining": "40",
+              "normal": "50",
+              "preferential": "10",
+              "bonus": "20",
+              "expiryMonth": "2099-05",
+              "status": "有効"
+            },
+            "_kogane": {
+              "sourceView": "point-history-acquisition-month",
+              "normalizerVersion": "myjcb-jpoint-history-html-v1",
+              "acquisitionDate": "2098-12-15",
+              "paymentMonthText": "(1/10)",
+              "amountBasis": "provider-monthly-activity-total",
+              "reportedHistoryTotal": "100",
+              "historyBucketCount": 3,
+              "jpointHoldingSourceAccount": "myjcb:synthetic:j-point:total",
+              "observedExpiry": {
+                "kind": "period",
+                "start": "2099-05",
+                "end": "2099-05",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              },
+              "activityPeriod": {
+                "kind": "period",
+                "start": "2098-12",
+                "end": "2098-12",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              }
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "myjcb:synthetic:j-point:acquired:2098-12-15",
+          "metric": "jpoint_acquisition_remaining",
+          "amountText": "40",
+          "amountScale": 0,
+          "instrument": "J_POINT",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "json:$.rows[1].remaining",
+          "extra": {
+            "row": {
+              "acquiredOn": "2098-12-15",
+              "paymentText": "(1/10)",
+              "earned": "80",
+              "used": "-20",
+              "expired": "-10",
+              "remaining": "40",
+              "normal": "50",
+              "preferential": "10",
+              "bonus": "20",
+              "expiryMonth": "2099-05",
+              "status": "有効"
+            },
+            "_kogane": {
+              "sourceView": "point-history-acquisition-month",
+              "normalizerVersion": "myjcb-jpoint-history-html-v1",
+              "acquisitionDate": "2098-12-15",
+              "paymentMonthText": "(1/10)",
+              "amountBasis": "acquisition-bucket-stock",
+              "reportedHistoryTotal": "100",
+              "historyBucketCount": 3,
+              "jpointHoldingSourceAccount": "myjcb:synthetic:j-point:total",
+              "observedExpiry": {
+                "kind": "period",
+                "start": "2099-05",
+                "end": "2099-05",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              }
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "myjcb:synthetic:j-point:acquired:2098-11-15",
+          "metric": "jpoint_acquisition_earned",
+          "amountText": "10",
+          "amountScale": 0,
+          "instrument": "J_POINT",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "json:$.rows[2].earned",
+          "extra": {
+            "row": {
+              "acquiredOn": "2098-11-15",
+              "paymentText": "(-)",
+              "earned": "10",
+              "used": "0",
+              "expired": "0",
+              "remaining": "0",
+              "normal": "10",
+              "preferential": "0",
+              "bonus": "0",
+              "expiryMonth": null,
+              "status": "-"
+            },
+            "_kogane": {
+              "sourceView": "point-history-acquisition-month",
+              "normalizerVersion": "myjcb-jpoint-history-html-v1",
+              "acquisitionDate": "2098-11-15",
+              "paymentMonthText": "(-)",
+              "amountBasis": "provider-monthly-activity-total",
+              "reportedHistoryTotal": "100",
+              "historyBucketCount": 3,
+              "jpointHoldingSourceAccount": "myjcb:synthetic:j-point:total",
+              "observedExpiry": {
+                "kind": "unknown",
+                "reasonCode": "zero_bucket_expiry_not_displayed"
+              },
+              "activityPeriod": {
+                "kind": "period",
+                "start": "2098-11",
+                "end": "2098-11",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              }
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "myjcb:synthetic:j-point:acquired:2098-11-15",
+          "metric": "jpoint_acquisition_used",
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "J_POINT",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "json:$.rows[2].used",
+          "extra": {
+            "row": {
+              "acquiredOn": "2098-11-15",
+              "paymentText": "(-)",
+              "earned": "10",
+              "used": "0",
+              "expired": "0",
+              "remaining": "0",
+              "normal": "10",
+              "preferential": "0",
+              "bonus": "0",
+              "expiryMonth": null,
+              "status": "-"
+            },
+            "_kogane": {
+              "sourceView": "point-history-acquisition-month",
+              "normalizerVersion": "myjcb-jpoint-history-html-v1",
+              "acquisitionDate": "2098-11-15",
+              "paymentMonthText": "(-)",
+              "amountBasis": "provider-monthly-activity-total",
+              "reportedHistoryTotal": "100",
+              "historyBucketCount": 3,
+              "jpointHoldingSourceAccount": "myjcb:synthetic:j-point:total",
+              "observedExpiry": {
+                "kind": "unknown",
+                "reasonCode": "zero_bucket_expiry_not_displayed"
+              },
+              "activityPeriod": {
+                "kind": "period",
+                "start": "2098-11",
+                "end": "2098-11",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              }
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "myjcb:synthetic:j-point:acquired:2098-11-15",
+          "metric": "jpoint_acquisition_expired",
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "J_POINT",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "json:$.rows[2].expired",
+          "extra": {
+            "row": {
+              "acquiredOn": "2098-11-15",
+              "paymentText": "(-)",
+              "earned": "10",
+              "used": "0",
+              "expired": "0",
+              "remaining": "0",
+              "normal": "10",
+              "preferential": "0",
+              "bonus": "0",
+              "expiryMonth": null,
+              "status": "-"
+            },
+            "_kogane": {
+              "sourceView": "point-history-acquisition-month",
+              "normalizerVersion": "myjcb-jpoint-history-html-v1",
+              "acquisitionDate": "2098-11-15",
+              "paymentMonthText": "(-)",
+              "amountBasis": "provider-monthly-activity-total",
+              "reportedHistoryTotal": "100",
+              "historyBucketCount": 3,
+              "jpointHoldingSourceAccount": "myjcb:synthetic:j-point:total",
+              "observedExpiry": {
+                "kind": "unknown",
+                "reasonCode": "zero_bucket_expiry_not_displayed"
+              },
+              "activityPeriod": {
+                "kind": "period",
+                "start": "2098-11",
+                "end": "2098-11",
+                "endExclusive": false,
+                "zone": "Asia/Tokyo",
+                "granularity": "month"
+              }
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "myjcb:synthetic:j-point:acquired:2098-11-15",
+          "metric": "jpoint_acquisition_remaining",
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "J_POINT",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "json:$.rows[2].remaining",
+          "extra": {
+            "row": {
+              "acquiredOn": "2098-11-15",
+              "paymentText": "(-)",
+              "earned": "10",
+              "used": "0",
+              "expired": "0",
+              "remaining": "0",
+              "normal": "10",
+              "preferential": "0",
+              "bonus": "0",
+              "expiryMonth": null,
+              "status": "-"
+            },
+            "_kogane": {
+              "sourceView": "point-history-acquisition-month",
+              "normalizerVersion": "myjcb-jpoint-history-html-v1",
+              "acquisitionDate": "2098-11-15",
+              "paymentMonthText": "(-)",
+              "amountBasis": "acquisition-bucket-stock",
+              "reportedHistoryTotal": "100",
+              "historyBucketCount": 3,
+              "jpointHoldingSourceAccount": "myjcb:synthetic:j-point:total",
+              "observedExpiry": {
+                "kind": "unknown",
+                "reasonCode": "zero_bucket_expiry_not_displayed"
+              }
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "unreadable-container": {
+      "error": true
+    }
+  }
+}

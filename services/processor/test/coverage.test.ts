@@ -91,7 +91,11 @@ test("the migration chain names every explicit policy and preserves other run-sc
           row.parser_name !== "prestia-bank-balances" &&
           row.parser_name !== "sbi-shinsei-exchange-rate" &&
           row.parser_name !== "sbi-shinsei-monthly-report-metadata" &&
-          row.parser_name !== "moneyforward-detail-balances",
+          row.parser_name !== "moneyforward-detail-balances" &&
+          row.parser_name !== "sbi-income-payments" &&
+          row.parser_name !== "sbi-realised-gains" &&
+          row.parser_name !== "myjcb-jpoint-history" &&
+          row.parser_name !== "vpass-credit-snapshot",
       )
       .every((row) => row.policy_id === "legacy-warning-compat-v1"),
   ).toBe(true);
@@ -116,6 +120,28 @@ test("the migration chain names every explicit policy and preserves other run-sc
   expect(policies.find((row) => row.parser_name === "sbi-shinsei-exchange-rate")?.policy_id).toBe(
     "coverage-v1",
   );
+  expect(
+    policies.filter((row) =>
+      ["sbi-income-payments", "sbi-realised-gains"].includes(row.parser_name),
+    ),
+  ).toEqual([
+    {
+      source_id: "sbi-securities",
+      parser_name: "sbi-income-payments",
+      dataset: "income-payments",
+      policy_id: "coverage-v1",
+      unit_scope: "run",
+      snapshot_selection: 1,
+    },
+    {
+      source_id: "sbi-securities",
+      parser_name: "sbi-realised-gains",
+      dataset: "realised-gains",
+      policy_id: "coverage-v1",
+      unit_scope: "run",
+      snapshot_selection: 1,
+    },
+  ]);
   expect(containers.filter((row) => row.unit_scope === "unit")).toEqual(
     EXPECTED_UNIT_POLICIES.filter((row) => row.snapshot_selection === 1).map(
       ({ source_id, parser_name, dataset, policy_id, unit_scope, snapshot_selection }) => ({
@@ -137,14 +163,18 @@ test("the migration chain names every explicit policy and preserves other run-sc
   );
   expect(pinned.map((row) => row.parser_name)).toEqual([
     "moneyforward-detail-balances",
+    "myjcb-jpoint-history",
     "prestia-bank-balances",
     "sbi-foreign-cash-positions",
+    "sbi-income-payments",
+    "sbi-realised-gains",
     "sbi-shinsei-exchange-rate",
     "sbi-shinsei-monthly-report-metadata",
     "sbi-vc-document-metadata",
     "sbi-vc-document-metadata",
     "smbc-foreign-ordinary-balance",
     "st-george-balances",
+    "vpass-credit-snapshot",
   ]);
   for (const row of pinned)
     expect(

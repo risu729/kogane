@@ -34,6 +34,9 @@ for (const file of [
   "sbi-shinsei-exchange-rate-expected.json",
   "sbi-shinsei-observed-shapes-expected.json",
   "smbc-foreign-ordinary-expected.json",
+  "myjcb-jpoint-history-expected.json",
+  "sbi-income-expected.json",
+  "vpass-credit-expected.json",
   "moneyforward-detail-expected.json",
 ]) {
   const frozen = JSON.parse(
@@ -110,6 +113,14 @@ const partial = (
 
 /** What each case must claim. A throwing case has no claim and no entry here. */
 const CLAIMS: Record<string, Record<string, Expectation>> = {
+  "myjcb-jpoint-history": { "complete-rows": { ...complete(12), expected: 12 } },
+  "sbi-income-payments": { "complete-payments": { ...complete(15), expected: 15 } },
+  "sbi-realised-gains": { "complete-sales": { ...complete(4), expected: 4 } },
+  "vpass-credit-snapshot": {
+    "authori-visible": complete(12),
+    "authori-hidden": complete(0),
+    "revo-exact": complete(2),
+  },
   "moneyforward-detail-balances": {
     "complete-rows": { ...complete(1, ["row_unreadable", "row_unreadable"]), expected: 1 },
   },

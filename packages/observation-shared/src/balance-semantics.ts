@@ -52,8 +52,62 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
     timeBasis: "unknown",
     ...details,
   });
+  if (input.sourceId === "vpass" && input.parserName === "vpass-credit-snapshot") {
+    const scopes = ["overall", "card", "revolving", "installment_twice_bonus"];
+    if (
+      scopes.some((scope) =>
+        ["limit", "available"].some(
+          (measure) => input.metric === `reported_${scope}_${measure}_thousand_yen`,
+        ),
+      )
+    )
+      return result(
+        "other",
+        "Reported credit capacity (1,000 JPY precision)",
+        "Shared provider-reported credit; non-additive.",
+        { measurementKind: "capacity" },
+      );
+    if (
+      scopes.some((scope) => input.metric === `reported_${scope}_outstanding_thousand_yen`) ||
+      input.metric === "reported_revolving_outstanding_yen"
+    )
+      return result(
+        "other",
+        input.metric.endsWith("_thousand_yen")
+          ? "Reported outstanding (1,000 JPY precision)"
+          : "Reported revolving outstanding (JPY)",
+        "Overlapping provider-reported snapshots; non-additive.",
+        { measurementKind: "balance", timeBasis: "reported_snapshot" },
+      );
+    if (input.metric === "reported_revolving_repayment_yen")
+      return result(
+        "other",
+        "Reported revolving repayment (JPY)",
+        "Reported repayment is not an additional debt or bank balance.",
+      );
+  }
   const matches = (source: string, parser: string, metrics: string[]) =>
     input.sourceId === source && input.parserName === parser && metrics.includes(input.metric);
+  if (
+    matches("myjcb", "myjcb-jpoint-history", [
+      "jpoint_acquisition_earned",
+      "jpoint_acquisition_used",
+      "jpoint_acquisition_expired",
+    ])
+  )
+    return result(
+      "period_total",
+      "獲得月のポイント活動集計",
+      "取得元が月ごとに示した獲得・使用・失効の集計です。獲得日別の保有残高とは別の値で、保有額へ加算しません。",
+      { assetClass: "reward" },
+    );
+  if (matches("myjcb", "myjcb-jpoint-history", ["jpoint_acquisition_remaining"]))
+    return result(
+      "asset",
+      "獲得日別のポイント残高",
+      "取得元が示す獲得日別の残高です。プログラムの合計表示や別の取得時点と重複加算しません。",
+      { assetClass: "reward", timeBasis: "reported_snapshot" },
+    );
   if (
     matches("myjcb", "myjcb-credit-past-month-balances", ["credit_statement_payment_amount"]) ||
     matches("myjcb", "myjcb-credit-statement-total", ["credit_statement_payment_amount"]) ||

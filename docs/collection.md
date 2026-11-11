@@ -636,6 +636,32 @@ provider was contacted and no production bucket was read or written.
 
 ### Vpass (`services/collector-vpass`, `kogane-vpass-collector-poc`)
 
+Daily reported credit snapshots (ADR 0105) are independent
+`<session>-credit-card-NNN` runs. They reuse the existing authenticated
+card selection and durable binding. Alongside sanitized card inventory,
+selection and statement discovery, they store `credit/authori.json` and
+`credit/revo.json` in the existing `card-NNN` unit, plus the existing
+binding unit when derivable. The new credit sanitizer explicitly keeps
+observed Authori financial keys while removing authentication/card references;
+statement sanitizer v1 output remains unchanged. Registration v8 maps only
+these two new JSON keys to `credit-snapshot`; versions v1-v7 keep their
+old meaning.
+
+The `vpass-credit-snapshot` parser publishes visible overall/card/revolving/
+installment-twice-bonus reported limit, outstanding and availability at
+1,000 JPY precision, cross-checked against the 万円 display, plus exact
+reported revolving outstanding/repayment yen. The metric names and
+`extra._kogane.reportedPrecisionJPY` state precision. Hidden zero rows are
+unavailable. Metrics are non-additive shared-credit reports, outside assets
+and canonical liabilities; availability is not recomputed. The selecting
+`coverage-v1` policy keeps the newest complete card snapshot, while raw
+history and prior publications remain append-only. Statement failures do
+not discard a successful card snapshot. Exact installment precision remains
+unobserved, so the existing `balance` catalogue entry stays partial under
+[#1256](https://github.com/risu729/kogane/issues/1256).
+See the [dated source observation](sources/vpass.md).
+The table below describes statement runs.
+
 | Artifact key                             | Role                         | Unit                  |
 | ---------------------------------------- | ---------------------------- | --------------------- |
 | `card-list.json`                         | `sanitized_provider_capture` | `card-NNN`            |
@@ -921,6 +947,13 @@ for this artifact, with the CP932 charset a constant of the source.
 | `account-assets-history-source.json`         | `provider_response` | `domestic` |
 | `account-assets-history-inventory.json`      | `collector_derived` | `domestic` |
 | `account-assets-history-<year>.json`         | `collector_derived` | `domestic` |
+| `income-payments-summary-source.json`        | `provider_response` | `domestic` |
+| `income-payments-rows-source.json`           | `provider_response` | `domestic` |
+| `income-payments.json`                       | `collector_derived` | `domestic` |
+| `realised-gains-all-summary-source.json`     | `provider_response` | `domestic` |
+| `realised-gains-summary-source.json`         | `provider_response` | `domestic` |
+| `realised-gains-rows-source.json`            | `provider_response` | `domestic` |
+| `realised-gains.json`                        | `collector_derived` | `domestic` |
 | `yen-detail-history.json`                    | `collector_derived` | `domestic` |
 | `yen-detail-history-page-NNNN-source.json`   | `provider_response` | `domestic` |
 | `foreign-cash-history.json`                  | `collector_derived` | `domestic` |

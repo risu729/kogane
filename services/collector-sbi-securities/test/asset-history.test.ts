@@ -106,7 +106,9 @@ for (const kind of [
       new Response(Buffer.concat([header, Buffer.from("SYNTHETIC_LINK")])),
       new Response("synthetic failure", { status: 503 }),
     ];
-    const fetchMock = mock(async () => {
+    const fetchMock = mock(async (input: RequestInfo | URL) => {
+      if (/\/account\/api\/assets\/(?:dividends|profit-loss)/u.test(String(input)))
+        return new Response("synthetic income sibling failure", { status: 503 });
       const response = responses.shift();
       if (response === undefined) throw new Error("unexpected synthetic request");
       return response;
@@ -115,6 +117,7 @@ for (const kind of [
     const retained: Artifact[] = [];
     await expect(
       collectMainSiteArtifacts({
+        onIncomeHistoryError: () => {},
         session: {
           sessionId: "synthetic",
           branchCode: "001",

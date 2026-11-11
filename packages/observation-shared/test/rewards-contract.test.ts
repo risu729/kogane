@@ -54,6 +54,28 @@ test("unclassified holding quantities remain valid without claiming consumabilit
   };
   const response = { rows: [row], coverage: { limit: 1, truncated: false, nextOffset: null } };
   expect(validApiResponse("/api/v2/rewards/holdings", response)).toBe(true);
+  for (const state of ["current", "stale", "unavailable"]) {
+    const pointHistoryCoverage = {
+      state,
+      reasonCode: state === "current" ? null : "history_not_current",
+      observedAt: state === "unavailable" ? null : "2026-01-01T00:00:00.000Z",
+      sourceFactRefs: state === "unavailable" ? [] : ["balance:12"],
+    };
+    expect(
+      validApiResponse("/api/v2/rewards/holdings", {
+        ...response,
+        rows: [{ ...row, pointHistoryCoverage }],
+      }),
+    ).toBe(true);
+    expect(
+      validApiResponse("/api/v2/rewards/holdings", {
+        ...response,
+        rows: [
+          { ...row, pointHistoryCoverage: { ...pointHistoryCoverage, state: "future-status" } },
+        ],
+      }),
+    ).toBe(false);
+  }
   for (const kind of ["future-provider-enum", "", null]) {
     expect(validRewardBucketKind(kind)).toBe(false);
     expect(

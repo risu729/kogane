@@ -32,10 +32,33 @@ const policy = (
   ...extra,
 });
 
-// The closed default opt-ins of migrations 0080, 0088, 0090, 0095, 0096 and 0097.
+// The closed default opt-ins of migrations 0080, 0088, 0090, 0092, 0094, 0095, 0096
+// and 0097.
 // This expected catalogue is independent of the SQL read under test: an extra
 // source, page, parser, scope, snapshot membership or policy still fails.
 export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
+  ...(
+    [
+      ["credit-ledger", "myjcb-credit-ledger"],
+      ["credit-detail", "myjcb-credit-statement-total"],
+      ["credit-past-months", "myjcb-credit-past-month-balances"],
+      ["credit-schedule", "myjcb-skip-payment-schedule"],
+    ] as const
+  ).map(([dataset, parser]) =>
+    policy("myjcb", dataset, parser, { snapshot_selection: 0, updated_at_ms: 1794268800000 }),
+  ),
+  policy("myjcb", "jpoint-history", "myjcb-jpoint-history", {
+    policy_id: "coverage-v1",
+    required_parser_version: "1.0.1",
+    replaces_previous_on_complete_empty: 0,
+    updated_at_ms: 1794268800000,
+  }),
+  policy("vpass", "credit-snapshot", "vpass-credit-snapshot", {
+    policy_id: "coverage-v1",
+    required_parser_version: "1.0.1",
+    replaces_previous_on_complete_empty: 0,
+    updated_at_ms: 1794268800000,
+  }),
   policy("myjcb", "debit-detail", "myjcb-debit-ledger", {
     snapshot_selection: 0,
     updated_at_ms: 1794268800000,

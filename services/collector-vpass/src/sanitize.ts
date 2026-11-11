@@ -86,7 +86,7 @@ function sensitiveKey(key: string): boolean {
   );
 }
 
-function sanitizeJson(value: unknown, sensitiveContext: boolean): JsonValue {
+function sanitizeJson(value: unknown, sensitiveContext: boolean, credit = false): JsonValue {
   if (value === null || typeof value === "boolean" || typeof value === "string") {
     return sensitiveContext && typeof value === "string" && value.length > 0
       ? REDACTED_VALUE
@@ -96,19 +96,21 @@ function sanitizeJson(value: unknown, sensitiveContext: boolean): JsonValue {
     if (!Number.isFinite(value)) throw new VpassSanitizeError("json_number_invalid");
     return sensitiveContext ? 0 : value;
   }
-  if (Array.isArray(value)) return value.map((entry) => sanitizeJson(entry, sensitiveContext));
+  if (Array.isArray(value))
+    return value.map((entry) => sanitizeJson(entry, sensitiveContext, credit));
   if (!isRecord(value)) throw new VpassSanitizeError("json_value_invalid");
   return Object.fromEntries(
     Object.entries(value).map(([key, child]) => {
-      if (sensitiveContext || sensitiveKey(key)) return [key, REDACTED_VALUE];
-      return [key, sanitizeJson(child, false)];
+      if (sensitiveContext || (sensitiveKey(key) && !(credit && creditDataKey(key))))
+        return [key, REDACTED_VALUE];
+      return [key, sanitizeJson(child, false, credit)];
     }),
   );
 }
 
 /** The post-check: output that still holds a sensitive value is refused, so a
  * change in the rules above fails the run instead of publishing the value. */
-function assertSanitized(value: JsonValue, cardList: boolean): void {
+function assertSanitized(value: JsonValue, cardList: boolean, credit = false): void {
   const visit = (child: JsonValue): void => {
     if (Array.isArray(child)) {
       child.forEach(visit);
@@ -116,7 +118,7 @@ function assertSanitized(value: JsonValue, cardList: boolean): void {
     }
     if (child === null || typeof child !== "object") return;
     for (const [key, nested] of Object.entries(child)) {
-      if (sensitiveKey(key) && nested !== REDACTED_VALUE) {
+      if (sensitiveKey(key) && !(credit && creditDataKey(key)) && nested !== REDACTED_VALUE) {
         throw new VpassSanitizeError("sanitizer_sensitive_value_retained");
       }
       visit(nested);
@@ -192,4 +194,26 @@ export function sanitizedEnvelopeBytes(
   cardList = false,
 ): Uint8Array {
   return encodeCanonical(sanitizeEnvelope(parseEnvelope(rawJson, code), cardList));
+}
+
+/** Observed credit data names contain "auth" but are not authentication material.
+ * The statement sanitizer v1 remains byte-for-byte unchanged by default.
+ */
+function creditDataKey(key: string): boolean {
+  return [
+    "AuthoriShokaiDisplayServiceBean",
+    "authoriShokaiVo",
+    "authoriShokaiDisplayVo",
+    "authoriEntryFlg",
+    "authoriReservationFlg",
+  ].includes(key);
+}
+export const VPASS_CREDIT_SANITIZER_ID = "vpass-credit-json-sanitizer";
+export const VPASS_CREDIT_SANITIZER_VERSION = "v1";
+
+/** Credit-only sanitizer: retain observed financial fields, redact credentials and identifiers. */
+export function sanitizedCreditEnvelopeBytes(rawJson: string, code: string): Uint8Array {
+  const sanitized = sanitizeJson(parseEnvelope(rawJson, code), false, true);
+  assertSanitized(sanitized, false, true);
+  return encodeCanonical(sanitized);
 }

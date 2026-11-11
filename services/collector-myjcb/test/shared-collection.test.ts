@@ -864,6 +864,7 @@ describe("ADR 0005 second amendment: unread months and export offers in the mani
       artifactCount: 3,
       unreadMonths: [{ position: 2, code: "scheduled_payments_page" }],
       exportOffers: [{ position: 1, kinds: ["pdf", "csv", "ofx"] }],
+      documentCode: "statement_export_bytes_unverified",
     });
     // Not a stop: nothing is recorded as a failure.
     expect(manifest.failures).toEqual([]);

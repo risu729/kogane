@@ -2,6 +2,9 @@
 // Full CORE migrations, real sealed observation/unit views, all triggers/foreign keys,
 // no ANALYZE. Provider values are synthetic. No Worker runtime is started.
 import { beforeAll, expect, test } from "bun:test";
+import { QualityStore } from "../../../packages/read-model/test/collection-quality-fixture.ts";
+import { myJcbJPointHistory } from "../../../packages/parsers/src/parsers/myjcb-jpoint-history.ts";
+import { syntheticJPointHistory } from "../../../packages/parsers/test/myjcb-jpoint-history-fixture.ts";
 import { fromTemplate } from "../../../packages/read-model/test/schema-template.ts";
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
@@ -188,9 +191,13 @@ function fullSchema(): Database {
   return db;
 }
 beforeAll(() => fullSchema().close(), 30000);
-function claim(db: Database, row: Candidate, release: string): void {
+function claim(
+  db: Database,
+  row: Pick<Candidate, "id" | "parse_run_id" | "parser_name" | "source_id">,
+  release: string,
+): void {
   const program =
-    row.parser_name === "myjcb-jpoint-balance"
+    row.parser_name === "myjcb-jpoint-balance" || row.parser_name === "myjcb-jpoint-history"
       ? "program:j-point"
       : row.source_id === "v-point-pay"
         ? "program:v-point-pay"
@@ -523,19 +530,83 @@ test("reward candidate plan on real CORE views preserves indexed probes without 
     expect(db.query("SELECT name FROM sqlite_master WHERE name='sqlite_stat1'").get()).toBeNull();
     const plan = (sql: string, args: readonly (string | number)[]) =>
       db
-        .query<{ detail: string }, SQLQueryBindings[]>("EXPLAIN QUERY PLAN " + sql)
-        .all(...args)
-        .map((row) => row.detail);
+        .query<{ id: number; parent: number; detail: string }, SQLQueryBindings[]>(
+          "EXPLAIN QUERY PLAN " + sql,
+        )
+        .all(...args);
     const q = rewardCandidateQuery(REWARD_PROMOTION_RELEASE, 500);
     const old = plan(FROZEN_REWARD_CANDIDATE_QUERY.sql, [
-        REWARD_PROMOTION_RELEASE,
-        500,
-        ...FROZEN_REWARD_CANDIDATE_QUERY.scopeBindings,
-      ]),
-      fresh = plan(q.sql, q.bindings);
+      REWARD_PROMOTION_RELEASE,
+      500,
+      ...FROZEN_REWARD_CANDIDATE_QUERY.scopeBindings,
+    ]);
+    const nodes = plan(q.sql, q.bindings),
+      fresh = nodes.map((row) => row.detail);
     const scans = (steps: string[]) => steps.filter((step) => /^SCAN /u.test(step));
-    expect(scans(old)).toEqual(["SCAN b"]);
-    expect(scans(fresh)).toEqual(["SCAN b", "SCAN unit_policy"]);
+    expect(scans(old.map((row) => row.detail))).toEqual(["SCAN b"]);
+    const named = (detail: string) => {
+      const found = nodes.filter((row) => row.detail === detail);
+      expect(found).toHaveLength(1);
+      return found[0]!;
+    };
+    const children = (id: number) => nodes.filter((row) => row.parent === id);
+    const coroutine = (parent: number) => {
+      const rows = children(parent).filter((row) =>
+        /^CO-ROUTINE \(subquery-\d+\)$/u.test(row.detail),
+      );
+      expect(rows).toHaveLength(1);
+      return rows[0]!;
+    };
+    const history = named("CO-ROUTINE jpoint_histories"),
+      historyWindow = coroutine(history.id);
+    const distinct = named("CO-ROUTINE jpoint_history_distinct");
+    expect(distinct.parent).toBe(historyWindow.id);
+    const membershipWindow = coroutine(distinct.id);
+    const totals = named("MATERIALIZE jpoint_totals"),
+      totalWindow = coroutine(totals.id);
+    expect(history.parent).toBe(totals.parent);
+    expect(nodes.find((row) => row.id === history.parent)?.detail).toMatch(
+      /^CORRELATED SCALAR SUBQUERY \d+$/u,
+    );
+    const windowScan = (node: typeof history, parent: number) => {
+      const detail = "SCAN " + node.detail.slice("CO-ROUTINE ".length);
+      expect(nodes.filter((row) => row.detail === detail)).toEqual([
+        expect.objectContaining({ parent }),
+      ]);
+      return detail;
+    };
+    const derivedScans = [
+      windowScan(membershipWindow, distinct.id),
+      "SCAN h",
+      windowScan(historyWindow, history.id),
+      windowScan(totalWindow, totals.id),
+    ];
+    expect(named("SCAN h").parent).toBe(historyWindow.id);
+    expect(scans(fresh).filter((step) => !derivedScans.includes(step))).toEqual([
+      "SCAN b",
+      "SCAN unit_policy",
+      "SCAN unit_policy",
+      "SCAN unit_policy",
+    ]);
+    expect(fresh.filter((step) => /USING AUTOMATIC/u.test(step))).toEqual([
+      "SEARCH h USING AUTOMATIC PARTIAL COVERING INDEX (parse_run_id=? AND history_rank=?)",
+      "SEARCH t USING AUTOMATIC PARTIAL COVERING INDEX (total_rank=? AND reported_total=? AND fetch_run_id=? AND holding_account=?)",
+    ]);
+    for (const row of nodes.filter((row) => /USING AUTOMATIC/u.test(row.detail)))
+      expect(row.parent).toBe(history.parent);
+    for (const window of [membershipWindow, totalWindow]) {
+      const detail = children(window.id).map((row) => row.detail);
+      expect(detail).toContain(
+        "SEARCH a USING INDEX idx_fetch_artifacts_source_dataset_time (source_id=?)",
+      );
+      expect(detail).toContain(
+        "SEARCH p USING COVERING INDEX idx_parse_runs_artifact (fetch_artifact_id=? AND parser_name=?)",
+      );
+      expect(detail).toContain(
+        "SEARCH pub USING COVERING INDEX published_parse_runs_run (parse_run_id=?)",
+      );
+      expect(detail).toContain("SEARCH b USING INDEX idx_bal_obs_parse_run (parse_run_id=?)");
+    }
     expect(
       fresh.some((step) =>
         /^SEARCH e USING INDEX idx_fetch_artifacts_run_role \(fetch_run_id=\? AND artifact_role=\?\)/u.test(
@@ -556,7 +627,7 @@ test("reward candidate plan on real CORE views preserves indexed probes without 
         /^SEARCH s EXISTS USING COVERING INDEX sqlite_autoindex_fetch_run_seals_1/u.test(step),
       ),
     ).toBe(true);
-    expect(fresh.some((step) => /USING AUTOMATIC/u.test(step))).toBe(false);
+
     expect(fresh.filter((step) => /^SCAN (?:a|e|u|ur|claimed|pub|p|seal|s)\b/u.test(step))).toEqual(
       [],
     );
@@ -564,3 +635,180 @@ test("reward candidate plan on real CORE views preserves indexed probes without 
     db.close();
   }
 });
+
+type HistoryMode = "complete" | "partial" | "failed" | "mismatch";
+function seedHistoryCapture(
+  store: QualityStore,
+  index: number,
+  conn: string,
+  mode: HistoryMode,
+): number[] {
+  const at = new Date(Date.UTC(2099, 0, 1, 0, 0, index)).toISOString();
+  const capture = store.run({
+    source: "myjcb",
+    at,
+    units: {
+      [`${conn}:j-point`]: { outcome: "success" },
+      [`${conn}:j-point-history`]: { outcome: mode === "failed" ? "failed" : "success" },
+    },
+    artifacts: [
+      { key: `${conn}/jpoint-balance.json`, dataset: "jpoint-balance", unit: `${conn}:j-point` },
+      {
+        key: `${conn}/jpoint-history.json`,
+        dataset: "jpoint-history",
+        unit: `${conn}:j-point-history`,
+      },
+    ],
+  });
+  const totalParse = store.parse(capture.artifacts[0]!, "myjcb-jpoint-balance", {
+    kind: "published",
+    version: "1.0.1",
+  });
+  if (totalParse === null) throw new Error("synthetic_total_parse_missing");
+  const insert = (
+    parse: number,
+    account: string,
+    metric: string,
+    amount: string,
+    extra = "{}",
+    instrument = "J_POINT",
+  ) =>
+    (
+      store.db
+        .query(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_text,amount_scale,instrument,observed_at,raw_locator,extra_json)
+      VALUES(?,?,?,?,0,?,?,'json:synthetic',?) RETURNING id`)
+        .get(parse, account, metric, amount, instrument, at, extra) as { id: number }
+    ).id;
+  const totalFact = insert(
+    totalParse,
+    `myjcb:${conn}:j-point:total`,
+    "displayed_jpoint_total",
+    mode === "mismatch" ? "200" : "100",
+  );
+  claim(
+    store.db,
+    {
+      id: totalFact,
+      parse_run_id: totalParse,
+      parser_name: "myjcb-jpoint-balance",
+      source_id: "myjcb",
+    },
+    REWARD_PROMOTION_RELEASE,
+  );
+  if (mode === "failed") return [];
+  const data = syntheticJPointHistory();
+  const historyParse = store.parse(capture.artifacts[1]!, myJcbJPointHistory.name, {
+    kind: "published",
+    version: myJcbJPointHistory.version,
+    claim: {
+      completeness: mode === "partial" ? "partial" : "complete",
+      observed: data.rows.length * 4,
+    },
+  });
+  if (historyParse === null) throw new Error("synthetic_history_parse_missing");
+  const parsed = myJcbJPointHistory.parse(new TextEncoder().encode(JSON.stringify(data)), {
+    id: capture.artifacts[1]!,
+    sourceId: "myjcb",
+    dataset: "jpoint-history",
+    artifactKey: `${conn}/jpoint-history.json`,
+    fetchUnitKey: `${conn}:j-point-history`,
+    mime: "application/json",
+    url: null,
+    fetchedAt: at,
+    sha256: "a".repeat(64),
+    runStatus: "success",
+    runFailureCount: 0,
+  });
+  const ids: number[] = [];
+  for (const row of parsed.observations) {
+    if (row.kind !== "balance") throw new Error("synthetic_history_kind_invalid");
+    const id = insert(
+      historyParse,
+      row.sourceAccount,
+      row.metric,
+      row.amountText!,
+      JSON.stringify(row.extra),
+    );
+    if (row.metric === "jpoint_acquisition_remaining") ids.push(id);
+  }
+  return mode === "complete" ? ids : [];
+}
+for (const randomSeed of [null, 1, 2, 3, 4])
+  test(`real acquisition history candidate membership and bounded work: ${randomSeed ?? "scaled"}`, () => {
+    const store = new QualityStore();
+    try {
+      const next = random(randomSeed ?? 1),
+        expected = new Map<string, number[]>();
+      const connections = randomSeed === null ? 8 : 4,
+        captures = randomSeed === null ? 20 : 12;
+      let index = 0;
+      for (let c = 0; c < connections; c++)
+        for (let n = 0; n < captures; n++) {
+          const conn = `synthetic-history-${c}`;
+          const mode: HistoryMode =
+            randomSeed === null
+              ? "complete"
+              : (["complete", "partial", "failed", "mismatch"] as const)[Math.floor(next() * 4)]!;
+          expected.set(conn, seedHistoryCapture(store, ++index, conn, mode));
+        }
+      // A native legacy family is present in the same CORE store. Its exact
+      // candidate bytes remain the frozen query's, not a restated expectation.
+      const legacyRun = store.run({
+        source: "v-point",
+        at: "2099-02-01T00:00:00.000Z",
+        artifacts: [{ key: "legacy.json", dataset: "balance-info" }],
+      });
+      const legacyParse = store.parse(legacyRun.artifacts[0]!, "v-point-balance-info", {
+        kind: "published",
+      });
+      if (legacyParse === null) throw new Error("synthetic_legacy_parse_missing");
+      store.db
+        .query(
+          "INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_text,amount_scale,instrument,observed_at,raw_locator,extra_json) VALUES(?,'v-point:regular:0','available_point_bucket','1000',0,'V_POINT','2099-02-01T00:00:00.000Z','json:synthetic','{}')",
+        )
+        .run(legacyParse);
+      const old = frozen(store.db, 5000),
+        actual = current(store.db, 5000);
+      expect(actual.filter((row) => row.parser_name !== myJcbJPointHistory.name)).toEqual(old);
+      expect(actual.map((row) => row.id)).toEqual(
+        [...old.map((row) => row.id), ...[...expected.values()].flat()].sort((a, b) => a - b),
+      );
+      for (const limit of [1, 7, 37, 500]) {
+        expect(current(store.db, limit)).toEqual(actual.slice(0, limit));
+        expect(drain(store.db, limit)).toEqual(actual);
+      }
+      // Identity probes count input evaluations on this same SQLite engine;
+      // they do not change ordering or selection. Each source history fact and
+      // each distinct capture is processed once, not once per outer candidate.
+      let facts = 0,
+        ranks = 0;
+      store.db.function("history_input_probe", (id: number) => {
+        facts++;
+        return id;
+      });
+      store.db.function("history_rank_probe", (id: number) => {
+        ranks++;
+        return id;
+      });
+      const q = rewardCandidateQuery(REWARD_PROMOTION_RELEASE, 5000);
+      const measured = q.sql
+        .replace(
+          "SELECT DISTINCT p.id AS parse_run_id",
+          "SELECT DISTINCT history_input_probe(p.id) AS parse_run_id",
+        )
+        .replace(
+          "h.fetched_at DESC,h.artifact_id DESC,h.parse_run_id DESC",
+          "h.fetched_at DESC,h.artifact_id DESC,history_rank_probe(h.parse_run_id) DESC",
+        );
+      expect(query(store.db, measured, q.bindings)).toEqual(actual);
+      expect(facts).toBeLessThanOrEqual(index * 3);
+      expect(ranks).toBeLessThanOrEqual(index);
+      expect(facts).toBeGreaterThan(0);
+      expect(ranks).toBeGreaterThan(0);
+      expect(
+        store.db.query("SELECT name FROM sqlite_master WHERE name='sqlite_stat1'").get(),
+      ).toBeNull();
+    } finally {
+      store.db.close();
+    }
+  });
