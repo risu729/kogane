@@ -134,7 +134,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
       ["sbi-account-assets-current", "sbi-account-assets-history", "sbi-realised-gains"],
       1238,
     ),
-    missing("document", 446),
+    partial("document", ["sbi-delivered-document-metadata"], 1248),
   ],
   // SBI新生銀行: top accounts with recent activity, balance summary and the yen
   // deposit account, exchange rates; dated history and CSV, term and foreign

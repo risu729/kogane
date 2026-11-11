@@ -111,3 +111,4 @@ for current behavior.
 
 - [ADR 0105: Preserve Vpass credit snapshots as overlapping provider reports](0105-vpass-reported-credit-snapshots.md) — proposed; independent daily card snapshots, explicit thousand-yen precision and exact revolving yen, shared non-additive metrics, registration v8
 - [ADR 0106: Preserve reported SBI payments and sales as complete retained containers](0106-sbi-reported-income-and-gains.md) — proposed; observed JPY/USD payments and domestic sales, exact raw numeric tokens, checked full-retention counts, complete-container current membership and registration v9
+- [ADR 0108: SBI delivered-document evidence and bounded continuation](0108-sbi-delivered-documents.md) — proposed; exact observed DOM/AST handoff, original single-PDF evidence, independent document units, round-robin progress and registration v11

@@ -43,6 +43,7 @@ import { sbiVcAccountMargin } from "./sbi-vc-account-margin.ts";
 import { sbiVcCashBalances } from "./sbi-vc-cash-balances.ts";
 import { sbiVcCashflows } from "./sbi-vc-cashflows.ts";
 import { sbiVcDocuments } from "./sbi-vc-documents.ts";
+import { sbiDocuments } from "./sbi-documents.ts";
 import { sbiVcExecutions } from "./sbi-vc-executions.ts";
 import { sbiVcPositionSummary } from "./sbi-vc-position-summary.ts";
 import { smbcDirectBalance, smbcDirectTransactions } from "./smbc-direct.ts";
@@ -59,6 +60,7 @@ import { vPointPayNotificationEvent } from "./v-point-pay.ts";
 import { vpassStatementPage } from "./vpass.ts";
 
 export const PARSERS: readonly Parser[] = [
+  sbiDocuments,
   prestiaBankBalances,
   globalPassActivity,
   mobileSuicaSfHistory,
