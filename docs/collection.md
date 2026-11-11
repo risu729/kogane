@@ -947,6 +947,13 @@ for this artifact, with the CP932 charset a constant of the source.
 | `account-assets-history-source.json`         | `provider_response` | `domestic` |
 | `account-assets-history-inventory.json`      | `collector_derived` | `domestic` |
 | `account-assets-history-<year>.json`         | `collector_derived` | `domestic` |
+| `income-payments-summary-source.json`        | `provider_response` | `domestic` |
+| `income-payments-rows-source.json`           | `provider_response` | `domestic` |
+| `income-payments.json`                       | `collector_derived` | `domestic` |
+| `realised-gains-all-summary-source.json`     | `provider_response` | `domestic` |
+| `realised-gains-summary-source.json`         | `provider_response` | `domestic` |
+| `realised-gains-rows-source.json`            | `provider_response` | `domestic` |
+| `realised-gains.json`                        | `collector_derived` | `domestic` |
 | `yen-detail-history.json`                    | `collector_derived` | `domestic` |
 | `yen-detail-history-page-NNNN-source.json`   | `provider_response` | `domestic` |
 | `foreign-cash-history.json`                  | `collector_derived` | `domestic` |

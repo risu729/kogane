@@ -1,4 +1,5 @@
 import { vpassCreditSnapshot } from "./vpass-credit.ts";
+import { sbiIncomePayments, sbiRealisedGains } from "./sbi-income-history.ts";
 import type { Parser } from "../types.ts";
 import { moneyForwardDetailBalances } from "./moneyforward-detail-balances.ts";
 // Build identity of every parser below (design review D03): the registry is
@@ -77,6 +78,8 @@ export const PARSERS: readonly Parser[] = [
   sbiDomesticCashPositions,
   sbiAccountAssetsCurrent,
   sbiAccountAssetsHistory,
+  sbiIncomePayments,
+  sbiRealisedGains,
   sbiYenDetailHistory,
   sbiDomesticTradeRecords,
   sbiForeignTradeRecords,

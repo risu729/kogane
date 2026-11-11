@@ -10,6 +10,8 @@ import {
 import type { Artifact, DomesticSession } from "./types";
 import { assetHistoryArtifacts, readAssetHistoryResponse } from "./asset-history";
 import { collectCashHistory, readCashHistoryResponse } from "./cash-history";
+import { collectIncomeHistory, incomeHistoryUrl } from "./income-history";
+import { IncomeHistoryError } from "../../../packages/parsers/src/parsers/sbi-income-history-schema";
 import {
   CashHistoryError,
   CASH_HISTORY_PAGE_SIZE,
@@ -96,6 +98,7 @@ export async function collectMainSiteArtifacts(options: {
   onHistoryError?: (error: SbiHistoryError) => void;
   onAssetHistoryError?: (error: AssetHistoryError) => void;
   onCashHistoryError?: (error: CashHistoryError) => void;
+  onIncomeHistoryError?: (error: IncomeHistoryError) => void;
   onArtifact?: (artifact: Artifact) => void;
 }): Promise<Artifact[]> {
   const to = options.to ?? jstDate(new Date());
@@ -131,6 +134,38 @@ export async function collectMainSiteArtifacts(options: {
       : assetHistoryError("sbi_asset_history_fetch_failed", { cause });
     if (options.onAssetHistoryError === undefined) throw error;
     options.onAssetHistoryError(error);
+  }
+
+  for (const kind of ["income", "gains"] as const) {
+    try {
+      await collectIncomeHistory({
+        kind,
+        today: jstDate(new Date()),
+        retain,
+        fetch: async (role, range) => {
+          const url = incomeHistoryUrl(auth.assetsUrl, kind, role, range);
+          const response = await fetch(url, {
+            headers: {
+              accept: "application/json, text/plain, */*",
+              cookie: cookieHeader(auth.cookies, url),
+              referer: auth.assetsUrl,
+              "user-agent": MAIN_SITE_USER_AGENT,
+            },
+          });
+          if (!response.ok) throw new IncomeHistoryError("sbi_income_history_fetch_failed");
+          // Cash's bounded reader also counts the actual stream independently
+          // of Content-Length; its transport failures are closed below.
+          return readCashHistoryResponse(response);
+        },
+      });
+    } catch (cause) {
+      const error =
+        cause instanceof IncomeHistoryError
+          ? cause
+          : new IncomeHistoryError("sbi_income_history_fetch_failed");
+      if (options.onIncomeHistoryError === undefined) throw error;
+      options.onIncomeHistoryError(error);
+    }
   }
 
   // Cash presets always cover all retained history, independently of the

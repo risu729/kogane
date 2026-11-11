@@ -13,6 +13,8 @@ import { moneyForwardDetailBalances } from "../src/parsers/moneyforward-detail-b
 import { join } from "node:path";
 import type { ArtifactMeta, Parser } from "../src/types.ts";
 import { sbiAccountAssetsCurrent } from "../src/parsers/sbi-account-assets-current.ts";
+import { sbiIncomePayments, sbiRealisedGains } from "../src/parsers/sbi-income-history.ts";
+import { incomeBundle } from "./fixtures/sbi-income.ts";
 import { sbiDomesticCashPositions } from "../src/parsers/sbi-domestic-cash-positions.ts";
 import { sbiForeignCashBalances } from "../src/parsers/sbi-foreign-cash-balances.ts";
 import { sbiForeignCashPositions } from "../src/parsers/sbi-foreign-cash-positions.ts";
@@ -451,6 +453,12 @@ const VPASS_CREDIT: ContractParser = {
 };
 
 export const CONTRACT_PARSERS: ContractParser[] = [
+  cases(sbiIncomePayments, meta("sbi-securities", "income-payments"), {
+    "complete-payments": json(incomeBundle("income")),
+  }),
+  cases(sbiRealisedGains, meta("sbi-securities", "realised-gains"), {
+    "complete-sales": json(incomeBundle("gains")),
+  }),
   VPASS_CREDIT,
   cases(
     moneyForwardDetailBalances,

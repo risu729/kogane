@@ -10,6 +10,8 @@
 // when the two disagree, so a new snapshot parser cannot ship without a
 // policy row.
 export const SNAPSHOT_DATASETS = [
+  ["sbi-income-payments", "income-payments"],
+  ["sbi-realised-gains", "realised-gains"],
   ["vpass-credit-snapshot", "credit-snapshot"],
   ["moneyforward-detail-balances", "account-detail"],
   ["sbi-domestic-cash-positions", "domestic-cash-positions"],

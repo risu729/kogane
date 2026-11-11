@@ -109,3 +109,4 @@ for current behavior.
 - [ADR 0102: Preserve retained SBI cash history with checked page coverage](0102-sbi-retained-cash-history.md) — proposed; observed retained yen paging and USD statement, exact raw pages and exhaustive lineage, control totals, occurrence identities, registration v7, unobserved foreign continuation fails closed
 
 - [ADR 0105: Preserve Vpass credit snapshots as overlapping provider reports](0105-vpass-reported-credit-snapshots.md) — proposed; independent daily card snapshots, explicit thousand-yen precision and exact revolving yen, shared non-additive metrics, registration v8
+- [ADR 0106: Preserve reported SBI payments and sales as complete retained containers](0106-sbi-reported-income-and-gains.md) — proposed; observed JPY/USD payments and domestic sales, exact raw numeric tokens, checked full-retention counts, complete-container current membership and registration v9

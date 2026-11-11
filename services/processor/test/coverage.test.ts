@@ -117,6 +117,8 @@ test("the current production migration chain preserves legacy policies and adds 
           row.parser_name !== "sbi-shinsei-exchange-rate" &&
           row.parser_name !== "sbi-shinsei-monthly-report-metadata" &&
           row.parser_name !== "moneyforward-detail-balances" &&
+          row.parser_name !== "sbi-income-payments" &&
+          row.parser_name !== "sbi-realised-gains" &&
           row.parser_name !== "vpass-credit-snapshot",
       )
       .every((row) => row.policy_id === "legacy-warning-compat-v1"),
@@ -142,6 +144,28 @@ test("the current production migration chain preserves legacy policies and adds 
   expect(policies.find((row) => row.parser_name === "sbi-shinsei-exchange-rate")?.policy_id).toBe(
     "coverage-v1",
   );
+  expect(
+    policies.filter((row) =>
+      ["sbi-income-payments", "sbi-realised-gains"].includes(row.parser_name),
+    ),
+  ).toEqual([
+    {
+      source_id: "sbi-securities",
+      parser_name: "sbi-income-payments",
+      dataset: "income-payments",
+      policy_id: "coverage-v1",
+      unit_scope: "run",
+      snapshot_selection: 1,
+    },
+    {
+      source_id: "sbi-securities",
+      parser_name: "sbi-realised-gains",
+      dataset: "realised-gains",
+      policy_id: "coverage-v1",
+      unit_scope: "run",
+      snapshot_selection: 1,
+    },
+  ]);
   expect(containers.filter((row) => row.unit_scope !== "run")).toEqual([
     {
       source_id: "vpass",
@@ -163,6 +187,8 @@ test("the current production migration chain preserves legacy policies and adds 
     "moneyforward-detail-balances",
     "prestia-bank-balances",
     "sbi-foreign-cash-positions",
+    "sbi-income-payments",
+    "sbi-realised-gains",
     "sbi-shinsei-exchange-rate",
     "sbi-shinsei-monthly-report-metadata",
     "st-george-balances",
