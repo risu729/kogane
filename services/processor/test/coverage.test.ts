@@ -181,9 +181,9 @@ test("the migration chain names every explicit policy and preserves other run-sc
     "sbi-shinsei-monthly-report-metadata",
     "sbi-vc-document-metadata",
     "sbi-vc-document-metadata",
+    "smbc-foreign-ordinary-balance",
     "sony-bank-document-metadata",
     "sony-bank-realised-gains",
-    "smbc-foreign-ordinary-balance",
     "st-george-balances",
     "vpass-credit-snapshot",
   ]);
