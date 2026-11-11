@@ -100,8 +100,8 @@ export async function collectMainSiteArtifacts(options: {
   to?: string;
   onHistoryError?: (error: SbiHistoryError) => void;
   onAssetHistoryError?: (error: AssetHistoryError) => void;
-  onCashHistoryError?: (error: CashHistoryError) => void;
-  onIncomeHistoryError?: (error: IncomeHistoryError) => void;
+  onCashHistoryError?: (error: CashHistoryError, kind: CashHistoryKind) => void;
+  onIncomeHistoryError?: (error: IncomeHistoryError, kind: "income" | "gains") => void;
   onArtifact?: (artifact: Artifact) => void;
   onMailboxUnit?: (unit: MailboxUnit) => void;
   onMailboxError?: (error: MailboxError) => void;
@@ -195,7 +195,7 @@ export async function collectMainSiteArtifacts(options: {
           ? cause
           : new IncomeHistoryError("sbi_income_history_fetch_failed");
       if (options.onIncomeHistoryError === undefined) throw error;
-      options.onIncomeHistoryError(error);
+      options.onIncomeHistoryError(error, kind);
     }
   }
 
@@ -210,7 +210,7 @@ export async function collectMainSiteArtifacts(options: {
           ? cause
           : new CashHistoryError("sbi_cash_history_fetch_failed");
       if (options.onCashHistoryError === undefined) throw error;
-      options.onCashHistoryError(error);
+      options.onCashHistoryError(error, kind);
     }
   }
 

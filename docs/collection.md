@@ -1630,3 +1630,15 @@ format change is needed for that step.
 - A bare `bun test` also discovers `worker-test/shared-data-bucket.test.ts`,
   whose `cloudflare:test` import resolves only under Vitest. The test task runs
   `vitest run` and `bun test ./test` separately, and both pass under bun 1.4.0.
+
+### SBI supplementary publication boundaries
+
+SBI financial collection keeps `domestic` and `foreign` as dependent core units.
+Retained yen cash, retained foreign cash, income, realised gains and weekly
+assets have independent units containing all of their retained inputs and
+outputs. A refused supplement keeps the overall run partial while complete
+siblings remain eligible. A partial core still blocks its own dependent
+datasets. The document mailbox remains a separate terminal. Migration 0100
+preserves operator policies and snapshot membership; the exact legacy income/
+gains `domestic` partition aliases its successor only during snapshot ranking.
+See [ADR 0109](adr/0109-sbi-supplemental-unit-eligibility.md).

@@ -88,9 +88,11 @@ a separate `<financial-run-id>-mailbox` terminal with the same acquisition
 reference/start time and no financial units or ranges. Its refusal cannot make
 the financial run partial. The cursor references only its durable mailbox run;
 operations retain both known durable run IDs even if a later cursor/lease
-failure makes the operation fail. Existing supplementary financial refusals
-remain governed by the existing run-scope policies under
-[issue 1296](https://github.com/risu729/kogane/issues/1296).
+failure makes the operation fail. Supplementary financial refusals use independent units under
+[ADR 0109](../../docs/adr/0109-sbi-supplemental-unit-eligibility.md): retained
+yen/foreign cash, income/gains and weekly assets each preserve complete core
+publication and healthy siblings. A partial domestic or foreign core still
+blocks all its dependent positions, executions and current cash.
 
 Registration v11 maps only the new PDF dataset and preserves v1–v10 meanings.
 `sbi-delivered-document-metadata` emits evidence-only coverage, with independently
@@ -195,7 +197,8 @@ with a closed failure code.
 After original-JSON, duplicate-key, exact-number and closed-field audits, each
 raw page is retained as `<dataset>-page-NNNN-source.json`. The derived bundle
 names all raw inputs; shared persistence checks its exhaustive inventory.
-Both statements belong to the domestic main-site unit. Bounds are 2,000 pages /
+The statements have separate `cash-history-yen` and `cash-history-foreign`
+units, including each statement's raw pages and derived bundle. Bounds are 2,000 pages /
 20,000 rows. Page metadata, each page's expected rows, total rows, descending
 calendar dates and requested-range membership are checked, as are known codes,
 unsigned exact amounts and duplicate yen `did`. Yen deposit/payment counts and
@@ -241,10 +244,10 @@ calendar-year shard/hash/count with the raw hash, GET path and capture time.
 `account-assets-history-<year>.json` retains at most 53 weeks, keeping long
 histories under the existing 2 MiB parser-output limit. Each shard's input
 lineage names source and inventory. Missing or altered inventory members make
-the domestic unit/run partial; available evidence remains stored. Registration
+the `weekly-assets` unit and run partial; available evidence remains stored. Registration
 v5 names only yearly shards as the new dataset and freezes v1–v4 mappings. Each successful
 main-site capture is retained immediately, so a later yen/history failure
-keeps these bytes while the run stays partial under the existing policy.
+keeps these bytes while the run stays partial; unrelated complete units remain publishable.
 
 Whole-source calendar, native-series and exact-total validation runs before
 any yearly filtering. Before auditing or normalizing numbers, the JSON reader
@@ -268,6 +271,21 @@ added. The catalogue remains partial: the observed 44 points do not establish
 August 2021 coverage, the two iDeCo profiles were unavailable, and a scheduled
 production collection/publication is still required ([ADR 0098](../../docs/adr/0098-sbi-weekly-asset-history.md)).
 
+## Financial publication units
+
+Migration 0100 enables the existing unit eligibility gate for the eleven SBI
+financial datasets. The core `domestic` and `foreign` units retain their coarse
+failure boundaries, including all execution windows; a partial core cannot be
+rescued by a successful sibling. Supplements are independent units with their
+whole retained input inventory. Unknown continuation and provider shapes stay
+refused. Existing operator policy alternatives survive the migration.
+
+Income/gains snapshot ranking treats only the old exact `domestic` key as the
+corresponding new unit: a corrected or complete-empty capture supersedes the
+old container rather than adding a second partition. Refusals preserve the
+last complete container, including through historical cutoffs. No original
+evidence or coverage claim is rewritten. See [ADR 0109](../../docs/adr/0109-sbi-supplemental-unit-eligibility.md).
+
 ## Reported income and realised gains
 
 Normal domestic main-site collection also reads the observed My Assets income
@@ -275,8 +293,8 @@ and domestic realised-gain routes from `2021/08/01` through the current JST
 date. These five GETs use the observed first-page `offset=1&limit=30`, existing
 cookies and referer; no collection window, cursor or login is added. Summary
 counts, category counts and row counts must agree. More than 30 rows, unknown
-products/accounts/currencies or a missing source makes the domestic unit/run
-partial. Unobserved continuation requests are never guessed.
+products/accounts/currencies or a missing source makes its `income-history-income`
+or `income-history-gains` unit and the run partial. Unobserved continuation requests are never guessed.
 
 Exact summary/row bytes stay in unmapped private `provider_response` artifacts.
 Only closed financial schemas reach that storage; duplicate-key secrets,

@@ -555,6 +555,27 @@ describe("named concepts in the final SQL", () => {
     expect(economicallySummable.policy).toBeNull();
     expect(economicallySummable.predicate()).toBe("0");
     const db = migratedDatabase();
+    const sbiUnitPolicies = (
+      [
+        ["account-assets-current", 1],
+        ["account-assets-history", 0],
+        ["domestic-cash-positions", 1],
+        ["domestic-trade-records", 0],
+        ["foreign-cash-balances", 1],
+        ["foreign-cash-history", 0],
+        ["foreign-cash-positions", 1],
+        ["foreign-trade-records", 0],
+        ["income-payments", 1],
+        ["realised-gains", 1],
+        ["yen-detail-history", 0],
+      ] as const
+    ).map(([dataset, snapshot_selection]) => ({
+      source_id: "sbi-securities",
+      parser_name: `sbi-${dataset}`,
+      dataset,
+      unit_scope: "unit",
+      snapshot_selection,
+    }));
     expect(db.query(`SELECT ${economicallySummable.predicate()} AS summable`).get()).toEqual({
       summable: 0,
     });
@@ -578,6 +599,9 @@ describe("named concepts in the final SQL", () => {
         .all(),
     ).toEqual([
       { parser_name: "myjcb-jpoint-history", dataset: "jpoint-history", unit_scope: "unit" },
+      ...sbiUnitPolicies
+        .filter((row) => row.snapshot_selection === 1)
+        .map(({ parser_name, dataset, unit_scope }) => ({ parser_name, dataset, unit_scope })),
       { parser_name: "sbi-vc-account-margin", dataset: "account-margin", unit_scope: "unit" },
       { parser_name: "sbi-vc-cash-balances", dataset: "cash-balances", unit_scope: "unit" },
       { parser_name: "sbi-vc-position-summary", dataset: "position-summary", unit_scope: "unit" },
@@ -595,94 +619,107 @@ describe("named concepts in the final SQL", () => {
           "SELECT source_id,parser_name,dataset,unit_scope,snapshot_selection FROM dataset_snapshot_policies WHERE snapshot_selection<>1 OR unit_scope<>'run' ORDER BY parser_name,dataset",
         )
         .all(),
-    ).toEqual([
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-credit-ledger",
-        dataset: "credit-ledger",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-credit-past-month-balances",
-        dataset: "credit-past-months",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-credit-statement-total",
-        dataset: "credit-detail",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-debit-ledger",
-        dataset: "debit-detail",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-debit-other-statement",
-        dataset: "debit-other-detail",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-jpoint-balance",
-        dataset: "jpoint-balance",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-jpoint-history",
-        dataset: "jpoint-history",
-        unit_scope: "unit",
-        snapshot_selection: 1,
-      },
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-skip-payment-schedule",
-        dataset: "credit-schedule",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "sbi-securities",
-        parser_name: "sbi-delivered-document-metadata",
-        dataset: "delivered-document-pdf",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "sbi-shinsei-bank",
-        parser_name: "sbi-shinsei-monthly-report-metadata",
-        dataset: "monthly-report-pdf",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "sbi-shinsei-bank",
-        parser_name: "sbi-shinsei-savings-activity",
-        dataset: "savings-activity",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      ...SBI_VC_UNIT_POLICIES,
-      ...smbcUnitPolicies,
-      {
-        source_id: "vpass",
-        parser_name: "vpass-credit-snapshot",
-        dataset: "credit-snapshot",
-        unit_scope: "unit",
-        snapshot_selection: 1,
-      },
-    ]);
+    ).toEqual(
+      [
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-credit-ledger",
+          dataset: "credit-ledger",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-credit-past-month-balances",
+          dataset: "credit-past-months",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-credit-statement-total",
+          dataset: "credit-detail",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-debit-ledger",
+          dataset: "debit-detail",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-debit-other-statement",
+          dataset: "debit-other-detail",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-jpoint-balance",
+          dataset: "jpoint-balance",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-jpoint-history",
+          dataset: "jpoint-history",
+          unit_scope: "unit",
+          snapshot_selection: 1,
+        },
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-skip-payment-schedule",
+          dataset: "credit-schedule",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "sbi-securities",
+          parser_name: "sbi-delivered-document-metadata",
+          dataset: "delivered-document-pdf",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "sbi-shinsei-bank",
+          parser_name: "sbi-shinsei-monthly-report-metadata",
+          dataset: "monthly-report-pdf",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "sbi-shinsei-bank",
+          parser_name: "sbi-shinsei-savings-activity",
+          dataset: "savings-activity",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        ...SBI_VC_UNIT_POLICIES,
+        ...smbcUnitPolicies,
+        {
+          source_id: "vpass",
+          parser_name: "vpass-credit-snapshot",
+          dataset: "credit-snapshot",
+          unit_scope: "unit",
+          snapshot_selection: 1,
+        },
+        ...sbiUnitPolicies,
+      ].sort((left, right) =>
+        left.parser_name < right.parser_name
+          ? -1
+          : left.parser_name > right.parser_name
+            ? 1
+            : left.dataset < right.dataset
+              ? -1
+              : left.dataset > right.dataset
+                ? 1
+                : 0,
+      ),
+    );
   });
 
   test("the publication gate decides every current read and every recorded read", () => {
