@@ -66,6 +66,14 @@ export const PARSER_DIGESTS: ParserDigests = {
       "aa24f5018ae32b1019713dfc675de63e137b1f9c16f2622e2d66c8fec4e6f861",
     "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts":
       "5c3fac4fdb4b0af4b1cafc6580790e45c212b095089764e8240d8ad064058c58",
+    "poc/observation-pipeline/src/parsers/sbi-account-assets-history.ts":
+      "f8061e4def8cd5e01ccdce3d6eb53e0c470369ac14c4ac6e8b18de9d5579a00b",
+    "poc/observation-pipeline/src/parsers/sbi-asset-history-json.ts":
+      "4ebc8ee80f122423a0855b89d92b503ba972342072beb9afbfa643ad3f0d1e80",
+    "poc/observation-pipeline/src/parsers/sbi-asset-history-schema.ts":
+      "f6244707d0d6a15b2c8e27074b57dbdc3e36862182940572c193f252b64e35a1",
+    "poc/observation-pipeline/src/parsers/sbi-asset-history-validation.ts":
+      "9a9dec469cd4a4d7d70b8bc9b9b52d9ef9dae5e965b036e1d89be5138101a86a",
     "poc/observation-pipeline/src/parsers/sbi-domestic-cash-positions.ts":
       "c9dbf90ce8e391a8880ec019bd346ca9647470a346403f1414a7636ca70fb064",
     "poc/observation-pipeline/src/parsers/sbi-domestic-trade-records.ts":
@@ -365,6 +373,22 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/parsers/coverage.ts",
         "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "sbi-account-assets-history": {
+      version: "0.1.2",
+      codeDigest: "d345231e64132547383c8dec20ecbb5cec6d6af94df1b391a2c73bb647f16158",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-account-assets-history.ts",
+        "poc/observation-pipeline/src/parsers/sbi-asset-history-json.ts",
+        "poc/observation-pipeline/src/parsers/sbi-asset-history-schema.ts",
+        "poc/observation-pipeline/src/parsers/sbi-asset-history-validation.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],

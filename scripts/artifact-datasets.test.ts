@@ -205,6 +205,7 @@ const SAMPLES: readonly Sample[] = [
   ...[
     ["domestic-cash-positions", "domestic"],
     ["account-assets-current", "domestic"],
+
     ["yen-detail-history", "domestic"],
     ["domestic-trade-records", "domestic"],
     ["foreign-cash-positions", "foreign"],
@@ -217,6 +218,14 @@ const SAMPLES: readonly Sample[] = [
     mediaType: json,
     dataset: dataset!,
     unitKey: unitKey!,
+  })),
+  ...["source", "inventory", "2099"].map((part) => ({
+    source: "sbi-securities",
+    artifactKey: `account-assets-history-${part}.json`,
+    role: part === "source" ? "provider_response" : "collector_derived",
+    mediaType: json,
+    dataset: part === "2099" ? "account-assets-history" : null,
+    unitKey: "domestic",
   })),
   {
     source: "sbi-shinsei",
@@ -629,6 +638,7 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
   "sbi-securities": [
     "domestic-cash-positions",
     "account-assets-current",
+    "account-assets-history",
     "yen-detail-history",
     "domestic-trade-records",
     "foreign-cash-positions",
@@ -733,8 +743,9 @@ describe("the registration dataset table (ADR 0022)", () => {
       "terminal-registration-v2",
       "terminal-registration-v3",
       "terminal-registration-v4",
+      "terminal-registration-v5",
     ]);
-    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v4");
+    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v5");
     const vpass = (await allSamples()).filter((sample) => sample.source === "vpass");
     expect(vpass.filter((sample) => sample.dataset === "statement-page").length).toBe(2);
     for (const sample of vpass) {
@@ -811,7 +822,7 @@ describe("the registration dataset table (ADR 0022)", () => {
   test("v4 changes dataset mapping only for SBI's dated execution keys; v3 remains reproducible", async () => {
     for (const sample of await allSamples()) {
       const before = artifactDataset(sample.source, sample, "terminal-registration-v3");
-      const after = artifactDataset(sample.source, sample);
+      const after = artifactDataset(sample.source, sample, "terminal-registration-v4");
       if (before === after) continue;
       expect(sample.source).toBe("sbi-securities");
       expect(sample.artifactKey).toMatch(
@@ -819,6 +830,18 @@ describe("the registration dataset table (ADR 0022)", () => {
       );
       expect(before).toBeNull();
       expect(after).toBe(sample.dataset);
+    }
+  });
+
+  test("v5 adds only weekly assets while v4 stays reproducible", async () => {
+    for (const sample of await allSamples()) {
+      const before = artifactDataset(sample.source, sample, "terminal-registration-v4");
+      const after = artifactDataset(sample.source, sample);
+      if (before === after) continue;
+      expect(sample.source).toBe("sbi-securities");
+      expect(sample.artifactKey).toBe("account-assets-history-2099.json");
+      expect(before).toBeNull();
+      expect(after).toBe("account-assets-history");
     }
   });
 

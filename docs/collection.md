@@ -918,6 +918,9 @@ for this artifact, with the CP932 charset a constant of the source.
 | ----------------------------------------- | ------------------- | ---------- |
 | `domestic-cash-positions.json`            | `collector_derived` | `domestic` |
 | `account-assets-current.json`             | `collector_derived` | `domestic` |
+| `account-assets-history-source.json`      | `provider_response` | `domestic` |
+| `account-assets-history-inventory.json`   | `collector_derived` | `domestic` |
+| `account-assets-history-<year>.json`      | `collector_derived` | `domestic` |
 | `yen-detail-history.json`                 | `collector_derived` | `domestic` |
 | `domestic-trade-records.json`             | `collector_derived` | `domestic` |
 | `foreign-cash-positions.json`             | `collector_derived` | `foreign`  |
@@ -926,7 +929,26 @@ for this artifact, with the CP932 charset a constant of the source.
 | `domestic-trade-records-<from>-<to>.json` | `collector_derived` | `domestic` |
 | `foreign-trade-records-<from>-<to>.json`  | `collector_derived` | `foreign`  |
 
-The bytes are `JSON.stringify(artifact.body)` — the collector's re-encoded view
+Weekly asset history comes from the observed no-query/no-body GET
+`/account/api/assets/valuations` in the existing main-site session. The
+collector audits its closed shape and preserves the exact full response bytes.
+A derived inventory records every expected calendar-year shard
+(`account-assets-history-<year>.json`), hash and point count, and the source
+hash/request/capture time. Yearly shards retain all profiles, native tuples
+and residual rows while keeping at most 53 weeks under the unchanged parser
+output budget. Their transformation inputs name both the source and inventory.
+Missing or changed shards make the domestic unit/run partial. Registration v5
+names only yearly derivatives as the history dataset; source/inventory are unparsed;
+v1–v4 stay frozen. The parser separates available window coverage from
+unavailable null profiles and emits no extra points for native ALL tuples.
+The production observation reader chooses one latest witnessed revision per
+point before filtering/paging; old raw and superseded observations remain
+archived. No new read route is added. The catalogue is partial pending
+scheduled publication and account-specific retained-period verification
+([ADR 0098](adr/0098-sbi-weekly-asset-history.md)).
+
+Except for the exact weekly-history source bytes above, the bytes are
+`JSON.stringify(artifact.body)` — the collector's re-encoded view
 of each response, exactly what the retired legacy path wrote to the per-source
 bucket and the importer forwarded centrally. A dataset is attributed to a unit
 by the same rule the importer used (`foreign-` prefix → `foreign`).
@@ -945,7 +967,7 @@ windows at year end. Web retention is a different surface and is not used as
 the mobile boundary. The mobile execution query fields stay unchanged. No progress cursor or operations window
 parameter is added ([ADR 0096](adr/0096-sbi-scheduled-execution-history.md)).
 
-Every dataset states one `extracted` step by `collector-sbi-securities` at the
+Other datasets state one `extracted` step by `collector-sbi-securities` at the
 producer version with no input (ADR 0021): each is the collector's own
 envelope around what it read from provider responses (the MTS payload with its
 result codes, the GraphQL and main-site JSON, the foreign trade history pages

@@ -26,6 +26,7 @@ import {
 } from "./sony-bank.ts";
 import { globalPassActivity } from "./global-pass-activity-parser.ts";
 import { sbiAccountAssetsCurrent } from "./sbi-account-assets-current.ts";
+import { sbiAccountAssetsHistory } from "./sbi-account-assets-history.ts";
 import { sbiDomesticCashPositions } from "./sbi-domestic-cash-positions.ts";
 import { sbiDomesticTradeRecords } from "./sbi-domestic-trade-records.ts";
 import { sbiForeignCashBalances } from "./sbi-foreign-cash-balances.ts";
@@ -68,6 +69,7 @@ export const PARSERS: readonly Parser[] = [
   sonyBankWalletHistory,
   sbiDomesticCashPositions,
   sbiAccountAssetsCurrent,
+  sbiAccountAssetsHistory,
   sbiYenDetailHistory,
   sbiDomesticTradeRecords,
   sbiForeignTradeRecords,

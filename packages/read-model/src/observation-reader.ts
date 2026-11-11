@@ -52,6 +52,10 @@ import {
 } from "./reader";
 import { CANDIDATE_LIMIT, GLOBAL_PASS_NOTICE_LIMIT, RESULT_BOUND } from "./scope";
 import {
+  portfolioValuationHistorySql,
+  type PortfolioValuationHistoryRow,
+} from "./portfolio-valuation-history";
+import {
   ARTIFACT_DETAIL_SQL,
   ARTIFACT_PARSE_RUNS_SQL,
   ARTIFACTS_SQL,
@@ -210,6 +214,11 @@ export function createObservationReader(
     async listBalanceHistory({ offset, ...scope }) {
       const page = balanceHistorySql(scope, offset);
       return (await list<BalanceHistorySqlRow>(page.sql, page.args)).map(balanceHistoryRow);
+    },
+
+    async listPortfolioValuationHistory(query) {
+      const page = portfolioValuationHistorySql(query);
+      return list<PortfolioValuationHistoryRow>(page.sql, page.args);
     },
 
     async listPositions({ offset, ...scope }): Promise<PositionWithValuations[]> {

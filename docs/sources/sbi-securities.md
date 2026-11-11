@@ -610,3 +610,52 @@ nor terminals; failures retain only machine codes derived from `safeErrorDetails
 Worker names and secrets are unchanged. The Processor's
 `SHARED_R2_INGEST_ENABLED` gates registration, rather than switching the collector's
 storage destination. See `docs/collection.md` for details.
+
+## 2026-11-09 weekly asset history
+
+Observed read-only in an authenticated ordinary Chrome session, following the
+main site's My Assets link and clicking `資産推移情報を読み込む` (load asset
+trends). `GET /account/api/assets/valuations` returned HTTP 200 without a query
+or body. Request header names included Accept, Referer, User-Agent and browser
+client hints; no CSRF header was present. Selecting `全期間` (all periods)
+issued no additional account API request: it changed the client-side range.
+No new login or collector invocation was performed for this observation.
+
+The full response contained 44 consecutive seven-day points anchored at
+Saturday 00:00 JST. This timestamp labels a weekly point, not its retrieval
+or the provider's background update time. The general August 2021 product
+retention description does not prove this account has points back to that
+month. No actual dates, amounts or account identifiers are recorded here.
+
+The response had exactly 16 root keys: `holdCategories`,
+`valuationsTransitions`, `acquisitionCosts`, `balances`, and the same four
+with suffixes `WithoutDeposit`, `WithoutIdeco`, `WithoutDepositAndIdeco`.
+Transitions were keyed by 13-digit epoch milliseconds. Each category point
+had valuation/acquisitionCost numbers and nullable profitLoss/profitLossRate
+numbers. Native series were timestamp/value pairs. There was no pagination
+or provider count field.
+
+Further value-free comparisons established:
+
+- Full holdCategories listed five categories: DOMESTIC_DEPOSIT,
+  DOMESTIC_STOCK_SPOT, FOREIGN_DEPOSIT, SBI_HYBRID_DEPOSIT, FOREIGN_STOCK_US.
+  The transitions contained those five plus ALL at every point.
+- WithoutDeposit listed only the two stock categories, while every transition
+  still contained all six keys. Excluded deposits included nonzero values.
+  Only the listed categories participate in that profile's aggregate.
+- For both available profiles, every native timestamp set matched the
+  transitions. Native balances/acquisitionCosts matched ALL valuation and
+  acquisitionCost at all 44 points, and sums of the listed categories matched
+  ALL for both monetary fields at every point.
+- Every non-null monetary value examined (660 per available profile) and
+  native monetary tuple value was a safe integer. Deposit profitLoss and
+  profitLossRate were null; stock and ALL values were numeric.
+- Both iDeCo-related profiles had null transitions and empty category/native
+  arrays. This is an unavailable shape, not a zero financial position. Their
+  positive-data shape has not been observed.
+
+[ADR 0098](../adr/0098-sbi-weekly-asset-history.md) implements only this observed
+route and retains the catalogue as partial. Scheduled collection, publication,
+returned earliest/latest keys and count, freshness, execution budget and any
+account-specific earlier history remain unverified. A different retention
+route or positive iDeCo shape requires observation before implementation.
