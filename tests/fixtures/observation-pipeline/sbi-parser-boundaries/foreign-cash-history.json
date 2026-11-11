@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "sbi-retained-cash-history-v1",
+  "kind": "foreign",
+  "requestedRange": { "from": "2095-01-01", "to": "2099-12-31" },
+  "pageSize": 10,
+  "totalCount": 3,
+  "pages": [{
+    "pageCount": 1,
+    "totalCount": 3,
+    "businessErrorMessage": null,
+    "items": [
+      { "valueDate": "2099/09/03", "tradeType": "入金", "cashType": "配当金", "cometCurrencyCode": "011", "cometCurrencyName": "米ドル", "description": "synthetic distribution", "amount": "12.34" },
+      { "valueDate": "2099/09/03", "tradeType": "入金", "cashType": "配当金", "cometCurrencyCode": "011", "cometCurrencyName": "米ドル", "description": "synthetic distribution", "amount": "12.34" },
+      { "valueDate": "2099/09/02", "tradeType": "出金", "cashType": null, "cometCurrencyCode": "011", "cometCurrencyName": "米ドル", "description": "synthetic payout", "amount": "5.67" }
+    ]
+  }]
+}

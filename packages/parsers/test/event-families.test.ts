@@ -31,11 +31,14 @@ import {
   myJcbPastMonthBalances,
 } from "../src/parsers/myjcb.ts";
 import { myJcbJPointBalance } from "../src/parsers/myjcb-jpoint.ts";
+import { myJcbDebitLedger, myJcbDebitOtherStatement } from "../src/parsers/myjcb-debit.ts";
 import { myJcbSkipPaymentSchedule } from "../src/parsers/myjcb-skip-payment-schedule.ts";
 import { paypayCsv } from "../src/parsers/paypay-csv.ts";
 import { PARSERS } from "../src/parsers/registry.ts";
 import { sbiDomesticTradeRecords } from "../src/parsers/sbi-domestic-trade-records.ts";
+import { sbiAccountAssetsHistory } from "../src/parsers/sbi-account-assets-history.ts";
 import { sbiForeignCashPositions } from "../src/parsers/sbi-foreign-cash-positions.ts";
+import { sbiForeignCashHistory } from "../src/parsers/sbi-foreign-cash-history.ts";
 import { sbiForeignTradeRecords } from "../src/parsers/sbi-foreign-trade-records.ts";
 import { sbiVcCashflows } from "../src/parsers/sbi-vc-cashflows.ts";
 import { sbiVcExecutions } from "../src/parsers/sbi-vc-executions.ts";
@@ -66,13 +69,16 @@ import { skipMeta, skipPage } from "./myjcb-skip-payment-fixture.ts";
 const NOT_IN_REGISTRY = [
   "mizuho-account-list",
   "moneyforward-canonical-evidence-boundary",
+  "moneyforward-detail-balances",
   "myjcb-canonical-evidence-boundary",
   "myjcb-credit-past-month-balances",
   "myjcb-credit-statement-total",
   "myjcb-skip-payment-schedule",
   "myjcb-jpoint-balance",
+  "myjcb-debit-other-statement",
   "prestia-bank-balances",
   "sbi-account-assets-current",
+  "sbi-account-assets-history",
   "sbi-foreign-cash-balances",
   "sbi-shinsei-balance-summary-and-stage",
   "sbi-shinsei-exchange-rate",
@@ -234,6 +240,18 @@ const CASES: Case[] = [
     );
   }),
   one(
+    myJcbDebitLedger,
+    "debit-sections",
+    meta("myjcb", "debit-detail", {
+      artifactKey: "connection-a/debit-detail-01.html",
+      mime: "text/html",
+      statementState: "debit",
+    }),
+    encode(
+      '<div class="pc-disp"><table><tr><th>ご利用者</th><th>お振替日</th><th>ご利用先など</th><th>お振替金額</th><th>摘要</th><th>承認番号</th></tr><tr><td>本人</td><td>2030/01/01</td><td>架空店舗</td><td>100</td><td></td><td>000001</td></tr></table><table><tr><th>ご利用者</th><th>差額発生日</th><th>ご利用先など</th><th>差額</th><th>摘要</th><th>お取引結果</th><th>承認番号</th></tr><tr><td>本人</td><td>2030/01/02</td><td>架空店舗</td><td>-20</td><td></td><td>銀行振替済</td><td>000001</td></tr></table></div>',
+    ),
+  ),
+  one(
     paypayCsv,
     "csv",
     meta("paypay", null, { mime: "text/csv" }),
@@ -262,6 +280,12 @@ const CASES: Case[] = [
     "boundary",
     meta("sbi-securities", "foreign-trade-records"),
     read("sbi-parser-boundaries", "foreign-trade-records.json"),
+  ),
+  one(
+    sbiForeignCashHistory,
+    "cash-history",
+    meta("sbi-securities", "foreign-cash-history"),
+    read("sbi-parser-boundaries", "foreign-cash-history.json"),
   ),
   one(
     sbiYenDetailHistory,
@@ -407,6 +431,21 @@ const OUTSIDE_CASES: Case[] = [
     encode(smbcForeignHistory()),
   ),
   one(
+    myJcbDebitOtherStatement,
+    "other-empty",
+    meta("myjcb", "debit-other-detail", {
+      artifactKey: "connection-a/debit-other-detail-01.html",
+      mime: "text/html",
+    }),
+    encode('<h1 class="heading01-01">選択された月のご請求はございません。</h1>'),
+  ),
+  one(
+    sbiAccountAssetsHistory,
+    "account-assets-history",
+    meta("sbi-securities", "account-assets-history"),
+    read("sbi-parser-boundaries", "account-assets-history.json"),
+  ),
+  one(
     sbiShinseiMonthlyReport,
     "monthly-report",
     meta("sbi-shinsei-bank", "monthly-report-pdf", {
@@ -549,6 +588,7 @@ const LINK_FIELDS: Record<
     exchange_rate_stated: [["overseas", "conversionRateJpy"]],
   },
   "sbi-securities/sbi-domestic-trade-records": { value_date: [["valueDate"]] },
+  "sbi-securities/sbi-foreign-cash-history": { value_date: [["valueDate"]] },
   "sbi-securities/sbi-foreign-trade-records": {
     value_date: [["_kogane", "valueDate"], ["valueDate"]],
     settlement_amount: [["settlementCurrencyCode"]],

@@ -237,6 +237,31 @@ export const UNKNOWN_METRIC: MetricDefinition = {
 
 // Order matters and mirrors the branch order of classifyBalance / classifyActivity.
 export const METRIC_REGISTRY: readonly RegistryEntry[] = [
+  ...(
+    [
+      [
+        "reported_account_value_jpy",
+        "moneyforward.reported-account-value",
+        "valuation",
+        "currency",
+      ],
+      ["reported_point_quantity", "moneyforward.reported-point-quantity", "stock", "reward"],
+      ["reported_point_value_jpy", "moneyforward.reported-point-value", "valuation", "currency"],
+    ] as const
+  ).map(([metric, metricId, measurementKind, unitDimension]) =>
+    entry([balance("moneyforward-me", "moneyforward-detail-balances", [metric])], {
+      metricId,
+      measurementKind,
+      subjectKind: "connection",
+      unitDimension,
+      signMeaning: "provider-sign",
+      timeBasis: "point-in-time",
+      aggregationRule: "non-additive",
+      overlapGroup: "moneyforward:reported-detail-values",
+      sourceAuthority: "provider-reported",
+      legacyBalance: LEGACY_UNKNOWN,
+    }),
+  ),
   entry([balance("prestia", "prestia-bank-balances", ["available_balance"])], {
     metricId: "prestia.available-balance",
     measurementKind: "capacity",

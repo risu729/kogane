@@ -610,3 +610,112 @@ nor terminals; failures retain only machine codes derived from `safeErrorDetails
 Worker names and secrets are unchanged. The Processor's
 `SHARED_R2_INGEST_ENABLED` gates registration, rather than switching the collector's
 storage destination. See `docs/collection.md` for details.
+
+## 2026-11-09 weekly asset history
+
+Observed read-only in an authenticated ordinary Chrome session, following the
+main site's My Assets link and clicking `資産推移情報を読み込む` (load asset
+trends). `GET /account/api/assets/valuations` returned HTTP 200 without a query
+or body. Request header names included Accept, Referer, User-Agent and browser
+client hints; no CSRF header was present. Selecting `全期間` (all periods)
+issued no additional account API request: it changed the client-side range.
+No new login or collector invocation was performed for this observation.
+
+The full response contained 44 consecutive seven-day points anchored at
+Saturday 00:00 JST. This timestamp labels a weekly point, not its retrieval
+or the provider's background update time. The general August 2021 product
+retention description does not prove this account has points back to that
+month. No actual dates, amounts or account identifiers are recorded here.
+
+The response had exactly 16 root keys: `holdCategories`,
+`valuationsTransitions`, `acquisitionCosts`, `balances`, and the same four
+with suffixes `WithoutDeposit`, `WithoutIdeco`, `WithoutDepositAndIdeco`.
+Transitions were keyed by 13-digit epoch milliseconds. Each category point
+had valuation/acquisitionCost numbers and nullable profitLoss/profitLossRate
+numbers. Native series were timestamp/value pairs. There was no pagination
+or provider count field.
+
+Further value-free comparisons established:
+
+- Full holdCategories listed five categories: DOMESTIC_DEPOSIT,
+  DOMESTIC_STOCK_SPOT, FOREIGN_DEPOSIT, SBI_HYBRID_DEPOSIT, FOREIGN_STOCK_US.
+  The transitions contained those five plus ALL at every point.
+- WithoutDeposit listed only the two stock categories, while every transition
+  still contained all six keys. Excluded deposits included nonzero values.
+  Only the listed categories participate in that profile's aggregate.
+- For both available profiles, every native timestamp set matched the
+  transitions. Native balances/acquisitionCosts matched ALL valuation and
+  acquisitionCost at all 44 points, and sums of the listed categories matched
+  ALL for both monetary fields at every point.
+- Every non-null monetary value examined (660 per available profile) and
+  native monetary tuple value was a safe integer. Deposit profitLoss and
+  profitLossRate were null; stock and ALL values were numeric.
+- Both iDeCo-related profiles had null transitions and empty category/native
+  arrays. This is an unavailable shape, not a zero financial position. Their
+  positive-data shape has not been observed.
+
+[ADR 0098](../adr/0098-sbi-weekly-asset-history.md) implements only this observed
+route and retains the catalogue as partial. Scheduled collection, publication,
+returned earliest/latest keys and count, freshness, execution budget and any
+account-specific earlier history remain unverified. A different retention
+route or positive iDeCo shape requires observation before implementation.
+
+## 2026-11-10 retained cash statements
+
+Read-only observations used the owner's ordinary Chrome session and official
+statement links. Search dates below are UI request parameters, never personal
+transaction dates. No provider amounts, row ids, names, accounts, cookies or
+tokens were recorded. These reads did not run a collector or modify an account.
+
+The yen statement is `/banking/yen/detail-history` on the member site. Selecting
+the two-year preset issued `GET /banking/api/yen/detail/query` with
+`depositDateFrom=20241111`, `depositDateTo=20261110`,
+`payDepKbnList=1,2,5`, `detailKbnList=11,12,13,14,15,16,17,18,21,22,23,24`,
+`sortDateType=1`, `pageNumber=1`, `pageSize=10`, `totalCountKbn=1`.
+The UI offers page sizes 10/20/50/100/150/200 and sort types 0 ascending /
+1 descending. Clicking page 2 issued the same query with only `pageNumber=2`.
+
+Each response had exactly these fields:
+
+- `totalDepositAmount`, `totalDepositCount`, `totalPaymentAmount`,
+  `totalPaymentCount`, `totalTransDepositAmount`, `totalTransDepositCount`,
+  `totalTransPaymentAmount`, `totalTransPaymentCount`: strings.
+- `totalCount`, `pageCount`, `pageNumber`, `pageSize`: numbers.
+- `detailsConditions`: the fixed filter labels `['入金：すべて','出金：すべて']`.
+- `exceededMaxCount`, `isExceededMaxCount`: booleans, both false.
+- `depositRecordList`: rows with exactly `payDepDate`, `payDepKbn`, `detailKbn`,
+  `dispAbstract`, `payAmount` strings and numeric `did`.
+
+There was no `nextBusinessDate` field in this query response; historical init
+artifacts have a different shape. Both pages declared total 20, two pages and
+size 10, each returned ten rows, and all twenty `did` values were distinct.
+The controls stayed identical across pages. Direction strings were `入金` and
+`出金`; the observed detail labels were `その他`, `利金・配当金`,
+`金融機関への出金`, `金融機関からの入金`. Exact value-free checks established that
+each direction's count and sum of unsigned amounts matched its deposit/payment
+controls. Both transfer counts were zero, so their relationship to the other
+controls was not established.
+
+The official foreign-cash link reaches `/banking/fc/detail-history`. Selecting
+the five-year preset issued `GET /banking/api/fc/detail-history/search` with
+`startDate=2021/11/11`, `endDate=2026/11/10`, `tradeKind=''`,
+`currencyCode=''`, `pageNumber=1`, `pageSize=10`, `termKind=1`, `sortType=1`.
+Opening detailed conditions, selecting the USD radio and querying issued the
+same request with `currencyCode=011`. Both returned HTTP 200 and exactly
+`{pageCount:number,totalCount:number,items:array,businessErrorMessage:null}`.
+The observed filtered response had one page, total ten and ten rows, all code
+`011`, whose fixed currency name was `米ドル`. Each row had exactly
+`valueDate`, `tradeType`, `cometCurrencyCode`, `cometCurrencyName`, `description`,
+`amount` strings and nullable/string `cashType`. Trade types were `入金` and
+`出金`; cash types were null, `分配金`, `配当金`; all amount text was unsigned
+decimal. No stable row-id field was present. A foreign second-page request
+was not observable with the current one-page data and remains unsupported.
+
+[ADR 0102](../adr/0102-sbi-retained-cash-history.md) uses only these request
+shapes and exact labels. The normal collector requests all retained yen pages
+and the retained USD statement, preserving per-page raw inputs. Unknown labels,
+positive transfer controls, unknown currencies, changed totals or missing pages
+keep coverage partial. The catalogue remains partial under #1226 until foreign
+continuation/transfer semantics and actual scheduled retained publication,
+freshness and the execution budget are verified. Dividend-labelled cash rows
+publish settlement cash only; they establish no separate income dataset.

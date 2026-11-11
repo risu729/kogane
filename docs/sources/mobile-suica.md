@@ -715,9 +715,9 @@ longer-lived, lossy rewards path.
 4. **Browser cost and failure telemetry.** Record Browser duration and acquisition
    errors without URLs, credential values or cookies. Alert on a failed manifest;
    do not automatically retry authentication many times.
-5. **Pagination boundary.** The live account currently fits on one 15-row page.
-   Retain the implemented earlier-date cursor and fail closed if one day alone
-   reaches 100 rows; a synthetic parser test is not proof of the server limit.
+5. **Pagination boundary.** The latest observed account fits on one 48-row page.
+   The inclusive date walk is implemented; a real capped page and high-volume
+   scheduled acquisition remain unverified. One capped day fails closed.
 6. **Google Wallet inventory and cross-check.** On the owned Android device,
    record only field names, visible row count, oldest/newest dates, whether
    amounts/balance-after/station/merchant/charge labels are present, and current
@@ -804,3 +804,34 @@ The Worker has no Cron trigger since
 Processor's alarm job `mobile-suica` (06:10 JST, `10 21 * * *` in
 `config/alarm-jobs.json`) calls its private `ScheduledCollection` entrypoint
 ([schedules](../schedules.md)).
+
+## 2026-11-10: observed PC history date search
+
+The owner completed JRE ID login in normal local Chrome. The member menu's SF
+history link opened `/iq/ir/SuicaDisp.aspx`. Its form POSTs to the same endpoint,
+with URL-encoded fields `baseVariable` (private session state), `specifyYearMonth`
+(`YYYY/MM`), `specifyDay` (`DD`), and `SEARCH` (`%8C%9F%8D%F5`, Shift_JIS 検索).
+Unchecking print selection proved that `selectAll` and repeated `printCheck` are
+unnecessary. The label explicitly says 以前: the bound includes the selected day.
+A completed response to public test selector `2026/10`, `01` contained 19 rows,
+all included in the initial 48-row response. Counts were checked after complete
+navigation, because intermediate streamed DOM reads undercounted rows.
+
+History has eight TD columns: checkbox, month/day, type/place, type/place, balance,
+and deposit/use amount. The first cell is not an ordinal. The oldest displayed
+amount is blank by provider design and may become available in an earlier search.
+The UI states 100 rows per search, 26 weeks, no current-day history, and the
+00:50–05:00 JST service stop. A real capped response was unavailable; capped-page
+and one-day saturation tests use invented data matching this observed schema.
+
+The public test selector `2026/05`, `13` returned HTTP 200 on the same endpoint,
+with title ご案内 and paragraph 利用履歴がありません。, no history table/selects,
+and form action `/cm/lb/Message.aspx`. Hidden fields were `baseVariable`,
+`returnUrlList`, and `checkScreenTransfer`; their values are private and never
+retained. Only this exact empty response is recognized; other messages fail closed.
+
+The daily collector walks inclusive oldest dates until a sub-100 response, verifies
+and replaces complete boundary-day suffixes, and preserves occurrences. It retains
+sanitized pages and per-page provenance, with bounds and failure rules in
+[ADR 0104](../adr/0104-mobile-suica-retained-history.md). No live collector or
+production ingestion was invoked for this observation.

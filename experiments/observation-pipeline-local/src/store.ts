@@ -220,6 +220,26 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
     'smbc-bank','foreign-ordinary-aud-balance','smbc-foreign-ordinary-balance',
     'coverage-v1','0.1.2',0,'run',1,1794268800000
   )`);
+  // Mirror the MoneyForward detail policy once; preserve operator choices.
+  if (
+    !db
+      .query(
+        "SELECT 1 FROM dataset_snapshot_policies WHERE parser_name='moneyforward-detail-balances' AND dataset='account-detail'",
+      )
+      .get()
+  ) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(
+            EXPERIMENT_ROOT,
+            "../../packages/storage-d1/migrations/core/0091_moneyforward_detail_balance_snapshots.sql",
+          ),
+          "utf8",
+        ),
+      ),
+    )();
+  }
   // 0056/0059 advance the board reader (ADR 0028 and its amendment). 0084
   // follows the shared CSV release for all four exact-version policies.
   // Each UPDATE names its previous value, so reopening preserves later pins

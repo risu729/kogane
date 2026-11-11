@@ -37,6 +37,26 @@ function lookupsFor(
 }
 
 describe("metric registry seeded from the current PoC rules", () => {
+  test("MoneyForward reported detail measures have no additive or direct-deposit interpretation", () => {
+    for (const metric of [
+      "reported_account_value_jpy",
+      "reported_point_quantity",
+      "reported_point_value_jpy",
+    ]) {
+      const definition = resolveMetric({
+        family: "balance",
+        sourceId: "moneyforward-me",
+        parserName: "moneyforward-detail-balances",
+        metric,
+        sourceAccount: "moneyforward-me:synthetic",
+        amountBasis: null,
+      });
+      expect(definition.metricId).not.toBe("unknown");
+      expect(definition.metricId).not.toBe("deposit.balance");
+      expect(definition.aggregationRule).toBe("non-additive");
+      expect(additivityVerdict(definition, definition).additive).toBe(false);
+    }
+  });
   test("J-POINT total is a non-additive reward stock with frozen legacy fallback", () => {
     const definition = resolveMetric({
       family: "balance",

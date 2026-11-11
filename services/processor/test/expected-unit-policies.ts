@@ -32,10 +32,18 @@ const policy = (
   ...extra,
 });
 
-// The closed default opt-ins of migrations 0080, 0088, 0095 and 0096.
+// The closed default opt-ins of migrations 0080, 0088, 0090, 0095 and 0096.
 // This expected catalogue is independent of the SQL read under test: an extra
 // source, page, parser, scope, snapshot membership or policy still fails.
 export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
+  policy("myjcb", "debit-detail", "myjcb-debit-ledger", {
+    snapshot_selection: 0,
+    updated_at_ms: 1794268800000,
+  }),
+  policy("myjcb", "debit-other-detail", "myjcb-debit-other-statement", {
+    snapshot_selection: 0,
+    updated_at_ms: 1794268800000,
+  }),
   policy("myjcb", "jpoint-balance", "myjcb-jpoint-balance", {
     snapshot_selection: 0,
     updated_at_ms: 1791590400000,

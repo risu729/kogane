@@ -1,0 +1,217 @@
+{
+  "holdCategories": [
+    "DOMESTIC_DEPOSIT",
+    "DOMESTIC_STOCK_SPOT",
+    "FOREIGN_DEPOSIT",
+    "SBI_HYBRID_DEPOSIT",
+    "FOREIGN_STOCK_US"
+  ],
+  "valuationsTransitions": {
+    "4071049200000": {
+      "DOMESTIC_DEPOSIT": {
+        "valuation": 10,
+        "acquisitionCost": 5,
+        "profitLoss": null,
+        "profitLossRate": null
+      },
+      "DOMESTIC_STOCK_SPOT": {
+        "valuation": 20,
+        "acquisitionCost": 10,
+        "profitLoss": 10,
+        "profitLossRate": 100
+      },
+      "FOREIGN_DEPOSIT": {
+        "valuation": 30,
+        "acquisitionCost": 15,
+        "profitLoss": null,
+        "profitLossRate": null
+      },
+      "SBI_HYBRID_DEPOSIT": {
+        "valuation": 40,
+        "acquisitionCost": 20,
+        "profitLoss": null,
+        "profitLossRate": null
+      },
+      "FOREIGN_STOCK_US": {
+        "valuation": 50,
+        "acquisitionCost": 25,
+        "profitLoss": 25,
+        "profitLossRate": 100
+      },
+      "ALL": {
+        "valuation": 150,
+        "acquisitionCost": 75,
+        "profitLoss": 75,
+        "profitLossRate": 100
+      }
+    },
+    "4071654000000": {
+      "DOMESTIC_DEPOSIT": {
+        "valuation": 11,
+        "acquisitionCost": 6,
+        "profitLoss": null,
+        "profitLossRate": null
+      },
+      "DOMESTIC_STOCK_SPOT": {
+        "valuation": 21,
+        "acquisitionCost": 11,
+        "profitLoss": 10,
+        "profitLossRate": 100
+      },
+      "FOREIGN_DEPOSIT": {
+        "valuation": 31,
+        "acquisitionCost": 16,
+        "profitLoss": null,
+        "profitLossRate": null
+      },
+      "SBI_HYBRID_DEPOSIT": {
+        "valuation": 41,
+        "acquisitionCost": 21,
+        "profitLoss": null,
+        "profitLossRate": null
+      },
+      "FOREIGN_STOCK_US": {
+        "valuation": 51,
+        "acquisitionCost": 26,
+        "profitLoss": 25,
+        "profitLossRate": 100
+      },
+      "ALL": {
+        "valuation": 155,
+        "acquisitionCost": 80,
+        "profitLoss": 75,
+        "profitLossRate": 100
+      }
+    }
+  },
+  "balances": [
+    [
+      4071049200000,
+      150
+    ],
+    [
+      4071654000000,
+      155
+    ]
+  ],
+  "acquisitionCosts": [
+    [
+      4071049200000,
+      75
+    ],
+    [
+      4071654000000,
+      80
+    ]
+  ],
+  "holdCategoriesWithoutDeposit": [
+    "DOMESTIC_STOCK_SPOT",
+    "FOREIGN_STOCK_US"
+  ],
+  "valuationsTransitionsWithoutDeposit": {
+    "4071049200000": {
+      "DOMESTIC_DEPOSIT": {
+        "valuation": 10,
+        "acquisitionCost": 5,
+        "profitLoss": null,
+        "profitLossRate": null
+      },
+      "DOMESTIC_STOCK_SPOT": {
+        "valuation": 20,
+        "acquisitionCost": 10,
+        "profitLoss": 10,
+        "profitLossRate": 100
+      },
+      "FOREIGN_DEPOSIT": {
+        "valuation": 30,
+        "acquisitionCost": 15,
+        "profitLoss": null,
+        "profitLossRate": null
+      },
+      "SBI_HYBRID_DEPOSIT": {
+        "valuation": 40,
+        "acquisitionCost": 20,
+        "profitLoss": null,
+        "profitLossRate": null
+      },
+      "FOREIGN_STOCK_US": {
+        "valuation": 50,
+        "acquisitionCost": 25,
+        "profitLoss": 25,
+        "profitLossRate": 100
+      },
+      "ALL": {
+        "valuation": 70,
+        "acquisitionCost": 35,
+        "profitLoss": 35,
+        "profitLossRate": 100
+      }
+    },
+    "4071654000000": {
+      "DOMESTIC_DEPOSIT": {
+        "valuation": 11,
+        "acquisitionCost": 6,
+        "profitLoss": null,
+        "profitLossRate": null
+      },
+      "DOMESTIC_STOCK_SPOT": {
+        "valuation": 21,
+        "acquisitionCost": 11,
+        "profitLoss": 10,
+        "profitLossRate": 100
+      },
+      "FOREIGN_DEPOSIT": {
+        "valuation": 31,
+        "acquisitionCost": 16,
+        "profitLoss": null,
+        "profitLossRate": null
+      },
+      "SBI_HYBRID_DEPOSIT": {
+        "valuation": 41,
+        "acquisitionCost": 21,
+        "profitLoss": null,
+        "profitLossRate": null
+      },
+      "FOREIGN_STOCK_US": {
+        "valuation": 51,
+        "acquisitionCost": 26,
+        "profitLoss": 25,
+        "profitLossRate": 100
+      },
+      "ALL": {
+        "valuation": 72,
+        "acquisitionCost": 37,
+        "profitLoss": 35,
+        "profitLossRate": 100
+      }
+    }
+  },
+  "balancesWithoutDeposit": [
+    [
+      4071049200000,
+      70
+    ],
+    [
+      4071654000000,
+      72
+    ]
+  ],
+  "acquisitionCostsWithoutDeposit": [
+    [
+      4071049200000,
+      35
+    ],
+    [
+      4071654000000,
+      37
+    ]
+  ],
+  "holdCategoriesWithoutIdeco": [],
+  "valuationsTransitionsWithoutIdeco": null,
+  "balancesWithoutIdeco": [],
+  "acquisitionCostsWithoutIdeco": [],
+  "holdCategoriesWithoutDepositAndIdeco": [],
+  "valuationsTransitionsWithoutDepositAndIdeco": null,
+  "balancesWithoutDepositAndIdeco": [],
+  "acquisitionCostsWithoutDepositAndIdeco": []
+}
