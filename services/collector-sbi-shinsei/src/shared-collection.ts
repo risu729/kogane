@@ -27,6 +27,8 @@ import {
   type R2BucketLike,
   type TerminalRunFields,
   type TerminalTransformation,
+  type TerminalUnit,
+  type TerminalRange,
 } from "../../../packages/collection/src/index";
 import type { CollectionFailure, CollectionManifest, RawArtifact, StoredArtifact } from "./types";
 
@@ -99,7 +101,20 @@ export function sanitizeProviderCapture(body: string | ArrayBuffer): Uint8Array 
 
 /** Bytes of an artifact as they are stored in DATA. */
 function sharedArtifactBytes(artifact: RawArtifact): Uint8Array {
-  if (artifact.dataset === NORMALIZED_DATASET) {
+  if (artifact.dataset === "monthly-report-pdf") {
+    if (typeof artifact.body === "string") throw new SharedCollectionError("shared_report_invalid");
+    const bytes = new Uint8Array(artifact.body);
+    if (
+      artifact.mediaType !== "application/pdf" ||
+      !/^monthly-report-(?!0000)\d{4}-(?:0[1-9]|1[0-2])\.pdf$/u.test(artifact.filename) ||
+      bytes.length < 5 ||
+      bytes.length > 1024 * 1024 ||
+      new TextDecoder().decode(bytes.subarray(0, 5)) !== "%PDF-"
+    )
+      throw new SharedCollectionError("shared_report_invalid");
+    return bytes;
+  }
+  if (artifact.dataset === NORMALIZED_DATASET || artifact.dataset === "savings-activity") {
     return typeof artifact.body === "string"
       ? encoder.encode(artifact.body)
       : new Uint8Array(artifact.body.slice(0));
@@ -181,12 +196,13 @@ async function artifactOf(options: {
   artifactKey: string;
   bytes: Uint8Array;
   role: string;
+  mediaType?: string;
 }): Promise<PersistArtifact> {
   return {
     artifactKey: options.artifactKey,
     sha256: await sha256Hex(options.bytes),
     byteSize: options.bytes.byteLength,
-    mediaType: JSON_MEDIA_TYPE,
+    mediaType: options.mediaType ?? JSON_MEDIA_TYPE,
     role: options.role,
     body: { kind: "bytes", bytes: options.bytes },
   };
@@ -223,14 +239,55 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
   const stored: StoredArtifact[] = [];
   const transformations: TerminalTransformation[] = [];
   const collected = new Set<string>();
+  const units: TerminalUnit[] = [];
+  const ranges: TerminalRange[] = [];
   for (const artifact of input.artifacts) {
     const normalized = artifact.dataset === NORMALIZED_DATASET;
-    const entry = await artifactOf({
+    const history = artifact.dataset === "savings-activity";
+    const document = artifact.dataset === "monthly-report-pdf";
+    const scope = artifact.historyScope;
+    const unitKey = scope
+      ? "savings-" + (await sha256Hex(encoder.encode(scope.accountNo))).slice(0, 32)
+      : undefined;
+    let entry = await artifactOf({
       artifactKey: artifact.filename,
       bytes: sharedArtifactBytes(artifact),
-      role: normalized ? COLLECTOR_DERIVED_ROLE : PROVIDER_CAPTURE_ROLE,
+      role: document
+        ? "provider_document"
+        : normalized || history
+          ? COLLECTOR_DERIVED_ROLE
+          : PROVIDER_CAPTURE_ROLE,
+      mediaType: document ? "application/pdf" : JSON_MEDIA_TYPE,
     });
+    if (document) {
+      const period = artifact.filename.slice(15, 22);
+      entry = {
+        ...entry,
+        artifactKey: `monthly-report-${period}-${entry.sha256}.pdf`,
+        unitKey: `monthly-report-${period}`,
+      };
+    }
+    if (unitKey) entry = { ...entry, unitKey };
     artifacts.push(entry);
+    if (history && scope && unitKey) {
+      units.push({ unitKey, unitKind: "account", artifactCount: 2, coverageStatus: "complete" });
+      for (const kind of ["requested", "declared_coverage"] as const)
+        ranges.push({
+          rangeKey: unitKey + "-" + kind,
+          rangeKind: kind,
+          precision: "date",
+          basis: kind === "requested" ? "manifest" : "source",
+          startValue:
+            scope.fromDate.slice(0, 4) +
+            "-" +
+            scope.fromDate.slice(4, 6) +
+            "-" +
+            scope.fromDate.slice(6),
+          endValue:
+            scope.toDate.slice(0, 4) + "-" + scope.toDate.slice(4, 6) + "-" + scope.toDate.slice(6),
+          unitKey,
+        });
+    }
     stored.push({
       dataset: artifact.dataset,
       key: objectKey(entry.sha256),
@@ -240,37 +297,88 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
     });
     collected.add(artifact.filename);
     transformations.push(
-      normalized
+      document
         ? {
-            transformationId: `${artifact.filename}:extracted`,
+            transformationId: `${entry.artifactKey}:decoded`,
             stepKind: "extracted",
-            transformerId: "sbi-shinsei-normalizer",
-            transformerVersion: "sbi-shinsei-v1",
-            // Empty when the source capture failed: the manifest states the
-            // lineage it has rather than inventing a parent.
-            inputArtifactKeys: input.artifacts.some(
-              (candidate) => candidate.filename === TOP_BALANCES_ARTIFACT_KEY,
-            )
-              ? [TOP_BALANCES_ARTIFACT_KEY]
-              : [],
-            outputArtifactKey: artifact.filename,
-          }
-        : {
-            transformationId: `${artifact.filename}:redacted`,
-            stepKind: "redacted",
-            transformerId: "sbi-shinsei-token-sanitizer",
-            // v3: only the token is stripped again; v2 (#333) also replaced
-            // person names, which ADR 0029's amendment 2 withdrew. The version
-            // moves forward so each stored run still says which step wrote it.
-            transformerVersion: "v3",
-            // The provider response is not retained: only its redaction is.
+            transformerId: "sbi-shinsei-report-pdf-extractor",
+            transformerVersion: "v1",
             inputArtifactKeys: [],
-            outputArtifactKey: artifact.filename,
-          },
+            outputArtifactKey: entry.artifactKey,
+          }
+        : history
+          ? {
+              transformationId: artifact.filename + ":scope",
+              stepKind: "extracted",
+              transformerId: "sbi-shinsei-period-scope",
+              transformerVersion: "v1",
+              inputArtifactKeys: [
+                artifact.filename.replace("savings-activity-", "raw-period-activity-"),
+                TOP_BALANCES_ARTIFACT_KEY,
+              ],
+              outputArtifactKey: artifact.filename,
+            }
+          : normalized
+            ? {
+                transformationId: `${artifact.filename}:extracted`,
+                stepKind: "extracted",
+                transformerId: "sbi-shinsei-normalizer",
+                transformerVersion: "sbi-shinsei-v1",
+                // Empty when the source capture failed: the manifest states the
+                // lineage it has rather than inventing a parent.
+                inputArtifactKeys: input.artifacts.some(
+                  (candidate) => candidate.filename === TOP_BALANCES_ARTIFACT_KEY,
+                )
+                  ? [TOP_BALANCES_ARTIFACT_KEY]
+                  : [],
+                outputArtifactKey: artifact.filename,
+              }
+            : {
+                transformationId: `${artifact.filename}:redacted`,
+                stepKind: "redacted",
+                transformerId: "sbi-shinsei-token-sanitizer",
+                // v3: only the token is stripped again; v2 (#333) also replaced
+                // person names, which ADR 0029's amendment 2 withdrew. The version
+                // moves forward so each stored run still says which step wrote it.
+                transformerVersion: "v3",
+                // The provider response is not retained: only its redaction is.
+                inputArtifactKeys: [],
+                outputArtifactKey: artifact.filename,
+              },
     );
   }
   if (collected.size !== input.artifacts.length) {
     throw new SharedCollectionError("shared_duplicate_artifact_key");
+  }
+  for (const failure of input.manifest.failures) {
+    const scope = failure.historyScope;
+    if (!scope) continue;
+    const unitKey = "savings-" + (await sha256Hex(encoder.encode(scope.accountNo))).slice(0, 32);
+    if (units.some((unit) => unit.unitKey === unitKey)) {
+      throw new SharedCollectionError("shared_duplicate_history_unit");
+    }
+    units.push({
+      unitKey,
+      unitKind: "account",
+      artifactCount: 0,
+      coverageStatus: "partial",
+      safeErrorCode: safeFailureMessage(failure),
+    });
+    ranges.push({
+      rangeKey: unitKey + "-requested",
+      rangeKind: "requested",
+      precision: "date",
+      basis: "manifest",
+      unitKey,
+      startValue:
+        scope.fromDate.slice(0, 4) +
+        "-" +
+        scope.fromDate.slice(4, 6) +
+        "-" +
+        scope.fromDate.slice(6),
+      endValue:
+        scope.toDate.slice(0, 4) + "-" + scope.toDate.slice(4, 6) + "-" + scope.toDate.slice(6),
+    });
   }
   artifacts.push(
     await artifactOf({
@@ -281,6 +389,7 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
   );
 
   const outcome = sharedOutcome(input.manifest);
+  const documents = artifacts.filter((artifact) => artifact.role === "provider_document");
   const run: TerminalRunFields = {
     source: SHARED_SOURCE,
     producer: PRODUCER,
@@ -304,9 +413,44 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
     coverageStatus: outcome.coverageStatus,
     persistenceComplete: true,
     ...(outcome.safeErrorCode === undefined ? {} : { safeErrorCode: outcome.safeErrorCode }),
-    units: [],
-    ranges: [],
-    reports: [],
+    units: [
+      ...units,
+      ...documents.map((artifact) => ({
+        unitKey: artifact.unitKey!,
+        unitKind: "document",
+        artifactCount: 1,
+        coverageStatus: "complete" as const,
+      })),
+    ],
+    ranges: [
+      ...ranges,
+      ...documents.map((artifact) => ({
+        rangeKey: `${artifact.unitKey}:month`,
+        rangeKind: "declared_coverage" as const,
+        precision: "month" as const,
+        basis: "source" as const,
+        startValue: artifact.unitKey!.slice(15),
+        endValue: artifact.unitKey!.slice(15),
+        unitKey: artifact.unitKey!,
+      })),
+    ],
+    reports: [
+      ...units.map((unit) => ({
+        reportRef: unit.unitKey,
+        reportKind: "terminal" as const,
+        scope: "unit" as const,
+        unitKey: unit.unitKey,
+        outcome: unit.coverageStatus === "complete" ? ("success" as const) : ("partial" as const),
+        ...(unit.safeErrorCode ? { safeErrorCode: unit.safeErrorCode } : {}),
+      })),
+      ...documents.map((artifact) => ({
+        reportRef: `${artifact.unitKey}-terminal`,
+        reportKind: "terminal" as const,
+        scope: "unit" as const,
+        outcome: "success" as const,
+        unitKey: artifact.unitKey!,
+      })),
+    ],
     transformations,
   };
   return { run, artifacts };

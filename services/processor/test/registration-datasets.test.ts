@@ -7,7 +7,7 @@ import { applyTestReadMigrations, applyTestSql } from "./migration-setup.ts";
 // statement pages, and only a successful card run's pages are parsed.
 //
 // Synthetic bytes only: the shared parser fixtures and the Mizuho fixture.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
@@ -29,6 +29,12 @@ import {
   type VpassCardRun,
 } from "../../collector-vpass/src/shared-collection.ts";
 import { vpassPayload } from "./card-purchase-world.ts";
+import { collectMobileSuica } from "../../collector-mobile-suica/src/mobile-suica.ts";
+import {
+  walkPages,
+  syntheticSession,
+  historyResponse,
+} from "../../collector-mobile-suica/test/history-fixture.ts";
 import { mobileSuicaRunPlan } from "../../collector-mobile-suica/src/shared-run.ts";
 import { registerCollectionRun } from "../src/collection/index.ts";
 import { sweep } from "../src/worker.ts";
@@ -940,3 +946,58 @@ test.each(["success", "partial"] as const)(
   },
   60000,
 );
+
+test("Mobile Suica real retained walk registers and publishes once across two runs", async () => {
+  const query = transactionsSql({ source: "mobile-suica" }, 0);
+  const before = (await rows(query)).length;
+  for (let runIndex = 0; runIndex < 2; runIndex += 1) {
+    let pageIndex = 0;
+    const transport = spyOn(globalThis, "fetch").mockImplementation(
+      Object.assign(
+        async () => {
+          const html = walkPages[pageIndex++];
+          if (!html) throw new Error("unexpected_synthetic_request");
+          return historyResponse(html);
+        },
+        { preconnect() {} },
+      ),
+    );
+    let captured;
+    try {
+      captured = await collectMobileSuica({ session: syntheticSession, asOfDateJst: "2026-08-30" });
+    } finally {
+      transport.mockRestore();
+    }
+    const runId = `suica-walk-synthetic-${runIndex}`;
+    const plan = await mobileSuicaRunPlan({
+      runId,
+      producerVersion: "synthetic-v2",
+      attemptId: `attempt-${runId}`,
+      startedAt: `2026-08-${30 + runIndex}T01:00:00Z`,
+      completedAt: `2026-08-${30 + runIndex}T01:01:00Z`,
+      status: "success",
+      asOfDateJst: "2026-08-30",
+      complete: captured.complete,
+      artifacts: captured.artifacts,
+      failureCodes: [],
+    });
+    expect(
+      plan.run.transformations.find((t) => t.outputArtifactKey === "sf-history.json")!
+        .inputArtifactKeys,
+    ).toEqual(["sf-history-page-0001.html", "sf-history-page-0002.html"]);
+    expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
+    expect(await registerCollectionRun(env, { source: "mobile-suica", runId })).toMatchObject({
+      outcome: "registered",
+      artifacts: 4,
+    });
+    expect(await sweep(env)).toMatchObject({ parsed: 1, error: 0 });
+    expect(await rows(query)).toHaveLength(before + 100);
+  }
+  expect(
+    await env.DB.prepare(`SELECT COUNT(*) AS n FROM transaction_observations t
+    JOIN parse_runs p ON p.id=t.parse_run_id JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+    JOIN collection_runs c ON c.fetch_run_id=a.fetch_run_id WHERE a.source_id='mobile-suica' AND c.run_id LIKE 'suica-walk-synthetic-%'`).first<number>(
+      "n",
+    ),
+  ).toBe(200);
+}, 60000);

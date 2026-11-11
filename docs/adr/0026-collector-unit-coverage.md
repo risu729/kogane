@@ -1,5 +1,84 @@
 # ADR 0026: A collector's unit coverage is a claim about what the run set out to collect
 
+## Amendment: SBI VC document evidence is independent of account and CSV checks (2026-11-10)
+
+Status: proposed.
+
+Authenticated normal navigation confirmed monthly PDF and P&L ZIP reads on the
+same simple-mode HTTP host/session as the existing collector. Downloads use JSON Buffer envelopes;
+the preserved native file is therefore an `extracted` artifact, with its own
+immutable period/hash key and MIME reference. A JSON wrapper is never published
+as a native document. Provider PDF retrieval marks a report read, an intrinsic
+side effect authorized by the requested collection.
+
+Indices, individual downloads and derived CSV comparisons have separate units.
+A failed comparison cannot discard a valid file; a new report failure cannot
+invalidate the completed classic account. The collector walks 2018 through its
+capture's Tokyo calendar year as an operational window (observed UI years were
+2018..2026, not a retention guarantee). Annual empty-index evidence is retained;
+unknown annual downloads and unobserved daily/valuation events are refused.
+
+Raw evidence readers already expose reachable files without a parse policy.
+Publishing metadata coverage from a partial parent additionally requires two
+explicit eligibility-only policies: CORE 0097 uses `INSERT OR IGNORE` for
+`monthly-report-pdf` and `pnl-data-zip`, parser `sbi-vc-document-metadata`
+1.0.0, `coverage-v1`, unit scope, and no snapshot selection or empty replacement.
+No CSV generates economic rows. The existing API publishers remain sole owners
+of executions and cash flows. Independent-unit admission is tied to the same
+acquisition session, never a previous run's successful report.
+
+Verification uses synthetic native archives, the actual collector Durable
+Object and DATA registration pipeline, parser policy removal/restoration,
+metadata publication and raw readers. It proves successful individual files
+survive a failed sibling, repeated period/hash storage is reused, failed units
+cannot borrow admission, and document metadata emits zero economic rows. See
+[the source observation](../sources/sbi-vc-trade.md#18-simple-mode-documents-and-spot-execution-correspondence-2026-11-10).
+
+## Amendment: SBI VC's unfiltered evidence is independent of its classic account unit (2026-11-10)
+
+Status: proposed.
+
+Context. The new all-type cash-flow request has only been observed on the
+trader UI's Socket.IO transport. A failure of that additional request must not
+hide otherwise complete balance, execution and JPY-remittance updates. The
+previous SBI VC collector placed every artifact in one `account` unit and
+applied the whole run's failure to that unit.
+
+Options considered: retain one unit and suppress its valid updates when the
+new request fails; ignore the new failure and falsely report full success;
+or use the existing `unit-independent-v1` policy for a separate evidence unit.
+
+Decision. Retain the classic datasets together in `account`, complete only
+after every classic request and page check succeeds. Put the two unfiltered
+views in `full-cashflows`. Its error keeps the overall run and its own unit
+partial, without changing the completed `account` report. Opt in only the
+three classic snapshot datasets, the one recent execution page and the two
+100-page historical chains. Transaction policies enable eligibility only;
+snapshot selection remains unchanged. A classic error keeps the original
+account unit ineligible, even if another run or acquisition session has an
+identically named successful unit. No publishing parser accepts the raw lists.
+
+Migration `0095_sbi_vc_classic_unit_eligibility.sql` advances the three snapshot
+rows only when every policy field and timestamp matches its shipped default.
+It inserts the 201 exact transaction-dataset policies with `INSERT OR IGNORE`.
+Nondefault policy, version, empty replacement, unit scope, snapshot selection
+and timestamp choices survive. The table has no provenance distinguishing an
+operator's explicit choice identical to all defaults from a shipped default;
+that indistinguishable choice necessarily advances with the default.
+
+Consequences. A refused or malformed unfiltered request remains visible as a
+partial collection, and new valid classic observations can still be published.
+Old partial runs whose original account unit was incomplete remain ineligible.
+This does not establish crypto-transfer/reward row semantics or verify the
+unfiltered parameters on the deployed HTTP gateway.
+
+Verification. Synthetic tests run the real collector Durable Object, persist
+its R2 bytes, register them through the normal CORE path, publish parses and
+query the ordinary readers. They cover raw HTTP failure, invalid raw identity,
+failed classic collection, acquisition-session isolation and unknown raw rows.
+Migration tests cover default advancement, exact dataset bounds, idempotence
+and every nondefault policy field.
+
 ## Amendment: SBI VC retries the login while a terms agreement is pending (2026-11-07)
 
 Status: accepted (merged 2026-11-07 in [#1035](https://github.com/risu729/kogane/pull/1035)).

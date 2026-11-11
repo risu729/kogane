@@ -1,3 +1,4 @@
+import { unitScopeAdmitted } from "../../../packages/parsers/src/parsers/util.ts";
 // Run every registered parser over every artifact it accepts.
 //
 // Idempotent per (artifact, parser_name, parser_version): an identical
@@ -50,9 +51,12 @@ export function runParsers(
     for (const parser of parsers) {
       if (!parser.accepts(artifact)) continue;
       // A partial/failed collection is evidence about the failed attempt, not
-      // a provider snapshot. Keep its raw artifact queryable, but never turn
-      // it into current financial observations.
-      if (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) {
+      // a provider snapshot. Only a dataset policy and a proven independent
+      // unit can admit a successful sibling from that run.
+      if (
+        (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) &&
+        !unitScopeAdmitted(artifact)
+      ) {
         summary.blocked += 1;
         continue;
       }

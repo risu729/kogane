@@ -50,6 +50,12 @@ import { ID } from "../../../evidence-contract/src/validate.ts";
  *   collector's statement pages (`statement-page`).
  * - `terminal-registration-v4` (ADR 0096): SBI's dated execution keys and
  *   their matching per-artifact requested ranges; earlier mappings are frozen.
+ * - `terminal-registration-v5` (ADR 0098): SBI weekly asset history.
+ * - `terminal-registration-v6` (ADR 0101): observed MyJCB debit statement pages.
+ * - `terminal-registration-v7` (ADR 0102): retained SBI cash history and ranges.
+ * - `terminal-registration-v8` (ADR 0105): reported Vpass credit snapshots.
+ * - `terminal-registration-v9` (ADR 0106): observed SBI income and realised gains.
+ * - `terminal-registration-v10` (ADR 0107): observed J-POINT acquisition history.
  *
  * A terminal already registered under an earlier version whose descriptors
  * the current version does not change is not registered again: the new
@@ -57,13 +63,19 @@ import { ID } from "../../../evidence-contract/src/validate.ts";
  * `register-terminal.ts`, ADR 0022). Registering it again would parse the same
  * capture twice, and a Mizuho capture's transactions would be listed twice.
  */
-export const REGISTRATION_CONTRACT_VERSION = "terminal-registration-v4";
+export const REGISTRATION_CONTRACT_VERSION = "terminal-registration-v10";
 
 /** Every version this code can derive, oldest first; each derivation is kept reproducible. */
 export const REGISTRATION_CONTRACT_VERSIONS = [
   "terminal-registration-v1",
   "terminal-registration-v2",
   "terminal-registration-v3",
+  "terminal-registration-v4",
+  "terminal-registration-v5",
+  "terminal-registration-v6",
+  "terminal-registration-v7",
+  "terminal-registration-v8",
+  "terminal-registration-v9",
   REGISTRATION_CONTRACT_VERSION,
 ] as const;
 export type RegistrationContractVersion = (typeof REGISTRATION_CONTRACT_VERSIONS)[number];
@@ -244,6 +256,24 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
   // `text/html; charset=utf-8`, which no terminal can declare.
   myjcb: [
     {
+      key: /^[a-z0-9-]+\/jpoint-history\.json$/u,
+      role: "collector_derived",
+      mediaTypes: JSON_TYPE,
+      dataset: "jpoint-history",
+    },
+    {
+      key: /^[^/]+\/debit-detail-(?:0[0-9]|1[0-4])\.html$/u,
+      role: "sanitized_provider_capture",
+      mediaTypes: HTML_TYPE,
+      dataset: "debit-detail",
+    },
+    {
+      key: /^[^/]+\/debit-other-detail-(?:0[1-9]|1[0-4])\.html$/u,
+      role: "sanitized_provider_capture",
+      mediaTypes: HTML_TYPE,
+      dataset: "debit-other-detail",
+    },
+    {
       key: /^[^/]+\/jpoint-balance\.json$/u,
       role: "provider_response",
       mediaTypes: JSON_TYPE,
@@ -297,6 +327,14 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
   ],
   "sbi-securities": [
     ...SBI_LEGACY_DATASET_RULES,
+    ...jsonByName(["income-payments", "realised-gains"], "collector_derived"),
+    ...jsonByName(["foreign-cash-history"], "collector_derived"),
+    {
+      key: /^account-assets-history-\d{4}\.json$/u,
+      role: "collector_derived",
+      mediaTypes: JSON_TYPE,
+      dataset: "account-assets-history",
+    },
     {
       key: SBI_WINDOW_KEY,
       role: "collector_derived",
@@ -307,17 +345,43 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
   // `exchange-rate` is read by `sbi-shinsei-exchange-rate` (ADR 0020) and
   // `balance-summary-and-stage` by `sbi-shinsei-balance-summary-and-stage`
   // (ADR 0031).
-  "sbi-shinsei": jsonByName(
-    [
-      "top-accounts-balance-and-activity",
-      "yen-deposit-account",
-      "exchange-rate",
-      "balance-summary-and-stage",
-    ],
-    "sanitized_provider_capture",
-    "raw-",
-  ),
+  "sbi-shinsei": [
+    {
+      key: /^savings-activity-\d{4}\.json$/u,
+      role: "collector_derived",
+      mediaTypes: JSON_TYPE,
+      dataset: "savings-activity",
+    },
+    ...jsonByName(
+      [
+        "top-accounts-balance-and-activity",
+        "yen-deposit-account",
+        "exchange-rate",
+        "balance-summary-and-stage",
+      ],
+      "sanitized_provider_capture",
+      "raw-",
+    ),
+    {
+      key: /^monthly-report-\d{4}-(?:0[1-9]|1[0-2])-[a-f0-9]{64}\.pdf$/u,
+      role: "provider_document",
+      mediaTypes: ["application/pdf"],
+      dataset: "monthly-report-pdf",
+    },
+  ],
   "sbi-vc-trade": [
+    {
+      key: /^monthly-report-\d{8}-[a-f0-9]{64}\.pdf$/u,
+      role: "provider_document",
+      mediaTypes: ["application/pdf"],
+      dataset: "monthly-report-pdf",
+    },
+    {
+      key: /^pnl-data-\d{8}-[a-f0-9]{64}\.zip$/u,
+      role: "provider_document",
+      mediaTypes: ["application/zip"],
+      dataset: "pnl-data-zip",
+    },
     ...jsonByName(
       ["cash-balances", "account-margin", "position-summary", "executions-recent-page-0001"],
       "collector_derived",
@@ -330,6 +394,18 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
     },
   ],
   "smbc-direct": [
+    {
+      key: "foreign-ordinary-aud/balance.json",
+      role: "sanitized_provider_capture",
+      mediaTypes: JSON_TYPE,
+      dataset: "foreign-ordinary-aud-balance",
+    },
+    {
+      key: /^foreign-ordinary-aud\/history\/\d{8}-\d{8}\.json$/u,
+      role: "sanitized_provider_capture",
+      mediaTypes: JSON_TYPE,
+      dataset: "foreign-ordinary-aud-history",
+    },
     {
       key: "balance.normalized.json",
       role: "collector_derived",
@@ -403,6 +479,12 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
   // (`unitParseable`), so only a successful run's pages get a job.
   vpass: [
     {
+      key: /^credit\/(?:authori|revo)\.json$/u,
+      role: "sanitized_provider_capture",
+      mediaTypes: JSON_TYPE,
+      dataset: "credit-snapshot",
+    },
+    {
       // The collector writes its pages as sanitized captures (ADR 0021).
       key: /^months\/\d{6}\/(?:top|answer)-\d{3}\.json$/u,
       role: "sanitized_provider_capture",
@@ -442,11 +524,55 @@ export function artifactDataset(
   return datasetByRules(table[collectorSource]!, artifact);
 }
 
-/** `terminal-registration-v2`'s table: ADR 0022's, with Vpass withheld. */
-const V3_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
+/** v9 predates acquisition-history normalization. */
+const V9_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
   ...ARTIFACT_DATASETS,
+  myjcb: ARTIFACT_DATASETS["myjcb"]!.filter((rule) => rule.dataset !== "jpoint-history"),
+};
+
+/** v8 predates the SBI income and realised-gain routes. */
+const V8_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
+  ...V9_ARTIFACT_DATASETS,
+  "sbi-securities": ARTIFACT_DATASETS["sbi-securities"]!.filter(
+    (rule) => rule.dataset !== "income-payments" && rule.dataset !== "realised-gains",
+  ),
+};
+
+/** v7 predates the Vpass credit snapshot routes. */
+const V7_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
+  ...V8_ARTIFACT_DATASETS,
+  vpass: V8_ARTIFACT_DATASETS["vpass"]!.filter((rule) => rule.dataset !== "credit-snapshot"),
+};
+
+/** v6 predates the retained foreign-cash statement mapping. */
+const V6_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
+  ...V7_ARTIFACT_DATASETS,
+  "sbi-securities": V7_ARTIFACT_DATASETS["sbi-securities"]!.filter(
+    (rule) => rule.dataset !== "foreign-cash-history",
+  ),
+};
+
+/** v5 predates MyJCB debit datasets; earlier mappings must keep that meaning. */
+const V5_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
+  ...V6_ARTIFACT_DATASETS,
+  myjcb: V6_ARTIFACT_DATASETS["myjcb"]!.filter(
+    (rule) => rule.dataset !== "debit-detail" && rule.dataset !== "debit-other-detail",
+  ),
+};
+
+/** v4 keeps the execution-window mapping but predates weekly assets. */
+const V4_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
+  ...V5_ARTIFACT_DATASETS,
+  "sbi-securities": V5_ARTIFACT_DATASETS["sbi-securities"]!.filter(
+    (rule) => rule.dataset !== "account-assets-history",
+  ),
+};
+
+const V3_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
+  ...V5_ARTIFACT_DATASETS,
   "sbi-securities": SBI_LEGACY_DATASET_RULES,
 };
+/** `terminal-registration-v2`'s table: ADR 0022's, with Vpass withheld. */
 const V2_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> =
   Object.fromEntries(Object.entries(V3_ARTIFACT_DATASETS).filter(([source]) => source !== "vpass"));
 
@@ -462,7 +588,13 @@ const DATASETS_BY_VERSION: Readonly<
   "terminal-registration-v1": { "st-george": ARTIFACT_DATASETS["st-george"]! },
   "terminal-registration-v2": V2_ARTIFACT_DATASETS,
   "terminal-registration-v3": V3_ARTIFACT_DATASETS,
-  "terminal-registration-v4": ARTIFACT_DATASETS,
+  "terminal-registration-v4": V4_ARTIFACT_DATASETS,
+  "terminal-registration-v5": V5_ARTIFACT_DATASETS,
+  "terminal-registration-v6": V6_ARTIFACT_DATASETS,
+  "terminal-registration-v7": V7_ARTIFACT_DATASETS,
+  "terminal-registration-v8": V8_ARTIFACT_DATASETS,
+  "terminal-registration-v9": V9_ARTIFACT_DATASETS,
+  "terminal-registration-v10": ARTIFACT_DATASETS,
 };
 
 /** The dataset the first matching rule names, or null. */
@@ -844,14 +976,34 @@ export function artifactRequest(
   // keeps no dataset and so does not inherit financial eligibility.
   const dataset = artifactDataset(manifest.source, artifact, contractVersion);
   const sbiHistory =
-    contractVersion === "terminal-registration-v4" &&
+    (contractVersion === "terminal-registration-v4" ||
+      contractVersion === "terminal-registration-v5" ||
+      contractVersion === "terminal-registration-v6" ||
+      contractVersion === "terminal-registration-v7" ||
+      contractVersion === "terminal-registration-v8" ||
+      contractVersion === "terminal-registration-v9" ||
+      contractVersion === "terminal-registration-v10") &&
     manifest.source === "sbi-securities" &&
     (dataset === "domestic-trade-records" || dataset === "foreign-trade-records");
-  const windowRange = sbiHistory
-    ? manifest.ranges.find((range) => range.rangeKey === `${artifact.artifactKey}:requested`)
-    : undefined;
+  const sbiCash =
+    (contractVersion === "terminal-registration-v7" ||
+      contractVersion === "terminal-registration-v8" ||
+      contractVersion === "terminal-registration-v9" ||
+      contractVersion === "terminal-registration-v10") &&
+    manifest.source === "sbi-securities" &&
+    (dataset === "yen-detail-history" || dataset === "foreign-cash-history");
+  const sbiIncome =
+    (contractVersion === "terminal-registration-v9" ||
+      contractVersion === "terminal-registration-v10") &&
+    manifest.source === "sbi-securities" &&
+    (dataset === "income-payments" || dataset === "realised-gains");
+  const windowRange =
+    sbiHistory || sbiCash || sbiIncome
+      ? manifest.ranges.find((range) => range.rangeKey === `${artifact.artifactKey}:requested`)
+      : undefined;
   const windowKey = sbiHistory ? SBI_WINDOW_KEY.exec(artifact.artifactKey) : null;
   if (windowKey !== null && windowRange === undefined) fail("sbi_history_range_missing");
+  if (sbiIncome && windowRange === undefined) fail("sbi_income_range_missing");
   if (
     windowRange !== undefined &&
     (windowRange.unitKey !== artifact.unitKey ||

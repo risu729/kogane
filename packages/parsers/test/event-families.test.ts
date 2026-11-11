@@ -1,3 +1,6 @@
+import { vpassCreditSnapshot } from "../src/parsers/vpass-credit.ts";
+import { authori as vpassAuthori } from "./fixtures/vpass-credit.ts";
+import { sbiShinseiMonthlyReport } from "../src/parsers/sbi-shinsei-monthly-report.ts";
 // The transaction-family registry (packages/domain/src/event-families.ts,
 // ADR 0053) against the parsers it describes. Every PARSERS entry whose rows
 // are transactions or positions has exactly one registry entry and no entry is
@@ -8,6 +11,7 @@
 // compared, never an id or a provider value.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import {
   TRANSACTION_FAMILY_REGISTRY,
@@ -30,21 +34,31 @@ import {
   myJcbPastMonthBalances,
 } from "../src/parsers/myjcb.ts";
 import { myJcbJPointBalance } from "../src/parsers/myjcb-jpoint.ts";
+import { myJcbDebitLedger, myJcbDebitOtherStatement } from "../src/parsers/myjcb-debit.ts";
 import { myJcbSkipPaymentSchedule } from "../src/parsers/myjcb-skip-payment-schedule.ts";
 import { paypayCsv } from "../src/parsers/paypay-csv.ts";
 import { PARSERS } from "../src/parsers/registry.ts";
 import { sbiDomesticTradeRecords } from "../src/parsers/sbi-domestic-trade-records.ts";
+import { sbiAccountAssetsHistory } from "../src/parsers/sbi-account-assets-history.ts";
 import { sbiForeignCashPositions } from "../src/parsers/sbi-foreign-cash-positions.ts";
+import { sbiForeignCashHistory } from "../src/parsers/sbi-foreign-cash-history.ts";
 import { sbiForeignTradeRecords } from "../src/parsers/sbi-foreign-trade-records.ts";
 import { sbiVcCashflows } from "../src/parsers/sbi-vc-cashflows.ts";
+import { sbiVcDocuments } from "../src/parsers/sbi-vc-documents.ts";
 import { sbiVcExecutions } from "../src/parsers/sbi-vc-executions.ts";
 import { sbiYenDetailHistory } from "../src/parsers/sbi-yen-detail-history.ts";
 import { smbcDirectTransactions } from "../src/parsers/smbc-direct.ts";
+import {
+  smbcForeignOrdinaryBalance,
+  smbcForeignOrdinaryHistory,
+} from "../src/parsers/smbc-foreign-ordinary.ts";
+import { smbcForeignBalance, smbcForeignHistory } from "./smbc-foreign-fixture.ts";
 import {
   sonyBankHistoryCsv,
   sonyBankHistoryJson,
   sonyBankWalletHistory,
 } from "../src/parsers/sony-bank.ts";
+import { sbiShinseiSavingsActivity } from "../src/parsers/sbi-shinsei-savings-activity.ts";
 import { sbiShinseiBalanceSummaryAndStage } from "../src/parsers/sbi-shinsei-balance-summary-and-stage.ts";
 import { stGeorgeTransactions } from "../src/parsers/st-george.ts";
 import { vPointBalanceInfo, vPointHistoryPage, vPointSmfgPoint } from "../src/parsers/v-point.ts";
@@ -58,22 +72,33 @@ import { skipMeta, skipPage } from "./myjcb-skip-payment-fixture.ts";
 
 /** PARSERS entries whose rows are balances, valuations, scheduled payments or none. */
 const NOT_IN_REGISTRY = [
+  "sbi-income-payments",
+  "sbi-realised-gains",
+  "vpass-credit-snapshot",
   "mizuho-account-list",
   "moneyforward-canonical-evidence-boundary",
+  "moneyforward-detail-balances",
   "myjcb-canonical-evidence-boundary",
   "myjcb-credit-past-month-balances",
   "myjcb-credit-statement-total",
   "myjcb-skip-payment-schedule",
   "myjcb-jpoint-balance",
+  "myjcb-jpoint-history",
+  "myjcb-debit-other-statement",
   "prestia-bank-balances",
   "sbi-account-assets-current",
+  "sbi-account-assets-history",
   "sbi-foreign-cash-balances",
   "sbi-shinsei-balance-summary-and-stage",
   "sbi-shinsei-exchange-rate",
+  "sbi-shinsei-monthly-report-metadata",
   "sbi-shinsei-yen-deposit-account",
   "sbi-vc-account-margin",
   "sbi-vc-cash-balances",
+  "sbi-vc-document-metadata",
   "smbc-direct-balance",
+  "smbc-foreign-ordinary-balance",
+  "smbc-foreign-ordinary-history",
   "sony-bank-gross-balance",
   "st-george-balances",
   "v-point-balance-info",
@@ -167,6 +192,12 @@ const contractCases = (parserNames: readonly string[]): Case[] =>
 
 const CASES: Case[] = [
   one(
+    sbiShinseiSavingsActivity,
+    "savings-period",
+    meta("sbi-shinsei-bank", "savings-activity"),
+    read("sbi-shinsei-parser-boundaries", "savings-activity.json"),
+  ),
+  one(
     globalPassActivity,
     "activity",
     meta("global-pass", "globalpass-activity", {
@@ -225,6 +256,18 @@ const CASES: Case[] = [
     );
   }),
   one(
+    myJcbDebitLedger,
+    "debit-sections",
+    meta("myjcb", "debit-detail", {
+      artifactKey: "connection-a/debit-detail-01.html",
+      mime: "text/html",
+      statementState: "debit",
+    }),
+    encode(
+      '<div class="pc-disp"><table><tr><th>ご利用者</th><th>お振替日</th><th>ご利用先など</th><th>お振替金額</th><th>摘要</th><th>承認番号</th></tr><tr><td>本人</td><td>2030/01/01</td><td>架空店舗</td><td>100</td><td></td><td>000001</td></tr></table><table><tr><th>ご利用者</th><th>差額発生日</th><th>ご利用先など</th><th>差額</th><th>摘要</th><th>お取引結果</th><th>承認番号</th></tr><tr><td>本人</td><td>2030/01/02</td><td>架空店舗</td><td>-20</td><td></td><td>銀行振替済</td><td>000001</td></tr></table></div>',
+    ),
+  ),
+  one(
     paypayCsv,
     "csv",
     meta("paypay", null, { mime: "text/csv" }),
@@ -253,6 +296,12 @@ const CASES: Case[] = [
     "boundary",
     meta("sbi-securities", "foreign-trade-records"),
     read("sbi-parser-boundaries", "foreign-trade-records.json"),
+  ),
+  one(
+    sbiForeignCashHistory,
+    "cash-history",
+    meta("sbi-securities", "foreign-cash-history"),
+    read("sbi-parser-boundaries", "foreign-cash-history.json"),
   ),
   one(
     sbiYenDetailHistory,
@@ -378,7 +427,74 @@ const CASES: Case[] = [
  * `NOT_IN_REGISTRY` is run at least once.
  */
 const MF_EVIDENCE = { fetchUnitKey: null, statementState: null, period: null, mime: "text/html" };
+const sbiVcDocumentBytes = encode("%PDF-1.7\nSynthetic private report\n%%EOF\n");
+const sbiVcDocumentHash = createHash("sha256").update(sbiVcDocumentBytes).digest("hex");
 const OUTSIDE_CASES: Case[] = [
+  one(
+    sbiVcDocuments,
+    "monthly-report-evidence",
+    meta("sbi-vc-trade", "monthly-report-pdf", {
+      mime: "application/pdf",
+      artifactKey: `monthly-report-20260930-${sbiVcDocumentHash}.pdf`,
+      fetchUnitKey: "monthly-report-20260930",
+      sha256: sbiVcDocumentHash,
+      fetchedAt: "2026-11-10T00:00:00Z",
+    }),
+    sbiVcDocumentBytes,
+  ),
+  one(
+    smbcForeignOrdinaryBalance,
+    "foreign-balance",
+    meta("smbc-bank", "foreign-ordinary-aud-balance", {
+      artifactKey: "foreign-ordinary-aud/balance.json",
+      fetchUnitKey: "foreign-ordinary-aud-balance",
+    }),
+    encode(smbcForeignBalance()),
+  ),
+  one(
+    smbcForeignOrdinaryHistory,
+    "foreign-empty-history",
+    meta("smbc-bank", "foreign-ordinary-aud-history", {
+      artifactKey: "foreign-ordinary-aud/history/20990101-20990131.json",
+      fetchUnitKey: "foreign-ordinary-aud-history",
+    }),
+    encode(smbcForeignHistory()),
+  ),
+  one(
+    vpassCreditSnapshot,
+    "reported-credit",
+    meta("vpass", "credit-snapshot", {
+      artifactKey: "credit/authori.json",
+      fetchUnitKey: "card-001",
+    }),
+    encode(JSON.stringify(vpassAuthori())),
+  ),
+  one(
+    myJcbDebitOtherStatement,
+    "other-empty",
+    meta("myjcb", "debit-other-detail", {
+      artifactKey: "connection-a/debit-other-detail-01.html",
+      mime: "text/html",
+    }),
+    encode('<h1 class="heading01-01">選択された月のご請求はございません。</h1>'),
+  ),
+  one(
+    sbiAccountAssetsHistory,
+    "account-assets-history",
+    meta("sbi-securities", "account-assets-history"),
+    read("sbi-parser-boundaries", "account-assets-history.json"),
+  ),
+  one(
+    sbiShinseiMonthlyReport,
+    "monthly-report",
+    meta("sbi-shinsei-bank", "monthly-report-pdf", {
+      mime: "application/pdf",
+      artifactKey: `monthly-report-2099-01-${"a".repeat(64)}.pdf`,
+      fetchUnitKey: "monthly-report-2099-01",
+      sha256: "a".repeat(64),
+    }),
+    encode("%PDF-1.7\nsynthetic\n%%EOF"),
+  ),
   one(
     myJcbJPointBalance,
     "jpoint-balance",
@@ -511,6 +627,7 @@ const LINK_FIELDS: Record<
     exchange_rate_stated: [["overseas", "conversionRateJpy"]],
   },
   "sbi-securities/sbi-domestic-trade-records": { value_date: [["valueDate"]] },
+  "sbi-securities/sbi-foreign-cash-history": { value_date: [["valueDate"]] },
   "sbi-securities/sbi-foreign-trade-records": {
     value_date: [["_kogane", "valueDate"], ["valueDate"]],
     settlement_amount: [["settlementCurrencyCode"]],
@@ -663,7 +780,7 @@ describe("transaction-family registry against PARSERS", () => {
       expect({ parser: parse.parser.name, rows }).toEqual({ parser: parse.parser.name, rows: [] });
       parsed.add(parse.parser.name);
     }
-    // Every one of the 19 was parsed at least once.
+    // Every excluded parser was exercised at least once.
     expect([...parsed].sort()).toEqual([...NOT_IN_REGISTRY].sort());
   });
 

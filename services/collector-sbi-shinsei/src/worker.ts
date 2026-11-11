@@ -1,3 +1,4 @@
+import { storedReportPeriods } from "./monthly-reports";
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
 import {
   scheduledFailure,
@@ -110,11 +111,15 @@ export async function runCollection(
     const container = getContainer(env.COLLECTOR_CONTAINER, `run-${runId}`);
     let stage = "credential-validation";
     try {
+      stage = "report-inventory";
+      const knownReports = await diagnostic.step(stage, () => storedReportPeriods(env.SCHEDULE_DB));
+      stage = "credential-validation";
       const output = await diagnostic.step(
         "collection",
         () =>
           collectSbiShinsei({
             credentialJson: env.SBI_SHINSEI_CREDENTIAL_JSON,
+            storedReportPeriods: knownReports,
             collectHandoff: async (credentialJson) => {
               stage = "container-start";
               await diagnostic.step(stage, () => container.startAndWaitForPorts());
@@ -128,6 +133,7 @@ export async function runCollection(
                     headers: { "content-type": "application/json; charset=utf-8" },
                     body: JSON.stringify({
                       credentialJson,
+                      storedReportPeriods: knownReports,
                       relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
                       relayUrl: relayUrl.href,
                     }),
@@ -185,11 +191,12 @@ export async function runCollection(
     } finally {
       // Emit before teardown and before central import so a later failure cannot hide the cause.
       for (const entry of failures) {
+        const { historyScope: _historyScope, ...diagnostic } = entry;
         emitDiagnostic("error", {
           event: "sbi-shinsei-collection-failure",
           runId,
           phase: "collection",
-          ...entry,
+          ...diagnostic,
         });
       }
       emitDiagnostic("log", {
@@ -274,7 +281,11 @@ export async function runCollection(
       collectionTarget: target,
       ...(shared ? { terminalKey: shared.terminalKey, terminalDigest: shared.terminalDigest } : {}),
     });
-    return { ...manifest, manifestKey };
+    return {
+      ...manifest,
+      failures: manifest.failures.map(({ historyScope: _historyScope, ...failure }) => failure),
+      manifestKey,
+    };
   });
 }
 async function readBoundedText(response: Response, maximumBytes: number): Promise<string> {

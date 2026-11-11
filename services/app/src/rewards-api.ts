@@ -73,6 +73,7 @@ function holdingDto(view: RewardHoldingView, membership: readonly MembershipStat
     sourceId: view.sourceId,
     holdingRef: view.holding.holdingRef,
     holdingKind: view.holdingKind,
+    ...(view.pointHistoryCoverage ? { pointHistoryCoverage: view.pointHistoryCoverage } : {}),
     unitRef: view.holding.unitRef,
     termsEvidenceRefs: view.program.termsEvidenceRefs,
     // The consumable quantity is in the programme's own unit and is never a

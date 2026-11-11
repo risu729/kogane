@@ -317,9 +317,9 @@ describe("the summary", () => {
     const of = (id: string) => summary.sources.find((source) => source.sourceId === id)!.dataTypes;
     expect(of("sbi-securities")).toContainEqual({
       type: "income",
-      status: "not_collected",
-      parsers: [],
-      issue: 446,
+      status: "partial",
+      parsers: ["sbi-income-payments"],
+      issue: 1236,
     });
     expect(of("vpass")).toContainEqual({
       type: "card_usage",

@@ -14,6 +14,7 @@ export default defineConfig({
     observability: {
       enabled: true,
       logs: { enabled: true, invocationLogs: true, headSamplingRate: 1 },
+      issues: { enabled: true },
     },
     env: {
       SESSION_SEED: bindings.secret(),

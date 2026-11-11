@@ -5,13 +5,13 @@ import { SbiShinseiReadTransport } from "../src/transport";
 import type { ReadExecutionProfile } from "../src/types";
 
 describe("SBI Shinsei read allowlist", () => {
-  test("unapproved history and CSV candidates stop before session access or network", async () => {
+  test("unapproved CSV candidates stop before session access or network", async () => {
     const profiles: readonly ReadExecutionProfile[] = [
       "worker-production",
       "local-captured-validation",
       "direct-http-diagnostic",
     ];
-    const operations = ["account.casa-activity-specific-period", "csv.download"] as const;
+    const operations = ["csv.download"] as const;
     for (const operation of operations) {
       const route = READ_ROUTE_CATALOG.find((candidate) => candidate.operation === operation);
       expect(route).toBeDefined();
@@ -54,7 +54,7 @@ describe("SBI Shinsei read allowlist", () => {
   });
 
   test("only captured routes with strict schemas are production-enabled", () => {
-    expect(READ_ROUTE_CATALOG.length).toBe(17);
+    expect(READ_ROUTE_CATALOG.length).toBe(19);
     expect(liveReadsEnabled()).toBeTrue();
     for (const route of READ_ROUTE_CATALOG) {
       expect(route.productionEnabled).toBe(
@@ -64,7 +64,7 @@ describe("SBI Shinsei read allowlist", () => {
       expect(route.origin).toBe("https://bk.web.sbishinseibank.co.jp");
     }
     expect(READ_ROUTE_CATALOG.filter((route) => route.responseSchema !== "unknown")).toHaveLength(
-      6,
+      9,
     );
   });
 
@@ -160,9 +160,7 @@ describe("SBI Shinsei read allowlist", () => {
       ).operation,
     ).toBe(captured.operation);
 
-    const bundleOnly = READ_ROUTE_CATALOG.find(
-      (route) => route.operation === "account.casa-activity-specific-period",
-    );
+    const bundleOnly = READ_ROUTE_CATALOG.find((route) => route.operation === "csv.download");
     if (!bundleOnly) throw new Error("bundle-only route is missing");
     expect(() =>
       assertReadAllowed(

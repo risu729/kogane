@@ -181,6 +181,12 @@ export class MyJcbReadClient {
 }
 
 function refererFor(operation: GetOperation, query?: URLSearchParams): string {
+  if (operation === "jpoint-inquiry") return allowedUrl("mypage").href;
+  if (operation === "jpoint-history")
+    return allowedUrl("jpoint-inquiry", new URLSearchParams({ link_id: "myj_main_pointInquiry" }))
+      .href;
+  if (operation === "debit-other-detail") return allowedUrl("debit-other-menu").href;
+  if (operation === "debit-other-menu") return allowedUrl("mypage").href;
   if (operation === "credit-csv" || operation === "credit-ofx" || operation === "credit-pdf") {
     const month = query?.get("detailMonth") ?? "0";
     return allowedUrl("credit-detail", new URLSearchParams({ detailMonth: month, output: "web" }))

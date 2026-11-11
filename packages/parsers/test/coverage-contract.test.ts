@@ -33,6 +33,11 @@ for (const file of [
   "prestia-bank-expected.json",
   "sbi-shinsei-exchange-rate-expected.json",
   "sbi-shinsei-observed-shapes-expected.json",
+  "smbc-foreign-ordinary-expected.json",
+  "myjcb-jpoint-history-expected.json",
+  "sbi-income-expected.json",
+  "vpass-credit-expected.json",
+  "moneyforward-detail-expected.json",
 ]) {
   const frozen = JSON.parse(
     readFileSync(join(FIXTURES_ROOT, "coverage-contract", file), "utf8"),
@@ -108,6 +113,17 @@ const partial = (
 
 /** What each case must claim. A throwing case has no claim and no entry here. */
 const CLAIMS: Record<string, Record<string, Expectation>> = {
+  "myjcb-jpoint-history": { "complete-rows": { ...complete(12), expected: 12 } },
+  "sbi-income-payments": { "complete-payments": { ...complete(15), expected: 15 } },
+  "sbi-realised-gains": { "complete-sales": { ...complete(4), expected: 4 } },
+  "vpass-credit-snapshot": {
+    "authori-visible": complete(12),
+    "authori-hidden": complete(0),
+    "revo-exact": complete(2),
+  },
+  "moneyforward-detail-balances": {
+    "complete-rows": { ...complete(1, ["row_unreadable", "row_unreadable"]), expected: 1 },
+  },
   "sbi-foreign-cash-balances": {
     "complete-empty": complete(0),
     "complete-rows": complete(2),
@@ -175,6 +191,7 @@ const CLAIMS: Record<string, Record<string, Expectation>> = {
   },
   "sony-bank-gross-balance": { "complete-rows": { ...complete(17), expected: 17 } },
   "smbc-direct-balance": { "complete-rows": { ...complete(1), expected: 1 } },
+  "smbc-foreign-ordinary-balance": { "complete-rows": { ...complete(1), expected: 1 } },
   "st-george-balances": { "complete-rows": { ...complete(2), expected: 2 } },
   "prestia-bank-balances": {
     "complete-rows": complete(12, [
@@ -267,7 +284,9 @@ for (const { parser, cases } of CONTRACT_PARSERS) {
         expect(coverage.observedCount).toBe(result.observations.length);
         expect(coverage.evidenceRefs.length).toBeGreaterThan(0);
         // Evidence references are locators and page markers, never provider values.
-        if (parser.name === "prestia-bank-balances")
+        if (parser.name === "moneyforward-detail-balances")
+          expect(coverage.evidenceRefs).toEqual(["html:section.accounts-form"]);
+        else if (parser.name === "prestia-bank-balances")
           expect(coverage.evidenceRefs).toEqual([
             "html:form[name=ACKZDSP]",
             "html:section=balance-summary",

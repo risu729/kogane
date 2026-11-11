@@ -1,6 +1,6 @@
 // Snapshot policy ownership (design review D01, A03): the policy table seed
-// must mirror the SNAPSHOT_DATASETS registry, every dataset must start on the
-// legacy adapter, and the shadow comparison must agree on the synthetic
+// must mirror the SNAPSHOT_DATASETS registry and each declared coverage or
+// legacy policy. The shadow comparison must agree on the synthetic
 // fixture set except where the two policies intentionally disagree.
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -20,11 +20,13 @@ import {
 } from "../../../packages/parsers/src/snapshot-query.ts";
 import { insertFetchRun, listArtifacts, upsertSource, type Store } from "../src/store.ts";
 import { openTestStore } from "./test-store.ts";
+import { currentValuations } from "../src/queries.ts";
 import {
   balance,
   closeStores,
   database,
   EXPLICIT_COVERAGE,
+  REPLACING_EMPTY_COVERAGE,
   facts,
   snapshot,
 } from "./snapshot-fixture.ts";
@@ -73,6 +75,47 @@ test("reopening upgrades the local exact-version policies and preserves an opera
   }
 });
 
+test("the local AUD snapshot subset is exact and reopening preserves every operator field", () => {
+  const expected = {
+    source_id: "smbc-bank",
+    dataset: "foreign-ordinary-aud-balance",
+    parser_name: "smbc-foreign-ordinary-balance",
+    policy_id: "coverage-v1",
+    policy_version: 1,
+    required_parser_version: "0.1.2",
+    replaces_previous_on_complete_empty: 0,
+    unit_scope: "run",
+    snapshot_selection: 1,
+    updated_at_ms: 1794268800000,
+  };
+  const overrides = {
+    policy_id: "legacy-warning-compat-v1",
+    policy_version: 9,
+    required_parser_version: "9.0.0",
+    replaces_previous_on_complete_empty: 1,
+    unit_scope: "unit",
+    snapshot_selection: 0,
+    updated_at_ms: 42,
+  };
+  for (const [field, value] of Object.entries(overrides)) {
+    const store = database();
+    const select =
+      "SELECT * FROM dataset_snapshot_policies WHERE parser_name='smbc-foreign-ordinary-balance'";
+    expect(store.db.query(select).get()).toEqual(expected);
+    store.db
+      .query(
+        `UPDATE dataset_snapshot_policies SET ${field}=? WHERE parser_name='smbc-foreign-ordinary-balance'`,
+      )
+      .run(value);
+    const reopened = openTestStore(join(store.blobDir, ".."));
+    try {
+      expect(reopened.db.query(select).get()).toEqual({ ...expected, [field]: value });
+    } finally {
+      reopened.db.close();
+    }
+  }
+});
+
 interface PolicyRow {
   source_id: string;
   dataset: string;
@@ -88,6 +131,94 @@ function policyRows(store: Store): PolicyRow[] {
   return store.db
     .query("SELECT * FROM dataset_snapshot_policies ORDER BY parser_name, dataset")
     .all() as PolicyRow[];
+}
+
+test("fresh and repeated local bootstrap seeds both retained-history policies after creating their table", () => {
+  const store = database();
+  const expected = policyRows(store).filter((row) => REPLACING_EMPTY_COVERAGE.has(row.parser_name));
+  expect(expected).toHaveLength(2);
+  for (const row of expected)
+    expect(row).toMatchObject({
+      source_id: "sbi-securities",
+      policy_id: "coverage-v1",
+      required_parser_version: "0.1.2",
+      replaces_previous_on_complete_empty: 1,
+      unit_scope: "run",
+      snapshot_selection: 1,
+    });
+  const reopened = openTestStore(join(store.blobDir, ".."));
+  try {
+    expect(
+      policyRows(reopened).filter((row) => REPLACING_EMPTY_COVERAGE.has(row.parser_name)),
+    ).toEqual(expected);
+  } finally {
+    reopened.db.close();
+  }
+});
+
+test("reopening repairs one missing retained-history row while preserving an operator alternative", () => {
+  const store = database();
+  store.db.exec(
+    "UPDATE dataset_snapshot_policies SET policy_id='legacy-warning-compat-v1', required_parser_version='9.0.0', replaces_previous_on_complete_empty=0, unit_scope='unit', snapshot_selection=0, updated_at_ms=99 WHERE parser_name='sbi-income-payments'",
+  );
+  const alternative = policyRows(store).find((row) => row.parser_name === "sbi-income-payments")!;
+  const gains = policyRows(store).find((row) => row.parser_name === "sbi-realised-gains")!;
+  store.db.exec("DELETE FROM dataset_snapshot_policies WHERE parser_name='sbi-realised-gains'");
+  const reopened = openTestStore(join(store.blobDir, ".."));
+  try {
+    expect(policyRows(reopened).find((row) => row.parser_name === "sbi-income-payments")).toEqual(
+      alternative,
+    );
+    expect(policyRows(reopened).find((row) => row.parser_name === "sbi-realised-gains")).toEqual(
+      gains,
+    );
+  } finally {
+    reopened.db.close();
+  }
+  const again = openTestStore(join(store.blobDir, ".."));
+  try {
+    expect(policyRows(again).find((row) => row.parser_name === "sbi-income-payments")).toEqual(
+      alternative,
+    );
+  } finally {
+    again.db.close();
+  }
+});
+
+for (const [parser, version] of REPLACING_EMPTY_COVERAGE) {
+  test(`${parser} requires complete coverage and replaces previous history on verified complete empty`, () => {
+    const store = database();
+    const base = {
+      parser,
+      parserVersion: version,
+      source: "sbi-securities",
+      dataset: parser === "sbi-income-payments" ? "income-payments" : "realised-gains",
+    };
+    snapshot(store, { ...base, observations: facts(parser, "CLAIMLESS") });
+    expect(currentValuations(store)).toEqual([]);
+    snapshot(store, {
+      ...base,
+      time: "2026-09-02T00:00:00Z",
+      observations: facts(parser, "OLD"),
+      coverage: {},
+    });
+    expect(currentValuations(store)).toHaveLength(1);
+    snapshot(store, {
+      ...base,
+      time: "2026-09-03T00:00:00Z",
+      observations: [],
+      coverage: {
+        completeness: "partial",
+        membershipComplete: false,
+        failureCause: "container_unreadable",
+        absenceMeaning: "not-observed",
+      },
+    });
+    expect(currentValuations(store)).toHaveLength(1);
+    snapshot(store, { ...base, time: "2026-09-04T00:00:00Z", observations: [], coverage: {} });
+    expect(currentValuations(store)).toEqual([]);
+    expect(store.db.query("SELECT COUNT(*) AS n FROM parse_runs").get()).toEqual({ n: 4 });
+  });
 }
 
 describe("dataset_snapshot_policies seed", () => {
@@ -136,6 +267,41 @@ describe("dataset_snapshot_policies seed", () => {
           "../../../packages/storage-d1/migrations/core/0066_prestia_bank_snapshot_schedule.sql",
         ),
         "utf8",
+      ) +
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0091_moneyforward_detail_balance_snapshots.sql",
+        ),
+        "utf8",
+      ) +
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0092_vpass_credit_snapshots.sql",
+        ),
+        "utf8",
+      ) +
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0093_sbi_income_complete_containers.sql",
+        ),
+        "utf8",
+      ) +
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0094_myjcb_jpoint_history.sql",
+        ),
+        "utf8",
+      ) +
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0096_smbc_foreign_ordinary_unit_eligibility.sql",
+        ),
+        "utf8",
       );
     for (const [parser, dataset] of SNAPSHOT_DATASETS) {
       expect(sql).toContain("'" + dataset + "'");
@@ -144,22 +310,28 @@ describe("dataset_snapshot_policies seed", () => {
   });
 
   test("legacy datasets retain their policies and the St.George and FX board parsers use explicit coverage", () => {
-    for (const row of policyRows(database())) {
+    for (const row of policyRows(database()).filter((row) => row.snapshot_selection === 1)) {
       const stGeorge = row.parser_name === "st-george-balances";
       const prestia = row.parser_name === "prestia-bank-balances";
-      const explicit = EXPLICIT_COVERAGE.has(row.parser_name);
+      const smbcAud = row.parser_name === "smbc-foreign-ordinary-balance";
+      const nonemptyOnly = EXPLICIT_COVERAGE.has(row.parser_name);
+      const explicit = nonemptyOnly || REPLACING_EMPTY_COVERAGE.has(row.parser_name);
       expect(row.policy_id).toBe(explicit ? "coverage-v1" : LEGACY_SNAPSHOT_POLICY);
       expect(row.policy_version).toBe(1);
-      // D13/PR-14: every seeded dataset stays on the run scope and stays a
-      // container-snapshot dataset. Enabling `unit-independent-v1` is an
-      // operator write, never a deploy.
-      expect(row.unit_scope).toBe("run");
+      // Only explicitly enabled independent snapshot families use unit scope.
+      expect(row.unit_scope).toBe(
+        ["vpass-credit-snapshot", "myjcb-jpoint-history"].includes(row.parser_name)
+          ? "unit"
+          : "run",
+      );
       expect(row.snapshot_selection).toBe(1);
-      expect(row.replaces_previous_on_complete_empty).toBe(explicit ? 0 : 1);
+      expect(row.replaces_previous_on_complete_empty).toBe(nonemptyOnly ? 0 : 1);
       expect(row.required_parser_version).toBe(
         row.parser_name === "sbi-foreign-cash-positions"
           ? FOREIGN_POSITION_SNAPSHOT_VERSION
-          : (EXPLICIT_COVERAGE.get(row.parser_name) ?? null),
+          : (EXPLICIT_COVERAGE.get(row.parser_name) ??
+              REPLACING_EMPTY_COVERAGE.get(row.parser_name) ??
+              null),
       );
       // The declared owner source is the one the parser accepts.
       const parser = PARSERS.find((candidate) => candidate.name === row.parser_name)!;
@@ -171,15 +343,21 @@ describe("dataset_snapshot_policies seed", () => {
           runFailureCount: 0,
           dataset: row.dataset,
           url: null,
-          mime: prestia ? "text/html" : "application/json",
+          mime:
+            prestia || row.parser_name === "moneyforward-detail-balances"
+              ? "text/html"
+              : "application/json",
           fetchedAt: "2026-09-07T00:00:00.000Z",
           sha256: "0".repeat(64),
           artifactKey: prestia
             ? "balance.html"
             : stGeorge
               ? "account-snapshot.json"
-              : "balance.normalized.json",
+              : smbcAud
+                ? "foreign-ordinary-aud/balance.json"
+                : "balance.normalized.json",
           ...(prestia ? { fetchUnitKey: "balance-summary" } : {}),
+          ...(smbcAud ? { fetchUnitKey: "foreign-ordinary-aud-balance" } : {}),
         }),
         row.parser_name,
       ).toBe(true);
@@ -340,7 +518,7 @@ describe("eligibility-only policy rows", () => {
   function enable(store: Store): void {
     store.db
       .query(
-        `INSERT INTO dataset_snapshot_policies
+        `INSERT OR IGNORE INTO dataset_snapshot_policies
            (source_id, dataset, parser_name, policy_id, unit_scope, snapshot_selection, updated_at_ms)
          VALUES (?1, ?2, ?3, 'legacy-warning-compat-v1', 'unit', 0, 1)`,
       )
@@ -371,6 +549,10 @@ describe("eligibility-only policy rows", () => {
         parseStatus: "missing",
         observations: [],
       });
+    // Explicit rollback reproduces the prior run-scoped behavior.
+    store.db
+      .query("DELETE FROM dataset_snapshot_policies WHERE parser_name=? AND dataset=?")
+      .run(MYJCB.parser, MYJCB.dataset);
     // Before the row: no artifact of the partial run is admitted.
     expect(listArtifacts(store).map((a) => a.unitScopeEligibility)).toEqual([null, null]);
     enable(store);
@@ -394,4 +576,50 @@ describe("eligibility-only policy rows", () => {
     // The shadow comparison is unchanged too: it reads the same CTEs.
     expect(compare(store)).toEqual([]);
   });
+});
+
+test("MyJCB credit eligibility seeds exactly four datasets and repairs missing rows without replacing operator choices", () => {
+  const store = database();
+  const expected = [
+    ["myjcb-credit-ledger", "credit-ledger"],
+    ["myjcb-credit-past-month-balances", "credit-past-months"],
+    ["myjcb-credit-statement-total", "credit-detail"],
+    ["myjcb-skip-payment-schedule", "credit-schedule"],
+  ];
+  const seeded = policyRows(store).filter((row) => row.snapshot_selection === 0);
+  expect(seeded.map((row) => [row.parser_name, row.dataset])).toEqual(expected);
+  for (const row of seeded)
+    expect(row).toMatchObject({
+      source_id: "myjcb",
+      unit_scope: "unit",
+      policy_id: "legacy-warning-compat-v1",
+      required_parser_version: null,
+      replaces_previous_on_complete_empty: 1,
+    });
+  store.db.exec(
+    "UPDATE dataset_snapshot_policies SET unit_scope='run', required_parser_version='9.0.0' WHERE parser_name IN ('myjcb-credit-ledger','myjcb-jpoint-history')",
+  );
+  store.db.exec(
+    "DELETE FROM dataset_snapshot_policies WHERE parser_name='myjcb-credit-statement-total'",
+  );
+  for (let count = 0; count < 2; count++) {
+    const reopened = openTestStore(join(store.blobDir, ".."));
+    try {
+      expect(
+        policyRows(reopened)
+          .filter((row) => row.snapshot_selection === 0)
+          .map((row) => [row.parser_name, row.dataset]),
+      ).toEqual(expected);
+      for (const parser of ["myjcb-credit-ledger", "myjcb-jpoint-history"])
+        expect(
+          reopened.db
+            .query(
+              "SELECT unit_scope,required_parser_version FROM dataset_snapshot_policies WHERE parser_name=?",
+            )
+            .get(parser),
+        ).toEqual({ unit_scope: "run", required_parser_version: "9.0.0" });
+    } finally {
+      reopened.db.close();
+    }
+  }
 });

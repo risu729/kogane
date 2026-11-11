@@ -5,6 +5,14 @@ import {
 import iconv from "iconv-lite";
 import { renderSVG } from "uqr";
 import { compactDate } from "./dates";
+import {
+  assertForeignHistoryContext,
+  foreignHistoryIndex,
+  sanitizeForeignBalance,
+  sanitizeForeignHistory,
+  type ForeignOrdinaryBalance,
+  type ForeignOrdinaryHistory,
+} from "./foreign-ordinary";
 import type {
   AuthenticatedSession,
   ChallengeState,
@@ -718,6 +726,137 @@ export class DirectProfile {
     };
   }
 
+  async #foreignDetail(): Promise<{
+    html: string;
+    url: string;
+    selection: { accountBranchCode: string; accountItemCode: string; accountNo: string };
+  }> {
+    await this.continueSession();
+    const selections = [
+      ...this.#topPage.html.matchAll(
+        /directib\.TPALTOP\.accountDetail\(\s*['"]([0-9]{1,8})['"]\s*,\s*['"]([^'"\\\r\n]{1,64})['"]\s*,\s*['"]([0-9]{1,16})['"]\s*,\s*['"]TPALTOPaccountGaikaFutsuDetail['"]\s*\)/gu,
+      ),
+    ];
+    if (selections.length !== 1) throw new Error("foreign_account_selection_unreviewed");
+    const match = selections[0]!;
+    const selection = {
+      accountBranchCode: match[1]!,
+      accountItemCode: match[2]!,
+      accountNo: match[3]!,
+    };
+    const { topForm } = this.#topForms();
+    const response = await fetchWithCookies(
+      new URL("/ib/web/top/TPALTOPaccountGaikaFutsuDetail.smbc", this.origins.baseURL),
+      {
+        method: "POST",
+        headers: {
+          ...browserHeaders,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: this.origins.baseURL,
+          referer: this.#topPage.url,
+        },
+        body: shiftJisForm({
+          ...topForm,
+          ...selection,
+        }),
+      },
+      this.jar,
+      this.transport,
+    );
+    return {
+      html: (await responseShiftJis(response, "foreign_detail")).text,
+      url: response.url,
+      selection,
+    };
+  }
+
+  async getForeignBalance(): Promise<ForeignOrdinaryBalance> {
+    return sanitizeForeignBalance((await this.#foreignDetail()).html);
+  }
+
+  async getForeignHistory(range: DateRange): Promise<ForeignOrdinaryHistory> {
+    const detail = await this.#foreignDetail();
+    const balance = sanitizeForeignBalance(detail.html);
+    const index = foreignHistoryIndex(detail.html);
+    const form = formFields(detail.html, "AIFDDTL");
+    if (required(form, "_FORMID") !== "AIFDDTL") throw new Error("foreign_form_unreviewed");
+    const entry = await fetchWithCookies(
+      new URL("/ib/web/accountinquiry/AIFDDTLmeisai.smbc", this.origins.baseURL),
+      {
+        method: "POST",
+        headers: {
+          ...browserHeaders,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: this.origins.baseURL,
+          referer: detail.url,
+        },
+        body: shiftJisForm({
+          ...pickFields(form, [
+            "_FRAMEID",
+            "_TARGETID",
+            "_LUID",
+            "_TOKEN",
+            "_FORMID",
+            "selectDateStare",
+            "selectDateEnd",
+            "firstEndDate",
+          ]),
+          ...pickFields(form, ["accountBranchCode", "accountItemCode", "accountNo"]),
+          _SUBINDEX: index,
+          accountSelect: "0",
+          shoriTaibu: "",
+        }),
+      },
+      this.jar,
+      this.transport,
+    );
+    const entryHtml = (await responseShiftJis(entry, "foreign_history")).text;
+    assertForeignHistoryContext(entryHtml, detail.selection.accountNo, balance.amount);
+    const query = formFields(entryHtml, "AIFDDT1");
+    if (required(query, "_FORMID") !== "AIFDDT1") throw new Error("foreign_form_unreviewed");
+    const fields: Record<string, string> = {
+      ...pickFields(query, ["_FRAMEID", "_TARGETID", "_LUID", "_TOKEN", "_FORMID"]),
+      _SUBINDEX: "",
+      accountSelect: "0",
+      ...pickFields(query, ["accountBranchCode", "accountItemCode", "accountNo"]),
+      shoriTaibu: "05",
+    };
+    for (const [side, date] of [
+      ["From", range.start],
+      ["To", range.end],
+    ] as const) {
+      compactDate(date);
+      for (const [part, value] of [
+        ["Year", date.slice(0, 4)],
+        ["Month", date.slice(5, 7)],
+        ["Day", date.slice(8, 10)],
+      ] as const) {
+        const name = `select${side}${part}`;
+        if (!new RegExp(`<select\\b[^>]*\\bname=["']${name}["']`, "u").test(entryHtml))
+          throw new Error("foreign_date_selector_missing");
+        fields[name] = value;
+      }
+    }
+    const response = await fetchWithCookies(
+      new URL("/ib/web/accountinquiry/AIFDDT1meisai.smbc", this.origins.baseURL),
+      {
+        method: "POST",
+        headers: {
+          ...browserHeaders,
+          "content-type": "application/x-www-form-urlencoded",
+          origin: this.origins.baseURL,
+          referer: entry.url,
+        },
+        body: shiftJisForm(fields),
+      },
+      this.jar,
+      this.transport,
+    );
+    const historyHtml = (await responseShiftJis(response, "foreign_history")).text;
+    assertForeignHistoryContext(historyHtml, detail.selection.accountNo, balance.amount);
+    return sanitizeForeignHistory(historyHtml, range);
+  }
+
   async logout(): Promise<void> {
     const { headerForm } = this.#topForms();
     const response = await fetchWithCookies(
@@ -737,4 +876,29 @@ export class DirectProfile {
     );
     await responseShiftJis(response, "logout");
   }
+}
+
+function pickFields(fields: Record<string, string>, names: string[]): Record<string, string> {
+  return Object.fromEntries(names.map((name) => [name, required(fields, name)]));
+}
+
+/** Native bank forms are Shift_JIS. Keep copied date-label fields in that
+ * encoding instead of silently switching them to UTF-8 URLSearchParams. */
+function shiftJisForm(fields: Record<string, string>): string {
+  const encode = (value: string): string =>
+    [...iconv.encode(value, "Shift_JIS")]
+      .map((byte) =>
+        (byte >= 0x41 && byte <= 0x5a) ||
+        (byte >= 0x61 && byte <= 0x7a) ||
+        (byte >= 0x30 && byte <= 0x39) ||
+        [0x2a, 0x2d, 0x2e, 0x5f].includes(byte)
+          ? String.fromCharCode(byte)
+          : byte === 0x20
+            ? "+"
+            : `%${byte.toString(16).toUpperCase().padStart(2, "0")}`,
+      )
+      .join("");
+  return Object.entries(fields)
+    .map(([name, value]) => `${encode(name)}=${encode(value)}`)
+    .join("&");
 }

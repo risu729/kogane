@@ -1290,3 +1290,99 @@ resume issue 1242 with observation of the held contracts: establish their item
 schemas, currency/principal/rate/start/maturity fields, totals and pagination
 before enabling daily capture and publication. This observation does not supply
 those semantics and does not prove a successful production collection.
+
+## Online monthly PDF report observation (2026-11-09)
+
+Ordinary authenticated Chrome navigation from TOP to `お取引レポート` issued
+`POST /SFC/app/AIAI_AccountInfomationAdapter/getStatementReport` with JSON
+`{requestParam:{}}`. The response had exactly `responseParam` and `header`.
+The response parameters were string fields `postingDate`, `mailID`,
+`eStatementStatus`, `mfReportStatus`, `slPostingDate` and `periodDetails`, an
+array of `{month:string, year:string}`. All eight unique offered periods used
+four ASCII digits for the year and two zero-padded digits for the month. The
+UI initially displayed three PDF links; the response list, rather than that
+visible default or the public 60-month maximum, is the collection inventory.
+
+Clicking a visible PDF issued
+`POST /SFC/app/AIAI_AccountInfomationAdapter/downloadStatement` with JSON
+`{requestParam:{year:string,month:string}}`, selected from that list. The
+response parameters were string fields `postingDate`, `month`, `year`,
+`fileName`, `fileSize`, `fileStream`. Both routes used a string
+`header.adapterResultCode`; the successful download's code was `"0"`.
+The returned year/month exactly matched the request. In-memory base64 decoding
+of `fileStream` produced a `%PDF-` prefix, and its byte length equalled the
+numeric `fileSize`. No filename, personal period, PDF contents, account value,
+registration-setting value, cookie or token is reproduced here.
+
+The scheduled collector now reads the offered inventory in its existing browser
+session, captures missing reports and rechecks the newest offered month. It
+validates the observed shapes and stores private PDF bytes with month/size/hash
+metadata; report content is not parsed. The metadata parser emits only
+`evidence-only` coverage and no financial observations. Existing registered
+months act as the checkpoint, so no new state store or request window is added.
+The limits, revision policy, independent-month eligibility and remaining
+production acceptance are recorded in
+[ADR 0097](../adr/0097-sbi-shinsei-monthly-report-evidence.md).
+
+## Selected-period savings history observed 2026-11-10
+
+The owner-authorized same-page browser observation covered yen savings, SBI
+Hyper Yokin and foreign savings, including a foreign account whose selected
+period was explicitly empty. No provider account identifiers or values are
+recorded here.
+
+- Read: `POST /SFC/app/IFAI_AccountAdapter/getCasaAccountActivitySpecificPeriod`.
+- Request: `{requestParam:{accountNo:string,type:"1",fromDate:string,toDate:string,eventType:"3"}}`.
+  Dates use `YYYYMMDD`; the selected range was the first day of the same
+  month two years earlier through the current Tokyo day. The visible form
+  accepted that first day and rejected the previous day, explaining that
+  activity is available from today back to the same month two years earlier.
+- Account selection uses the selected savings account's `accountNo`.
+  Yen/Hyper and foreign-account selection produced the same request shape.
+  Ordinary yen, Hyper and USD results matched the screen's row counts.
+- Root response: `requestParam.accountActivityDetails:[]`,
+  `responseParam:{activity,memoInquiry,summaryColumnTransformation,sysTimeForCsvDownload:string}`,
+  and `header.adapterResultCode:"0"`.
+- Each populated wrapper has `requestParam:{nationalid:string}`,
+  `responseParam:object`, `header:{referenceNo,systemCode,langCode}` (strings),
+  and `errorInfo:{statusID:"00000",statusMessage:string}`.
+- `activity.responseParam` has strings `type,fromDate,toDate,purgeflag,currentBalance,accountNo,currency`
+  and `activityDetails:array`. The populated selected-period response has
+  `type:"1"`, slash-separated date echoes and `purgeflag:"Y"`; the flag's
+  business meaning was not established.
+- Every money row has strings `txnReferenceNo,description,credit,debit,postingDate,balance,tradeTypeCode`.
+  The inactive debit/credit column is an empty string. Native currency is
+  retained; no yen conversion is substituted for foreign activity.
+- The initial response includes every money row for the selected range.
+  The UI presents thirty at a time. Initial `memoInquiry.responseParam.memoInquiryDetails`
+  has up to thirty `{txnReferenceNo,memo}` string records; initial
+  `summaryColumnTransformation.responseParam.descriptionTransformDetails`
+  has up to thirty `{txnReferenceNo,descriptionTransform}` string records.
+- Selecting a subsequent screen page posts to the same route with
+  `type:"0",eventType:"1"`, the same selected dates, and
+  `accountActivityDetails` containing up to thirty string records
+  `{txnReferenceNo,description,tradeTypeCode}`. Its `activity` wrapper's
+  four children are empty objects. The memo and transformation wrappers
+  enrich the selected rows; this does not supply additional money rows.
+- The observed empty response has `activity.errorInfo.statusID:"30024"`,
+  all seven activity strings empty, `activityDetails:[]`, and only
+  `activity` plus `sysTimeForCsvDownload` in `responseParam`.
+  Memo and transformation wrappers are absent. The UI explicitly reports
+  an empty result. Account, currency and dates must come from the validated
+  request scope; an empty echo is not a zero balance.
+
+The scheduled container path now uses one selected-period read per savings
+account in the existing top overview inventory. It retains a sanitized raw
+response and a request-bound derived artifact per account, with unit reports
+and date ranges. CSV and enrichment-page reads are unnecessary for the monetary
+history and remain unused. Unknown shapes or codes make that account partial.
+See [ADR 0095](../adr/0095-sbi-shinsei-selected-period-history.md). This is
+implementation and browser-shape evidence; a production scheduled run and
+published counts have not been verified.
+
+The account-coverage view currently attributes cells from observation rows only.
+A complete-empty savings history has no transaction observation, so this cell
+remains in the view's unattributed list. Its exact account/currency/request
+range remains in the derived artifact, and its hashed account unit, terminal
+report, dated ranges and complete-empty parser claim retain the evidence.
+No amount or synthetic statement observation is created to force attribution.

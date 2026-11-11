@@ -68,6 +68,14 @@ describe("SBI VC Trade parser registry", () => {
     };
     expect(PARSERS.filter((parser) => parser.accepts(wrongSource))).toHaveLength(0);
   });
+
+  test("does not republish the unfiltered cash-flow evidence as JPY remittances", () => {
+    for (const view of ["recent", "historical"]) {
+      const meta = artifact(`cashflows-all-${view}-page-0001`);
+      expect(PARSERS.filter((parser) => parser.accepts(meta))).toHaveLength(0);
+    }
+    expect(parserFor("cashflows-historical-page-0001")).toBe(sbiVcCashflows);
+  });
 });
 
 describe("SBI VC Trade envelope and balance schemas", () => {

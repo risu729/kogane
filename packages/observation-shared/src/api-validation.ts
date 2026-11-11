@@ -612,6 +612,14 @@ const rewardBucket = object<RewardBucketRow>({
   sourceFactRefs: array(text),
 });
 const rewardHolding = object<RewardHoldingRow>({
+  pointHistoryCoverage: optional(
+    object<NonNullable<RewardHoldingRow["pointHistoryCoverage"]>>({
+      state: literal("current", "stale", "unavailable"),
+      reasonCode: nullable(literal("history_not_current")),
+      observedAt: nullable(text),
+      sourceFactRefs: array(text),
+    }),
+  ),
   programId: text,
   programRef: text,
   institutionRef: text,
