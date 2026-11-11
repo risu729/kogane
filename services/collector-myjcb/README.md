@@ -133,6 +133,8 @@ The active allowlist contains only these operations.
 | credit PDF         | GET           | `detailDbPdf.html?detailMonth=N&output=pdf`                                          | Official statement PDFs for confirmed months                  |
 | debit menu         | GET           | `/iss-pc/member/debit/details/debitDetailMenu.html?link_id=myj_main_debitDetailMenu` | Period enumeration                                            |
 | debit detail       | GET           | `/iss-pc/member/debit/details/debitDetail.html?seq=0..14`                            | Ordinary/difference details                                   |
+| debit other menu   | GET           | `/iss-pc/member/debit/od_details/debitOdDetailMenu.html`                             | Separate statement period enumeration                         |
+| debit other detail | GET           | `/iss-pc/member/debit/od_details/debitOdDetail.html?seq=1..14&inquiry=%8F%C6%89%EF`  | Observed Shift_JIS form query; known-empty statements only    |
 
 These read candidates remain **disabled**.
 
@@ -140,7 +142,13 @@ These read candidates remain **disabled**.
 - `detailReplaceJson` (read-like, but unnecessary for ledger capture).
 - Notice `detailNewspdf.html` (not a statement PDF).
 
-They are not categorically prohibited just because their HTTP method is POST. Their current origin/path, field names/types, CSRF/session tokens, expected responses, redirects and read semantics have not been verified through sanitized observation of owner actions. Even after verification, add each as a fixed individual operation and stop on unknown fields or redirects.
+They are not categorically prohibited just because their HTTP method is POST.
+The 2026-11-10 observation established the display-switch paths and field
+names, but relay response validation and stable cross-run card identity remain
+unproved. Add a fixed operation only after its complete response/identity
+contract is verified, and stop on unknown fields or redirects. Until then,
+each reachable card requires its own owner-configured credential connection;
+this change does not establish daily collection for all five visible cards.
 
 The collector does not add/remove consolidated-account settings, change initial display or payment methods, perform revolving/installment payments, early repayment or cash advances, change limits/locks/notifications/personal information, apply for/cancel cards, exchange points, register campaigns, register/remove passkeys or reset passwords.
 
@@ -167,7 +175,22 @@ Scheduled runs do not automatically retry the same connection. The next daily ru
 
 `parseCardInventory` normalizes existing card candidates in each independent connection's mypage to local indices such as `card-001` and an allowlist of generic product names, rather than card numbers or names. This PoC does not switch cards, so candidates outside the current root remain discovery candidates. It does not infer identity or consolidated relationships across connections.
 
-Debit enumerates only `seq=0..14` actually present in the menu. Parse failure stops processing rather than blindly scanning 0–14.
+Debit enumerates every `seq=0..14` actually offered by the menu on each daily run.
+It keeps sanitized ordinary detail HTML, read by `myjcb-debit-ledger@1.0.0`.
+The shared structural reader accepts only the observed desktop ordinary and
+difference column schemas, skips duplicate mobile markup, and admits the
+observed difference status `銀行振替済`. It retains signed differences separately
+from ordinary rows even when approval numbers match. Row identity excludes
+rolling month position, so overlapping captures retain the same external ID.
+An exact empty marker must name the selected period to establish zero rows;
+unknown pages are retained unread and make the connection partial. No debit
+row creates an adopted payment or automatic cash reconciliation. The separate
+`od_details` menu and every offered past month are collected daily into an
+independent `:debit-other` unit. `myjcb-debit-other-statement@1.0.0` admits
+only the observed explicit no-charges heading. Unknown nonempty pages are
+retained, the unit is partial, and the parser refuses them. Its outcome does
+not relabel ordinary-page differences as absent. Nonempty `od_details` schemas
+remain unsupported (ADR 0101).
 
 The initial credit menu is grouped by the last `h2` or `h3` before each link (ADR 0005 amendment (j)). Under `h2`, `最新のご利用明細` ("latest usage details") and `過去の明細` ("past details") contain months; under `h3`, `ボーナス#回払い・ショッピングスキップ払い` ("bonus # installment / shopping skip payment") contains payment-schedule pages. Other headings (or links preceding any heading) stop with `credit_menu_group_unrecognized`. Payment-schedule pages are captured/saved after months and recorded in manifest `schedulePages`. Only a page with exactly 1 observed h1 `ショッピングスキップ払いご利用明細(未確定分)` ("shopping skip-payment usage details, unconfirmed") is saved as `credit-skip-payment-NN.html`; registration assigns dataset `credit-schedule`, read by `myjcb-skip-payment-schedule` (ADR 0005 amendment (e)). Others, such as bonus-payment pages, are saved unread as `credit-schedule-NN.html`. They do not count toward month coverage (ADR 0005 amendment (c)). Even at a month position, a page with exactly 1 such h1 is likewise saved as `credit-skip-payment-NN.html`, recorded in `schedulePages` and excluded from months (ADR 0005 amendment (h)). A page with exactly 1 h1 `ボーナス#回払いご利用代金明細(未確定分)` ("bonus # installment billing details, unconfirmed") is also saved as `credit-schedule-NN.html` at any position, recorded in `schedulePages` and excluded from months (amendment (j)). Only observed months are captured; among `detailPastJson` candidates 9–17, only `detailAvailableFlag=true` candidates are added. In the example, only offsets 10 and 13 among the 9 older candidates were available, so offsets are not exhaustively tried. API failure or missing hidden `generalJsonShikibetuId` stops processing. JSON-RPC uses `method=execute`, `params=[{generalJsonShikibetuId}]` and IDs matching official JS: `0301006` plus a 2-digit counter.
 
@@ -220,7 +243,11 @@ Existing raw evidence and manifests are not rewritten. `myjcb-credit-statement-t
     discovery.json
 ```
 
-`debit-*` and CSV/PDF/OFX datasets remain unobserved in the central contract. Runs containing them are refused with `artifact_dataset_unobserved`; neither objects nor terminals are written to `DATA`.
+Debit menu and detail HTML are admitted to shared storage. Debit details use
+the observed parser; menus remain evidence only. CSV/PDF/OFX export datasets
+remain unobserved in the central contract. Runs containing them are refused
+with `artifact_dataset_unobserved`; neither objects nor terminals are written
+to `DATA`.
 
 Captured HTML source is decoded to UTF-8. Scripts/styles/meta, embedded elements, event/data attributes, navigation URLs, form actions, all value/textarea contents, token/session-like attributes and 16-digit card numbers are deterministically removed/replaced before storage. Login/mypage HTML is not stored. Object R2 metadata contains only `sha256` and `byteSize` written by `packages/collection`. Manifests contain only run/connection/artifact/failure metadata; neither cookie values nor actual detail values enter logs. The bucket must not be public.
 
@@ -271,7 +298,9 @@ The public AGPL-3.0 implementation [youseiushida/Okura](https://github.com/youse
 - Current mypage card-enumeration DOM and consolidated-account switching contract.
 - Whether credit paths, ledger DOM and CSV/PDF/OFX schemas match across real IDs/issuers.
 - Zero-row CSV/PDF/OFX responses, card/subcard columns and cancellation/refund representations.
-- Debit-menu/detail compatibility across issuers, state labels and 0-record/cancellation/difference representations.
+- Debit issuer compatibility beyond observed ordinary/difference schemas,
+  difference statuses other than `銀行振替済`, cancellation representations,
+  and nonempty separate `od_details` statements.
 - Session idle/absolute TTL and cookie rotation.
 - Whether TLS/connection/egress differences reject replay when Browser Run cookies move to ordinary Worker `fetch`.
 - Login-protection vendor and change cadence.

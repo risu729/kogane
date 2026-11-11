@@ -64,10 +64,26 @@ test("the current production migration chain preserves legacy policies and adds 
   expect(containers.map(({ parser_name, dataset }) => [parser_name, dataset])).toEqual(
     SNAPSHOT_DATASETS.map(([parserName, dataset]) => [parserName, dataset]).sort(),
   );
-  expect(policies).toHaveLength(SNAPSHOT_DATASETS.length + 2 + 201);
+  expect(policies).toHaveLength(SNAPSHOT_DATASETS.length + 4 + 201);
   expect(
     policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
   ).toEqual([
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-debit-ledger",
+      dataset: "debit-detail",
+      policy_id: "legacy-warning-compat-v1",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-debit-other-statement",
+      dataset: "debit-other-detail",
+      policy_id: "legacy-warning-compat-v1",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
     {
       source_id: "myjcb",
       parser_name: "myjcb-jpoint-balance",
@@ -93,7 +109,8 @@ test("the current production migration chain preserves legacy policies and adds 
           row.parser_name !== "st-george-balances" &&
           row.parser_name !== "prestia-bank-balances" &&
           row.parser_name !== "sbi-shinsei-exchange-rate" &&
-          row.parser_name !== "sbi-shinsei-monthly-report-metadata",
+          row.parser_name !== "sbi-shinsei-monthly-report-metadata" &&
+          row.parser_name !== "moneyforward-detail-balances",
       )
       .every((row) => row.policy_id === "legacy-warning-compat-v1"),
   ).toBe(true);
@@ -103,6 +120,17 @@ test("the current production migration chain preserves legacy policies and adds 
   expect(policies.find((row) => row.parser_name === "prestia-bank-balances")?.policy_id).toBe(
     "coverage-v1",
   );
+  expect(
+    await all(
+      "SELECT policy_id,required_parser_version,replaces_previous_on_complete_empty FROM dataset_snapshot_policies WHERE parser_name='moneyforward-detail-balances'",
+    ),
+  ).toEqual([
+    {
+      policy_id: "coverage-v1",
+      required_parser_version: "1.0.1",
+      replaces_previous_on_complete_empty: 0,
+    },
+  ]);
   // 0053: the SBI Shinsei exchange-rate board is chosen by its coverage claim.
   expect(policies.find((row) => row.parser_name === "sbi-shinsei-exchange-rate")?.policy_id).toBe(
     "coverage-v1",
@@ -126,6 +154,7 @@ test("the current production migration chain preserves legacy policies and adds 
     "SELECT parser_name,required_parser_version FROM dataset_snapshot_policies WHERE required_parser_version IS NOT NULL ORDER BY parser_name",
   );
   expect(pinned.map((row) => row.parser_name)).toEqual([
+    "moneyforward-detail-balances",
     "prestia-bank-balances",
     "sbi-foreign-cash-positions",
     "sbi-shinsei-exchange-rate",
@@ -324,7 +353,7 @@ test("the comparison route reports counts, ids and policies only", async () => {
     }[];
     differingDatasets: number;
   };
-  expect(body.policies).toHaveLength(SNAPSHOT_DATASETS.length + 2 + 201);
+  expect(body.policies).toHaveLength(SNAPSHOT_DATASETS.length + 4 + 201);
   expect(
     body.policies
       .filter((row) => row.snapshot_selection === 1)
@@ -338,6 +367,30 @@ test("the comparison route reports counts, ids and policies only", async () => {
   expect(
     body.policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
   ).toEqual([
+    {
+      source_id: "myjcb",
+      dataset: "debit-detail",
+      parser_name: "myjcb-debit-ledger",
+      policy_id: "legacy-warning-compat-v1",
+      policy_version: 1,
+      required_parser_version: null,
+      replaces_previous_on_complete_empty: 1,
+      unit_scope: "unit",
+      snapshot_selection: 0,
+      updated_at_ms: 1794268800000,
+    },
+    {
+      source_id: "myjcb",
+      dataset: "debit-other-detail",
+      parser_name: "myjcb-debit-other-statement",
+      policy_id: "legacy-warning-compat-v1",
+      policy_version: 1,
+      required_parser_version: null,
+      replaces_previous_on_complete_empty: 1,
+      unit_scope: "unit",
+      snapshot_selection: 0,
+      updated_at_ms: 1794268800000,
+    },
     {
       source_id: "myjcb",
       dataset: "jpoint-balance",

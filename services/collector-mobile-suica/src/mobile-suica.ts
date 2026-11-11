@@ -1,4 +1,10 @@
+import {
+  mergeHistoryPage,
+  MAX_HISTORY_PAGES,
+  strictHistoryDate,
+} from "../../../packages/parsers/src/parsers/mobile-suica-walk.ts";
 import { decode } from "iconv-lite";
+import { sanitizeHistoryHtmlText } from "./sanitize-contract";
 import { sanitizeHistoryHtml } from "./sanitize";
 import type { HistoryRow, RawArtifact, SessionEnvelope } from "./types";
 
@@ -36,73 +42,134 @@ export function parseSessionEnvelope(input: string): SessionEnvelope {
   };
 }
 
+export class HistoryCollectionError extends Error {
+  constructor(
+    readonly artifacts: RawArtifact[],
+    code: string,
+    readonly httpStatus?: number,
+  ) {
+    super(code);
+  }
+}
+
 export async function collectMobileSuica(options: {
   session: SessionEnvelope;
   asOfDateJst: string;
-}): Promise<{ artifacts: RawArtifact[]; rows: HistoryRow[]; pageCount: 1; complete: boolean }> {
+}): Promise<{
+  artifacts: RawArtifact[];
+  rows: HistoryRow[];
+  pageCount: number;
+  complete: boolean;
+}> {
+  strictHistoryDate(options.asOfDateJst);
   const cookieJar = parseCookieHeader(options.session.cookieHeader);
-  const initialFields = new URLSearchParams(options.session.formBody);
-  const baseVariable = requiredString(initialFields.get("baseVariable"), "baseVariable");
-  const response = await fetch(historyUrl, {
-    method: "POST",
-    redirect: "manual",
-    headers: {
-      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "accept-language": "ja-JP,ja;q=0.9,en;q=0.8",
-      "content-type": "application/x-www-form-urlencoded",
-      cookie: serializeCookies(cookieJar),
-      origin: "https://www.mobilesuica.com",
-      referer: `${historyUrl}?returnId=SFRCMMEPC03`,
-      "user-agent": options.session.userAgent,
-    },
-    body: historySearchBody(baseVariable, options.asOfDateJst),
-  });
-  updateCookies(cookieJar, response.headers.getSetCookie());
-  if (response.status !== 200)
-    throw Object.assign(new Error("history_request_failed"), { httpStatus: response.status });
-  const responseBytes = await readBounded(response, maxResponseBytes);
-  const html = decode(responseBytes, "shift_jis");
-  if (isLoginPage(html)) throw new Error("history_session_expired");
-  const collectedRows = parseHistoryRows(html, options.asOfDateJst);
-  if (collectedRows.length === 0 && !isHistoryPage(html)) {
-    throw new Error("history_response_invalid");
+  let baseVariable = requiredString(
+    new URLSearchParams(options.session.formBody).get("baseVariable"),
+    "baseVariable",
+  );
+  let cursorDate = options.asOfDateJst;
+  let rows: HistoryRow[] = [];
+  const artifacts: RawArtifact[] = [];
+  const pages: { cursorDate: string; rows: HistoryRow[] }[] = [];
+  const deadline = Date.now() + 10 * 60 * 1000;
+  let totalBytes = 0;
+  let complete = false;
+  try {
+    for (let index = 0; index < MAX_HISTORY_PAGES; index += 1) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error("history_time_budget_exceeded");
+      const response = await fetch(historyUrl, {
+        method: "POST",
+        redirect: "manual",
+        signal: AbortSignal.timeout(remaining),
+        headers: {
+          accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "accept-language": "ja-JP,ja;q=0.9,en;q=0.8",
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: serializeCookies(cookieJar),
+          origin: "https://www.mobilesuica.com",
+          referer: `${historyUrl}?returnId=SFRCMMEPC03`,
+          "user-agent": options.session.userAgent,
+        },
+        body: historySearchBody(baseVariable, cursorDate),
+      });
+      updateCookies(cookieJar, response.headers.getSetCookie());
+      if (response.status !== 200)
+        throw Object.assign(new Error("history_request_failed"), { httpStatus: response.status });
+      const responseBytes = await readBounded(response, maxResponseBytes);
+      totalBytes += responseBytes.byteLength;
+      if (totalBytes > 16 * maxResponseBytes) throw new Error("history_total_bytes_exceeded");
+      const html = decode(responseBytes, "shift_jis");
+      if (isLoginPage(html)) throw new Error("history_session_expired");
+      if (!isHistoryPage(html) && !isKnownEmptyPage(html))
+        throw new Error("history_response_invalid");
+      // Validate and redact before any response becomes persistent evidence.
+      const sanitizedBytes = sanitizeHistoryHtml(html);
+      baseVariable = sanitizeHistoryHtmlText(html).originalValue;
+      artifacts.push({
+        dataset: "sf-history-html",
+        filename: `sf-history-page-${String(index + 1).padStart(4, "0")}.html`,
+        mediaType: "text/html; charset=shift_jis",
+        body: sanitizedBytes,
+      });
+      const pageRows = parseHistoryRows(html, cursorDate);
+      if (
+        (isKnownEmptyPage(html) && pageRows.length !== 0) ||
+        (!isKnownEmptyPage(html) && pageRows.length === 0)
+      )
+        throw new Error("history_response_invalid");
+      pages.push({ cursorDate, rows: pageRows });
+      rows = mergeHistoryPage(rows, pageRows, cursorDate, options.asOfDateJst, index);
+      if (collectionCompleteness(pageRows.length)) {
+        complete = true;
+        break;
+      }
+      const oldest = pageRows.at(-1)!.date;
+      if (oldest === pageRows[0]!.date) throw new Error("history_single_day_limit");
+      cursorDate = oldest;
+    }
+    if (!complete) throw new Error("history_page_limit_exceeded");
+    const body = JSON.stringify({
+      asOfDateJst: options.asOfDateJst,
+      pageCount: pages.length,
+      transactionCount: rows.length,
+      complete,
+      rows,
+      ...(pages.length > 1 ? { pages } : {}),
+    });
+    if (new TextEncoder().encode(body).byteLength > maxResponseBytes)
+      throw new Error("history_output_bytes_exceeded");
+    artifacts.push({
+      dataset: "sf-history",
+      filename: "sf-history.json",
+      mediaType: "application/json",
+      body,
+    });
+    artifacts.push({
+      dataset: "collection-summary",
+      filename: "collection-summary.json",
+      mediaType: "application/json",
+      body: JSON.stringify({
+        asOfDateJst: options.asOfDateJst,
+        pageCount: pages.length,
+        transactionCount: rows.length,
+        complete,
+      }),
+    });
+    return { artifacts, rows, pageCount: pages.length, complete };
+  } catch (error) {
+    const code =
+      error instanceof Error && /^history_[a-z_]+$/u.test(error.message)
+        ? error.message
+        : "history_collection_failed";
+    throw new HistoryCollectionError(
+      artifacts.filter((artifact) => artifact.dataset === "sf-history-html"),
+      code,
+      error instanceof Error && "httpStatus" in error && typeof error.httpStatus === "number"
+        ? error.httpStatus
+        : undefined,
+    );
   }
-  const complete = collectionCompleteness(collectedRows.length);
-  const sanitizedBytes = sanitizeHistoryHtml(html);
-  const artifacts: RawArtifact[] = [
-    {
-      dataset: "sf-history-html",
-      filename: "sf-history-page-0001.html",
-      mediaType: "text/html; charset=shift_jis",
-      body: sanitizedBytes,
-    },
-  ];
-  artifacts.push({
-    dataset: "sf-history",
-    filename: "sf-history.json",
-    mediaType: "application/json",
-    body: JSON.stringify({
-      asOfDateJst: options.asOfDateJst,
-      pageCount: 1,
-      transactionCount: collectedRows.length,
-      complete,
-      rows: collectedRows,
-    }),
-  });
-  artifacts.push({
-    dataset: "collection-summary",
-    filename: "collection-summary.json",
-    mediaType: "application/json",
-    body: JSON.stringify({
-      asOfDateJst: options.asOfDateJst,
-      pageCount: 1,
-      transactionCount: collectedRows.length,
-      complete,
-      cookieNames: [...cookieJar.keys()].sort(),
-      capturedSessionAt: options.session.capturedAt,
-    }),
-  });
-  return { artifacts, rows: collectedRows, pageCount: 1, complete };
 }
 
 export function collectionCompleteness(rowCount: number): boolean {
@@ -114,10 +181,11 @@ export function collectionCompleteness(rowCount: number): boolean {
 
 export function parseHistoryRows(html: string, cursorDate: string): HistoryRow[] {
   const rows: HistoryRow[] = [];
+  strictHistoryDate(cursorDate);
   let inferredYear = Number(cursorDate.slice(0, 4));
   let previousTime = Date.parse(`${cursorDate}T23:59:59+09:00`);
   for (const cells of tableRows(html)) {
-    if (cells.length < 8 || !/^\d{1,2}\/\d{1,2}$/u.test(cells[1] ?? "")) continue;
+    if (cells.length !== 8 || !/^\d{1,2}\/\d{1,2}$/u.test(cells[1] ?? "")) continue;
     const [monthText, dayText] = (cells[1] ?? "").split("/");
     const month = Number(monthText);
     const day = Number(dayText);
@@ -126,6 +194,8 @@ export function parseHistoryRows(html: string, cursorDate: string): HistoryRow[]
       inferredYear -= 1;
       time = Date.parse(`${inferredYear}-${pad(month)}-${pad(day)}T00:00:00+09:00`);
     }
+    strictHistoryDate(`${inferredYear}-${pad(month)}-${pad(day)}`);
+    if (!Number.isFinite(time)) throw new Error("history_date_invalid");
     previousTime = time;
     const typeFrom = cells[2] ?? "";
     const placeFrom = cells[3] ?? "";
@@ -144,10 +214,13 @@ export function parseHistoryRows(html: string, cursorDate: string): HistoryRow[]
       kind: classify(typeFrom, placeFrom, typeTo),
     });
   }
+  const checked = [...html.matchAll(/<input\b[^>]*name=["']printCheck["'][^>]*>/giu)].length;
+  if (checked > 0 && checked !== rows.length) throw new Error("history_row_shape_invalid");
   return rows;
 }
 
 export function historySearchBody(baseVariable: string, date: string): string {
+  strictHistoryDate(date);
   const [year, month, day] = date.split("-");
   if (!year || !month || !day) throw new Error("Mobile Suica cursor date is invalid");
   return [
@@ -183,7 +256,13 @@ function textContent(html: string): string {
 
 function parseAmount(value: string): number | null {
   const normalized = value.replace(/[￥¥\\円,\s]/gu, "");
-  return /^[+-]?\d+$/u.test(normalized) ? Number(normalized) : null;
+  if (!/^[+-]?\d+$/u.test(normalized)) {
+    if (normalized !== "") throw new Error("history_amount_invalid");
+    return null;
+  }
+  const result = Number(normalized);
+  if (!Number.isSafeInteger(result)) throw new Error("history_amount_invalid");
+  return result;
 }
 
 function classify(typeFrom: string, placeFrom: string, typeTo: string): HistoryRow["kind"] {
@@ -248,7 +327,23 @@ async function readBounded(response: Response, limit: number): Promise<Uint8Arra
 }
 
 function isHistoryPage(html: string): boolean {
-  return /name=["']baseVariable["']/iu.test(html) && /name=["']specifyYearMonth["']/iu.test(html);
+  return (
+    /name=["']baseVariable["']/iu.test(html) &&
+    /name=["']specifyYearMonth["']/iu.test(html) &&
+    /月日/.test(html) &&
+    /入金・利用額/.test(html)
+  );
+}
+
+function isKnownEmptyPage(html: string): boolean {
+  return (
+    /<title[^>]*>\s*ご案内\s*<\/title>/iu.test(html) &&
+    /<p\b[^>]*>\s*利用履歴がありません。\s*<\/p>/iu.test(html) &&
+    /action=["'](?:https:\/\/www\.mobilesuica\.com)?\/cm\/lb\/Message\.aspx["']/iu.test(html) &&
+    /name=["']returnUrlList["']/iu.test(html) &&
+    /name=["']checkScreenTransfer["']/iu.test(html) &&
+    !/<select\b|name=["']printCheck["']/iu.test(html)
+  );
 }
 
 function isLoginPage(html: string): boolean {

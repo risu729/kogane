@@ -15,7 +15,7 @@ This independent Worker creates a fresh session from a stored `SBI証券` passke
 ## Current scope
 
 - Domestic-stock app: domestic cash equities/custody-cash payload through an MTS session and read-only TR code `F2631`.
-- Main site: current `My資産` ("My assets") valuation, yen deposit/withdrawal details and domestic-stock execution history from January 1 of year minus two, split into windows of at most 90 days as in the successful historical scan. Yen details retain every provider page-metadata field and response field in a page bundle, validating completeness before making an artifact.
+- Main site: current and available weekly `My資産` ("My assets") valuations, yen deposit/withdrawal details and domestic-stock execution history from January 1 of year minus two, split into windows of at most 90 days as in the successful historical scan. Yen details retain every provider page-metadata field and response field in a page bundle, validating completeness before making an artifact.
 - Foreign-stock app: US cash equities, USD custody cash and retained execution history in windows of at most 90 days. The historically observed mobile BFF duration query supplies `pastYears`; the successful historical scan began January 1 of year minus `pastYears`, rather than at the web rolling cutoff.
 - Execution: the Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the `sbi-securities` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), daily at 06:00 JST (21:00 UTC), and an accepted operations request calls `runOperation` (ADR 0048). Either one collects domestic/foreign data serially in one invocation (`scope=all`). The Worker has no Cron Trigger and no public trigger route.
 - Storage: `packages/collection` writes directly to shared DATA; the Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). The only D1 the collector uses is the execution lease (`withCollectionLease`) in `SCHEDULE_DB` (`kogane-raw-evidence`).
@@ -74,7 +74,7 @@ The terminal records the period, success/partial success/failure, artifact hashe
 Execution windows are newest first and disjoint, with at most thirteen per scope.
 The newest ordinary 90-day request keeps `<scope>-trade-records.json`; older
 requests use `<scope>-trade-records-<from>-<to>.json`. Each carries its own
-requested range in the terminal and, under `terminal-registration-v4`, its
+requested range in the terminal and, under `terminal-registration-v4` and later, its
 CORE artifact descriptor. Equal empty bodies may share a content-addressed
 object while their separate requested windows remain registered evidence.
 Foreign retention is the historically observed read-only `GetSearchingDuration`
@@ -99,7 +99,38 @@ not proof of that earlier window. Publication, complete retention counts
 and the 13-minute holder limit still require a scheduled production run to
 verify ([ADR 0096](../../docs/adr/0096-sbi-scheduled-execution-history.md)).
 
-`yen-detail-history.json` uses `sbi-yen-detail-history-bundle-v1`, retaining bundle counts/completion/bound flags and provider responses within `pages[]`. It validates consecutive `pageNumber`, constant `pageCount` / `pageSize` / `totalCount`, total row count, duplicate `did` and provider/collector bound flags. Only read-only `GET /banking/api/yen/detail/init` has been observed; the next-page request endpoint/parameter contract is unconfirmed. Consequently, when init indicates multiple pages or uncaptured rows, the run closes as a `main-site` failure without guessed requests, rather than saving missing history as a successful artifact.
+`yen-detail-history.json` and `foreign-cash-history.json` use
+`sbi-retained-cash-history-v1`. Every main-site run selects the observed two-year
+yen / five-year foreign preset through JST today, independently of execution
+window arguments. `GET /banking/api/yen/detail/query` walks every declared page
+with observed size 10, all directions/details and descending dates. The foreign
+statement uses `GET /banking/api/fc/detail-history/search`, all trade kinds and
+the observed USD filter `currencyCode=011`, with the same page size and descending sort. Only USD code `011`
+is supported; other currencies and an unobserved foreign second page stop
+with a closed failure code.
+
+After original-JSON, duplicate-key, exact-number and closed-field audits, each
+raw page is retained as `<dataset>-page-NNNN-source.json`. The derived bundle
+names all raw inputs; shared persistence checks its exhaustive inventory.
+Both statements belong to the domestic main-site unit. Bounds are 2,000 pages /
+20,000 rows. Page metadata, each page's expected rows, total rows, descending
+calendar dates and requested-range membership are checked, as are known codes,
+unsigned exact amounts and duplicate yen `did`. Yen deposit/payment counts and
+domain exact sums must match the unchanged controls. Positive transfer controls
+remain unsupported until their semantics are observed. Unknown fields/private
+error envelopes are rejected before storage; coverage failures retain audited
+financial evidence and keep the unit partial.
+
+Registration v7 maps only the new USD derivative and attaches cash requested
+ranges; earlier mappings stay frozen and raw pages remain unparsed. The yen
+parser retains legacy single-page/v1 bundles and stable provider ids. USD uses
+normalized row fingerprints with occurrence ordinals, preserving identical
+receipts and stable ids across full-range runs; the production reader selects
+one witnessed revision per id. These are settlement-cash observations, never
+a second income publication. Catalogue status remains partial under #1226 until
+foreign continuation/transfer semantics and scheduled publication, retained
+coverage, freshness and the 13-minute execution budget are verified
+([ADR 0102](../../docs/adr/0102-sbi-retained-cash-history.md)).
 
 Stored runs in the old dedicated source bucket were copied to central DATA and verified on 2026-09-13; no outbox remains to resend ([legacy-retirement.md](../../docs/legacy-retirement.md)).
 
@@ -118,3 +149,38 @@ No Queue, dispatcher or GitHub Actions schedule is used. D1 is used only for the
 ## Sources
 
 Some protocol understanding and the first implementation were based on `pnsk-lab/mnie` commit `c87e65c0a04c03c560962f8ead6e77415fb841f4`. Kogane code was independently rewritten for Cloudflare Workers, removing filesystem, OpenSSL-process, Mnie-session-type and order-API dependencies. See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for license attribution.
+
+Weekly asset history is requested once through the existing main-site session
+at `/account/api/assets/valuations`, without a period parameter. The closed
+shape audit precedes exact-byte storage as unmapped
+`account-assets-history-source.json`. A derived inventory records every expected
+calendar-year shard/hash/count with the raw hash, GET path and capture time.
+`account-assets-history-<year>.json` retains at most 53 weeks, keeping long
+histories under the existing 2 MiB parser-output limit. Each shard's input
+lineage names source and inventory. Missing or altered inventory members make
+the domestic unit/run partial; available evidence remains stored. Registration
+v5 names only yearly shards as the new dataset and freezes v1–v4 mappings. Each successful
+main-site capture is retained immediately, so a later yen/history failure
+keeps these bytes while the run stays partial under the existing policy.
+
+Whole-source calendar, native-series and exact-total validation runs before
+any yearly filtering. Before auditing or normalizing numbers, the JSON reader
+validates original syntax and per-object decoded-key uniqueness within fixed
+byte/depth/token budgets. Duplicate keys (including escaped aliases) and
+malformed numeric fragments are rejected before any raw capture is stored.
+The JSON reader then proves financial numeric tokens are
+exact safe integers before Number conversion. Inexact or inconsistent
+financial-shaped responses keep their exact audited raw bytes but produce no
+derivatives and leave collection partial. The closed shape/secret-field audit
+still refuses unexpected fields or login payloads before storage. Rates stay
+finite metadata, outside the three monetary metrics.
+
+The parser emits available weekly profiles and listed categories plus ALL,
+corroborates ALL with native tuples and exact category sums, and preserves
+unlisted residual rows. Null metrics/views never become zero facts. The
+production observation reader selects one latest revision per portfolio point,
+keeps older witnessed weeks absent from a shorter response, and separates
+aggregate/profile alternatives. No new UI, public trigger or read operation is
+added. The catalogue remains partial: the observed 44 points do not establish
+August 2021 coverage, the two iDeCo profiles were unavailable, and a scheduled
+production collection/publication is still required ([ADR 0098](../../docs/adr/0098-sbi-weekly-asset-history.md)).

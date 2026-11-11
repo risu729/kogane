@@ -149,6 +149,79 @@ show no exception or limit, the other alarms of 21:00 finished normally, and
 the reservation for the next occurrence stayed armed. The alarm and lease log
 lines below were added so the next such stop shows where it happened.
 
+### Vpass recurrence on 2026-11-09
+
+A read-only investigation on 2026-11-10 placed the next
+silent stop inside the open collector call
+([issue 1142](https://github.com/risu729/kogane/issues/1142)). The maintenance
+read reported the nominal 2026-11-09 21:00 UTC occurrence as `uncertain` /
+`dispatch_uncertain`, with `startedAt` 21:00:00.587 UTC and no `finishedAt`.
+The next occurrence, 2026-11-10 21:00 UTC, remained `armed`. These are
+operational timestamps, not provider statement dates.
+
+Workers Logs were queried with `dry: true` for 2026-11-09 20:59–21:17 UTC.
+The occurrence id was `scheduled:vpass:1794258000000`:
+
+| UTC time        | Evidence                                                                                                                                                                                                       |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 21:00:01.028    | Processor `schedule_alarm`, `outcome: claimed`, `lagMs: 587`, `claimMs: 441`.                                                                                                                                  |
+| 21:00:01.217    | Processor `schedule_dispatch_start`, `target: collector-vpass`; no dispatch result or final invocation outcome was found for the original alarm.                                                               |
+| 21:00:01.290    | Lease `startedAt`, recovered from the later `collection_lease_expired` line.                                                                                                                                   |
+| 21:01:24.987259 | Vpass deployment `270a1e1d-5bbd-4fdd-83eb-8bc566dbc2e1` assigned version `4c1cbf1f-f9fc-495f-9601-a2da4fe9ac93` to 100% of traffic.                                                                            |
+| 21:01:41.481688 | Processor deployment `3eae8b05-d6fe-4322-99c7-b45dd009687f` assigned version `dba57c4c-2940-41be-9f3a-3443d839ff86` to 100% of traffic.                                                                        |
+| 21:01:57.164    | The only Vpass Worker event found was a successful `/health` invocation on the new version, with CPU and wall time both 0 ms; it was not the scheduled collection.                                             |
+| 21:02:01.896    | Lease `lastHeartbeatAt`: 120.606 s after its recorded start. This proves a heartbeat was written then, not that provider collection or receipt persistence finished.                                           |
+| 21:04:32.583    | The same alarm object answered `alarmTime` on the new Processor version; later successful calls were at 21:09:50.999, 21:13:20.601 and 21:15:38.421. These calls do not describe how the old invocation ended. |
+| 21:15:34.931    | Audit `alarm.lease.expire` recorded an applied release (`released: true`).                                                                                                                                     |
+| 21:15:35.126    | Processor `collection_lease_expired` recorded the start and last-heartbeat times above.                                                                                                                        |
+
+The claim and dispatch-start lines belonged to Processor version
+`9c74c4bd-e346-4549-adc8-1f399c231428`, request
+`20d85b31859cc56d04164b1e7a83f26d`, alarm object
+`046f6bbef2765bb60fe8fad5eaf88e14e4f3bed3fdb10d9472b949263235bb8c`.
+The lease proves that collection reached the Vpass lease path. No scheduled
+Vpass invocation, `collector-diagnostic` card/session step,
+`vpass-scheduled-result`, CPU-limit or memory-limit outcome was found. The
+existing `createDiagnostics().step` already emits `started` before opening
+the session and before collecting each card; absence of those records does
+not establish that either step was never entered. The health invocation's
+resource measurements say nothing about the missing collection invocation.
+
+The deployments overlap the open call, unlike the November 7 incident.
+Cloudflare's [code-update documentation](https://developers.cloudflare.com/durable-objects/deployments/durable-objects-code-updates/)
+and [2026-10-30 changelog](https://developers.cloudflare.com/changelog/post/2026-10-30-durable-objects-deferred-code-updates/)
+describe a default deferral of up to 300 s for active Durable Objects, with
+best-effort completion and no guarantee that the entire delay is available.
+This makes an update-related interruption a candidate, not a demonstrated
+cause: there is no reset/cancellation outcome linking either deployment to
+this invocation. The last heartbeat at about two minutes and the new-version
+object response at about four and a half minutes also do not match the
+[15-minute alarm wall-time limit](https://developers.cloudflare.com/durable-objects/platform/limits/)
+as the point where this holder went silent. They do not identify a CPU or
+memory failure either. No execution, lease, replay or deployment behavior was
+changed on this evidence.
+
+For the next occurrence, read the receipt, `alarm.lease.expire` audit, and
+both Workers' logs together before the seven-day log retention expires. Query
+the collector script and the alarm object id as well as `vpass`, so an
+invocation or platform outcome without a source field is included; correlate
+the original request and version ids with deployment times. The missing
+discriminator is the old invocation's reset/cancellation/limit outcome or the
+last retained collector stage, with its timestamp and version. If another
+stop retains neither, another console start line duplicates the existing
+step starts; a separately designed durable stage marker would need review
+before adding storage or RPC behavior. This document does not implement such
+a marker or claim that it would establish a platform cause.
+
+The November 8 nominal occurrence (deferred to 23:00 UTC for Monday
+maintenance) was reported completed at 23:04 UTC in the
+[November 9 issue update](https://github.com/risu729/kogane/issues/1142#issuecomment-6738569121).
+The November 9 recurrence breaks that sequence. A demonstrated cause/fix and
+three consecutive scheduled days completing or failing with closed codes
+after that fix is deployed remain open acceptance work in issue 1142.
+
+### Collection dispatch and recovery
+
 An accepted operations-API collection or session refresh runs through the same
 named collector RPC and the same lease
 ([ADR 0048](adr/0048-operation-collector-dispatch.md),
