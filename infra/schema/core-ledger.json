@@ -1269,6 +1269,21 @@
       "statementCount": 2,
       "insertStatements": [],
       "sha256": "5cb9b300e1ed17b8b56f27a18164818cccaec856ac5cd01c36cb691ae98875ea"
+    },
+    {
+      "file": "0096_smbc_foreign_ordinary_unit_eligibility.sql",
+      "statementCount": 3,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "5e3a1330519a885fe59b0424d0bc7c7fe0f4c09a9fef5b8b0b239749f36066a9"
     }
   ],
   "tables": [
@@ -22177,7 +22192,8 @@
       "0091_moneyforward_detail_balance_snapshots.sql",
       "0092_vpass_credit_snapshots.sql",
       "0093_sbi_income_complete_containers.sql",
-      "0094_myjcb_jpoint_history.sql"
+      "0094_myjcb_jpoint_history.sql",
+      "0096_smbc_foreign_ordinary_unit_eligibility.sql"
     ],
     "schemaSha256": "0b2ddb2a8d7e9b70df8ec4b3937eeef911d2737a1e55ca0d06eb316f47695af9"
   }

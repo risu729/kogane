@@ -77,6 +77,21 @@ const SBI_VC_UNIT_POLICIES = [
   `${left.parser_name}:${left.dataset}`.localeCompare(`${right.parser_name}:${right.dataset}`),
 );
 
+/** The four closed SMBC default unit opt-ins added by CORE 0096. */
+const SMBC_UNIT_POLICIES = [
+  ["smbc-direct-balance", "balance-normalized", 1],
+  ["smbc-direct-transactions", "transactions-normalized", 0],
+  ["smbc-foreign-ordinary-balance", "foreign-ordinary-aud-balance", 1],
+  ["smbc-foreign-ordinary-history", "foreign-ordinary-aud-history", 0],
+] as const;
+const smbcUnitPolicies = SMBC_UNIT_POLICIES.map(([parser_name, dataset, snapshot_selection]) => ({
+  source_id: "smbc-bank",
+  parser_name,
+  dataset,
+  unit_scope: "unit",
+  snapshot_selection,
+}));
+
 /** The production schema, views included, on an in-memory SQLite. */
 function migratedDatabase(): Database {
   return fromTemplate("core", () => {
@@ -437,6 +452,7 @@ describe("named concepts in the final SQL", () => {
         snapshot_selection: 0,
       },
       ...SBI_VC_UNIT_POLICIES,
+      ...smbcUnitPolicies,
       {
         source_id: "vpass",
         parser_name: "vpass-credit-snapshot",
@@ -448,7 +464,7 @@ describe("named concepts in the final SQL", () => {
     expect(
       db
         .query(
-          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'moneyforward-detail-balances', 'sbi-income-payments', 'sbi-realised-gains', 'vpass-credit-snapshot', 'myjcb-jpoint-history')",
+          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'moneyforward-detail-balances', 'sbi-income-payments', 'sbi-realised-gains', 'vpass-credit-snapshot', 'myjcb-jpoint-history', 'smbc-direct-transactions', 'smbc-foreign-ordinary-balance', 'smbc-foreign-ordinary-history')",
         )
         .get(),
     ).toEqual({ n: 0 });
@@ -521,9 +537,9 @@ describe("named concepts in the final SQL", () => {
     expect(db.query(`SELECT ${economicallySummable.predicate()} AS summable`).get()).toEqual({
       summable: 0,
     });
-    // The classic SBI VC snapshots, the Vpass credit snapshot and the J-POINT
-    // history use unit scope, alongside eligibility-only policies; this fixture
-    // has no successful unit artifact.
+    // The classic SBI VC and SMBC snapshots, the Vpass credit snapshot and the
+    // J-POINT history use unit scope, alongside eligibility-only policies; this
+    // fixture has no successful unit artifact.
     expect(
       db
         .query(
@@ -544,6 +560,12 @@ describe("named concepts in the final SQL", () => {
       { parser_name: "sbi-vc-account-margin", dataset: "account-margin", unit_scope: "unit" },
       { parser_name: "sbi-vc-cash-balances", dataset: "cash-balances", unit_scope: "unit" },
       { parser_name: "sbi-vc-position-summary", dataset: "position-summary", unit_scope: "unit" },
+      { parser_name: "smbc-direct-balance", dataset: "balance-normalized", unit_scope: "unit" },
+      {
+        parser_name: "smbc-foreign-ordinary-balance",
+        dataset: "foreign-ordinary-aud-balance",
+        unit_scope: "unit",
+      },
       { parser_name: "vpass-credit-snapshot", dataset: "credit-snapshot", unit_scope: "unit" },
     ]);
     expect(
@@ -617,6 +639,7 @@ describe("named concepts in the final SQL", () => {
         snapshot_selection: 0,
       },
       ...SBI_VC_UNIT_POLICIES,
+      ...smbcUnitPolicies,
       {
         source_id: "vpass",
         parser_name: "vpass-credit-snapshot",

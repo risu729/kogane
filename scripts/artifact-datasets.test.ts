@@ -373,6 +373,22 @@ const SAMPLES: readonly Sample[] = [
   // services/collector-smbc-direct/src/shared-collection.ts
   {
     source: "smbc-direct",
+    artifactKey: "foreign-ordinary-aud/balance.json",
+    role: "sanitized_provider_capture",
+    mediaType: json,
+    dataset: "foreign-ordinary-aud-balance",
+    unitKey: "foreign-ordinary-aud-balance",
+  },
+  {
+    source: "smbc-direct",
+    artifactKey: "foreign-ordinary-aud/history/20990101-20990131.json",
+    role: "sanitized_provider_capture",
+    mediaType: json,
+    dataset: "foreign-ordinary-aud-history",
+    unitKey: "foreign-ordinary-aud-history",
+  },
+  {
+    source: "smbc-direct",
     artifactKey: "balance.normalized.json",
     role: "collector_derived",
     mediaType: json,
@@ -723,7 +739,12 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
     "executions-historical-page-0001",
     "cashflows-historical-page-0002",
   ],
-  "smbc-bank": ["balance-normalized", "transactions-normalized"],
+  "smbc-bank": [
+    "balance-normalized",
+    "transactions-normalized",
+    "foreign-ordinary-aud-balance",
+    "foreign-ordinary-aud-history",
+  ],
   "sony-bank": [
     "gross-balance",
     "yen-history-page-0001",

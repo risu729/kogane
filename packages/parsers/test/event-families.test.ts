@@ -47,6 +47,11 @@ import { sbiVcExecutions } from "../src/parsers/sbi-vc-executions.ts";
 import { sbiYenDetailHistory } from "../src/parsers/sbi-yen-detail-history.ts";
 import { smbcDirectTransactions } from "../src/parsers/smbc-direct.ts";
 import {
+  smbcForeignOrdinaryBalance,
+  smbcForeignOrdinaryHistory,
+} from "../src/parsers/smbc-foreign-ordinary.ts";
+import { smbcForeignBalance, smbcForeignHistory } from "./smbc-foreign-fixture.ts";
+import {
   sonyBankHistoryCsv,
   sonyBankHistoryJson,
   sonyBankWalletHistory,
@@ -88,6 +93,8 @@ const NOT_IN_REGISTRY = [
   "sbi-vc-account-margin",
   "sbi-vc-cash-balances",
   "smbc-direct-balance",
+  "smbc-foreign-ordinary-balance",
+  "smbc-foreign-ordinary-history",
   "sony-bank-gross-balance",
   "st-george-balances",
   "v-point-balance-info",
@@ -411,6 +418,24 @@ const CASES: Case[] = [
  */
 const MF_EVIDENCE = { fetchUnitKey: null, statementState: null, period: null, mime: "text/html" };
 const OUTSIDE_CASES: Case[] = [
+  one(
+    smbcForeignOrdinaryBalance,
+    "foreign-balance",
+    meta("smbc-bank", "foreign-ordinary-aud-balance", {
+      artifactKey: "foreign-ordinary-aud/balance.json",
+      fetchUnitKey: "foreign-ordinary-aud-balance",
+    }),
+    encode(smbcForeignBalance()),
+  ),
+  one(
+    smbcForeignOrdinaryHistory,
+    "foreign-empty-history",
+    meta("smbc-bank", "foreign-ordinary-aud-history", {
+      artifactKey: "foreign-ordinary-aud/history/20990101-20990131.json",
+      fetchUnitKey: "foreign-ordinary-aud-history",
+    }),
+    encode(smbcForeignHistory()),
+  ),
   one(
     vpassCreditSnapshot,
     "reported-credit",

@@ -192,6 +192,7 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
     ]) ||
     matches("prestia", "prestia-bank-balances", ["term_deposit_principal"]) ||
     matches("smbc-bank", "smbc-direct-balance", ["account_balance"]) ||
+    matches("smbc-bank", "smbc-foreign-ordinary-balance", ["account_balance"]) ||
     matches("mizuho-bank", "mizuho-account-list", ["account_balance"]) ||
     matches("sony-bank", "sony-bank-history-json", ["available_after_transaction"]) ||
     matches("sony-bank", "sony-bank-history-csv", ["available_after_transaction"]);

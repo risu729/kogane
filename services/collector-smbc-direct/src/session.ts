@@ -1,8 +1,15 @@
 import { DurableObject } from "cloudflare:workers";
 import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import { decryptJson, encryptJson, parseCredentials } from "./crypto";
-import { lastFinishedJapanDay, monthRanges, nextJapanMidnight, validateDate } from "./dates";
+import {
+  foreignOrdinaryRange,
+  lastFinishedJapanDay,
+  monthRanges,
+  nextJapanMidnight,
+  validateDate,
+} from "./dates";
 import { isResumable } from "./progress";
+import { foreignFailureCodes } from "./foreign-ordinary";
 import {
   dataBucket,
   manifestBytes,
@@ -29,6 +36,7 @@ import type {
   FinishChallengeResult,
   StartChallengeResult,
   StoredArtifact,
+  ForeignOrdinaryProgress,
 } from "./types";
 const INITIAL_PROGRESS: BackfillProgress = {
   phase: "idle",
@@ -156,6 +164,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
       }
       if (resume) {
         const artifacts = (await this.ctx.storage.get<StoredArtifact[]>("artifacts")) ?? [];
+        const retainedForeignFailures = foreignFailureCodes(current.foreignOrdinary);
         const resumed: BackfillProgress = {
           ...current,
           phase: "running",
@@ -175,7 +184,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           progress: resumed,
           session: await encryptJson(profile.export(), this.env.SESSION_ENCRYPTION_KEY),
           artifacts,
-          failureCodes: [],
+          failureCodes: retainedForeignFailures,
           // A resume is a new authenticated session, so it opens a new
           // generation. `runSessionRef` is not touched: the run keeps the
           // generation that opened it (12 §4).
@@ -218,6 +227,15 @@ export class SmbcBackfillSession extends DurableObject<Env> {
       });
       await this.ctx.storage.delete("challenge");
       try {
+        progress.foreignOrdinary = await this.#collectForeign(
+          profile,
+          prefix,
+          startedAt,
+          artifacts,
+          diagnostic,
+        );
+        const foreignFailures = foreignFailureCodes(progress.foreignOrdinary);
+        await profile.continueSession();
         const balance = await diagnostic.step("balance-collection", () => profile.getBalance());
         upsertArtifact(
           artifacts,
@@ -249,16 +267,88 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         progress.manifestKey = await storeManifest(
           this.env.DATA,
           prefix,
-          this.#manifest(progress, artifacts, []),
+          this.#manifest(progress, artifacts, foreignFailures),
         );
-        await this.ctx.storage.put({ progress, artifacts });
+        await this.ctx.storage.put({
+          progress,
+          artifacts,
+          failureCodes: foreignFailures,
+          session: await encryptJson(profile.export(), this.env.SESSION_ENCRYPTION_KEY),
+        });
         await this.ctx.storage.setAlarm(Date.now());
         return { phase: progress.phase, progress };
       } catch (error) {
-        await this.#fail(progress, artifacts, [classifyError(error)], profile);
+        await this.#fail(
+          progress,
+          artifacts,
+          [...foreignFailureCodes(progress.foreignOrdinary), classifyError(error)],
+          profile,
+        );
         throw error;
       }
     });
+  }
+  async #collectForeign(
+    profile: DirectProfile,
+    prefix: string,
+    startedAt: string,
+    artifacts: StoredArtifact[],
+    diagnostic: ReturnType<typeof createDiagnostics>,
+  ): Promise<ForeignOrdinaryProgress> {
+    const range = foreignOrdinaryRange(new Date(startedAt));
+    const result: ForeignOrdinaryProgress = {
+      range,
+      history: { status: "partial", failureCode: "foreign_history_not_collected" },
+    };
+    const code = (error: unknown): string => {
+      const classified = classifyError(error);
+      return classified.startsWith("foreign_") ? classified : "foreign_collection_failed";
+    };
+    try {
+      const balance = await diagnostic.step("balance-collection", () =>
+        profile.getForeignBalance(),
+      );
+      upsertArtifact(
+        artifacts,
+        await storeJson({
+          bucket: this.env.DATA,
+          key: `${prefix}/foreign-ordinary-aud/balance.json`,
+          value: { ...balance, observedAt: new Date().toISOString() },
+          artifact: { dataset: "foreign-ordinary-aud-balance" },
+        }),
+      );
+      result.balance = { status: "success" };
+    } catch (error) {
+      result.balance = { status: "partial", failureCode: code(error) };
+      return result;
+    }
+    try {
+      for (const month of monthRanges(range.start, range.end)) {
+        const collectedAt = new Date().toISOString();
+        const history = await diagnostic.step("transactions-collection", () =>
+          profile.getForeignHistory(month),
+        );
+        const name = `${month.start.replaceAll("-", "")}-${month.end.replaceAll("-", "")}`;
+        upsertArtifact(
+          artifacts,
+          await storeJson({
+            bucket: this.env.DATA,
+            key: `${prefix}/foreign-ordinary-aud/history/${name}.json`,
+            value: history,
+            artifact: {
+              dataset: "foreign-ordinary-aud-history",
+              range: month,
+              collectedAt,
+              transactionCount: 0,
+            },
+          }),
+        );
+      }
+      result.history = { status: "success" };
+    } catch (error) {
+      result.history = { status: "partial", failureCode: code(error) };
+    }
+    return result;
   }
   override async alarm(): Promise<void> {
     await this.#exclusive(async () => {
@@ -386,6 +476,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
             completedAt: new Date().toISOString(),
             nextRange: null,
             logoutSucceeded,
+            lastErrorCode: failureCodes.at(-1) ?? null,
           };
           // The completion's own steps name their stage: a failure here is
           // not one of the last chunk's, and the retry log says which failed.
@@ -457,7 +548,11 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     }
     const failed: BackfillProgress = {
       ...progress,
-      phase: artifacts.length > 2 ? "partial" : "failed",
+      phase:
+        artifacts.length > 2 ||
+        artifacts.some((artifact) => artifact.dataset === "foreign-ordinary-aud-balance")
+          ? "partial"
+          : "failed",
       completedAt: new Date().toISOString(),
       nextRange: null,
       artifactCount: artifacts.length,
@@ -509,6 +604,9 @@ export class SmbcBackfillSession extends DurableObject<Env> {
             : "running";
     return {
       schemaVersion: this.env.COLLECTOR_SCHEMA_VERSION,
+      ...(progress.foreignOrdinary === undefined
+        ? {}
+        : { foreignOrdinary: progress.foreignOrdinary }),
       source: "smbc-direct",
       runId: progress.runId,
       startedAt: progress.startedAt,
@@ -620,6 +718,25 @@ export class SmbcBackfillSession extends DurableObject<Env> {
   }
 }
 const FIXED_COLLECTION_FAILURE_CODES = new Set([
+  "foreign_account_selection_unreviewed",
+  "foreign_collection_failed",
+  "foreign_history_not_collected",
+  "foreign_history_account_mismatch",
+  "foreign_history_currency_mismatch",
+  "foreign_currency_unreviewed",
+  "foreign_decimal_invalid",
+  "foreign_html_shape_unreviewed",
+  "foreign_history_response_unreviewed",
+  "foreign_history_range_mismatch",
+  "foreign_nonempty_unreviewed",
+  "foreign_form_unreviewed",
+  "foreign_date_selector_missing",
+  "foreign_detail_body_missing",
+  "foreign_detail_body_too_large",
+  "foreign_history_body_missing",
+  "foreign_history_body_too_large",
+  "aifddtl_form_missing",
+  "aifddt1_form_missing",
   "_formid_field_missing",
   "_token_field_missing",
   "account_detail_body_missing",
@@ -649,7 +766,7 @@ const FIXED_COLLECTION_FAILURE_CODES = new Set([
   "withdrawals_total_invalid",
 ]);
 const COLLECTION_HTTP_FAILURE_CODE =
-  /^(?:account_detail|balance|continue_session|transactions)_http_[1-5][0-9]{2}$/u;
+  /^(?:account_detail|balance|continue_session|transactions|foreign_detail|foreign_history)_http_[1-5][0-9]{2}$/u;
 export function classifyError(error: unknown): string {
   if (error instanceof DOMException) return "crypto_error";
   if (error instanceof SyntaxError) return "json_parse_failed";
