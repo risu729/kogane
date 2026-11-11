@@ -13,6 +13,7 @@ import { createDiagnostics } from "../../../packages/collector-diagnostics/src/i
 import { objectKey } from "../../../packages/collection/src/index";
 import { collectSbiVcTrade } from "./collector";
 import { collectSbiVcDocuments } from "./documents";
+import { collectSbiVcLeverageExecutions } from "./leverage-executions";
 import { decryptSession, encryptSession } from "./crypto";
 import { createPasskeySession, parsePasskeyCredential } from "./passkey";
 import { applySessionUpdates, cookieHeader, parseGatewayMeta, parseSession } from "./session";
@@ -326,6 +327,27 @@ export class SbiVcSessionState extends DurableObject<Env> {
           failures.push({ operation: "reports", errorCode });
           units.push({ unitKey: "report-year-range", status: "failed", errorCode });
         }
+      }
+      if (classicComplete && liveSession !== undefined) {
+        // Only closed local-data refusals permit new reads after a prior failure.
+        const sessionStopped = failures.some(
+          ({ errorCode }) =>
+            errorCode === "report_collection_failed" ||
+            !(
+              errorCode.startsWith("cashflows_all_") ||
+              errorCode.startsWith("report_") ||
+              errorCode.startsWith("pnl_")
+            ),
+        );
+        const leverage = await collectSbiVcLeverageExecutions({
+          sessionStopped,
+          session: liveSession,
+          onSession,
+          onArtifact,
+          diagnostic,
+        });
+        units.push(...leverage.units);
+        failures.push(...leverage.failures);
       }
       const completedAt = new Date().toISOString();
       const status: CollectionManifest["status"] =

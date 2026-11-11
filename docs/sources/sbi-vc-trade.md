@@ -889,7 +889,7 @@ exactly. API `executionYmdDate` uses `YYYY/MM/DD`. All five CSV rows said
 filter includes both retail and exchange executions; another venue endpoint
 would duplicate them. This resolves that distinction for
 [#1228](https://github.com/risu729/kogane/issues/1228), while leverage opening
-and closing filters remain unobserved. The full historical API list had six
+and closing filters were subsequently observed in section 20. The full historical API list had six
 executions; the same-month CSV contained five. The cash-flow CSV's sixteen
 rows matched the all-type API count within that month. Individual financial
 values and identities are not included here.
@@ -960,3 +960,69 @@ later login reports `manual_agreement_required`, the owner must agree at the
 provider; another human-required reauthentication failure needs the existing
 operations recovery path. The underlying cause of the intermittent 403s is
 still unverified and this issue must not claim it has been diagnosed.
+
+## 20. Trader leverage execution filters (2026-11-11)
+
+Normal authenticated trader navigation selected `販売所：レバレッジ` →
+`約定履歴` → `検索`. The screen displays a My Number registration prerequisite
+for leverage; no registration, order or account-setting action was performed.
+Read-only execution-history controls remained accessible. The observed transport
+was Socket.IO event `executionList`, not the simple-mode HTTP gateway.
+
+All four combinations below displayed the official no-data marker. The inspected
+empty acknowledgement had numeric `pageSize`, `pageNumber`, `totalSize` and
+`totalNumOfPages`, with `pageSize: 20`, the other three zero, and `list: []`.
+No populated leverage execution, fee semantics or row contract was observed.
+
+| Selected kind | `isExOrder` | `isCloseOrder` | Latest `historical` | Past-history `historical` |
+| ------------- | ----------- | -------------- | ------------------- | ------------------------- |
+| `新規`        | `"false"`   | `"false"`      | `"false"`           | `"true"`                  |
+| `決済`        | `"false"`   | `"true"`       | `"false"`           | `"true"`                  |
+
+The exact history labels were `最新` and `過去履歴`; this observation does not
+establish a four-month retention boundary. With neither kind selected,
+`isCloseOrder` was omitted. Collection uses only the four individually selected
+combinations and avoids an overlapping unfiltered fifth dataset.
+
+The common request fields beyond the session-only `secureKey` were:
+
+```json
+{
+  "currencyPairs": [],
+  "fromDate": "",
+  "toDate": "",
+  "isActiveStatus": false,
+  "isTodayOrder": "false",
+  "isHistory": true,
+  "isTargetDate": true,
+  "isAuction": "false",
+  "sortKey": "executionDatetime",
+  "sortAsc": "false",
+  "pageNumber": "0",
+  "pageSize": "20"
+}
+```
+
+The collector's bounded implementation retains sanitized page-one evidence in
+`executions-leverage-{open|close}-{recent|historical}-page-0001`, each in its own
+unit. A numeric-zero envelope remains `partial` with
+`leverage_execution_transport_unverified`: an HTTP acknowledgement alone cannot
+prove that the HTTP gateway applied filters observed only on Socket.IO. It has
+no complete-empty absence claim. A nonempty first page is retained as partial
+`leverage_execution_rows_unobserved`; further populated pagination and financial
+publication remain unsupported. Missing, string-valued or contradictory empty
+pagination is refused. No parser accepts these dataset names, and no leverage
+quantity, direction, price, fee or realized result is guessed from spot rows.
+
+A transport, session, redirect or unknown failure stops subsequent leverage
+requests. A refusal already recorded by earlier capture stages also skips all
+four views. Skipped units remain partial with zero artifacts. Local envelope or
+unobserved-row failures do not suppress an independent sibling view. These new
+failures cannot revoke the completed classic account unit or valid document
+units. No extra publishing policy or parser registration is added.
+
+The source `execution` capability remains partial for
+[#1228](https://github.com/risu729/kogane/issues/1228). HTTP compatibility for these
+parameter combinations, populated leverage rows and fees, complete retained
+pagination, and a deployed scheduled run with per-kind count reconciliation
+remain unverified. This change performs no hosted experiment or production run.

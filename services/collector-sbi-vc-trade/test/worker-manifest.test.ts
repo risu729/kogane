@@ -38,6 +38,13 @@ function gateway(_input: string | URL | Request, init?: RequestInit): Promise<Re
     event: string;
     data: Record<string, unknown>;
   };
+  if (request.event === "executionList" && request.data.isExOrder === "false")
+    return Promise.resolve(
+      Response.json({
+        meta: { status: "OK" },
+        body: { list: [], pageNumber: 0, pageSize: 20, totalSize: 0, totalNumOfPages: 0 },
+      }),
+    );
   const paged = request.event === "executionList" || request.event === "getCashflowList";
   if (request.event === "tradeReportList")
     return Promise.resolve(
@@ -70,7 +77,7 @@ afterEach(() => {
   for (const restore of restores.splice(0)) restore();
 });
 
-async function collect() {
+async function collect(response: typeof gateway = gateway) {
   const values = new Map<string, unknown>([["session", await encryptSession(SEED, KEY)]]);
   const state = {
     storage: {
@@ -85,7 +92,7 @@ async function collect() {
   } as unknown as DurableObjectState;
   const data = new FakeR2Bucket();
   for (const spy of [
-    spyOn(globalThis, "fetch").mockImplementation(gateway as typeof fetch),
+    spyOn(globalThis, "fetch").mockImplementation(response as typeof fetch),
     spyOn(console, "log").mockImplementation(() => {}),
     spyOn(console, "warn").mockImplementation(() => {}),
     spyOn(console, "error").mockImplementation(() => {}),
@@ -103,9 +110,24 @@ async function collect() {
 describe("the stored collector manifest", () => {
   test("names the content-addressed object of every artifact, as the terminal does", async () => {
     const { summary, data } = await collect();
-    expect(summary.status).toBe("success");
+    expect(summary.status).toBe("partial");
     const read = await readTerminal(data, "sbi-vc-trade", summary.runId);
     if (read.outcome !== "found") throw new Error("terminal missing");
+    expect(read.manifest.units.find((unit) => unit.unitKey === "account")?.coverageStatus).toBe(
+      "complete",
+    );
+    const leverage = read.manifest.units.filter((unit) =>
+      unit.unitKey.startsWith("executions-leverage-"),
+    );
+    expect(leverage).toHaveLength(4);
+    expect(
+      leverage.every(
+        (unit) =>
+          unit.coverageStatus === "partial" &&
+          unit.artifactCount === 1 &&
+          unit.safeErrorCode === "leverage_execution_transport_unverified",
+      ),
+    ).toBe(true);
     const manifestRef = read.manifest.artifacts.find(
       (entry) => entry.artifactKey === "manifest.json",
     )!.storageRef.key;
@@ -120,7 +142,7 @@ describe("the stored collector manifest", () => {
         new Date(),
       ),
     );
-    expect(manifest.artifacts).toHaveLength(9 + 2 * (year - 2018 + 1));
+    expect(manifest.artifacts).toHaveLength(13 + 2 * (year - 2018 + 1));
     expect(manifest.artifacts).toHaveLength(planned.length);
     for (const entry of manifest.artifacts) {
       const terminalEntry = planned.find(
@@ -136,4 +158,36 @@ describe("the stored collector manifest", () => {
       expect(data.entries.get(entry.key)?.bytes.byteLength).toBe(entry.bytes);
     }
   });
+});
+
+test("a prior rejected gateway suppresses all leverage requests without harming the account", async () => {
+  let leverageRequests = 0;
+  const { summary, data } = await collect(async (input, init) => {
+    const request = JSON.parse(String(init?.body)) as {
+      event: string;
+      data: Record<string, unknown>;
+    };
+    if (request.event === "getCashflowList" && request.data.pageSize === "20")
+      return new Response("synthetic private rejection", { status: 403 });
+    if (request.event === "executionList" && request.data.isExOrder === "false") leverageRequests++;
+    return gateway(input, init);
+  });
+  expect(leverageRequests).toBe(0);
+  const read = await readTerminal(data, "sbi-vc-trade", summary.runId);
+  if (read.outcome !== "found") throw new Error("terminal missing");
+  expect(read.manifest.units.find((unit) => unit.unitKey === "account")?.coverageStatus).toBe(
+    "complete",
+  );
+  const leverage = read.manifest.units.filter((unit) =>
+    unit.unitKey.startsWith("executions-leverage-"),
+  );
+  expect(leverage).toHaveLength(4);
+  expect(
+    leverage.every(
+      (unit) =>
+        unit.coverageStatus === "partial" &&
+        unit.artifactCount === 0 &&
+        unit.safeErrorCode === "leverage_execution_session_stopped",
+    ),
+  ).toBe(true);
 });
