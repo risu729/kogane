@@ -1,7 +1,7 @@
 # Hostname maintenance
 
 The manually dispatched **Hostname maintenance** workflow manages only the fixed
-production hostname declarations in the application config. Ordinary deployments
+production hostname declarations in the application config. Ordinary App deployments
 keep `deploy-triggers: false`. No Worker version, secret, schedule, workers.dev
 setting, Queue consumer or Workflow is written by this maintenance path.
 
