@@ -147,3 +147,25 @@ test("three pages advance inclusive oldest dates without dropping the intervenin
   expect(result.rows.filter((row) => row.date === "2026-08-27")).toHaveLength(97);
   expect(String(fetchMock!.mock.calls[2]![1]!.body)).toContain("specifyDay=26");
 });
+
+test("a row past the documented window is kept for the parser's warning; a year-wrapped date is refused", async () => {
+  responses([historyPage(historyRow("08/29") + historyRow("02/28", ""))]);
+  const result = await collect();
+  expect(result.rows.map((row) => row.date)).toEqual(["2026-08-29", "2026-02-28"]);
+  const body = result.artifacts.find((a) => a.dataset === "sf-history")!.body as string;
+  const parsed = mobileSuicaSfHistory.parse(new TextEncoder().encode(body), {
+    id: 1,
+    sourceId: "mobile-suica",
+    runStatus: "success" as const,
+    runFailureCount: 0,
+    dataset: "sf-history",
+    url: null,
+    mime: "application/json",
+    fetchedAt: "2026-08-30T01:00:00Z",
+    sha256: "0".repeat(64),
+  });
+  expect(parsed.warnings.some((w) => w.includes("26-week history window"))).toBe(true);
+  fetchMock!.mockRestore();
+  responses([historyPage(historyRow("08/29") + historyRow("08/30"))]);
+  await expect(collect()).rejects.toThrow("history_date_order_invalid");
+});

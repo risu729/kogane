@@ -1,6 +1,10 @@
 // The observed search is inclusive. Replace the complete boundary-day suffix,
 // rather than subtracting one day or collapsing equal rows into a set.
 export const MAX_HISTORY_PAGES = 26 * 7 + 1;
+// A row a little past the documented 26 weeks stays a preserved parser
+// warning, as before the walk. Only a year-wrapped month/day inference, which
+// is always at least 365 days old, is an impossible date.
+const YEAR_WRAP_MS = 365 * 86_400_000;
 interface WalkRow {
   date: string;
   amount: number | null;
@@ -30,7 +34,7 @@ export function mergeHistoryPage<T extends WalkRow>(
     if (
       row.date > latest ||
       row.date >= asOf ||
-      Date.parse(asOf) - Date.parse(row.date) > 182 * 86400000
+      Date.parse(asOf) - Date.parse(row.date) >= YEAR_WRAP_MS
     )
       throw new Error("history_date_order_invalid");
     latest = row.date;

@@ -37,7 +37,9 @@ fields and unknown message/login responses. Multi-page normalized bundles retain
 all page rows, cursor dates, and the merged rows. The parser reproduces the overlap
 proof, validates every row, and records each merged row's page/row provenance.
 Terminal transformations reference every input page. Legacy sub-100 bundles remain
-accepted and unchanged. Missing amounts remain null and emit no transaction.
+accepted and unchanged. A row older than the documented 26 weeks keeps the parser's
+existing preserved warning; only a year-wrapped month/day inference (365 days or
+older) refuses the run. Missing amounts remain null and emit no transaction.
 
 Keep existing canonical-row-plus-occurrence transaction IDs. The boundary row with
 an unavailable amount emitted no transaction before enrichment. Production

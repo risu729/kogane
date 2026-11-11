@@ -66,7 +66,7 @@ interface IndexedRow {
 
 export const mobileSuicaSfHistory: Parser = {
   name: "mobile-suica-sf-history",
-  version: "1.1.0",
+  version: "1.1.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
