@@ -54,6 +54,14 @@ const html = "text/html";
 
 /** Artifacts as the collectors write them. */
 const SAMPLES: readonly Sample[] = [
+  ...["authori", "revo"].map((kind) => ({
+    source: "vpass",
+    artifactKey: `credit/${kind}.json`,
+    role: "sanitized_provider_capture",
+    mediaType: json,
+    dataset: "credit-snapshot",
+    unitKey: "card-001",
+  })),
   {
     source: "myjcb",
     artifactKey: "conn-a/debit-detail-01.html",
@@ -690,7 +698,7 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
   "st-george": ["account-snapshot"],
   "v-point": ["balance-info", "smfg-point", "history-page-0001"],
   "v-point-pay": ["notification-event"],
-  vpass: ["statement-page"],
+  vpass: ["statement-page", "credit-snapshot"],
 };
 
 /** Parsers of sources no shared-R2 collector writes. */
@@ -764,8 +772,9 @@ describe("the registration dataset table (ADR 0022)", () => {
       "terminal-registration-v5",
       "terminal-registration-v6",
       "terminal-registration-v7",
+      "terminal-registration-v8",
     ]);
-    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v7");
+    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v8");
     const vpass = (await allSamples()).filter((sample) => sample.source === "vpass");
     expect(vpass.filter((sample) => sample.dataset === "statement-page").length).toBe(2);
     for (const sample of vpass) {
@@ -906,7 +915,9 @@ describe("the registration dataset table (ADR 0022)", () => {
       expect(sample.artifactKey).toBe("foreign-cash-history.json");
       expect(before).toBeNull();
       expect(after).toBe("foreign-cash-history");
-      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, -1))
+      for (const version of REGISTRATION_CONTRACT_VERSIONS.filter(
+        (version) => Number(version.split("-v")[1]) < 7,
+      ))
         expect(artifactDataset(sample.source, sample, version)).toBeNull();
     }
     expect(changed).toBe(1);
@@ -1134,4 +1145,18 @@ describe("the registration dataset table (ADR 0022)", () => {
       "myjcb-canonical-evidence-boundary",
     ]);
   });
+});
+
+test("Vpass credit routes map only under v8; statement and binding descriptors retain their earlier meanings", () => {
+  for (const kind of ["authori", "revo"]) {
+    const artifact = {
+      artifactKey: `credit/${kind}.json`,
+      role: "sanitized_provider_capture",
+      mediaType: "application/json",
+    };
+    for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, -1))
+      expect(artifactDataset("vpass", artifact, version)).toBeNull();
+    expect(artifactDataset("vpass", artifact)).toBe("credit-snapshot");
+    expect(artifactDataset("vpass", { ...artifact, role: "provider_response" })).toBeNull();
+  }
 });

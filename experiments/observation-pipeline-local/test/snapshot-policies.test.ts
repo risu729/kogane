@@ -143,6 +143,13 @@ describe("dataset_snapshot_policies seed", () => {
           "../../../packages/storage-d1/migrations/core/0091_moneyforward_detail_balance_snapshots.sql",
         ),
         "utf8",
+      ) +
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0092_vpass_credit_snapshots.sql",
+        ),
+        "utf8",
       );
     for (const [parser, dataset] of SNAPSHOT_DATASETS) {
       expect(sql).toContain("'" + dataset + "'");
@@ -157,10 +164,9 @@ describe("dataset_snapshot_policies seed", () => {
       const explicit = EXPLICIT_COVERAGE.has(row.parser_name);
       expect(row.policy_id).toBe(explicit ? "coverage-v1" : LEGACY_SNAPSHOT_POLICY);
       expect(row.policy_version).toBe(1);
-      // D13/PR-14: every seeded dataset stays on the run scope and stays a
-      // container-snapshot dataset. Enabling `unit-independent-v1` is an
-      // operator write, never a deploy.
-      expect(row.unit_scope).toBe("run");
+      // Existing policies remain run-scoped. ADR 0105 explicitly seeds only
+      // Vpass credit snapshots as independent selecting card units.
+      expect(row.unit_scope).toBe(row.parser_name === "vpass-credit-snapshot" ? "unit" : "run");
       expect(row.snapshot_selection).toBe(1);
       expect(row.replaces_previous_on_complete_empty).toBe(explicit ? 0 : 1);
       expect(row.required_parser_version).toBe(

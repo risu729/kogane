@@ -33,6 +33,7 @@ for (const file of [
   "prestia-bank-expected.json",
   "sbi-shinsei-exchange-rate-expected.json",
   "sbi-shinsei-observed-shapes-expected.json",
+  "vpass-credit-expected.json",
   "moneyforward-detail-expected.json",
 ]) {
   const frozen = JSON.parse(
@@ -109,6 +110,11 @@ const partial = (
 
 /** What each case must claim. A throwing case has no claim and no entry here. */
 const CLAIMS: Record<string, Record<string, Expectation>> = {
+  "vpass-credit-snapshot": {
+    "authori-visible": complete(12),
+    "authori-hidden": complete(0),
+    "revo-exact": complete(2),
+  },
   "moneyforward-detail-balances": {
     "complete-rows": { ...complete(1, ["row_unreadable", "row_unreadable"]), expected: 1 },
   },

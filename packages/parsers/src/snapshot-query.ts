@@ -1,7 +1,7 @@
 // These collector datasets are complete containers, not transaction windows.
 // Every account, currency and market inside one container belongs to its
 // snapshot; partitioning by an emitted row would resurrect disappeared rows.
-// MyJCB, V Point and Vpass have separate multi-page/card contracts in queries.ts.
+// MyJCB, V Point and Vpass statement pages have separate multi-page/card contracts.
 //
 // Policy ownership (design review D01): the active selection policy of each
 // dataset lives in the `dataset_snapshot_policies` table (migration 0025),
@@ -10,6 +10,7 @@
 // when the two disagree, so a new snapshot parser cannot ship without a
 // policy row.
 export const SNAPSHOT_DATASETS = [
+  ["vpass-credit-snapshot", "credit-snapshot"],
   ["moneyforward-detail-balances", "account-detail"],
   ["sbi-domestic-cash-positions", "domestic-cash-positions"],
   ["sbi-foreign-cash-positions", "foreign-cash-positions"],

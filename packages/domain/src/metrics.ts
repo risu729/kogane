@@ -237,6 +237,45 @@ export const UNKNOWN_METRIC: MetricDefinition = {
 
 // Order matters and mirrors the branch order of classifyBalance / classifyActivity.
 export const METRIC_REGISTRY: readonly RegistryEntry[] = [
+  ...(["overall", "card", "revolving", "installment_twice_bonus"] as const).flatMap((scope) =>
+    (["limit", "outstanding", "available"] as const).map((measure) =>
+      entry(
+        [balance("vpass", "vpass-credit-snapshot", [`reported_${scope}_${measure}_thousand_yen`])],
+        {
+          metricId: `vpass.reported-${scope}-${measure}-thousand-yen`,
+          measurementKind: measure === "outstanding" ? "stock" : "capacity",
+          subjectKind: scope === "overall" ? "connection" : "account",
+          unitDimension: "currency",
+          signMeaning: "provider-sign",
+          timeBasis: "point-in-time",
+          aggregationRule: "non-additive",
+          overlapGroup: "vpass:shared-card-credit",
+          sourceAuthority: "provider-reported",
+          legacyBalance:
+            measure === "outstanding"
+              ? { ...LEGACY_UNKNOWN, measurementKind: "balance", timeBasis: "reported_snapshot" }
+              : LEGACY_CAPACITY,
+        },
+      ),
+    ),
+  ),
+  ...(["outstanding", "repayment"] as const).map((measure) =>
+    entry([balance("vpass", "vpass-credit-snapshot", [`reported_revolving_${measure}_yen`])], {
+      metricId: `vpass.reported-revolving-${measure}-yen`,
+      measurementKind: measure === "outstanding" ? "stock" : "obligation",
+      subjectKind: "account",
+      unitDimension: "currency",
+      signMeaning: "provider-sign",
+      timeBasis: "point-in-time",
+      aggregationRule: "non-additive",
+      overlapGroup: "vpass:shared-card-credit",
+      sourceAuthority: "provider-reported",
+      legacyBalance:
+        measure === "outstanding"
+          ? { ...LEGACY_UNKNOWN, measurementKind: "balance", timeBasis: "reported_snapshot" }
+          : LEGACY_UNKNOWN,
+    }),
+  ),
   ...(
     [
       [

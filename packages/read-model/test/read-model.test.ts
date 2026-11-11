@@ -360,11 +360,18 @@ describe("named concepts in the final SQL", () => {
         unit_scope: "unit",
         snapshot_selection: 0,
       },
+      {
+        source_id: "vpass",
+        parser_name: "vpass-credit-snapshot",
+        dataset: "credit-snapshot",
+        unit_scope: "unit",
+        snapshot_selection: 1,
+      },
     ]);
     expect(
       db
         .query(
-          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'moneyforward-detail-balances')",
+          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'moneyforward-detail-balances', 'vpass-credit-snapshot')",
         )
         .get(),
     ).toEqual({ n: 0 });
@@ -437,8 +444,8 @@ describe("named concepts in the final SQL", () => {
     expect(db.query(`SELECT ${economicallySummable.predicate()} AS summable`).get()).toEqual({
       summable: 0,
     });
-    // Prior snapshot policies keep the run scope. The sole new eligibility-only
-    // J-POINT policy uses the unit scope; this fixture has no reward-unit artifact.
+    // Prior snapshots keep run scope. Vpass credit is the one independently
+    // selecting unit policy; this fixture has no Vpass or reward-unit artifact.
     expect(
       db
         .query(
@@ -454,7 +461,7 @@ describe("named concepts in the final SQL", () => {
           "SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE snapshot_selection=1 AND unit_scope<>'run'",
         )
         .get(),
-    ).toEqual({ n: 0 });
+    ).toEqual({ n: 1 });
     expect(
       db
         .query(
@@ -489,6 +496,13 @@ describe("named concepts in the final SQL", () => {
         dataset: "monthly-report-pdf",
         unit_scope: "unit",
         snapshot_selection: 0,
+      },
+      {
+        source_id: "vpass",
+        parser_name: "vpass-credit-snapshot",
+        dataset: "credit-snapshot",
+        unit_scope: "unit",
+        snapshot_selection: 1,
       },
     ]);
   });

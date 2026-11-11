@@ -1,3 +1,5 @@
+import { vpassCreditSnapshot } from "../src/parsers/vpass-credit.ts";
+import { authori as creditAuthori, revo as creditRevo } from "./fixtures/vpass-credit.ts";
 // Synthetic inputs for the parser coverage contract (design review D01).
 //
 // Every case is built here from code, never from data/. The expected
@@ -411,7 +413,45 @@ const BANKS: ContractParser[] = [
   ),
 ];
 
+const hiddenCredit = creditAuthori();
+const hiddenDisplay =
+  hiddenCredit.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiDisplayVo;
+hiddenDisplay.hyoujiFlg = "1";
+for (const row of hiddenDisplay.autoriShokaiDisplayList) row.hyoujiFlg = "1";
+const unknownCreditFlag = creditAuthori();
+unknownCreditFlag.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiDisplayVo.hyoujiFlg =
+  "future";
+const creditMeta = (key: string) =>
+  meta("vpass", "credit-snapshot", { artifactKey: key, fetchUnitKey: "card-001" });
+const VPASS_CREDIT: ContractParser = {
+  parser: vpassCreditSnapshot,
+  cases: [
+    {
+      name: "authori-visible",
+      artifact: creditMeta("credit/authori.json"),
+      bytes: json(creditAuthori()),
+    },
+    {
+      name: "authori-hidden",
+      artifact: creditMeta("credit/authori.json"),
+      bytes: json(hiddenCredit),
+    },
+    {
+      name: "authori-unknown-flag",
+      artifact: creditMeta("credit/authori.json"),
+      bytes: json(unknownCreditFlag),
+    },
+    { name: "revo-exact", artifact: creditMeta("credit/revo.json"), bytes: json(creditRevo()) },
+    {
+      name: "revo-malformed",
+      artifact: creditMeta("credit/revo.json"),
+      bytes: json(creditRevo("not-an-amount")),
+    },
+  ],
+};
+
 export const CONTRACT_PARSERS: ContractParser[] = [
+  VPASS_CREDIT,
   cases(
     moneyForwardDetailBalances,
     meta("moneyforward-me", "account-detail", {

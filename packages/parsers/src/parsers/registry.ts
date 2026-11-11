@@ -1,3 +1,4 @@
+import { vpassCreditSnapshot } from "./vpass-credit.ts";
 import type { Parser } from "../types.ts";
 import { moneyForwardDetailBalances } from "./moneyforward-detail-balances.ts";
 // Build identity of every parser below (design review D03): the registry is
@@ -101,5 +102,6 @@ export const PARSERS: readonly Parser[] = [
   vPointHistoryPage,
   vPointPayNotificationEvent,
   vpassStatementPage,
+  vpassCreditSnapshot,
   paypayCsv,
 ];

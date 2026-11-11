@@ -26,6 +26,9 @@
 // `VPASS_LEGACY_ADAPTER` uses for a legacy re-persist.
 import {
   sanitizedEnvelopeBytes,
+  sanitizedCreditEnvelopeBytes,
+  VPASS_CREDIT_SANITIZER_ID,
+  VPASS_CREDIT_SANITIZER_VERSION,
   encodeCanonical,
   VPASS_SANITIZER_ID,
   VPASS_SANITIZER_VERSION,
@@ -615,4 +618,85 @@ export function sharedRunDiagnostic(
       : {}),
     ...(result.outcome === "conflict" ? { reasonCode: result.reasonCode } : {}),
   };
+}
+
+/** An independent per-card daily snapshot run, preserving the existing binding contract. */
+export async function vpassCreditRunPlan(
+  run: VpassCardRun,
+  credit: { readonly authori: string; readonly revo: string },
+): Promise<PersistRunPlan> {
+  const binding = await deriveVpassCardBinding(run);
+  if (binding.status === "derived") {
+    for (const rawJson of [credit.authori, credit.revo]) {
+      const responseBinding = await deriveVpassCardBinding({
+        ...run,
+        webMeisaiTopRawJson: rawJson,
+      });
+      if (responseBinding.status !== "derived" || responseBinding.token !== binding.token)
+        throw new Error("credit_binding_mismatch");
+    }
+  }
+  const base = await planFor({ ...run, months: {} }, binding);
+  const snapshots = await Promise.all([
+    artifactOf(
+      "credit/authori.json",
+      sanitizedCreditEnvelopeBytes(credit.authori, "credit_json_invalid"),
+      "sanitized_provider_capture",
+      run.cardLabel,
+    ),
+    artifactOf(
+      "credit/revo.json",
+      sanitizedCreditEnvelopeBytes(credit.revo, "revo_json_invalid"),
+      "sanitized_provider_capture",
+      run.cardLabel,
+    ),
+  ]);
+  const artifacts = base.artifacts.filter((artifact) => artifact.artifactKey !== "manifest.json");
+  artifacts.push(...snapshots);
+  artifacts.push(
+    await artifactOf(
+      "manifest.json",
+      encodeCanonical({
+        schemaVersion: "vpass-credit-snapshot-v1",
+        source: SOURCE,
+        card: run.cardLabel,
+        startedAt: run.startedAt,
+        completedAt: run.completedAt,
+        reportedAuthoriPrecisionJPY: 1000,
+        reportedRevolvingPrecisionJPY: 1,
+      }),
+      "collector_manifest",
+    ),
+  );
+  return {
+    artifacts,
+    run: {
+      ...base.run,
+      producerVersion: "vpass-credit-snapshot-v1",
+      runId: `${run.sessionRunId}-credit-${run.cardLabel}`,
+      acquisitionSessionRef: run.sessionRunId,
+      coverageStatus: "complete",
+      units: base.run.units.map((unit) =>
+        unit.unitKey === run.cardLabel
+          ? { ...unit, artifactCount: 5, coverageStatus: "complete" as const }
+          : unit,
+      ),
+      transformations: [
+        ...base.run.transformations,
+        ...snapshots.map((artifact) => ({
+          ...redaction(artifact.artifactKey),
+          transformerId: VPASS_CREDIT_SANITIZER_ID,
+          transformerVersion: VPASS_CREDIT_SANITIZER_VERSION,
+        })),
+      ],
+    },
+  };
+}
+
+export async function persistCreditRun(
+  bucket: R2BucketLike,
+  run: VpassCardRun,
+  credit: { readonly authori: string; readonly revo: string },
+): Promise<PersistRunResult> {
+  return persistRun(bucket, await vpassCreditRunPlan(run, credit));
 }
