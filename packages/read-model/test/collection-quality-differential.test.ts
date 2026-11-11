@@ -24,6 +24,7 @@ import {
   LEGACY_CELL_QUALITY_SQL_SHA256,
 } from "./collection-quality-cells-legacy-sql";
 import { type ArtifactSpec, type ParseSpec, QualityStore } from "./collection-quality-fixture";
+import { withoutSbiLegacySnapshotPartition } from "../../parsers/test/snapshot-partition-compatibility";
 
 beforeAll(() => {
   fullCoreSchema().close();
@@ -294,19 +295,7 @@ function cellsOf(rows: readonly AccountCoverageRow[]): CellQualityRow[] {
 test("the frozen cell page differs only in the explicit SBI legacy snapshot partition", () => {
   const hash = (text: string) => createHash("sha256").update(text).digest("hex");
   expect(hash(LEGACY_CELL_QUALITY_SQL)).toBe(LEGACY_CELL_QUALITY_SQL_SHA256);
-  // ADR 0109 joins only the two witnessed legacy domestic snapshot units to
-  // their supplemental successors. The native SBI snapshot compatibility
-  // tests prove that delta; every other byte remains the frozen cell page.
-  const sbiPartition = `CASE
-    WHEN source_id = 'sbi-securities' AND fetch_unit_key = 'domestic'
-      AND parser_name = 'sbi-income-payments' AND dataset = 'income-payments'
-      THEN 'income-history-income'
-    WHEN source_id = 'sbi-securities' AND fetch_unit_key = 'domestic'
-      AND parser_name = 'sbi-realised-gains' AND dataset = 'realised-gains'
-      THEN 'income-history-gains'
-    ELSE fetch_unit_key END`;
-  expect(CELL_QUALITY_SQL.split(sbiPartition)).toHaveLength(2);
-  expect(hash(CELL_QUALITY_SQL.replace(sbiPartition, "fetch_unit_key"))).toBe(
+  expect(hash(withoutSbiLegacySnapshotPartition(CELL_QUALITY_SQL))).toBe(
     LEGACY_CELL_QUALITY_SQL_SHA256,
   );
 });

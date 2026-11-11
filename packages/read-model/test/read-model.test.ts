@@ -37,11 +37,13 @@ import * as sql from "../src/sql";
 const MIGRATIONS = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
 /** The bounded classic SBI VC datasets retain snapshot selection independently. */
 const SBI_VC_UNIT_POLICIES = [
-  ...[
-    ["sbi-vc-account-margin", "account-margin"],
-    ["sbi-vc-cash-balances", "cash-balances"],
-    ["sbi-vc-position-summary", "position-summary"],
-  ].map(([parser_name, dataset]) => ({
+  ...(
+    [
+      ["sbi-vc-account-margin", "account-margin"],
+      ["sbi-vc-cash-balances", "cash-balances"],
+      ["sbi-vc-position-summary", "position-summary"],
+    ] as const
+  ).map(([parser_name, dataset]) => ({
     source_id: "sbi-vc-trade",
     parser_name,
     dataset,
@@ -98,6 +100,44 @@ const smbcUnitPolicies = SMBC_UNIT_POLICIES.map(([parser_name, dataset, snapshot
   unit_scope: "unit",
   snapshot_selection,
 }));
+
+/** The eleven closed SBI unit policies introduced by CORE 0100. */
+const sbiUnitPolicies = (
+  [
+    ["account-assets-current", 1],
+    ["account-assets-history", 0],
+    ["domestic-cash-positions", 1],
+    ["domestic-trade-records", 0],
+    ["foreign-cash-balances", 1],
+    ["foreign-cash-history", 0],
+    ["foreign-cash-positions", 1],
+    ["foreign-trade-records", 0],
+    ["income-payments", 1],
+    ["realised-gains", 1],
+    ["yen-detail-history", 0],
+  ] as const
+).map(([dataset, snapshot_selection]) => ({
+  source_id: "sbi-securities",
+  parser_name: `sbi-${dataset}`,
+  dataset,
+  unit_scope: "unit",
+  snapshot_selection,
+}));
+
+function compareUnitPolicies(
+  left: { parser_name: string; dataset: string },
+  right: { parser_name: string; dataset: string },
+): number {
+  return left.parser_name < right.parser_name
+    ? -1
+    : left.parser_name > right.parser_name
+      ? 1
+      : left.dataset < right.dataset
+        ? -1
+        : left.dataset > right.dataset
+          ? 1
+          : 0;
+}
 
 /** The production schema, views included, on an in-memory SQLite. */
 function migratedDatabase(): Database {
@@ -394,98 +434,101 @@ describe("named concepts in the final SQL", () => {
           "SELECT source_id,parser_name,dataset,unit_scope,snapshot_selection FROM dataset_snapshot_policies WHERE snapshot_selection<>1 OR unit_scope<>'run' ORDER BY parser_name,dataset",
         )
         .all(),
-    ).toEqual([
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-credit-ledger",
-        dataset: "credit-ledger",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-credit-past-month-balances",
-        dataset: "credit-past-months",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-credit-statement-total",
-        dataset: "credit-detail",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-debit-ledger",
-        dataset: "debit-detail",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-debit-other-statement",
-        dataset: "debit-other-detail",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-jpoint-balance",
-        dataset: "jpoint-balance",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-jpoint-history",
-        dataset: "jpoint-history",
-        unit_scope: "unit",
-        snapshot_selection: 1,
-      },
-      {
-        source_id: "myjcb",
-        parser_name: "myjcb-skip-payment-schedule",
-        dataset: "credit-schedule",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "sbi-securities",
-        parser_name: "sbi-delivered-document-metadata",
-        dataset: "delivered-document-pdf",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "sbi-shinsei-bank",
-        parser_name: "sbi-shinsei-monthly-report-metadata",
-        dataset: "monthly-report-pdf",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      {
-        source_id: "sbi-shinsei-bank",
-        parser_name: "sbi-shinsei-savings-activity",
-        dataset: "savings-activity",
-        unit_scope: "unit",
-        snapshot_selection: 0,
-      },
-      ...SBI_VC_UNIT_POLICIES,
-      ...smbcUnitPolicies,
-      {
-        source_id: "vpass",
-        parser_name: "vpass-credit-snapshot",
-        dataset: "credit-snapshot",
-        unit_scope: "unit",
-        snapshot_selection: 1,
-      },
-    ]);
+    ).toEqual(
+      [
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-credit-ledger",
+          dataset: "credit-ledger",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-credit-past-month-balances",
+          dataset: "credit-past-months",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-credit-statement-total",
+          dataset: "credit-detail",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-debit-ledger",
+          dataset: "debit-detail",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-debit-other-statement",
+          dataset: "debit-other-detail",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-jpoint-balance",
+          dataset: "jpoint-balance",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-jpoint-history",
+          dataset: "jpoint-history",
+          unit_scope: "unit",
+          snapshot_selection: 1,
+        },
+        {
+          source_id: "myjcb",
+          parser_name: "myjcb-skip-payment-schedule",
+          dataset: "credit-schedule",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "sbi-securities",
+          parser_name: "sbi-delivered-document-metadata",
+          dataset: "delivered-document-pdf",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "sbi-shinsei-bank",
+          parser_name: "sbi-shinsei-monthly-report-metadata",
+          dataset: "monthly-report-pdf",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
+          source_id: "sbi-shinsei-bank",
+          parser_name: "sbi-shinsei-savings-activity",
+          dataset: "savings-activity",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        ...SBI_VC_UNIT_POLICIES,
+        ...smbcUnitPolicies,
+        {
+          source_id: "vpass",
+          parser_name: "vpass-credit-snapshot",
+          dataset: "credit-snapshot",
+          unit_scope: "unit",
+          snapshot_selection: 1,
+        },
+        ...sbiUnitPolicies,
+      ].sort(compareUnitPolicies),
+    );
     expect(
       db
         .query(
-          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'moneyforward-detail-balances', 'sbi-income-payments', 'sbi-realised-gains', 'vpass-credit-snapshot', 'myjcb-jpoint-history', 'sbi-vc-document-metadata', 'sbi-delivered-document-metadata', 'smbc-direct-transactions', 'smbc-foreign-ordinary-balance', 'smbc-foreign-ordinary-history', 'sbi-shinsei-savings-activity')",
+          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'moneyforward-detail-balances', 'sbi-income-payments', 'sbi-realised-gains', 'vpass-credit-snapshot', 'myjcb-jpoint-history', 'sbi-vc-document-metadata', 'sbi-delivered-document-metadata', 'smbc-direct-transactions', 'smbc-foreign-ordinary-balance', 'smbc-foreign-ordinary-history', 'sbi-shinsei-savings-activity', 'sbi-account-assets-history', 'sbi-domestic-trade-records', 'sbi-foreign-cash-history', 'sbi-foreign-trade-records', 'sbi-yen-detail-history')",
         )
         .get(),
     ).toEqual({ n: 0 });
@@ -555,27 +598,6 @@ describe("named concepts in the final SQL", () => {
     expect(economicallySummable.policy).toBeNull();
     expect(economicallySummable.predicate()).toBe("0");
     const db = migratedDatabase();
-    const sbiUnitPolicies = (
-      [
-        ["account-assets-current", 1],
-        ["account-assets-history", 0],
-        ["domestic-cash-positions", 1],
-        ["domestic-trade-records", 0],
-        ["foreign-cash-balances", 1],
-        ["foreign-cash-history", 0],
-        ["foreign-cash-positions", 1],
-        ["foreign-trade-records", 0],
-        ["income-payments", 1],
-        ["realised-gains", 1],
-        ["yen-detail-history", 0],
-      ] as const
-    ).map(([dataset, snapshot_selection]) => ({
-      source_id: "sbi-securities",
-      parser_name: `sbi-${dataset}`,
-      dataset,
-      unit_scope: "unit",
-      snapshot_selection,
-    }));
     expect(db.query(`SELECT ${economicallySummable.predicate()} AS summable`).get()).toEqual({
       summable: 0,
     });
@@ -708,17 +730,7 @@ describe("named concepts in the final SQL", () => {
           snapshot_selection: 1,
         },
         ...sbiUnitPolicies,
-      ].sort((left, right) =>
-        left.parser_name < right.parser_name
-          ? -1
-          : left.parser_name > right.parser_name
-            ? 1
-            : left.dataset < right.dataset
-              ? -1
-              : left.dataset > right.dataset
-                ? 1
-                : 0,
-      ),
+      ].sort(compareUnitPolicies),
     );
   });
 
