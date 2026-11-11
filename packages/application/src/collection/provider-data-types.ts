@@ -65,11 +65,11 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     missing("reward_activity", 1252),
     missing("reward_expiry", 1252),
   ],
-  // Mobile Suica: the SF balance and the one history page of at most 100 rows
-  // (docs/sources/mobile-suica.md, #451).
+  // Mobile Suica: SF balance and the retained 26-week history via verified
+  // inclusive date searches (docs/sources/mobile-suica.md, ADR 0104).
   "mobile-suica": [
     collected("balance", ["mobile-suica-sf-history"]),
-    partial("cash_movement", ["mobile-suica-sf-history"], 451),
+    collected("cash_movement", ["mobile-suica-sf-history"]),
   ],
   // Money Forward ME (aggregator): monthly transactions of the current and 11
   // past months and observed detail-page aggregates/points are parsed.
@@ -81,17 +81,20 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     partial("reward_balance", ["moneyforward-detail-balances"], 1240),
   ],
   // MyJCB: credit statements and their ledger, J-POINT balance with its
-  // nearest expiry; the bonus-payment schedule (stored, not parsed), debit
-  // statements, the PDF/CSV/OFX statement exports, J-POINT history and expiry
+  // nearest expiry, and observed debit ordinary/difference statements; the
+  // bonus-payment schedule (stored, not parsed), unsupported debit routes and
+  // statuses, PDF/CSV/OFX statement exports, J-POINT history and expiry
   // buckets are not collected (docs/sources/myjcb.md, #444).
   myjcb: [
-    partial("card_usage", ["myjcb-credit-ledger"], 444),
+    partial("card_usage", ["myjcb-credit-ledger", "myjcb-debit-ledger"], 444),
     partial(
       "card_statement",
       [
         "myjcb-credit-statement-total",
         "myjcb-credit-past-month-balances",
         "myjcb-skip-payment-schedule",
+        "myjcb-debit-ledger",
+        "myjcb-debit-other-statement",
       ],
       444,
     ),
@@ -118,7 +121,11 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     collected("execution", ["sbi-domestic-trade-records", "sbi-foreign-trade-records"]),
     partial("settlement_cash", ["sbi-foreign-cash-balances", "sbi-yen-detail-history"], 446),
     missing("income", 446),
-    partial("valuation_history", ["sbi-account-assets-current"], 446),
+    partial(
+      "valuation_history",
+      ["sbi-account-assets-current", "sbi-account-assets-history"],
+      1238,
+    ),
     missing("document", 446),
   ],
   // SBI新生銀行: top accounts with recent activity, balance summary and the yen

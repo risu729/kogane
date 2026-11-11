@@ -16,6 +16,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "5b40a5fb92a270668fbc3e9053e84af0d990c16d5873934e125b1e9822aa4fc9",
     "packages/domain/src/myjcb-amounts.ts":
       "072dc5fc2570fc8257343d85d53e93cf9fa9036f61a1648390a8d8845303ea3e",
+    "packages/domain/src/myjcb-debit-page.ts":
+      "6df61bcf418a2c8bc44f56447f5fa752e0b6888ff2e1bb44a7089f156519a9e8",
     "packages/domain/src/myjcb-jpoint-response.ts":
       "2ab195e078255201c9a9d4ce9d44100f505b10cdca430e9801623841bf472c5e",
     "packages/domain/src/myjcb-schedule-page-kind.ts":
@@ -49,13 +51,17 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/mizuho.ts":
       "f2833f796bdf748567138dd644d54d061cedb08a8747472bb13165223fcaec41",
     "poc/observation-pipeline/src/parsers/mobile-suica-sf-history.ts":
-      "a6130061da1c857b4e88477b53486b653981dcc12e34c0020fc3e28f4d255eb4",
+      "0f7aeb447cb33840f77b2171be25f70f08b6299f18216d7adb23e7f2ca7bb728",
+    "poc/observation-pipeline/src/parsers/mobile-suica-walk.ts":
+      "5974f45fa83510c2f3906e91a31e6cc7d6ca0cfc7c2891b7b8c766050f32ea0b",
     "poc/observation-pipeline/src/parsers/moneyforward-detail-balances.ts":
       "fae42407867416bb82c8f3f608ceabe9ab5cec30f6b9651733c16da897ba8c3f",
     "poc/observation-pipeline/src/parsers/moneyforward-parser.ts":
       "9ff15fc630314c798312a9d39872bbeb88872a03e83a464abf53446eff373108",
     "poc/observation-pipeline/src/parsers/moneyforward.ts":
       "743299901b3f796a7e53ff39db06b8cacf9039136c30fd8daeec66dbed4545aa",
+    "poc/observation-pipeline/src/parsers/myjcb-debit.ts":
+      "351cc8786811af43e65b9e8804cb7296442d15bd39c3ec28f00068e6fe3a7e05",
     "poc/observation-pipeline/src/parsers/myjcb-jpoint.ts":
       "f53f9d187aab2027151a01be3d4aae1f3792006583ffb40045b4cfa2020c1bf8",
     "poc/observation-pipeline/src/parsers/myjcb-skip-payment-schedule.ts":
@@ -68,6 +74,14 @@ export const PARSER_DIGESTS: ParserDigests = {
       "aa24f5018ae32b1019713dfc675de63e137b1f9c16f2622e2d66c8fec4e6f861",
     "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts":
       "5c3fac4fdb4b0af4b1cafc6580790e45c212b095089764e8240d8ad064058c58",
+    "poc/observation-pipeline/src/parsers/sbi-account-assets-history.ts":
+      "f8061e4def8cd5e01ccdce3d6eb53e0c470369ac14c4ac6e8b18de9d5579a00b",
+    "poc/observation-pipeline/src/parsers/sbi-asset-history-json.ts":
+      "4ebc8ee80f122423a0855b89d92b503ba972342072beb9afbfa643ad3f0d1e80",
+    "poc/observation-pipeline/src/parsers/sbi-asset-history-schema.ts":
+      "f6244707d0d6a15b2c8e27074b57dbdc3e36862182940572c193f252b64e35a1",
+    "poc/observation-pipeline/src/parsers/sbi-asset-history-validation.ts":
+      "9a9dec469cd4a4d7d70b8bc9b9b52d9ef9dae5e965b036e1d89be5138101a86a",
     "poc/observation-pipeline/src/parsers/sbi-domestic-cash-positions.ts":
       "c9dbf90ce8e391a8880ec019bd346ca9647470a346403f1414a7636ca70fb064",
     "poc/observation-pipeline/src/parsers/sbi-domestic-trade-records.ts":
@@ -173,13 +187,14 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "mobile-suica-sf-history": {
-      version: "1.0.1",
-      codeDigest: "1b3abc05774aab35c9ff596af73e41ef5c079d367970dc1ee05ad59608ecd24e",
+      version: "1.1.1",
+      codeDigest: "f2bc82440c9a49fa3a37d629514a385afb5a2171d1c9dcb1e63e8aa3ca20e6ee",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/mobile-suica-sf-history.ts",
+        "poc/observation-pipeline/src/parsers/mobile-suica-walk.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
@@ -313,6 +328,42 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/types.ts",
       ],
     },
+    "myjcb-debit-ledger": {
+      version: "1.0.0",
+      codeDigest: "1288092e480aae280f658c2663a946abbd99bad4dbf7ce7884a78eec23b6af2b",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "packages/domain/src/myjcb-amounts.ts",
+        "packages/domain/src/myjcb-debit-page.ts",
+        "packages/domain/src/myjcb-statement-page.ts",
+        "packages/domain/src/values.ts",
+        "packages/observation-shared/src/normalized-decimal.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/myjcb-debit.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "myjcb-debit-other-statement": {
+      version: "1.0.0",
+      codeDigest: "1288092e480aae280f658c2663a946abbd99bad4dbf7ce7884a78eec23b6af2b",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "packages/domain/src/myjcb-amounts.ts",
+        "packages/domain/src/myjcb-debit-page.ts",
+        "packages/domain/src/myjcb-statement-page.ts",
+        "packages/domain/src/values.ts",
+        "packages/observation-shared/src/normalized-decimal.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/myjcb-debit.ts",
+        "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
     "myjcb-jpoint-balance": {
       version: "1.0.1",
       codeDigest: "2523ed031762524e8e46d9103454f8907f2fc79496847608b01999868e47779e",
@@ -383,6 +434,22 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/parsers/coverage.ts",
         "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "sbi-account-assets-history": {
+      version: "0.1.2",
+      codeDigest: "d345231e64132547383c8dec20ecbb5cec6d6af94df1b391a2c73bb647f16158",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-account-assets-history.ts",
+        "poc/observation-pipeline/src/parsers/sbi-asset-history-json.ts",
+        "poc/observation-pipeline/src/parsers/sbi-asset-history-schema.ts",
+        "poc/observation-pipeline/src/parsers/sbi-asset-history-validation.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],

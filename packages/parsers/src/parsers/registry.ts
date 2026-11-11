@@ -18,6 +18,7 @@ import {
   myJcbPastMonthBalances,
 } from "./myjcb.ts";
 import { myJcbJPointBalance } from "./myjcb-jpoint.ts";
+import { myJcbDebitLedger, myJcbDebitOtherStatement } from "./myjcb-debit.ts";
 import { myJcbSkipPaymentSchedule } from "./myjcb-skip-payment-schedule.ts";
 import {
   sonyBankGrossBalance,
@@ -27,6 +28,7 @@ import {
 } from "./sony-bank.ts";
 import { globalPassActivity } from "./global-pass-activity-parser.ts";
 import { sbiAccountAssetsCurrent } from "./sbi-account-assets-current.ts";
+import { sbiAccountAssetsHistory } from "./sbi-account-assets-history.ts";
 import { sbiDomesticCashPositions } from "./sbi-domestic-cash-positions.ts";
 import { sbiDomesticTradeRecords } from "./sbi-domestic-trade-records.ts";
 import { sbiForeignCashBalances } from "./sbi-foreign-cash-balances.ts";
@@ -64,12 +66,15 @@ export const PARSERS: readonly Parser[] = [
   myJcbEvidenceOnly,
   myJcbSkipPaymentSchedule,
   myJcbJPointBalance,
+  myJcbDebitLedger,
+  myJcbDebitOtherStatement,
   sonyBankGrossBalance,
   sonyBankHistoryJson,
   sonyBankHistoryCsv,
   sonyBankWalletHistory,
   sbiDomesticCashPositions,
   sbiAccountAssetsCurrent,
+  sbiAccountAssetsHistory,
   sbiYenDetailHistory,
   sbiDomesticTradeRecords,
   sbiForeignTradeRecords,

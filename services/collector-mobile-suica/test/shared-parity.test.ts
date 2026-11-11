@@ -17,7 +17,7 @@ import { describe, expect, test } from "bun:test";
 import { encode } from "iconv-lite";
 import { sha256Hex, terminalKey } from "../../../packages/collection/src/index";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
-import { collectMobileSuica } from "../src/mobile-suica";
+import { collectMobileSuica, HistoryCollectionError } from "../src/mobile-suica";
 import { REDACTED_BASE_VARIABLE } from "../src/sanitize";
 import { persistMobileSuicaRun } from "../src/shared-run";
 import { storeArtifact } from "../src/storage";
@@ -68,7 +68,7 @@ function historyPage(): Uint8Array {
   const html = [
     "<html><body>利用履歴<form>",
     `<input type="hidden" name="baseVariable" value="${BASE_VARIABLE_SECRET}">`,
-    '<input type="hidden" name="specifyYearMonth" value="2026/09">',
+    '<select name="specifyYearMonth"><option value="2026/09"></option></select>',
     "<table><tr><td></td><td>月日</td><td>種別</td><td>利用場所</td><td>種別</td><td>利用場所</td><td>残高</td><td>入金・利用額</td></tr>",
     '<tr><td><input name="printCheck"></td><td>09/10</td><td>物販</td><td>東京駅</td><td></td><td></td><td>\\1,234</td><td>-100</td></tr>',
     "</table></form></body></html>",
@@ -258,62 +258,41 @@ describe("mobile-suica: the shared target persists the legacy bytes (U09 parity,
     expect(unit.safeErrorCode).toBeUndefined();
   });
 
-  test("persists a 100-row January page as partial when the history boundary is unproven", async () => {
-    const collection = await collectJanuaryBoundary(92);
-    expect(collection.rows).toHaveLength(100);
-    expect(collection.complete).toBe(false);
-    expect(collection.pageCount).toBe(1);
-    expect(collection.artifacts).toHaveLength(3);
-    expect(collection.artifacts.map((artifact) => artifact.filename)).toEqual([
-      "sf-history-page-0001.html",
-      "sf-history.json",
-      "collection-summary.json",
-    ]);
-    const history = jsonObject(artifactBody(collection.artifacts, "sf-history.json"));
-    const historyRows = rowDates(history.rows);
-    expect(history.transactionCount).toBe(100);
-    expect(historyRows).toHaveLength(100);
-    expect(history.complete).toBe(false);
-    expect(history.pageCount).toBe(1);
-    expect(history.asOfDateJst).toBe("2026-01-15");
-    expect(historyRows.filter((date) => date === "2026-01-14")).toHaveLength(2);
-    expect(historyRows.filter((date) => date === "2025-12-31")).toHaveLength(2);
-    expect(history.transactionCount).toBe(collection.rows.length);
-    expect(history.complete).toBe(collection.complete);
-    const summary = jsonObject(artifactBody(collection.artifacts, "collection-summary.json"));
-    expect(summary.transactionCount).toBe(100);
-    expect(summary.complete).toBe(false);
-    expect(summary.pageCount).toBe(1);
-    expect(summary.asOfDateJst).toBe("2026-01-15");
-    expect(summary.transactionCount).toBe(collection.rows.length);
-    expect(summary.complete).toBe(collection.complete);
-
+  test("a capped January page refuses a repeated non-progressing response and preserves sanitized evidence", async () => {
+    let failure: HistoryCollectionError | undefined;
+    try {
+      await collectJanuaryBoundary(92);
+    } catch (error) {
+      if (!(error instanceof HistoryCollectionError)) throw error;
+      failure = error;
+    }
+    expect(failure).toBeDefined();
+    expect(failure!.artifacts.every((artifact) => artifact.dataset === "sf-history-html")).toBe(
+      true,
+    );
+    expect(failure!.artifacts.length).toBeGreaterThan(0);
     const runId = crypto.randomUUID();
     const result = await persistMobileSuicaRun(new FakeR2Bucket(), {
       runId,
       producerVersion: PRODUCER_VERSION,
       attemptId: `attempt-${runId}`,
-      startedAt: "2026-09-11T00:00:00.000Z",
-      completedAt: "2026-09-11T00:00:30.000Z",
+      startedAt: "2026-01-15T00:00:00.000Z",
+      completedAt: "2026-01-15T00:00:30.000Z",
       status: "partial",
       asOfDateJst: "2026-01-15",
       complete: false,
-      artifacts: collection.artifacts,
+      artifacts: failure!.artifacts,
       failureCodes: ["history_boundary_unproven"],
     });
     expect(result.outcome).toBe("persisted");
-    if (result.outcome !== "persisted") return;
-    expect(result.manifest.providerOutcome).toBe("partial");
-    expect(result.manifest.coverageStatus).toBe("partial");
-    expect(result.manifest.safeErrorCode).toBe("history_boundary_unproven");
-    expect(result.manifest.artifacts).toHaveLength(3);
-    expect(result.objects).toHaveLength(3);
-    expect(result.manifest.units).toHaveLength(1);
-    const unit = result.manifest.units[0]!;
-    expect(unit.unitKey).toBe("account");
-    expect(unit.artifactCount).toBe(3);
-    expect(unit.coverageStatus).toBe("partial");
-    expect(unit.safeErrorCode).toBe("history_boundary_unproven");
+    if (result.outcome === "persisted") {
+      expect(result.manifest.coverageStatus).toBe("partial");
+      expect(
+        result.manifest.artifacts.every(
+          (artifact) => artifact.role === "sanitized_provider_capture",
+        ),
+      ).toBe(true);
+    }
   });
 });
 
@@ -334,7 +313,7 @@ function januaryBoundaryPage(julyCount: number): Uint8Array {
   const html = [
     "<html><body>利用履歴<form>",
     `<input type="hidden" name="baseVariable" value="${BASE_VARIABLE_SECRET}">`,
-    '<input type="hidden" name="specifyYearMonth" value="2026/01">',
+    '<select name="specifyYearMonth"><option value="2026/01"></option></select>',
     "<table><tr><td></td><td>月日</td><td>種別</td><td>利用場所</td><td>種別</td><td>利用場所</td><td>残高</td><td>入金・利用額</td></tr>",
     rows,
     "</table></form></body></html>",

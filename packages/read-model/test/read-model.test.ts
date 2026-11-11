@@ -334,6 +334,20 @@ describe("named concepts in the final SQL", () => {
     ).toEqual([
       {
         source_id: "myjcb",
+        parser_name: "myjcb-debit-ledger",
+        dataset: "debit-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-debit-other-statement",
+        dataset: "debit-other-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
         parser_name: "myjcb-jpoint-balance",
         dataset: "jpoint-balance",
         unit_scope: "unit",
@@ -448,6 +462,20 @@ describe("named concepts in the final SQL", () => {
         )
         .all(),
     ).toEqual([
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-debit-ledger",
+        dataset: "debit-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-debit-other-statement",
+        dataset: "debit-other-detail",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
       {
         source_id: "myjcb",
         parser_name: "myjcb-jpoint-balance",

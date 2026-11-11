@@ -17,6 +17,10 @@ import type {
   UnitUpdateSummary,
 } from "../../../packages/observation-shared/src/api-contract";
 import type { MeasureView, PageLimit } from "./scope";
+import type {
+  PortfolioValuationHistoryQuery,
+  PortfolioValuationHistoryRow,
+} from "./portfolio-valuation-history";
 
 export interface TransactionQuery {
   source?: string;
@@ -138,6 +142,9 @@ export interface ObservationReader {
   listTransactions(query: TransactionQuery): Promise<TransactionRow[]>;
   listLatestBalances(query: LatestBalanceQuery): Promise<BalanceRow[]>;
   listBalanceHistory(query: BalanceHistoryQuery): Promise<BalanceHistoryRow[]>;
+  listPortfolioValuationHistory(
+    query: PortfolioValuationHistoryQuery,
+  ): Promise<PortfolioValuationHistoryRow[]>;
   listPositions(query: PositionQuery): Promise<PositionWithValuations[]>;
   listArtifacts(query: ArtifactQuery): Promise<ArtifactRow[]>;
   filterOptions(query: FilterOptionsQuery): Promise<FilterOptions>;

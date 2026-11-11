@@ -26,6 +26,7 @@ export default defineConfig({
         invocationLogs: false,
         headSamplingRate: 1,
       },
+      issues: { enabled: true },
     },
     assets: {
       notFoundHandling: "single-page-application",

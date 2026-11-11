@@ -8,6 +8,18 @@ import {
   type HistoryWindow,
 } from "./history-windows";
 import type { Artifact, DomesticSession } from "./types";
+import { assetHistoryArtifacts, readAssetHistoryResponse } from "./asset-history";
+import {
+  auditAssetHistoryJson,
+  parseAssetHistoryJson,
+} from "../../../packages/parsers/src/parsers/sbi-asset-history-json";
+import {
+  assetHistoryError,
+  isAssetHistoryError,
+  sanitizeAssetHistory,
+  type AssetHistoryError,
+  ASSET_HISTORY_SOURCE_KEY,
+} from "../../../packages/parsers/src/parsers/sbi-asset-history-schema";
 
 const MAIN_SITE_USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
@@ -76,34 +88,58 @@ export async function collectMainSiteArtifacts(options: {
   from?: string;
   to?: string;
   onHistoryError?: (error: SbiHistoryError) => void;
+  onAssetHistoryError?: (error: AssetHistoryError) => void;
+  onArtifact?: (artifact: Artifact) => void;
 }): Promise<Artifact[]> {
   const to = options.to ?? jstDate(new Date());
   const from = options.from ?? historyYearStart(to);
   const auth = await createMainSiteAuth(options.session, options.mainSiteBaseUrl);
   const artifacts: Artifact[] = [];
+  const retain = (artifact: Artifact) => {
+    artifacts.push(artifact);
+    options.onArtifact?.(artifact);
+  };
 
   const assets = await fetchAssets(auth);
-  artifacts.push({
+  retain({
     dataset: "account-assets-current",
     mediaType: "application/json",
     body: assets,
   });
 
+  try {
+    const history = await fetchAssetHistoryCapture(auth);
+    retain({
+      artifactKey: ASSET_HISTORY_SOURCE_KEY,
+      dataset: "account-assets-history-source",
+      mediaType: "application/json",
+      role: "provider_response",
+      body: history.body,
+      bytes: history.bytes,
+    });
+    for (const artifact of await assetHistoryArtifacts(history)) retain(artifact);
+  } catch (cause) {
+    const error = isAssetHistoryError(cause)
+      ? cause
+      : assetHistoryError("sbi_asset_history_fetch_failed", { cause });
+    if (options.onAssetHistoryError === undefined) throw error;
+    options.onAssetHistoryError(error);
+  }
+
   const yenHistory = await fetchYenHistory(options.session, auth);
-  artifacts.push({
+  retain({
     dataset: "yen-detail-history",
     mediaType: "application/json",
     body: yenHistory,
   });
 
-  artifacts.push(
-    ...(await collectHistoryArtifacts({
-      dataset: "domestic-trade-records",
-      range: { from, to },
-      collect: (window) => fetchDomesticTradeHistory({ session: options.session, auth, ...window }),
-      ...(options.onHistoryError === undefined ? {} : { onError: options.onHistoryError }),
-    })),
-  );
+  for (const artifact of await collectHistoryArtifacts({
+    dataset: "domestic-trade-records",
+    range: { from, to },
+    collect: (window) => fetchDomesticTradeHistory({ session: options.session, auth, ...window }),
+    ...(options.onHistoryError === undefined ? {} : { onError: options.onHistoryError }),
+  }))
+    retain(artifact);
   return artifacts;
 }
 
@@ -195,6 +231,38 @@ async function fetchAssets(auth: MainSiteAuth): Promise<Record<string, unknown>>
     });
   }
   return parseJsonObject(text, "SBI account assets");
+}
+
+/** The observed all-period endpoint has no period query or pagination. */
+export async function fetchAssetHistory(
+  auth: Pick<MainSiteAuth, "assetsUrl" | "cookies">,
+): Promise<unknown> {
+  return parseAssetHistoryJson(
+    new TextDecoder().decode((await fetchAssetHistoryCapture(auth)).bytes),
+  );
+}
+
+async function fetchAssetHistoryCapture(
+  auth: Pick<MainSiteAuth, "assetsUrl" | "cookies">,
+): Promise<{
+  body: unknown;
+  bytes: Uint8Array;
+  capturedAt: string;
+}> {
+  const capturedAt = new Date().toISOString();
+  const requestUrl = new URL("/account/api/assets/valuations", auth.assetsUrl);
+  const response = await fetch(requestUrl, {
+    headers: {
+      accept: "application/json, text/plain, */*",
+      cookie: cookieHeader(auth.cookies, requestUrl),
+      referer: auth.assetsUrl,
+      "user-agent": MAIN_SITE_USER_AGENT,
+    },
+  });
+  if (!response.ok) throw assetHistoryError("sbi_asset_history_fetch_failed");
+  const bytes = await readAssetHistoryResponse(response);
+  const body = sanitizeAssetHistory(auditAssetHistoryJson(new TextDecoder().decode(bytes)));
+  return { body, bytes, capturedAt };
 }
 
 async function fetchYenHistory(

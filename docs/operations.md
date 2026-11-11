@@ -394,6 +394,61 @@ most 50 artifacts per run, the parser version replayed is the one in the
 checkout (not necessarily the one that failed), and one category names only
 the first check that refused; the `shape` line is what shows the rest.
 
+### Workers Issues (error grouping)
+
+Adopted 2026-11-09 21:05 UTC (owner decision). Every production Worker under
+`services/` turns on Cloudflare
+[Workers Issues](https://developers.cloudflare.com/workers/observability/issues/),
+which groups recurring failures of one Worker into issues without an SDK:
+
+```jsonc
+// wrangler.jsonc
+"observability": { "enabled": true, "issues": { "enabled": true } }
+```
+
+```ts
+// cloudflare.config.ts
+observability: { enabled: true, issues: { enabled: true } },
+```
+
+How the setting reaches Cloudflare: only the three Container Workers
+(GlobalPass, SBI Shinsei, St.George) apply it today, because they publish with
+`cf deploy`, which applies `cloudflare.config.ts` including `observability`.
+The other fourteen publish with `cf workers versions create` and
+`cf workers deployments create`, which carry no non-versioned script settings,
+so no `observability` change (this one or any earlier one) has reached them
+since they moved to cf. Moving them to `cf deploy` is the open follow-up; until
+then Issues covers the three Container Workers only. A full deploy or rollback
+from a commit whose config lacks the key turns Issues off for a Container
+Worker. `tasks/_lib/cf-deploy.test.ts` requires `issues.enabled` in both files
+of every cf-deployed Worker.
+
+What becomes an occurrence: an uncaught exception, a failed invocation, a `5xx`
+response the Worker returns, and a console line at error level or one carrying
+an `Error` object or stack trace. Today that covers:
+
+- the failed-stage and failed-terminal `console.error` lines of
+  `packages/collector-diagnostics` (`event: "collector-diagnostic"`, safe error
+  fields only), used by GlobalPass, Mobile Suica, MyJCB, SBI Securities, SBI VC
+  Trade, SMBC Direct, St.George and Vpass;
+- the few direct `console.error` calls in Workers (schedule lease, SBI VC
+  Trade, SMBC Direct, one in the Processor's schedule alarm).
+
+It does not cover a collector run that catches its failure and only returns
+or `console.log`s a result: Mizuho (`mizuho-collection-result`), PRESTIA,
+SBI Shinsei, Sony Bank, Money Forward, V Point and V Point Pay. Every collector runs from
+the Processor's alarm RPC (`crons: []`), and the Processor logs each result as
+the `console.log` line `schedule_dispatch_result`, so those failures are not
+issues either.
+
+Limits: occurrence details are kept seven days (issues stay listed after
+that); only traffic after the setting is applied is processed; Issues is in
+open beta and free during the beta. Issues are read in the dashboard
+(Worker > Issues) or through the account API under
+`/accounts/{account_id}/workers/observability/issues` (list, `/{issueId}`,
+`/{issueId}/occurrences`, `PATCH` for the status). The wrangler OAuth token has
+no Workers Observability scope, so it cannot read them.
+
 ## 2. Load budgets and the D1 harness
 
 The review's design load is a shape, not a forecast:
