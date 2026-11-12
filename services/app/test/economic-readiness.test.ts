@@ -7,6 +7,8 @@ import { queryEconomicRowReadiness } from "../../../packages/application/src/que
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
+import { economicReadinessRequest } from "../src/economic-readiness-api";
+import { validEconomicReadinessResult } from "../../../packages/observation-shared/src/economic-readiness-contract.ts";
 
 const OWNER = "synthetic-readiness-owner";
 const APP_AUD = "synthetic-readiness-browser";
@@ -91,11 +93,12 @@ async function call(body: unknown) {
     params: { name: TOOL, arguments: body },
   });
   expect(response.status).toBe(200);
-  return (
+  const result = (
     (await response.json()) as {
       result: { isError?: boolean; structuredContent: Record<string, unknown> };
     }
   ).result;
+  return { ...result, correlationId: response.headers.get("x-request-id") };
 }
 async function listed() {
   const response = await send(true, { jsonrpc: "2.0", id: 1, method: "tools/list" });
@@ -106,6 +109,97 @@ async function listed() {
     }
   ).result.tools;
 }
+async function browserRead(params: URLSearchParams, authenticated = true) {
+  const headers: Record<string, string> = {};
+  if (authenticated)
+    headers["cf-access-jwt-assertion"] = await new SignJWT({ type: "app" })
+      .setProtectedHeader({ alg: "RS256", kid: "fixture" })
+      .setIssuer(issuer)
+      .setAudience(APP_AUD)
+      .setSubject(OWNER)
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(keys.privateKey);
+  return worker.fetch(
+    new Request(`https://fixture.test/api/v2/economic-readiness?${params}`, { headers }),
+    {
+      ...env,
+      ACCESS_ISSUER: issuer,
+      ACCESS_AUDIENCE: APP_AUD,
+      ACCESS_MCP_AUDIENCE: MCP_AUD,
+      AGENT_GRANTS: "[]",
+      OPERATOR_SUBJECTS: "[]",
+    } as Env,
+  );
+}
+
+it("browser reader parity uses exact row and parse, audits counts and preserves financial state", async () => {
+  const params = new URLSearchParams({
+    family: "bank-movement",
+    observationId: String(row.observationId),
+    parseRunId: String(row.parseRunId),
+  });
+  const before = await financialSnapshot();
+  const expected = await queryEconomicRowReadiness(d1Executor(env.DB), {
+    ...request(),
+    rows: [row],
+  });
+  expect(validEconomicReadinessResult(expected)).toBe(true);
+  const browser = await browserRead(params);
+  expect(browser.status).toBe(200);
+  expect(await browser.json()).toEqual(expected);
+  const http = await send(false, { ...request(), rows: [row] });
+  expect(await http.json()).toEqual(expected);
+  expect((await call({ ...request(), rows: [row] })).structuredContent).toEqual(expected);
+  const audit = await env.DB.prepare(
+    "SELECT path,result,result_code,diff_json,refs_json,target_ref FROM audit_records WHERE operation='economic-readiness.read' AND correlation_id=?",
+  )
+    .bind(browser.headers.get("x-request-id"))
+    .all();
+  expect(audit.results).toHaveLength(1);
+  expect(audit.results[0]).toMatchObject({
+    path: "ui",
+    result: "read",
+    result_code: null,
+    diff_json: '{"kind":"read","rows":1,"truncated":false}',
+    refs_json: "[]",
+    target_ref: null,
+  });
+  expect(JSON.stringify(audit.results)).not.toContain(PRIVATE);
+  expect(await financialSnapshot()).toEqual(before);
+  params.set("parseRunId", String(Number.MAX_SAFE_INTEGER));
+  const old = await browserRead(params);
+  expect(await old.json()).toEqual(
+    await queryEconomicRowReadiness(d1Executor(env.DB), economicReadinessRequest(params)),
+  );
+  expect((await browserRead(params, false)).status).toBe(401);
+});
+
+it("browser query parser refuses repeated, unknown, unsafe and malformed refs without coercing them", async () => {
+  const base = `family=bank-movement&observationId=${row.observationId}&parseRunId=${row.parseRunId}`;
+  const correlations: (string | null)[] = [];
+  for (const text of [
+    base + "&owner=" + PRIVATE,
+    base + "&family=bank-movement",
+    base.replace(/observationId=[0-9]+/u, "observationId=01"),
+    base.replace(/parseRunId=[0-9]+/u, "parseRunId=9007199254740992"),
+    base.replace("bank-movement", "card-purchase"),
+  ]) {
+    const response = await browserRead(new URLSearchParams(text));
+    expect(response.status).toBe(400);
+    correlations.push(response.headers.get("x-request-id"));
+    expect(await response.json()).toMatchObject({ code: "invalid_query" });
+  }
+  const audit = await env.DB.prepare(
+    "SELECT refs_json,target_ref,diff_json FROM audit_records WHERE operation='economic-readiness.read' AND correlation_id IN (SELECT value FROM json_each(?))",
+  )
+    .bind(JSON.stringify(correlations))
+    .all();
+  expect(audit.results).toHaveLength(correlations.length);
+  expect(JSON.stringify(audit.results)).not.toContain(PRIVATE);
+  for (const entry of audit.results)
+    expect(entry).toMatchObject({ refs_json: "[]", target_ref: null });
+});
 async function financialSnapshot() {
   return env.DB.prepare(`SELECT
     (SELECT count(*) FROM economic_event_revisions) AS events,
@@ -136,7 +230,10 @@ it("real D1 matches the shared S0 query over HTTP/MCP, retains missing reasons a
   expect(text).not.toContain("987654321");
   expect(text).toContain("observation_missing");
   const audit = await env.DB.prepare(`SELECT path,risk_class,result,result_code,diff_json,
-    target_ref,refs_json FROM audit_records WHERE operation='economic-readiness.read' ORDER BY path`).all();
+    target_ref,refs_json FROM audit_records WHERE operation='economic-readiness.read'
+    AND correlation_id IN (SELECT value FROM json_each(?)) ORDER BY path`)
+    .bind(JSON.stringify([http.headers.get("x-request-id"), mcp.correlationId]))
+    .all();
   expect(audit.results).toHaveLength(2);
   for (const entry of audit.results)
     expect(entry).toMatchObject({
@@ -167,7 +264,7 @@ it("is listed to every MCP client, and both transports refuse a strict-input vio
   }
   expect((await send(false, request(), false)).status).toBe(401);
 });
-it("missing schema is a closed 503 on both transports", async () => {
+it("missing schema is a closed 503 on browser, agent HTTP and MCP", async () => {
   const trigger = await env.DB.prepare(
     "SELECT sql FROM sqlite_schema WHERE name='economic_claims_guard'",
   ).first<{ sql: string }>();
@@ -182,9 +279,27 @@ it("missing schema is a closed 503 on both transports", async () => {
       status: "unavailable",
       reason: "readiness_store_unavailable",
     });
+    const browser = await browserRead(
+      new URLSearchParams({
+        family: "bank-movement",
+        observationId: String(row.observationId),
+        parseRunId: String(row.parseRunId),
+      }),
+    );
+    expect(browser.status).toBe(503);
+    expect(await browser.json()).toEqual(mcp.structuredContent);
     const audit = await env.DB.prepare(`SELECT result,result_code FROM audit_records
-      WHERE operation='economic-readiness.read' AND result='failed'`).all();
+      WHERE operation='economic-readiness.read' AND correlation_id IN (SELECT value FROM json_each(?))`)
+      .bind(
+        JSON.stringify([
+          http.headers.get("x-request-id"),
+          mcp.correlationId,
+          browser.headers.get("x-request-id"),
+        ]),
+      )
+      .all();
     expect(audit.results).toEqual([
+      { result: "failed", result_code: "readiness_store_unavailable" },
       { result: "failed", result_code: "readiness_store_unavailable" },
       { result: "failed", result_code: "readiness_store_unavailable" },
     ]);

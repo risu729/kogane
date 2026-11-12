@@ -210,3 +210,65 @@ real-client tool discovery/read acceptance and production coverage are not
 asserted. It creates no authentication resource, configured grant, delegation,
 proposal, command or financial writer; S1/S2 still require their own guarded
 ownership and writer contracts.
+
+## Amendment 2026-11-12: transaction-detail read parity
+
+### Context and options
+
+The safe S0 diagnostic was available over agent HTTP and MCP, while a person
+viewing a transaction could only read its raw facts. Options were to keep that
+transport gap, create a separate browser evaluator, or adapt the same service.
+The shared-service adapter avoids divergent authority and financial meanings.
+
+### Decision
+
+`GET /api/v2/economic-readiness` accepts exactly one `family`, `observationId`
+and `parseRunId` parameter. Only positive safe integer references and the
+existing bank-movement/securities-execution family vocabulary are admitted.
+The authenticated browser subject receives its existing `readerGrant`; the
+route calls `readEconomicRowReadinessForGrant`, which still checks capability
+and both whole-store scope axes before any store read. There is no new grant,
+capability, Access configuration or financial command. The response is the
+unchanged S0 result, or its existing fixed refusal/unavailable result.
+
+`economic-readiness.read` now includes `ui` in the existing R0 catalogue entry.
+The browser route records only row count and truncation on success, or a closed
+refusal/failure code, through the common audit path. It never records request
+row references, financial values, provider text or exception messages.
+
+The transaction-detail panel intersects the source/parser registry's families
+with the diagnostic's two supported families and reads only after the reader
+asks. It uses the displayed observation's exact ID and provenance parse ID,
+including a superseded parse, and preserves every current-evidence reason.
+State and request cache are keyed by family, observation and parse. Navigation
+unmounts the previous panel and cancels its read. A strict shared wire guard
+rejects unknown fields/codes, malformed references, inconsistent counts and
+enabled writer/proposal flags; response correlation also rejects a valid
+answer for a different family, observation or parse.
+
+The Japanese panel explains identity status, row-specific blockers and the
+remaining generation gates without presenting digests or internal flags as
+actions. An admitted identity is explicitly not an admitted economic event.
+Proposal and writer enablement stay false; history coverage and the
+principal-to-owner contract remain unknown/unresolved. Loading or failure is
+local to the panel; the existing observation, old-parse warning and original
+evidence links remain usable. No SQL, writer, proposal, adoption, financial
+policy, evidence or raw object changes.
+
+### Consequences and verification
+
+This closes one read-parity gap under
+[issue 549](https://github.com/risu729/kogane/issues/549). It does not complete
+non-card event generation or dated-state reconstruction. Rollback removes the
+browser adapter and panel; stored financial evidence is unaffected.
+
+Synthetic contract tests cover malformed/unknown wire shapes and exact
+response correlation. Worker tests compare browser, agent HTTP and MCP with
+the common S0 query, exercise a non-operator browser reader, strict query
+refusals, authentication, unavailable schema, fixed failure audit and
+unchanged financial state. Existing application tests retain the no-read
+capability/scope refusal checks. Production-bundle browser tests cover the
+on-demand old-parse explanation, original evidence links, navigation while a
+read is pending, locally contained refusal/unavailable/malformed/mismatched
+answers, and excluded card/non-transaction details. These are synthetic test
+contracts, not production acceptance or evidence of writer enablement.
