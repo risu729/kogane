@@ -23,6 +23,8 @@
 // strictest of them, leaving the rest of the invocation to the lanes that
 // share it.
 
+import { platformLimitError } from "./platform-limit.ts";
+
 /**
  * The per-invocation limits the registration path is reconciled against, as
  * Cloudflare documents them for Workers Paid. They are recorded here so the
@@ -145,7 +147,7 @@ function observedProperty(value: unknown, property: PropertyKey): unknown {
 /** Observe completion, preserving the original return value, Promise and errors. */
 function observeOperation(
   call: () => unknown,
-  settled: (result: unknown, durationMs: number, rejected: boolean) => void,
+  settled: (result: unknown, durationMs: number, rejected: boolean, limit: boolean) => void,
 ): unknown {
   let started: number;
   try {
@@ -154,11 +156,11 @@ function observeOperation(
     return call();
   }
   let completed = false;
-  const done = (result: unknown, rejected: boolean) => {
+  const done = (result: unknown, rejected: boolean, limit = false) => {
     if (completed) return;
     completed = true;
     try {
-      settled(result, Math.max(0, performance.now() - started), rejected);
+      settled(result, Math.max(0, performance.now() - started), rejected, limit);
     } catch {
       // Observer failures must neither replace the source return/error nor
       // reject the detached Promise reaction. Keep no exception text.
@@ -168,7 +170,7 @@ function observeOperation(
   try {
     result = call();
   } catch (error) {
-    done(undefined, true);
+    done(undefined, true, platformLimitError(error));
     throw error;
   }
   const then = observedProperty(result, "then");
@@ -178,7 +180,7 @@ function observeOperation(
       // again and manufacture a rejection that the source never returned.
       Reflect.apply(then, result, [
         (value: unknown) => done(value, false),
-        () => done(undefined, true),
+        (error: unknown) => done(undefined, true, platformLimitError(error)),
       ]);
     } catch {
       // Unexpected observer setup is unavailable, without changing the call.
@@ -195,6 +197,8 @@ export class OperationMeter {
   #d1FailedStatements = 0;
   #d1SettledStatements = 0;
   #r2FailedOperations = 0;
+  #d1PlatformLimitCalls = 0;
+  #r2PlatformLimitCalls = 0;
   #r2SettledOperations = 0;
   #d1ElapsedMs = 0;
   #r2ElapsedMs = 0;
@@ -210,7 +214,8 @@ export class OperationMeter {
 
   executeD1(call: () => unknown, count: number, metadata: "result" | "batch" | "none"): unknown {
     this.d1Statements += count;
-    return observeOperation(call, (result, durationMs, rejected) => {
+    return observeOperation(call, (result, durationMs, rejected, limit) => {
+      if (limit) this.#d1PlatformLimitCalls += 1;
       this.#d1ElapsedMs += durationMs;
       this.#d1SettledStatements += count;
       for (let index = 0; index < count; index += 1) {
@@ -236,7 +241,8 @@ export class OperationMeter {
 
   executeR2(call: () => unknown): unknown {
     this.r2Operations += 1;
-    return observeOperation(call, (_result, durationMs, rejected) => {
+    return observeOperation(call, (_result, durationMs, rejected, limit) => {
+      if (limit) this.#r2PlatformLimitCalls += 1;
       this.#r2ElapsedMs += durationMs;
       this.#r2SettledOperations += 1;
       if (rejected) this.#r2FailedOperations += 1;
@@ -253,6 +259,8 @@ export class OperationMeter {
       d1FailedStatements: this.#d1FailedStatements,
       r2SettledOperations: this.#r2SettledOperations,
       r2FailedOperations: this.#r2FailedOperations,
+      d1PlatformLimitCalls: this.#d1PlatformLimitCalls,
+      r2PlatformLimitCalls: this.#r2PlatformLimitCalls,
       d1ElapsedMs: this.#d1ElapsedMs,
       r2ElapsedMs: this.#r2ElapsedMs,
       d1RowsRead: this.#rowsRead.summary(this.d1Statements),
