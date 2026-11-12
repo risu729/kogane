@@ -42,7 +42,7 @@ import { openTestStore } from "./test-store.ts";
  */
 export const EXPLICIT_COVERAGE: ReadonlyMap<string, string> = new Map([
   ["myjcb-jpoint-history", "1.0.1"],
-  ["vpass-credit-snapshot", "1.0.1"],
+  ["vpass-credit-snapshot", "1.0.2"],
   ["moneyforward-detail-balances", "1.0.1"],
   ["st-george-balances", "1.0.1"],
   ["prestia-bank-balances", "1.0.1"],

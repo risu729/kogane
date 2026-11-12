@@ -107,7 +107,7 @@ async function collect(day: number) {
         if (path.includes("/authori/authori_shokai/"))
           return Response.json({
             ...authori(String(100 + selected + day)),
-            header: envelope({}, selected).header,
+            header: { ...envelope({}, selected).header, transitTo: "vp.member.pages.info" },
           });
         if (path.includes("/revo/xt_revo_shokai/"))
           return Response.json({

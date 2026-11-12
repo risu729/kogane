@@ -1339,6 +1339,12 @@
         }
       ],
       "sha256": "4097cc524cbb682a4b114a37d917dbb1e0ba6de291e8079eff65c0e492467cf5"
+    },
+    {
+      "file": "0102_vpass_authori_transition_policy.sql",
+      "statementCount": 1,
+      "insertStatements": [],
+      "sha256": "54e07f3efa8b9f844f6c62e8030390d4a9abf2510f650848c00584b29b8f7823"
     }
   ],
   "tables": [

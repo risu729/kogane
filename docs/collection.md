@@ -661,7 +661,13 @@ statement sanitizer v1 output remains unchanged. Registration v8 maps only
 these two new JSON keys to `credit-snapshot`; versions v1-v7 keep their
 old meaning.
 
-The `vpass-credit-snapshot` parser publishes visible overall/card/revolving/
+The `vpass-credit-snapshot` 1.0.2 reader accepts only the observed normal
+`vp.member.pages.info` module or an empty transition for Authori; Revo remains
+empty-only. Its successful result-code, true-login and financial validation
+guards remain mandatory. Migration 0102 advances only the complete shipped
+default version pin, preserving operator choices and stored evidence.
+
+The parser publishes visible overall/card/revolving/
 installment-twice-bonus reported limit, outstanding and availability at
 1,000 JPY precision, cross-checked against the 万円 display, plus exact
 reported revolving outstanding/repayment yen. The metric names and
