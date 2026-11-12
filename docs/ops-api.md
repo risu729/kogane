@@ -930,6 +930,16 @@ following [#1131](https://github.com/risu729/kogane/pull/1131)
 enabled so that its first production collection, which its daily alarm has never
 made, is a request (owner, 2026-11-09 19:52 UTC;
 [ADR 0048, amendment 2026-11-09](adr/0048-operation-collector-dispatch.md#amendment-2026-11-09-prestia-bank-enabled)).
+That first request (`op_f791e3ed…`, accepted 2026-11-09 20:57 UTC) collected with
+provider outcome `success` a minute later, but registration was refused
+`inactive_ingest_route`: production CORE had none of the `collector-prestia-bank`
+rows of `infra/bootstrap/ingest-clients.sql`, which an operator applies by hand
+([#1270](https://github.com/risu729/kogane/issues/1270)). With the owner's approval
+those rows were applied on 2026-11-11 (11:10 UTC). The collection scan registered
+the stored run on 2026-11-12 (07:50 UTC) as fetch run 1673, and its one
+balance-summary artifact was parsed and published. The operation itself reads
+`failed` with `publication_not_observed`, because its 24-hour window ended first.
+No new login was needed. Enabling the daily alarm is the next, separate step.
 The remaining connections (`prestia-globalpass`, `sbi-shinsei`, `vpass`,
 `mizuho-bank`, `vpoint`) come after their open fixes. `mobile-suica` and
 `myjcb` drive a browser and run far longer than `sony-bank`; the Processor tick
