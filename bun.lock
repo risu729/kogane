@@ -194,7 +194,7 @@
       "dependencies": {
         "@modelcontextprotocol/server": "2.4.0",
         "hono": "4.13.17",
-        "jose": "6.2.16",
+        "jose": "6.2.17",
         "zod": "4.6.7",
       },
       "devDependencies": {
@@ -254,7 +254,7 @@
         "@types/node": "26.6.6",
         "@vitest/coverage-istanbul": "5.1.0",
         "cf": "1.0.0-beta.28",
-        "devtools-protocol": "0.0.1734725",
+        "devtools-protocol": "0.0.1740066",
         "typescript": "7.0.2",
         "vitest": "5.1.0",
         "wrangler": "4.158.0",
@@ -1042,7 +1042,7 @@
 
     "devlop": ["devlop@1.1.0", "", { "dependencies": { "dequal": "^2.0.0" } }, "sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA=="],
 
-    "devtools-protocol": ["devtools-protocol@0.0.1734725", "", {}, "sha512-MR4wa1X950I/Xah+jSm5WyquFKm/7vWX1tzTCxqDlu2Oxb7sGHkZ3kMk/xKpCbJt1iwSvKTxwV6PSnJNw73Xqg=="],
+    "devtools-protocol": ["devtools-protocol@0.0.1740066", "", {}, "sha512-eRiboX7pr1ex7j6c2VBWZNs8pXbbVT6AoKDanmdYMzyDPXdPx9UUHtI7mVz+4uh8/TT85R5VYqAAZugvsbyOjQ=="],
 
     "dom-serializer": ["dom-serializer@2.0.0", "", { "dependencies": { "domelementtype": "^2.3.0", "domhandler": "^5.0.2", "entities": "^4.2.0" } }, "sha512-wIkAryiqt/nV5EQKqQpo3SToSOV9J0DnbJqwK7Wv/Trc92zIAYZ4FlMu+JPFW1DfGFt81ZTCGgDEabffXeLyJg=="],
 
@@ -1188,7 +1188,7 @@
 
     "jiti": ["jiti@2.7.0", "", { "bin": { "jiti": "lib/jiti-cli.mjs" } }, "sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ=="],
 
-    "jose": ["jose@6.2.16", "", {}, "sha512-4LSJpbuBuPdGrONCdZUy0xnxtLf8eEz+EY0SMXdHQEBU7bgUHDVblU/JAjryv3wID9/LK7/YuwFwq+AQNfMscQ=="],
+    "jose": ["jose@6.2.17", "", {}, "sha512-wOuK9V1yujQFH5S0ZWmLcDZN7+IKh9bUCC2ZPCf2HDlol3WWHy+PPyNjEI75FXRLMp3vDKQcupP59xhVU95hcg=="],
 
     "json5": ["json5@2.2.3", "", { "bin": { "json5": "lib/cli.js" } }, "sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg=="],
 

@@ -1,5 +1,7 @@
 # Architecture decision records
 
+- [ADR 0111: Accept requested V Point OTPs through a private durable owner offer](0111-fumi-vpoint-owner-offers.md) — accepted; private owner manifest/RPC, atomic challenge claims, durable receipts and legacy exclusion; production adoption remains separate
+
 ADRs preserve the context, options, decision and consequences at adoption time.
 Their original status/date and wording remain history; they are not current
 release instructions. A changed choice needs an amendment or superseding ADR
@@ -112,3 +114,5 @@ for current behavior.
 - [ADR 0105: Preserve Vpass credit snapshots as overlapping provider reports](0105-vpass-reported-credit-snapshots.md) — proposed; independent daily card snapshots, explicit thousand-yen precision and exact revolving yen, shared non-additive metrics, registration v8
 - [ADR 0106: Preserve reported SBI payments and sales as complete retained containers](0106-sbi-reported-income-and-gains.md) — proposed; observed JPY/USD payments and domestic sales, exact raw numeric tokens, checked full-retention counts, complete-container current membership and registration v9
 - [ADR 0108: SBI delivered-document evidence and bounded continuation](0108-sbi-delivered-documents.md) — proposed; exact observed DOM/AST handoff, original single-PDF evidence, independent document units, round-robin progress and registration v11
+
+- [ADR 0112: Pin the branded Stable Chrome payload in collector images](0112-pinned-chrome-collector-builds.md) — proposed; signed official package provenance, bounded extraction, retained wrapper/channel paths and offline image validation without APT

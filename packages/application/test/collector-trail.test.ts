@@ -5,11 +5,14 @@
 import type { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { explain } from "../../read-model/test/card-usage-plan.ts";
+import { validOperationRecord } from "../../observation-shared/src/operation-contract.ts";
 import {
   claimCollectorStart,
   collectorExecution,
   collectorRunTrails,
   type CollectorRunTrail,
+  readOperation,
+  trackCollectorPublication,
   trailOutcome,
 } from "../src/index.ts";
 import { migratedDatabase, sqliteCommandStore } from "./sqlite-store.ts";
@@ -22,6 +25,35 @@ afterAll(() => db.close());
 
 const OP = `op_${"b".repeat(64)}`;
 const NOW = "2026-09-11T00:00:00Z";
+
+function seedCollectionRun(
+  target: Database,
+  id: number,
+  runId: string,
+  blockedCode: string | null = null,
+): void {
+  target.run(
+    `INSERT INTO collection_runs(id,source,run_id,terminal_key,terminal_digest,
+      registration_contract_version,provider_outcome,coverage_status,first_seen_at,blocked_code)
+     VALUES(?,'synthetic',?,'runs/synthetic/run/terminal.json',?,
+      'terminal-registration-v2','success','complete',?,?)`,
+    [id, runId, id.toString(16).padStart(64, "0"), NOW, blockedCode],
+  );
+}
+
+function seedRegistrationStage(
+  target: Database,
+  id: number,
+  state: string,
+  code: string | null,
+  at: string,
+): void {
+  target.run(
+    `INSERT INTO collection_run_stages(collection_run_id,stage,state,failure_code,recorded_at)
+     VALUES(?,'registered',?,?,?)`,
+    [id, state, code, at],
+  );
+}
 
 function seedRequest(target: Database, operationId = OP, kind = "collection"): void {
   target.run(
@@ -194,6 +226,7 @@ describe("the trail", () => {
     providerOutcome: "success",
     evidenceRunId: "r_1",
     registeredAt: NOW,
+    registration: { state: "completed", failureCode: null, attempts: 1, updatedAt: NOW },
     artifacts: {
       total: 2,
       parseSelected: 1,
@@ -256,9 +289,210 @@ describe("the trail", () => {
         providerOutcome: null,
         evidenceRunId: null,
         registeredAt: null,
+        registration: { state: "pending", failureCode: null, attempts: 0, updatedAt: null },
         artifacts: null,
       },
     ]);
+  });
+
+  test("latest retryable registration is visible, stays unsettled, and keeps its recorded attempts", async () => {
+    const local = migratedDatabase();
+    seedCollectionRun(local, 9001, "retryable");
+    seedRegistrationStage(local, 9001, "pending", null, NOW);
+    seedRegistrationStage(
+      local,
+      9001,
+      "retryable",
+      "inactive_ingest_route",
+      "2026-09-11T00:01:00Z",
+    );
+    seedRegistrationStage(
+      local,
+      9001,
+      "retryable",
+      "inactive_ingest_route",
+      "2026-09-11T01:01:00Z",
+    );
+    const runs = await collectorRunTrails(sqliteCommandStore(local), "synthetic", ["retryable"]);
+    expect(runs[0]).toMatchObject({
+      state: "retryable",
+      reasonCode: "inactive_ingest_route",
+      registration: {
+        state: "retryable",
+        failureCode: "inactive_ingest_route",
+        attempts: 3,
+        updatedAt: "2026-09-11T01:01:00Z",
+      },
+    });
+    expect(trailOutcome(runs)).toMatchObject({
+      settled: false,
+      registered: { state: "retryable", failureCode: "inactive_ingest_route" },
+      adopted: { state: "pending" },
+    });
+    seedRequest(local);
+    local.run(
+      `INSERT INTO ops_collector_dispatches(operation_id,connection_id,action,terminal_source,state,
+        accepted_at,expires_at,updated_at) VALUES(?,'synthetic','collect','synthetic','waiting',?,?,?)`,
+      [OP, NOW, NOW, NOW],
+    );
+    local.run(
+      "UPDATE ops_collector_dispatches SET state='started',starts=1,started_at=? WHERE operation_id=?",
+      [NOW, OP],
+    );
+    local.run(
+      `UPDATE ops_collector_dispatches SET state='collected',collected_at=?,
+      run_ids_json='["retryable"]' WHERE operation_id=?`,
+      [NOW, OP],
+    );
+    const result = await readOperation({
+      store: sqliteCommandStore(local),
+      operationId: OP,
+      principal: { id: "operator-1", kind: "human", verification: "server", capabilities: [] },
+      now: NOW,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(validOperationRecord(result.receipt, OP)).toBe(true);
+      expect(result.receipt.stages.find((stage) => stage.stage === "registered")).toMatchObject({
+        state: "retryable",
+        failureCode: "inactive_ingest_route",
+        attempts: 3,
+        updatedAt: "2026-09-11T01:01:00Z",
+      });
+    }
+    for (const minute of [2, 3])
+      expect(
+        await trackCollectorPublication({
+          store: sqliteCommandStore(local),
+          operationId: OP,
+          now: `2026-09-11T01:0${minute}:00Z`,
+          nowMs: Date.parse(`2026-09-11T01:0${minute}:00Z`),
+          checkIntervalMs: 300_000,
+        }),
+      ).toBe("pending");
+    expect(
+      local
+        .query(`SELECT state,failure_code,attempts FROM ops_request_stages
+      WHERE operation_id=? AND stage='registered'`)
+        .get(OP),
+    ).toEqual({
+      state: "retryable",
+      failure_code: "inactive_ingest_route",
+      attempts: 1,
+    });
+    local.close();
+  });
+
+  test("legacy free-text registration failures are reduced to a closed code", async () => {
+    const runs = await collectorRunTrails(
+      {
+        first: async () => null,
+        all: async <T>(): Promise<T[]> =>
+          [
+            {
+              run_id: "synthetic",
+              blocked_code: null,
+              provider_outcome: "success",
+              fetch_run_id: null,
+              registered_at: null,
+              processed_at_ms: null,
+              registration_state: "retryable",
+              registration_failure_code: "Provider said: try again",
+              registration_updated_at: NOW,
+              registration_attempts: 1,
+            },
+          ] as T[],
+        batch: async () => [],
+      },
+      "synthetic",
+      ["synthetic"],
+    );
+    expect(runs[0]).toMatchObject({
+      state: "retryable",
+      reasonCode: "unclassified",
+      registration: { failureCode: "unclassified" },
+    });
+  });
+
+  test("registered revision wins over retryable history; blocked and absent runs stay distinct", async () => {
+    const local = migratedDatabase();
+    seedCollectionRun(local, 9010, "same");
+    seedRegistrationStage(local, 9010, "retryable", "inactive_ingest_route", NOW);
+    seedCollectionRun(local, 9011, "blocked", "object_missing");
+    seedRegistrationStage(local, 9011, "blocked", "object_missing", NOW);
+    seedCollectionRun(local, 9012, "same");
+    seedRegistrationStage(local, 9012, "pending", null, NOW);
+    seedCollectionRun(local, 9013, "unstaged");
+    local.run(
+      "INSERT INTO sources(id,provider,display_name) VALUES('synthetic','synthetic','Synthetic')",
+    );
+    local.run(
+      "INSERT INTO producers(id,kind,display_name) VALUES('synthetic','collector','Synthetic')",
+    );
+    local.run(
+      "INSERT INTO producer_sources(producer_id,source_id) VALUES('synthetic','synthetic')",
+    );
+    local.run("INSERT INTO ingest_clients(id,display_name) VALUES('synthetic','Synthetic')");
+    local.run(
+      "INSERT INTO ingest_client_producers(ingest_client_id,producer_id) VALUES('synthetic','synthetic')",
+    );
+    local.run(
+      "INSERT INTO ingest_client_routes(ingest_client_id,producer_id,source_id) VALUES('synthetic','synthetic','synthetic')",
+    );
+    local.run(`INSERT INTO acquisition_sessions(id,producer_id,first_recorded_by_client_id,
+      external_id_namespace,external_session_id,first_recorded_at_ms)
+      VALUES(9012,'synthetic','synthetic','synthetic','synthetic-session',0)`);
+    local.run(`INSERT INTO fetch_runs(id,acquisition_session_id,producer_id,source_id,
+      first_recorded_by_client_id,first_recorded_at_ms)
+      VALUES(9012,9012,'synthetic','synthetic','synthetic',0)`);
+    local.run("UPDATE collection_runs SET fetch_run_id=9012,registered_at=? WHERE id=9012", [NOW]);
+    seedRegistrationStage(local, 9012, "completed", null, NOW);
+    const runs = await collectorRunTrails(sqliteCommandStore(local), "synthetic", [
+      "same",
+      "blocked",
+      "unstaged",
+      "absent",
+    ]);
+    expect(
+      runs.map((run) => [run.state, run.registration.state, run.registration.attempts]),
+    ).toEqual([
+      ["parsing", "completed", 2],
+      ["blocked", "blocked", 1],
+      ["registering", "pending", 0],
+      ["not_registered", "pending", 0],
+    ]);
+    expect(runs[0]?.evidenceRunId).toBe("r_9012");
+    expect(runs[1]?.registration.failureCode).toBe("object_missing");
+    seedRequest(local);
+    local.run(
+      `INSERT INTO ops_collector_dispatches(operation_id,connection_id,action,terminal_source,state,
+        accepted_at,expires_at,updated_at) VALUES(?,'synthetic','collect','synthetic','waiting',?,?,?)`,
+      [OP, NOW, NOW, NOW],
+    );
+    local.run(
+      "UPDATE ops_collector_dispatches SET state='started',starts=1,started_at=? WHERE operation_id=?",
+      [NOW, OP],
+    );
+    local.run(
+      `UPDATE ops_collector_dispatches SET state='collected',collected_at=?,
+      run_ids_json='["same"]' WHERE operation_id=?`,
+      [NOW, OP],
+    );
+    const result = await readOperation({
+      store: sqliteCommandStore(local),
+      operationId: OP,
+      principal: { id: "operator-1", kind: "human", verification: "server", capabilities: [] },
+      now: NOW,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok)
+      expect(result.receipt.stages.find((stage) => stage.stage === "registered")).toMatchObject({
+        state: "completed",
+        evidenceRef: "r_9012",
+        failureCode: null,
+        attempts: 2,
+      });
+    local.close();
   });
 
   test("a request handed to a person is reported as waiting for them, with no expiry", async () => {
@@ -306,6 +540,10 @@ describe("the trail's cost on a store without statistics", () => {
                   fetch_run_id: 1,
                   registered_at: NOW,
                   processed_at_ms: 1,
+                  registration_state: "completed",
+                  registration_failure_code: null,
+                  registration_updated_at: NOW,
+                  registration_attempts: 1,
                 },
               ] as T[])
             : [];

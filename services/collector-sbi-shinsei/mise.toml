@@ -49,6 +49,7 @@ depends = ["//services/collector-sbi-shinsei:cf-typecheck", "//services/collecto
 description = "Build and validate the prebuilt Worker and Container production artifacts without credentials."
 depends = ["//services/collector-sbi-shinsei:types"]
 run = [
+	"node ../../tasks/_lib/pinned-chrome/sync.mjs",
 	"./node_modules/.bin/cf build --mode production",
 	"./node_modules/.bin/cf deploy --prebuilt --mode production --worker kogane-sbi-shinsei-collector-poc --dry-run",
 	"node ../../tasks/_lib/ci/cf-container-release.mjs validate sbi-shinsei-worker",

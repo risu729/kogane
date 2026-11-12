@@ -6,6 +6,7 @@ export default defineConfig({
     name: "kogane-vpoint-collector-poc",
     compatibilityDate: "2026-08-30",
     compatibilityFlags: ["nodejs_compat"],
+    // ScheduledCollection and FumiOffer are private named RPC entrypoints.
     entrypoint: "src/schedule-entrypoint.ts",
     workersDev: true,
     previewUrls: false,
