@@ -632,9 +632,14 @@ failed commit leaves no acceptance, claim, time, seal or receipt. Withdrawal
 revisions have no movement legs and zero times.
 
 The B adapter explicitly accepts both v1 and v2 settlement releases and still
-refuses unknown releases. Legacy fixtures retain v1 as the first allowlisted
-contract; adding the new release does not relabel old seals or infer their
-missing times.
+refuses unknown releases. Its interpretation release is
+`reconstruction-adapter-b-v2`: both the fold manifest and outer query manifest
+pin this version. A mixed v1 withdrawal/v2 acceptance can select the same
+immutable cut and set version under either reader yet yield a different
+interpretation, so retaining `reconstruction-adapter-b-v1` would incorrectly
+give those answers the same manifest identity. Legacy fixtures retain writer
+v1 as the first allowlisted contract; the reader upgrade does not relabel old
+seals or infer their missing times.
 
 ### Consequences and correction boundary
 
@@ -651,6 +656,13 @@ old match to add a time. Correcting a wrong match still means withdrawing it
 and accepting a distinct eligible candidate, preserving allocation and claim
 guards. A same-match restatement would need a separate design.
 
+Stored rows and knowledge cuts remain unchanged. The manifest and query
+context intentionally identify the reader contract too, so upgrading the B
+adapter changes those identities even for an older cut. Stability of an old
+cut as later events arrive is within the same reader release; it is not a
+claim that historical output identities are byte-identical across reader
+upgrades. The selector's data-only set version is not a reader-version pin.
+
 ### Verification
 
 Synthetic application tests cover exact source/parser/origin admission and
@@ -662,6 +674,10 @@ claim, zero-time withdrawals and preserved legacy seals. Vertical tests use
 the actual acceptance, selector, B adapter and `queryReconstructedState` for
 a literal reconstructed balance, both snapshot boundaries, unchanged earlier
 cuts, refused same-candidate readoption and a distinct-candidate correction.
+The mixed-release regression pins the original selection's set version and
+legacy manifest digest, then requires a new interpretation identity. An
+application query regression checks the B release at both manifest layers
+and its contribution to the returned context digest.
 
 No provider login, production acceptance, existing-match restatement or
 deployment is established by these synthetic tests. Local and hosted command

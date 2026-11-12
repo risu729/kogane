@@ -678,7 +678,8 @@ Writer `card-statement-settlement-v2:economic-guard-v1` also records one typed
 The time keeps `local-date`, `Asia/Tokyo` and `provider`, is included in the
 seal content digest and child count, and is written before the seal in the
 same guarded batch. SMBC gains no inferred time; withdrawal revisions have
-zero times. The reconstruction reader accepts both v1 and v2 seals.
+zero times. Reconstruction adapter `reconstruction-adapter-b-v2` accepts both
+v1 and v2 seals and pins its changed interpretation in the result identity.
 Old sealed correct matches stay unchanged; the existing correction flow
 cannot restate the same match just to add a posting time
 ([ADR 0058 amendment](adr/0058-knowledge-selector-and-reconstruction-adapter.md#amendment-2026-11-12-sbi-shinsei-settlement-posting-dates)).

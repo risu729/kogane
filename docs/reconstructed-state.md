@@ -298,6 +298,13 @@ policy references. `canonicalReconstructionManifest` gives its canonical text
 synchronously; `contextId = canonicalDigest(manifest)` is the caller's step.
 Any input order gives the same output and the same id.
 
+The B adapter's posting-date interpretation is `reconstruction-adapter-b-v2`,
+pinned in both this manifest and the outer query manifest. Stored revisions
+and knowledge cuts are unchanged by the reader upgrade, but manifest/context
+identities intentionally change with that interpretation version. An old cut
+stays stable as later events arrive under the same reader contract; it is not
+an assurance of identical output identities across reader versions.
+
 ## Limits
 
 - Cost: at the budget a fold takes about 0.45–0.72 s on `bun` locally without

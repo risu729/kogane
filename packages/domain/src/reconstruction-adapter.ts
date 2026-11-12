@@ -52,7 +52,8 @@ import {
 } from "./reconstruction.ts";
 import { validInstantText } from "./time.ts";
 
-export const RECONSTRUCTION_ADAPTER_RELEASE = "reconstruction-adapter-b-v1";
+/** v2 interprets the settlement v2 posting-time contract; manifests must distinguish it. */
+export const RECONSTRUCTION_ADAPTER_RELEASE = "reconstruction-adapter-b-v2";
 /** No producer states family or history coverage yet; pinned so a producer changes the id. */
 export const COVERAGE_PRODUCER_NONE = "coverage-producer-none-v1";
 

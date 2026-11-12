@@ -465,6 +465,36 @@ describe("the late part and the manifest", () => {
 });
 
 describe("writer releases", () => {
+  test("the changed interpretation has a new manifest identity for the same mixed stored selection", async () => {
+    const selection = await new Rows()
+      .add({ eventId: "ev-legacy", seq: 1, legs: [{ amount: "100" }] })
+      .add({ eventId: "ev-legacy", revision: 2, seq: 2, state: "unknown", legs: [] })
+      .add({
+        eventId: "ev-new",
+        seq: 3,
+        writerRelease: "card-statement-settlement-v2:economic-guard-v1",
+        times: [posting("2026-03-15")],
+        legs: [{ amount: "100" }],
+      })
+      .select(3);
+    const stored = structuredClone(selection);
+    // Frozen be9b738 contract expectation, from the independent v1-only reader
+    // reproduction: v2 was unsupported, but the v1 withdrawal named the writer.
+    const legacy = {
+      setVersion: "b188672a6e01eb9bac4d419441152735fe251e2c93fc27b5dc5eb81fe4e87c65",
+      manifestDigest: "3fb91a90437176d387ce9e549125c3566b1e3295a5602fa6f6e4251403a145a1",
+    };
+    expect(selection.setVersion).toBe(legacy.setVersion);
+    const state = await fold(selection, "9900");
+    expect(state.manifest.writers).toEqual(["card-settlement-review"]);
+    expect(state.manifest.adapterRelease).toBe("reconstruction-adapter-b-v2");
+    expect(quantityText(cellOf(state).reconstructed)).toBe("9900");
+    expect(cellOf(state).applied.refs).toEqual(["ev-new@1#0"]);
+    expect(cellOf(state).gaps).not.toContain("writer_unsupported");
+    expect(await canonicalDigest(state.manifest)).not.toBe(legacy.manifestDigest);
+    expect(selection).toEqual(stored);
+  });
+
   test("both settlement contracts retain their stored times and refuse an unknown next release", async () => {
     for (const [release, times, supported] of [
       ["card-statement-settlement-v1:economic-guard-v1", [], true],

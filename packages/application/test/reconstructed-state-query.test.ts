@@ -8,6 +8,7 @@
 // account, amount and date is invented.
 import { describe, expect, test } from "bun:test";
 import { CARD_PURCHASE_WRITER_RELEASE } from "../../domain/src/card-purchase.ts";
+import { canonicalDigest } from "../../domain/src/context.ts";
 import { KNOWN_WRITER_RELEASES } from "../../domain/src/reconstruction-adapter.ts";
 import { DatedStore } from "../../read-model/test/dated-state-fixture.ts";
 import {
@@ -260,11 +261,62 @@ describe("acceptance", () => {
     expect(two.contextId).toBe(one.contextId);
     expect(one.manifest).toMatchObject({
       selectorRelease: "knowledge-selector-v1",
-      adapterRelease: "reconstruction-adapter-b-v1",
+      adapterRelease: "reconstruction-adapter-b-v2",
       coverageProducer: "coverage-producer-none-v1",
       foldPolicy: "reconstruction-fold-v1",
     });
   });
+});
+
+test("the query context pins the changed B interpretation in both manifest layers", async () => {
+  const h = world(9_000);
+  settle(h, "ev-legacy", null);
+  h.adopt({
+    eventId: "ev-legacy",
+    revision: 2,
+    state: "unknown",
+    legs: [],
+    knownAt: "2026-04-02T00:00:00.000Z",
+    writerRelease: SETTLEMENT_RELEASE,
+    supersedes: [{ eventId: "ev-legacy", revision: 1 }],
+  });
+  settle(h, "ev-v2", "2026-03-15", {
+    knownAt: "2026-04-03T00:00:00.000Z",
+    writerRelease: "card-statement-settlement-v2:economic-guard-v1",
+  });
+  const result = await queryReconstructedState(storeExecutor(h.db), input());
+  expect(result.status).toBe("incomplete");
+  const cell = result.reconstruction!.cells.find((row) => row.accountId === BANK)!;
+  expect(cell.applied.refs).toEqual(["ev-v2@1#0"]);
+  expect(cell.reconstructed.value).toMatchObject({
+    status: "exact",
+    value: { coefficient: "9000", scale: 0 },
+  });
+  const inner = result.reconstruction!.manifest;
+  const outer = result.manifest!;
+  expect(inner.adapterRelease).toBe("reconstruction-adapter-b-v2");
+  expect(outer.adapterRelease).toBe("reconstruction-adapter-b-v2");
+  expect(outer.innerManifestDigest).toBe(await canonicalDigest(inner));
+  expect(result.contextId).toBe(await canonicalDigest(outer));
+  // Both version pins contribute to identity. This is a contract-identity
+  // comparison, not a re-execution or mutation of the old reader or stored rows.
+  const oldInnerVersion = await canonicalDigest({
+    ...inner,
+    adapterRelease: "reconstruction-adapter-b-v1",
+  });
+  expect(oldInnerVersion).not.toBe(outer.innerManifestDigest);
+  expect(
+    await canonicalDigest({
+      ...outer,
+      adapterRelease: "reconstruction-adapter-b-v1",
+    }),
+  ).not.toBe(result.contextId);
+  expect(
+    await canonicalDigest({
+      ...outer,
+      innerManifestDigest: oldInnerVersion,
+    }),
+  ).not.toBe(result.contextId);
 });
 
 describe("refusals", () => {
