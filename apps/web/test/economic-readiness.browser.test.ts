@@ -144,7 +144,9 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
       expect(requests.length).toBe(before + 1);
       expect(requests.at(-1)!.searchParams.get("parseRunId")).toBe("7");
       expect(await panel(page).innerText()).toContain("この記録は旧解析のものです");
-      expect(await panel(page).innerText()).toContain("この機能から新しい計算用取引を作成することは、まだできません。");
+      expect(await panel(page).innerText()).toContain(
+        "この機能から新しい計算用取引を作成することは、まだできません。",
+      );
       expect(await panel(page).innerText()).not.toContain("writerEnabled");
       const popup = page.waitForEvent("popup");
       await page.getByRole("link", { name: "この記録の原本を開く ↗" }).click();
@@ -221,8 +223,12 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
   test("a held observation can already be used while new generation from this feature stays unavailable", async () => {
     mode = "held";
     const page = await open(2);
-    await panel(page).getByRole("button", { name: "新規作成の条件を確認する", exact: true }).click();
-    await panel(page).getByText("この記録はすでに別の計算用取引が参照しています。", { exact: true }).waitFor();
+    await panel(page)
+      .getByRole("button", { name: "新規作成の条件を確認する", exact: true })
+      .click();
+    await panel(page)
+      .getByText("この記録はすでに別の計算用取引が参照しています。", { exact: true })
+      .waitFor();
     const text = await panel(page).innerText();
     expect(text).toContain("口座の所有者を、この計算で確認する仕組みが未対応です。");
     expect(text).toContain("既存の計算用取引で使われている場合もあります。");

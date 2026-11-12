@@ -83,9 +83,7 @@ function ReadinessPanel({
             {query.isFetching ? <p role="status">新規作成の条件を確認しています。</p> : null}
             {query.isError ? (
               <Notice tone="warn">
-                <p>
-                  新規作成の条件を取得できませんでした。この記録と原本は引き続き確認できます。
-                </p>
+                <p>新規作成の条件を取得できませんでした。この記録と原本は引き続き確認できます。</p>
                 <p>{query.error.message}</p>
               </Notice>
             ) : null}
