@@ -675,6 +675,10 @@ export interface ReconstructedState {
 export type ReconstructionResult =
   | { ok: true; state: ReconstructedState }
   | { ok: false; error: ReconstructionError };
+/** One validating fold also returns the whole-scope late revision diff. */
+export type ReconstructionWithLateResult =
+  | { ok: true; state: ReconstructedState; late: LateExplanation | null }
+  | { ok: false; error: ReconstructionError };
 export type KnowledgeSelectionResult =
   | { ok: true; selection: KnowledgeSelection }
   | { ok: false; error: ReconstructionError };
@@ -1831,14 +1835,26 @@ const COUNTED: readonly LegDisposition[] = ["applied", "pending_shown_apart", "b
  * `request.knowledgeCut`; `baseline`, when given, is the selection of the same
  * scope at the cut of the end capture, and yields `lateRecorded`.
  */
-export function reconstructState(input: {
+export function reconstructState(input: ReconstructionInput): ReconstructionResult {
+  const result = reconstructStateWithLate(input);
+  return result.ok ? { ok: true, state: result.state } : result;
+}
+
+export interface ReconstructionInput {
   request: ReconstructionRequest;
   policy: FoldPolicy;
   start: StartSnapshot;
   end: EndReported;
   selection: KnowledgeSelection;
   baseline: KnowledgeSelection | null;
-}): ReconstructionResult {
+}
+
+/**
+ * The validated fold and whole-scope late explanation together. Each selection
+ * is checked once; no validation state escapes or survives this call. The old
+ * fold entrypoint projects its original result shape from the same validation.
+ */
+export function reconstructStateWithLate(input: ReconstructionInput): ReconstructionWithLateResult {
   const { request, policy, start, end, selection, baseline } = input;
   if (!validReconstructionRequest(request))
     return { ok: false, error: { code: "invalid_request", refs: ["request"] } };
@@ -1852,12 +1868,15 @@ export function reconstructState(input: {
   if (selectionProblem !== null) return { ok: false, error: selectionProblem };
   if (!sameCut(selection.knowledgeCut, request.knowledgeCut))
     return { ok: false, error: { code: "selection_mismatch", refs: ["selection.knowledgeCut"] } };
+  let late: LateExplanation | null = null;
   if (baseline !== null) {
     const baselineProblem = checkSelection(baseline);
     if (baselineProblem !== null)
       return { ok: false, error: { code: "baseline_mismatch", refs: baselineProblem.refs } };
-    const late = lateUnchecked(baseline, selection);
-    if (!late.ok) return { ok: false, error: { code: "baseline_mismatch", refs: late.error.refs } };
+    const explained = lateUnchecked(baseline, selection);
+    if (!explained.ok)
+      return { ok: false, error: { code: "baseline_mismatch", refs: explained.error.refs } };
+    late = explained.late;
   }
 
   const legBasis = policy.bases[request.basis].legBasis;
@@ -2252,6 +2271,7 @@ export function reconstructState(input: {
       netWorth: "not-computed",
       manifest,
     },
+    late,
   };
 }
 

@@ -8,7 +8,7 @@
 //                commit of the current core epoch), and at the cut of the end
 //                capture for the late part;
 //   fold         the B adapter's `resolved-at-cut` input to
-//                `reconstructState` with `reconstruction-fold-v1`.
+//                `reconstructStateWithLate` with `reconstruction-fold-v1`.
 //
 // The answer says what it is before what it computed: `unavailable` (CORE
 // 0070 is not applied, or no reported container lists the account),
@@ -40,8 +40,7 @@ import {
   RECONSTRUCTION_ENGINE_RELEASE,
   RECONSTRUCTION_FOLD_V1,
   RECONSTRUCTION_GAPS,
-  explainLate,
-  reconstructState,
+  reconstructStateWithLate,
   type KnowledgeSelection,
   type LateExplanation,
   type ReconstructedState,
@@ -427,7 +426,7 @@ export async function queryReconstructedState(
     "instant" in requested
       ? requested.instant
       : (cut.knownAt ?? new Date(Date.parse(input.now)).toISOString());
-  const folded = reconstructState({
+  const folded = reconstructStateWithLate({
     request: {
       accountIds: [input.account],
       startDate: input.from,
@@ -443,18 +442,7 @@ export async function queryReconstructedState(
     baseline: baseline?.knowledge ?? null,
   });
   refusedIfNot(folded);
-  const state = folded.state;
-  // The fold already diffed the two selections inside each cell (the late
-  // total and the legs that entered or left it); it does not return the list
-  // of revisions that entered or left the whole scope, so that list is diffed
-  // here once more from the same two selections. Only the selections are
-  // re-checked twice; no row is read again.
-  let late: LateExplanation | null = null;
-  if (baseline !== null) {
-    const explained = explainLate(baseline.knowledge, now.knowledge);
-    refusedIfNot(explained);
-    late = explained.late;
-  }
+  const { state, late } = folded;
 
   const reasons = new Set<ReconstructedStateReason>();
   if (!hasContainer) reasons.add("no_reported_container");
