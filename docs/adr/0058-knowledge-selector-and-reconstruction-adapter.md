@@ -30,7 +30,9 @@ What the stored rows are today, read from the code:
 
 - The card purchase lane writes `account:<id>` leg subjects; the card
   settlement writer writes bare account ids (read under 0044's tolerance).
-- Neither writer writes `economic_event_times` or `economic_leg_effects`. 0070
+- At the original implementation neither writer wrote `economic_event_times`
+  or `economic_leg_effects` (the 2026-11-12 amendment adds posting dates for
+  future admitted SBI Shinsei settlements). 0070
   says a time role without a row is unknown, "never the effective time of
   0032".
 - Revisions written before G1b have no seal or commit
@@ -266,13 +268,13 @@ across accounts.
 - **Today's answers.** A card account is `unavailable`
   (`no_reported_container`), its purchases listed as `other_basis`. A bank
   account is at best `incomplete` (`family_not_evented`,
-  `history_coverage_unknown`): no coverage producer exists. Neither writer
-  writes event times, so every settlement leg is listed as `unknown_effect`
+  `history_coverage_unknown`): no coverage producer exists. At this ADR's
+  original implementation neither writer wrote event times, so every settlement leg was listed as `unknown_effect`
   with `event_time_unknown` and the bank cell has no figure; a settlement
   accepted before G1b makes the account `indeterminate`
   (`knowledge_unlogged`) until a logged revision supersedes it. The
-  settlement writer writing a `posting` time is a writer change of its own,
-  not done here, and it fixes only future acceptances: a sealed revision
+  settlement writer writing a `posting` time is a writer change of its own
+  (the 2026-11-12 amendment below adds the SBI Shinsei slice), and it fixes only future acceptances: a sealed revision
   takes no time row after its seal (`economic_revision_sealed`), so a
   settlement accepted before that change stays `event_time_unknown` until a
   new revision restates it with a time. The 0032 effective time is not shown
@@ -589,3 +591,78 @@ Synthetic data only; no production data, remote D1 or deployed Worker.
   unexplained difference shown as such, the knowledge panel and pinning,
   refusals, the missing guard and a card account, provisional cuts, the
   bound, and a 390 px width.
+
+## Amendment 2026-11-12: SBI Shinsei settlement posting dates
+
+- Status: proposed
+- Scope: [state reconstruction issue 550](https://github.com/risu729/kogane/issues/550),
+  future acceptances only; no migration, financial matching policy or activation.
+
+### Context and options
+
+The cash fold reads typed `posting` times only. The admitted SBI Shinsei
+`sbi-shinsei-top-balances-and-activity` parser already stores the provider's
+`postingDate` as a civil date, and the bank adapter preserves it in the
+candidate's `bankDebit.occurred` ([ADR 0018](0018-sbi-shinsei-bank-debit-adapter.md)).
+Leaving the role unstored makes a known cash movement `event_time_unknown`.
+
+Inferring a role from every old `effective_time_json` is rejected: the old
+field declares no role, and SMBC's midnight-shaped date does not establish
+the same meaning. Appending a child to an already sealed revision is rejected:
+it would violate immutable evidence and change old knowledge cuts. The chosen
+slice writes a typed time with a future acceptance, through existing guarded
+finalization.
+
+### Decision
+
+The settlement writer release is
+`card-statement-settlement-v2:economic-guard-v1`. On acceptance, it reuses the
+existing cited-bank-row identity admission, then establishes the posting role
+only for source `sbi-shinsei-bank`, parser
+`sbi-shinsei-top-balances-and-activity`, and a valid candidate local date whose
+value equals that immutable row's `as_of`, with `Asia/Tokyo` and `provider`
+unchanged. No instant, trade time or settlement time is invented. Other
+adapters gain no typed time and retain their existing admission rules.
+
+One normalized `EventTimeRecord[]` feeds the canonical content digest,
+`economicFinalizationWrites` and seal `timeCount`. The receipt-gated atomic
+batch keeps the accepted decision before the seal/commit and inserts the
+typed time before the seal. A lost reservation, malformed seal count or
+failed commit leaves no acceptance, claim, time, seal or receipt. Withdrawal
+revisions have no movement legs and zero times.
+
+The B adapter explicitly accepts both v1 and v2 settlement releases and still
+refuses unknown releases. Legacy fixtures retain v1 as the first allowlisted
+contract; adding the new release does not relabel old seals or infer their
+missing times.
+
+### Consequences and correction boundary
+
+The existing query can subtract a newly accepted SBI Shinsei debit once
+between reported snapshots. A provider civil date on either snapshot's day
+is still a boundary candidate. `family_not_evented` and
+`history_coverage_unknown` remain: a computed figure is not complete history,
+and this does not implement an own-transfer or securities writer.
+
+Previously sealed correct matches stay unchanged. The command set refuses
+accepting the same withdrawn candidate, and the sweep deduplicates identical
+facts; there is no timestamp-upgrade restatement. Do not withdraw a correct
+old match to add a time. Correcting a wrong match still means withdrawing it
+and accepting a distinct eligible candidate, preserving allocation and claim
+guards. A same-match restatement would need a separate design.
+
+### Verification
+
+Synthetic application tests cover exact source/parser/origin admission and
+date/value/zone/basis/precision negatives. Domain tests cover v1/v2 reading,
+missing times and arbitrary-release refusal. The Processor's native D1
+command tests cover the actual acceptance, normalized typed time and seal
+digest/count, duplicate replay, malformed seal/final commit rollback, stale
+claim, zero-time withdrawals and preserved legacy seals. Vertical tests use
+the actual acceptance, selector, B adapter and `queryReconstructedState` for
+a literal reconstructed balance, both snapshot boundaries, unchanged earlier
+cuts, refused same-candidate readoption and a distinct-candidate correction.
+
+No provider login, production acceptance, existing-match restatement or
+deployment is established by these synthetic tests. Local and hosted command
+results are recorded in the implementing PR.

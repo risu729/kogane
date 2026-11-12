@@ -330,9 +330,14 @@ Any input order gives the same output and the same id.
   sequence. The resolved sequence reproduces the answer.
 - The load is whole-history: an account touching more than 2,000 events is
   refused at every range.
-- Neither writer writes event times, so a settlement's cash leg has no
-  `posting` time and is `event_time_unknown`: a bank account's cell has no
-  figure while a settlement touches it.
+- Newly accepted SBI Shinsei settlements from the admitted
+  `sbi-shinsei-top-balances-and-activity` parser carry the provider's civil
+  posting date. The cash fold applies a date strictly between snapshots;
+  a date on either capture day remains a boundary candidate. Older sealed
+  acceptances and SMBC settlements still have no typed `posting` time and
+  remain `event_time_unknown`; no timestamp is inferred from their effective
+  time. No existing correct match is withdrawn or rewritten to add a time
+  ([ADR 0058 amendment](adr/0058-knowledge-selector-and-reconstruction-adapter.md#amendment-2026-11-12-sbi-shinsei-settlement-posting-dates)).
 - Card accounts have no reported container and their movements are on the
   purchase-recognition basis, so on the cash basis a card account produces no
   cell at all: the query answers `unavailable` (`no_reported_container`), its

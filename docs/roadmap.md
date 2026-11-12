@@ -293,6 +293,16 @@ windows and replay tracing stay out of scope.
 
 **Status:** current milestone since 2026-11-09.
 
+The settlement writer preserves the admitted SBI Shinsei top-activity parser's
+provider posting date on future acceptances, so the existing cash reconstruction
+can apply that movement between snapshots; capture-day dates remain boundary
+candidates ([ADR 0058 amendment](adr/0058-knowledge-selector-and-reconstruction-adapter.md#amendment-2026-11-12-sbi-shinsei-settlement-posting-dates)).
+This is an implemented input slice of [#550](https://github.com/risu729/kogane/issues/550),
+with synthetic validation, not production acceptance or Phase 4 completion.
+Old sealed correct matches stay unchanged, SMBC dates are not assigned an
+unobserved posting role, no non-card writer is enabled, and family/history
+coverage remains unknown.
+
 Issues: [#549](https://github.com/risu729/kogane/issues/549),
 [#550](https://github.com/risu729/kogane/issues/550),
 [#551](https://github.com/risu729/kogane/issues/551).

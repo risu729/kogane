@@ -70,7 +70,10 @@ const WRITER_OF_KIND: Partial<Record<EconomicEventKind, ProvisionalWriter>> = {
 };
 export const KNOWN_WRITER_RELEASES: Readonly<Record<ProvisionalWriter, readonly string[]>> = {
   "card-purchase-recognition-v1": [CARD_PURCHASE_WRITER_RELEASE],
-  "card-settlement-review": ["card-statement-settlement-v1:economic-guard-v1"],
+  "card-settlement-review": [
+    "card-statement-settlement-v1:economic-guard-v1",
+    "card-statement-settlement-v2:economic-guard-v1",
+  ],
 };
 
 /** Why the adapter could not hand a revision, or a leg of it, over as stored. */

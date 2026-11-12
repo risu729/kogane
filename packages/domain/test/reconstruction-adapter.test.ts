@@ -465,6 +465,33 @@ describe("the late part and the manifest", () => {
 });
 
 describe("writer releases", () => {
+  test("both settlement contracts retain their stored times and refuse an unknown next release", async () => {
+    for (const [release, times, supported] of [
+      ["card-statement-settlement-v1:economic-guard-v1", [], true],
+      ["card-statement-settlement-v2:economic-guard-v1", [posting("2026-03-15")], true],
+      ["card-statement-settlement-v3:economic-guard-v1", [posting("2026-03-15")], false],
+    ] as const) {
+      const rows = new Rows().add({
+        eventId: "ev-release",
+        seq: 1,
+        writerRelease: release,
+        times: [...times],
+        legs: [{ amount: "100" }],
+      });
+      const selection = await rows.select(1);
+      const adapted = await adaptSelection(selection);
+      expect(adapted.notes.some((note) => note.code === "writer_unsupported")).toBe(!supported);
+      const cell = cellOf(await fold(selection, "9900"));
+      if (release === "card-statement-settlement-v2:economic-guard-v1") {
+        expect(quantityText(cell.reconstructed)).toBe("9900");
+        expect(cell.applied.refs).toEqual(["ev-release@1#0"]);
+      } else {
+        expect(cell.applied.count).toBe(0);
+        expect(cell.gaps).toContain(supported ? "event_time_unknown" : "writer_unsupported");
+      }
+    }
+  });
+
   test("the known releases are the writers' own constants", () => {
     expect(KNOWN_WRITER_RELEASES["card-purchase-recognition-v1"]).toEqual([
       CARD_PURCHASE_WRITER_RELEASE,
@@ -474,6 +501,9 @@ describe("writer releases", () => {
       "utf8",
     );
     const declared = /CARD_SETTLEMENT_WRITER_RELEASE = "([^"]+)"/u.exec(source)?.[1];
-    expect(KNOWN_WRITER_RELEASES["card-settlement-review"]).toEqual([declared!]);
+    expect(KNOWN_WRITER_RELEASES["card-settlement-review"]).toEqual([
+      "card-statement-settlement-v1:economic-guard-v1",
+      declared!,
+    ]);
   });
 });
