@@ -126,7 +126,7 @@ test("download bounds and integrity precede extraction, with no redirect/fallbac
     new Response("abc", { headers: { "content-encoding": "gzip" } }),
     new Response("abcd"),
     new Response("ab"),
-    new Response("abd"),
+    new Response("bad"),
   ];
   for (const [i, response] of cases.entries())
     await expect(
