@@ -3,7 +3,9 @@ import { once } from "node:events";
 import { execFileSync } from "node:child_process";
 import http from "node:http";
 import net from "node:net";
-import { createSmokeProxy } from "./pinned-chrome/image-smoke.mjs";
+import { pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { createSmokeProxy, isSmokeEntrypoint } from "./pinned-chrome/image-smoke.mjs";
 
 const servers: (http.Server | net.Server)[] = [];
 async function listen(server: http.Server | net.Server) {
@@ -161,4 +163,14 @@ test("node eval can import the smoke proxy without starting image-only browser c
     { encoding: "utf8", timeout: 5000 },
   );
   expect(result).toBe("function\n");
+});
+
+test("the smoke entry guard recognizes raw and encoded stdin URLs without executing imports", () => {
+  const stdin = pathToFileURL(join(process.cwd(), "[eval1]"));
+  expect(isSmokeEntrypoint(stdin.href, undefined)).toBe(true);
+  expect(isSmokeEntrypoint(stdin.href.replace("%5Beval1%5D", "[eval1]"), undefined)).toBe(true);
+  const module = new URL("./pinned-chrome/image-smoke.mjs", import.meta.url);
+  expect(isSmokeEntrypoint(module.href, undefined)).toBe(false);
+  expect(isSmokeEntrypoint(module.href, "other-entry.mjs")).toBe(false);
+  expect(isSmokeEntrypoint(module.href, module.pathname)).toBe(true);
 });

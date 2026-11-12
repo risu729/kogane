@@ -9,7 +9,7 @@ import https from "node:https";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 
 /** The offline proxy exposes only the synthetic GET root and exact TLS tunnel. */
 export function createSmokeProxy(pagePort, tlsPort, denied = () => {}) {
@@ -359,5 +359,8 @@ export async function runImageSmoke() {
   }
 }
 
-if (import.meta.url === pathToFileURL(resolve(process.argv[1] ?? "[eval1]")).href)
-  await runImageSmoke();
+export function isSmokeEntrypoint(moduleUrl, entry) {
+  return fileURLToPath(moduleUrl) === resolve(entry ?? "[eval1]");
+}
+
+if (isSmokeEntrypoint(import.meta.url, process.argv[1])) await runImageSmoke();
