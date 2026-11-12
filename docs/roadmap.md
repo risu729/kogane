@@ -15,6 +15,13 @@ the relevant rollout records.
 
 ## Work order
 
+The owner-requested [V Point mail owner adapter](adr/0111-fumi-vpoint-owner-offers.md)
+is implemented with synthetic validation, separately from financial interpretation.
+It lets Fumi adopt Kogane's pinned rules and durably offer requested OTPs through
+private RPC; unrelated messages retain normal fallback. Production binding/adoption,
+Email Routing cutover and real OTP acceptance remain pending. No live collection or
+provider login is established by these tests.
+
 This section is the work order. Agents continue with the next unit of the
 current phase after each merged PR, until the phase's done-when holds; then the
 next phase. Issues track the individual items

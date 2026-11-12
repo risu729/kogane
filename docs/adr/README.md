@@ -1,5 +1,7 @@
 # Architecture decision records
 
+- [ADR 0111: Accept requested V Point OTPs through a private durable owner offer](0111-fumi-vpoint-owner-offers.md) — proposed; private owner manifest/RPC, atomic challenge claims, durable receipts and legacy exclusion; production adoption remains separate
+
 ADRs preserve the context, options, decision and consequences at adoption time.
 Their original status/date and wording remain history; they are not current
 release instructions. A changed choice needs an amendment or superseding ADR

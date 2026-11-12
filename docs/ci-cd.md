@@ -845,3 +845,13 @@ the type packages in the shared `typescript` group. Renovate pull requests use
 The trusted workflow refuses pre-alarm release/rollback targets before checkout
 and before any production mutation. Removing the ScheduleAlarm class requires a
 separate retirement migration; it is not an ordinary old-commit rollback.
+
+## App hostname reconciliation
+
+The owner selected routine App trigger synchronization on 2026-11-11 13:40 UTC.
+The cf App deployment now reconciles its existing Custom Domain and declared URL
+settings after version readback. The shared action rejects known domain conflicts
+before publication and verifies the resulting attachment. Other Workers retain
+their existing trigger settings. See the
+[ADR amendment](adr/0047-mcp-client-connection.md#amendment-reconcile-the-app-domain-in-normal-delivery)
+for the permission and non-atomic concurrency boundaries.
