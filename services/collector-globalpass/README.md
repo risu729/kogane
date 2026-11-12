@@ -280,3 +280,12 @@ the real Worker relay handler in workerd with fake WebSocket endpoints and VPC
 streams: normal/EOF closes, open/read/write failures, queued-write suppression,
 byte counts, and a read error after peer close. These tests use no provider
 connection or browser; the existing Node CONNECT relay suite remains separate.
+
+## Container browser build
+
+The image installs a version/size/SHA-256-pinned official Google Chrome Stable
+payload over the existing Playwright Noble base, without an APT install step.
+[ADR 0112](../../docs/adr/0112-pinned-chrome-collector-builds.md) records the retained
+wrapper/channel behavior and skipped package hooks; the [maintenance procedure](../../docs/pinned-chrome-builds.md)
+records signed provenance, generated build inputs and offline image checks.
+These synthetic checks do not establish a provider login or production collection.

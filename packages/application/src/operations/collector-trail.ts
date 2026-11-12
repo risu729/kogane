@@ -55,6 +55,7 @@ export const PUBLICATION_HORIZON_MS = 48 * 3_600_000;
 export const RUN_TRAIL_STATES = [
   "not_registered",
   "registering",
+  "retryable",
   "blocked",
   "parsing",
   "published",
@@ -83,6 +84,13 @@ export interface CollectorRunTrail {
   /** The fetch-history id the evidence browser links (`r_<fetch run>`), once registered. */
   evidenceRunId: string | null;
   registeredAt: string | null;
+  /** Latest stored registration attempt; historical refusals never override a seal. */
+  registration: {
+    state: "pending" | "completed" | "retryable" | "blocked";
+    failureCode: string | null;
+    attempts: number;
+    updatedAt: string | null;
+  };
   artifacts: CollectorRunArtifacts | null;
 }
 
@@ -176,11 +184,18 @@ export function expiresAtFor(acceptedAt: string): string {
  * "nothing to parse".
  */
 const RUN_ROWS = `SELECT r.value AS run_id, c.blocked_code, c.provider_outcome, c.fetch_run_id,
-  c.registered_at, w.processed_at_ms
+  c.registered_at, w.processed_at_ms, s.state AS registration_state,
+  s.failure_code AS registration_failure_code, s.recorded_at AS registration_updated_at,
+  (SELECT count(*) FROM collection_run_stages a
+    WHERE a.collection_run_id=c.id AND a.stage='registered') AS registration_attempts
  FROM json_each(?2) r
  LEFT JOIN collection_runs c ON c.id=(
    SELECT x.id FROM collection_runs x WHERE x.source=?1 AND x.run_id=r.value
     ORDER BY x.fetch_run_id IS NULL, x.id DESC LIMIT 1)
+ LEFT JOIN collection_run_stages s ON s.id=(
+   SELECT y.id FROM collection_run_stages y
+    WHERE y.collection_run_id=c.id AND y.stage='registered'
+    ORDER BY y.id DESC LIMIT 1)
  LEFT JOIN observation_work_items w ON w.fetch_run_id=c.fetch_run_id AND w.kind='sealed_run'
  ORDER BY r.key`;
 
@@ -214,6 +229,10 @@ interface RunRow {
   fetch_run_id: number | null;
   registered_at: string | null;
   processed_at_ms: number | null;
+  registration_state: "pending" | "completed" | "retryable" | "blocked" | null;
+  registration_failure_code: string | null;
+  registration_updated_at: string | null;
+  registration_attempts: number;
 }
 interface CountRow {
   fetch_run_id: number;
@@ -243,24 +262,42 @@ export async function collectorRunTrails(
 }
 
 function runTrail(row: RunRow, counts: CountRow | undefined): CollectorRunTrail {
+  const registrationState =
+    row.fetch_run_id !== null
+      ? "completed"
+      : row.blocked_code !== null
+        ? "blocked"
+        : (row.registration_state ?? "pending");
+  const registration = {
+    state: registrationState,
+    failureCode:
+      registrationState === "retryable" || registrationState === "blocked"
+        ? (closedCode(row.registration_failure_code ?? row.blocked_code) ?? "unclassified")
+        : null,
+    attempts: row.registration_attempts ?? 0,
+    updatedAt: row.registration_updated_at,
+  };
   const base = {
     runId: row.run_id,
     blockedCode: null,
     providerOutcome: row.provider_outcome,
     evidenceRunId: row.fetch_run_id === null ? null : `r_${row.fetch_run_id}`,
     registeredAt: row.registered_at,
+    registration,
   };
   if (row.blocked_code === null && row.provider_outcome === null && row.fetch_run_id === null)
     return { ...base, state: "not_registered", reasonCode: null, artifacts: null };
   if (row.fetch_run_id === null) {
-    if (row.blocked_code !== null)
+    if (registrationState === "blocked")
       return {
         ...base,
         state: "blocked",
         reasonCode: "registration_blocked",
-        blockedCode: row.blocked_code,
+        blockedCode: row.blocked_code ?? registration.failureCode,
         artifacts: null,
       };
+    if (registrationState === "retryable")
+      return { ...base, state: "retryable", reasonCode: registration.failureCode, artifacts: null };
     return { ...base, state: "registering", reasonCode: null, artifacts: null };
   }
   const total = counts?.total ?? 0;
@@ -292,9 +329,15 @@ function runTrail(row: RunRow, counts: CountRow | undefined): CollectorRunTrail 
   return { ...base, state: "unpublished", reasonCode, artifacts };
 }
 
+function closedCode(code: string | null): string | null {
+  if (code === null) return null;
+  return /^[a-z0-9_]{1,64}$/u.test(code) ? code : "unclassified";
+}
+
 export type StageVerdict =
   | { state: "pending" }
   | { state: "completed"; evidenceRef: string }
+  | { state: "retryable"; failureCode: string }
   | { state: "blocked"; failureCode: string };
 
 export interface TrailOutcome {
@@ -340,7 +383,14 @@ export function trailOutcome(runs: readonly CollectorRunTrail[]): TrailOutcome {
       ? { state: "completed", evidenceRef: evidenceRef(registeredRuns) }
       : settled
         ? { state: "blocked", failureCode: "registration_blocked" }
-        : { state: "pending" };
+        : runs.some((run) => run.state === "retryable")
+          ? {
+              state: "retryable",
+              failureCode:
+                runs.find((run) => run.state === "retryable")?.registration.failureCode ??
+                "unclassified",
+            }
+          : { state: "pending" };
   const selected = registeredRuns.reduce(
     (sum, run) => sum + (run.artifacts?.parseSelected ?? 0),
     0,

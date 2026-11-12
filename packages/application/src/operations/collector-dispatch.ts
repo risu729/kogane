@@ -437,6 +437,19 @@ async function syncStages(
       });
       continue;
     }
+    if (verdict.state === "retryable") {
+      if (current?.state === "blocked") continue;
+      if (current?.state === "retryable" && current.failure_code === verdict.failureCode) continue;
+      await recordOperationStage({
+        store,
+        operationId,
+        stage,
+        state: "retryable",
+        now,
+        failureCode: verdict.failureCode,
+      });
+      continue;
+    }
     if (current?.state === "blocked" && current.failure_code === verdict.failureCode) continue;
     await recordOperationStage({
       store,

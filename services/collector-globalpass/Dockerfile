@@ -3,9 +3,11 @@
 FROM mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
 
 WORKDIR /app
+COPY container/chrome-install.mjs container/chrome-manifest.json ./
+RUN node chrome-install.mjs install && rm chrome-install.mjs chrome-manifest.json
 COPY container/package.json container/package-lock.json ./
 RUN npm ci --omit=dev
-RUN npx playwright install chrome
+COPY container/browser-launch.mjs ./
 COPY container/server.mjs container/collect.mjs container/connect-relay.mjs container/diagnostics.mjs container/failure.mjs container/challenge.mjs container/logout.mjs ./
 EXPOSE 8080
 CMD ["node", "server.mjs"]
