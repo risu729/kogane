@@ -132,3 +132,18 @@ does not prove public-CA/provider compatibility or production collection accepta
 Exact-image results and complete workspace/hosted checks are recorded in the PR.
 No merge, deployment, provider login or hosted Container experiment is part of
 this implementation's local verification.
+
+## Amendment: explicit outbound destinations (2026-11-12 05:54 UTC)
+
+The installer compares the manifest against a literal reviewed package version
+and official download URL, then supplies only that URL constant to the download
+sink. Updating a payload requires reviewing both constants and the manifest.
+File-derived URL data never selects the outgoing request destination.
+
+The offline image proxy admits only the exact synthetic HTTP GET root and exact
+locally allocated TLS tunnel. Its HTTP sink uses literal loopback host, path and
+method plus the locally allocated port. It never forwards an incoming URL,
+headers, credentials or body. Adversarial loopback tests cover rejected origins,
+credentials, paths, methods and tunnel authorities without invoking a collector.
+The smoke entrypoint remains usable on stdin and can be imported without starting
+an image test, so the tests exercise the same proxy implementation.

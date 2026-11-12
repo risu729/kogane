@@ -9,6 +9,9 @@ import { fileURLToPath } from "node:url";
 const fail = (code) => {
   throw new Error(`pinned_chrome_${code}`);
 };
+const pinnedVersion = "157.0.8103.78-1";
+const downloadUrl =
+  "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_157.0.8103.78-1_amd64.deb";
 const runtimePrefix = "opt/google/chrome/";
 const skippedLinks = new Map([
   ["etc/cron.daily/google-chrome", "/opt/google/chrome/cron/google-chrome"],
@@ -21,12 +24,14 @@ export function validateManifest(value) {
   if (
     value?.schemaVersion !== 1 ||
     value.package !== "google-chrome-stable" ||
+    value.version !== pinnedVersion ||
     !/^\d{1,3}\.\d{1,3}\.\d{1,5}\.\d{1,5}-\d{1,3}$/u.test(value.version ?? "") ||
     value.architecture !== "amd64" ||
     !Number.isSafeInteger(value.bytes) ||
     value.bytes < 1 ||
     value.bytes > 200_000_000 ||
     !/^[a-f0-9]{64}$/u.test(value.sha256 ?? "") ||
+    value.url !== downloadUrl ||
     value.url !==
       `https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_${value.version}_amd64.deb`
   )
@@ -37,7 +42,7 @@ export function validateManifest(value) {
 /** Write only verified bytes to a new private staging file, never an extraction target. */
 export async function downloadChrome(manifest, target, fetchImpl = fetch) {
   validateManifest(manifest);
-  const response = await fetchImpl(manifest.url, {
+  const response = await fetchImpl(downloadUrl, {
     redirect: "error",
     signal: AbortSignal.timeout(180_000),
     headers: { "Accept-Encoding": "identity" },

@@ -137,6 +137,56 @@ test("download bounds and integrity precede extraction, with no redirect/fallbac
   ).rejects.toThrow();
 });
 
+test("untrusted manifest URL changes fail before any download or file creation", async () => {
+  const directory = await temporary();
+  for (const [index, url] of [
+    manifest.url.replace("dl.google.com", "localhost"),
+    manifest.url.replace("dl.google.com", "dl.google.com.example.com"),
+    manifest.url.replace("https://", "https://user:password@"),
+    manifest.url.replace("https://", "http://"),
+    manifest.url.replace("dl.google.com", "dl.google.com:444"),
+    manifest.url.replace("/pool/", "/pool/../"),
+    manifest.url.replace("/pool/", "/pool/%2e%2e/"),
+    manifest.url.replace("/pool/", "/pool/redirect/"),
+    `${manifest.url}?redirect=https://example.com/`,
+    `${manifest.url}#fragment`,
+  ].entries()) {
+    let called = false;
+    const target = join(directory, `invalid-${index}`);
+    await expect(
+      downloadChrome({ ...manifest, url }, target, async () => {
+        called = true;
+        return new Response("abc");
+      }),
+    ).rejects.toThrow("manifest_invalid");
+    expect(called).toBe(false);
+    await expect(stat(target)).rejects.toThrow();
+  }
+  const changedVersion = "158.0.8103.78-1";
+  expect(() =>
+    validateManifest({
+      ...manifest,
+      version: changedVersion,
+      url: manifest.url.replace(version, changedVersion),
+    }),
+  ).toThrow("manifest_invalid");
+});
+
+test("a rejected redirect never retries or creates a download target", async () => {
+  const target = join(await temporary(), "redirect");
+  let attempts = 0;
+  await expect(
+    downloadChrome(manifest, target, async (url, options) => {
+      attempts += 1;
+      expect(url).toBe(manifest.url);
+      expect(options.redirect).toBe("error");
+      throw new TypeError("synthetic redirect refused");
+    }),
+  ).rejects.toThrow("synthetic redirect refused");
+  expect(attempts).toBe(1);
+  await expect(stat(target)).rejects.toThrow();
+});
+
 function header(name: string, type = "0", body = "", mode = 0o644, link = "") {
   const bytes = Buffer.alloc(512);
   bytes.write(name, 0, 100, "ascii");
