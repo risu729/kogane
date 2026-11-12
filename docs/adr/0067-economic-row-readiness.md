@@ -249,6 +249,11 @@ answer for a different family, observation or parse.
 The Japanese panel explains identity status, row-specific blockers and the
 remaining generation gates without presenting digests or internal flags as
 actions. An admitted identity is explicitly not an admitted economic event.
+The disabled writer flag concerns generating a new economic event through
+this diagnostic, not whether an existing event already uses the observation.
+Live claim holders, including accepted legacy card settlements, remain
+reported by `economic_claim_held`; the panel can show that existing use beside
+the unavailability of new generation without denying the existing use.
 Proposal and writer enablement stay false; history coverage and the
 principal-to-owner contract remain unknown/unresolved. Loading or failure is
 local to the panel; the existing observation, old-parse warning and original

@@ -33,7 +33,8 @@ const REASONS: Record<ReadinessReason, string> = {
 const GATES: Record<EconomicGenerationGate, string> = {
   ownership_principal_contract_missing:
     "口座の所有者と操作する本人の対応を確認する仕組みが必要です。",
-  writer_not_registered: "銀行の入出金から計算用の取引を作る機能は、まだ有効になっていません。",
+  writer_not_registered:
+    "この診断から銀行の入出金を基に新しい計算用取引を作る機能は、まだ有効になっていません。",
   security_book_unsupported: "証券の保有数量を増減させる記録には、まだ対応していません。",
   security_selector_unsupported: "証券取引を指定時点の計算へ取り込む機能が未対応です。",
   security_event_vocabulary_missing: "証券取引の計算用の表現が、まだ定まっていません。",
@@ -68,22 +69,22 @@ function ReadinessPanel({
   const title = family === "bank-movement" ? "銀行の入出金" : "証券の約定";
   const row = query.data?.manifest.rows[0];
   return (
-    <Panel id={`economic-readiness-${family}`} title={`${title}の計算への反映`}>
+    <Panel id={`economic-readiness-${family}`} title={`${title}からの新しい計算用取引`}>
       <div className="panel-body">
         <p>
-          記録があっても、計算用の取引に反映できるとは限りません。この記録と解析を根拠に、反映できない理由を確認できます。
+          この記録から新しい計算用取引を作るための条件を確認できます。既存の計算用取引で使われている場合もあります。
         </p>
         {!opened ? (
           <button className="button" type="button" onClick={() => setOpened(true)}>
-            反映できない理由を確認する
+            新規作成の条件を確認する
           </button>
         ) : (
           <div aria-live="polite">
-            {query.isFetching ? <p role="status">反映できない理由を確認しています。</p> : null}
+            {query.isFetching ? <p role="status">新規作成の条件を確認しています。</p> : null}
             {query.isError ? (
               <Notice tone="warn">
                 <p>
-                  反映できない理由を取得できませんでした。この記録と原本は引き続き確認できます。
+                  新規作成の条件を取得できませんでした。この記録と原本は引き続き確認できます。
                 </p>
                 <p>{query.error.message}</p>
               </Notice>
@@ -94,19 +95,20 @@ function ReadinessPanel({
                   <strong>記録の識別状態:</strong> {IDENTITY[row.identity]}
                 </p>
                 <p>
-                  識別条件を満たしていても、計算への反映や取引の採用ができるという意味ではありません。
+                  識別条件を満たしていても、この記録から新しい計算用取引を作成・採用できるという意味ではありません。
                 </p>
                 {row.reasons.length ? (
-                  <ul aria-label="この記録を反映できない理由">
+                  <ul aria-label="新規作成に向けたこの記録の確認事項">
                     {row.reasons.map((code) => (
                       <li key={code}>{REASONS[code]}</li>
                     ))}
                   </ul>
                 ) : null}
                 <p>
-                  <strong>計算への反映は未対応です。</strong>この確認では取引を作成・採用しません。
+                  <strong>この機能から新しい計算用取引を作成することは、まだできません。</strong>
+                  この確認では取引を作成・採用しません。
                 </p>
-                <ul aria-label="計算に必要な未対応の機能">
+                <ul aria-label="新規作成に必要な未対応の機能">
                   {query.data.generationGates.map((code) => (
                     <li key={code}>{GATES[code]}</li>
                   ))}

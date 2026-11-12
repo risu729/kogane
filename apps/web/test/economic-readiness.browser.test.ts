@@ -51,7 +51,7 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
   let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
-  let mode: "ok" | "unavailable" | "refused" | "mismatch" | "malformed" | "delayed" = "ok";
+  let mode: "ok" | "unavailable" | "refused" | "mismatch" | "malformed" | "delayed" | "held" = "ok";
   let release: (() => void) | undefined;
   let received: (() => void) | undefined;
   let requests: URL[] = [];
@@ -91,6 +91,8 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
           const body = economicReadinessFixture(mode === "mismatch" ? id + 1 : id);
           if (id === 1)
             body.manifest.rows[0]!.reasons = ["evidence_not_current", "ownership_unresolved"];
+          if (mode === "held")
+            body.manifest.rows[0]!.reasons = ["ownership_unresolved", "economic_claim_held"];
           if (mode === "delayed" && id === 1)
             await new Promise<void>((resolve) => {
               release = resolve;
@@ -115,7 +117,7 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
     server?.stop(true);
   });
   const panel = (page: Page) =>
-    page.getByRole("region", { name: "銀行の入出金の計算への反映", exact: true });
+    page.getByRole("region", { name: "銀行の入出金からの新しい計算用取引", exact: true });
   async function screenshot(page: Page, name: string) {
     const screenshots = process.env["READINESS_REVIEW_SCREENSHOTS"];
     if (!screenshots) return;
@@ -142,7 +144,7 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
       expect(requests.length).toBe(before + 1);
       expect(requests.at(-1)!.searchParams.get("parseRunId")).toBe("7");
       expect(await panel(page).innerText()).toContain("この記録は旧解析のものです");
-      expect(await panel(page).innerText()).toContain("計算への反映は未対応です");
+      expect(await panel(page).innerText()).toContain("この機能から新しい計算用取引を作成することは、まだできません。");
       expect(await panel(page).innerText()).not.toContain("writerEnabled");
       const popup = page.waitForEvent("popup");
       await page.getByRole("link", { name: "この記録の原本を開く ↗" }).click();
@@ -160,7 +162,7 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
       const page = await open();
       await panel(page).getByRole("button").click();
       await panel(page)
-        .getByText("反映できない理由を取得できませんでした。", { exact: false })
+        .getByText("新規作成の条件を取得できませんでした。", { exact: false })
         .waitFor();
       expect(await panel(page).innerText()).not.toContain("識別条件を満たしています");
       expect(await page.getByRole("link", { name: "この記録の原本を開く ↗" }).count()).toBe(1);
@@ -202,7 +204,7 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
     await page.getByRole("button", { name: "表示を更新", exact: true }).click();
     await refreshed;
     await panel(page)
-      .getByText("反映できない理由を取得できませんでした。", { exact: false })
+      .getByText("新規作成の条件を取得できませんでした。", { exact: false })
       .waitFor();
     expect(await panel(page).innerText()).not.toContain("識別条件を満たしています");
     expect(await panel(page).innerText()).not.toContain("この記録は旧解析のものです");
@@ -215,5 +217,21 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
       await page.close();
     }
     expect(requests).toHaveLength(0);
+  });
+  test("a held observation can already be used while new generation from this feature stays unavailable", async () => {
+    mode = "held";
+    const page = await open(2);
+    await panel(page).getByRole("button", { name: "新規作成の条件を確認する", exact: true }).click();
+    await panel(page).getByText("この記録はすでに別の計算用取引が参照しています。", { exact: true }).waitFor();
+    const text = await panel(page).innerText();
+    expect(text).toContain("口座の所有者を、この計算で確認する仕組みが未対応です。");
+    expect(text).toContain("既存の計算用取引で使われている場合もあります。");
+    expect(text).toContain("この機能から新しい計算用取引を作成することは、まだできません。");
+    expect(text).not.toContain("計算への反映は未対応です");
+    expect(text).not.toContain("反映できない理由");
+    const original = page.getByRole("link", { name: "この記録の原本を開く ↗" });
+    expect(await original.getAttribute("href")).toBe(`/api/raw/${"a".repeat(64)}`);
+    await screenshot(page, "readiness-held-1280");
+    await page.close();
   });
 });
