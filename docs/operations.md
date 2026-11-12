@@ -20,21 +20,21 @@ budgets, the retention classes and the drills.
 Root review 08 section 2 asks for coverage of the same subject range from
 Layer A through to the read model, not just "no failed jobs".
 
-| Signal (review 08 section 2)                        | Where it is served today                                                                                | Gap                                                         |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Latest sealed artifact arrival                      | pipeline `GET /status`: `freshness.latestSealedAtMs`, `freshness.latestSealedArtifactFetchedAtMs`       | -                                                           |
-| Eligible / unsupported / oversized reasons          | evidence-browser metadata API (parse health); pipeline safe failure codes on jobs                       | Not aggregated into one "why is there no job" counter       |
-| Oldest pending age, per-lane backlog                | pipeline `GET /status`: `lanes.<lane>.{pending,running,done,failed}`, `lanes.<lane>.oldestPendingAgeMs` | -                                                           |
-| Parsed Layer B versus sealed identity               | identity audit (`docs/identity-audit.md`)                                                               | Not exposed as a single coverage percentage per source      |
-| Candidate versus active                             | `published_parse_runs` versus successful `parse_runs`; `GET /publication/consistency`                   | Candidate releases themselves are the next step (A04)       |
-| Latest complete snapshot                            | complete-snapshot projection used by every reader                                                       | Not surfaced as a freshness signal on `/status`             |
-| Raw integrity verification result                   | raw-evidence verification tables                                                                        | Not summarised on `/status`                                 |
-| Notification backlog                                | pipeline `GET /status`: `workItems.unprocessed`, `workItems.oldestUnprocessedAgeMs`                     | -                                                           |
-| Unregistered shared-R2 terminals                    | Processor `GET /internal/health`: `registration.unregistered`, `.pending`, `.oldestPendingAgeMs`        | Not summarised on `/status`                                 |
-| Operations and covered D1 costs per invocation/lane | Processor `invocation_budget` log line per scheduled and queue invocation (§1.1)                        | Workers Logs only; not persisted                            |
-| Lane liveness and replay progress                   | pipeline `GET /status`: `laneState[]`, `replayPlans[]`                                                  | -                                                           |
-| Event-lane ticks and their counts                   | pipeline `GET /status` and `GET /internal/health`: `laneTicks[]`; `processor_lane_ticks` (last day)     | The latest tick per lane only; older ticks are read from D1 |
-| Report generation                                   | `report_job` scheduled stage log line (only while `REPORTS_ENABLED` is on)                              | Not on `/status`; add when the flag becomes the default     |
+| Signal (review 08 section 2)                        | Where it is served today                                                                                                 | Gap                                                         |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| Latest sealed artifact arrival                      | pipeline `GET /status`: `freshness.latestSealedAtMs`, `freshness.latestSealedArtifactFetchedAtMs`                        | -                                                           |
+| Eligible / unsupported / oversized reasons          | evidence-browser metadata API (parse health); pipeline safe failure codes on jobs                                        | Not aggregated into one "why is there no job" counter       |
+| Oldest pending age, per-lane backlog                | pipeline `GET /status`: `lanes.<lane>.{pending,running,done,failed}`, `lanes.<lane>.oldestPendingAgeMs`                  | -                                                           |
+| Parsed Layer B versus sealed identity               | identity audit (`docs/identity-audit.md`)                                                                                | Not exposed as a single coverage percentage per source      |
+| Candidate versus active                             | `published_parse_runs` versus successful `parse_runs`; `GET /publication/consistency`                                    | Candidate releases themselves are the next step (A04)       |
+| Latest complete snapshot                            | complete-snapshot projection used by every reader                                                                        | Not surfaced as a freshness signal on `/status`             |
+| Raw integrity verification result                   | raw-evidence verification tables                                                                                         | Not summarised on `/status`                                 |
+| Notification backlog                                | pipeline `GET /status`: `workItems.unprocessed`, `workItems.oldestUnprocessedAgeMs`                                      | -                                                           |
+| Unregistered shared-R2 terminals                    | Processor `GET /internal/health`: `registration.unregistered`, `.pending`, `.retryable`, ages and closed retryable codes | Not summarised on `/status`                                 |
+| Operations and covered D1 costs per invocation/lane | Processor `invocation_budget` log line per scheduled and queue invocation (§1.1)                                         | Workers Logs only; not persisted                            |
+| Lane liveness and replay progress                   | pipeline `GET /status`: `laneState[]`, `replayPlans[]`                                                                   | -                                                           |
+| Event-lane ticks and their counts                   | pipeline `GET /status` and `GET /internal/health`: `laneTicks[]`; `processor_lane_ticks` (last day)                      | The latest tick per lane only; older ticks are read from D1 |
+| Report generation                                   | `report_job` scheduled stage log line (only while `REPORTS_ENABLED` is on)                                               | Not on `/status`; add when the flag becomes the default     |
 
 Addendum 12 section 5 also asks the operational metrics to separate freshness,
 coverage, resolution, publication and safety. Today `/status` covers freshness,
@@ -185,8 +185,13 @@ which the App relays at `GET /api/ops/v1/health`
 carries `registration`: the enforced `operationBudget`, the `documented`
 limits, and the backlog read from CORE — `unregistered` terminals,
 `pending` staged registrations waiting for their next invocation, and
-`oldestPendingAgeMs`. A pending count that stays up, or an age that keeps
-growing, is a staged registration that is not converging.
+`oldestPendingAgeMs`. It also reports `retryable`, `retryableAttempts`,
+`oldestRetryableAgeMs`, `latestRetryableAt` and a bounded `retryableCodes`
+breakdown (code, count, attempts and latest attempt time), with
+`retryableCodesTruncated` when more than 32 codes exist. A pending count that
+stays up, or an age that keeps growing, is a staged registration that is not
+converging; a retryable count identifies a recorded refusal still awaiting a
+successful retry.
 
 ### Lane tick records
 

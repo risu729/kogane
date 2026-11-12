@@ -49,6 +49,7 @@ depends = ["//services/collector-globalpass:cf-typecheck", "//services/collector
 description = "Build and validate the prebuilt Worker and Container production artifacts without credentials."
 depends = ["//services/collector-globalpass:types"]
 run = [
+	"node ../../tasks/_lib/pinned-chrome/sync.mjs",
 	"./node_modules/.bin/cf build --mode production",
 	"./node_modules/.bin/cf deploy --prebuilt --mode production --worker kogane-globalpass-collector-poc --dry-run",
 	"node ../../tasks/_lib/ci/cf-container-release.mjs validate globalpass-worker",

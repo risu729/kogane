@@ -25,6 +25,12 @@ const run = (change: Partial<OperationRecordRunWire> = {}): OperationRecordRunWi
   providerOutcome: "success",
   evidenceRunId: "r_12",
   registeredAt: "2026-09-11T00:10:00.000Z",
+  registration: {
+    state: "completed",
+    failureCode: null,
+    attempts: 1,
+    updatedAt: "2026-09-11T00:10:00.000Z",
+  },
   artifacts: {
     total: 2,
     parseSelected: 1,
@@ -144,6 +150,7 @@ describe("operation record contract", () => {
         providerOutcome: null,
         evidenceRunId: null,
         registeredAt: null,
+        registration: { state: "pending", failureCode: null, attempts: 0, updatedAt: null },
         artifacts: null,
       }),
     ).toBe(true);
@@ -154,9 +161,46 @@ describe("operation record contract", () => {
         blockedCode: "terminal_invalid",
         evidenceRunId: null,
         registeredAt: null,
+        registration: {
+          state: "blocked",
+          failureCode: "terminal_invalid",
+          attempts: 1,
+          updatedAt: "2026-09-11T00:10:00.000Z",
+        },
         artifacts: null,
       }),
     ).toBe(true);
+    expect(
+      withRun({
+        state: "retryable",
+        reasonCode: "inactive_ingest_route",
+        blockedCode: null,
+        evidenceRunId: null,
+        registeredAt: null,
+        artifacts: null,
+        registration: {
+          state: "retryable",
+          failureCode: "inactive_ingest_route",
+          attempts: 2,
+          updatedAt: "2026-09-11T00:10:00.000Z",
+        },
+      }),
+    ).toBe(true);
+    expect(
+      withRun({
+        state: "retryable",
+        reasonCode: "Provider said no",
+        evidenceRunId: null,
+        registeredAt: null,
+        artifacts: null,
+        registration: {
+          state: "retryable",
+          failureCode: "Provider said no",
+          attempts: 1,
+          updatedAt: "2026-09-11T00:10:00.000Z",
+        },
+      }),
+    ).toBe(false);
     expect(
       withRun({
         state: "unpublished",

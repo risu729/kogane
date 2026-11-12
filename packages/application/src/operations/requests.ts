@@ -319,14 +319,51 @@ async function loadReceipt(
     readStore,
     receiptOf(row, await store.all<StageRow>(SELECT_STAGES, [operationId])),
   );
+  const execution = await collectorExecution(store, {
+    operationId,
+    kind: row.kind,
+    status: row.status,
+    acceptedAt: row.created_at,
+  });
+  const registered = receipt.stages.find((stage) => stage.stage === "registered");
+  const runs = execution?.runs ?? [];
+  if (
+    registered === undefined ||
+    runs.length === 0 ||
+    registered.state === "completed" ||
+    registered.state === "blocked"
+  )
+    return { ...receipt, execution };
+  const retryable = runs.find((run) => run.registration.state === "retryable");
+  const allRegistered = runs.every((run) => run.evidenceRunId !== null);
+  if (!retryable && !allRegistered) return { ...receipt, execution };
+  const attempts = runs.reduce((sum, run) => sum + run.registration.attempts, 0);
+  const updatedAt =
+    runs
+      .map((run) => run.registration.updatedAt)
+      .filter((at): at is string => at !== null)
+      .sort()
+      .at(-1) ?? null;
+  const stage: OperationStageReport = allRegistered
+    ? {
+        ...registered,
+        state: "completed",
+        evidenceRef: runs.length === 1 ? runs[0]!.evidenceRunId : `runs:${runs.length}`,
+        failureCode: null,
+        attempts,
+        updatedAt,
+      }
+    : {
+        ...registered,
+        state: "retryable",
+        failureCode: retryable!.registration.failureCode,
+        attempts,
+        updatedAt,
+      };
   return {
     ...receipt,
-    execution: await collectorExecution(store, {
-      operationId,
-      kind: row.kind,
-      status: row.status,
-      acceptedAt: row.created_at,
-    }),
+    execution,
+    stages: receipt.stages.map((entry) => (entry.stage === "registered" ? stage : entry)),
   };
 }
 

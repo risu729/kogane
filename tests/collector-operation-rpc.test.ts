@@ -118,7 +118,23 @@ describe("collector entrypoints", () => {
       // (ADR 0069, 2026-11-08 amendment); the rest run exactly as the alarm.
       expect(entrypoint).toContain(OPERATOR_DECISION[workspace] ?? "this.runScheduled(cron, time)");
       const worker = readFileSync(join(REPO_ROOT, "services", workspace, "src/worker.ts"), "utf8");
-      const alarm = worker.slice(worker.indexOf("export async function alarmCollection("));
-      expect(alarm.slice(0, alarm.indexOf("\n}\n"))).toContain("return scheduledFailure(error");
+      // V Point shares its collection runtime between scheduled RPC and durable owner jobs.
+      // Follow that explicit bridge so the failure guard still covers the implementation.
+      let alarmSource = worker;
+      if (workspace === "collector-vpoint") {
+        expect(worker).toContain(
+          'export { runCollection, alarmCollection } from "./collection-runtime"',
+        );
+        expect(entrypoint).toContain("return alarmCollection(this.env, cron, scheduledTime)");
+        alarmSource = readFileSync(
+          join(REPO_ROOT, "services", workspace, "src/collection-runtime.ts"),
+          "utf8",
+        );
+      }
+      const start = alarmSource.indexOf("export async function alarmCollection(");
+      expect(start).toBeGreaterThanOrEqual(0);
+      const end = alarmSource.indexOf("\n}\n", start);
+      expect(end).toBeGreaterThan(start);
+      expect(alarmSource.slice(start, end)).toContain("return scheduledFailure(error");
     });
 });
