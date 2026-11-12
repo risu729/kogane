@@ -34,7 +34,10 @@ the signed public metadata is retained under `fixtures/provenance/`.
    AppArmor, alternatives, desktop and update configuration; new package contents
    must fail existing archive assumptions until explicitly reviewed. Preserve the
    complete runtime and original wrapper, without enabling a sandbox helper.
-5. Update the manifest and run `mise exec -- node tasks/_lib/pinned-chrome/sync.mjs --write`.
+5. Update the manifest and the literal `pinnedVersion` and `downloadUrl` in the canonical
+   installer together. The download sink consumes that fixed official URL, never
+   file-derived URL data; a changed manifest alone fails closed. Run
+   `mise exec -- node tasks/_lib/pinned-chrome/sync.mjs --write`.
    Run the root guards and both owning service checks. Build both exact local
    contexts without APT fallback, then run the offline image test below and inspect
    the exact base's dependencies, files/modes and skipped-hook conditions. Test both
@@ -61,7 +64,10 @@ docker run --rm --network none -i --entrypoint node IMAGE --input-type=module < 
 Do not call `/collect` or `/probe` for this test: their normal behavior navigates
 to providers. The script imports `/app/browser-launch.mjs`, starts the same Xvfb
 configuration and browser launch paths, and appends only a loopback synthetic URL.
-No host mount, privilege, extra capability or certificate-error bypass is needed.
+The proxy admits only an exact synthetic HTTP GET root and the exact TLS tunnel;
+its upstream destination and request method/path are constructed locally. Incoming
+URLs, headers, credentials and request bodies are never forwarded to the HTTP
+upstream. No host mount, privilege, extra capability or certificate-error bypass is needed.
 It generates its own short-lived self-signed localhost certificate and requires
 the browser to reject it. It checks the base certificate bundle, but no successful
 public-CA connection is established under network isolation.
