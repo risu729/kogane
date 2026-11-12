@@ -101,6 +101,17 @@ const smbcUnitPolicies = SMBC_UNIT_POLICIES.map(([parser_name, dataset, snapshot
   snapshot_selection,
 }));
 
+/** The three evidence-only MyJCB document opt-ins introduced by CORE 0101. */
+const myJcbDocumentUnitPolicies = (["credit-csv", "credit-ofx", "credit-pdf"] as const).map(
+  (dataset) => ({
+    source_id: "myjcb",
+    parser_name: "myjcb-statement-document-metadata",
+    dataset,
+    unit_scope: "unit",
+    snapshot_selection: 0,
+  }),
+);
+
 /** The eleven closed SBI unit policies introduced by CORE 0100. */
 const sbiUnitPolicies = (
   [
@@ -513,6 +524,7 @@ describe("named concepts in the final SQL", () => {
           unit_scope: "unit",
           snapshot_selection: 0,
         },
+        ...myJcbDocumentUnitPolicies,
         ...SBI_VC_UNIT_POLICIES,
         ...smbcUnitPolicies,
         {
@@ -528,7 +540,7 @@ describe("named concepts in the final SQL", () => {
     expect(
       db
         .query(
-          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'moneyforward-detail-balances', 'sbi-income-payments', 'sbi-realised-gains', 'vpass-credit-snapshot', 'myjcb-jpoint-history', 'sbi-vc-document-metadata', 'sbi-delivered-document-metadata', 'smbc-direct-transactions', 'smbc-foreign-ordinary-balance', 'smbc-foreign-ordinary-history', 'sbi-shinsei-savings-activity', 'sbi-account-assets-history', 'sbi-domestic-trade-records', 'sbi-foreign-cash-history', 'sbi-foreign-trade-records', 'sbi-yen-detail-history')",
+          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'moneyforward-detail-balances', 'sbi-income-payments', 'sbi-realised-gains', 'vpass-credit-snapshot', 'myjcb-jpoint-history', 'sbi-vc-document-metadata', 'sbi-delivered-document-metadata', 'myjcb-statement-document-metadata', 'smbc-direct-transactions', 'smbc-foreign-ordinary-balance', 'smbc-foreign-ordinary-history', 'sbi-shinsei-savings-activity', 'sbi-account-assets-history', 'sbi-domestic-trade-records', 'sbi-foreign-cash-history', 'sbi-foreign-trade-records', 'sbi-yen-detail-history')",
         )
         .get(),
     ).toEqual({ n: 0 });
@@ -720,6 +732,7 @@ describe("named concepts in the final SQL", () => {
           unit_scope: "unit",
           snapshot_selection: 0,
         },
+        ...myJcbDocumentUnitPolicies,
         ...SBI_VC_UNIT_POLICIES,
         ...smbcUnitPolicies,
         {

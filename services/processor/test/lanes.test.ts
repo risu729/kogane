@@ -125,6 +125,7 @@ test("harness applies every Layer B migration in order through 0101", () => {
     "0098_sbi_shinsei_savings_activity.sql",
     "0099_sbi_document_unit_eligibility.sql",
     "0100_sbi_supplemental_unit_eligibility.sql",
+    "0101_myjcb_document_unit_eligibility.sql",
   ]);
   expect([...names].sort()).toEqual(names);
 });
