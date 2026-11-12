@@ -6,6 +6,12 @@ import { VPOINT_EMAIL_SUBJECT } from "../src/email";
 
 afterEach(() => vi.restoreAllMocks());
 
+const LEGACY_CLAIM = {
+  schemaVersion: 1 as const,
+  operationId: "a".repeat(64),
+  requestSha256: "b".repeat(64),
+};
+
 // A synthetic authentication mail: the subject the collector reads and one code.
 function authenticationMail(): ReadableStream<Uint8Array> {
   const subject = Buffer.from(VPOINT_EMAIL_SUBJECT).toString("base64");
@@ -34,9 +40,7 @@ function postAuthEnv(): Env {
       get: () => ({
         completeEmailCode: async () => ({
           status: "authenticated",
-          schemaVersion: 1,
-          operationId: "a".repeat(64),
-          requestSha256: "b".repeat(64),
+          ...LEGACY_CLAIM,
         }),
         beginLegacyCollection: async () => true,
         finishLegacyCollection: async () => undefined,
@@ -117,8 +121,10 @@ test("an expired scheduled session recovers through email as a separate persiste
   const completeEmailCode = vi.fn(async () => {
     pending = false;
     cookie = "session=synthetic-refreshed";
-    return { status: "authenticated" };
+    return { status: "authenticated", ...LEGACY_CLAIM };
   });
+  const beginLegacyCollection = vi.fn(async () => true);
+  const finishLegacyCollection = vi.fn(async () => undefined);
   const configured = {
     ...postAuthEnv(),
     VPOINT_SESSION: {
@@ -129,6 +135,8 @@ test("an expired scheduled session recovers through email as a separate persiste
         ensureEmailChallenge,
         hasPendingChallenge: async () => pending,
         completeEmailCode,
+        beginLegacyCollection,
+        finishLegacyCollection,
       }),
     },
   } as unknown as Env;
@@ -168,6 +176,10 @@ test("an expired scheduled session recovers through email as a separate persiste
     {} as unknown as ExecutionContext,
   );
   expect(completeEmailCode).toHaveBeenCalledOnce();
+  expect(beginLegacyCollection).toHaveBeenCalledOnce();
+  expect(beginLegacyCollection).toHaveBeenCalledWith(LEGACY_CLAIM);
+  expect(finishLegacyCollection).toHaveBeenCalledOnce();
+  expect(finishLegacyCollection).toHaveBeenCalledWith(LEGACY_CLAIM, true);
   const records = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
   const followup = records.find((record) => record.event === "vpoint-post-auth-collection")!;
   const persisted = records.find(
