@@ -294,3 +294,97 @@ describe("operation record contract", () => {
     expect(validOperationRecord(record({ execution: execution({ runs }) }))).toBe(false);
   });
 });
+
+describe("versioned same-operation late-publication result", () => {
+  const late = (): OperationRecordWire =>
+    record({
+      status: "failed",
+      failureCode: "publication_not_observed",
+      execution: execution({
+        state: "unpublished",
+        reasonCode: "publication_not_observed",
+        publishedAt: null,
+        finishedAt: "2026-09-13T00:06:00.000Z",
+        currentResult: {
+          schemaVersion: "kogane-collector-current-result-v1",
+          state: "published",
+          publishedAt: null,
+          readReadiness: "unproven",
+          originalTracking: {
+            state: "unpublished",
+            reasonCode: "publication_not_observed",
+            publicationDeadlineAt: "2026-09-13T00:05:00.000Z",
+            finishedAt: "2026-09-13T00:06:00.000Z",
+          },
+        },
+      }),
+    });
+  test("accepts both recorded deadline failure and current publication on the same GET", () => {
+    expect(validApiResponse(PATH, late())).toBe(true);
+  });
+  test("rejects widened versions, unknown fields, fabricated times and READ readiness", () => {
+    for (const change of [
+      { schemaVersion: "kogane-collector-current-result-v2" },
+      { extra: "provider text" },
+      { publishedAt: "2026-09-13T01:00:00Z" },
+      { readReadiness: "completed" },
+      { state: "publication_not_observed" },
+    ]) {
+      const value = late();
+      Object.assign(value.execution!.currentResult!, change);
+      expect(validOperationRecord(value)).toBe(false);
+    }
+  });
+  test("rejects publication claims with pending, empty, duplicated or provider-failed runs", () => {
+    for (const runs of [
+      [],
+      [run({ state: "parsing" })],
+      [run(), run()],
+      [run({ providerOutcome: "failed" })],
+      [
+        run({
+          artifacts: {
+            total: 2,
+            parseSelected: 2,
+            published: 1,
+            pending: 1,
+            parseFailed: 0,
+            notPublished: 0,
+          },
+        }),
+      ],
+    ]) {
+      const value = late();
+      value.execution!.runs = runs;
+      expect(validOperationRecord(value)).toBe(false);
+    }
+    const value = late();
+    value.execution!.runs = [run({ state: "parsing" })];
+    value.execution!.currentResult!.state = "publication_not_observed";
+    expect(validOperationRecord(value)).toBe(true);
+  });
+  test("rejects a different historical outcome or deadline", () => {
+    for (const mutate of [
+      (v: OperationRecordWire) => {
+        v.status = "completed";
+      },
+      (v: OperationRecordWire) => {
+        v.failureCode = "provider_failed";
+      },
+      (v: OperationRecordWire) => {
+        v.execution!.reasonCode = "parse_failed";
+      },
+      (v: OperationRecordWire) => {
+        v.execution!.finishedAt = "2026-09-11T01:00:00Z";
+      },
+      (v: OperationRecordWire) => {
+        v.execution!.currentResult!.originalTracking.publicationDeadlineAt =
+          "2026-09-14T00:05:00.000Z";
+      },
+    ]) {
+      const value = late();
+      mutate(value);
+      expect(validOperationRecord(value)).toBe(false);
+    }
+  });
+});

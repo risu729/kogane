@@ -324,6 +324,7 @@ async function loadReceipt(
     kind: row.kind,
     status: row.status,
     acceptedAt: row.created_at,
+    failureCode: row.failure_code,
   });
   const registered = receipt.stages.find((stage) => stage.stage === "registered");
   const runs = execution?.runs ?? [];

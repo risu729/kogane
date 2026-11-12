@@ -94,6 +94,22 @@ export interface CollectorRunTrail {
   artifacts: CollectorRunArtifacts | null;
 }
 
+/** Current CORE publication only; never a replacement for the recorded receipt. */
+export interface CollectorCurrentResult {
+  schemaVersion: "kogane-collector-current-result-v1";
+  state: "published" | "publication_not_observed";
+  /** The bounded trail proves publication pointers, not their original publication instant. */
+  publishedAt: null;
+  /** Late publication has no recorded CORE epoch/revision requirement for READ. */
+  readReadiness: "unproven";
+  originalTracking: {
+    state: "unpublished";
+    reasonCode: "publication_not_observed";
+    publicationDeadlineAt: string;
+    finishedAt: string;
+  };
+}
+
 export interface CollectorExecutionReport {
   action: CollectorAction;
   state: CollectorExecutionState;
@@ -115,6 +131,7 @@ export interface CollectorExecutionReport {
   publishedAt: string | null;
   finishedAt: string | null;
   runs: CollectorRunTrail[];
+  currentResult?: CollectorCurrentResult;
 }
 
 export interface CollectorDispatchRow {
@@ -419,6 +436,63 @@ function evidenceRef(runs: readonly CollectorRunTrail[]): string {
     : `runs:${runs.length}`;
 }
 
+/** Fail closed on malformed legacy bindings; never filter an invalid run out of the proof. */
+function currentResult(
+  row: CollectorDispatchRow,
+  status: string,
+  failureCode: string | null | undefined,
+  runs: readonly CollectorRunTrail[],
+): CollectorCurrentResult | undefined {
+  if (
+    status !== "failed" ||
+    failureCode !== "publication_not_observed" ||
+    row.action !== "collect" ||
+    row.state !== "unpublished" ||
+    row.reason_code !== "publication_not_observed" ||
+    row.published_at !== null ||
+    row.terminal_source === null ||
+    !/^[a-z0-9-]{1,100}$/u.test(row.terminal_source) ||
+    row.collected_at === null ||
+    row.finished_at === null
+  )
+    return undefined;
+  const deadline = Date.parse(row.collected_at) + PUBLICATION_HORIZON_MS;
+  if (!Number.isFinite(deadline) || !(Date.parse(row.finished_at) >= deadline)) return undefined;
+  let bound: unknown;
+  try {
+    bound = JSON.parse(row.run_ids_json);
+  } catch {
+    return undefined;
+  }
+  if (
+    !Array.isArray(bound) ||
+    bound.length === 0 ||
+    bound.length > 100 ||
+    !bound.every(
+      (id) => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u.test(id),
+    ) ||
+    new Set(bound).size !== bound.length ||
+    runs.length !== bound.length ||
+    !runs.every((run, index) => run.runId === bound[index])
+  )
+    return undefined;
+  const outcome = trailOutcome(runs);
+  const published =
+    outcome.settled && outcome.published && runs.every((run) => run.providerOutcome !== "failed");
+  return {
+    schemaVersion: "kogane-collector-current-result-v1",
+    state: published ? "published" : "publication_not_observed",
+    publishedAt: null,
+    readReadiness: "unproven",
+    originalTracking: {
+      state: "unpublished",
+      reasonCode: "publication_not_observed",
+      publicationDeadlineAt: new Date(deadline).toISOString(),
+      finishedAt: row.finished_at,
+    },
+  };
+}
+
 // ── the report a reader gets ────────────────────────────────────────────
 
 /**
@@ -428,7 +502,13 @@ function evidenceRef(runs: readonly CollectorRunTrail[]): string {
  */
 export async function collectorExecution(
   store: CommandStore,
-  operation: { operationId: string; kind: string; status: string; acceptedAt: string },
+  operation: {
+    operationId: string;
+    kind: string;
+    status: string;
+    acceptedAt: string;
+    failureCode?: string | null;
+  },
 ): Promise<CollectorExecutionReport | null> {
   const action = collectorActionForKind(operation.kind);
   if (action === null) return null;
@@ -457,7 +537,12 @@ export async function collectorExecution(
     row.terminal_source === null || runIds.length === 0
       ? []
       : await collectorRunTrails(store, row.terminal_source, runIds);
+  const current =
+    action === "collect"
+      ? currentResult(row, operation.status, operation.failureCode, runs)
+      : undefined;
   return {
+    ...(current === undefined ? {} : { currentResult: current }),
     action,
     state: row.state,
     connectionId: row.connection_id,
