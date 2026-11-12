@@ -69,7 +69,6 @@ cover open-start JSON/CSV with end-date rejection, and Processor tests pin the
 Sony-only metadata boundary. All tests use synthetic data; deployment and
 production ingestion are not claimed.
 
-
 ## Amendment 2026-11-11: observed encoding and retained row order
 
 Read-only owner-browser checks for [1295](https://github.com/risu729/kogane/issues/1295)
@@ -91,7 +90,6 @@ as the Processor does. Synthetic parser/collector and native read-model cases
 cover the mislabeled bytes, refusals, original row locators and final same-day
 balance. No deployment or successful scheduled run is claimed.
 
-
 Same-day latest-balance ties prefer the complete official CSV to JSON. A JSON
 page can finish publication after the CSV or split a day across pages, so
 reversing each JSON page cannot establish a global transaction order. The
@@ -100,7 +98,6 @@ JSON-only evidence keeps its previous behavior. Synthetic regressions publish
 same-day JSON across pages before and after the CSV, preserve monthly CSV
 behavior, and compare the amended query to frozen SQL on a scaled random store
 with unrelated-source, JSON-only and older-CSV controls and unchanged plans.
-
 
 For Sony history only, same-day ties first select the newer capture cohort
 (`fetch_run.started_at`, then its run id), then prefer CSV within that cohort.
