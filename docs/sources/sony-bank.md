@@ -678,7 +678,6 @@ Resume implementation when a held contract provides an observed schema; first
 resolve the foreign-time selection boundary. The existing movement collector
 is unchanged, and transfers into or out of deposits are not classified as income.
 
-
 ## 2026-11-11: retained history row order and CSV encoding
 
 Read-only owner-browser observation at `/pages/ea/eaba0600/`, with the start
@@ -707,7 +706,6 @@ balance insertion ties select the final transaction. Closed monthly-window
 parsing keeps its existing order. Scheduled production completion is not
 established by this read-only observation or the synthetic regressions.
 
-
 Same-day latest-balance ties prefer the complete official CSV to JSON. A JSON
 page can finish publication after the CSV or split a day across pages, so
 reversing each JSON page cannot establish a global transaction order. The
@@ -716,7 +714,6 @@ JSON-only evidence keeps its previous behavior. Synthetic regressions publish
 same-day JSON across pages before and after the CSV, preserve monthly CSV
 behavior, and compare the amended query to frozen SQL on a scaled random store
 with unrelated-source, JSON-only and older-CSV controls and unchanged plans.
-
 
 For Sony history only, same-day ties first select the newer capture cohort
 (`fetch_run.started_at`, then its run id), then prefer CSV within that cohort.
