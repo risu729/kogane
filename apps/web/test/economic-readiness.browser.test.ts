@@ -28,7 +28,7 @@ function detail(id: number): ObservationDetail {
       parse_status: "ok",
       error: null,
       warnings: { list: [], raw: "[]", parsed: true },
-      superseded_by_parse_run_id: id === 1 ? 8 : null,
+      superseded_by_parse_run_id: id === 1 || (id >= 101 && id <= 104) ? 8 : null,
       artifact_id: 1,
       dataset: "synthetic",
       url: null,
@@ -159,17 +159,58 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
       await page.close();
     });
   test("unavailable, refused, malformed and unrelated responses fail locally", async () => {
-    for (const failure of ["unavailable", "refused", "malformed", "mismatch"] as const) {
-      mode = failure;
-      const page = await open();
-      await panel(page).getByRole("button").click();
-      await panel(page)
-        .getByText("新規作成の条件を取得できませんでした。", { exact: false })
-        .waitFor();
-      expect(await panel(page).innerText()).not.toContain("識別条件を満たしています");
-      expect(await page.getByRole("link", { name: "この記録の原本を開く ↗" }).count()).toBe(1);
-      expect(await page.locator("main").innerText()).not.toContain("private response");
-      if (failure === "unavailable") await screenshot(page, "readiness-unavailable-1280");
+    const failures = [
+      ["unavailable", "データを取得できませんでした。時間をおいて再試行してください。"],
+      ["refused", "このデータを表示する権限がありません。接続先のアクセス権を確認してください。"],
+      ["malformed", "受信したデータの形式が対応していません。接続先を確認してください。"],
+      ["mismatch", "別の記録の応答を受信しました。この記録の判定は表示できません。"],
+    ] as const;
+    const page = await open(101);
+    try {
+      for (const [index, [failure, message]] of failures.entries()) {
+        const id = 101 + index;
+        mode = failure;
+        if (index > 0)
+          await page.evaluate((observationId) => {
+            history.pushState(null, "", `/observations/transaction/${observationId}`);
+            dispatchEvent(new PopStateEvent("popstate"));
+          }, id);
+        await page.getByRole("heading", { name: `取引の詳細 #${id}`, exact: true }).waitFor();
+        const diagnostic = panel(page);
+        const optIn = diagnostic.getByRole("button", {
+          name: "新規作成の条件を確認する",
+          exact: true,
+        });
+        await optIn.waitFor();
+        expect(await page.getByText("これは旧解析の記録です", { exact: true }).count()).toBe(1);
+        const before = await diagnostic.innerText();
+        expect(before).not.toContain("新規作成の条件を取得できませんでした。");
+        expect(before).not.toContain("記録の識別状態:");
+        expect(before).not.toContain(
+          "この機能から新しい計算用取引を作成することは、まだできません。",
+        );
+        expect(requests).toHaveLength(index);
+        const rowRequests = () =>
+          requests.filter(
+            (url) =>
+              url.searchParams.get("family") === "bank-movement" &&
+              url.searchParams.get("observationId") === String(id) &&
+              url.searchParams.get("parseRunId") === "7",
+          );
+        expect(rowRequests()).toHaveLength(0);
+        await optIn.click();
+        await diagnostic
+          .getByText("新規作成の条件を取得できませんでした。", { exact: false })
+          .waitFor();
+        await diagnostic.getByText(message, { exact: true }).waitFor();
+        expect(requests).toHaveLength(index + 1);
+        expect(rowRequests()).toHaveLength(1);
+        expect(await diagnostic.innerText()).not.toContain("識別条件を満たしています");
+        expect(await page.getByRole("link", { name: "この記録の原本を開く ↗" }).count()).toBe(1);
+        expect(await page.locator("main").innerText()).not.toContain("private response");
+        if (failure === "unavailable") await screenshot(page, "readiness-unavailable-1280");
+      }
+    } finally {
       await page.close();
     }
   });
