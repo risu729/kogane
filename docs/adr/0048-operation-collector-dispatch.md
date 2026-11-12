@@ -19,6 +19,9 @@
 - Amended: 2026-11-08, St George and SBI VC enabled
   ([below](#amendment-2026-11-08-st-george-and-sbi-vc-enabled);
   accepted, #1189)
+- Amended: 2026-11-12, retryable registration visibility
+  ([below](#amendment-2026-11-12-retryable-registration-visibility);
+  proposed, #1270)
 
 ## Context
 
@@ -727,3 +730,45 @@ change that records its result removes `prestia-bank` until the cause is fixed.
   `scripts/resource-ledger.test.ts`.
 - The first request's terminal state through `kogane.ops.operation.get`,
   recorded in [ops-api.md](../ops-api.md#enabling-collector-execution-adr-0048).
+
+## Amendment 2026-11-12: Retryable registration visibility
+
+Status: proposed (accepted when its pull request merges).
+
+### Context
+
+The first PRESTIA run recorded a `registered` stage with state `retryable` and
+code `inactive_ingest_route`. Its production ingest route was missing; the
+route was added with owner approval on 2026-11-11. The existing operation
+trail read the run as `registering`, and the operation's `registered` stage
+remained `pending` with zero attempts and no code. The route repair does not
+prove that the stored run has since registered or published (#1270).
+
+### Decision
+
+The CORE trail selects the registered revision of each run when present,
+otherwise the newest revision. It reads that revision's latest `registered`
+stage and counts its stored stage rows. A retryable refusal is reported as
+`retryable` with its closed failure code, attempt count and latest recorded
+time in the run trail. The operation's `registered` stage derives the same
+facts at read time while the request remains open; the publication tracker
+also records a retryable verdict when it sees one. A later registered run
+outranks historical retryable refusals. Malformed legacy failure text becomes
+`unclassified`.
+
+### Consequences
+
+- A retryable registration remains unsettled. It cannot by itself publish or
+  block the operation, and the collection scan's retry interval is unchanged.
+- The operation and run trail expose only counts, timestamps and closed codes;
+  no provider text, object key or amount is returned.
+- This read-side change neither re-registers the stored PRESTIA terminal nor
+  satisfies its production publication gate.
+
+### Verification
+
+- `packages/application/test/collector-trail.test.ts` covers the latest
+  retryable stage, multiple attempts, the operation receipt, registered
+  revision precedence, a blocked run and a missing run.
+- Hosted CI and independent review are required before this amendment is
+  accepted.
