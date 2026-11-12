@@ -275,6 +275,7 @@ test("the query context pins the changed B interpretation in both manifest layer
     eventId: "ev-legacy",
     revision: 2,
     state: "unknown",
+    unknownReason: "conflicting_evidence",
     legs: [],
     knownAt: "2026-04-02T00:00:00.000Z",
     writerRelease: SETTLEMENT_RELEASE,
