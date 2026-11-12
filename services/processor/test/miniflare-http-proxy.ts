@@ -11,6 +11,7 @@
 // Workers and global fetch are untouched. Like the synchronous proxy guard,
 // this replaces the CommonJS module object Miniflare reads, before test files
 // run; Bun's mock.module does not replace its built-in CommonJS `undici`.
+import "./miniflare-sync-worker.ts";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 

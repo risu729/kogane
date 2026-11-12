@@ -130,6 +130,34 @@ This restores Miniflare's transport contract without retries or changed test
 deadlines; the exact socket-close race behind the observed CI `ECONNRESET`
 remains inferred. The change affects the test process only.
 
+The synchronous fetch helper is a separate bootstrap boundary. The test-only
+`services/processor/test/miniflare-sync-worker.ts` constructor guard selects
+the same locked npm Undici entry inside the actual Miniflare eval Worker;
+changing the parent's module object alone does not change that Worker realm.
+
+Decision recorded 2026-11-12 12:28 UTC, tracked in
+[issue 1337](https://github.com/risu729/kogane/issues/1337): guard only the helper
+whose Miniflare entry path, eval/workerData/MessagePort/transfer shape and full
+script SHA-256 match the reviewed installed payload. Replace its single known
+bare Undici selection with an absolute entry resolved from Miniflare's own
+locked dependency. Preserve the original constructor, subclass target,
+options, ports, events, protocol, errors and disposal. Other Workers pass
+through unchanged; a changed known Miniflare helper fails explicitly pending
+compatibility review. No regular-expression source rewrite, dependency
+change, retry or deadline adjustment is involved.
+
+Before this correction, a single probe of the genuine helper on the pinned
+Bun/Miniflare versions observed a guarded parent but different fetch and Pool
+identities in the helper; that Pool had no dispatch method. A synthetic D1
+query succeeded and the helper exited through normal disposal. The new
+regression observes the actual helper's captured functions, checks supplied
+Pool dispatch for each protocol request and verifies real DB/READ/R2 results,
+error propagation and termination. It also checks unrelated constructors and
+compatibility refusal. These are transport-contract checks. They do not
+establish the cause of historical ECONNRESET failures or eliminate every
+possible socket failure. The D1 native-stub lifetime guard remains a separate
+concern.
+
 D1 bindings obtained through `getD1Database` also pass through
 `services/processor/test/miniflare-d1-lifetime.ts`. The wrapper retains the
 native receiver, method and argument references until each call settles,
