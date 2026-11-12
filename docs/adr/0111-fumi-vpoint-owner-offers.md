@@ -1,6 +1,6 @@
 # ADR 0111: Accept requested V Point OTPs through a private durable owner offer
 
-- Status: proposed
+- Status: accepted ([PR #1317](https://github.com/risu729/kogane/pull/1317))
 - Date: 2026-11-11 UTC
 
 ## Context
