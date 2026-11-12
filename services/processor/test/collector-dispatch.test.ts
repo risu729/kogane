@@ -403,7 +403,7 @@ test("a started execution is claimed once even when two ticks race", async () =>
     ]),
   ).toThrow(/only moves forward/u);
   expect(() =>
-    w.db.run("DELETE FROM ops_collector_dispatches WHERE operation_id=?", operationId),
+    w.db.run("DELETE FROM ops_collector_dispatches WHERE operation_id=?", [operationId]),
   ).toThrow(/never deleted/u);
 });
 
