@@ -57,6 +57,17 @@ fixed toolchain:
   `--dry-run` through workspace mise tasks in both local checks and CI.
   Production uploads retain the pinned `risu729/wrangler-deploy-action`.
 
+An explicit engine-only compatibility probe can use Miniflare's documented
+`MINIFLARE_WORKERD_PATH` selection without changing package pins. Scope it to
+the single local probe process, identify the selected binary by realpath,
+SHA-256 and `--version`, and retain those records beside the output. The
+canonical probe's `workerd` field identifies the packaged dependency, even
+when this variable selects another executable. Its script-relative imports
+choose the migrations and SQL from the checkout containing the script; record
+that source separately. Such a probe does not establish a coherent dependency
+upgrade or replace its required CI. [ADR 0110's dated verification](adr/0110-workers-cte-regression.md#released-fix-and-explicit-engine-probe-2026-11-12)
+records the fixed engine, exact source and observed local result.
+
 [Development checks and CI](ci.md) describes the native monorepo task names,
 the shared hk check and how to add a workspace; `infra/dependency-resolution.md` records
 how the single lockfile resolves.

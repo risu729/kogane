@@ -113,11 +113,13 @@ claim to satisfy those acceptance criteria. No fixed workerd release was
 published when the npm registry was checked on 2026-11-11: latest workerd was
 1.20261110.1, also used by Wrangler 4.160.1 and the Vitest plugin 1.8.0.
 
-An upstream release can become a normal candidate immediately. Before claiming
-it fixes this issue, run the probe below, all touched workspace checks and the
-complete required local and hosted checks on the exact candidate head. Keep the
-packages version-coupled. Remove the temporary exclusions once their reason is
-obsolete, with evidence in that pull request.
+A coherent upstream package release can become a normal candidate immediately.
+The fixed engine and explicit local probe recorded below do not establish such
+a release. Before claiming the upgrade fixes this issue, run the probe, all
+touched workspace checks and the complete required local and hosted checks on
+the exact candidate head. Keep the packages version-coupled. Remove the
+temporary exclusions once their reason is obsolete, with evidence in that pull
+request.
 
 ## Verification
 
@@ -142,3 +144,58 @@ The candidate directory must already contain Wrangler and its declared
 runtime dependencies. A successful empty-store probe proves runtime parsing
 and migration compatibility, not financial correctness or production readiness;
 the existing populated settlement, purchases and Worker tests remain required.
+
+### Released fix and explicit engine probe, 2026-11-12
+
+[Upstream workerd PR 8347](https://github.com/cloudflare/workerd/pull/8347)
+merged the [SQLite CTE backout](https://github.com/cloudflare/workerd/commit/0d01fe9f6850d038d80e6debb54c683a51a9ac65)
+at 2026-11-10 22:04:10 UTC. It removes the cursor-count substitution for nesting
+depth while retaining the actual nesting check. The
+[v1.20261111.1 release notes](https://github.com/cloudflare/workerd/releases/tag/v1.20261111.1)
+include the fix; the distributed
+[v1.20261112.1 engine](https://github.com/cloudflare/workerd/releases/tag/v1.20261112.1)
+retains its [SQLite patch](https://github.com/cloudflare/workerd/blob/v1.20261112.1/patches/sqlite/0006-cte-nesting-depth.patch).
+
+Registry checks at 2026-11-12 01:39–01:41 UTC found Wrangler 4.160.1, the Vitest
+plugin 1.8.0 and cf 1.0.0-beta.30 still coupled to Miniflare
+5.20261110.1-beta and workerd 1.20261110.1. Miniflare's relevant `beta` tag
+remained 5.20261110.1-beta. A fixed engine is now published, but a coherent
+released wrapper upgrade and its required hosted CI remain unverified.
+
+An explicit, ephemeral local engine probe ran once at 2026-11-12
+02:06:49–02:06:55 UTC, after the separate full local check graph ended. It used
+the existing Wrangler 4.160.1/Miniflare 5.20261110.1-beta candidate with
+`MINIFLARE_WORKERD_PATH` selecting the official
+[@cloudflare/workerd-linux-64 1.20261112.1 tarball](https://registry.npmjs.org/@cloudflare%2fworkerd-linux-64/1.20261112.1).
+Its registry SHA-512 integrity was verified before extraction. No package,
+lockfile or installed dependency was changed. This selection follows the
+[Miniflare release documentation](https://github.com/cloudflare/workers-sdk/blob/wrangler@4.160.1/packages/miniflare/README.md#local-workerd).
+
+The unchanged probe from [the prior implementation head](https://github.com/risu729/kogane/commit/90f73fed33b36d2fe5f81e510d631c031fc80a34)
+ran in an isolated validation checkout. All 94 raw CORE migration files from
+`0001_initial.sql` through `0102_vpass_authori_transition_policy.sql`, the
+migration helper and the keyed-read/readiness SQL sources were byte-identical
+to [published source 6232be0a](https://github.com/risu729/kogane/commit/6232be0a0ed6b7a7018a8f6ca052d832019746b2).
+All five flat-reference cases (90, 98, 99, 100 and 110), all 94 migration files,
+and the readiness, settlement-review and settlement-page reads passed; exit
+status was zero with no timeout.
+
+The effective executable reported `workerd 2026-11-12`. Its realpath and
+device/inode matched the observed workerd child process. The probe's legacy
+`workerd` field still reports the **packaged** version 1.20261110.1; it does not
+identify the selected executable. Separate preflight/completion records preserve
+that distinction. SHA-256 identities of the retained local evidence are:
+
+| Item                                             | SHA-256                                                            |
+| ------------------------------------------------ | ------------------------------------------------------------------ |
+| Effective executable                             | `2fe2593698b848b472575833ecb1432d793c82639910c3e2f499a4d65a4a75c0` |
+| Unchanged probe script                           | `d7e2d928491b202a12a8c48aeb38e5a4526e71595e7e70a1c321f2c58392c53f` |
+| `explicit-engine-probe-core0102-20261112.jsonl`  | `c14fb530097f2651f4adbda2cc09e55d87b221c7c9914640211e923411b823ab` |
+| `effective-runtime-preflight-20261112.json`      | `51e01f925284291a0da2cbf3f429e0ea873e352d8c34a402e7fb5a162c95e393` |
+| `explicit-engine-probe-completion-20261112.json` | `4f079a9bfd1c2e2ac4a85cc572f95ea65e8f2a0d4f5b942c6ee0f67495f7483a` |
+
+This establishes local parsing/migration compatibility for that explicit engine
+selection and source. It is not a declared wrapper combination, populated-store
+financial equivalence, new-stack hosted CI, deployment evidence or a new
+production D1 observation. The known-bad exact-version exclusions remain in
+place, and the issue remains open.
