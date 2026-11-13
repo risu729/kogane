@@ -182,7 +182,7 @@ test("separate mailbox terminals preserve healthy financial publication and neve
     const financial = await env.DB.prepare(
       "SELECT a.id FROM fetch_artifacts a JOIN fetch_runs r ON r.id=a.fetch_run_id WHERE r.source_run_key=? AND a.dataset='foreign-cash-balances'",
     )
-      .bind(`${runId}:terminal-registration-v11`)
+      .bind(`${runId}:terminal-registration-v12`)
       .first<{ id: number }>();
     expect(financial).not.toBeNull();
     await env.DB.prepare(
@@ -211,7 +211,7 @@ test("separate mailbox terminals preserve healthy financial publication and neve
       const document = await env.DB.prepare(
         "SELECT a.id FROM fetch_artifacts a JOIN fetch_runs r ON r.id=a.fetch_run_id WHERE r.source_run_key=? AND a.dataset='delivered-document-pdf'",
       )
-        .bind(`${runId}-mailbox:terminal-registration-v11`)
+        .bind(`${runId}-mailbox:terminal-registration-v12`)
         .first<{ id: number }>();
       expect(document).not.toBeNull();
       await env.DB.prepare(

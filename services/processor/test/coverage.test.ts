@@ -165,6 +165,9 @@ test("the migration chain names every explicit policy and preserves other run-sc
   expect(pinned.map((row) => row.parser_name)).toEqual([
     "moneyforward-detail-balances",
     "myjcb-jpoint-history",
+    "myjcb-statement-document-metadata",
+    "myjcb-statement-document-metadata",
+    "myjcb-statement-document-metadata",
     "prestia-bank-balances",
     "sbi-delivered-document-metadata",
     "sbi-foreign-cash-positions",

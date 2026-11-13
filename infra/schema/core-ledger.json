@@ -1328,6 +1328,17 @@
         }
       ],
       "sha256": "bbdc0321eaf89245bc316c6f99229a24111f4c7a658dba02c48caf3b24f587b3"
+    },
+    {
+      "file": "0101_myjcb_document_unit_eligibility.sql",
+      "statementCount": 1,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "4097cc524cbb682a4b114a37d917dbb1e0ba6de291e8079eff65c0e492467cf5"
     }
   ],
   "tables": [
@@ -22283,7 +22294,8 @@
       "0097_sbi_vc_document_unit_eligibility.sql",
       "0098_sbi_shinsei_savings_activity.sql",
       "0099_sbi_document_unit_eligibility.sql",
-      "0100_sbi_supplemental_unit_eligibility.sql"
+      "0100_sbi_supplemental_unit_eligibility.sql",
+      "0101_myjcb_document_unit_eligibility.sql"
     ],
     "schemaSha256": "1783ff9f980ab8cac79d6dfce7fc4f4d08db3dede5d457e02daa7bc0af3d9211"
   }
