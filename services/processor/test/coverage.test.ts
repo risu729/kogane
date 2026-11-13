@@ -139,7 +139,7 @@ test("the migration chain names every explicit policy and preserves other run-sc
       parser_name: "sbi-income-payments",
       dataset: "income-payments",
       policy_id: "coverage-v1",
-      unit_scope: "run",
+      unit_scope: "unit",
       snapshot_selection: 1,
     },
     {
@@ -147,7 +147,7 @@ test("the migration chain names every explicit policy and preserves other run-sc
       parser_name: "sbi-realised-gains",
       dataset: "realised-gains",
       policy_id: "coverage-v1",
-      unit_scope: "run",
+      unit_scope: "unit",
       snapshot_selection: 1,
     },
   ]);

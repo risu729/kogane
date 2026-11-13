@@ -246,6 +246,19 @@ export interface SnapshotCteOptions {
 
 const CUTOFF_PARAM = /^\?[1-9][0-9]{0,2}$/u;
 
+/** Only witnessed legacy unit names share the successor snapshot partition.
+ * Keep raw keys in selected rows and claims; evidence is never rewritten. */
+function snapshotPartitionUnitSql(): string {
+  return `CASE
+    WHEN source_id = 'sbi-securities' AND fetch_unit_key = 'domestic'
+      AND parser_name = 'sbi-income-payments' AND dataset = 'income-payments'
+      THEN 'income-history-income'
+    WHEN source_id = 'sbi-securities' AND fetch_unit_key = 'domestic'
+      AND parser_name = 'sbi-realised-gains' AND dataset = 'realised-gains'
+      THEN 'income-history-gains'
+    ELSE fetch_unit_key END`;
+}
+
 export function snapshotCtes(
   relations: SnapshotRelations,
   options: SnapshotCteOptions = {},
@@ -314,7 +327,7 @@ export function snapshotCtes(
   ) THEN 1 ELSE 0 END)${snapshotCutoff}
 ), ${p}ranked_snapshots AS (
   SELECT *, ROW_NUMBER() OVER (
-    PARTITION BY source_id, parser_name, dataset, fetch_unit_key
+    PARTITION BY source_id, parser_name, dataset, ${snapshotPartitionUnitSql()}
     ORDER BY fetched_at DESC, artifact_id DESC
   ) AS snapshot_rank FROM ${p}eligible_snapshots
 ), ${p}current_snapshots AS (

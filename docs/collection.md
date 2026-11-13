@@ -1636,3 +1636,15 @@ format change is needed for that step.
 The scheduled Sony session also captures the provider-stated current/previous-year annual FX gains and after-tax interest, with the complete detail CSV retained privately. These are bounded annual valuation observations, never recomputed gains or additional cash income. Year-scoped snapshot units preserve older collected years and replace repeated annual revisions. Core history, realised evidence and foreign-document evidence have separate terminal runs with one acquisition-session reference; every persisted run ID is returned.
 
 The observed five-year foreign-document query archives its offered PDFs by content hash in private DATA. Full retention and pagination beyond ten documents remain unconfirmed, and fund document access is unavailable for the observed account. The document run remains partial; no unsupported list is treated as empty. See [Sony source evidence](sources/sony-bank.md) and [ADR 0100](adr/0100-sony-realised-gains-documents.md).
+
+### SBI supplementary publication boundaries
+
+SBI financial collection keeps `domestic` and `foreign` as dependent core units.
+Retained yen cash, retained foreign cash, income, realised gains and weekly
+assets have independent units containing all of their retained inputs and
+outputs. A refused supplement keeps the overall run partial while complete
+siblings remain eligible. A partial core still blocks its own dependent
+datasets. The document mailbox remains a separate terminal. Migration 0100
+preserves operator policies and snapshot membership; the exact legacy income/
+gains `domestic` partition aliases its successor only during snapshot ranking.
+See [ADR 0109](adr/0109-sbi-supplemental-unit-eligibility.md).

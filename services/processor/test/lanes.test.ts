@@ -45,10 +45,10 @@ const job = (id: number) =>
     .bind(id)
     .first<{ lane: string; status: string; replay_plan_id: number | null }>();
 
-test("harness applies every Layer B migration in order through 0099", () => {
+test("harness applies every Layer B migration in order through 0100", () => {
   const names = layerBMigrations();
   expect(names[0]).toBe("0017_observation_pipeline.sql");
-  expect(names.at(-1)).toBe("0099_sbi_document_unit_eligibility.sql");
+  expect(names.at(-1)).toBe("0100_sbi_supplemental_unit_eligibility.sql");
   expect(names).toEqual([
     "0017_observation_pipeline.sql",
     "0018_identity.sql",
@@ -125,6 +125,7 @@ test("harness applies every Layer B migration in order through 0099", () => {
     "0097_sbi_vc_document_unit_eligibility.sql",
     "0098_sbi_shinsei_savings_activity.sql",
     "0099_sbi_document_unit_eligibility.sql",
+    "0100_sbi_supplemental_unit_eligibility.sql",
   ]);
   expect([...names].sort()).toEqual(names);
 });

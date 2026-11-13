@@ -1026,3 +1026,95 @@ The source `execution` capability remains partial for
 parameter combinations, populated leverage rows and fees, complete retained
 pagination, and a deployed scheduled run with per-kind count reconciliation
 remain unverified. This change performs no hosted experiment or production run.
+
+## 21. Trader balance-history quantities (2026-11-11)
+
+Normal authenticated `販売所：現物` → `残高履歴` opened the balance-history
+panel. Its read-only date input uses placeholder `基準日`; `検索` sends the read.
+The visible table headers are `基準日`, `暗号資産/通貨`, `残高`.
+
+The observed transport is Socket.IO event `getQuarterCashBalance`, with
+`meta: {}` and body fields `baseDate: string`, `secureKey: string`. The request
+date uses eight ASCII digits, `YYYYMMDD`. The acknowledgement is an array
+envelope with string `meta.status` and session-only `meta.secureKey`; its
+`body.list` contains objects with exactly these fields:
+
+| Field         | Observed shape                                                    |
+| ------------- | ----------------------------------------------------------------- |
+| `baseDate`    | Eight ASCII digits, `YYYYMMDD`; all inspected rows share one date |
+| `currency`    | String                                                            |
+| `cashbalance` | Signed or unsigned exact decimal string                           |
+
+A nonempty response and the corresponding table were observed. No provider
+date, quantity, account identity or private count is retained here. There is
+no price or converted-valuation field. These are dated currency quantities,
+not proven valuation points; no multiplication, conversion or zero balance is
+inferred for missing rows.
+
+The normal datepicker exposes an editable popup input and year/month
+navigation. The inspected input has no `min`/`max` attributes and the visible
+month has no disabled dates. The official public component formats
+`YYYYMMDD` and supplies no explicit datepicker bounds. These UI facts do not
+establish provider retention or that each selectable date has retained records.
+No retention boundary, complete daily walk or simple-mode HTTP mapping was
+observed. The HTTP collector does not add this Socket.IO event to its allowlist.
+Balance/valuation history remains uncollected for
+[#1249](https://github.com/risu729/kogane/issues/1249).
+
+## 22. Trader daily-report list and browser PDF navigation (2026-11-11)
+
+Normal top-right menu → `アカウント情報` → `報告書` exposes `日次報告書`,
+`月次報告書`, `年間損益報告書`, `損益計算用データ`. Selecting daily reports
+sent Socket.IO event `tradeReportList` with request-local `secureKey` and:
+
+```json
+{
+  "statementType": "DAY",
+  "getUnreadReportOnly": "false",
+  "fromBasisYmdDate": "",
+  "toBasisYmdDate": "",
+  "pageSize": "20",
+  "pageNumber": "0"
+}
+```
+
+The nonempty list has string `pageNumber`, `totalSize`, `totalNumOfPages`,
+and array `list`. Each inspected row has string `readStatus`,
+`readStatusString`, `statementType`, `reportTitle`, `basisYmdDate`. Visible
+headers are `取引日`, `閲覧状態`, `表示形式`. Private report dates and counts
+are omitted. This does not establish complete pagination or retention.
+
+Clicking an offered `PDF` opened a separate browser window at:
+
+```text
+/cccmdipresen/interconnect/DAILY_TRADE_REPORT_CC_[YYYYMMDD].pdf
+```
+
+The observed URL query keys are `secureKey`, `event`, `basisYmdDate`, `type`,
+`displayDate`. Public parameter values are `event=dailyTradeReport` and
+`type=DAILY`; both date fields use eight ASCII digits. The session key and
+actual report date are not persisted. The official public bundle constructs
+this URL and calls `window.open`, consistent with normal GET navigation.
+This observed browser navigation is not an observed HTTP gateway event.
+
+The loaded browser frame reports MIME `application/pdf` through
+`Page.getResourceTree`. Its opening request's HTTP status and headers were
+not captured: the child-tab network buffer did not retain them, and a normal
+reload did not recover them. Browser resource-content retrieval said the
+resource was not cached, so no byte signature or EOF was verified and no
+original was archived by this observation.
+
+One ordinary download of that exact observed URL outside the browser, without
+browser cookies, returned HTTP 403 HTML. This is a separate unauthenticated
+result; it neither contradicts the loaded browser PDF frame nor diagnoses the
+refusal or scheduled-collector compatibility. No cookies were extracted, no
+retry was made and no speculative gateway event was called.
+
+The earlier section 18 limit on daily reports meant that their read route had
+not yet been observed at that date. The present observation establishes trader
+list/navigation shapes only. The collector still archives only the implemented
+monthly PDF and P&L ZIP evidence. Daily-report native bytes, authenticated
+collector transport, full retention, annual PDF downloads, valuation semantics
+and a scheduled acceptance run remain unverified. Document capability remains
+partial; valuation history remains uncollected. This observation changes no
+runtime event allowlist, parser, publication policy or provider setting.
