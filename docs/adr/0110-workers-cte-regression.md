@@ -31,6 +31,7 @@ uses the unchanged repository migration files, beginning with `0001_initial.sql`
 | 4.159.0  | 5.20261109.0-beta | 1.20261109.1 | Fails at 0045, statement 13                            |
 | 4.160.0  | 5.20261110.0-beta | 1.20261110.1 | Fails at 0045, statement 13                            |
 | 4.160.1  | 5.20261110.1-beta | 1.20261110.1 | Fails at 0045, statement 13                            |
+| 4.161.0  | 5.20261110.2-beta | 1.20261110.1 | Fails at 0045, statement 13                            |
 
 The exact first failure is in
 `packages/storage-d1/migrations/core/0045_expand_card_settlement_commands.sql`:
@@ -99,8 +100,8 @@ These are not semver ranges. Lockfile maintenance cannot select a newer
 workerd on this path while those package versions remain pinned.
 
 The Renovate rules exclude only the known affected Wrangler releases 4.159.0,
-4.160.0 and 4.160.1 and the coupled Vitest plugin releases 1.6.1, 1.7.0 and
-1.8.0. They use the documented
+4.160.0, 4.160.1 and 4.161.0 and the coupled Vitest plugin releases 1.6.1,
+1.7.0, 1.8.0 and 1.8.1. They use the documented
 [negated allowedVersions syntax](https://docs.renovatebot.com/configuration-options/#packageRules.allowedVersions).
 Future releases remain eligible: this is neither an indefinite upper version
 bound nor a disabled dependency group. Normal CI remains the acceptance gate.
@@ -199,3 +200,14 @@ selection and source. It is not a declared wrapper combination, populated-store
 financial equivalence, new-stack hosted CI, deployment evidence or a new
 production D1 observation. The known-bad exact-version exclusions remain in
 place, and the issue remains open.
+
+### Wrangler 4.161.0, 2026-11-13
+
+Wrangler 4.161.0 and the Vitest plugin 1.8.1 (published 2026-11-12) still
+require Miniflare 5.20261110.2-beta and workerd 1.20261110.1. The unchanged
+`runtime-compatibility` probe, run once locally on 2026-11-13 against an
+isolated Wrangler 4.161.0 install, failed the flat 100 and 110 reference cases
+and stopped at `0045_expand_card_settlement_commands.sql`, statement 13, with
+the same error; the reads were skipped. The pinned 4.158.0 stack passed the
+same probe on the same checkout. Both releases are added to the exclusions so
+the dependency pull request does not keep proposing a known-failing runtime.

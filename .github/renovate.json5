@@ -28,12 +28,12 @@
       // ADR 0110: these releases bundle the upstream CTE expansion regression.
       // Exclude exact observed releases; future fixes still enter normal CI.
       matchPackageNames: ["wrangler"],
-      allowedVersions: "!/^4\\.(159\\.0|160\\.[01])$/",
+      allowedVersions: "!/^4\\.(159\\.0|160\\.[01]|161\\.0)$/",
     },
     {
       // These Vitest releases depend on the same affected Wrangler runtimes.
       matchPackageNames: ["@cloudflare/vitest-plugin"],
-      allowedVersions: "!/^1\\.(6\\.1|7\\.0|8\\.0)$/",
+      allowedVersions: "!/^1\\.(6\\.1|7\\.0|8\\.[01])$/",
     },
     {
       // The preset groups "typescript" already; keep the type packages with it.
