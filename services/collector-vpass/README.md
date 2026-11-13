@@ -30,6 +30,12 @@ a successful card snapshot. The `credit/authori.json` and `credit/revo.json`
 artifacts register under v8 and publish through `vpass-credit-snapshot`;
 the existing card ordinal plus durable v2 binding shape is reused.
 
+Reader 1.0.2 admits the observed normal Authori module transition
+`vp.member.pages.info` only for `credit/authori.json`, alongside its prior
+empty transition. Revo stays empty-only; unsuccessful sessions and unknown
+transitions still fail closed. Migration 0102 advances only the complete
+shipped default snapshot policy and preserves operator alternatives.
+
 Authori integer values represent thousands of JPY, checked against the
 display in 万円; they are explicitly reported at 1,000 JPY precision.
 Separate revolving `revoZan`/`hensaiAmount` are signed reported yen.

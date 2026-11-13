@@ -116,3 +116,39 @@ Exact installment debt finer than 1,000 JPY was not observed. The catalogue
 therefore keeps Vpass balance coverage partial under #1256. No bank balance,
 canonical liability, asset total or financial action is established by these
 snapshots.
+
+## 2026-11-12: The normal Authori module transition
+
+A normal reload of the existing authenticated Authori read view rendered its
+available-credit heading, logout control and table. No login, credential,
+security-code or financial action was entered. The final Authori API response
+was HTTP 200 JSON, with a successful result code, true `loginFlg` and the
+expected `AuthoriShokaiDisplayServiceBean` content. Its `transitTo` was the
+normal public module identity, not an empty string.
+
+The view's loaded public `/memx/authori/shokai/js/widget/info.js` declares
+`vp.member.pages.info` and initializes with `WebApiConst.API.VC0403001_RS0003`.
+The loaded `/app/memx/js/widget/WebApiConst.js` maps that constant to
+`/memapi/jaxrs/authori/authori_shokai/v1`. The view's `js/main.js` accepts the
+`info` hash and initially loads the dummy widget, whose initial calls match
+the sequence above. An in-memory comparison of the final successful response's
+transition against that exact public module returned true. No raw transition,
+body, session value, identifier or financial value was retained.
+
+Read-only operational metadata found Authori parser rejections alongside
+successful revolving publication from the first scheduled credit captures.
+A bounded server-side projection of one previously failed stored Authori
+artifact returned only closed codes, booleans, known key names/types and
+counts. It matched the same public module, successful result code and true
+login flag. The 1.0.1 parser's first failure was its empty-only transition
+guard. Excluding that guard only for diagnosis left that artifact's existing
+content/type/display comparisons satisfied. This identifies one actual stored
+failure; it does not prove the inner reason of every other failed artifact.
+
+Reader 1.0.2 accepts exactly the empty transition or `vp.member.pages.info`
+for `credit/authori.json`. The empty transition remains supported for prior
+accepted captures. `credit/revo.json` remains empty-only. Unknown transitions,
+false login flags, unsuccessful result codes and malformed financial content
+remain rejected. This compatibility correction adds no new financial meaning,
+precision or provider-data catalogue coverage. Production publication after
+release remains a separate verification step.

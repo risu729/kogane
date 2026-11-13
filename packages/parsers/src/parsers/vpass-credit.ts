@@ -38,7 +38,10 @@ function displayRaw(value: unknown): bigint {
   const magnitude = BigInt(match[2]!) * 10n + BigInt((match[3] ?? "0")[0] ?? "0");
   return match[1] === "-" ? -magnitude : magnitude;
 }
-function response(bytes: Uint8Array): Record<string, unknown> {
+function response(
+  bytes: Uint8Array,
+  artifactKey: ArtifactMeta["artifactKey"],
+): Record<string, unknown> {
   const root = strictObject(JSON.parse(decodeUtf8(bytes)), "vpass_credit_envelope_invalid");
   exactKeys(root, ["header", "body"], "vpass_credit_envelope_invalid");
   const header = strictObject(root["header"], "vpass_credit_header_invalid");
@@ -58,7 +61,8 @@ function response(bytes: Uint8Array): Record<string, unknown> {
   if (
     ![0, "0", "0000"].includes(header["resultCode"] as never) ||
     header["loginFlg"] !== true ||
-    header["transitTo"] !== ""
+    (header["transitTo"] !== "" &&
+      !(artifactKey === "credit/authori.json" && header["transitTo"] === "vp.member.pages.info"))
   )
     throw new Error("vpass_credit_session_invalid");
   return strictObject(
@@ -134,7 +138,7 @@ function reported(
 }
 export const vpassCreditSnapshot: Parser = {
   name: "vpass-credit-snapshot",
-  version: "1.0.1",
+  version: "1.0.2",
   accepts: (artifact) =>
     artifact.sourceId === "vpass" &&
     artifact.dataset === "credit-snapshot" &&
@@ -145,7 +149,7 @@ export const vpassCreditSnapshot: Parser = {
       !unitScopeAdmitted(artifact)
     )
       throw new Error("vpass_credit_capture_incomplete");
-    const content = response(bytes);
+    const content = response(bytes, artifact.artifactKey);
     const observations: BalanceObservation[] = [];
     if (artifact.artifactKey === "credit/authori.json") {
       exactKeys(content, ["AuthoriShokaiDisplayServiceBean"], "vpass_credit_content_shape");
