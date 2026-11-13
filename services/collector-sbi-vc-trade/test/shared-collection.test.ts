@@ -39,6 +39,7 @@ const HEALTHY: HealthState = {
   lastReauthSuccessAt: null,
   lastReauthErrorCode: null,
   manualAgreementPendingSince: null,
+  sessionRefreshRequired: false,
 };
 
 function storedArtifact(dataset: string): StoredArtifact {

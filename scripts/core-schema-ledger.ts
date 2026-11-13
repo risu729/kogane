@@ -58,6 +58,10 @@ interface ClassificationEntry {
  * them on purpose.
  */
 export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
+  sbi_mailbox_progress: {
+    classification: "operational-mutable",
+    planRow: "SBI mailbox bounded-run continuation cursor; no evidence or session material",
+  },
   instrument_temporal_acceptances: {
     classification: "core-keep",
     planRow: "append-only temporal identity acceptance journal (ADR 0055)",

@@ -426,7 +426,8 @@ test("sbi-securities: original datasets state their extraction and register", as
   const registered = await registerPlan(plan, 7);
   expect(registered.roles).toEqual(["collector_derived/transformed/source_bytes_not_available"]);
   expect(registered.units).toEqual([
-    { unit_key: "domestic", artifacts: 4, declared: 4 },
+    { unit_key: "cash-history-yen", artifacts: 1, declared: 1 },
+    { unit_key: "domestic", artifacts: 3, declared: 3 },
     { unit_key: "foreign", artifacts: 3, declared: 3 },
   ]);
 });

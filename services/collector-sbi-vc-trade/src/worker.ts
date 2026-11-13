@@ -11,8 +11,9 @@ import {
 import { DurableObject } from "cloudflare:workers";
 import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import { objectKey } from "../../../packages/collection/src/index";
-import { collectSbiVcTrade } from "./collector";
-import { collectSbiVcDocuments } from "./documents";
+import { collectSbiVcTrade, isLocalSbiVcCashflowFailure } from "./collector";
+import { collectSbiVcDocuments, isLocalSbiVcReportFailure } from "./documents";
+import { collectSbiVcLeverageExecutions } from "./leverage-executions";
 import { decryptSession, encryptSession } from "./crypto";
 import { createPasskeySession, parsePasskeyCredential } from "./passkey";
 import { applySessionUpdates, cookieHeader, parseGatewayMeta, parseSession } from "./session";
@@ -66,6 +67,7 @@ const INITIAL_HEALTH: HealthState = {
   lastReauthSuccessAt: null,
   lastReauthErrorCode: null,
   manualAgreementPendingSince: null,
+  sessionRefreshRequired: false,
 };
 export class SbiVcSessionState extends DurableObject<Env> {
   #running: Promise<HealthState> | null = null;
@@ -326,6 +328,22 @@ export class SbiVcSessionState extends DurableObject<Env> {
           units.push({ unitKey: "report-year-range", status: "failed", errorCode });
         }
       }
+      if (classicComplete && liveSession !== undefined) {
+        // Only closed local-data refusals permit new reads after a prior failure.
+        const sessionStopped = failures.some(
+          ({ errorCode }) =>
+            !isLocalSbiVcCashflowFailure(errorCode) && !isLocalSbiVcReportFailure(errorCode),
+        );
+        const leverage = await collectSbiVcLeverageExecutions({
+          sessionStopped,
+          session: liveSession,
+          onSession,
+          onArtifact,
+          diagnostic,
+        });
+        units.push(...leverage.units);
+        failures.push(...leverage.failures);
+      }
       const completedAt = new Date().toISOString();
       const status: CollectionManifest["status"] =
         failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
@@ -417,6 +435,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
         lastReauthSuccessAt: attemptAt,
         lastReauthErrorCode: null,
         manualAgreementPendingSince: null,
+        sessionRefreshRequired: false,
       };
       // New session, new generation — written in the same batch as the session
       // it names, so a failed re-authentication above leaves the previous
@@ -473,6 +492,8 @@ export class SbiVcSessionState extends DurableObject<Env> {
   async #performKeepAlive(signal?: AbortSignal): Promise<HealthState> {
     const attemptAt = new Date().toISOString();
     const previous = await this.getHealth();
+    // After a refusal, wait for session replacement instead of probing during the login cooldown.
+    if (previous.sessionRefreshRequired) return previous;
     let stage = "load_session";
     try {
       const session = await this.loadSession(attemptAt);
@@ -599,6 +620,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
       consecutiveFailures: previous.consecutiveFailures + 1,
       lastErrorCode: errorCode,
     };
+    health.sessionRefreshRequired = shouldReauthenticate(health);
     await this.ctx.storage.put("health", health);
     console.error(
       JSON.stringify({ message: "sbi_vc_keepalive", outcome: "failure", httpStatus, errorCode }),

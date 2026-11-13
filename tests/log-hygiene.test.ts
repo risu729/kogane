@@ -45,6 +45,11 @@ const NOT_SOURCE = /(?:\.d\.ts|\.test\.ts|\.test\.mjs|\.node-test\.mjs)$/u;
  * its entry here, with the reason.
  */
 const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>> = {
+  "services/collector-sbi-securities/src/mailbox-contract.ts": {
+    count: 1,
+    reason:
+      "validates the provider envelope's message field as a bounded string; no exception is read and the text is never retained or logged",
+  },
   "packages/application/src/collection/seal-refusal.ts": {
     count: 3,
     reason: "a D1 trigger refusal's RAISE code is kept only when it is a code-shaped token",
@@ -108,6 +113,11 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     count: 1,
     reason: "a failure's message field, which the collector already sets to its failure code",
   },
+  "services/collector-myjcb/src/credit.ts": {
+    count: 1,
+    reason:
+      "compared only with the exact local myjcb_statement_export_budget_exhausted code; only budget_exhausted or unavailable is retained, and the message is never logged or persisted",
+  },
   "services/collector-sbi-shinsei/src/diagnostics.ts": {
     count: 1,
     reason: "matched against exact runtime phrases; only the mapped closed reason is kept",
@@ -122,6 +132,11 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     count: 1,
     reason:
       "safeError reads once under catch, requires a string, and retains only the closed report codes or bounded HTTP status code",
+  },
+  "services/collector-sbi-vc-trade/src/leverage-executions.ts": {
+    count: 1,
+    reason:
+      "safeError reads once under catch and retains only exact closed codes or a bounded HTTP status code; raw exception text is never serialized",
   },
   "services/collector-sbi-vc-trade/src/worker.ts": {
     count: 2,
