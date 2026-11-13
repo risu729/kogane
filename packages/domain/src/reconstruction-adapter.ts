@@ -52,7 +52,8 @@ import {
 } from "./reconstruction.ts";
 import { validInstantText } from "./time.ts";
 
-export const RECONSTRUCTION_ADAPTER_RELEASE = "reconstruction-adapter-b-v1";
+/** v2 interprets the settlement v2 posting-time contract; manifests must distinguish it. */
+export const RECONSTRUCTION_ADAPTER_RELEASE = "reconstruction-adapter-b-v2";
 /** No producer states family or history coverage yet; pinned so a producer changes the id. */
 export const COVERAGE_PRODUCER_NONE = "coverage-producer-none-v1";
 
@@ -70,7 +71,10 @@ const WRITER_OF_KIND: Partial<Record<EconomicEventKind, ProvisionalWriter>> = {
 };
 export const KNOWN_WRITER_RELEASES: Readonly<Record<ProvisionalWriter, readonly string[]>> = {
   "card-purchase-recognition-v1": [CARD_PURCHASE_WRITER_RELEASE],
-  "card-settlement-review": ["card-statement-settlement-v1:economic-guard-v1"],
+  "card-settlement-review": [
+    "card-statement-settlement-v1:economic-guard-v1",
+    "card-statement-settlement-v2:economic-guard-v1",
+  ],
 };
 
 /** Why the adapter could not hand a revision, or a leg of it, over as stored. */

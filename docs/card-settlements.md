@@ -672,6 +672,18 @@ The event revision's evidence is the statement and bank rows as `SourceFactRef`
 objects (`{kind, id, revision}`); the decisions keep citing their ids. The cash
 leg's subject stays the bare account id the 0044 readers tolerate.
 
+Writer `card-statement-settlement-v2:economic-guard-v1` also records one typed
+`posting` time for future SBI Shinsei acceptances whose cited, admitted
+`sbi-shinsei-top-balances-and-activity` row establishes that provider date.
+The time keeps `local-date`, `Asia/Tokyo` and `provider`, is included in the
+seal content digest and child count, and is written before the seal in the
+same guarded batch. SMBC gains no inferred time; withdrawal revisions have
+zero times. Reconstruction adapter `reconstruction-adapter-b-v2` accepts both
+v1 and v2 seals and pins its changed interpretation in the result identity.
+Old sealed correct matches stay unchanged; the existing correction flow
+cannot restate the same match just to add a posting time
+([ADR 0058 amendment](adr/0058-knowledge-selector-and-reconstruction-adapter.md#amendment-2026-11-12-sbi-shinsei-settlement-posting-dates)).
+
 An accepted decision can be withdrawn through a new approved plan. Withdrawal
 retracts the interpretation, never the bank movement or original evidence.
 Rejected and withdrawn candidates remain in history; a different correspondence

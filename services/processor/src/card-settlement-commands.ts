@@ -22,7 +22,7 @@ import {
   type PreparedWrite,
   type CardSettlementPayload,
 } from "../../../packages/application/src/command/contract.ts";
-import { cardSettlementDebitIdentity } from "../../../packages/application/src/operations/card-settlement-target.ts";
+import { cardSettlementDebitEvidence } from "../../../packages/application/src/operations/card-settlement-target.ts";
 import {
   validCardSettlementFacts,
   cardSettlementEligible,
@@ -34,6 +34,7 @@ import {
   type AliasClass,
   type BookClaim,
   type EconomicClaimRecord,
+  type EventTimeRecord,
 } from "../../../packages/domain/src/economic-contract.ts";
 import { cardSettlementReadinessCtes } from "../../../packages/read-model/src/card-settlement-readiness.ts";
 import { CURRENT_IDENTITY_EPOCH_SQL } from "../../../packages/storage-d1/src/atomic/card-purchase-recognition.ts";
@@ -44,7 +45,7 @@ import {
 } from "../../../packages/storage-d1/src/atomic/economic-commit.ts";
 
 /** The writer release the settlement commands seal their revisions under. */
-export const CARD_SETTLEMENT_WRITER_RELEASE = "card-statement-settlement-v1:economic-guard-v1";
+export const CARD_SETTLEMENT_WRITER_RELEASE = "card-statement-settlement-v2:economic-guard-v1";
 
 interface Row {
   id: string;
@@ -83,15 +84,16 @@ export function cardSettlementCommitGuardSql(accept: boolean): string {
 
 /**
  * The digest of a settlement event revision's content, as its seal states it:
- * the stored fields of the revision, its legs and its claims, nothing else.
+ * the stored fields of the revision, its legs, claims and typed times.
  */
-async function contentDigest(content: {
+export async function cardSettlementContentDigest(content: {
   eventId: string;
   revision: number;
   withdraw: boolean;
   facts: CardSettlementFacts;
   claims: readonly BookClaim[];
   aliasClass: AliasClass | null;
+  times: readonly EventTimeRecord[];
 }): Promise<string> {
   const { facts } = content;
   return canonicalDigest({
@@ -124,6 +126,7 @@ async function contentDigest(content: {
         ],
     claims: content.claims.map((claim) => [claim.book, claim.key]),
     aliasClass: content.aliasClass,
+    times: content.times,
   });
 }
 
@@ -166,12 +169,15 @@ export const cardSettlementMutation: MutationPlanner = async (input) => {
   const key = parseConsumptionKey(row.bank_key);
   let aliasClass: AliasClass | null = null;
   let identityEpoch: string | null = null;
+  const times: EventTimeRecord[] = [];
   if (eventId !== null) {
     if (key === null) return null;
     if (accept) {
-      const identity = await cardSettlementDebitIdentity(store, row.id, facts);
-      if (identity === null || !identity.admitted) return null;
-      aliasClass = identity.aliasClass;
+      const evidence = await cardSettlementDebitEvidence(store, row.id, facts);
+      if (evidence === null || !evidence.identity.admitted) return null;
+      aliasClass = evidence.identity.aliasClass;
+      if (evidence.posting !== null)
+        times.push({ eventId, revision, role: "posting", time: evidence.posting });
     }
     identityEpoch =
       (await store.first<{ identity_epoch: string }>(CURRENT_IDENTITY_EPOCH_SQL, []))
@@ -320,7 +326,7 @@ export const cardSettlementMutation: MutationPlanner = async (input) => {
         planId: plan.planId,
       }),
       claims,
-      times: [],
+      times,
       effects: [],
       seals: [
         {
@@ -330,15 +336,16 @@ export const cardSettlementMutation: MutationPlanner = async (input) => {
           legCount: withdraw ? 0 : 2,
           // The economic_claims row; the accepted decision restates its key.
           claimCount: claims.length,
-          timeCount: 0,
+          timeCount: times.length,
           effectCount: 0,
-          contentDigest: await contentDigest({
+          contentDigest: await cardSettlementContentDigest({
             eventId,
             revision,
             withdraw,
             facts,
             claims: claims.map(({ book, key: claimed }) => ({ book, key: claimed })),
             aliasClass,
+            times,
           }),
           // The plan pins the review and the event head and the reservation
           // re-judges the facts' accounts and owners; the seal pins no

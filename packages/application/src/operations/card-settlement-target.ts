@@ -8,6 +8,7 @@ import {
   type CardSettlementStatus,
 } from "../../../domain/src/card-settlement.ts";
 import { economicEventSubject } from "../../../domain/src/economic-contract.ts";
+import { parseLocalDate, type TemporalValue } from "../../../domain/src/time.ts";
 import {
   humanAdoptedRowIdentity,
   type HumanAdoptedRowIdentity,
@@ -53,7 +54,7 @@ SELECT c.id,c.facts_json,c.status,c.revision,
 FROM chosen JOIN card_settlement_reviews c ON c.id=chosen.id JOIN readiness r ON r.id=c.id`;
 
 /** The candidate's cited bank row, as `humanAdoptedRowIdentity` reads it; ?1 the candidate id. */
-export const CARD_SETTLEMENT_BANK_ROW_SQL = `SELECT a.source_id,p.parser_name,t.source_account,t.external_id,t.extra_json
+export const CARD_SETTLEMENT_BANK_ROW_SQL = `SELECT a.source_id,p.parser_name,t.source_account,t.external_id,t.extra_json,t.as_of
 FROM card_settlement_candidates c JOIN transaction_observations t ON t.id=c.bank_observation_id AND t.parse_run_id=c.bank_parse_run_id
 JOIN parse_runs p ON p.id=t.parse_run_id JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id WHERE c.id=?1`;
 
@@ -63,6 +64,7 @@ interface BankRow {
   source_account: string;
   external_id: string | null;
   extra_json: string;
+  as_of: string | null;
 }
 
 /**
@@ -76,6 +78,15 @@ export async function cardSettlementDebitIdentity(
   proposalId: string,
   facts: CardSettlementFacts,
 ): Promise<HumanAdoptedRowIdentity | null> {
+  return (await cardSettlementDebitEvidence(store, proposalId, facts))?.identity ?? null;
+}
+
+/** The admitted cited row, with only the posting date its exact adapter establishes. */
+export async function cardSettlementDebitEvidence(
+  store: Pick<CommandStore, "first">,
+  proposalId: string,
+  facts: CardSettlementFacts,
+): Promise<{ identity: HumanAdoptedRowIdentity; posting: TemporalValue | null } | null> {
   const row = await store.first<BankRow>(CARD_SETTLEMENT_BANK_ROW_SQL, [proposalId]);
   if (!row || typeof facts.bankDebit.accountId !== "string") return null;
   let extra: unknown = null;
@@ -84,7 +95,7 @@ export async function cardSettlementDebitIdentity(
   } catch {
     extra = null;
   }
-  return humanAdoptedRowIdentity({
+  const identity = humanAdoptedRowIdentity({
     sourceId: row.source_id,
     parserName: row.parser_name,
     sourceAccount: row.source_account,
@@ -92,6 +103,22 @@ export async function cardSettlementDebitIdentity(
     extra,
     accountId: facts.bankDebit.accountId,
   });
+  const occurred = facts.bankDebit.occurred;
+  // ADR 0018: this parser stores the provider's postingDate as a civil date.
+  // Other adapters' dates have no declared posting role. Never invent midnight.
+  const posting =
+    identity.admitted &&
+    row.source_id === "sbi-shinsei-bank" &&
+    row.parser_name === "sbi-shinsei-top-balances-and-activity" &&
+    facts.bankDebit.sourceId === row.source_id &&
+    occurred.kind === "local-date" &&
+    occurred.zone === "Asia/Tokyo" &&
+    occurred.basis === "provider" &&
+    parseLocalDate(occurred.value) !== null &&
+    occurred.value === row.as_of
+      ? { ...occurred }
+      : null;
+  return { identity, posting };
 }
 
 /** The settlement event an acceptance creates, or the one a withdrawal supersedes. */

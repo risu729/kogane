@@ -410,7 +410,10 @@ Limits:
   needs-review is the planners' job (G3); the knowledge selector reports them
   as `identity_changed`, holder kept ([ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md)).
 - Settlement leg subjects stay bare account ids (read through 0044's
-  tolerance); neither writer writes event times or leg effects.
+  tolerance). The v2 settlement writer records the admitted SBI Shinsei
+  top-activity parser's posting date on future acceptances; older seals and
+  other adapters have no inferred time. Neither writer writes leg effects
+  ([ADR 0058 amendment](adr/0058-knowledge-selector-and-reconstruction-adapter.md#amendment-2026-11-12-sbi-shinsei-settlement-posting-dates)).
 - Trigger behaviour and cost on remote D1 are not verified.
 
 Verified locally (synthetic data only): `packages/storage-d1/test/economic-commit-guard.test.ts`
