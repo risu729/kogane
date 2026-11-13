@@ -98,6 +98,15 @@ const SAMPLES: readonly Sample[] = [
     dataset: "credit-snapshot",
     unitKey: "card-001",
   })),
+  ...(["csv", "pdf", "ofx"] as const).map((kind) => ({
+    source: "myjcb",
+    artifactKey: `conn-a/credit-document-2098-01.${kind}`,
+    role: "provider_export",
+    mediaType:
+      kind === "csv" ? "text/csv" : kind === "pdf" ? "application/pdf" : "application/x-ofx",
+    dataset: `credit-${kind}`,
+    unitKey: `conn-a:document:credit:2098-01:${kind}`,
+  })),
   {
     source: "myjcb",
     artifactKey: "conn-a/debit-detail-01.html",
@@ -364,6 +373,14 @@ const SAMPLES: readonly Sample[] = [
     dataset: null,
   },
   // services/collector-sbi-vc-trade/src/shared-collection.ts (`<dataset>.json`)
+  {
+    source: "sbi-securities",
+    artifactKey: `document-${"b".repeat(64)}-20990101-${"a".repeat(64)}-${"c".repeat(64)}.pdf`,
+    role: "provider_document",
+    mediaType: "application/pdf",
+    dataset: "delivered-document-pdf",
+    unitKey: `mailbox-document-${"a".repeat(64)}`,
+  },
   {
     source: "sbi-vc-trade",
     artifactKey: `monthly-report-20260930-${"a".repeat(64)}.pdf`,
@@ -868,8 +885,10 @@ describe("the registration dataset table (ADR 0022)", () => {
       "terminal-registration-v8",
       "terminal-registration-v9",
       "terminal-registration-v10",
+      "terminal-registration-v11",
+      "terminal-registration-v12",
     ]);
-    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v10");
+    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v12");
     const vpass = (await allSamples()).filter((sample) => sample.source === "vpass");
     expect(vpass.filter((sample) => sample.dataset === "statement-page").length).toBe(2);
     for (const sample of vpass) {
@@ -1282,9 +1301,40 @@ test("v10 changes only J-POINT history; earlier registration meanings stay froze
     const old = artifactDataset(sample.source, sample, "terminal-registration-v9");
     const current = artifactDataset(sample.source, sample, "terminal-registration-v10");
     if (sample.dataset === "jpoint-history") {
-      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, -1))
+      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(
+        0,
+        REGISTRATION_CONTRACT_VERSIONS.indexOf("terminal-registration-v10"),
+      ))
         expect(artifactDataset(sample.source, sample, version)).toBeNull();
       expect(current).toBe("jpoint-history");
     } else expect(current).toBe(old);
+  }
+});
+
+test("v11 adds only independently covered SBI PDF documents and preserves every earlier mapping", () => {
+  for (const sample of SAMPLES) {
+    const prior = artifactDataset(sample.source, sample, "terminal-registration-v10");
+    const current = artifactDataset(sample.source, sample, "terminal-registration-v11");
+    if (sample.dataset === "delivered-document-pdf") {
+      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(
+        0,
+        REGISTRATION_CONTRACT_VERSIONS.indexOf("terminal-registration-v11"),
+      ))
+        expect(artifactDataset(sample.source, sample, version)).toBeNull();
+      expect(current).toBe("delivered-document-pdf");
+    } else expect(current).toBe(prior);
+  }
+});
+
+test("v12 maps only original MyJCB exports and leaves prior versions unchanged", () => {
+  for (const sample of SAMPLES) {
+    const prior = artifactDataset(sample.source, sample, "terminal-registration-v11");
+    const current = artifactDataset(sample.source, sample, "terminal-registration-v12");
+    if (sample.source === "myjcb" && /^credit-(csv|pdf|ofx)$/u.test(sample.dataset ?? "")) {
+      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, -1))
+        expect(artifactDataset(sample.source, sample, version)).toBeNull();
+      expect(current).toBe(sample.dataset);
+      expect(artifactDataset(sample.source, { ...sample, role: "collector_derived" })).toBeNull();
+    } else expect(current).toBe(prior);
   }
 });

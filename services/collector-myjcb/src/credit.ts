@@ -1,3 +1,12 @@
+import {
+  creditDocumentOffers,
+  documentBudget,
+  MAX_DOCUMENT_RUN_BYTES,
+  type DocumentBudget,
+  fetchCreditDocument,
+  type StatementDocumentResult,
+} from "./documents";
+import { validateMyJcbCreditCsvText } from "../../../packages/domain/src/myjcb-statement-export";
 // Credit read collection is independent of browser authentication. The connection
 // orchestrator supplies the same allowlisted client and preserves its exports.
 import { safeErrorDetails } from "../../../packages/collector-diagnostics/src/index";
@@ -14,6 +23,8 @@ import {
   redactedStatementHtml,
   scheduledLedgerRowCount,
   schedulePageKind,
+  settlementMonth,
+  statedPaymentMonths,
   type MyJcbSchedulePageKind,
 } from "./parsers";
 import type {
@@ -106,14 +117,7 @@ export async function collectionStage<T>(
 /** The reads the credit collection makes; the Worker passes a `MyJcbReadClient`. */
 export type CreditReadClient = Pick<MyJcbReadClient, "get" | "postCreditPastJson">;
 
-/**
- * What becomes of the exports a confirmed month's page links to. `record`
- * (the Worker's mode) records the kinds offered and fetches nothing: the
- * shared bucket refuses the export datasets (`artifact_dataset_unobserved`),
- * so a fetched export would fail the whole run's plan. `fetch` reads and
- * validates each one as part of its month; no caller passes it until those
- * datasets are accepted end to end (ADR 0005's second amendment).
- */
+/** Production fetches observed original exports; record remains for historical callers. */
 export type CreditExportMode = "record" | "fetch";
 
 /**
@@ -145,7 +149,7 @@ export type CreditExportMode = "record" | "fetch";
 export async function collectCredit(
   client: CreditReadClient,
   linkId: string,
-  options: { readonly exports?: CreditExportMode } = {},
+  options: { readonly exports?: CreditExportMode; readonly documentBudget?: DocumentBudget } = {},
 ): Promise<{
   readonly periodCount: number;
   readonly artifacts: RawArtifact[];
@@ -159,6 +163,8 @@ export async function collectCredit(
   readonly unreadMonths: readonly UnreadMonth[];
   /** The export kinds each month's page offered for its own month. */
   readonly exportOffers: readonly ExportOffer[];
+  readonly documentResults: readonly StatementDocumentResult[];
+  readonly documentCode?: "partial";
   /**
    * Each schedule page, ascending by position, with its outcome: the
    * positions the menu listed, and the month positions whose page is the
@@ -178,6 +184,13 @@ export async function collectCredit(
   readonly stop?: CreditStop;
 }> {
   const exportMode = options.exports ?? "record";
+  const budget = options.documentBudget ?? documentBudget();
+  if (
+    !Number.isInteger(budget.remainingBytes) ||
+    budget.remainingBytes < 0 ||
+    budget.remainingBytes > MAX_DOCUMENT_RUN_BYTES
+  )
+    throw new Error("myjcb_document_budget_invalid");
   const { menuHtml, initialMonths, schedulePositions } = await collectionStage(
     "collect-credit-menu",
     async () => {
@@ -247,6 +260,9 @@ export async function collectCredit(
 
   const unreadMonths: UnreadMonth[] = [];
   const exportOffers: ExportOffer[] = [];
+  const documentResults: StatementDocumentResult[] = [];
+  const capturedDocuments = new Set<string>();
+  let documentCode: "partial" | undefined;
   // Month positions whose page is the ショッピングスキップ払い (amendment (h))
   // or ボーナス払い (amendment (j)) schedule by its own h1: stored as schedule
   // pages, never months.
@@ -258,8 +274,7 @@ export async function collectCredit(
   const months = () => availableMonths.length - monthSchedulePages.length;
   let capturedMonthCount = 0;
   for (const detailMonth of availableMonths) {
-    // A month is kept whole or not at all: its page, ledger and exports join
-    // the connection's artifacts only once every one of them was read.
+    // Financial page and ledger stay atomic. Documents have independent outcomes.
     const monthArtifacts: RawArtifact[] = [];
     const settlementYM = pastMonths.find(
       (month) => month.detailMonth === detailMonth,
@@ -390,16 +405,80 @@ export async function collectCredit(
           period,
         });
       }
-      // An unread month's exports are recorded, never fetched: they would be
-      // read as the confirmed statement the month is not read as.
-      if (exportMode === "fetch" && unread === undefined) {
-        for (const exportKind of offered) {
-          monthArtifacts.push(
-            await collectionStage(
-              "collect-credit-export",
-              async () => await fetchCreditExport(client, detailMonth, period, exportKind),
-            ),
-          );
+      // Files are independent evidence: a bad file never drops the valid page,
+      // ledger, sibling file or later statement. Session denial still stops reads.
+      if (exportMode === "fetch" && unread === undefined && state === "confirmed") {
+        const pagePeriods = statedPaymentMonths(html);
+        const labelledPeriod = settlementMonth(period);
+        const canonicalPeriod =
+          pagePeriods.length === 1 && (labelledPeriod === null || labelledPeriod === pagePeriods[0])
+            ? pagePeriods[0]!
+            : null;
+        const actualOffers = creditDocumentOffers(html, detailMonth);
+        if (actualOffers.unavailableKinds.length) {
+          documentCode = "partial";
+          if (canonicalPeriod !== null)
+            for (const kind of actualOffers.unavailableKinds) {
+              const identity = `${canonicalPeriod}:${kind}`;
+              if (!capturedDocuments.has(identity)) {
+                capturedDocuments.add(identity);
+                documentResults.push({ period: canonicalPeriod, kind, code: "unavailable" });
+              }
+            }
+        }
+        for (const kind of actualOffers.kinds) {
+          if (canonicalPeriod === null) {
+            documentCode = "partial";
+            continue;
+          }
+          const identity = `${canonicalPeriod}:${kind}`;
+          if (capturedDocuments.has(identity)) continue;
+          capturedDocuments.add(identity);
+          if (budget.remainingBytes === 0) {
+            documentResults.push({ period: canonicalPeriod, kind, code: "budget_exhausted" });
+            continue;
+          }
+          try {
+            monthArtifacts.push(
+              await fetchCreditDocument(
+                client,
+                detailMonth,
+                canonicalPeriod,
+                kind,
+                budget.remainingBytes,
+              ),
+            );
+            const retained = monthArtifacts[monthArtifacts.length - 1]!.body;
+            budget.remainingBytes -=
+              typeof retained === "string"
+                ? new TextEncoder().encode(retained).byteLength
+                : retained.byteLength;
+            documentResults.push({ period: canonicalPeriod, kind, code: "collected" });
+          } catch (error) {
+            documentResults.push({
+              period: canonicalPeriod,
+              kind,
+              code:
+                error instanceof Error &&
+                error.message === "myjcb_statement_export_budget_exhausted"
+                  ? "budget_exhausted"
+                  : "unavailable",
+            });
+            const status = safeErrorDetails(error).httpStatus;
+            if (
+              status === 401 ||
+              status === 403 ||
+              status === 429 ||
+              (status !== undefined && status >= 300 && status < 400)
+            ) {
+              // The valid statement artifacts survive a session-wide stop.
+              artifacts.push(...monthArtifacts);
+              throw Object.assign(
+                new StopConditionError("MyJCB export session stopped", "collect-credit-export"),
+                { httpStatus: status },
+              );
+            }
+          }
         }
       }
     } catch (error) {
@@ -446,6 +525,8 @@ export async function collectCredit(
         artifacts,
         unreadMonths,
         exportOffers,
+        documentResults,
+        ...(documentCode === undefined ? {} : { documentCode }),
         schedulePages: monthSchedulePages,
         stop: { code, position: detailMonth, capturedMonthCount },
       };
@@ -499,6 +580,8 @@ export async function collectCredit(
     artifacts,
     unreadMonths,
     exportOffers,
+    documentResults,
+    ...(documentCode === undefined ? {} : { documentCode }),
     schedulePages: schedulePages.sort((left, right) => left.position - right.position),
   };
 }
@@ -540,98 +623,7 @@ async function fetchCreditDetail(
   );
 }
 
-async function fetchCreditExport(
-  client: CreditReadClient,
-  detailMonth: number,
-  period: string,
-  kind: "csv" | "pdf" | "ofx",
-): Promise<RawArtifact> {
-  const operation = kind === "csv" ? "credit-csv" : kind === "pdf" ? "credit-pdf" : "credit-ofx";
-  const output = kind === "csv" ? "csv" : kind === "pdf" ? "pdf" : "money";
-  const response = await client.get(
-    operation,
-    new URLSearchParams({ detailMonth: String(detailMonth), output }),
-  );
-  validateCreditExport(kind, response.body);
-  const mediaType =
-    kind === "csv"
-      ? "text/csv; charset=windows-31j"
-      : kind === "pdf"
-        ? "application/pdf"
-        : "application/x-ofx";
-  return {
-    dataset: `credit-${kind}`,
-    filename: `credit-${String(detailMonth).padStart(2, "0")}.${kind}`,
-    body: response.body,
-    mediaType,
-    statementState: "confirmed",
-    period,
-  };
-}
-
-function validateCreditExport(kind: "csv" | "pdf" | "ofx", body: ArrayBuffer): void {
-  const bytes = new Uint8Array(body);
-  if (kind === "pdf") {
-    const header = new TextDecoder("ascii").decode(bytes.slice(0, 8));
-    if (!header.startsWith("%PDF-")) throw new Error("MyJCB PDF export had an invalid signature");
-    return;
-  }
-  if (kind === "ofx") {
-    const header = new TextDecoder("ascii").decode(bytes.slice(0, 256));
-    if (!/(?:OFXHEADER:|<OFX>)/u.test(header)) {
-      throw new Error("MyJCB OFX export had an invalid header");
-    }
-    return;
-  }
-  const csv = new TextDecoder("shift_jis", { fatal: true }).decode(body);
-  validateCreditCsvText(csv);
-}
-
+/** Compatibility export; validation is shared with the evidence parser. */
 export function validateCreditCsvText(csv: string): void {
-  const expectedHeaders = [
-    "ご利用者",
-    "カテゴリ",
-    "ご利用日",
-    "ご利用先など",
-    "ご利用金額(￥)",
-    "支払区分",
-    "今回回数",
-    "訂正サイン",
-    "お支払い金額(￥)",
-    "国内／海外",
-    "摘要",
-    "備考",
-  ];
-  const foundHeader = csv
-    .split(/\r?\n/u)
-    .filter((line) => line.trim() !== "")
-    .some((line) => csvColumns(line).join("\0") === expectedHeaders.join("\0"));
-  if (!foundHeader) {
-    throw new Error("MyJCB CSV export had an unknown 12-column schema");
-  }
-}
-
-function csvColumns(line: string): string[] {
-  const values: string[] = [];
-  let value = "";
-  let quoted = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index];
-    if (character === '"') {
-      if (quoted && line[index + 1] === '"') {
-        value += '"';
-        index += 1;
-      } else {
-        quoted = !quoted;
-      }
-    } else if (character === "," && !quoted) {
-      values.push(value);
-      value = "";
-    } else {
-      value += character;
-    }
-  }
-  if (quoted) throw new Error("MyJCB CSV export contained an unterminated quote");
-  values.push(value);
-  return values;
+  validateMyJcbCreditCsvText(csv);
 }

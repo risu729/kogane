@@ -108,10 +108,13 @@ for current behavior.
 - [ADR 0096: Walk SBI's retained execution history in every normal collection](0096-sbi-scheduled-execution-history.md) — proposed; disjoint windows, provider-based foreign cutoff, per-window evidence and registration v4, no persisted progress
 
 - [ADR 0098: Preserve SBI weekly asset history and select one revision per point](0098-sbi-weekly-asset-history.md) — proposed; observed all-period GET, exact raw capture and bounded year shards, conditional category membership, registration v5, production per-point revision selection
+- [ADR 0099: Sony Bank scheduled collection includes all retained deposit history](0099-sony-retained-history.md) — proposed; omitted start, explicit end, CSV-only publication and monthly evidence retained
 - [ADR 0101: Read observed MyJCB debit statement rows separately from credit payments](0101-myjcb-debit-statements.md) — proposed; desktop ordinary/difference rows and separate known-empty other statements, all offered periods daily, registration v6 and independent unit eligibility, card switching deferred
 - [ADR 0102: Preserve retained SBI cash history with checked page coverage](0102-sbi-retained-cash-history.md) — proposed; observed retained yen paging and USD statement, exact raw pages and exhaustive lineage, control totals, occurrence identities, registration v7, unobserved foreign continuation fails closed
 
 - [ADR 0105: Preserve Vpass credit snapshots as overlapping provider reports](0105-vpass-reported-credit-snapshots.md) — proposed; independent daily card snapshots, explicit thousand-yen precision and exact revolving yen, shared non-additive metrics, registration v8
 - [ADR 0106: Preserve reported SBI payments and sales as complete retained containers](0106-sbi-reported-income-and-gains.md) — proposed; observed JPY/USD payments and domestic sales, exact raw numeric tokens, checked full-retention counts, complete-container current membership and registration v9
+- [ADR 0108: SBI delivered-document evidence and bounded continuation](0108-sbi-delivered-documents.md) — proposed; exact observed DOM/AST handoff, original single-PDF evidence, independent document units, round-robin progress and registration v11
+- [ADR 0109: Isolate SBI supplementary completeness from core publication](0109-sbi-supplemental-unit-eligibility.md) — proposed; independent retained cash, income/gains and weekly units, preserved core refusal and legacy snapshot partition compatibility
 
 - [ADR 0112: Pin the branded Stable Chrome payload in collector images](0112-pinned-chrome-collector-builds.md) — proposed; signed official package provenance, bounded extraction, retained wrapper/channel paths and offline image validation without APT

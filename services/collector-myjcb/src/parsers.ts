@@ -609,7 +609,7 @@ export function schedulePageKind(html: string): MyJcbSchedulePageKind {
  * is not recorded here; the statement parser compares it with the total's
  * payment date.
  */
-function statedPaymentMonths(html: string): string[] {
+export function statedPaymentMonths(html: string): string[] {
   return findElements(parse(html), (element) => element.tagName === "h2").flatMap((element) => {
     const heading = readMyJcbStatementHeading(compactText(element));
     return heading ? [heading.month] : [];

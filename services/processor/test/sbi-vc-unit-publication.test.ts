@@ -140,7 +140,19 @@ test("raw failures preserve fresh classic publications without rescuing a failed
     "sbi-vc-position-summary",
   ];
   const first = await capture("success", "synthetic-connection-a");
-  expect(first.summary.status).toBe("success");
+  expect(first.summary.status).toBe("partial");
+  const leverage = first.terminal.units.filter((unit) =>
+    unit.unitKey.startsWith("executions-leverage-"),
+  );
+  expect(leverage).toHaveLength(4);
+  expect(
+    leverage.every(
+      (unit) =>
+        unit.coverageStatus === "partial" &&
+        unit.artifactCount === 1 &&
+        unit.safeErrorCode === "leverage_execution_transport_unverified",
+    ),
+  ).toBe(true);
   expect(await sweep(env)).toMatchObject({ parsed: 6, error: 0 });
   expect(await publishedFor(first.fetchRunId)).toEqual(expected);
   const initial = await readers();
@@ -225,7 +237,7 @@ test("raw failures preserve fresh classic publications without rescuing a failed
   expect(
     (
       await env.DB.prepare(
-        `SELECT p.id FROM parse_runs p JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id WHERE a.artifact_key LIKE 'cashflows-all-%'`,
+        `SELECT p.id FROM parse_runs p JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id WHERE a.artifact_key LIKE 'cashflows-all-%' OR a.artifact_key LIKE 'executions-leverage-%'`,
       ).all()
     ).results,
   ).toEqual([]);
