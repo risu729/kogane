@@ -75,6 +75,7 @@ const NOT_OPERATIONS: Readonly<Partial<Record<OperationName, string>>> = {
  * `:name` segments are parameters.
  */
 const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
+  "/api/v2/economic-readiness": ["kogane.economic-readiness.read"],
   "/api/v2/query": ["kogane.financial.query", "kogane.context.open"],
   "/api/identity/instrument-candidates": ["kogane.instruments.candidates"],
   "/api/identity/account-candidates": ["kogane.accounts.candidates"],
@@ -148,7 +149,6 @@ const TOOLS_WITHOUT_UI_ROUTE: Readonly<Record<string, string>> = {
   "kogane.explain":
     "an evidence graph of one ref; the observation detail is kogane.observations.get",
   "kogane.reconcile.propose": "an agent's relation proposal; no screen offers it",
-  "kogane.economic-readiness.read": "economic row readiness; no screen reads it",
   "kogane.events.read":
     "GET /api/v2/activity and /api/v2/obligations, which no screen reads (ADR 0072); plan D19",
   "kogane.audit.get":

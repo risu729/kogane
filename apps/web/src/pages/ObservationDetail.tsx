@@ -25,6 +25,7 @@ import { displayLabel } from "../labels.ts";
 import { OrganizationPanel } from "../organization.tsx";
 import { classifyActivity } from "../../../../packages/observation-shared/src/activity-semantics.ts";
 import { ActivityFacts } from "../activity-display.tsx";
+import { EconomicReadinessPanels } from "../economic-readiness-display.tsx";
 import {
   classifyBalance,
   BALANCE_INTERPRETATION_POLICY_VERSION,
@@ -157,6 +158,7 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
         </Panel>
       ) : null}
       <OrganizationPanel organization={detail.organization} />
+      <EconomicReadinessPanels detail={detail} />
       {detail.normalized ? (
         <Panel id="normalized-value" title="DBの正規化値">
           <div className="panel-body">
