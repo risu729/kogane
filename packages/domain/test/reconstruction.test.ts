@@ -14,6 +14,7 @@ import {
   RECONSTRUCTION_BUDGET,
   RECONSTRUCTION_FOLD_V1,
   reconstructState,
+  reconstructStateWithLate,
   selectKnowledge,
   type EndReported,
   type KnowledgeSelection,
@@ -25,6 +26,8 @@ import {
   type ReconstructionReportedBalance,
   type ReconstructionReportedPosition,
   type ReconstructionRequest,
+  type ReconstructionInput,
+  type ReconstructionError,
   type StartSnapshot,
 } from "../src/reconstruction.ts";
 import { absentQuantity, type Quantity } from "../src/values.ts";
@@ -1847,5 +1850,149 @@ describe("second review", () => {
     });
     expect(disposition(state, "event:test:1@1#1")).toBe("state_no_effect");
     expect(cell(state).gaps).toEqual([]);
+  });
+});
+
+describe("the validated fold and late explanation together", () => {
+  const compositionInput = () => {
+    const set = eventSet([
+      debit("event:test:late", "1", "2026-03-15", { supersededBy: "event:test:late@2" }),
+      debit("event:test:late", "2", "2026-02-15", { revision: 2, commit: 60 }),
+      debit("event:test:other", "3", "2026-03-20"),
+    ]);
+    return {
+      request: request(),
+      policy: RECONSTRUCTION_FOLD_V1,
+      start: side(START_DATE, [balance()]),
+      end: side(END_DATE, [endBalance("9997")]),
+      selection: select(set, CUT),
+      baseline: select(set, 50),
+    };
+  };
+
+  test("keeps the whole-scope late diff, including a correction outside the cell window", async () => {
+    const input = compositionInput();
+    const combined = ok(reconstructStateWithLate(input));
+    expect(combined.late).toEqual({
+      baselineCut: { coreEpoch: EPOCH, commitSeq: 50 },
+      cut: { coreEpoch: EPOCH, commitSeq: CUT },
+      entered: ["event:test:late@2"],
+      left: ["event:test:late@1"],
+    });
+    expect(combined.late).toEqual(ok(explainLate(input.baseline, input.selection)).late);
+    expect(reconstructState(input)).toEqual({ ok: true, state: combined.state });
+    expect(Object.keys(reconstructState(input)).sort()).toEqual(["ok", "state"]);
+    const reordered = structuredClone(input);
+    reordered.selection.revisions.reverse();
+    reordered.baseline.revisions.reverse();
+    // Selection itself has a canonical row order: a caller cannot reorder it.
+    const refused = reconstructStateWithLate(reordered);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(reconstructState(reordered)).toEqual(refused);
+    const noBaseline = ok(reconstructStateWithLate({ ...input, baseline: null }));
+    expect(noBaseline.late).toBeNull();
+    expect(await canonicalDigest(noBaseline.state.manifest)).toBe(
+      await canonicalDigest(ok(reconstructState({ ...input, baseline: null })).state.manifest),
+    );
+  });
+
+  test("keeps reconstruction's first refusal and standalone late's distinct selection order", () => {
+    const input = compositionInput();
+    const badSelection = { ...input.selection, revisions: null } as never;
+    const badBaseline = { ...input.baseline, contract: "other" } as never;
+    const variants: {
+      value: ReconstructionInput;
+      code: ReconstructionError["code"];
+      refs: string[];
+    }[] = [
+      {
+        value: {
+          ...input,
+          request: {} as never,
+          policy: {} as never,
+          selection: badSelection,
+          baseline: badBaseline,
+        },
+        code: "invalid_request",
+        refs: ["request"],
+      },
+      {
+        value: { ...input, policy: {} as never, start: {} as never, selection: badSelection },
+        code: "invalid_policy",
+        refs: ["policy"],
+      },
+      {
+        value: { ...input, start: {} as never, end: {} as never, selection: badSelection },
+        code: "invalid_start_snapshot",
+        refs: ["$"],
+      },
+      {
+        value: { ...input, end: {} as never, selection: badSelection },
+        code: "invalid_end_reported",
+        refs: ["$"],
+      },
+      {
+        value: { ...input, selection: badSelection, baseline: badBaseline },
+        code: "selection_mismatch",
+        refs: ["selection"],
+      },
+      {
+        value: {
+          ...input,
+          request: request({ knowledgeCut: { coreEpoch: EPOCH, commitSeq: 101 } }),
+          baseline: badBaseline,
+        },
+        code: "selection_mismatch",
+        refs: ["selection.knowledgeCut"],
+      },
+    ];
+    for (const { value, code, refs } of variants) {
+      const expected = { ok: false as const, error: { code, refs } };
+      expect(reconstructStateWithLate(value)).toEqual(expected);
+      expect(reconstructState(value)).toEqual(expected);
+    }
+    const currentProblem = reconstructStateWithLate({
+      ...input,
+      selection: badSelection,
+      baseline: badBaseline,
+    });
+    expect(currentProblem).toEqual({
+      ok: false,
+      error: { code: "selection_mismatch", refs: ["selection"] },
+    });
+    const baselineProblem = reconstructStateWithLate({ ...input, baseline: badBaseline });
+    expect(baselineProblem.ok).toBe(false);
+    if (!baselineProblem.ok) expect(baselineProblem.error.code).toBe("baseline_mismatch");
+    expect(explainLate(badBaseline, badSelection)).toEqual(
+      explainLate(badBaseline, input.selection),
+    );
+    expect(explainLate(badBaseline, badSelection)).not.toEqual(currentProblem);
+  });
+
+  test("each public call revalidates a previously valid selection after mutation", () => {
+    const input = compositionInput();
+    expect(reconstructStateWithLate(input).ok).toBe(true);
+    expect(reconstructState(input).ok).toBe(true);
+    expect(explainLate(input.baseline, input.selection).ok).toBe(true);
+    input.selection.revisions[0]!.status = "recorded_after_cut";
+    expect(reconstructStateWithLate(input)).toEqual({
+      ok: false,
+      error: { code: "selection_mismatch", refs: ["selection"] },
+    });
+    expect(reconstructState(input)).toEqual({
+      ok: false,
+      error: { code: "selection_mismatch", refs: ["selection"] },
+    });
+    expect(explainLate(input.baseline, input.selection)).toEqual({
+      ok: false,
+      error: { code: "selection_mismatch", refs: ["selection"] },
+    });
+    const fresh = compositionInput();
+    expect(reconstructStateWithLate(fresh).ok).toBe(true);
+    fresh.baseline.revisions[0]!.status = "recorded_after_cut";
+    expect(reconstructStateWithLate(fresh)).toEqual({
+      ok: false,
+      error: { code: "baseline_mismatch", refs: ["selection"] },
+    });
   });
 });

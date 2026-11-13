@@ -363,3 +363,25 @@ an assurance of identical output identities across reader versions.
   workerd or D1 (ADR 0058).
 - Own transfers are held, never applied; trade and settlement bases are never
   compared with a provider figure.
+
+## Validated fold and late composition (2026-11-12)
+
+The domain's `reconstructStateWithLate` returns the validated fold state and
+the whole-scope late revision diff together. `queryReconstructedState` calls
+it once. The previous query called `reconstructState`, then standalone
+`explainLate`, repeating both selections' canonical validation when a
+baseline was available. No row is read again or omitted by this composition.
+
+The old public entrypoints retain their result shapes and validation,
+including their distinct refusal order. Inputs are revalidated on every
+call; no caller-supplied bypass or cross-call cache exists. Without a
+baseline, `late` remains null and the query's existing `lateUnavailable`
+reason is preserved. The late list remains the whole-scope revision diff,
+which can include revisions outside a reconstructed cell's date window.
+The SQL, budgets, policy and engine releases, state/route contracts,
+manifests and context IDs are unchanged
+([ADR 0052 amendment](adr/0052-reconstructed-state-fold.md#amendment-compose-the-validated-fold-and-late-explanation-2026-11-12)).
+
+This establishes less repeated validation, not a measured latency improvement.
+The cost figures in [Limits](#limits) remain historical measurements of the
+earlier implementation. No new workerd or remote D1 latency is established.
