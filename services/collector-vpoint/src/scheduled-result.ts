@@ -26,5 +26,16 @@ export function vPointScheduledResult(outcome: {
     return { ...result, status: "failed", failureCode: "terminal_persistence_failed" };
   if (awaitingReauthentication(outcome.manifest))
     return { ...result, status: "failed", failureCode: "reauthentication_pending" };
+  // A refused session whose automatic challenge also failed needs the owner's refresh path.
+  if (
+    outcome.manifest.status === "failed" &&
+    outcome.manifest.failures.some(
+      (failure) =>
+        ["VPointReauthenticationPendingError", "VPointSessionExpiredError"].includes(
+          failure.errorType,
+        ) || failure.stage === "email-challenge-request",
+    )
+  )
+    return { ...result, status: "failed", failureCode: "human_required_session_refresh" };
   return result;
 }

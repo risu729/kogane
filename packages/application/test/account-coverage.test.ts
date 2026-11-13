@@ -942,3 +942,64 @@ describe("account coverage", () => {
     ).rejects.toBeInstanceOf(CollectionQualityLimitError);
   });
 });
+
+test("V Point summary, current cells and account coverage clear recovery after a later registered success", async () => {
+  const store = new QualityStore();
+  const ids = new Identities(store, "v-point");
+  try {
+    ids.map("synthetic-vpoint-ref", "synthetic-vpoint-account", "identified");
+    const capture = (at: string) => {
+      const run = store.run({
+        source: "v-point",
+        at,
+        artifacts: [
+          { key: "balance-info.json", dataset: "balance-info" },
+          { key: "smfg-point.json", dataset: "smfg-point" },
+          { key: "history-page-0001.json", dataset: "history-page-0001" },
+        ],
+      });
+      for (const [index, parser] of [
+        "v-point-balance-info",
+        "v-point-smfg-point",
+        "v-point-history-page",
+      ].entries()) {
+        const parse = store.parse(run.artifacts[index]!, parser, { kind: "published" })!;
+        if (index === 0) ids.identify(parse, [{ ref: "synthetic-vpoint-ref", kind: "balance" }]);
+      }
+      return run;
+    };
+    capture("2099-02-01T00:00:00.000Z");
+    store.occurrence("vpoint", {
+      nominalAt: "2099-02-01T21:15:00.000Z",
+      status: "failed",
+      failureCode: "reauthentication_pending",
+    });
+    const asOf = "2099-02-10T03:00:00.000Z";
+    const parity = async (waiting: boolean) => {
+      const source = (await queryCollectionQualitySummary(executor(store), { asOf })).sources.find(
+        (entry) => entry.sourceId === "v-point",
+      )!;
+      const page = await queryCollectionQualityCells(executor(store), {
+        sourceId: "v-point",
+        offset: 0,
+        asOf,
+      });
+      const accounts = await read(store, "v-point", asOf);
+      expect(source.reasons.includes("user_action_required")).toBe(waiting);
+      expect(source.freshness.state).toBe(waiting ? "human-required" : "stale");
+      expect(page!.cells.find((cell) => cell.dataset === "balance-info")!.freshness).toEqual(
+        source.freshness,
+      );
+      expect(accounts.accounts[0]!.freshness).toEqual(source.freshness);
+      expect(source.schedules[0]!.latest).toMatchObject({
+        status: "failed",
+        failureCode: "reauthentication_pending",
+      });
+    };
+    await parity(true);
+    capture("2099-02-01T21:16:00.000Z");
+    await parity(false);
+  } finally {
+    store.db.close();
+  }
+});

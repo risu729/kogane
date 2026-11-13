@@ -416,3 +416,74 @@ Before creating new acquisition/input contracts, tie these four facts to evidenc
 4. **Applicable terms**: confirm versions effective between candidate base dates/evaluation date, change-effective dates, carryover/transitions for old limited-period use/base dates. Differences between 2024 and April 1, 2026 versions are confirmed; holding-specific transition rules remain unconfirmed. Do not apply current rules historically based on open-ended current-seed periods.
 
 Only after confirmed facts/source refs exist should a design connect classification versions, qualifying activities, windows, date bases, and applicable terms to existing fixed inputs. This PR implements no such adapter and does not close #554.
+
+## 2026-11-11: scheduled session refusal and automatic email recovery
+
+The error-only view in [#1301](https://github.com/risu729/kogane/issues/1301)
+showed one expired-session balance read on each of November 9 and 10 at
+21:15 UTC. It did not show the successful recovery events. A read-only,
+unsampled Workers Logs review of 21:14 through 21:20 UTC on both days found:
+
+- A balance read returned application code `0010`, classified as
+  `VPointSessionExpiredError` / `authentication_required`, at about 21:15:03.
+- The collector invalidated the retained cookie and requested an email login
+  challenge. The delivered email completed authentication automatically.
+- A separate post-authentication collection persisted a successful terminal at
+  2026-11-09 21:15:25.501 UTC and 2026-11-10 21:15:27.015 UTC. In both traces,
+  the authentication email's run ID matched the post-auth parent's ID, and the
+  post-auth child ID matched the persisted successful collection's ID.
+
+Both observed attempts therefore recovered automatically. The post-auth parent
+is the email run, not the original scheduled run. The original scheduled
+receipt remains failed with `reauthentication_pending`, and its failed terminal
+retains `authentication_required`; these records are immutable history. A
+successful separate follow-up does not turn the original receipt into success.
+The operations snapshot's later registered successful V Point fetch is also
+consistent with recovery. No new login, email delivery or collection was
+initiated for this investigation.
+
+The provider rejected the retained cookie at the next daily read. These two
+observations do not distinguish a fixed session lifetime from idle expiry,
+revocation or another invalidation mechanism. They establish no exact TTL.
+V Point Pay is a separate source and this finding says nothing about its app
+session or email notifications.
+
+The expected recovery path is already automatic: delete the expired session,
+request an email code, complete a fresh pending challenge from the delivered
+message, then collect again. The challenge freshness window is two minutes in
+our implementation; this is not the provider's session lifetime. A failed
+challenge after an expired-session read now retains the explicit scheduled
+reason `human_required_session_refresh`, rather than a generic collection
+failure. A challenge still awaiting email remains `reauthentication_pending`.
+Neither is reported as a successful scheduled collection.
+
+Collection quality interprets an unresolved V Point recovery receipt as
+`user_action_required`, making the existing owner session-refresh path visible
+while automatic recovery is still pending. This is a recovery option, not proof
+that a human must immediately intervene. After a later registered successful
+V Point fetch, the current recovery action and waiting state clear; the failed
+receipt and acquisition history remain visible. The comparison uses the actual
+failed occurrence's finish time, falling back to its start time, never its
+nominal scheduled time. Equal, missing or invalid times and later failed or
+partial fetches do not establish recovery. Summary, cell and account freshness
+share this rule. No unrelated authentication codes or V Point Pay statuses are
+reclassified.
+
+If recovery remains unresolved, the owner can request the existing
+`kogane.ops.session.refresh` operation for the V Point connection through the
+operations UI/API. It follows the same email challenge flow; it does not need
+a new public collector admin route, secret rotation or manually supplied cookie.
+Check that email handling completes and a new registered collection succeeds;
+submitting a refresh request alone is not proof of recovery. A provider refusal,
+email-routing failure or authentication-completion error still needs separate
+investigation using closed diagnostic codes.
+
+Synthetic tests cover actual expired-read handling, challenge creation, delivered
+email completion and a separate persisted successful follow-up while preserving
+the failed terminal. SQLite read tests cover unresolved action, later registered
+success, older/equal/invalid time boundaries, a newer failure, summary/cell/account
+agreement and the bounded schedule read. The literal acceptance condition in
+#1301 that a scheduled receipt succeeds after refresh is not established by
+these production observations; the verified success was the separate email
+follow-up. The issue remains open for that distinction and any required later
+scheduled-success observation.
