@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { SonyBankError } from "../src/diagnostics";
 import {
   CookieBag,
   parseCredential,
@@ -116,7 +117,7 @@ describe("Sony Bank history pagination", () => {
         1,
         first.total,
       ),
-    ).toThrow("pagination_total_changed");
+    ).toThrow(expect.objectContaining({ reason: "history_pagination_total_changed" }));
     expect(() =>
       validateHistoryPage(
         {
@@ -126,7 +127,14 @@ describe("Sony Bank history pagination", () => {
         0,
         null,
       ),
-    ).toThrow("pagination_length_mismatch");
-    expect(() => validateHistoryPage({ countCnt: 0 }, 0, null)).toThrow("pagination_invalid");
+    ).toThrow(expect.objectContaining({ reason: "history_pagination_length_mismatch" }));
+    expect(() => validateHistoryPage({ countCnt: 0 }, 0, null)).toThrow(SonyBankError);
+    expect(() =>
+      validateHistoryPage(
+        { countCnt: 3, returnCnt: 2, transactionHistInfo: [{}, {}, {}] },
+        0,
+        null,
+      ),
+    ).toThrow(expect.objectContaining({ reason: "history_pagination_length_mismatch" }));
   });
 });

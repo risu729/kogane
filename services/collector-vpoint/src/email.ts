@@ -14,7 +14,12 @@ export async function extractVPointEmailCode(
 ): Promise<string | null> {
   const email = await PostalMime.parse(raw);
   if (email.subject !== VPOINT_EMAIL_SUBJECT || !email.text) return null;
-  const preamble = email.text.split(/-{10,}/u, 1)[0] ?? "";
+  return extractVPointTextCode(email.subject, email.text);
+}
+
+export function extractVPointTextCode(subject: string, text: string): string | null {
+  if (subject !== VPOINT_EMAIL_SUBJECT) return null;
+  const preamble = text.split(/-{10,}/u, 1)[0] ?? "";
   const candidates = [...new Set(preamble.match(/(?<![0-9])[0-9]{4,6}(?![0-9])/gu) ?? [])];
   return candidates.length === 1 ? (candidates[0] ?? null) : null;
 }

@@ -31,8 +31,14 @@ function postAuthEnv(): Env {
     VPOINT_SESSION: {
       idFromName: () => "synthetic",
       get: () => ({
-        hasPendingChallenge: async () => true,
-        completeEmailCode: async () => ({ status: "authenticated" }),
+        completeEmailCode: async () => ({
+          status: "authenticated",
+          schemaVersion: 1,
+          operationId: "a".repeat(64),
+          requestSha256: "b".repeat(64),
+        }),
+        beginLegacyCollection: async () => true,
+        finishLegacyCollection: async () => undefined,
         getSession: async () => "session=synthetic",
       }),
     },
