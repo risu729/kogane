@@ -31,7 +31,7 @@ fixed toolchain:
   `linker = "isolated"`, so a workspace sees only what it declares and
   conflicting pins (TypeScript 6.0.3 and 7.0.2) coexist instead of being
   reconciled by hoisting; every workspace that declares Wrangler pins the same
-  version (4.157.0 today). Every workspace pins TypeScript
+  version (4.158.0 today; the bounded CTE-regression exclusions and upgrade gate are recorded in [ADR 0110](adr/0110-workers-cte-regression.md)). Every workspace pins TypeScript
   7.0.2 except `services/collector-globalpass`, and both it and the root
   manifest stay below 7 (6.0.3 today). Both need the in-process TypeScript
   compiler API, which 7.0 no longer ships (its `typescript` entry point exports
@@ -56,6 +56,17 @@ fixed toolchain:
   **Wrangler** generates Worker types and validates deployments with
   `--dry-run` through workspace mise tasks in both local checks and CI.
   Production uploads retain the pinned `risu729/wrangler-deploy-action`.
+
+An explicit engine-only compatibility probe can use Miniflare's documented
+`MINIFLARE_WORKERD_PATH` selection without changing package pins. Scope it to
+the single local probe process, identify the selected binary by realpath,
+SHA-256 and `--version`, and retain those records beside the output. The
+canonical probe's `workerd` field identifies the packaged dependency, even
+when this variable selects another executable. Its script-relative imports
+choose the migrations and SQL from the checkout containing the script; record
+that source separately. Such a probe does not establish a coherent dependency
+upgrade or replace its required CI. [ADR 0110's dated verification](adr/0110-workers-cte-regression.md#released-fix-and-explicit-engine-probe-2026-11-12)
+records the fixed engine, exact source and observed local result.
 
 [Development checks and CI](ci.md) describes the native monorepo task names,
 the shared hk check and how to add a workspace; `infra/dependency-resolution.md` records

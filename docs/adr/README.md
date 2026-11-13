@@ -118,4 +118,5 @@ for current behavior.
 - [ADR 0108: SBI delivered-document evidence and bounded continuation](0108-sbi-delivered-documents.md) — proposed; exact observed DOM/AST handoff, original single-PDF evidence, independent document units, round-robin progress and registration v11
 - [ADR 0109: Isolate SBI supplementary completeness from core publication](0109-sbi-supplemental-unit-eligibility.md) — proposed; independent retained cash, income/gains and weekly units, preserved core refusal and legacy snapshot partition compatibility
 
+- [ADR 0110: Keep the coherent Workers stack while the upstream CTE expansion regression is unresolved](0110-workers-cte-regression.md) — proposed; exact local reproduction, bounded known-release exclusions and a future-upgrade gate; no migration or runtime override
 - [ADR 0112: Pin the branded Stable Chrome payload in collector images](0112-pinned-chrome-collector-builds.md) — proposed; signed official package provenance, bounded extraction, retained wrapper/channel paths and offline image validation without APT
