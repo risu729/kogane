@@ -81,6 +81,7 @@ export const OPERATION_RECORD_EXECUTION_STATES = [
 export const OPERATION_RECORD_RUN_STATES = [
   "not_registered",
   "registering",
+  "retryable",
   "blocked",
   "parsing",
   "published",
@@ -122,6 +123,12 @@ export interface OperationRecordRunWire {
   providerOutcome: (typeof OPERATION_RECORD_PROVIDER_OUTCOMES)[number] | null;
   evidenceRunId: string | null;
   registeredAt: string | null;
+  registration: {
+    state: OperationRecordStageState;
+    failureCode: string | null;
+    attempts: number;
+    updatedAt: string | null;
+  };
   artifacts: OperationRecordRunArtifacts | null;
 }
 export interface OperationRecordExecutionWire {
@@ -249,6 +256,7 @@ function validRun(value: unknown): value is OperationRecordRunWire {
       "providerOutcome",
       "evidenceRunId",
       "registeredAt",
+      "registration",
       "artifacts",
     ]) ||
     !matches(RUN_ID)(value.runId) ||
@@ -258,6 +266,12 @@ function validRun(value: unknown): value is OperationRecordRunWire {
     !orNull(isOneOf(OPERATION_RECORD_PROVIDER_OUTCOMES))(value.providerOutcome) ||
     !orNull(matches(EVIDENCE_RUN_ID))(value.evidenceRunId) ||
     !instant(value.registeredAt) ||
+    !isRecord(value.registration) ||
+    !hasExactKeys(value.registration, ["state", "failureCode", "attempts", "updatedAt"]) ||
+    !isOneOf(OPERATION_RECORD_STAGE_STATES)(value.registration.state) ||
+    !code(value.registration.failureCode) ||
+    !count(value.registration.attempts) ||
+    !instant(value.registration.updatedAt) ||
     !(value.artifacts === null || validArtifacts(value.artifacts))
   )
     return false;
@@ -266,12 +280,38 @@ function validRun(value: unknown): value is OperationRecordRunWire {
   const registered = value.evidenceRunId !== null;
   const artifacts = value.artifacts as OperationRecordRunArtifacts | null;
   const state = value.state as OperationRecordRunState;
+  const registration = value.registration;
+  if (registered !== (registration.state === "completed")) return false;
+  if ((registration.attempts === 0) !== (registration.updatedAt === null)) return false;
+  if (
+    (registration.state === "retryable" || registration.state === "blocked") !==
+    (registration.failureCode !== null)
+  )
+    return false;
   switch (state) {
     case "not_registered":
     case "registering":
-      return !registered && artifacts === null && value.blockedCode === null;
+      return (
+        !registered &&
+        artifacts === null &&
+        value.blockedCode === null &&
+        registration.state === "pending"
+      );
+    case "retryable":
+      return (
+        !registered &&
+        artifacts === null &&
+        value.blockedCode === null &&
+        registration.state === "retryable" &&
+        value.reasonCode === registration.failureCode
+      );
     case "blocked":
-      return !registered && artifacts === null && value.blockedCode !== null;
+      return (
+        !registered &&
+        artifacts === null &&
+        value.blockedCode !== null &&
+        registration.state === "blocked"
+      );
     case "parsing":
       return registered && artifacts !== null && value.reasonCode === null;
     case "published":

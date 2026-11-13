@@ -55,11 +55,46 @@ Consecutive live emails had 4-, 5- and 6-digit authentication codes, so no fixed
 In the production PoC, a single SQLite Durable Object instance retains:
 
 - A valid My Page session cookie.
-- Serializable challenge state for at most 2 minutes, only while awaiting email.
+- Serializable challenge state usable for one minute, only while awaiting email.
 
 A run without a session, or receiving `0010`, requests a new authentication email. A Cloudflare Email Routing rule scoped to the target address delivers to this Worker's `email()` handler, which forwards the original message to the existing Gmail destination and extracts the code. Once the Durable Object completes login, collection runs again within the email event. The ordinary catch-all forwarding rule is unchanged.
 
-Cookies, member numbers, authentication codes, email bodies and challenge state are stored in neither source, logs, R2 nor manifests. Cookies/challenge state remain only in Durable Object storage.
+Cookies, member numbers, authentication codes, email bodies and challenge state are stored in neither source, logs, R2 nor manifests. Cookies, pending challenge state and the briefly queued owner OTP remain only in private Durable Object storage. A claimed job removes its stored code/challenge before its external attempt begins.
+
+## Private Fumi owner adapter
+
+Status: implemented with synthetic tests; Service Binding adoption, Email Routing
+cutover and real OTP acceptance remain separate. [ADR 0111](../../docs/adr/0111-fumi-vpoint-owner-offers.md)
+records the owner-approved boundary and recovery behavior.
+
+The existing Worker's named `FumiOffer` entrypoint provides private RPC methods
+`manifest()`, `offer(request)` and `receipt({schemaVersion,operationId,requestSha256})`.
+Its default HTTP routes do not expose those methods. An administrator binds Fumi
+to Worker `kogane-vpoint-collector-poc`, entrypoint `FumiOffer`; no bearer secret or
+public endpoint is added. The manifest's exact JSON bytes and digest come from
+Kogane's `src/fumi-offer.ts`, not an edited copy of provider rules in Fumi.
+
+Fumi pins the manifest/version/digest, grants metadata-only matching on `subject`
+and separately permits offer fields `subject`, trusted SMTP `envelope` and bounded
+decoded `text`. The owner checks its configured recipient and pending request.
+An unrelated or expired OTP returns `not_applicable` without a claim or provider
+call. A new offer's attempt expires within ten seconds and is checked in the claim
+transaction. The host must offer promptly after durable MIME extraction, with a
+short retry cadence; a five-minute repair schedule cannot satisfy OTP validity.
+
+`handled` acknowledges durable responsibility. The existing session object stores
+an immutable operation/hash receipt and a queued job before acknowledging; an alarm
+then authenticates and runs the shared terminal-last collection. Replays return the
+same receipt, changed request hashes reject, and legacy delivery uses the same
+exclusive claim gate. A lost external response is held internally as `uncertain`
+and is never automatically replayed or turned into normal fallback. Small receipts
+and source-deduplication markers are retained indefinitely. `not_found` is used
+only by status lookup; the host must first wait out the sending lease/attempt.
+
+Legacy mail still forwards according to its existing rules and fails if its
+synchronous post-authentication collection writes no terminal. Adopted offers never
+forward. Select exactly one forwarding owner during cutover; this implementation
+does not alter production Email Routing, secrets, schedules or forwarding rules.
 
 The Web screen kept the V member number masked even after login, but collection APIs do not require it as a request field. The member number is a Worker secret solely for session regeneration.
 

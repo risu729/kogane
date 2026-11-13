@@ -753,6 +753,14 @@ The collector execution services are in
 `packages/application/src/operations/collector-dispatch.ts` (writes) and
 `collector-trail.ts` (reads):
 
+The per-run trail includes `registration: {state, failureCode, attempts,
+updatedAt}` from the selected CORE run's latest `registered` stage. A stored
+`retryable` refusal also reads as `execution.runs[].state: "retryable"` and
+derives the operation's `registered` stage with the recorded failure code,
+attempt count and timestamp. It remains open for the scan's retry. A later
+registered revision takes precedence over an earlier refusal. The trail
+returns closed codes, never provider text (ADR 0048, 2026-11-12 amendment).
+
 | Service                                                      | For                                                                   |
 | ------------------------------------------------------------ | --------------------------------------------------------------------- |
 | `claimCollectorStart`                                        | the one start of an operation, with the request row in the same batch |
