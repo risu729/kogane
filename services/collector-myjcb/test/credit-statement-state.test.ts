@@ -409,7 +409,7 @@ describe("ADR 0005 amendment: a stopped connection keeps the months before the s
     ]);
   });
 
-  test("in fetch mode a failed export drops its whole month: the page and ledger read before it too", async () => {
+  test("in fetch mode a malformed export preserves its month and later statements", async () => {
     const exporting = page({
       headings: [CONFIRMED_STATEMENT_HEADING],
       months: ["2026年2月"],
@@ -426,9 +426,11 @@ describe("ADR 0005 amendment: a stopped connection keeps the months before the s
       "x",
       { exports: "fetch" },
     );
-    expect(run.stop).toEqual({ code: "export_fetch", position: 2, capturedMonthCount: 2 });
-    // The page itself was read: an export stop keeps no stop page.
-    expect(filenames(run.artifacts).filter((name) => /-0[23]\./u.test(name))).toEqual([]);
+    expect(run.stop).toBeUndefined();
+    expect(run.documentResults).toEqual([{ period: "2026-02", kind: "csv", code: "unavailable" }]);
+    expect(filenames(run.artifacts)).toContain("credit-detail-02.html");
+    expect(filenames(run.artifacts)).toContain("credit-ledger-02.json");
+    expect(filenames(run.artifacts)).toContain("credit-detail-03.html");
   });
 
   test("by default an offered export is recorded and not fetched (ADR 0005's second amendment)", async () => {

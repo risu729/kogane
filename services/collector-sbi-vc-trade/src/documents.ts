@@ -359,7 +359,7 @@ function apiMonth(captures: readonly SharedCapture[], month: string, cashflowsCo
     cashflows: cashflows.size,
   };
 }
-const SAFE_REPORT_ERRORS = new Set([
+const LOCAL_REPORT_ERRORS = new Set([
   "annual_report_download_unobserved",
   "report_year_range_invalid",
   "report_list_invalid",
@@ -384,6 +384,12 @@ const SAFE_REPORT_ERRORS = new Set([
   "pnl_csv_period_mismatch",
   "pnl_csv_execution_identity_invalid",
   "pnl_csv_invalid",
+]);
+export function isLocalSbiVcReportFailure(errorCode: string): boolean {
+  return LOCAL_REPORT_ERRORS.has(errorCode);
+}
+const SAFE_REPORT_ERRORS = new Set([
+  ...LOCAL_REPORT_ERRORS,
   "collector_non_json_response",
   "collector_gateway_rejected",
   "collector_invalid_gateway_envelope",

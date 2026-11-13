@@ -16,6 +16,7 @@ const health: HealthState = {
   lastReauthSuccessAt: null,
   lastReauthErrorCode: "manual_agreement_required",
   manualAgreementPendingSince: null,
+  sessionRefreshRequired: false,
 };
 
 afterEach(() => vi.restoreAllMocks());
@@ -269,11 +270,17 @@ describe("the login cooldown while an agreement is pending", () => {
                 ]),
           );
         vi.spyOn(console, "error").mockImplementation(() => {});
-        await state.storage.put("health", { ...health, lastReauthErrorCode: null });
+        await state.storage.put("health", {
+          ...health,
+          lastReauthErrorCode: null,
+          sessionRefreshRequired: true,
+        });
         const first = await instance.runReauthenticate(false);
         expect(fetched).toHaveBeenCalledTimes(2);
         expect(first.lastReauthErrorCode).toBe("manual_agreement_required");
         expect(first.manualAgreementPendingSince).toBe(first.lastReauthAttemptAt);
+        expect(first.sessionRefreshRequired).toBe(true);
+        expect(await instance.runKeepAlive()).toEqual(first);
         // Inside the hour nothing logs in.
         expect(await instance.runReauthenticate(false)).toEqual(first);
         expect(fetched).toHaveBeenCalledTimes(2);
@@ -298,7 +305,11 @@ describe("the login cooldown while an agreement is pending", () => {
         expect(resumed).toMatchObject({
           lastReauthErrorCode: null,
           manualAgreementPendingSince: null,
+          sessionRefreshRequired: false,
         });
+        expect(resumed.sessionRefreshRequired).toBe(false);
+        expect((await instance.runKeepAlive()).lastErrorCode).toBeNull();
+        expect(fetched).toHaveBeenCalledTimes(7);
       } finally {
         Object.assign(bindings, original);
       }

@@ -35,6 +35,8 @@ import { cashHistoryInventoryComplete } from "./cash-history";
 import { CashHistoryError } from "../../../packages/parsers/src/parsers/sbi-cash-history-schema";
 import { IncomeHistoryError } from "../../../packages/parsers/src/parsers/sbi-income-history-schema";
 import { incomeHistoryInventoryComplete } from "./income-history";
+import { MailboxError } from "./mailbox-bootstrap";
+import type { MailboxUnit } from "./mailbox";
 
 export const SBI_SECURITIES_SOURCE = "sbi-securities";
 export const SHARED_PRODUCER = "collector-sbi-securities";
@@ -49,10 +51,46 @@ const FALLBACK_ERROR_CODE = "collector_failed";
 const SAFE_CODE = /^[a-z0-9][a-z0-9_-]{0,99}$/u;
 
 type UnitScope = "domestic" | "foreign";
+const SUPPLEMENTAL_UNITS = [
+  "cash-history-yen",
+  "cash-history-foreign",
+  "income-history-income",
+  "income-history-gains",
+  "weekly-assets",
+] as const;
+export type SupplementalUnit = (typeof SUPPLEMENTAL_UNITS)[number];
+
+/** Closed dataset membership: retained inputs and outputs share completeness. */
+export function supplementalUnit(dataset: string): SupplementalUnit | undefined {
+  switch (dataset) {
+    case "yen-detail-history":
+    case "yen-detail-history-page-source":
+      return "cash-history-yen";
+    case "foreign-cash-history":
+    case "foreign-cash-history-page-source":
+      return "cash-history-foreign";
+    case "income-payments":
+    case "income-payments-summary-source":
+    case "income-payments-rows-source":
+      return "income-history-income";
+    case "realised-gains":
+    case "realised-gains-all-summary-source":
+    case "realised-gains-summary-source":
+    case "realised-gains-rows-source":
+      return "income-history-gains";
+    case "account-assets-history":
+    case "account-assets-history-source":
+    case "account-assets-history-inventory":
+      return "weekly-assets";
+    default:
+      return undefined;
+  }
+}
 
 /** One failure, reduced to what a terminal may state. */
 export interface SharedFailure {
-  readonly scope: UnitScope;
+  readonly scope: UnitScope | "mailbox";
+  readonly unitKey?: SupplementalUnit;
   readonly code: string;
 }
 
@@ -71,13 +109,13 @@ export interface SbiSharedRun {
   readonly window?: { readonly from: string; readonly to: string };
   readonly artifacts: readonly Artifact[];
   readonly failures: readonly SharedFailure[];
+  readonly mailboxUnits?: readonly MailboxUnit[];
 }
 
-/** The same split the central importer uses to attribute an artifact. */
-function datasetScope(dataset: string): UnitScope {
-  // The foreign-cash statement is read through the domestic main-site session.
-  if (dataset === "foreign-cash-history" || dataset === "foreign-cash-history-page-source")
-    return "domestic";
+/** Core dependencies retain their old scope; supplements share their inputs. */
+function datasetScope(dataset: string): UnitScope | SupplementalUnit {
+  const supplement = supplementalUnit(dataset);
+  if (supplement !== undefined) return supplement;
   return dataset.startsWith("foreign-") ? "foreign" : "domestic";
 }
 
@@ -91,6 +129,7 @@ function scopesFor(scope: CollectionScope): UnitScope[] {
  * stable code, so no free-text ever reaches the manifest.
  */
 export function safeFailureCode(error: unknown): string {
+  if (error instanceof MailboxError) return error.code;
   if (error instanceof IncomeHistoryError) return error.code;
   if (error instanceof CashHistoryError) return error.code;
   if (isAssetHistoryError(error)) return error.code;
@@ -117,32 +156,41 @@ export function safeFailureCode(error: unknown): string {
 
 /** Builds the plan without writing anything, so a test can read the manifest. */
 export async function sbiRunPlan(run: SbiSharedRun): Promise<PersistRunPlan> {
-  if (!(await incomeHistoryInventoryComplete(run.artifacts))) {
-    run = {
-      ...run,
-      status: run.status === "failed" ? "failed" : "partial",
-      failures: [
-        ...run.failures,
-        { scope: "domestic", code: "sbi_income_history_source_inventory" },
-      ],
-    };
+  // A missing or changed retained input invalidates only its entire dependent
+  // supplement, including every weekly shard. Unattributed failures stay core.
+  for (const unitKey of SUPPLEMENTAL_UNITS) {
+    const captured = run.artifacts.filter(
+      (artifact) => supplementalUnit(artifact.dataset) === unitKey,
+    );
+    const complete = unitKey.startsWith("income-")
+      ? await incomeHistoryInventoryComplete(captured)
+      : unitKey.startsWith("cash-")
+        ? await cashHistoryInventoryComplete(captured)
+        : await assetHistoryInventoryComplete(captured);
+    if (!complete) {
+      const code = unitKey.startsWith("income-")
+        ? "sbi_income_history_source_inventory"
+        : unitKey.startsWith("cash-")
+          ? "sbi_cash_history_source_inventory"
+          : "sbi_asset_history_shard_inventory";
+      run = {
+        ...run,
+        status: run.status === "failed" ? "failed" : "partial",
+        failures: [...run.failures, { scope: "domestic", unitKey, code }],
+      };
+    }
   }
-  if (!(await cashHistoryInventoryComplete(run.artifacts))) {
-    run = {
-      ...run,
-      status: run.status === "failed" ? "failed" : "partial",
-      failures: [...run.failures, { scope: "domestic", code: "sbi_cash_history_source_inventory" }],
-    };
-  }
-  if (!(await assetHistoryInventoryComplete(run.artifacts))) {
-    run = {
-      ...run,
-      status: run.status === "failed" ? "failed" : "partial",
-      failures: [...run.failures, { scope: "domestic", code: "sbi_asset_history_shard_inventory" }],
-    };
-  }
-  const artifacts = await Promise.all(run.artifacts.map((artifact) => plannedArtifact(artifact)));
-  const scopes = scopesFor(run.scope);
+  // Hash sequentially so the document ceiling does not also become that many
+  // concurrent WebCrypto buffer copies.
+  const artifacts: PersistArtifact[] = [];
+  for (const artifact of run.artifacts) artifacts.push(await plannedArtifact(artifact));
+  const scopes: (UnitScope | SupplementalUnit)[] = scopesFor(run.scope);
+  for (const unitKey of SUPPLEMENTAL_UNITS)
+    if (
+      run.artifacts.some((artifact) => supplementalUnit(artifact.dataset) === unitKey) ||
+      run.failures.some((failure) => failure.unitKey === unitKey)
+    )
+      scopes.push(unitKey);
   const providerOutcome: ProviderOutcome = run.status;
   const coverageStatus = coverageFor(providerOutcome);
   const safeErrorCode =
@@ -153,7 +201,7 @@ export async function sbiRunPlan(run: SbiSharedRun): Promise<PersistRunPlan> {
   // no failure succeeded, a scope that produced nothing failed, anything else
   // is partial.
   const units: TerminalUnit[] = scopes.map((scope) => {
-    const failures = run.failures.filter((entry) => entry.scope === scope);
+    const failures = run.failures.filter((entry) => (entry.unitKey ?? entry.scope) === scope);
     const count = artifacts.filter((artifact) => artifact.unitKey === scope).length;
     const unitCoverage: CoverageStatus =
       failures.length === 0 ? "complete" : count === 0 ? "unknown" : "partial";
@@ -166,6 +214,12 @@ export async function sbiRunPlan(run: SbiSharedRun): Promise<PersistRunPlan> {
       ...(unitCode === undefined ? {} : { safeErrorCode: unitCode }),
     };
   });
+  for (const unit of run.mailboxUnits ?? [])
+    units.push({
+      ...unit,
+      unitKind: "document",
+      artifactCount: artifacts.filter((artifact) => artifact.unitKey === unit.unitKey).length,
+    });
   const ranges: TerminalRange[] =
     run.window === undefined
       ? []
@@ -208,7 +262,7 @@ export async function sbiRunPlan(run: SbiSharedRun): Promise<PersistRunPlan> {
       scopeKind: run.window === undefined ? "full_snapshot" : "date_range",
       startValue: run.window?.from ?? null,
       endValue: run.window?.to ?? null,
-      unitKeys: scopes,
+      unitKeys: units.map((unit) => unit.unitKey),
     },
     startedAt: run.startedAt,
     completedAt: run.completedAt,
@@ -220,7 +274,7 @@ export async function sbiRunPlan(run: SbiSharedRun): Promise<PersistRunPlan> {
     ranges,
     reports: [],
     transformations: artifacts.flatMap((artifact, index) =>
-      artifact.role === "provider_response"
+      artifact.role === "provider_response" || artifact.role === "provider_document"
         ? []
         : [
             extraction(
@@ -288,7 +342,8 @@ async function plannedArtifact(artifact: Artifact): Promise<PersistArtifact> {
     // in an envelope), which is the role the central descriptor gave them; the
     // terminal's `extracted` step says so (ADR 0021).
     role: artifact.role ?? "collector_derived",
-    unitKey: datasetScope(artifact.dataset),
+    unitKey:
+      supplementalUnit(artifact.dataset) ?? artifact.unitKey ?? datasetScope(artifact.dataset),
     body: { kind: "bytes", bytes },
   };
 }

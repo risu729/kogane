@@ -33,10 +33,45 @@ const policy = (
 });
 
 // The closed default opt-ins of migrations 0080, 0088, 0090, 0092, 0094, 0095, 0096,
-// 0097 and 0098.
+// 0097, 0098, 0099, 0100 and 0101.
 // This expected catalogue is independent of the SQL read under test: an extra
 // source, page, parser, scope, snapshot membership or policy still fails.
 export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
+  ...(["domestic-cash-positions", "account-assets-current", "foreign-cash-balances"] as const).map(
+    (dataset) => policy("sbi-securities", dataset, `sbi-${dataset}`),
+  ),
+  policy("sbi-securities", "foreign-cash-positions", "sbi-foreign-cash-positions", {
+    required_parser_version: "0.3.1",
+    updated_at_ms: 1794096000000,
+  }),
+  ...(["income-payments", "realised-gains"] as const).map((dataset) =>
+    policy("sbi-securities", dataset, `sbi-${dataset}`, {
+      policy_id: "coverage-v1",
+      required_parser_version: "0.1.2",
+      updated_at_ms: 1794268800000,
+    }),
+  ),
+  ...(
+    [
+      "domestic-trade-records",
+      "foreign-trade-records",
+      "yen-detail-history",
+      "foreign-cash-history",
+      "account-assets-history",
+    ] as const
+  ).map((dataset) =>
+    policy("sbi-securities", dataset, `sbi-${dataset}`, {
+      policy_id: "coverage-v1",
+      replaces_previous_on_complete_empty: 0,
+      snapshot_selection: 0,
+    }),
+  ),
+  policy("sbi-securities", "delivered-document-pdf", "sbi-delivered-document-metadata", {
+    policy_id: "coverage-v1",
+    required_parser_version: "1.0.0",
+    replaces_previous_on_complete_empty: 0,
+    snapshot_selection: 0,
+  }),
   ...(
     [
       ["credit-ledger", "myjcb-credit-ledger"],
@@ -46,6 +81,14 @@ export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
     ] as const
   ).map(([dataset, parser]) =>
     policy("myjcb", dataset, parser, { snapshot_selection: 0, updated_at_ms: 1794268800000 }),
+  ),
+  ...(["credit-csv", "credit-ofx", "credit-pdf"] as const).map((dataset) =>
+    policy("myjcb", dataset, "myjcb-statement-document-metadata", {
+      policy_id: "coverage-v1",
+      required_parser_version: "1.0.1",
+      replaces_previous_on_complete_empty: 0,
+      snapshot_selection: 0,
+    }),
   ),
   policy("myjcb", "jpoint-history", "myjcb-jpoint-history", {
     policy_id: "coverage-v1",
