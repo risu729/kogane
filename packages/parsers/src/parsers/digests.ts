@@ -92,6 +92,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "0e2a58d6475a480a08fb81017c139c32130309e2fb1186d93234a051e46f2d55",
     "poc/observation-pipeline/src/parsers/sbi-cash-history.ts":
       "060c7284831cf117010cf1dfbf9424478f78ad70a63940d1c44d3cb16bf4bfc8",
+    "poc/observation-pipeline/src/parsers/sbi-documents.ts":
+      "dd30456aa880891c946d39ec1947fa5ac352e8544453de0d544174263bf40aa0",
     "poc/observation-pipeline/src/parsers/sbi-domestic-cash-positions.ts":
       "c9dbf90ce8e391a8880ec019bd346ca9647470a346403f1414a7636ca70fb064",
     "poc/observation-pipeline/src/parsers/sbi-domestic-trade-records.ts":
@@ -496,6 +498,19 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/parsers/sbi-asset-history-json.ts",
         "poc/observation-pipeline/src/parsers/sbi-asset-history-schema.ts",
         "poc/observation-pipeline/src/parsers/sbi-asset-history-validation.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "sbi-delivered-document-metadata": {
+      version: "1.0.0",
+      codeDigest: "cc0fb1436840d2dbaaf87c26f1df5a98e847c578f6e93a0c0851f85b41bafd9f",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/coverage.ts",
+        "poc/observation-pipeline/src/parsers/sbi-documents.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],
