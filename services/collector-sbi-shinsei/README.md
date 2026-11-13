@@ -379,3 +379,12 @@ remains in the view's unattributed list. Its exact account/currency/request
 range remains in the derived artifact, and its hashed account unit, terminal
 report, dated ranges and complete-empty parser claim retain the evidence.
 No amount or synthetic statement observation is created to force attribution.
+
+## Container browser build
+
+The image installs a version/size/SHA-256-pinned official Google Chrome Stable
+payload over the existing Playwright Noble base, without an APT install step.
+[ADR 0112](../../docs/adr/0112-pinned-chrome-collector-builds.md) records the retained
+wrapper/channel behavior and skipped package hooks; the [maintenance procedure](../../docs/pinned-chrome-builds.md)
+records signed provenance, generated build inputs and offline image checks.
+These synthetic checks do not establish a provider login or production collection.

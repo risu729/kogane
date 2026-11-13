@@ -59,6 +59,8 @@ try {
     };
     if (row.window_start && row.window_end)
       meta.runWindow = { from: row.window_start, to: row.window_end };
+    else if (row.source_id === "sony-bank" && row.window_start === null && row.window_end)
+      Object.assign(meta, { retainedHistoryEnd: row.window_end });
     for (const parser of PARSERS.filter((p) => p.accepts(meta))) {
       if (row.byte_size > 16 * 1024 * 1024) {
         console.log(JSON.stringify({ parser: parser.name, result: "oversize" }));

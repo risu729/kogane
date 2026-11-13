@@ -151,7 +151,9 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/smbc-foreign-ordinary.ts":
       "f27648c71d5b6b70045f5742c87c3778af6d5079ec3a515f644e980850a3892f",
     "poc/observation-pipeline/src/parsers/sony-bank.ts":
-      "b114022993854781bb293e40330eca99c04dafab22b12b594dbe35fedb8b679c",
+      "f8c316fc89e8ab4962ef8527beba4aba92d79cf6c4ed956adb7e09c840b90589",
+    "poc/observation-pipeline/src/parsers/sony-csv.ts":
+      "0ba763384e89a0dbc0fbf5d436e70bf0173ca26e658b77c8ca985efa6c135141",
     "poc/observation-pipeline/src/parsers/st-george.ts":
       "278eeb68604bfd69d6a81fb0ed314a8559ffb90d4da023bc4918321c8cd013b3",
     "poc/observation-pipeline/src/parsers/util.ts":
@@ -893,8 +895,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sony-bank-gross-balance": {
-      version: "1.0.3",
-      codeDigest: "49e0c58ef3a9a29b9231140ad041714bb33eda78ec3680d77bc2a9318a186f91",
+      version: "1.0.5",
+      codeDigest: "59f7a13c42e601ef588bbc47e51c7cddb8d1afbadc0908bb0469f0d63b85c14c",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -902,13 +904,14 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/parsers/coverage.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
         "poc/observation-pipeline/src/parsers/sony-bank.ts",
+        "poc/observation-pipeline/src/parsers/sony-csv.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],
     },
     "sony-bank-history-csv": {
-      version: "1.0.3",
-      codeDigest: "49e0c58ef3a9a29b9231140ad041714bb33eda78ec3680d77bc2a9318a186f91",
+      version: "1.0.5",
+      codeDigest: "59f7a13c42e601ef588bbc47e51c7cddb8d1afbadc0908bb0469f0d63b85c14c",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -916,13 +919,14 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/parsers/coverage.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
         "poc/observation-pipeline/src/parsers/sony-bank.ts",
+        "poc/observation-pipeline/src/parsers/sony-csv.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],
     },
     "sony-bank-history-json": {
-      version: "1.0.2",
-      codeDigest: "49e0c58ef3a9a29b9231140ad041714bb33eda78ec3680d77bc2a9318a186f91",
+      version: "1.0.4",
+      codeDigest: "59f7a13c42e601ef588bbc47e51c7cddb8d1afbadc0908bb0469f0d63b85c14c",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -930,13 +934,14 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/parsers/coverage.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
         "poc/observation-pipeline/src/parsers/sony-bank.ts",
+        "poc/observation-pipeline/src/parsers/sony-csv.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],
     },
     "sony-bank-wallet-history": {
-      version: "1.0.4",
-      codeDigest: "49e0c58ef3a9a29b9231140ad041714bb33eda78ec3680d77bc2a9318a186f91",
+      version: "1.0.6",
+      codeDigest: "59f7a13c42e601ef588bbc47e51c7cddb8d1afbadc0908bb0469f0d63b85c14c",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -944,6 +949,7 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/parsers/coverage.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
         "poc/observation-pipeline/src/parsers/sony-bank.ts",
+        "poc/observation-pipeline/src/parsers/sony-csv.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],
