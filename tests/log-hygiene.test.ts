@@ -45,6 +45,11 @@ const NOT_SOURCE = /(?:\.d\.ts|\.test\.ts|\.test\.mjs|\.node-test\.mjs)$/u;
  * its entry here, with the reason.
  */
 const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>> = {
+  "packages/application/src/collection/platform-limit.ts": {
+    count: 1,
+    reason:
+      "transient platform-limit classification returns only a boolean; no message or error is retained",
+  },
   "services/collector-sbi-securities/src/mailbox-contract.ts": {
     count: 1,
     reason:
@@ -173,10 +178,6 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     reason:
       "the redacted failure message of a run the disabled app path can no longer start; " +
       "the terminal and the log line carry closed codes only",
-  },
-  "services/processor/src/invocation-probe.ts": {
-    count: 1,
-    reason: "tested against the platform-limit phrase; only a boolean is kept",
   },
   "services/processor/src/schedule-alarm.ts": {
     count: 1,

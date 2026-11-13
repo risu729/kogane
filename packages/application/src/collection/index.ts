@@ -31,3 +31,5 @@ export {
   RETRYABLE_RETRY_INTERVAL_MS,
   type RegisterTerminalOutcome,
 } from "./register-terminal.ts";
+
+export { platformLimitError } from "./platform-limit.ts";
