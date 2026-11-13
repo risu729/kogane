@@ -113,6 +113,11 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     count: 1,
     reason: "a failure's message field, which the collector already sets to its failure code",
   },
+  "services/collector-myjcb/src/credit.ts": {
+    count: 1,
+    reason:
+      "compared only with the exact local myjcb_statement_export_budget_exhausted code; only budget_exhausted or unavailable is retained, and the message is never logged or persisted",
+  },
   "services/collector-sbi-shinsei/src/diagnostics.ts": {
     count: 1,
     reason: "matched against exact runtime phrases; only the mapped closed reason is kept",

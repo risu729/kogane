@@ -99,9 +99,9 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
       ],
       444,
     ),
-    // Finalised statement HTML and export offers are retained. Actual PDF/CSV
-    // bytes remain unverified after the browser blocked the observed download.
-    missing("document", 1251),
+    // Observed credit CSV/PDF/OFX originals are retained as evidence only.
+    // Debit files, durable root-card switching and full live archival remain unverified.
+    partial("document", ["myjcb-statement-document-metadata"], 1251),
     collected("reward_balance", ["myjcb-jpoint-balance", "myjcb-jpoint-history"]),
     collected("reward_activity", ["myjcb-jpoint-history"]),
     partial("reward_expiry", ["myjcb-jpoint-balance", "myjcb-jpoint-history"], 1251),

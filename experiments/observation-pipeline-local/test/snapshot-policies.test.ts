@@ -594,7 +594,10 @@ test("MyJCB credit eligibility seeds exactly four datasets and repairs missing r
     ["myjcb-skip-payment-schedule", "credit-schedule"],
   ];
   const seeded = policyRows(store).filter(
-    (row) => row.snapshot_selection === 0 && row.source_id === "myjcb",
+    (row) =>
+      row.snapshot_selection === 0 &&
+      row.source_id === "myjcb" &&
+      row.parser_name !== "myjcb-statement-document-metadata",
   );
   expect(seeded.map((row) => [row.parser_name, row.dataset])).toEqual(expected);
   for (const row of seeded)
@@ -616,7 +619,12 @@ test("MyJCB credit eligibility seeds exactly four datasets and repairs missing r
     try {
       expect(
         policyRows(reopened)
-          .filter((row) => row.snapshot_selection === 0 && row.source_id === "myjcb")
+          .filter(
+            (row) =>
+              row.snapshot_selection === 0 &&
+              row.source_id === "myjcb" &&
+              row.parser_name !== "myjcb-statement-document-metadata",
+          )
           .map((row) => [row.parser_name, row.dataset]),
       ).toEqual(expected);
       for (const parser of ["myjcb-credit-ledger", "myjcb-jpoint-history"])
@@ -678,6 +686,45 @@ test("reopening installs Sony policies once and preserves explicit operator alte
         )
         .get(),
     ).toEqual({ unit_scope: "run", snapshot_selection: 0 });
+  } finally {
+    reopened.db.close();
+  }
+});
+
+test("local document policy repair preserves every operator alternative", () => {
+  const store = database();
+  const read = (current: Store) =>
+    current.db
+      .query(
+        "SELECT dataset,unit_scope,required_parser_version,snapshot_selection,replaces_previous_on_complete_empty FROM dataset_snapshot_policies WHERE parser_name='myjcb-statement-document-metadata' ORDER BY dataset",
+      )
+      .all();
+  expect(read(store)).toEqual(
+    ["credit-csv", "credit-ofx", "credit-pdf"].map((dataset) => ({
+      dataset,
+      unit_scope: "unit",
+      required_parser_version: "1.0.1",
+      snapshot_selection: 0,
+      replaces_previous_on_complete_empty: 0,
+    })),
+  );
+  store.db.exec(
+    "UPDATE dataset_snapshot_policies SET unit_scope='run',required_parser_version='9.0.0' WHERE parser_name='myjcb-statement-document-metadata' AND dataset='credit-csv'",
+  );
+  store.db.exec(
+    "DELETE FROM dataset_snapshot_policies WHERE parser_name='myjcb-statement-document-metadata' AND dataset='credit-pdf'",
+  );
+  const reopened = openTestStore(join(store.blobDir, ".."));
+  try {
+    expect(read(reopened)).toEqual(
+      ["credit-csv", "credit-ofx", "credit-pdf"].map((dataset) => ({
+        dataset,
+        unit_scope: dataset === "credit-csv" ? "run" : "unit",
+        required_parser_version: dataset === "credit-csv" ? "9.0.0" : "1.0.1",
+        snapshot_selection: 0,
+        replaces_previous_on_complete_empty: 0,
+      })),
+    );
   } finally {
     reopened.db.close();
   }

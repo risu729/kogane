@@ -21,6 +21,7 @@ import {
   myJcbEvidenceOnly,
   myJcbPastMonthBalances,
 } from "./myjcb.ts";
+import { myJcbDocuments } from "./myjcb-documents.ts";
 import { myJcbJPointBalance } from "./myjcb-jpoint.ts";
 import { myJcbJPointHistory } from "./myjcb-jpoint-history.ts";
 import { myJcbDebitLedger, myJcbDebitOtherStatement } from "./myjcb-debit.ts";
@@ -79,6 +80,7 @@ export const PARSERS: readonly Parser[] = [
   myJcbEvidenceOnly,
   myJcbSkipPaymentSchedule,
   myJcbJPointBalance,
+  myJcbDocuments,
   myJcbJPointHistory,
   myJcbDebitLedger,
   myJcbDebitOtherStatement,
