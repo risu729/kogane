@@ -33,9 +33,11 @@ are separate claims. Historical acceptance records are linked from the
   observation details, not added to native balance rows. Synthetic tests cover the
   production run plan through registration, parsing, publication and readback.
   Local authenticated page evidence is not deployed Worker evidence. The Worker is
-  deployed and its connection dispatches collection requests; the first production
-  collection/publication and then the separate schedule activation remain pending;
-  its daily 06:30 JST alarm is disabled. See [ADR 0042](adr/0042-prestia-bank-worker.md),
+  deployed and its connection dispatches collection requests. Its first production
+  collection, requested on 2026-11-09, was published on 2026-11-12 after the
+  missing ingest route was applied ([#1270](https://github.com/risu729/kogane/issues/1270);
+  [ops API](ops-api.md#enabling-collector-execution-adr-0048)). The separate schedule
+  activation remains pending; its daily 06:30 JST alarm is disabled. See [ADR 0042](adr/0042-prestia-bank-worker.md),
   the [plan](plans/2026-10-prestia-bank-worker.md) and the
   [dated source update](sources/prestia.md#prestia-bank-worker-integration-2026-10-05).
 
@@ -89,9 +91,9 @@ are separate claims. Historical acceptance records are linked from the
   `moneyforward-me`, `myjcb`, `st-george`, `sbi-vc-trade`, `sbi-vc-keepalive` and `prestia-bank`; requests for
   any other connection wait and expire after 24 hours. Production checks followed one
   request per original connection (`sony-bank`, `sbi-securities`, `mobile-suica`,
-  `moneyforward-me`, `myjcb`) to publication. The four additional connections still
-  need their post-deployment request checks; `prestia-bank`'s is also its first
-  production collection. Collectors run their daily
+  `moneyforward-me`, `myjcb`) to publication. Of the four additional connections,
+  `prestia-bank`'s first production collection was followed to publication
+  (2026-11-12); the other three still need their post-deployment request checks. Collectors run their daily
   scope, not a requested window; READ projection of a run is derived from the READ pointer each time the record is read, not stored; only
   SBI VC's keepalive is an unattended session refresh. An accepted operation is
   still not an executed collection. The schedules page's **収集を依頼** sends the
