@@ -53,7 +53,25 @@ test("extraction retains the frozen base SQL apart from explicit provider histor
   expect(hash(transactions)).toBe(
     "9876071ea165908299b34c61aad1005b7531fe5a010c213c2bc193f2b1be3ff9",
   );
-  expect(hash(latestBalancesSql({}, 0, 501).sql)).toBe(
+  // ADR 0099 adds only this Sony capture/CSV ordering. Its semantic and plan
+  // differences are covered by sony-csv-history.test.ts.
+  const sonyHistoryOrder = `                    -- Keep newer Sony captures ahead of older replays, then
+                    -- prefer the complete CSV within the same capture cohort.
+                    CASE WHEN fa.source_id = 'sony-bank' AND p.parser_name IN (
+                        'sony-bank-history-json', 'sony-bank-history-csv'
+                      ) THEN f.started_at END DESC,
+                    CASE WHEN fa.source_id = 'sony-bank' AND p.parser_name IN (
+                        'sony-bank-history-json', 'sony-bank-history-csv'
+                      ) THEN f.id END DESC,
+                    -- The complete official CSV has one chronological row order.
+                    -- JSON pages may publish later and split a day's history.
+                    CASE WHEN fa.source_id = 'sony-bank'
+                           AND p.parser_name = 'sony-bank-history-csv'
+                      THEN 1 ELSE 0 END DESC,
+`;
+  const balances = latestBalancesSql({}, 0, 501).sql;
+  expect(balances.split(sonyHistoryOrder)).toHaveLength(2);
+  expect(hash(balances.replace(sonyHistoryOrder, ""))).toBe(
     "8c260635f19d6028616e96fc1bc300ef3a96a5990468a3d86f60acfd2f598ba9",
   );
   // ADR 0107 adds only the three acquisition-month activity measures to
@@ -62,7 +80,8 @@ test("extraction retains the frozen base SQL apart from explicit provider histor
   const historySummary =
     " OR (source_id = 'myjcb' AND parser LIKE 'myjcb-jpoint-history@%' AND metric IN ('jpoint_acquisition_earned','jpoint_acquisition_used','jpoint_acquisition_expired'))";
   expect(summaries.split(historySummary)).toHaveLength(2);
-  expect(hash(summaries.replace(historySummary, ""))).toBe(
+  expect(summaries.split(sonyHistoryOrder)).toHaveLength(2);
+  expect(hash(summaries.replace(historySummary, "").replace(sonyHistoryOrder, ""))).toBe(
     "023d01804a87ae85f6bad1550b18e675f33015d02c5ea9534d8a672e3fb6811a",
   );
 });

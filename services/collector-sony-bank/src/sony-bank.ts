@@ -1,4 +1,5 @@
-import { decodeUtf8, parseCsv } from "../../../packages/parsers/src/parsers/util";
+import { decodeSonyCsv, SonyCsvDecodeError } from "../../../packages/parsers/src/parsers/sony-csv";
+import { parseCsv } from "../../../packages/parsers/src/parsers/util";
 import { SonyBankDiagnostics, SonyBankError } from "./diagnostics";
 import type { JsonObject, RawArtifact, SonyBankCredential } from "./types";
 
@@ -129,6 +130,7 @@ export async function collectSonyBank(options: {
   to: string;
   fetcher?: Fetcher;
   runId?: string;
+  includeRetainedHistory?: boolean;
 }): Promise<SonyBankCollection> {
   const fetcher = options.fetcher ?? fetch;
   const diagnostics = new SonyBankDiagnostics(options.runId);
@@ -149,16 +151,67 @@ export async function collectSonyBank(options: {
     ),
   );
 
-  const history = await diagnostics.stage(
-    "history",
-    () => client.history("JPY", options.from, options.to),
-    { currency: "JPY" },
-  );
+  const monthly = await collectHistoryRange(client, diagnostics, options.from, options.to);
+  const retained = options.includeRetainedHistory
+    ? await collectHistoryRange(client, diagnostics, undefined, options.to)
+    : null;
+  const history = retained ?? monthly;
+  const wallet = await diagnostics.stage("wallet", () => client.walletHistory());
+  const artifacts: RawArtifact[] = [
+    {
+      dataset: "gross-balance",
+      filename: "gross-balance.json",
+      mediaType: "application/json",
+      body: gross.rawText,
+    },
+    ...history.artifacts,
+    ...(retained
+      ? monthly.artifacts.map((artifact) => ({
+          ...artifact,
+          filename: `monthly-${artifact.filename}`,
+        }))
+      : []),
+    ...wallet.months.map((month) => ({
+      dataset: `wallet-history-${month.value.slice(0, 6)}`,
+      filename: `wallet-history-${month.value.slice(0, 4)}-${month.value.slice(4, 6)}.html`,
+      mediaType: "text/html; charset=UTF-8",
+      body: month.html,
+    })),
+    {
+      dataset: "collection-summary",
+      filename: "collection-summary.json",
+      mediaType: "application/json",
+      body: JSON.stringify({
+        schemaVersion: "sony-bank-collection-summary-v2",
+        window: { from: retained ? null : options.from, to: options.to },
+        monthlyWindow: { from: options.from, to: options.to },
+        transactionCount: history.transactionCount,
+        pageCount: history.pageCount,
+        foreignCurrencyCount: FOREIGN_CURRENCY_CODES.length,
+        foreignTransactionCount: history.foreignTransactionCount,
+        foreignPageCount: history.foreignPageCount,
+        walletMonthCount: wallet.months.length,
+        cookieNames: client.cookieNames(),
+      }),
+    },
+  ];
+  return { artifacts, transactionCount: history.transactionCount };
+}
+
+async function collectHistoryRange(
+  client: SonyBankClient,
+  diagnostics: SonyBankDiagnostics,
+  from: string | undefined,
+  to: string,
+) {
+  const history = await diagnostics.stage("history", () => client.history("JPY", from, to), {
+    currency: "JPY",
+  });
   const csv =
     history.transactionCount > 0
       ? await diagnostics.stage(
           "history-csv",
-          () => client.historyCsv("JPY", options.from, options.to, history.transactionCount),
+          () => client.historyCsv("JPY", from, to, history.transactionCount),
           { currency: "JPY", transactionCount: history.transactionCount },
         )
       : null;
@@ -172,20 +225,14 @@ export async function collectSonyBank(options: {
   for (const currency of FOREIGN_CURRENCY_CODES) {
     const currencyHistory = await diagnostics.stage(
       "history",
-      () => client.history(currency, options.from, options.to),
+      () => client.history(currency, from, to),
       { currency },
     );
     const currencyCsv =
       currencyHistory.transactionCount > 0
         ? await diagnostics.stage(
             "history-csv",
-            () =>
-              client.historyCsv(
-                currency,
-                options.from,
-                options.to,
-                currencyHistory.transactionCount,
-              ),
+            () => client.historyCsv(currency, from, to, currencyHistory.transactionCount),
             { currency, transactionCount: currencyHistory.transactionCount },
           )
         : null;
@@ -197,14 +244,7 @@ export async function collectSonyBank(options: {
     foreignTransactionCount += currencyHistory.transactionCount;
     foreign.push({ currency, history: currencyHistory, csv: currencyCsv });
   }
-  const wallet = await diagnostics.stage("wallet", () => client.walletHistory());
   const artifacts: RawArtifact[] = [
-    {
-      dataset: "gross-balance",
-      filename: "gross-balance.json",
-      mediaType: "application/json",
-      body: gross.rawText,
-    },
     ...history.pages.map((page, index) => ({
       dataset: `yen-history-page-${String(index + 1).padStart(4, "0")}`,
       filename: `yen-history-page-${String(index + 1).padStart(4, "0")}.json`,
@@ -239,30 +279,14 @@ export async function collectSonyBank(options: {
           ]
         : []),
     ]),
-    ...wallet.months.map((month) => ({
-      dataset: `wallet-history-${month.value.slice(0, 6)}`,
-      filename: `wallet-history-${month.value.slice(0, 4)}-${month.value.slice(4, 6)}.html`,
-      mediaType: "text/html; charset=UTF-8",
-      body: month.html,
-    })),
-    {
-      dataset: "collection-summary",
-      filename: "collection-summary.json",
-      mediaType: "application/json",
-      body: JSON.stringify({
-        schemaVersion: "sony-bank-collection-summary-v2",
-        window: { from: options.from, to: options.to },
-        transactionCount: history.transactionCount,
-        pageCount: history.pages.length,
-        foreignCurrencyCount: FOREIGN_CURRENCY_CODES.length,
-        foreignTransactionCount,
-        foreignPageCount: foreign.reduce((count, entry) => count + entry.history.pages.length, 0),
-        walletMonthCount: wallet.months.length,
-        cookieNames: client.cookieNames(),
-      }),
-    },
   ];
-  return { artifacts, transactionCount: history.transactionCount };
+  return {
+    artifacts,
+    transactionCount: history.transactionCount,
+    pageCount: history.pages.length,
+    foreignTransactionCount,
+    foreignPageCount: foreign.reduce((count, entry) => count + entry.history.pages.length, 0),
+  };
 }
 
 class SonyBankClient {
@@ -406,7 +430,11 @@ class SonyBankClient {
     return { rawText, json };
   }
 
-  async history(currency: string, from: string, to: string): Promise<HistoryCollection> {
+  async history(
+    currency: string,
+    from: string | undefined,
+    to: string,
+  ): Promise<HistoryCollection> {
     const revision = await this.revision("ea");
     const pages: RawJsonResponse[] = [];
     let acquisitionStart = 1;
@@ -419,13 +447,14 @@ class SonyBankClient {
         {
           branchNum: this.credential.branchNum,
           accountNum: this.credential.accountNum,
-          currencyCdInq: first ? currency : "",
-          ...(first ? {} : { currencyCd: currency }),
-          inquiryStrtdtCat: from,
+          ...(first
+            ? { currencyCdInq: currency }
+            : { ...(from === undefined ? {} : { currencyCdInq: "" }), currencyCd: currency }),
+          ...(from === undefined ? {} : { inquiryStrtdtCat: from }),
           inquiryEnddtCat: to,
           maximumAcqCnt: PAGE_SIZE,
           acquisitionStrtCnt: acquisitionStart,
-          sortSelect: "00001",
+          sortSelect: from === undefined ? "00002" : "00001",
           detailDispSg: "1",
         },
         {
@@ -460,12 +489,12 @@ class SonyBankClient {
       }
       acquisitionStart += PAGE_SIZE;
     }
-    throw new Error("Sony Bank history exceeded the bounded page limit");
+    throw new SonyBankError("EABA0600S1fE10", undefined, 0, "history_page_limit_exceeded");
   }
 
   async historyCsv(
     currency: string,
-    from: string,
+    from: string | undefined,
     to: string,
     expectedCount: number,
   ): Promise<{ body: ArrayBuffer; mediaType: string }> {
@@ -486,9 +515,9 @@ class SonyBankClient {
           branchNum: this.credential.branchNum,
           accountNum: this.credential.accountNum,
           currencyCd: currency,
-          inquiryStrtdtCat: from,
+          ...(from === undefined ? {} : { inquiryStrtdtCat: from }),
           inquiryEnddtCat: to,
-          sortSelect: "00001",
+          sortSelect: from === undefined ? "00002" : "00001",
           detailDispSg: "1",
         }),
         redirect: "manual",
@@ -667,16 +696,20 @@ export function validateHistoryPage(
     !Number.isSafeInteger(pageIndex) ||
     pageIndex < 0
   ) {
-    throw new Error("sony_bank_history_pagination_invalid");
+    throw new SonyBankError("EABA0600S1fE10", undefined, 0, "history_pagination_invalid");
+  }
+  if (json.returnCnt !== undefined && countValue(json.returnCnt) !== rowCount) {
+    throw new SonyBankError("EABA0600S1fE10", undefined, 0, "history_pagination_length_mismatch");
   }
   const total = countValue(json.countCnt);
-  if (total === null) throw new Error("sony_bank_history_pagination_invalid");
+  if (total === null)
+    throw new SonyBankError("EABA0600S1fE10", undefined, 0, "history_pagination_invalid");
   if (expectedTotal !== null && total !== expectedTotal) {
-    throw new Error("sony_bank_history_pagination_total_changed");
+    throw new SonyBankError("EABA0600S1fE10", undefined, 0, "history_pagination_total_changed");
   }
   const expectedRows = Math.max(0, Math.min(PAGE_SIZE, total - pageIndex * PAGE_SIZE));
   if (rowCount !== expectedRows) {
-    throw new Error("sony_bank_history_pagination_length_mismatch");
+    throw new SonyBankError("EABA0600S1fE10", undefined, 0, "history_pagination_length_mismatch");
   }
   return {
     rowCount,
@@ -878,37 +911,33 @@ function assertHistoryCsvCount(
     throw new SonyBankError(operation, undefined, 0, "history_csv_missing_with_transactions");
   let rows: string[][];
   try {
-    const charset = /;\s*charset="?([a-z0-9._-]+)"?$/iu
-      .exec(mediaType)?.[1]
-      ?.toLowerCase()
-      .replaceAll("_", "-");
-    const shiftJis = ["shift-jis", "shiftjis", "sjis", "windows-31j", "cp932"];
-    if (charset && !["utf-8", "utf8", ...shiftJis].includes(charset)) throw new Error("charset");
-    let text: string;
-    if (charset && shiftJis.includes(charset)) {
-      text = new TextDecoder("shift-jis", { fatal: true }).decode(body);
-    } else if (charset) {
-      text = decodeUtf8(new Uint8Array(body));
-    } else {
-      try {
-        text = decodeUtf8(new Uint8Array(body));
-      } catch {
-        text = new TextDecoder("shift-jis", { fatal: true }).decode(body);
-      }
-    }
-    rows = parseCsv(text);
-  } catch {
-    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid");
+    rows = parseCsv(decodeSonyCsv(new Uint8Array(body), mediaType));
+  } catch (error) {
+    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid", {
+      csvFailure: error instanceof SonyCsvDecodeError ? error.category : "parse",
+    });
   }
   const header = ["取引日", "摘要", "参考情報", "通貨", "預入額", "引出額", "差引残高"];
   if (currency !== "JPY") header.push("為替レート");
   if (rows.length === 0)
     throw new SonyBankError(operation, undefined, 0, "history_csv_missing_with_transactions");
-  if (
-    rows.some((row) => row.length !== header.length) ||
-    header.some((value, index) => rows[0]![index] !== value)
-  )
-    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid");
+  const shape = {
+    csvExpectedColumnCount: header.length,
+    csvHeaderColumnCount: rows[0]!.length,
+    csvMinColumnCount: rows.reduce((minimum, row) => Math.min(minimum, row.length), Infinity),
+    csvMaxColumnCount: rows.reduce((maximum, row) => Math.max(maximum, row.length), 0),
+    csvInvalidRowCount: rows.filter((row) => row.length !== header.length).length,
+  };
+  if (header.some((value, index) => rows[0]![index] !== value))
+    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid", {
+      ...shape,
+      csvFailure: "header",
+    });
+  if (shape.csvInvalidRowCount > 0)
+    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid", {
+      ...shape,
+      csvFailure: "columns",
+    });
   if (rows.length - 1 !== expectedCount)
     throw new SonyBankError(operation, undefined, 0, "history_csv_count_mismatch");
 }

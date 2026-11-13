@@ -36,7 +36,7 @@ interface SharedResult {
   readonly runId: string;
   readonly status: CollectionManifest["status"];
   readonly window: {
-    from: string;
+    from: string | null;
     to: string;
   };
   readonly transactionCount: number;
@@ -80,6 +80,7 @@ export async function runSharedCollection(
         from: window.from,
         to: window.to,
         runId,
+        includeRetainedHistory: true,
       });
       transactionCount = collection.transactionCount;
       artifacts = collection.artifacts;
@@ -103,7 +104,7 @@ export async function runSharedCollection(
       startedAt,
       completedAt,
       status,
-      window,
+      window: { from: null, to: window.to },
       transactionCount,
       artifacts,
       failures,
@@ -118,7 +119,7 @@ export async function runSharedCollection(
     return {
       runId,
       status,
-      window,
+      window: { from: null, to: window.to },
       transactionCount,
       artifactCount: outcome.artifactCount,
       failureCount: failures.length,
@@ -135,9 +136,8 @@ export async function runSharedCollection(
  * and a month's last day would never be requested again once the next run's
  * window starts on the new month. On the first of a month the run therefore
  * requests the whole previous month; the new month's first day comes the next day.
- * Open limit: only the run on the 1st requests the previous month's last day, so
- * a missed or failed run on the 1st leaves that day unrequested; reaching back
- * across the month boundary would be an unobserved request shape (ADR 0004).
+ * The scheduled run additionally requests all retained history through the same
+ * end date, so any later successful run recovers missed month-end dates.
  */
 export function defaultWindow(now: Date): {
   from: string;

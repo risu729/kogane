@@ -45,9 +45,9 @@ describe("defaultWindow", () => {
     });
   });
 
-  test("an open limit: after a missed run on the 1st, the 2nd does not reach back", () => {
+  test("the daily window remains monthly after a missed run on the 1st", () => {
     // 2026-04-02T06:00+09:00. Only the run on the 1st requests 2026-03-31; the
-    // window never crosses a month boundary, an unobserved shape (ADR 0004).
+    // daily window remains monthly; retained history separately recovers that day.
     expect(defaultWindow(new Date("2026-04-01T21:00:00Z"))).toEqual({
       from: "2026-04-01",
       to: "2026-04-01",

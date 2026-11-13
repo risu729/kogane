@@ -190,7 +190,9 @@ export function artifactMeta(row: ArtifactRow): ArtifactMeta {
       row.run_status === "success" && row.run_failure_count === 0 ? null : "unit-independent-v1",
     ...(row.window_start && row.window_end
       ? { runWindow: { from: row.window_start, to: row.window_end } }
-      : {}),
+      : row.source_id === "sony-bank" && row.window_start === null && row.window_end
+        ? { retainedHistoryEnd: row.window_end }
+        : {}),
     dataset: row.dataset,
     artifactKey: row.artifact_key,
     fetchUnitKey: row.fetch_unit_key,
