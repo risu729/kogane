@@ -940,6 +940,24 @@ for this artifact, with the CP932 charset a constant of the source.
 
 ### `sbi-securities` (`services/collector-sbi-securities`)
 
+Delivered reports additionally use the exact new-mailbox handoff observed on
+2026-11-11. After ordinary domestic and foreign work, the collector uses the
+remaining shared eleven-minute budget to corroborate the current list and
+archive supported single-file PDFs. The private inventory and per-document
+metadata retain provider fields; no handoff material is persisted. Each original
+PDF has its own `provider_document` artifact/unit and kind/date/identity/hash
+locator, while identical bytes reuse one content-addressed DATA object.
+The financial terminal is stored before this archive starts; a separate
+`<financial-run-id>-mailbox` terminal shares its acquisition reference/start
+but carries only mailbox artifacts, failures and units. Its failure cannot
+alter the existing financial terminal's publication eligibility.
+Registration v11 maps `delivered-document-pdf` only, freezing v1–v10 mappings;
+the metadata parser emits evidence-only coverage with independent unit
+eligibility on partial runs. A bounded round-robin hash cursor commits only
+after durable terminal persistence. Legacy and unsupported document formats,
+HTTP-only session readiness and scheduled production coverage remain unproved
+or unsupported ([ADR 0108](adr/0108-sbi-delivered-documents.md)).
+
 | Artifact key                                 | Role                | Unit       |
 | -------------------------------------------- | ------------------- | ---------- |
 | `domestic-cash-positions.json`               | `collector_derived` | `domestic` |

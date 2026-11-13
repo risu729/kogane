@@ -37,6 +37,12 @@ const policy = (
 // This expected catalogue is independent of the SQL read under test: an extra
 // source, page, parser, scope, snapshot membership or policy still fails.
 export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
+  policy("sbi-securities", "delivered-document-pdf", "sbi-delivered-document-metadata", {
+    policy_id: "coverage-v1",
+    required_parser_version: "1.0.0",
+    replaces_previous_on_complete_empty: 0,
+    snapshot_selection: 0,
+  }),
   ...(
     [
       ["credit-ledger", "myjcb-credit-ledger"],

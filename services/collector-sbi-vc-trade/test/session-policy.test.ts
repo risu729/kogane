@@ -24,6 +24,7 @@ const health: HealthState = {
   lastReauthSuccessAt: null,
   lastReauthErrorCode: "manual_agreement_required",
   manualAgreementPendingSince: null,
+  sessionRefreshRequired: false,
 };
 const summary: SharedRunSummary = {
   runId: "00000000-0000-4000-8000-000000000000",

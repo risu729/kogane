@@ -248,3 +248,19 @@ async function readBoundedText(response: Response, limit: number): Promise<strin
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+const LOCAL_FULL_CASHFLOW_ERRORS = new Set(
+  ["recent", "historical"].flatMap((view) =>
+    [
+      "invalid_pagination",
+      "pagination_total_changed",
+      "pagination_length_mismatch",
+      "invalid_identity",
+      "duplicate_identity",
+      "page_limit_exceeded",
+    ].map((reason) => `cashflows_all_${view}_${reason}`),
+  ),
+);
+export function isLocalSbiVcCashflowFailure(errorCode: string): boolean {
+  return LOCAL_FULL_CASHFLOW_ERRORS.has(errorCode);
+}

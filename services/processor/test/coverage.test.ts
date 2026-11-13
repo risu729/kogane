@@ -174,6 +174,7 @@ test("the migration chain names every explicit policy and preserves other run-sc
     "moneyforward-detail-balances",
     "myjcb-jpoint-history",
     "prestia-bank-balances",
+    "sbi-delivered-document-metadata",
     "sbi-foreign-cash-positions",
     "sbi-income-payments",
     "sbi-realised-gains",

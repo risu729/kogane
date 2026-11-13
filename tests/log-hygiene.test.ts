@@ -45,6 +45,11 @@ const NOT_SOURCE = /(?:\.d\.ts|\.test\.ts|\.test\.mjs|\.node-test\.mjs)$/u;
  * its entry here, with the reason.
  */
 const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>> = {
+  "services/collector-sbi-securities/src/mailbox-contract.ts": {
+    count: 1,
+    reason:
+      "validates the provider envelope's message field as a bounded string; no exception is read and the text is never retained or logged",
+  },
   "packages/application/src/collection/seal-refusal.ts": {
     count: 3,
     reason: "a D1 trigger refusal's RAISE code is kept only when it is a code-shaped token",
@@ -122,6 +127,11 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     count: 1,
     reason:
       "safeError reads once under catch, requires a string, and retains only the closed report codes or bounded HTTP status code",
+  },
+  "services/collector-sbi-vc-trade/src/leverage-executions.ts": {
+    count: 1,
+    reason:
+      "safeError reads once under catch and retains only exact closed codes or a bounded HTTP status code; raw exception text is never serialized",
   },
   "services/collector-sbi-vc-trade/src/worker.ts": {
     count: 2,
