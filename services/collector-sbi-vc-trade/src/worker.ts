@@ -66,6 +66,7 @@ const INITIAL_HEALTH: HealthState = {
   lastReauthSuccessAt: null,
   lastReauthErrorCode: null,
   manualAgreementPendingSince: null,
+  sessionRefreshRequired: false,
 };
 export class SbiVcSessionState extends DurableObject<Env> {
   #running: Promise<HealthState> | null = null;
@@ -417,6 +418,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
         lastReauthSuccessAt: attemptAt,
         lastReauthErrorCode: null,
         manualAgreementPendingSince: null,
+        sessionRefreshRequired: false,
       };
       // New session, new generation — written in the same batch as the session
       // it names, so a failed re-authentication above leaves the previous
@@ -473,6 +475,8 @@ export class SbiVcSessionState extends DurableObject<Env> {
   async #performKeepAlive(signal?: AbortSignal): Promise<HealthState> {
     const attemptAt = new Date().toISOString();
     const previous = await this.getHealth();
+    // After a refusal, wait for session replacement instead of probing during the login cooldown.
+    if (previous.sessionRefreshRequired) return previous;
     let stage = "load_session";
     try {
       const session = await this.loadSession(attemptAt);
@@ -599,6 +603,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
       consecutiveFailures: previous.consecutiveFailures + 1,
       lastErrorCode: errorCode,
     };
+    health.sessionRefreshRequired = shouldReauthenticate(health);
     await this.ctx.storage.put("health", health);
     console.error(
       JSON.stringify({ message: "sbi_vc_keepalive", outcome: "failure", httpStatus, errorCode }),

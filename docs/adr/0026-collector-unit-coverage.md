@@ -1,5 +1,37 @@
 # ADR 0026: A collector's unit coverage is a claim about what the run set out to collect
 
+## Amendment: SBI VC waits for a replacement after a refused session (2026-11-11)
+
+Status: proposed.
+
+Context. A read-only log review found intermittent HTTP 403 keepalives and
+successful automatic passkey replacement, not a continuous outage. During the
+existing login cooldown the same refused session could still be replayed every
+15 minutes. The provider's reason for the 403 remains unverified.
+
+Options considered: keep probing the refused session during the cooldown;
+disable automatic recovery and require an owner action for every refusal; or
+suppress that session's keepalive requests while preserving the accepted login
+policy. The third option is selected.
+
+Decision. A refusal matching the existing `shouldReauthenticate` policy stores
+`sessionRefreshRequired` in the same health write. Keepalive returns that stored
+failure until successful passkey login atomically stores a new session and
+clears the flag. Alarms still call the existing login policy and cooldown;
+forced refresh spacing, the bounded terms-agreement window and the prohibition
+on accepting terms remain unchanged. A missing legacy flag defaults to false
+until the next refusal. Transient server/network errors remain probeable.
+
+Consequences. A refused seed is not repeatedly sent to the gateway, and skipped
+probes do not inflate failure counts or pretend to be new attempts. A future
+alarm can still replace the session automatically. This changes local retry
+behavior, not provider semantics, credentials, alarm configuration or authority.
+
+Verification. Synthetic Workers-runtime tests exercise refusal, repeated
+keepalive, a failed login, successful passkey replacement and resumed keepalive;
+a server error still permits a successful later probe. The dated observations
+and remaining cause uncertainty are in the [source note](../sources/sbi-vc-trade.md#19-intermittent-keepalive-refusals-and-recovery-2026-11-11).
+
 ## Amendment: SBI VC document evidence is independent of account and CSV checks (2026-11-10)
 
 Status: proposed.
