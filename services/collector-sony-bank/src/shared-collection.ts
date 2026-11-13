@@ -47,7 +47,7 @@ export interface SharedRunInput {
   readonly startedAt: string;
   readonly completedAt: string;
   readonly status: CollectionManifest["status"];
-  readonly window: { readonly from: string; readonly to: string };
+  readonly window: { readonly from: string | null; readonly to: string };
   readonly transactionCount: number;
   readonly artifacts: readonly RawArtifact[];
   readonly failures: readonly CollectionFailure[];
@@ -167,9 +167,9 @@ function providerOutcome(status: CollectionManifest["status"]): ProviderOutcome 
 }
 
 /**
- * A finished window is a claim about the window that was requested, never
- * about the account's whole history — which is why `requestedScope` carries
- * the window and a partial run may not claim complete coverage.
+ * Coverage describes the requested provider range. An omitted start names
+ * provider retention, not independently proved account-opening coverage;
+ * a partial run may not claim complete coverage.
  */
 function coverage(status: CollectionManifest["status"]): CoverageStatus {
   if (status === "success") return "complete";
@@ -184,7 +184,11 @@ function safeErrorCode(input: SharedRunInput): string | undefined {
     if (
       reason === "history_csv_missing_with_transactions" ||
       reason === "history_csv_count_mismatch" ||
-      reason === "history_csv_invalid"
+      reason === "history_csv_invalid" ||
+      reason === "history_pagination_invalid" ||
+      reason === "history_pagination_total_changed" ||
+      reason === "history_pagination_length_mismatch" ||
+      reason === "history_page_limit_exceeded"
     )
       return reason;
   }
@@ -344,7 +348,7 @@ export async function sonyBankRunPlan(input: SharedRunInput): Promise<PersistRun
       ...(operationId === undefined ? {} : { operationId }),
       ...(sessionRef === undefined ? {} : { acquisitionSessionRef: sessionRef }),
       requestedScope: {
-        scopeKind: "date_range",
+        scopeKind: input.window.from === null ? "full_snapshot" : "date_range",
         startValue: input.window.from,
         endValue: input.window.to,
         unitKeys: [UNIT_KEY],

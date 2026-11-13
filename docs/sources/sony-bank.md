@@ -577,6 +577,61 @@ observed empty-CSV server failure. Successful JSON and CSV bytes are stored
 unchanged. No provider login or production-data inspection was performed for
 this implementation.
 
+## 2026-11-09: retained ordinary-deposit history without a start date
+
+Read-only observation in the owner's authenticated local Chrome, through the
+normal history controls at `/pages/ea/eaba0600/`. No authentication material,
+account identifiers, provider row values or transaction dates were retained.
+
+The currency combobox lists JPY/USD/EUR/GBP/AUD/NZD/CAD/CHF/HKD/ZAR/SEK.
+Leaving the start date blank and setting the end to the last finished JST day
+(observed request value `2026-11-09`) accepts every currency with HTTP 200 and
+an empty `errors` array. The initial history request is POST
+`/custom-web00/eaba/cust-web/ordinary-deposit-transaction-histories`:
+
+- private `branchNum` and `accountNum` (values not recorded);
+- `currencyCdInq` set to the selected currency;
+- no `inquiryStrtdtCat`; `inquiryEnddtCat=2026-11-09`;
+- `maximumAcqCnt=3`, `acquisitionStrtCnt=1`, `sortSelect=00002`, `detailDispSg=1`.
+
+The next page is POST
+`/custom-web00/eaba/cust-web/ordinary-deposit-transaction-histories-pager`,
+with `currencyCd` instead of `currencyCdInq`, the same omitted start and explicit end,
+`maximumAcqCnt=3`, `acquisitionStrtCnt=4`, `sortSelect=00002`, `detailDispSg=1`.
+JPY, USD and AUD pagination was observed; the remaining currencies each fit
+on their first page. No guessed opening date or early-range probe is needed.
+
+The CSV link sends POST
+`/custom-web00/eaba/ordinary-deposit-transaction-histories/csv/load`, with
+private branch/account identifiers, `currencyCd`, the same omitted start and explicit end,
+`sortSelect=00002` and `detailDispSg=1`, without paging keys. Every currency's
+CSV returned HTTP 200 `application/octet-stream`. Logical data-row counts
+matched the JSON totals for all eleven currencies; quoted framing and field
+counts matched. JPY has the existing seven columns (`取引日`, `摘要`, `参考情報`,
+`通貨`, `預入額`, `引出額`, `差引残高`); all foreign currencies add `為替レート`.
+Only counts and schema were inspected in memory; no private row was copied.
+
+The JSON envelope remains `errors: array`,
+`responseBizCommon: {bizResult: string, exceptionRsn: array}`, `countCnt: number`,
+`returnCnt: number`, `transactionHistInfo: array`, with the existing transaction
+string fields and optional FX fields. `currencyMst` retains 13 entries and
+`ordinaryDepAcInfo` 11 entries with existing string fields. First-page array
+length and `returnCnt` equal the lesser of total and three.
+
+The scheduled collector preserves the prior monthly requests and also walks
+this unbounded-start query for every currency through yesterday. Canonical
+filenames contain full retained history; `monthly-*` files retain the monthly
+responses as evidence without a parser dataset. The production dataset selector
+therefore publishes only the full CSV. Existing external IDs collapse overlap
+with earlier monthly runs and repeated retained runs, while retaining distinct
+occurrences of truly identical rows (ADR 0092). The Processor passes an explicit
+null lower bound only for Sony; its parsers use the Sony-only
+`retainedHistoryEnd` field and continue to enforce the end date. Every page and CSV must pass completeness checks. A mismatch, unavailable CSV,
+or page limit fails the run with a closed code, rather than claiming zero or
+publishing a partial CSV. There is no continuation cursor at the observed size.
+This proves the query's entire provider-retained result, not independent
+account-opening coverage or deployment of this implementation.
+
 ## Deposit contract observations on 2026-11-09 UTC
 
 Read-only checks for [issue 1243](https://github.com/risu729/kogane/issues/1243)
@@ -622,3 +677,47 @@ promotion, catalogue-version bump or guessed currency parameter is added.
 Resume implementation when a held contract provides an observed schema; first
 resolve the foreign-time selection boundary. The existing movement collector
 is unchanged, and transfers into or out of deposits are not classified as income.
+
+## 2026-11-11: retained history row order and CSV encoding
+
+Read-only owner-browser observation at `/pages/ea/eaba0600/`, with the start
+omitted, the end set to the last finished JST day, and JPY selected. The normal
+history and CSV requests both sent `sortSelect=00002`. JSON and CSV dates were
+newest-first. Within a day, CSV after-transaction balances followed the reverse
+transaction chain: reversing the rows restores the chronological chain. No
+transaction dates, amounts, account identifiers or account-specific counts are
+recorded here. This observation did not recheck monthly `00001` or foreign CSVs.
+
+The official CSV download returned HTTP 200 with
+`application/octet-stream;charset=utf-8`. Its bytes failed strict UTF-8 decoding
+and passed strict Shift-JIS/CP932 decoding. The seven JPY headers were exactly
+`取引日,摘要,参考情報,通貨,預入額,引出額,差引残高`; every logical row had the
+header's column count. No BOM, blank record or embedded field newline was
+observed. The bytes remain private evidence and are never transcoded on storage.
+
+Both collection validation and parsing use the same Sony-specific decoder.
+For this octet-stream UTF-8 declaration only, failed strict UTF-8 decoding may
+fall back to strict Shift-JIS; unsupported charsets, invalid bytes, changed
+headers and inconsistent row widths still fail closed. Other declared UTF-8
+media types remain strict. Validation reports only a closed rejection branch
+and column counts, without header text or row values. Retained CSV parsing emits
+oldest-first while keeping original logical CSV row locators, so same-day
+balance insertion ties select the final transaction. Closed monthly-window
+parsing keeps its existing order. Scheduled production completion is not
+established by this read-only observation or the synthetic regressions.
+
+Same-day latest-balance ties prefer the complete official CSV to JSON. A JSON
+page can finish publication after the CSV or split a day across pages, so
+reversing each JSON page cannot establish a global transaction order. The
+reader's date ordering stays first: a newer JSON date remains newer, and
+JSON-only evidence keeps its previous behavior. Synthetic regressions publish
+same-day JSON across pages before and after the CSV, preserve monthly CSV
+behavior, and compare the amended query to frozen SQL on a scaled random store
+with unrelated-source, JSON-only and older-CSV controls and unchanged plans.
+
+For Sony history only, same-day ties first select the newer capture cohort
+(`fetch_run.started_at`, then its run id), then prefer CSV within that cohort.
+An older CSV replay cannot displace a newer JSON-only correction. JSON-only
+retained history keeps the legacy same-day/page-order limitation; it is not a
+substitute for the complete official CSV and is not guaranteed to identify a
+day's final transaction. Unrelated sources keep their existing ordering.
