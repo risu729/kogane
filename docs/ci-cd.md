@@ -125,8 +125,10 @@ caller ever drops it again.
 [ADR 0040](adr/0040-compatible-cf-version-deployment.md) established prebuilt deployment
 for thirteen compatible Workers; [ADR 0042](adr/0042-prestia-bank-worker.md) adds the
 PRESTIA bank Worker, bringing the compatible fleet to fourteen Workers using
-`cf@1.0.0-beta.12` and the pinned `wrangler-deploy-action` (v3.0.0 since 2026-11-06;
-no step uses `worker-preview`, the only mode v3 changed). Their native
+the `cf` pin in `package.json` (`1.0.0-beta.28` since 2026-11-06) and the pinned
+`wrangler-deploy-action` v3 (no step uses `worker-preview`). ADR 0040's
+2026-11-13 amendment (proposed) moves them to `cf deploy` in three phases,
+because `cf workers versions create` never applies declared `observability`. Their native
 `cloudflare.config.ts` and
 `wrangler.config.ts` retain the canonical Wrangler settings; parity guards
 cover bindings, variables, observability, assets and the two already-declared
@@ -134,7 +136,7 @@ V Point exports. Existing Wrangler tests, bundles and dry runs remain, with
 credential-free cf builds and prebuilt version-upload dry runs added.
 
 The three Container deployments (GlobalPass, SBI Shinsei, St.George) use the
-pinned Action v2.2.0 full-deploy strategy under [ADR 0043](adr/0043-cf-container-deployment.md),
+pinned Action's full-deploy strategy under [ADR 0043](adr/0043-cf-container-deployment.md),
 because `cf workers versions create` does not update Container applications.
 They retain the default scheduling policy, existing app/namespaces and
 APAC/basic/max-instance settings. Their image manifest binds the Docker image,

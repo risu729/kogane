@@ -4,11 +4,17 @@ import { parseJsonc } from "../../scripts/jsonc.ts";
 import { readDeployOrder, workflowSteps } from "./deploy-order.ts";
 import { REPO_ROOT } from "./repo-root.ts";
 import { releaseProgress } from "./ci/release-ledger.mjs";
-import { containerProgress } from "./ci/cf-container-release.mjs";
+import { CONTAINER_TARGETS, containerProgress } from "./ci/cf-container-release.mjs";
 
 const order = readDeployOrder();
 const allTargets = order.workers.filter((worker) => worker.deployBackend === "cf");
-const targets = allTargets.filter((worker) => worker.productionStrategy !== "deploy");
+// Configuration parity covers every cf Worker except the Container owners, whatever its
+// production strategy (ADR 0040, 2026-11-13 amendment).
+const containerNames = CONTAINER_TARGETS.map((target: { name: string }) => target.name);
+const targets = allTargets.filter((worker) => !containerNames.includes(worker.name));
+const triggerSynchronized = (target: (typeof targets)[number]) =>
+  target.productionStrategy === "deploy" ||
+  ["app", "processor", "prestia-bank-worker"].includes(target.name);
 const workflow = readFileSync(`${REPO_ROOT}/.github/workflows/_deploy-workers.yml`, "utf8");
 const steps = workflowSteps(workflow);
 const camel = (value: unknown): any =>
@@ -52,7 +58,7 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
     }
     expect(pins.size).toBe(1);
   });
-  test("code-only Workers keep the versions strategy", () => {
+  test("every non-Container cf Worker is under configuration parity", () => {
     expect(targets.map((worker) => worker.name)).toEqual([
       "mobile-suica-worker",
       "moneyforward-worker",
@@ -70,17 +76,18 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       "app",
     ]);
   });
-  test("App, Processor and PRESTIA opt into version-strategy trigger synchronization", async () => {
+  test("App, Processor, PRESTIA and full-deploy Workers opt into trigger synchronization", async () => {
     const opted = targets.filter((target) =>
       steps
         .find((step) => step.body.includes(`id: cf-deploy-${target.name}\n`))
         ?.body.includes("deploy-triggers: 'true'"),
     );
-    expect(opted.map((target) => target.name).sort()).toEqual([
-      "app",
-      "prestia-bank-worker",
-      "processor",
-    ]);
+    expect(opted.map((target) => target.name).sort()).toEqual(
+      targets
+        .filter(triggerSynchronized)
+        .map((target) => target.name)
+        .sort(),
+    );
     const prestia = opted.find((target) => target.name === "prestia-bank-worker")!;
     const worker = (await import(`${REPO_ROOT}/${prestia.path}/cloudflare.config.ts`)).default
       .worker;
@@ -232,7 +239,10 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       expect(cf?.body).toContain("mode: production");
       expect(cf?.body).toContain(`worker: ${target.worker}`);
       expect(cf?.body).toContain(
-        `deploy-triggers: '${["app", "processor", "prestia-bank-worker"].includes(target.name) ? "true" : "false"}'`,
+        `deploy-triggers: '${triggerSynchronized(target) ? "true" : "false"}'`,
+      );
+      expect(cf?.body.includes("production-strategy: deploy")).toBe(
+        target.productionStrategy === "deploy",
       );
       expect(steps.indexOf(cf!)).toBe(steps.indexOf(legacy!) + 1);
     });

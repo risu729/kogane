@@ -52,7 +52,7 @@ for current behavior.
 - [ADR 0037: Admit reconciliation pages by evidence and reuse clean purchase retirement checks](0037-reconciliation-purchase-cost.md)
 - [ADR 0038: Isolate complete hosted verification while sharing preparation](0038-shared-verification-preparation.md)
 - [ADR 0039: Alarm scheduling and public maintenance rules](0039-alarm-schedule-management.md) — accepted; amended by ADR 0063 and ADR 0085
-- [ADR 0040: Deploy compatible Workers through prebuilt cf versions](0040-compatible-cf-version-deployment.md)
+- [ADR 0040: Deploy compatible Workers through prebuilt cf versions](0040-compatible-cf-version-deployment.md) — accepted; amendment 2026-11-13 (proposed): every non-Container cf Worker moves to `cf deploy` in three phases, with script-settings readback
 - [ADR 0041: Separate maintained documentation from historical records](0041-documentation-scope.md)
 - [ADR 0042: PRESTIA bank snapshots and non-additive provider measures](0042-prestia-bank-worker.md) — accepted; production verification pending
 - [ADR 0043: Deploy the remaining Container Workers through cf](0043-cf-container-deployment.md) — accepted
