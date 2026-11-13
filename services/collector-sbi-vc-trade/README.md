@@ -42,6 +42,17 @@ jobs in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), passing each j
   while a completed classic unit remains eligible for its existing publishers.
   Classic failures still block the original account unit. The exact dataset
   eligibility policies do not enable publication of the raw lists.
+- Leverage opening/closing × latest/past-history page-one responses are retained
+  in four separate `executions-leverage-*` units. Filters were observed only on
+  trader Socket.IO; even a strict numeric empty HTTP envelope remains partial
+  `leverage_execution_transport_unverified`, without complete-empty coverage.
+  Populated pages remain partial `leverage_execution_rows_unobserved` and do
+  not initiate further pagination. No parser publishes these evidence datasets.
+  Session/transport failures stop later leverage reads, including refusals from
+  earlier stages; local shape refusals preserve sibling independence. Existing
+  spot account and valid document units keep their own completion. The source
+  execution capability remains partial. See the
+  [observed filters and remaining limits](../../docs/sources/sbi-vc-trade.md#20-trader-leverage-execution-filters-2026-11-11).
 - The observed simple-mode report events are `tradeReportList`, `monthlyTradeReport`
   and `plCalcData`. The collector walks MONTH and TRADE_DATA indices for 2018
   through the capture's Tokyo calendar year, and captures the unbounded YEAR
