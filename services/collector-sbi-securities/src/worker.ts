@@ -161,17 +161,29 @@ async function runCollection(
                     mailboxSafeFailures.push({ scope: "mailbox", code: safeFailureCode(error) });
                   },
                   onHistoryError: (error) => historyFailure("domestic", error),
-                  onCashHistoryError: (error) => {
+                  onCashHistoryError: (error, kind) => {
                     failures.push(failure("domestic", "cash-history", error));
-                    safeFailures.push({ scope: "domestic", code: safeFailureCode(error) });
+                    safeFailures.push({
+                      scope: "domestic",
+                      unitKey: `cash-history-${kind}`,
+                      code: safeFailureCode(error),
+                    });
                   },
-                  onIncomeHistoryError: (error) => {
+                  onIncomeHistoryError: (error, kind) => {
                     failures.push(failure("domestic", "income-history", error));
-                    safeFailures.push({ scope: "domestic", code: safeFailureCode(error) });
+                    safeFailures.push({
+                      scope: "domestic",
+                      unitKey: `income-history-${kind}`,
+                      code: safeFailureCode(error),
+                    });
                   },
                   onAssetHistoryError: (error) => {
                     failures.push(failure("domestic", "asset-history", error));
-                    safeFailures.push({ scope: "domestic", code: safeFailureCode(error) });
+                    safeFailures.push({
+                      scope: "domestic",
+                      unitKey: "weekly-assets",
+                      code: safeFailureCode(error),
+                    });
                   },
                 }),
               );

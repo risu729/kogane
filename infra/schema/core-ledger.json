@@ -1317,6 +1317,17 @@
         }
       ],
       "sha256": "01a7fd6d68d0966682d3dfa806b07abde4cf9a59297a683c5e826ececcc83e02"
+    },
+    {
+      "file": "0100_sbi_supplemental_unit_eligibility.sql",
+      "statementCount": 4,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "bbdc0321eaf89245bc316c6f99229a24111f4c7a658dba02c48caf3b24f587b3"
     }
   ],
   "tables": [
@@ -22271,7 +22282,8 @@
       "0096_smbc_foreign_ordinary_unit_eligibility.sql",
       "0097_sbi_vc_document_unit_eligibility.sql",
       "0098_sbi_shinsei_savings_activity.sql",
-      "0099_sbi_document_unit_eligibility.sql"
+      "0099_sbi_document_unit_eligibility.sql",
+      "0100_sbi_supplemental_unit_eligibility.sql"
     ],
     "schemaSha256": "1783ff9f980ab8cac79d6dfce7fc4f4d08db3dede5d457e02daa7bc0af3d9211"
   }

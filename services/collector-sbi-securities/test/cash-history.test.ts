@@ -99,7 +99,13 @@ test("raw page bytes, complete lineage and requested retention survive terminal 
   const plan = await sbiRunPlan(run(artifacts));
   expect(plan.run.providerOutcome).toBe("success");
   expect(plan.run.units).toEqual([
-    { unitKey: "domestic", unitKind: "scope", artifactCount: 2, coverageStatus: "complete" },
+    { unitKey: "domestic", unitKind: "scope", artifactCount: 0, coverageStatus: "complete" },
+    {
+      unitKey: "cash-history-foreign",
+      unitKind: "scope",
+      artifactCount: 2,
+      coverageStatus: "complete",
+    },
   ]);
   expect(plan.run.transformations[0]!.inputArtifactKeys).toEqual([
     "foreign-cash-history-page-0001-source.json",
@@ -108,7 +114,7 @@ test("raw page bytes, complete lineage and requested retention survive terminal 
     rangeKey: "foreign-cash-history.json:requested",
     startValue: "2095-01-01",
     endValue: "2099-12-31",
-    unitKey: "domestic",
+    unitKey: "cash-history-foreign",
   });
 });
 
@@ -124,7 +130,9 @@ test("missing, changed or repeated raw inputs cannot seal successful cash covera
     const plan = await sbiRunPlan(run(changed));
     expect(plan.run.providerOutcome).toBe("partial");
     expect(plan.run.safeErrorCode).toBe("sbi_cash_history_source_inventory");
-    expect(plan.run.units[0]!.coverageStatus).toBe("partial");
+    expect(
+      plan.run.units.find((unit) => unit.unitKey === "cash-history-foreign")!.coverageStatus,
+    ).toBe("partial");
   }
 });
 

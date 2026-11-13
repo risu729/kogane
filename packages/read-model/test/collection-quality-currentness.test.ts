@@ -13,6 +13,7 @@ import { cell, cellFreshness, freshnessAsOf } from "../../application/src/query/
 import { validCollectionQualityCells } from "../../observation-shared/src/collection-quality-contract";
 import { fullCoreSchema } from "./card-usage-scale-fixture";
 import { QualityStore, type ArtifactSpec } from "./collection-quality-fixture";
+import { withoutSbiLegacySnapshotPartition } from "../../parsers/test/snapshot-partition-compatibility";
 
 beforeAll(() => {
   fullCoreSchema().close();
@@ -32,6 +33,8 @@ test("extraction retains the frozen base SQL apart from explicit provider histor
   // parser to the same event allowlist, covered by the cash production pipeline.
   // ADR 0095's Shinsei identity/witness additions are removed explicitly too;
   // parser/processor mixed-history tests separately prove those deltas.
+  // ADR 0109's exact SBI legacy partition alias is removed from the balance
+  // and summary SQL too; native snapshot compatibility proves that delta.
   const renderedTransactions = transactionsSql({}, 0).sql;
   expect(renderedTransactions).toContain("                           'myjcb-debit-ledger',\n");
   expect(renderedTransactions).toContain(
@@ -71,7 +74,7 @@ test("extraction retains the frozen base SQL apart from explicit provider histor
 `;
   const balances = latestBalancesSql({}, 0, 501).sql;
   expect(balances.split(sonyHistoryOrder)).toHaveLength(2);
-  expect(hash(balances.replace(sonyHistoryOrder, ""))).toBe(
+  expect(hash(withoutSbiLegacySnapshotPartition(balances.replace(sonyHistoryOrder, "")))).toBe(
     "8c260635f19d6028616e96fc1bc300ef3a96a5990468a3d86f60acfd2f598ba9",
   );
   // ADR 0107 adds only the three acquisition-month activity measures to
@@ -81,9 +84,13 @@ test("extraction retains the frozen base SQL apart from explicit provider histor
     " OR (source_id = 'myjcb' AND parser LIKE 'myjcb-jpoint-history@%' AND metric IN ('jpoint_acquisition_earned','jpoint_acquisition_used','jpoint_acquisition_expired'))";
   expect(summaries.split(historySummary)).toHaveLength(2);
   expect(summaries.split(sonyHistoryOrder)).toHaveLength(2);
-  expect(hash(summaries.replace(historySummary, "").replace(sonyHistoryOrder, ""))).toBe(
-    "023d01804a87ae85f6bad1550b18e675f33015d02c5ea9534d8a672e3fb6811a",
-  );
+  expect(
+    hash(
+      withoutSbiLegacySnapshotPartition(
+        summaries.replace(historySummary, "").replace(sonyHistoryOrder, ""),
+      ),
+    ),
+  ).toBe("023d01804a87ae85f6bad1550b18e675f33015d02c5ea9534d8a672e3fb6811a");
 });
 
 test("SMBC request keys remain separate; failed/pending newest runs do not displace a published capture; artifact id breaks ties", () => {

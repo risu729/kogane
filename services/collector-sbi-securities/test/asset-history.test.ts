@@ -222,5 +222,55 @@ test("year shards keep exact source bytes and an exhaustive hash inventory; miss
   });
   expect(partial.run.providerOutcome).toBe("partial");
   expect(partial.run.safeErrorCode).toBe("sbi_asset_history_shard_inventory");
-  expect(partial.run.units[0]!.coverageStatus).toBe("partial");
+  expect(partial.run.units.find((unit) => unit.unitKey === "weekly-assets")!.coverageStatus).toBe(
+    "partial",
+  );
+  expect(partial.run.units.find((unit) => unit.unitKey === "domestic")!.coverageStatus).toBe(
+    "complete",
+  );
+});
+
+test("supplement transport failures retain their cash and income kinds through main-site callbacks", async () => {
+  const header = Buffer.alloc(70, " ");
+  header.write("F1132", 34);
+  header.write("000000", 45);
+  const responses = [
+    new Response(Buffer.concat([header, Buffer.from("SYNTHETIC_LINK")])),
+    new Response('<form action="/switch"><input name="synthetic" value="fixture"></form>'),
+    new Response(null, { status: 302, headers: { location: "https://site.invalid/sso" } }),
+    new Response(null, { status: 302, headers: { location: "/account/assets" } }),
+    new Response("<html></html>"),
+    Response.json({}),
+  ];
+  globalThis.fetch = mock(
+    async () => responses.shift() ?? new Response(null, { status: 503 }),
+  ) as unknown as typeof fetch;
+  const failures: string[] = [];
+  const result = await collectMainSiteArtifacts({
+    session: {
+      sessionId: "synthetic",
+      branchCode: "001",
+      accountNumber: "1234567",
+      accountHash: "synthetic",
+      mtsBaseUrl: "https://mts.invalid",
+    },
+    mainSiteBaseUrl: "https://main.invalid",
+    from: "2026-01-01",
+    to: "2026-01-01",
+    onAssetHistoryError: () => failures.push("weekly"),
+    onIncomeHistoryError: (_, kind) => failures.push(`income-${kind}`),
+    onCashHistoryError: (_, kind) => failures.push(`cash-${kind}`),
+    onHistoryError: () => failures.push("core-history"),
+    // The worker persists financial evidence before executing this separate archive.
+    deferMailbox: () => {},
+  });
+  expect(result.map((artifact) => artifact.dataset)).toEqual(["account-assets-current"]);
+  expect(failures).toEqual([
+    "weekly",
+    "income-income",
+    "income-gains",
+    "cash-yen",
+    "cash-foreign",
+    "core-history",
+  ]);
 });
