@@ -132,6 +132,7 @@ export const EXECUTION_REASON_LABELS: Readonly<Record<string, string>> = {
 export const RUN_STATE_LABELS: Readonly<Record<string, string>> = {
   not_registered: "未登録",
   registering: "登録中",
+  retryable: "登録の再試行待ち",
   blocked: "登録を拒否",
   parsing: "解析中",
   published: "公開済み",

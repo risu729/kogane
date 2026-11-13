@@ -195,12 +195,27 @@ export async function internalHealthBody(env: Env): Promise<{ status: number; bo
       backlog.oldest_pending_first_seen_at === null
         ? Number.NaN
         : Date.parse(backlog.oldest_pending_first_seen_at);
+    const oldestRetryable =
+      backlog.oldest_retryable_first_seen_at === null
+        ? Number.NaN
+        : Date.parse(backlog.oldest_retryable_first_seen_at);
     registration = {
       ...registration,
       recorded: true,
       unregistered: backlog.unregistered,
       pending: backlog.pending,
       oldestPendingAgeMs: Number.isNaN(oldest) ? null : now - oldest,
+      retryable: backlog.retryable,
+      retryableAttempts: backlog.retryable_attempts,
+      oldestRetryableAgeMs: Number.isNaN(oldestRetryable) ? null : now - oldestRetryable,
+      latestRetryableAt: backlog.latest_retryable_at,
+      retryableCodes: backlog.retryable_codes.map((entry) => ({
+        code: entry.code,
+        count: entry.count,
+        attempts: entry.attempts,
+        latestAt: entry.latest_at,
+      })),
+      retryableCodesTruncated: backlog.retryable_codes_truncated,
     };
   } catch {
     /* Before migration 0039 there is no such table; `recorded` stays false. */
