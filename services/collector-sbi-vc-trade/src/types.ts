@@ -98,6 +98,7 @@ export interface CollectionUnit {
   unitKey:
     | "account"
     | "full-cashflows"
+    | `executions-leverage-${"open" | "close"}-${"recent" | "historical"}`
     | "report-annual-index"
     | `report-index-${number}`
     | `monthly-report-${string}`

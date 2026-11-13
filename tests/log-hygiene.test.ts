@@ -128,6 +128,11 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     reason:
       "safeError reads once under catch, requires a string, and retains only the closed report codes or bounded HTTP status code",
   },
+  "services/collector-sbi-vc-trade/src/leverage-executions.ts": {
+    count: 1,
+    reason:
+      "safeError reads once under catch and retains only exact closed codes or a bounded HTTP status code; raw exception text is never serialized",
+  },
   "services/collector-sbi-vc-trade/src/worker.ts": {
     count: 2,
     reason: "classifyError keeps a message only when it is already a code-shaped token",

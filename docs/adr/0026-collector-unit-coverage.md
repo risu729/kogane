@@ -1,5 +1,48 @@
 # ADR 0026: A collector's unit coverage is a claim about what the run set out to collect
 
+## Amendment: leverage execution evidence cannot assert unverified transport coverage (2026-11-12)
+
+Status: proposed.
+
+Context. Trader Socket.IO navigation established four leverage execution filters
+and empty acknowledgements. The collector uses a different, existing HTTP
+transport. Its acknowledgement cannot establish that the new filter parameters
+were applied, and no populated leverage execution semantics have been observed.
+
+Options considered: treat a numeric-zero HTTP reply as complete leverage absence;
+reuse the spot parser for leverage rows; or retain four independent evidence
+units while refusing unverified transport and row semantics. The third option
+is selected.
+
+Decision. Capture only page one for each observed opening/closing and
+latest/past-history combination, under exact
+`executions-leverage-{open|close}-{recent|historical}-page-0001` datasets and
+matching units. Strict numeric empty pagination remains partial with
+`leverage_execution_transport_unverified`, without counts or an absence claim.
+Nonempty evidence remains partial `leverage_execution_rows_unobserved` and does
+not trigger further pagination. These datasets have no publishing parser or
+eligibility policy. No financial observations or empty snapshot replacements
+are produced. The source execution capability remains partial.
+
+A transport/session/redirect/unknown failure halts later leverage reads, including
+when earlier stages have already refused the session. Local pagination and
+unobserved-row refusals leave sibling reads independent. Exact unit routing
+refuses a missing leverage unit rather than assigning its artifacts to account.
+Classic account and valid document units retain their own completion.
+
+Consequences. The new evidence is inspectable without pretending that HTTP
+compatibility, leverage publication, fees or full retention have been proved.
+No new read event, parser version, registration or migration is required.
+A future transport observation and populated-row contract must precede stronger
+coverage or publication. No production collection or manual HTTP replay is
+part of this change.
+
+Verification. Synthetic tests cover all four exact filters, session rotation and
+redaction, numeric and malformed envelopes, nonempty refusal, transport stops,
+skipped units, exact terminal artifact membership, preserved classic completion
+and exclusion from every registered publishing parser. See the
+[dated protocol boundary](../sources/sbi-vc-trade.md#20-trader-leverage-execution-filters-2026-11-11).
+
 ## Amendment: SBI VC waits for a replacement after a refused session (2026-11-11)
 
 Status: proposed.
