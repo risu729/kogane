@@ -1,3 +1,4 @@
+import { XVFB_ARGS, chromeLaunch } from "./browser-launch.mjs";
 import { createStageDiagnostics } from "./stage-diagnostics.mjs";
 import { observeChildProcess } from "./child-lifecycle.mjs";
 import http from "node:http";
@@ -23,7 +24,7 @@ const PROXY_HOSTS = new Set([
 ]);
 let collecting = false;
 process.env.DISPLAY = ":99";
-const xvfb = spawn("Xvfb", [":99", "-screen", "0", "1365x768x24", "-nolisten", "tcp"], {
+const xvfb = spawn("Xvfb", XVFB_ARGS, {
   stdio: "ignore",
 });
 const xvfbLifecycle = observeChildProcess(xvfb, "xvfb");
@@ -626,26 +627,8 @@ async function collect({ credential, relayToken, relayUrl, storedReportPeriods }
     });
     advance("chrome-start");
     await waitForXvfb();
-    child = spawn(
-      "/usr/bin/google-chrome",
-      [
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--no-first-run",
-        "--no-default-browser-check",
-        `--user-data-dir=${profileDirectory}`,
-        `--remote-debugging-port=${debuggingPort}`,
-        "--remote-debugging-address=127.0.0.1",
-        "--lang=ja-JP",
-        `--proxy-server=http://127.0.0.1:${relay.port}`,
-        "--window-size=1365,768",
-        LOGIN_URL,
-      ],
-      {
-        env: { ...process.env, DISPLAY: ":99", TZ: "Asia/Tokyo" },
-        stdio: "ignore",
-      },
-    );
+    const launch = chromeLaunch(profileDirectory, debuggingPort, relay.port);
+    child = spawn(launch.executable, [...launch.args, LOGIN_URL], launch.options);
     childLifecycle = observeChildProcess(child, "chrome", { relayUrl });
     await waitForChromeEndpoint(endpoint, childLifecycle);
     const remaining = 25_000 - (Date.now() - startedAt);
