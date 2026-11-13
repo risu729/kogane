@@ -4,7 +4,7 @@
   "type": "module",
   "dependencies": {
     "@clack/prompts": "1.8.1",
-    "impit": "0.14.8",
+    "impit": "0.14.9",
     "tough-cookie": "6.1.0"
   },
   "devDependencies": {

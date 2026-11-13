@@ -2,7 +2,7 @@ import { queryDatedState } from "../../../packages/application/src/query/dated-s
 import type { SqlExecutor } from "../../../packages/read-model/src/reader.ts";
 import { identitySweep } from "../src/identity-store.ts";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
-import { afterAll, beforeAll, expect, spyOn, test } from "bun:test";
+import { afterAll, beforeAll, expect, setSystemTime, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
@@ -120,6 +120,7 @@ async function collect(day: number) {
     ),
   );
   try {
+    setSystemTime(new Date(`2026-09-0${day}T00:01:00Z`));
     const result = await alarmCollection(
       {
         DATA: env.EVIDENCE,
@@ -138,6 +139,7 @@ async function collect(day: number) {
     expect(reads.filter((path) => path.includes("/authori/authori_shokai/"))).toHaveLength(2);
     return result.runIds;
   } finally {
+    setSystemTime();
     fetcher.mockRestore();
     for (const spy of [...auth, ...logs]) spy.mockRestore();
   }

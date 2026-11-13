@@ -78,9 +78,10 @@ export async function beginVPointEmailLogin(options: {
     TID: memberNumber,
   });
   const confirmPage = await client.postForm(authPage, EMAIL_CONFIRM);
+  // Timestamp the request before the provider can deliver the email.
+  const requestedAt = (options.now ?? (() => new Date()))().toISOString();
   const codePage = await client.postForm(confirmPage, EMAIL_CODE);
   assertFormField(codePage.html, "NINSYO_CD", EMAIL_CODE);
-  const requestedAt = (options.now ?? (() => new Date()))().toISOString();
   const state: VPointEmailChallengeState = {
     version: 1,
     requestedAt,

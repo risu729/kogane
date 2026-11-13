@@ -37,6 +37,7 @@ const WAITING = id("2");
 const REBUILD = id("3");
 const MISSING = id("4");
 const REFRESH = id("5");
+const RETRYABLE = id("6");
 
 const pending = (kind: OperationRecordKind) =>
   OPERATION_RECORD_STAGES_BY_KIND[kind].map((stage) => ({
@@ -92,6 +93,12 @@ const published: OperationRecordWire = {
         providerOutcome: "success",
         evidenceRunId: "r_12",
         registeredAt: "2026-09-11T00:10:00.000Z",
+        registration: {
+          state: "completed",
+          failureCode: null,
+          attempts: 1,
+          updatedAt: "2026-09-11T00:10:00.000Z",
+        },
         artifacts: {
           total: 3,
           parseSelected: 2,
@@ -109,6 +116,69 @@ const published: OperationRecordWire = {
         providerOutcome: "partial",
         evidenceRunId: null,
         registeredAt: null,
+        registration: {
+          state: "blocked",
+          failureCode: "terminal_digest_conflict",
+          attempts: 1,
+          updatedAt: "2026-09-11T00:10:00.000Z",
+        },
+        artifacts: null,
+      },
+    ],
+  },
+};
+
+/** Persisted but retryable: no registration or publication has completed. */
+const retryable: OperationRecordWire = {
+  ...published,
+  operationId: RETRYABLE,
+  updatedAt: "2026-09-11T00:12:00.000Z",
+  stages: pending("collection").map((stage) => {
+    if (stage.stage === "persisted")
+      return {
+        ...stage,
+        state: "completed",
+        evidenceRef: "runs:1",
+        attempts: 1,
+        updatedAt: "2026-09-11T00:06:00.000Z",
+      };
+    if (stage.stage === "registered")
+      return {
+        ...stage,
+        state: "retryable",
+        failureCode: "inactive_ingest_route",
+        attempts: 2,
+        updatedAt: "2026-09-11T00:12:00.000Z",
+      };
+    return stage;
+  }),
+  execution: {
+    action: "collect",
+    state: "collected",
+    connectionId: "synthetic-bank-collect",
+    reasonCode: null,
+    scope: "collector_default",
+    waits: 1,
+    expiresAt: "2026-09-12T00:00:00.000Z",
+    startedAt: "2026-09-11T00:05:00.000Z",
+    collectedAt: "2026-09-11T00:06:00.000Z",
+    publishedAt: null,
+    finishedAt: null,
+    runs: [
+      {
+        runId: "synthetic-run-003",
+        state: "retryable",
+        reasonCode: "inactive_ingest_route",
+        blockedCode: null,
+        providerOutcome: "success",
+        evidenceRunId: null,
+        registeredAt: null,
+        registration: {
+          state: "retryable",
+          failureCode: "inactive_ingest_route",
+          attempts: 2,
+          updatedAt: "2026-09-11T00:12:00.000Z",
+        },
         artifacts: null,
       },
     ],
@@ -199,7 +269,7 @@ const refresh: OperationRecordWire = {
 };
 
 const RECORDS = new Map(
-  [published, waiting, rebuild, refresh].map((record) => [record.operationId, record]),
+  [published, waiting, rebuild, refresh, retryable].map((record) => [record.operationId, record]),
 );
 
 describe.if(runnable)("the operator's 依頼の経過 page", () => {
@@ -311,6 +381,32 @@ describe.if(runnable)("the operator's 依頼の経過 page", () => {
         const prefix = process.env["OPERATION_SCREENSHOT_PREFIX"];
         if (prefix)
           await page.screenshot({ path: `${prefix}-${viewport.name}.png`, fullPage: true });
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
+
+  for (const viewport of VIEWPORTS)
+    test(`${viewport.name}: a retryable registration remains unsettled and names its cause`, async () => {
+      const page = await browser.newPage({
+        viewport: { width: viewport.width, height: viewport.height },
+      });
+      try {
+        await page.goto(`${origin}/operations/${RETRYABLE}`);
+        await page.getByRole("heading", { level: 2, name: "報告された収集実行" }).waitFor();
+        expect(reads).toEqual([RETRYABLE]);
+        expect(await text(page)).toContain("収集済み・公開を確認中");
+        const stage = page.getByRole("row").filter({ hasText: "取得記録への登録" });
+        expect(await stage.innerText()).toContain("再試行待ち");
+        expect(await stage.innerText()).toContain("inactive_ingest_route");
+        expect(await stage.getByRole("cell", { name: "2", exact: true }).count()).toBe(1);
+        const run = page.getByRole("row").filter({ hasText: "synthetic-run-003" });
+        expect(await run.innerText()).toContain("登録の再試行待ち");
+        expect(await run.innerText()).toContain("inactive_ingest_route");
+        expect(await run.innerText()).toContain("登録前のため未集計");
+        expect(await run.innerText()).not.toContain("公開済み");
+        expect(await page.getByRole("link", { name: /^取得記録 /u }).count()).toBe(0);
+        expect(await noPageOverflow(page)).toBe(true);
       } finally {
         await page.close();
       }
