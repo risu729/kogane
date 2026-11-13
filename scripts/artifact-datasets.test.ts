@@ -365,6 +365,14 @@ const SAMPLES: readonly Sample[] = [
   },
   // services/collector-sbi-vc-trade/src/shared-collection.ts (`<dataset>.json`)
   {
+    source: "sbi-securities",
+    artifactKey: `document-${"b".repeat(64)}-20990101-${"a".repeat(64)}-${"c".repeat(64)}.pdf`,
+    role: "provider_document",
+    mediaType: "application/pdf",
+    dataset: "delivered-document-pdf",
+    unitKey: `mailbox-document-${"a".repeat(64)}`,
+  },
+  {
     source: "sbi-vc-trade",
     artifactKey: `monthly-report-20260930-${"a".repeat(64)}.pdf`,
     role: "provider_document",
@@ -868,8 +876,9 @@ describe("the registration dataset table (ADR 0022)", () => {
       "terminal-registration-v8",
       "terminal-registration-v9",
       "terminal-registration-v10",
+      "terminal-registration-v11",
     ]);
-    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v10");
+    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v11");
     const vpass = (await allSamples()).filter((sample) => sample.source === "vpass");
     expect(vpass.filter((sample) => sample.dataset === "statement-page").length).toBe(2);
     for (const sample of vpass) {
@@ -1282,9 +1291,24 @@ test("v10 changes only J-POINT history; earlier registration meanings stay froze
     const old = artifactDataset(sample.source, sample, "terminal-registration-v9");
     const current = artifactDataset(sample.source, sample, "terminal-registration-v10");
     if (sample.dataset === "jpoint-history") {
-      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, -1))
+      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(
+        0,
+        REGISTRATION_CONTRACT_VERSIONS.indexOf("terminal-registration-v10"),
+      ))
         expect(artifactDataset(sample.source, sample, version)).toBeNull();
       expect(current).toBe("jpoint-history");
     } else expect(current).toBe(old);
+  }
+});
+
+test("v11 adds only independently covered SBI PDF documents and preserves every earlier mapping", () => {
+  for (const sample of SAMPLES) {
+    const prior = artifactDataset(sample.source, sample, "terminal-registration-v10");
+    const current = artifactDataset(sample.source, sample, "terminal-registration-v11");
+    if (sample.dataset === "delivered-document-pdf") {
+      for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(0, -1))
+        expect(artifactDataset(sample.source, sample, version)).toBeNull();
+      expect(current).toBe("delivered-document-pdf");
+    } else expect(current).toBe(prior);
   }
 });

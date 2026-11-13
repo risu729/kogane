@@ -1306,6 +1306,17 @@
         }
       ],
       "sha256": "d8adf648466879986bba5d1f6255989c7949e624ca509f422b0704e3a122753f"
+    },
+    {
+      "file": "0099_sbi_document_unit_eligibility.sql",
+      "statementCount": 2,
+      "insertStatements": [
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "01a7fd6d68d0966682d3dfa806b07abde4cf9a59297a683c5e826ececcc83e02"
     }
   ],
   "tables": [
@@ -16100,6 +16111,46 @@
       "sqlSha256": "2fbe8139ce2f86cd"
     },
     {
+      "name": "sbi_mailbox_progress",
+      "classification": "operational-mutable",
+      "planRow": "SBI mailbox bounded-run continuation cursor; no evidence or session material",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "source",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "next_identity",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "persisted_run_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "source"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "cd0bddf5c4847e6a"
+    },
+    {
       "name": "scheduled_payment_observations",
       "classification": "core-keep",
       "planRow": "parse runs and observations",
@@ -21948,7 +21999,7 @@
     }
   ],
   "summary": {
-    "tableCount": 141,
+    "tableCount": 142,
     "viewCount": 44,
     "triggerCount": 527,
     "explicitIndexCount": 147,
@@ -22092,7 +22143,8 @@
         "price_promotion_cursor",
         "processor_lane_ticks",
         "provider_maintenance_references",
-        "reconciliation_scan_cursor"
+        "reconciliation_scan_cursor",
+        "sbi_mailbox_progress"
       ],
       "unclassified-keep": [
         "dataset_snapshot_policies",
@@ -22149,6 +22201,7 @@
       "reconciliation_proposals",
       "reconciliation_scan_cursor",
       "retention_classes",
+      "sbi_mailbox_progress",
       "settlement_relations",
       "source_external_ids",
       "sources"
@@ -22217,8 +22270,9 @@
       "0094_myjcb_jpoint_history.sql",
       "0096_smbc_foreign_ordinary_unit_eligibility.sql",
       "0097_sbi_vc_document_unit_eligibility.sql",
-      "0098_sbi_shinsei_savings_activity.sql"
+      "0098_sbi_shinsei_savings_activity.sql",
+      "0099_sbi_document_unit_eligibility.sql"
     ],
-    "schemaSha256": "1c795f338cbef0b839998f0dadeb61807e95553ea92a187f101afb27997f4563"
+    "schemaSha256": "1783ff9f980ab8cac79d6dfce7fc4f4d08db3dede5d457e02daa7bc0af3d9211"
   }
 }

@@ -45,6 +45,11 @@ const NOT_SOURCE = /(?:\.d\.ts|\.test\.ts|\.test\.mjs|\.node-test\.mjs)$/u;
  * its entry here, with the reason.
  */
 const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>> = {
+  "services/collector-sbi-securities/src/mailbox-contract.ts": {
+    count: 1,
+    reason:
+      "validates the provider envelope's message field as a bounded string; no exception is read and the text is never retained or logged",
+  },
   "packages/application/src/collection/seal-refusal.ts": {
     count: 3,
     reason: "a D1 trigger refusal's RAISE code is kept only when it is a code-shaped token",

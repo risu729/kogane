@@ -35,6 +35,8 @@ import { cashHistoryInventoryComplete } from "./cash-history";
 import { CashHistoryError } from "../../../packages/parsers/src/parsers/sbi-cash-history-schema";
 import { IncomeHistoryError } from "../../../packages/parsers/src/parsers/sbi-income-history-schema";
 import { incomeHistoryInventoryComplete } from "./income-history";
+import { MailboxError } from "./mailbox-bootstrap";
+import type { MailboxUnit } from "./mailbox";
 
 export const SBI_SECURITIES_SOURCE = "sbi-securities";
 export const SHARED_PRODUCER = "collector-sbi-securities";
@@ -52,7 +54,7 @@ type UnitScope = "domestic" | "foreign";
 
 /** One failure, reduced to what a terminal may state. */
 export interface SharedFailure {
-  readonly scope: UnitScope;
+  readonly scope: UnitScope | "mailbox";
   readonly code: string;
 }
 
@@ -71,6 +73,7 @@ export interface SbiSharedRun {
   readonly window?: { readonly from: string; readonly to: string };
   readonly artifacts: readonly Artifact[];
   readonly failures: readonly SharedFailure[];
+  readonly mailboxUnits?: readonly MailboxUnit[];
 }
 
 /** The same split the central importer uses to attribute an artifact. */
@@ -91,6 +94,7 @@ function scopesFor(scope: CollectionScope): UnitScope[] {
  * stable code, so no free-text ever reaches the manifest.
  */
 export function safeFailureCode(error: unknown): string {
+  if (error instanceof MailboxError) return error.code;
   if (error instanceof IncomeHistoryError) return error.code;
   if (error instanceof CashHistoryError) return error.code;
   if (isAssetHistoryError(error)) return error.code;
@@ -141,7 +145,10 @@ export async function sbiRunPlan(run: SbiSharedRun): Promise<PersistRunPlan> {
       failures: [...run.failures, { scope: "domestic", code: "sbi_asset_history_shard_inventory" }],
     };
   }
-  const artifacts = await Promise.all(run.artifacts.map((artifact) => plannedArtifact(artifact)));
+  // Hash sequentially so the document ceiling does not also become that many
+  // concurrent WebCrypto buffer copies.
+  const artifacts: PersistArtifact[] = [];
+  for (const artifact of run.artifacts) artifacts.push(await plannedArtifact(artifact));
   const scopes = scopesFor(run.scope);
   const providerOutcome: ProviderOutcome = run.status;
   const coverageStatus = coverageFor(providerOutcome);
@@ -166,6 +173,12 @@ export async function sbiRunPlan(run: SbiSharedRun): Promise<PersistRunPlan> {
       ...(unitCode === undefined ? {} : { safeErrorCode: unitCode }),
     };
   });
+  for (const unit of run.mailboxUnits ?? [])
+    units.push({
+      ...unit,
+      unitKind: "document",
+      artifactCount: artifacts.filter((artifact) => artifact.unitKey === unit.unitKey).length,
+    });
   const ranges: TerminalRange[] =
     run.window === undefined
       ? []
@@ -208,7 +221,7 @@ export async function sbiRunPlan(run: SbiSharedRun): Promise<PersistRunPlan> {
       scopeKind: run.window === undefined ? "full_snapshot" : "date_range",
       startValue: run.window?.from ?? null,
       endValue: run.window?.to ?? null,
-      unitKeys: scopes,
+      unitKeys: units.map((unit) => unit.unitKey),
     },
     startedAt: run.startedAt,
     completedAt: run.completedAt,
@@ -220,7 +233,7 @@ export async function sbiRunPlan(run: SbiSharedRun): Promise<PersistRunPlan> {
     ranges,
     reports: [],
     transformations: artifacts.flatMap((artifact, index) =>
-      artifact.role === "provider_response"
+      artifact.role === "provider_response" || artifact.role === "provider_document"
         ? []
         : [
             extraction(
@@ -288,7 +301,7 @@ async function plannedArtifact(artifact: Artifact): Promise<PersistArtifact> {
     // in an envelope), which is the role the central descriptor gave them; the
     // terminal's `extracted` step says so (ADR 0021).
     role: artifact.role ?? "collector_derived",
-    unitKey: datasetScope(artifact.dataset),
+    unitKey: artifact.unitKey ?? datasetScope(artifact.dataset),
     body: { kind: "bytes", bytes },
   };
 }

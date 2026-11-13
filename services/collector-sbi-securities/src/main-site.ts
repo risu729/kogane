@@ -11,6 +11,9 @@ import type { Artifact, DomesticSession } from "./types";
 import { assetHistoryArtifacts, readAssetHistoryResponse } from "./asset-history";
 import { collectCashHistory, readCashHistoryResponse } from "./cash-history";
 import { collectIncomeHistory, incomeHistoryUrl } from "./income-history";
+import { collectMailbox, type MailboxUnit } from "./mailbox";
+import { MailboxHttp } from "./mailbox-http";
+import type { MailboxError } from "./mailbox-bootstrap";
 import { IncomeHistoryError } from "../../../packages/parsers/src/parsers/sbi-income-history-schema";
 import {
   CashHistoryError,
@@ -100,6 +103,13 @@ export async function collectMainSiteArtifacts(options: {
   onCashHistoryError?: (error: CashHistoryError) => void;
   onIncomeHistoryError?: (error: IncomeHistoryError) => void;
   onArtifact?: (artifact: Artifact) => void;
+  onMailboxUnit?: (unit: MailboxUnit) => void;
+  onMailboxError?: (error: MailboxError) => void;
+  onMailboxArtifact?: (artifact: Artifact) => void;
+  mailboxDeadline?: number;
+  mailboxSignal?: AbortSignal;
+  deferMailbox?: (collect: (startIdentity: string | null) => Promise<void>) => void;
+  onMailboxProgress?: (nextIdentity: string | null) => void;
 }): Promise<Artifact[]> {
   const to = options.to ?? jstDate(new Date());
   const from = options.from ?? historyYearStart(to);
@@ -109,6 +119,27 @@ export async function collectMainSiteArtifacts(options: {
     artifacts.push(artifact);
     options.onArtifact?.(artifact);
   };
+
+  const collectReports = (startIdentity: string | null) =>
+    collectMailbox({
+      client: new MailboxHttp(
+        auth.cookies,
+        fetch,
+        options.mailboxDeadline ?? Date.now(),
+        options.mailboxSignal,
+      ),
+      retain: options.onMailboxArtifact ?? retain,
+      deadline: options.mailboxDeadline ?? Date.now(),
+      signal: options.mailboxSignal ?? new AbortController().signal,
+      startIdentity,
+      onProgress: (nextIdentity) => options.onMailboxProgress?.(nextIdentity),
+      onUnit: (unit) => options.onMailboxUnit?.(unit),
+      onError: (error) => {
+        if (options.onMailboxError === undefined) throw error;
+        options.onMailboxError(error);
+      },
+    });
+  options.deferMailbox?.(collectReports);
 
   const assets = await fetchAssets(auth);
   retain({
@@ -190,6 +221,7 @@ export async function collectMainSiteArtifacts(options: {
     ...(options.onHistoryError === undefined ? {} : { onError: options.onHistoryError }),
   }))
     retain(artifact);
+  if (options.deferMailbox === undefined) await collectReports(null);
   return artifacts;
 }
 
@@ -947,6 +979,13 @@ function updateCookieJar(jar: ScopedCookie[], response: Response, requestUrl: UR
       attributes.set(name, attributeSeparator < 0 ? "" : part.slice(attributeSeparator + 1));
     }
     const domainAttribute = attributes.get("domain")?.replace(/^\./u, "").toLowerCase();
+    if (
+      domainAttribute !== undefined &&
+      ((requestUrl.hostname !== domainAttribute &&
+        !requestUrl.hostname.endsWith(`.${domainAttribute}`)) ||
+        (domainAttribute !== "sbisec.co.jp" && !domainAttribute.endsWith(".sbisec.co.jp")))
+    )
+      throw new Error("SBI main-site cookie domain invalid");
     const cookie: ScopedCookie = {
       name: nameValue.slice(0, separator),
       value: nameValue.slice(separator + 1),

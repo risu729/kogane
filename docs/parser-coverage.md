@@ -1,5 +1,16 @@
 # Parser coverage contract (issues, coverage claims, snapshot policies)
 
+## SBI delivered-document evidence
+
+`sbi-delivered-document-metadata` validates original PDF signatures, bounds,
+calendar dates, artifact identity/hash and document-unit binding. It emits one
+evidence-only coverage claim and no financial observations. Migration 0099
+permits independently complete document units on partial parent runs, without
+snapshot replacement or complete mailbox membership claims. Registration v11
+adds the exact new PDF mapping while earlier mappings remain reproducible.
+Unverified legacy/multi-file formats and scheduled production coverage keep the
+source catalogue partial ([ADR 0108](adr/0108-sbi-delivered-documents.md)).
+
 ## Shared CSV quote diagnostics
 
 The shared reader accepts an optional `CsvWarning[]` and records
