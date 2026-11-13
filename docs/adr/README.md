@@ -109,6 +109,7 @@ for current behavior.
 
 - [ADR 0098: Preserve SBI weekly asset history and select one revision per point](0098-sbi-weekly-asset-history.md) — proposed; observed all-period GET, exact raw capture and bounded year shards, conditional category membership, registration v5, production per-point revision selection
 - [ADR 0099: Sony Bank scheduled collection includes all retained deposit history](0099-sony-retained-history.md) — proposed; omitted start, explicit end, CSV-only publication and monthly evidence retained
+- [ADR 0100: Sony annual realised gains and delivered PDF evidence](0100-sony-realised-gains-documents.md) — proposed; year-scoped annual summaries and private PDF evidence, separate terminal runs
 - [ADR 0101: Read observed MyJCB debit statement rows separately from credit payments](0101-myjcb-debit-statements.md) — proposed; desktop ordinary/difference rows and separate known-empty other statements, all offered periods daily, registration v6 and independent unit eligibility, card switching deferred
 - [ADR 0102: Preserve retained SBI cash history with checked page coverage](0102-sbi-retained-cash-history.md) — proposed; observed retained yen paging and USD statement, exact raw pages and exhaustive lineage, control totals, occurrence identities, registration v7, unobserved foreign continuation fails closed
 

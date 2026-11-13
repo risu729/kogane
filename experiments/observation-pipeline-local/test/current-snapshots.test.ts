@@ -780,3 +780,123 @@ describe("unit-scoped eligibility", () => {
     });
   });
 });
+
+function annualRows(year: number, currency: string, gain: number, interest: number): Observation[] {
+  return (
+    [
+      ["annual_realised_fx_gain", gain],
+      ["annual_after_tax_interest", interest],
+    ] as const
+  ).map(([metric, amount]) => ({
+    ...valuation(`sony-bank:realised:${year}:${currency}`),
+    sourceAccount: `sony-bank:deposit:${currency}`,
+    metric,
+    amountMinor: amount,
+    extra: { _kogane: { period: String(year), sourceCurrency: currency } },
+  }));
+}
+const annualScope = (year: number) => ({
+  parser: "sony-bank-realised-gains",
+  dataset: "realised-gains",
+  source: "sony-bank",
+  unit: `realised-year-${year}`,
+});
+describe("Sony annual realised containers", () => {
+  test("revisions remove currencies only within their year and rollover preserves previously collected years", () => {
+    const store = database();
+    snapshot(store, {
+      ...annualScope(2098),
+      observations: annualRows(2098, "USD", 456, 8),
+      coverage: {},
+    });
+    snapshot(store, {
+      ...annualScope(2099),
+      observations: [...annualRows(2099, "USD", -123, 7), ...annualRows(2099, "AUD", 5, 2)],
+      coverage: {},
+    });
+    expect(currentValuations(store)).toHaveLength(6);
+    snapshot(store, {
+      ...annualScope(2099),
+      observations: annualRows(2099, "USD", -124, 9),
+      coverage: {},
+    });
+    const revised = currentValuations(store);
+    expect(revised).toHaveLength(4);
+    expect(revised.some((row) => row.subject === "sony-bank:realised:2099:AUD")).toBe(false);
+    expect(
+      revised.find(
+        (row) =>
+          row.subject === "sony-bank:realised:2099:USD" && row.metric === "annual_realised_fx_gain",
+      )?.amount_minor,
+    ).toBe("-124");
+    snapshot(store, {
+      ...annualScope(2100),
+      observations: annualRows(2100, "USD", 10, 2),
+      coverage: {},
+    });
+    snapshot(store, {
+      ...annualScope(2099),
+      observations: annualRows(2099, "USD", -125, 11),
+      coverage: {},
+    });
+    const rollover = currentValuations(store);
+    expect(rollover).toHaveLength(6);
+    expect(
+      rollover.find(
+        (row) =>
+          row.subject === "sony-bank:realised:2098:USD" && row.metric === "annual_realised_fx_gain",
+      )?.amount_minor,
+    ).toBe("456");
+    expect(
+      rollover.find(
+        (row) =>
+          row.subject === "sony-bank:realised:2099:USD" && row.metric === "annual_realised_fx_gain",
+      )?.amount_minor,
+    ).toBe("-125");
+    expect(store.db.query("SELECT count(*) n FROM valuation_observations").get()).toEqual({
+      n: 12,
+    });
+  });
+  test("unconfirmed annual revisions cannot replace a year, and a proven empty year clears only its own membership", () => {
+    const store = database();
+    snapshot(store, {
+      ...annualScope(2098),
+      observations: annualRows(2098, "USD", 456, 8),
+      coverage: {},
+    });
+    snapshot(store, {
+      ...annualScope(2099),
+      observations: annualRows(2099, "USD", -123, 7),
+      coverage: {},
+    });
+    const baseline = currentValuations(store);
+    snapshot(store, { ...annualScope(2099), observations: annualRows(2099, "USD", 901, 1) });
+    snapshot(store, {
+      ...annualScope(2099),
+      observations: annualRows(2099, "USD", 902, 2),
+      status: "partial",
+      coverage: {},
+    });
+    snapshot(store, {
+      ...annualScope(2099),
+      observations: annualRows(2099, "USD", 903, 3),
+      parseStatus: "error",
+      coverage: {},
+    });
+    snapshot(store, {
+      ...annualScope(2099),
+      observations: annualRows(2099, "USD", 904, 4),
+      coverage: {
+        completeness: "partial",
+        membershipComplete: false,
+        failureCause: "row_unreadable",
+      },
+    });
+    expect(currentValuations(store)).toEqual(baseline);
+    snapshot(store, { ...annualScope(2099), observations: [], coverage: {} });
+    const emptyYear = currentValuations(store);
+    expect(emptyYear).toHaveLength(2);
+    expect(emptyYear.every((row) => row.subject === "sony-bank:realised:2098:USD")).toBe(true);
+    expect(store.db.query("SELECT count(*) n FROM parse_runs").get()).toEqual({ n: 7 });
+  });
+});

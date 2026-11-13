@@ -6,7 +6,7 @@
     "iconv-lite": "0.7.3"
   },
   "devDependencies": {
-    "@cloudflare/puppeteer": "1.4.0",
+    "@cloudflare/puppeteer": "2.0.0",
     "@cloudflare/vitest-plugin": "1.6.0",
     "@types/bun": "1.4.4",
     "@types/node": "26.6.6",

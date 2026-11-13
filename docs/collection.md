@@ -1651,6 +1651,12 @@ format change is needed for that step.
   whose `cloudflare:test` import resolves only under Vitest. The test task runs
   `vitest run` and `bun test ./test` separately, and both pass under bun 1.4.0.
 
+### Sony realised results and delivered documents
+
+The scheduled Sony session also captures the provider-stated current/previous-year annual FX gains and after-tax interest, with the complete detail CSV retained privately. These are bounded annual valuation observations, never recomputed gains or additional cash income. Year-scoped snapshot units preserve older collected years and replace repeated annual revisions. Core history, realised evidence and foreign-document evidence have separate terminal runs with one acquisition-session reference; every persisted run ID is returned.
+
+The observed five-year foreign-document query archives its offered PDFs by content hash in private DATA. Full retention and pagination beyond ten documents remain unconfirmed, and fund document access is unavailable for the observed account. The document run remains partial; no unsupported list is treated as empty. See [Sony source evidence](sources/sony-bank.md) and [ADR 0100](adr/0100-sony-realised-gains-documents.md).
+
 ### SBI supplementary publication boundaries
 
 SBI financial collection keeps `domestic` and `foreign` as dependent core units.

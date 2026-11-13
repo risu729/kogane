@@ -1,3 +1,4 @@
+import { sonyBankRealisedGains } from "../src/parsers/sony-realised-gains.ts";
 import { vpassCreditSnapshot } from "../src/parsers/vpass-credit.ts";
 import { authori as creditAuthori, revo as creditRevo } from "./fixtures/vpass-credit.ts";
 // Synthetic inputs for the parser coverage contract (design review D01).
@@ -470,6 +471,21 @@ const VPASS_CREDIT: ContractParser = {
 };
 
 export const CONTRACT_PARSERS: ContractParser[] = [
+  cases(
+    sonyBankRealisedGains,
+    meta("sony-bank", "realised-gains", {
+      artifactKey: "realised-gains-2099.json",
+      fetchUnitKey: "realised-year-2099",
+    }),
+    {
+      "annual-summary": fixture("sony-bank-parser-boundaries", "realised-gains.json"),
+      "year-scope-drift": json({
+        ...fixtureJson("sony-bank-parser-boundaries", "realised-gains.json"),
+        rliztnPrftLsCy: "2100",
+        rliztnPrftLsLy: "2098",
+      }),
+    },
+  ),
   cases(
     myJcbJPointHistory,
     meta("myjcb", "jpoint-history", {

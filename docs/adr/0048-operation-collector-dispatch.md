@@ -772,3 +772,75 @@ outranks historical retryable refusals. Malformed legacy failure text becomes
   revision precedence, a blocked run and a missing run.
 - Hosted CI and independent review are required before this amendment is
   accepted.
+
+## Amendment 2026-11-12: Current publication after the tracking horizon
+
+Status: proposed (accepted when its pull request merges).
+
+### Context
+
+A stored collection can remain retryable beyond the operation's fixed
+48-hour publication-observation horizon. The request and execution then end
+`failed / unpublished / publication_not_observed`, and their terminal guards
+correctly forbid reopening them. Later registration and publication of the
+same bound runs can appear in the live trail, while the original operation
+still needs an explicit current publication result
+([issue 1270](https://github.com/risu729/kogane/issues/1270)).
+
+### Options considered
+
+- Rewrite or reopen the terminal receipt: rejected because it erases the
+  original horizon result and violates the terminal-state invariants.
+- Persist a separate recovery fact and maintain a historical observer queue:
+  unnecessary for current-result reporting. A durable past observation would
+  be a separate contract, including its evidence revision and observed time.
+- Derive a versioned current-result extension on the existing bounded detail
+  read: chosen because the exact original run trail is already read there.
+
+### Decision
+
+The same application reader used by HTTP, MCP and the detail page adds the
+optional `execution.currentResult` contract documented in
+[the operations API](../ops-api.md#collector-execution-adr-0048). Its schema
+is `kogane-collector-current-result-v1`; `state: published` means current CORE
+publication proof, alongside the immutable `originalTracking` outcome,
+original 48-hour `publicationDeadlineAt` and recorded `finishedAt`.
+
+Eligibility requires the original failed request, a collected execution that
+ended `unpublished / publication_not_observed` after its existing horizon,
+and a valid original source and unique nonempty run set of at most 100.
+Every bound run must be returned in the same order. The existing
+`trailOutcome` rule requires all runs settled and at least one published
+parse; failed provider outcomes never qualify. Other outcomes, malformed
+bindings, absent/pending evidence and zero selected parsers cannot claim
+publication. A newer unrelated run is not evidence for this operation.
+
+### Consequences
+
+- Existing v1 status, stages, execution state, reason and timestamps retain
+  their meanings. Terminal rows and evidence remain untouched.
+- `publishedAt` in the extension is null: the current trail does not establish
+  an actual first publication time. No observation time is invented either.
+- `readReadiness: unproven` leaves the existing CORE epoch/revision and READ
+  gate intact. Publication alone never completes `projected` or the request.
+- Current pointers are re-read, so the result can become unobserved again.
+  There is no durable late-publication fact, migration, GET write, historical
+  scan, new capability, grant, resource or provider action.
+- The detail page explicitly distinguishes the original deadline failure
+  from current publication. The operations list remains a stored summary.
+- This implementation supplies the same-operation reporting contract; it
+  does not itself prove the original production run published or close its
+  production acceptance gate.
+
+### Verification
+
+- Pure application and strict-wire tests cover exact bindings, malformed
+  metadata, the 100-run bound, pending/failed/empty trails, original outcomes,
+  closed versions and unknown fields, without a writable read path.
+- The Processor integration regression reaches the original horizon, then
+  registers and publishes the same synthetic run, and compares stored request,
+  dispatch and stage rows unchanged across repeated reads and tracker ticks.
+- Worker tests compare the same operation's HTTP and MCP detail responses
+  before and after synthetic publication. Browser checks cover Japanese copy,
+  accessibility and overflow at desktop/mobile widths.
+- Existing terminal-immutability and projection-revision tests remain required.

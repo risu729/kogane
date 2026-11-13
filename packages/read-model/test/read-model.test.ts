@@ -528,6 +528,13 @@ describe("named concepts in the final SQL", () => {
         ...SBI_VC_UNIT_POLICIES,
         ...smbcUnitPolicies,
         {
+          source_id: "sony-bank",
+          parser_name: "sony-bank-document-metadata",
+          dataset: "delivered-document-pdf",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
+        {
           source_id: "vpass",
           parser_name: "vpass-credit-snapshot",
           dataset: "credit-snapshot",
@@ -540,7 +547,7 @@ describe("named concepts in the final SQL", () => {
     expect(
       db
         .query(
-          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'moneyforward-detail-balances', 'sbi-income-payments', 'sbi-realised-gains', 'vpass-credit-snapshot', 'myjcb-jpoint-history', 'sbi-vc-document-metadata', 'sbi-delivered-document-metadata', 'myjcb-statement-document-metadata', 'smbc-direct-transactions', 'smbc-foreign-ordinary-balance', 'smbc-foreign-ordinary-history', 'sbi-shinsei-savings-activity', 'sbi-account-assets-history', 'sbi-domestic-trade-records', 'sbi-foreign-cash-history', 'sbi-foreign-trade-records', 'sbi-yen-detail-history')",
+          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1' AND parser_name NOT IN ('st-george-balances', 'sbi-shinsei-exchange-rate', 'prestia-bank-balances', 'sbi-shinsei-monthly-report-metadata', 'moneyforward-detail-balances', 'sbi-income-payments', 'sbi-realised-gains', 'vpass-credit-snapshot', 'myjcb-jpoint-history', 'sbi-vc-document-metadata', 'sbi-delivered-document-metadata', 'myjcb-statement-document-metadata', 'smbc-direct-transactions', 'smbc-foreign-ordinary-balance', 'smbc-foreign-ordinary-history', 'sbi-shinsei-savings-activity', 'sbi-account-assets-history', 'sbi-domestic-trade-records', 'sbi-foreign-cash-history', 'sbi-foreign-trade-records', 'sbi-yen-detail-history', 'sony-bank-realised-gains', 'sony-bank-document-metadata')",
         )
         .get(),
     ).toEqual({ n: 0 });
@@ -735,6 +742,13 @@ describe("named concepts in the final SQL", () => {
         ...myJcbDocumentUnitPolicies,
         ...SBI_VC_UNIT_POLICIES,
         ...smbcUnitPolicies,
+        {
+          source_id: "sony-bank",
+          parser_name: "sony-bank-document-metadata",
+          dataset: "delivered-document-pdf",
+          unit_scope: "unit",
+          snapshot_selection: 0,
+        },
         {
           source_id: "vpass",
           parser_name: "vpass-credit-snapshot",

@@ -1,3 +1,5 @@
+import { sonyBankDocumentMetadata } from "./sony-document-metadata.ts";
+import { sonyBankRealisedGains } from "./sony-realised-gains.ts";
 import { vpassCreditSnapshot } from "./vpass-credit.ts";
 import { sbiIncomePayments, sbiRealisedGains } from "./sbi-income-history.ts";
 import type { Parser } from "../types.ts";
@@ -61,6 +63,8 @@ import { vPointPayNotificationEvent } from "./v-point-pay.ts";
 import { vpassStatementPage } from "./vpass.ts";
 
 export const PARSERS: readonly Parser[] = [
+  sonyBankDocumentMetadata,
+  sonyBankRealisedGains,
   sbiDocuments,
   prestiaBankBalances,
   globalPassActivity,

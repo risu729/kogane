@@ -1,0 +1,151 @@
+{
+  "errors": [],
+  "responseBizCommon": {
+    "bizResult": "0",
+    "exceptionRsn": []
+  },
+  "rliztnPrftLsCy": "2099",
+  "rliztnPrftLsLy": "2098",
+  "cyAgrRliztnPrftLs": "-123",
+  "cyAgrItrAmt": "7",
+  "cyCcySepRliztnPrftLsCnt": 1,
+  "cyCcySepRliztnPrftLsFcplSi": [
+    {
+      "currencyCd": "USD",
+      "cyRliztnPrftLs": "-123",
+      "cyItrAmt": "7"
+    }
+  ],
+  "lyAgrRliztnPrftLs": "456",
+  "lyAgrItrAmt": "8",
+  "lyCcySepRliztnPrftLsCnt": 1,
+  "lyCcySepRliztnPrftLsFcplSi": [
+    {
+      "currencyCd": "USD",
+      "lyRliztnPrftLs": "456",
+      "lyItrAmt": "8"
+    }
+  ],
+  "totalDtlStartYr": "2098",
+  "totalDtlEndYr": "2099",
+  "totalDtlCnt": 1,
+  "totalDtlGrsCnt": 1,
+  "totalDtlFcplSi": [
+    {
+      "transactionDt": "2099-01-01",
+      "currencyCd": "USD",
+      "productTpy": "1",
+      "abridgmentObj": "synthetic",
+      "transactionAmt": "10",
+      "applicationExchRt": "2",
+      "transactionAfBal": "3",
+      "traAvgPurRt": "4",
+      "traExchProfLos": "-123",
+      "interestYenAmt": "7"
+    }
+  ],
+  "assPrftLsAgr": "0",
+  "assPrftLsInfoCnt": 0,
+  "assPrftLsInfoFcplSi": [],
+  "returnCnt": 11,
+  "ordinaryDepAcInfo": [
+    {
+      "accountStat": "1",
+      "currencyCd": "JPY"
+    },
+    {
+      "accountStat": "1",
+      "currencyCd": "USD"
+    },
+    {
+      "accountStat": "1",
+      "currencyCd": "EUR"
+    },
+    {
+      "accountStat": "1",
+      "currencyCd": "GBP"
+    },
+    {
+      "accountStat": "1",
+      "currencyCd": "AUD"
+    },
+    {
+      "accountStat": "1",
+      "currencyCd": "NZD"
+    },
+    {
+      "accountStat": "1",
+      "currencyCd": "CAD"
+    },
+    {
+      "accountStat": "1",
+      "currencyCd": "CHF"
+    },
+    {
+      "accountStat": "1",
+      "currencyCd": "HKD"
+    },
+    {
+      "accountStat": "1",
+      "currencyCd": "ZAR"
+    },
+    {
+      "accountStat": "1",
+      "currencyCd": "SEK"
+    }
+  ],
+  "currencyMst": [
+    {
+      "currencyNm": "synthetic-JPY",
+      "currencyCd": "JPY"
+    },
+    {
+      "currencyNm": "synthetic-USD",
+      "currencyCd": "USD"
+    },
+    {
+      "currencyNm": "synthetic-EUR",
+      "currencyCd": "EUR"
+    },
+    {
+      "currencyNm": "synthetic-GBP",
+      "currencyCd": "GBP"
+    },
+    {
+      "currencyNm": "synthetic-AUD",
+      "currencyCd": "AUD"
+    },
+    {
+      "currencyNm": "synthetic-NZD",
+      "currencyCd": "NZD"
+    },
+    {
+      "currencyNm": "synthetic-CAD",
+      "currencyCd": "CAD"
+    },
+    {
+      "currencyNm": "synthetic-CHF",
+      "currencyCd": "CHF"
+    },
+    {
+      "currencyNm": "synthetic-HKD",
+      "currencyCd": "HKD"
+    },
+    {
+      "currencyNm": "synthetic-BRL",
+      "currencyCd": "BRL"
+    },
+    {
+      "currencyNm": "synthetic-CNH",
+      "currencyCd": "CNH"
+    },
+    {
+      "currencyNm": "synthetic-ZAR",
+      "currencyCd": "ZAR"
+    },
+    {
+      "currencyNm": "synthetic-SEK",
+      "currencyCd": "SEK"
+    }
+  ]
+}

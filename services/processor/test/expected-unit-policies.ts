@@ -33,7 +33,7 @@ const policy = (
 });
 
 // The closed default opt-ins of migrations 0080, 0088, 0090, 0092, 0094, 0095, 0096,
-// 0097, 0098, 0099, 0100, 0101 and 0102.
+// 0097, 0098, 0099, 0100, 0101 and 0102, plus Sony 0089.
 // This expected catalogue is independent of the SQL read under test: an extra
 // source, page, parser, scope, snapshot membership or policy still fails.
 export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
@@ -122,6 +122,11 @@ export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
   }),
   policy("sbi-shinsei-bank", "savings-activity", "sbi-shinsei-savings-activity", {
     policy_id: "coverage-v1",
+    snapshot_selection: 0,
+  }),
+  policy("sony-bank", "delivered-document-pdf", "sony-bank-document-metadata", {
+    policy_id: "coverage-v1",
+    required_parser_version: "1.0.0",
     snapshot_selection: 0,
   }),
   ...SBI_VC_UNIT_POLICIES.map((row) =>

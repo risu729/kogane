@@ -7,6 +7,7 @@ export interface SonyBankCredential {
 }
 
 export interface RawArtifact {
+  unitKey?: string;
   dataset: string;
   filename: string;
   mediaType: string;
@@ -51,7 +52,7 @@ export interface CollectionManifest {
   startedAt: string;
   completedAt: string;
   status: "success" | "partial" | "failed";
-  window: { from: string | null; to: string };
+  window: { from: string | null; to: string | null };
   transactionCount: number;
   artifacts: StoredArtifact[];
   failures: CollectionFailure[];

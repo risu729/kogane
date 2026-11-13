@@ -25,7 +25,7 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import demo from "./snapshot-worker";
 import worker from "../src/worker";
-import { seedRegistry } from "./fixtures";
+import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { validOperationRecord } from "../../../packages/observation-shared/src/operation-contract";
 import { PURCHASES_TOOL_NAME } from "../src/agent-service";
 import { MCP_TOOLS, RECONSTRUCTED_STATE_MCP_TOOLS } from "../src/mcp";
@@ -40,6 +40,7 @@ import {
   projectionRequirementWrite,
   recordCollectorOutcome,
   recordOperationStage,
+  trackCollectorPublication,
 } from "../../../packages/application/src/index";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 
@@ -1104,6 +1105,93 @@ describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)
       status: 202,
       json: { operationId: ids[0], status: "completed" },
     });
+  });
+
+  it("reads late publication on the same operation equally over HTTP and MCP without changing its receipt", async () => {
+    const accepted = await ops("/collections", {
+      ...COLLECTION,
+      idempotencyKey: "late-publication",
+    });
+    const operationId = accepted.json.operationId as string;
+    const stored = (await row(operationId)) as Record<string, any>;
+    const store = d1CommandStore(env.DB);
+    const collectedAt = "2026-09-07T00:06:00.000Z";
+    const finishedAt = "2026-09-09T00:07:00.000Z";
+    expect(
+      await claimCollectorStart({
+        store,
+        operationId,
+        action: "collect",
+        acceptedAt: stored.created_at,
+        expiresAt: new Date(Date.parse(stored.created_at) + 24 * 3_600_000).toISOString(),
+        now: collectedAt,
+        binding: { connectionId: "sony-bank", terminalSource: "sony-bank" },
+      }),
+    ).toBe(true);
+    await recordCollectorOutcome({
+      store,
+      operationId,
+      now: collectedAt,
+      nowMs: Date.parse(collectedAt),
+      outcome: { kind: "collected", runIds: ["synthetic-late-original"] },
+    });
+    await trackCollectorPublication({
+      store,
+      operationId,
+      now: finishedAt,
+      nowMs: Date.parse(finishedAt),
+      checkIntervalMs: 300_000,
+    });
+    const read = async () => {
+      const http = await call(`${OPS}/operations/${operationId}`, { environment: ENABLED });
+      const viaMcp = await mcp(
+        "tools/call",
+        {
+          name: "kogane.ops.operation.get",
+          arguments: { operationId },
+        },
+        THROUGH_MCP,
+      );
+      expect(http.status).toBe(200);
+      expect(viaMcp.result.isError).not.toBe(true);
+      const receipt = (await http.json()) as Record<string, any>;
+      expect(viaMcp.result.structuredContent).toEqual(receipt);
+      expect(validOperationRecord(receipt, operationId)).toBe(true);
+      return receipt;
+    };
+    const originalRow = await row(operationId);
+    const before = await read();
+    expect(before.execution.currentResult.state).toBe("publication_not_observed");
+    const fetch = await seedRun({ source: "sony-bank", count: 1 });
+    await env.DB.prepare(`INSERT INTO collection_runs(source,run_id,terminal_key,terminal_digest,
+      registration_contract_version,provider_outcome,coverage_status,first_seen_at)
+      VALUES('sony-bank','synthetic-late-original','runs/synthetic/terminal.json',?1,
+      'terminal-registration-v2','success','complete',?2)`)
+      .bind("d".repeat(64), finishedAt)
+      .run();
+    await env.DB.prepare(`UPDATE collection_runs SET fetch_run_id=?1,registered_at=?2
+      WHERE source='sony-bank' AND run_id='synthetic-late-original'`)
+      .bind(fetch.id, finishedAt)
+      .run();
+    await env.DB.prepare(`UPDATE observation_work_items SET processed_at_ms=1,outcome='jobs_created'
+      WHERE fetch_run_id=? AND kind='sealed_run'`)
+      .bind(fetch.id)
+      .run();
+    const parse =
+      await env.DB.prepare(`INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,
+      parsed_at,status,warnings_json) VALUES(?,'ops-fixture','1.0.0','2026-09-09','ok','[]')`)
+        .bind(fetch.artifacts[0]!.id)
+        .run();
+    await publishParse(Number(parse.meta.last_row_id), "2026-09-09T00:10:00Z");
+    const after = await read();
+    expect(after.execution.currentResult.state).toBe("published");
+    expect(after.execution.currentResult.publishedAt).toBeNull();
+    expect(after.execution.currentResult.readReadiness).toBe("unproven");
+    expect(after.status).toBe("failed");
+    expect(after.failureCode).toBe("publication_not_observed");
+    expect(after.stages).toEqual(before.stages);
+    expect(after.execution.finishedAt).toBe(before.execution.finishedAt);
+    expect(await row(operationId)).toEqual(originalRow);
   });
 
   it("shows the operator's browser receipt to its MCP principal as the route does (ADR 0086)", async () => {

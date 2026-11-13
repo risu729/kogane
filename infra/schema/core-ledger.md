@@ -14,7 +14,7 @@ Schema digest: `1783ff9f980ab8cac79d6dfce7fc4f4d08db3dede5d457e02daa7bc0af3d9211
 
 ## Summary
 
-- Migrations applied: 94
+- Migrations applied: 95
 - Tables: 142 (all `STRICT`: yes)
 - Views: 44
 - Triggers: 527
@@ -284,6 +284,7 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0080_jpoint_program.sql` | 2 | dataset_snapshot_policies, reward_programs |
 | `0085_schedule_dispatch_marker.sql` | 9 | collection_schedule_occurrences_v2 |
 | `0088_sbi_shinsei_monthly_report_units.sql` | 1 | dataset_snapshot_policies |
+| `0089_sony_realised_gains_snapshot.sql` | 2 | dataset_snapshot_policies |
 | `0090_myjcb_debit_unit_eligibility.sql` | 1 | dataset_snapshot_policies |
 | `0091_moneyforward_detail_balance_snapshots.sql` | 1 | dataset_snapshot_policies |
 | `0092_vpass_credit_snapshots.sql` | 1 | dataset_snapshot_policies |
