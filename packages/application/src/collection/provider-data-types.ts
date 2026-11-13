@@ -99,9 +99,9 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
       ],
       444,
     ),
-    // Finalised statement HTML and export offers are retained. Actual PDF/CSV
-    // bytes remain unverified after the browser blocked the observed download.
-    missing("document", 1251),
+    // Observed credit CSV/PDF/OFX originals are retained as evidence only.
+    // Debit files, durable root-card switching and full live archival remain unverified.
+    partial("document", ["myjcb-statement-document-metadata"], 1251),
     collected("reward_balance", ["myjcb-jpoint-balance", "myjcb-jpoint-history"]),
     collected("reward_activity", ["myjcb-jpoint-history"]),
     partial("reward_expiry", ["myjcb-jpoint-balance", "myjcb-jpoint-history"], 1251),
@@ -134,7 +134,7 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
       ["sbi-account-assets-current", "sbi-account-assets-history", "sbi-realised-gains"],
       1238,
     ),
-    missing("document", 446),
+    partial("document", ["sbi-delivered-document-metadata"], 1248),
   ],
   // SBI新生銀行: top accounts with recent activity, balance summary and the yen
   // deposit account, exchange rates; dated history and CSV, term and foreign
@@ -187,11 +187,12 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   ],
   // ソニー銀行: total balance, yen and ten foreign-currency histories and WALLET
   // statements; the realized FX P&L, term deposit contracts, the delivered
-  // documents and backfill beyond the daily window are not collected
+  // documents are not collected; ordinary deposit history covers everything the
+  // provider retains through yesterday, without an invented opening date
   // (docs/sources/sony-bank.md, #449).
   "sony-bank": [
     collected("balance", ["sony-bank-gross-balance"]),
-    partial("cash_movement", ["sony-bank-history-json", "sony-bank-history-csv"], 449),
+    collected("cash_movement", ["sony-bank-history-json", "sony-bank-history-csv"]),
     collected("card_usage", ["sony-bank-wallet-history"]),
     missing("valuation_history", 449),
     missing("term_deposit", 1243),

@@ -119,7 +119,9 @@ for (const row of rows) {
     ...replayStatementMetadata(row),
     ...(row.window_start && row.window_end
       ? { runWindow: { from: row.window_start, to: row.window_end } }
-      : {}),
+      : row.source_id === "sony-bank" && row.window_start === null && row.window_end
+        ? { retainedHistoryEnd: row.window_end }
+        : {}),
   };
   if (row.parser_name === "sony-bank-wallet-history") {
     const manifestSql = `SELECT o.blob_key,o.sha256,o.byte_size FROM fetch_artifacts a JOIN raw_objects o ON o.sha256=a.sha256 WHERE a.fetch_run_id=${Number(row.fetch_run_id)} AND a.artifact_role='collector_manifest'`;

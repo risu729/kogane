@@ -308,6 +308,28 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
       ),
     )();
   }
+  // Missing document policies are repaired individually; operator choices stay.
+  if (
+    (
+      db
+        .query(
+          "SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE source_id='myjcb' AND parser_name='myjcb-statement-document-metadata' AND dataset IN ('credit-csv','credit-pdf','credit-ofx')",
+        )
+        .get() as { n: number }
+    ).n < 3
+  ) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(
+            EXPERIMENT_ROOT,
+            "../../packages/storage-d1/migrations/core/0101_myjcb_document_unit_eligibility.sql",
+          ),
+          "utf8",
+        ),
+      ),
+    )();
+  }
   // 0056/0059 advance the board reader (ADR 0028 and its amendment). 0084
   // follows the shared CSV release for all four exact-version policies.
   // Each UPDATE names its previous value, so reopening preserves later pins

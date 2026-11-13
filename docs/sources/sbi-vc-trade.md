@@ -889,7 +889,7 @@ exactly. API `executionYmdDate` uses `YYYY/MM/DD`. All five CSV rows said
 filter includes both retail and exchange executions; another venue endpoint
 would duplicate them. This resolves that distinction for
 [#1228](https://github.com/risu729/kogane/issues/1228), while leverage opening
-and closing filters remain unobserved. The full historical API list had six
+and closing filters were subsequently observed in section 20. The full historical API list had six
 executions; the same-month CSV contained five. The cash-flow CSV's sixteen
 rows matched the all-type API count within that month. Individual financial
 values and identities are not included here.
@@ -908,3 +908,213 @@ metadata parsing; raw evidence listing does not require those policy rows.
 [#1249](https://github.com/risu729/kogane/issues/1249) remains partial: annual
 PDF downloads, daily reports, balance/valuation history, provider retention
 limits, and a deployed scheduled run with these document calls are unverified.
+
+## 19. Intermittent keepalive refusals and recovery (2026-11-11)
+
+A read-only Workers Logs review on 2026-11-11 contradicts the continuous
+outage suggested by [#1300](https://github.com/risu729/kogane/issues/1300).
+HTTP 403 keepalive failures occurred between 2026-11-09 23:00 UTC and
+2026-11-11 05:00 UTC, with successful HTTP 200 keepalives between them.
+Error-level logs alone cannot establish that every keepalive failed.
+
+Two unsampled boundary traces establish the recovery path:
+
+- 2026-11-10 17:30:03.126 UTC: HTTP 403; 17:30:04.094: passkey
+  reauthentication succeeded; 17:30:04.240: keepalive HTTP 200.
+- 2026-11-11 05:00:01.338 UTC: HTTP 403; 05:00:03.092: passkey
+  reauthentication succeeded; 05:00:03.248: keepalive HTTP 200;
+  05:15:01.300: another keepalive HTTP 200.
+
+The disappearance of the observed errors after 05:00 is therefore consistent
+with successful automatic session replacement, not an alarm stopping. The
+read-only operations snapshot also showed a completed 14:45 keepalive and an
+armed 15:00 occurrence. The 2026-11-10 21:05 scheduled collection was completed
+and its fetch was registered. These observations establish recovery at those
+instants, not a guarantee of future health or of every dataset's publication.
+
+The rejected responses' bodies were not inspected. Whether the original 403
+was caused by expiry, invalidation, a notice, routing or request blocking
+remains unknown; a 403 alone cannot distinguish them. No new provider login,
+credential access or collection was performed for this investigation.
+
+The collector now records `sessionRefreshRequired: true` with a keepalive
+refusal that calls for reauthentication: HTTP 401/403, gateway rejection,
+missing seed, or the existing pending-agreement redirect case. Further
+keepalive calls return that stored failure without contacting the gateway,
+updating the failure timestamp/count, or seeding the rejected session again.
+A successful passkey login stores the replacement session and clears the flag
+atomically. The next keepalive validates it before collection can proceed.
+A health record from before this field defaults to false; its next refusal
+sets the flag. Ordinary server/network failures retain their retry behavior.
+
+Processor alarms remain enabled and keep the existing unforced login cooldown:
+six hours normally, or one hour for the bounded pending-agreement window in
+section 16. The owner session-refresh operation keeps its existing one-hour
+forced-login spacing. No provider terms are accepted automatically. A failed
+login leaves the flag and stored failure intact. Synthetic Workers-runtime
+tests cover refused-session suppression, failed login, successful passkey
+replacement and resumed keepalive, plus retry after a server error.
+
+No owner session action was indicated by the verified recovery snapshot. If a
+later login reports `manual_agreement_required`, the owner must agree at the
+provider; another human-required reauthentication failure needs the existing
+operations recovery path. The underlying cause of the intermittent 403s is
+still unverified and this issue must not claim it has been diagnosed.
+
+## 20. Trader leverage execution filters (2026-11-11)
+
+Normal authenticated trader navigation selected `販売所：レバレッジ` →
+`約定履歴` → `検索`. The screen displays a My Number registration prerequisite
+for leverage; no registration, order or account-setting action was performed.
+Read-only execution-history controls remained accessible. The observed transport
+was Socket.IO event `executionList`, not the simple-mode HTTP gateway.
+
+All four combinations below displayed the official no-data marker. The inspected
+empty acknowledgement had numeric `pageSize`, `pageNumber`, `totalSize` and
+`totalNumOfPages`, with `pageSize: 20`, the other three zero, and `list: []`.
+No populated leverage execution, fee semantics or row contract was observed.
+
+| Selected kind | `isExOrder` | `isCloseOrder` | Latest `historical` | Past-history `historical` |
+| ------------- | ----------- | -------------- | ------------------- | ------------------------- |
+| `新規`        | `"false"`   | `"false"`      | `"false"`           | `"true"`                  |
+| `決済`        | `"false"`   | `"true"`       | `"false"`           | `"true"`                  |
+
+The exact history labels were `最新` and `過去履歴`; this observation does not
+establish a four-month retention boundary. With neither kind selected,
+`isCloseOrder` was omitted. Collection uses only the four individually selected
+combinations and avoids an overlapping unfiltered fifth dataset.
+
+The common request fields beyond the session-only `secureKey` were:
+
+```json
+{
+  "currencyPairs": [],
+  "fromDate": "",
+  "toDate": "",
+  "isActiveStatus": false,
+  "isTodayOrder": "false",
+  "isHistory": true,
+  "isTargetDate": true,
+  "isAuction": "false",
+  "sortKey": "executionDatetime",
+  "sortAsc": "false",
+  "pageNumber": "0",
+  "pageSize": "20"
+}
+```
+
+The collector's bounded implementation retains sanitized page-one evidence in
+`executions-leverage-{open|close}-{recent|historical}-page-0001`, each in its own
+unit. A numeric-zero envelope remains `partial` with
+`leverage_execution_transport_unverified`: an HTTP acknowledgement alone cannot
+prove that the HTTP gateway applied filters observed only on Socket.IO. It has
+no complete-empty absence claim. A nonempty first page is retained as partial
+`leverage_execution_rows_unobserved`; further populated pagination and financial
+publication remain unsupported. Missing, string-valued or contradictory empty
+pagination is refused. No parser accepts these dataset names, and no leverage
+quantity, direction, price, fee or realized result is guessed from spot rows.
+
+A transport, session, redirect or unknown failure stops subsequent leverage
+requests. A refusal already recorded by earlier capture stages also skips all
+four views. Skipped units remain partial with zero artifacts. Local envelope or
+unobserved-row failures do not suppress an independent sibling view. These new
+failures cannot revoke the completed classic account unit or valid document
+units. No extra publishing policy or parser registration is added.
+
+The source `execution` capability remains partial for
+[#1228](https://github.com/risu729/kogane/issues/1228). HTTP compatibility for these
+parameter combinations, populated leverage rows and fees, complete retained
+pagination, and a deployed scheduled run with per-kind count reconciliation
+remain unverified. This change performs no hosted experiment or production run.
+
+## 21. Trader balance-history quantities (2026-11-11)
+
+Normal authenticated `販売所：現物` → `残高履歴` opened the balance-history
+panel. Its read-only date input uses placeholder `基準日`; `検索` sends the read.
+The visible table headers are `基準日`, `暗号資産/通貨`, `残高`.
+
+The observed transport is Socket.IO event `getQuarterCashBalance`, with
+`meta: {}` and body fields `baseDate: string`, `secureKey: string`. The request
+date uses eight ASCII digits, `YYYYMMDD`. The acknowledgement is an array
+envelope with string `meta.status` and session-only `meta.secureKey`; its
+`body.list` contains objects with exactly these fields:
+
+| Field         | Observed shape                                                    |
+| ------------- | ----------------------------------------------------------------- |
+| `baseDate`    | Eight ASCII digits, `YYYYMMDD`; all inspected rows share one date |
+| `currency`    | String                                                            |
+| `cashbalance` | Signed or unsigned exact decimal string                           |
+
+A nonempty response and the corresponding table were observed. No provider
+date, quantity, account identity or private count is retained here. There is
+no price or converted-valuation field. These are dated currency quantities,
+not proven valuation points; no multiplication, conversion or zero balance is
+inferred for missing rows.
+
+The normal datepicker exposes an editable popup input and year/month
+navigation. The inspected input has no `min`/`max` attributes and the visible
+month has no disabled dates. The official public component formats
+`YYYYMMDD` and supplies no explicit datepicker bounds. These UI facts do not
+establish provider retention or that each selectable date has retained records.
+No retention boundary, complete daily walk or simple-mode HTTP mapping was
+observed. The HTTP collector does not add this Socket.IO event to its allowlist.
+Balance/valuation history remains uncollected for
+[#1249](https://github.com/risu729/kogane/issues/1249).
+
+## 22. Trader daily-report list and browser PDF navigation (2026-11-11)
+
+Normal top-right menu → `アカウント情報` → `報告書` exposes `日次報告書`,
+`月次報告書`, `年間損益報告書`, `損益計算用データ`. Selecting daily reports
+sent Socket.IO event `tradeReportList` with request-local `secureKey` and:
+
+```json
+{
+  "statementType": "DAY",
+  "getUnreadReportOnly": "false",
+  "fromBasisYmdDate": "",
+  "toBasisYmdDate": "",
+  "pageSize": "20",
+  "pageNumber": "0"
+}
+```
+
+The nonempty list has string `pageNumber`, `totalSize`, `totalNumOfPages`,
+and array `list`. Each inspected row has string `readStatus`,
+`readStatusString`, `statementType`, `reportTitle`, `basisYmdDate`. Visible
+headers are `取引日`, `閲覧状態`, `表示形式`. Private report dates and counts
+are omitted. This does not establish complete pagination or retention.
+
+Clicking an offered `PDF` opened a separate browser window at:
+
+```text
+/cccmdipresen/interconnect/DAILY_TRADE_REPORT_CC_[YYYYMMDD].pdf
+```
+
+The observed URL query keys are `secureKey`, `event`, `basisYmdDate`, `type`,
+`displayDate`. Public parameter values are `event=dailyTradeReport` and
+`type=DAILY`; both date fields use eight ASCII digits. The session key and
+actual report date are not persisted. The official public bundle constructs
+this URL and calls `window.open`, consistent with normal GET navigation.
+This observed browser navigation is not an observed HTTP gateway event.
+
+The loaded browser frame reports MIME `application/pdf` through
+`Page.getResourceTree`. Its opening request's HTTP status and headers were
+not captured: the child-tab network buffer did not retain them, and a normal
+reload did not recover them. Browser resource-content retrieval said the
+resource was not cached, so no byte signature or EOF was verified and no
+original was archived by this observation.
+
+One ordinary download of that exact observed URL outside the browser, without
+browser cookies, returned HTTP 403 HTML. This is a separate unauthenticated
+result; it neither contradicts the loaded browser PDF frame nor diagnoses the
+refusal or scheduled-collector compatibility. No cookies were extracted, no
+retry was made and no speculative gateway event was called.
+
+The earlier section 18 limit on daily reports meant that their read route had
+not yet been observed at that date. The present observation establishes trader
+list/navigation shapes only. The collector still archives only the implemented
+monthly PDF and P&L ZIP evidence. Daily-report native bytes, authenticated
+collector transport, full retention, annual PDF downloads, valuation semantics
+and a scheduled acceptance run remain unverified. Document capability remains
+partial; valuation history remains uncollected. This observation changes no
+runtime event allowlist, parser, publication policy or provider setting.
