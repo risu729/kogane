@@ -42,6 +42,17 @@ jobs in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), passing each j
   while a completed classic unit remains eligible for its existing publishers.
   Classic failures still block the original account unit. The exact dataset
   eligibility policies do not enable publication of the raw lists.
+- Leverage opening/closing × latest/past-history page-one responses are retained
+  in four separate `executions-leverage-*` units. Filters were observed only on
+  trader Socket.IO; even a strict numeric empty HTTP envelope remains partial
+  `leverage_execution_transport_unverified`, without complete-empty coverage.
+  Populated pages remain partial `leverage_execution_rows_unobserved` and do
+  not initiate further pagination. No parser publishes these evidence datasets.
+  Session/transport failures stop later leverage reads, including refusals from
+  earlier stages; local shape refusals preserve sibling independence. Existing
+  spot account and valid document units keep their own completion. The source
+  execution capability remains partial. See the
+  [observed filters and remaining limits](../../docs/sources/sbi-vc-trade.md#20-trader-leverage-execution-filters-2026-11-11).
 - The observed simple-mode report events are `tradeReportList`, `monthlyTradeReport`
   and `plCalcData`. The collector walks MONTH and TRADE_DATA indices for 2018
   through the capture's Tokyo calendar year, and captures the unbounded YEAR
@@ -58,6 +69,11 @@ jobs in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), passing each j
   captures, not published again. Missing API views never mean zero rows.
   Annual downloads, daily reports and valuation history remain unsupported;
   see [the dated protocol evidence](../../docs/sources/sbi-vc-trade.md#18-simple-mode-documents-and-spot-execution-correspondence-2026-11-10).
+- Later trader navigation observed balance quantities via Socket.IO and daily
+  report list/browser-PDF routes. Their HTTP collector compatibility, retention
+  and valuation/native-file semantics remain unverified; they add no runtime
+  events or publication. See the [balance-history boundary](../../docs/sources/sbi-vc-trade.md#21-trader-balance-history-quantities-2026-11-11)
+  and [daily-report observation](../../docs/sources/sbi-vc-trade.md#22-trader-daily-report-list-and-browser-pdf-navigation-2026-11-11).
 - After each response, the rotated session is encrypted and saved immediately. Artifacts with `meta.secureKey` removed remain in memory until the terminal is written; no staging R2 objects are written.
 - `packages/collection` writes objects and the final terminal with `etagDoesNotMatch: "*"` and R2-native SHA-256. The terminal follows every object, so a run without a terminal is not considered completely stored.
 - The central importer, its Service Binding and `POST /backfill-raw-evidence` were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)). Even runs with 12 or more data artifacts write through the terminal immediately, without deferral. The Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)).

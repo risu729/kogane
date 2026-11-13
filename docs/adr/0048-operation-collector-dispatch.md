@@ -690,7 +690,7 @@ refresh still waits for a person.
 
 ## Amendment 2026-11-09: PRESTIA bank enabled
 
-Status: proposed (accepted when its pull request merges).
+Status: accepted ([#1232](https://github.com/risu729/kogane/pull/1232)). The first request's result is recorded in [ops-api.md](../ops-api.md#enabling-collector-execution-adr-0048).
 
 ### Context
 

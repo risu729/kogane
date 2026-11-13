@@ -18,9 +18,94 @@ This independent Worker creates a fresh session from a stored `SBI証券` passke
 - Main site: current and available weekly `My資産` ("My assets") valuations, yen deposit/withdrawal details and domestic-stock execution history from January 1 of year minus two, split into windows of at most 90 days as in the successful historical scan. Yen details retain every provider page-metadata field and response field in a page bundle, validating completeness before making an artifact.
 - Foreign-stock app: US cash equities, USD custody cash and retained execution history in windows of at most 90 days. The historically observed mobile BFF duration query supplies `pastYears`; the successful historical scan began January 1 of year minus `pastYears`, rather than at the web rolling cutoff.
 - Execution: the Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the `sbi-securities` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), daily at 06:00 JST (21:00 UTC), and an accepted operations request calls `runOperation` (ADR 0048). Either one collects domestic/foreign data serially in one invocation (`scope=all`). The Worker has no Cron Trigger and no public trigger route.
-- Storage: `packages/collection` writes directly to shared DATA; the Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). The only D1 the collector uses is the execution lease (`withCollectionLease`) in `SCHEDULE_DB` (`kogane-raw-evidence`).
+- Storage: `packages/collection` writes directly to shared DATA; the Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). `SCHEDULE_DB` (`kogane-raw-evidence`) holds the execution lease and the operational mailbox continuation cursor.
 
 Neither implementation nor configuration includes orders, amendments, cancellations, trading passwords or device registration. Even for `POST`, allowed hosts, paths, MTS TR codes and GraphQL operations are fixed to read-only purposes.
+
+## 2026-11-10: delivered-document observation boundary
+
+This section preserves the boundary at that date; the later implementation
+and evidence are described below.
+
+Normal authenticated browser observations on 2026-11-09 and 2026-11-10 UTC for
+[issue 1248](https://github.com/risu729/kogane/issues/1248) reached the new
+electronic mailbox and the legacy mailbox. The new mailbox returned 66 list
+rows, matching its stated total, visible total and separately requested
+issued-document summary count. One selected detail/PDF request returned
+`application/pdf` with verified `%PDF-` magic. This proves the observed
+current list and one PDF response, without proving that all listed files were
+downloaded or archived.
+
+The legacy inbox and saved folder showed no rows or document links, but no
+independent zero total or explicit empty message. Complete legacy coverage
+and its download route remain unverified. A later read-only DOM observation
+caught the connecting page's form POST to
+`https://plus.e-shishobako.ne.jp/dp-uw/v1/SSO`, with hidden fields
+`sfn,ric,ked,epr,itv,hav,spm`; no values were read or recorded. This establishes
+the carrier and exact destination, but the SSO response and the producer of
+sessionStorage `dp-csrf` and `dp-riyoCd` remain unverified. Existing HTTP-only
+sessions do not prove access to that mailbox context.
+
+The collector still captures no delivered documents, and the catalogue's
+`document` entry stays `not_collected`. No guessed HTTP SSO route,
+collector behavior, secret, feature flag or deployment was added. See the
+[dated source notes](../../docs/sources/sbi-securities.md#2026-11-09-and-2026-11-10-delivered-document-observations)
+for request/response shapes, mark-read behavior allowed by the issue,
+session-material boundaries and remaining evidence gaps.
+
+## 2026-11-11: delivered-document collection
+
+Normal domestic collection attempts the observed authenticated site4 ETGate
+report link, mobile entry, two exact POST forms and the new mailbox bootstrap.
+DOM and AST parsing extract the witnessed literal grammar without executing
+provider JavaScript. SBI and mailbox cookies retain separate host/domain/path
+scopes; invalid-domain cookies and unobserved transitions fail closed. Forms,
+bootstrap HTML, session values and free-text error envelopes are never stored.
+
+The current list must match its declared total and independent issued summary,
+including conservative per-group count agreement. Private list metadata stays
+in `mailbox-inventory.json`. Each supported single-PDF detail uses its own
+closed unit; an unknown kind, multiple files or non-PDF detail leaves that
+unit partial while verified siblings survive. Detail type `sTypeCd=" "`
+is preserved verbatim. Original PDF artifacts are
+`document-<kind-sha256>-<YYYYMMDD>-<stable-row-sha256>-<content-sha256>.pdf`;
+their private metadata retains title, original filename and lineage. Identical
+bytes share one DATA object while distinct document identities keep distinct
+references. Changed bytes retain a new immutable revision.
+
+Responses are bounded before buffering (256 KiB HTML, 2 MiB JSON and 4 MiB
+per PDF). A run retains at most 48 MiB of PDFs and stops mailbox work before
+the shared collection start plus eleven minutes. If it cannot finish, the
+next stable identity is stored in operational `sbi_mailbox_progress` only after
+terminal persistence, with a previous-run comparison. The next run resumes
+at that identity, wraps once and later refetches earlier documents; no identity
+is assumed to have immutable bytes. A persistence failure does not advance
+the pointer. The existing source lease remains the concurrency boundary.
+Its original abort signal gates every mailbox request and loop, cancels body
+streaming and prevents cursor commits after lease loss.
+The financial terminal is stored before mailbox work starts. Mailbox data has
+a separate `<financial-run-id>-mailbox` terminal with the same acquisition
+reference/start time and no financial units or ranges. Its refusal cannot make
+the financial run partial. The cursor references only its durable mailbox run;
+operations retain both known durable run IDs even if a later cursor/lease
+failure makes the operation fail. Supplementary financial refusals use independent units under
+[ADR 0109](../../docs/adr/0109-sbi-supplemental-unit-eligibility.md): retained
+yen/foreign cash, income/gains and weekly assets each preserve complete core
+publication and healthy siblings. A partial domestic or foreign core still
+blocks all its dependent positions, executions and current cash.
+
+Registration v11 maps only the new PDF dataset and preserves v1–v10 meanings.
+`sbi-delivered-document-metadata` emits evidence-only coverage, with independently
+complete document units eligible on partial runs. It emits no financial facts.
+No public route, secret, feature flag or operation is added.
+
+The browser currently corroborated 67 list rows and one representative detail
+for each of eight kinds. Only selected native PDF responses were verified;
+the browser did not archive every listed file. The HTTP-only transport and
+scheduled production archive have not been run or verified. Legacy mailbox
+coverage, multiple files, other formats and multiple-group behavior remain
+unsupported or unproved; catalogue `document` stays `partial`. See the
+[dated source evidence](../../docs/sources/sbi-securities.md#2026-11-11-observed-bootstrap-producer-and-current-mailbox-contract).
 
 <a id="公開接続先とsecret"></a>
 
@@ -112,7 +197,8 @@ with a closed failure code.
 After original-JSON, duplicate-key, exact-number and closed-field audits, each
 raw page is retained as `<dataset>-page-NNNN-source.json`. The derived bundle
 names all raw inputs; shared persistence checks its exhaustive inventory.
-Both statements belong to the domestic main-site unit. Bounds are 2,000 pages /
+The statements have separate `cash-history-yen` and `cash-history-foreign`
+units, including each statement's raw pages and derived bundle. Bounds are 2,000 pages /
 20,000 rows. Page metadata, each page's expected rows, total rows, descending
 calendar dates and requested-range membership are checked, as are known codes,
 unsigned exact amounts and duplicate yen `did`. Yen deposit/payment counts and
@@ -158,10 +244,10 @@ calendar-year shard/hash/count with the raw hash, GET path and capture time.
 `account-assets-history-<year>.json` retains at most 53 weeks, keeping long
 histories under the existing 2 MiB parser-output limit. Each shard's input
 lineage names source and inventory. Missing or altered inventory members make
-the domestic unit/run partial; available evidence remains stored. Registration
+the `weekly-assets` unit and run partial; available evidence remains stored. Registration
 v5 names only yearly shards as the new dataset and freezes v1–v4 mappings. Each successful
 main-site capture is retained immediately, so a later yen/history failure
-keeps these bytes while the run stays partial under the existing policy.
+keeps these bytes while the run stays partial; unrelated complete units remain publishable.
 
 Whole-source calendar, native-series and exact-total validation runs before
 any yearly filtering. Before auditing or normalizing numbers, the JSON reader
@@ -185,6 +271,21 @@ added. The catalogue remains partial: the observed 44 points do not establish
 August 2021 coverage, the two iDeCo profiles were unavailable, and a scheduled
 production collection/publication is still required ([ADR 0098](../../docs/adr/0098-sbi-weekly-asset-history.md)).
 
+## Financial publication units
+
+Migration 0100 enables the existing unit eligibility gate for the eleven SBI
+financial datasets. The core `domestic` and `foreign` units retain their coarse
+failure boundaries, including all execution windows; a partial core cannot be
+rescued by a successful sibling. Supplements are independent units with their
+whole retained input inventory. Unknown continuation and provider shapes stay
+refused. Existing operator policy alternatives survive the migration.
+
+Income/gains snapshot ranking treats only the old exact `domestic` key as the
+corresponding new unit: a corrected or complete-empty capture supersedes the
+old container rather than adding a second partition. Refusals preserve the
+last complete container, including through historical cutoffs. No original
+evidence or coverage claim is rewritten. See [ADR 0109](../../docs/adr/0109-sbi-supplemental-unit-eligibility.md).
+
 ## Reported income and realised gains
 
 Normal domestic main-site collection also reads the observed My Assets income
@@ -192,8 +293,8 @@ and domestic realised-gain routes from `2021/08/01` through the current JST
 date. These five GETs use the observed first-page `offset=1&limit=30`, existing
 cookies and referer; no collection window, cursor or login is added. Summary
 counts, category counts and row counts must agree. More than 30 rows, unknown
-products/accounts/currencies or a missing source makes the domestic unit/run
-partial. Unobserved continuation requests are never guessed.
+products/accounts/currencies or a missing source makes its `income-history-income`
+or `income-history-gains` unit and the run partial. Unobserved continuation requests are never guessed.
 
 Exact summary/row bytes stay in unmapped private `provider_response` artifacts.
 Only closed financial schemas reach that storage; duplicate-key secrets,

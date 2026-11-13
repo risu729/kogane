@@ -22,7 +22,11 @@ export class MyJcbReadClient {
     private readonly userAgent: string,
   ) {}
 
-  async get(operation: GetOperation, query?: URLSearchParams): Promise<ReadResponse> {
+  async get(
+    operation: GetOperation,
+    query?: URLSearchParams,
+    options?: { readonly maxResponseBytes: number },
+  ): Promise<ReadResponse> {
     const url = allowedUrl(operation, query);
     assertAllowedRequest(operation, "GET", url);
     const cookie = this.jar.header(url);
@@ -33,7 +37,24 @@ export class MyJcbReadClient {
       "User-Agent": this.userAgent,
     });
     if (cookie) headers.set("Cookie", cookie);
-    const response = await fetch(url, { headers, redirect: "manual" });
+    const isExport = ["credit-csv", "credit-pdf", "credit-ofx"].includes(operation);
+    const responseLimit = options?.maxResponseBytes ?? MAX_RESPONSE_BYTES;
+    if (
+      !Number.isInteger(responseLimit) ||
+      responseLimit <= 0 ||
+      responseLimit > MAX_RESPONSE_BYTES ||
+      (!isExport && options !== undefined)
+    )
+      throw new StopConditionError("myjcb_response_limit_invalid");
+    const sizeCode =
+      responseLimit < MAX_RESPONSE_BYTES
+        ? "myjcb_statement_export_budget_exhausted"
+        : "myjcb_statement_export_too_large";
+    const response = await fetch(url, {
+      headers,
+      redirect: "manual",
+      ...(isExport ? { signal: AbortSignal.timeout(30_000) } : {}),
+    });
     this.jar.updateFromResponse(response, url);
     if (response.status >= 300 && response.status < 400) {
       throw Object.assign(
@@ -56,10 +77,31 @@ export class MyJcbReadClient {
       );
     }
     const length = Number(response.headers.get("content-length") ?? "0");
-    if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) {
-      throw new StopConditionError(`MyJCB ${operation} response exceeds the size limit`);
+    if (Number.isFinite(length) && length > responseLimit) {
+      await response.body?.cancel();
+      throw new StopConditionError(
+        isExport ? sizeCode : `MyJCB ${operation} response exceeds the size limit`,
+      );
     }
-    const body = await response.arrayBuffer();
+    if (isExport) {
+      const contentType = response.headers.get("content-type") ?? "";
+      const expected =
+        operation === "credit-csv"
+          ? /^text\/csv;\s*charset=Windows-31j$/iu
+          : operation === "credit-pdf"
+            ? /^application\/pdf$/iu
+            : /^application\/x-ofx;\s*charset=UTF-8$/iu;
+      if (
+        !expected.test(contentType) ||
+        !/^attachment(?:;|$)/iu.test(response.headers.get("content-disposition") ?? "")
+      ) {
+        await response.body?.cancel();
+        throw new StopConditionError("myjcb_statement_export_headers_unsupported");
+      }
+    }
+    const body = isExport
+      ? await boundedPointBody(response, responseLimit, sizeCode)
+      : await response.arrayBuffer();
     if (body.byteLength > MAX_RESPONSE_BYTES) {
       throw new StopConditionError(`MyJCB ${operation} response exceeds the size limit`);
     }
@@ -213,11 +255,14 @@ export function decodeMyJcbHtml(body: ArrayBuffer, contentType: string): string 
 }
 
 // Bound allocation while streaming: Content-Length alone is not authoritative.
-async function boundedPointBody(response: Response): Promise<ArrayBuffer> {
-  const max = 1024 * 1024;
+async function boundedPointBody(
+  response: Response,
+  max = 1024 * 1024,
+  sizeCode = "myjcb_jpoint_response_too_large",
+): Promise<ArrayBuffer> {
   if (Number(response.headers.get("content-length")) > max) {
     await response.body?.cancel();
-    throw new StopConditionError("myjcb_jpoint_response_too_large");
+    throw new StopConditionError(sizeCode);
   }
   if (!response.body) throw new StopConditionError("myjcb_jpoint_response_empty");
   const reader = response.body.getReader();
@@ -230,7 +275,7 @@ async function boundedPointBody(response: Response): Promise<ArrayBuffer> {
       size += part.value.byteLength;
       if (size > max) {
         await reader.cancel();
-        throw new StopConditionError("myjcb_jpoint_response_too_large");
+        throw new StopConditionError(sizeCode);
       }
       chunks.push(part.value);
     }
