@@ -12,6 +12,9 @@ export default defineConfig({
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
       miniflare: {
+        bindings: {
+          VPOINT_EMAIL_RECIPIENT: "synthetic-otp@example.invalid",
+        },
         serviceBindings: {
           RAW_EVIDENCE_IMPORTER: () =>
             Response.json({ error: "not_used_in_runtime_tests" }, { status: 503 }),
