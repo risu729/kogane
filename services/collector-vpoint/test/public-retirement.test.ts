@@ -5,7 +5,16 @@ const { default: worker } = await import("../src/worker");
 const retired = ["/trigger"];
 // Synthetic old bearer, spoofed Access headers, and RPC-shaped URLs cannot
 // make public HTTP reach an environment binding, provider, or private RPC.
-for (const path of [...retired, "/runOperation", "/runScheduled", "/rpc", "/alarmCollection"]) {
+for (const path of [
+  ...retired,
+  "/runOperation",
+  "/runScheduled",
+  "/rpc",
+  "/alarmCollection",
+  "/offer",
+  "/receipt",
+  "/manifest",
+]) {
   for (const method of ["GET", "POST", "PUT", "DELETE", "OPTIONS"]) {
     for (const bearer of [null, "wrong-token", "formerly-valid-token"]) {
       test(`retired public route ${method} ${path}, bearer=${bearer ?? "missing"}`, async () => {

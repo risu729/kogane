@@ -6,7 +6,9 @@
   [amendment of 2026-11-06](#amendment-2026-11-06-a-registration-that-throws-spends-none-of-the-five)
   is accepted (owner approved 2026-11-07 13:39 UTC); the
   [amendment of 2026-11-08](#amendment-2026-11-08-a-pending-run-whose-terminal-is-missing-spends-no-continuation)
-  is accepted (#1155)
+  is accepted (#1155); the
+  [visibility amendment of 2026-11-12](#amendment-2026-11-12-the-backlog-reports-retryable-registrations)
+  is proposed (#1270)
 - Date: 2026-09-26
 - Amends: [ADR 0010](0010-terminal-registration-budget.md) (how the scan's
   per-tick registration count is spent; the operation budget is unchanged)
@@ -536,3 +538,31 @@ say why.
   not continued; the throwing one registers once its cause is gone.
 
 The existing collection scan suites pass unchanged.
+
+## Amendment 2026-11-12: The backlog reports retryable registrations
+
+Status: proposed (accepted when its pull request merges).
+
+### Context
+
+The `unregistered` count included runs whose latest `registered` stage was
+`retryable`, while the only reported breakdown was `pending`. The first
+PRESTIA run therefore appeared as one unregistered run with no pending work,
+despite its recorded `inactive_ingest_route` refusal (#1270).
+
+### Decision
+
+The registration backlog separately counts current-contract runs whose
+latest `registered` stage is `retryable`, their stored registration attempts,
+the oldest first-seen age, the latest attempt time and a bounded closed-code
+breakdown. It continues to count only open, unblocked rows of the current
+contract version. The `pending` count and the scan's continuation query still
+select only latest-stage `pending` runs; retryable runs retain the full-walk
+and retry-interval behavior already specified here.
+
+### Verification
+
+`packages/storage-d1/test/registration-backlog.test.ts` checks pending,
+retryable, unstaged, blocked and older-contract rows, latest-stage selection,
+codes, attempts and timestamps. The test is synthetic and runs on the real
+CORE migrations.

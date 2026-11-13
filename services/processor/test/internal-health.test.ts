@@ -126,6 +126,12 @@ test("the answer carries the build identity, the stores, the flags and the curso
     unregistered: 0,
     pending: 0,
     oldestPendingAgeMs: null,
+    retryable: 0,
+    retryableAttempts: 0,
+    oldestRetryableAgeMs: null,
+    latestRetryableAt: null,
+    retryableCodes: [],
+    retryableCodesTruncated: false,
   });
   // No lane has ticked in this fixture: no record, rather than an invented one.
   expect(health["laneTicks"]).toEqual([]);

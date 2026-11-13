@@ -21,11 +21,20 @@ export interface StoredArtifact {
   bytes: number;
 }
 
+export interface CsvValidationDiagnostics {
+  csvFailure?: "media_type" | "charset" | "decode" | "parse" | "header" | "columns";
+  csvExpectedColumnCount?: number;
+  csvHeaderColumnCount?: number;
+  csvMinColumnCount?: number;
+  csvMaxColumnCount?: number;
+  csvInvalidRowCount?: number;
+}
+
 export interface CollectionFailure {
   operation: string;
   errorType: string;
   message: string;
-  diagnostics?: {
+  diagnostics?: CsvValidationDiagnostics & {
     stage: string;
     reason: string;
     providerOperation?: string;
@@ -42,7 +51,7 @@ export interface CollectionManifest {
   startedAt: string;
   completedAt: string;
   status: "success" | "partial" | "failed";
-  window: { from: string; to: string };
+  window: { from: string | null; to: string };
   transactionCount: number;
   artifacts: StoredArtifact[];
   failures: CollectionFailure[];

@@ -423,7 +423,8 @@ it compares an Origin header with the request's own origin.
 
 Options: enable App trigger synchronization in the shared workflow, or keep
 its existing version-publication behavior and attach the approved custom
-domain separately. The latter is selected: the App's `deploy-triggers: false` stays unchanged. Its declared hostname does not create DNS or a live
+domain separately. At this historical checkpoint the latter was selected
+(superseded by the 2026-11-11 amendment below): the App's `deploy-triggers: false` stays unchanged. Its declared hostname does not create DNS or a live
 custom-domain attachment during the normal version deployment. The operator
 must attach the domain once through the Cloudflare API and verify it points
 to this Worker. Cloudflare's [custom-domain configuration][cf-custom-domain]
@@ -488,3 +489,28 @@ Verified 2026-11-07: the Portal lists Kogane `ready` with 42 tools after
 [ce1aa27](https://github.com/risu729/kogane/commit/ce1aa27); claude.ai's
 "Cloudflare Portal" connector called `kogane.capabilities` (read-only) at
 about 16:40 UTC.
+
+## Amendment: reconcile the App domain in normal delivery
+
+- Status: accepted by the owner, implementation pending merge
+- Date: 2026-11-11 13:40 UTC
+
+The owner selected normal `deploy-triggers: true` delivery for all four maintained
+applications. Kogane's App now synchronizes its existing
+`kogane-mcp.takuk.me` declaration after the exact new version is verified at 100%.
+This replaces separate hostname maintenance. Existing `workersDev: true` and
+`previewUrls: false` values remain declared, and no schedule, route, binding or
+Access policy is added. Other collectors' and Processor's trigger settings remain
+unchanged; their lifecycle and resource permissions are separate.
+
+The shared action checks the actual deployment credential against the legacy
+script-scoped domain changeset before publication and before trigger writes, then
+verifies that all declared domains are attached unchanged to the same Worker.
+It refuses conflicting DNS, removals, modified existing attachments and malformed
+or unauthorized responses. These checks are not atomic with cf's write; retain
+one production writer. A post-activation failure fails delivery without rollback.
+
+Reuse the existing scoped token and add only permissions shown necessary by the
+actual endpoint. Public account-wide domain API permissions do not establish the
+legacy endpoint's grants. Offline checks do not prove effective permissions or
+live reconciliation; verify the authorized production workflow and readback.
