@@ -209,6 +209,31 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
     if (policy === undefined) throw new Error("0066 names no snapshot policy row");
     db.transaction(() => db.exec(policy))();
   }
+  // 0089: mirror the annual Sony container and PDF eligibility policy from
+  // production. Apply missing rows only; reopening preserves operator choices.
+  const sonyPolicies = readFileSync(
+    join(
+      EXPERIMENT_ROOT,
+      "../../packages/storage-d1/migrations/core/0089_sony_realised_gains_snapshot.sql",
+    ),
+    "utf8",
+  )
+    .replace(/^\s*--.*$/gm, "")
+    .split(";");
+  for (const [parser, dataset] of [
+    ["sony-bank-realised-gains", "realised-gains"],
+    ["sony-bank-document-metadata", "delivered-document-pdf"],
+  ] as const) {
+    if (
+      db
+        .query("SELECT 1 FROM dataset_snapshot_policies WHERE parser_name=? AND dataset=?")
+        .get(parser, dataset)
+    )
+      continue;
+    const policy = sonyPolicies.find((statement) => statement.includes(`'${parser}'`));
+    if (policy === undefined) throw new Error("0089 names no snapshot policy row");
+    db.transaction(() => db.exec(policy))();
+  }
   // Snapshot membership subset of CORE 0096 only. The local parser still
   // rejects every partial parent, so retain its run scope instead of importing
   // production's independent-unit/transaction eligibility rows. Never replace

@@ -47,7 +47,7 @@ export interface SharedRunInput {
   readonly startedAt: string;
   readonly completedAt: string;
   readonly status: CollectionManifest["status"];
-  readonly window: { readonly from: string | null; readonly to: string };
+  readonly window: { readonly from: string | null; readonly to: string | null };
   readonly transactionCount: number;
   readonly artifacts: readonly RawArtifact[];
   readonly failures: readonly CollectionFailure[];
@@ -83,6 +83,7 @@ export interface SharedRunOutcome {
  * same bytes.
  */
 export function artifactRole(dataset: string): string {
+  if (dataset === "delivered-document-pdf") return "provider_export";
   if (dataset === "collection-summary") return "collector_summary";
   if (dataset.startsWith("wallet-history-")) return "sanitized_provider_capture";
   if (dataset.endsWith("-csv")) return "provider_export";
@@ -133,6 +134,16 @@ function containsSecretField(value: unknown): boolean {
  * never the offending text.
  */
 export function assertCentralSafe(artifact: RawArtifact, bytes: Uint8Array): void {
+  if (artifact.dataset === "delivered-document-pdf") {
+    if (
+      artifact.mediaType !== "application/pdf" ||
+      bytes.length < 5 ||
+      bytes.length > 1024 * 1024 ||
+      new TextDecoder().decode(bytes.subarray(0, 5)) !== "%PDF-"
+    )
+      throw new Error("artifact_pdf_invalid");
+    return;
+  }
   if (artifact.dataset.startsWith("wallet-history-")) {
     let html: string;
     try {
@@ -182,6 +193,12 @@ function safeErrorCode(input: SharedRunInput): string | undefined {
   for (const entry of input.failures) {
     const reason = entry.diagnostics?.reason;
     if (
+      reason === "realised_gains_invalid" ||
+      reason === "realised_gains_csv_invalid" ||
+      reason === "document_retention_unconfirmed" ||
+      reason === "document_list_incomplete" ||
+      reason === "document_list_invalid" ||
+      reason === "document_pdf_invalid" ||
       reason === "history_csv_missing_with_transactions" ||
       reason === "history_csv_count_mismatch" ||
       reason === "history_csv_invalid" ||
@@ -254,7 +271,7 @@ export async function sonyBankRunPlan(input: SharedRunInput): Promise<PersistRun
       byteSize: bytes.byteLength,
       mediaType: artifact.mediaType.split(";", 1)[0]!.trim(),
       role,
-      unitKey: UNIT_KEY,
+      unitKey: artifact.unitKey ?? UNIT_KEY,
       body: { kind: "bytes", bytes },
     });
     stored.push({
@@ -290,28 +307,39 @@ export async function sonyBankRunPlan(input: SharedRunInput): Promise<PersistRun
     });
   }
 
-  const units: TerminalUnit[] = [
-    {
-      unitKey: UNIT_KEY,
-      unitKind: "account",
-      // Exactly the artifacts that name this unit: every provider artifact,
-      // not the run manifest.
-      artifactCount: artifacts.filter((artifact) => artifact.unitKey === UNIT_KEY).length,
-      coverageStatus,
-      ...(errorCode === undefined ? {} : { safeErrorCode: errorCode }),
-    },
-  ];
+  const unitKeys = [...new Set(sources.map((artifact) => artifact.unitKey ?? UNIT_KEY))];
+  if (unitKeys.length === 0) unitKeys.push(UNIT_KEY);
+  const completeDocuments = new Set(
+    sources
+      .filter(
+        (artifact) =>
+          artifact.dataset === "delivered-document-pdf" && artifact.unitKey !== undefined,
+      )
+      .map((artifact) => artifact.unitKey!),
+  );
+  const units: TerminalUnit[] = unitKeys.map((unitKey) => ({
+    unitKey,
+    unitKind: completeDocuments.has(unitKey) ? "document" : "account",
+    artifactCount: artifacts.filter((artifact) => artifact.unitKey === unitKey).length,
+    coverageStatus: completeDocuments.has(unitKey) ? "complete" : coverageStatus,
+    ...(errorCode === undefined || completeDocuments.has(unitKey)
+      ? {}
+      : { safeErrorCode: errorCode }),
+  }));
   const months = walletMonths(sources);
   const ranges: TerminalRange[] = [
-    {
-      rangeKey: "request-window",
-      rangeKind: "requested",
-      precision: "date",
-      basis: "manifest",
-      startValue: input.window.from,
-      endValue: input.window.to,
-      unitKey: UNIT_KEY,
-    },
+    ...(input.window.from === null && input.window.to === null
+      ? []
+      : [
+          {
+            rangeKey: "request-window",
+            rangeKind: "requested",
+            precision: "date",
+            basis: "manifest",
+            startValue: input.window.from,
+            endValue: input.window.to,
+          } satisfies TerminalRange,
+        ]),
     ...(months.length === 0
       ? []
       : [
@@ -327,6 +355,13 @@ export async function sonyBankRunPlan(input: SharedRunInput): Promise<PersistRun
         ]),
   ];
   const reports: TerminalReport[] = [
+    ...[...completeDocuments].map((unitKey): TerminalReport => ({
+      reportRef: `${unitKey}-terminal`,
+      reportKind: "terminal",
+      scope: "unit",
+      unitKey,
+      outcome: "success",
+    })),
     {
       reportRef: "terminal",
       reportKind: "terminal",
@@ -351,7 +386,7 @@ export async function sonyBankRunPlan(input: SharedRunInput): Promise<PersistRun
         scopeKind: input.window.from === null ? "full_snapshot" : "date_range",
         startValue: input.window.from,
         endValue: input.window.to,
-        unitKeys: [UNIT_KEY],
+        unitKeys,
       },
       startedAt: input.startedAt,
       completedAt: input.completedAt,

@@ -52,6 +52,7 @@ export const EXPLICIT_COVERAGE: ReadonlyMap<string, string> = new Map([
 
 /** Fully counted retained histories replace old membership on complete empty. */
 export const REPLACING_EMPTY_COVERAGE: ReadonlyMap<string, string> = new Map([
+  ["sony-bank-realised-gains", "1.0.0"],
   ["sbi-income-payments", "0.1.2"],
   ["sbi-realised-gains", "0.1.2"],
 ]);

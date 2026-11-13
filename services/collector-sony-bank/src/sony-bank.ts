@@ -1,7 +1,7 @@
 import { decodeSonyCsv, SonyCsvDecodeError } from "../../../packages/parsers/src/parsers/sony-csv";
-import { parseCsv } from "../../../packages/parsers/src/parsers/util";
-import { SonyBankDiagnostics, SonyBankError } from "./diagnostics";
-import type { JsonObject, RawArtifact, SonyBankCredential } from "./types";
+import { decodeUtf8, parseCsv, type CsvWarning } from "../../../packages/parsers/src/parsers/util";
+import { failure, SonyBankDiagnostics, SonyBankError } from "./diagnostics";
+import type { CollectionFailure, JsonObject, RawArtifact, SonyBankCredential } from "./types";
 
 const ORIGIN = "https://sonybank.jp";
 const LOGIN_PAGE = `${ORIGIN}/pages/db/dbca0100/input/`;
@@ -42,7 +42,7 @@ interface RawJsonResponse {
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 interface RequestContext {
-  area: "db" | "da" | "ea" | "ja";
+  area: "db" | "da" | "ea" | "ja" | "aa";
   revision: string;
   pageUrl: string;
   screenId: string;
@@ -55,6 +55,14 @@ interface RequestContext {
 export interface SonyBankCollection {
   artifacts: RawArtifact[];
   transactionCount: number;
+  supplements: Supplement[];
+}
+
+export interface Supplement {
+  kind: "realised-gains" | "documents";
+  window: { from: string | null; to: string | null };
+  artifacts: RawArtifact[];
+  failures: CollectionFailure[];
 }
 
 interface HistoryCollection {
@@ -131,6 +139,7 @@ export async function collectSonyBank(options: {
   fetcher?: Fetcher;
   runId?: string;
   includeRetainedHistory?: boolean;
+  includeSupplementaryData?: boolean;
 }): Promise<SonyBankCollection> {
   const fetcher = options.fetcher ?? fetch;
   const diagnostics = new SonyBankDiagnostics(options.runId);
@@ -195,7 +204,35 @@ export async function collectSonyBank(options: {
       }),
     },
   ];
-  return { artifacts, transactionCount: history.transactionCount };
+  const supplements: Supplement[] = [];
+  if (options.includeSupplementaryData) {
+    for (const kind of ["realised-gains", "documents"] as const) {
+      const supplementaryArtifacts: RawArtifact[] = [];
+      const failures: CollectionFailure[] = [];
+      try {
+        if (kind === "realised-gains") await client.realisedGains(supplementaryArtifacts);
+        else {
+          await client.deliveredDocuments(options.to, supplementaryArtifacts);
+          // The five-year query is observed, not a proof of all provider retention.
+          throw new SonyBankError(
+            "delivered-documents",
+            undefined,
+            0,
+            "document_retention_unconfirmed",
+          );
+        }
+      } catch (error) {
+        failures.push(failure(kind, error));
+      }
+      supplements.push({
+        kind,
+        window: kind === "documents" ? documentWindow(options.to) : { from: null, to: null },
+        artifacts: supplementaryArtifacts,
+        failures,
+      });
+    }
+  }
+  return { artifacts, transactionCount: history.transactionCount, supplements };
 }
 
 async function collectHistoryRange(
@@ -372,7 +409,7 @@ class SonyBankClient {
     }
   }
 
-  async revision(area: "db" | "da" | "ea" | "ja"): Promise<string> {
+  async revision(area: "db" | "da" | "ea" | "ja" | "aa"): Promise<string> {
     const cached = this.#revisions.get(area);
     if (cached) return cached;
     const response = await this.request(
@@ -548,6 +585,202 @@ class SonyBankClient {
     return {
       body,
       mediaType,
+    };
+  }
+
+  async realisedGains(artifacts: RawArtifact[]): Promise<void> {
+    const context: RequestContext = {
+      area: "ea",
+      revision: await this.revision("ea"),
+      pageUrl: `${ORIGIN}/pages/ea/eada110a/`,
+      screenId: "EADA110AS1f",
+      eventId: "EADA110AS1fE01",
+    };
+    const summary = await this.requestJson(
+      "/custom-web00/eada/eada110as1g/e10",
+      {
+        branchNum: this.credential.branchNum,
+        accountNum: this.credential.accountNum,
+      },
+      context,
+    );
+    artifacts.push({
+      dataset: "realised-gains-response",
+      filename: "realised-gains-response.json",
+      mediaType: "application/json",
+      body: summary.rawText,
+      unitKey: "realised-evidence",
+    });
+    const years = [summary.json.rliztnPrftLsCy, summary.json.rliztnPrftLsLy];
+    if (
+      years.some((year) => typeof year !== "string" || !/^\d{4}$/u.test(year)) ||
+      Number(years[0]) !== Number(years[1]) + 1
+    )
+      throw new SonyBankError("realised-gains", undefined, 0, "realised_gains_invalid");
+    const expected = countValue(summary.json.totalDtlGrsCnt);
+    if (
+      expected === null ||
+      summary.json.totalDtlStartYr !== years[1] ||
+      summary.json.totalDtlEndYr !== years[0]
+    )
+      throw new SonyBankError("realised-gains", undefined, 0, "realised_gains_invalid");
+    const csv = await this.binary(
+      "/custom-web00/eada/cust-web/foreign-currency-profit-loss/situation-inquiry/download",
+      {
+        branchNum: this.credential.branchNum,
+        accountNum: this.credential.accountNum,
+        totalDtlStartYr: years[1],
+        totalDtlEndYr: years[0],
+      },
+      { ...context, eventId: "EADA110AS1fE12" },
+    );
+    let rows: string[][];
+    try {
+      let text: string;
+      try {
+        text = decodeUtf8(new Uint8Array(csv.body));
+      } catch {
+        text = new TextDecoder("shift-jis", { fatal: true }).decode(csv.body);
+      }
+      const warnings: CsvWarning[] = [];
+      rows = parseCsv(text, warnings);
+      if (warnings.length > 0) throw new Error("csv_shape");
+    } catch {
+      throw new SonyBankError("realised-gains", undefined, 0, "realised_gains_csv_invalid");
+    }
+    const header = [
+      "お取り引き日",
+      "商品",
+      "契約番号",
+      "明細番号",
+      "通貨",
+      "摘要",
+      "入金額",
+      "出金額",
+      "残高",
+      "適用レート",
+      "取引円換算額",
+      "特約レート",
+      "為替差損益",
+      "平均購入レート",
+      "利息円貨額",
+    ];
+    if (
+      rows.length - 1 !== expected ||
+      rows.some((row) => row.length !== 15) ||
+      header.some((cell, i) => rows[0]?.[i] !== cell)
+    )
+      throw new SonyBankError("realised-gains", undefined, 0, "realised_gains_csv_invalid");
+    artifacts.push({
+      dataset: "realised-gains-csv",
+      filename: "realised-gains.csv",
+      mediaType: csv.mediaType,
+      body: csv.body,
+      unitKey: "realised-evidence",
+    });
+    for (const year of years)
+      artifacts.push({
+        dataset: "realised-gains",
+        filename: `realised-gains-${String(year)}.json`,
+        mediaType: "application/json",
+        body: summary.rawText,
+        unitKey: `realised-year-${String(year)}`,
+      });
+  }
+
+  async deliveredDocuments(to: string, artifacts: RawArtifact[]): Promise<void> {
+    const { from: start } = documentWindow(to);
+    const context: RequestContext = {
+      area: "aa",
+      revision: await this.revision("aa"),
+      pageUrl: `${ORIGIN}/pages/aa/dbba1800/`,
+      screenId: "DBBA1800S1f",
+      eventId: "DBBA1800S1fE11",
+    };
+    const list = await this.requestJson(
+      "/custom-web00/dbba/delive-doc/inquiry/cust",
+      {
+        branchNum: this.credential.branchNum,
+        accountNum: this.credential.accountNum,
+        productTyp: "01",
+        browseTyp: "0",
+        searchStartDt: start,
+        searchEndDt: to,
+        maxCnt: 10,
+        startCnt: 1,
+      },
+      context,
+    );
+    artifacts.push({
+      dataset: "delivered-documents",
+      filename: "delivered-documents.json",
+      mediaType: "application/json",
+      body: list.rawText,
+    });
+    const rows = list.json.deliveryDocInfo;
+    const count = countValue(list.json.extractionAgrCnt);
+    if (
+      !Array.isArray(rows) ||
+      count === null ||
+      rows.length !== countValue(list.json.returnCnt) ||
+      count !== rows.length ||
+      count > 10
+    )
+      throw new SonyBankError("delivered-documents", undefined, 0, "document_list_incomplete");
+    const seen = new Set<number>();
+    for (const [index, value] of rows.entries()) {
+      if (
+        !isObject(value) ||
+        value.deliveryDocTyp !== "20" ||
+        !Number.isSafeInteger(value.deliveryDocNum) ||
+        Number(value.deliveryDocNum) < 0 ||
+        seen.has(Number(value.deliveryDocNum))
+      )
+        throw new SonyBankError("delivered-documents", undefined, 0, "document_list_invalid");
+      seen.add(Number(value.deliveryDocNum));
+      const pdf = await this.binary(
+        "/custom-web00/dbba/delivery-documents/pdf-download",
+        {
+          branchNumber: this.credential.branchNum,
+          accountNumber: this.credential.accountNum,
+          deliveryDocNum: value.deliveryDocNum,
+        },
+        { ...context, eventId: "DBBA1800S1fE12" },
+      );
+      if (
+        pdf.body.byteLength < 5 ||
+        pdf.body.byteLength > 1024 * 1024 ||
+        new TextDecoder().decode(new Uint8Array(pdf.body, 0, 5)) !== "%PDF-"
+      )
+        throw new SonyBankError("delivered-documents", undefined, 0, "document_pdf_invalid");
+      artifacts.push({
+        dataset: "delivered-document-pdf",
+        filename: `delivered-document-${String(index + 1).padStart(4, "0")}.pdf`,
+        unitKey: `delivered-document-${String(index + 1).padStart(4, "0")}`,
+        mediaType: "application/pdf",
+        body: pdf.body,
+      });
+    }
+  }
+
+  private async binary(
+    path: string,
+    body: JsonObject,
+    context: RequestContext,
+  ): Promise<{ body: ArrayBuffer; mediaType: string }> {
+    const response = await this.request(context.eventId, `${ORIGIN}${path}`, {
+      method: "POST",
+      headers: this.headers(context, true),
+      body: JSON.stringify(body),
+      redirect: "manual",
+    });
+    this.#cookies.absorb(response.headers);
+    const nextCsrf = response.headers.get("bff-csrf");
+    if (nextCsrf) this.#csrf = nextCsrf;
+    if (!response.ok) throw new SonyBankError(context.eventId, response.status);
+    return {
+      body: await response.arrayBuffer(),
+      mediaType: response.headers.get("content-type") ?? "application/octet-stream",
     };
   }
 
@@ -940,4 +1173,11 @@ function assertHistoryCsvCount(
     });
   if (rows.length - 1 !== expectedCount)
     throw new SonyBankError(operation, undefined, 0, "history_csv_count_mismatch");
+}
+
+function documentWindow(to: string): { from: string; to: string } {
+  const year = Number(to.slice(0, 4)) - 5;
+  // The same calendar day five years ago may not exist on a leap day.
+  const from = `${year}${to.slice(4) === "-02-29" ? "-02-28" : to.slice(4)}`;
+  return { from, to };
 }

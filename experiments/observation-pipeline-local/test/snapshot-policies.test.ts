@@ -136,12 +136,12 @@ function policyRows(store: Store): PolicyRow[] {
 test("fresh and repeated local bootstrap seeds both retained-history policies after creating their table", () => {
   const store = database();
   const expected = policyRows(store).filter((row) => REPLACING_EMPTY_COVERAGE.has(row.parser_name));
-  expect(expected).toHaveLength(2);
+  expect(expected).toHaveLength(REPLACING_EMPTY_COVERAGE.size);
   for (const row of expected)
     expect(row).toMatchObject({
-      source_id: "sbi-securities",
+      source_id: row.parser_name === "sony-bank-realised-gains" ? "sony-bank" : "sbi-securities",
       policy_id: "coverage-v1",
-      required_parser_version: "0.1.2",
+      required_parser_version: REPLACING_EMPTY_COVERAGE.get(row.parser_name),
       replaces_previous_on_complete_empty: 1,
       unit_scope: "run",
       snapshot_selection: 1,
@@ -191,7 +191,7 @@ for (const [parser, version] of REPLACING_EMPTY_COVERAGE) {
     const base = {
       parser,
       parserVersion: version,
-      source: "sbi-securities",
+      source: parser === "sony-bank-realised-gains" ? "sony-bank" : "sbi-securities",
       dataset: parser === "sbi-income-payments" ? "income-payments" : "realised-gains",
     };
     snapshot(store, { ...base, observations: facts(parser, "CLAIMLESS") });
@@ -265,6 +265,13 @@ describe("dataset_snapshot_policies seed", () => {
         join(
           import.meta.dir,
           "../../../packages/storage-d1/migrations/core/0066_prestia_bank_snapshot_schedule.sql",
+        ),
+        "utf8",
+      ) +
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../../packages/storage-d1/migrations/core/0089_sony_realised_gains_snapshot.sql",
         ),
         "utf8",
       ) +
@@ -588,7 +595,9 @@ test("MyJCB credit eligibility seeds exactly four datasets and repairs missing r
   ];
   const seeded = policyRows(store).filter(
     (row) =>
-      row.snapshot_selection === 0 && row.parser_name !== "myjcb-statement-document-metadata",
+      row.snapshot_selection === 0 &&
+      row.source_id === "myjcb" &&
+      row.parser_name !== "myjcb-statement-document-metadata",
   );
   expect(seeded.map((row) => [row.parser_name, row.dataset])).toEqual(expected);
   for (const row of seeded)
@@ -613,6 +622,7 @@ test("MyJCB credit eligibility seeds exactly four datasets and repairs missing r
           .filter(
             (row) =>
               row.snapshot_selection === 0 &&
+              row.source_id === "myjcb" &&
               row.parser_name !== "myjcb-statement-document-metadata",
           )
           .map((row) => [row.parser_name, row.dataset]),
@@ -628,6 +638,56 @@ test("MyJCB credit eligibility seeds exactly four datasets and repairs missing r
     } finally {
       reopened.db.close();
     }
+  }
+});
+
+test("reopening installs Sony policies once and preserves explicit operator alternatives", () => {
+  const store = database();
+  const sony = () =>
+    store.db
+      .query(
+        "SELECT parser_name,policy_id,required_parser_version,unit_scope,snapshot_selection,replaces_previous_on_complete_empty FROM dataset_snapshot_policies WHERE source_id='sony-bank' AND parser_name IN ('sony-bank-realised-gains','sony-bank-document-metadata') ORDER BY parser_name",
+      )
+      .all();
+  expect(sony()).toEqual([
+    {
+      parser_name: "sony-bank-document-metadata",
+      policy_id: "coverage-v1",
+      required_parser_version: "1.0.0",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+      replaces_previous_on_complete_empty: 1,
+    },
+    {
+      parser_name: "sony-bank-realised-gains",
+      policy_id: "coverage-v1",
+      required_parser_version: "1.0.0",
+      unit_scope: "run",
+      snapshot_selection: 1,
+      replaces_previous_on_complete_empty: 1,
+    },
+  ]);
+  store.db.exec(
+    "UPDATE dataset_snapshot_policies SET required_parser_version='9.0.0' WHERE parser_name='sony-bank-realised-gains'; UPDATE dataset_snapshot_policies SET unit_scope='run' WHERE parser_name='sony-bank-document-metadata'",
+  );
+  const reopened = openTestStore(join(store.blobDir, ".."));
+  try {
+    expect(
+      reopened.db
+        .query(
+          "SELECT required_parser_version FROM dataset_snapshot_policies WHERE parser_name='sony-bank-realised-gains'",
+        )
+        .get(),
+    ).toEqual({ required_parser_version: "9.0.0" });
+    expect(
+      reopened.db
+        .query(
+          "SELECT unit_scope,snapshot_selection FROM dataset_snapshot_policies WHERE parser_name='sony-bank-document-metadata'",
+        )
+        .get(),
+    ).toEqual({ unit_scope: "run", snapshot_selection: 0 });
+  } finally {
+    reopened.db.close();
   }
 });
 

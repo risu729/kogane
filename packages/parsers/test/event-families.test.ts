@@ -1,6 +1,7 @@
 import { vpassCreditSnapshot } from "../src/parsers/vpass-credit.ts";
 import { authori as vpassAuthori } from "./fixtures/vpass-credit.ts";
 import { sbiShinseiMonthlyReport } from "../src/parsers/sbi-shinsei-monthly-report.ts";
+import { sonyBankDocumentMetadata } from "../src/parsers/sony-document-metadata.ts";
 // The transaction-family registry (packages/domain/src/event-families.ts,
 // ADR 0053) against the parsers it describes. Every PARSERS entry whose rows
 // are transactions or positions has exactly one registry entry and no entry is
@@ -76,6 +77,8 @@ import { skipMeta, skipPage } from "./myjcb-skip-payment-fixture.ts";
 
 /** PARSERS entries whose rows are balances, valuations, scheduled payments or none. */
 const NOT_IN_REGISTRY = [
+  "sony-bank-document-metadata",
+  "sony-bank-realised-gains",
   "myjcb-statement-document-metadata",
   "sbi-delivered-document-metadata",
   "sbi-income-payments",
@@ -518,6 +521,16 @@ const OUTSIDE_CASES: Case[] = [
       sha256: "a".repeat(64),
     }),
     encode("%PDF-1.7\nsynthetic\n%%EOF"),
+  ),
+  one(
+    sonyBankDocumentMetadata,
+    "pdf-envelope",
+    meta("sony-bank", "delivered-document-pdf", {
+      artifactKey: "delivered-document-0001.pdf",
+      fetchUnitKey: "delivered-document-0001",
+      mime: "application/pdf",
+    }),
+    encode("%PDF-synthetic"),
   ),
   one(
     myJcbJPointBalance,

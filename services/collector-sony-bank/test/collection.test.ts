@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
+import { readTerminal } from "../../../packages/collection/src/index";
+import { scheduledResult } from "../../../packages/collection/src/schedule-result";
 import { describe, expect, spyOn, test } from "bun:test";
 import { collectSonyBank } from "../src/sony-bank";
 import { failure, SonyBankDiagnostics } from "../src/diagnostics";
-import { runSharedCollection } from "../src/worker";
+import { alarmCollection, runSharedCollection } from "../src/worker";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 
 const runId = "123e4567-e89b-42d3-a456-426614174000";
@@ -484,10 +487,11 @@ describe("Sony CSV completeness reaches the shared terminal", () => {
             { from: "2099-01-01", to: "2099-01-02" },
           ),
         );
-        expect(value.status).toBe(code === undefined ? "success" : "failed");
+        expect(value.status).toBe(code === undefined ? "partial" : "failed");
         const terminal = JSON.parse(
           new TextDecoder().decode(data.entries.get(value.terminalKey)!.bytes),
         );
+        expect(terminal.providerOutcome).toBe(code === undefined ? "success" : "failed");
         expect(terminal.safeErrorCode).toBe(code);
         expect(terminal.units[0].safeErrorCode).toBe(code);
         expect(terminal.reports[0].safeErrorCode).toBe(code);
@@ -640,6 +644,183 @@ describe("scheduled retained history", () => {
       globalThis.fetch = originalFetch;
     }
   });
+});
+
+const realised = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../../tests/fixtures/observation-pipeline/sony-bank-parser-boundaries/realised-gains.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+);
+const realisedCsv =
+  "お取り引き日,商品,契約番号,明細番号,通貨,摘要,入金額,出金額,残高,適用レート,取引円換算額,特約レート,為替差損益,平均購入レート,利息円貨額\n2099/01/01,普通,synthetic-contract,synthetic-detail,USD,synthetic,10,,3,2,20,,-123,4,7\n";
+function supplementProvider(
+  options: { csvShort?: boolean; documentTotal?: number; badPdf?: boolean } = {},
+) {
+  const core = provider(0);
+  const requests: { path: string; body: Record<string, unknown>; event: unknown }[] = [];
+  return {
+    requests,
+    fetcher: async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (!path.includes("/eada/") && !path.includes("/dbba/")) return core.fetcher(input, init);
+      const body = JSON.parse(String(init?.body));
+      const event = JSON.parse(
+        new Headers(init?.headers).get("FBaaS-Request-Biz-Hd-Common") ?? "{}",
+      );
+      requests.push({ path, body, event });
+      if (path.endsWith("/e10")) return Response.json(realised);
+      if (path.endsWith("/download"))
+        return new Response(options.csvShort ? realisedCsv.split("\n")[0] + "\n" : realisedCsv, {
+          headers: { "content-type": "application/octet-stream" },
+        });
+      if (path.endsWith("/cust"))
+        return Response.json({
+          errors: [],
+          responseBizCommon: { bizResult: "0", exceptionRsn: [] },
+          extractionAgrCnt: options.documentTotal ?? 1,
+          returnCnt: 1,
+          deliveryDocInfo: [
+            {
+              deliveryDocTyp: "20",
+              currencyNm: "synthetic",
+              acquisitionDt: "2099-01-01",
+              deliveryDocItem: "001",
+              contractDttm: "2099-01-01",
+              depositAmt: "123",
+              browseTyp: "0",
+              deliveryDocNum: 1,
+            },
+          ],
+          currencyMst: [],
+        });
+      if (path.endsWith("pdf-download"))
+        return new Response(options.badPdf ? "not pdf" : "%PDF-synthetic");
+      throw new Error("unexpected synthetic route");
+    },
+  };
+}
+for (const options of [{}, { csvShort: true }, { documentTotal: 11 }, { badPdf: true }]) {
+  test(`supplemental scheduled runs isolate core, preserve all terminal IDs and fail closed ${JSON.stringify(options)}`, async () => {
+    const mock = supplementProvider(options);
+    const bucket = new FakeR2Bucket();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mock.fetcher as typeof fetch;
+    try {
+      const { value, records } = await capture(() =>
+        runSharedCollection(
+          {
+            DATA: bucket,
+            COLLECTOR_SCHEMA_VERSION: "sony-bank-worker-poc-v3",
+            SONY_BANK_CREDENTIAL_JSON: JSON.stringify({
+              branchNum: "001",
+              accountNum: "1234567",
+              loginPwd: privateValue,
+            }),
+          } as unknown as Env,
+          { from: "2099-04-01", to: "2099-04-02" },
+        ),
+      );
+      expect(value.status).toBe("partial");
+      expect(value.runIds).toHaveLength(3);
+      expect(scheduledResult(value)).toEqual({
+        status: "completed",
+        runIds: value.runIds,
+        failureCode: null,
+      });
+      const terminals = await Promise.all(
+        value.runIds.map((id) => readTerminal(bucket, "sony-bank", id)),
+      );
+      if (terminals.some((result) => result.outcome !== "found"))
+        throw new Error("missing synthetic terminal");
+      const manifests = terminals.map((result) => {
+        if (result.outcome !== "found") throw new Error("missing");
+        return result.manifest;
+      });
+      expect(manifests[0]?.providerOutcome).toBe("success");
+      expect(manifests[0]?.artifacts.some((a) => a.artifactKey === "gross-balance.json")).toBe(
+        true,
+      );
+      expect(manifests[1]?.providerOutcome).toBe(options.csvShort ? "partial" : "success");
+      expect(
+        manifests[1]?.artifacts.filter((a) => a.artifactKey.match(/^realised-gains-\d{4}\.json$/u)),
+      ).toHaveLength(options.csvShort ? 0 : 2);
+      expect(manifests[2]?.providerOutcome).toBe("partial");
+      expect(manifests[2]?.safeErrorCode).toBe(
+        options.documentTotal
+          ? "document_list_incomplete"
+          : options.badPdf
+            ? "document_pdf_invalid"
+            : "document_retention_unconfirmed",
+      );
+      expect(manifests[2]?.artifacts.filter((a) => a.mediaType === "application/pdf")).toHaveLength(
+        options.documentTotal || options.badPdf ? 0 : 1,
+      );
+      expect(mock.requests.find((r) => r.path.endsWith("/download"))?.event).toEqual({
+        screenId: "EADA110AS1f",
+        eventId: "EADA110AS1fE12",
+      });
+      expect(mock.requests.find((r) => r.path.endsWith("/cust"))?.body).toMatchObject({
+        productTyp: "01",
+        browseTyp: "0",
+        searchStartDt: "2094-04-02",
+        searchEndDt: "2099-04-02",
+        maxCnt: 10,
+        startCnt: 1,
+      });
+      expect(JSON.stringify(records)).not.toContain("synthetic-contract");
+      expect(JSON.stringify(records)).not.toContain("depositAmt");
+      expect(JSON.stringify(records)).not.toContain(privateValue);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+}
+
+test("a missing supplemental terminal reports failure with every independently persisted run ID", async () => {
+  const mock = supplementProvider();
+  const bucket = new FakeR2Bucket();
+  const originalPut = bucket.put.bind(bucket);
+  let terminalPuts = 0;
+  bucket.put = async (key, body, options) => {
+    if (key.startsWith("runs/") && key.endsWith("terminal.json") && ++terminalPuts === 2)
+      throw new Error("synthetic write fault");
+    return originalPut(key, body, options);
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = mock.fetcher as typeof fetch;
+  try {
+    const { value } = await capture(() =>
+      alarmCollection(
+        {
+          DATA: bucket,
+          COLLECTOR_SCHEMA_VERSION: "sony-bank-worker-poc-v3",
+          SONY_BANK_CREDENTIAL_JSON: JSON.stringify({
+            branchNum: "001",
+            accountNum: "1234567",
+            loginPwd: privateValue,
+          }),
+        } as unknown as Env,
+        "0 21 * * *",
+        0,
+      ),
+    );
+    expect(value.status).toBe("failed");
+    expect(value.failureCode).toBe("collection_failed");
+    expect(value.runIds).toHaveLength(2);
+    for (const id of value.runIds)
+      expect((await readTerminal(bucket, "sony-bank", id)).outcome).toBe("found");
+    expect(
+      [...bucket.entries.keys()].filter(
+        (key) => key.startsWith("runs/") && key.endsWith("terminal.json"),
+      ),
+    ).toHaveLength(2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 describe("Sony CSV refusal diagnostics retain only closed branches and counts", () => {

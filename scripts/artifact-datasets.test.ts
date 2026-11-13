@@ -467,6 +467,22 @@ const SAMPLES: readonly Sample[] = [
   // services/collector-sony-bank/src/shared-collection.ts
   {
     source: "sony-bank",
+    artifactKey: "realised-gains-2099.json",
+    role: "provider_response",
+    mediaType: json,
+    dataset: "realised-gains",
+    unitKey: "realised-year-2099",
+  },
+  {
+    source: "sony-bank",
+    artifactKey: "delivered-document-0001.pdf",
+    role: "provider_export",
+    mediaType: "application/pdf",
+    dataset: "delivered-document-pdf",
+    unitKey: "delivered-document-0001",
+  },
+  {
+    source: "sony-bank",
     artifactKey: "gross-balance.json",
     role: "provider_response",
     mediaType: json,
@@ -798,6 +814,8 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
     "foreign-ordinary-aud-history",
   ],
   "sony-bank": [
+    "realised-gains",
+    "delivered-document-pdf",
     "gross-balance",
     "yen-history-page-0001",
     "foreign-history-usd-page-0002",
@@ -1315,7 +1333,9 @@ test("v11 adds only independently covered SBI PDF documents and preserves every 
   for (const sample of SAMPLES) {
     const prior = artifactDataset(sample.source, sample, "terminal-registration-v10");
     const current = artifactDataset(sample.source, sample, "terminal-registration-v11");
-    if (sample.dataset === "delivered-document-pdf") {
+    // Sony's delivered PDFs (ADR 0100) share the dataset name but not this
+    // contract step; only SBI's mapping is new in v11.
+    if (sample.source === "sbi-securities" && sample.dataset === "delivered-document-pdf") {
       for (const version of REGISTRATION_CONTRACT_VERSIONS.slice(
         0,
         REGISTRATION_CONTRACT_VERSIONS.indexOf("terminal-registration-v11"),
