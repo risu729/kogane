@@ -259,6 +259,8 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
   test("unsupported card and non-transaction details never offer the diagnostic", async () => {
     for (const id of [3, 4]) {
       const page = await open(id);
+      // Wait for the detail body so the absence is not read before it renders.
+      await page.getByRole("link", { name: "この記録の原本を開く ↗" }).waitFor();
       expect(await page.locator("[id^=economic-readiness-]").count()).toBe(0);
       await page.close();
     }
