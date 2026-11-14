@@ -136,7 +136,10 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
     test(`lazy exact old-parse explanation preserves evidence and layout at ${width}px`, async () => {
       const page = await open(1, width);
       const before = requests.length;
-      expect(await page.getByText("これは旧解析の記録です", { exact: true }).count()).toBe(1);
+      // The heading renders from the route before the detail response arrives.
+      const notice = page.getByText("これは旧解析の記録です", { exact: true });
+      await notice.waitFor();
+      expect(await notice.count()).toBe(1);
       expect(requests).toHaveLength(0);
       await screenshot(page, `readiness-collapsed-${width}`);
       await panel(page).getByRole("button").click();
