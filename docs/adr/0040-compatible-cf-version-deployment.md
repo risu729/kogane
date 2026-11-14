@@ -193,3 +193,88 @@ checks occur after authorization and before bootstrap writes, and that actual
 POST identity differs from a health snapshot. Processor route tests prove
 invalid/missing targets perform no DB/alarm operations, its captured identity
 survives asynchronous writes, and operational failures keep a generic code.
+
+## Amendment: publish every non-Container cf Worker with `cf deploy`
+
+- Status: proposed
+- Date: 2026-11-13
+
+Workers Issues is declared as `observability.issues.enabled` for every Worker
+(#1261). Only the three Container Workers received it. With cf
+1.0.0-beta.28, `cf workers versions create` never sends `observability` or
+`logpush`, and `cf workers deployments create` takes no configuration. So no
+observability change has reached the fourteen versions-strategy Workers since
+they moved to cf. cf has no other command for non-versioned script settings.
+The owner rejected adding a settings write outside cf. The shared infrastructure
+policy makes this repository the single `cf` writer of each Worker's code, runtime
+settings and logging, custom domains, routes and triggers.
+
+Options considered:
+
+1. A workflow step that writes the script settings after publication. Rejected:
+   a second writer outside cf, and a workaround the owner declined.
+2. Keep the versions strategy. Rejected: declared observability, including
+   Issues, never reaches those Workers.
+3. Publish them with `cf deploy --prebuilt`, which already publishes the
+   Container Workers. Selected.
+
+Option 2 of the original decision was rejected because `cf deploy` broadened
+the Action's exact-version readback. That no longer holds. With
+risu729/wrangler-deploy-action#298, the deploy strategy:
+
+- finds the deployment that serves the returned version at 100%;
+- proves that exact deployment and the current deployment collection within the
+  same 30-second budget as the versions strategy;
+- reads the script settings back and requires every declared `observability`
+  value from the Build Output.
+
+cf reports a failed settings write only as a warning, so this readback is what
+turns it into a failed deployment. A collection that lags the exact deployment
+is read again within the budget. The 2026-11-10 Sony Bank deployment failed
+for that reason on the versions strategy and passed on a rerun.
+
+Decision: every cf Worker uses `production-strategy: deploy` with
+`deploy-triggers: 'true'`. The move is staged, one pull request per phase:
+
+1. PRESTIA, whose only new effect is the settings write, since it already
+   synchronizes triggers.
+2. The other Workers on cf's versions-API path: Mobile Suica, Money Forward,
+   MyJCB, SBI Securities, Mizuho, Sony Bank, Vpass, SBI VC Trade, SMBC Direct,
+   Processor and the App.
+3. V Point and V Point Pay. Their declared exports take cf's script-upload
+   path, so this phase adds a live namespace-identity check like
+   `cf-do-identity`.
+
+Each phase moves its ledger entries to `productionStrategy: "deploy"` and its
+dry runs to `cf deploy --prebuilt --dry-run`. Before each phase, the
+workers.dev subdomain, schedules and script settings of its Workers are read
+once, so any change that cf would apply from the declared configuration is
+known in advance.
+
+What `cf deploy` changes beyond the versions strategy:
+
+- the declared observability and logpush are written;
+- the declared `workersDev` and `previewUrls` are applied;
+- triggers are synchronized.
+
+The DO payload is unchanged: the three legacy owners still send neither exports
+nor migrations, and `doLifecycle: "preserve"` with the `cf-do-identity`
+capture and verify still applies. No empty export set is sent. Secrets are
+inherited as before. Crons are empty, so no schedule is written. No routes are
+declared. The App's Custom Domain stays under ADR 0047's 2026-11-11 amendment
+and the Action's domain guard. Processor's Queue consumer options move from
+`cf workers triggers deploy` into `cf deploy`, which uses the same code.
+
+### Consequences and verification
+
+- The configuration parity suite covers every cf Worker except the three
+  Container owners, whatever its strategy. A moved Worker keeps its binding,
+  variable, secret and observability checks.
+- Rollback still runs the target checkout's own cf and Build Output through
+  the trusted workflow's strategy. A target whose configuration lacks
+  `observability` is published as `{enabled: false}`, and one that lacks
+  `issues` turns Issues off. If the target's cf does not apply its declared
+  settings, the readback fails after publication, and the failure is recorded
+  like any other partial release, without a repeat.
+- After each phase's first production release, the live script settings and
+  the Issues dashboard are read once to confirm the result.
