@@ -136,7 +136,10 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
     test(`lazy exact old-parse explanation preserves evidence and layout at ${width}px`, async () => {
       const page = await open(1, width);
       const before = requests.length;
-      expect(await page.getByText("これは旧解析の記録です", { exact: true }).count()).toBe(1);
+      // The heading renders from the route before the detail response arrives.
+      const notice = page.getByText("これは旧解析の記録です", { exact: true });
+      await notice.waitFor();
+      expect(await notice.count()).toBe(1);
       expect(requests).toHaveLength(0);
       await screenshot(page, `readiness-collapsed-${width}`);
       await panel(page).getByRole("button").click();
@@ -256,6 +259,8 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
   test("unsupported card and non-transaction details never offer the diagnostic", async () => {
     for (const id of [3, 4]) {
       const page = await open(id);
+      // Wait for the detail body so the absence is not read before it renders.
+      await page.getByRole("link", { name: "この記録の原本を開く ↗" }).waitFor();
       expect(await page.locator("[id^=economic-readiness-]").count()).toBe(0);
       await page.close();
     }
