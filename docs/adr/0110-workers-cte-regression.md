@@ -1,6 +1,6 @@
 # ADR 0110: Keep the coherent Workers stack while the upstream CTE expansion regression is unresolved
 
-- Status: proposed
+- Status: proposed; retired 2026-11-16: the fixed toolchain is on main and the exclusions and probe are removed (see [Retirement](#retirement-2026-11-16))
 - Date: 2026-11-11
 - Related: [D1 compatibility investigation](https://github.com/risu729/kogane/issues/1294), [Workers dependency update](https://github.com/risu729/kogane/pull/1213)
 
@@ -211,3 +211,27 @@ and stopped at `0045_expand_card_settlement_commands.sql`, statement 13, with
 the same error; the reads were skipped. The pinned 4.158.0 stack passed the
 same probe on the same checkout. Both releases are added to the exclusions so
 the dependency pull request does not keep proposing a known-failing runtime.
+
+## Retirement, 2026-11-16
+
+[#1213](https://github.com/risu729/kogane/pull/1213) merged as
+[ac32043](https://github.com/risu729/kogane/commit/ac320434d78a7ce0357d75965b27e7a9d02a16e5)
+on 2026-11-15 17:56 UTC. It pins Wrangler 4.162.0, the Vitest plugin 1.8.2,
+Miniflare 5.20261113.0-beta and workerd 1.20261113.1, which is newer than the
+fixed engine v1.20261112.1 probed on 2026-11-12. Hosted CI passed on that head and on main,
+including the suites that apply the full CORE chain and run the settlement and
+readiness reads. The `runtime-compatibility` probe passed on ac32043
+(5/5 flat-reference cases, 95/95 CORE migrations, all three reads), and
+[#1294](https://github.com/risu729/kogane/issues/1294#issuecomment-6904160921)
+was closed with that evidence.
+
+The reason for this decision is therefore obsolete. Renovate never proposes a
+downgrade below the pinned 4.162.0, so the exact-version exclusions for Wrangler
+4.159.0, 4.160.0, 4.160.1 and 4.161.0 and the Vitest plugin 1.6.1, 1.7.0, 1.8.0
+and 1.8.1 no longer do anything; they
+are removed from `.github/renovate.json5`. The one-off
+`//experiments/d1-conformance:runtime-compatibility` task and its script are
+removed as well, together with the engine-probe guidance in
+[tooling](../tooling.md). Normal CI is the only gate for later Workers updates.
+No migration or application SQL was changed for this regression, so nothing
+else needs reverting. The sections above remain as the record at adoption time.
