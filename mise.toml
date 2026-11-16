@@ -31,6 +31,7 @@ ruff = "0.17.5"
 [settings]
 experimental = true
 lockfile = true
+# mise defaults to generate only from 2026.10.19, which is newer than min_version.
 lockfile_mode = "generate"
 lockfile_platforms = ["linux-x64", "windows-x64"]
 
