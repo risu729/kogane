@@ -73,15 +73,17 @@ describe("only the three admitted Container configurations change deployment bac
     "utf8",
   );
   const steps = workflowSteps(workflow);
-  test("all deployed Workers use cf; only three use full deploy and consent to trigger synchronization", () => {
+  test("all deployed Workers use cf; the Container owners use full deploy and consent to trigger synchronization", () => {
     expect(order.workers.filter((entry) => entry.deployBackend === "cf")).toHaveLength(
       order.workers.filter((entry) => entry.deploy).length,
     );
+    // ADR 0040's 2026-11-13 amendment moves the other cf Workers to full deploy in
+    // phases; phase 1 is PRESTIA.
     expect(
       order.workers
         .filter((entry) => entry.productionStrategy === "deploy")
         .map((entry) => entry.name),
-    ).toEqual(CONTAINER_TARGETS.map((entry) => entry.name));
+    ).toEqual([...CONTAINER_TARGETS.map((entry) => entry.name), "prestia-bank-worker"]);
     for (const item of CONTAINER_TARGETS) {
       const deploy = steps.find((step) => step.body.includes(`id: cf-deploy-${item.name}\n`))!;
       const verify = steps.find((step) =>

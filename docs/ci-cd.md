@@ -128,7 +128,9 @@ PRESTIA bank Worker, bringing the compatible fleet to fourteen Workers using
 the `cf` pin in `package.json` and the pinned
 `wrangler-deploy-action` v3 (no step uses `worker-preview`). ADR 0040's
 2026-11-13 amendment (proposed) proposes moving them to `cf deploy` in three phases,
-because `cf workers versions create` never applies declared `observability`. Their native
+because `cf workers versions create` never applies declared `observability`.
+Phase 1, PRESTIA, uses `production-strategy: deploy`; the other thirteen still
+use the versions strategy. Their native
 `cloudflare.config.ts` and
 `wrangler.config.ts` retain the canonical Wrangler settings; parity guards
 cover bindings, variables, observability, assets and the two already-declared

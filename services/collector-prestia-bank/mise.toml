@@ -33,7 +33,7 @@ description = "Build and validate the prebuilt cf production artifact without cr
 depends = ["//services/collector-prestia-bank:types"]
 run = [
 	"./node_modules/.bin/cf build --mode production",
-	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-prestia-bank-collector --dry-run",
+	"./node_modules/.bin/cf deploy --prebuilt --mode production --worker kogane-prestia-bank-collector --dry-run",
 ]
 
 [tasks."cf-typecheck"]
