@@ -126,7 +126,7 @@ caller ever drops it again.
 for thirteen compatible Workers; [ADR 0042](adr/0042-prestia-bank-worker.md) adds the
 PRESTIA bank Worker, bringing the compatible fleet to fourteen Workers using
 `cf@1.0.0-beta.12` and the pinned `wrangler-deploy-action` (v3.0.0 since 2026-11-06;
-no step uses `worker-preview`, the only mode v3 changed; v3.2.0 since 2026-11-17). Their native
+no step uses `worker-preview`, the only mode v3 changed; now v3.2.0). Their native
 `cloudflare.config.ts` and
 `wrangler.config.ts` retain the canonical Wrangler settings; parity guards
 cover bindings, variables, observability, assets and the two already-declared
@@ -136,13 +136,15 @@ credential-free cf builds and prebuilt version-upload dry runs added.
 The three Container deployments (GlobalPass, SBI Shinsei, St.George) use the
 pinned Action's `deploy` strategy under [ADR 0043](adr/0043-cf-container-deployment.md),
 because `cf workers versions create` does not update Container applications.
-Since Action v3.2.0 that strategy identifies the active deployment through the
+Since Action v3.1.0 that strategy identifies the active deployment through the
 Cloudflare API, retrying a lagging deployment list within 30 seconds
-([risu729/wrangler-deploy-action#326](https://github.com/risu729/wrangler-deploy-action/pull/326)),
-and reads the script settings back so that the declared `observability`,
-including Workers Issues, must match
-([risu729/wrangler-deploy-action#327](https://github.com/risu729/wrangler-deploy-action/pull/327)):
-`cf deploy` reports a failed settings write only as a warning.
+([risu729/wrangler-deploy-action#326](https://github.com/risu729/wrangler-deploy-action/pull/326)).
+Since v3.2.0 it also reads the script settings back, so the declared
+`observability`, including Workers Issues, must be live
+([risu729/wrangler-deploy-action#327](https://github.com/risu729/wrangler-deploy-action/pull/327)).
+These Container Workers send `observability` with the script upload, where a
+failure fails `cf deploy`; for Workers without Containers, `cf deploy` writes it
+in a separate settings request whose failure is only a warning.
 They retain the default scheduling policy, existing app/namespaces and
 APAC/basic/max-instance settings. Their image manifest binds the Docker image,
 daemon and source measurement; identity, immutable registry digest and complete
