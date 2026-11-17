@@ -6,23 +6,17 @@ import react from "@vitejs/plugin-react";
 // serve. In development Vite serves the client and proxies /api to the Hono
 // server, so the client talks to the same URLs in both modes and no
 // environment switch leaks into the application code.
+//
+// Keep Vite's default of no source map: serve.ts would serve it, and it is a
+// megabyte of artifact on a surface that renders real financial evidence.
 export default defineConfig(({ mode }) => ({
-  root: ".",
   plugins: [react()],
   define: { __EVIDENCE_BROWSER__: JSON.stringify(mode === "evidence") },
-  build: {
-    outDir: "dist",
-    emptyOutDir: true,
-    // No source map: serve.ts would serve it, and it is a megabyte of
-    // artifact on a surface that renders real financial evidence.
-    sourcemap: false,
-  },
   server: {
-    port: 5173,
     proxy: {
+      // The object form keeps changeOrigin off; the string shorthand turns it on.
       "/api": {
         target: `http://127.0.0.1:${process.env["PORT"] ?? 8787}`,
-        changeOrigin: false,
       },
     },
   },

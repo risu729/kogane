@@ -1,5 +1,5 @@
+# yamlfmt defaults to CRLF on Windows, which mise.toml locks for.
 line_ending: lf
 formatter:
-  type: basic
   eof_newline: true
   trim_trailing_whitespace: true

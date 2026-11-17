@@ -1,8 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["bun"],
-    "noEmit": true
+    "types": ["bun"]
   },
   "include": ["scripts/**/*.ts"],
   "exclude": ["src", "test", "worker-configuration.d.ts"]
