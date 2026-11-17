@@ -122,8 +122,8 @@ APK as described in
 [`../../docs/vpass-android-reproduction.md`](../../docs/vpass-android-reproduction.md).
 
 ```powershell
+mise run install                     # from the repository root
 cd services/collector-vpass
-bun install
 bun src/mobile-cli.ts -- --auth-key /private/f2hKiZCtFQdbfuiVGduZ.pem --config-key /private/pubkey_relese.pem
 ```
 

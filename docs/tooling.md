@@ -21,7 +21,11 @@ fixed toolchain:
   each workspace owns a `mise.toml`, discovered through native mise monorepo
   config roots and addressed as `//<workspace>:<task>`. Dependencies are installed by the `bun` deps provider
   (`bun install --frozen-lockfile`), never by a task that downloads a tool on
-  demand. Tool lockfiles use format version 3 and mise's default
+  demand. The three Container relays under `services/*/container` keep their own
+  npm trees; each service's `mise.toml` installs one with a `[deps.npm]`
+  provider (`npm ci --ignore-scripts`), which mise runs before that service's
+  tasks, so the `container` tasks no longer run `npm ci`. Tool lockfiles use
+  format version 3 and mise's default
   `lockfile_mode`, `generate`, which rebuilds them from current requests while
   reusing unchanged artifacts. mise 2026.10.19 is the minimum because
   `lockfile_mode` defaults to `generate` from that release; it also includes
