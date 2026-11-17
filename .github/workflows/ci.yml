@@ -42,7 +42,7 @@ jobs:
       - name: Install mise
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          version: 2026.11.8
+          version: 2026.11.9
       - name: Verify bounded large-artifact restore
         timeout-minutes: 2
         run: mise exec -- node tasks/_lib/ci/release-resume.mjs resource-check
@@ -92,7 +92,7 @@ jobs:
       - name: Install mise
         uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          version: 2026.11.8
+          version: 2026.11.9
       - name: Run the complete native processor shard
         run: mise run --continue-on-error "//services/processor:test-shard-${SHARD}"
         env:
