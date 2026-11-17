@@ -54,11 +54,12 @@ export interface ForeignSession {
 
 export interface Artifact {
   bytes?: Uint8Array;
-  role?: "provider_response";
+  role?: "provider_response" | "provider_document";
+  unitKey?: string;
   inputArtifactKeys?: readonly string[];
   artifactKey?: string;
   dataset: string;
-  mediaType: "application/json";
+  mediaType: "application/json" | "application/pdf";
   body: unknown;
   window?: { from: string; to: string };
 }

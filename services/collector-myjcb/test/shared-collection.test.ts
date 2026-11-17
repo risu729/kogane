@@ -206,7 +206,7 @@ describe("G3-08 nothing unredacted or free-text reaches the shared bucket", () =
     );
   });
 
-  test("a dataset the central path has never accepted is refused, not stored", async () => {
+  test("an export without independently validated document metadata is refused", async () => {
     const base = connection("account-one");
     const debit = {
       ...base,
@@ -222,7 +222,7 @@ describe("G3-08 nothing unredacted or free-text reaches the shared bucket", () =
       ],
     };
     await expect(myJcbRunPlan(input({ connections: [debit] }))).rejects.toThrow(
-      "artifact_dataset_unobserved",
+      "myjcb_document_metadata_invalid",
     );
   });
 

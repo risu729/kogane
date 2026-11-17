@@ -15,7 +15,6 @@ export default defineConfig({
     compatibilityDate: "2026-09-07",
     compatibilityFlags: ["nodejs_compat"],
     entrypoint: "src/schedule-entrypoint.ts",
-    workersDev: true,
     previewUrls: false,
     observability: { enabled: true, issues: { enabled: true } },
     env: {

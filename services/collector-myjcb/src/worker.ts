@@ -1,3 +1,4 @@
+import { documentBudget } from "./documents";
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
 import {
   scheduledFailure,
@@ -84,6 +85,7 @@ export async function runSharedCollection(
       const connections: SharedConnectionRun[] = [];
       const failures: CollectionFailure[] = [];
       let artifactCount = 0;
+      const runDocumentBudget = documentBudget();
       for (const credential of credentials) {
         try {
           const collected = await diagnostic.step("connection-collection", () =>
@@ -91,6 +93,7 @@ export async function runSharedCollection(
               browserBinding: env.BROWSER,
               credential,
               diagnostic,
+              documentBudget: runDocumentBudget,
             }),
           );
           artifactCount += collected.artifacts.length;
@@ -131,7 +134,12 @@ export async function runSharedCollection(
       // without a failure (ADR 0026).
       const whole =
         failures.length === 0 &&
-        connections.every((connection) => connection.summary.status === "success");
+        connections.every(
+          (connection) =>
+            connection.summary.status === "success" &&
+            connection.summary.documentCode !== "partial" &&
+            !(connection.summary.documentResults ?? []).some((doc) => doc.code !== "collected"),
+        );
       const status = whole ? "success" : artifactCount === 0 ? "failed" : "partial";
       const input = {
         schemaVersion: env.COLLECTOR_SCHEMA_VERSION,

@@ -42,8 +42,10 @@ function capture(
       unitOutcome: outcome,
       ...(outcome === "failed" ? { failureCode: "synthetic-fetch-failed" } : {}),
     });
+    const credit = authori(String(100 + card + day));
+    credit.header.transitTo = "vp.member.pages.info";
     for (const [artifactKey, value] of [
-      ["credit/authori.json", authori(String(100 + card + day))],
+      ["credit/authori.json", credit],
       ["credit/revo.json", revo(malformedRevo ? "unreadable" : `+${100000 + card + day}`)],
     ] as const) {
       const raw = putRawObject(
@@ -120,7 +122,7 @@ test("the real local parser runner publishes independent Vpass card units and re
   expect(latestBalances(store)).toHaveLength(28);
 });
 
-test("reopening mirrors the exact 0092 policy once and preserves an operator's rollback and version pin", () => {
+test("reopening advances the shipped 0092 policy through 0102 and preserves an operator's rollback and version pin", () => {
   const store = database();
   const policy = () =>
     store.db
@@ -130,7 +132,7 @@ test("reopening mirrors the exact 0092 policy once and preserves an operator's r
       .get();
   expect(policy()).toEqual({
     policy_id: "coverage-v1",
-    required_parser_version: "1.0.1",
+    required_parser_version: "1.0.2",
     replaces_previous_on_complete_empty: 0,
     unit_scope: "unit",
     snapshot_selection: 1,

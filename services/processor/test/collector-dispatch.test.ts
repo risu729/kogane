@@ -695,6 +695,58 @@ test("a run that never reaches CORE is reported unpublished after the horizon", 
   });
 });
 
+test("the original operation reports later publication without rewriting its deadline or proving READ", async () => {
+  const w = world();
+  const operationId = await collect(w);
+  await w.tick(T0 + MINUTE);
+  await w.tick(T0 + MINUTE + 48 * HOUR);
+  const before = await read(w, operationId);
+  expect(before.execution?.currentResult?.state).toBe("publication_not_observed");
+  const stored = () => ({
+    request: rows(w.db, "SELECT * FROM ops_requests WHERE operation_id=?", operationId),
+    execution: rows(
+      w.db,
+      "SELECT * FROM ops_collector_dispatches WHERE operation_id=?",
+      operationId,
+    ),
+    stages: rows(
+      w.db,
+      "SELECT * FROM ops_request_stages WHERE operation_id=? ORDER BY stage",
+      operationId,
+    ),
+  });
+  const original = stored();
+  await registerCollectionRun(w.env, { source: SOURCE, runId: "op-run-001" });
+  workItemProcessed(w);
+  publishArtifact(w, "balance.json");
+  const after = await read(w, operationId);
+  expect(after.execution?.currentResult).toMatchObject({
+    schemaVersion: "kogane-collector-current-result-v1",
+    state: "published",
+    publishedAt: null,
+    readReadiness: "unproven",
+    originalTracking: {
+      state: "unpublished",
+      reasonCode: "publication_not_observed",
+      publicationDeadlineAt: new Date(T0 + MINUTE + 48 * HOUR).toISOString(),
+    },
+  });
+  expect(after.status).toBe("failed");
+  expect(after.failureCode).toBe("publication_not_observed");
+  expect(after.stages).toEqual(before.stages);
+  expect(after.execution).toMatchObject({
+    state: "unpublished",
+    reasonCode: "publication_not_observed",
+    finishedAt: before.execution!.finishedAt,
+    publishedAt: null,
+  });
+  expect(after.stages.find((stage) => stage.stage === "projected")?.state).toBe("pending");
+  expect(await read(w, operationId)).toEqual(after);
+  expect(await w.tick(T0 + 50 * HOUR)).toMatchObject({ tracked: 0 });
+  expect(stored()).toEqual(original);
+  expect(w.calls).toHaveLength(1);
+});
+
 test("a run whose artifacts no parser selects ends unpublished with that reason", async () => {
   const w = world();
   const operationId = await collect(w);

@@ -285,7 +285,14 @@ export class QualityStore {
   /** A schedule receipt of a configured job. */
   occurrence(
     schedule: string,
-    spec: { nominalAt: string; status: string; failureCode?: string; runIds?: string[] },
+    spec: {
+      nominalAt: string;
+      startedAt?: string;
+      finishedAt?: string;
+      status: string;
+      failureCode?: string;
+      runIds?: string[];
+    },
   ): void {
     this.db.run(
       `INSERT INTO collection_schedule_occurrences(id,schedule_id,nominal_at,started_at,finished_at,status,run_ids_json,failure_code)
@@ -294,8 +301,8 @@ export class QualityStore {
         `scheduled:${schedule}:${Date.parse(spec.nominalAt)}`,
         schedule,
         spec.nominalAt,
-        spec.nominalAt,
-        spec.status === "started" ? null : spec.nominalAt,
+        spec.startedAt ?? spec.nominalAt,
+        spec.status === "started" ? null : (spec.finishedAt ?? spec.nominalAt),
         spec.status,
         JSON.stringify(spec.runIds ?? []),
         spec.failureCode ?? null,

@@ -973,3 +973,59 @@ reachable display alternatives; it does not inspect or alter connection secrets.
 No private dates, amounts, merchant names, account identifiers, session fields,
 credentials or raw provider HTML are recorded here. Synthetic tests mirror
 only these structures. See [ADR 0101](../adr/0101-myjcb-debit-statements.md).
+
+## Original credit statement exports observed on 2026-11-12
+
+This supersedes the earlier credit-download blocker above. Normal owner-machine
+browser clicks on two credit displays downloaded CSV, PDF and OFX files. A
+fresh network trace around the linked credit display's confirmed statement
+witnessed exactly these read requests (the menu was initialized first):
+
+| Format | GET path and exact query                                                   | HTTP Content-Type                 |
+| ------ | -------------------------------------------------------------------------- | --------------------------------- |
+| CSV    | `/iss-pc/member/details_inquiry/detail.html?detailMonth=2&output=csv`      | `text/csv;charset=Windows-31j`    |
+| PDF    | `/iss-pc/member/details_inquiry/detailDbPdf.html?detailMonth=2&output=pdf` | `application/pdf`                 |
+| OFX    | `/iss-pc/member/details_inquiry/detail.html?detailMonth=2&output=money`    | `application/x-ofx;charset=UTF-8` |
+
+Each returned HTTP 200 and `Content-Disposition: attachment;filename=...`.
+The original filenames remain private. The browser's subsequent
+`net::ERR_ABORTED` accompanied a completed normal download; it is not a file
+failure. The integer selector is an offered position, never a calendar month.
+Actual links contained exactly `detailMonth` and `output`. Relative links
+without a month remain historical recorded offers and do not authorize the
+new file-fetch path.
+
+CSV bytes decode as CP932 without a UTF-8 BOM and use CRLF. A nonempty metadata
+preamble precedes the exact ordered twelve-column header: `ご利用者`,
+`カテゴリ`, `ご利用日`, `ご利用先など`, `ご利用金額(￥)`, `支払区分`,
+`今回回数`, `訂正サイン`, `お支払い金額(￥)`, `国内／海外`, `摘要`, `備考`.
+The header has no additional trailing empty column. Preamble fields, row counts,
+amount/date lexical forms and reconciliation totals were not classified.
+PDF has the `%PDF-1.4` prefix and a trailing `%%EOF` after whitespace trimming;
+no text or page layout was inspected. OFX is UTF-8 without BOM, uses LF and
+ends with `</OFX>` plus a newline. Its public headers are `OFXHEADER:100`,
+`DATA:OFXSGML`, `VERSION:102`, `SECURITY:NONE`, `ENCODING:UTF-8`,
+`CHARSET:CSUNICODE`, `COMPRESSION:NONE`. It contains the credit-card statement
+containers; SGML leaf tags need not close. No financial values or row semantics
+are established by this envelope observation.
+
+The collector now archives validated offered credit exports as original bytes,
+with immutable content-addressed objects and stable connection/payment-month/
+format provenance. It walks all offered statement positions, including sparse
+past positions, on every scheduled run. It neither invents fifteen positions
+nor assumes all retained pages offer all formats. Files have separate terminal
+units: a malformed/missing file leaves its unit unavailable while healthy files
+and financial pages survive. Authentication, redirect or rate-limit denial
+still stops subsequent provider reads. A document metadata parser emits only
+an evidence claim; CSV/OFX transactions and PDF text are not published again.
+File month metadata comes from the validated statement page, not file contents.
+
+A bounded follow-up visited each linked Kyoto/MUFG/Mizuho debit display's
+actual latest `seq=0` and one older offered Kyoto period. These pages explicitly
+reported no details and offered no file controls. This does not establish
+absence across all retained periods. Debit export response bytes remain
+unverified; credit envelope contracts are not applied to debit. Durable
+root-card switching, scheduled production capture, a complete fifteen-month
+archive and live parser validation remain unproved. The document catalogue
+therefore stays partial and [issue 1251](https://github.com/risu729/kogane/issues/1251)
+remains open.

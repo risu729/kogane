@@ -281,6 +281,26 @@ function Execution({ execution }: { execution: OperationRecordExecutionWire }): 
           依頼で指定した期間は保存されるだけで、収集には使われません。収集は接続先の定期実行と同じ既定の範囲で行われます。
         </Notice>
       ) : null}
+      {execution.currentResult ? (
+        <Notice
+          tone={execution.currentResult.state === "published" ? undefined : "warn"}
+          role="note"
+        >
+          <p>
+            {execution.currentResult.state === "published"
+              ? "現在の公開結果：公開済み。元の依頼が報告した収集実行の公開を、追跡終了後の現在の記録で確認しています。"
+              : "現在の公開結果：公開を確認できていません。"}
+          </p>
+          <p>
+            元の追跡結果：収集から48時間以内に公開を確認できませんでした。 公開確認の期限（UTC）：
+            {execution.currentResult.originalTracking.publicationDeadlineAt}。 追跡終了（UTC）：
+            {execution.currentResult.originalTracking.finishedAt}。
+          </p>
+          <p>
+            公開時刻は不明です。読み取りモデルへの反映は未確認です。元の依頼の失敗と各段階の記録は保持されています。
+          </p>
+        </Notice>
+      ) : null}
       <div className="panel-body">
         <Kv>
           <KvRow label="実行の状態">

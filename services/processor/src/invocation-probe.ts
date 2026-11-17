@@ -8,10 +8,10 @@
 // (`scripts/service-binding-chain.test.ts`). The other two do, and production
 // has registered every observed run although the arithmetic said a large one
 // could pass the D1 limit. This probe is what reconciles the two: every cron
-// and queue invocation counts what it actually did through its bindings and
-// logs one line with the counts next to the documented numbers, so an
-// invocation that went past a documented limit and still succeeded is
-// visible as exactly that.
+// and queue invocation counts what it actually did through its bindings.
+// Its statement-based threshold comparison is conservative: a D1 batch is
+// one invocation query under the platform contract. Only matching rejected
+// calls contribute to the additive platform-limit call counters.
 //
 // The line carries counts, booleans and the documented constants. Never a
 // key, a statement, a value, an identifier or an exception message: a failure
@@ -164,18 +164,7 @@ export function invocationContext(): InvocationContext {
   return { registration: new RegistrationBudget(), limitErrors: 0, lanes: {} };
 }
 
-/**
- * The messages the platform throws when an invocation passes one of the
- * documented limits: D1's per-invocation query limit, the subrequest limit,
- * and the Service Binding chain limit.
- */
-const PLATFORM_LIMIT =
-  /too many api requests by single worker invocation|too many subrequests|subrequest depth limit|worker invocation limit/iu;
-
-/** True when the error names a platform invocation limit; the text is not kept. */
-export function platformLimitError(error: unknown): boolean {
-  return error instanceof Error && PLATFORM_LIMIT.test(error.message);
-}
+export { platformLimitError } from "../../../packages/application/src/collection/index.ts";
 
 /**
  * The same bindings, counted. Every other property of the environment — the

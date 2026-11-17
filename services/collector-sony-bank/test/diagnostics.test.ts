@@ -40,6 +40,21 @@ describe("safe Sony diagnostics", () => {
       providerErrorCount: 100,
     });
     expect(failure("collect", new SonyBankStageError(secret)).diagnostics?.stage).toBe("collect");
+    const csv = new SonyBankError("EABA0600S1fE12:JPY", undefined, 0, "history_csv_invalid", {
+      csvFailure: secret as "header",
+      csvHeaderColumnCount: Infinity,
+      csvMinColumnCount: -1,
+      csvExpectedColumnCount: 7,
+      csvInvalidRowCount: 2,
+    });
+    expect(failure("collect", csv).diagnostics).toEqual({
+      stage: "history-csv",
+      reason: "history_csv_invalid",
+      providerOperation: "EABA0600S1fE12",
+      currency: "JPY",
+      csvExpectedColumnCount: 7,
+      csvInvalidRowCount: 2,
+    });
   });
 
   test("network errors preserve the actual login step without echoing fetch errors", async () => {

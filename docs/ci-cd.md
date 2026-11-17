@@ -156,7 +156,8 @@ match the captured baseline. A refused check prints only its closed `cf_do_…`
 code, and an unexpected error prints `cf_do_internal_error`. Pending DO
 lifecycle work requires a separate Wrangler rollout. Processor and PRESTIA opt into trigger synchronization on the
 versions strategy: Processor preserves its Queue consumer settings; PRESTIA
-applies its checked-in workersDev:true/previewUrls:false after version upload.
+applies workers.dev (on by default without routes or domains) and its checked-in
+previewUrls:false after version upload.
 The three Container full-deploy steps also explicitly consent to synchronization.
 All 17 deployed Workers keep ADR 0039's order and the authenticated
 App/Processor release and schema postcheck.

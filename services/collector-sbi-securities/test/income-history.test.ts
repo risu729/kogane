@@ -111,10 +111,14 @@ test("financial precision, unknown categories and count failures keep raw but no
       status: "partial",
       scope: "domestic",
       artifacts,
-      failures: [{ scope: "domestic", code: safeFailureCode(failure) }],
+      failures: [
+        { scope: "domestic", unitKey: "income-history-income", code: safeFailureCode(failure) },
+      ],
     });
     expect(plan.run.providerOutcome).toBe("partial");
-    expect(plan.run.units[0]!.coverageStatus).toBe("partial");
+    expect(
+      plan.run.units.find((unit) => unit.unitKey === "income-history-income")!.coverageStatus,
+    ).toBe("partial");
     expect(plan.artifacts.every((a) => a.role === "provider_response")).toBe(true);
   }
 });

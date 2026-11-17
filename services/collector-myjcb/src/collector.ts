@@ -1,3 +1,4 @@
+import type { DocumentBudget } from "./documents";
 import { collectCredit, collectionStage, type CreditStop } from "./credit";
 export { collectCredit, connectionStopCode, validateCreditCsvText } from "./credit";
 export type { CreditReadClient, CreditExportMode, CreditStop } from "./credit";
@@ -32,6 +33,7 @@ export async function collectConnection(options: {
   >;
   browserBinding: BrowserRun;
   credential: MyJcbCredential;
+  documentBudget?: DocumentBudget;
 }): Promise<ConnectionCollection> {
   const login = await loginStage(async () =>
     options.credential.bootstrapMode === "password"
@@ -49,6 +51,8 @@ export async function collectConnection(options: {
     let periodCount = 0;
     let unreadMonths: readonly UnreadMonth[] = [];
     let exportOffers: readonly ExportOffer[] = [];
+    let documentResults: ConnectionSummary["documentResults"];
+    let documentCode: ConnectionSummary["documentCode"];
     let schedulePages: readonly SchedulePage[] = [];
     let stop: CreditStop | undefined;
     let debitOtherCode: ConnectionSummary["debitOtherCode"];
@@ -57,12 +61,20 @@ export async function collectConnection(options: {
     if (creditLinkId) {
       const credit = await collectionStage(
         "collect-credit",
-        async () => await collectCredit(client, creditLinkId),
+        async () =>
+          await collectCredit(client, creditLinkId, {
+            exports: "fetch",
+            ...(options.documentBudget === undefined
+              ? {}
+              : { documentBudget: options.documentBudget }),
+          }),
       );
       artifacts.push(...credit.artifacts);
       periodCount += credit.periodCount;
       unreadMonths = credit.unreadMonths;
       exportOffers = credit.exportOffers;
+      documentResults = credit.documentResults;
+      documentCode = credit.documentCode;
       schedulePages = credit.schedulePages;
       stop = credit.stop;
     }
@@ -155,6 +167,10 @@ export async function collectConnection(options: {
             }),
         ...(unreadMonths.length === 0 ? {} : { unreadMonths }),
         ...(exportOffers.length === 0 ? {} : { exportOffers }),
+        ...(documentResults === undefined || documentResults.length === 0
+          ? {}
+          : { documentResults }),
+        ...(documentCode === undefined ? {} : { documentCode }),
         ...(schedulePages.length === 0
           ? {}
           : {

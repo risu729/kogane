@@ -298,6 +298,13 @@ policy references. `canonicalReconstructionManifest` gives its canonical text
 synchronously; `contextId = canonicalDigest(manifest)` is the caller's step.
 Any input order gives the same output and the same id.
 
+The B adapter's posting-date interpretation is `reconstruction-adapter-b-v2`,
+pinned in both this manifest and the outer query manifest. Stored revisions
+and knowledge cuts are unchanged by the reader upgrade, but manifest/context
+identities intentionally change with that interpretation version. An old cut
+stays stable as later events arrive under the same reader contract; it is not
+an assurance of identical output identities across reader versions.
+
 ## Limits
 
 - Cost: at the budget a fold takes about 0.45–0.72 s on `bun` locally without
@@ -330,9 +337,14 @@ Any input order gives the same output and the same id.
   sequence. The resolved sequence reproduces the answer.
 - The load is whole-history: an account touching more than 2,000 events is
   refused at every range.
-- Neither writer writes event times, so a settlement's cash leg has no
-  `posting` time and is `event_time_unknown`: a bank account's cell has no
-  figure while a settlement touches it.
+- Newly accepted SBI Shinsei settlements from the admitted
+  `sbi-shinsei-top-balances-and-activity` parser carry the provider's civil
+  posting date. The cash fold applies a date strictly between snapshots;
+  a date on either capture day remains a boundary candidate. Older sealed
+  acceptances and SMBC settlements still have no typed `posting` time and
+  remain `event_time_unknown`; no timestamp is inferred from their effective
+  time. No existing correct match is withdrawn or rewritten to add a time
+  ([ADR 0058 amendment](adr/0058-knowledge-selector-and-reconstruction-adapter.md#amendment-2026-11-12-sbi-shinsei-settlement-posting-dates)).
 - Card accounts have no reported container and their movements are on the
   purchase-recognition basis, so on the cash basis a card account produces no
   cell at all: the query answers `unavailable` (`no_reported_container`), its
@@ -351,3 +363,25 @@ Any input order gives the same output and the same id.
   workerd or D1 (ADR 0058).
 - Own transfers are held, never applied; trade and settlement bases are never
   compared with a provider figure.
+
+## Validated fold and late composition (2026-11-12)
+
+The domain's `reconstructStateWithLate` returns the validated fold state and
+the whole-scope late revision diff together. `queryReconstructedState` calls
+it once. The previous query called `reconstructState`, then standalone
+`explainLate`, repeating both selections' canonical validation when a
+baseline was available. No row is read again or omitted by this composition.
+
+The old public entrypoints retain their result shapes and validation,
+including their distinct refusal order. Inputs are revalidated on every
+call; no caller-supplied bypass or cross-call cache exists. Without a
+baseline, `late` remains null and the query's existing `lateUnavailable`
+reason is preserved. The late list remains the whole-scope revision diff,
+which can include revisions outside a reconstructed cell's date window.
+The SQL, budgets, policy and engine releases, state/route contracts,
+manifests and context IDs are unchanged
+([ADR 0052 amendment](adr/0052-reconstructed-state-fold.md#amendment-compose-the-validated-fold-and-late-explanation-2026-11-12)).
+
+This establishes less repeated validation, not a measured latency improvement.
+The cost figures in [Limits](#limits) remain historical measurements of the
+earlier implementation. No new workerd or remote D1 latency is established.

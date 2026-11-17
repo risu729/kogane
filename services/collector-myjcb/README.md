@@ -154,7 +154,7 @@ The collector does not add/remove consolidated-account settings, change initial 
 
 ## stop condition
 
-Stop the affected connection immediately without retries when detecting any condition below. A connection stopped before its first credit month stores nothing and records `human-required` or `failed` in the manifest. A connection stopped during month capture, state determination, statement-period determination, ledger or export capture saves earlier months and becomes `partial`. In either case, the manifest and terminal unit record only a closed stop code (`CONNECTION_STOP_CODES`), stopped-month position and saved-month count (the connection-stopping/captured-months section of `docs/sources/myjcb.md`, ADR 0005 amendment).
+Stop the affected connection immediately without retries when detecting any condition below. A connection stopped before its first credit month stores nothing and records `human-required` or `failed` in the manifest. A connection stopped during month capture, state determination, statement-period determination, ledger parsing or session-wide export denial saves earlier months and becomes `partial`. In either case, the manifest and terminal unit record only a closed stop code (`CONNECTION_STOP_CODES`), stopped-month position and saved-month count (the connection-stopping/captured-months section of `docs/sources/myjcb.md`, ADR 0005 amendment).
 
 - Passkey, biometric/PIN, QR, OTP, secret phrase, CAPTCHA or identity verification.
 - Access Denied, 401, 403, 429 or account lock/risk warnings.
@@ -318,7 +318,7 @@ Both password and passkey appear as ordinary choices on the initial screen, so m
 
 The seed in `login-prot.js?async` changes on every load; passkey/NNL SDK assets also have versioned scripts. The PoC hard-codes neither script source/version/seed nor commits raw captures. Observed versions and privacy boundaries are recorded in `docs/sources/myjcb.md`.
 
-## Acquisition-month point history and document gap
+## Acquisition-month point history and original credit documents
 
 Eligible J-POINT connections reuse the already collected total response, then
 follow the observed point-inquiry/history GET routes. The collector validates
@@ -339,8 +339,17 @@ before a later stop. This changes eligibility only, not snapshot membership.
 
 Credit statement retention still follows provider-offered months and separate
 schedule groups. Export links are recorded only on confirmed statements.
-PDF/CSV/OFX bytes remain unverified and unfetched; the sanitized manifest
-records `documentCode: statement_export_bytes_unverified` beside offered kinds.
-No new file HTTP contract, root-card switch or authentication action is enabled.
+The Worker fetches exact same-month CSV/PDF/OFX offers using the observed GET
+contracts, validates their byte envelopes and keeps original bytes in private
+content-addressed storage. Streaming limits are 8 MiB per file and 32 MiB
+across all connections in one run. Exhaustion skips later file requests and
+remains partial while financial pages continue. Stable connection/payment-month/format provenance
+survives a rolling selector. Each file has an independent terminal unit and
+an evidence-only metadata parser; no file publishes financial rows again.
+Malformed files leave the parent partial while valid statement pages, sibling
+files and later months survive. Session denial still stops further reads.
+Registration v12 and migration 0101 admit only these file datasets on their
+successful units. Debit file bytes, durable root-card switching, a complete
+fifteen-month production archive and live parser validation remain unproved.
 See [the source observation](../../docs/sources/myjcb.md) and
 [ADR 0107](../../docs/adr/0107-myjcb-point-history-and-document-boundary.md).

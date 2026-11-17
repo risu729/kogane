@@ -21,17 +21,25 @@ fixed toolchain:
   each workspace owns a `mise.toml`, discovered through native mise monorepo
   config roots and addressed as `//<workspace>:<task>`. Dependencies are installed by the `bun` deps provider
   (`bun install --frozen-lockfile`), never by a task that downloads a tool on
-  demand. Tool lockfiles use format version 3 and `lockfile_mode = "generate"`,
-  which rebuilds them from current requests while reusing unchanged artifacts.
-  mise 2026.10.10 is the minimum because the web browser-install task uses
-  native `skip_if`: it installs Chromium only in CI without `CHROMIUM_PATH`.
-  Locally, supply an installed Chromium through that variable.
+  demand. The three Container relays under `services/*/container` keep their own
+  npm trees; each service's `mise.toml` installs one with a `[deps.npm]`
+  provider (`npm ci --ignore-scripts`), which mise runs before that service's
+  tasks, so the `container` tasks no longer run `npm ci`. Tool lockfiles use
+  format version 3 and mise's default
+  `lockfile_mode`, `generate`, which rebuilds them from current requests while
+  reusing unchanged artifacts. mise 2026.10.19 is the minimum because
+  `lockfile_mode` defaults to `generate` from that release; it also includes
+  native `skip_if` (from 2026.10.10), which the web browser-install task uses:
+  it installs Chromium only in CI without `CHROMIUM_PATH`. Locally, supply an
+  installed Chromium through that variable. The owner decided on 2026-11-17 at
+  02:55 UTC to raise `min_version` when the repository relies on a newer mise
+  default or feature, instead of keeping default-equal settings for older mise.
 - **Bun** is the package manager and the test runner for pure TypeScript. The
   repository is one Bun workspace with a single root `bun.lock` and
   `linker = "isolated"`, so a workspace sees only what it declares and
   conflicting pins (TypeScript 6.0.3 and 7.0.2) coexist instead of being
   reconciled by hoisting; every workspace that declares Wrangler pins the same
-  version (4.157.0 today). Every workspace pins TypeScript
+  version (4.162.0 today). Every workspace pins TypeScript
   7.0.2 except `services/collector-globalpass`, and both it and the root
   manifest stay below 7 (6.0.3 today). Both need the in-process TypeScript
   compiler API, which 7.0 no longer ships (its `typescript` entry point exports

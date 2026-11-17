@@ -75,3 +75,71 @@ lane attribution, skipped flags, failure isolation and private-field exclusion;
 and real Miniflare cron plus budget-deferred queue registration behavior.
 Focused application/Processor typechecks and invocation-probe/registration/
 lane tests use the repository's native mise environment.
+
+## Amendment 2026-11-12: Observe platform-limit rejections before recovery
+
+- Status: proposed
+- Tracking: [recovered platform-limit observation](https://github.com/risu729/kogane/issues/1333)
+
+### Context and options
+
+The binding meter observes a rejected D1/R2 call even when a parse job or
+registration recovers internally, but previously discarded its limit
+classification. The existing `limitErrors` counts exceptions escaping a lane
+or queue-message handler. Changing that field to count binding calls would
+change its meaning, while adding classifiers to individual recovery catches
+would duplicate policy and miss future recovery paths.
+
+### Decision
+
+Keep `limitErrors` unchanged and add `d1PlatformLimitCalls` and
+`r2PlatformLimitCalls` to operation-meter summaries. Classify the original
+rejection transiently at the shared binding observation boundary, passing
+only a boolean to the settled observer. The shared classifier also supplies
+the Processor's existing escaped-failure classification. Retain no Error,
+message, SQL, key or provider field in a meter or log.
+
+Count one classified rejected executing call, including a synchronous throw
+or Promise rejection. A rejected D1 batch is one call; its existing failure
+metric still counts N statements. Separate calls reusing the same Error are
+separate rejected calls. First settlement wins; hostile thenable setup is
+unavailable observation rather than a manufactured source rejection. Error
+introspection is total and nonthrowing, including inaccessible or malformed
+messages and revoked proxies, and preserves the original return, Promise and
+exception identities.
+
+Invocation, lane and registration meters observe their own overlapping
+scopes once per call. Never sum those scopes or add escaped-failure
+`limitErrors` to rejected-call counts. A binding rejection escaping a lane
+can contribute one call and one existing lane failure without representing
+two binding calls. Queue acknowledgement failures can contribute only the
+existing lane count because they are outside the metered D1/R2 bindings.
+
+No budget, reserve, query, retry, cursor, publication, authority, flag or
+persistent tick contract changes. Registration's compact budget summary
+retains its existing shape; invocation and lane summaries expose the new
+counts. The [current D1 batch-limit contract](https://developers.cloudflare.com/d1/platform/limits/#batch-limits)
+counts a batch as one invocation query. The retained per-statement threshold
+comparison is conservative accounting, not proof of an enforced query limit
+being exceeded.
+
+### Consequences and verification
+
+A normally returned lane can now report a classified platform refusal from
+an internally recovered binding failure. Zero means no positively classified
+observed rejection; it does not establish that every exception was
+classifiable, that platform capacity remains, that collection succeeded, or
+that an invocation killed before its final log was measured.
+Existing platform-limit spellings remain a closed allowlist, and generic
+binding failure and metadata-coverage counters retain their meanings.
+
+Synthetic regressions use the actual `parseJob` / `executeParseJob` recovery
+path and `collectionScan` registration recovery. They verify safe persisted
+failure state, later job and stage progress, unchanged scan continuation,
+old escaped-failure counts and invocation/lane rejected-call attribution.
+Additional tests cover a rejected N-statement batch, D1 session methods,
+nested meters, reused Error objects, exact return/Promise/error identities,
+hostile error shapes and thenables, non-limit controls, outer catches and
+queue acknowledgements. Error markers are absent from complete emitted logs
+and summaries. These checks do not establish a production platform-limit
+incident.

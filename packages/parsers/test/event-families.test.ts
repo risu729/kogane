@@ -1,6 +1,7 @@
 import { vpassCreditSnapshot } from "../src/parsers/vpass-credit.ts";
 import { authori as vpassAuthori } from "./fixtures/vpass-credit.ts";
 import { sbiShinseiMonthlyReport } from "../src/parsers/sbi-shinsei-monthly-report.ts";
+import { sonyBankDocumentMetadata } from "../src/parsers/sony-document-metadata.ts";
 // The transaction-family registry (packages/domain/src/event-families.ts,
 // ADR 0053) against the parsers it describes. Every PARSERS entry whose rows
 // are transactions or positions has exactly one registry entry and no entry is
@@ -33,6 +34,8 @@ import {
   myJcbEvidenceOnly,
   myJcbPastMonthBalances,
 } from "../src/parsers/myjcb.ts";
+import { myJcbDocuments } from "../src/parsers/myjcb-documents.ts";
+import { creditExportBytes } from "./myjcb-document-fixture.ts";
 import { myJcbJPointBalance } from "../src/parsers/myjcb-jpoint.ts";
 import { myJcbDebitLedger, myJcbDebitOtherStatement } from "../src/parsers/myjcb-debit.ts";
 import { myJcbSkipPaymentSchedule } from "../src/parsers/myjcb-skip-payment-schedule.ts";
@@ -45,6 +48,8 @@ import { sbiForeignCashHistory } from "../src/parsers/sbi-foreign-cash-history.t
 import { sbiForeignTradeRecords } from "../src/parsers/sbi-foreign-trade-records.ts";
 import { sbiVcCashflows } from "../src/parsers/sbi-vc-cashflows.ts";
 import { sbiVcDocuments } from "../src/parsers/sbi-vc-documents.ts";
+import { sbiDocuments } from "../src/parsers/sbi-documents.ts";
+import { sbiDocumentFixture } from "./sbi-documents-fixture.ts";
 import { sbiVcExecutions } from "../src/parsers/sbi-vc-executions.ts";
 import { sbiYenDetailHistory } from "../src/parsers/sbi-yen-detail-history.ts";
 import { smbcDirectTransactions } from "../src/parsers/smbc-direct.ts";
@@ -72,6 +77,10 @@ import { skipMeta, skipPage } from "./myjcb-skip-payment-fixture.ts";
 
 /** PARSERS entries whose rows are balances, valuations, scheduled payments or none. */
 const NOT_IN_REGISTRY = [
+  "sony-bank-document-metadata",
+  "sony-bank-realised-gains",
+  "myjcb-statement-document-metadata",
+  "sbi-delivered-document-metadata",
   "sbi-income-payments",
   "sbi-realised-gains",
   "vpass-credit-snapshot",
@@ -431,6 +440,24 @@ const sbiVcDocumentBytes = encode("%PDF-1.7\nSynthetic private report\n%%EOF\n")
 const sbiVcDocumentHash = createHash("sha256").update(sbiVcDocumentBytes).digest("hex");
 const OUTSIDE_CASES: Case[] = [
   one(
+    myJcbDocuments,
+    "original-credit-export",
+    meta("myjcb", "credit-pdf", {
+      mime: "application/pdf",
+      artifactKey: "synthetic/credit-document-2098-01.pdf",
+      period: "2098-01",
+      statementState: "confirmed",
+      fetchUnitKey: "synthetic:document:credit:2098-01:pdf",
+    }),
+    creditExportBytes("pdf"),
+  ),
+  one(
+    sbiDocuments,
+    "delivered-report-evidence",
+    sbiDocumentFixture().meta,
+    sbiDocumentFixture().bytes,
+  ),
+  one(
     sbiVcDocuments,
     "monthly-report-evidence",
     meta("sbi-vc-trade", "monthly-report-pdf", {
@@ -494,6 +521,16 @@ const OUTSIDE_CASES: Case[] = [
       sha256: "a".repeat(64),
     }),
     encode("%PDF-1.7\nsynthetic\n%%EOF"),
+  ),
+  one(
+    sonyBankDocumentMetadata,
+    "pdf-envelope",
+    meta("sony-bank", "delivered-document-pdf", {
+      artifactKey: "delivered-document-0001.pdf",
+      fetchUnitKey: "delivered-document-0001",
+      mime: "application/pdf",
+    }),
+    encode("%PDF-synthetic"),
   ),
   one(
     myJcbJPointBalance,

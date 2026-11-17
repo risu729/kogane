@@ -35,6 +35,8 @@ regist = "regist"
 Metrix = "Metrix"
 Infomation = "Infomation"
 Ordr = "Ordr"
+# Observed SBI electronic-mailbox SSO form field.
+hav = "hav"
 # Literal Vpass response key: chengeCourseExplanation.
 chenge = "chenge"
 # SQLite resolves a column's affinity by looking for these exact substrings in

@@ -1,6 +1,7 @@
-import { decodeUtf8, parseCsv } from "../../../packages/parsers/src/parsers/util";
-import { SonyBankDiagnostics, SonyBankError } from "./diagnostics";
-import type { JsonObject, RawArtifact, SonyBankCredential } from "./types";
+import { decodeSonyCsv, SonyCsvDecodeError } from "../../../packages/parsers/src/parsers/sony-csv";
+import { decodeUtf8, parseCsv, type CsvWarning } from "../../../packages/parsers/src/parsers/util";
+import { failure, SonyBankDiagnostics, SonyBankError } from "./diagnostics";
+import type { CollectionFailure, JsonObject, RawArtifact, SonyBankCredential } from "./types";
 
 const ORIGIN = "https://sonybank.jp";
 const LOGIN_PAGE = `${ORIGIN}/pages/db/dbca0100/input/`;
@@ -41,7 +42,7 @@ interface RawJsonResponse {
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 interface RequestContext {
-  area: "db" | "da" | "ea" | "ja";
+  area: "db" | "da" | "ea" | "ja" | "aa";
   revision: string;
   pageUrl: string;
   screenId: string;
@@ -54,6 +55,14 @@ interface RequestContext {
 export interface SonyBankCollection {
   artifacts: RawArtifact[];
   transactionCount: number;
+  supplements: Supplement[];
+}
+
+export interface Supplement {
+  kind: "realised-gains" | "documents";
+  window: { from: string | null; to: string | null };
+  artifacts: RawArtifact[];
+  failures: CollectionFailure[];
 }
 
 interface HistoryCollection {
@@ -129,6 +138,8 @@ export async function collectSonyBank(options: {
   to: string;
   fetcher?: Fetcher;
   runId?: string;
+  includeRetainedHistory?: boolean;
+  includeSupplementaryData?: boolean;
 }): Promise<SonyBankCollection> {
   const fetcher = options.fetcher ?? fetch;
   const diagnostics = new SonyBankDiagnostics(options.runId);
@@ -149,16 +160,95 @@ export async function collectSonyBank(options: {
     ),
   );
 
-  const history = await diagnostics.stage(
-    "history",
-    () => client.history("JPY", options.from, options.to),
-    { currency: "JPY" },
-  );
+  const monthly = await collectHistoryRange(client, diagnostics, options.from, options.to);
+  const retained = options.includeRetainedHistory
+    ? await collectHistoryRange(client, diagnostics, undefined, options.to)
+    : null;
+  const history = retained ?? monthly;
+  const wallet = await diagnostics.stage("wallet", () => client.walletHistory());
+  const artifacts: RawArtifact[] = [
+    {
+      dataset: "gross-balance",
+      filename: "gross-balance.json",
+      mediaType: "application/json",
+      body: gross.rawText,
+    },
+    ...history.artifacts,
+    ...(retained
+      ? monthly.artifacts.map((artifact) => ({
+          ...artifact,
+          filename: `monthly-${artifact.filename}`,
+        }))
+      : []),
+    ...wallet.months.map((month) => ({
+      dataset: `wallet-history-${month.value.slice(0, 6)}`,
+      filename: `wallet-history-${month.value.slice(0, 4)}-${month.value.slice(4, 6)}.html`,
+      mediaType: "text/html; charset=UTF-8",
+      body: month.html,
+    })),
+    {
+      dataset: "collection-summary",
+      filename: "collection-summary.json",
+      mediaType: "application/json",
+      body: JSON.stringify({
+        schemaVersion: "sony-bank-collection-summary-v2",
+        window: { from: retained ? null : options.from, to: options.to },
+        monthlyWindow: { from: options.from, to: options.to },
+        transactionCount: history.transactionCount,
+        pageCount: history.pageCount,
+        foreignCurrencyCount: FOREIGN_CURRENCY_CODES.length,
+        foreignTransactionCount: history.foreignTransactionCount,
+        foreignPageCount: history.foreignPageCount,
+        walletMonthCount: wallet.months.length,
+        cookieNames: client.cookieNames(),
+      }),
+    },
+  ];
+  const supplements: Supplement[] = [];
+  if (options.includeSupplementaryData) {
+    for (const kind of ["realised-gains", "documents"] as const) {
+      const supplementaryArtifacts: RawArtifact[] = [];
+      const failures: CollectionFailure[] = [];
+      try {
+        if (kind === "realised-gains") await client.realisedGains(supplementaryArtifacts);
+        else {
+          await client.deliveredDocuments(options.to, supplementaryArtifacts);
+          // The five-year query is observed, not a proof of all provider retention.
+          throw new SonyBankError(
+            "delivered-documents",
+            undefined,
+            0,
+            "document_retention_unconfirmed",
+          );
+        }
+      } catch (error) {
+        failures.push(failure(kind, error));
+      }
+      supplements.push({
+        kind,
+        window: kind === "documents" ? documentWindow(options.to) : { from: null, to: null },
+        artifacts: supplementaryArtifacts,
+        failures,
+      });
+    }
+  }
+  return { artifacts, transactionCount: history.transactionCount, supplements };
+}
+
+async function collectHistoryRange(
+  client: SonyBankClient,
+  diagnostics: SonyBankDiagnostics,
+  from: string | undefined,
+  to: string,
+) {
+  const history = await diagnostics.stage("history", () => client.history("JPY", from, to), {
+    currency: "JPY",
+  });
   const csv =
     history.transactionCount > 0
       ? await diagnostics.stage(
           "history-csv",
-          () => client.historyCsv("JPY", options.from, options.to, history.transactionCount),
+          () => client.historyCsv("JPY", from, to, history.transactionCount),
           { currency: "JPY", transactionCount: history.transactionCount },
         )
       : null;
@@ -172,20 +262,14 @@ export async function collectSonyBank(options: {
   for (const currency of FOREIGN_CURRENCY_CODES) {
     const currencyHistory = await diagnostics.stage(
       "history",
-      () => client.history(currency, options.from, options.to),
+      () => client.history(currency, from, to),
       { currency },
     );
     const currencyCsv =
       currencyHistory.transactionCount > 0
         ? await diagnostics.stage(
             "history-csv",
-            () =>
-              client.historyCsv(
-                currency,
-                options.from,
-                options.to,
-                currencyHistory.transactionCount,
-              ),
+            () => client.historyCsv(currency, from, to, currencyHistory.transactionCount),
             { currency, transactionCount: currencyHistory.transactionCount },
           )
         : null;
@@ -197,14 +281,7 @@ export async function collectSonyBank(options: {
     foreignTransactionCount += currencyHistory.transactionCount;
     foreign.push({ currency, history: currencyHistory, csv: currencyCsv });
   }
-  const wallet = await diagnostics.stage("wallet", () => client.walletHistory());
   const artifacts: RawArtifact[] = [
-    {
-      dataset: "gross-balance",
-      filename: "gross-balance.json",
-      mediaType: "application/json",
-      body: gross.rawText,
-    },
     ...history.pages.map((page, index) => ({
       dataset: `yen-history-page-${String(index + 1).padStart(4, "0")}`,
       filename: `yen-history-page-${String(index + 1).padStart(4, "0")}.json`,
@@ -239,30 +316,14 @@ export async function collectSonyBank(options: {
           ]
         : []),
     ]),
-    ...wallet.months.map((month) => ({
-      dataset: `wallet-history-${month.value.slice(0, 6)}`,
-      filename: `wallet-history-${month.value.slice(0, 4)}-${month.value.slice(4, 6)}.html`,
-      mediaType: "text/html; charset=UTF-8",
-      body: month.html,
-    })),
-    {
-      dataset: "collection-summary",
-      filename: "collection-summary.json",
-      mediaType: "application/json",
-      body: JSON.stringify({
-        schemaVersion: "sony-bank-collection-summary-v2",
-        window: { from: options.from, to: options.to },
-        transactionCount: history.transactionCount,
-        pageCount: history.pages.length,
-        foreignCurrencyCount: FOREIGN_CURRENCY_CODES.length,
-        foreignTransactionCount,
-        foreignPageCount: foreign.reduce((count, entry) => count + entry.history.pages.length, 0),
-        walletMonthCount: wallet.months.length,
-        cookieNames: client.cookieNames(),
-      }),
-    },
   ];
-  return { artifacts, transactionCount: history.transactionCount };
+  return {
+    artifacts,
+    transactionCount: history.transactionCount,
+    pageCount: history.pages.length,
+    foreignTransactionCount,
+    foreignPageCount: foreign.reduce((count, entry) => count + entry.history.pages.length, 0),
+  };
 }
 
 class SonyBankClient {
@@ -348,7 +409,7 @@ class SonyBankClient {
     }
   }
 
-  async revision(area: "db" | "da" | "ea" | "ja"): Promise<string> {
+  async revision(area: "db" | "da" | "ea" | "ja" | "aa"): Promise<string> {
     const cached = this.#revisions.get(area);
     if (cached) return cached;
     const response = await this.request(
@@ -406,7 +467,11 @@ class SonyBankClient {
     return { rawText, json };
   }
 
-  async history(currency: string, from: string, to: string): Promise<HistoryCollection> {
+  async history(
+    currency: string,
+    from: string | undefined,
+    to: string,
+  ): Promise<HistoryCollection> {
     const revision = await this.revision("ea");
     const pages: RawJsonResponse[] = [];
     let acquisitionStart = 1;
@@ -419,13 +484,14 @@ class SonyBankClient {
         {
           branchNum: this.credential.branchNum,
           accountNum: this.credential.accountNum,
-          currencyCdInq: first ? currency : "",
-          ...(first ? {} : { currencyCd: currency }),
-          inquiryStrtdtCat: from,
+          ...(first
+            ? { currencyCdInq: currency }
+            : { ...(from === undefined ? {} : { currencyCdInq: "" }), currencyCd: currency }),
+          ...(from === undefined ? {} : { inquiryStrtdtCat: from }),
           inquiryEnddtCat: to,
           maximumAcqCnt: PAGE_SIZE,
           acquisitionStrtCnt: acquisitionStart,
-          sortSelect: "00001",
+          sortSelect: from === undefined ? "00002" : "00001",
           detailDispSg: "1",
         },
         {
@@ -460,12 +526,12 @@ class SonyBankClient {
       }
       acquisitionStart += PAGE_SIZE;
     }
-    throw new Error("Sony Bank history exceeded the bounded page limit");
+    throw new SonyBankError("EABA0600S1fE10", undefined, 0, "history_page_limit_exceeded");
   }
 
   async historyCsv(
     currency: string,
-    from: string,
+    from: string | undefined,
     to: string,
     expectedCount: number,
   ): Promise<{ body: ArrayBuffer; mediaType: string }> {
@@ -486,9 +552,9 @@ class SonyBankClient {
           branchNum: this.credential.branchNum,
           accountNum: this.credential.accountNum,
           currencyCd: currency,
-          inquiryStrtdtCat: from,
+          ...(from === undefined ? {} : { inquiryStrtdtCat: from }),
           inquiryEnddtCat: to,
-          sortSelect: "00001",
+          sortSelect: from === undefined ? "00002" : "00001",
           detailDispSg: "1",
         }),
         redirect: "manual",
@@ -519,6 +585,202 @@ class SonyBankClient {
     return {
       body,
       mediaType,
+    };
+  }
+
+  async realisedGains(artifacts: RawArtifact[]): Promise<void> {
+    const context: RequestContext = {
+      area: "ea",
+      revision: await this.revision("ea"),
+      pageUrl: `${ORIGIN}/pages/ea/eada110a/`,
+      screenId: "EADA110AS1f",
+      eventId: "EADA110AS1fE01",
+    };
+    const summary = await this.requestJson(
+      "/custom-web00/eada/eada110as1g/e10",
+      {
+        branchNum: this.credential.branchNum,
+        accountNum: this.credential.accountNum,
+      },
+      context,
+    );
+    artifacts.push({
+      dataset: "realised-gains-response",
+      filename: "realised-gains-response.json",
+      mediaType: "application/json",
+      body: summary.rawText,
+      unitKey: "realised-evidence",
+    });
+    const years = [summary.json.rliztnPrftLsCy, summary.json.rliztnPrftLsLy];
+    if (
+      years.some((year) => typeof year !== "string" || !/^\d{4}$/u.test(year)) ||
+      Number(years[0]) !== Number(years[1]) + 1
+    )
+      throw new SonyBankError("realised-gains", undefined, 0, "realised_gains_invalid");
+    const expected = countValue(summary.json.totalDtlGrsCnt);
+    if (
+      expected === null ||
+      summary.json.totalDtlStartYr !== years[1] ||
+      summary.json.totalDtlEndYr !== years[0]
+    )
+      throw new SonyBankError("realised-gains", undefined, 0, "realised_gains_invalid");
+    const csv = await this.binary(
+      "/custom-web00/eada/cust-web/foreign-currency-profit-loss/situation-inquiry/download",
+      {
+        branchNum: this.credential.branchNum,
+        accountNum: this.credential.accountNum,
+        totalDtlStartYr: years[1],
+        totalDtlEndYr: years[0],
+      },
+      { ...context, eventId: "EADA110AS1fE12" },
+    );
+    let rows: string[][];
+    try {
+      let text: string;
+      try {
+        text = decodeUtf8(new Uint8Array(csv.body));
+      } catch {
+        text = new TextDecoder("shift-jis", { fatal: true }).decode(csv.body);
+      }
+      const warnings: CsvWarning[] = [];
+      rows = parseCsv(text, warnings);
+      if (warnings.length > 0) throw new Error("csv_shape");
+    } catch {
+      throw new SonyBankError("realised-gains", undefined, 0, "realised_gains_csv_invalid");
+    }
+    const header = [
+      "お取り引き日",
+      "商品",
+      "契約番号",
+      "明細番号",
+      "通貨",
+      "摘要",
+      "入金額",
+      "出金額",
+      "残高",
+      "適用レート",
+      "取引円換算額",
+      "特約レート",
+      "為替差損益",
+      "平均購入レート",
+      "利息円貨額",
+    ];
+    if (
+      rows.length - 1 !== expected ||
+      rows.some((row) => row.length !== 15) ||
+      header.some((cell, i) => rows[0]?.[i] !== cell)
+    )
+      throw new SonyBankError("realised-gains", undefined, 0, "realised_gains_csv_invalid");
+    artifacts.push({
+      dataset: "realised-gains-csv",
+      filename: "realised-gains.csv",
+      mediaType: csv.mediaType,
+      body: csv.body,
+      unitKey: "realised-evidence",
+    });
+    for (const year of years)
+      artifacts.push({
+        dataset: "realised-gains",
+        filename: `realised-gains-${String(year)}.json`,
+        mediaType: "application/json",
+        body: summary.rawText,
+        unitKey: `realised-year-${String(year)}`,
+      });
+  }
+
+  async deliveredDocuments(to: string, artifacts: RawArtifact[]): Promise<void> {
+    const { from: start } = documentWindow(to);
+    const context: RequestContext = {
+      area: "aa",
+      revision: await this.revision("aa"),
+      pageUrl: `${ORIGIN}/pages/aa/dbba1800/`,
+      screenId: "DBBA1800S1f",
+      eventId: "DBBA1800S1fE11",
+    };
+    const list = await this.requestJson(
+      "/custom-web00/dbba/delive-doc/inquiry/cust",
+      {
+        branchNum: this.credential.branchNum,
+        accountNum: this.credential.accountNum,
+        productTyp: "01",
+        browseTyp: "0",
+        searchStartDt: start,
+        searchEndDt: to,
+        maxCnt: 10,
+        startCnt: 1,
+      },
+      context,
+    );
+    artifacts.push({
+      dataset: "delivered-documents",
+      filename: "delivered-documents.json",
+      mediaType: "application/json",
+      body: list.rawText,
+    });
+    const rows = list.json.deliveryDocInfo;
+    const count = countValue(list.json.extractionAgrCnt);
+    if (
+      !Array.isArray(rows) ||
+      count === null ||
+      rows.length !== countValue(list.json.returnCnt) ||
+      count !== rows.length ||
+      count > 10
+    )
+      throw new SonyBankError("delivered-documents", undefined, 0, "document_list_incomplete");
+    const seen = new Set<number>();
+    for (const [index, value] of rows.entries()) {
+      if (
+        !isObject(value) ||
+        value.deliveryDocTyp !== "20" ||
+        !Number.isSafeInteger(value.deliveryDocNum) ||
+        Number(value.deliveryDocNum) < 0 ||
+        seen.has(Number(value.deliveryDocNum))
+      )
+        throw new SonyBankError("delivered-documents", undefined, 0, "document_list_invalid");
+      seen.add(Number(value.deliveryDocNum));
+      const pdf = await this.binary(
+        "/custom-web00/dbba/delivery-documents/pdf-download",
+        {
+          branchNumber: this.credential.branchNum,
+          accountNumber: this.credential.accountNum,
+          deliveryDocNum: value.deliveryDocNum,
+        },
+        { ...context, eventId: "DBBA1800S1fE12" },
+      );
+      if (
+        pdf.body.byteLength < 5 ||
+        pdf.body.byteLength > 1024 * 1024 ||
+        new TextDecoder().decode(new Uint8Array(pdf.body, 0, 5)) !== "%PDF-"
+      )
+        throw new SonyBankError("delivered-documents", undefined, 0, "document_pdf_invalid");
+      artifacts.push({
+        dataset: "delivered-document-pdf",
+        filename: `delivered-document-${String(index + 1).padStart(4, "0")}.pdf`,
+        unitKey: `delivered-document-${String(index + 1).padStart(4, "0")}`,
+        mediaType: "application/pdf",
+        body: pdf.body,
+      });
+    }
+  }
+
+  private async binary(
+    path: string,
+    body: JsonObject,
+    context: RequestContext,
+  ): Promise<{ body: ArrayBuffer; mediaType: string }> {
+    const response = await this.request(context.eventId, `${ORIGIN}${path}`, {
+      method: "POST",
+      headers: this.headers(context, true),
+      body: JSON.stringify(body),
+      redirect: "manual",
+    });
+    this.#cookies.absorb(response.headers);
+    const nextCsrf = response.headers.get("bff-csrf");
+    if (nextCsrf) this.#csrf = nextCsrf;
+    if (!response.ok) throw new SonyBankError(context.eventId, response.status);
+    return {
+      body: await response.arrayBuffer(),
+      mediaType: response.headers.get("content-type") ?? "application/octet-stream",
     };
   }
 
@@ -667,16 +929,20 @@ export function validateHistoryPage(
     !Number.isSafeInteger(pageIndex) ||
     pageIndex < 0
   ) {
-    throw new Error("sony_bank_history_pagination_invalid");
+    throw new SonyBankError("EABA0600S1fE10", undefined, 0, "history_pagination_invalid");
+  }
+  if (json.returnCnt !== undefined && countValue(json.returnCnt) !== rowCount) {
+    throw new SonyBankError("EABA0600S1fE10", undefined, 0, "history_pagination_length_mismatch");
   }
   const total = countValue(json.countCnt);
-  if (total === null) throw new Error("sony_bank_history_pagination_invalid");
+  if (total === null)
+    throw new SonyBankError("EABA0600S1fE10", undefined, 0, "history_pagination_invalid");
   if (expectedTotal !== null && total !== expectedTotal) {
-    throw new Error("sony_bank_history_pagination_total_changed");
+    throw new SonyBankError("EABA0600S1fE10", undefined, 0, "history_pagination_total_changed");
   }
   const expectedRows = Math.max(0, Math.min(PAGE_SIZE, total - pageIndex * PAGE_SIZE));
   if (rowCount !== expectedRows) {
-    throw new Error("sony_bank_history_pagination_length_mismatch");
+    throw new SonyBankError("EABA0600S1fE10", undefined, 0, "history_pagination_length_mismatch");
   }
   return {
     rowCount,
@@ -878,37 +1144,40 @@ function assertHistoryCsvCount(
     throw new SonyBankError(operation, undefined, 0, "history_csv_missing_with_transactions");
   let rows: string[][];
   try {
-    const charset = /;\s*charset="?([a-z0-9._-]+)"?$/iu
-      .exec(mediaType)?.[1]
-      ?.toLowerCase()
-      .replaceAll("_", "-");
-    const shiftJis = ["shift-jis", "shiftjis", "sjis", "windows-31j", "cp932"];
-    if (charset && !["utf-8", "utf8", ...shiftJis].includes(charset)) throw new Error("charset");
-    let text: string;
-    if (charset && shiftJis.includes(charset)) {
-      text = new TextDecoder("shift-jis", { fatal: true }).decode(body);
-    } else if (charset) {
-      text = decodeUtf8(new Uint8Array(body));
-    } else {
-      try {
-        text = decodeUtf8(new Uint8Array(body));
-      } catch {
-        text = new TextDecoder("shift-jis", { fatal: true }).decode(body);
-      }
-    }
-    rows = parseCsv(text);
-  } catch {
-    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid");
+    rows = parseCsv(decodeSonyCsv(new Uint8Array(body), mediaType));
+  } catch (error) {
+    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid", {
+      csvFailure: error instanceof SonyCsvDecodeError ? error.category : "parse",
+    });
   }
   const header = ["取引日", "摘要", "参考情報", "通貨", "預入額", "引出額", "差引残高"];
   if (currency !== "JPY") header.push("為替レート");
   if (rows.length === 0)
     throw new SonyBankError(operation, undefined, 0, "history_csv_missing_with_transactions");
-  if (
-    rows.some((row) => row.length !== header.length) ||
-    header.some((value, index) => rows[0]![index] !== value)
-  )
-    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid");
+  const shape = {
+    csvExpectedColumnCount: header.length,
+    csvHeaderColumnCount: rows[0]!.length,
+    csvMinColumnCount: rows.reduce((minimum, row) => Math.min(minimum, row.length), Infinity),
+    csvMaxColumnCount: rows.reduce((maximum, row) => Math.max(maximum, row.length), 0),
+    csvInvalidRowCount: rows.filter((row) => row.length !== header.length).length,
+  };
+  if (header.some((value, index) => rows[0]![index] !== value))
+    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid", {
+      ...shape,
+      csvFailure: "header",
+    });
+  if (shape.csvInvalidRowCount > 0)
+    throw new SonyBankError(operation, undefined, 0, "history_csv_invalid", {
+      ...shape,
+      csvFailure: "columns",
+    });
   if (rows.length - 1 !== expectedCount)
     throw new SonyBankError(operation, undefined, 0, "history_csv_count_mismatch");
+}
+
+function documentWindow(to: string): { from: string; to: string } {
+  const year = Number(to.slice(0, 4)) - 5;
+  // The same calendar day five years ago may not exist on a leap day.
+  const from = `${year}${to.slice(4) === "-02-29" ? "-02-28" : to.slice(4)}`;
+  return { from, to };
 }

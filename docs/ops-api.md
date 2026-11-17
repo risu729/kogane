@@ -594,6 +594,49 @@ only. A collected execution with no reported run is `unpublished`
 (`run_not_reported`); one whose runs do not settle within 48 h of collection is
 `unpublished` (`publication_not_observed`).
 
+**Current publication after tracking ended.** The same detail GET and
+`kogane.ops.operation.get` may add `execution.currentResult`, explicitly
+versioned as `kogane-collector-current-result-v1`. This extension applies only
+to an original collection whose failed receipt and collected execution ended
+`unpublished / publication_not_observed` at or after its unchanged 48-hour
+horizon. It does not change the v1 request status, stages, execution state,
+reason, `publishedAt` or `finishedAt`.
+
+```json
+{
+  "schemaVersion": "kogane-collector-current-result-v1",
+  "state": "published",
+  "publishedAt": null,
+  "readReadiness": "unproven",
+  "originalTracking": {
+    "state": "unpublished",
+    "reasonCode": "publication_not_observed",
+    "publicationDeadlineAt": "2026-09-13T00:00:00.000Z",
+    "finishedAt": "2026-09-13T00:01:00.000Z"
+  }
+}
+```
+
+These timestamps are synthetic. `currentResult.state` is `published` only
+when the original exact, valid, nonempty, unique run set (at most 100) has the
+normal trail proof: all reported runs settled and at least one published
+parse, with no failed provider outcome. It is `publication_not_observed`
+otherwise. A different later run from the same source is never substituted.
+Invalid source/run bindings and other terminal outcomes omit the extension.
+The existing registered-revision precedence and artifact publication pointers
+supply the proof; the GET performs no writes and launches no provider work.
+
+`publishedAt: null` explicitly leaves the actual publication instant unknown:
+the trail proves current pointers, not when publication first occurred.
+`readReadiness: unproven` does not mark `projected` complete or the request
+completed; the existing CORE epoch/revision and READ requirements still apply.
+This result is derived on each read, not a durable recovery observation. If
+current pointers cease to prove publication it returns
+`publication_not_observed` again. No historical polling queue or migration is
+needed. The operations list remains a stored summary and does not include
+this detail-only extension. The detail page labels both the original deadline
+failure and the current publication result in Japanese.
+
 Limits: only the connections `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names are
 started; the requested window is not applied; one collector call is awaited
 per Processor invocation, inside the tick. The web UI requests only a

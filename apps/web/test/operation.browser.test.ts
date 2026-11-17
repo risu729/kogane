@@ -38,6 +38,7 @@ const REBUILD = id("3");
 const MISSING = id("4");
 const REFRESH = id("5");
 const RETRYABLE = id("6");
+const LATE = id("7");
 
 const pending = (kind: OperationRecordKind) =>
   OPERATION_RECORD_STAGES_BY_KIND[kind].map((stage) => ({
@@ -268,8 +269,48 @@ const refresh: OperationRecordWire = {
   },
 };
 
+const late: OperationRecordWire = {
+  ...published,
+  operationId: LATE,
+  status: "failed",
+  failureCode: "publication_not_observed",
+  stages: pending("collection").map((stage) =>
+    stage.stage === "registered"
+      ? {
+          ...stage,
+          state: "blocked",
+          failureCode: "publication_not_observed",
+          attempts: 1,
+          updatedAt: "2026-09-13T00:07:00.000Z",
+        }
+      : stage,
+  ),
+  execution: {
+    ...published.execution!,
+    state: "unpublished",
+    reasonCode: "publication_not_observed",
+    publishedAt: null,
+    finishedAt: "2026-09-13T00:07:00.000Z",
+    currentResult: {
+      schemaVersion: "kogane-collector-current-result-v1",
+      state: "published",
+      publishedAt: null,
+      readReadiness: "unproven",
+      originalTracking: {
+        state: "unpublished",
+        reasonCode: "publication_not_observed",
+        publicationDeadlineAt: "2026-09-13T00:06:00.000Z",
+        finishedAt: "2026-09-13T00:07:00.000Z",
+      },
+    },
+  },
+};
+
 const RECORDS = new Map(
-  [published, waiting, rebuild, refresh, retryable].map((record) => [record.operationId, record]),
+  [published, waiting, rebuild, refresh, retryable, late].map((record) => [
+    record.operationId,
+    record,
+  ]),
 );
 
 describe.if(runnable)("the operator's 依頼の経過 page", () => {
@@ -450,6 +491,32 @@ describe.if(runnable)("the operator's 依頼の経過 page", () => {
       await page.close();
     }
   }, 60_000);
+
+  for (const viewport of VIEWPORTS)
+    test(`${viewport.name}: late publication keeps the original deadline failure explicit`, async () => {
+      const page = await browser.newPage({ viewport });
+      try {
+        await page.goto(`${origin}/operations/${LATE}`);
+        await page.getByRole("heading", { level: 2, name: "収集の実行" }).waitFor();
+        const shown = await text(page);
+        for (const expected of [
+          "現在の公開結果：公開済み",
+          "元の追跡結果",
+          "収集から48時間以内に公開を確認できませんでした",
+          "2026-09-13T00:06:00.000Z",
+          "2026-09-13T00:07:00.000Z",
+          "公開時刻は不明",
+          "読み取りモデルへの反映は未確認",
+          "元の依頼の失敗と各段階の記録は保持",
+        ])
+          expect(shown).toContain(expected);
+        expect(reads).toEqual([LATE]);
+        expect(await noPageOverflow(page)).toBe(true);
+        expect(await auditView(page)).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
 
   test("a rebuild has its one stage and no collector execution", async () => {
     const page = await browser.newPage();

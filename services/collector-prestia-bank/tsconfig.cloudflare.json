@@ -1,8 +1,7 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["node"],
-    "skipLibCheck": true
+    "types": ["node"]
   },
   "include": ["worker-configuration.d.ts", "cloudflare.config.ts", "wrangler.config.ts"]
 }

@@ -131,6 +131,18 @@ export interface OperationRecordRunWire {
   };
   artifacts: OperationRecordRunArtifacts | null;
 }
+export interface OperationRecordCurrentResultWire {
+  schemaVersion: "kogane-collector-current-result-v1";
+  state: "published" | "publication_not_observed";
+  publishedAt: null;
+  readReadiness: "unproven";
+  originalTracking: {
+    state: "unpublished";
+    reasonCode: "publication_not_observed";
+    publicationDeadlineAt: string;
+    finishedAt: string;
+  };
+}
 export interface OperationRecordExecutionWire {
   action: (typeof OPERATION_RECORD_COLLECTOR_ACTIONS)[number];
   state: OperationRecordExecutionState;
@@ -144,6 +156,7 @@ export interface OperationRecordExecutionWire {
   publishedAt: string | null;
   finishedAt: string | null;
   runs: OperationRecordRunWire[];
+  currentResult?: OperationRecordCurrentResultWire;
 }
 export interface OperationRecordWire {
   schemaVersion: typeof OPERATION_RECORD_SCHEMA;
@@ -323,23 +336,73 @@ function validRun(value: unknown): value is OperationRecordRunWire {
   }
 }
 
-function validExecution(value: unknown, kind: OperationRecordKind): boolean {
+function validCurrentResult(value: unknown, execution: OperationRecordExecutionWire): boolean {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
-      "action",
+      "schemaVersion",
       "state",
-      "connectionId",
-      "reasonCode",
-      "scope",
-      "waits",
-      "expiresAt",
-      "startedAt",
-      "collectedAt",
       "publishedAt",
-      "finishedAt",
-      "runs",
-    ])
+      "readReadiness",
+      "originalTracking",
+    ]) ||
+    value.schemaVersion !== "kogane-collector-current-result-v1" ||
+    !isOneOf(["published", "publication_not_observed"] as const)(value.state) ||
+    value.publishedAt !== null ||
+    value.readReadiness !== "unproven" ||
+    execution.action !== "collect" ||
+    execution.state !== "unpublished" ||
+    execution.reasonCode !== "publication_not_observed" ||
+    execution.publishedAt !== null ||
+    execution.collectedAt === null ||
+    execution.finishedAt === null ||
+    execution.runs.length === 0 ||
+    new Set(execution.runs.map((run) => run.runId)).size !== execution.runs.length
+  )
+    return false;
+  const original = value.originalTracking;
+  const deadline = Date.parse(execution.collectedAt) + 48 * 3_600_000;
+  if (
+    !isRecord(original) ||
+    !hasExactKeys(original, ["state", "reasonCode", "publicationDeadlineAt", "finishedAt"]) ||
+    original.state !== "unpublished" ||
+    original.reasonCode !== "publication_not_observed" ||
+    original.finishedAt !== execution.finishedAt ||
+    original.publicationDeadlineAt !== new Date(deadline).toISOString() ||
+    Date.parse(execution.finishedAt) < deadline
+  )
+    return false;
+  const published =
+    execution.runs.every(
+      (run) =>
+        ["published", "unpublished", "blocked"].includes(run.state) &&
+        run.providerOutcome !== "failed" &&
+        (run.artifacts === null || run.artifacts.pending === 0),
+    ) && execution.runs.some((run) => run.state === "published");
+  return value.state === (published ? "published" : "publication_not_observed");
+}
+
+function validExecution(value: unknown, kind: OperationRecordKind): boolean {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(
+      value,
+      [
+        "action",
+        "state",
+        "connectionId",
+        "reasonCode",
+        "scope",
+        "waits",
+        "expiresAt",
+        "startedAt",
+        "collectedAt",
+        "publishedAt",
+        "finishedAt",
+        "runs",
+      ],
+      ["currentResult"],
+    )
   )
     return false;
   const action = kind === "collection" ? "collect" : "refresh-session";
@@ -358,7 +421,9 @@ function validExecution(value: unknown, kind: OperationRecordKind): boolean {
     instant(value.finishedAt) &&
     Array.isArray(value.runs) &&
     value.runs.length <= OPERATION_RECORD_MAX_RUNS &&
-    value.runs.every(validRun)
+    value.runs.every(validRun) &&
+    (!Object.hasOwn(value, "currentResult") ||
+      validCurrentResult(value.currentResult, value as unknown as OperationRecordExecutionWire))
   );
 }
 
@@ -416,7 +481,13 @@ export function validOperationRecord(
     return false;
   // Only a collector executes a collection or a session refresh.
   const executed = value.kind === "collection" || value.kind === "session-refresh";
-  return executed ? validExecution(value.execution, value.kind) : value.execution === null;
+  if (!executed) return value.execution === null;
+  if (!validExecution(value.execution, value.kind)) return false;
+  const execution = value.execution as unknown as OperationRecordExecutionWire;
+  return (
+    execution.currentResult === undefined ||
+    (value.status === "failed" && value.failureCode === "publication_not_observed")
+  );
 }
 
 /** The operation id a record path names, or null for any other path. */

@@ -17,7 +17,6 @@ export default defineConfig({
     compatibilityDate: "2026-08-30",
     compatibilityFlags: ["nodejs_compat"],
     entrypoint: "src/schedule-entrypoint.ts",
-    workersDev: true,
     previewUrls: false,
     placement: {
       region: "aws:ap-northeast-1",

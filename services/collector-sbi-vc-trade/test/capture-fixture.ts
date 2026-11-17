@@ -99,6 +99,11 @@ async function capture() {
     }
     if (event === "getCashflowList" && scenario === "classic-error")
       return new Response("synthetic unavailable", { status: 503 });
+    if (event === "executionList" && data.isExOrder === "false")
+      return Response.json({
+        meta: { status: "OK" },
+        body: { list: [], pageNumber: 0, pageSize: 20, totalSize: 0, totalNumOfPages: 0 },
+      });
     const dataset =
       event === "executionList"
         ? `executions-${data.historical === "true" ? "historical" : "recent"}-page-0001`

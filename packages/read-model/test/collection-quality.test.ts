@@ -13,6 +13,7 @@ import {
   LEGACY_CELL_QUALITY_SQL_SHA256,
 } from "./collection-quality-cells-legacy-sql";
 import { QualityStore } from "./collection-quality-fixture";
+import { withoutSbiLegacySnapshotPartition } from "../../parsers/test/snapshot-partition-compatibility";
 import {
   ACCOUNT_COVERAGE_SQL,
   CELL_QUALITY_SQL,
@@ -953,12 +954,13 @@ describe("collection quality on the complete CORE schema without statistics", ()
     ).toEqual([]);
   });
 
-  test("the cell page's text is unchanged by sharing its CTEs with the account read", () => {
-    // The frozen text of CELL_QUALITY_SQL before ADR 0088 split out its CTEs.
-    expect(createHash("sha256").update(CELL_QUALITY_SQL).digest("hex")).toBe(
+  test("sharing CTEs preserves the frozen cell page apart from the explicit SBI legacy partition", () => {
+    // Keep the pre-ADR 0088 text, allowing only ADR 0109's closed partition alias.
+    const legacyPartition = withoutSbiLegacySnapshotPartition(CELL_QUALITY_SQL);
+    expect(createHash("sha256").update(legacyPartition).digest("hex")).toBe(
       LEGACY_CELL_QUALITY_SQL_SHA256,
     );
-    expect(CELL_QUALITY_SQL).toBe(LEGACY_CELL_QUALITY_SQL);
+    expect(legacyPartition).toBe(LEGACY_CELL_QUALITY_SQL);
     const shared = CELL_QUALITY_SQL.split("\nSELECT * FROM cq_result")[0]!;
     expect(ACCOUNT_COVERAGE_SQL.startsWith(shared)).toBe(true);
   });

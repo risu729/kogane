@@ -87,3 +87,49 @@ test("an accepted gateway status is stored as OK", async () => {
   expect(stored).toEqual(health);
   expect(lines.join("\n")).toContain("sbi_vc_keepalive");
 });
+
+test.each([401, 403, 200])(
+  "a refused session waits for refresh without replaying it (HTTP %s)",
+  async (status) => {
+    const stub = env.SESSION_STATE.getByName(`refresh-required-${status}`);
+    await runInDurableObject(stub, async (instance, state) => {
+      Object.assign((instance as unknown as { env: Env }).env, {
+        SESSION_SEED: SEED,
+        SESSION_ENCRYPTION_KEY: KEY,
+      });
+      const fetched = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(status === 200 ? gateway("rejected") : new Response(null, { status }));
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const refused = await instance.runKeepAlive();
+      expect(refused.sessionRefreshRequired).toBe(true);
+      expect(await state.storage.get<HealthState>("health")).toEqual(refused);
+      // Neither repeated alarms nor a failed login can make this seed usable.
+      expect(await instance.runKeepAlive()).toEqual(refused);
+      const login = await instance.runReauthenticate();
+      expect(login.lastReauthErrorCode).not.toBeNull();
+      expect(login.sessionRefreshRequired).toBe(true);
+      expect(await instance.runKeepAlive()).toEqual(login);
+      expect(fetched).toHaveBeenCalledOnce();
+      expect(login.consecutiveFailures).toBe(1);
+    });
+  },
+);
+
+test("a server error can be probed again without invalidating the session", async () => {
+  const stub = env.SESSION_STATE.getByName("retry-server-error");
+  await runInDurableObject(stub, async (instance) => {
+    Object.assign((instance as unknown as { env: Env }).env, {
+      SESSION_SEED: SEED,
+      SESSION_ENCRYPTION_KEY: KEY,
+    });
+    const fetched = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(gateway("OK"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect((await instance.runKeepAlive()).sessionRefreshRequired).toBe(false);
+    expect((await instance.runKeepAlive()).lastErrorCode).toBeNull();
+    expect(fetched).toHaveBeenCalledTimes(2);
+  });
+});

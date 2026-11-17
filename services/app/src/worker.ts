@@ -28,6 +28,7 @@ import {
   REPORTED_HOLDINGS_CHANGE_PATH,
 } from "./reported-holdings-change-api";
 import { reconstructedStateApi, RECONSTRUCTED_STATE_PATH } from "./reconstructed-state-api";
+import { economicReadinessApi, ECONOMIC_READINESS_PATH } from "./economic-readiness-api";
 import { collectionQualityApi } from "./collection-quality-api";
 import { identityApi } from "./identity-api";
 import { accountCandidatesApi } from "./account-candidates-api";
@@ -62,6 +63,7 @@ function classify(path: string): string {
   if (path === REPORTED_STATE_PATH) return "reported_state";
   if (path === REPORTED_HOLDINGS_CHANGE_PATH) return "reported_holdings_change";
   if (path === RECONSTRUCTED_STATE_PATH) return "reconstructed_state";
+  if (path === ECONOMIC_READINESS_PATH) return "economic_readiness";
   if (path === "/api/collection-quality" || path.startsWith("/api/collection-quality/"))
     return "collection_quality";
   if (path === `${EVIDENCE_PREFIX}/meta`) return "meta";
@@ -145,6 +147,8 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     reconstructedStateApi(request, env, url, subject),
   );
   if (reconstructedResponse) return reconstructedResponse;
+  const readinessResponse = await catalogue(() => economicReadinessApi(request, env, url, subject));
+  if (readinessResponse) return readinessResponse;
   const collectionQualityResponse = await catalogue(() =>
     collectionQualityApi(request, env, url, subject),
   );

@@ -1,3 +1,4 @@
+import type { StatementDocumentResult } from "./documents";
 export interface PasswordCredential {
   readonly connectionId: string;
   readonly bootstrapMode: "password";
@@ -84,8 +85,9 @@ export interface ConnectionSummary {
   readonly jpointCode?: JPointCollectionCode;
   /** Independent acquisition-month history; never a statement coverage claim. */
   readonly jpointHistoryCode?: JPointCollectionCode;
-  /** Offered file bytes remain outside observed acquisition. */
-  readonly documentCode?: "statement_export_bytes_unverified";
+  /** Original export outcome is independent from financial statement coverage. */
+  readonly documentCode?: "statement_export_bytes_unverified" | "collected" | "partial";
+  readonly documentResults?: readonly StatementDocumentResult[];
   readonly connectionId: string;
   readonly bootstrapMode: MyJcbCredential["bootstrapMode"];
   readonly status: "success" | "partial" | "failed" | "human-required";

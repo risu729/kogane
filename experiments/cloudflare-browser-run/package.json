@@ -3,11 +3,11 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@cloudflare/puppeteer": "1.4.0"
+    "@cloudflare/puppeteer": "2.0.0"
   },
   "devDependencies": {
     "@types/node": "26.6.6",
     "typescript": "7.0.2",
-    "wrangler": "4.158.0"
+    "wrangler": "4.162.0"
   }
 }

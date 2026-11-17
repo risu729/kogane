@@ -209,6 +209,31 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
     if (policy === undefined) throw new Error("0066 names no snapshot policy row");
     db.transaction(() => db.exec(policy))();
   }
+  // 0089: mirror the annual Sony container and PDF eligibility policy from
+  // production. Apply missing rows only; reopening preserves operator choices.
+  const sonyPolicies = readFileSync(
+    join(
+      EXPERIMENT_ROOT,
+      "../../packages/storage-d1/migrations/core/0089_sony_realised_gains_snapshot.sql",
+    ),
+    "utf8",
+  )
+    .replace(/^\s*--.*$/gm, "")
+    .split(";");
+  for (const [parser, dataset] of [
+    ["sony-bank-realised-gains", "realised-gains"],
+    ["sony-bank-document-metadata", "delivered-document-pdf"],
+  ] as const) {
+    if (
+      db
+        .query("SELECT 1 FROM dataset_snapshot_policies WHERE parser_name=? AND dataset=?")
+        .get(parser, dataset)
+    )
+      continue;
+    const policy = sonyPolicies.find((statement) => statement.includes(`'${parser}'`));
+    if (policy === undefined) throw new Error("0089 names no snapshot policy row");
+    db.transaction(() => db.exec(policy))();
+  }
   // Snapshot membership subset of CORE 0096 only. The local parser still
   // rejects every partial parent, so retain its run scope instead of importing
   // production's independent-unit/transaction eligibility rows. Never replace
@@ -308,14 +333,38 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
       ),
     )();
   }
+  // Missing document policies are repaired individually; operator choices stay.
+  if (
+    (
+      db
+        .query(
+          "SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE source_id='myjcb' AND parser_name='myjcb-statement-document-metadata' AND dataset IN ('credit-csv','credit-pdf','credit-ofx')",
+        )
+        .get() as { n: number }
+    ).n < 3
+  ) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(
+            EXPERIMENT_ROOT,
+            "../../packages/storage-d1/migrations/core/0101_myjcb_document_unit_eligibility.sql",
+          ),
+          "utf8",
+        ),
+      ),
+    )();
+  }
   // 0056/0059 advance the board reader (ADR 0028 and its amendment). 0084
-  // follows the shared CSV release for all four exact-version policies.
+  // follows the shared CSV release for all four exact-version policies. 0102
+  // advances only the complete shipped Vpass default to its compatible reader.
   // Each UPDATE names its previous value, so reopening preserves later pins
   // and operator-selected alternatives.
   for (const migration of [
     "0056_sbi_shinsei_exchange_rate_policy_version.sql",
     "0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql",
     "0084_csv_reader_release_snapshot_policies.sql",
+    "0102_vpass_authori_transition_policy.sql",
   ])
     db.exec(
       readFileSync(

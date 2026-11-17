@@ -320,3 +320,58 @@ Status: accepted (merged 2026-10-09 in #592).
   produces coverage; 10, seals are compared with the current identity epoch
   and pins (`identity_changed`), but the start snapshot still uses today's
   mappings. Still held as written: 3, 6, 9 and 11.
+
+## Amendment: compose the validated fold and late explanation (2026-11-12)
+
+- Status: proposed until this amendment's implementation merges.
+
+### Context
+
+The stored-state query called `reconstructState` and then `explainLate` on
+the same selections. The fold had already validated both selections and
+computed the whole-scope late revision diff to check baseline compatibility.
+The second public call validated both selections and calculated that diff
+again. It performed no additional SQL, but repeated the selector's complete
+canonical equality check.
+
+### Decision
+
+`reconstructStateWithLate` accepts the same untrusted reconstruction input
+and returns the fold result and its whole-scope `LateExplanation` together.
+Each selection is validated once during that call. The stored-state query
+uses this composition instead of calling the two public functions in turn.
+The existing `reconstructState` projects exactly its original `{ ok, state }`
+or refusal shape from the same validating composition. Standalone
+`explainLate` retains its validation and refusal order.
+
+Reconstruction still checks the request, policy, start, end, current
+selection, request cut, baseline validity and pair compatibility in that
+order. Standalone late explanation still checks baseline before current.
+An invalid baseline is mapped to `baseline_mismatch` only in reconstruction.
+The returned late diff names active revisions across the whole scope,
+including records outside a cell's date window; it is not derived from
+per-cell totals. Without a baseline it is null.
+
+No unchecked entrypoint, validation token, boolean bypass or mutable-object
+cache is introduced. A later public call validates again even if the same
+object was previously accepted. SQL, input bounds, policies, fold engine
+release, state/route DTOs, manifests and context digests do not change.
+
+### Consequences and verification
+
+The query avoids one repeated validation of each selection when a baseline
+exists. Baseline-free reads retain one validation and have no duplicate work
+to remove. Full-result comparisons against the frozen pre-change public
+entrypoints cover valid and malformed selections, late corrections,
+withdrawals, history cuts, duplicate claims, reordered inputs and mismatched
+baselines. The shared read service is compared over synthetic SQLite stores,
+including refusals, complete canonical answers and digests. Unit regressions
+also preserve the public result shape, refusal precedence and revalidation
+after input mutation.
+
+The reduction in repeated validation is visible in the call path; this
+amendment claims no newly measured latency improvement. Historical cost
+figures and their runtime limits remain in
+[reconstructed state](../reconstructed-state.md#limits).
+Timings are observations, not test thresholds. No provider, remote D1,
+deployed Worker or production financial state is validated by this change.

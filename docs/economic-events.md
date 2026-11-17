@@ -1,6 +1,6 @@
 # Economic events, allocations, obligations and reconciliation
 
-## Internal current row readiness (S0)
+## Current row readiness (S0)
 
 The internal `queryEconomicRowReadiness` query diagnoses 1–64 explicit
 transaction/parse pairs for bank movements or securities executions. It reads
@@ -9,7 +9,13 @@ live key/alias holders in one SQL snapshot, returning closed reasons and
 digested pins only. It writes nothing. Agents read it through
 `kogane.economic-readiness.read` (`/mcp`) or
 `POST /api/agent/v1/economic-readiness.read` (`services/app/src/read-tools.ts`,
-[agent API](agent-api.md#tools)); no page shows it.
+[agent API](agent-api.md#tools)). Transaction detail also offers an on-demand
+explanation for a registry-supported bank movement or securities execution,
+through `GET /api/v2/economic-readiness?family=…&observationId=…&parseRunId=…`.
+It diagnoses the exact displayed observation and parse, including an old parse;
+it never substitutes the current parse. The browser and tools call the same
+grant-checked service. A failed diagnostic leaves the observation and original
+evidence readable. See the [browser amendment](adr/0067-economic-row-readiness.md#amendment-2026-11-12-transaction-detail-read-parity).
 Provider-ID identity may be admitted; overall readiness remains blocked by
 the unresolved principal-to-owner contract. Proposal/writer flags stay false
 and history coverage stays unknown. See [ADR 0067](adr/0067-economic-row-readiness.md)
@@ -410,7 +416,10 @@ Limits:
   needs-review is the planners' job (G3); the knowledge selector reports them
   as `identity_changed`, holder kept ([ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md)).
 - Settlement leg subjects stay bare account ids (read through 0044's
-  tolerance); neither writer writes event times or leg effects.
+  tolerance). The v2 settlement writer records the admitted SBI Shinsei
+  top-activity parser's posting date on future acceptances; older seals and
+  other adapters have no inferred time. Neither writer writes leg effects
+  ([ADR 0058 amendment](adr/0058-knowledge-selector-and-reconstruction-adapter.md#amendment-2026-11-12-sbi-shinsei-settlement-posting-dates)).
 - Trigger behaviour and cost on remote D1 are not verified.
 
 Verified locally (synthetic data only): `packages/storage-d1/test/economic-commit-guard.test.ts`

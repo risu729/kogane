@@ -33,7 +33,7 @@ test("an additional auth failure is not hidden as ordinary waiting", () => {
   expect(
     vPointScheduledResult({ manifest: { ...manifest, failures }, terminal: { persisted: true } })
       .failureCode,
-  ).toBe("collection_failed");
+  ).toBe("human_required_session_refresh");
 });
 test("only the independently successful persisted follow-up is complete", () => {
   expect(
@@ -42,4 +42,30 @@ test("only the independently successful persisted follow-up is complete", () => 
       terminal: { persisted: true },
     }),
   ).toEqual({ status: "completed", runIds: ["follow-up"], failureCode: null });
+});
+
+test("a missing session whose email challenge failed exposes the same owner refresh path", () => {
+  const failed = {
+    ...manifest,
+    failures: [
+      {
+        operation: "collect",
+        errorType: "Error",
+        message: "operation_failed",
+        stage: "email-challenge-request",
+      },
+    ],
+  };
+  expect(
+    vPointScheduledResult({ manifest: failed, terminal: { persisted: true } }).failureCode,
+  ).toBe("human_required_session_refresh");
+  expect(
+    vPointScheduledResult({ manifest: failed, terminal: { persisted: false } }).failureCode,
+  ).toBe("terminal_persistence_failed");
+  expect(
+    vPointScheduledResult({
+      manifest: { ...failed, failures: [{ ...failed.failures[0]!, stage: "balance-read" }] },
+      terminal: { persisted: true },
+    }).failureCode,
+  ).toBe("collection_failed");
 });

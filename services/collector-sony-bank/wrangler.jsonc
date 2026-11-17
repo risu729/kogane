@@ -5,7 +5,6 @@
   "compatibility_date": "2026-08-30",
   "compatibility_flags": ["nodejs_compat"],
   "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
-  "workers_dev": true,
   "preview_urls": false,
   "observability": {
     "enabled": true,
@@ -23,7 +22,7 @@
     }
   ],
   "vars": {
-    "COLLECTOR_SCHEMA_VERSION": "sony-bank-worker-poc-v2"
+    "COLLECTOR_SCHEMA_VERSION": "sony-bank-worker-poc-v3"
   },
   "triggers": {
     "crons": []

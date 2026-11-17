@@ -1,5 +1,5 @@
 // Internal current evidence diagnostic; never an adoption or writer permission.
-import { parseConsumptionKey, type IdentityAdmission } from "./economic-contract.ts";
+import { IDENTITY_REFUSALS, parseConsumptionKey } from "./economic-contract.ts";
 import { transactionFamilyEntry } from "./event-families.ts";
 import { hasExactKeys, isRecord } from "./guards.ts";
 import { humanAdoptedRowIdentity } from "./row-identity.ts";
@@ -50,19 +50,20 @@ export function validEconomicRowReadinessRequest(
   });
 }
 
-type ReadinessReason =
-  | Extract<IdentityAdmission, { admitted: false }>["refusal"]
-  | "observation_missing"
-  | "evidence_not_current"
-  | "evidence_restricted"
-  | "evidence_unavailable"
-  | "family_mismatch"
-  | "account_mapping_unresolved"
-  | "account_mapping_ambiguous"
-  | "ownership_unresolved"
-  | "economic_claim_held"
-  | "alias_conflict"
-  | "identity_key_invalid";
+export const ECONOMIC_ROW_READINESS_REASONS = [
+  ...IDENTITY_REFUSALS,
+  "observation_missing",
+  "evidence_not_current",
+  "evidence_restricted",
+  "evidence_unavailable",
+  "family_mismatch",
+  "account_mapping_unresolved",
+  "account_mapping_ambiguous",
+  "ownership_unresolved",
+  "economic_claim_held",
+  "identity_key_invalid",
+] as const;
+export type ReadinessReason = (typeof ECONOMIC_ROW_READINESS_REASONS)[number];
 
 /** Trusted loader output. Internal strings must never escape the application digest boundary. */
 export interface EconomicRowEvidence {

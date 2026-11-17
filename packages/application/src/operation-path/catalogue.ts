@@ -411,7 +411,7 @@ export const OPERATION_CATALOGUE = {
     effect: null,
     quiet: "read",
     capability: "records.read",
-    paths: AGENT,
+    paths: ["ui", ...AGENT],
   },
   "audit.search": {
     risk: ["R0"],

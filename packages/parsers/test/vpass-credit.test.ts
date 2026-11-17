@@ -17,6 +17,40 @@ const meta: ArtifactMeta = {
 };
 const parse = (value: unknown, artifact = meta) =>
   vpassCreditSnapshot.parse(new TextEncoder().encode(JSON.stringify(value)), artifact);
+test("the normal Authori module transition preserves the empty-transition observations", () => {
+  const value = authori();
+  value.header.transitTo = "vp.member.pages.info";
+  expect(parse(value)).toEqual(parse(authori()));
+});
+
+test("only Authori admits its exact public module and all session guards remain closed", () => {
+  for (const transition of [
+    "vp.member.pages.unknown",
+    "vp.member.pages.info ",
+    " vp.member.pages.info",
+    "vp.member.pages.info.extra",
+    "VP.member.pages.info",
+    "/memx/authori/shokai/index.html",
+    null,
+    true,
+    0,
+  ]) {
+    const value = authori();
+    Object.assign(value.header, { transitTo: transition });
+    expect(() => parse(value)).toThrow("vpass_credit_session_invalid");
+  }
+  const wrongEndpoint = revo();
+  wrongEndpoint.header.transitTo = "vp.member.pages.info";
+  expect(() => parse(wrongEndpoint, { ...meta, artifactKey: "credit/revo.json" })).toThrow(
+    "vpass_credit_session_invalid",
+  );
+  for (const header of [{ loginFlg: false }, { resultCode: "synthetic_failure" }]) {
+    const value = authori();
+    Object.assign(value.header, { transitTo: "vp.member.pages.info", ...header });
+    expect(() => parse(value)).toThrow("vpass_credit_session_invalid");
+  }
+});
+
 test("reported authori units are thousand yen; shared availability is never recomputed", () => {
   const result = parse(authori());
   expect(result.observations).toHaveLength(12);

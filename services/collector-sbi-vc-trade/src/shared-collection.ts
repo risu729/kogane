@@ -185,6 +185,14 @@ function artifactUnit(
   document?: ProviderDocument,
 ): string {
   if (document !== undefined) return `${document.kind}-${document.basisDate}`;
+  const leverage = /^(executions-leverage-(?:open|close)-(?:recent|historical))-page-0001$/u.exec(
+    dataset,
+  );
+  if (leverage) {
+    if (!collectionUnits(manifest).some((unit) => unit.unitKey === leverage[1]))
+      throw new Error("shared_leverage_unit_missing");
+    return leverage[1]!;
+  }
   if (dataset === "report-annual-list-page-0001") return "report-annual-index";
   const index = /^report-(?:month|pnl)-list-(\d{4})(?:-page-\d{4})?$/u.exec(dataset);
   if (index) return `report-index-${index[1]}`;

@@ -99,10 +99,12 @@ carries `"limit": true` and still only its safe code.
 How to read it, in Workers Logs for `kogane-observation-pipeline`, filtered on
 `event = invocation_budget`:
 
-- `overDocumentedD1Queries: true` on an invocation that did not fail is the
-  runtime saying the documented D1 number is not what was enforced for that
-  invocation. It is recorded, not acted on: the registration budget stays a
-  fraction of the documented limit either way.
+- `overDocumentedD1Queries: true` says the conservative statement count passed
+  the documented numeric query limit. It does not prove the enforced query
+  limit was exceeded: the [D1 batch-limit contract](https://developers.cloudflare.com/d1/platform/limits/#batch-limits)
+  counts one batch as one invocation query, while this metric counts its
+  statements separately. The statement metric and registration budget stay
+  unchanged.
 - `limitErrors > 0` is an invocation the platform refused at a limit. The
   failing lane's own line says where it was hit. Registration's own share
   never exceeds its budget, so a limit reached during registration means the
@@ -142,6 +144,19 @@ Invocation and lane meters report:
   completion claim. `d1FailedStatements` counts rejected/thrown statements
   and returned `success: false`; rejection of a batch counts every member
   as failed, without claiming which member executed before rollback.
+- `d1PlatformLimitCalls` and `r2PlatformLimitCalls`: rejected binding calls
+  whose original Error message matched the closed platform invocation-limit
+  classifier. One rejected D1 batch is one call even though its N statements
+  contribute N to `d1FailedStatements`. These counters include failures a
+  parse job or registration recovered internally; the lane can still report
+  `runs: 1`, `failed: 0` and `limitErrors: 0`. A later outer catch adds no
+  binding call. `limitErrors` retains its existing escaped lane/message-failure
+  meaning; never add it to these call counts. Nested invocation, lane and
+  registration meters report overlapping scopes of the same calls and must
+  not be summed together. Non-limit and unclassifiable exceptions add no
+  positive limit classification. Introspection failures cannot replace a
+  binding result, Promise or exception, and exception text is never retained.
+  Zero does not establish remaining platform capacity or successful collection.
 - `d1ElapsedMs` and `r2ElapsedMs`: summed caller elapsed time per call,
   including rejection, with a batch timed once. Overlapping calls can make
   these sums exceed lane elapsed time. They are neither CPU time nor billing.

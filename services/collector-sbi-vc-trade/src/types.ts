@@ -38,6 +38,8 @@ export interface HealthState {
    * after a successful login.
    */
   manualAgreementPendingSince: string | null;
+  /** A refused gateway session waits for a successful login before another keepalive. */
+  sessionRefreshRequired: boolean;
 }
 
 export interface GatewayMeta {
@@ -96,6 +98,7 @@ export interface CollectionUnit {
   unitKey:
     | "account"
     | "full-cashflows"
+    | `executions-leverage-${"open" | "close"}-${"recent" | "historical"}`
     | "report-annual-index"
     | `report-index-${number}`
     | `monthly-report-${string}`

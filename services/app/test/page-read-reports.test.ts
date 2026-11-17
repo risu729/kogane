@@ -308,9 +308,9 @@ describe("collection quality page reads", () => {
           dataTypes: expect.arrayContaining([
             {
               type: "cash_movement",
-              status: "partial",
+              status: "collected",
               parsers: ["sony-bank-history-json", "sony-bank-history-csv"],
-              issue: 449,
+              issue: null,
             },
           ]),
           accounts: [

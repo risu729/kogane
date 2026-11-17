@@ -136,6 +136,31 @@ export function safeCode(value: string | null): string | null {
 const userActionRequired = (code: string | null): boolean =>
   code !== null && (code.startsWith("human_required") || code === "manual_agreement_required");
 
+/** V Point's email login may finish in a separate run after its failed scheduled receipt. */
+function currentSessionFailure(
+  sourceId: string,
+  failureCode: string | null,
+  failedAt: string | null,
+  latestFetchRun: CollectionQualityFetchRun | null,
+): string | null {
+  if (
+    sourceId !== "v-point" ||
+    !["reauthentication_pending", "human_required_session_refresh"].includes(failureCode ?? "")
+  )
+    return failureCode;
+  const failureTime = Date.parse(failedAt ?? "");
+  const successTime = Date.parse(latestFetchRun?.completedAt ?? "");
+  // No nominal-time inference: a successful read must be later than the actual failed attempt.
+  if (
+    latestFetchRun?.succeeded === true &&
+    Number.isFinite(failureTime) &&
+    Number.isFinite(successTime) &&
+    successTime > failureTime
+  )
+    return null;
+  return "human_required_session_refresh";
+}
+
 /** The kinds of job that collect a source's data (a keepalive or the Processor tick does not). */
 const COLLECTING_KINDS: readonly string[] = ["collection", "manual", "email"];
 
@@ -277,6 +302,7 @@ function schedule(
 
 function sourceReasons(
   source: Omit<CollectionQualitySource, "reasons" | "freshness" | "dataTypes">,
+  currentFailureCodes: ReadonlyMap<string, string | null>,
 ): SourceReason[] {
   const reasons = new Set<SourceReason>();
   if (source.collectors.length === 0) reasons.add("no_collector");
@@ -286,13 +312,14 @@ function sourceReasons(
     else if (!job.enabled) reasons.add("schedule_disabled");
     else if (job.latest === null) reasons.add("schedule_never_ran");
     if (job.leaseStartedAt !== null) reasons.add("lease_held");
+    if (userActionRequired(currentFailureCodes.get(job.id) ?? null))
+      reasons.add("user_action_required");
     const latest = job.latest;
     if (latest === null) continue;
     if (latest.status === "started") reasons.add("occurrence_running");
     if (latest.status === "failed") reasons.add("occurrence_failed");
     if (latest.status === "uncertain") reasons.add("occurrence_uncertain");
     if (latest.status === "not_dispatched") reasons.add("occurrence_not_dispatched");
-    if (userActionRequired(latest.failureCode)) reasons.add("user_action_required");
     for (const run of latest.terminals) {
       if (run.registration === "unrecorded") reasons.add("terminal_unrecorded");
       if (run.registration === "pending") reasons.add("terminal_registration_pending");
@@ -350,6 +377,7 @@ export async function queryCollectionQualitySummary(
           JSON.stringify(collectors),
         ]);
   const schedules = jobs.map((job) => schedule(job, terminals));
+  const receiptById = new Map(jobs.map((job) => [job.id, job]));
   const placed = new Set<string>();
   const summaries = sources.map((row): CollectionQualitySource => {
     const own = sourceCollectors(row.source_id);
@@ -372,17 +400,31 @@ export async function queryCollectionQualitySummary(
           newestSeenAt: unregistered.newest_seen_at,
         })),
     };
+    const currentFailureCodes = new Map(
+      jobsOfSource.map((job) => {
+        const receipt = receiptById.get(job.id)!;
+        return [
+          job.id,
+          currentSessionFailure(
+            row.source_id,
+            safeCode(receipt.occurrence_failure_code),
+            receipt.occurrence_finished_at ?? receipt.occurrence_started_at,
+            entry.latestFetchRun,
+          ),
+        ] as const;
+      }),
+    );
     const wait = sourceWait(
       jobsOfSource.map((job) => ({
         kind: job.kind,
         enabled: job.enabled,
         supported: job.supported,
-        failureCode: job.latest?.failureCode ?? null,
+        failureCode: currentFailureCodes.get(job.id) ?? null,
       })),
     );
     return {
       ...entry,
-      reasons: sourceReasons(entry),
+      reasons: sourceReasons(entry, currentFailureCodes),
       freshness: collectionFreshness(entry.latestFetchRun?.completedAt ?? null, asOf.date, wait),
       dataTypes: providerDataTypes(row.source_id),
     };
@@ -511,11 +553,33 @@ export function sourceJobSources(sourceId: string): string[] {
   return [...new Set([...own, ...aliases])].sort();
 }
 
-/** What the jobs of one CORE source wait on, from its stored jobs only (the cells route's read). */
+/** Current waiting state; a V Point email follow-up may supersede its failed receipt. */
 export async function waitOfSource(
   executor: SqlExecutor,
   sourceId: string,
+  latestFetchRun: CollectionQualityFetchRun | null = null,
 ): Promise<CollectionWait> {
+  if (sourceId === "v-point") {
+    // Reuse the bounded receipt read so this matches the summary's actual attempt times.
+    const jobs = await executor.all<ScheduleQualityRow>(SCHEDULE_QUALITY_SQL, []);
+    if (jobs.length > COLLECTION_QUALITY_ROW_BOUND) throw new CollectionQualityLimitError();
+    const sources = sourceJobSources(sourceId);
+    return sourceWait(
+      jobs
+        .filter((job) => sources.includes(job.source ?? ""))
+        .map((job) => ({
+          kind: job.kind,
+          enabled: job.enabled === 1,
+          supported: job.supported === 1,
+          failureCode: currentSessionFailure(
+            sourceId,
+            safeCode(job.occurrence_failure_code),
+            job.occurrence_finished_at ?? job.occurrence_started_at,
+            latestFetchRun,
+          ),
+        })),
+    );
+  }
   const jobs = await executor.all<SourceJobRow>(SOURCE_JOBS_SQL, [
     JSON.stringify(sourceJobSources(sourceId)),
   ]);
@@ -549,7 +613,7 @@ export async function queryCollectionQualityCells(
   const source = await executor.first<SourceQualityRow>(ONE_SOURCE_QUALITY_SQL, [input.sourceId]);
   if (source === null) return null;
   const asOf = freshnessAsOf(input.asOf);
-  const wait = await waitOfSource(executor, source.source_id);
+  const wait = await waitOfSource(executor, source.source_id, fetchRun(source));
   const rows = await executor.all<CellQualityRow>(CELL_QUALITY_SQL, [input.sourceId, input.offset]);
   const truncated = rows.length > COLLECTION_QUALITY_PAGE;
   return {
@@ -636,7 +700,7 @@ export async function queryAccountCoverage(
   const source = await executor.first<SourceQualityRow>(ONE_SOURCE_QUALITY_SQL, [input.sourceId]);
   if (source === null) return null;
   const asOf = freshnessAsOf(input.asOf);
-  const wait = await waitOfSource(executor, source.source_id);
+  const wait = await waitOfSource(executor, source.source_id, fetchRun(source));
   const providerTypes = providerDataTypes(source.source_id);
   const rows = await executor.all<AccountCoverageRow>(ACCOUNT_COVERAGE_SQL, [input.sourceId]);
   if (rows.length > ACCOUNT_COVERAGE_CELL_BOUND) throw new CollectionQualityLimitError();

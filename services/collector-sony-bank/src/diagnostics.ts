@@ -1,4 +1,4 @@
-import type { CollectionFailure } from "./types";
+import type { CollectionFailure, CsvValidationDiagnostics } from "./types";
 
 const OPERATIONS: Record<string, string> = {
   "login-page": "login-page",
@@ -6,6 +6,13 @@ const OPERATIONS: Record<string, string> = {
   "revision-da": "revision",
   "revision-ea": "revision",
   "revision-ja": "revision",
+  "revision-aa": "revision",
+  "realised-gains": "realised-gains",
+  "delivered-documents": "delivered-documents",
+  EADA110AS1fE01: "realised-gains",
+  EADA110AS1fE12: "realised-gains",
+  DBBA1800S1fE11: "delivered-documents",
+  DBBA1800S1fE12: "delivered-documents",
   csrf: "csrf",
   login: "login",
   DBCA5700C1fE99: "csrf",
@@ -48,6 +55,16 @@ const REASONS = new Set([
   "history_csv_missing_with_transactions",
   "history_csv_count_mismatch",
   "history_csv_invalid",
+  "history_pagination_invalid",
+  "history_pagination_total_changed",
+  "history_pagination_length_mismatch",
+  "history_page_limit_exceeded",
+  "realised_gains_invalid",
+  "realised_gains_csv_invalid",
+  "document_retention_unconfirmed",
+  "document_list_incomplete",
+  "document_list_invalid",
+  "document_pdf_invalid",
   "unexpected_error",
 ]);
 
@@ -57,6 +74,7 @@ export class SonyBankError extends Error {
     readonly httpStatus?: number,
     readonly providerErrorCount = 0,
     readonly reason = "http_error",
+    readonly csvValidation: CsvValidationDiagnostics = {},
   ) {
     // Never retain the provider's free-text codes, response body or request URL.
     super("Sony Bank request failed");
@@ -107,6 +125,7 @@ export function failure(operation: string, error: unknown): CollectionFailure {
       details.httpStatus = error.httpStatus!;
     }
     if (REASONS.has(error.reason)) details.reason = error.reason;
+    Object.assign(details, safeCsvValidation(error.csvValidation));
     if (Number.isSafeInteger(error.providerErrorCount) && error.providerErrorCount > 0) {
       details.providerErrorCount = Math.min(error.providerErrorCount, 100);
     }
@@ -147,7 +166,25 @@ export function emitDiagnostic(
   }
 }
 
-interface ProgressFields {
+const CSV_COUNTS = [
+  "csvExpectedColumnCount",
+  "csvHeaderColumnCount",
+  "csvMinColumnCount",
+  "csvMaxColumnCount",
+  "csvInvalidRowCount",
+] as const;
+const CSV_FAILURES = new Set(["media_type", "charset", "decode", "parse", "header", "columns"]);
+function safeCsvValidation(fields: CsvValidationDiagnostics): CsvValidationDiagnostics {
+  const safe: CsvValidationDiagnostics = {};
+  if (fields.csvFailure && CSV_FAILURES.has(fields.csvFailure)) safe.csvFailure = fields.csvFailure;
+  for (const key of CSV_COUNTS) {
+    const value = fields[key];
+    if (Number.isSafeInteger(value) && value! >= 0) safe[key] = value!;
+  }
+  return safe;
+}
+
+interface ProgressFields extends CsvValidationDiagnostics {
   phase?: "collection" | "request";
   currency?: string;
   page?: number;
@@ -200,6 +237,7 @@ export class SonyBankDiagnostics {
         const value = fields[key];
         if (Number.isSafeInteger(value) && value! >= 0) record[key] = value;
       }
+      Object.assign(record, safeCsvValidation(fields));
       const status = fields.httpStatus;
       if (Number.isInteger(status) && status! >= 100 && status! <= 599) record.httpStatus = status;
       const reason = fields.reason;

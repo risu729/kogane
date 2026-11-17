@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "package": "google-chrome-stable",
+  "version": "157.0.8103.78-1",
+  "architecture": "amd64",
+  "url": "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_157.0.8103.78-1_amd64.deb",
+  "bytes": 147497676,
+  "sha256": "4d740636b5c96f687798602c5aad6a5a270f44dd02e48db0638ae77aa4867b1b",
+  "provenance": {
+    "primaryFingerprint": "EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796",
+    "signingFingerprint": "0E225917414670F4442C250DFD533C07C264648F",
+    "releaseDate": "Wed, 11 Nov 2026 22:12:33 UTC",
+    "releaseUrl": "https://dl.google.com/linux/chrome/deb/dists/stable/Release",
+    "signatureUrl": "https://dl.google.com/linux/chrome/deb/dists/stable/Release.gpg",
+    "packagesUrl": "https://dl.google.com/linux/chrome/deb/dists/stable/main/binary-amd64/Packages",
+    "packagesBytes": 6207,
+    "packagesSha256": "20315c5f40c63201b93152d685b885800b8095fe9c2ea428c338242c4597659c"
+  }
+}

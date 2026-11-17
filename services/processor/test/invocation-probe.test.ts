@@ -664,6 +664,8 @@ test("a failed queue acknowledgement counts the lane exception and only the succ
   ]);
   expect(invocationProbe("queue", new OperationMeter(), context)).toMatchObject({
     limitErrors: 1,
+    d1PlatformLimitCalls: 0,
+    r2PlatformLimitCalls: 0,
     lanes: {
       collection_notification: {
         runs: 0,

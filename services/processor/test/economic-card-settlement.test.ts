@@ -11,6 +11,7 @@ import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 import { cardSettlementSweep } from "../src/card-settlement-job.ts";
 import {
   CARD_SETTLEMENT_WRITER_RELEASE,
+  cardSettlementContentDigest,
   cardSettlementMutation,
 } from "../src/card-settlement-commands.ts";
 import { identifyParse, type IdentityResolver } from "../src/identity-store.ts";
@@ -38,6 +39,11 @@ import {
   economicFinalizationWrites,
 } from "../../../packages/storage-d1/src/atomic/economic-commit.ts";
 import type { SqlWrite } from "../../../packages/storage-d1/src/core/operations.ts";
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
+import { queryReconstructedState } from "../../../packages/application/src/query/reconstructed-state.ts";
+import { quantityText } from "../../../packages/domain/test/helpers.ts";
+import type { CardSettlementFacts } from "../../../packages/domain/src/card-settlement.ts";
+import type { EventTimeRecord } from "../../../packages/domain/src/economic-contract.ts";
 
 let mf: Miniflare, env: Env, db: D1Database;
 const actor: Principal = {
@@ -209,24 +215,30 @@ async function debit(
   providerId: string,
   period: string,
   path: { producer: string; namespace: string } | null = null,
+  shinsei = false,
 ) {
+  const source = shinsei ? "sbi-shinsei-bank" : "smbc-bank";
   if (path === null)
-    await seedArtifact(env, id, "smbc-bank", "transactions-normalized", `g1b-debit-${id}`, {});
+    await seedArtifact(env, id, source, "transactions-normalized", `g1b-debit-${id}`, {});
   else await seedArtifactAs(id, path.producer, path.namespace);
-  await parseRun(id, "smbc-direct-transactions");
+  await parseRun(
+    id,
+    shinsei ? "sbi-shinsei-top-balances-and-activity" : "smbc-direct-transactions",
+  );
   await db
     .prepare(`INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,currency,as_of,raw_locator,extra_json)
- VALUES(?,?,?,'posted',-3000,'-3000',0,'JPY',?,'json:$.transactions[0]',?)`)
+ VALUES(?,?,?,?, -3000,'-3000',0,'JPY',?,'json:$.transactions[0]',?)`)
     .bind(
       id,
       sourceAccount,
       providerId,
-      `${period}-10T00:00:00+09:00`,
+      shinsei ? null : "posted",
+      shinsei ? `${period}-10` : `${period}-10T00:00:00+09:00`,
       JSON.stringify({
-        id: providerId,
+        ...(shinsei ? { txnReferenceNo: providerId } : { id: providerId }),
         _kogane: {
           direction: "outflow",
-          amountSignSource: "direction",
+          amountSignSource: shinsei ? "debit" : "direction",
           identityOrigin: "provider-id",
         },
       }),
@@ -238,7 +250,7 @@ async function debit(
     {
       id,
       artifact_id: id,
-      source_id: "smbc-bank",
+      source_id: source,
       producer_id: path?.producer ?? "collector-r2-importer",
       fetch_run_id: id,
     },
@@ -247,9 +259,16 @@ async function debit(
 }
 
 /** One owned statement and one owned SMBC debit of it; returns the ready candidate. */
-async function ownedPair(base: number, period: string): Promise<string> {
+async function ownedPair(base: number, period: string, shinsei = false): Promise<string> {
   await statement(base, "myjcb", `myjcb:g1b-${base}:root`, period);
-  await debit(base + 1, `smbc-bank:g1b-${base}`, `g1b-debit-${base}`, period);
+  await debit(
+    base + 1,
+    `${shinsei ? "sbi-shinsei" : "smbc-bank"}:g1b-${base}`,
+    `g1b-debit-${base}`,
+    period,
+    null,
+    shinsei,
+  );
   await ownership(base, "liable_party");
   await ownership(base + 1, "beneficial_owner");
   await cardSettlementSweep(db);
@@ -290,6 +309,43 @@ const count = async (sql: string, ...binds: unknown[]): Promise<number> =>
     .prepare(sql)
     .bind(...binds)
     .first<{ n: number }>())!.n;
+
+/** A complete reported yen deposit capture, on the same account as the debit. */
+async function reportedShinseiBalance(id: number, account: string, date: string, amount: number) {
+  await seedArtifact(
+    env,
+    id,
+    "sbi-shinsei-bank",
+    "yen-deposit-account",
+    `balance-${id}`,
+    {},
+    true,
+    Date.parse(`${date}T03:00:00Z`),
+  );
+  await parseRun(id, "sbi-shinsei-yen-deposit-account");
+  await db
+    .prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,raw_locator,extra_json)
+    VALUES(?,?,'yen_deposit_account_balance',?,?,0,'JPY','synthetic-balance','{}')`)
+    .bind(id, account, amount, String(amount))
+    .run();
+  await db
+    .prepare(`INSERT INTO parse_coverage_claims(parse_run_id,claim_id,scope_key,mode,completeness,membership_complete,observed_count,expected_count,evidence_refs_json,policy_version,failure_cause,absence_meaning,parent_run_status,parent_run_failure_count)
+    VALUES(?,'container','sbi-shinsei-bank/yen-deposit-account','complete-container','complete',1,1,NULL,'[]','coverage-v1',NULL,'not-applicable','success',0)`)
+    .bind(id)
+    .run();
+  await publishParse(db, id);
+  await identifyParse(
+    db,
+    {
+      id,
+      artifact_id: id,
+      source_id: "sbi-shinsei-bank",
+      producer_id: "collector-r2-importer",
+      fetch_run_id: id,
+    },
+    resolver,
+  );
+}
 
 interface BankRow {
   id: number;
@@ -643,6 +699,276 @@ describe("an acceptance and a withdrawal join the guard", () => {
         "SELECT count(*) AS n FROM unlogged_economic_revisions WHERE event_id=?",
         eventId,
       ),
+    ).toBe(0);
+  }, 60000);
+});
+
+describe("future SBI Shinsei posting dates", () => {
+  test.each([
+    { base: 4100, period: "2028-03", fromDay: "01", toDay: "28", boundary: false },
+    { base: 4200, period: "2028-04", fromDay: "01", toDay: "10", boundary: true },
+    { base: 4300, period: "2028-05", fromDay: "10", toDay: "28", boundary: true },
+  ])(
+    "a real acceptance reaches the fold without inventing snapshot-boundary precision: $period",
+    async ({ base, period, fromDay, toDay, boundary }) => {
+      const proposalId = await ownedPair(base, period, true);
+      const bank = await bankRow(base + 1);
+      const from = `${period}-${fromDay}`,
+        to = `${period}-${toDay}`;
+      await reportedShinseiBalance(base + 2, bank.source_account, from, 10000);
+      await reportedShinseiBalance(base + 3, bank.source_account, to, 7000);
+      const accept = await preparedCommand("card-settlement.accept", {
+        proposalId,
+        reason: "Synthetic verified posting date",
+      });
+      const accepted = await accept();
+      if (!accepted.ok) throw new Error(JSON.stringify(accepted));
+      const eventId = accepted.receipt.result["eventId"] as string;
+      const times: EventTimeRecord[] = [
+        {
+          eventId,
+          revision: 1,
+          role: "posting",
+          time: {
+            kind: "local-date",
+            value: `${period}-10`,
+            zone: "Asia/Tokyo",
+            basis: "provider",
+          },
+        },
+      ];
+      expect(
+        (
+          await db
+            .prepare(
+              "SELECT event_id,revision,role,temporal_json FROM economic_event_times WHERE event_id=?",
+            )
+            .bind(eventId)
+            .all()
+        ).results,
+      ).toEqual([
+        {
+          event_id: eventId,
+          revision: 1,
+          role: "posting",
+          temporal_json: JSON.stringify(times[0]!.time),
+        },
+      ]);
+      const facts = JSON.parse(
+        (await db
+          .prepare("SELECT facts_json FROM card_settlement_candidates WHERE id=?")
+          .bind(proposalId)
+          .first<{ facts_json: string }>())!.facts_json,
+      ) as CardSettlementFacts;
+      expect(
+        await db
+          .prepare(
+            "SELECT writer_release,leg_count,claim_count,time_count,content_digest FROM economic_revision_seals WHERE event_id=?",
+          )
+          .bind(eventId)
+          .first(),
+      ).toEqual({
+        writer_release: CARD_SETTLEMENT_WRITER_RELEASE,
+        leg_count: 2,
+        claim_count: 1,
+        time_count: 1,
+        content_digest: await cardSettlementContentDigest({
+          eventId,
+          revision: 1,
+          withdraw: false,
+          facts,
+          claims: [{ book: "cash-movement", key: parseConsumptionKey(bank.key)! }],
+          aliasClass: aliasOf(bank),
+          times,
+        }),
+      });
+      const beforeReplay = await snapshot();
+      expect(await accept()).toMatchObject({ ok: true, replayed: true });
+      expect(await snapshot()).toEqual(beforeReplay);
+      const input = { account: bank.account_id, from, to, basis: "cash", cut: null, now };
+      const result = await queryReconstructedState(d1Executor(db), input);
+      const cell = result.reconstruction!.cells.find(
+        (row) => row.accountId === bank.account_id && row.unitRef === "JPY",
+      )!;
+      expect(cell.gaps).not.toContain("event_time_unknown");
+      expect(result.reasons).toContain("family_not_evented");
+      expect(result.reasons).toContain("history_coverage_unknown");
+      if (boundary) {
+        expect(cell.applied.count).toBe(0);
+        expect(cell.boundary.count).toBe(1);
+        expect(result.reasons).toContain("snapshot_boundary_unknown");
+      } else {
+        expect(result.status).toBe("incomplete");
+        expect(cell.applied.refs).toEqual([`${eventId}@1#0`]);
+        expect(quantityText(cell.applied.total)).toBe("-3000");
+        expect(quantityText(cell.reconstructed)).toBe("7000");
+        expect(cell.explanation.status).not.toBe("reconciled");
+      }
+      const oldRevision = await db
+        .prepare("SELECT * FROM economic_revision_seals WHERE event_id=? AND revision=1")
+        .bind(eventId)
+        .first();
+      expect(
+        (await command("card-settlement.withdraw", { proposalId, reason: "Synthetic correction" }))
+          .ok,
+      ).toBe(true);
+      expect(
+        await db
+          .prepare(
+            "SELECT time_count,leg_count FROM economic_revision_seals WHERE event_id=? AND revision=2",
+          )
+          .bind(eventId)
+          .first(),
+      ).toEqual({ time_count: 0, leg_count: 0 });
+      expect(
+        await count(
+          "SELECT count(*) AS n FROM economic_event_times WHERE event_id=? AND revision=2",
+          eventId,
+        ),
+      ).toBe(0);
+      expect(
+        await db
+          .prepare("SELECT * FROM economic_revision_seals WHERE event_id=? AND revision=1")
+          .bind(eventId)
+          .first(),
+      ).toEqual(oldRevision);
+      const historical = await queryReconstructedState(d1Executor(db), {
+        ...input,
+        cut: result.cut!.requested,
+      });
+      expect(historical.manifest).toEqual(result.manifest);
+      expect(historical.reconstruction).toEqual(result.reconstruction);
+      expect(
+        await resolveAndSimulate(d1CommandStore(db), "card-settlement.accept", {
+          proposalId,
+          reason: "Must not upgrade a withdrawn candidate",
+        }),
+      ).toMatchObject({ ok: false, error: "stale_context" });
+      if (!boundary) {
+        await statement(base + 4, "vpass", "vpass:synthetic-corrected-card", period);
+        await ownership(base + 4, "liable_party");
+        await cardSettlementSweep(db);
+        const corrected = await candidateOf(base + 4, base + 1);
+        expect(corrected).not.toBe(proposalId);
+        expect(
+          (
+            await command("card-settlement.accept", {
+              proposalId: corrected,
+              reason: "Synthetic different statement correction",
+            })
+          ).ok,
+        ).toBe(true);
+        expect(
+          await count(
+            "SELECT count(*) AS n FROM live_consumption_claims WHERE book='cash-movement' AND consumption_key=?",
+            bank.key,
+          ),
+        ).toBe(1);
+        expect(
+          (await queryReconstructedState(d1Executor(db), { ...input, cut: result.cut!.requested }))
+            .manifest,
+        ).toEqual(result.manifest);
+      }
+    },
+    60000,
+  );
+
+  test("typed times and the receipt roll back with a malformed seal or final commit", async () => {
+    const proposalId = await ownedPair(4400, "2028-06", true);
+    for (const fault of ["count", "commit"] as const) {
+      const planners: MutationPlanners = {
+        ...changeMutationPlanners(db),
+        "card-settlement.accept": async (input) => {
+          const mutation = await cardSettlementMutation(input);
+          if (!mutation) return null;
+          return {
+            ...mutation,
+            writes: mutation.writes.map((write) => {
+              const binds = [...write.binds];
+              if (fault === "count" && write.sql.startsWith("INSERT INTO economic_revision_seals"))
+                binds[5] = 0;
+              if (fault === "commit" && write.sql.startsWith("INSERT INTO economic_commit_log"))
+                binds[5] = "[]";
+              return { ...write, binds };
+            }),
+          };
+        },
+      };
+      const accept = await preparedCommand(
+        "card-settlement.accept",
+        { proposalId, reason: `Synthetic ${fault} corruption` },
+        planners,
+      );
+      const before = await snapshot();
+      expect(await accept()).toMatchObject({ ok: false, error: "commit_failed" });
+      expect(await snapshot()).toEqual(before);
+    }
+    const held = await preparedCommand("card-settlement.accept", {
+      proposalId,
+      reason: "Synthetic stale reservation",
+    });
+    await batch(
+      ownTransferWrites("transfer-posting-conflict", 1, [await bankRow(4401)], [], false),
+    );
+    const before = await snapshot();
+    expect(await held()).toMatchObject({ ok: false, error: "stale_context" });
+    expect(await snapshot()).toEqual(before);
+  }, 60000);
+
+  test("withdrawal of an existing zero-time legacy-release seal preserves that seal", async () => {
+    const proposalId = await ownedPair(4500, "2028-07");
+    // A synthetic already-shipped v1 seal: the original SMBC writer has no typed times.
+    const legacy: MutationPlanners = {
+      ...changeMutationPlanners(db),
+      "card-settlement.accept": async (input) => {
+        const mutation = await cardSettlementMutation(input);
+        if (!mutation) return null;
+        return {
+          ...mutation,
+          writes: mutation.writes.map((write) => ({
+            ...write,
+            binds: write.binds.map((value) =>
+              value === CARD_SETTLEMENT_WRITER_RELEASE
+                ? "card-statement-settlement-v1:economic-guard-v1"
+                : value,
+            ),
+          })),
+        };
+      },
+    };
+    const accepted = await (
+      await preparedCommand(
+        "card-settlement.accept",
+        { proposalId, reason: "Synthetic legacy fixture" },
+        legacy,
+      )
+    )();
+    if (!accepted.ok) throw new Error(JSON.stringify(accepted));
+    const eventId = accepted.receipt.result["eventId"] as string;
+    const oldSeal = await db
+      .prepare("SELECT * FROM economic_revision_seals WHERE event_id=? AND revision=1")
+      .bind(eventId)
+      .first();
+    expect(oldSeal).toMatchObject({
+      writer_release: "card-statement-settlement-v1:economic-guard-v1",
+      time_count: 0,
+    });
+    expect(
+      (
+        await command("card-settlement.withdraw", {
+          proposalId,
+          reason: "Synthetic wrong match correction",
+        })
+      ).ok,
+    ).toBe(true);
+    expect(
+      await db
+        .prepare("SELECT * FROM economic_revision_seals WHERE event_id=? AND revision=1")
+        .bind(eventId)
+        .first(),
+    ).toEqual(oldSeal);
+    expect(
+      await count("SELECT count(*) AS n FROM economic_event_times WHERE event_id=?", eventId),
     ).toBe(0);
   }, 60000);
 });

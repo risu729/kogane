@@ -106,6 +106,8 @@ function parserVisibleMetadata(meta: ArtifactMeta): Record<string, unknown> {
     runFailureCount: meta.runFailureCount,
     runStatus: meta.runStatus,
     runWindow: meta.runWindow ?? null,
+    // Preserve all previous fingerprints when this Sony-only query bound is absent.
+    ...("retainedHistoryEnd" in meta ? { retainedHistoryEnd: meta.retainedHistoryEnd } : {}),
     sourceId: meta.sourceId,
     statementState: meta.statementState ?? null,
     // D13 eligibility is parser-visible and can change a parser's own

@@ -92,7 +92,8 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
     const worker = (await import(`${REPO_ROOT}/${prestia.path}/cloudflare.config.ts`)).default
       .worker;
     expect(worker.name).toBe("kogane-prestia-bank-collector");
-    expect(worker.workersDev).toBe(true);
+    // Unset, workers.dev is enabled because the Worker has no routes or domains.
+    expect(worker.workersDev).toBeUndefined();
     expect(worker.previewUrls).toBe(false);
     expect(worker.routes ?? []).toEqual([]);
     expect(worker.domains ?? []).toEqual([]);

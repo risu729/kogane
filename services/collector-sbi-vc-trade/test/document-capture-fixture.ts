@@ -157,6 +157,11 @@ async function capture() {
         },
       );
     }
+    if (event === "executionList" && data.isExOrder === "false")
+      return Response.json({
+        meta: { status: "OK" },
+        body: { list: [], pageNumber: 0, pageSize: 20, totalSize: 0, totalNumOfPages: 0 },
+      });
     const dataset =
       event === "executionList"
         ? `executions-${data.historical === "true" ? "historical" : "recent"}-page-0001`

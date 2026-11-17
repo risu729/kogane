@@ -1,15 +1,10 @@
 {
   "compilerOptions": {
-    "allowJs": false,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
     "lib": ["ES2023"],
     "module": "ESNext",
-    "moduleResolution": "Bundler",
     "noEmit": true,
     "noImplicitOverride": true,
     "noUncheckedIndexedAccess": true,
-    "strict": true,
     "skipLibCheck": true,
     "target": "ES2023",
     "types": ["node", "bun", "@cloudflare/vitest-plugin/types"]

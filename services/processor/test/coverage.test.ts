@@ -91,6 +91,8 @@ test("the migration chain names every explicit policy and preserves other run-sc
           row.parser_name !== "prestia-bank-balances" &&
           row.parser_name !== "sbi-shinsei-exchange-rate" &&
           row.parser_name !== "sbi-shinsei-monthly-report-metadata" &&
+          row.parser_name !== "sony-bank-realised-gains" &&
+          row.parser_name !== "sony-bank-document-metadata" &&
           row.parser_name !== "moneyforward-detail-balances" &&
           row.parser_name !== "sbi-income-payments" &&
           row.parser_name !== "sbi-realised-gains" &&
@@ -100,6 +102,12 @@ test("the migration chain names every explicit policy and preserves other run-sc
       )
       .every((row) => row.policy_id === "legacy-warning-compat-v1"),
   ).toBe(true);
+  expect(policies.find((row) => row.parser_name === "sony-bank-realised-gains")).toMatchObject({
+    dataset: "realised-gains",
+    policy_id: "coverage-v1",
+    unit_scope: "run",
+    snapshot_selection: 1,
+  });
   expect(policies.find((row) => row.parser_name === "st-george-balances")?.policy_id).toBe(
     "coverage-v1",
   );
@@ -131,7 +139,7 @@ test("the migration chain names every explicit policy and preserves other run-sc
       parser_name: "sbi-income-payments",
       dataset: "income-payments",
       policy_id: "coverage-v1",
-      unit_scope: "run",
+      unit_scope: "unit",
       snapshot_selection: 1,
     },
     {
@@ -139,7 +147,7 @@ test("the migration chain names every explicit policy and preserves other run-sc
       parser_name: "sbi-realised-gains",
       dataset: "realised-gains",
       policy_id: "coverage-v1",
-      unit_scope: "run",
+      unit_scope: "unit",
       snapshot_selection: 1,
     },
   ]);
@@ -165,7 +173,11 @@ test("the migration chain names every explicit policy and preserves other run-sc
   expect(pinned.map((row) => row.parser_name)).toEqual([
     "moneyforward-detail-balances",
     "myjcb-jpoint-history",
+    "myjcb-statement-document-metadata",
+    "myjcb-statement-document-metadata",
+    "myjcb-statement-document-metadata",
     "prestia-bank-balances",
+    "sbi-delivered-document-metadata",
     "sbi-foreign-cash-positions",
     "sbi-income-payments",
     "sbi-realised-gains",
@@ -174,6 +186,8 @@ test("the migration chain names every explicit policy and preserves other run-sc
     "sbi-vc-document-metadata",
     "sbi-vc-document-metadata",
     "smbc-foreign-ordinary-balance",
+    "sony-bank-document-metadata",
+    "sony-bank-realised-gains",
     "st-george-balances",
     "vpass-credit-snapshot",
   ]);

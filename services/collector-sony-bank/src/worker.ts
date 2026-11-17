@@ -6,7 +6,7 @@ import {
 } from "../../../packages/collection/src/schedule-result";
 import { atStage, emitDiagnostic, failure } from "./diagnostics";
 import { persistSharedRun, sharedBucket, sharedRunDiagnostic } from "./shared-collection";
-import { collectSonyBank, parseCredential } from "./sony-bank";
+import { collectSonyBank, parseCredential, type Supplement } from "./sony-bank";
 import type { CollectionFailure, CollectionManifest, RawArtifact } from "./types";
 export default {
   async fetch(request, env): Promise<Response> {
@@ -34,9 +34,10 @@ export default {
 } satisfies ExportedHandler<Env>;
 interface SharedResult {
   readonly runId: string;
+  readonly runIds: string[];
   readonly status: CollectionManifest["status"];
   readonly window: {
-    from: string;
+    from: string | null;
     to: string;
   };
   readonly transactionCount: number;
@@ -71,6 +72,7 @@ export async function runSharedCollection(
     const failures: CollectionFailure[] = [];
     let artifacts: readonly RawArtifact[] = [];
     let transactionCount = 0;
+    let supplements: Supplement[] = [];
     try {
       const credential = await atStage("credential", async () =>
         parseCredential(requiredSecret(env.SONY_BANK_CREDENTIAL_JSON, "SONY_BANK_CREDENTIAL_JSON")),
@@ -80,9 +82,12 @@ export async function runSharedCollection(
         from: window.from,
         to: window.to,
         runId,
+        includeRetainedHistory: true,
+        includeSupplementaryData: true,
       });
       transactionCount = collection.transactionCount;
       artifacts = collection.artifacts;
+      supplements = collection.supplements;
     } catch (error) {
       failures.push(failure("collect", error));
     }
@@ -103,10 +108,11 @@ export async function runSharedCollection(
       startedAt,
       completedAt,
       status,
-      window,
+      window: { from: null, to: window.to },
       transactionCount,
       artifacts,
       failures,
+      acquisitionSessionRef: runId,
     } as const;
     const outcome = await persistSharedRun(sharedBucket(env.DATA), input);
     emitDiagnostic(
@@ -115,14 +121,67 @@ export async function runSharedCollection(
         : "error",
       sharedRunDiagnostic(input, outcome),
     );
+    const persisted = [outcome];
+    const runIds =
+      outcome.result.outcome === "persisted" || outcome.result.outcome === "already_persisted"
+        ? [runId]
+        : [];
+    let supplementalPersistenceFailed = false;
+    for (const supplement of supplements) {
+      const supplementalInput = {
+        ...input,
+        runId: crypto.randomUUID(),
+        acquisitionSessionRef: runId,
+        status:
+          supplement.failures.length === 0
+            ? "success"
+            : supplement.artifacts.length === 0
+              ? "failed"
+              : "partial",
+        window: supplement.window,
+        transactionCount: 0,
+        artifacts: supplement.artifacts,
+        failures: supplement.failures,
+      } as const;
+      try {
+        const supplementalOutcome = await persistSharedRun(
+          sharedBucket(env.DATA),
+          supplementalInput,
+        );
+        persisted.push(supplementalOutcome);
+        emitDiagnostic("log", sharedRunDiagnostic(supplementalInput, supplementalOutcome));
+        if (
+          supplementalOutcome.result.outcome === "persisted" ||
+          supplementalOutcome.result.outcome === "already_persisted"
+        )
+          runIds.push(supplementalInput.runId);
+      } catch {
+        supplementalPersistenceFailed = true;
+        emitDiagnostic("error", {
+          event: "sony-bank-supplement-persistence-failed",
+          reason: "persistence_failed",
+        });
+      }
+    }
+    const allPersisted =
+      !supplementalPersistenceFailed &&
+      persisted.every(
+        (entry) =>
+          entry.result.outcome === "persisted" || entry.result.outcome === "already_persisted",
+      );
     return {
       runId,
-      status,
-      window,
+      runIds,
+      status:
+        status === "success" && supplements.some((entry) => entry.failures.length > 0)
+          ? "partial"
+          : status,
+      window: { from: null, to: window.to },
       transactionCount,
-      artifactCount: outcome.artifactCount,
-      failureCount: failures.length,
-      persistence: outcome.result.outcome,
+      artifactCount: persisted.reduce((sum, entry) => sum + entry.artifactCount, 0),
+      failureCount:
+        failures.length + supplements.reduce((sum, entry) => sum + entry.failures.length, 0),
+      persistence: allPersisted ? outcome.result.outcome : "incomplete",
       terminalKey: outcome.result.terminalKey,
     };
   });
@@ -135,9 +194,8 @@ export async function runSharedCollection(
  * and a month's last day would never be requested again once the next run's
  * window starts on the new month. On the first of a month the run therefore
  * requests the whole previous month; the new month's first day comes the next day.
- * Open limit: only the run on the 1st requests the previous month's last day, so
- * a missed or failed run on the 1st leaves that day unrequested; reaching back
- * across the month boundary would be an unobserved request shape (ADR 0004).
+ * The scheduled run additionally requests all retained history through the same
+ * end date, so any later successful run recovers missed month-end dates.
  */
 export function defaultWindow(now: Date): {
   from: string;
@@ -159,7 +217,10 @@ export async function alarmCollection(
 ): Promise<ScheduledResult> {
   try {
     const window = defaultWindow(new Date());
-    return scheduledResult(await runSharedCollection(env, window));
+    const result = await runSharedCollection(env, window);
+    return result.persistence === "incomplete"
+      ? scheduledFailure(new Error("collection_failed"), result.runIds)
+      : scheduledResult(result);
   } catch (error) {
     return scheduledFailure(error);
   }

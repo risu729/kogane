@@ -2,9 +2,7 @@
   "compilerOptions": {
     "target": "ES2024",
     "module": "ESNext",
-    "moduleResolution": "Bundler",
     "lib": ["ES2024", "DOM", "DOM.Iterable", "WebWorker"],
-    "strict": true,
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
     // test/shared-parity.test.ts imports the importer's module directly, and the

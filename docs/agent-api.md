@@ -1958,12 +1958,13 @@ owner's agreement.
    `kogane.card-settlements.statements` with the grouped `/statements` route. Every other published tool that is
    not a `ui` operation is listed with its reason (`kogane.capabilities`,
    `kogane.explain`, `kogane.reconcile.propose`,
-   `kogane.economic-readiness.read`, `kogane.events.read`, `kogane.audit.get`),
+   `kogane.events.read`, `kogane.audit.get`),
    so a new read tool is mapped to its route and that route leaves the gaps.
 
    | UI read route                                                                                                 | MCP read                                                                                                                                                       |
    | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
    | `/api/v2/query`                                                                                               | `kogane.financial.query`, `kogane.context.open`                                                                                                                |
+   | `/api/v2/economic-readiness`                                                                                  | `kogane.economic-readiness.read`                                                                                                                               |
    | `/api/identity/instrument-candidates`                                                                         | `kogane.instruments.candidates`                                                                                                                                |
    | `/api/identity/account-candidates`                                                                            | `kogane.accounts.candidates`                                                                                                                                   |
    | `/api/identity/account-history`                                                                               | `kogane.accounts.history`                                                                                                                                      |

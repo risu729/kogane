@@ -1,0 +1,30 @@
+Origin: Google LLC
+Label: Google
+Suite: stable
+Codename: stable
+Version: 1.0
+Date: Wed, 11 Nov 2026 22:12:33 UTC
+Architectures: amd64 arm64
+Components: main
+Description: Google chrome-linux software repository
+MD5Sum:
+ 630768b27eefdf05410067726bb953f7 6207 main/binary-amd64/Packages
+ ebb87781963e06eff181b545c50cb170 1408 main/binary-amd64/Packages.gz
+ 156e5ea7a0c6bed5973a68a45e546dc9 151 main/binary-amd64/Release
+ 723c59acf59367b60a4414802b721a70 6207 main/binary-arm64/Packages
+ 421ecd38998bd888858ce34f631af631 1412 main/binary-arm64/Packages.gz
+ fa9332f7f48fabf2a9015ece5b110dd6 151 main/binary-arm64/Release
+SHA1:
+ 58d287dac562aa1718acbd4b0a473cdfd9789478 6207 main/binary-amd64/Packages
+ 4e9ad8dcd46b4410bf880f98fcc64341b576cfa5 1408 main/binary-amd64/Packages.gz
+ 0f4348c2d4d7cc1f8e59b5934d87f1ca872f6e34 151 main/binary-amd64/Release
+ f9e24b68f3043031e21da58865403f57eb0f590f 6207 main/binary-arm64/Packages
+ 78916099933dab674fdb931dc472aff154679693 1412 main/binary-arm64/Packages.gz
+ 1192bce6bc4c2f641a0287ad41c6bd47e7b2e81d 151 main/binary-arm64/Release
+SHA256:
+ 20315c5f40c63201b93152d685b885800b8095fe9c2ea428c338242c4597659c 6207 main/binary-amd64/Packages
+ f59bd9e735e0d300433a1af370af1cfc10e25258da8d32c527fc120dff974a04 1408 main/binary-amd64/Packages.gz
+ c1e3c9318381862306adcdc4fd4fe2d85be8aa4c4f3dcbb40fce80413f588286 151 main/binary-amd64/Release
+ 6f4ee85736e708479b4c121284fe93517750ff382b1bc0aafa614b21e87fb2ee 6207 main/binary-arm64/Packages
+ 108a7327e00d5fa931cbb6caa0a09eb81ce9ebb6d0b7884475ff366d5a18a1f7 1412 main/binary-arm64/Packages.gz
+ 0146ffd3e2f8867413c78a453f9fdf691a39b0c205f8d3f152c555cb2040c7da 151 main/binary-arm64/Release
