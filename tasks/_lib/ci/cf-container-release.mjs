@@ -652,7 +652,7 @@ export function containerProgress(steps) {
   return result;
 }
 
-function apiOperation(path, body) {
+export function apiOperation(path, body) {
   if (body !== undefined) {
     if (
       path === "containers/registries/registry.cloudflare.com/credentials" &&

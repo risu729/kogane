@@ -27,6 +27,7 @@ import { isReleaseRecord, setDeploymentStatus } from "./release-ledger.mjs";
 import { canonicalJson } from "./release-manifest.mjs";
 import {
   CONTAINER_TARGETS,
+  apiOperation,
   cloudflareApi,
   readApplication,
   verifyApplicationIdentity,
@@ -301,6 +302,26 @@ export function publicationCandidate(before, versions, registryNamespace, target
   registryImage(target, candidates[0].configuration?.image, registryNamespace);
   return candidates[0];
 }
+/**
+ * Closed, numeric-only view of one capture read for the failure diagnostic:
+ * which allocation versions were listed, never images, names or provider text.
+ */
+export function captureObservation(baseline, publishedVersion, snapshot, versions) {
+  return {
+    baselineVersion: Number.isSafeInteger(baseline?.version) ? baseline.version : null,
+    applicationVersion: Number.isSafeInteger(snapshot?.version) ? snapshot.version : null,
+    activeRollout: typeof snapshot?.activeRolloutId === "string",
+    workerVersionMatches: snapshot?.workerVersion === publishedVersion,
+    listed: Array.isArray(versions)
+      ? versions.slice(0, 8).map((entry) => ({
+          version: Number.isSafeInteger(entry?.version) ? entry.version : null,
+          percentage: Number.isFinite(entry?.percentage) ? entry.percentage : null,
+        }))
+      : null,
+  };
+}
+// Set by `capture` only; reported beside its closed failure code.
+let captureTrace = null;
 /** Retry only an absent allocation target; all schema/identity/read errors are final. */
 export async function waitForPublicationCandidate(
   readState,
@@ -680,12 +701,24 @@ async function main() {
     const image = json(resolve(temp, "container-manifest.json")).find((i) => i.name === argument);
     if (!target || !image || !before.snapshots.some((entry) => entry.name === argument))
       fail("prepared_binding");
-    const deadline = Date.now() + 30000;
-    const api = cloudflareApi({
+    const started = Date.now();
+    const deadline = started + 30000;
+    // Every expired wait below ends as publication_pending; the trace records
+    // the phase, the request that crossed the deadline or failed, and what the
+    // last read listed.
+    const trace = { phase: "allocation", reads: 0, inFlight: null, observed: null };
+    captureTrace = { trace, started };
+    const cloudflare = cloudflareApi({
       accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
       token: process.env.CLOUDFLARE_API_TOKEN,
       deadline,
     });
+    const api = async (path, body) => {
+      trace.inFlight = apiOperation(path, body);
+      const result = await cloudflare(path, body);
+      trace.inFlight = null;
+      return result;
+    };
     const baseline = before.snapshots.find((s) => s.name === argument);
     let publishedVersion = process.env.PUBLISHED_WORKER_VERSION;
     if (!publishedVersion && process.env.LEGACY_PUBLICATION === "true") {
@@ -693,11 +726,21 @@ async function main() {
       if (first.workerVersion !== baseline.workerVersion) publishedVersion = first.workerVersion;
     }
     if (!uuid.test(publishedVersion ?? "")) fail("published_worker_mismatch");
-    const readState = async () => ({
-      snapshot: await readApplication(target, api, process.env.CLOUDFLARE_ACCOUNT_ID),
-      versions: await api(`containers/applications/${target.appId}/versions`),
-      registryNamespace: await currentRegistryNamespace(api, before.registryNamespace),
-    });
+    const readState = async () => {
+      const state = {
+        snapshot: await readApplication(target, api, process.env.CLOUDFLARE_ACCOUNT_ID),
+        versions: await api(`containers/applications/${target.appId}/versions`),
+        registryNamespace: await currentRegistryNamespace(api, before.registryNamespace),
+      };
+      trace.reads += 1;
+      trace.observed = captureObservation(
+        baseline,
+        publishedVersion,
+        state.snapshot,
+        state.versions,
+      );
+      return state;
+    };
     const { snapshot, candidate, registryNamespace } = await waitForPublicationCandidate(
       readState,
       {
@@ -707,10 +750,12 @@ async function main() {
         deadline,
       },
     );
+    trace.phase = "registry";
     const credentials = await api("containers/registries/registry.cloudflare.com/credentials", {
       expiration_minutes: 5,
       permissions: ["pull"],
     });
+    trace.inFlight = "registry_manifest";
     await verifyRegistryImage({
       target,
       image: candidate.configuration.image,
@@ -720,9 +765,11 @@ async function main() {
       ...credentials,
       deadline,
     });
+    trace.inFlight = null;
     if (image.legacy && image.registryImage !== candidate.configuration.image)
       fail("rollback_image_changed");
     // Reconfirm the complete exact target after registry proof, before any receipt can be written.
+    trace.phase = "final";
     const final = await readState();
     if (Date.now() >= deadline) fail("publication_pending");
     if (
@@ -795,13 +842,22 @@ if (invokedDirectly()) {
   try {
     await main();
   } catch (error) {
-    console.error(
+    const code =
       process.argv[2] === "capture" && error.message === "cf_container_rollout_pending"
         ? "release_resume_publication_pending"
         : /^(?:release_resume|cf_container)_[a-z_]+$/u.test(error.message)
           ? error.message
-          : `release_resume_${process.argv[2] === "restore" ? "restore_failed" : "failed"}`,
-    );
+          : `release_resume_${process.argv[2] === "restore" ? "restore_failed" : "failed"}`;
+    if (captureTrace)
+      console.error(
+        JSON.stringify({
+          diagnostic: "release_resume_capture",
+          code,
+          elapsedMs: Date.now() - captureTrace.started,
+          ...captureTrace.trace,
+        }),
+      );
+    console.error(code);
     process.exitCode = 1;
   }
 }

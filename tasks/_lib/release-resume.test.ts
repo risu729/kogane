@@ -35,6 +35,7 @@ import {
   positiveId,
   streamArtifact,
   waitForPublicationCandidate,
+  captureObservation,
 } from "./ci/release-resume.mjs";
 import { workflowSteps } from "./deploy-order.ts";
 import { REPO_ROOT } from "./repo-root.ts";
@@ -269,6 +270,44 @@ describe("exact publication readback and the bounded convergence window", () => 
         target,
       ),
     ).toThrow("registry_image_invalid");
+  });
+  test("the capture diagnostic keeps only allocation numbers and flags", () => {
+    expect(
+      captureObservation(
+        before,
+        before.workerVersion,
+        { ...before, activeRolloutId: "11111111-1111-4111-a111-111111111111" },
+        [
+          { version: 3, percentage: 50, configuration: { image } },
+          { version: 4, percentage: 50, configuration: { image } },
+        ],
+      ),
+    ).toEqual({
+      baselineVersion: 3,
+      applicationVersion: 3,
+      activeRollout: true,
+      workerVersionMatches: true,
+      listed: [
+        { version: 3, percentage: 50 },
+        { version: 4, percentage: 50 },
+      ],
+    });
+    const malformed = captureObservation(before, "other", { version: "3" }, [
+      null,
+      { version: 4.5, percentage: "50", configuration: { image } },
+    ]);
+    expect(malformed).toEqual({
+      baselineVersion: 3,
+      applicationVersion: null,
+      activeRollout: false,
+      workerVersionMatches: false,
+      listed: [
+        { version: null, percentage: null },
+        { version: null, percentage: null },
+      ],
+    });
+    expect(JSON.stringify(malformed)).not.toContain("registry.cloudflare.com");
+    expect(captureObservation(before, "other", undefined, { result: [] }).listed).toBeNull();
   });
   test("unpublished future Container drift is refused before resumed mutations", () => {
     const versions = [{ version: 3, configuration: { image }, percentage: 100 }];
@@ -1102,6 +1141,32 @@ for (const phase of [
           expect(result.status).toBe(1);
           expect(result.stderr).toContain(code!);
           expect(readdirSync(temp)).not.toContain("resume-receipt.json");
+          // Every expired wait shares one code; the diagnostic names which one.
+          const expected = {
+            zero: {
+              phase: "allocation",
+              inFlight: null,
+              reads: 6,
+              observed: {
+                baselineVersion: 3,
+                applicationVersion: 3,
+                activeRollout: false,
+                workerVersionMatches: true,
+                listed: [{ version: 3, percentage: 100 }],
+              },
+            },
+            late: { phase: "allocation", inFlight: "application_versions", reads: 0 },
+            "registry-late": { phase: "registry", inFlight: "registry_manifest", reads: 1 },
+          }[mode as string];
+          if (expected) {
+            const lines = result.stderr.trim().split("\n");
+            expect(lines.at(-1)).toBe(`release_resume_${code!}`);
+            expect(JSON.parse(lines.at(-2)!)).toMatchObject({
+              diagnostic: "release_resume_capture",
+              code: `release_resume_${code!}`,
+              ...expected,
+            });
+          }
         }
         const manifestId = newImage.split("@")[1];
         for (const [name, id, kind, success] of [
