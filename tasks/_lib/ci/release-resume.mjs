@@ -308,7 +308,7 @@ export function publicationCandidate(before, versions, registryNamespace, target
  */
 export function captureObservation(baseline, publishedVersion, snapshot, versions) {
   return {
-    baselineVersion: baseline.version,
+    baselineVersion: Number.isSafeInteger(baseline?.version) ? baseline.version : null,
     applicationVersion: Number.isSafeInteger(snapshot?.version) ? snapshot.version : null,
     activeRollout: typeof snapshot?.activeRolloutId === "string",
     workerVersionMatches: snapshot?.workerVersion === publishedVersion,
@@ -704,7 +704,8 @@ async function main() {
     const started = Date.now();
     const deadline = started + 30000;
     // Every expired wait below ends as publication_pending; the trace records
-    // which phase and request were still open, and what the last read listed.
+    // the phase, the request that crossed the deadline or failed, and what the
+    // last read listed.
     const trace = { phase: "allocation", reads: 0, inFlight: null, observed: null };
     captureTrace = { trace, started };
     const cloudflare = cloudflareApi({

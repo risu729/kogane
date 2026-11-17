@@ -503,17 +503,15 @@ against that same baseline immediately before its Action; unbound targets are
 also checked during restore before resumed migrations. Capture retries only an
 absent new allocation version within one absolute 30-second budget, including
 registry proof and final readback. Any wait that outlives that budget, whether
-for the allocation version, an open Cloudflare API request or the registry
-manifest, ends as `release_resume_publication_pending`. The line before that
-code is a JSON diagnostic with the phase (`allocation`, `registry` or `final`),
-the request still open, the count of completed reads and the last read's
-numbers only: baseline and application versions, rollout flag, whether the
-Worker UUID matched, and each listed allocation version and percentage. Deploy
-run 44098109978 (2026-11-17, `02f76d2`) failed this way before the diagnostic
-existed, so which wait stalled is unknown; Cloudflare had created the new
-application version and rollout three seconds before capture began. Multiple
-candidates, malformed/read failures and identity changes are refused immediately. The native returned UUID, or the
-frozen first changed legacy UUID, stays exact. The final readback must retain the
+for the allocation version, a Cloudflare API request or the registry manifest,
+ends as `release_resume_publication_pending`. Every capture failure first prints
+a JSON diagnostic: the phase (`allocation`, `registry` or `final`), the request
+that crossed the deadline or failed, the count of completed reads, and the last
+read's numbers only (baseline and application versions, rollout flag, whether
+the Worker UUID matched, and up to eight listed allocation versions with their
+percentages). Multiple candidates, malformed/read failures and identity changes
+are refused immediately. The native returned UUID, or the frozen first changed
+legacy UUID, stays exact. The final readback must retain the
 same candidate before any receipt is written.
 
 Rerunning the failed release job reacquires its own `production-deploy` lock,
