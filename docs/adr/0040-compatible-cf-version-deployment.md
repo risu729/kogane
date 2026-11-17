@@ -200,10 +200,10 @@ survives asynchronous writes, and operational failures keep a generic code.
 - Date: 2026-11-13
 
 Workers Issues is declared as `observability.issues.enabled` for every Worker
-(#1261). Only the three Container Workers received it. With cf
-1.0.0-beta.28, `cf workers versions create` never sends `observability` or
-`logpush`, and `cf workers deployments create` takes no configuration. So no
-observability change has reached the fourteen versions-strategy Workers since
+(#1261). Only the three Container Workers received it. From cf
+1.0.0-beta.28 through at least 1.0.0-beta.32, `cf workers versions create`
+never sends `observability` or `logpush`, and `cf workers deployments create`
+takes no configuration. So no observability change has reached the fourteen versions-strategy Workers since
 they moved to cf. cf has no other command for non-versioned script settings.
 The owner rejected adding a settings write outside cf. The shared infrastructure
 policy makes this repository the single `cf` writer of each Worker's code, runtime
@@ -219,14 +219,15 @@ Options considered:
    Container Workers. Selected.
 
 Option 2 of the original decision was rejected because `cf deploy` broadened
-the Action's exact-version readback. That no longer holds. With
-risu729/wrangler-deploy-action#298, the deploy strategy:
+the Action's exact-version readback. That no longer holds. Since
+risu729/wrangler-deploy-action v3.2.0 (risu729/wrangler-deploy-action#326 and
+risu729/wrangler-deploy-action#327), the deploy strategy:
 
 - finds the deployment that serves the returned version at 100%;
 - proves that exact deployment and the current deployment collection within the
   same 30-second budget as the versions strategy;
-- reads the script settings back and requires every declared `observability`
-  value from the Build Output.
+- reads the script settings back, within its own 30-second budget, and requires
+  every declared `observability` value from the Build Output.
 
 cf reports a failed settings write only as a warning, so this readback is what
 turns it into a failed deployment. A collection that lags the exact deployment
