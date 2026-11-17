@@ -138,6 +138,15 @@ credential-free cf builds and prebuilt version-upload dry runs added.
 The three Container deployments (GlobalPass, SBI Shinsei, St.George) use the
 pinned Action's full-deploy strategy under [ADR 0043](adr/0043-cf-container-deployment.md),
 because `cf workers versions create` does not update Container applications.
+Since Action v3.1.0 that strategy identifies the active deployment through the
+Cloudflare API, retrying a lagging deployment list within 30 seconds
+([risu729/wrangler-deploy-action#326](https://github.com/risu729/wrangler-deploy-action/pull/326)).
+Since v3.2.0 it also reads the script settings back, so the declared
+`observability`, including Workers Issues, must be live
+([risu729/wrangler-deploy-action#327](https://github.com/risu729/wrangler-deploy-action/pull/327)).
+These Container Workers send `observability` with the script upload, where a
+failure fails `cf deploy`; for Workers without Containers, `cf deploy` writes it
+in a separate settings request whose failure is only a warning.
 They retain the default scheduling policy, existing app/namespaces and
 APAC/basic/max-instance settings. Their image manifest binds the Docker image,
 daemon and source measurement; identity, immutable registry digest and complete
