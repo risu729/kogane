@@ -1,9 +1,10 @@
 #:schema https://mise.jdx.dev/schema/mise.json
 
-# mise 2026.10.10 is the minimum: it is the first release with the native
-# task `skip_if` that //apps/web:browser uses. CI pins a newer release
-# (jdx/mise-action `version:` in .github/workflows/).
-min_version = "2026.10.10"
+# mise 2026.10.19 is the minimum: it is the first release where
+# `lockfile_mode` defaults to "generate", and it includes the native task
+# `skip_if` (from 2026.10.10) that //apps/web:browser uses. CI pins a newer
+# release (jdx/mise-action `version:` in .github/workflows/).
+min_version = "2026.10.19"
 monorepo_root = true
 
 [monorepo]
@@ -31,8 +32,6 @@ ruff = "0.17.5"
 [settings]
 experimental = true
 lockfile = true
-# mise defaults to generate only from 2026.10.19, which is newer than min_version.
-lockfile_mode = "generate"
 lockfile_platforms = ["linux-x64", "windows-x64"]
 
 [settings.npm]

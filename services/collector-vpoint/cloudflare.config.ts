@@ -8,7 +8,6 @@ export default defineConfig({
     compatibilityFlags: ["nodejs_compat"],
     // ScheduledCollection and FumiOffer are private named RPC entrypoints.
     entrypoint: "src/schedule-entrypoint.ts",
-    workersDev: true,
     previewUrls: false,
     observability: {
       enabled: true,

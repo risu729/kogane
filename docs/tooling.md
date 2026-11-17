@@ -21,11 +21,15 @@ fixed toolchain:
   each workspace owns a `mise.toml`, discovered through native mise monorepo
   config roots and addressed as `//<workspace>:<task>`. Dependencies are installed by the `bun` deps provider
   (`bun install --frozen-lockfile`), never by a task that downloads a tool on
-  demand. Tool lockfiles use format version 3 and `lockfile_mode = "generate"`,
-  which rebuilds them from current requests while reusing unchanged artifacts.
-  mise 2026.10.10 is the minimum because the web browser-install task uses
-  native `skip_if`: it installs Chromium only in CI without `CHROMIUM_PATH`.
-  Locally, supply an installed Chromium through that variable.
+  demand. Tool lockfiles use format version 3 and mise's default
+  `lockfile_mode`, `generate`, which rebuilds them from current requests while
+  reusing unchanged artifacts. mise 2026.10.19 is the minimum because
+  `lockfile_mode` defaults to `generate` from that release; it also includes
+  native `skip_if` (from 2026.10.10), which the web browser-install task uses:
+  it installs Chromium only in CI without `CHROMIUM_PATH`. Locally, supply an
+  installed Chromium through that variable. The owner decided on 2026-11-17 at
+  02:55 UTC to raise `min_version` when the repository relies on a newer mise
+  default or feature, instead of keeping default-equal settings for older mise.
 - **Bun** is the package manager and the test runner for pure TypeScript. The
   repository is one Bun workspace with a single root `bun.lock` and
   `linker = "isolated"`, so a workspace sees only what it declares and

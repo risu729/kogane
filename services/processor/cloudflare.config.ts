@@ -15,7 +15,8 @@ export default defineConfig({
   worker: {
     name: "kogane-observation-pipeline",
     compatibilityDate: "2026-09-07",
-    compatibilityFlags: ["nodejs_compat", "enable_ctx_exports"],
+    // ctx.exports (src/schedule-alarm.ts) is on from compatibility date 2025-11-17.
+    compatibilityFlags: ["nodejs_compat"],
     entrypoint: "src/schedule-entrypoint.ts",
     workersDev: false,
     previewUrls: false,
