@@ -125,9 +125,9 @@ caller ever drops it again.
 [ADR 0040](adr/0040-compatible-cf-version-deployment.md) established prebuilt deployment
 for thirteen compatible Workers; [ADR 0042](adr/0042-prestia-bank-worker.md) adds the
 PRESTIA bank Worker, bringing the compatible fleet to fourteen Workers using
-the `cf` pin in `package.json` (`1.0.0-beta.28` since 2026-11-06) and the pinned
+the `cf` pin in `package.json` and the pinned
 `wrangler-deploy-action` v3 (no step uses `worker-preview`). ADR 0040's
-2026-11-13 amendment (proposed) moves them to `cf deploy` in three phases,
+2026-11-13 amendment (proposed) proposes moving them to `cf deploy` in three phases,
 because `cf workers versions create` never applies declared `observability`. Their native
 `cloudflare.config.ts` and
 `wrangler.config.ts` retain the canonical Wrangler settings; parity guards

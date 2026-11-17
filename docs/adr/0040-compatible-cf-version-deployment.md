@@ -200,11 +200,11 @@ survives asynchronous writes, and operational failures keep a generic code.
 - Date: 2026-11-13
 
 Workers Issues is declared as `observability.issues.enabled` for every Worker
-(#1261). Only the three Container Workers received it. From cf
-1.0.0-beta.28 through at least 1.0.0-beta.32, `cf workers versions create`
-never sends `observability` or `logpush`, and `cf workers deployments create`
-takes no configuration. So no observability change has reached the fourteen versions-strategy Workers since
-they moved to cf. cf has no other command for non-versioned script settings.
+(#1261). Only the three Container Workers received it. From the first cf
+pin, 1.0.0-beta.12, through at least 1.0.0-beta.32, `cf workers versions
+create` never sends `observability` or `logpush`, and `cf workers deployments
+create` takes no configuration. So no observability change has reached the
+fourteen versions-strategy Workers since they moved to cf. cf has no other command for non-versioned script settings.
 The owner rejected adding a settings write outside cf. The shared infrastructure
 policy makes this repository the single `cf` writer of each Worker's code, runtime
 settings and logging, custom domains, routes and triggers.
@@ -219,7 +219,8 @@ Options considered:
    Container Workers. Selected.
 
 Option 2 of the original decision was rejected because `cf deploy` broadened
-the Action's exact-version readback. That no longer holds. Since
+the Action's exact-version readback and trigger permission contract. The
+readback half no longer holds. Since
 risu729/wrangler-deploy-action v3.2.0 (risu729/wrangler-deploy-action#326 and
 risu729/wrangler-deploy-action#327), the deploy strategy:
 
@@ -230,9 +231,16 @@ risu729/wrangler-deploy-action#327), the deploy strategy:
   every declared `observability` value from the Build Output.
 
 cf reports a failed settings write only as a warning, so this readback is what
-turns it into a failed deployment. A collection that lags the exact deployment
-is read again within the budget. The 2026-11-10 Sony Bank deployment failed
-for that reason on the versions strategy and passed on a rerun.
+turns an `observability` value that was not applied into a failed deployment.
+It does not read `logpush`, tail consumers or tags back. Since v3.0.4
+(risu729/wrangler-deploy-action#324), a collection that lags the exact
+deployment is read again within the budget, for both strategies. The
+2026-11-10 Sony Bank deployment failed for that reason on the versions strategy
+and passed on a rerun.
+
+The trigger half is accepted, not removed: the deploy strategy requires
+`deploy-triggers: 'true'`, so each moved Worker's triggers are synchronized by
+the same `cf deploy`, as PRESTIA, the App and Processor already do.
 
 Decision: every cf Worker uses `production-strategy: deploy` with
 `deploy-triggers: 'true'`. The move is staged, one pull request per phase:
@@ -272,10 +280,13 @@ and the Action's domain guard. Processor's Queue consumer options move from
   Container owners, whatever its strategy. A moved Worker keeps its binding,
   variable, secret and observability checks.
 - Rollback still runs the target checkout's own cf and Build Output through
-  the trusted workflow's strategy. A target whose configuration lacks
-  `observability` is published as `{enabled: false}`, and one that lacks
-  `issues` turns Issues off. If the target's cf does not apply its declared
-  settings, the readback fails after publication, and the failure is recorded
-  like any other partial release, without a repeat.
+  the trusted workflow's strategy. On cf's versions-API path, a target whose
+  configuration lacks `observability` is expected to be published as
+  `{enabled: false}`, and one that lacks `issues` is expected to turn Issues
+  off. On the full script-upload path (V Point and V Point Pay) an undeclared
+  `observability` is omitted, and the Action reads nothing back. If the
+  target's cf does not apply its declared settings, the readback fails after
+  publication, and the failure is recorded like any other partial release,
+  without a repeat.
 - After each phase's first production release, the live script settings and
   the Issues dashboard are read once to confirm the result.
