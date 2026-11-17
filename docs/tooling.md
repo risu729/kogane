@@ -24,7 +24,8 @@ fixed toolchain:
   demand. The three Container relays under `services/*/container` keep their own
   npm trees; each service's `mise.toml` installs one with a `[deps.npm]`
   provider (`npm ci --ignore-scripts`), which mise runs before that service's
-  tasks, so no task runs an install command. Tool lockfiles use format version 3 and mise's default
+  tasks, so the `container` tasks no longer run `npm ci`. Tool lockfiles use
+  format version 3 and mise's default
   `lockfile_mode`, `generate`, which rebuilds them from current requests while
   reusing unchanged artifacts. mise 2026.10.19 is the minimum because
   `lockfile_mode` defaults to `generate` from that release; it also includes
