@@ -432,15 +432,16 @@ observability: { enabled: true, issues: { enabled: true } },
 ```
 
 How the setting reaches Cloudflare: only the three Container Workers
-(GlobalPass, SBI Shinsei, St.George) apply it today, because they publish with
-`cf deploy`, which applies `cloudflare.config.ts` including `observability`.
-The other fourteen publish with `cf workers versions create` and
+(GlobalPass, SBI Shinsei, St.George) and PRESTIA apply it today, because they
+publish with `cf deploy`, which applies `cloudflare.config.ts` including
+`observability`; the Action then reads the declared values back. The other
+thirteen publish with `cf workers versions create` and
 `cf workers deployments create`, which carry no non-versioned script settings,
 so no `observability` change (this one or any earlier one) has reached them
-since they moved to cf. Moving them to `cf deploy` is the open follow-up; until
-then Issues covers the three Container Workers only. A full deploy or rollback
-from a commit whose config lacks the key turns Issues off for a Container
-Worker. `tasks/_lib/cf-deploy.test.ts` requires `issues.enabled` in both files
+since they moved to cf. ADR 0040's 2026-11-13 amendment moves them to
+`cf deploy` in phases; until then Issues covers those four Workers only. A full
+deploy or rollback from a commit whose config lacks the key turns Issues off
+for those Workers. `tasks/_lib/cf-deploy.test.ts` requires `issues.enabled` in both files
 of every cf-deployed Worker.
 
 What becomes an occurrence: an uncaught exception, a failed invocation, a `5xx`
