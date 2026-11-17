@@ -128,12 +128,15 @@ PRESTIA bank Worker, bringing the compatible fleet to fourteen Workers using
 the `cf` pin in `package.json` and the pinned
 `wrangler-deploy-action` v3 (no step uses `worker-preview`). ADR 0040's
 2026-11-13 amendment (proposed) proposes moving them to `cf deploy` in three phases,
-because `cf workers versions create` never applies declared `observability`. Their native
+because `cf workers versions create` never applies declared `observability`.
+Phase 1, PRESTIA, uses `production-strategy: deploy`; the other thirteen still
+use the versions strategy. Their native
 `cloudflare.config.ts` and
 `wrangler.config.ts` retain the canonical Wrangler settings; parity guards
 cover bindings, variables, observability, assets and the two already-declared
 V Point exports. Existing Wrangler tests, bundles and dry runs remain, with
-credential-free cf builds and prebuilt version-upload dry runs added.
+credential-free cf builds and prebuilt dry runs added: version uploads, and
+`cf deploy` for PRESTIA.
 
 The three Container deployments (GlobalPass, SBI Shinsei, St.George) use the
 pinned Action's full-deploy strategy under [ADR 0043](adr/0043-cf-container-deployment.md),
@@ -163,11 +166,11 @@ actual artifacts; before publication the live migration tag must match the
 latest canonical tag, and after publication all active namespace IDs must
 match the captured baseline. A refused check prints only its closed `cf_do_…`
 code, and an unexpected error prints `cf_do_internal_error`. Pending DO
-lifecycle work requires a separate Wrangler rollout. Processor and PRESTIA opt into trigger synchronization on the
-versions strategy: Processor preserves its Queue consumer settings; PRESTIA
-applies workers.dev (on by default without routes or domains) and its checked-in
-previewUrls:false after version upload.
-The three Container full-deploy steps also explicitly consent to synchronization.
+lifecycle work requires a separate Wrangler rollout. Processor opts into trigger synchronization on the
+versions strategy and preserves its Queue consumer settings. The full-deploy
+steps (the three Container owners and PRESTIA) explicitly consent to
+synchronization, which `cf deploy` performs itself; PRESTIA applies workers.dev
+(on by default without routes or domains) and its checked-in previewUrls:false.
 All 17 deployed Workers keep ADR 0039's order and the authenticated
 App/Processor release and schema postcheck.
 
@@ -223,9 +226,9 @@ the same identity. The manifest digests the native source and build config and
 every file in cf Build Output, including assets and Worker metadata. It is
 rechecked before the first upload. v2 uploads that prebuilt artifact, deploys
 the returned version at 100%, and reads that exact deployment back. Trigger
-synchronization is disabled for the other code-only Workers. Processor/PRESTIA
-and the three full-deploy Container owners explicitly enable it as described
-above. No preview lane, route/domain addition or bank-secret synchronization
+synchronization is disabled for the other code-only Workers. Processor and
+the full-deploy Workers (the three Container owners and PRESTIA) explicitly
+enable it as described above. No preview lane, route/domain addition or bank-secret synchronization
 is introduced.
 
 ### What the release job does, in order

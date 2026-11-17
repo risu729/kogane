@@ -931,6 +931,7 @@ jobs:
           working-directory: services/collector-prestia-bank
           worker: kogane-prestia-bank-collector
           build-mode: production
+          production-strategy: deploy
           deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}

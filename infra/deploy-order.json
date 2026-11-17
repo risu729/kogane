@@ -200,7 +200,8 @@
       "bundleTask": "prestia-bank-worker:bundle",
       "bundleDir": "dist/prestia-bank-worker",
       "after": [],
-      "deployBackend": "cf"
+      "deployBackend": "cf",
+      "productionStrategy": "deploy"
     },
     {
       "name": "vpass-json",
