@@ -1,5 +1,13 @@
 #:schema https://mise.jdx.dev/schema/mise.json
 
+[deps.npm]
+# The container's own npm tree, kept apart from the Bun workspace. mise run
+# installs it before this service's tasks when package-lock.json or
+# package.json changed. --ignore-scripts keeps dependency install scripts off.
+auto = true
+dir = "container"
+run = "npm ci --ignore-scripts"
+
 [tasks.types]
 description = "Generate St.George Worker binding types."
 run = "./node_modules/.bin/wrangler types"
@@ -16,9 +24,9 @@ run = ["node ../../tasks/_lib/coverage-run.mjs bun test ./test/*.test.ts", "node
 
 [tasks.container]
 depends = ["//apps/web:browser"]
-description = "Install pinned browser dependencies and test the isolated container runtime."
+description = "Test the isolated container runtime with its pinned browser dependencies."
 dir = "container"
-run = ["npm ci --ignore-scripts", "node --test *.node-test.mjs *.test.mjs"]
+run = "node --test *.node-test.mjs *.test.mjs"
 
 [tasks.dry-run]
 # Wait only when full verification already schedules workspace checks.
