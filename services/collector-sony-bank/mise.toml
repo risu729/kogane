@@ -36,7 +36,7 @@ description = "Build and validate the prebuilt cf production artifact without cr
 depends = ["//services/collector-sony-bank:types"]
 run = [
 	"./node_modules/.bin/cf build --mode production",
-	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-sony-bank-collector-poc --dry-run",
+	"./node_modules/.bin/cf deploy --prebuilt --mode production --worker kogane-sony-bank-collector-poc --dry-run",
 ]
 
 [tasks."cf-typecheck"]

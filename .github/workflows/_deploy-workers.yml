@@ -627,7 +627,8 @@ jobs:
           working-directory: services/collector-mobile-suica
           worker: kogane-mobile-suica-collector-poc
           build-mode: production
-          deploy-triggers: 'false'
+          production-strategy: deploy
+          deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the Money Forward collector
@@ -649,7 +650,8 @@ jobs:
           working-directory: services/collector-moneyforward
           worker: kogane-moneyforward-collector-poc
           build-mode: production
-          deploy-triggers: 'false'
+          production-strategy: deploy
+          deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the MyJCB collector
@@ -671,7 +673,8 @@ jobs:
           working-directory: services/collector-myjcb
           worker: kogane-myjcb-collector-poc
           build-mode: production
-          deploy-triggers: 'false'
+          production-strategy: deploy
+          deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the SBI Securities collector
@@ -693,7 +696,8 @@ jobs:
           working-directory: services/collector-sbi-securities
           worker: kogane-sbi-collector-poc
           build-mode: production
-          deploy-triggers: 'false'
+          production-strategy: deploy
+          deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Verify the original SBI Shinsei baseline immediately before publication
@@ -779,7 +783,8 @@ jobs:
           working-directory: services/collector-sbi-vc-trade
           worker: kogane-sbi-vc-session-poc
           build-mode: production
-          deploy-triggers: 'false'
+          production-strategy: deploy
+          deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the SMBC Direct collector
@@ -801,7 +806,8 @@ jobs:
           working-directory: services/collector-smbc-direct
           worker: kogane-smbc-direct-backfill-poc
           build-mode: production
-          deploy-triggers: 'false'
+          production-strategy: deploy
+          deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the Mizuho collector
@@ -823,7 +829,8 @@ jobs:
           working-directory: services/collector-mizuho
           worker: kogane-mizuho-collector
           build-mode: production
-          deploy-triggers: 'false'
+          production-strategy: deploy
+          deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the Sony Bank collector
@@ -845,7 +852,8 @@ jobs:
           working-directory: services/collector-sony-bank
           worker: kogane-sony-bank-collector-poc
           build-mode: production
-          deploy-triggers: 'false'
+          production-strategy: deploy
+          deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Verify the original St.George baseline immediately before publication
@@ -954,7 +962,8 @@ jobs:
           working-directory: services/collector-vpass
           worker: kogane-vpass-collector-poc
           build-mode: production
-          deploy-triggers: 'false'
+          production-strategy: deploy
+          deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the V Point Pay collector
@@ -1022,6 +1031,7 @@ jobs:
           working-directory: services/processor
           worker: kogane-observation-pipeline
           build-mode: production
+          production-strategy: deploy
           deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -1048,6 +1058,7 @@ jobs:
           working-directory: services/app
           worker: kogane-evidence-browser
           build-mode: production
+          production-strategy: deploy
           deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}

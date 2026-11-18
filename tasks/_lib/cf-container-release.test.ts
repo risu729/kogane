@@ -78,12 +78,18 @@ describe("only the three admitted Container configurations change deployment bac
       order.workers.filter((entry) => entry.deploy).length,
     );
     // ADR 0040's 2026-11-13 amendment moves the other cf Workers to full deploy in
-    // phases; phase 1 is PRESTIA.
+    // phases; after phases 1 and 2 only V Point and V Point Pay remain on versions.
+    const containerNames = CONTAINER_TARGETS.map((entry) => entry.name);
+    for (const name of containerNames) {
+      expect(order.workers.find((entry) => entry.name === name)?.productionStrategy).toBe(
+        "deploy",
+      );
+    }
     expect(
       order.workers
-        .filter((entry) => entry.productionStrategy === "deploy")
+        .filter((entry) => entry.deployBackend === "cf" && entry.productionStrategy !== "deploy")
         .map((entry) => entry.name),
-    ).toEqual([...CONTAINER_TARGETS.map((entry) => entry.name), "prestia-bank-worker"]);
+    ).toEqual(["vpoint-pay-worker", "vpoint-worker"]);
     for (const item of CONTAINER_TARGETS) {
       const deploy = steps.find((step) => step.body.includes(`id: cf-deploy-${item.name}\n`))!;
       const verify = steps.find((step) =>

@@ -39,7 +39,7 @@ description = "Build and validate the prebuilt cf production artifact without cr
 depends = ["//services/collector-sbi-vc-trade:types"]
 run = [
 	"./node_modules/.bin/cf build --mode production",
-	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-sbi-vc-session-poc --dry-run",
+	"./node_modules/.bin/cf deploy --prebuilt --mode production --worker kogane-sbi-vc-session-poc --dry-run",
 	"node ../../tasks/_lib/ci/cf-do-identity.mjs validate sbi-vc-trade-worker",
 ]
 
