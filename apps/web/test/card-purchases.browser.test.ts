@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import { auditView } from "./a11y-audit.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { CARD_PURCHASE_PAGE_SIZE } from "../../../packages/application/src/query/card-purchases.ts";
+import type { CardPurchaseView } from "../../../packages/domain/src/card-purchase-view.ts";
 import {
   capturedPurchase,
   purchasePage,
@@ -15,6 +17,22 @@ const runnable = existsSync(join(client, "index.html")) && existsSync(executable
 if (!runnable && (!existsSync(join(client, "index.html")) || process.env["CI"] === "true"))
   process.exitCode = 1;
 
+/**
+ * A synthetic store longer than one server page: 55 purchases on the 2026-09
+ * statement and 5 on 2026-10, each the captured fixture under its own id.
+ */
+const PAGED_STORE: CardPurchaseView[] = Array.from({ length: 60 }, (_, index) => {
+  const base = capturedPurchase();
+  const period = index < 55 ? "2026-09" : "2026-10";
+  return {
+    ...base,
+    eventId: `purchase_${index.toString(16).padStart(64, "a")}`,
+    statementPeriod: period,
+    statement: base.statement.status === "linked" ? { ...base.statement, period } : base.statement,
+    settlement: period === "2026-09" ? base.settlement : null,
+  };
+});
+
 describe.if(runnable)("card purchase explanation", () => {
   let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
@@ -22,11 +40,13 @@ describe.if(runnable)("card purchase explanation", () => {
   let advertised = true;
   let empty = false;
   let tooMany = false;
+  let paged = false;
   const requests: URL[] = [];
   beforeEach(() => {
     advertised = true;
     empty = false;
     tooMany = false;
+    paged = false;
     requests.length = 0;
   });
   beforeAll(async () => {
@@ -50,8 +70,26 @@ describe.if(runnable)("card purchase explanation", () => {
           // The server refuses a filter it cannot total completely.
           if (tooMany && !url.searchParams.has("period"))
             return Response.json({ error: "result_limit_exceeded" }, { status: 413 });
-          const page = purchasePage(empty ? [] : undefined);
           const eventId = url.searchParams.get("eventId");
+          if (paged && eventId === null) {
+            // Pages the synthetic store the way the App route does.
+            const period = url.searchParams.get("period");
+            const matching = PAGED_STORE.filter(
+              (item) => period === null || item.statementPeriod === period,
+            );
+            const offset = Number(url.searchParams.get("offset"));
+            const answer = purchasePage(matching.slice(offset, offset + CARD_PURCHASE_PAGE_SIZE));
+            return Response.json({
+              apiVersion: 2,
+              ...answer,
+              nextOffset:
+                offset + CARD_PURCHASE_PAGE_SIZE < matching.length
+                  ? offset + CARD_PURCHASE_PAGE_SIZE
+                  : null,
+              summary: { ...answer.summary, events: matching.length },
+            });
+          }
+          const page = purchasePage(empty ? [] : undefined);
           if (eventId !== null) {
             const item = page.items.find((entry) => entry.eventId === eventId);
             return item
@@ -81,6 +119,17 @@ describe.if(runnable)("card purchase explanation", () => {
     await page.getByRole("heading", { name: heading, exact: true }).waitFor();
     await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
     return page;
+  }
+  /**
+   * The browser's receipt of the next list answer for this statement month
+   * (null: unfiltered). By then the server has recorded the request, which a
+   * heading rendered from a cached answer does not prove.
+   */
+  function listAnswer(page: Page, period: string | null) {
+    return page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/v2/card-purchases" && url.searchParams.get("period") === period;
+    });
   }
 
   test("an unadvertised feature has no navigation entry and requests nothing", async () => {
@@ -182,9 +231,56 @@ describe.if(runnable)("card purchase explanation", () => {
     await page.getByRole("heading", { name: "2026-09 請求分の状態ごとの利用額" }).waitFor();
     expect(requests.at(-1)?.searchParams.get("period")).toBe("2026-09");
     expect(requests.at(-1)?.searchParams.get("offset")).toBe("0");
+    // The unfiltered answer is cached from the first load, so its heading can
+    // render before the refetch reaches the server. Wait for that refetch's
+    // answer instead.
+    const unfiltered = listAnswer(page, null);
     await page.getByRole("button", { name: "すべて表示", exact: true }).click();
+    await unfiltered;
     await page.getByRole("heading", { name: "状態ごとの利用額", exact: true }).waitFor();
     expect(requests.at(-1)?.searchParams.has("period")).toBe(false);
+    expect(requests.at(-1)?.searchParams.get("offset")).toBe("0");
+    await page.close();
+  }, 30_000);
+
+  test("changing the filter on a later page asks for the new filter's first page", async () => {
+    paged = true;
+    const page = await open();
+    const pager = page.getByRole("group", { name: "カード利用のページ" });
+    const rows = page.getByRole("region", { name: "カード利用の一覧" }).locator("tbody tr");
+    await pager.getByText("60件中 1–50件").waitFor();
+    // Unfiltered, to the second page.
+    const second = listAnswer(page, null);
+    await pager.getByRole("button", { name: "次の50件", exact: true }).click();
+    await second;
+    await pager.getByText("60件中 51–60件").waitFor();
+    expect(requests.at(-1)?.searchParams.get("offset")).toBe("50");
+    expect(await rows.count()).toBe(10);
+    // A statement month from there starts at that month's first page.
+    await page.getByLabel("請求月", { exact: true }).fill("2026-09");
+    const filtered = listAnswer(page, "2026-09");
+    await page.getByRole("button", { name: "絞り込む", exact: true }).click();
+    await filtered;
+    expect(requests.at(-1)?.searchParams.get("period")).toBe("2026-09");
+    expect(requests.at(-1)?.searchParams.get("offset")).toBe("0");
+    await page.getByRole("heading", { name: "2026-09 請求分の状態ごとの利用額" }).waitFor();
+    await pager.getByText("55件中 1–50件").waitFor();
+    expect(await rows.count()).toBe(50);
+    // The month's second page, then every month again from its first page.
+    const monthSecond = listAnswer(page, "2026-09");
+    await pager.getByRole("button", { name: "次の50件", exact: true }).click();
+    await monthSecond;
+    await pager.getByText("55件中 51–55件").waitFor();
+    expect(requests.at(-1)?.searchParams.get("offset")).toBe("50");
+    const unfiltered = listAnswer(page, null);
+    await page.getByRole("button", { name: "すべて表示", exact: true }).click();
+    await unfiltered;
+    expect(requests.at(-1)?.searchParams.has("period")).toBe(false);
+    expect(requests.at(-1)?.searchParams.get("offset")).toBe("0");
+    await page.getByRole("heading", { name: "状態ごとの利用額", exact: true }).waitFor();
+    await pager.getByText("60件中 1–50件").waitFor();
+    expect(await rows.count()).toBe(50);
+    expect(await page.getByLabel("請求月", { exact: true }).inputValue()).toBe("");
     await page.close();
   }, 30_000);
 

@@ -177,25 +177,31 @@ describe("V Point Pay normalized notification-event Layer B", () => {
   });
 
   test("enforces the exact Layer A v2 provenance envelope without propagating it", () => {
+    // Provenance v2 as the collector writes it. The recipient is synthetic: the
+    // parser records it but does not compare it; the sender is the provider's
+    // public notification address, which the parser does check (ADR 0115).
     const input = value("usage");
     input["schemaVersion"] = "vpoint-pay-email-event-v2";
     input["sourceProvenance"] = {
-      schemaVersion: "vpoint-pay-email-source-provenance-v1",
-      delivery: "direct",
-      storedMessageScope: "smtp-message",
+      schemaVersion: "vpoint-pay-email-source-provenance-v2",
+      delivery: "forwarded-rfc822",
+      storedMessageScope: "forwarded-rfc822-part",
       sourceVerification: "source_unverified",
-      envelopeFrom: "info@prepaid.smbc-card.com",
-      // The parser pins the schema-v2 envelope recipient to the deployed V Point Pay
-      // routing address in its source (parsers take no configuration), so an accepted
-      // v2 event must carry that address. Documented as a limit in
-      // docs/sources/v-point-pay.md (Layer B).
-      envelopeTo: "vpointpay@takuk.me",
-      outerMessageSha256: input["id"],
+      envelopeFrom: "forwarder@example.invalid",
+      envelopeTo: "synthetic-vpoint-pay@example.invalid",
+      messageFrom: "info@prepaid.smbc-card.com",
+      outerMessageSha256: "f".repeat(64),
       authenticationProvenance: "not-exposed-by-cloudflare-email-event",
     };
     const result = vPointPayNotificationEvent.parse(encode(input), artifact());
     expect(result.observations[0]?.extra).not.toHaveProperty("sourceProvenance");
-    (input["sourceProvenance"] as Record<string, unknown>)["outerMessageSha256"] = "f".repeat(64);
+    const provenance = input["sourceProvenance"] as Record<string, unknown>;
+    provenance["messageFrom"] = "forwarder@example.invalid";
+    expect(() => vPointPayNotificationEvent.parse(encode(input), artifact())).toThrow(
+      /provenance/iu,
+    );
+    provenance["messageFrom"] = "info@prepaid.smbc-card.com";
+    provenance["outerMessageSha256"] = input["id"];
     expect(() => vPointPayNotificationEvent.parse(encode(input), artifact())).toThrow(
       /provenance/iu,
     );
