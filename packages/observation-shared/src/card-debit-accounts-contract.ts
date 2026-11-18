@@ -159,7 +159,8 @@ export function validCardDebitAccountsReview(value: unknown): boolean {
           validSourceFactRef(statement.ref) &&
           nullableText(statement.period) &&
           (statement.paymentDate === null || validTemporalValue(statement.paymentDate)) &&
-          (statement.amount === null || validQuantity(statement.amount)))) &&
+          // A total that is not exact carries its status and reason (INV05).
+          validQuantity(statement.amount))) &&
       validStated(item.stated) &&
       Array.isArray(item.settled) &&
       item.settled.every(validMatched) &&

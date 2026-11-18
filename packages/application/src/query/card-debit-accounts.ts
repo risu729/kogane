@@ -49,7 +49,7 @@ import type { SourceFactRef } from "../../../domain/src/events.ts";
 import { CARD_INFORMATION_READER_VERSION } from "../../../domain/src/myjcb-card-information.ts";
 import type { FinancialError } from "../../../domain/src/result.ts";
 import { parseLocalDate, type TemporalValue } from "../../../domain/src/time.ts";
-import type { Quantity } from "../../../domain/src/values.ts";
+import { absentQuantity, type Quantity } from "../../../domain/src/values.ts";
 import {
   sweepRowAmount,
   type CardSettlementSweepRow,
@@ -94,8 +94,12 @@ export interface CardDebitAccountCard {
     period: string | null;
     /** The provider's due date; null when absent or not a civil date. */
     paymentDate: TemporalValue | null;
-    /** The provider's total; null when it is not exact (INV05). */
-    amount: Quantity | null;
+    /**
+     * The provider's total. One that is not exact keeps its status and a
+     * closed reason (`stored:<status>`, or `decimal_not_projected` when no
+     * decimal-v1 value was recorded), never zero and never dropped (INV05).
+     */
+    amount: Quantity;
   } | null;
   stated: StatedDebitAccount;
   /** Accepted settlements per bank account, newest debit first. */
@@ -129,7 +133,15 @@ export type CardDebitAccountsOutcome =
   | { ok: true; review: CardDebitAccountsReview }
   | { ok: false; error: FinancialError };
 
-type CardRow = CardSettlementSweepRow & { payment_date: string | null; period: string | null };
+/**
+ * A statement row. `value_status` is null when `card_statement_facts` found
+ * no decimal-v1 value for the observation (its join is a LEFT JOIN).
+ */
+type CardRow = Omit<CardSettlementSweepRow, "value_status"> & {
+  value_status: string | null;
+  payment_date: string | null;
+  period: string | null;
+};
 
 /**
  * Each card's newest current statement total (`?1` the card bound plus one),
@@ -254,6 +266,27 @@ const reasonCode = (value: unknown): value is CardDebitAccountReason =>
 const cardKey = (sourceId: string, sourceAccount: string) => sourceId + "\n" + sourceAccount;
 const localDate = (value: string | null): string | null =>
   value !== null && parseLocalDate(value) !== null ? value : null;
+
+/**
+ * The statement's total as the provider stated it, with the reasons
+ * `queryCardPurchases` gives the same view's total (`providerTotal`): exact,
+ * else its stored status with `stored:<status>`, else `missing` with
+ * `decimal_not_projected` when no decimal-v1 value was recorded. An `exact`
+ * status without its two columns, or a status outside decimal-v1, is what
+ * CORE 0024's CHECK refuses to store, so it fails the read.
+ */
+function statementTotal(row: CardRow): Quantity {
+  const status = row.value_status;
+  if (status === "exact") {
+    const exact = sweepRowAmount({ ...row, value_status: status });
+    if (exact === null) throw invalid();
+    return exact;
+  }
+  if (status === "missing" || status === "unparsed" || status === "conflict")
+    return absentQuantity(row.unit_ref, status, `stored:${status}`);
+  if (status === null) return absentQuantity(row.unit_ref, "missing", "decimal_not_projected");
+  throw invalid();
+}
 
 /** The account a `supports` or `names_other_account` row's proposal names. */
 function namedAccount(json: string | null): { account: DebitBankAccount; digits: number } {
@@ -466,7 +499,7 @@ export async function reviewCardDebitAccounts(input: {
                       zone: "Asia/Tokyo",
                       basis: "provider" as const,
                     },
-              amount: sweepRowAmount(row),
+              amount: statementTotal(row),
             },
       stated,
       settled,

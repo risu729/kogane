@@ -2,8 +2,8 @@
 // migrations: `GET /api/v2/reconciliation/card-debit-accounts` for the
 // operator's カード照合 page and `kogane.card-settlements.debit-accounts` for
 // an agent answer one read (docs/card-settlements.md, Debit account per card;
-// ADR 0114). The store holds one MyJCB statement total, no reading and no
-// candidate. The answers are exercised on the complete schema in
+// ADR 0114). The store holds two MyJCB statement totals, one exact and one
+// the decimal-v1 projection could not read, no reading and no candidate. The answers are exercised on the complete schema in
 // services/processor/test/card-debit-accounts.test.ts. Every value is
 // invented.
 import { env } from "cloudflare:test";
@@ -47,19 +47,27 @@ beforeAll(async () => {
     VALUES(?,'myjcb-credit-statement-total','1','2099-01-12T00:00:00Z','ok','[]') RETURNING id`)
       .bind(run.artifacts[0]!.id)
       .first<{ id: number }>();
-  await env.DB.prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
-    VALUES(?,'myjcb:synthetic:root','credit_statement_payment_amount',4000,'4000',0,'JPY','2099-01-01','synthetic-total',?)`)
-    .bind(
-      parse!.id,
-      JSON.stringify({
-        _kogane: {
-          period: "2099-01",
-          paymentDate: "2099-01-10",
-          snapshotSemantics: "provider-reported-monthly-payment-amount",
-        },
-      }),
-    )
-    .run();
+  // The second card's total is not a number: decimal-v1 records it `unparsed`.
+  for (const [card, minor, text] of [
+    ["myjcb:synthetic:root", 4000, "4000"],
+    ["myjcb:synthetic:unreadable", null, "unreadable"],
+  ] as const)
+    await env.DB.prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
+    VALUES(?,?,'credit_statement_payment_amount',?,?,0,'JPY','2099-01-01','synthetic-total',?)`)
+      .bind(
+        parse!.id,
+        card,
+        minor,
+        text,
+        JSON.stringify({
+          _kogane: {
+            period: "2099-01",
+            paymentDate: "2099-01-10",
+            snapshotSemantics: "provider-reported-monthly-payment-amount",
+          },
+        }),
+      )
+      .run();
   await publishParse(parse!.id);
   keys = await generateKeyPair("RS256", { extractable: true });
   jwks = {
@@ -188,6 +196,18 @@ describe("GET /api/v2/reconciliation/card-debit-accounts", () => {
           proposed: [],
           answer: { basis: "unknown", reason: "no_debit_account_evidence" },
         },
+        {
+          card: { sourceId: "myjcb", sourceAccount: "myjcb:synthetic:unreadable" },
+          // Not exact: its status and reason, never null or zero (INV05).
+          latestStatement: {
+            period: "2099-01",
+            amount: {
+              unitRef: "JPY",
+              value: { status: "unparsed", reasonCode: "stored:unparsed" },
+            },
+          },
+          answer: { basis: "unknown", reason: "no_debit_account_evidence" },
+        },
       ],
     });
     expect(await tables()).toEqual(before);
@@ -296,7 +316,7 @@ describe("kogane.card-settlements.debit-accounts", () => {
         path: "agent-http",
         risk_class: "R0",
         result: "read",
-        diff_json: JSON.stringify({ kind: "read", rows: 1, truncated: false }),
+        diff_json: JSON.stringify({ kind: "read", rows: 2, truncated: false }),
       },
     ]);
   });

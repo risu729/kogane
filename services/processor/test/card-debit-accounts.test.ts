@@ -4,7 +4,9 @@
 // schema: a stated MyJCB account whose newest reading no longer resolves, a
 // Vpass card answered by an accepted settlement and unanswered again after
 // its withdrawal, a Vpass card with only an undecided candidate, and one with
-// nothing; that the read writes nothing, is graded before it reads, and
+// nothing, and a Vpass card whose total the decimal-v1 projection could not
+// read, which keeps its status and reason; that the read writes nothing, is
+// graded before it reads, and
 // reaches readings and decisions by key without table statistics. Every
 // value is synthetic.
 import { afterAll, beforeAll, expect, test } from "bun:test";
@@ -79,6 +81,8 @@ const STATEMENTS: [number, string, string, string, string, string, string][] = [
   [811, "vpass", "vpass-statement-page", "vpass:card-001", "2098-01", "5000", "2098-01-27"],
   [812, "vpass", "vpass-statement-page", "vpass:card-002", "2098-01", "4000", "2098-01-26"],
   [813, "vpass", "vpass-statement-page", "vpass:card-003", "2098-01", "7000", "2098-01-25"],
+  // A total that is not a number: decimal-v1 records it `unparsed`.
+  [814, "vpass", "vpass-statement-page", "vpass:card-004", "2098-01", "unreadable", "2098-01-25"],
 ];
 /** SMBC debits: [provider id, magnitude, debit date]. */
 const DEBITS: [string, string, string][] = [
@@ -102,7 +106,7 @@ async function seed() {
       .bind(
         id,
         card,
-        Number(total),
+        /^-?\d+$/u.test(total) ? Number(total) : null,
         total,
         period + "-01",
         "synthetic-" + period,
@@ -303,6 +307,7 @@ test("before any evidence, every card is listed with its newest statement and no
     "vpass:card-001",
     "vpass:card-002",
     "vpass:card-003",
+    "vpass:card-004",
   ]);
   const cards = byCard(page.items);
   // The newest statement is the zero total, shown as the provider stated it.
@@ -310,6 +315,11 @@ test("before any evidence, every card is listed with its newest statement and no
     period: "2098-02",
     paymentDate: { kind: "local-date", value: "2098-02-10" },
     amount: { unitRef: "JPY", value: { status: "exact", value: { coefficient: "0" } } },
+  });
+  // A total the projection could not read keeps its status and reason (INV05).
+  expect(cards.get("vpass:card-004")?.latestStatement).toMatchObject({
+    period: "2098-01",
+    amount: { unitRef: "JPY", value: { status: "unparsed", reasonCode: "stored:unparsed" } },
   });
   expect(cards.get(MYJCB)?.stated).toEqual({
     status: "absent",

@@ -136,3 +136,72 @@ writer or command is added, and no candidate's eligibility changes.
 - `apps/web/test/card-settlement.browser.test.ts`: the section names each
   basis and offers no action, warns that an older stated account may have
   changed, and says when the list is cut.
+
+## Amendment 2026-11-18: a statement total that is not exact keeps its reason
+
+- Status: proposed
+- Date: 2026-11-18
+
+### Context
+
+Each card's `latestStatement.amount` was the statement total when its
+decimal-v1 value was exact and `null` otherwise. A total the decimal-v1
+projection recorded as `missing`, `unparsed` or `conflict`, or one with no
+decimal-v1 value at all, lost its status and reason: the wire, the MCP tool
+result and the `カードの引落口座` section showed it only as absent, which the
+section rendered as a bare `不明`. INV05 asks that a value that is not exact
+be a reason, and the card purchase read already answers the same view's total
+(`providerTotal`) as a quantity with its status and reason.
+
+### Options considered
+
+1. **Keep `null` and add a sibling reason field.** A second shape for the
+   same fact, different from every other quantity on the wire. Rejected.
+2. **Always a quantity, with the reasons `providerTotal` gives (chosen).**
+   The domain's `Quantity` already carries `{status, reasonCode}`; the page's
+   `SettlementQuantity` already shows it as unknown with its reason.
+3. **Drop a card whose newest total is not exact.** It hides how old the
+   answer is, which is why the statement is listed. Rejected.
+
+### Decision
+
+`latestStatement.amount` is always a `Quantity` (`latestStatement` itself is
+still `null` for a card without a current statement). An exact total is
+unchanged. A total that is not exact is `missing`, `unparsed` or `conflict`
+with the reason `stored:<status>`, or `missing` with `decimal_not_projected`
+when `card_statement_facts` found no decimal-v1 value for the observation.
+An `exact` status without both decimal-v1 columns, or a status outside
+decimal-v1, is what CORE 0024's CHECK never stores; the read fails
+(`card_debit_accounts_row_invalid`) rather than answer it. The wire contract
+(`validCardDebitAccountsReview`) requires a quantity and refuses `null`, and
+the page renders the total through `SettlementQuantity` only.
+
+### Consequences
+
+- The route body and the `kogane.card-settlements.debit-accounts` result
+  change shape for a non-exact total (`null` becomes a quantity with its
+  status and reason); every other answer is unchanged byte for byte. The
+  tool's name, description and input schema are unchanged, and the catalogue
+  is not touched. `schemaVersion` stays `kogane-card-debit-accounts-v1`: an
+  older browser client accepts the new shape (it already validated a
+  non-null amount as a quantity), and client and Worker deploy together.
+- An MCP client that relied on `amount === null` to mean "not exact" now
+  reads `amount.value.status`.
+
+### Verification
+
+- `packages/application/test/card-debit-accounts-contract.test.ts`: each
+  non-exact status and the missing decimal value give their quantity and
+  reason and pass the wire contract; an `exact` status without its columns,
+  or an unknown status, fails the read; the random stores now use the view's
+  real shapes, non-exact totals included.
+- `services/processor/test/card-debit-accounts.test.ts`: on the complete CORE
+  schema, a Vpass total that is not a number is `unparsed` /
+  `stored:unparsed`.
+- `services/app/test/card-debit-accounts-api.test.ts`: the route and the MCP
+  tool give the same answer for that total.
+- `packages/observation-shared/test/card-debit-accounts-contract.test.ts`:
+  the contract accepts a non-exact quantity and refuses `null`, a missing
+  amount and an `exact` status with a reason.
+- `apps/web/test/card-settlement.browser.test.ts`: the section shows
+  `不明（stored:unparsed） · JPY` and refuses a `null` total before it renders.

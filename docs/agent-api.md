@@ -628,7 +628,9 @@ Input: an empty object; any key is `400 invalid_request`. Output:
 `cardsMax` 100), at most 100 `items` by source and source account, and
 `cardsTruncated`. Each item has the `card` (source, source account, resolved
 account), its `latestStatement` (ref, period, due date, total; null when the
-card has no current statement), `stated` (status `named`, `conflicting`,
+card has no current statement; a total that is not exact is a quantity with
+its status and reason, `stored:<status>` or `decimal_not_projected`, never
+null), `stated` (status `named`, `conflicting`,
 `not_named` or `absent` with its reason, the newest reading and the newest
 one naming exactly one account), `settled` and `proposed` (per bank account:
 distinct statements and the candidate with the latest debit date), and the

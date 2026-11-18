@@ -316,7 +316,14 @@ settlement candidate is listed, by source and source account, at most 100
 
 - `latestStatement`: its newest current statement total (by period, then due
   date), with the provider's total and due date, so a card whose last
-  statement is zero still shows how old its answer is;
+  statement is zero still shows how old its answer is. The total is always a
+  quantity: one that is not exact keeps its decimal-v1 status with the reason
+  `stored:<status>` (`missing`, `unparsed`, `conflict`), or `missing` with
+  `decimal_not_projected` when no decimal-v1 value was recorded, the reasons
+  the card purchase read gives the same view's `providerTotal`; it is never
+  null or zero (INV05), and the page shows it as unknown with that reason. An
+  `exact` status without both decimal-v1 columns, which CORE 0024's CHECK
+  never stores, fails the read (`card_debit_accounts_row_invalid`);
 - `stated`: the readings the settlement sweep compared with a candidate (the
   `card_debit_account_statement` rows under `CARD_INFORMATION_READER_VERSION`
   that `card_settlement_debit_account_evidence` cites under
@@ -353,7 +360,7 @@ The page shows it as `カードの引落口座` above `照合候補のない請�
 `GET /api/v2/reconciliation/card-debit-accounts` (operator-only, no
 parameter: any is `400 invalid_query`); agents read the same answer through
 `kogane.card-settlements.debit-accounts` ([agent API](agent-api.md#each-cards-debit-account)).
-A malformed evidence or candidate row fails the read
+A malformed evidence, candidate or statement-total row fails the read
 (`card_debit_accounts_row_invalid`), never an answer.
 
 Limits:

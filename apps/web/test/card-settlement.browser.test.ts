@@ -607,6 +607,29 @@ describe.if(runnable)("card settlement review", () => {
     await page.close();
   });
 
+  test("a statement total that is not exact shows its reason, and a bare null is refused (INV05)", async () => {
+    const first = debitAccounts.items[0]!;
+    const withTotal = (amount: unknown) => ({
+      ...debitAccounts,
+      items: [{ ...first, latestStatement: { ...first.latestStatement!, amount } }],
+    });
+    debitAccountsPage = withTotal({
+      unitRef: "JPY",
+      value: { status: "unparsed", reasonCode: "stored:unparsed" },
+    });
+    let page = await open();
+    let section = page.getByRole("region", { name: "カードの引落口座" });
+    await section.getByText("myjcb:synthetic:root").waitFor();
+    expect(await section.innerText()).toContain("請求総額 不明（stored:unparsed） · JPY");
+    await page.close();
+    debitAccountsPage = withTotal(null);
+    page = await open();
+    section = page.getByRole("region", { name: "カードの引落口座" });
+    await section.getByRole("alert").waitFor();
+    expect(await section.innerText()).not.toContain("myjcb:synthetic:root");
+    await page.close();
+  });
+
   test("statements without a candidate show their reason and the planner's answer, with no action", async () => {
     const page = await open();
     const section = page.getByRole("region", { name: "照合候補のない請求" });
