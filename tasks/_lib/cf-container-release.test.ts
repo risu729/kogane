@@ -81,9 +81,7 @@ describe("only the three admitted Container configurations change deployment bac
     // phases; after phases 1 and 2 only V Point and V Point Pay remain on versions.
     const containerNames = CONTAINER_TARGETS.map((entry) => entry.name);
     for (const name of containerNames) {
-      expect(order.workers.find((entry) => entry.name === name)?.productionStrategy).toBe(
-        "deploy",
-      );
+      expect(order.workers.find((entry) => entry.name === name)?.productionStrategy).toBe("deploy");
     }
     expect(
       order.workers
