@@ -329,12 +329,15 @@ compares its answer with the route's.
 
 - Status: proposed
 - Date: 2026-11-18
+- Replaces: the 2026-11-06 amendment's limit that the page "does not offer
+  the `source` or `account` filters the route takes"
 
 ### Context
 
 The route and `kogane.reported-holdings-change.read` take `source` and
 `account`, but the panel sent only `from` and `to`, so a comparison narrowed
-to one source or account existed over HTTP and MCP but not on the screen.
+to one source or account existed over HTTP and MCP but not on the screen. The
+2026-11-06 amendment recorded this as a limit, which no longer holds.
 
 ### Options considered
 

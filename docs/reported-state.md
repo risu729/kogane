@@ -307,7 +307,6 @@ answer under two seconds.
   total across sources.
 - Nothing is stored: a reported state has no fixed report or
   `calculation_runs` row yet.
-- The holdings-change page compares only up to its own 基準日
-  without the route's `source` and `account` filters. A change is what two captures report, not attributed to any trade or
+- The holdings-change page compares only up to its own 基準日. A change is what two captures report, not attributed to any trade or
   transfer (no event moves a security quantity); a parser renamed between the
   dates would make one holding two keys; balances are not compared there.

@@ -454,7 +454,7 @@ export function HoldingsChangePanel({ to }: { to: string }): ReactNode {
     >
       {filters === null ? (
         <Notice tone="bad" role="alert">
-          このURLの保有数量の変化の絞り込み条件は指定できません。{" "}
+          保有数量の変化について、このURLの絞り込み条件は指定できません。{" "}
           <button
             className="button"
             type="button"

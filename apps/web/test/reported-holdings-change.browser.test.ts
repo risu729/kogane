@@ -321,7 +321,9 @@ describe.if(runnable)("reported holdings change between two dates", () => {
     await page.close();
     // A URL that holds one asks nothing rather than widening the comparison.
     const linked = await open(DESKTOP, "/state?changeSource=SBI&changeAccount=acct-sbi");
-    await linked.getByText("このURLの保有数量の変化の絞り込み条件は指定できません。").waitFor();
+    await linked
+      .getByText("保有数量の変化について、このURLの絞り込み条件は指定できません。")
+      .waitFor();
     expect(await linked.getByRole("textbox", { name: "比較の開始日" }).count()).toBe(0);
     await linked.getByRole("button", { name: "絞り込みを解除", exact: true }).click();
     await linked.getByRole("textbox", { name: "比較の開始日", exact: true }).waitFor();
