@@ -330,9 +330,20 @@ describe.if(runnable)("the operator's 依頼の一覧 page", () => {
   test("the list passes the accessibility audit", async () => {
     const page = await browser.newPage();
     try {
-      await page.goto(`${origin}/operations`);
-      await rows(page).first().waitFor();
-      expect(await auditView(page)).toEqual([]);
+      // Both widths, with a row that shows its stored status beside its status.
+      for (const viewport of VIEWPORTS) {
+        await page.setViewportSize({ width: viewport.width, height: viewport.height });
+        for (const search of ["", "?status=running"]) {
+          await page.goto(`${origin}/operations${search}`);
+          await rows(page).first().waitFor();
+          expect(await page.getByText("保存された状態：", { exact: false }).count()).toBe(1);
+          expect([viewport.name, search, await auditView(page)]).toEqual([
+            viewport.name,
+            search,
+            [],
+          ]);
+        }
+      }
     } finally {
       await page.close();
     }

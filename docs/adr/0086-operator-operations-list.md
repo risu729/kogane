@@ -325,6 +325,12 @@ already answered "which requests exist" over one service, `listOperations`.
 - Revises: decision 5 (`status` is the stored status), and the amendment
   above (decision 3's note, and its consequence that a request the list
   shows `running` can read `completed` on its 依頼の経過 page)
+- Owner approval: required before merge. The published answer of the MCP
+  tool `kogane.ops.operation.list` changes incompatibly (v2) and its
+  description changes; published MCP answer and description changes have
+  been owner-gated before
+  ([ADR 0081's `nextPage`](0081-ui-parity-through-mcp.md),
+  [ADR 0088's `view`](0088-collection-quality-per-account.md)).
 
 ### Context
 
@@ -430,6 +436,12 @@ only as `completed`.
 - The list, the 依頼の一覧 page, the single read and the 依頼の経過 page give a
   request the same status at the same moment. The open limit of the
   amendment above is removed.
+- A page compares all its rows with one reading of READ and CORE, taken
+  after its rows and stages are read, as the single read takes its own after
+  its row and stages. A single read made later takes a later reading: if READ
+  publishes, is lost or CORE changes epoch between the two, they can differ,
+  exactly as two single reads made at those two moments would. Within one
+  page, every row is judged against the same reading.
 - The status filter still reads the stored status. This is a stated basis
   that the answer shows: every page names it, and every row carries the
   value it matched.
@@ -439,8 +451,10 @@ only as `completed`.
 - A reader that pinned `kogane-operation-list-v1` gets a version it does not
   know, rather than a `status` whose meaning changed silently.
 - The answer changes shape, but the tool set, inputs, capabilities and
-  catalogue do not. No operation or capability is added (AGENTS.md lists
-  those as needing the owner before merge).
+  catalogue do not. No operation or capability is added, which AGENTS.md
+  names as needing the owner; the changed published answer and description
+  of `kogane.ops.operation.list` still need the owner's approval before
+  merge, as ADR 0081's and ADR 0088's changes to published tools did.
 
 ### Verification
 

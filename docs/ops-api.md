@@ -269,7 +269,9 @@ whichever principal made it: the operator in the browser or any MCP client
   one read of those rows' stages by primary key (`SELECT_STAGES_OF_PAGE`),
   and, when one of them has a stored requirement to compare, READ's instance
   and pointer and CORE's epoch once for the page. A page with no such row
-  reads nothing more.
+  reads nothing more. Every row of a page is judged against that one
+  reading; a single read made later takes its own, so the two can differ if
+  READ or CORE's epoch moved in between, as two single reads would.
 - **Audit.** Each request is recorded once as `ops.operation.list`, with the
   number of rows shown and whether a next page exists
   ([audit log](audit-log.md)).
@@ -651,8 +653,9 @@ completed; the existing CORE epoch/revision and READ requirements still apply.
 This result is derived on each read, not a durable recovery observation. If
 current pointers cease to prove publication it returns
 `publication_not_observed` again. No historical polling queue or migration is
-needed. The operations list does not include this detail-only extension. The detail page labels both the original deadline
-failure and the current publication result in Japanese.
+needed. The operations list does not include this detail-only extension.
+The detail page labels both the original deadline failure and the current
+publication result in Japanese.
 
 Limits: only the connections `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names are
 started; the requested window is not applied; one collector call is awaited
@@ -683,9 +686,9 @@ validates each page first (`validOperationListPage` in
 values, a `status` its `storedStatus` can read as, `statusFilterMatches`
 naming the stored status, at most 50 rows in the list's order, each once, a
 cursor that is the last row's id or null, and rows of the kind and stored
-status asked for); a page outside it is an error. A `403` says the list is the operator's; a `404`
-says this deployment does not provide it, which covers `OPS_API_ENABLED`
-off. Every page read is one audited `ops.operation.list`, and the page reads
+status asked for); a page outside it is an error. A `403` says the list is
+the operator's; a `404` says this deployment does not provide it, which
+covers `OPS_API_ENABLED` off. Every page read is one audited `ops.operation.list`, and the page reads
 again only when asked.
 
 **The 依頼の経過 page.** `/operations/op_<id>` in the observation client
@@ -730,10 +733,10 @@ whenever it is read, and writes nothing:
 The record's `status` reads `completed` when the stored status is `running`
 and every stage, this one included, is `completed`; a re-send of the request
 answers with that same status, and the list shows it as the request's
-`status` beside its `storedStatus` ([the list](#the-list)). The stored request stays
-`running` and its `projected` row `pending`, so the answer follows READ: it
-falls back to `running` with the reason if READ is lost or CORE is restored
-under a new epoch. Coverage compares revisions over the whole CORE input, so
+`status` beside its `storedStatus` ([the list](#the-list)). The stored
+request stays `running` and its `projected` row `pending`, so the answer
+follows READ: it falls back to `running` with the reason if READ is lost or
+CORE is restored under a new epoch. Coverage compares revisions over the whole CORE input, so
 a collection whose parses add no balance row is covered once the published
 snapshot was verified at or above its revision. A use restriction that makes
 the snapshot unservable does not reopen the stage. Requests of the other
