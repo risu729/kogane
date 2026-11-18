@@ -137,6 +137,25 @@ jobs:
               exit 1
             fi
           done
+      - name: Confirm the target writes cf Build Output v1
+        # Trusted workflow gate before target code or any production write.
+        # The trusted adapters and wrangler-deploy-action v4 read only
+        # .cloudflare/output/v1, and cf beta targets write v0, so rollback to
+        # them is unsupported (owner, 2026-11-18). Targets without cf use the
+        # Wrangler steps.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          content=$(gh api "repos/${GITHUB_REPOSITORY}/contents/package.json?ref=${SHA}" --jq '.content')
+          manifest=$(base64 --decode <<<"${content}")
+          cf=$(jq --exit-status --raw-output '.devDependencies.cf // .dependencies.cf // ""' <<<"${manifest}")
+          case "${cf}" in
+            0.* | 1.0.0-alpha.* | 1.0.0-beta.*)
+              echo "The target pins cf ${cf}, which writes Build Output v0; no production change was made." >&2
+              exit 1
+              ;;
+          esac
       - name: Load the trusted Container compatibility adapter
         env:
           GH_TOKEN: ${{ github.token }}

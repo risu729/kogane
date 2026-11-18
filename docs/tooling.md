@@ -39,7 +39,7 @@ fixed toolchain:
   `linker = "isolated"`, so a workspace sees only what it declares and
   conflicting pins (TypeScript 6.0.3 and 7.0.2) coexist instead of being
   reconciled by hoisting; every workspace that declares Wrangler pins the same
-  version (4.162.0 today). Every workspace pins TypeScript
+  version (4.163.0 today). Every workspace pins TypeScript
   7.0.2 except `services/collector-globalpass`, and both it and the root
   manifest stay below 7 (6.0.3 today). Both need the in-process TypeScript
   compiler API, which 7.0 no longer ships (its `typescript` entry point exports
