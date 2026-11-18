@@ -137,6 +137,13 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
         expect(target.doLifecycle).toBe("preserve");
         expect(worker.exports).toBeUndefined();
         expect((worker as any).migrations).toBeUndefined();
+      } else if (old.durable_objects) {
+        // Exports owners have no migration history: each bound class is one SQLite export.
+        expect(target.doLifecycle).toBe("exports");
+        expect((worker as any).migrations).toBeUndefined();
+        expect(Object.keys(worker.exports ?? {}).sort()).toEqual(
+          old.durable_objects.bindings.map((binding: any) => binding.class_name).sort(),
+        );
       } else expect(target.doLifecycle).toBeUndefined();
       const example = `${REPO_ROOT}/${target.path}/.dev.vars.example`;
       const inferredSecrets =

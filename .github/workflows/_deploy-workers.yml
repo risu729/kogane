@@ -985,7 +985,8 @@ jobs:
           working-directory: services/collector-vpoint-pay
           worker: kogane-vpoint-pay-collector-poc
           build-mode: production
-          deploy-triggers: 'false'
+          production-strategy: deploy
+          deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the V Point collector
@@ -1007,7 +1008,8 @@ jobs:
           working-directory: services/collector-vpoint
           worker: kogane-vpoint-collector-poc
           build-mode: production
-          deploy-triggers: 'false'
+          production-strategy: deploy
+          deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the Processor

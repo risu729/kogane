@@ -196,7 +196,7 @@ survives asynchronous writes, and operational failures keep a generic code.
 
 ## Amendment: publish every non-Container cf Worker with `cf deploy`
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-13
 
 Workers Issues is declared as `observability.issues.enabled` for every Worker
@@ -252,7 +252,10 @@ Decision: every cf Worker uses `production-strategy: deploy` with
    Processor and the App.
 3. V Point and V Point Pay. Their declared exports take cf's script-upload
    path, so this phase adds a live namespace-identity check like
-   `cf-do-identity`.
+   `cf-do-identity`. They are recorded as `doLifecycle: "exports"`: the build
+   guard requires exactly one SQLite export per bound class and no
+   migrations, the live migration tag must stay empty, and the active
+   namespace IDs are captured before publication and verified after it.
 
 Each phase moves its ledger entries to `productionStrategy: "deploy"` and its
 dry runs to `cf deploy --prebuilt --dry-run`. Before each phase, the

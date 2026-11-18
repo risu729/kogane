@@ -53,7 +53,7 @@ export interface DeployEntry {
   after?: string[];
   deployBackend?: "cf";
   productionStrategy?: "deploy";
-  doLifecycle?: "preserve";
+  doLifecycle?: "preserve" | "exports";
   bundleTask?: string;
   bundleDir?: string;
 }

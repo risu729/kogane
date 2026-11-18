@@ -127,18 +127,16 @@ for thirteen compatible Workers; [ADR 0042](adr/0042-prestia-bank-worker.md) add
 PRESTIA bank Worker, bringing the compatible fleet to fourteen Workers using
 the `cf` pin in `package.json` and the pinned
 `wrangler-deploy-action` v3 (no step uses `worker-preview`). ADR 0040's
-2026-11-13 amendment (proposed) proposes moving them to `cf deploy` in three phases,
+2026-11-13 amendment moves them to `cf deploy` in three phases,
 because `cf workers versions create` never applies declared `observability`.
-Phases 1 (PRESTIA) and 2 (the other Workers on cf's versions-API path except
-V Point and V Point Pay, including Processor and the App)
-use `production-strategy: deploy`; only V Point and V Point Pay, phase 3, still
-use the versions strategy. Their native
+Phases 1 (PRESTIA), 2 (the other Workers on cf's versions-API path, including
+Processor and the App) and 3 (V Point and V Point Pay) all use
+`production-strategy: deploy`; no cf Worker uses the versions strategy. Their native
 `cloudflare.config.ts` and
 `wrangler.config.ts` retain the canonical Wrangler settings; parity guards
 cover bindings, variables, observability, assets and the two already-declared
 V Point exports. Existing Wrangler tests, bundles and dry runs remain, with
-credential-free cf builds and prebuilt dry runs added: `cf deploy`, and version
-uploads for V Point and V Point Pay.
+credential-free cf builds and prebuilt `cf deploy` dry runs added.
 
 The three Container deployments (GlobalPass, SBI Shinsei, St.George) use the
 pinned Action's full-deploy strategy under [ADR 0043](adr/0043-cf-container-deployment.md),
@@ -163,10 +161,14 @@ the trusted, strict SQLite-exports/image-reference rollback adapter; actual
 production readback and controlled rollback remain verification gates. Legacy DO
 owners (SBI VC Trade, SMBC Direct, Processor) use code-only cf bindings to their
 existing self-Worker/class namespaces, with no native exports or migrations.
-Canonical migration histories remain unchanged. A build guard checks their
-actual artifacts; before publication the live migration tag must match the
-latest canonical tag, and after publication all active namespace IDs must
-match the captured baseline. A refused check prints only its closed `cf_do_…`
+Canonical migration histories remain unchanged. V Point and V Point Pay
+(`doLifecycle: "exports"`) have no migration history: each declares its one
+bound class as a SQLite export, which `cf deploy` sends with the full script
+upload. A build guard checks the actual artifacts of both kinds (no lifecycle
+payload for the legacy owners; exactly the bound SQLite exports and no
+migrations for the exports owners); before publication the live migration tag
+must match the latest canonical tag (empty for the exports owners), and after
+publication all active namespace IDs must match the captured baseline. A refused check prints only its closed `cf_do_…`
 code, and an unexpected error prints `cf_do_internal_error`. Pending DO
 lifecycle work requires a separate Wrangler rollout. Every full-deploy step
 explicitly consents to trigger synchronization, which `cf deploy` performs
@@ -227,11 +229,8 @@ partial failure and resume accounting. Exactly one backend runs per target.
 The release sha is stamped before building, so both deployment artifacts carry
 the same identity. The manifest digests the native source and build config and
 every file in cf Build Output, including assets and Worker metadata. It is
-rechecked before the first upload. For V Point and V Point Pay the Action uploads
-that prebuilt artifact, deploys the returned version at 100%, and reads that
-exact deployment back; the full-deploy Workers publish it with `cf deploy`. Trigger
-synchronization is disabled for the versions-strategy Workers (V Point and
-V Point Pay). The full-deploy Workers explicitly enable it as described above.
+rechecked before the first upload. Every cf Worker publishes it with
+`cf deploy` and explicitly enables trigger synchronization as described above.
 No preview lane, route/domain addition or bank-secret synchronization
 is introduced.
 
@@ -471,8 +470,7 @@ hashes each native source and build configuration and every cf build-output file
 including Worker metadata, modules, maps and App assets. Missing metadata or an
 empty entry module fails before upload. Full-deploy Workers run `cf deploy` and
 the pinned Action reads the exact active deployment and the declared
-observability settings back; V Point and V Point Pay still create one version,
-deploy that exact version at 100%, and read the allocation back.
+observability settings back.
 
 The Workers API does not expose the uploaded script's content digest, so the
 recorded digests prove the validated build identity and unchanged inputs. The existing
