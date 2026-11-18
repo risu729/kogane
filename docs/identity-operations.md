@@ -713,8 +713,15 @@ source's policy-2 run already revised it, a policy-2 rule revision of
 version; the current views select the newer sealed run. The account entity
 keeps the role, label and status it was first written with (`source-account`,
 the yen fallback label, `unresolved`); the classification is on the policy-2
-mapping revision, and the ownership declaration's single-account check, which
-also reads the entity's role and status, still refuses the account.
+mapping revision. Reads of the current mapping show the new label and
+`provider-local`: the identity read and 識別 page, observation organization,
+account history, account candidates, dated state and holdings change, the
+audit's `account_status` and collection quality's `unresolved_identities`.
+Reads of the entity do not: the identity read's role (区分) stays
+`source-account`, collection quality's per-account coverage still labels the
+account with the yen fallback label, and the ownership declaration's
+single-account check, which also reads the entity's role and status, still
+refuses the account ([ADR 0118](adr/0118-smbc-aud-deposit-identity.md)).
 Policy-1 runs, their rows and revisions and Layer A/B stay as recorded, and a
 manual decision on the reference is not replaced. SBI Securities income and
 realised-gains references are not changed: their `accountType` names no

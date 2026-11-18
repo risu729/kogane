@@ -169,17 +169,30 @@ a new numeric version (0018: `UNIQUE(parse_run_id, policy_version)`).
   - Nothing else: the yen ordinary deposit, `iso4217/global/JPY` and every
     other SMBC subject gain no revision, so the yen mapping id that
     card-settlement ownership evidence cites is unchanged.
-- The AUD reference reads `provider-local` with its own label in the identity
-  read, the audit's `account_status` and collection quality's
-  `unresolved_identities`, so it leaves the Phase 3 unresolved count. An open
-  plan that pinned its policy-1 mapping revision is refused with
-  `stale_context`.
 - Its account entity keeps the role, label and status it was first written
   with (`source-account`, `三井住友銀行 円普通預金`, `unresolved`; the ADR
-  0012 limit). The identity read shows the mapping's label and the entity's
-  role. The ownership declaration's single-account check reads the entity's
-  role and status as well as the mapping's, so it still refuses the AUD
-  account (`single_account_scope_unconfirmed`), as it did before.
+  0012 limit). Entities are append-only (`accounts_no_update`), no rule
+  revision writes a new one for an existing source account, and a manual
+  decision only maps onto an existing entity, so nothing changes them. Which
+  reads show the classification depends on whether they read the current
+  mapping revision or the entity:
+  - **Mapping (new label and `provider-local`):** the identity read
+    (`kogane.identity.read` and the 識別 page: label, status, reason, and the
+    per-source status counts), observation organization, account history,
+    account candidates (`kogane.accounts.candidates`), the organized filter
+    options, dated state and holdings change (`identityStatus`), the audit's
+    `account_status`, and collection quality's `unresolved_identities`, so
+    the AUD balance cell no longer carries `identity_unresolved` and the
+    reference leaves the Phase 3 unresolved count.
+  - **Entity (policy-1 values):** the identity read's role (区分 on the 識別
+    page) stays `source-account`; collection quality's per-account coverage
+    (`queryAccountCoverage`, `accounts_json`) still labels the account
+    `三井住友銀行 円普通預金`, next to the mapping status `provider-local`;
+    and the ownership declaration's single-account check reads the entity's
+    role and status as well as the mapping's, so it still refuses the AUD
+    account (`single_account_scope_unconfirmed`), as it did before.
+- An open plan that pinned the AUD reference's policy-1 mapping revision is
+  refused with `stale_context`.
 - The balance projection is unchanged: within-source disjointness only tests
   `!== "aggregate"`, and the cross-institution rule (ADR 0093) admits only
   `deposit.balance` readings, whose registry entry names `smbc-direct-balance`
