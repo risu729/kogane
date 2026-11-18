@@ -36,7 +36,9 @@ import {
 import { validInstantText, validLocalDateText } from "../../domain/src/time.ts";
 import { isZeroDecimal, type Quantity, validQuantity } from "../../domain/src/values.ts";
 
-export const RECONSTRUCTED_STATE_QUERY_SCHEMA = "reconstructed-state-query-v1";
+export const RECONSTRUCTED_STATE_QUERY_SCHEMA = "reconstructed-state-query-v2";
+/** `RECONSTRUCTION_ACCOUNTS_MAX` of the query: the most accounts one scope names (ADR 0116). */
+export const RECONSTRUCTED_STATE_WIRE_ACCOUNTS_MAX = 20;
 /** `RECONSTRUCTED_STATE_STATUSES` of the query, in precedence order. */
 export const RECONSTRUCTED_STATE_WIRE_STATUSES = [
   "unavailable",
@@ -431,6 +433,22 @@ function validDisposition(value: unknown): boolean {
   );
 }
 
+/** The scope: one to 20 account ids, sorted, each once. */
+function scope(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.length <= RECONSTRUCTED_STATE_WIRE_ACCOUNTS_MAX &&
+    value.every(text) &&
+    value.every((entry, index) => index === 0 || (value[index - 1] as string) < entry)
+  );
+}
+
+/** Two scopes name the same accounts in the same order. */
+function sameScope(left: readonly unknown[], right: readonly unknown[]): boolean {
+  return left.length === right.length && left.every((entry, index) => entry === right[index]);
+}
+
 function validReconstruction(value: unknown): boolean {
   return (
     record(value) &&
@@ -495,7 +513,7 @@ function validManifest(value: unknown): boolean {
       "adapterRelease",
       "engineRelease",
       "foldPolicy",
-      "account",
+      "accounts",
       "range",
       "basis",
       "cut",
@@ -512,7 +530,7 @@ function validManifest(value: unknown): boolean {
     text(value.adapterRelease) &&
     text(value.engineRelease) &&
     text(value.foldPolicy) &&
-    text(value.account) &&
+    scope(value.accounts) &&
     record(value.range) &&
     exactKeys(value.range, ["from", "to"]) &&
     value.basis === "cash" &&
@@ -551,7 +569,7 @@ export function validReconstructedState(value: unknown): boolean {
         "schemaVersion",
         "status",
         "reasons",
-        "account",
+        "accounts",
         "range",
         "basis",
         "cut",
@@ -568,7 +586,7 @@ export function validReconstructedState(value: unknown): boolean {
       value.schemaVersion === RECONSTRUCTED_STATE_QUERY_SCHEMA &&
       member(RECONSTRUCTED_STATE_WIRE_STATUSES)(value.status) &&
       list(value.reasons, member(RECONSTRUCTED_STATE_WIRE_REASONS)) &&
-      text(value.account) &&
+      scope(value.accounts) &&
       record(value.range) &&
       exactKeys(value.range, ["from", "to"]) &&
       date(value.range.from) &&
@@ -614,6 +632,14 @@ export function validReconstructedState(value: unknown): boolean {
       member(RECONSTRUCTED_STATE_LATE_UNAVAILABLE)(value.lateUnavailable)) &&
     (value.late === null) !== (value.lateUnavailable === null) &&
     validManifest(value.manifest) &&
-    digest(value.contextId)
+    digest(value.contextId) &&
+    // The fold, the manifest and the answer name the same scope, every account listed.
+    sameScope(
+      (value.reconstruction as { accounts: { accountId: string }[] }).accounts.map(
+        (entry) => entry.accountId,
+      ),
+      value.accounts,
+    ) &&
+    sameScope((value.manifest as { accounts: string[] }).accounts, value.accounts)
   );
 }

@@ -338,6 +338,7 @@ export {
   reconstructedStateBodyFromQuery,
   reconstructedStateError,
 } from "./query/reconstructed-state-read.ts";
+export { RECONSTRUCTION_ACCOUNTS_MAX } from "./query/reconstructed-state.ts";
 export {
   parseReportedStateRequest,
   readReportedStateRequest,

@@ -52,6 +52,10 @@ result. What exists, read from the code on main at `f33b121`:
    scope multiplies it, and which accounts a scope may name depends on the
    grant contract (today's grant scopes list sources and provider accounts,
    not resolved accounts; ADR 0058, amendment, Limits).
+   _Pointer (2026-11-18): [ADR 0116](0116-reconstructed-state-account-scope.md)
+   takes this option up: a scope costs one load and one read per date, not
+   one per account, and every caller reads with the whole-store grant since
+   ADR 0084._
 3. **Holdings changes from adopted events.** Not possible: no event moves a
    security quantity (above).
 4. **Reported holdings changes between two dates.** Chosen. It needs no new

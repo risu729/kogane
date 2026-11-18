@@ -903,19 +903,20 @@ for field (`validReconstructedState` in
 
 Input, a closed object:
 
-| Key          | Shape                                                  | Means                                                                   |
-| ------------ | ------------------------------------------------------ | ----------------------------------------------------------------------- |
-| `account`    | a resolved account id                                  | Required; one account (an array, `accounts` or `instrument` is refused) |
-| `from`, `to` | `YYYY-MM-DD`                                           | Required; `from` before `to`, at most 366 days, `to` not after today    |
-| `basis`      | `"cash"`                                               | Optional; the only basis answered                                       |
-| `cut`        | `{coreEpoch, commitSeq ≥ 1}` or `{coreEpoch, instant}` | Optional; the latest commit of the current epoch when absent            |
-| `setVersion` | 64 hex                                                 | Optional; refused with `set_version_changed` if the answer's differs    |
+| Key          | Shape                                                  | Means                                                                                                        |
+| ------------ | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `account`    | a resolved account id                                  | One account; exactly one of `account` and `accounts` (an array here or `instrument` is refused)              |
+| `accounts`   | 1 to 20 distinct resolved account ids                  | A scope read as one: one cut, the scope's status and reasons, cells per account, nothing totalled (ADR 0116) |
+| `from`, `to` | `YYYY-MM-DD`                                           | Required; `from` before `to`, at most 366 days, `to` not after today                                         |
+| `basis`      | `"cash"`                                               | Optional; the only basis answered                                                                            |
+| `cut`        | `{coreEpoch, commitSeq ≥ 1}` or `{coreEpoch, instant}` | Optional; the latest commit of the current epoch when absent                                                 |
+| `setVersion` | 64 hex                                                 | Optional; refused with `set_version_changed` if the answer's differs                                         |
 
 Authorization, before the request is read: `records.read`, else
 `403 unauthorized` with refs `refusal:capability_missing`,
 `capability:records.read`; and, as for `purchases.explain`, a whole-store
 perimeter, else `403 evidence_restricted` (`refusal:scope_restricted`,
-`scope:source`, `scope:account`), because the answer reads the account's
+`scope:source`, `scope:account`), because the answer reads the accounts'
 reported state through every source its mappings name and its events through
 every claim holder. That is today's grant model, not a rule about who may
 read: the browser's reader authority and an agent grant that holds the same
@@ -923,7 +924,8 @@ capability and perimeter get the same answer.
 
 Every refusal carries the route's code as its first ref (`refusal:<code>`) and
 the route's HTTP status; the `financial-error-v1` code is its category:
-`invalid_query`, `invalid_account`, `invalid_date`, `invalid_range`,
+`invalid_query`, `invalid_account`, `too_many_accounts` (ref `maxAccounts:20`),
+`invalid_date`, `invalid_range`,
 `range_too_long`, `range_in_future`, `invalid_cut`, `cut_in_future`,
 `cut_after_log_end` (`400 invalid_query`); `scope_unsupported`,
 `basis_unsupported` (`400 unsupported_semantics`); `cut_epoch_not_current`,

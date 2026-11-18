@@ -1,17 +1,21 @@
-// Reconstructed state of one account over one range, on the cash basis
-// (docs/reconstructed-state.md, ADR 0052 and ADR 0058). Read-only and computed
-// per request; nothing is stored, nothing adopted, nothing written.
+// Reconstructed state of a scope of accounts (one to
+// `RECONSTRUCTION_ACCOUNTS_MAX`) over one range, on the cash basis
+// (docs/reconstructed-state.md, ADR 0052, ADR 0058 and ADR 0116). Read-only and
+// computed per request; nothing is stored, nothing adopted, nothing written.
 //
-//   start, end   queryDatedState at the range's two dates (their context ids
-//                are pinned);
-//   knowledge    the knowledge selector at the asked cut (default: the latest
-//                commit of the current core epoch), and at the cut of the end
-//                capture for the late part;
-//   fold         the B adapter's `resolved-at-cut` input to
-//                `reconstructStateWithLate` with `reconstruction-fold-v1`.
+//   start, end   queryDatedState at the range's two dates, narrowed to the
+//                scope (their context ids are pinned): one read per date,
+//                however many accounts;
+//   knowledge    the knowledge selector over the whole scope at the asked cut
+//                (default: the latest commit of the current core epoch), and
+//                at the cut of the end capture for the late part: one load;
+//   fold         the B adapter's `resolved-at-cut` input to one
+//                `reconstructStateWithLate` with `reconstruction-fold-v1`,
+//                its cells per (account, unit); nothing is added across
+//                accounts.
 //
 // The answer says what it is before what it computed: `unavailable` (CORE
-// 0070 is not applied, or no reported container lists the account),
+// 0070 is not applied, or no reported container lists an account of the scope),
 // `indeterminate` (the log does not place what the scope needs, or a
 // movement sits on a snapshot's boundary), `needs_review` (an identity
 // changed, two holders of one claim, an inconsistent chain, a shape the fold
@@ -51,7 +55,7 @@ import {
 import { captureDate, type ReportedState } from "../../../domain/src/reported-state.ts";
 import { daysFromCivil, parseLocalDate, validInstantText } from "../../../domain/src/time.ts";
 import {
-  ACCOUNT_SOURCES_SQL,
+  ACCOUNTS_SOURCES_SQL,
   economicSelectorAvailable,
   loadSelectorRows,
   readSelectorMeta,
@@ -64,9 +68,11 @@ import {
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { queryDatedState } from "./dated-state.ts";
 
-export const RECONSTRUCTED_STATE_QUERY_SCHEMA = "reconstructed-state-query-v1";
+export const RECONSTRUCTED_STATE_QUERY_SCHEMA = "reconstructed-state-query-v2";
 /** The longest range asked about, in days. */
 export const RECONSTRUCTION_RANGE_MAX_DAYS = 366;
+/** The most accounts one scope names (ADR 0116). */
+export const RECONSTRUCTION_ACCOUNTS_MAX = 20;
 
 const RECONSTRUCTED_STATE_INPUT_ERRORS = [
   "invalid_query",
@@ -103,8 +109,12 @@ class ReconstructedStateRefusedError extends Error {
 }
 
 export interface ReconstructedStateInput {
-  /** A resolved account id (`accounts.id`). */
-  account: string;
+  /**
+   * The scope: one to `RECONSTRUCTION_ACCOUNTS_MAX` distinct resolved account
+   * ids (`accounts.id`). The answer lists them sorted, so the order asked in
+   * never changes it.
+   */
+  accounts: readonly string[];
   /** Start and end dates, civil days in Asia/Tokyo; `from` before `to`. */
   from: string;
   to: string;
@@ -176,7 +186,8 @@ interface ReconstructedStateManifest {
   adapterRelease: typeof RECONSTRUCTION_ADAPTER_RELEASE;
   engineRelease: typeof RECONSTRUCTION_ENGINE_RELEASE;
   foldPolicy: string;
-  account: string;
+  /** The scope, sorted. */
+  accounts: string[];
   range: { from: string; to: string };
   basis: "cash";
   cut: { requested: KnowledgeCut; resolved: ResolvedCut; knownAt: string | null };
@@ -206,7 +217,8 @@ export interface ReconstructedStateResult {
   schemaVersion: typeof RECONSTRUCTED_STATE_QUERY_SCHEMA;
   status: ReconstructedStateStatus;
   reasons: ReconstructedStateReason[];
-  account: string;
+  /** The scope, sorted. */
+  accounts: string[];
   range: { from: string; to: string };
   basis: "cash";
   cut: ReconstructedStateManifest["cut"] | null;
@@ -238,9 +250,13 @@ function checkInput(input: ReconstructedStateInput): void {
     ? captureDate(new Date(Date.parse(input.now)).toISOString())
     : null;
   if (
-    typeof input.account !== "string" ||
-    input.account.length === 0 ||
-    input.account.length > 256 ||
+    !Array.isArray(input.accounts) ||
+    input.accounts.length === 0 ||
+    input.accounts.length > RECONSTRUCTION_ACCOUNTS_MAX ||
+    new Set(input.accounts).size !== input.accounts.length ||
+    input.accounts.some(
+      (account) => typeof account !== "string" || account.length === 0 || account.length > 256,
+    ) ||
     !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(input.from) ||
     !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(input.to) ||
     from === null ||
@@ -263,16 +279,18 @@ function checkInput(input: ReconstructedStateInput): void {
     throw new ReconstructedStateInputError("cut_in_future");
 }
 
-/** The account's balances on one reported side, in the fold's terms. */
+/** The scope's balances on one reported side, in the fold's terms. */
 function reportedSide(
   state: ReportedState,
-  account: string,
-  hasContainer: boolean,
+  accounts: readonly string[],
+  withoutContainer: readonly string[],
 ): { side: ReconstructionReportedSide; positions: number } {
   const balances: ReconstructionReportedBalance[] = [];
+  const scope = new Set(accounts);
   let positions = 0;
   for (const entry of state.accounts) {
-    if (entry.accountId !== account) continue;
+    if (entry.accountId === null || !scope.has(entry.accountId)) continue;
+    const account = entry.accountId;
     const captured = new Map(
       entry.snapshots
         .filter((snapshot) => snapshot.parserName !== "vpass-credit-snapshot")
@@ -298,7 +316,7 @@ function reportedSide(
     side: {
       contextId: state.contextId,
       date: state.date,
-      accountsWithoutContainer: hasContainer ? [] : [account],
+      accountsWithoutContainer: [...withoutContainer],
       balances,
       positions: [],
     },
@@ -336,7 +354,7 @@ async function select(
 }
 
 /**
- * One account, one range, cash basis, at one cut. Throws
+ * One scope of accounts, one range, cash basis, at one cut. Throws
  * `ReconstructedStateInputError` for a query it does not answer,
  * `EconomicSelectorError` for a bound or a cut the log cannot answer, and
  * `DatedStateLimitError` past the reported-state bound; nothing is cut.
@@ -347,9 +365,10 @@ export async function queryReconstructedState(
 ): Promise<ReconstructedStateResult> {
   checkInput(input);
   const range = { from: input.from, to: input.to };
+  const accounts = [...input.accounts].sort();
   const empty = {
     schemaVersion: RECONSTRUCTED_STATE_QUERY_SCHEMA as typeof RECONSTRUCTED_STATE_QUERY_SCHEMA,
-    account: input.account,
+    accounts,
     range,
     basis: "cash" as const,
   };
@@ -377,7 +396,7 @@ export async function queryReconstructedState(
       : { coreEpoch: meta.currentCoreEpoch, commitSeq: meta.log.lastSeq });
   const cut = await resolveSelectorCut(sql, meta, requested);
   const scope: SelectionScope = {
-    accounts: [input.account],
+    accounts,
     instruments: null,
     kinds: null,
     legEffects: null,
@@ -388,9 +407,11 @@ export async function queryReconstructedState(
   const now = await select(meta, cut, scope, rows);
 
   const [startState, endState, sources] = await Promise.all([
-    queryDatedState(sql, { date: input.from, account: input.account }),
-    queryDatedState(sql, { date: input.to, account: input.account }),
-    sql.all<{ source_id: string }>(ACCOUNT_SOURCES_SQL, [input.account]),
+    queryDatedState(sql, { date: input.from, accounts }),
+    queryDatedState(sql, { date: input.to, accounts }),
+    sql.all<{ account_id: string; source_id: string }>(ACCOUNTS_SOURCES_SQL, [
+      JSON.stringify(accounts),
+    ]),
   ]);
   // Credit capacity and overlapping outstanding reports establish no cash-basis opening stock.
   const perimeter = new Set(
@@ -403,9 +424,13 @@ export async function queryReconstructedState(
         .map((container) => container.sourceId),
     ]),
   );
-  const hasContainer = sources.some((row) => perimeter.has(row.source_id));
-  const start = reportedSide(startState, input.account, hasContainer);
-  const end = reportedSide(endState, input.account, hasContainer);
+  // Each account by itself: one the perimeter does not list is named as such.
+  const contained = new Set(
+    sources.filter((row) => perimeter.has(row.source_id)).map((row) => row.account_id),
+  );
+  const withoutContainer = accounts.filter((account) => !contained.has(account));
+  const start = reportedSide(startState, accounts, withoutContainer);
+  const end = reportedSide(endState, accounts, withoutContainer);
 
   // The late part: the same scope at the cut of the end capture.
   const endCaptures = [...new Set(end.side.balances.map((row) => row.capturedAt))];
@@ -428,7 +453,7 @@ export async function queryReconstructedState(
       : (cut.knownAt ?? new Date(Date.parse(input.now)).toISOString());
   const folded = reconstructStateWithLate({
     request: {
-      accountIds: [input.account],
+      accountIds: accounts,
       startDate: input.from,
       endDate: input.to,
       basis: "cash",
@@ -444,8 +469,10 @@ export async function queryReconstructedState(
   refusedIfNot(folded);
   const { state, late } = folded;
 
+  // Every reason is the scope's: one account's reason is the answer's
+  // (`reconstruction.accounts` and each cell say which account it is).
   const reasons = new Set<ReconstructedStateReason>();
-  if (!hasContainer) reasons.add("no_reported_container");
+  if (withoutContainer.length > 0) reasons.add("no_reported_container");
   for (const reason of now.selection.coverage.reasons)
     if (reason !== "cut_epoch_not_current") reasons.add(reason);
   if (state.cells.some((cell) => cell.boundary.count > 0)) reasons.add("snapshot_boundary_unknown");
@@ -469,7 +496,7 @@ export async function queryReconstructedState(
           ? "claim_conflict"
           : (gap as ReconstructionGap & ReconstructedStateReason),
       );
-  if (state.cells.length === 0) reasons.add("nothing_to_reconstruct");
+  if (state.accounts.some((account) => account.cells === 0)) reasons.add("nothing_to_reconstruct");
   if (start.positions + end.positions > 0) reasons.add("positions_not_folded");
   const sorted = RECONSTRUCTED_STATE_REASONS.filter((reason) => reasons.has(reason));
   const status: ReconstructedStateStatus = sorted.some((reason) =>
@@ -501,7 +528,7 @@ export async function queryReconstructedState(
     adapterRelease: RECONSTRUCTION_ADAPTER_RELEASE,
     engineRelease: RECONSTRUCTION_ENGINE_RELEASE,
     foldPolicy: RECONSTRUCTION_FOLD_V1.policyId,
-    account: input.account,
+    accounts,
     range,
     basis: "cash",
     cut: { requested: { ...requested }, resolved: { ...cut.cut }, knownAt: cut.knownAt },

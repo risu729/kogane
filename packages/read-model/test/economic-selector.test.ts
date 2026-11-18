@@ -16,7 +16,7 @@ import {
   type SelectionScope,
 } from "../../domain/src/knowledge-selector.ts";
 import {
-  ACCOUNT_SOURCES_SQL,
+  ACCOUNTS_SOURCES_SQL,
   ALIAS_HOLDERS_SQL,
   CLAIMS_SQL,
   COMMIT_AT_SQL,
@@ -663,13 +663,13 @@ describe("plans on the complete CORE schema without statistics", () => {
       expect(scans).toEqual([]);
     });
 
-  test("the account's sources read the mapping table once (no index by account)", () => {
+  test("the accounts' sources read the mapping table once, however many accounts (no index by account)", () => {
     const db = fullCoreSchema();
-    const steps = explain(db, ACCOUNT_SOURCES_SQL, [BANK]);
+    const steps = explain(db, ACCOUNTS_SOURCES_SQL, [JSON.stringify([BANK, "acct-other"])]);
     const scans = steps
-      .filter((step) => step.detail.startsWith("SCAN "))
-      .map((step) => step.detail);
-    expect(scans.every((detail) => /^SCAN (m|n)\b/u.test(detail))).toBe(true);
+      .filter((step) => step.detail.startsWith("SCAN ") && !step.detail.includes("VIRTUAL TABLE"))
+      .map((step) => step.detail.slice(5).split(" ")[0]);
+    expect(scans).toEqual(["m"]);
     expect(
       steps.some(
         (step) =>
@@ -678,6 +678,49 @@ describe("plans on the complete CORE schema without statistics", () => {
           step.detail.includes("SEARCH sa"),
       ),
     ).toBe(true);
+  });
+
+  test("the accounts' sources are, per account, what the one-account read it replaced answered", () => {
+    // The shipped one-account text, frozen (ADR 0116 replaced it with one read for the scope).
+    const LEGACY_ACCOUNT_SOURCES_SQL = `SELECT DISTINCT sa.source_id FROM current_account_mappings m
+ CROSS JOIN source_accounts sa ON sa.id=m.source_account_id WHERE m.account_id=?1 ORDER BY sa.source_id`;
+    const store = new DatedStore();
+    const accounts = ["acct-a", "acct-b", "acct-c", "acct-none"];
+    const sources = [
+      ["smbc-bank", "acct-a"],
+      ["sbi-shinsei-bank", "acct-a"],
+      ["sbi-shinsei-bank", "acct-b"],
+      ["vpass", "acct-c"],
+      ["mizuho-bank", "acct-c"],
+    ] as const;
+    for (const [index, [source, account]] of sources.entries()) {
+      const capture = store.capture({
+        source,
+        dataset: "synthetic-dataset",
+        parser: "synthetic-parser",
+        fetchedAt: `2026-03-0${String(index + 1)}T00:00:00Z`,
+        balances: [{ account: `p-${String(index)}`, metric: "m", instrument: "JPY", minor: 1 }],
+      });
+      store.identify(capture, source, account, "identified");
+    }
+    const grouped = store.db.query(ACCOUNTS_SOURCES_SQL).all(JSON.stringify(accounts)) as {
+      account_id: string;
+      source_id: string;
+    }[];
+    for (const account of accounts)
+      expect([
+        account,
+        grouped.filter((row) => row.account_id === account).map((row) => row.source_id),
+      ]).toEqual([
+        account,
+        (store.db.query(LEGACY_ACCOUNT_SOURCES_SQL).all(account) as { source_id: string }[]).map(
+          (row) => row.source_id,
+        ),
+      ]);
+    expect(grouped.map((row) => row.account_id)).toEqual(
+      [...grouped.map((row) => row.account_id)].sort(),
+    );
+    expect(grouped).toHaveLength(sources.length);
   });
 
   test("the key and alias holder reads use their indexes", () => {

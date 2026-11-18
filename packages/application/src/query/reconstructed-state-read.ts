@@ -1,20 +1,21 @@
-// The reconstructed state of one account over one range, for every caller:
+// The reconstructed state of a scope of accounts over one range, for every caller:
 // the HTTP route (`GET /api/v2/reconstructed-state`, the page's read) and the
 // agent tool (`kogane.reconstructed-state.read`, over `/api/agent/v1` and
 // `/mcp`) both call `readReconstructedState`, so the request rules, the
 // bounds, the refusal codes and the answer are one implementation
-// (docs/reconstructed-state.md, ADR 0058 amendment of 2026-10-09).
+// (docs/reconstructed-state.md, ADR 0058 amendment of 2026-10-09, ADR 0116).
 //
 // It is `queryReconstructedState` behind three things decided here:
 //
 // - The request. An untrusted body is validated into the query's input:
-//   one account, a `from`/`to` range of at most 366 days not after today in
-//   Tokyo, the cash basis, an optional cut (`{coreEpoch, commitSeq}` or
+//   one `account` or an `accounts` list of one to 20 distinct ids (ADR 0116),
+//   a `from`/`to` range of at most 366 days not after today in Tokyo, the
+//   cash basis, an optional cut (`{coreEpoch, commitSeq}` or
 //   `{coreEpoch, instant}`) and an optional `setVersion` the answer must
-//   still have. A scope the query cannot answer (several accounts, an
-//   instrument) is refused by name, never narrowed.
+//   still have. A scope the query cannot answer (an instrument) is refused by
+//   name, never narrowed; a list past its bound is refused, never cut.
 // - The grant. `records.read` over the whole store: the answer reads the
-//   account's reported state through every source its mappings name and its
+//   accounts' reported state through every source its mappings name and its
 //   events through every claim holder, so a perimeter narrowed on either axis
 //   cannot be honoured and is refused before anything is read (as
 //   `kogane.purchases.explain` refuses it). The browser's reader authority
@@ -36,6 +37,7 @@ import { DatedStateLimitError } from "./dated-state.ts";
 import {
   queryReconstructedState,
   RECONSTRUCTION_RANGE_MAX_DAYS,
+  RECONSTRUCTION_ACCOUNTS_MAX,
   ReconstructedStateInputError,
   type ReconstructedStateResult,
 } from "./reconstructed-state.ts";
@@ -45,6 +47,7 @@ export const RECONSTRUCTED_STATE_CAPABILITY: AgentCapability = "records.read";
 /** Every key a request may carry. */
 export const RECONSTRUCTED_STATE_KEYS = [
   "account",
+  "accounts",
   "from",
   "to",
   "basis",
@@ -52,7 +55,7 @@ export const RECONSTRUCTED_STATE_KEYS = [
   "setVersion",
 ] as const;
 /** Scope keys the query does not answer: refused by name, never ignored. */
-const RECONSTRUCTED_STATE_UNSUPPORTED_SCOPES = ["accounts", "instrument", "instruments"] as const;
+const RECONSTRUCTED_STATE_UNSUPPORTED_SCOPES = ["instrument", "instruments"] as const;
 /** The forms the HTTP route and the tool schema publish. */
 export const RECONSTRUCTED_STATE_ACCOUNT = /^[A-Za-z0-9][A-Za-z0-9_:.-]{0,127}$/u;
 export const RECONSTRUCTED_STATE_DATE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u;
@@ -72,6 +75,7 @@ export const RECONSTRUCTED_STATE_REFUSALS = {
   invalid_query: { status: 400, category: "invalid_query" },
   scope_unsupported: { status: 400, category: "unsupported_semantics" },
   invalid_account: { status: 400, category: "invalid_query" },
+  too_many_accounts: { status: 400, category: "invalid_query" },
   invalid_date: { status: 400, category: "invalid_query" },
   invalid_range: { status: 400, category: "invalid_query" },
   range_too_long: { status: 400, category: "invalid_query" },
@@ -94,7 +98,10 @@ export const RECONSTRUCTED_STATE_REFUSAL_CODES = Object.keys(
 
 /** A validated request: the query's input without the clock. */
 export interface ReconstructedStateRequest {
-  account: string;
+  /** One to `RECONSTRUCTION_ACCOUNTS_MAX` distinct account ids, as asked. */
+  accounts: string[];
+  /** Which key named them: refusals about an account name the same key. */
+  accountKey: "account" | "accounts";
   from: string;
   to: string;
   basis: "cash";
@@ -172,10 +179,29 @@ export function parseReconstructedStateRequest(value: unknown, now: string): Par
   );
   // An unknown key is not echoed: it is the caller's text, not a field of ours.
   if (unknown.length > 0) return refuse("invalid_query");
-  const { account, from, to, basis, cut, setVersion } = value;
-  if (Array.isArray(account)) return refuse("scope_unsupported", ["account"]);
-  if (typeof account !== "string" || !RECONSTRUCTED_STATE_ACCOUNT.test(account))
-    return refuse("invalid_account", ["account"]);
+  const { account, accounts, from, to, basis, cut, setVersion } = value;
+  if (account !== undefined && accounts !== undefined)
+    return refuse("invalid_query", ["account", "accounts"]);
+  let scope: string[];
+  if (accounts === undefined) {
+    if (typeof account !== "string" || !RECONSTRUCTED_STATE_ACCOUNT.test(account))
+      return refuse("invalid_account", ["account"]);
+    scope = [account];
+  } else {
+    if (!Array.isArray(accounts) || accounts.length === 0)
+      return refuse("invalid_account", ["accounts"]);
+    if (accounts.length > RECONSTRUCTION_ACCOUNTS_MAX)
+      return refuse("too_many_accounts", [`maxAccounts:${String(RECONSTRUCTION_ACCOUNTS_MAX)}`]);
+    // A repeated id is refused rather than merged: the caller's list is the scope.
+    if (
+      accounts.some(
+        (entry) => typeof entry !== "string" || !RECONSTRUCTED_STATE_ACCOUNT.test(entry),
+      ) ||
+      new Set(accounts).size !== accounts.length
+    )
+      return refuse("invalid_account", ["accounts"]);
+    scope = [...(accounts as string[])];
+  }
   for (const [name, date] of [
     ["from", from],
     ["to", to],
@@ -210,7 +236,8 @@ export function parseReconstructedStateRequest(value: unknown, now: string): Par
   return {
     ok: true,
     value: {
-      account,
+      accounts: scope,
+      accountKey: accounts === undefined ? "account" : "accounts",
       from: from as string,
       to: to as string,
       basis: "cash",
@@ -236,8 +263,10 @@ const SEQ_TEXT = /^[1-9][0-9]{0,15}$/u;
 
 /**
  * The GET route's query string as a request body, or the refusal. Each
- * parameter once and non-empty; the cut is `coreEpoch` with exactly one of
- * `commitSeq` and `instant`. The body is then validated like any other.
+ * parameter once and non-empty, except `account`, which may repeat up to
+ * `RECONSTRUCTION_ACCOUNTS_MAX` times (once is `account`, more is
+ * `accounts`, in the order given); the cut is `coreEpoch` with exactly one
+ * of `commitSeq` and `instant`. The body is then validated like any other.
  */
 export function reconstructedStateBodyFromQuery(
   params: URLSearchParams,
@@ -253,16 +282,21 @@ export function reconstructedStateBodyFromQuery(
     if (!(RECONSTRUCTED_STATE_PARAMETERS as readonly string[]).includes(key))
       return { ok: false, refusal: "invalid_query", refs: [] };
     const values = params.getAll(key);
-    if (values.length !== 1)
+    if (key === "account" && values.length > RECONSTRUCTION_ACCOUNTS_MAX)
       return {
         ok: false,
-        refusal: key === "account" ? "scope_unsupported" : "invalid_query",
-        refs: [key],
+        refusal: "too_many_accounts",
+        refs: [`maxAccounts:${String(RECONSTRUCTION_ACCOUNTS_MAX)}`],
       };
-    if (values[0] === "") return { ok: false, refusal: "invalid_query", refs: [key] };
+    if (values.length !== 1 && key !== "account")
+      return { ok: false, refusal: "invalid_query", refs: [key] };
+    if (values.includes("")) return { ok: false, refusal: "invalid_query", refs: [key] };
   }
   const body: Record<string, unknown> = {};
-  for (const key of ["account", "from", "to", "basis", "setVersion"]) {
+  const accounts = params.getAll("account");
+  if (accounts.length === 1) body["account"] = accounts[0];
+  else if (accounts.length > 1) body["accounts"] = accounts;
+  for (const key of ["from", "to", "basis", "setVersion"]) {
     const value = params.get(key);
     if (value !== null) body[key] = value;
   }
@@ -280,8 +314,9 @@ export function reconstructedStateBodyFromQuery(
   return { ok: true, body };
 }
 
-/** Whether a resolved account id names an `accounts` row (by primary key). */
-const RECONSTRUCTED_STATE_ACCOUNT_SQL = "SELECT 1 AS present FROM accounts WHERE id=?1";
+/** ?1 a JSON list of distinct account ids: how many name an `accounts` row (each by primary key). */
+const RECONSTRUCTED_STATE_ACCOUNTS_SQL =
+  "SELECT count(*) AS present FROM json_each(?1) w CROSS JOIN accounts a ON a.id=w.value";
 
 /** The refusal codes the query's own errors become; null for an error that is not a refusal. */
 export function reconstructedStateRefusalOf(
@@ -311,7 +346,7 @@ export function reconstructedStateRefusalOf(
 
 /**
  * The answer for one request under one grant, or the closed refusal. The
- * grant is checked before the request is read; the account before the query.
+ * grant is checked before the request is read; the accounts before the query.
  */
 export async function readReconstructedState(input: {
   grant: Grant;
@@ -335,14 +370,16 @@ export async function readReconstructedState(input: {
   const parsed = parseReconstructedStateRequest(body, now);
   if (!parsed.ok) return parsed;
   const request = parsed.value;
-  const known = await sql.first<{ present: number }>(RECONSTRUCTED_STATE_ACCOUNT_SQL, [
-    request.account,
+  const known = await sql.first<{ present: number }>(RECONSTRUCTED_STATE_ACCOUNTS_SQL, [
+    JSON.stringify(request.accounts),
   ]);
-  if (known === null) return { ok: false, refusal: "unknown_account", refs: ["account"] };
+  // Which id is unknown is not said: the refusal names the key, never a value.
+  if ((known?.present ?? 0) !== request.accounts.length)
+    return { ok: false, refusal: "unknown_account", refs: [request.accountKey] };
   let result: ReconstructedStateResult;
   try {
     result = await queryReconstructedState(sql, {
-      account: request.account,
+      accounts: request.accounts,
       from: request.from,
       to: request.to,
       basis: request.basis,

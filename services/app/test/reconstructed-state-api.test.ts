@@ -19,6 +19,8 @@ import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 
 const PATH = "/api/v2/reconstructed-state";
 const ACCOUNT = "acct-reconstructed-synthetic";
+/** A second account, for a scope of two (ADR 0116). */
+const OTHER = "acct-reconstructed-synthetic-other";
 const RANGE = `account=${ACCOUNT}&from=2026-03-01&to=2026-03-31`;
 const TOOL_PATH = "/api/agent/v1/reconstructed-state.read";
 /** The MCP Access application's audience (ADR 0047); `/mcp` accepts nothing else. */
@@ -29,11 +31,12 @@ let jwks: { keys: unknown[] };
 let sequence = 0;
 
 beforeAll(async () => {
-  await env.DB.prepare(
-    "INSERT OR IGNORE INTO accounts(id,label,role,status) VALUES(?,'Synthetic','asset','identified')",
-  )
-    .bind(ACCOUNT)
-    .run();
+  for (const account of [ACCOUNT, OTHER])
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO accounts(id,label,role,status) VALUES(?,'Synthetic','asset','identified')",
+    )
+      .bind(account)
+      .run();
   keys = await generateKeyPair("RS256", { extractable: true });
   jwks = {
     keys: [{ ...(await exportJWK(keys.publicKey)), kid: "fixture", alg: "RS256", use: "sig" }],
@@ -147,9 +150,9 @@ describe("reconstructed state over HTTP", () => {
     // status with its reasons, never a figure of zero.
     expect(body).toMatchObject({
       apiVersion: 2,
-      schemaVersion: "reconstructed-state-query-v1",
+      schemaVersion: "reconstructed-state-query-v2",
       status: "unavailable",
-      account: ACCOUNT,
+      accounts: [ACCOUNT],
       range: { from: "2026-03-01", to: "2026-03-31" },
       basis: "cash",
       cutStanding: "provisional",
@@ -177,7 +180,14 @@ describe("reconstructed state over HTTP", () => {
       [`${RANGE}&offset=0`, 400, "invalid_query"],
       [`${RANGE}&basis=`, 400, "invalid_query"],
       [`${RANGE}&instrument=inst-1`, 400, "scope_unsupported"],
-      [`${RANGE}&account=acct-other`, 400, "scope_unsupported"],
+      // A scope names each account once and at most 20.
+      [`${RANGE}&account=${ACCOUNT}`, 400, "invalid_account"],
+      [
+        `${Array.from({ length: 21 }, (_, index) => `account=acct-${String(index)}`).join("&")}&from=2026-03-01&to=2026-03-31`,
+        400,
+        "too_many_accounts",
+      ],
+      [`${RANGE}&account=acct-nowhere`, 404, "unknown_account"],
       [`account=%20x&from=2026-03-01&to=2026-03-31`, 400, "invalid_account"],
       [`account=${ACCOUNT}&from=2026-02-30&to=2026-03-31`, 400, "invalid_date"],
       [`account=${ACCOUNT}&from=2026-03-31&to=2026-03-01`, 400, "invalid_range"],
@@ -289,6 +299,44 @@ describe("the agent tool", () => {
     // answer is the same.
     expect(called.result.structuredContent).toEqual(route);
     expect(validApiResponse(PATH, called.result.structuredContent)).toBe(true);
+  });
+
+  it("answers a scope of several accounts as the route does (ADR 0116)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date());
+    const called = (await (
+      await call("/mcp", {
+        subject: "agent-principal",
+        body: {
+          jsonrpc: "2.0",
+          id: 3,
+          method: "tools/call",
+          params: {
+            name: RECONSTRUCTED_STATE_TOOL_NAME,
+            arguments: { accounts: [OTHER, ACCOUNT], from: "2026-03-01", to: "2026-03-31" },
+          },
+        },
+        environment: granted,
+      })
+    ).json()) as { result: { isError: boolean; structuredContent: Record<string, unknown> } };
+    expect(called.result.isError).toBe(false);
+    const route = (await (
+      await call(`${PATH}?account=${ACCOUNT}&account=${OTHER}&from=2026-03-01&to=2026-03-31`)
+    ).json()) as Record<string, unknown>;
+    expect(called.result.structuredContent).toEqual(route);
+    expect(route["accounts"]).toEqual([ACCOUNT, OTHER]);
+    expect(validApiResponse(PATH, route)).toBe(true);
+    // One account or a list, never both.
+    const both = await call(TOOL_PATH, {
+      subject: "agent-principal",
+      body: { ...body, accounts: [ACCOUNT] },
+      environment: granted,
+    });
+    expect(both.status).toBe(400);
+    expect(await both.json()).toMatchObject({
+      code: "invalid_query",
+      refs: ["refusal:invalid_query", "account", "accounts"],
+    });
   });
 
   it("refuses with the route's codes, as the first ref of a financial error", async () => {

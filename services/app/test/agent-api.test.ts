@@ -709,9 +709,9 @@ describe("untrusted provider content (AT71)", () => {
       // Published because this store has the reported state's views.
       {
         name: "kogane.reconstructed-state.read",
-        required: ["account", "from", "to"],
+        required: ["from", "to"],
         closed: false,
-        properties: ["account", "basis", "cut", "from", "setVersion", "to"],
+        properties: ["account", "accounts", "basis", "cut", "from", "setVersion", "to"],
         annotations: readOnly,
       },
     ]);

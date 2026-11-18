@@ -235,6 +235,50 @@ describe("coverage", () => {
     expect(byAccount.accounts.map((a) => a.accountId)).toEqual(["acct-sbi"]);
   });
 
+  test("an accounts scope lists each account as its one-account read does (ADR 0116)", async () => {
+    const store = holdings();
+    // The same provider account in a second SBI container, mapped to another account.
+    const foreign = store.capture({
+      source: SBI.source,
+      dataset: "foreign-cash-positions",
+      parser: "sbi-foreign-cash-positions",
+      // The reader release migration 0084 requires.
+      version: "0.3.1",
+      fetchedAt: "2026-09-07T01:00:00Z",
+      positions: [{ account: "sbi-a", code: "3003", quantity: "4" }],
+    });
+    store.identify(foreign, SBI.source, "acct-sbi-usd", "identified");
+    const executorFor = executor(store);
+    const date = "2026-09-10";
+    const scoped = await queryDatedState(executorFor, {
+      date,
+      accounts: ["acct-sbi-usd", "acct-sbi"],
+    });
+    const one = await Promise.all(
+      ["acct-sbi", "acct-sbi-usd"].map((account) =>
+        queryDatedState(executorFor, { date, account }),
+      ),
+    );
+    // Two entries for one provider account: neither account's rows are listed under the other.
+    expect(scoped.accounts.map((a) => [a.sourceAccount, a.accountId]).sort()).toEqual([
+      ["sbi-a", "acct-sbi"],
+      ["sbi-a", "acct-sbi-usd"],
+    ]);
+    for (const state of one)
+      expect(scoped.accounts.filter((a) => a.accountId === state.filters.account)).toEqual(
+        state.accounts,
+      );
+    // The manifest has no filter: a one-account scope is the one-account read.
+    const single = await queryDatedState(executorFor, { date, accounts: ["acct-sbi"] });
+    expect({ ...single, filters: null }).toEqual({ ...one[0]!, filters: null });
+    // Unscoped, the provider account is one entry under the first account its rows map to.
+    const all = await queryDatedState(executorFor, { date });
+    expect(all.accounts.filter((a) => a.sourceAccount === "sbi-a")).toHaveLength(1);
+    await expect(
+      queryDatedState(executorFor, { date, account: "acct-sbi", accounts: ["acct-sbi"] }),
+    ).rejects.toThrow("invalid_query");
+  });
+
   test("the context id is a digest of the manifest", async () => {
     const executorFor = executor(holdings());
     const first = await queryDatedState(executorFor, { date: "2026-09-10" });

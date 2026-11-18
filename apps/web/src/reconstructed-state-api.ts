@@ -13,7 +13,8 @@ const RECONSTRUCTED_STATE_PATH = "/api/v2/reconstructed-state";
 
 /** What the page asks: the route's own parameters, nothing computed here. */
 export interface ReconstructedStateQuery {
-  account: string;
+  /** One account, or a scope of up to 20 (ADR 0116), in the order typed. */
+  accounts: string[];
   from: string;
   to: string;
   cut:
@@ -24,7 +25,10 @@ export interface ReconstructedStateQuery {
 
 /** The route's query string for a request. */
 export function reconstructedStateSearch(query: ReconstructedStateQuery): URLSearchParams {
-  const params = new URLSearchParams({ account: query.account, from: query.from, to: query.to });
+  const params = new URLSearchParams();
+  for (const account of query.accounts) params.append("account", account);
+  params.set("from", query.from);
+  params.set("to", query.to);
   if (query.cut.kind === "sequence") {
     params.set("coreEpoch", query.cut.coreEpoch);
     params.set("commitSeq", query.cut.commitSeq);

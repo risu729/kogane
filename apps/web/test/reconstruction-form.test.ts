@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { formProblem } from "../src/reconstruction-form.ts";
+import { accountsOf, formProblem } from "../src/reconstruction-form.ts";
 import type { ReconstructedStateQuery } from "../src/reconstructed-state-api.ts";
 
 const TODAY = "2400-01-01";
-const BASE = { account: "synthetic-account", from: "2026-03-01", to: "2026-03-31" };
+const BASE = { accounts: ["synthetic-account"], from: "2026-03-01", to: "2026-03-31" };
 const INSTANT_PROBLEM = "時刻を 2026-04-01T00:00:00Z のように UTC で入力してください。";
 const SEQUENCE_PROBLEM = "コミット番号は1以上の整数で入力してください。";
 const pad = (value: number) => String(value).padStart(2, "0");
@@ -115,7 +115,15 @@ describe("reconstruction form knowledge cuts", () => {
     const latest = { kind: "latest" } as const;
     const cases: [Partial<ReconstructedStateQuery>, string | null][] = [
       [{}, null],
-      [{ account: "" }, "口座 ID を選ぶか入力してください。"],
+      [{ accounts: [] }, "口座 ID を選ぶか入力してください。"],
+      [{ accounts: ["ok", " x"] }, "口座 ID を選ぶか入力してください。"],
+      [{ accounts: ["acct-a", "acct-b"] }, null],
+      [{ accounts: ["acct-a", "acct-a"] }, "同じ口座 ID が2回以上入力されています。"],
+      [{ accounts: Array.from({ length: 20 }, (_, index) => `acct-${String(index)}`) }, null],
+      [
+        { accounts: Array.from({ length: 21 }, (_, index) => `acct-${String(index)}`) },
+        "口座は20件まで指定できます。",
+      ],
       [{ from: "2026-02-30" }, "日付を 2026-03-31 のように指定してください。"],
       [{ from: BASE.to }, "開始日は終了日より前にしてください。"],
       [{ to: "2400-01-02" }, "終了日は今日（日本時間）以前にしてください。"],
@@ -130,5 +138,21 @@ describe("reconstruction form knowledge cuts", () => {
     ];
     for (const [change, expected] of cases)
       expect(formProblem({ ...BASE, cut: latest, ...change }, TODAY)).toBe(expected);
+  });
+
+  test("the account field takes one id or several, separated by spaces or commas", () => {
+    expect(accountsOf("")).toEqual([]);
+    expect(accountsOf("  ")).toEqual([]);
+    expect(accountsOf(" acct-a ")).toEqual(["acct-a"]);
+    expect(accountsOf("acct-a acct-b,acct-c、acct-d\tacct-e ,, acct-f")).toEqual([
+      "acct-a",
+      "acct-b",
+      "acct-c",
+      "acct-d",
+      "acct-e",
+      "acct-f",
+    ]);
+    // A repeated id is kept, so the form names it rather than merging it.
+    expect(accountsOf("acct-a acct-a")).toEqual(["acct-a", "acct-a"]);
   });
 });

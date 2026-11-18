@@ -619,12 +619,15 @@ export function selectorInput(
 }
 
 /**
- * ?1 account id: the sources the account's current mappings come from. The
- * reconstruction query compares them with the reported-state perimeter to
- * tell an account no reported container lists (a card account) from one whose
- * container has no capture yet. `account_mappings` has no index by account,
- * so this reads the mapping table once; it holds one row per source account
- * revision, curated by the operator, not one per observation.
+ * ?1 a JSON list of account ids: the sources each account's current mappings
+ * come from, as (account, source) rows. The reconstruction query compares
+ * them with the reported-state perimeter to tell an account no reported
+ * container lists (a card account) from one whose container has no capture
+ * yet. `account_mappings` has no index by account, so this reads the mapping
+ * table once for the whole scope, however many accounts it names; it holds
+ * one row per source account revision, curated by the operator, not one per
+ * observation.
  */
-export const ACCOUNT_SOURCES_SQL = `SELECT DISTINCT sa.source_id FROM current_account_mappings m
- CROSS JOIN source_accounts sa ON sa.id=m.source_account_id WHERE m.account_id=?1 ORDER BY sa.source_id`;
+export const ACCOUNTS_SOURCES_SQL = `SELECT DISTINCT m.account_id,sa.source_id FROM current_account_mappings m
+ CROSS JOIN source_accounts sa ON sa.id=m.source_account_id
+ WHERE m.account_id IN (SELECT value FROM json_each(?1)) ORDER BY m.account_id,sa.source_id`;

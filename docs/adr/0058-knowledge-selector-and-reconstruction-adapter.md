@@ -682,3 +682,20 @@ and its contribution to the returned context digest.
 No provider login, production acceptance, existing-match restatement or
 deployment is established by these synthetic tests. Local and hosted command
 results are recorded in the implementing PR.
+
+## Amendment 2026-11-18: a scope of several accounts
+
+- Status: proposed
+- Decided in: [ADR 0116](0116-reconstructed-state-account-scope.md)
+
+The query answers a scope of one to 20 accounts, not only one: the request
+takes `account` or an `accounts` list (the route, `account` repeated), and a
+list past 20 is refused (`too_many_accounts`); `instrument` and `instruments`
+stay `scope_unsupported`. One cut, one selector load over the scope, one
+reported-state read per date and one fold serve every account; the status and
+reasons are the scope's; the answer's schema is `reconstructed-state-query-v2`,
+with `accounts` in place of `account`. This replaces "One account" in "The
+query", the request rule of the 2026-10-09 amendment ("several, `accounts` …
+are `scope_unsupported`") and the one-account scope in both Limits sections.
+Everything else here, the selection, the B adapter, the bounds and the cut
+rules, is unchanged.
