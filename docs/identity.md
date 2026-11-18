@@ -42,7 +42,14 @@ claims, not updates to original evidence.
 Instruments have opaque IDs, a kind, and separate namespaced identifiers.
 ISO currency codes, offshore CNH, V POINT program units, exchange product IDs,
 MIC+listing symbols and provider-reported RICs are different namespaces.
-Tickers and labels are **not global identities**. A provider-local security can
+Tickers and labels are **not global identities**. A security code whose scope
+nobody reported does not get a shared placeholder scope: from identity policy
+2 an SBI Securities code with no RIC, no MIC and no country is `unresolved`
+(`missing-security-scope`) on an identifier scoped to its fetch run, so
+different securities stating one code in different captures never share an
+instrument; policy-1 runs keep the `unknown-country` placeholder they recorded
+([ADR 0113](adr/0113-sbi-scopeless-security-identity.md),
+[SBI](identity-sbi.md)). A provider-local security can
 later be mapped to an externally verified canonical instrument without changing
 its observations. No currency suffix is treated as proof of a crypto asset,
 and no derivative/product is automatically treated as the underlying coin.

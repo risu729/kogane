@@ -1437,58 +1437,59 @@ The first live ownership and card-settlement decisions, the verification of the
 [Phase 2 plan](plans/2026-11-phase2-card-flow.md#2g-settlement-decisions-by-an-agent-and-verification-code--adrs)'s
 unit 2g. An MCP client made them through the Cloudflare MCP Portal with the
 `kogane.command.*` tools, under the owner's approval of 2026-11-07, 16:47 UTC.
-Counts and identifiers only; no amount or account value is recorded here. Every
-decision below is in the audit log under principal `mcp-client:169b1b83…`.
+Counts, closed codes and decision kinds only: account labels, statement
+periods, candidate, event and principal ids, decision times and amounts are not
+copied here ([production data](../AGENTS.md#production-data)). Every decision
+below is in the audit log under the one MCP client principal that made them.
 
 1. **Before.** 426 candidates, all `proposed`, every one blocked by
    `owner_not_established`. Ten resolved accounts had no ownership claim and
    empty `ownerDefaultBlockers`: seven card accounts (the MyJCB connection root
-   under two identities, Vpass `card-002` to `card-006`) and three debit
-   accounts (SMBC ordinary yen under two identities, one SBI Shinsei account).
-2. **Owner default.** Ten `relation.accept` decisions (16:48 to 16:53 UTC) with
-   marker `ownership-declaration:owner-default-v1:<role>:2026-11-07` and party
+   under two identities and five Vpass cards) and three debit accounts (one
+   SMBC account under two identities, one SBI Shinsei account).
+2. **Owner default.** Ten `relation.accept` decisions with the marker
+   `ownership-declaration:owner-default-v1:<role>:<date>` and party
    `party:owner`: `liable_party` on the seven card accounts,
    `beneficial_owner` on the three debit accounts. Each plan cited, as its
    review marker, a candidate whose only blocker was `owner_not_established`.
-3. **Sweep.** A sweep at 16:52 UTC, while the ten were being recorded, proposed
-   7 MyJCB candidates that still carry `owner_not_established` (they cite only
-   the ownership recorded by then). The sweep of 16:56 to 16:57 UTC proposed 55
+3. **Sweep.** A sweep that ran while the ten were being recorded proposed 7
+   MyJCB candidates that still carry `owner_not_established` (they cite only
+   the ownership recorded by then). The next sweep, after all ten, proposed 55
    candidates with `ownership: established-same` and no acceptance blocker (14
    MyJCB, 41 Vpass). Earlier candidates keep their blockers; the sweep
    appends, it does not rewrite them.
-4. **Decisions.** Accepted one MyJCB candidate (`cs_be06321d`, 2026-09,
-   `collector-myjcb` statement, SMBC debit, debit-account statement
-   `supports`) and one Vpass candidate (`cs_93bffe03`, card-005 2026-08,
-   importer-era statement, SMBC debit) at 17:04 UTC. Withdrew the
-   `cs_93bffe03` acceptance at 17:05 UTC; it keeps its history (`accepted`
-   then `withdrawn`), and the 2026-08 statement's lead became the next proposed
-   candidate (`cs_80687b69`), which is left undecided. Then accepted a Vpass
-   candidate for another statement (`cs_6c1a79c8`, card-005 2026-09, SMBC
-   debit, proposed by the 16:56 sweep) at 17:07 UTC, so one Vpass and one
-   MyJCB settlement stay accepted.
-5. **Purchases.** `kogane.purchases.explain` for 2026-08 and 2026-09 returned
-   the same captured, authorized and refund totals, event counts and zero
+4. **Decisions.** Accepted one MyJCB candidate (a `collector-myjcb` statement
+   paid by an SMBC debit, debit-account statement `supports`) and one Vpass
+   candidate (an importer-era statement of one Vpass card, paid by an SMBC
+   debit). Then withdrew the Vpass acceptance; it keeps its history
+   (`accepted` then `withdrawn`), and that statement's lead became the next
+   proposed candidate, which is left undecided. Then accepted a Vpass
+   candidate for the same card's next statement (paid by an SMBC debit,
+   proposed by the second sweep), so one Vpass and one MyJCB settlement stay
+   accepted. Both accepted statements belong to the same statement period;
+   the withdrawn one belongs to the period before it.
+5. **Purchases.** `kogane.purchases.explain` for both periods returned the
+   same captured, authorized and refund totals, event counts and zero
    unresolved before, after acceptance and after withdrawal;
    `settlementAddsPurchaseExpense` stayed `false` and each decided candidate's
    `impact.addedPurchaseExpense` and `addedCashMovement` are zero. Of the 80
-   events of 2026-09, the 11 MyJCB and 68 Vpass card-005 ones name their
-   accepted settlement and its bank debit (利用 → 請求 → 引落); the 22 events
-   of 2026-08, whose acceptance was withdrawn, name the next proposed candidate
-   and no bank debit.
+   events of the later period, the 11 MyJCB ones and the 68 of the Vpass card
+   name their accepted settlement and its bank debit (利用 → 請求 → 引落); the
+   22 events of the earlier period, whose acceptance was withdrawn, name the
+   next proposed candidate and no bank debit.
 6. **Cash movement.** `kogane.economic-readiness.read` (`bank-movement`) on the
    three debits returns `economic_claim_held` for the two accepted ones and
    not for the withdrawn one, so the withdrawal released its claim.
-   The cash-movement view itself was read on 2026-11-08 at 01:45 UTC through
-   the Portal with `kogane.events.read` (`collection: activity`,
+   The cash-movement view itself was read the next day through the Portal
+   with `kogane.events.read` (`collection: activity`,
    `basis: cash-movement`, added by #1094). It lists exactly two
-   `card_settlement` events in state `debited`, one per accepted candidate:
-   `cs_be06321d` as `event_ae848343…` and `cs_6c1a79c8` as
-   `event_b8560480…`. Each has one exact cash-movement `decrease` leg on the
-   paying bank account, the unvalued obligation-change leg (`statement_principal_and_fees_unknown`) and
-   one settlement allocation from its bank debit. The withdrawn
-   `cs_93bffe03` (`event_501722b7…`) is not listed, and `nextCursor` is
-   null. So the cash-movement view counts each accepted case once and the
-   withdrawn one not at all.
+   `card_settlement` events in state `debited`, one per accepted candidate.
+   Each has one exact cash-movement `decrease` leg on the paying bank
+   account, the unvalued obligation-change leg
+   (`statement_principal_and_fees_unknown`) and one settlement allocation
+   from its bank debit. The withdrawn candidate's event is not listed, and
+   `nextCursor` is null. So the cash-movement view counts each accepted case
+   once and the withdrawn one not at all.
 
 ## Automation prerequisites (ADR 0034)
 

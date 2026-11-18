@@ -27,8 +27,8 @@ const PRODUCER_VERSION = "vpoint-worker-poc-v2";
 const COOKIE_SECRET = "synthetic-session-cookie-secret-value";
 const OUTER_TOKEN_SECRET = "synthetic-outer-message-token-secret";
 const ENVELOPE = {
-  envelopeTo: "vpointpay@takuk.me",
-  expectedRecipient: "vpointpay@takuk.me",
+  envelopeTo: "synthetic-vpoint-pay@example.invalid",
+  expectedRecipient: "synthetic-vpoint-pay@example.invalid",
 };
 
 interface LegacyPut {
@@ -197,7 +197,7 @@ describe("v-point-pay-email: the shared target keeps the stored message, not mor
     return new TextEncoder().encode(
       [
         "From: owner@example.invalid",
-        "To: vpointpay@takuk.me",
+        "To: synthetic-vpoint-pay@example.invalid",
         "Subject: Fwd: notification",
         `X-Synthetic-Session-Token: ${OUTER_TOKEN_SECRET}`,
         "MIME-Version: 1.0",

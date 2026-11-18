@@ -68,7 +68,7 @@ function notification(text: string): Uint8Array {
   return new TextEncoder().encode(
     [
       "From: V Point Pay <info@prepaid.smbc-card.com>",
-      "To: vpointpay@takuk.me",
+      "To: synthetic-vpoint-pay@example.invalid",
       `Subject: =?UTF-8?B?${btoa(String.fromCharCode(...new TextEncoder().encode("【VポイントPay】ご利用のお知らせ")))}?=`,
       "Date: Sun, 31 Aug 2026 12:00:00 +0900",
       "Message-ID: <synthetic@example.invalid>",
@@ -87,8 +87,8 @@ async function prepareNotification() {
   return await prepareVPointPayEmail({
     parsed,
     envelopeFrom: "info@prepaid.smbc-card.com",
-    envelopeTo: "vpointpay@takuk.me",
-    expectedRecipient: "vpointpay@takuk.me",
+    envelopeTo: "synthetic-vpoint-pay@example.invalid",
+    expectedRecipient: "synthetic-vpoint-pay@example.invalid",
   });
 }
 

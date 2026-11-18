@@ -83,7 +83,7 @@ supplementing gaps, not authoritative replacement for app statements. Added inge
 `services/collector-vpoint/` Email Worker, saving original EML/normalized JSON to V Point Pay private R2.
 Gmail forwarding wraps originals in inline `message/rfc822`; validate inner official senders, not outer Gmail senders.
 
-After registered email changed to `vpointpay@takuk.me`, save direct official delivery then forward to Gmail.
+After the registered email changed to the collector's `VPOINT_PAY_EMAIL_RECIPIENT` address, save direct official delivery then forward to Gmail.
 Do not reforward Gmail-backfilled `message/rfc822` notifications. Distinguish transport shapes explicitly,
 preventing loops without losing ordinary notices.
 
@@ -156,6 +156,18 @@ v2 envelopes/integer amount bounds, rejecting non-successful/non-failure-free ru
 collapse identity replays; current balances select latest event time in successful runs, not insertion order.
 Anonymous fixtures pin four types, dual-route refusal, notice status-signs, no funding split inference,
 declined amounts, balance account separation, schema/provenance drift, failed runs.
+
+**Limit: the parser pins the routing address.** A v2 event's `sourceProvenance.envelopeTo` must equal,
+after trimming and lowercasing, a constant in `packages/parsers/src/parsers/v-point-pay.ts`: the real V Point
+Pay routing address, the same value as `VPOINT_PAY_EMAIL_RECIPIENT` in the collector's deployed config. The
+collector already compares against that configured value; parsers take no configuration (`parse` reads only
+the bytes and the artifact metadata). So the address stays in the parser source and in
+`experiments/observation-pipeline-local/test/v-point-pay-parser.test.ts`, which accepts a v2 event;
+`packages/parsers/test/v-point-pay-refusals.test.ts` reads it from the collector's `wrangler.jsonc`, so a parser
+constant that drifts from the deployed recipient fails that test. The collector tests use synthetic
+`example.invalid` addresses. Moving the check out of the parser, or giving parsers configuration, is an open
+design decision: a parser release whose result depends on deployed configuration would no longer be a function of
+the stored evidence alone.
 
 `services/collector-r2-importer/scripts/audit-v-point-pay-layer-b-r2.sh` was a production canary running Layer B
 after pair validation (retired with Importer 2026-09-13). Localhost-only Worker/remote read-only R2, returning

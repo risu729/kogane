@@ -185,6 +185,10 @@ describe("V Point Pay normalized notification-event Layer B", () => {
       storedMessageScope: "smtp-message",
       sourceVerification: "source_unverified",
       envelopeFrom: "info@prepaid.smbc-card.com",
+      // The parser pins the schema-v2 envelope recipient to the deployed V Point Pay
+      // routing address in its source (parsers take no configuration), so an accepted
+      // v2 event must carry that address. Documented as a limit in
+      // docs/sources/v-point-pay.md (Layer B).
       envelopeTo: "vpointpay@takuk.me",
       outerMessageSha256: input["id"],
       authenticationProvenance: "not-exposed-by-cloudflare-email-event",

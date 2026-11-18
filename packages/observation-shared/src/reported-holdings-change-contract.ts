@@ -22,6 +22,55 @@ import {
 import { validInstantText, validLocalDateText } from "../../domain/src/time.ts";
 import { validQuantity } from "../../domain/src/values.ts";
 
+export const REPORTED_HOLDINGS_CHANGE_PATH = "/api/v2/reported-holdings-change";
+/** Every query parameter the route (and so its agent read) takes; any other is refused. */
+export const HOLDINGS_CHANGE_PARAMETERS = ["from", "to", "source", "account"] as const;
+// The reported state's own parameter shapes.
+export const HOLDINGS_CHANGE_SOURCE = /^[a-z0-9][a-z0-9-]{0,63}$/u;
+export const HOLDINGS_CHANGE_ACCOUNT = /^[A-Za-z0-9][A-Za-z0-9_:.-]{0,127}$/u;
+
+/** A request the route takes: two dates and, optionally, one source and one account. */
+export interface HoldingsChangeRequest {
+  from: string;
+  to: string;
+  source?: string;
+  account?: string;
+}
+
+/**
+ * The route's refusal of a query string's shape, decided before the store is
+ * read: `invalid_query` for another, repeated or empty parameter or a
+ * malformed source or account, `invalid_date` for a missing, malformed or
+ * impossible date, and null when the shape is accepted. The route and the
+ * page both apply it, so the page never sends a shape the route refuses.
+ */
+export function holdingsChangeQueryRefusal(
+  params: URLSearchParams,
+): "invalid_query" | "invalid_date" | null {
+  for (const [key, value] of params)
+    if (
+      !(HOLDINGS_CHANGE_PARAMETERS as readonly string[]).includes(key) ||
+      params.getAll(key).length !== 1 ||
+      !value
+    )
+      return "invalid_query";
+  if (!validLocalDateText(params.get("from")) || !validLocalDateText(params.get("to")))
+    return "invalid_date";
+  const source = params.get("source");
+  if (source !== null && !HOLDINGS_CHANGE_SOURCE.test(source)) return "invalid_query";
+  const account = params.get("account");
+  if (account !== null && !HOLDINGS_CHANGE_ACCOUNT.test(account)) return "invalid_query";
+  return null;
+}
+
+/** The route's query string for a request, in the route's parameter order. */
+export function holdingsChangeSearch(request: HoldingsChangeRequest): URLSearchParams {
+  const params = new URLSearchParams({ from: request.from, to: request.to });
+  if (request.source !== undefined) params.set("source", request.source);
+  if (request.account !== undefined) params.set("account", request.account);
+  return params;
+}
+
 /** Every key of two dates, each bounded by the query on its own date. */
 const BOUND = 2 * HOLDINGS_CHANGE_SIDE_BOUND;
 const POSITION_REF = /^position:[1-9][0-9]*$/u;

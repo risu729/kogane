@@ -120,8 +120,8 @@ the attempt count; later runs are refused as busy until the tick frees it
 (above). Both statements clear only the execution's own reference, never a
 lease another execution acquired.
 
-On 2026-11-07 two leases had been held for weeks: `vpass` since
-2026-10-12 21:00 UTC and `sbi-vc-trade` since 2026-10-23 18:15 UTC. Every later
+On 2026-11-07 two leases had been held for weeks, one for `vpass` and one for
+`sbi-vc-trade`, each since an occurrence that had stopped. Every later
 occurrence of those sources failed `collection_busy`. The vpass occurrence had
 ended `uncertain` with no `finished_at`, so the Processor alarm waiting on the
 collector had itself stopped; that is the stopped-execution case, which then
@@ -129,56 +129,59 @@ only the operator's release cleared, and which the heartbeat above now covers. T
 `collection_failed` 0.25 s after its claim. That is consistent with either
 failed-statement case above, and also with the session object stopping between
 claim and release; the records do not say which. With the owner's go-ahead
-(2026-11-07 04:17 UTC), both were cleared at about 04:25 UTC by an
+(2026-11-07 04:17 UTC), both were cleared minutes later by an
 exact-reference UPDATE on CORE D1, not through the page. These two releases
 therefore have no audit record.
 
-The next Vpass occurrence, 2026-11-07 21:00 UTC, also ended `uncertain`
-(`dispatch_uncertain`, no `finished_at`). Read from Workers Logs on
-2026-11-08: the Vpass alarm object claimed the occurrence at 21:00:00.609 UTC,
-but neither the Processor nor the Vpass Worker has an invocation record of
-that attempt. One more alarm invocation of the same object, at 21:01:39 UTC,
-ended `canceled` after 32 ms with no log line. The claim had already moved the
-schedule to the next occurrence, so a retried alarm could only re-arm for it.
-A Vpass lease was nevertheless held: the processor tick triggered at 21:10:05
-freed it at 21:15:01 UTC (`alarm.lease.expire`) under the ten-minute heartbeat
-rule, so its last heartbeat was written before about 21:05. The collector had
+The next Vpass occurrence also ended `uncertain`
+(`dispatch_uncertain`, no `finished_at`). Times in this paragraph are offsets
+from that occurrence's nominal time, read from Workers Logs the next day: the
+Vpass alarm object claimed the occurrence at +0.609 s, but neither the
+Processor nor the Vpass Worker has an invocation record of that attempt. One
+more alarm invocation of the same object, at +1 min 39 s, ended `canceled`
+after 32 ms with no log line. The claim had already moved the schedule to the
+next occurrence, so a retried alarm could only re-arm for it. A Vpass lease
+was nevertheless held: the processor tick triggered at about +10 min freed it
+at about +15 min (`alarm.lease.expire`) under the ten-minute heartbeat rule,
+so its last heartbeat was written before about +5 min. The collector had
 therefore most likely been called and had claimed its lease before both
 executions stopped without a record. No deploy ran in that window, the logs
-show no exception or limit, the other alarms of 21:00 finished normally, and
-the reservation for the next occurrence stayed armed. The alarm and lease log
-lines below were added so the next such stop shows where it happened.
+show no exception or limit, the other alarms due at the same time finished
+normally, and the reservation for the next occurrence stayed armed. The alarm
+and lease log lines below were added so the next such stop shows where it
+happened.
 
-### Vpass recurrence on 2026-11-09
+### A second silent Vpass stop
 
-A read-only investigation on 2026-11-10 placed the next
-silent stop inside the open collector call
-([issue 1142](https://github.com/risu729/kogane/issues/1142)). The maintenance
-read reported the nominal 2026-11-09 21:00 UTC occurrence as `uncertain` /
-`dispatch_uncertain`, with `startedAt` 21:00:00.587 UTC and no `finishedAt`.
-The next occurrence, 2026-11-10 21:00 UTC, remained `armed`. These are
-operational timestamps, not provider statement dates.
+A later read-only investigation placed the next silent stop inside the open
+collector call ([issue 1142](https://github.com/risu729/kogane/issues/1142)).
+The maintenance read reported that occurrence as `uncertain` /
+`dispatch_uncertain`, with `startedAt` 0.587 s after its nominal time and no
+`finishedAt`; the next day's occurrence remained `armed`. Exact production
+times are not copied here
+([production data](../AGENTS.md#production-data)); the times below are
+offsets from the occurrence's nominal time.
 
-Workers Logs were queried with `dry: true` for 2026-11-09 20:59–21:17 UTC.
-The occurrence id was `scheduled:vpass:1794258000000`:
+Workers Logs were queried with `dry: true` for a window from one minute before
+to 17 minutes after the nominal time. The occurrence id has the form
+`scheduled:vpass:<nominal epoch milliseconds>`:
 
-| UTC time        | Evidence                                                                                                                                                                                                       |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 21:00:01.028    | Processor `schedule_alarm`, `outcome: claimed`, `lagMs: 587`, `claimMs: 441`.                                                                                                                                  |
-| 21:00:01.217    | Processor `schedule_dispatch_start`, `target: collector-vpass`; no dispatch result or final invocation outcome was found for the original alarm.                                                               |
-| 21:00:01.290    | Lease `startedAt`, recovered from the later `collection_lease_expired` line.                                                                                                                                   |
-| 21:01:24.987259 | Vpass deployment `270a1e1d-5bbd-4fdd-83eb-8bc566dbc2e1` assigned version `4c1cbf1f-f9fc-495f-9601-a2da4fe9ac93` to 100% of traffic.                                                                            |
-| 21:01:41.481688 | Processor deployment `3eae8b05-d6fe-4322-99c7-b45dd009687f` assigned version `dba57c4c-2940-41be-9f3a-3443d839ff86` to 100% of traffic.                                                                        |
-| 21:01:57.164    | The only Vpass Worker event found was a successful `/health` invocation on the new version, with CPU and wall time both 0 ms; it was not the scheduled collection.                                             |
-| 21:02:01.896    | Lease `lastHeartbeatAt`: 120.606 s after its recorded start. This proves a heartbeat was written then, not that provider collection or receipt persistence finished.                                           |
-| 21:04:32.583    | The same alarm object answered `alarmTime` on the new Processor version; later successful calls were at 21:09:50.999, 21:13:20.601 and 21:15:38.421. These calls do not describe how the old invocation ended. |
-| 21:15:34.931    | Audit `alarm.lease.expire` recorded an applied release (`released: true`).                                                                                                                                     |
-| 21:15:35.126    | Processor `collection_lease_expired` recorded the start and last-heartbeat times above.                                                                                                                        |
+| Offset (min:s) | Evidence                                                                                                                                                                                                 |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| +00:01.028     | Processor `schedule_alarm`, `outcome: claimed`, `lagMs: 587`, `claimMs: 441`.                                                                                                                            |
+| +00:01.217     | Processor `schedule_dispatch_start`, `target: collector-vpass`; no dispatch result or final invocation outcome was found for the original alarm.                                                         |
+| +00:01.290     | Lease `startedAt`, recovered from the later `collection_lease_expired` line.                                                                                                                             |
+| +01:24.987     | Vpass deployment `270a1e1d-5bbd-4fdd-83eb-8bc566dbc2e1` assigned version `4c1cbf1f-f9fc-495f-9601-a2da4fe9ac93` to 100% of traffic.                                                                      |
+| +01:41.482     | Processor deployment `3eae8b05-d6fe-4322-99c7-b45dd009687f` assigned version `dba57c4c-2940-41be-9f3a-3443d839ff86` to 100% of traffic.                                                                  |
+| +01:57.164     | The only Vpass Worker event found was a successful `/health` invocation on the new version, with CPU and wall time both 0 ms; it was not the scheduled collection.                                       |
+| +02:01.896     | Lease `lastHeartbeatAt`: 120.606 s after its recorded start. This proves a heartbeat was written then, not that provider collection or receipt persistence finished.                                     |
+| +04:32.583     | The same alarm object answered `alarmTime` on the new Processor version; later successful calls were at +09:50.999, +13:20.601 and +15:38.421. These calls do not describe how the old invocation ended. |
+| +15:34.931     | Audit `alarm.lease.expire` recorded an applied release (`released: true`).                                                                                                                               |
+| +15:35.126     | Processor `collection_lease_expired` recorded the start and last-heartbeat times above.                                                                                                                  |
 
 The claim and dispatch-start lines belonged to Processor version
-`9c74c4bd-e346-4549-adc8-1f399c231428`, request
-`20d85b31859cc56d04164b1e7a83f26d`, alarm object
-`046f6bbef2765bb60fe8fad5eaf88e14e4f3bed3fdb10d9472b949263235bb8c`.
+`9c74c4bd-e346-4549-adc8-1f399c231428`, the version the deployment above
+replaced; their request and alarm object ids are not copied here.
 The lease proves that collection reached the Vpass lease path. No scheduled
 Vpass invocation, `collector-diagnostic` card/session step,
 `vpass-scheduled-result`, CPU-limit or memory-limit outcome was found. The
@@ -187,7 +190,7 @@ the session and before collecting each card; absence of those records does
 not establish that either step was never entered. The health invocation's
 resource measurements say nothing about the missing collection invocation.
 
-The deployments overlap the open call, unlike the November 7 incident.
+The deployments overlap the open call, unlike the first stop above.
 Cloudflare's [code-update documentation](https://developers.cloudflare.com/durable-objects/deployments/durable-objects-code-updates/)
 and [2026-10-30 changelog](https://developers.cloudflare.com/changelog/post/2026-10-30-durable-objects-deferred-code-updates/)
 describe a default deferral of up to 300 s for active Durable Objects, with
@@ -213,10 +216,10 @@ step starts; a separately designed durable stage marker would need review
 before adding storage or RPC behavior. This document does not implement such
 a marker or claim that it would establish a platform cause.
 
-The November 8 nominal occurrence (deferred to 23:00 UTC for Monday
-maintenance) was reported completed at 23:04 UTC in the
-[November 9 issue update](https://github.com/risu729/kogane/issues/1142#issuecomment-6738569121).
-The November 9 recurrence breaks that sequence. A demonstrated cause/fix and
+The occurrence between the two stops (deferred by two hours for Monday
+maintenance) was reported completed four minutes after its deferred time in
+an [issue update](https://github.com/risu729/kogane/issues/1142#issuecomment-6738569121).
+The second stop breaks that sequence. A demonstrated cause/fix and
 three consecutive scheduled days completing or failing with closed codes
 after that fix is deployed remain open acceptance work in issue 1142.
 

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import { otherIdentity as providerIdentity } from "../../../packages/identity/src/other.ts";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import type { IdentityInput, IdentityPlan } from "../../../packages/identity/src/types.ts";
@@ -927,6 +928,269 @@ test("MyJCB J-POINT parses are re-identified at policy 2; statement parses stay 
     { parse_run_id: 140, v: 2 },
     { parse_run_id: 141, v: 1 },
   ]);
+});
+
+test("SBI foreign positions parses are re-identified at policy 2; a scopeless code no longer merges", async () => {
+  await db.prepare("INSERT OR IGNORE INTO sources VALUES('sbi-securities','synthetic')").run();
+  // Two foreign positions captures, each with a different synthetic security
+  // that states the same code and neither a country nor a RIC.
+  const position = (name: string) => (id: number) => [
+    db
+      .prepare(
+        "INSERT INTO position_observations(parse_run_id,source_account,security_code,security_name,quantity_text,quantity_scale,currency,raw_locator,extra_json) VALUES(?,'sbi-securities:foreign','SYNX',?,'1',0,'USD','synthetic:position',?)",
+      )
+      .bind(
+        id,
+        name,
+        JSON.stringify({
+          specificAccountCode: "SPECIFIC",
+          securities: { securitiesCode: "SYNX", securitiesName: name },
+        }),
+      ),
+  ];
+  await seed(160, 0, "sbi-securities", true, position("Synthetic one"), "foreign-cash-positions");
+  await seed(161, 0, "sbi-securities", true, position("Synthetic two"), "foreign-cash-positions");
+  // A domestic positions capture: its code is always scoped JP.
+  await seed(
+    162,
+    0,
+    "sbi-securities",
+    true,
+    (id) => [
+      db
+        .prepare(
+          "INSERT INTO position_observations(parse_run_id,source_account,security_code,market,quantity_text,quantity_scale,currency,raw_locator,extra_json) VALUES(?,'sbi-securities:domestic:deposit-type=0','1234','XTKS','1',0,'JPY','synthetic:position','{}')",
+        )
+        .bind(id),
+    ],
+    "domestic-cash-positions",
+  );
+  for (const id of [160, 161, 162])
+    expect(await identifyParse(db, parse(id, "sbi-securities"), resolveIdentity, 1)).toBe(1);
+  const securities = () =>
+    db
+      .prepare(
+        `SELECT o.parse_run_id,o.policy_version,d.namespace,d.scope,d.value,m.status,m.reason
+         FROM current_identity_observations o
+         JOIN identity_instrument_uses u ON u.identity_observation_id=o.id AND u.role='security'
+         JOIN instrument_identifiers d ON d.id=u.identifier_id
+         JOIN instrument_mappings m ON m.id=u.instrument_mapping_id
+         WHERE o.parse_run_id IN (160,161,162) ORDER BY o.parse_run_id`,
+      )
+      .all();
+  const unknownCountry = {
+    namespace: "sbi-security-code",
+    scope: "unknown-country",
+    value: "SYNX",
+    status: "provider-local",
+    reason: "provider-code-without-global-crosswalk",
+  };
+  const domestic = {
+    parse_run_id: 162,
+    policy_version: 1,
+    namespace: "mic-symbol",
+    scope: "XTKS",
+    value: "1234",
+    status: "provider-local",
+    reason: "provider-reported-listing",
+  };
+  // What policy 1 recorded: both securities on one placeholder identifier.
+  expect((await securities()).results).toEqual([
+    { parse_run_id: 160, policy_version: 1, ...unknownCountry },
+    { parse_run_id: 161, policy_version: 1, ...unknownCountry },
+    domestic,
+  ]);
+  const placeholder = await count("instrument_identifiers", "scope='unknown-country'");
+  expect(placeholder).toBe(1);
+  const mappingsBefore = (await db.prepare("SELECT * FROM instrument_mappings ORDER BY id").all())
+    .results;
+  // Only the two positions parses are candidates again.
+  expect(await identitySweep(db, resolveIdentity, 8, "sbi-securities")).toEqual({
+    processedRuns: 2,
+    identifiedRuns: 2,
+    identifiedObservations: 2,
+  });
+  expect(await identitySweep(db, resolveIdentity, 8, "sbi-securities")).toEqual({
+    processedRuns: 0,
+    identifiedRuns: 0,
+    identifiedObservations: 0,
+  });
+  // Policy 2: each security is unresolved on an identifier scoped to its own
+  // capture; the domestic parse keeps its policy-1 run.
+  const unresolved = (id: number) => ({
+    parse_run_id: id,
+    policy_version: 2,
+    namespace: "sbi-security-code",
+    scope: `fetch-run:${id}`,
+    value: "SYNX",
+    status: "unresolved",
+    reason: "missing-security-scope",
+  });
+  expect((await securities()).results).toEqual([unresolved(160), unresolved(161), domestic]);
+  // Append-only: the placeholder identifier and every earlier mapping revision
+  // stay as recorded; the policy-1 runs still name them.
+  expect(await count("instrument_identifiers", "scope='unknown-country'")).toBe(placeholder);
+  const mappingsAfter = (await db.prepare("SELECT * FROM instrument_mappings ORDER BY id").all())
+    .results;
+  for (const mapping of mappingsBefore) expect(mappingsAfter).toContainEqual(mapping);
+  expect(
+    await count(
+      "identity_runs",
+      "parse_run_id IN (160,161) AND policy_version=1 AND id IN (SELECT identity_run_id FROM identity_run_seals)",
+    ),
+  ).toBe(2);
+  // The domestic listing gained no revision.
+  expect(
+    await count(
+      "instrument_mappings",
+      "identifier_id IN (SELECT id FROM instrument_identifiers WHERE namespace='mic-symbol' AND value='1234') AND policy_version=2",
+    ),
+  ).toBe(0);
+});
+
+test("re-identifying an observed-shape positions parse revises unchanged identities with new mapping ids (ADR 0113)", async () => {
+  // Every observed capture states a country and a RIC, so policy 2 plans it
+  // exactly as policy 1 did. The re-identification still appends a policy-2
+  // rule revision, with a new id, for each source account and identifier the
+  // parse uses whose current mapping is the rule's policy-1 one. A manual
+  // mapping is not revised. A policy-1 parse of another dataset that uses the
+  // same identifier keeps citing the revision it recorded, while the current
+  // mapping of that identifier becomes the policy-2 one.
+  const element = (code: string, ric: string) => ({
+    specificAccountCode: "OBSERVED",
+    countryCode: "US",
+    securities: {
+      securitiesCode: code,
+      securitiesName: `Synthetic ${code}`,
+      countryCode: "US",
+      ric,
+    },
+  });
+  await seed(
+    163,
+    0,
+    "sbi-securities",
+    true,
+    (id) =>
+      [
+        ["SYNO", "SYNO.O"],
+        ["SYNP", "SYNP.O"],
+      ].map(([code, ric]) =>
+        db
+          .prepare(
+            "INSERT INTO position_observations(parse_run_id,source_account,security_code,quantity_text,quantity_scale,currency,raw_locator,extra_json) VALUES(?,'sbi-securities:foreign',?,'1',0,'USD','synthetic:position',?)",
+          )
+          .bind(id, code, JSON.stringify(element(code!, ric!))),
+      ),
+    "foreign-cash-positions",
+  );
+  // A trade of the same security, from a dataset that stays at policy 1.
+  await seed(
+    164,
+    0,
+    "sbi-securities",
+    true,
+    (id) => [
+      db
+        .prepare(
+          "INSERT INTO transaction_observations(parse_run_id,source_account,currency,raw_locator,extra_json) VALUES(?,'sbi-securities:foreign','USD','synthetic:trade',?)",
+        )
+        .bind(
+          id,
+          JSON.stringify({
+            ...element("SYNO", "SYNO.O"),
+            tradeCurrencyCode: "USD",
+            settlementCurrencyCode: "USD",
+          }),
+        ),
+    ],
+    "foreign-trade-records",
+  );
+  expect(await identifyParse(db, parse(163, "sbi-securities"), resolveIdentity, 1)).toBe(2);
+  expect(await identifyParse(db, parse(164, "sbi-securities"), resolveIdentity, 1)).toBe(1);
+  const ricId = (value: string) => identityKey("ii", ["ric", "", value]);
+  const tradedId = await ricId("SYNO.O");
+  const decidedId = await ricId("SYNP.O");
+  // A person maps the second security's identifier: a protected manual revision.
+  const decided = await db
+    .prepare("SELECT * FROM current_instrument_mappings WHERE identifier_id=?")
+    .bind(decidedId)
+    .first<{ instrument_id: string; revision: number }>();
+  await reviseIdentity(db, {
+    kind: "instrument",
+    referenceId: decidedId,
+    targetId: decided!.instrument_id,
+    expectedRevision: decided!.revision,
+    reason: "synthetic manual decision",
+  });
+  const sourceAccount = await db
+    .prepare(
+      "SELECT DISTINCT source_account_id id FROM current_identity_observations WHERE parse_run_id=163",
+    )
+    .first<string>("id");
+  type MappingRevision = {
+    id: string;
+    revision: number;
+    policy_version: number | null;
+    [column: string]: unknown;
+  };
+  const instrumentRevisions = (identifier: string) =>
+    db
+      .prepare(
+        "SELECT id,revision,instrument_id,method,reason,label,status,policy_version FROM instrument_mappings WHERE identifier_id=? ORDER BY revision",
+      )
+      .bind(identifier)
+      .all<MappingRevision>();
+  const accountRevisions = () =>
+    db
+      .prepare(
+        "SELECT id,revision,account_id,method,reason,label,status,policy_version FROM account_mappings WHERE source_account_id=? ORDER BY revision",
+      )
+      .bind(sourceAccount)
+      .all<MappingRevision>();
+  const tradedBefore = (await instrumentRevisions(tradedId)).results;
+  const decidedBefore = (await instrumentRevisions(decidedId)).results;
+  const accountBefore = (await accountRevisions()).results;
+  expect(tradedBefore).toHaveLength(1);
+  expect(accountBefore).toHaveLength(1);
+
+  // Only the positions parse is a candidate again.
+  expect(await identitySweep(db, resolveIdentity, 8, "sbi-securities")).toEqual({
+    processedRuns: 1,
+    identifiedRuns: 1,
+    identifiedObservations: 2,
+  });
+  const revised = (before: MappingRevision[], after: MappingRevision[]) => {
+    expect(after.slice(0, before.length)).toEqual(before);
+    expect(after).toHaveLength(before.length + 1);
+    const { id: oldId, revision: _r1, policy_version: v1, ...was } = before.at(-1)!;
+    const { id: newId, revision: _r2, policy_version: v2, ...now } = after.at(-1)!;
+    // Equal except for its id, revision and policy version.
+    expect(now).toEqual(was);
+    expect([v1, v2]).toEqual([1, 2]);
+    expect(newId).not.toBe(oldId);
+    return newId;
+  };
+  const tradedNow = revised(tradedBefore, (await instrumentRevisions(tradedId)).results);
+  revised(accountBefore, (await accountRevisions()).results);
+  // The manual decision is untouched.
+  expect((await instrumentRevisions(decidedId)).results).toEqual(decidedBefore);
+  // The trade parse's sealed policy-1 run keeps citing the first revision;
+  // the identifier's current mapping, which a pinned plan expects, moved on.
+  expect(
+    await db
+      .prepare(
+        "SELECT DISTINCT u.instrument_mapping_id id FROM current_identity_observations o JOIN identity_instrument_uses u ON u.identity_observation_id=o.id WHERE o.parse_run_id=164 AND u.identifier_id=?",
+      )
+      .bind(tradedId)
+      .first<string>("id"),
+  ).toBe(tradedBefore[0]!.id);
+  expect(
+    await db
+      .prepare("SELECT id FROM current_instrument_mappings WHERE identifier_id=?")
+      .bind(tradedId)
+      .first<string>("id"),
+  ).toBe(tradedNow);
 });
 
 test("all four observation kinds preserve their instrument roles and provenance", async () => {
