@@ -46,7 +46,13 @@ const KINDS = new Set([
   "STWHAB240P",
 ]);
 const COMMON = ["ctt", "code", "message"];
-const MAX_ROWS = 1000;
+/**
+ * The mailbox terminal carries one unit per listed row plus `mailbox-index`,
+ * and a terminal holds at most 1,000 units (`packages/collection` manifest).
+ * A longer list is refused here, so the refusal is persisted as the index
+ * unit's closed code instead of making the whole terminal unplannable.
+ */
+const MAX_ROWS = 999;
 type JsonObject = Record<string, unknown>;
 export type MailboxRow = Record<(typeof ROW_STRINGS)[number], string> &
   Record<(typeof ROW_NULLS)[number], null>;

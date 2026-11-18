@@ -107,3 +107,18 @@ round-robin continuation, cursor comparisons, native byte persistence, duplicate
 object reuse, metadata registration/publication and absence of financial facts.
 Required workspace/root and repository checks validate the implementation;
 no provider collector execution or deployment is part of these checks.
+
+## Amendment 2026-11-18: the current list is bounded by the terminal's unit capacity
+
+The mailbox terminal states one unit per listed row plus `mailbox-index`, and
+a terminal manifest holds at most 1,000 units (`packages/collection`). The
+collector accepted lists of up to 1,000 rows, so a list of exactly 1,000 rows
+needed 1,001 units: the terminal could not be planned, the archive and the
+index failure were both lost behind a generic `operation_failed`, and the
+cursor never moved. The list is now refused above 999 rows with the existing
+`sbi_mailbox_response_unobserved` code, like any longer list before. The
+refusal is persisted on `mailbox-index` in its own mailbox terminal; the
+financial terminal is unaffected. A mailbox of 1,000 or more current rows is
+therefore not archived; this is an open limit, not an observation of the
+provider. Verified by `test/mailbox-terminal-bound.test.ts` with synthetic
+999- and 1,000-row lists; no provider was contacted.
