@@ -266,12 +266,18 @@ const statusOf = async (id: string): Promise<string> =>
     .first<{ status: string }>())!.status;
 const currentAllocations = () => count("current_allocations");
 
+/**
+ * The statement's `myjcb:<connection>:root` takes a card connection root's
+ * role and status, as the myjcb resolver gives it (packages/identity): the
+ * owner default admits it, the sole-personal self-declaration does not.
+ */
 const resolver: IdentityResolver = (input) => ({
   account: {
     key: [input.sourceAccount],
     label: "synthetic",
-    role: input.sourceId === "myjcb" ? "card-statement" : "deposit",
-    status: "provider-local",
+    ...(input.sourceId === "myjcb"
+      ? { role: "card-statement-aggregate", status: "aggregate" }
+      : { role: "deposit", status: "provider-local" }),
     reason: "test",
   },
   instruments: [],
@@ -472,9 +478,51 @@ describe("card settlement decisions over the page's path and MCP (ADR 0081, unit
     expect(await count("decision_revisions")).toBe(decisions);
   });
 
+  it("refuses the page's self-declaration for a card connection root alike on both paths", async () => {
+    // Nothing is recorded yet, so the scope is the only blocker: the card
+    // side is a connection root, which the owner default admits and the
+    // self-declaration refuses; the debit's deposit account is admitted.
+    const proposalId = (await env.DB.prepare("SELECT id FROM card_settlement_reviews").first<{
+      id: string;
+    }>())!.id;
+    const read = await send(
+      `/api/v2/reconciliation/card-settlements/ownership?proposalId=${proposalId}`,
+      { method: "GET" },
+      APP_AUD,
+    );
+    const review = (await read.json()) as CardOwnershipReview;
+    const card = review.sides.find((side) => side.role === "liable_party")!;
+    const bank = review.sides.find((side) => side.role === "beneficial_owner")!;
+    expect([card.blockers, card.ownerDefaultBlockers]).toEqual([[], []]);
+    expect(card.selfDeclarationBlockers).toEqual(["single_account_scope_unconfirmed"]);
+    expect(bank.selfDeclarationBlockers).toEqual([]);
+    const before = [await count("change_plans"), await count("decision_revisions")];
+    // The payload the card-ownership page posts for 本人申告（名義は未確認）.
+    const payload = {
+      relationKind: card.role,
+      fromRef: `account:${card.accountId}`,
+      toRef: PARTY,
+      validFrom: null,
+      validTo: null,
+      evidenceRefs: [...card.evidenceRefs, ownershipDeclarationRef(card.role, "2026-11-18")!],
+      reason: "synthetic self-declaration",
+    };
+    const baseContextId = `card-ownership:${proposalId}:${card.role}`;
+    const overHttp = await http("plan", { kind: "relation.accept", payload, baseContextId });
+    const overMcp = await mcp("kogane.command.plan", {
+      kind: "relation.accept",
+      payload,
+      baseContextId,
+      idempotencyKey: "self-declaration-scope-refused",
+    });
+    expect(overHttp).toMatchObject({ failed: true, body: { error: "needs_scope_resolution" } });
+    expect(overMcp).toEqual(overHttp);
+    expect([await count("change_plans"), await count("decision_revisions")]).toEqual(before);
+  });
+
   it("records the ownership review over either path, with the same receipt", async () => {
-    // The candidate the previous test's sweep proposed, still unowned: its
-    // owner-default plans decided nothing.
+    // The candidate the first test's sweep proposed, still unowned: its
+    // owner-default plans and the refused self-declaration decided nothing.
     const unowned = await env.DB.prepare("SELECT id FROM card_settlement_reviews").first<{
       id: string;
     }>();
