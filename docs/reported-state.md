@@ -315,6 +315,11 @@ answer under two seconds.
   answer counts them per source and reason (`statementsBeforeWindow`) but does
   not say whether any was settled: it bounds how many older captured
   statements could still be unpaid and is not a figure of what is owed.
+- Only captured statements are listed or counted. A card or a month whose
+  statement was never captured before the cutoff (or whose capture has no
+  published parse) is neither, and no coverage entry names it: an empty
+  `statementsBeforeWindow` means no captured statement was left out, not that
+  no older bill exists.
 - Only the Vpass and MyJCB statement parsers supply payables; unbilled usage,
   installment remainders and loans are not shown (`liabilitiesMissing`).
 - Adoption and overlap across sources (`selectAdoptedSet`) are not applied:

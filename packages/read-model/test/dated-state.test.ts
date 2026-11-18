@@ -4,7 +4,11 @@
 import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { reportedStateCutoff } from "../../domain/src/reported-state";
+import {
+  payablesFromPaymentDate,
+  reportedStateCutoff,
+  UNDATED_STATEMENT_WINDOW_DAYS,
+} from "../../domain/src/reported-state";
 import {
   DATED_BALANCES_SQL,
   DATED_POSITION_CONTAINER_PARSERS,
@@ -531,30 +535,101 @@ describe("statements the payable window leaves out", () => {
       t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
       return Math.floor((((t ^ (t >>> 14)) >>> 0) / 4_294_967_296) * n);
     };
+    // The bounds the query layer passes (queryDatedState): the first listed
+    // due date, and the first listed capture instant of an undated statement.
+    const windows = ["2026-09-10", "2026-05-20", "2026-11-01"].map((date) => {
+      const cutoff = reportedStateCutoff(date);
+      return {
+        date,
+        cutoff,
+        from: payablesFromPaymentDate(date),
+        undated: new Date(
+          Date.parse(cutoff) - UNDATED_STATEMENT_WINDOW_DAYS * 86_400_000,
+        ).toISOString(),
+      };
+    });
+    expect(windows.map(({ from, undated }) => [from, undated])).toEqual([
+      ["2026-08-10", "2026-07-27T15:00:00.000Z"],
+      ["2026-04-19", "2026-04-05T15:00:00.000Z"],
+      ["2026-10-01", "2026-09-17T15:00:00.000Z"],
+    ]);
+    const dayBefore = (date: string): string =>
+      new Date(Date.parse(`${date}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+    const shifted = (instant: string, ms: number): string =>
+      new Date(Date.parse(instant) + ms).toISOString();
     const seen = { listed: 0, due: 0, undated: 0, resolved: 0 };
+    // Statements placed on each boundary of some window, and where each went.
+    const edges = {
+      dueOnFrom: { listed: 0, counted: 0 },
+      dueDayBeforeFrom: { listed: 0, counted: 0 },
+      undatedOnBound: { listed: 0, counted: 0 },
+      undatedJustBeforeBound: { listed: 0, counted: 0 },
+      atCutoff: { listed: 0, counted: 0 },
+      justBeforeCutoff: { listed: 0, counted: 0 },
+    };
+    type Edge = keyof typeof edges;
+    const EDGES = Object.keys(edges) as Edge[];
     for (let round = 0; round < 6; round += 1) {
       const store = new DatedStore();
-      for (let index = 0; index < 24; index += 1) {
+      // Observation id -> the boundary it sits on, and for which date.
+      const placed = new Map<number, { edge: Edge; date: string }>();
+      for (let index = 0; index < 36; index += 1) {
         const month = String(1 + random(10)).padStart(2, "0");
         const card = `card-${random(4)}`;
         const due = random(4);
+        const window = windows[random(windows.length)]!;
+        // A third of the statements sit on a boundary of one window.
+        const edge: Edge | null = random(3) === 0 ? EDGES[random(EDGES.length)]! : null;
+        const paymentDate =
+          edge === "dueOnFrom"
+            ? window.from
+            : edge === "dueDayBeforeFrom"
+              ? dayBefore(window.from)
+              : edge === "undatedOnBound" || edge === "undatedJustBeforeBound"
+                ? null
+                : // A readable due date, none, or text that is not one.
+                  due === 0
+                  ? null
+                  : due === 1
+                    ? "unknown"
+                    : `2026-${month}-26`;
+        const fetchedAt =
+          edge === "undatedOnBound"
+            ? window.undated
+            : edge === "undatedJustBeforeBound"
+              ? shifted(window.undated, -1)
+              : edge === "atCutoff"
+                ? window.cutoff
+                : edge === "justBeforeCutoff"
+                  ? shifted(window.cutoff, -1)
+                  : edge === "dueOnFrom" || edge === "dueDayBeforeFrom"
+                    ? shifted(window.cutoff, -86_400_000)
+                    : `2026-${month}-${String(1 + random(28)).padStart(2, "0")}T0${random(10)}:00:00Z`;
         const capture = store.statement({
           card,
-          period: `2026-${month}`,
-          // A readable due date, none, or text that is not one.
-          paymentDate: due === 0 ? null : due === 1 ? "unknown" : `2026-${month}-26`,
+          // A boundary statement has a period of its own, so a later random
+          // capture never replaces it as the newest of its statement key.
+          period:
+            edge === null ? `2026-${month}` : `2025-${String(1 + (index % 12)).padStart(2, "0")}`,
+          paymentDate,
           minor: 1 + random(9_000),
-          fetchedAt: `2026-${month}-${String(1 + random(28)).padStart(2, "0")}T0${random(10)}:00:00Z`,
+          fetchedAt,
         });
+        if (edge !== null && !placed.has(capture.balances[0]!))
+          placed.set(capture.balances[0]!, { edge, date: window.date });
         if (random(3) > 0) store.identify(capture, "vpass", `acct-${card}`, "identified");
       }
-      for (const [date, from, undated] of [
-        ["2026-09-10", "2026-08-10", "2026-07-27T15:00:00.000Z"],
-        ["2026-05-20", "2026-04-19", "2026-04-05T15:00:00.000Z"],
-        ["2026-11-01", "2026-10-01", "2026-09-17T15:00:00.000Z"],
-      ] as const) {
+      for (const { date, from, undated } of windows) {
         const every = listed(store, date, "0000-00-00", "");
         const shown = new Set(listed(store, date, from, undated).map((row) => row.id));
+        const asOf = new Set(every.map((row) => row.id));
+        for (const [id, { edge, date: on }] of placed) {
+          if (on !== date || !asOf.has(id)) continue;
+          edges[edge][shown.has(id) ? "listed" : "counted"] += 1;
+        }
+        // A capture at the cutoff is after the date: neither listed nor counted.
+        for (const [id, { edge, date: on }] of placed)
+          if (on === date && edge === "atCutoff") expect(asOf.has(id)).toBe(false);
         const expected = new Map<string, number>();
         for (const row of every) {
           if (shown.has(row.id)) continue;
@@ -584,6 +659,20 @@ describe("statements the payable window leaves out", () => {
     }
     // The rounds exercise every branch, not only an empty split.
     for (const value of Object.values(seen)) expect(value).toBeGreaterThan(0);
+    // Each boundary is reached, and falls on its side: a due date on D − 31
+    // days and an undated capture on the 45-day bound are listed, a day or a
+    // millisecond earlier counted; a capture just before the cutoff is a
+    // statement of the date, one at the cutoff is not (checked above).
+    expect(edges.dueOnFrom.listed).toBeGreaterThan(0);
+    expect(edges.dueOnFrom.counted).toBe(0);
+    expect(edges.dueDayBeforeFrom.counted).toBeGreaterThan(0);
+    expect(edges.dueDayBeforeFrom.listed).toBe(0);
+    expect(edges.undatedOnBound.listed).toBeGreaterThan(0);
+    expect(edges.undatedOnBound.counted).toBe(0);
+    expect(edges.undatedJustBeforeBound.counted).toBeGreaterThan(0);
+    expect(edges.undatedJustBeforeBound.listed).toBe(0);
+    expect(edges.justBeforeCutoff.listed).toBeGreaterThan(0);
+    expect(edges.atCutoff).toEqual({ listed: 0, counted: 0 });
   });
 });
 

@@ -276,6 +276,11 @@ statement at all ([reported state, limits](../reported-state.md#limits)).
   settled long ago is counted as one that never was. It bounds how many
   older captured statements could still be unpaid; it is not a figure of what
   is owed.
+- The count covers captured statements only. Before this amendment a store
+  with no statement still named `statements_before_window`; now it names no
+  such gap, and a card or month whose statement was never captured is
+  neither listed nor counted, with no coverage entry of its own (a limit,
+  [reported state, limits](../reported-state.md#limits)).
 - A count can change without a change to `contextId` when a parse of an older
   capture is published late or, under an `account` filter, when an older
   statement's account mapping changes.
@@ -283,7 +288,9 @@ statement at all ([reported state, limits](../reported-state.md#limits)).
 **Verification.** `packages/read-model/test/dated-state.test.ts` ("statements
 the payable window leaves out": per source, account and reason; on random
 synthetic stores the listed and counted statements split the statements as
-of the cutoff exactly), `packages/application/test/dated-state-query.test.ts`
+of the cutoff exactly, with statements placed on each boundary: a due date on
+`D − 31` days and the day before, an undated capture on the 45-day bound and
+a millisecond before, and captures just before and at the cutoff), `packages/application/test/dated-state-query.test.ts`
 (counts under the source and account filters, the gap named only when a
 statement is left out), `packages/application/test/dated-state-scale.test.ts`
 (the count equals an independent count of the due-before-window statement
