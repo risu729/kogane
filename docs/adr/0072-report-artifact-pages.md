@@ -165,3 +165,57 @@ refused. `services/app/test/page-read-reports.test.ts` checks the parity, both
 refusals while the operator page still answers (also for a body that leaves
 R2 while it is read), the closed schema, the audit rows, and that the tool is
 neither listed nor served without the table.
+
+## Amendment: a report cut at its row bound is not complete (2026-11-18)
+
+- Status: proposed
+
+### Context
+
+The report job (`services/processor/src/report-job.ts`) reads at most
+`maxRows` positions (500 by default) and records `coverage.truncated` when
+more were in scope. It took `partition` from `summarizeValuation` over the
+rows it kept, so a truncated report whose kept rows were all valued was
+stored `complete`, and the detail page labelled its subtotal 評価額の合計
+(the whole valuation) and said every holding was valued, beside the notice
+that positions past the bound were left out. A figure that leaves positions
+out was presented as the whole (INV05, [ADR 0001](0001-domain-axes.md)).
+
+### Options considered
+
+1. Leave the stored partition and rely on the truncation notice. Rejected:
+   the badge, the subtotal's label and the note still state the whole, and
+   `kogane.reports.read` hands an agent `partition: "complete"`.
+2. Refuse a `complete` body with `truncated: true` in `validReportBody`.
+   Rejected: report bodies are append-only, so a body already stored that way
+   would become unreadable instead of being shown as what it is.
+3. Write `partial-verified-scope` for a truncated report whose kept rows are
+   all valued, and have the page read a stored `complete` body with
+   `truncated: true` as `partial-verified-scope`.
+
+### Decision
+
+Option 3. The report job stores `partition: "partial-verified-scope"` when
+`coverage.truncated` is true and `summarizeValuation` returned `complete`;
+the subtotal is unchanged and is the subtotal of the rows the report holds.
+`not-computable` and `partial-verified-scope` are kept as computed. The page's
+`shownPartition` (`apps/web/src/report-display.tsx`) applies the same reading
+to bodies stored before this change, for the badge, the note and the
+subtotal's label; the stored body, its digest and the HTTP and MCP answers
+are unchanged.
+
+### Consequences
+
+A new truncated report gets a new body, so its digest differs from the one
+the old rule would have written; reports already stored are not rewritten,
+and an agent reading one stored before this change still receives
+`complete` with `truncated: true`.
+
+### Verification
+
+`services/processor/test/report-job-truncated.test.ts` stores two valued
+positions: the job without a bound writes `complete`, and with `maxRows: 1`
+it writes `partial-verified-scope` with one valued row and
+`truncated: true`. `apps/web/test/reports.browser.test.ts` shows a stored
+`complete` body with `truncated: true` as 確認できた範囲のみ評価 with
+評価できた保有資産だけの小計, never 評価額の合計.

@@ -16,6 +16,7 @@ export const RESTRICTED_ID = "rpt-synthetic-restricted";
 export const MISSING_ID = "rpt-synthetic-missing";
 export const MISMATCH_ID = "rpt-synthetic-mismatch";
 export const UNEXPLAINED_ID = "rpt-synthetic-unexplained";
+export const TRUNCATED_ID = "rpt-synthetic-truncated";
 /** An id with the characters a path segment must encode (`:`), as context-derived ids have. */
 export const COLON_ID = "rpt-synthetic:export.1";
 
@@ -162,7 +163,22 @@ export function completeDetail(): Extract<ReportDetail, { view: "body" }> {
     partition: "complete",
     subtotal: { coefficient: "1200000", scale: 0 },
     rows: [detail.body.rows[0]!],
-    coverage: { ...detail.body.coverage, coveredRef: "positions:1", truncated: true },
+    coverage: { ...detail.body.coverage, coveredRef: "positions:1", truncated: false },
+  };
+  return detail;
+}
+
+/**
+ * A body stored `complete` although the job cut its positions at the row
+ * bound, as the report job wrote it before a truncated report was partial.
+ */
+export function truncatedCompleteDetail(): Extract<ReportDetail, { view: "body" }> {
+  const detail = completeDetail();
+  detail.report = summary(TRUNCATED_ID, 7, "artifact-preserved");
+  detail.body = {
+    ...detail.body,
+    contextId: detail.report.contextId,
+    coverage: { ...detail.body.coverage, truncated: true },
   };
   return detail;
 }

@@ -28,6 +28,7 @@ import {
   type PriceObservation,
   type ReportBody,
   type ReportRow,
+  type ResultPartition,
   type ValuationCell,
 } from "../../../packages/domain/src/index.ts";
 import { PRICE_RULE_IDS } from "../../../packages/domain/src/price-sources.ts";
@@ -507,6 +508,11 @@ export async function runReportJob(
     }
   }
   const summary = summarizeValuation(options.unitRef, cells);
+  // Every row the report holds may be valued while positions past the bound
+  // were never read: that is a subtotal of a partial scope, never the whole
+  // figure (INV05). A truncated report is not `complete`.
+  const partition: ResultPartition =
+    truncated && summary.partition === "complete" ? "partial-verified-scope" : summary.partition;
 
   const restrictions = await restrictionsFor(env.DB, [
     contextId,
@@ -526,7 +532,7 @@ export async function runReportJob(
     calculationRunId: runId,
     policyRefs: [DEFAULT_INSTRUMENT_VALUATION_POLICY.policyId, options.decimalPolicyRelease].sort(),
     unitRef: options.unitRef,
-    partition: summary.partition,
+    partition,
     subtotal:
       summary.subtotal && summary.subtotal.value.status === "exact"
         ? summary.subtotal.value.value
@@ -659,7 +665,7 @@ export async function runReportJob(
     contextId,
     contentDigest,
     runId,
-    partition: summary.partition,
+    partition,
     unvaluedReasons: summary.reasons,
     truncated,
   };

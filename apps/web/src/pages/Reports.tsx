@@ -28,6 +28,7 @@ import {
   ReplayabilityBadge,
   ReportAmount,
   RUN_STATUS_LABELS,
+  shownPartition,
   UNVALUED_LABELS,
 } from "../report-display.tsx";
 import { Link } from "../router.tsx";
@@ -177,7 +178,7 @@ function ReportFigures({ body }: { body: ReportBody }): ReactNode {
   const valued = body.rows.filter((row) => row.valued).length;
   const unvalued = body.rows.length - valued;
   const subtotalLabel =
-    body.partition === "complete" ? "評価額の合計" : "評価できた保有資産だけの小計";
+    shownPartition(body) === "complete" ? "評価額の合計" : "評価できた保有資産だけの小計";
   return (
     <div className="tiles report-figures">
       <div className="tile tile-wide">
@@ -477,11 +478,13 @@ function ReportContent({ detail }: { detail: ReportDetail }): ReactNode {
         <Panel
           id="report-body"
           title={`${PURPOSE_LABELS[detail.body.purpose]}（${detail.body.unitRef}）`}
-          count={<PartitionBadge partition={detail.body.partition} />}
+          count={<PartitionBadge partition={shownPartition(detail.body)} />}
           note={
-            detail.body.partition === "complete"
+            shownPartition(detail.body) === "complete"
               ? "すべての保有資産を評価できたレポートです。対象は取得済みの保有資産だけで、資産全体の合計ではありません。"
-              : "評価できなかった保有資産があります。小計はそれを含まないため、資産全体の合計でも、その下限でもありません。"
+              : detail.body.coverage.truncated
+                ? "上限を超えた保有資産を含みません。小計はそれを含まないため、資産全体の合計でも、その下限でもありません。"
+                : "評価できなかった保有資産があります。小計はそれを含まないため、資産全体の合計でも、その下限でもありません。"
           }
         >
           <ReportFigures body={detail.body} />
