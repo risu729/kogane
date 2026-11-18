@@ -27,7 +27,7 @@ import type { IdentityPolicyModule } from "./index.ts";
 
 export { SMBC_BANK_POLICY_VERSION };
 /** The dataset the AUD balance parser reads (`smbc-foreign-ordinary-balance`). */
-export const SMBC_FOREIGN_ORDINARY_AUD_BALANCE_DATASET = "foreign-ordinary-aud-balance";
+const SMBC_FOREIGN_ORDINARY_AUD_BALANCE_DATASET = "foreign-ordinary-aud-balance";
 
 export const smbcBankPolicy: IdentityPolicyModule = {
   family: DEFAULT_POLICY_FAMILY,
