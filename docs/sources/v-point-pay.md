@@ -161,9 +161,10 @@ declined amounts, balance account separation, schema/provenance drift, failed ru
 after trimming and lowercasing, a constant in `packages/parsers/src/parsers/v-point-pay.ts`: the real V Point
 Pay routing address, the same value as `VPOINT_PAY_EMAIL_RECIPIENT` in the collector's deployed config. The
 collector already compares against that configured value; parsers take no configuration (`parse` reads only
-the bytes and the artifact metadata). So the address stays in the parser source and in the two parser tests
-that accept a v2 event (`packages/parsers/test/v-point-pay-refusals.test.ts`,
-`experiments/observation-pipeline-local/test/v-point-pay-parser.test.ts`); the collector tests use synthetic
+the bytes and the artifact metadata). So the address stays in the parser source and in
+`experiments/observation-pipeline-local/test/v-point-pay-parser.test.ts`, which accepts a v2 event;
+`packages/parsers/test/v-point-pay-refusals.test.ts` reads it from the collector's `wrangler.jsonc`, so a parser
+constant that drifts from the deployed recipient fails that test. The collector tests use synthetic
 `example.invalid` addresses. Moving the check out of the parser, or giving parsers configuration, is an open
 design decision: a parser release whose result depends on deployed configuration would no longer be a function of
 the stored evidence alone.
