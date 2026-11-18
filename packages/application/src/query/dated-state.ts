@@ -172,10 +172,10 @@ export async function queryDatedState(
 
   const accounts = new Map<string, ReportedAccount>();
   const accountOf = (row: DatedPositionRow | DatedBalanceRow): ReportedAccount => {
-    // One entry per resolved account a provider account's rows map to: a
-    // provider account whose containers map to two accounts (a reference per
-    // container or currency) is two entries, so no row is listed under an
-    // account its own mapping does not name.
+    // One entry per resolved account a provider account's rows map to: an
+    // identity can key a source account on more than the provider account,
+    // so a provider account whose rows map to two accounts is two entries,
+    // and no row is listed under an account its own mapping does not name.
     const key = JSON.stringify([row.source_id, row.source_account, row.account_id]);
     let entry = accounts.get(key);
     if (entry === undefined) {

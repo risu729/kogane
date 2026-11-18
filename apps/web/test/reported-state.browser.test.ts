@@ -119,6 +119,27 @@ describe.if(runnable)("reported state on a date", () => {
     await page.close();
   }, 30_000);
 
+  test("a provider account whose rows map apart is one card per resolved account, each named by it", async () => {
+    const page = await open();
+    await choose(page, "2026-09-10");
+    // The world's foreign capture of sbi-a has no recorded identity and its
+    // domestic one maps to acct-sbi: two cards, the unmapped one first, and
+    // no holding listed under an account its own row does not name.
+    const holdings = async (name: string): Promise<string> =>
+      page.getByRole("region", { name, exact: true }).innerText();
+    expect(await holdings("sbi-securities · sbi-a · 口座の対応付けなしの保有銘柄")).toContain(
+      "VTX",
+    );
+    expect(await holdings("sbi-securities · sbi-a · 口座の対応付けなしの保有銘柄")).not.toContain(
+      "1001",
+    );
+    expect(await holdings("sbi-securities · sbi-a · acct-sbiの保有銘柄")).toContain("1001");
+    expect(await holdings("sbi-securities · sbi-a · acct-sbiの保有銘柄")).not.toContain("VTX");
+    // An account listed once keeps its plain name.
+    await page.getByRole("region", { name: "smbc-bank · smbc-aの残高", exact: true }).waitFor();
+    await page.close();
+  }, 30_000);
+
   test("card payables say where each stands on the date", async () => {
     const page = await open();
     await choose(page, "2026-09-10");

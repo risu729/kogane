@@ -86,11 +86,14 @@ A perimeter container with no snapshot before the cutoff is listed in
 - `accounts`: one per (source, provider account, resolved account), with the
   snapshots its rows came from, its resolved account and identity status (the
   current account mapping of its rows' identities, or `not-recorded`). A
-  provider account whose rows map to two accounts (the identity of each
-  container names its own) is listed once under each, and its rows without a
-  mapping once more with no account, so no row is listed under an account its
-  own mapping does not name; entries of one provider account are ordered by
-  account id, the one without first. Each entry lists:
+  provider account whose rows map to two accounts (an identity can key a
+  source account on more than the provider account, as SBI Securities'
+  foreign positions do with the specific-account code) is listed once under
+  each, and its rows without a mapping once more with no account, so no row
+  is listed under an account its own mapping does not name; entries of one
+  provider account are ordered by account id, the one without first. The
+  manifest names no entry, so this keying leaves the context id as it was.
+  Each entry lists:
   - `positions`: the provider quantity as decimal text, the instrument mapping,
     and the provider valuations matched as `POSITION_VALUATIONS_SQL` matches
     them (same parse run, account and code, and the locator guard
