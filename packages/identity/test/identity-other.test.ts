@@ -279,6 +279,51 @@ describe("non-SBI account identification", () => {
       });
   });
 
+  test("a MyJCB J-POINT acquisition bucket keys the connection's total, never its own account", () => {
+    // `myjcb-jpoint-history` files each acquisition date under its own
+    // reference; ADR 0107 maps every one to the connection's J-POINT holding.
+    const bucket = (connection: string, date: string) =>
+      otherIdentity(
+        input("myjcb", `myjcb:${connection}:j-point:acquired:${date}`, {
+          kind: "balance",
+          currency: null,
+          instrument: "J_POINT",
+        }),
+      );
+    const plan = bucket("synthetic-connection", "2099-01-01");
+    expect(plan.account).toEqual({
+      key: ["myjcb:synthetic-connection:j-point:total"],
+      label: "MyJCB J-POINT",
+      role: "reward-account",
+      status: "provider-local",
+      reason: "provider-jpoint-acquisition-bucket",
+    });
+    expect(plan.issues).toEqual([]);
+    // Every date and every run of one connection is the total's reference.
+    expect(bucket("synthetic-connection", "2099-02-01").account.key).toEqual(plan.account.key);
+    expect(
+      otherIdentity(input("myjcb", "myjcb:synthetic-connection:j-point:total", { fetchRunId: 99 }))
+        .account.key,
+    ).toEqual(plan.account.key);
+    // Another connection's bucket is another connection's total.
+    expect(bucket("other-connection", "2099-01-01").account.key).toEqual([
+      "myjcb:other-connection:j-point:total",
+    ]);
+    for (const unexpected of [
+      "myjcb:synthetic-connection:j-point:acquired:2099-01",
+      "myjcb:synthetic-connection:j-point:acquired:20990101",
+      "myjcb:synthetic-connection:j-point:acquired:2099-01-01:extra",
+      "myjcb:Synthetic:j-point:acquired:2099-01-01",
+    ])
+      expect(otherIdentity(input("myjcb", unexpected)).account).toEqual({
+        key: [unexpected],
+        label: "MyJCB請求口座",
+        role: "source-account",
+        status: "unresolved",
+        reason: "unrecognized-source-account",
+      });
+  });
+
   test.each([
     ["global-pass", "global-pass:card", "debit-card-activity", "provider-local"],
     ["myjcb", "myjcb:synthetic-connection:root", "card-statement-aggregate", "aggregate"],
@@ -340,6 +385,8 @@ describe("non-SBI account identification", () => {
     ["vpass", "vpass:root"],
     ["vpass", "vpass:card-1"],
     ["smbc-bank", "smbc-bank:ordinary-aud"],
+    // The AUD ordinary-deposit parser's constant: no rule classifies it yet.
+    ["smbc-bank", "smbc-bank:ordinary-foreign-aud"],
     ["sbi-shinsei", "sbi-shinsei:synthetic-ref"],
     ["moneyforward-me", "moneyforward-me:account-001"],
     ["moneyforward-me", `moneyforward-me:moneyforward-account-v3-${"a".repeat(64)}`],
