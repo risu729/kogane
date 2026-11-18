@@ -1005,17 +1005,30 @@ and settlement unchanged.
 The rule never overrides a reviewer: it leaves a provider-linked pair to
 review once any decision other than a rule's is recorded about either event
 (a reviewed merge, or the split of a withdrawal), or about an earlier
-`pending_to_posted` proposal of the same two events (a rejection, or the
-withdrawal of a link no merge followed, which are recorded on the proposal
-and its triple and never on an event). An earlier proposal is found through
-every observation either event's keys have cited in any revision
-(`REVIEWED_PAIR_SQL`, read by the decision subject index's `proposal:` range
-and each proposal's key). Both checks run before the merge and again inside
-its batch. Otherwise a rejected or withdrawn link would be merged as soon as
-either row is re-anchored, because the re-anchored pair is a new proposal
-that the provider link makes `autoAcceptable`
-(`card-purchase-merge.test.ts`, "the rule never merges a provider-linked pair
-a reviewer rejected, even after a re-anchor").
+`pending_to_posted` link of the same two events (a rejection, or the
+withdrawal of a link no merge followed, which a review records on the
+proposal and, in the same batch, as a `rejected` row of its triple with its
+own `manual` decision, and never on an event). An earlier link is found
+through every observation either event's keys have cited in any revision:
+`REVIEWED_PAIR_SQL` reads the pending event's keys by their event, each
+cited row's triples by `entity_relations_from` and each triple's decision by
+its key, so it is bounded by the two events' own history, never by how many
+proposals were ever reviewed. A triple's `proposed` row is not a decision and
+does not count. Both checks run before the merge and again inside its batch.
+Otherwise a rejected or withdrawn link would be merged as soon as either row
+is re-anchored, because the re-anchored pair is a new proposal that the
+provider link makes `autoAcceptable` (`card-purchase-merge.test.ts`, "the
+rule never merges a provider-linked pair a reviewer rejected, even after a
+re-anchor", and "a rejection the merge's first read missed still holds the
+merge batch back"). Two limits: a rejection recorded only on `proposal:`,
+which `decideProposal` writes without a triple, is not seen, and nothing
+calls it with any method but `rule`; and a link the reconciliation lane's
+stage B once proposed over a row no event's key ever cited is not found.
+The reconciliation lane's own provider-link acceptance (`acceptProposal`)
+does not read this guard, so it would accept a re-anchored pair a reviewer
+rejected (and the purchase lane would then leave it unmerged); it is not
+reached today, since the lane runs stage A only for Vpass and MyJCB and no
+source supplies a pending-to-posted link id.
 
 **Split.** Withdrawing an accepted link (`relation.reject` of an accepted
 triple) retires the merged event first, holding its pending key alone, in
@@ -1223,7 +1236,8 @@ event already retired keeps the period it had.
   reviewer split, nor merge a pair a reviewer rejected, even after a
   re-anchor makes it a new provider-linked proposal; and the stored pairs are
   looked up a bounded chunk at a time. `test/card-purchase-link-current.test.ts`
-  checks that the reviewed-pair guard is keyed without table statistics.
+  checks that the reviewed-pair guard is keyed by the two events without
+  table statistics.
   `test/reconciliation.test.ts` checks the canonical relation ends and
   proposal evidence.
 - `packages/storage-d1`: `test/card-purchase-links.test.ts` (merge and split

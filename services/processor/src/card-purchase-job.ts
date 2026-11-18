@@ -764,28 +764,31 @@ const REVIEWED_EVENT_SQL = `SELECT d.id FROM decision_revisions d
 
 /**
  * A decision someone other than a rule recorded about an earlier
- * pending-to-posted proposal of the same two events, bound as the pending
- * event's id and then the posted event's. A proposal names its rows as
- * `transaction:<observation id>`, and a re-anchored or revised event cites a
- * new observation, so the proposal of the same pair after a re-anchor is a
- * new row; its earlier proposals are found through every observation either
- * event's keys have cited, in any revision. A rejection (or a withdrawal of a
- * link no merge followed) is recorded on `proposal:<id>` and the triple only,
- * never on either event, so `REVIEWED_EVENT_SQL` alone does not see it.
+ * pending-to-posted link of the same two events, bound as the pending
+ * event's id and then the posted event's. A proposal and its triple name the
+ * rows as `transaction:<observation id>`, and a re-anchored or revised event
+ * cites a new observation, so the proposal of the same pair after a re-anchor
+ * is a new proposal with a new triple; the earlier triples are found through
+ * every observation either event's keys have cited, in any revision. A
+ * rejection (or a withdrawal of a link no merge followed) is recorded on
+ * `proposal:<id>` and, in the same batch, as a `rejected` row of the triple
+ * with its own `manual` decision (`relationMutation`), never on either event,
+ * so `REVIEWED_EVENT_SQL` alone does not see it. A `proposed` row of a triple
+ * is a proposal, not a decision about it, and is not counted (ADR 0017's
+ * amendment of 2026-11-06).
  *
- * The reviewed decisions are read by the subject index's `proposal:` range
- * and each one's proposal by its key; the `CROSS JOIN` keeps that order
- * (D1's planner has no statistics). The binds are plain `?`, as the merge
- * guard appends them after its own.
+ * Read from the pending event's keys by the primary key's event prefix, each
+ * observation's triples by `entity_relations_from` and each triple's decision
+ * by its key; the `CROSS JOIN`s keep that order (D1's planner has no
+ * statistics), so the read is bounded by the two events' own history, never
+ * by the store's. The binds are plain `?`, as the merge guard appends them
+ * after its own.
  */
-export const REVIEWED_PAIR_SQL = `SELECT d.id FROM decision_revisions d
- CROSS JOIN reconciliation_proposals p ON p.id=substr(d.subject_ref,10)
- WHERE d.subject_kind='relation' AND d.subject_ref>'proposal:' AND d.subject_ref<'proposal;'
-  AND d.method<>'rule' AND p.kind='${PENDING_POSTED_RELATION_KIND}'
-  AND json_extract(p.target_refs_json,'$[0].id') IN
-   (SELECT 'transaction:'||k.observation_id FROM card_purchase_recognition_keys k WHERE k.event_id=?)
-  AND json_extract(p.target_refs_json,'$[1].id') IN
-   (SELECT 'transaction:'||k.observation_id FROM card_purchase_recognition_keys k WHERE k.event_id=?)
+export const REVIEWED_PAIR_SQL = `SELECT d.id FROM card_purchase_recognition_keys a
+ CROSS JOIN entity_relations r ON r.kind='${PENDING_POSTED_RELATION_KIND}' AND r.from_ref='transaction:'||a.observation_id
+ CROSS JOIN decision_revisions d ON d.id=r.decision_revision_id
+ WHERE a.event_id=? AND r.status<>'proposed' AND d.method<>'rule'
+  AND r.to_ref IN (SELECT 'transaction:'||k.observation_id FROM card_purchase_recognition_keys k WHERE k.event_id=?)
  LIMIT 1`;
 
 /**
@@ -798,8 +801,8 @@ export const REVIEWED_PAIR_SQL = `SELECT d.id FROM decision_revisions d
  *
  * The rule never overrides a reviewer: once a human decision is recorded
  * about either event (a reviewed merge or a withdrawal's split), or about an
- * earlier proposal of the same two events (a rejection, or the withdrawal of
- * a link no merge followed), the pair is left to review. Without this, a
+ * earlier link of the same two events (a rejection, or the withdrawal of a
+ * link no merge followed, `REVIEWED_PAIR_SQL`), the pair is left to review. Without this, a
  * rejected or withdrawn link would be merged as soon as either row is
  * re-anchored, because the re-anchored pair is a new proposal the provider
  * link makes `autoAcceptable` again.

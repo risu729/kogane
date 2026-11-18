@@ -118,34 +118,35 @@ test("without table statistics the link lookup is a keyed search", () => {
   expect(link[0]).toMatch(/^SEARCH r USING (COVERING )?INDEX entity_relations_(from|to) /u);
 });
 
-test("without table statistics the reviewed-pair guard reads reviewed proposal decisions by key", () => {
+test("without table statistics the reviewed-pair guard is keyed by the two events", () => {
   const db = migratedDatabase();
   const details = (
     db
       .query(`EXPLAIN QUERY PLAN SELECT EXISTS(${REVIEWED_PAIR_SQL}) AS reviewed`)
       .all("cp_pending", "cp_posted") as { detail: string }[]
   ).map((step) => step.detail);
-  // Decisions by the subject index's `proposal:` range, each proposal by its
-  // key, and each event's keys by the primary key's event prefix: no step
-  // reads a table or an index whole.
+  // The pending event's keys and the posted event's by the primary key's
+  // event prefix, each cited row's triples by `entity_relations_from`, and
+  // each triple's decision by its key: no step reads a table or an index
+  // whole, so the read never grows with the store's reviewed history.
   expect(details.filter((detail) => /^SCAN (?!CONSTANT ROW$)/u.test(detail))).toEqual([]);
-  expect(details).toContainEqual(
+  expect(details.filter((detail) => /^SEARCH (a|k) /u.test(detail))).toEqual([
     expect.stringMatching(
-      /^SEARCH d USING INDEX decision_revisions_subject \(subject_kind=\? AND subject_ref>\? AND subject_ref<\?\)$/u,
-    ),
-  );
-  expect(details).toContainEqual(
-    expect.stringMatching(
-      /^SEARCH p USING INDEX sqlite_autoindex_reconciliation_proposals_1 \(id=\?\)$/u,
-    ),
-  );
-  expect(details.filter((detail) => /\bk\b/u.test(detail) && detail.startsWith("SEARCH"))).toEqual([
-    expect.stringMatching(
-      /^SEARCH k USING (COVERING )?INDEX sqlite_autoindex_card_purchase_recognition_keys_1 \(event_id=\?\)$/u,
+      /^SEARCH a USING (COVERING )?INDEX sqlite_autoindex_card_purchase_recognition_keys_1 \(event_id=\?\)$/u,
     ),
     expect.stringMatching(
       /^SEARCH k USING (COVERING )?INDEX sqlite_autoindex_card_purchase_recognition_keys_1 \(event_id=\?\)$/u,
     ),
   ]);
+  expect(details).toContainEqual(
+    expect.stringMatching(
+      /^SEARCH r USING INDEX entity_relations_from \(kind=\? AND from_ref=\?\)$/u,
+    ),
+  );
+  expect(details).toContainEqual(
+    expect.stringMatching(
+      /^SEARCH d USING INDEX sqlite_autoindex_decision_revisions_1 \(id=\?\)$/u,
+    ),
+  );
   db.close();
 });
