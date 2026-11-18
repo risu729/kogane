@@ -889,7 +889,11 @@ its captured evidence.
 
 Current reward holdings select complete acquisition membership only when its
 total and the newest total revision belong to the same capture and every
-bucket has been promoted. A newer total with missing/failed history selects
+bucket has been promoted. Complete means the published history parse carries
+a `complete-container` coverage claim with proven membership; a history
+capture without one never enters the cohort, so it is neither promoted, nor
+current, nor the capture whose time and source fact a stale gap reports.
+A newer total with missing/failed history selects
 that current total and reports a stale/unavailable history gap. Older history
 remains dated evidence. The total and acquisition buckets are never added.
 See [ADR 0107](../adr/0107-myjcb-point-history-and-document-boundary.md).
