@@ -71,7 +71,63 @@ describe("code-only DO publication preserves live lifecycle and namespace", () =
         order,
         selected: order.workers.map((entry: any) => entry.name),
       }),
-    ).toHaveLength(3);
+    ).toHaveLength(5);
+    expect(preservedDoTargets({ root: REPO_ROOT, order, selected: ["vpoint-worker"] })).toEqual([
+      {
+        name: "vpoint-worker",
+        worker: "kogane-vpoint-collector-poc",
+        migrationTag: null,
+        bindings: [{ name: "VPOINT_SESSION", className: "VPointSession" }],
+      },
+    ]);
+  });
+  test("an exports owner must have no live migration tag", async () => {
+    const exportsTarget = { ...target, migrationTag: null };
+    const exportsOptions = { ...options, targets: [exportsTarget] };
+    const api = mock({ tag: null } as any);
+    const before = await readDoIdentity({ ...exportsOptions, fetchImpl: api.fetchImpl });
+    expect(before).toEqual([
+      { ...exportsTarget, bindings: [{ ...target.bindings[0], namespaceId: namespace }] },
+    ]);
+    for (const tag of [undefined, ""]) {
+      const fetchImpl = async (url: string, init: RequestInit) =>
+        url.endsWith("/services/kogane-session")
+          ? Response.json({
+              success: true,
+              result: { default_environment: { script: { migration_tag: tag } } },
+            })
+          : api.fetchImpl(url, init);
+      expect(await readDoIdentity({ ...exportsOptions, fetchImpl })).toEqual(before);
+    }
+    await expect(
+      readDoIdentity({ ...exportsOptions, fetchImpl: mock({ tag: "v1" }).fetchImpl }),
+    ).rejects.toThrow("pending_lifecycle");
+    // A legacy owner never accepts an empty live tag.
+    await expect(
+      readDoIdentity({ ...options, fetchImpl: mock({ tag: "" }).fetchImpl }),
+    ).rejects.toThrow("pending_lifecycle");
+  });
+  test("an exports owner's artifact declares exactly its bound SQLite classes", () => {
+    const exportsTarget = { ...target, migrationTag: null };
+    const artifact = {
+      name: target.worker,
+      exports: { Session: { type: "durable-object", storage: "sqlite" } },
+      env: { SESSION: { type: "durable-object", worker: target.worker, exportName: "Session" } },
+    };
+    verifyPreservedDoArtifact(exportsTarget, artifact);
+    for (const exports of [
+      undefined,
+      {},
+      { Session: { type: "durable-object", storage: "kv" } },
+      { Session: { type: "durable-object", storage: "sqlite" }, Other: { type: "durable-object" } },
+    ])
+      expect(() => verifyPreservedDoArtifact(exportsTarget, { ...artifact, exports })).toThrow(
+        "lifecycle_changed",
+      );
+    expect(() => verifyPreservedDoArtifact(exportsTarget, { ...artifact, migrations: [] })).toThrow(
+      "lifecycle_changed",
+    );
+    expect(() => verifyPreservedDoArtifact(target, artifact)).toThrow("lifecycle_changed");
   });
   test("all live allocations resolve the same exact self namespace", async () => {
     const api = mock();

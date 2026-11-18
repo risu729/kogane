@@ -240,7 +240,9 @@
       "bundleTask": "vpoint-pay-worker:bundle",
       "bundleDir": "dist/vpoint-pay-worker",
       "after": [],
-      "deployBackend": "cf"
+      "deployBackend": "cf",
+      "productionStrategy": "deploy",
+      "doLifecycle": "exports"
     },
     {
       "name": "vpoint-worker",
@@ -255,7 +257,9 @@
       "bundleTask": "vpoint-worker:bundle",
       "bundleDir": "dist/vpoint-worker",
       "after": [],
-      "deployBackend": "cf"
+      "deployBackend": "cf",
+      "productionStrategy": "deploy",
+      "doLifecycle": "exports"
     },
     {
       "name": "processor",

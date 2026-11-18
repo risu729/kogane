@@ -431,14 +431,9 @@ which groups recurring failures of one Worker into issues without an SDK:
 observability: { enabled: true, issues: { enabled: true } },
 ```
 
-How the setting reaches Cloudflare: every cf Worker except V Point and
-V Point Pay applies it, because they publish with `cf deploy`, which applies
-`cloudflare.config.ts` including `observability`; the Action then reads the
-declared values back. V Point and V Point Pay still publish with
-`cf workers versions create` and `cf workers deployments create`, which carry
-no non-versioned script settings, so no `observability` change has reached
-them since they moved to cf. ADR 0040's 2026-11-13 amendment moves them to
-`cf deploy` in its phase 3; until then Issues does not cover them. A full
+How the setting reaches Cloudflare: every cf Worker applies it, because they
+publish with `cf deploy`, which applies `cloudflare.config.ts` including
+`observability`; the Action then reads the declared values back. A full
 deploy or rollback from a commit whose config lacks the key turns Issues off
 for that Worker. `tasks/_lib/cf-deploy.test.ts` requires `issues.enabled` in both files
 of every cf-deployed Worker.

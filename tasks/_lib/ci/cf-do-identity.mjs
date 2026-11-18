@@ -3,13 +3,19 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseJsonc } from "../../../scripts/jsonc.ts";
 
-/** Existing namespaces are a prerequisite; this path never applies DO migrations. */
+/**
+ * Existing namespaces are a prerequisite; this path never applies DO migrations.
+ * `preserve` owners keep a legacy migration history and send neither exports nor
+ * migrations. `exports` owners have no migration history and declare their
+ * classes as exports, which cf's full script upload sends again; their live
+ * migration tag must stay empty (`migrationTag: null`).
+ */
 export function preservedDoTargets({ root, order, selected }) {
   return order.workers
     .filter(
       (worker) =>
         worker.deployBackend === "cf" &&
-        worker.doLifecycle === "preserve" &&
+        (worker.doLifecycle === "preserve" || worker.doLifecycle === "exports") &&
         selected.includes(worker.name),
     )
     .map((worker) => {
@@ -17,11 +23,13 @@ export function preservedDoTargets({ root, order, selected }) {
         readFileSync(resolve(root, worker.path, worker.config), "utf8"),
         worker.config,
       );
-      const tag = config.migrations?.at(-1)?.tag;
+      const exportsOwner = worker.doLifecycle === "exports";
+      const tag = exportsOwner ? null : config.migrations?.at(-1)?.tag;
       const bindings = config.durable_objects?.bindings;
       if (
-        typeof tag !== "string" ||
-        tag.length === 0 ||
+        (exportsOwner
+          ? config.migrations !== undefined
+          : typeof tag !== "string" || tag.length === 0) ||
         !Array.isArray(bindings) ||
         bindings.length === 0 ||
         bindings.some(
@@ -44,11 +52,42 @@ export function preservedDoTargets({ root, order, selected }) {
     });
 }
 
-/** Require code-only build output to keep the canonical self-worker bindings. */
+/**
+ * Require the build output to keep the canonical self-worker bindings: no
+ * lifecycle payload for `preserve` owners, and exactly one SQLite export per
+ * bound class (and no migrations) for `exports` owners.
+ */
 export function verifyPreservedDoArtifact(target, artifact) {
+  const byCodeUnit = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const expectedExports =
+    target.migrationTag === null
+      ? JSON.stringify(
+          Object.fromEntries(
+            target.bindings
+              .map((binding) => binding.className)
+              .sort(byCodeUnit)
+              .map((className) => [className, { storage: "sqlite", type: "durable-object" }]),
+          ),
+        )
+      : undefined;
+  const foundExports =
+    artifact.exports === undefined
+      ? undefined
+      : JSON.stringify(
+          Object.fromEntries(
+            Object.entries(artifact.exports)
+              .sort(([a], [b]) => byCodeUnit(a, b))
+              .map(([name, value]) => [
+                name,
+                Object.fromEntries(
+                  Object.entries(value ?? {}).sort(([a], [b]) => byCodeUnit(a, b)),
+                ),
+              ]),
+          ),
+        );
   if (
     artifact.name !== target.worker ||
-    artifact.exports !== undefined ||
+    foundExports !== expectedExports ||
     artifact.migrations !== undefined
   )
     throw new Error("cf_do_artifact_lifecycle_changed");
@@ -93,7 +132,8 @@ export async function readDoIdentity({ targets, accountId, token, fetchImpl = fe
   for (const target of targets) {
     if (!/^[a-z0-9-]{1,63}$/u.test(target.worker)) throw new Error("cf_do_invalid_worker");
     const service = await api(`services/${target.worker}`);
-    if (service.default_environment?.script?.migration_tag !== target.migrationTag)
+    // An empty live tag may be absent, null or ""; only exports owners expect it.
+    if ((service.default_environment?.script?.migration_tag || null) !== target.migrationTag)
       throw new Error(`cf_do_pending_lifecycle_${target.name}`);
     const deployment = (await api(`scripts/${target.worker}/deployments`)).deployments?.[0];
     if (

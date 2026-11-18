@@ -336,6 +336,21 @@ jobs:
             exit 1
           fi
           echo "The production Cloudflare credentials are in scope." | tee -a "${GITHUB_STEP_SUMMARY}"
+      - name: Refuse a V Point rollback without its namespace check
+        # Trusted gate before any production write. The DO identity steps run
+        # the target's own check and ledger; a target that predates
+        # `doLifecycle: "exports"` would publish V Point or V Point Pay with
+        # `cf deploy` without capturing and verifying their namespaces.
+        if: ${{ steps.resume.outputs.resume != 'true' && steps.decide.outputs.proceed == 'true' && inputs.mode == 'rollback' }}
+        run: |
+          plan="${RUNNER_TEMP}/release-plan.json"
+          for name in vpoint-worker vpoint-pay-worker; do
+            if jq -e --arg name "${name}" '.selected | index($name) != null' "${plan}" > /dev/null &&
+              ! jq -e --arg name "${name}" 'any(.workers[]; .name == $name and .doLifecycle == "exports")' infra/deploy-order.json > /dev/null; then
+              echo "The rollback target predates the namespace check for ${name}; no production change was made. Roll back the other Workers with a targets subset." >&2
+              exit 1
+            fi
+          done
       - name: Capture the existing DO namespaces and lifecycle
         if: ${{ steps.resume.outputs.resume != 'true' && steps.decide.outputs.proceed == 'true' }}
         env:
@@ -985,7 +1000,8 @@ jobs:
           working-directory: services/collector-vpoint-pay
           worker: kogane-vpoint-pay-collector-poc
           build-mode: production
-          deploy-triggers: 'false'
+          production-strategy: deploy
+          deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the V Point collector
@@ -1007,7 +1023,8 @@ jobs:
           working-directory: services/collector-vpoint
           worker: kogane-vpoint-collector-poc
           build-mode: production
-          deploy-triggers: 'false'
+          production-strategy: deploy
+          deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the Processor

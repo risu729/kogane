@@ -137,6 +137,13 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
         expect(target.doLifecycle).toBe("preserve");
         expect(worker.exports).toBeUndefined();
         expect((worker as any).migrations).toBeUndefined();
+      } else if (old.durable_objects) {
+        // Exports owners have no migration history: each bound class is one SQLite export.
+        expect(target.doLifecycle).toBe("exports");
+        expect((worker as any).migrations).toBeUndefined();
+        expect(Object.keys(worker.exports ?? {}).sort()).toEqual(
+          old.durable_objects.bindings.map((binding: any) => binding.class_name).sort(),
+        );
       } else expect(target.doLifecycle).toBeUndefined();
       const example = `${REPO_ROOT}/${target.path}/.dev.vars.example`;
       const inferredSecrets =
@@ -271,6 +278,16 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       (step) => step.name === "Verify the existing DO namespaces and lifecycle",
     )!;
     expect(capture.body).toContain("cf-do-identity.mjs capture");
+    // A rollback target that predates the exports lifecycle cannot publish V Point.
+    const gate = steps.find(
+      (step) => step.name === "Refuse a V Point rollback without its namespace check",
+    )!;
+    expect(gate.body).toContain("inputs.mode == 'rollback'");
+    for (const name of targets
+      .filter((entry) => entry.doLifecycle === "exports")
+      .map((entry) => entry.name))
+      expect(gate.body).toContain(name);
+    expect(steps.indexOf(gate)).toBeLessThan(steps.indexOf(capture));
     expect(verify.body).toContain("cf-do-identity.mjs verify");
     expect(steps.indexOf(capture)).toBeLessThan(
       steps.findIndex((step) => step.name === "Open the deployment record"),
