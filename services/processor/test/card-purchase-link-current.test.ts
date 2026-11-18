@@ -25,7 +25,7 @@ import {
   randomHistory,
   tripleKey,
 } from "../../../packages/read-model/test/relation-history.ts";
-import { ACCEPTED_APART_GUARD_SQL } from "../src/card-purchase-job.ts";
+import { ACCEPTED_APART_GUARD_SQL, REVIEWED_PAIR_SQL } from "../src/card-purchase-job.ts";
 import {
   LEGACY_ACCEPTED_APART_GUARD_SQL,
   LEGACY_ACCEPTED_APART_GUARD_SQL_SHA256,
@@ -116,4 +116,36 @@ test("without table statistics the link lookup is a keyed search", () => {
   const link = details.filter((detail) => /^(SCAN|SEARCH) r\b/u.test(detail));
   expect(link).toHaveLength(1);
   expect(link[0]).toMatch(/^SEARCH r USING (COVERING )?INDEX entity_relations_(from|to) /u);
+});
+
+test("without table statistics the reviewed-pair guard reads reviewed proposal decisions by key", () => {
+  const db = migratedDatabase();
+  const details = (
+    db
+      .query(`EXPLAIN QUERY PLAN SELECT EXISTS(${REVIEWED_PAIR_SQL}) AS reviewed`)
+      .all("cp_pending", "cp_posted") as { detail: string }[]
+  ).map((step) => step.detail);
+  // Decisions by the subject index's `proposal:` range, each proposal by its
+  // key, and each event's keys by the primary key's event prefix: no step
+  // reads a table or an index whole.
+  expect(details.filter((detail) => /^SCAN (?!CONSTANT ROW$)/u.test(detail))).toEqual([]);
+  expect(details).toContainEqual(
+    expect.stringMatching(
+      /^SEARCH d USING INDEX decision_revisions_subject \(subject_kind=\? AND subject_ref>\? AND subject_ref<\?\)$/u,
+    ),
+  );
+  expect(details).toContainEqual(
+    expect.stringMatching(
+      /^SEARCH p USING INDEX sqlite_autoindex_reconciliation_proposals_1 \(id=\?\)$/u,
+    ),
+  );
+  expect(details.filter((detail) => /\bk\b/u.test(detail) && detail.startsWith("SEARCH"))).toEqual([
+    expect.stringMatching(
+      /^SEARCH k USING (COVERING )?INDEX sqlite_autoindex_card_purchase_recognition_keys_1 \(event_id=\?\)$/u,
+    ),
+    expect.stringMatching(
+      /^SEARCH k USING (COVERING )?INDEX sqlite_autoindex_card_purchase_recognition_keys_1 \(event_id=\?\)$/u,
+    ),
+  ]);
+  db.close();
 });

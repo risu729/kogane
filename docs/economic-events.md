@@ -1004,10 +1004,18 @@ and settlement unchanged.
 
 The rule never overrides a reviewer: it leaves a provider-linked pair to
 review once any decision other than a rule's is recorded about either event
-(a reviewed merge, or the split of a withdrawal), checked before the merge and
-again inside its batch. Otherwise a withdrawn link would be merged again as
-soon as either row is re-anchored, because the re-anchored pair is a new
-proposal that the provider link makes `autoAcceptable`.
+(a reviewed merge, or the split of a withdrawal), or about an earlier
+`pending_to_posted` proposal of the same two events (a rejection, or the
+withdrawal of a link no merge followed, which are recorded on the proposal
+and its triple and never on an event). An earlier proposal is found through
+every observation either event's keys have cited in any revision
+(`REVIEWED_PAIR_SQL`, read by the decision subject index's `proposal:` range
+and each proposal's key). Both checks run before the merge and again inside
+its batch. Otherwise a rejected or withdrawn link would be merged as soon as
+either row is re-anchored, because the re-anchored pair is a new proposal
+that the provider link makes `autoAcceptable`
+(`card-purchase-merge.test.ts`, "the rule never merges a provider-linked pair
+a reviewer rejected, even after a re-anchor").
 
 **Split.** Withdrawing an accepted link (`relation.reject` of an accepted
 triple) retires the merged event first, holding its pending key alone, in
@@ -1212,8 +1220,10 @@ event already retired keeps the period it had.
   absolute payment month) once, under the same `rp_<digest>`, whichever runs
   first; a provider-linked pair the reconciliation lane accepted is merged
   once, with no second acceptance; the rule does not merge again a pair a
-  reviewer split, even after a re-anchor makes it a new provider-linked
-  proposal; and the stored pairs are looked up a bounded chunk at a time.
+  reviewer split, nor merge a pair a reviewer rejected, even after a
+  re-anchor makes it a new provider-linked proposal; and the stored pairs are
+  looked up a bounded chunk at a time. `test/card-purchase-link-current.test.ts`
+  checks that the reviewed-pair guard is keyed without table statistics.
   `test/reconciliation.test.ts` checks the canonical relation ends and
   proposal evidence.
 - `packages/storage-d1`: `test/card-purchase-links.test.ts` (merge and split

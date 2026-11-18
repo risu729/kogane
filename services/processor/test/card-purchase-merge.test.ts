@@ -839,6 +839,77 @@ test("the rule never merges again a provider-linked pair a reviewer split, even 
   ).toMatchObject({ providerLinked: true, actions: ["accept", "reject"] });
 }, 120_000);
 
+test("the rule never merges a provider-linked pair a reviewer rejected, even after a re-anchor", async () => {
+  const w = await world();
+  const { capture } = await pendingThenPosted(w, [POSTED], linked("provider-auth-8"));
+  // D1 rejects the merge batch of the first tick, so the provider-linked pair
+  // stays a proposal a reviewer can answer before the rule tries again.
+  const sqlOf = new WeakMap<object, string>();
+  const failingMerge = new Proxy(w.db, {
+    get(target, property) {
+      if (property === "prepare")
+        return (sql: string) => {
+          const statement = target.prepare(sql);
+          sqlOf.set(statement, sql);
+          return new Proxy(statement, {
+            get(inner, name) {
+              const value = Reflect.get(inner, name) as unknown;
+              if (name !== "bind") return typeof value === "function" ? value.bind(inner) : value;
+              return (...args: unknown[]) => {
+                const bound = inner.bind(...args);
+                sqlOf.set(bound, sql);
+                return bound;
+              };
+            },
+          });
+        };
+      if (property === "batch")
+        return (statements: D1PreparedStatement[]) =>
+          statements.some((statement) => sqlOf.get(statement)?.includes("INTO entity_relations"))
+            ? Promise.reject(new Error("synthetic D1 refusal"))
+            : target.batch(statements);
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  expect(counts(await cardPurchaseSweep(failingMerge, { now: NOW }))).toEqual({
+    ...NOTHING,
+    retired: 1,
+    recognized: 1,
+    proposed: 1,
+    failed: 1,
+  });
+  const split = await events(w);
+  const pendingEvent = split.find((event) => event.roles === "pending")!.event_id;
+  const candidate = await candidateOf(w, pendingEvent);
+  expect(candidate).toMatchObject({ providerLinked: true, actions: ["accept", "reject"] });
+  expect((await review(w, "relation.reject", candidate)).result).toMatchObject({
+    review: "reject",
+  });
+  expect(counts(await w.sweep())).toEqual(NOTHING);
+  // A published replay re-anchors the posted event on a new row: the pair is
+  // a new proposal, still provider-linked, and the rule leaves it to review.
+  await w.publish(await capture.replay({ publish: false }));
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, reanchored: 1, proposed: 1 });
+  expect((await events(w)).map((event) => [event.state, event.roles]).sort()).toEqual([
+    ["captured", "posted"],
+    ["unknown", "pending"],
+  ]);
+  // No rule accepted any proposal, and no link was recorded.
+  expect(
+    await w.count(
+      "SELECT count(*) AS n FROM decision_revisions WHERE method='rule' AND subject_ref LIKE 'proposal:%'",
+    ),
+  ).toBe(0);
+  expect(await w.count("SELECT count(*) AS n FROM entity_relations WHERE status='accepted'")).toBe(
+    0,
+  );
+  const fresh = (await proposals(w)).filter((row) => row.status === "proposed");
+  expect(fresh).toHaveLength(1);
+  expect(JSON.parse(fresh[0]!.rationale_codes_json)).toContain("provider_link_id_equal");
+  expect(counts(await w.sweep())).toEqual(NOTHING);
+}, 120_000);
+
 test("the candidate pass looks up stored pairs a bounded chunk at a time", async () => {
   const w = await world();
   await pendingThenPosted(w, [POSTED, OTHER, { ...OTHER, date: "26/05/07", amount: "800" }]);

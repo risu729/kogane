@@ -763,6 +763,32 @@ const REVIEWED_EVENT_SQL = `SELECT d.id FROM decision_revisions d
  WHERE d.subject_kind='relation' AND d.subject_ref IN (?,?) AND d.method<>'rule' LIMIT 1`;
 
 /**
+ * A decision someone other than a rule recorded about an earlier
+ * pending-to-posted proposal of the same two events, bound as the pending
+ * event's id and then the posted event's. A proposal names its rows as
+ * `transaction:<observation id>`, and a re-anchored or revised event cites a
+ * new observation, so the proposal of the same pair after a re-anchor is a
+ * new row; its earlier proposals are found through every observation either
+ * event's keys have cited, in any revision. A rejection (or a withdrawal of a
+ * link no merge followed) is recorded on `proposal:<id>` and the triple only,
+ * never on either event, so `REVIEWED_EVENT_SQL` alone does not see it.
+ *
+ * The reviewed decisions are read by the subject index's `proposal:` range
+ * and each one's proposal by its key; the `CROSS JOIN` keeps that order
+ * (D1's planner has no statistics). The binds are plain `?`, as the merge
+ * guard appends them after its own.
+ */
+export const REVIEWED_PAIR_SQL = `SELECT d.id FROM decision_revisions d
+ CROSS JOIN reconciliation_proposals p ON p.id=substr(d.subject_ref,10)
+ WHERE d.subject_kind='relation' AND d.subject_ref>'proposal:' AND d.subject_ref<'proposal;'
+  AND d.method<>'rule' AND p.kind='${PENDING_POSTED_RELATION_KIND}'
+  AND json_extract(p.target_refs_json,'$[0].id') IN
+   (SELECT 'transaction:'||k.observation_id FROM card_purchase_recognition_keys k WHERE k.event_id=?)
+  AND json_extract(p.target_refs_json,'$[1].id') IN
+   (SELECT 'transaction:'||k.observation_id FROM card_purchase_recognition_keys k WHERE k.event_id=?)
+ LIMIT 1`;
+
+/**
  * Accept and merge a pair the provider itself linked, as one batch of rule
  * decisions (card purchase plan §1.1): the merge (statement 1 carries the
  * merge guard and the proposal's state), the `proposal:` decision, the
@@ -771,10 +797,12 @@ const REVIEWED_EVENT_SQL = `SELECT d.id FROM decision_revisions d
  * acceptance. A heuristic pair is never merged here, whatever else agrees.
  *
  * The rule never overrides a reviewer: once a human decision is recorded
- * about either event (a reviewed merge or a withdrawal's split), the pair is
- * left to review. Without this, a withdrawn link would be merged again as
- * soon as either row is re-anchored, because the re-anchored pair is a new
- * proposal the provider link makes `autoAcceptable` again.
+ * about either event (a reviewed merge or a withdrawal's split), or about an
+ * earlier proposal of the same two events (a rejection, or the withdrawal of
+ * a link no merge followed), the pair is left to review. Without this, a
+ * rejected or withdrawn link would be merged as soon as either row is
+ * re-anchored, because the re-anchored pair is a new proposal the provider
+ * link makes `autoAcceptable` again.
  */
 async function mergeLinked(
   db: D1Database,
@@ -801,7 +829,10 @@ async function mergeLinked(
       pending.holder.eventId !== posted.holder.eventId;
     if (!open && !acceptedApart) continue;
     const events = [`event:${pending.holder?.eventId}`, `event:${posted.holder?.eventId}`];
+    const pair = [pending.holder?.eventId, posted.holder?.eventId];
     if ((await page<{ id: string }>(db, { sql: REVIEWED_EVENT_SQL, args: events })).length > 0)
+      continue;
+    if ((await page<{ id: string }>(db, { sql: REVIEWED_PAIR_SQL, args: pair })).length > 0)
       continue;
     const merge = await candidateMerge(reader, pending, posted, null);
     if (merge === null) {
@@ -821,8 +852,8 @@ async function mergeLinked(
     // Re-checked inside the batch: a review committed since the read above
     // leaves this merge unwritten.
     const state: SqlWrite = {
-      sql: `${proposalState.sql}\n AND NOT EXISTS(${REVIEWED_EVENT_SQL})`,
-      binds: [...proposalState.binds, ...events],
+      sql: `${proposalState.sql}\n AND NOT EXISTS(${REVIEWED_EVENT_SQL})\n AND NOT EXISTS(${REVIEWED_PAIR_SQL})`,
+      binds: [...proposalState.binds, ...events, ...pair],
     };
     // The seal and commit row end the merge's economic statements; the link's
     // proposal, relation and resolution rows below are not economic rows.
