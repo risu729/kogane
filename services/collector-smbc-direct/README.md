@@ -100,7 +100,7 @@ The Worker also returns 403 to requests without Access authentication. POST requ
 
 ## Verified state
 
-- Local SMBC Direct: after Safety Pass approval, yen balance, 14 details for 2026/8, deposit/withdrawal totals and logout succeeded.
+- Local SMBC Direct: after Safety Pass approval, yen balance, 14 details for the current month, deposit/withdrawal totals and logout succeeded.
 - Worker QR challenge: ordinary Workers egress returned SMBC `ERRINFO`; the existing TAMIA VPC binding successfully generated it.
 - Worker login/backfill to SMBC Direct: Safety Pass QR approval through TAMIA, 93 months from 2019-01-01 through 2026-09-01, 1,069 detail rows, 188 artifacts, failure 0 and successful logout were also confirmed in the private R2 manifest.
 - The 1st authenticated session lost `TPALTOP` at 48/93 months and became partial after 3 retries. Approving a new QR resumed the same Run ID from month 49 while retaining 98 existing artifacts, eventually reaching success.

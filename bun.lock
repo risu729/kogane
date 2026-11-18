@@ -254,7 +254,7 @@
         "@types/node": "26.6.6",
         "@vitest/coverage-istanbul": "5.1.0",
         "cf": "1.0.0-beta.32",
-        "devtools-protocol": "0.0.1744848",
+        "devtools-protocol": "0.0.1746437",
         "typescript": "7.0.2",
         "vitest": "5.1.0",
         "wrangler": "4.162.0",
@@ -1004,7 +1004,7 @@
 
     "devlop": ["devlop@1.1.0", "", { "dependencies": { "dequal": "^2.0.0" } }, "sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA=="],
 
-    "devtools-protocol": ["devtools-protocol@0.0.1744848", "", {}, "sha512-+z0N2dvljlKe+++tRFF0gOLoetJMfy9pvjI4l4VaEV37UdnnTJS6PXMbNKE7ExncMLA0WiTSZ04ZMGtXLifqpA=="],
+    "devtools-protocol": ["devtools-protocol@0.0.1746437", "", {}, "sha512-tpqM/kbt5yabggpsyF0J8mEzOElhZL3NSve6jAN8fuOm5RXkjI+JcPp0BbqTUGwE/arCHHoyWhL0wkaGY1g+tg=="],
 
     "dom-serializer": ["dom-serializer@2.0.0", "", { "dependencies": { "domelementtype": "^2.3.0", "domhandler": "^5.0.2", "entities": "^4.2.0" } }, "sha512-wIkAryiqt/nV5EQKqQpo3SToSOV9J0DnbJqwK7Wv/Trc92zIAYZ4FlMu+JPFW1DfGFt81ZTCGgDEabffXeLyJg=="],
 

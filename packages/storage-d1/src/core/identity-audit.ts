@@ -24,6 +24,7 @@ const ISSUES = [
   "conflicting-settlement-currency",
   "security-without-global-crosswalk",
   "missing-security-identifier",
+  "missing-security-scope",
   "unknown-sbi-account-scope",
   "unrecognized-source-account",
   "execution-quote-unit-conflict",
