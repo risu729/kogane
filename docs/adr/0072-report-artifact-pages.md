@@ -169,6 +169,9 @@ neither listed nor served without the table.
 ## Amendment: a report cut at its row bound is not complete (2026-11-18)
 
 - Status: proposed
+- Date: 2026-11-18
+- Owner approval: required before merge, for the `partition` field added to
+  the published `kogane.reports.read` answer (see Consequences)
 
 ### Context
 
@@ -221,9 +224,18 @@ is still answered exactly as stored.
   rewritten: their `body.partition` still reads `complete`, and the
   answer's `partition` says `partial-verified-scope`, on the page, over
   HTTP and over MCP alike.
-- The detail answer has one more field. The MCP tool's published
-  definition (name, description, input schema) does not change; a client
-  that checks the answer's keys exactly must accept `partition`.
+- The detail answer has one more field, on the route, `/export` and
+  `kogane.reports.read`. The MCP tool's definition (name, description,
+  input schema) does not change, but its result does: like `nextPage` in
+  [ADR 0081's amendment of 2026-11-08](0081-ui-parity-through-mcp.md#amendment-no-card-settlement-page-offers-a-next-page-its-budget-refuses-2026-11-08),
+  a field added to a published tool's answer is an addition to the wire
+  the owner approves before this merges. A client that checks the answer's
+  keys exactly must accept `partition`; the web client refuses a detail
+  without it, so the client and the App Worker deploy together.
+- `/export` is the same JSON answer with `view: "export"`, not the stored
+  bytes, so the downloaded file gains `partition` too; its `body` and the
+  report's `contentDigest` are unchanged. The catalogue list states no
+  partition, so it cannot disagree with the detail.
 - Limit: the report id and context id are digests of the input manifest,
   which lists the positions the report kept but not whether more were in
   scope. A store whose first `maxRows` positions are the same with and

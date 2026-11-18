@@ -272,7 +272,9 @@ answered by the routes' own reader `readRewardRoute`
 - The page reads only the first page of each route (`offset=0`). When the server's
   page bound cuts a list, that block says how many rows it shows and that it did not
   read the rest; it offers no link to a next page. A holding the bound cuts shows its
-  totals as `未確定` with `holding_cut_by_page`, never the sum of the buckets shown.
+  total as `未確定` with the reason in words (the code is the badge's title), never the
+  sum of the buckets shown. Every missing quantity's reason is shown through the same
+  labels as the other reason codes, and a code without a label is shown verbatim.
 - Each expiry panel is named by what tells it apart: a published-snapshot row by its
   programme, bucket kind, bucket reference and rule (the snapshot holds one row per
   bucket for every rule version of the programme); a provider display section by its
