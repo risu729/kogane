@@ -1407,7 +1407,16 @@ test("a shared currency identifier gains one policy-3 revision in all, which lat
           "SELECT id,revision,instrument_id,method,reason,policy_version,label,status FROM instrument_mappings WHERE identifier_id=? ORDER BY revision",
         )
         .bind(identifier)
-        .all<{ id: string; policy_version: number }>()
+        .all<{
+          id: string;
+          revision: number;
+          instrument_id: string;
+          method: string;
+          reason: string;
+          policy_version: number;
+          label: string;
+          status: string;
+        }>()
     ).results;
   const cited = async (parseId: number) =>
     (
