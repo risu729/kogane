@@ -193,11 +193,15 @@ export class ScheduleAlarm extends DurableObject<Env> {
           )
           .run();
         if (claimed.meta.changes !== 1) return null;
+        // The fence above bound `row.revision`, and the UPDATE changed the row
+        // only if the stored revision still equalled it, so this is the
+        // revision the retry was fenced on. A log line, not an audit record.
         logAlarm({
           event: "schedule_alarm",
           jobId: id,
           occurrenceId: retry.id,
           outcome: "retry_claimed",
+          scheduleRevision: row.revision,
         });
         return {
           job: jobFor(id),
