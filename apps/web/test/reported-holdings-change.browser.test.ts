@@ -164,7 +164,7 @@ describe.if(runnable)("reported holdings change between two dates", () => {
     expect(
       await page
         .getByRole("list", {
-          name: "1004（sbi-securities · sbi-a · sbi-domestic-cash-positions）を比較できない理由",
+          name: "1004（sbi-securities · sbi-a · sbi-domestic-cash-positions · domestic-cash-positions）を比較できない理由",
           exact: true,
         })
         .innerText(),
@@ -193,11 +193,21 @@ describe.if(runnable)("reported holdings change between two dates", () => {
     ]);
     // Each row's reasons are named after its whole key, so the two lists are
     // told apart by their account, and no two lists of the table share a name.
+    // The name reads as the row header does.
+    expect(
+      await page
+        .getByRole("region", { name: "保有数量の変化の一覧" })
+        .locator("tbody th .holdings-change-capture")
+        .allInnerTexts(),
+    ).toEqual([
+      "sbi-securities · sbi-a · sbi-domestic-cash-positions · domestic-cash-positions",
+      "sbi-securities · sbi-b · sbi-domestic-cash-positions · domestic-cash-positions",
+    ]);
     for (const account of ["sbi-a", "sbi-b"])
       expect(
         await page
           .getByRole("list", {
-            name: `1004（sbi-securities · ${account} · sbi-domestic-cash-positions）を比較できない理由`,
+            name: `1004（sbi-securities · ${account} · sbi-domestic-cash-positions · domestic-cash-positions）を比較できない理由`,
             exact: true,
           })
           .innerText(),

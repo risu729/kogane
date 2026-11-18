@@ -113,12 +113,18 @@ function SideCell({ side }: { side: HoldingSide }): ReactNode {
 
 /**
  * A holding as its row header shows it: the code and market, then the source,
- * provider account and parser. Two accounts or sources can hold the same code,
- * so a name per row carries all of them.
+ * provider account, parser and dataset, which together are the whole holding
+ * key. Two accounts, sources or containers can hold the same code, so a name
+ * per row carries all of them.
  */
 function holdingName({ key }: HoldingChange): string {
   const code = key.market === null ? key.securityCode : `${key.securityCode} · ${key.market}`;
-  return `${code}（${key.sourceId} · ${key.sourceAccount} · ${key.parserName}）`;
+  return `${code}（${containerLine(key)}）`;
+}
+
+/** The row header's second line: where the holding was reported. */
+function containerLine(key: HoldingChange["key"]): string {
+  return `${key.sourceId} · ${key.sourceAccount} · ${key.parserName} · ${key.dataset}`;
 }
 
 function HoldingRow({ holding }: { holding: HoldingChange }): ReactNode {
@@ -128,9 +134,7 @@ function HoldingRow({ holding }: { holding: HoldingChange }): ReactNode {
       <th scope="row">
         {holding.key.securityCode}
         {holding.key.market === null ? null : <span className="dim"> · {holding.key.market}</span>}
-        <span className="holdings-change-capture dim">
-          {holding.key.sourceId} · {holding.key.sourceAccount} · {holding.key.parserName}
-        </span>
+        <span className="holdings-change-capture dim">{containerLine(holding.key)}</span>
       </th>
       <td className="num">
         <SideCell side={holding.start} />

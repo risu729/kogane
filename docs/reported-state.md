@@ -219,13 +219,14 @@ condition). It asks nothing until a start date 比較の開始日 before the pag
 基準日 is chosen, then lists each holding key with each side's provider text
 and capture date, the server's change with its sign (`+2.5`, `±0`, `-3.5`)
 for `compared` rows, `数値なし` for rows listed on one date only and for
-`not_comparable` rows, whose reasons it states in words. Each row's reasons
-are a list named after the row's holding as its header shows it (code and
-market, then source, provider account and parser, as in
-`1004（sbi-securities · sbi-a · sbi-domestic-cash-positions）を比較できない理由`),
-so the rows of one code in two accounts or sources are told apart by ear. It
-shows counts per status and the coverage notes, never a total, valuation or
-sum of changes.
+`not_comparable` rows, whose reasons it states in words. Each row's header
+reads the whole holding key: code and market, then source, provider account,
+parser and dataset. Each row's reasons are a list named after that header (as
+in
+`1004（sbi-securities · sbi-a · sbi-domestic-cash-positions · domestic-cash-positions）を比較できない理由`),
+so no two rows' lists share a name, and the rows of one code in two accounts,
+sources or containers are told apart by ear as by eye. It shows counts per
+status and the coverage notes, never a total, valuation or sum of changes.
 
 The panel also takes the route's `source` and `account` filters (取得元 and
 口座 ID). They live in the page URL as `changeSource` and `changeAccount`, so a
