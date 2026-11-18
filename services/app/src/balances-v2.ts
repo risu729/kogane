@@ -19,7 +19,11 @@ import {
   KEYSET_PAGINATION_VERSION,
   SNAPSHOT_PAGE_SCHEMA_VERSION,
 } from "../../../packages/domain/src/paging.ts";
-import { addDecimals, integerDecimal } from "../../../packages/domain/src/values.ts";
+import {
+  addDecimals,
+  integerDecimal,
+  normalizeDecimal,
+} from "../../../packages/domain/src/values.ts";
 import type {
   BalanceEvidenceMember,
   BalanceHistoryItem,
@@ -33,6 +37,7 @@ import type {
   ObservedQuantityWire,
   SnapshotDataCoverage,
 } from "../../../packages/observation-shared/src/api-contract.ts";
+import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import {
   BALANCE_INTERPRETATION_POLICY_VERSION,
   classifyBalance,
@@ -230,33 +235,20 @@ async function filterDigest(
   return await canonicalDigest({ route, scope, limit, mode });
 }
 
-function quantityOf(row: {
-  value_status: ProjectionPageRow["value_status"];
-  quantity_coefficient: string | null;
-  quantity_scale: number | null;
-  unit_ref: string;
-  amount_minor: string | null;
-  amount_text: string | null;
-}): ObservedQuantityWire {
+/**
+ * The quantity a calculation may use. `normalized` carries the basis its
+ * decimal-v1 value rests on: how the observation's own representations
+ * normalized (docs/normalized-decimals.md, input contract), `agreement` only
+ * when both were valid and equal, `minor_units` or `decimal_text` when one
+ * alone was. The basis belongs to the stored normalization, not to the
+ * adoption outcome, so it is read from the store and never inferred here.
+ */
+function quantityOf(
+  normalized: NormalizedDecimal,
+  row: { unit_ref: string; amount_minor: string | null; amount_text: string | null },
+): ObservedQuantityWire {
   return {
-    normalized:
-      row.value_status === "exact" &&
-      row.quantity_coefficient !== null &&
-      row.quantity_scale !== null
-        ? {
-            policyVersion: "decimal-v1",
-            status: "exact",
-            coefficient: row.quantity_coefficient,
-            scale: row.quantity_scale,
-            basis: "agreement",
-          }
-        : {
-            policyVersion: "decimal-v1",
-            status: row.value_status,
-            coefficient: null,
-            scale: null,
-            basis: "none",
-          },
+    normalized,
     unitReference: row.unit_ref || null,
     sourceRepresentation: {
       amountText: row.amount_text,
@@ -265,6 +257,45 @@ function quantityOf(row: {
       // contract for known currencies, never guessed from the value.
       legacyMinorUnitExponent: minorUnitExponent(row.unit_ref) ?? null,
     },
+  };
+}
+
+/**
+ * A projection row's value with its basis. The projection stores the value
+ * but not its basis. That value is the representative observation's stored
+ * decimal-v1 row, captured when the snapshot was built. Neither side can
+ * change afterwards (stored decimals refuse updates, a sealed snapshot is
+ * immutable), so the same observation's stored row carries the basis. Should
+ * the two values ever differ, the page is refused rather than labelled with a
+ * basis nobody recorded for that value.
+ */
+function projectedNormalized(
+  row: Pick<ProjectionPageRow, "value_status" | "quantity_coefficient" | "quantity_scale">,
+  stored: NormalizedDecimal,
+): NormalizedDecimal {
+  if (
+    row.value_status !== "exact" ||
+    row.quantity_coefficient === null ||
+    row.quantity_scale === null
+  )
+    return {
+      policyVersion: "decimal-v1",
+      status: row.value_status,
+      coefficient: null,
+      scale: null,
+      basis: "none",
+    };
+  if (stored.status !== "exact" || stored.coefficient === null || stored.scale === null)
+    throw new Error("projection_decimal_mismatch");
+  const value = normalizeDecimal(BigInt(stored.coefficient), stored.scale);
+  if (value.coefficient !== row.quantity_coefficient || value.scale !== row.quantity_scale)
+    throw new Error("projection_decimal_mismatch");
+  return {
+    policyVersion: "decimal-v1",
+    status: "exact",
+    coefficient: row.quantity_coefficient,
+    scale: row.quantity_scale,
+    basis: stored.basis,
   };
 }
 
@@ -605,7 +636,7 @@ export async function latestBalancePage(
     return {
       observationId: row.observation_id,
       row: { ...withDecimals[index]!, interpretation: interpretationOf(row, evidence) },
-      quantity: quantityOf(row),
+      quantity: quantityOf(projectedNormalized(row, withDecimals[index]!.normalized), row),
       metric: measureOf(row.metric_id, row.definition_release),
       adoption: {
         state: row.state as LatestBalanceItem["adoption"]["state"],
@@ -710,10 +741,9 @@ export async function balanceHistoryPage(
     return {
       observationId: row.id,
       row: historyRow,
-      quantity: quantityOf({
-        value_status: historyRow.normalized?.status ?? "missing",
-        quantity_coefficient: historyRow.normalized?.coefficient ?? null,
-        quantity_scale: historyRow.normalized?.scale ?? null,
+      // A history item is one observation: its quantity is that
+      // observation's stored normalization, basis included.
+      quantity: quantityOf(withDecimals[index]!.normalized, {
         unit_ref: row.instrument,
         amount_minor: row.amount_minor,
         amount_text: row.amount_text,

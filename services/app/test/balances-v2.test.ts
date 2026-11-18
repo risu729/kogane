@@ -385,6 +385,55 @@ describe("v2 balance read model", () => {
     ]);
   });
 
+  it("states the decimal-v1 basis each observation's value rests on, never a blanket agreement", async () => {
+    // `basis` is how the observation's own representations normalized
+    // (docs/normalized-decimals.md): both valid and equal is `agreement`, one
+    // valid representation alone is `minor_units` or `decimal_text`. A
+    // currency with no known exponent has no valid minor-unit reading.
+    const run = await seedRun({ count: 1, source: "other-test", dataset: "basis-fixture" });
+    const parse = await parseRun(run.artifacts[0].id, "v2-basis-fixture");
+    await env.DB.prepare(
+      `INSERT INTO balance_observations
+         (parse_run_id,source_account,metric,instrument,amount_minor,amount_text,as_of,raw_locator,extra_json)
+       VALUES (?1,'v2-basis-account','basis-a','JPY','1200',NULL,'2026-09-07','basis:a','{}'),
+              (?1,'v2-basis-account','basis-b','JPY',NULL,'1300','2026-09-07','basis:b','{}'),
+              (?1,'v2-basis-account','basis-c','JPY','1400','1400','2026-09-07','basis:c','{}'),
+              (?1,'v2-basis-account','basis-d','XTS','1500','15.00','2026-09-07','basis:d','{}')`,
+    )
+      .bind(parse)
+      .run();
+    expect((await build()).status).toBe("complete");
+    const expected = {
+      "basis-a": "minor_units",
+      "basis-b": "decimal_text",
+      "basis-c": "agreement",
+      "basis-d": "decimal_text",
+    };
+    type BasisItem = {
+      row: { metric: string; normalized: { basis: string } };
+      quantity: { normalized: { status: string; basis: string } };
+    };
+    const bases = (items: BasisItem[]) =>
+      Object.fromEntries(
+        items.map((item) => {
+          // The quantity and the evidence row of one item never disagree.
+          expect(item.quantity.normalized.basis).toBe(item.row.normalized.basis);
+          expect(item.quantity.normalized.status).toBe("exact");
+          return [item.row.metric, item.quantity.normalized.basis];
+        }),
+      );
+    const latest = (await (
+      await call("/api/v2/balances/latest?account=v2-basis-account")
+    ).json()) as { items: BasisItem[] };
+    expect(validApiResponse("/api/v2/balances/latest", latest)).toBe(true);
+    expect(bases(latest.items)).toEqual(expected);
+    const history = (await (
+      await call("/api/v2/balances/history?account=v2-basis-account")
+    ).json()) as { items: BasisItem[] };
+    expect(validApiResponse("/api/v2/balances/history", history)).toBe(true);
+    expect(bases(history.items)).toEqual(expected);
+  });
+
   it("serves the v1 list from the projection with exactly the rows it serves today", async () => {
     const run = await seedRun({ count: 1, source: "other-test", dataset: "parity-fixture" });
     const parse = await parseRun(run.artifacts[0].id, "v2-parity-fixture");
