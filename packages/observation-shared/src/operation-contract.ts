@@ -504,17 +504,37 @@ export function operationIdOfPath(path: string): string | null {
 // without its stages, bound target or execution (`OperationSummary` in
 // `packages/application/src/operations/list.ts`), so it carries the same
 // closed codes, identifiers, a count and canonical instants, and nothing else.
+// Its `status` is the record's: a stored `running` request whose `projected`
+// stage READ covers reads `completed`, as on the single read. The `status`
+// filter matches the stored status, which each summary carries as
+// `storedStatus` and the page names in `statusFilterMatches` (ADR 0086,
+// amendment of 2026-11-18, projection).
 
 /** The list route the 依頼の一覧 page reads. */
 export const OPERATION_LIST_PATH = "/api/ops/v1/operations";
-const OPERATION_LIST_SCHEMA = "kogane-operation-list-v1";
+const OPERATION_LIST_SCHEMA = "kogane-operation-list-v2";
+/** The summary field the `status` filter matches (`STATUS_FILTER_MATCHES`). */
+const STATUS_FILTER_MATCHES = "storedStatus";
+/**
+ * The kinds whose record derives `projected` from READ: those whose stages
+ * run from `adopted` to `projected` (`STAGES_BY_KIND`). Only their stored
+ * `running` may read `completed`.
+ */
+export const OPERATION_PROJECTED_KINDS: readonly OperationRecordKind[] = [
+  "collection",
+  "import",
+  "replay",
+];
 /** `OPERATION_LIST_MAX_LIMIT`: no page holds more rows than this. */
 export const OPERATION_LIST_MAX_ROWS = 50;
 
 export interface OperationSummaryWire {
   operationId: string;
   kind: OperationRecordKind;
+  /** The status the single read answers: READ consulted for `projected`. */
   status: OperationRecordStatus;
+  /** The stored status, which the `status` filter matches. */
+  storedStatus: OperationRecordStatus;
   source: string | null;
   dispatch: { state: (typeof OPERATION_RECORD_DISPATCH_STATES)[number]; attempts: number };
   failureCode: string | null;
@@ -524,12 +544,13 @@ export interface OperationSummaryWire {
 
 export interface OperationListPageWire {
   schemaVersion: typeof OPERATION_LIST_SCHEMA;
+  statusFilterMatches: typeof STATUS_FILTER_MATCHES;
   operations: OperationSummaryWire[];
   /** The last row's id when another page follows; null on the last page. */
   nextCursor: string | null;
 }
 
-/** The filters a page was asked for; a row of another kind or status contradicts them. */
+/** The filters a page was asked for; a row of another kind or stored status contradicts them. */
 export interface OperationListFilterWire {
   kind?: OperationRecordKind | undefined;
   status?: OperationRecordStatus | undefined;
@@ -542,6 +563,7 @@ function validSummary(value: unknown): value is OperationSummaryWire {
       "operationId",
       "kind",
       "status",
+      "storedStatus",
       "source",
       "dispatch",
       "failureCode",
@@ -551,6 +573,8 @@ function validSummary(value: unknown): value is OperationSummaryWire {
     !matches(OPERATION_ID)(value.operationId) ||
     !isOneOf(OPERATION_RECORD_KINDS)(value.kind) ||
     !isOneOf(OPERATION_RECORD_STATUSES)(value.status) ||
+    !isOneOf(OPERATION_RECORD_STATUSES)(value.storedStatus) ||
+    !derivedFrom(value.kind, value.storedStatus, value.status) ||
     !orNull(matches(SOURCE_ID))(value.source) ||
     !code(value.failureCode) ||
     !validInstantText(value.acceptedAt) ||
@@ -563,6 +587,22 @@ function validSummary(value: unknown): value is OperationSummaryWire {
     hasExactKeys(dispatch, ["state", "attempts"]) &&
     isOneOf(OPERATION_RECORD_DISPATCH_STATES)(dispatch.state) &&
     count(dispatch.attempts)
+  );
+}
+
+/**
+ * Whether the record can read `status` for a request stored as `stored`: the
+ * same, or `completed` for a stored `running` request of a kind that derives
+ * `projected`. READ changes nothing else.
+ */
+function derivedFrom(
+  kind: OperationRecordKind,
+  stored: OperationRecordStatus,
+  status: OperationRecordStatus,
+): boolean {
+  return (
+    status === stored ||
+    (stored === "running" && status === "completed" && OPERATION_PROJECTED_KINDS.includes(kind))
   );
 }
 
@@ -580,9 +620,10 @@ function listedBefore(before: OperationSummaryWire, after: OperationSummaryWire)
 
 /**
  * Whether `value` is one page of the operations list: at most 50 summaries in
- * the list's order, each once, and a cursor that is the last row's id or null.
- * With `filter`, every row is also of the kind and status the page asked for,
- * so a page that answers another question is refused rather than shown.
+ * the list's order, each once, each `status` one its `storedStatus` can read
+ * as, and a cursor that is the last row's id or null. With `filter`, every
+ * row is also of the kind and stored status the page asked for, so a page
+ * that answers another question is refused rather than shown.
  */
 export function validOperationListPage(
   value: unknown,
@@ -590,8 +631,9 @@ export function validOperationListPage(
 ): value is OperationListPageWire {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["schemaVersion", "operations", "nextCursor"]) ||
+    !hasExactKeys(value, ["schemaVersion", "statusFilterMatches", "operations", "nextCursor"]) ||
     value.schemaVersion !== OPERATION_LIST_SCHEMA ||
+    value.statusFilterMatches !== STATUS_FILTER_MATCHES ||
     !Array.isArray(value.operations) ||
     value.operations.length > OPERATION_LIST_MAX_ROWS ||
     !value.operations.every(validSummary)
@@ -603,7 +645,7 @@ export function validOperationListPage(
     rows.some(
       (row) =>
         (filter.kind !== undefined && row.kind !== filter.kind) ||
-        (filter.status !== undefined && row.status !== filter.status),
+        (filter.status !== undefined && row.storedStatus !== filter.status),
     )
   )
     return false;

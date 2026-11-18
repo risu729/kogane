@@ -36,7 +36,13 @@ import { canonicalDigest } from "../../../domain/src/context.ts";
 import type { CommandStore, PreparedWrite, Principal } from "../command/contract.ts";
 import { commandError, type CommandResult } from "../command/errors.ts";
 import { collectorExecution, type CollectorExecutionReport } from "./collector-trail.ts";
-import { projectionCoverage, projectionRequirement } from "./projection-trace.ts";
+import {
+  coverageAt,
+  projectionCoverage,
+  projectionRequirement,
+  projectionWatermark,
+  type ProjectionVerdict,
+} from "./projection-trace.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import type { OperationCall } from "../audit/call.ts";
 
@@ -273,9 +279,27 @@ const INSERT_REQUEST = `INSERT INTO ops_requests
  SELECT ?1,?2,?3,?4,?5,?6,json(?7),?8,?9,0,0,NULL,NULL,?10,?10
  WHERE NOT EXISTS(SELECT 1 FROM ops_requests WHERE operation_id=?1)`;
 
+/**
+ * Every stage the kind can reach, in order, from its stored rows. A stage
+ * nobody has reported is `pending`: silence is never progress.
+ */
+function stageReports(kind: OperationKind, stages: readonly StageRow[]): OperationStageReport[] {
+  const recorded = new Map(stages.map((stage) => [stage.stage, stage]));
+  return STAGES_BY_KIND[kind].map((stage) => {
+    const recordedStage = recorded.get(stage);
+    return {
+      stage,
+      state: (recordedStage?.state ?? "pending") as StageState,
+      evidenceRef: recordedStage?.evidence_ref ?? null,
+      failureCode: recordedStage?.failure_code ?? null,
+      attempts: recordedStage?.attempts ?? 0,
+      updatedAt: recordedStage?.updated_at ?? null,
+    };
+  });
+}
+
 function receiptOf(row: OpsRow, stages: readonly StageRow[]): OperationReceipt {
   const kind = row.kind as OperationKind;
-  const recorded = new Map(stages.map((stage) => [stage.stage, stage]));
   return {
     schemaVersion: "kogane-operation-v1",
     operationId: row.operation_id,
@@ -287,19 +311,7 @@ function receiptOf(row: OpsRow, stages: readonly StageRow[]): OperationReceipt {
       state: row.dispatch_state as DispatchState,
       attempts: row.dispatch_attempts,
     },
-    // Every stage the kind can reach, in order. A stage nobody has reported is
-    // `pending`: silence is never progress.
-    stages: STAGES_BY_KIND[kind].map((stage) => {
-      const recordedStage = recorded.get(stage);
-      return {
-        stage,
-        state: (recordedStage?.state ?? "pending") as StageState,
-        evidenceRef: recordedStage?.evidence_ref ?? null,
-        failureCode: recordedStage?.failure_code ?? null,
-        attempts: recordedStage?.attempts ?? 0,
-        updatedAt: recordedStage?.updated_at ?? null,
-      };
-    }),
+    stages: stageReports(kind, stages),
     failureCode: row.failure_code,
     acceptedAt: row.created_at,
     updatedAt: row.updated_at,
@@ -383,25 +395,110 @@ async function withProjection(
   readStore: SqlExecutor | null | undefined,
   receipt: OperationReceipt,
 ): Promise<OperationReceipt> {
-  const adopted = receipt.stages.find((stage) => stage.stage === "adopted");
-  const projected = receipt.stages.find((stage) => stage.stage === "projected");
-  if (adopted?.state !== "completed" || !projected || projected.state === "completed")
-    return receipt;
-  const verdict = await projectionCoverage(
-    store,
-    readStore,
-    projectionRequirement(projected.evidenceRef),
+  const projected = projectionToDerive(receipt.stages);
+  if (!projected) return receipt;
+  return withVerdict(
+    receipt,
+    await projectionCoverage(store, readStore, projectionRequirement(projected.evidenceRef)),
   );
-  const derived: OperationStageReport =
-    verdict.state === "completed"
-      ? { ...projected, state: "completed", evidenceRef: verdict.evidenceRef, failureCode: null }
-      : { ...projected, state: "pending", evidenceRef: null, failureCode: verdict.reasonCode };
-  const stages = receipt.stages.map((stage) => (stage.stage === "projected" ? derived : stage));
+}
+
+/**
+ * The `projected` stage `withProjection` derives: the stored (or unreported)
+ * one once `adopted` is complete and it is not; null when the record shows
+ * its stages as stored.
+ */
+function projectionToDerive(stages: readonly OperationStageReport[]): OperationStageReport | null {
+  const adopted = stages.find((stage) => stage.stage === "adopted");
+  const projected = stages.find((stage) => stage.stage === "projected");
+  if (adopted?.state !== "completed" || !projected || projected.state === "completed") return null;
+  return projected;
+}
+
+/** The record with `verdict` as its `projected` stage, and the status that follows from it. */
+function withVerdict<T extends { status: OperationStatus; stages: OperationStageReport[] }>(
+  receipt: T,
+  verdict: ProjectionVerdict,
+): T {
+  const stages = receipt.stages.map((stage): OperationStageReport =>
+    stage.stage !== "projected"
+      ? stage
+      : verdict.state === "completed"
+        ? { ...stage, state: "completed", evidenceRef: verdict.evidenceRef, failureCode: null }
+        : { ...stage, state: "pending", evidenceRef: null, failureCode: verdict.reasonCode },
+  );
   const status =
     receipt.status === "running" && stages.every((stage) => stage.state === "completed")
       ? "completed"
       : receipt.status;
   return { ...receipt, stages, status };
+}
+
+/** The kinds whose record can derive `projected`: those that reach `adopted` too. */
+const PROJECTION_KINDS = OPERATION_KINDS.filter(
+  (kind) => STAGES_BY_KIND[kind].includes("adopted") && STAGES_BY_KIND[kind].includes("projected"),
+);
+
+/**
+ * The most rows `recordStatuses` derives at once: the list's largest page
+ * (`OPERATION_LIST_MAX_LIMIT`). One bind holds the ids, so the bound is the
+ * page, not D1's bind limit.
+ */
+export const RECORD_STATUSES_MAX_ROWS = 50;
+
+/** The stored stages of every operation `?1` (a JSON array of ids) names, by primary key. */
+export const SELECT_STAGES_OF_PAGE = `SELECT operation_id,stage,state,evidence_ref,failure_code,
+ attempts,updated_at FROM ops_request_stages
+ WHERE operation_id IN (SELECT value FROM json_each(?1))`;
+
+/**
+ * The `status` `readOperation` answers for each of `rows`, from their stored
+ * kind, status and stages and one reading of READ — the same derivation
+ * (`withProjection`), batched for a page. Only a stored `running` request of
+ * a kind that reaches `adopted` can read otherwise than stored, so only those
+ * are looked at: one read of their stages by primary key, and, when one of
+ * them has a stored requirement to compare, the three singleton reads of
+ * `projectionWatermark` once. Nothing is written. At most
+ * `RECORD_STATUSES_MAX_ROWS` rows.
+ */
+export async function recordStatuses(
+  store: CommandStore,
+  readStore: SqlExecutor | null | undefined,
+  rows: readonly { operationId: string; kind: OperationKind; status: OperationStatus }[],
+): Promise<Map<string, OperationStatus>> {
+  if (rows.length > RECORD_STATUSES_MAX_ROWS)
+    throw new Error(`recordStatuses reads at most ${RECORD_STATUSES_MAX_ROWS} rows`);
+  const statuses = new Map(rows.map((row) => [row.operationId, row.status]));
+  const candidates = rows.filter(
+    (row) => row.status === "running" && PROJECTION_KINDS.includes(row.kind),
+  );
+  if (candidates.length === 0) return statuses;
+  const stored = await store.all<StageRow & { operation_id: string }>(SELECT_STAGES_OF_PAGE, [
+    JSON.stringify(candidates.map((row) => row.operationId)),
+  ]);
+  const derivable = candidates.flatMap((row) => {
+    const stages = stageReports(
+      row.kind,
+      stored.filter((stage) => stage.operation_id === row.operationId),
+    );
+    const projected = projectionToDerive(stages);
+    return projected
+      ? [{ row, stages, requirement: projectionRequirement(projected.evidenceRef) }]
+      : [];
+  });
+  // READ is read once for the page, and only when a stored requirement can be compared.
+  const watermark = derivable.some((entry) => entry.requirement !== null)
+    ? await projectionWatermark(store, readStore)
+    : null;
+  for (const { row, stages, requirement } of derivable) {
+    // Without a stored requirement READ was not read: such a stage is never covered.
+    const verdict: ProjectionVerdict =
+      requirement === null || watermark === null
+        ? { state: "pending", reasonCode: "projection_revision_unrecorded" }
+        : coverageAt(watermark, requirement);
+    statuses.set(row.operationId, withVerdict({ status: row.status, stages }, verdict).status);
+  }
+  return statuses;
 }
 
 export interface OperationContext {

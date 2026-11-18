@@ -2,7 +2,10 @@
 // request (ADR 0086 and its 2026-11-18 amendment; docs/ops-api.md). One page
 // of `GET /api/ops/v1/operations` at a time — newest first, the route's page
 // size, filtered by its closed `kind` and `status` only, paged by its cursor
-// with no total. Each row links to its 依頼の経過 page. Every value is a closed
+// with no total. Each row links to its 依頼の経過 page and shows the status
+// that page shows (READ consulted for `projected`), with the stored status
+// beside it where the two differ; the status filter matches the stored one,
+// as the page says (ADR 0086, second amendment of 2026-11-18). Every value is a closed
 // code, an identifier, a count or a stored UTC time; the summary holds no
 // request payload and names no principal, so neither is shown. Nothing here
 // writes, and each page read is recorded once in the audit log by the server.
@@ -37,7 +40,8 @@ const SELECTS: Readonly<
   >
 > = {
   kind: { label: "依頼の種類", all: "すべての種類", labels: OPERATION_KIND_LABELS },
-  status: { label: "状態", all: "すべての状態", labels: OPERATION_STATUS_LABELS },
+  // The route's `status` filter matches the stored status (`statusFilterMatches`).
+  status: { label: "保存された状態", all: "すべての状態", labels: OPERATION_STATUS_LABELS },
 };
 
 const STATUS_TONES: Readonly<Record<string, Tone>> = {
@@ -118,6 +122,12 @@ function SummaryRow({ summary }: { summary: OperationSummaryWire }): ReactNode {
           {displayLabel(OPERATION_STATUS_LABELS, summary.status)}
         </Badge>{" "}
         <Code value={summary.status} />
+        {summary.storedStatus === summary.status ? null : (
+          <div className="muted">
+            保存された状態：{displayLabel(OPERATION_STATUS_LABELS, summary.storedStatus)}{" "}
+            <Code value={summary.storedStatus} />
+          </div>
+        )}
       </td>
       <td>
         {summary.failureCode === null ? (
@@ -225,7 +235,7 @@ function Summaries({ filters }: { filters: OperationListFilters }): ReactNode {
             <div className="table-scroll" role="region" aria-label="依頼の一覧の表" tabIndex={0}>
               <table>
                 <caption className="visually-hidden">
-                  依頼の一覧。受付日時、依頼の種類、状態、待機・停止の理由、取得元、処理への引き渡し、最終更新、依頼ID。
+                  依頼の一覧。受付日時、依頼の種類、状態（異なる場合は保存された状態も）、待機・停止の理由、取得元、処理への引き渡し、最終更新、依頼ID。
                 </caption>
                 <thead>
                   <tr>
@@ -291,7 +301,7 @@ export function OperationsPage(): ReactNode {
           運用APIで受け付けた依頼を、受付の新しい順に表示します。管理画面から送った依頼も、MCPのクライアントが送った依頼も含みます。各行から依頼の経過を開けます。この画面から依頼の送信や再実行は行いません。
         </p>
         <p className="footnote">
-          状態は保存された状態で、状態での絞り込みもこの状態で行います。読み取りモデルへの反映は一覧では判定しないため、依頼の経過で「完了」と表示される収集の依頼が、ここでは「進行中」のことがあります。反映までの経過は依頼の経過で確認してください。依頼した人は表示しません（
+          状態は依頼の経過と同じく、読み取りモデルへの反映まで確かめた状態です。反映を確かめて「完了」となった依頼は、保存された状態が「進行中」のままなので、その行には保存された状態も表示します。絞り込みは保存された状態で行うため、「進行中」で絞り込むとそうした「完了」の依頼も表示され、「完了」で絞り込むと表示されません。依頼した人は表示しません（
           <Link to={AUDIT_ROUTE}>監査ログ</Link>
           に記録されています）。一覧を読み込むたびに、その読み込みが監査ログに1件記録されます。表示は開いたときの記録で、自動では更新されません。
         </p>

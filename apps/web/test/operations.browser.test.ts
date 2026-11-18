@@ -4,8 +4,11 @@
 // sends only the route's closed `kind`, `status` and `cursor`, never a page
 // size; pages by the cursor without a total; links each row to its 依頼の経過;
 // reads once per page and polls nothing; tells a non-operator plainly that the
-// list is the operator's; and refuses a malformed page, or one that answers
-// other filters than it sent. Every value is synthetic.
+// list is the operator's; shows each request with the status its 依頼の経過
+// page shows (a stored `running` collection whose `projected` stage a
+// synthetic READ covers is 完了, with its stored 進行中 beside it) while the
+// status filter matches the stored status; and refuses a malformed page, or
+// one that answers other filters than it sent. Every value is synthetic.
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
@@ -23,7 +26,13 @@ import {
   type OperationKind,
   type OperationStatus,
   type Principal,
+  readOperation,
+  STAGES_BY_KIND,
 } from "../../../packages/application/src/index.ts";
+import {
+  publishedReadDatabase,
+  sqliteExecutor as executor,
+} from "../../../packages/application/test/read-store.ts";
 import {
   migratedDatabase,
   sqliteCommandStore,
@@ -52,6 +61,8 @@ const SIZE = 25;
 const id = (index: number) => `op_${index.toString(16).padStart(64, "0")}`;
 /** The newest request: the first row of the unfiltered list. */
 const NEWEST = id(SIZE);
+/** A collection stored `running` (20 % 5 is collection, 20 % 6 is running) that READ covers. */
+const PROJECTED = id(20);
 
 /** The synthetic store: every kind and status, failure codes, and two requests accepted together. */
 function seed(db: Database): void {
@@ -91,13 +102,31 @@ function seed(db: Database): void {
       ],
     );
   }
+  // PROJECTED reached adoption, and its publication stored the CORE revision
+  // READ has to reach (ADR 0048, amended): its record reads completed once
+  // the synthetic READ below covers that revision.
+  for (const stage of STAGES_BY_KIND.collection)
+    db.run(
+      `INSERT INTO ops_request_stages(operation_id,stage,state,evidence_ref,failure_code,attempts,updated_at)
+       VALUES(?1,?2,?3,?4,NULL,1,'2026-09-11T01:00:00Z')`,
+      [
+        PROJECTED,
+        stage,
+        stage === "projected" ? "pending" : "completed",
+        stage === "projected" ? "core-revision:core-epoch-1:1" : "r_1",
+      ],
+    );
 }
+
+/** A READ database whose published pointer covers revision 1 of CORE's first epoch. */
+const readDatabase = (): Database => publishedReadDatabase(1, "core-epoch-1");
 
 describe.if(runnable)("the operator's 依頼の一覧 page", () => {
   let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let db: Database;
+  let read: Database;
   let operator = true;
   let provided = true;
   let malformed = false;
@@ -122,6 +151,7 @@ describe.if(runnable)("the operator's 依頼の一覧 page", () => {
     const outcome = await listOperations({
       store: sqliteCommandStore(db),
       principal: PRINCIPAL,
+      readStore: executor(read),
       query: {
         kind: ignoreFilters ? null : (kind as OperationKind | null),
         status: ignoreFilters ? null : (status as OperationStatus | null),
@@ -138,6 +168,7 @@ describe.if(runnable)("the operator's 依頼の一覧 page", () => {
   beforeAll(async () => {
     db = migratedDatabase();
     seed(db);
+    read = readDatabase();
     server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -170,6 +201,7 @@ describe.if(runnable)("the operator's 依頼の一覧 page", () => {
     await browser?.close();
     server?.stop(true);
     db?.close();
+    read?.close();
   });
 
   const rows = (page: Page) =>
@@ -183,6 +215,19 @@ describe.if(runnable)("the operator's 依頼の一覧 page", () => {
     expect(validOperationListPage(first)).toBe(true);
     expect(first.operations).toHaveLength(20);
     expect(first.nextCursor).toBe(first.operations[19].operationId);
+    // The covered collection is listed as its record reads it, beside its stored status.
+    const record = await readOperation({
+      store: sqliteCommandStore(db),
+      readStore: executor(read),
+      principal: PRINCIPAL,
+      now: "2026-09-11T02:00:00Z",
+      operationId: PROJECTED,
+    });
+    if (!record.ok) throw new Error(record.error);
+    expect(record.receipt.status).toBe("completed");
+    expect(
+      first.operations.find((row: { operationId: string }) => row.operationId === PROJECTED),
+    ).toMatchObject({ kind: "collection", status: "completed", storedStatus: "running" });
   });
 
   for (const viewport of VIEWPORTS)
@@ -241,9 +286,12 @@ describe.if(runnable)("the operator's 依頼の一覧 page", () => {
         const html = await page.content();
         for (const hidden of ["synthetic-client", PRINCIPAL.id, "synthetic rebuild reason"])
           expect(html).not.toContain(hidden);
-        // The page says the status is the stored one, so a 完了 trail can be listed 進行中.
+        // The page says the status is 依頼の経過's, and the filter the stored one.
         expect(shown).toContain(
-          "依頼の経過で「完了」と表示される収集の依頼が、ここでは「進行中」のことがあります。",
+          "状態は依頼の経過と同じく、読み取りモデルへの反映まで確かめた状態です。",
+        );
+        expect(shown).toContain(
+          "絞り込みは保存された状態で行うため、「進行中」で絞り込むとそうした「完了」の依頼も表示され、「完了」で絞り込むと表示されません。",
         );
         // Each row links to its 依頼の経過 page by its id.
         const first = rows(page).first().getByRole("link", { name: NEWEST, exact: true });
@@ -306,7 +354,11 @@ describe.if(runnable)("the operator's 依頼の一覧 page", () => {
         "読み取りモデルの再構築",
         "セッション更新",
       ]);
-      expect(await page.getByLabel("状態", { exact: true }).locator("option").count()).toBe(7);
+      // The status filter names its basis: the stored status.
+      expect(await page.getByLabel("状態", { exact: true }).count()).toBe(0);
+      expect(
+        await page.getByLabel("保存された状態", { exact: true }).locator("option").count(),
+      ).toBe(7);
       await kind.selectOption("import");
       await page.getByRole("button", { name: "条件を適用" }).click();
       await page.waitForURL(`${origin}/operations?kind=import`);
@@ -317,7 +369,7 @@ describe.if(runnable)("the operator's 依頼の一覧 page", () => {
         expect(row).toContain("取り込み（保存済みの収集結果の登録）");
 
       // No import is running in the store.
-      await page.getByLabel("状態", { exact: true }).selectOption("running");
+      await page.getByLabel("保存された状態", { exact: true }).selectOption("running");
       await page.getByRole("button", { name: "条件を適用" }).click();
       await page.waitForURL(`${origin}/operations?kind=import&status=running`);
       await page.getByText("この条件に当てはまる依頼はありません。", { exact: true }).waitFor();
@@ -337,13 +389,43 @@ describe.if(runnable)("the operator's 依頼の一覧 page", () => {
       await page.goto(`${origin}/operations?status=failed`);
       await rows(page).first().waitFor();
       expect(Object.fromEntries(reads.at(-1)!)).toEqual({ status: "failed" });
-      expect(await page.getByLabel("状態", { exact: true }).inputValue()).toBe("failed");
+      expect(await page.getByLabel("保存された状態", { exact: true }).inputValue()).toBe("failed");
       reads.length = 0;
       for (const search of ["?kind=rebuild", "?status=failed&status=blocked", "?limit=50"]) {
         await page.goto(`${origin}/operations${search}`);
         await page.getByText("このURLの絞り込み条件は指定できません。").waitFor();
       }
       expect(reads).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
+
+  test("a covered collection is 完了 with its stored 進行中 under a 進行中 filter, and absent under 完了", async () => {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    const rowOf = (op: string) =>
+      rows(page).filter({ has: page.getByRole("link", { name: op, exact: true }) });
+    try {
+      await page.goto(`${origin}/operations?status=running`);
+      await rows(page).first().waitFor();
+      expect(Object.fromEntries(reads.at(-1)!)).toEqual({ status: "running" });
+      const covered = (await rowOf(PROJECTED).innerText()).replace(/\s+/gu, " ");
+      expect(covered).toContain("完了 completed");
+      expect(covered).toContain("保存された状態：進行中 running");
+      // A request READ does not move shows its stored status once.
+      const others = (await rows(page).allInnerTexts()).filter((row) => !row.includes(PROJECTED));
+      expect(others.length).toBeGreaterThan(0);
+      for (const row of others) {
+        expect(row).toContain("進行中");
+        expect(row).not.toContain("保存された状態");
+      }
+      expect(await noPageOverflow(page)).toBe(true);
+      await page.goto(`${origin}/operations?status=completed`);
+      await rows(page).first().waitFor();
+      expect(Object.fromEntries(reads.at(-1)!)).toEqual({ status: "completed" });
+      expect(await rowOf(PROJECTED).count()).toBe(0);
+      for (const row of await rows(page).allInnerTexts())
+        expect(row).not.toContain("保存された状態");
     } finally {
       await page.close();
     }

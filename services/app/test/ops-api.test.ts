@@ -43,6 +43,7 @@ import {
   projectionRequirementWrite,
   recordCollectorOutcome,
   recordOperationStage,
+  SELECT_STAGES_OF_PAGE,
   trackCollectorPublication,
 } from "../../../packages/application/src/index";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
@@ -1045,6 +1046,36 @@ describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)
       receipts.forEach((receipt, index) =>
         expect(validOperationRecord(receipt, ids[index])).toBe(true),
       );
+      // The list answers each request with the status its record reads, on
+      // the route and over MCP alike, filtered by the stored `running` it
+      // names (ADR 0086, amendment of 2026-11-18, projection).
+      const listedHttp = await call(`${OPS}/operations?kind=collection&status=running&limit=50`, {
+        environment: ENABLED,
+      });
+      expect(listedHttp.status).toBe(200);
+      const listedMcp = await mcp(
+        "tools/call",
+        {
+          name: "kogane.ops.operation.list",
+          arguments: { kind: "collection", status: "running", limit: 50 },
+        },
+        THROUGH_MCP,
+      );
+      expect(listedMcp.result.isError).not.toBe(true);
+      const pages = [
+        (await listedHttp.json()) as Record<string, any>,
+        listedMcp.result.structuredContent,
+      ];
+      expect(pages[1]).toEqual(pages[0]);
+      for (const page of pages) {
+        expect(validOperationListPage(page, { kind: "collection", status: "running" })).toBe(true);
+        expect(page.statusFilterMatches).toBe("storedStatus");
+        receipts.forEach((receipt, index) =>
+          expect(
+            page.operations.find((entry: any) => entry.operationId === ids[index]),
+          ).toMatchObject({ status: receipt.status, storedStatus: "running" }),
+        );
+      }
       return receipts;
     };
     const projected = (receipt: Record<string, any>) => ({
@@ -1278,7 +1309,8 @@ describe("the operator lists every principal's operations (ADR 0086)", () => {
     const ids = await seed();
     const own = await list("?limit=50");
     expect(own.status).toBe(200);
-    expect(own.json["schemaVersion"]).toBe("kogane-operation-list-v1");
+    expect(own.json["schemaVersion"]).toBe("kogane-operation-list-v2");
+    expect(own.json["statusFilterMatches"]).toBe("storedStatus");
     // The page the 依頼の一覧 page reads, over the real migrations.
     expect(validOperationListPage(own.json)).toBe(true);
     const stored = await storedIds();
@@ -1299,9 +1331,15 @@ describe("the operator lists every principal's operations (ADR 0086)", () => {
       "operationId",
       "source",
       "status",
+      "storedStatus",
       "updatedAt",
     ]);
-    expect(projection).toMatchObject({ kind: "projection", status: "accepted", source: null });
+    expect(projection).toMatchObject({
+      kind: "projection",
+      status: "accepted",
+      storedStatus: "accepted",
+      source: null,
+    });
     // The stored request is not read: a rebuild's reason is the operator's text.
     expect(JSON.stringify(own.json)).not.toContain(REASON);
     // The peer is shown the same page.
@@ -1432,5 +1470,15 @@ describe("the operator lists every principal's operations (ADR 0086)", () => {
             `SEARCH ops_requests USING INDEX ops_requests_open (status=? AND kind=?${range}`,
           );
       }
+    // The page's stages, read once for the rows whose status is derived: a
+    // primary-key search per id, never a scan.
+    const stages = (
+      await env.DB.prepare(`EXPLAIN QUERY PLAN ${SELECT_STAGES_OF_PAGE}`)
+        .bind(JSON.stringify([`op_${"0".repeat(64)}`, `op_${"1".repeat(64)}`]))
+        .all<{ detail: string }>()
+    ).results.map((entry) => entry.detail);
+    expect(stages.filter((line) => /\bops_request_stages\b/u.test(line))).toEqual([
+      "SEARCH ops_request_stages USING INDEX sqlite_autoindex_ops_request_stages_1 (operation_id=?)",
+    ]);
   });
 });
