@@ -1340,6 +1340,55 @@ test("SBI foreign rows with no account discriminator leave the cash ledger's acc
   ).toBe(4);
 });
 
+test("empty SBI Securities parses take the empty fast path at their dataset's required version (ADR 0117)", async () => {
+  await db.prepare("INSERT OR IGNORE INTO sources VALUES('sbi-securities','synthetic')").run();
+  // Empty parses: a trade sealed at 1, positions sealed at 2, cash balances
+  // never identified, and the cash history sealed at 1 and never identified.
+  const cases = [
+    [3800, "foreign-trade-records", 1],
+    [3801, "foreign-cash-positions", 2],
+    [3802, "foreign-cash-balances", null],
+    [3803, "foreign-cash-history", 1],
+    [3804, "foreign-cash-history", null],
+  ] as const;
+  for (const [id, dataset, sealed] of cases) {
+    await seed(id, 0, "sbi-securities", true, () => [], dataset);
+    if (sealed !== null)
+      expect(await identifyParse(db, parse(id, "sbi-securities"), resolveIdentity, sealed)).toBe(0);
+  }
+  const reject: IdentityResolver = () => {
+    throw new Error("empty resolver should not run");
+  };
+  expect(await identitySweep(db, reject, 40, "sbi-securities")).toEqual({
+    processedRuns: 4,
+    identifiedRuns: 4,
+    identifiedObservations: 0,
+  });
+  expect(await identitySweep(db, reject, 40, "sbi-securities")).toEqual({
+    processedRuns: 0,
+    identifiedRuns: 0,
+    identifiedObservations: 0,
+  });
+  const runs = await db
+    .prepare(
+      `SELECT r.parse_run_id,r.policy_version,pol.policy_release FROM identity_runs r
+       JOIN identity_run_seals s ON s.identity_run_id=r.id
+       JOIN identity_run_policies pol ON pol.identity_run_id=r.id
+       WHERE r.parse_run_id BETWEEN 3800 AND 3804 ORDER BY r.parse_run_id,r.policy_version`,
+    )
+    .all();
+  expect(runs.results).toEqual([
+    { parse_run_id: 3800, policy_version: 1, policy_release: "identity-default-v1" },
+    { parse_run_id: 3800, policy_version: 3, policy_release: "identity-default-v3" },
+    { parse_run_id: 3801, policy_version: 2, policy_release: "identity-default-v2" },
+    { parse_run_id: 3801, policy_version: 3, policy_release: "identity-default-v3" },
+    { parse_run_id: 3802, policy_version: 3, policy_release: "identity-default-v3" },
+    { parse_run_id: 3803, policy_version: 1, policy_release: "identity-default-v1" },
+    // The cash history's module falls back: the base version, not the build's highest.
+    { parse_run_id: 3804, policy_version: 1, policy_release: "identity-default-v1" },
+  ]);
+});
+
 test("all four observation kinds preserve their instrument roles and provenance", async () => {
   await seed(108);
   await db.batch([
