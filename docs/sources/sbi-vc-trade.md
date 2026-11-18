@@ -700,8 +700,8 @@ stored `lastReauthErrorCode: "manual_agreement_required"`, and from then on
 `shouldReauthenticate` returned `false` for good. Only a successful forced
 `POST /reauth` cleared it, and the bearer token for it is a write-only Worker
 secret, so every agreement meant rotating that secret by hand. In production
-the keepalive failed this way from 2026-10-23 18:00 UTC and again from
-2026-11-07 04:30 UTC; the health record then held
+the keepalive failed this way for weeks, and again from just after its held
+lease was cleared on 2026-11-07; the health record then held
 `lastErrorCode: "http_rejected"` (the gateway answers the stale session with a
 3xx, which `redirect: "manual"` surfaces), `lastReauthErrorCode:
 "manual_agreement_required"` and 1,604 consecutive failures.

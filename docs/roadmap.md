@@ -146,9 +146,9 @@ tools, the catalogue's `command.*` operations the confirmation page also uses (p
 Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
 (2026-11-07) no delegation entry or grant is needed: an MCP client the MCP Access
 application admits acts with the UI's authority, as itself. Both decisions were first exercised
-in production on 2026-11-07, 16:48 to 17:07 UTC: an MCP client recorded the owner default on the
-ten accounts the candidates name and accepted one MyJCB and one Vpass settlement (both SMBC
-debits), withdrawing one Vpass acceptance on the way; purchase totals did not change and only
+in production on 2026-11-07: an MCP client recorded the owner default on the
+ten accounts the candidates name and accepted one MyJCB and one Vpass settlement (both paid by
+bank debits), withdrawing one Vpass acceptance on the way; purchase totals did not change and only
 the accepted debits hold a cash-movement claim
 ([verification](card-settlements.md#first-production-decisions-2026-11-07)). On 2026-11-08
 the cash-movement view itself was read through `kogane.events.read` (#1094): it lists each
@@ -255,10 +255,10 @@ current milestone. Production was read through the MCP Portal between 11:18 and 
   [#1215](https://github.com/risu729/kogane/issues/1215)). Every collected
   source's summary lists its provider data types as `collected`, `partial` or `not_collected`
   with the issue that tracks the rest.
-  A read-only follow-up on 2026-11-10 placed Vpass's November 9 silent stop
+  A later read-only follow-up placed Vpass's second silent stop
   inside its open scheduled RPC: lease heartbeats continued for 120.606 s,
   and deployments overlapped, but the terminating outcome was not retained.
-  [The UTC evidence and remaining discriminator](schedules.md#vpass-recurrence-on-2026-11-09)
+  [The log evidence and remaining discriminator](schedules.md#a-second-silent-vpass-stop)
   keep [issue 1142](https://github.com/risu729/kogane/issues/1142) open for a
   demonstrated fix and three consecutive post-fix scheduled days; this does
   not remeasure the account-coverage baseline above.
