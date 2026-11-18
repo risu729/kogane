@@ -6,6 +6,7 @@ import {
   mailboxPdfFields,
   mailboxDocumentIdentity,
   assertSupportedMailboxRow,
+  MAX_MAILBOX_ROWS,
   type MailboxRow,
 } from "../src/mailbox-contract";
 import { mailboxRow, mailboxList, mailboxSummary, mailboxDetailFixture } from "./mailbox-fixture";
@@ -47,6 +48,35 @@ test("refuses incomplete totals, duplicate identity and unknown fields", () => {
       ],
     }),
   ).toThrow("sbi_mailbox_inventory_incomplete");
+});
+
+test("a well-formed list beyond the terminal's unit capacity has its own closed code", () => {
+  const rows = (count: number) =>
+    Array.from({ length: count }, (_, index) => mailboxRow(`synthetic-${index}`));
+  const over = rows(MAX_MAILBOX_ROWS + 1);
+  expect(() => mailboxInventory(mailboxList(over), mailboxSummary(over.length))).toThrow(
+    "sbi_mailbox_rows_over_bound",
+  );
+  // A declared total or an issued group count past the bound names the same
+  // limit even when the returned list itself would fit.
+  const fits = rows(MAX_MAILBOX_ROWS);
+  expect(() =>
+    mailboxInventory(
+      { ...mailboxList(fits), allCountKen: MAX_MAILBOX_ROWS + 1 },
+      mailboxSummary(fits.length),
+    ),
+  ).toThrow("sbi_mailbox_rows_over_bound");
+  expect(() => mailboxInventory(mailboxList(fits), mailboxSummary(MAX_MAILBOX_ROWS + 1))).toThrow(
+    "sbi_mailbox_rows_over_bound",
+  );
+  // Malformed counts and lists are still unobserved shapes, not a bound.
+  for (const allCountKen of [-1, 1.5, "1"])
+    expect(() => mailboxInventory({ ...mailboxList(), allCountKen }, mailboxSummary())).toThrow(
+      "sbi_mailbox_response_unobserved",
+    );
+  expect(() => mailboxInventory({ ...mailboxList(), outlist: {} }, mailboxSummary())).toThrow(
+    "sbi_mailbox_response_unobserved",
+  );
 });
 
 test("retains metadata for unknown kinds and makes support refusal local to that document", () => {

@@ -987,10 +987,12 @@ for this artifact, with the CP932 charset a constant of the source.
 Delivered reports additionally use the exact new-mailbox handoff observed on
 2026-11-11. After ordinary domestic and foreign work, the collector uses the
 remaining shared eleven-minute budget to corroborate the current list and
-archive supported single-file PDFs. A list of more than 999 rows is refused
-(`sbi_mailbox_response_unobserved` on `mailbox-index`): the mailbox terminal
-has one unit per row plus the index, and a terminal holds at most 1,000 units.
-The private inventory and per-document
+archive supported single-file PDFs. A list of more than 999 rows (listed,
+declared or issued) is refused with `sbi_mailbox_rows_over_bound` on
+`mailbox-index`: the mailbox terminal has one unit per row plus the index, and
+a terminal holds at most 1,000 units. That terminal then fails with the same
+code, the cursor stays where it was, and nothing in the mailbox is archived
+until it shrinks below the bound (an open limit). The private inventory and per-document
 metadata retain provider fields; no handoff material is persisted. Each original
 PDF has its own `provider_document` artifact/unit and kind/date/identity/hash
 locator, while identical bytes reuse one content-addressed DATA object.

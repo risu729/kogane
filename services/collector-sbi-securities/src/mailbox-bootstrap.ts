@@ -24,6 +24,7 @@ export type MailboxFailureCode =
   | "sbi_mailbox_progress_failed"
   | "sbi_mailbox_lease_lost"
   | "sbi_mailbox_response_unobserved"
+  | "sbi_mailbox_rows_over_bound"
   | "sbi_mailbox_inventory_incomplete"
   | "sbi_mailbox_document_unobserved";
 

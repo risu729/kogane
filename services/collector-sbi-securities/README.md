@@ -63,10 +63,12 @@ scopes; invalid-domain cookies and unobserved transitions fail closed. Forms,
 bootstrap HTML, session values and free-text error envelopes are never stored.
 
 The current list must match its declared total and independent issued summary,
-including conservative per-group count agreement. It is refused with
-`sbi_mailbox_response_unobserved` above 999 rows: the mailbox terminal has one
-unit per row plus `mailbox-index`, and a terminal holds at most 1,000 units.
-Private list metadata stays
+including conservative per-group count agreement. Above 999 rows (listed,
+declared or issued) it is refused with `sbi_mailbox_rows_over_bound`: the
+mailbox terminal has one unit per row plus `mailbox-index`, and a terminal
+holds at most 1,000 units. The refusal is the failed mailbox terminal's code
+and leaves the cursor unchanged, so such a mailbox is not archived until it
+shrinks (an open limit, ADR 0108 amendment). Private list metadata stays
 in `mailbox-inventory.json`. Each supported single-PDF detail uses its own
 closed unit; an unknown kind, multiple files or non-PDF detail leaves that
 unit partial while verified siblings survive. Detail type `sTypeCd=" "`

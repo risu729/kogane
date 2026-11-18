@@ -49,10 +49,11 @@ const COMMON = ["ctt", "code", "message"];
 /**
  * The mailbox terminal carries one unit per listed row plus `mailbox-index`,
  * and a terminal holds at most 1,000 units (`packages/collection` manifest).
- * A longer list is refused here, so the refusal is persisted as the index
- * unit's closed code instead of making the whole terminal unplannable.
+ * A list, declared total or group count above this is refused with its own
+ * closed code, persisted on the index unit, instead of making the whole
+ * terminal unplannable or reading like an unobserved response shape.
  */
-const MAX_ROWS = 999;
+export const MAX_MAILBOX_ROWS = 999;
 type JsonObject = Record<string, unknown>;
 export type MailboxRow = Record<(typeof ROW_STRINGS)[number], string> &
   Record<(typeof ROW_NULLS)[number], null>;
@@ -83,16 +84,18 @@ export function mailboxJson(bytes: Uint8Array): unknown {
 export function mailboxInventory(listValue: unknown, summaryValue: unknown): MailboxInventory {
   const list = envelope(listValue, ["outlist", "allCountKen"]);
   const summary = envelope(summaryValue, ["summaryList"]);
-  if (!Array.isArray(list.outlist) || list.outlist.length > MAX_ROWS) refuse();
-  const total = count(list.allCountKen);
+  if (!Array.isArray(list.outlist)) refuse();
+  if (list.outlist.length > MAX_MAILBOX_ROWS) overBound();
+  const total = bounded(count(list.allCountKen));
   if (total !== list.outlist.length) incomplete();
-  if (!Array.isArray(summary.summaryList) || summary.summaryList.length > MAX_ROWS) refuse();
+  if (!Array.isArray(summary.summaryList) || summary.summaryList.length > MAX_MAILBOX_ROWS)
+    refuse();
   const groups = new Map<string, { issued: number; listed: number }>();
   let issuedTotal = 0;
   for (const value of summary.summaryList) {
     const group = object(value, ["busiSys", "userTokuteiId", "kofuKensu", "mikaifuKensu"]);
     const key = groupIdentity(string(group.busiSys), string(group.userTokuteiId));
-    const issued = count(group.kofuKensu);
+    const issued = bounded(count(group.kofuKensu));
     if (count(group.mikaifuKensu) > issued || groups.has(key)) refuse();
     groups.set(key, { issued, listed: 0 });
     issuedTotal += issued;
@@ -214,8 +217,13 @@ function string(value: unknown): string {
 }
 
 function count(value: unknown): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > MAX_ROWS)
-    refuse();
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) refuse();
+  return value;
+}
+
+/** A well-formed count the terminal cannot hold one unit per row for. */
+function bounded(value: number): number {
+  if (value > MAX_MAILBOX_ROWS) overBound();
   return value;
 }
 
@@ -225,6 +233,10 @@ function groupIdentity(business: string, user: string): string {
 
 function refuse(): never {
   throw new MailboxError("sbi_mailbox_response_unobserved");
+}
+
+function overBound(): never {
+  throw new MailboxError("sbi_mailbox_rows_over_bound");
 }
 
 function incomplete(): never {

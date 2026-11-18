@@ -115,10 +115,43 @@ a terminal manifest holds at most 1,000 units (`packages/collection`). The
 collector accepted lists of up to 1,000 rows, so a list of exactly 1,000 rows
 needed 1,001 units: the terminal could not be planned, the archive and the
 index failure were both lost behind a generic `operation_failed`, and the
-cursor never moved. The list is now refused above 999 rows with the existing
-`sbi_mailbox_response_unobserved` code, like any longer list before. The
-refusal is persisted on `mailbox-index` in its own mailbox terminal; the
-financial terminal is unaffected. A mailbox of 1,000 or more current rows is
-therefore not archived; this is an open limit, not an observation of the
-provider. Verified by `test/mailbox-terminal-bound.test.ts` with synthetic
-999- and 1,000-row lists; no provider was contacted.
+cursor never moved.
+
+Options considered:
+
+1. Refuse above 999 rows with the existing `sbi_mailbox_response_unobserved`.
+   This makes the terminal plannable, but an operator could not tell a
+   too-large mailbox from an unobserved response shape.
+2. Refuse above 999 rows with a distinct closed code.
+3. Accept longer lists and archive at most 999 rows per terminal, continuing
+   through the existing cursor, or split one acquisition across several
+   mailbox terminals. No collector does either today: every other collector's
+   unit count is bounded by its own months, pages or connections. Both would
+   accept list sizes nobody has observed (whether the unpaged list, its count
+   corroboration and the 2 MiB JSON bound hold there is unknown, ADR 0004), and
+   option 3's first form leaves listed rows with no unit in the terminal that
+   carries their inventory.
+
+Decision: option 2. A well-formed list of more than 999 rows, or a declared
+`allCountKen` or group `kofuKensu` above 999, is refused with
+`sbi_mailbox_rows_over_bound`; malformed lists and counts stay
+`sbi_mailbox_response_unobserved`. The refusal is the `mailbox-index` unit's
+code in its own mailbox terminal. With no document archived, that terminal's
+provider outcome is `failed` and the same code is its run-level safe error
+code, registered as the run's provider failure code and as the failed
+`mailbox-index` unit report; the operation's status is at most `partial` and the
+financial terminal is unaffected. No document is walked, so no pointer is
+reported and the stored cursor is left unchanged.
+
+Consequences: a mailbox of 1,000 or more current rows is not archived, on
+every run, until it shrinks below the bound or option 3 is adopted. This is an
+open limit, not an observation of the provider; it is visible as the closed
+code above, never as a generic failure or an empty archive. A list response
+larger than 2 MiB is refused as `sbi_mailbox_response_unobserved` before its
+rows are counted.
+
+Verification: `test/mailbox-terminal-bound.test.ts` persists synthetic 999-
+and 1,000-row lists (the first fills 1,000 units and reports a `null` pointer for a finished cycle, the
+second persists the refusal and reports none), and `test/mailbox-contract.test.ts`
+covers the row, total and group bounds and the malformed counts that stay
+unobserved; no provider was contacted.
