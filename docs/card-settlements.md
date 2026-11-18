@@ -586,8 +586,16 @@ The self-declared fallback also refuses any recorded ownership-role history for 
 same resolved account, including rejected or dated claims and the other role.
 It also refuses recorded `contradicts` relations touching the account,
 source-account reference or review evidence. The read response exposes these
-as separate `selfDeclarationBlockers`; explicit evidence review is still
-available. These checks do not infer relationships through account aliases or
+as separate `selfDeclarationBlockers`, together with the side's own blockers
+(a changed source, an unresolved or changed mapping); explicit evidence review
+is still available. The card-ownership page disables 本人申告 while
+`selfDeclarationBlockers` is non-empty and lists each code once with its reason
+in Japanese, so an unconfirmed scope does not hide a recorded claim; the scope
+reason names the individual card statement or deposit account the
+self-declaration needs, not the owner default's wider scope. The command
+refuses a self-declaration blocked by an unadmitted scope, a recorded claim or
+a contradiction with `needs_scope_resolution`, the same answer on the page's
+path and over MCP, and writes no plan. These checks do not infer relationships through account aliases or
 provider text, nor detect an unrecorded conflict. Commit repeats the exact
 checks atomically. Corrections append through explicit review rather than
 overwriting the declaration.
