@@ -133,8 +133,8 @@ Required Cloudflare resources/secrets:
 
 - R2 binding: `DATA` → `kogane-raw-evidence` (shared by all collectors; the old dedicated source bucket was deleted on 2026-09-13)
 - SQLite Durable Object: `VPointSession`
-- Email Routing rule: `kogane-vpoint-auth` (delivers only `vpoint@takuk.me` to the Worker)
-- Email Routing rule: `kogane-vpoint-pay` (delivers only `vpointpay@takuk.me` to the same Worker)
+- Email Routing rule: `kogane-vpoint-auth` (delivers only the `VPOINT_EMAIL_RECIPIENT` address to the Worker)
+- Email Routing rule: `kogane-vpoint-pay` (delivers only the `VPOINT_PAY_EMAIL_RECIPIENT` address to the same Worker)
 - secret: `VPOINT_MEMBER_NUMBER`
 - secret: `VPOINT_EMAIL_RECIPIENT`
 - secret: `VPOINT_EMAIL_FORWARD_TO`
@@ -169,14 +169,14 @@ Remove/disable Email Routing rules first, then remove the Worker. The catch-all 
 
 ## V Point Pay notification-email import and reconciliation
 
-The same Worker's V Point Pay-specific Email Routing rule also archives notifications. Forwarding target notifications from Gmail to `vpointpay@takuk.me` sends originals as inline `message/rfc822` attachments. The handler separates inner originals with `forceRfc822Attachments` and imports only when the inner From is `info@prepaid.smbc-card.com` and subject is one of:
+The same Worker's V Point Pay-specific Email Routing rule also archives notifications. Forwarding target notifications from Gmail to the `VPOINT_PAY_EMAIL_RECIPIENT` address sends originals as inline `message/rfc822` attachments. The handler separates inner originals with `forceRfc822Attachments` and imports only when the inner From is `info@prepaid.smbc-card.com` and subject is one of:
 
 - `ご利用のお知らせ` ("usage notification").
 - `チャージ受付のお知らせ` ("top-up acceptance notification").
 - `プリペイド残高加算のお知らせ` ("prepaid balance addition notification").
 - `ご利用不可のお知らせ／カードがご利用頂けませんでした` ("unavailable-use notification / your card could not be used").
 
-Original `notification.eml` and normalized `normalized-event.json` are content-addressed in shared DATA as 1 run per 1 notification, followed last by terminal `runs/v-point-pay-email/<original-sha256>/terminal.json`. The run ID is the original hash, so forwarding the same notification again yields `already_persisted` without adding another original. Notifications forwarded from Gmail as `message/rfc822` attachments already exist in Gmail and are not sent back by the Worker. Official-sender notifications delivered directly to `vpointpay@takuk.me` are forwarded to the existing Gmail destination after DATA storage. Other mail, such as OTPs or forwarding-address confirmations, is also forwarded as before. This distinction lets Gmail continue displaying notifications after the registered V Point Pay address changes to the alias, while Gmail backfill avoids forwarding loops.
+Original `notification.eml` and normalized `normalized-event.json` are content-addressed in shared DATA as 1 run per 1 notification, followed last by terminal `runs/v-point-pay-email/<original-sha256>/terminal.json`. The run ID is the original hash, so forwarding the same notification again yields `already_persisted` without adding another original. Notifications forwarded from Gmail as `message/rfc822` attachments already exist in Gmail and are not sent back by the Worker. Official-sender notifications delivered directly to the `VPOINT_PAY_EMAIL_RECIPIENT` address are forwarded to the existing Gmail destination after DATA storage. Other mail, such as OTPs or forwarding-address confirmations, is also forwarded as before. This distinction lets Gmail continue displaying notifications after the registered V Point Pay address changes to the alias, while Gmail backfill avoids forwarding loops.
 
 Existing-email backfill procedure:
 
@@ -186,10 +186,10 @@ Existing-email backfill procedure:
    from:info@prepaid.smbc-card.com (subject:"ご利用のお知らせ" OR subject:"チャージ受付のお知らせ" OR subject:"プリペイド残高加算のお知らせ" OR subject:"ご利用不可のお知らせ" OR subject:"カードがご利用頂けませんでした") -in:spam -in:trash
    ```
 
-2. Forward results with original attachments intact to `vpointpay@takuk.me`. Gmail API use must preserve `message/rfc822`, splitting requests at a maximum of 10 messages per 1 request.
-3. Each forwarded notification is saved to DATA as a `v-point-pay-email` run. Re-forwarding is safe (`already_persisted`), but forwarding only missing messages is sufficient. The handler stores notifications only when the envelope recipient is `VPOINT_PAY_EMAIL_RECIPIENT` (`vpointpay@takuk.me`); notifications forwarded to `vpoint@takuk.me` are not stored.
+2. Forward results with original attachments intact to the `VPOINT_PAY_EMAIL_RECIPIENT` address. Gmail API use must preserve `message/rfc822`, splitting requests at a maximum of 10 messages per 1 request.
+3. Each forwarded notification is saved to DATA as a `v-point-pay-email` run. Re-forwarding is safe (`already_persisted`), but forwarding only missing messages is sufficient. The handler stores notifications only when the envelope recipient is `VPOINT_PAY_EMAIL_RECIPIENT`; notifications forwarded to the `VPOINT_EMAIL_RECIPIENT` address are not stored.
 
-`vpoint@takuk.me` is solely for V Point Web authentication emails; `vpointpay@takuk.me` is the V Point Pay app registration address, official-notification destination and historical-notification backfill destination. Both routes reach the same Worker, but the latter is not used for code extraction. Keep the ordinary catch-all forwarding rule.
+The `VPOINT_EMAIL_RECIPIENT` address is solely for V Point Web authentication emails; the `VPOINT_PAY_EMAIL_RECIPIENT` address is the V Point Pay app registration address, official-notification destination and historical-notification backfill destination. Both routes reach the same Worker, but the latter is not used for code extraction. Keep the ordinary catch-all forwarding rule.
 
 The collector's email reconciliation report depended on old source-bucket `raw/v-point-pay-email/` listings, so none has been generated since retirement on 2026-09-13. Cross-source reconciliation belongs to the Processor reading terminals ([collection.md](../../docs/collection.md#v-point-servicescollector-vpoint)). The following records the reconciliation rules at that time.
 

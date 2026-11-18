@@ -973,7 +973,7 @@ following [#1131](https://github.com/risu729/kogane/pull/1131)
 enabled so that its first production collection, which its daily alarm has never
 made, is a request (owner, 2026-11-09 19:52 UTC;
 [ADR 0048, amendment 2026-11-09](adr/0048-operation-collector-dispatch.md#amendment-2026-11-09-prestia-bank-enabled)).
-That first request (`op_f791e3ed…`, accepted 2026-11-09 20:57 UTC) collected with
+That first request (accepted the same day) collected with
 provider outcome `success` a minute later, but registration was refused
 `inactive_ingest_route`: production CORE had none of the `collector-prestia-bank`
 rows of `infra/bootstrap/ingest-clients.sql`, which an operator applies by hand

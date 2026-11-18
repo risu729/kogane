@@ -83,7 +83,7 @@ supplementing gaps, not authoritative replacement for app statements. Added inge
 `services/collector-vpoint/` Email Worker, saving original EML/normalized JSON to V Point Pay private R2.
 Gmail forwarding wraps originals in inline `message/rfc822`; validate inner official senders, not outer Gmail senders.
 
-After registered email changed to `vpointpay@takuk.me`, save direct official delivery then forward to Gmail.
+After the registered email changed to the collector's `VPOINT_PAY_EMAIL_RECIPIENT` address, save direct official delivery then forward to Gmail.
 Do not reforward Gmail-backfilled `message/rfc822` notifications. Distinguish transport shapes explicitly,
 preventing loops without losing ordinary notices.
 
