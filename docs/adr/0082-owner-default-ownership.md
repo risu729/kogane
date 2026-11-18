@@ -164,8 +164,11 @@ beside the evidence review and the self-declaration. With it:
   date the operator picks: the date is when the default was applied;
 - planning needs the role-specific confirmation checkbox and a reason, as
   every other basis does, and is disabled while the side's
-  `ownerDefaultBlockers` is non-empty; the page says why (an account scope
-  the default does not admit, or a recorded claim, contradiction or update);
+  `ownerDefaultBlockers` is non-empty; the page lists each blocker's reason
+  in Japanese (an account scope the default does not admit, a recorded
+  claim, a recorded contradiction, or the side's own mapping blocker), and
+  the server refuses the same plan with `needs_scope_resolution`, so the
+  page is not the only guard;
 - it plans only `relation.accept`: the reject button stays disabled, since a
   default is withdrawn by an explicit review (point 3's refusals are
   unchanged).
@@ -183,14 +186,23 @@ is preselected.
   `services/app/test/ui-mcp-parity.test.ts`).
 - Recording the default still accepts no settlement; the next sweep proposes
   a fresh candidate, which is accepted or rejected as before.
+- Limit: the date is the plan day, not the commit day. The command reads the
+  marker's date only as a valid calendar date and compares it with neither
+  day, so a plan made late on one Tokyo day and committed the next is still
+  committed, with the plan's date. The page always sends the plan day; an MCP
+  client chooses the date it sends, and the server does not check it.
 
 ### Verification
 
 `apps/web/test/card-ownership.browser.test.ts`: the default's payload (party,
 marker and its Tokyo date, no typed name, the reject button disabled), the
-confirmation page's 所有者の既定 notice, and each blocker disabling the default
-without disabling an explicit review.
+confirmation page's 所有者の既定 notice and its 適用日 wording, each blocker
+(and two together) listed with its reason and disabling the default without
+disabling an explicit review, and the accessibility audit of the default's
+form with a blocker shown.
 `services/app/test/card-settlement-decisions-parity.test.ts`: the page's
 owner-default payload planned over `/api/command/v1/plan` and over
 `kogane.command.plan` gives the same kind, expected revisions and simulation
-(with its `owner-default` declaration) on both sides, and writes no decision.
+(with its `owner-default` declaration) on both sides, and writes no decision;
+once a claim is recorded, the same payload is refused alike on both paths
+(`needs_scope_resolution`) and writes no plan.

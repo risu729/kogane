@@ -16,6 +16,19 @@ const BLOCKERS: Record<string, string> = {
     "候補作成時の口座が未解決です。口座の整理後、新しい候補を確認してください。",
   account_context_changed: "候補作成後に口座の対応が変わっています。新しい候補で確認してください。",
 };
+/** The declaration's own closed codes (`ownershipDeclarationBlockers`). */
+const DECLARATION_BLOCKERS: Record<string, string> = {
+  single_account_scope_unconfirmed:
+    "この記録はカード請求口座・カード会社の接続全体・預金口座のいずれとも確認できない範囲です。口座の整理を先に確認してください。",
+  ownership_claims_require_review:
+    "この口座には記録済みの保有者の判断（却下・期間付きを含む）があります。記録済みの判断は上書きしません。",
+  contrary_evidence_recorded:
+    "この口座または根拠に矛盾の記録があります。記録済みの根拠を確認して判断してください。",
+};
+/** One blocker code in Japanese; an unknown code is shown as the code itself. */
+export function ownershipBlockerText(code: string): string {
+  return BLOCKERS[code] ?? DECLARATION_BLOCKERS[code] ?? code;
+}
 export function ownerLabel(ref: string): string {
   return ref.startsWith("party:") ? ref.slice(6) : ref;
 }

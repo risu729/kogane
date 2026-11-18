@@ -10,7 +10,12 @@ import {
   ownershipDeclarationRef,
 } from "../../../../packages/domain/src/ownership-declaration.ts";
 import { useCardOwnership } from "../card-ownership-api.ts";
-import { CardOwnershipDetails, OWNERSHIP_ROLES, ownerLabel } from "../card-ownership-display.tsx";
+import {
+  CardOwnershipDetails,
+  OWNERSHIP_ROLES,
+  ownerLabel,
+  ownershipBlockerText,
+} from "../card-ownership-display.tsx";
 import { useFeatures } from "../api.ts";
 import { tokyoToday } from "../reported-state-api.ts";
 import { postCommand, type ChangePlanView } from "../command-api.ts";
@@ -134,9 +139,13 @@ function OwnershipForm({
           </Notice>
           {side.ownerDefaultBlockers.length > 0 ? (
             <Notice tone="warn" inline role="note">
-              {side.ownerDefaultBlockers.includes("single_account_scope_unconfirmed")
-                ? "この記録はカード請求口座・カード会社の接続全体・預金口座のいずれとも確認できない範囲です。所有者の既定は適用できません。口座の整理を先に確認してください。"
-                : "この口座には記録済みの保有者の判断、矛盾の記録または口座の更新があります。所有者の既定は記録済みの判断を上書きしません。根拠を確認して判断してください。"}
+              所有者の既定は次の理由で適用できません。
+              <ul className="warning-list">
+                {/* A side's own blocker (an unresolved mapping) can repeat here. */}
+                {[...new Set(side.ownerDefaultBlockers)].map((code) => (
+                  <li key={code}>{ownershipBlockerText(code)}</li>
+                ))}
+              </ul>
             </Notice>
           ) : null}
         </>

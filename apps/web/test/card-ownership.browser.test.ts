@@ -288,6 +288,10 @@ describe.if(runnable)("explicit card ownership review", () => {
     ).toBe(true);
     await button.click();
     await page.getByText(/根拠は所有者の既定.*適用日は 2026-11-18/).waitFor();
+    // No name was typed and nothing was declared: the confirmation says so.
+    const confirmation = await page.locator("main").innerText();
+    expect(confirmation).toContain("適用日は過去の保有期間の証明ではありません");
+    expect(confirmation).not.toContain("識別名だけで");
     expect(posted.find((p) => p.operation === "plan")?.body).toMatchObject({
       kind: "relation.accept",
       payload: {
@@ -307,15 +311,28 @@ describe.if(runnable)("explicit card ownership review", () => {
     expect(committed).toBe(false);
     await page.close();
   });
-  for (const blocker of ["ownership_claims_require_review", "single_account_scope_unconfirmed"]) {
-    test(`${blocker} blocks the owner default without blocking explicit evidence review`, async () => {
-      review.sides[0]!.ownerDefaultBlockers = [blocker];
+  const ownerDefaultReasons: Record<string, string> = {
+    ownership_claims_require_review: "記録済みの保有者の判断",
+    single_account_scope_unconfirmed: "いずれとも確認できない範囲",
+    contrary_evidence_recorded: "矛盾の記録があります",
+  };
+  for (const blockers of [
+    ["ownership_claims_require_review"],
+    ["single_account_scope_unconfirmed"],
+    ["contrary_evidence_recorded"],
+    ["single_account_scope_unconfirmed", "ownership_claims_require_review"],
+  ]) {
+    test(`${blockers.join(" and ")} blocks the owner default, each reason shown, without blocking explicit evidence review`, async () => {
+      review.sides[0]!.ownerDefaultBlockers = blockers;
       const page = await open();
       const form = page.getByRole("region", { name: "カード請求の支払義務を負う人", exact: true });
       await form.getByLabel("根拠の種類", { exact: true }).selectOption("owner-default");
       await form.getByLabel("既定を適用する理由", { exact: true }).fill("既定");
       await form.getByRole("checkbox").check();
-      expect(await form.innerText()).toContain("所有者の既定は");
+      const reasons = form.getByRole("note").filter({ hasText: "所有者の既定は次の理由" });
+      expect(await reasons.getByRole("listitem").count()).toBe(blockers.length);
+      for (const code of blockers)
+        expect(await reasons.innerText()).toContain(ownerDefaultReasons[code]!);
       expect(
         await form
           .getByRole("button", { name: "この保有者の関係を確認", exact: true })
@@ -429,6 +446,17 @@ describe.if(runnable)("explicit card ownership review", () => {
     const page = await open();
     await page.getByRole("region", { name: "カード請求の支払義務を負う人", exact: true }).waitFor();
     await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  test("the owner default form, with its blocker reasons, passes the accessibility audit", async () => {
+    review.sides[0]!.ownerDefaultBlockers = ["ownership_claims_require_review"];
+    const page = await open();
+    const form = page.getByRole("region", { name: "カード請求の支払義務を負う人", exact: true });
+    await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
+    await form.getByLabel("根拠の種類", { exact: true }).selectOption("owner-default");
+    await form.getByLabel("既定を適用する理由", { exact: true }).waitFor();
     expect(await auditView(page)).toEqual([]);
     await page.close();
   }, 60_000);

@@ -524,6 +524,45 @@ describe("card settlement decisions over the page's path and MCP (ADR 0081, unit
     expect(await currentAllocations()).toBe(0);
   });
 
+  it("refuses the page's owner default alike on both paths once a claim is recorded", async () => {
+    // The page disables the default while `ownerDefaultBlockers` is non-empty;
+    // the server refuses the same payload too, so the page is not the only guard.
+    const read = await send(
+      `/api/v2/reconciliation/card-settlements/ownership?proposalId=${owned}`,
+      { method: "GET" },
+      APP_AUD,
+    );
+    const review = (await read.json()) as CardOwnershipReview;
+    const before = [await count("change_plans"), await count("decision_revisions")];
+    for (const side of review.sides) {
+      expect(side.blockers).toEqual([]);
+      expect(side.ownerDefaultBlockers).toContain("ownership_claims_require_review");
+      const payload = {
+        relationKind: side.role,
+        fromRef: `account:${side.accountId}`,
+        toRef: OWNER_DEFAULT_PARTY,
+        validFrom: null,
+        validTo: null,
+        evidenceRefs: [
+          ...side.evidenceRefs,
+          ownershipDeclarationRef(side.role, "2026-11-18", "owner-default")!,
+        ],
+        reason: "synthetic owner default",
+      };
+      const baseContextId = `card-ownership:${owned}:${side.role}`;
+      const overHttp = await http("plan", { kind: "relation.accept", payload, baseContextId });
+      const overMcp = await mcp("kogane.command.plan", {
+        kind: "relation.accept",
+        payload,
+        baseContextId,
+        idempotencyKey: `owner-default-refused-${side.role}`,
+      });
+      expect(overHttp).toMatchObject({ failed: true, body: { error: "needs_scope_resolution" } });
+      expect(overMcp).toEqual(overHttp);
+    }
+    expect([await count("change_plans"), await count("decision_revisions")]).toEqual(before);
+  });
+
   it("accepts and withdraws over either path with the same receipts, and refuses alike", async () => {
     const competitor = await cloneCandidate("competitor");
     const accept = (proposalId: string) => ({ proposalId, reason: "synthetic reviewed match" });
