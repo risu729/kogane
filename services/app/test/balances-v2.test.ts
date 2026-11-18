@@ -398,7 +398,9 @@ describe("v2 balance read model", () => {
        VALUES (?1,'v2-basis-account','basis-a','JPY','1200',NULL,'2026-09-07','basis:a','{}'),
               (?1,'v2-basis-account','basis-b','JPY',NULL,'1300','2026-09-07','basis:b','{}'),
               (?1,'v2-basis-account','basis-c','JPY','1400','1400','2026-09-07','basis:c','{}'),
-              (?1,'v2-basis-account','basis-d','XTS','1500','15.00','2026-09-07','basis:d','{}')`,
+              (?1,'v2-basis-account','basis-d','XTS','1500','15.00','2026-09-07','basis:d','{}'),
+              (?1,'v2-basis-account','basis-e','USD','1500','15.00','2026-09-07','basis:e','{}'),
+              (?1,'v2-basis-account','basis-f','JPY',NULL,'n/a','2026-09-07','basis:f','{}')`,
     )
       .bind(parse)
       .run();
@@ -408,17 +410,21 @@ describe("v2 balance read model", () => {
       "basis-b": "decimal_text",
       "basis-c": "agreement",
       "basis-d": "decimal_text",
+      // Both representations of 15.00 agree. The stored value drops the
+      // trailing zeros, and so does the projected one, so the page serves it.
+      "basis-e": "agreement",
+      // Neither representation is valid: not exact, so no basis.
+      "basis-f": "none",
     };
     type BasisItem = {
-      row: { metric: string; normalized: { basis: string } };
-      quantity: { normalized: { status: string; basis: string } };
+      row: { metric: string; normalized: Record<string, unknown> };
+      quantity: { normalized: Record<string, unknown> };
     };
     const bases = (items: BasisItem[]) =>
       Object.fromEntries(
         items.map((item) => {
           // The quantity and the evidence row of one item never disagree.
-          expect(item.quantity.normalized.basis).toBe(item.row.normalized.basis);
-          expect(item.quantity.normalized.status).toBe("exact");
+          expect(item.quantity.normalized).toEqual(item.row.normalized);
           return [item.row.metric, item.quantity.normalized.basis];
         }),
       );
@@ -432,6 +438,57 @@ describe("v2 balance read model", () => {
     ).json()) as { items: BasisItem[] };
     expect(validApiResponse("/api/v2/balances/history", history)).toBe(true);
     expect(bases(history.items)).toEqual(expected);
+    const quantity = (metric: string) =>
+      latest.items.find((item) => item.row.metric === metric)?.quantity.normalized;
+    expect(quantity("basis-e")).toMatchObject({ status: "exact", coefficient: "15", scale: 0 });
+    expect(quantity("basis-f")).toMatchObject({ status: "unparsed", coefficient: null });
+  });
+
+  it("refuses a latest page whose projected value is not its observation's stored value", async () => {
+    // The projection stores the value but not its basis, so the route reads
+    // the basis from the observation's stored decimal. A projected value that
+    // differs from that row is refused, never labelled with a basis recorded
+    // for another value. Only a damaged snapshot can get here, so this
+    // synthetic store lifts the sealed-row guard for the length of the test
+    // and puts it back afterwards.
+    const run = await seedRun({ count: 1, source: "other-test", dataset: "mismatch-fixture" });
+    const parse = await parseRun(run.artifacts[0].id, "v2-mismatch-fixture");
+    await env.DB.prepare(
+      `INSERT INTO balance_observations
+         (parse_run_id,source_account,metric,instrument,amount_minor,amount_text,as_of,raw_locator,extra_json)
+       VALUES (?1,'v2-mismatch-account','mismatch-a','JPY','1600','1600','2026-09-07','mismatch:a','{}')`,
+    )
+      .bind(parse)
+      .run();
+    expect((await build()).status).toBe("complete");
+    const path = "/api/v2/balances/latest?account=v2-mismatch-account";
+    expect((await call(path)).status).toBe(200);
+    const guard = await env.READ.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='current_balance_projection_sealed_no_update'",
+    ).first<{ sql: string }>();
+    expect(guard).not.toBeNull();
+    await env.READ.prepare("DROP TRIGGER current_balance_projection_sealed_no_update").run();
+    const damage = (coefficient: string) =>
+      env.READ.prepare(
+        "UPDATE current_balance_projection SET quantity_coefficient=?1 WHERE metric='mismatch-a'",
+      )
+        .bind(coefficient)
+        .run();
+    try {
+      await damage("1601");
+      // The Worker answers any unreadable store this way (docs/agent-api.md);
+      // the exception text and the value never reach the client.
+      const refused = await call(path);
+      expect(refused.status).toBe(503);
+      const text = await refused.text();
+      expect(JSON.parse(text)).toMatchObject({ error: "catalogue_read_failed" });
+      expect(text).not.toContain("projection_decimal_mismatch");
+      expect(text).not.toContain("1601");
+    } finally {
+      await damage("1600");
+      await env.READ.prepare(guard!.sql).run();
+    }
+    expect((await call(path)).status).toBe(200);
   });
 
   it("serves the v1 list from the projection with exactly the rows it serves today", async () => {

@@ -167,16 +167,17 @@ Each latest item carries:
 - `quantity` — `ObservedQuantity`: the decimal-v1 `normalized` value (the only
   input a calculation may use), the unit reference, and the legacy provider
   columns under `sourceRepresentation` as evidence. An unknown minor-unit
-  exponent stays `null` rather than being guessed. `normalized.basis` is the
-  stored decimal-v1 basis of the representative observation's value
-  (`agreement`, `minor_units` or `decimal_text`, as
+  exponent stays `null` rather than being guessed. For an exact value,
+  `normalized.basis` is the stored decimal-v1 basis of the representative
+  observation's value (`agreement`, `minor_units` or `decimal_text`, as
   [normalized decimals](normalized-decimals.md#入力契約) defines them), the
-  same basis as `row.normalized`. It says how that one observation's
-  representations normalized, not whether witnesses or scopes agree. The
-  projection row does not store it; the route reads it with the page's
-  stored decimals and refuses the page if that stored value differs from the
-  projected one. A history item's `quantity.normalized` is its observation's
-  stored normalization as is;
+  same basis as `row.normalized`; a value that is not exact carries `none`.
+  It says how that one observation's representations normalized, not whether
+  witnesses or scopes agree. The projection row does not store it; the route
+  reads it with the page's stored decimals, and if that stored value differs
+  from the projected one the whole page answers `503 catalogue_read_failed`,
+  as any unreadable store does. A history item's `quantity.normalized` is its
+  observation's stored normalization as is;
 - `metric` — `{ metricId, definitionRelease, measurementKind, aggregationRule }`;
 - `adoption` — `{ state, reasonCode, memberEvidence[], evidenceCount }`. The
   evidence count is the number of witnesses of one measurement, which is not
