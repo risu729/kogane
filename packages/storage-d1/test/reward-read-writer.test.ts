@@ -357,6 +357,144 @@ describe("the reward build", () => {
   });
 });
 
+// The writer skips a row only when its key is already written (a re-sent
+// chunk). A row the schema refuses fails the batch, so the chunk and its
+// checkpoint roll back together and the build cannot seal without the row. The
+// statements used `INSERT OR IGNORE` before, which skipped such a row with no
+// error while the checkpoint moved past it.
+describe("a row the schema refuses", () => {
+  async function writing(lease: string) {
+    const { db, sqlite, instanceId } = await claimed();
+    const started = await beginRewardSnapshot(db, instanceId, await plan(), NOW);
+    const projection = buildRewardProjection(rewardInput({ evaluatedAt: EVALUATED_AT }).content);
+    const rows = await digested(projection);
+    await claimRewardWriterLease(db, started!.snapshotId, lease, 1_000, 60_000);
+    const fence = (await rewardWriterFence(db, started!.snapshotId, lease)) as number;
+    const context = { lease, fence, now: NOW, rowsWritten: 0 };
+    return { db, sqlite, snapshotId: started!.snapshotId, rows, context };
+  }
+  const count = (sqlite: Database, table: string, snapshotId: string) =>
+    sqlite.query(`SELECT count(*) AS n FROM ${table} WHERE snapshot_id=?1`).get(snapshotId);
+
+  test("an estimate that breaks a CHECK fails its chunk instead of being left out", async () => {
+    const { db, sqlite, snapshotId, rows, context } = await writing("lease-check");
+    const first = rows.estimates[0]!.row;
+    // `exact` without its decimal-v1 columns: the amount CHECK refuses it.
+    const refused: RewardExpiryProjectionRow = {
+      ...first,
+      rowKey: "synthetic-refused-row",
+      rowSeq: rows.estimates.length,
+      amountStatus: "exact",
+      amountCoefficient: null,
+      amountScale: null,
+    };
+    await expect(
+      writeRewardEstimateChunk(
+        db,
+        snapshotId,
+        [...rows.estimates, { row: refused, digest: await rewardEstimateDigest(refused) }],
+        context,
+      ),
+    ).rejects.toThrow(/CHECK constraint failed/u);
+    // Nothing of the chunk is kept and the checkpoint did not move past it.
+    expect(count(sqlite, "reward_expiry_estimates_v2", snapshotId)).toEqual({ n: 0 });
+    expect(await rewardCheckpoint(db, snapshotId, "estimates")).toBe(-1);
+  });
+
+  test("a replay that breaks a CHECK fails its chunk instead of being left out", async () => {
+    const { db, sqlite, snapshotId, rows, context } = await writing("lease-check-sim");
+    const notReproduced = rows.simulations.find(
+      (entry) => entry.row.reproducibility === "not_reproducible",
+    )!.row;
+    // A row that is not reproduced must say why.
+    const refused: RewardSimulationProjectionRow = {
+      ...notReproduced,
+      requestDigest: "1".repeat(64),
+      rowSeq: rows.simulations.length,
+      reasonCode: null,
+    };
+    await expect(
+      writeRewardSimulationChunk(
+        db,
+        snapshotId,
+        [...rows.simulations, { row: refused, digest: await rewardSimulationDigest(refused) }],
+        context,
+      ),
+    ).rejects.toThrow(/CHECK constraint failed/u);
+    expect(count(sqlite, "reward_conversion_simulations", snapshotId)).toEqual({ n: 0 });
+    expect(await rewardCheckpoint(db, snapshotId, "simulations")).toBe(-1);
+  });
+
+  test("a new row at a written position is refused, not skipped", async () => {
+    const { db, sqlite, snapshotId, rows, context } = await writing("lease-order");
+    expect(await writeRewardEstimateChunk(db, snapshotId, rows.estimates, context)).toBe("written");
+    // A different key at row_seq 0: only the order index can refuse it.
+    const displaced: RewardExpiryProjectionRow = {
+      ...rows.estimates[0]!.row,
+      rowKey: "synthetic-displaced-row",
+    };
+    await expect(
+      writeRewardEstimateChunk(
+        db,
+        snapshotId,
+        [{ row: displaced, digest: await rewardEstimateDigest(displaced) }],
+        { ...context, rowsWritten: rows.estimates.length },
+      ),
+    ).rejects.toThrow(/UNIQUE constraint failed/u);
+    expect(count(sqlite, "reward_expiry_estimates_v2", snapshotId)).toEqual({
+      n: rows.estimates.length,
+    });
+  });
+
+  test("a re-sent replay chunk is a no-op, and different content for a written row is a conflict", async () => {
+    const { db, sqlite, snapshotId, rows, context } = await writing("lease-resend-sim");
+    expect(await writeRewardSimulationChunk(db, snapshotId, rows.simulations, context)).toBe(
+      "written",
+    );
+    expect(await writeRewardSimulationChunk(db, snapshotId, rows.simulations, context)).toBe(
+      "written",
+    );
+    expect(count(sqlite, "reward_conversion_simulations", snapshotId)).toEqual({
+      n: rows.simulations.length,
+    });
+    expect(await rewardCheckpoint(db, snapshotId, "simulations")).toBe(rows.simulations.length - 1);
+    const first = rows.simulations[0]!;
+    await expect(
+      writeRewardSimulationChunk(
+        db,
+        snapshotId,
+        [{ row: { ...first.row, searchCoverage: "bounded" }, digest: "9".repeat(64) }],
+        context,
+      ),
+    ).rejects.toThrow(/reward simulation chunk conflict/u);
+  });
+
+  test("an input ref that breaks a CHECK fails the start instead of being left out", async () => {
+    const { db, sqlite, instanceId } = await claimed();
+    const base = await plan();
+    const refused = {
+      ...base,
+      inputRefs: [
+        ...base.inputRefs,
+        { kind: "calendar_rule" as const, id: "UTC:start-of-day:assumed", digest: "not-a-digest" },
+      ],
+    };
+    await expect(beginRewardSnapshot(db, instanceId, refused, NOW)).rejects.toThrow(
+      /CHECK constraint failed/u,
+    );
+    expect(await rewardSnapshotForContent(db, base.contentKey)).toBeNull();
+    expect(sqlite.query("SELECT count(*) AS n FROM reward_snapshot_input_refs").get()).toEqual({
+      n: 0,
+    });
+    // A ref listed twice is still recorded once.
+    const repeated = { ...base, inputRefs: [...base.inputRefs, base.inputRefs[0]!] };
+    const started = await beginRewardSnapshot(db, instanceId, repeated, NOW);
+    expect(count(sqlite, "reward_snapshot_input_refs", started!.snapshotId)).toEqual({
+      n: base.inputRefs.length,
+    });
+  });
+});
+
 describe("publication", () => {
   test("the pointer publishes only a complete local snapshot and never moves backwards", async () => {
     const { db, instanceId } = await claimed();

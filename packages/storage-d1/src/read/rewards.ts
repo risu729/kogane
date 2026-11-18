@@ -376,11 +376,16 @@ export async function beginRewardSnapshot(
       // `building` trigger aborts the batch. A reward plan always carries at
       // least the evaluation clock and the calendar, and one without refs is
       // settled by the read-back below.
+      //
+      // Only a repeat of the same `(kind, id)` is skipped; a ref that breaks a
+      // CHECK or NOT NULL fails the batch rather than starting the build
+      // without it (`OR IGNORE` would skip both).
       ...plan.inputRefs.map((ref) =>
         db
           .prepare(
-            `INSERT OR IGNORE INTO reward_snapshot_input_refs(snapshot_id,ref_kind,ref_id,
-              ref_digest,core_epoch,created_at) VALUES(?1,?2,?3,?4,?5,?6)`,
+            `INSERT INTO reward_snapshot_input_refs(snapshot_id,ref_kind,ref_id,
+              ref_digest,core_epoch,created_at) VALUES(?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(snapshot_id,ref_kind,ref_id) DO NOTHING`,
           )
           .bind(snapshotId, ref.kind, ref.id, ref.digest, plan.coreEpoch, now),
       ),
@@ -499,6 +504,14 @@ function checkpointStatement(
 
 export type RewardChunkOutcome = "written" | "lease_lost";
 
+// A row is skipped only when its primary key is already written: that is the
+// re-sent chunk of a retried batch, and the `chunk_conflict` trigger (BEFORE
+// INSERT, so it runs before the conflict is resolved) has already refused it
+// unless its digest is the one stored. Every other failure raises and rolls
+// back the chunk with its checkpoint: a CHECK, a NOT NULL, the order index on
+// `row_seq` and the triggers. `INSERT OR IGNORE` is not used here because it
+// also skips a CHECK or NOT NULL failure without an error: the row the schema
+// refused would be missing while the checkpoint moved past it.
 function insertEstimate(
   db: D1Like,
   snapshotId: string,
@@ -507,12 +520,13 @@ function insertEstimate(
 ): D1StatementLike {
   return db
     .prepare(
-      `INSERT OR IGNORE INTO reward_expiry_estimates_v2(snapshot_id,row_key,row_seq,program_id,
+      `INSERT INTO reward_expiry_estimates_v2(snapshot_id,row_key,row_seq,program_id,
         holding_ref,bucket_ref,rule_id,rule_version,bucket_kind,state,deadline_basis,expires_on,
         amount_coefficient,amount_scale,amount_status,unit_ref,provider_observed_json,
         policy_estimated_json,reason_codes_json,uncertainty_codes_json,basis_refs_json,row_digest,
         expiry_basis_json)
-       VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)`,
+       VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)
+       ON CONFLICT(snapshot_id,row_key) DO NOTHING`,
     )
     .bind(
       snapshotId,
@@ -549,10 +563,11 @@ function insertSimulation(
 ): D1StatementLike {
   return db
     .prepare(
-      `INSERT OR IGNORE INTO reward_conversion_simulations(snapshot_id,request_digest,row_seq,
+      `INSERT INTO reward_conversion_simulations(snapshot_id,request_digest,row_seq,
         reproducibility,reason_code,request_json,offer_id,offer_version,result_json,
         search_coverage,evaluated_at,policy_release,row_digest)
-       VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)`,
+       VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+       ON CONFLICT(snapshot_id,request_digest) DO NOTHING`,
     )
     .bind(
       snapshotId,
@@ -574,7 +589,8 @@ function insertSimulation(
 /**
  * One chunk of estimates and the checkpoint that records it, in one batch. A
  * statement error rolls back both; a re-sent chunk with identical content is
- * ignored, and different content for a written row raises the trigger.
+ * ignored, different content for a written row raises the trigger, and a row
+ * the schema refuses raises its constraint.
  */
 export async function writeRewardEstimateChunk(
   db: D1Like,

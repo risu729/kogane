@@ -162,7 +162,14 @@ A build writes rows while `building`, and:
 - each chunk and its checkpoint are one D1 batch, so a statement error rolls
   both back (G2-08), and a re-sent chunk is a no-op only when its content is
   identical — different content for a row that exists raises `projection chunk
-  conflict` in a trigger (G2-07);
+  conflict` in a trigger (G2-07). The reward writer skips only a row whose
+  primary key is written (`ON CONFLICT … DO NOTHING`), so a reward row that
+  fails a CHECK or NOT NULL raises as well
+  ([rewards.md](rewards.md#read-tables-migration-0002_reward_readsql-current-expiry-rows-use-0004_reward_unclassified_bucketssql)).
+  Limit: the balance writer's `INSERT OR IGNORE` skips such a row without an
+  error and moves the checkpoint past it; the build then stops at the
+  verification before the seal (`projection_rows_unverified`) on each later tick,
+  and nothing names the row;
 - a writer holds a 60 s lease and a fence; a writer whose lease was taken can no
   longer write, seal or publish (G2-09);
 - the seal and the pointer switch are one batch. The pointer moves only to a

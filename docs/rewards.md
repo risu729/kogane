@@ -361,6 +361,8 @@ CORE migration `0041_reward_revision_triggers.sql` adds the original 5 tables to
 
 All are STRICT, without FKs to CORE. `building` rows are invisible to readers through the pointer.
 
+Writing rows: the writer inserts estimates, simulations, provider display sections (READ 0005) and input refs with `INSERT … ON CONFLICT(<primary key>) DO NOTHING` (`packages/storage-d1/src/read/rewards.ts`, `reward-provider-expiry.ts`). Only a row whose primary key is already written is skipped, which is the resent chunk of a retried batch; the table's `BEFORE INSERT` chunk-conflict trigger runs first, so a resent row with a different `row_digest` still raises `reward estimate chunk conflict` / `reward simulation chunk conflict` / `provider display chunk conflict`. A row that fails a CHECK or NOT NULL constraint, or a new key at a `row_seq` already written, raises its constraint: the chunk and its checkpoint roll back together, the `reward_read_projection` tick is recorded as failed, and the build stays `building` and unpublished. An input ref that fails a constraint fails the batch that starts the build, so no build starts. Input refs have no digest-conflict trigger: a `(kind, id)` the plan lists twice keeps its first row. The projection builds no row the schema refuses today.
+
 <a id="保存済みsimulationの扱いg2-20"></a>
 
 ### Stored simulations (G2-20)
@@ -414,7 +416,7 @@ To stop the writer, deploy processor `REWARD_READ_PROJECTION_ENABLED=false`. No 
 
 ### Synthetic verification (U16)
 
-- `packages/storage-d1/test/reward-read-writer.test.ts` — Identical input rebuilds exactly; changing evaluation time produces a different snapshot; an existing snapshot's evaluation time/calendar are immutable (G2-19). A stored simulation retaining only its digest becomes `not_reproducible` (G2-20). Triggers reject rows naming unfixed rules/offers. Chunk resends, lease loss and forward-only pointers are covered.
+- `packages/storage-d1/test/reward-read-writer.test.ts` — Identical input rebuilds exactly; changing evaluation time produces a different snapshot; an existing snapshot's evaluation time/calendar are immutable (G2-19). A stored simulation retaining only its digest becomes `not_reproducible` (G2-20). Triggers reject rows naming unfixed rules/offers. Chunk resends, lease loss and forward-only pointers are covered. An estimate, simulation or input ref that fails a CHECK, and a new estimate key at a written `row_seq`, fail their batch and leave the checkpoint where it was; `reward-provider-expiry.test.ts` shows the same for a provider display section.
 - `services/processor/test/reward-read-projection.test.ts` — The lane on actual D1: flag-off prevents execution; lane ordering; builds lacking budget stay unpublished and resume with their own time; unstable capture becomes `pending`; dropping all READ reward tables does not change even 1 CORE claim/rule/offer/stored-input row and expires old cursors (G0-09).
 - `services/app/test/rewards-v2-read.test.ts` — Route 503/cursors/reproducibility, `/api/meta` advertisement and 503 without READ.
 
