@@ -2,7 +2,8 @@
 // the query itself produces (packages/application/test/holdings-change-world.ts):
 // a valid answer passes, and an answer that adds a total or a valuation, puts
 // a figure on a holding one date lists only or one that is not comparable,
-// drops a reason or invents a status is refused rather than displayed.
+// drops a reason or invents a status is refused rather than displayed. The
+// request side is the route's own shape rule, which the page applies too.
 import { describe, expect, test } from "bun:test";
 import {
   holdingsChangeBody,
@@ -13,7 +14,11 @@ import type {
   HoldingChangeReason,
   HoldingChangeStatus,
 } from "../../../packages/domain/src/holdings-change.ts";
-import { validReportedHoldingsChange } from "../../../packages/observation-shared/src/reported-holdings-change-contract.ts";
+import {
+  holdingsChangeQueryRefusal,
+  holdingsChangeSearch,
+  validReportedHoldingsChange,
+} from "../../../packages/observation-shared/src/reported-holdings-change-contract.ts";
 
 const PATH = "/api/v2/reported-holdings-change";
 
@@ -152,5 +157,30 @@ describe("reported holdings change HTTP contract", () => {
     expect(mutate((copy) => copy["manifest"]["holdings"].reverse())).toBe(false);
     expect(mutate((copy) => (copy["from"] = "2026-09-10"))).toBe(false);
     expect(mutate((copy) => (copy["contextId"] = "not-a-digest"))).toBe(false);
+  });
+
+  test("the page's request is the route's own parameters, under the route's shape rule", () => {
+    const search = (request: Parameters<typeof holdingsChangeSearch>[0]) =>
+      holdingsChangeSearch(request).toString();
+    expect(search({ from: "2026-09-01", to: "2026-09-10" })).toBe("from=2026-09-01&to=2026-09-10");
+    expect(
+      search({
+        from: "2026-09-01",
+        to: "2026-09-10",
+        source: "sbi-securities",
+        account: "acct-sbi",
+      }),
+    ).toBe("from=2026-09-01&to=2026-09-10&source=sbi-securities&account=acct-sbi");
+    const refusal = (query: string) => holdingsChangeQueryRefusal(new URLSearchParams(query));
+    expect(refusal("from=2026-09-01&to=2026-09-10&source=sbi-securities&account=acct-sbi")).toBe(
+      null,
+    );
+    expect(refusal("from=2026-09-01&to=2026-09-10&source=SBI")).toBe("invalid_query");
+    expect(refusal("from=2026-09-01&to=2026-09-10&account=acct%20sbi")).toBe("invalid_query");
+    expect(refusal("from=2026-09-01&to=2026-09-10&source=")).toBe("invalid_query");
+    expect(refusal("from=2026-09-01&to=2026-09-10&changeSource=sbi-securities")).toBe(
+      "invalid_query",
+    );
+    expect(refusal("from=2026-02-30&to=2026-09-10")).toBe("invalid_date");
   });
 });
