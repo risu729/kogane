@@ -4,6 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseJsonc } from "../../../scripts/jsonc.ts";
 import { vPointPayNotificationEvent } from "../src/parsers/v-point-pay.ts";
 import type { ArtifactMeta, ParseResult } from "../src/types.ts";
 import { FIXTURES_ROOT } from "./fixture-root.ts";
@@ -34,6 +35,21 @@ const parse = (value: unknown, overrides: Partial<ArtifactMeta> = {}) =>
   vPointPayNotificationEvent.parse(encode(value), meta(overrides));
 const usage = (change: Record<string, unknown> = {}) => ({ ...fixture("usage"), ...change });
 
+// The parser pins the schema-v2 envelope recipient to the deployed V Point Pay
+// routing address in its source (parsers take no configuration), so an accepted
+// v2 event must carry that address. Documented as a limit in
+// docs/sources/v-point-pay.md (Layer B). The test reads the address from the
+// collector's deployed config instead of copying it, so every acceptance below
+// also fails if the parser constant and the deployed recipient drift apart
+// (tasks/_lib/cf-deploy.test.ts keeps wrangler.jsonc and cloudflare.config.ts equal).
+const COLLECTOR_CONFIG = "services/collector-vpoint/wrangler.jsonc";
+const PINNED_RECIPIENT = (
+  parseJsonc(
+    readFileSync(new URL(`../../../${COLLECTOR_CONFIG}`, import.meta.url), "utf8"),
+    COLLECTOR_CONFIG,
+  ) as { vars: { VPOINT_PAY_EMAIL_RECIPIENT: string } }
+).vars.VPOINT_PAY_EMAIL_RECIPIENT;
+
 // The Layer A provenance block of a schema-v2 event, in its direct form.
 const direct = (id: string) => ({
   schemaVersion: "vpoint-pay-email-source-provenance-v1",
@@ -41,7 +57,7 @@ const direct = (id: string) => ({
   storedMessageScope: "smtp-message",
   sourceVerification: "source_unverified",
   envelopeFrom: "info@prepaid.smbc-card.com",
-  envelopeTo: "vpointpay@takuk.me",
+  envelopeTo: PINNED_RECIPIENT,
   outerMessageSha256: id,
   authenticationProvenance: "not-exposed-by-cloudflare-email-event",
 });
@@ -192,6 +208,16 @@ describe("v-point-pay notification events refuse drift", () => {
     expect(subjectOnly).not.toHaveProperty("counterparty");
   });
 
+  test("schema-v2 accepts exactly the collector's deployed V Point Pay recipient", () => {
+    expect(PINNED_RECIPIENT).toMatch(/^[^@\s]+@[^@\s]+$/u);
+    expect(parse(v2(direct)).observations).toHaveLength(2);
+    // Another mailbox on the same domain is still refused.
+    const sameDomain = `other-${PINNED_RECIPIENT}`;
+    expect(() => parse(v2((id) => ({ ...direct(id), envelopeTo: sameDomain })))).toThrow(
+      "sourceProvenance contradicts the Layer A contract",
+    );
+  });
+
   test("schema-v2 provenance must match one of the two Layer A forms", () => {
     expect(parse(v2(direct)).observations).toHaveLength(2);
     const forwarded = (id: string) => ({
@@ -204,7 +230,8 @@ describe("v-point-pay notification events refuse drift", () => {
     expect(parse(v2(forwarded)).observations).toHaveLength(2);
     // Mailboxes are compared case-insensitively after trimming.
     expect(
-      parse(v2((id) => ({ ...direct(id), envelopeTo: " VPointPay@Takuk.me " }))).observations,
+      parse(v2((id) => ({ ...direct(id), envelopeTo: ` ${PINNED_RECIPIENT.toUpperCase()} ` })))
+        .observations,
     ).toHaveLength(2);
 
     expect(() => parse(v2(() => "direct"))).toThrow("sourceProvenance must be an object");
