@@ -865,12 +865,16 @@ which reads terminals (03 §4).
 | `notification.eml`      | `user_capture`      | the notification message exactly as it arrived |
 | `normalized-event.json` | `collector_derived` | the parsed event with its source provenance    |
 
-Sanitizer: the existing email handling is unchanged — the envelope recipient
-must match `VPOINT_PAY_EMAIL_RECIPIENT`, a directly delivered message must come
-from the V Point Pay sender, and the stored event records
+Sanitizer: the envelope recipient must match `VPOINT_PAY_EMAIL_RECIPIENT`
+(this is the only recipient check; the parser records the recipient but does
+not compare it, [ADR 0115](adr/0115-v-point-pay-email-sender-and-recipient-checks.md)),
+the stored message's RFC 5322 From must be the V Point Pay sender in both
+delivery forms, a directly delivered message must also carry that sender on
+the SMTP envelope, and the stored event records
 `sourceVerification: source_unverified` because the Email event exposes no
-trusted SPF/DKIM result. The V Point _login code_ mail is never stored: it is
-parsed for the code and dropped.
+trusted SPF/DKIM result. Provenance `vpoint-pay-email-source-provenance-v2`
+records the stored message's From as `messageFrom`. The V Point _login code_
+mail is never stored: it is parsed for the code and dropped.
 
 Terminal: `source: v-point-pay-email`, `producer: collector-v-point-pay-email`
 (one Worker, but a producer per source), `runId` the SHA-256 of the stored
@@ -883,7 +887,9 @@ terminal digest and is answered `already_persisted`, which replaces the
 retired legacy duplicate check. `producerVersion` is part of that
 digest: a mail redelivered after a `COLLECTOR_SCHEMA_VERSION` bump is a
 `conflict`, and the handler then fails the delivery rather than overwrite the
-terminal already written for that message.
+terminal already written for that message. The same holds for a mail stored
+with provenance v1 and redelivered with the same bytes after the provenance-v2
+collector deployed: its normalized event differs, so its terminal does too.
 
 `acquisitionSessionRef` is `email-<sha256 of the message as it arrived>` on the
 notification run, and the same value on the V Point run that the same delivered

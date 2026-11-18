@@ -16,8 +16,11 @@ const ARTIFACT_KEY = "normalized-event.json";
 const MIME = "application/json";
 const SCHEMA_V1 = "vpoint-pay-email-event-v1";
 const SCHEMA_V2 = "vpoint-pay-email-event-v2";
-const PROVENANCE_SCHEMA = "vpoint-pay-email-source-provenance-v1";
-const EXPECTED_RECIPIENT = "vpointpay@takuk.me";
+const PROVENANCE_SCHEMA_V1 = "vpoint-pay-email-source-provenance-v1";
+const PROVENANCE_SCHEMA_V2 = "vpoint-pay-email-source-provenance-v2";
+// The provider's public notification sender. It is a shape check on what the
+// collector recorded, not authentication: EmailEvent exposes no trusted
+// SPF/DKIM/DMARC result (ADR 0115).
 const EXPECTED_SENDER = "info@prepaid.smbc-card.com";
 const SHA256 = /^[0-9a-f]{64}$/u;
 const CORE_KEYS = [
@@ -33,7 +36,7 @@ const CORE_KEYS = [
   "subject",
   "usedPoints",
 ] as const;
-const PROVENANCE_KEYS = [
+const PROVENANCE_V1_KEYS = [
   "authenticationProvenance",
   "delivery",
   "envelopeFrom",
@@ -43,6 +46,9 @@ const PROVENANCE_KEYS = [
   "sourceVerification",
   "storedMessageScope",
 ] as const;
+// Provenance v2 adds the RFC 5322 From of the stored message: the official
+// notification itself for direct delivery, the inner forwarded part otherwise.
+const PROVENANCE_V2_KEYS = [...PROVENANCE_V1_KEYS, "messageFrom"] as const;
 
 type EventType = "usage" | "charge" | "balance-addition" | "declined";
 
@@ -61,7 +67,7 @@ interface Event {
 
 export const vPointPayNotificationEvent: Parser = {
   name: "v-point-pay-notification-event",
-  version: "1.0.2",
+  version: "1.1.0",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -207,11 +213,32 @@ function parseEvent(bytes: Uint8Array): Event {
   };
 }
 
+/**
+ * The Layer A provenance a schema-v2 event carries (ADR 0115).
+ *
+ * The sender is the provenance check: direct delivery needs the official
+ * sender on the SMTP envelope, and provenance v2 also needs it as the stored
+ * message's RFC 5322 From in both forms. Provenance v1 records no RFC 5322
+ * From, so a v1 forwarded event carries no sender the parser could check; the
+ * collector checked it at receipt. The recipient is recorded and must be a
+ * mailbox, but only the collector compares it, at receipt, with its configured
+ * address: a parser takes no configuration, so its result stays a function of
+ * the stored evidence alone.
+ */
 function validateProvenance(value: unknown, id: string): void {
   if (!isObject(value)) throw new Error("V Point Pay sourceProvenance must be an object");
-  exactKeys(value, PROVENANCE_KEYS, "sourceProvenance");
+  const provenanceSchema = value["schemaVersion"];
+  exactKeys(
+    value,
+    provenanceSchema === PROVENANCE_SCHEMA_V2 ? PROVENANCE_V2_KEYS : PROVENANCE_V1_KEYS,
+    "sourceProvenance",
+  );
   const envelopeFrom = mailbox(value["envelopeFrom"], "sourceProvenance.envelopeFrom");
-  const envelopeTo = mailbox(value["envelopeTo"], "sourceProvenance.envelopeTo");
+  mailbox(value["envelopeTo"], "sourceProvenance.envelopeTo");
+  const messageFrom =
+    provenanceSchema === PROVENANCE_SCHEMA_V2
+      ? mailbox(value["messageFrom"], "sourceProvenance.messageFrom")
+      : null;
   const outerHash = strictString(
     value["outerMessageSha256"],
     "sourceProvenance.outerMessageSha256",
@@ -229,10 +256,10 @@ function validateProvenance(value: unknown, id: string): void {
     value["storedMessageScope"] === "forwarded-rfc822-part" &&
     outerHash !== id;
   if (
-    value["schemaVersion"] !== PROVENANCE_SCHEMA ||
+    (provenanceSchema !== PROVENANCE_SCHEMA_V1 && provenanceSchema !== PROVENANCE_SCHEMA_V2) ||
     value["sourceVerification"] !== "source_unverified" ||
     value["authenticationProvenance"] !== "not-exposed-by-cloudflare-email-event" ||
-    envelopeTo !== EXPECTED_RECIPIENT ||
+    (messageFrom !== null && messageFrom !== EXPECTED_SENDER) ||
     (!direct && !forwarded)
   ) {
     throw new Error("V Point Pay sourceProvenance contradicts the Layer A contract");

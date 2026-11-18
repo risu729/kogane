@@ -17,6 +17,54 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## V Point Pay: the parser checks the sender, not the recipient (notification-event 1.1.0)
+
+2026-11-18. Owner decisions, 2026-11-18 04:42 UTC (the recipient check moves
+out of the parser; the collector checks at receipt) and 04:47 UTC (what is
+checked is the sender)
+([ADR 0115](adr/0115-v-point-pay-email-sender-and-recipient-checks.md)).
+
+`v-point-pay-notification-event@1.1.0` no longer compares a v2 event's
+`sourceProvenance.envelopeTo` with a routing address held in its source; it
+still requires the recipient to be present and a bounded mailbox. The
+collector compares the recipient with its configured
+`VPOINT_PAY_EMAIL_RECIPIENT` before storing anything, and is now the only
+recipient check. The sender is the parser's provenance check: direct delivery
+still needs the official sender as `envelopeFrom`, and the new provenance
+schema `vpoint-pay-email-source-provenance-v2`, which the collector now
+writes, adds `messageFrom`, the stored message's RFC 5322 From, which must be
+the official sender in both delivery forms. Before this release a forwarded
+event carried no sender the parser could check. A forwarded event stored with
+provenance v1 still carries none and is accepted as before, on the
+collector's check at receipt. Every other refusal is unchanged.
+
+| Parser                         | Previous | Release |
+| ------------------------------ | -------- | ------- |
+| v-point-pay-notification-event | 1.0.2    | 1.1.0   |
+
+Only this parser's digest changes. Observations do not depend on the
+provenance. Complete 1.0.2 outputs of the four anonymous fixtures, as v1
+events and as v2 events in both delivery forms, were frozen in
+`v-point-pay-parser-boundaries/expected-1.0.2.json` (generated with 1.0.2,
+which accepted those v2 events only for the deployed recipient; the file
+carries no address), and 1.1.0 reproduces them for any recipient and for
+provenance v2. The frozen 1.0.1 results still compare unchanged; existing
+fixture bytes are untouched. **A re-parse under 1.1.0 changes nothing for mail
+that passed the collector's recipient check**: such an event reads as it did.
+A v2 event 1.0.2 refused only because its recorded recipient differed from
+the constant would now be read; that can happen only if the configured
+recipient itself changed after storage. Production was not read for this
+release. No migration: the processor registers the release and the repair
+lane re-parses stored evidence; old raw objects, parse runs and observations
+remain append-only. Parser 1.0.2 refuses a provenance-v2 event as schema
+drift, so an event stored by the new collector before the processor runs
+1.1.0 is read when the repair lane re-parses it. Tests:
+`packages/parsers/test/v-point-pay-refusals.test.ts`,
+`packages/parsers/test/parser-digests.test.ts`,
+`experiments/observation-pipeline-local/test/v-point-pay-parser.test.ts`,
+`services/collector-vpoint/test/vpoint-pay-email.test.ts` and
+`services/collector-vpoint/worker-test/vpoint-pay-recipient.test.ts`.
+
 ## Sony Bank: only CSV history transactions are current
 
 2026-11-08. Owner decision, 2026-11-08 13:29 UTC, with the completeness

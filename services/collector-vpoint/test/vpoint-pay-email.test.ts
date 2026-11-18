@@ -93,17 +93,110 @@ describe("V Point Pay notification email", () => {
     for (const put of puts) {
       expect(put.options.sha256).toBe(await sha256Hex(put.body));
     }
-    expect(stored.event).toMatchObject({
-      schemaVersion: "vpoint-pay-email-event-v2",
-      sourceProvenance: {
-        delivery: "direct",
-        storedMessageScope: "smtp-message",
-        sourceVerification: "source_unverified",
+    expect(stored.event.schemaVersion).toBe("vpoint-pay-email-event-v2");
+    expect(stored.event.sourceProvenance).toEqual({
+      schemaVersion: "vpoint-pay-email-source-provenance-v2",
+      delivery: "direct",
+      storedMessageScope: "smtp-message",
+      sourceVerification: "source_unverified",
+      envelopeFrom: "info@prepaid.smbc-card.com",
+      envelopeTo: "synthetic-vpoint-pay@example.invalid",
+      messageFrom: "info@prepaid.smbc-card.com",
+      outerMessageSha256: stored.event.id,
+      authenticationProvenance: "not-exposed-by-cloudflare-email-event",
+    });
+  });
+
+  test("records the inner official sender of a forwarded notification as messageFrom", async () => {
+    const inner = notification("◇利用金額：1円");
+    const boundary = "forwarded-message";
+    const parsed = await parseVPointPayEmail(
+      new TextEncoder().encode(
+        [
+          "From: owner@example.invalid",
+          "To: synthetic-vpoint-pay@example.invalid",
+          "Subject: Fwd: notification",
+          "MIME-Version: 1.0",
+          `Content-Type: multipart/mixed; boundary=${boundary}`,
+          "",
+          `--${boundary}`,
+          "Content-Type: message/rfc822",
+          "Content-Transfer-Encoding: base64",
+          "",
+          Buffer.from(inner).toString("base64"),
+          `--${boundary}--`,
+        ].join("\r\n"),
+      ),
+    );
+    expect(parsed?.delivery).toBe("forwarded-rfc822");
+    const stored = await storeVPointPayEmail({
+      bucket: { head: async () => null, put: async () => null } as unknown as R2Bucket,
+      parsed: parsed!,
+      envelopeFrom: "Owner@Example.invalid",
+      envelopeTo: "synthetic-vpoint-pay@example.invalid",
+      expectedRecipient: "synthetic-vpoint-pay@example.invalid",
+    });
+    expect(stored.event.sourceProvenance).toMatchObject({
+      schemaVersion: "vpoint-pay-email-source-provenance-v2",
+      delivery: "forwarded-rfc822",
+      storedMessageScope: "forwarded-rfc822-part",
+      // The envelope names the forwarder; the stored inner message names the provider.
+      envelopeFrom: "owner@example.invalid",
+      messageFrom: "info@prepaid.smbc-card.com",
+    });
+  });
+
+  test("fails closed before storage when the mail was sent to another mailbox", async () => {
+    // The parser records the recipient but no longer compares it (ADR 0115):
+    // this comparison with the configured recipient is the only guard.
+    const parsed = await parseVPointPayEmail(notification("◇利用金額：1円"));
+    for (const envelopeTo of [
+      "other-vpoint-pay@example.invalid",
+      "synthetic-vpoint-pay@other.example.invalid",
+      "synthetic-vpoint-pay",
+      "",
+    ]) {
+      const puts: string[] = [];
+      const bucket = {
+        head: async () => null,
+        put: async (key: string) => {
+          puts.push(key);
+          return null;
+        },
+      } as unknown as R2Bucket;
+      await expect(
+        storeVPointPayEmail({
+          bucket,
+          parsed: parsed!,
+          envelopeFrom: "info@prepaid.smbc-card.com",
+          envelopeTo,
+          expectedRecipient: "synthetic-vpoint-pay@example.invalid",
+        }),
+      ).rejects.toThrow("vpoint_pay_email_envelope_invalid");
+      expect(puts).toHaveLength(0);
+    }
+  });
+
+  test("fails closed before storage when the stored message's From is not the provider", async () => {
+    const parsed = await parseVPointPayEmail(notification("◇利用金額：1円"));
+    const puts: string[] = [];
+    const bucket = {
+      head: async () => null,
+      put: async (key: string) => {
+        puts.push(key);
+        return null;
+      },
+    } as unknown as R2Bucket;
+    await expect(
+      storeVPointPayEmail({
+        bucket,
+        parsed: { ...parsed!, messageFrom: "attacker@example.invalid" },
         envelopeFrom: "info@prepaid.smbc-card.com",
         envelopeTo: "synthetic-vpoint-pay@example.invalid",
-        authenticationProvenance: "not-exposed-by-cloudflare-email-event",
-      },
-    });
+        expectedRecipient: "synthetic-vpoint-pay@example.invalid",
+      }),
+    ).rejects.toThrow("vpoint_pay_email_message_sender_invalid");
+    expect(puts).toHaveLength(0);
   });
 
   test("fails closed before storage when the direct SMTP envelope sender is a lookalike", async () => {

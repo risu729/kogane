@@ -163,7 +163,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/util.ts":
       "15ecd270250b82e4009b0b0b05469f5030849a555a9b671f7062941c90cf49dd",
     "poc/observation-pipeline/src/parsers/v-point-pay.ts":
-      "d16279ba46c167366bb29a62811517623c518bcaa0c0a8e9fa9a1b7fb60aeb51",
+      "6172716b502851b6cc91af63f040236365dac9e6466368f9b3cd5135f6e684a9",
     "poc/observation-pipeline/src/parsers/v-point.ts":
       "67e8b851360f2da7046967231407dfe2e0c01ee87e58a670d7a1f355efe2bb7d",
     "poc/observation-pipeline/src/parsers/vpass-credit.ts":
@@ -1042,8 +1042,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "v-point-pay-notification-event": {
-      version: "1.0.2",
-      codeDigest: "a1296deb79ac04b581bd32396bab0fd6b9eba4258ddc4a4328e9c5cc7d4e8293",
+      version: "1.1.0",
+      codeDigest: "a2e217d2af44cd7756abee7d6e7afabc934093350b429994c485f2e6a9241495",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
