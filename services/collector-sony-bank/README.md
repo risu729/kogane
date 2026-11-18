@@ -119,7 +119,8 @@ subsequent `NotAttempted` reads. No retries or collection requests are added.
 JPY now follows the same zero-transaction CSV rule as foreign currencies: after
 validating every official history JSON page, request CSV only when the total is
 positive. Keep the original zero-row JSON, balance and WALLET evidence; do not
-fabricate an empty CSV. A positive-history CSV error still fails collection.
+fabricate an empty CSV. A positive-history CSV error still stops the core run
+(see the last section).
 No importer re-checks this any more: the collector itself omits JPY CSV only after
 validating zero-row history, and the manifest and collection-summary field shapes
 remain unchanged.
@@ -140,7 +141,26 @@ counts are logged before requesting CSV, even if a later step fails. No URLs,
 credentials, financial bodies or free-text provider errors enter these records.
 Log emission is best effort and cannot replace a collection result or failure.
 
-Artifacts are still persisted after full collection returns. A failure midway
-does not yet preserve earlier fetched artifacts, so the failure manifest's
-default transaction count is not evidence that JPY history was empty; use the
-validated progress count instead.
+### A core failure keeps the finished steps
+
+The core run's steps are, in order, `login`, `gross-balance`,
+`monthly-history`, `retained-history` and `wallet` (`CORE_STEPS`,
+`src/sony-bank.ts`); each one is all-or-nothing across the eleven currencies.
+When a step throws, `runSharedCollection` (`src/worker.ts`) keeps the
+artifacts of the steps that finished before it and nothing of the failing step.
+With at least one kept artifact the core run is `partial`; a stop at `login`
+or `gross-balance` keeps nothing and stays `failed` with no artifact. The
+month window keeps its `monthly-*` names, so canonical history files (the
+parser input) appear only when the retained step finished. A stopped run
+writes no `collection-summary.json` and no WALLET page. Its `manifest.json`
+names the stopped step as the failure's `operation` and lists
+`coreSteps.completed`, `coreSteps.failed` and `coreSteps.notAttempted`; its
+terminal carries the allowlisted history reason or else
+`core_monthly_history_failed`, `core_retained_history_failed` or
+`core_wallet_failed`. `transactionCount` (manifest and returned result) is
+null, not 0, unless the retained step finished; use the validated progress
+count for an earlier stop. The kept artifacts are evidence only: every Sony
+core dataset has run-scoped parse eligibility, so a `partial` core run is
+never parsed. The two supplementary runs still start only after a complete
+core
+([ADR 0099, amendment 2026-11-18](../../docs/adr/0099-sony-retained-history.md#amendment-2026-11-18-a-mid-core-failure-keeps-the-finished-steps-as-a-partial-run)).

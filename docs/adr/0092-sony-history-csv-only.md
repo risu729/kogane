@@ -94,3 +94,19 @@ foreign-currency mismatch, successful CSV with quoted multiline cells, and
 zero transactions without CSV. They run the actual shared collection path and
 assert its terminal outcome and closed codes. No production data or provider
 requests are used.
+
+## Amendment 2026-11-18: a refused window stops a partial core run
+
+- Status: proposed
+- Date: 2026-11-18
+- Decided in: [ADR 0099, amendment 2026-11-18](0099-sony-retained-history.md#amendment-2026-11-18-a-mid-core-failure-keeps-the-finished-steps-as-a-partial-run)
+
+An incomplete currency/window still refuses its whole history step: that
+step's JSON pages and CSVs are never returned, and there is still no JSON
+fallback. What changes is the run around it. The core steps that finished
+before it (the balance, and for a retained-range refusal the complete month
+window under `monthly-*` names) are kept, so the run is `partial` rather than
+`failed`; it is `failed` only when nothing was kept. The closed reason still
+reaches the terminal, its account unit and its report. A `partial` core run is
+not parsed (run-scoped eligibility), so no current transaction or balance comes
+from it.

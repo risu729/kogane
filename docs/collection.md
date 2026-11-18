@@ -370,14 +370,37 @@ expected total, already checked against every walked JSON page. A zero total
 skips CSV; a positive total requires a CSV whose logical data-row count,
 excluding the header and blank lines, equals that total. The collector uses
 the shared CSV reader so quoted multiline cells and quote recovery count as
-in parsing. This check runs before collection returns artifacts, so failures
-end the shared run as `failed`, with no JSON transaction fallback:
+in parsing. This check runs before the history step returns any artifact, so a
+refusal stops the core run with no JSON transaction fallback:
 `history_csv_missing_with_transactions` (empty/missing body or failed CSV
 HTTP request), `history_csv_count_mismatch` (short or long CSV), or
 `history_csv_invalid` (invalid encoding/header). The allowlisted code is
 stored at terminal, report and account-unit scope, without provider text or
-amounts. Transport failures likewise fail the run. Existing failed-run
-artifact retention is unchanged. See [ADR 0092](adr/0092-sony-history-csv-only.md).
+amounts. Transport failures likewise stop the run. See
+[ADR 0092](adr/0092-sony-history-csv-only.md).
+
+The core steps run in order: `login`, `gross-balance`, `monthly-history`,
+`retained-history`, `wallet` (`CORE_STEPS`, `src/sony-bank.ts`). Each step is
+all-or-nothing across the eleven currencies. When one throws, the run keeps
+the artifacts of the steps that finished, under the names a complete run gives
+them (the month window stays `monthly-*`; a canonical history name appears only
+once the retained step finished), and keeps nothing of the step that threw. It
+is then `partial` (`failed` with no artifact when nothing finished that stores
+one, which is a stop at `login` or `gross-balance`). A stopped run writes no
+`collection-summary.json` and, WALLET being last, no WALLET page or
+`wallet-months` range. Its `manifest.json` adds `coreSteps` (`completed`,
+`failed`, `notAttempted`), names the stopped step as the failure's
+`operation`, and has a null `transactionCount` unless the retained step
+finished. The terminal's code is the allowlisted history reason above when
+there is one, else `core_monthly_history_failed`,
+`core_retained_history_failed` or `core_wallet_failed`; the account unit is
+`partial` with that code. `sonyBankRunPlan` refuses a stopped run carrying an
+artifact no finished step produced (`core_partial_scope_invalid`). A partial
+core run is never parsed: every Sony core dataset has run-scoped eligibility,
+so it is evidence only, and the scheduler records it `completed` like any
+persisted `partial` run
+([ADR 0099, amendment 2026-11-18](adr/0099-sony-retained-history.md#amendment-2026-11-18-a-mid-core-failure-keeps-the-finished-steps-as-a-partial-run)).
+The realised-gains and documents runs are read only after a complete core.
 
 Sanitizer: the collector's own `sanitizeWalletHtml` (Sony Bank Wallet
 statements), the same pass the retired legacy path applied before the importer

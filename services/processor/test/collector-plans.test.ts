@@ -26,6 +26,7 @@ import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket.ts";
 import { persistRun, type PersistRunPlan } from "../../../packages/collection/src/writer.ts";
 import { sha256Hex } from "../../../packages/collection/src/digest.ts";
 import { registerCollectionRun, type CollectionEnv } from "../src/collection/index.ts";
+import { unitParseable } from "../../../packages/read-model/src/concepts.ts";
 import { sanitizeMizuhoPage } from "../../../packages/parsers/src/parsers/mizuho-html.ts";
 import { mizuhoAccountHtml } from "../../../packages/parsers/test/mizuho-fixture.ts";
 import { buildSharedRunPlan as globalPassRunPlan } from "../../collector-globalpass/src/shared-collection.ts";
@@ -122,6 +123,8 @@ interface Registered {
   /** Each unit's terminal-report failure code, by unit key (null when none). */
   unitFailureCodes: (string | null)[];
   artifactRanges: { artifact_key: string; start_value: string; end_value: string }[];
+  /** Artifacts with a dataset the Worker's parse gate (`unitParseable`) admits. */
+  parseEligible: number;
 }
 
 /**
@@ -229,7 +232,14 @@ async function registerPlan(plan: PersistRunPlan, expectedArtifacts: number): Pr
       "SELECT a.artifact_key,r.start_value,r.end_value FROM artifact_ranges r JOIN fetch_artifacts a ON a.id=r.fetch_artifact_id WHERE a.fetch_run_id=? ORDER BY a.artifact_key",
     )
     .all(result.fetchRunId) as Registered["artifactRanges"];
-  return { roles, units, datasets, runStatus, unitFailureCodes, artifactRanges };
+  const parseEligible = count(
+    `SELECT count(*) AS n FROM observation_fetch_artifacts a
+       JOIN observation_fetch_runs r ON r.id=a.fetch_run_id
+      WHERE a.fetch_run_id=? AND a.dataset IS NOT NULL
+        AND ${unitParseable.policyPredicate("r", "a")}`,
+    result.fetchRunId,
+  );
+  return { roles, units, datasets, runStatus, unitFailureCodes, artifactRanges, parseEligible };
 }
 
 // --- Sources that registered before this change -------------------------------
@@ -1019,6 +1029,67 @@ test("moneyforward-me: sparse captured months register as separate sealed CORE r
   }
 });
 
+// Runs before the successful case below, which then records the status Sony
+// registers as for the last test.
+test("sony-bank: a core run that stopped at WALLET registers partial and nothing in it is parsed (ADR 0099 amendment 2026-11-18)", async () => {
+  const plan = await sonyBankRunPlan({
+    schemaVersion: "sony-bank-worker-poc-v3",
+    runId: RUN_ID,
+    startedAt: STARTED_AT,
+    completedAt: COMPLETED_AT,
+    status: "partial",
+    window: { from: null, to: "2099-01-01" },
+    transactionCount: 1,
+    artifacts: [
+      {
+        dataset: "gross-balance",
+        filename: "gross-balance.json",
+        mediaType: "application/json",
+        body: '{"synthetic":"balance"}',
+      },
+      {
+        dataset: "yen-history-csv",
+        filename: "yen-history.csv",
+        mediaType: "text/csv",
+        body: "synthetic,csv\n",
+      },
+      {
+        dataset: "yen-history-csv",
+        filename: "monthly-yen-history.csv",
+        mediaType: "text/csv",
+        body: "synthetic,monthly\n",
+      },
+    ],
+    failures: [
+      {
+        operation: "wallet",
+        errorType: "SonyBankError",
+        message: "collector_request_failed",
+        diagnostics: { stage: "wallet-gateway", reason: "http_error" },
+      },
+    ],
+    coreSteps: {
+      completed: ["login", "gross-balance", "monthly-history", "retained-history"],
+      failed: "wallet",
+      notAttempted: [],
+    },
+  });
+  expect(plan.run).toMatchObject({
+    providerOutcome: "partial",
+    coverageStatus: "partial",
+    safeErrorCode: "core_wallet_failed",
+    requestedScope: { scopeKind: "full_snapshot", startValue: null, endValue: "2099-01-01" },
+  });
+  const registered = await registerPlan(plan, 4);
+  expect(registered.runStatus).toBe("partial");
+  expect(registered.unitFailureCodes).toEqual(["core_wallet_failed"]);
+  // The retained CSV and the balance carry their datasets, the month-window
+  // file none (ADR 0099), and the run-scoped parse gate admits none of them:
+  // a partial core run is evidence only.
+  expect(registered.datasets).toEqual([null, "gross-balance", "yen-history-csv"]);
+  expect(registered.parseEligible).toBe(0);
+});
+
 test("sony-bank: responses, exports, redacted statements and the summary register and seal", async () => {
   const plan = await sonyBankRunPlan({
     schemaVersion: "sony-bank-worker-poc-v2",
@@ -1058,6 +1129,8 @@ test("sony-bank: responses, exports, redacted statements and the summary registe
   });
   const registered = await registerPlan(plan, 5);
   expect(registered.units).toEqual([{ unit_key: "account", artifacts: 4, declared: 4 }]);
+  // The same gate admits a successful run's balance, CSV and statement.
+  expect(registered.parseEligible).toBe(3);
 });
 
 /**

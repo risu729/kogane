@@ -140,6 +140,21 @@ async function capture<T>(task: () => Promise<T>, throwing = false) {
   }
 }
 
+/** The collector manifest a terminal lists, read back from the bucket. */
+function storedManifest(
+  data: FakeR2Bucket,
+  terminal: { artifacts: { artifactKey: string; storageRef: { key: string } }[] },
+) {
+  const entry = terminal.artifacts.find((artifact) => artifact.artifactKey === "manifest.json");
+  if (entry === undefined) throw new Error("manifest missing");
+  return JSON.parse(new TextDecoder().decode(data.entries.get(entry.storageRef.key)!.bytes));
+}
+
+/** The core run's terminal: the one that names the run the result reports. */
+function coreTerminal(data: FakeR2Bucket, terminalKey: string) {
+  return JSON.parse(new TextDecoder().decode(data.entries.get(terminalKey)!.bytes));
+}
+
 async function expectSecondPageRefused(secondPage: "changed-total" | "short") {
   const mock = provider(4, 200, false, { secondPage });
   const { value, records } = await capture(async () => {
@@ -487,14 +502,35 @@ describe("Sony CSV completeness reaches the shared terminal", () => {
             { from: "2099-01-01", to: "2099-01-02" },
           ),
         );
-        expect(value.status).toBe(code === undefined ? "partial" : "failed");
+        // A refused month-window CSV stops the core at `monthly-history`; the
+        // balance read before it is kept, so the run is `partial`, never a
+        // success, and still carries the closed CSV reason (ADR 0092; ADR 0099
+        // amendment 2026-11-18).
+        expect(value.status).toBe("partial");
         const terminal = JSON.parse(
           new TextDecoder().decode(data.entries.get(value.terminalKey)!.bytes),
         );
-        expect(terminal.providerOutcome).toBe(code === undefined ? "success" : "failed");
+        expect(terminal.providerOutcome).toBe(code === undefined ? "success" : "partial");
+        expect(terminal.coverageStatus).toBe(code === undefined ? "complete" : "partial");
         expect(terminal.safeErrorCode).toBe(code);
         expect(terminal.units[0].safeErrorCode).toBe(code);
         expect(terminal.reports[0].safeErrorCode).toBe(code);
+        if (code !== undefined) {
+          expect(
+            terminal.artifacts.map((entry: { artifactKey: string }) => entry.artifactKey).sort(),
+          ).toEqual(["gross-balance.json", "manifest.json"]);
+          const manifest = storedManifest(data, terminal);
+          expect(manifest.coreSteps).toEqual({
+            completed: ["login", "gross-balance"],
+            failed: "monthly-history",
+            notAttempted: ["retained-history", "wallet"],
+          });
+          expect(manifest.transactionCount).toBeNull();
+          expect(manifest.failures).toHaveLength(1);
+          expect(manifest.failures[0].operation).toBe("monthly-history");
+          expect(manifest.failures[0].message).toContain(`reason=${code}`);
+          expect(value.transactionCount).toBeNull();
+        }
         expect(JSON.stringify(records)).not.toContain(privateValue);
       } finally {
         fetchSpy.mockRestore();
@@ -625,24 +661,175 @@ describe("scheduled retained history", () => {
           { from: "2099-04-01", to: "2099-04-02" },
         ),
       );
-      expect(value.status).toBe("failed");
-      const terminal = JSON.parse(
-        new TextDecoder().decode(
-          [...data.entries.values()].find((e) =>
-            new TextDecoder().decode(e.bytes).includes('"manifestVersion"'),
-          )!.bytes,
-        ),
-      );
+      // The retained step stopped the run: the balance and the complete
+      // month window stay, under their `monthly-` names, and no canonical
+      // history name (the parser input) is written (ADR 0099 amendment
+      // 2026-11-18).
+      expect(value.status).toBe("partial");
+      expect(value.transactionCount).toBeNull();
+      const terminal = coreTerminal(data, value.terminalKey);
+      expect(terminal.providerOutcome).toBe("partial");
+      expect(terminal.coverageStatus).toBe("partial");
       expect(terminal.safeErrorCode).toBe("history_csv_count_mismatch");
+      expect(terminal.units).toEqual([
+        expect.objectContaining({
+          unitKey: "account",
+          coverageStatus: "partial",
+          safeErrorCode: "history_csv_count_mismatch",
+        }),
+      ]);
       expect(terminal.requestedScope).toMatchObject({
         scopeKind: "full_snapshot",
         startValue: null,
         endValue: "2099-04-02",
       });
-      expect(terminal.artifacts).toHaveLength(0);
+      const keys: string[] = terminal.artifacts.map(
+        (entry: { artifactKey: string }) => entry.artifactKey,
+      );
+      expect(keys).toContain("gross-balance.json");
+      expect(keys).toContain("monthly-yen-history.csv");
+      expect(keys).toContain("monthly-yen-history-page-0001.json");
+      expect(keys).toContain("manifest.json");
+      expect(
+        keys.filter(
+          (key) =>
+            key !== "gross-balance.json" && key !== "manifest.json" && !key.startsWith("monthly-"),
+        ),
+      ).toEqual([]);
+      expect(terminal.ranges.map((range: { rangeKey: string }) => range.rangeKey)).toEqual([
+        "request-window",
+      ]);
+      const manifest = storedManifest(data, terminal);
+      expect(manifest.coreSteps).toEqual({
+        completed: ["login", "gross-balance", "monthly-history"],
+        failed: "retained-history",
+        notAttempted: ["wallet"],
+      });
+      expect(manifest.transactionCount).toBeNull();
+      expect(manifest.failures.map((entry: { operation: string }) => entry.operation)).toEqual([
+        "retained-history",
+      ]);
+      // No supplement runs after a core failure.
+      expect(value.runIds).toEqual([value.runId]);
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe("a core failure keeps the steps that finished (ADR 0099 amendment 2026-11-18)", () => {
+  const env = (data: FakeR2Bucket) =>
+    ({
+      COLLECTOR_SCHEMA_VERSION: "sony-bank-worker-poc-v3",
+      SONY_BANK_CREDENTIAL_JSON: JSON.stringify({
+        branchNum: "001",
+        accountNum: "1234567",
+        loginPwd: privateValue,
+      }),
+      DATA: data,
+    }) as unknown as Env;
+  async function run(failingPath: string) {
+    const mock = provider(2, 200, false, { currencyTotals: { JPY: 2, USD: 1 } });
+    const data = new FakeR2Bucket();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+      new URL(String(input)).pathname.endsWith(failingPath)
+        ? Response.json({ errors: [{ code: privateValue }] }, { status: 500 })
+        : mock.fetcher(input, init)) as typeof fetch;
+    try {
+      const { value, records } = await capture(() =>
+        runSharedCollection(env(data), { from: "2099-04-01", to: "2099-04-02" }),
+      );
+      expect(JSON.stringify(records)).not.toContain(privateValue);
+      return { value, records, data, mock };
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  test("a WALLET failure keeps the balance and both validated history ranges as a partial run", async () => {
+    const { value, records, data } = await run("debit-sso/login-usage-dtl-inq");
+    expect(value.status).toBe("partial");
+    // The canonical (retained) yen total is known once that step finished.
+    expect(value.transactionCount).toBe(2);
+    expect(scheduledResult(value)).toEqual({
+      status: "completed",
+      runIds: [value.runId],
+      failureCode: null,
+    });
+    const terminal = coreTerminal(data, value.terminalKey);
+    expect(terminal).toMatchObject({
+      providerOutcome: "partial",
+      coverageStatus: "partial",
+      safeErrorCode: "core_wallet_failed",
+      requestedScope: { scopeKind: "full_snapshot", startValue: null, endValue: "2099-04-02" },
+    });
+    expect(terminal.units).toEqual([
+      expect.objectContaining({
+        unitKey: "account",
+        coverageStatus: "partial",
+        safeErrorCode: "core_wallet_failed",
+      }),
+    ]);
+    expect(terminal.reports).toEqual([
+      expect.objectContaining({
+        reportRef: "terminal",
+        outcome: "partial",
+        safeErrorCode: "core_wallet_failed",
+      }),
+    ]);
+    // No WALLET month, so no `wallet-months` coverage range and no summary.
+    expect(terminal.ranges.map((range: { rangeKey: string }) => range.rangeKey)).toEqual([
+      "request-window",
+    ]);
+    const keys: string[] = terminal.artifacts.map(
+      (entry: { artifactKey: string }) => entry.artifactKey,
+    );
+    for (const key of [
+      "gross-balance.json",
+      "yen-history-page-0001.json",
+      "yen-history.csv",
+      "foreign-history-usd.csv",
+      "monthly-yen-history.csv",
+      "monthly-foreign-history-usd.csv",
+      "manifest.json",
+    ])
+      expect(keys).toContain(key);
+    expect(keys.some((key) => key.startsWith("wallet-history-"))).toBe(false);
+    expect(keys).not.toContain("collection-summary.json");
+    const manifest = storedManifest(data, terminal);
+    expect(manifest.status).toBe("partial");
+    expect(manifest.transactionCount).toBe(2);
+    expect(manifest.coreSteps).toEqual({
+      completed: ["login", "gross-balance", "monthly-history", "retained-history"],
+      failed: "wallet",
+      notAttempted: [],
+    });
+    expect(manifest.failures).toEqual([
+      expect.objectContaining({ operation: "wallet", errorType: "SonyBankError" }),
+    ]);
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        event: "sony-bank-collection-failure",
+        operation: "wallet",
+        runId: value.runId,
+      }),
+    );
+  });
+
+  test("a balance failure has kept nothing, so the run stays failed with no artifact", async () => {
+    const { value, data, mock } = await run("gross-balance/acq");
+    expect(value.status).toBe("failed");
+    expect(value.transactionCount).toBeNull();
+    expect(scheduledResult(value).status).toBe("failed");
+    const terminal = coreTerminal(data, value.terminalKey);
+    expect(terminal).toMatchObject({
+      providerOutcome: "failed",
+      coverageStatus: "unknown",
+      safeErrorCode: "collector_failed",
+    });
+    expect(terminal.artifacts).toEqual([]);
+    expect(mock.historyRequests).toEqual([]);
   });
 });
 

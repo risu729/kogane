@@ -1,7 +1,14 @@
 import { decodeSonyCsv, SonyCsvDecodeError } from "../../../packages/parsers/src/parsers/sony-csv";
 import { decodeUtf8, parseCsv, type CsvWarning } from "../../../packages/parsers/src/parsers/util";
 import { failure, SonyBankDiagnostics, SonyBankError } from "./diagnostics";
-import type { CollectionFailure, JsonObject, RawArtifact, SonyBankCredential } from "./types";
+import type {
+  CollectionFailure,
+  CoreStep,
+  CoreStepOutcome,
+  JsonObject,
+  RawArtifact,
+  SonyBankCredential,
+} from "./types";
 
 const ORIGIN = "https://sonybank.jp";
 const LOGIN_PAGE = `${ORIGIN}/pages/db/dbca0100/input/`;
@@ -63,6 +70,40 @@ export interface Supplement {
   window: { from: string | null; to: string | null };
   artifacts: RawArtifact[];
   failures: CollectionFailure[];
+}
+
+/**
+ * The core steps of one session, in the order they run (ADR 0099, amendment
+ * 2026-11-18). `retained-history` runs only when retained history is requested.
+ * Each step is all-or-nothing: its artifacts exist only once every request of
+ * the step, across all eleven currencies, has been validated.
+ */
+const CORE_STEPS: readonly CoreStep[] = [
+  "login",
+  "gross-balance",
+  "monthly-history",
+  "retained-history",
+  "wallet",
+];
+
+/**
+ * What a core collection had finished when it stopped. A caller passes an
+ * empty one in; `collectSonyBank` appends each step's artifacts only after that
+ * step completed, named exactly as a complete run names them, and on a throw
+ * records the step that was running and the planned steps it never reached.
+ * The thrown error itself is unchanged.
+ */
+export interface CoreProgress {
+  readonly completed: CoreStep[];
+  readonly artifacts: RawArtifact[];
+  /** Set only when a core step threw. */
+  stopped?: CoreStepOutcome;
+  /** The canonical history's yen total, known once the step owning it finished. */
+  transactionCount: number | null;
+}
+
+export function coreProgress(): CoreProgress {
+  return { completed: [], artifacts: [], transactionCount: null };
 }
 
 interface HistoryCollection {
@@ -140,70 +181,117 @@ export async function collectSonyBank(options: {
   runId?: string;
   includeRetainedHistory?: boolean;
   includeSupplementaryData?: boolean;
+  /** Receives each finished core step's artifacts; see {@link CoreProgress}. */
+  progress?: CoreProgress;
 }): Promise<SonyBankCollection> {
   const fetcher = options.fetcher ?? fetch;
   const diagnostics = new SonyBankDiagnostics(options.runId);
   const client = new SonyBankClient(fetcher, options.credential, diagnostics);
-  await diagnostics.stage("login", () => client.login());
+  const progress = options.progress ?? coreProgress();
+  let step: CoreStep = "login";
+  const finish = (artifacts: readonly RawArtifact[]) => {
+    progress.completed.push(step);
+    progress.artifacts.push(...artifacts);
+  };
+  let core: { artifacts: RawArtifact[]; transactionCount: number };
+  try {
+    await diagnostics.stage("login", () => client.login());
+    finish([]);
 
-  const gross = await diagnostics.stage("gross-balance", async () =>
-    client.requestJson(
-      GROSS_BALANCE_PATH,
-      { branchNum: options.credential.branchNum, accountNum: options.credential.accountNum },
-      {
-        area: "da",
-        revision: await client.revision("da"),
-        pageUrl: DASHBOARD_PAGE,
-        screenId: "DAYA010AM1f",
-        eventId: "DAYA010AM1fE13",
-      },
-    ),
-  );
-
-  const monthly = await collectHistoryRange(client, diagnostics, options.from, options.to);
-  const retained = options.includeRetainedHistory
-    ? await collectHistoryRange(client, diagnostics, undefined, options.to)
-    : null;
-  const history = retained ?? monthly;
-  const wallet = await diagnostics.stage("wallet", () => client.walletHistory());
-  const artifacts: RawArtifact[] = [
-    {
+    step = "gross-balance";
+    const gross = await diagnostics.stage("gross-balance", async () =>
+      client.requestJson(
+        GROSS_BALANCE_PATH,
+        { branchNum: options.credential.branchNum, accountNum: options.credential.accountNum },
+        {
+          area: "da",
+          revision: await client.revision("da"),
+          pageUrl: DASHBOARD_PAGE,
+          screenId: "DAYA010AM1f",
+          eventId: "DAYA010AM1fE13",
+        },
+      ),
+    );
+    const grossArtifact: RawArtifact = {
       dataset: "gross-balance",
       filename: "gross-balance.json",
       mediaType: "application/json",
       body: gross.rawText,
-    },
-    ...history.artifacts,
-    ...(retained
+    };
+    finish([grossArtifact]);
+
+    step = "monthly-history";
+    const monthly = await collectHistoryRange(client, diagnostics, options.from, options.to);
+    // With retained history requested, the month window's files carry the
+    // `monthly-` prefix, which no parser dataset selects, whether or not the
+    // retained step later finishes: a canonical history name always means the
+    // retained range (ADR 0099).
+    const monthlyArtifacts = options.includeRetainedHistory
       ? monthly.artifacts.map((artifact) => ({
           ...artifact,
           filename: `monthly-${artifact.filename}`,
         }))
-      : []),
-    ...wallet.months.map((month) => ({
+      : monthly.artifacts;
+    finish(monthlyArtifacts);
+    if (!options.includeRetainedHistory) progress.transactionCount = monthly.transactionCount;
+
+    let retained: Awaited<ReturnType<typeof collectHistoryRange>> | null = null;
+    if (options.includeRetainedHistory) {
+      step = "retained-history";
+      retained = await collectHistoryRange(client, diagnostics, undefined, options.to);
+      finish(retained.artifacts);
+      progress.transactionCount = retained.transactionCount;
+    }
+    const history = retained ?? monthly;
+
+    step = "wallet";
+    const wallet = await diagnostics.stage("wallet", () => client.walletHistory());
+    const walletArtifacts: RawArtifact[] = wallet.months.map((month) => ({
       dataset: `wallet-history-${month.value.slice(0, 6)}`,
       filename: `wallet-history-${month.value.slice(0, 4)}-${month.value.slice(4, 6)}.html`,
       mediaType: "text/html; charset=UTF-8",
       body: month.html,
-    })),
-    {
-      dataset: "collection-summary",
-      filename: "collection-summary.json",
-      mediaType: "application/json",
-      body: JSON.stringify({
-        schemaVersion: "sony-bank-collection-summary-v2",
-        window: { from: retained ? null : options.from, to: options.to },
-        monthlyWindow: { from: options.from, to: options.to },
-        transactionCount: history.transactionCount,
-        pageCount: history.pageCount,
-        foreignCurrencyCount: FOREIGN_CURRENCY_CODES.length,
-        foreignTransactionCount: history.foreignTransactionCount,
-        foreignPageCount: history.foreignPageCount,
-        walletMonthCount: wallet.months.length,
-        cookieNames: client.cookieNames(),
-      }),
-    },
-  ];
+    }));
+    // WALLET is the last step: once it returns, the core run is complete and
+    // `progress` is no longer read.
+    core = {
+      artifacts: [
+        grossArtifact,
+        ...history.artifacts,
+        ...(retained ? monthlyArtifacts : []),
+        ...walletArtifacts,
+        {
+          dataset: "collection-summary",
+          filename: "collection-summary.json",
+          mediaType: "application/json",
+          body: JSON.stringify({
+            schemaVersion: "sony-bank-collection-summary-v2",
+            window: { from: retained ? null : options.from, to: options.to },
+            monthlyWindow: { from: options.from, to: options.to },
+            transactionCount: history.transactionCount,
+            pageCount: history.pageCount,
+            foreignCurrencyCount: FOREIGN_CURRENCY_CODES.length,
+            foreignTransactionCount: history.foreignTransactionCount,
+            foreignPageCount: history.foreignPageCount,
+            walletMonthCount: wallet.months.length,
+            cookieNames: client.cookieNames(),
+          }),
+        },
+      ],
+      transactionCount: history.transactionCount,
+    };
+  } catch (error) {
+    const planned = CORE_STEPS.filter(
+      (entry) => entry !== "retained-history" || options.includeRetainedHistory === true,
+    );
+    progress.stopped = {
+      completed: [...progress.completed],
+      failed: step,
+      notAttempted: planned.slice(planned.indexOf(step) + 1),
+    };
+    throw error;
+  }
+  const { artifacts } = core;
   const supplements: Supplement[] = [];
   if (options.includeSupplementaryData) {
     for (const kind of ["realised-gains", "documents"] as const) {
@@ -232,7 +320,7 @@ export async function collectSonyBank(options: {
       });
     }
   }
-  return { artifacts, transactionCount: history.transactionCount, supplements };
+  return { artifacts, transactionCount: core.transactionCount, supplements };
 }
 
 async function collectHistoryRange(
