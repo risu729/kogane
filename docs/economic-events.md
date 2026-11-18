@@ -1024,6 +1024,12 @@ merge batch back"). Two limits: a rejection recorded only on `proposal:`,
 which `decideProposal` writes without a triple, is not seen, and nothing
 calls it with any method but `rule`; and a link the reconciliation lane's
 stage B once proposed over a row no event's key ever cited is not found.
+`test/card-purchase-reviewed-pair.test.ts` compares the guard with its first
+text, which read every `proposal:` decision, on random stores and a scaled
+one: they agree on every pair of events except where the only review of the
+pair is such a `decideProposal` rejection; the second limit holds for both
+texts. Neither limit is reached today: the guard runs only for a
+provider-linked pair, and no source supplies a pending-to-posted link id.
 The reconciliation lane's own provider-link acceptance (`acceptProposal`)
 does not read this guard, so it would accept a re-anchored pair a reviewer
 rejected (and the purchase lane would then leave it unmerged); it is not
@@ -1237,7 +1243,9 @@ event already retired keeps the period it had.
   re-anchor makes it a new provider-linked proposal; and the stored pairs are
   looked up a bounded chunk at a time. `test/card-purchase-link-current.test.ts`
   checks that the reviewed-pair guard is keyed by the two events without
-  table statistics.
+  table statistics, and `test/card-purchase-reviewed-pair.test.ts` that it
+  reaches the verdict of its first text (frozen in
+  `test/reviewed-pair-guard-legacy-sql.ts`) wherever a review wrote its triple.
   `test/reconciliation.test.ts` checks the canonical relation ends and
   proposal evidence.
 - `packages/storage-d1`: `test/card-purchase-links.test.ts` (merge and split
