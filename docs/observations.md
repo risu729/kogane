@@ -57,8 +57,12 @@ recipient itself changed after storage. Production was not read for this
 release. No migration: the processor registers the release and the repair
 lane re-parses stored evidence; old raw objects, parse runs and observations
 remain append-only. Parser 1.0.2 refuses a provenance-v2 event as schema
-drift, so an event stored by the new collector before the processor runs
-1.1.0 is read when the repair lane re-parses it. Tests:
+drift. The release uploads the collectors before the Processor (ADR 0039), so
+an event stored between the two uploads, or while a Processor-only rollback
+runs a commit before 1.1.0, gets a 1.0.2 `error` parse run and no observation
+yet; parse jobs are keyed by parser version, so the repair lane's cyclic scan
+gives it a 1.1.0 job like every other stored artifact and it is read then,
+with no operator step. Tests:
 `packages/parsers/test/v-point-pay-refusals.test.ts`,
 `packages/parsers/test/parser-digests.test.ts`,
 `experiments/observation-pipeline-local/test/v-point-pay-parser.test.ts`,

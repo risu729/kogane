@@ -72,6 +72,9 @@ For forwarded events stored before this change, which record no From:
   sender the collector checked at receipt, without any new evidence against
   them.
 - (b) accept them as before and write the gap down as a limit. Chosen.
+- (c) check the From in the paired `notification.eml`. Not possible: a
+  parser reads only its own artifact's bytes and metadata, and this parser
+  accepts only `normalized-event.json`.
 
 ## Decision
 
@@ -122,16 +125,36 @@ For forwarded events stored before this change, which record no From:
   Production was not read for this decision. Existing raw objects, parse
   runs and observations remain append-only; the processor registers the
   release and the repair lane re-parses stored evidence.
-- **New mail is stored with provenance v2.** Parser 1.0.2 refuses a
-  provenance-v2 event as schema drift, so an event the new collector stores
-  before the processor runs 1.1.0 fails its first parse and is read when the
-  repair lane re-parses it under 1.1.0.
+- **New mail is stored with provenance v2, and the collector can write it
+  before the processor reads it.** The release uploads every collector
+  before the Processor (ADR 0039; `infra/deploy-order.json` puts
+  `vpoint-worker` before `processor`, and `tasks/_lib/deploy-order.test.ts`
+  holds the workflow to it), so the deploy order does not make 1.1.0 active
+  first. Parser 1.0.2 refuses a provenance-v2 event as schema drift: an
+  event stored between the two uploads, or while a Processor-only rollback
+  (`rollback.yml` with `targets`) runs a commit before 1.1.0, gets a 1.0.2
+  `error` parse run (`parser_rejected`, not retried at that version) and no
+  observation yet. Nothing is lost or stored twice: the raw pair is stored
+  once, and parse jobs are keyed by parser version, so the repair lane's
+  cyclic scan (`repairScan` in `services/processor/src/worker.ts`) creates a
+  1.1.0 job for that artifact as it does for every stored artifact after the
+  version bump, and the 1.1.0 result is published. No operator step is
+  needed; the bounded `ops sweep repair` or a replay plan only makes it
+  sooner ([observation lanes](../observation-lanes.md#bounded-operator-replay)).
+  Writing provenance v2 only after 1.1.0 is active would need a second
+  release (a collector flag or a split PR); it was not done because the
+  window delays a reading and loses nothing.
 - **A redelivery across the deploy boundary conflicts.** The normalized event
   of a message changes with provenance v2, so a mail stored before the deploy
   and delivered again with the same bytes after it produces a different run
-  terminal for the same run id; `persistRun` answers `conflict` and the
-  handler fails the mail with a closed code instead of storing a second
-  version. The first stored pair is unchanged.
+  terminal for the same run id; `persistRun` compares the terminal before
+  writing anything and answers `conflict`, the handler logs
+  `vpoint-pay-email-persisted` with `terminalOutcome: conflict` and the
+  existing `terminalKey`, and fails the delivery instead of storing a second
+  version, as it already does after a `COLLECTOR_SCHEMA_VERSION` bump. The
+  first stored pair is unchanged and holds the same message bytes, so no
+  evidence is lost and nothing needs repair; the failed delivery is expected
+  for this case and needs no operator action.
 - **Limits.** A v1 forwarded event has no parser sender check (the collector
   checked it at receipt; the paired `notification.eml` holds the From). A
   legacy `vpoint-pay-email-event-v1` event has no provenance at all, as

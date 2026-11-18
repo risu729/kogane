@@ -890,6 +890,10 @@ digest: a mail redelivered after a `COLLECTOR_SCHEMA_VERSION` bump is a
 terminal already written for that message. The same holds for a mail stored
 with provenance v1 and redelivered with the same bytes after the provenance-v2
 collector deployed: its normalized event differs, so its terminal does too.
+`persistRun` compares the terminal before writing anything, so the stored pair,
+which holds the same message bytes, stays as it was and no evidence is lost;
+the `vpoint-pay-email-persisted` log line records `terminalOutcome: conflict`
+and the existing `terminalKey`, and the failed delivery needs no repair.
 
 `acquisitionSessionRef` is `email-<sha256 of the message as it arrived>` on the
 notification run, and the same value on the V Point run that the same delivered

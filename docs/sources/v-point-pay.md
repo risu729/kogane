@@ -167,7 +167,9 @@ is a public provider address and stays a parser constant. The recipient is check
 `VPOINT_PAY_EMAIL_RECIPIENT`, and `prepareVPointPayEmail` refuses any other recipient before storage
 (`vpoint_pay_email_envelope_invalid`). The parser takes no configuration; it requires `envelopeTo` to be a
 bounded mailbox, so the evidence records where the mail went, but does not compare it. The routing address
-is therefore only in the collector's deployed config, and every test uses synthetic recipients. EmailEvent
+is therefore only in the collector's deployed config. No test copies it: the parser and collector unit tests
+use synthetic recipients, and `services/collector-vpoint/worker-test/vpoint-pay-recipient.test.ts` reads the
+configured binding to check that the guard applies to it. EmailEvent
 exposes no trusted SPF/DKIM/DMARC results, so both sender checks compare what the envelope and message say;
 they are shape checks, not authentication. Limits: a forwarded event stored with provenance v1 records no
 From, so the parser accepts it on the collector's check at receipt (the paired `notification.eml` holds the
