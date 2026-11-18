@@ -288,28 +288,50 @@ function manifestBytes(input: SharedRunInput, stored: readonly StoredArtifact[])
   return new TextEncoder().encode(JSON.stringify(manifest));
 }
 
-const HISTORY_DATASET = /^(?:yen-history|foreign-history-[a-z]{3})-(?:csv|page-\d{4})$/u;
+/**
+ * The canonical file name a history dataset is stored under (`collectHistoryRange`
+ * in `src/sony-bank.ts`), or null for any other dataset. The Processor derives
+ * an artifact's dataset from this name alone (`ARTIFACT_DATASETS` in
+ * `packages/application/src/collection/descriptors.ts`), so the name is what
+ * decides whether a parser may ever select the bytes.
+ */
+function canonicalHistoryFilename(dataset: string): string | null {
+  const page = /^((?:yen-history|foreign-history-[a-z]{3})-page-\d{4})$/u.exec(dataset);
+  if (page) return `${page[1]!}.json`;
+  const csv = /^(yen-history|foreign-history-[a-z]{3})-csv$/u.exec(dataset);
+  return csv ? `${csv[1]!}.csv` : null;
+}
 
 /**
  * A core run that stopped at a step keeps only what its finished steps
  * produced (ADR 0099, amendment 2026-11-18). In particular a canonical history
  * name (the parser input) appears only once the retained step finished, the
  * month window's files keep their `monthly-` prefix, and no collection summary
- * is written, so nothing in the run reads like a complete collection. Throws a
- * stable code, never a name.
+ * is written, so nothing in the run reads like a complete collection. The
+ * check is on the stored file name, which is what the Processor reads, and
+ * the name must be exactly the one its dataset is stored under. A stopped run
+ * is never `success`. Throws a stable code, never a name.
  */
-function assertStoppedCoreScope(steps: CoreStepOutcome, artifacts: readonly RawArtifact[]): void {
+function assertStoppedCoreScope(
+  status: CollectionManifest["status"],
+  steps: CoreStepOutcome,
+  artifacts: readonly RawArtifact[],
+): void {
+  if (status === "success") throw new Error("core_partial_scope_invalid");
   const finished = new Set(steps.completed);
   const retainedPlanned = [...steps.completed, steps.failed, ...steps.notAttempted].includes(
     "retained-history",
   );
   for (const artifact of artifacts) {
     let allowed = false;
-    if (artifact.dataset === "gross-balance") allowed = finished.has("gross-balance");
-    else if (HISTORY_DATASET.test(artifact.dataset)) {
-      if (artifact.filename.startsWith("monthly-"))
+    const canonical = canonicalHistoryFilename(artifact.dataset);
+    if (artifact.unitKey !== undefined) allowed = false;
+    else if (artifact.dataset === "gross-balance")
+      allowed = artifact.filename === "gross-balance.json" && finished.has("gross-balance");
+    else if (canonical !== null) {
+      if (artifact.filename === `monthly-${canonical}`)
         allowed = retainedPlanned && finished.has("monthly-history");
-      else
+      else if (artifact.filename === canonical)
         allowed = retainedPlanned
           ? finished.has("retained-history")
           : finished.has("monthly-history");
@@ -326,7 +348,7 @@ export async function sonyBankRunPlan(input: SharedRunInput): Promise<PersistRun
   // A failed run keeps no artifact: there is nothing whose persistence could
   // be claimed, and the terminal states the failure on its own.
   const sources = outcome === "failed" ? [] : input.artifacts;
-  if (input.coreSteps !== undefined) assertStoppedCoreScope(input.coreSteps, sources);
+  if (input.coreSteps !== undefined) assertStoppedCoreScope(input.status, input.coreSteps, sources);
 
   const artifacts: PersistArtifact[] = [];
   const stored: StoredArtifact[] = [];

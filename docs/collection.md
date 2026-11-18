@@ -393,9 +393,11 @@ one, which is a stop at `login` or `gross-balance`). A stopped run writes no
 `operation`, and has a null `transactionCount` unless the retained step
 finished. The terminal's code is the allowlisted history reason above when
 there is one, else `core_monthly_history_failed`,
-`core_retained_history_failed` or `core_wallet_failed`; the account unit is
-`partial` with that code. `sonyBankRunPlan` refuses a stopped run carrying an
-artifact no finished step produced (`core_partial_scope_invalid`). A partial
+`core_retained_history_failed` or `core_wallet_failed`; the account unit's
+`coverageStatus` is `partial` and it carries that code (so its registered unit
+report is `failed`). `sonyBankRunPlan` refuses a stopped run carrying an
+artifact no finished step produced, or one stored under any name other than
+the one its dataset is stored under (`core_partial_scope_invalid`). A partial
 core run is never parsed: every Sony core dataset has run-scoped eligibility,
 so it is evidence only, and the scheduler records it `completed` like any
 persisted `partial` run

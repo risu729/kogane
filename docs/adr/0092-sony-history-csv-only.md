@@ -100,13 +100,20 @@ requests are used.
 - Status: proposed
 - Date: 2026-11-18
 - Decided in: [ADR 0099, amendment 2026-11-18](0099-sony-retained-history.md#amendment-2026-11-18-a-mid-core-failure-keeps-the-finished-steps-as-a-partial-run)
+- Amends: the decision's "A missing body or failed CSV request, invalid CSV
+  framing/header, or unequal row count fails the run" and the consequence
+  "New incomplete currency/windows fail before artifacts are returned, as
+  other collector failures already do; their failed terminal retains the
+  closed reason"
 
-An incomplete currency/window still refuses its whole history step: that
-step's JSON pages and CSVs are never returned, and there is still no JSON
-fallback. What changes is the run around it. The core steps that finished
-before it (the balance, and for a retained-range refusal the complete month
-window under `monthly-*` names) are kept, so the run is `partial` rather than
-`failed`; it is `failed` only when nothing was kept. The closed reason still
-reaches the terminal, its account unit and its report. A `partial` core run is
-not parsed (run-scoped eligibility), so no current transaction or balance comes
-from it.
+An incomplete currency/window still refuses its whole history step: none of
+that step's JSON pages and CSVs, in any currency, is kept, and there is still
+no JSON fallback. What changes is the run around it. The core steps that
+finished before it are kept: always the balance (the history steps run after
+it), and for a retained-range refusal also the complete month window under its
+`monthly-*` names. The run is therefore `partial`, not `failed`, with its
+coverage `partial`; since the balance precedes every history step, a refused
+window never leaves a `failed` run. The closed reason still reaches the
+terminal, its account unit and its report. A `partial` core run is not parsed
+(run-scoped eligibility), so no current transaction or balance comes from
+it.

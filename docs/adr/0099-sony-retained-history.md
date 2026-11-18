@@ -155,8 +155,12 @@ checked against the code on 2026-11-18:
 - The `retainedHistoryEnd` mapping (null start) applies only to artifacts that
   reach a parser, which a partial run's do not.
 - Collection quality and the operation trail show the provider outcome
-  `partial` with its code; the trail names a run with no parse
-  `not_adopted`, as for any partial run of a run-scoped dataset.
+  `partial` with its code; the trail names such a run `unpublished` with
+  `no_parser_selected` (no artifact got a parse job), as for any partial run
+  of a run-scoped dataset (`collector-trail.ts`).
+- The metadata extractor reads only `wallet-history-*`, which a stopped core
+  run never holds; the evidence browser lists the run and its bytes as the
+  `partial` evidence they are.
 
 ### Options considered
 
@@ -194,7 +198,8 @@ A stopped core run states its scope:
   no `wallet-history-*` artifact and no `wallet-months` range.
 - The terminal keeps `full_snapshot` with a null start as the request, and
   says `providerOutcome: partial`, `coverageStatus: partial`, with the
-  account unit `partial`. Its code is the allowlisted history reason when
+  account unit's `coverageStatus` `partial` and the same code (so its
+  registered unit report is `failed`). Its code is the allowlisted history reason when
   there is one (ADR 0092 keeps those in the terminal, unit and report);
   otherwise it names the step: `core_monthly_history_failed`,
   `core_retained_history_failed` or `core_wallet_failed`. A `failed` core run
@@ -202,7 +207,10 @@ A stopped core run states its scope:
 - `sonyBankRunPlan` refuses (`core_partial_scope_invalid`) a stopped run whose
   artifacts a finished step did not produce: a canonical history name before
   the retained step finished, an unprefixed month-window file, a summary or a
-  WALLET page.
+  WALLET page. It checks the stored file name, which is what the Processor
+  derives the dataset from, and requires exactly the name the artifact's
+  dataset is stored under, with no unit of its own; a stopped run claiming
+  `success` is refused too.
 
 ### Consequences
 
@@ -217,8 +225,17 @@ A stopped core run with at least one artifact is a persisted `partial` run, so
 the alarm records the occurrence `completed` (`scheduledResult`), as it
 already does for partial supplements and other collectors; the run's
 `partial` outcome and code stay visible in collection quality. Before this
-amendment the same failure recorded the occurrence `failed`. A later
-successful run still recovers the whole retained range.
+amendment the same failure recorded the occurrence `failed`. The alarm retries
+only an occurrence that was never dispatched (`retryableOccurrence`), so this
+changes no retry. Collection quality loses `occurrence_failed` for such a run
+and shows `acquisition_partial`, `coverage_partial` and
+`latest_run_not_successful` instead. Because the stopped run now registers a
+fetch run (a `failed` run with no provider bytes did not,
+`provider_run_failed`), the source-level freshness, which is the age of the
+newest registered run whatever its outcome, counts from it; each dataset
+cell's freshness is still the age of its current capture, so a balance or
+history that no successful run refreshed keeps ageing. A later successful run
+still recovers the whole retained range.
 
 ### Verification
 
@@ -230,7 +247,9 @@ files with no canonical history name; a WALLET failure keeps the balance and
 both ranges with `core_wallet_failed`, no WALLET page, summary or
 `wallet-months` range, and a `completed` scheduled result; a balance failure
 stays `failed` with no artifact. Plan tests pin the manifest fields, the
-reason precedence and each `core_partial_scope_invalid` refusal. The
+reason precedence and each `core_partial_scope_invalid` refusal, including a
+balance or history stored under another file name, a core artifact in a unit
+of its own and a stopped run claiming `success`. The
 Processor's collector-plan test registers a stopped core plan end to end: the
 run registers `partial`, the unit carries `core_wallet_failed`, and the
 parse gate admits none of its artifacts, while the successful plan's

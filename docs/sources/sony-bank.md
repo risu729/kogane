@@ -751,3 +751,16 @@ An older CSV replay cannot displace a newer JSON-only correction. JSON-only
 retained history keeps the legacy same-day/page-order limitation; it is not a
 substitute for the complete official CSV and is not guaranteed to identify a
 day's final transaction. Unrelated sources keep their existing ordering.
+
+## 2026-11-18: a mid-core failure keeps the finished steps
+
+The 2026-11-08 and 2026-11-09 entries above say that an incomplete or
+unavailable CSV, or the page limit, fails the run. Since the
+[ADR 0099 amendment of 2026-11-18](../adr/0099-sony-retained-history.md#amendment-2026-11-18-a-mid-core-failure-keeps-the-finished-steps-as-a-partial-run),
+such a refusal still keeps nothing of the refused history step, but the core
+steps that finished before it (always the balance; for a retained-range
+refusal also the month window under its `monthly-*` names) are stored as a
+`partial` run with the same closed code. Canonical history names appear only
+once the retained step finished. A partial core run is never parsed, so it
+adds no current balance or transaction. No provider was contacted for this
+change.
