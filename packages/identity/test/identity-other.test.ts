@@ -324,6 +324,34 @@ describe("non-SBI account identification", () => {
       });
   });
 
+  test("the SMBC AUD ordinary deposit stays the unrecognized default, one reference for every run", () => {
+    // `smbc-foreign-ordinary-balance` emits this constant; no rule classifies
+    // it, so it takes the default plan, including the source's yen-deposit
+    // label (a display limit, docs/identity-sources.md).
+    const aud = (fetchRunId: number) =>
+      otherIdentity(
+        input("smbc-bank", "smbc-bank:ordinary-foreign-aud", {
+          kind: "balance",
+          currency: null,
+          instrument: "AUD",
+          fetchRunId,
+        }),
+      );
+    const plan = aud(4);
+    expect(plan.account).toEqual({
+      key: ["smbc-bank:ordinary-foreign-aud"],
+      label: "三井住友銀行 円普通預金",
+      role: "source-account",
+      status: "unresolved",
+      reason: "unrecognized-source-account",
+    });
+    expect(plan.issues).toEqual(["unrecognized-source-account"]);
+    expect(plan.instruments.map((item) => [item.role, item.value, item.status])).toEqual([
+      ["unit", "AUD", "identified"],
+    ]);
+    expect(aud(5).account.key).toEqual(plan.account.key);
+  });
+
   test.each([
     ["global-pass", "global-pass:card", "debit-card-activity", "provider-local"],
     ["myjcb", "myjcb:synthetic-connection:root", "card-statement-aggregate", "aggregate"],

@@ -411,28 +411,37 @@ describe("SBI identity", () => {
   test("through the real parsers: references no SBI rule classifies stay unresolved with a closed reason", () => {
     // What docs/identity-sbi.md states as today's limit: these parsers'
     // references are organized, never classified by guess.
-    const parse = (parser: Parser, bytes: Uint8Array, dataset: string) =>
+    const parse = (parser: Parser, bytes: Uint8Array, dataset: string, fetchRunId = 4) =>
       parser
         .parse(bytes, { ...ARTIFACT, dataset })
         .observations.map((observation, ordinal) =>
-          sbiIdentity(fromObservation(observation, ordinal)),
+          sbiIdentity({ ...fromObservation(observation, ordinal), fetchRunId }),
         );
 
     // Foreign cash history rows state no discriminator: every one, in every
     // capture, is the bare foreign reference, unresolved.
-    const history = parse(
-      sbiForeignCashHistory,
-      readFileSync(
-        new URL(
-          "../../../tests/fixtures/observation-pipeline/sbi-parser-boundaries/foreign-cash-history.json",
-          import.meta.url,
-        ),
+    const historyBytes = readFileSync(
+      new URL(
+        "../../../tests/fixtures/observation-pipeline/sbi-parser-boundaries/foreign-cash-history.json",
+        import.meta.url,
       ),
-      "foreign-cash-history",
     );
+    const history = parse(sbiForeignCashHistory, historyBytes, "foreign-cash-history");
+    // Another capture of the same rows: nothing scopes the reference to its run.
+    expect(
+      parse(sbiForeignCashHistory, historyBytes, "foreign-cash-history", 99).map(
+        (plan) => plan.account.key,
+      ),
+    ).toEqual(history.map((plan) => plan.account.key));
     expect(history.length).toBeGreaterThan(0);
     for (const plan of history) {
-      expect(plan.account).toMatchObject({ key: ["sbi-securities:foreign"], status: "unresolved" });
+      expect(plan.account).toEqual({
+        key: ["sbi-securities:foreign"],
+        label: "SBI証券 外国株式（預り区分: 未確定）",
+        role: "foreign-brokerage",
+        status: "unresolved",
+        reason: "exact-provider-account-reference",
+      });
       expect(plan.issues).toEqual([
         "missing-specificAccountCode",
         "missing-trade-currency",
