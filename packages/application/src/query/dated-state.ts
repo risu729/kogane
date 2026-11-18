@@ -24,6 +24,7 @@ import {
   UNDATED_STATEMENT_WINDOW_DAYS,
   type ExclusionReason,
   type IdentityStatus,
+  type ManifestStatementsBeforeWindow,
   type ReportedAccount,
   type ReportedBalance,
   type ReportedInstrument,
@@ -34,6 +35,7 @@ import {
   type ReportedState,
   type StatementsBeforeWindow,
   type StatementsBeforeWindowReason,
+  type UncountedReportedState,
 } from "../../../domain/src/reported-state.ts";
 import { parseLocalDate } from "../../../domain/src/time.ts";
 import {
@@ -110,6 +112,11 @@ function snapshotKey(row: { parser_name: string; snapshot_artifact_id: number })
   return `${row.parser_name}|artifact:${row.snapshot_artifact_id}`;
 }
 
+/** Text order by UTF-16 code units, as the manifest's ref lists are sorted. */
+function codeUnitOrder(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function bounded<T>(rows: T[]): T[] {
   if (rows.length > DATED_STATE_ROW_BOUND) throw new DatedStateLimitError();
   return rows;
@@ -128,10 +135,26 @@ function debitDate(factsJson: string): string | null {
   return occurred.kind === "local-date" ? occurred.value : null;
 }
 
+/**
+ * The reported state on `input.date`. It counts the statements the payable
+ * window leaves out (`DATED_STATEMENTS_BEFORE_WINDOW_SQL`) into its coverage
+ * and its manifest unless `includeStatementsBeforeWindow` is `false`: then it
+ * skips that read and answers an `UncountedReportedState`, whose coverage and
+ * manifest carry no count, for the reads that build on it and never show one
+ * (the holdings change, the reconstructed state and the valuation on a date).
+ */
+export function queryDatedState(
+  sql: SqlExecutor,
+  input: DatedStateInput & { includeStatementsBeforeWindow: false },
+): Promise<UncountedReportedState>;
+export function queryDatedState(
+  sql: SqlExecutor,
+  input: DatedStateInput & { includeStatementsBeforeWindow?: true },
+): Promise<ReportedState>;
 export async function queryDatedState(
   sql: SqlExecutor,
-  input: DatedStateInput,
-): Promise<ReportedState> {
+  input: DatedStateInput & { includeStatementsBeforeWindow?: boolean },
+): Promise<ReportedState | UncountedReportedState> {
   if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(input.date) || parseLocalDate(input.date) === null)
     throw new Error("invalid_date");
   const date = input.date;
@@ -142,22 +165,25 @@ export async function queryDatedState(
   ).toISOString();
   const source = input.source ?? null;
   const account = input.account ?? null;
+  const counted = input.includeStatementsBeforeWindow !== false;
 
   const [positionRows, balanceRows, perimeter, statementRows, omittedRows] = await Promise.all([
     sql.all<DatedPositionRow>(DATED_POSITIONS_SQL, [cutoff]),
     sql.all<DatedBalanceRow>(DATED_BALANCES_SQL, [cutoff]),
     sql.all<DatedSnapshotRow>(DATED_SNAPSHOTS_SQL, [cutoff]),
     sql.all<DatedStatementRow>(DATED_STATEMENTS_SQL, [cutoff, fromPaymentDate, undatedFrom]),
-    sql.all<DatedStatementsBeforeWindowRow>(DATED_STATEMENTS_BEFORE_WINDOW_SQL, [
-      cutoff,
-      fromPaymentDate,
-      undatedFrom,
-    ]),
+    counted
+      ? sql.all<DatedStatementsBeforeWindowRow>(DATED_STATEMENTS_BEFORE_WINDOW_SQL, [
+          cutoff,
+          fromPaymentDate,
+          undatedFrom,
+        ])
+      : null,
   ]);
   bounded(positionRows);
   bounded(balanceRows);
   bounded(statementRows);
-  bounded(omittedRows);
+  if (omittedRows !== null) bounded(omittedRows);
 
   const wanted = (sourceId: string, accountId: string | null): boolean =>
     (source === null || sourceId === source) && (account === null || accountId === account);
@@ -344,24 +370,52 @@ export async function queryDatedState(
   });
 
   // The statements the window leaves out, counted under the same filters as
-  // the payables (an unresolved statement has no account to match).
-  const omitted = new Map<string, StatementsBeforeWindow>();
-  for (const row of omittedRows) {
-    if (!wanted(row.source_id, row.account_id)) continue;
-    if (!REASONS.has(row.reason_code)) throw new Error("unknown_statement_window_reason");
-    const reasonCode = row.reason_code as StatementsBeforeWindowReason;
-    const key = JSON.stringify([row.source_id, reasonCode]);
-    const entry = omitted.get(key) ?? {
-      sourceId: row.source_id,
-      reasonCode,
-      count: 0,
+  // the payables (an unresolved statement has no account to match): per
+  // source, resolved account and reason for the manifest, so that a changed
+  // count gives a new context id, and per source and reason for the coverage.
+  let counts: {
+    manifest: ManifestStatementsBeforeWindow[];
+    coverage: StatementsBeforeWindow[];
+  } | null = null;
+  if (omittedRows !== null) {
+    const keyed = new Map<string, ManifestStatementsBeforeWindow>();
+    const omitted = new Map<string, StatementsBeforeWindow>();
+    for (const row of omittedRows) {
+      if (!wanted(row.source_id, row.account_id)) continue;
+      if (!REASONS.has(row.reason_code)) throw new Error("unknown_statement_window_reason");
+      const reasonCode = row.reason_code as StatementsBeforeWindowReason;
+      const manifestKey = JSON.stringify([row.source_id, row.account_id, reasonCode]);
+      const manifestEntry = keyed.get(manifestKey) ?? {
+        sourceId: row.source_id,
+        accountId: row.account_id,
+        reasonCode,
+        count: 0,
+      };
+      manifestEntry.count += row.statements;
+      keyed.set(manifestKey, manifestEntry);
+      const key = JSON.stringify([row.source_id, reasonCode]);
+      const entry = omitted.get(key) ?? { sourceId: row.source_id, reasonCode, count: 0 };
+      entry.count += row.statements;
+      omitted.set(key, entry);
+    }
+    counts = {
+      manifest: [...keyed.values()].sort(
+        (a, b) =>
+          codeUnitOrder(a.sourceId, b.sourceId) ||
+          (a.accountId === b.accountId
+            ? 0
+            : a.accountId === null
+              ? -1
+              : b.accountId === null
+                ? 1
+                : codeUnitOrder(a.accountId, b.accountId)) ||
+          codeUnitOrder(a.reasonCode, b.reasonCode),
+      ),
+      coverage: [...omitted.values()].sort(
+        (a, b) => a.sourceId.localeCompare(b.sourceId) || a.reasonCode.localeCompare(b.reasonCode),
+      ),
     };
-    entry.count += row.statements;
-    omitted.set(key, entry);
   }
-  const statementsBeforeWindow = [...omitted.values()].sort(
-    (a, b) => a.sourceId.localeCompare(b.sourceId) || a.reasonCode.localeCompare(b.reasonCode),
-  );
 
   const chosen = [...snapshots.values()].filter(
     (snapshot) => source === null || snapshot.sourceId === source,
@@ -370,7 +424,11 @@ export async function queryDatedState(
     (a, b) =>
       a.sourceId.localeCompare(b.sourceId) || a.sourceAccount.localeCompare(b.sourceAccount),
   );
-  const manifest = {
+  // A state read without the count records none: its context id claims only
+  // the inputs it read (ADR 0019, amendment of 2026-11-18).
+  const manifest: UncountedReportedState["manifest"] & {
+    statementsBeforeWindow?: ManifestStatementsBeforeWindow[];
+  } = {
     schemaVersion: REPORTED_STATE_SCHEMA,
     date,
     cutoff,
@@ -378,8 +436,9 @@ export async function queryDatedState(
     snapshotRefs: [...new Set(chosen.map((snapshot) => snapshot.ref))].sort(),
     statementRefs: payables.map((payable) => payable.ref).sort(),
     settlementRefs: settlementRows.map((row) => `card-settlement:${row.id}`).sort(),
-  } as const;
-  return {
+    ...(counts === null ? {} : { statementsBeforeWindow: counts.manifest }),
+  };
+  const state: UncountedReportedState = {
     schemaVersion: REPORTED_STATE_SCHEMA,
     date,
     cutoff,
@@ -411,12 +470,19 @@ export async function queryDatedState(
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([reasonCode, count]) => ({ reasonCode, count })),
       liabilitiesCoverage: "partial",
-      liabilitiesMissing: liabilityGaps(statementsBeforeWindow),
+      liabilitiesMissing: liabilityGaps(counts === null ? null : counts.coverage),
       payablesFromPaymentDate: fromPaymentDate,
-      statementsBeforeWindow,
+      ...(counts === null ? {} : { statementsBeforeWindow: counts.coverage }),
       netAssets: "not-computed",
     },
     manifest: { ...manifest, policies: [...manifest.policies] },
     contextId: await canonicalDigest(manifest),
+  };
+  if (counts === null) return state;
+  // The same objects, typed with the count (the keys keep their order).
+  return {
+    ...state,
+    coverage: { ...state.coverage, statementsBeforeWindow: counts.coverage },
+    manifest: { ...state.manifest, statementsBeforeWindow: counts.manifest },
   };
 }

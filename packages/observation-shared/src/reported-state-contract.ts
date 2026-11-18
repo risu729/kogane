@@ -315,6 +315,7 @@ function validManifest(value: unknown): boolean {
       "snapshotRefs",
       "statementRefs",
       "settlementRefs",
+      "statementsBeforeWindow",
     ]) &&
     value.schemaVersion === REPORTED_STATE_SCHEMA &&
     date(value.date) &&
@@ -322,7 +323,46 @@ function validManifest(value: unknown): boolean {
     list(value.policies, text) &&
     list(value.snapshotRefs, ref) &&
     list(value.statementRefs, ref) &&
-    list(value.settlementRefs, text)
+    list(value.settlementRefs, text) &&
+    list<Record<string, unknown>>(
+      value.statementsBeforeWindow,
+      (entry) =>
+        record(entry) &&
+        exactKeys(entry, ["sourceId", "accountId", "reasonCode", "count"]) &&
+        text(entry.sourceId) &&
+        nullableText(entry.accountId) &&
+        member(STATEMENTS_BEFORE_WINDOW_REASONS)(entry.reasonCode) &&
+        count(entry.count) &&
+        entry.count > 0,
+    ) &&
+    // One entry per source, resolved account and reason.
+    new Set(
+      value.statementsBeforeWindow.map((entry) =>
+        JSON.stringify([entry["sourceId"], entry["accountId"], entry["reasonCode"]]),
+      ),
+    ).size === value.statementsBeforeWindow.length
+  );
+}
+
+/**
+ * The coverage's counts are the manifest's, added per source and reason: the
+ * context id records every count the answer shows.
+ */
+function countsAgree(coverage: unknown, manifest: unknown): boolean {
+  if (!record(coverage) || !record(manifest)) return false;
+  const shown = coverage.statementsBeforeWindow as Record<string, unknown>[];
+  const recorded = manifest.statementsBeforeWindow as Record<string, unknown>[];
+  const sums = new Map<string, number>();
+  for (const entry of recorded) {
+    const key = JSON.stringify([entry["sourceId"], entry["reasonCode"]]);
+    sums.set(key, (sums.get(key) ?? 0) + (entry["count"] as number));
+  }
+  return (
+    sums.size === shown.length &&
+    shown.every(
+      (entry) =>
+        sums.get(JSON.stringify([entry["sourceId"], entry["reasonCode"]])) === entry["count"],
+    )
   );
 }
 
@@ -358,6 +398,7 @@ export function validReportedState(value: unknown): boolean {
     list(value.payables, validPayable) &&
     validCoverage(value.coverage) &&
     validManifest(value.manifest) &&
+    countsAgree(value.coverage, value.manifest) &&
     typeof value.contextId === "string" &&
     /^[0-9a-f]{64}$/u.test(value.contextId)
   );

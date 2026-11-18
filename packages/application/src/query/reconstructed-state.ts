@@ -3,7 +3,10 @@
 // per request; nothing is stored, nothing adopted, nothing written.
 //
 //   start, end   queryDatedState at the range's two dates (their context ids
-//                are pinned);
+//                are pinned), without the count of the statements before
+//                the payable window, which the fold never reads (so the
+//                pinned ids record no count: ADR 0019, amendment of
+//                2026-11-18);
 //   knowledge    the knowledge selector at the asked cut (default: the latest
 //                commit of the current core epoch), and at the cut of the end
 //                capture for the late part;
@@ -48,7 +51,7 @@ import {
   type ReconstructionReportedBalance,
   type ReconstructionReportedSide,
 } from "../../../domain/src/reconstruction.ts";
-import { captureDate, type ReportedState } from "../../../domain/src/reported-state.ts";
+import { captureDate, type UncountedReportedState } from "../../../domain/src/reported-state.ts";
 import { daysFromCivil, parseLocalDate, validInstantText } from "../../../domain/src/time.ts";
 import {
   ACCOUNT_SOURCES_SQL,
@@ -265,7 +268,7 @@ function checkInput(input: ReconstructedStateInput): void {
 
 /** The account's balances on one reported side, in the fold's terms. */
 function reportedSide(
-  state: ReportedState,
+  state: UncountedReportedState,
   account: string,
   hasContainer: boolean,
 ): { side: ReconstructionReportedSide; positions: number } {
@@ -388,8 +391,16 @@ export async function queryReconstructedState(
   const now = await select(meta, cut, scope, rows);
 
   const [startState, endState, sources] = await Promise.all([
-    queryDatedState(sql, { date: input.from, account: input.account }),
-    queryDatedState(sql, { date: input.to, account: input.account }),
+    queryDatedState(sql, {
+      date: input.from,
+      account: input.account,
+      includeStatementsBeforeWindow: false,
+    }),
+    queryDatedState(sql, {
+      date: input.to,
+      account: input.account,
+      includeStatementsBeforeWindow: false,
+    }),
     sql.all<{ source_id: string }>(ACCOUNT_SOURCES_SQL, [input.account]),
   ]);
   // Credit capacity and overlapping outstanding reports establish no cash-basis opening stock.

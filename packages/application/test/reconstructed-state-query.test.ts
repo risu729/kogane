@@ -10,12 +10,18 @@ import { describe, expect, test } from "bun:test";
 import { CARD_PURCHASE_WRITER_RELEASE } from "../../domain/src/card-purchase.ts";
 import { canonicalDigest } from "../../domain/src/context.ts";
 import { KNOWN_WRITER_RELEASES } from "../../domain/src/reconstruction-adapter.ts";
+import {
+  DATED_STATEMENTS_BEFORE_WINDOW_SQL,
+  DATED_STATEMENTS_SQL,
+} from "../../read-model/src/dated-state.ts";
+import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { DatedStore } from "../../read-model/test/dated-state-fixture.ts";
 import {
   EconomicHistory,
   day,
   storeExecutor,
 } from "../../read-model/test/economic-history-fixture.ts";
+import { queryDatedState } from "../src/query/dated-state.ts";
 import {
   queryReconstructedState,
   ReconstructedStateInputError,
@@ -265,6 +271,54 @@ describe("acceptance", () => {
       coverageProducer: "coverage-producer-none-v1",
       foldPolicy: "reconstruction-fold-v1",
     });
+  });
+
+  test("it never counts the statements before the payable window, and its context records no count", async () => {
+    const h = world();
+    settle(h, "ev-settle", "2026-03-15");
+    const statements: string[] = [];
+    const inner = storeExecutor(h.db);
+    const recording: SqlExecutor = {
+      all: async <T>(sql: string, args: readonly unknown[]) => {
+        statements.push(sql);
+        return inner.all<T>(sql, args);
+      },
+      first: async <T>(sql: string, args: readonly unknown[]) => {
+        statements.push(sql);
+        return inner.first<T>(sql, args);
+      },
+    };
+    const first = await queryReconstructedState(recording, input());
+    expect(statements).toContain(DATED_STATEMENTS_SQL);
+    expect(statements).not.toContain(DATED_STATEMENTS_BEFORE_WINDOW_SQL);
+    // The pinned snapshot contexts are those of the states it read: without the count.
+    const uncounted = await queryDatedState(storeExecutor(h.db), {
+      date: "2026-03-31",
+      account: BANK,
+      includeStatementsBeforeWindow: false,
+    });
+    const counted = await queryDatedState(storeExecutor(h.db), {
+      date: "2026-03-31",
+      account: BANK,
+    });
+    expect(first.manifest!.snapshots.endContextId).toBe(uncounted.contextId);
+    expect(first.manifest!.snapshots.endContextId).not.toBe(counted.contextId);
+    // A statement of the account that the window leaves out on both dates
+    // changes the reported state's context, not this one.
+    const older = h.store.statement({
+      card: "card-a",
+      period: "2025-12",
+      paymentDate: "2025-12-26",
+      minor: 1,
+      fetchedAt: "2025-12-05T01:00:00Z",
+    });
+    h.store.identify(older, "vpass", BANK, "identified");
+    expect((await queryReconstructedState(storeExecutor(h.db), input())).contextId).toBe(
+      first.contextId,
+    );
+    expect(
+      (await queryDatedState(storeExecutor(h.db), { date: "2026-03-31", account: BANK })).contextId,
+    ).not.toBe(counted.contextId);
   });
 });
 

@@ -101,6 +101,55 @@ describe("reported state HTTP contract", () => {
     ).toBe(false);
   });
 
+  test("the manifest records the left-out counts per source, account and reason, and they add up to the coverage", async () => {
+    const body = await reportedStateBody(reportedStateWorld(), "2026-09-10");
+    expect(body.manifest.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", accountId: null, reasonCode: "due_before_window", count: 1 },
+      {
+        sourceId: "vpass",
+        accountId: null,
+        reasonCode: "undated_captured_before_window",
+        count: 1,
+      },
+    ]);
+    const mutate = (change: (copy: Record<string, any>) => void): boolean => {
+      const copy = structuredClone(body) as Record<string, any>;
+      change(copy);
+      return validReportedState(copy);
+    };
+    const first = (copy: Record<string, any>): Record<string, any> =>
+      copy["manifest"]["statementsBeforeWindow"][0];
+    expect(mutate(() => {})).toBe(true);
+    expect(mutate((copy) => delete copy["manifest"]["statementsBeforeWindow"])).toBe(false);
+    expect(mutate((copy) => (first(copy)["count"] = 0))).toBe(false);
+    expect(mutate((copy) => (first(copy)["accountId"] = ""))).toBe(false);
+    expect(mutate((copy) => (first(copy)["reasonCode"] = "old"))).toBe(false);
+    expect(mutate((copy) => (first(copy)["amount"] = "20000"))).toBe(false);
+    // One entry per source, account and reason.
+    expect(
+      mutate((copy) => copy["manifest"]["statementsBeforeWindow"].push({ ...first(copy) })),
+    ).toBe(false);
+    // A count the coverage shows and the manifest does not record, or the reverse, is refused.
+    expect(mutate((copy) => (first(copy)["count"] = 2))).toBe(false);
+    expect(mutate((copy) => (copy["coverage"]["statementsBeforeWindow"][0]["count"] = 2))).toBe(
+      false,
+    );
+    expect(mutate((copy) => (copy["manifest"]["statementsBeforeWindow"] = []))).toBe(false);
+    // Split across two accounts, the same counts still add up.
+    expect(
+      mutate((copy) => {
+        first(copy)["accountId"] = "acct-card";
+        copy["manifest"]["statementsBeforeWindow"].unshift({
+          sourceId: "vpass",
+          accountId: null,
+          reasonCode: "due_before_window",
+          count: 1,
+        });
+        copy["coverage"]["statementsBeforeWindow"][0]["count"] = 2;
+      }),
+    ).toBe(true);
+  });
+
   test("the capability, the feature and the route", () => {
     expect(
       validApiCapabilities({

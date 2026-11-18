@@ -4,7 +4,9 @@
 //
 //   1. `queryDatedState`: the positions the reported state lists on D under
 //      the requested source and account (each checked to exist by key), with
-//      each instrument's identity status and each snapshot's freshness;
+//      each instrument's identity status and each snapshot's freshness,
+//      without the count of the statements before the payable window (its
+//      context id records no count either: ADR 0019, amendment of 2026-11-18);
 //   2. `DATED_POSITION_QUANTITIES_SQL`: each position's parse run and
 //      decimal-v1 quantity, by key;
 //   3. `selectMarketData`: one price per distinct (instrument, unit[, snapshot])
@@ -32,7 +34,11 @@ import {
   type SelectionBound,
 } from "../../../domain/src/market-data.ts";
 import { instrumentRef } from "../../../domain/src/price-sources.ts";
-import { reportedStateCutoff, type ReportedState } from "../../../domain/src/reported-state.ts";
+import {
+  reportedStateCutoff,
+  type ReportedState,
+  type UncountedReportedState,
+} from "../../../domain/src/reported-state.ts";
 import { parseLocalDate } from "../../../domain/src/time.ts";
 import {
   fxCurrenciesFor,
@@ -196,12 +202,13 @@ export async function queryValuationOnDate(
     if (found === null) refuse("unknown_account");
   }
 
-  let state: ReportedState;
+  let state: UncountedReportedState;
   try {
     state = await queryDatedState(sql, {
       date: request.date,
       ...(request.source === undefined ? {} : { source: request.source }),
       ...(request.account === undefined ? {} : { account: request.account }),
+      includeStatementsBeforeWindow: false,
     });
   } catch (error) {
     if (error instanceof DatedStateLimitError) refuse("dated_state_limit_exceeded");

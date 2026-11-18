@@ -81,11 +81,24 @@ export interface StatementsBeforeWindow {
 }
 
 /**
- * The liability gaps of an answer: every gap but `statements_before_window`,
- * and that one too when `omitted` names a statement.
+ * The statements left out of the payables as the manifest records them: per
+ * source, resolved account (null when none resolves) and reason, so that a
+ * change to any count gives a new `contextId`.
  */
-export function liabilityGaps(omitted: readonly StatementsBeforeWindow[]): LiabilityGap[] {
-  const leftOut = omitted.some((entry) => entry.count > 0);
+export interface ManifestStatementsBeforeWindow {
+  sourceId: string;
+  accountId: string | null;
+  reasonCode: StatementsBeforeWindowReason;
+  count: number;
+}
+
+/**
+ * The liability gaps of an answer: every gap but `statements_before_window`,
+ * and that one too when `omitted` names a statement. Without a count (`null`:
+ * the statements left out were not read) every gap is named.
+ */
+export function liabilityGaps(omitted: readonly StatementsBeforeWindow[] | null): LiabilityGap[] {
+  const leftOut = omitted === null || omitted.some((entry) => entry.count > 0);
   return LIABILITY_GAPS.filter((gap) => gap !== "statements_before_window" || leftOut);
 }
 
@@ -204,6 +217,13 @@ interface ReportedStateManifest {
   snapshotRefs: string[];
   statementRefs: string[];
   settlementRefs: string[];
+  /**
+   * The statements the payable window leaves out, counted per source,
+   * resolved account and reason under the answer's filters, ordered by those
+   * three (ADR 0019, amendment of 2026-11-18). Absent from a state read
+   * without the count (`UncountedReportedState`).
+   */
+  statementsBeforeWindow: ManifestStatementsBeforeWindow[];
 }
 export interface ReportedState {
   schemaVersion: typeof REPORTED_STATE_SCHEMA;
@@ -220,6 +240,19 @@ export interface ReportedState {
   /** `canonicalDigest(manifest)`: the same inputs give the same id. */
   contextId: string;
 }
+
+/**
+ * A reported state read without counting the statements the payable window
+ * leaves out (`queryDatedState` with `includeStatementsBeforeWindow: false`),
+ * for the reads that build on it and never show the count. Its coverage has
+ * no `statementsBeforeWindow` and names every liability gap, and its manifest
+ * has no `statementsBeforeWindow`, so its `contextId` claims no count it did
+ * not read. It is never served as a reported-state answer.
+ */
+export type UncountedReportedState = Omit<ReportedState, "coverage" | "manifest"> & {
+  coverage: Omit<ReportedStateCoverage, "statementsBeforeWindow">;
+  manifest: Omit<ReportedStateManifest, "statementsBeforeWindow">;
+};
 
 function civil(date: string): CivilDate {
   const parsed = parseLocalDate(date);

@@ -5,7 +5,12 @@
 // is not shown. Every account, code and amount is invented.
 import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { canonicalDigest } from "../../domain/src/context.ts";
 import { payableStatus, snapshotFreshness } from "../../domain/src/reported-state.ts";
+import {
+  DATED_STATEMENTS_BEFORE_WINDOW_SQL,
+  DATED_STATEMENTS_SQL,
+} from "../../read-model/src/dated-state.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { DatedStore } from "../../read-model/test/dated-state-fixture.ts";
 import { DatedStateLimitError, queryDatedState } from "../src/query/dated-state.ts";
@@ -380,8 +385,19 @@ describe("card payables on the date", () => {
       { sourceId: "vpass", reasonCode: "undated_captured_before_window", count: 1 },
     ]);
     expect(state.coverage.liabilitiesMissing).toContain("statements_before_window");
-    // The listed statements are in the manifest; the count is coverage.
+    // The listed statements are in the manifest by ref, and the ones left out
+    // by count per source, resolved account and reason.
     expect(state.manifest.statementRefs).toHaveLength(3);
+    expect(state.manifest.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", accountId: null, reasonCode: "due_before_window", count: 1 },
+      {
+        sourceId: "vpass",
+        accountId: null,
+        reasonCode: "undated_captured_before_window",
+        count: 1,
+      },
+      { sourceId: "vpass", accountId: "acct-card", reasonCode: "due_before_window", count: 1 },
+    ]);
     // The account filter counts only the statements resolved to that account.
     const byAccount = await queryDatedState(executor(store), {
       date: "2026-09-10",
@@ -389,6 +405,9 @@ describe("card payables on the date", () => {
     });
     expect(byAccount.coverage.statementsBeforeWindow).toEqual([
       { sourceId: "vpass", reasonCode: "due_before_window", count: 1 },
+    ]);
+    expect(byAccount.manifest.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", accountId: "acct-card", reasonCode: "due_before_window", count: 1 },
     ]);
     const other = await queryDatedState(executor(store), {
       date: "2026-09-10",
@@ -419,6 +438,80 @@ describe("card payables on the date", () => {
       "installment_remaining",
       "loan_balances",
     ]);
+    expect(state.manifest.statementsBeforeWindow).toEqual([]);
+  });
+
+  test("a changed count gives a new context id while the listed statements stay the same (INV09)", async () => {
+    const { store } = cards();
+    const before = await queryDatedState(executor(store), { date: "2026-09-10" });
+    // An older capture's parse published after the first answer: nothing
+    // listed changes, only the count of what the window leaves out.
+    const june = store.statement({
+      card: "card-a",
+      period: "2026-06",
+      paymentDate: "2026-06-26",
+      minor: 25_000,
+      fetchedAt: "2026-06-05T01:00:00Z",
+    });
+    const published = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(published.manifest.statementRefs).toEqual(before.manifest.statementRefs);
+    expect(published.manifest.snapshotRefs).toEqual(before.manifest.snapshotRefs);
+    expect(published.manifest.settlementRefs).toEqual(before.manifest.settlementRefs);
+    expect(published.coverage.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", reasonCode: "due_before_window", count: 1 },
+    ]);
+    expect(published.contextId).not.toBe(before.contextId);
+    // Resolving its account moves the count to another account: the coverage
+    // is unchanged, the manifest and the context id are not.
+    store.identify(june, "vpass", "acct-card", "identified");
+    const resolved = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(resolved.coverage).toEqual(published.coverage);
+    expect(resolved.manifest.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", accountId: "acct-card", reasonCode: "due_before_window", count: 1 },
+    ]);
+    expect(resolved.contextId).not.toBe(published.contextId);
+    expect(resolved.contextId).toBe(await canonicalDigest(resolved.manifest));
+  });
+
+  test("a state read without the count skips its read and records no count", async () => {
+    const { store } = cards();
+    store.statement({
+      card: "card-a",
+      period: "2026-06",
+      paymentDate: "2026-06-26",
+      minor: 25_000,
+      fetchedAt: "2026-06-05T01:00:00Z",
+    });
+    const statements: string[] = [];
+    const inner = executor(store);
+    const recording: SqlExecutor = {
+      all: async <T>(sql: string, args: readonly unknown[]) => {
+        statements.push(sql);
+        return inner.all<T>(sql, args);
+      },
+      first: async <T>(sql: string, args: readonly unknown[]) => {
+        statements.push(sql);
+        return inner.first<T>(sql, args);
+      },
+    };
+    const uncounted = await queryDatedState(recording, {
+      date: "2026-09-10",
+      includeStatementsBeforeWindow: false,
+    });
+    expect(statements).not.toContain(DATED_STATEMENTS_BEFORE_WINDOW_SQL);
+    expect(statements).toContain(DATED_STATEMENTS_SQL);
+    expect("statementsBeforeWindow" in uncounted.coverage).toBe(false);
+    expect("statementsBeforeWindow" in uncounted.manifest).toBe(false);
+    // It cannot tell whether a statement was left out, so it names the gap.
+    expect(uncounted.coverage.liabilitiesMissing).toContain("statements_before_window");
+    expect(uncounted.contextId).toBe(await canonicalDigest(uncounted.manifest));
+    // Everything else is the counted answer's.
+    const counted = await queryDatedState(executor(store), { date: "2026-09-10" });
+    const { statementsBeforeWindow: _manifestCounts, ...countedManifest } = counted.manifest;
+    expect(uncounted.manifest).toEqual(countedManifest);
+    expect(uncounted.payables).toEqual(counted.payables);
+    expect(uncounted.accounts).toEqual(counted.accounts);
+    expect(uncounted.contextId).not.toBe(counted.contextId);
   });
 
   test("the pure rule: settled only by an accepted review debited on or before the date", () => {
