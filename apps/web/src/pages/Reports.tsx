@@ -4,6 +4,7 @@
 // rows itself, and offers no recompute or share button, because those are
 // commands no route serves.
 import type { ReactNode } from "react";
+import type { ResultPartition } from "../../../../packages/domain/src/calculation.ts";
 import { ApiError, useFeatures } from "../api.ts";
 import { Pagination } from "../pagination.tsx";
 import {
@@ -28,7 +29,6 @@ import {
   ReplayabilityBadge,
   ReportAmount,
   RUN_STATUS_LABELS,
-  shownPartition,
   UNVALUED_LABELS,
 } from "../report-display.tsx";
 import { Link } from "../router.tsx";
@@ -173,12 +173,21 @@ export function ReportsPage(): ReactNode {
   );
 }
 
-/** The figure a body states, with what it covers. A partial subtotal is named as one. */
-function ReportFigures({ body }: { body: ReportBody }): ReactNode {
+/**
+ * The figure a body states, with what it covers. A partial subtotal is named as
+ * one; `partition` is the one the server states for the body, never read from
+ * the body alone (a truncated body is not complete).
+ */
+function ReportFigures({
+  body,
+  partition,
+}: {
+  body: ReportBody;
+  partition: ResultPartition;
+}): ReactNode {
   const valued = body.rows.filter((row) => row.valued).length;
   const unvalued = body.rows.length - valued;
-  const subtotalLabel =
-    shownPartition(body) === "complete" ? "評価額の合計" : "評価できた保有資産だけの小計";
+  const subtotalLabel = partition === "complete" ? "評価額の合計" : "評価できた保有資産だけの小計";
   return (
     <div className="tiles report-figures">
       <div className="tile tile-wide">
@@ -478,16 +487,16 @@ function ReportContent({ detail }: { detail: ReportDetail }): ReactNode {
         <Panel
           id="report-body"
           title={`${PURPOSE_LABELS[detail.body.purpose]}（${detail.body.unitRef}）`}
-          count={<PartitionBadge partition={shownPartition(detail.body)} />}
+          count={<PartitionBadge partition={detail.partition} />}
           note={
-            shownPartition(detail.body) === "complete"
+            detail.partition === "complete"
               ? "すべての保有資産を評価できたレポートです。対象は取得済みの保有資産だけで、資産全体の合計ではありません。"
               : detail.body.coverage.truncated
                 ? "上限を超えた保有資産を含みません。小計はそれを含まないため、資産全体の合計でも、その下限でもありません。"
                 : "評価できなかった保有資産があります。小計はそれを含まないため、資産全体の合計でも、その下限でもありません。"
           }
         >
-          <ReportFigures body={detail.body} />
+          <ReportFigures body={detail.body} partition={detail.partition} />
           {detail.body.coverage.truncated ? (
             <div className="panel-body">
               <Notice tone="warn" inline role="note">

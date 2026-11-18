@@ -190,32 +190,57 @@ out was presented as the whole (INV05, [ADR 0001](0001-domain-axes.md)).
    Rejected: report bodies are append-only, so a body already stored that way
    would become unreadable instead of being shown as what it is.
 3. Write `partial-verified-scope` for a truncated report whose kept rows are
-   all valued, and have the page read a stored `complete` body with
-   `truncated: true` as `partial-verified-scope`.
+   all valued, and have only the web page read a stored `complete` body with
+   `truncated: true` as `partial-verified-scope`. Rejected: the page would
+   say partial while `kogane.reports.read` hands an agent `complete` for the
+   same stored body, two answers for one read ([ADR 0081](0081-ui-parity-through-mcp.md)).
+4. As option 3, but the report reader states the partition beside the
+   stored body, so the page and the MCP read show the same one.
 
 ### Decision
 
-Option 3. The report job stores `partition: "partial-verified-scope"` when
-`coverage.truncated` is true and `summarizeValuation` returned `complete`;
+Option 4. One domain function, `reportPartition(partition, truncated)` in
+`packages/domain/src/reports.ts`, gives `partial-verified-scope` for a
+`complete` partition with `truncated: true` and every other partition as
+it is. The report job stores `reportPartition(summarizeValuation(...).partition, truncated)`;
 the subtotal is unchanged and is the subtotal of the rows the report holds.
-`not-computable` and `partial-verified-scope` are kept as computed. The page's
-`shownPartition` (`apps/web/src/report-display.tsx`) applies the same reading
-to bodies stored before this change, for the badge, the note and the
-subtotal's label; the stored body, its digest and the HTTP and MCP answers
-are unchanged.
+The report reader `readReportRoute` (`services/app/src/reports-api.ts`),
+which answers both `GET /api/v2/reports/{id}` (and `/export`) and
+`kogane.reports.read`, adds `partition`, the same function over the stored
+body, beside `body`. The wire contract
+(`packages/observation-shared/src/report-artifact-contract.ts`) requires
+that field and refuses a detail whose `partition` is not the one its body
+implies. The page shows that `partition` for the badge, the note and the
+subtotal's label. The stored body and its digest are unchanged, and `body`
+is still answered exactly as stored.
 
 ### Consequences
 
-A new truncated report gets a new body, so its digest differs from the one
-the old rule would have written; reports already stored are not rewritten,
-and an agent reading one stored before this change still receives
-`complete` with `truncated: true`.
+- A new truncated report gets a new body, so its digest differs from the one
+  the old rule would have written. Reports already stored are not
+  rewritten: their `body.partition` still reads `complete`, and the
+  answer's `partition` says `partial-verified-scope`, on the page, over
+  HTTP and over MCP alike.
+- The detail answer has one more field. The MCP tool's published
+  definition (name, description, input schema) does not change; a client
+  that checks the answer's keys exactly must accept `partition`.
+- Limit: the report id and context id are digests of the input manifest,
+  which lists the positions the report kept but not whether more were in
+  scope. A store whose first `maxRows` positions are the same with and
+  without positions past the bound gives the same report id, so the job
+  reuses whichever body was stored first, with its own `truncated` and
+  partition. This is as before this amendment; the reused body states its
+  own truncation, and `partition` follows it.
 
 ### Verification
 
 `services/processor/test/report-job-truncated.test.ts` stores two valued
 positions: the job without a bound writes `complete`, and with `maxRows: 1`
 it writes `partial-verified-scope` with one valued row and
-`truncated: true`. `apps/web/test/reports.browser.test.ts` shows a stored
-`complete` body with `truncated: true` as 確認できた範囲のみ評価 with
-評価できた保有資産だけの小計, never 評価額の合計.
+`truncated: true`. `services/app/test/page-read-reports.test.ts` stores a
+body `complete` with `truncated: true`: the route and `kogane.reports.read`
+give the same answer, with the body as stored and `partition:
+"partial-verified-scope"`. `apps/web/test/report-artifacts-contract.test.ts`
+refuses a detail whose `partition` is not its body's, and
+`apps/web/test/reports.browser.test.ts` shows such a body as
+確認できた範囲のみ評価 with 評価できた保有資産だけの小計, never 評価額の合計.

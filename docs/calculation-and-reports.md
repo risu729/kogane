@@ -487,16 +487,21 @@ The report job stores a report whose positions it cut at `maxRows` (500 by
 default; `coverage.truncated`) as `partial-verified-scope` even when every
 row it kept is valued: the positions past the bound are not in its subtotal
 ([ADR 0072, amendment of 2026-11-18](adr/0072-report-artifact-pages.md#amendment-a-report-cut-at-its-row-bound-is-not-complete-2026-11-18)).
+The detail answer (`GET /api/v2/reports/{id}`, `/export` and
+`kogane.reports.read`) carries `partition` beside the stored `body`: the
+same rule (`reportPartition`) over that body, so a body stored `complete`
+with `truncated: true` before that amendment is answered
+`partial-verified-scope` while `body` stays as stored.
 
 The detail page shows the stored body as fixed: the stated figure (a
 `complete` report's total, or a partial report's subtotal of the valued
 holdings, named as neither a whole total nor a lower bound), the counts of
 valued and unvalued rows, each row with its exact amount or its unvalued
 reason (never zero), the truncation notice, the run, the `report_events` and
-the replayability. A body stored `complete` with `truncated: true`, as the
-job wrote one before that amendment, is shown as a partial subtotal; the
-body itself is not rewritten, so the HTTP and MCP answers still carry its
-stored `complete`. The explanation (perimeter, effective knowledge boundary,
+the replayability. The page states the answer's `partition`, not the
+body's, so a body stored `complete` with `truncated: true`, as the job
+wrote one before that amendment, is shown as a partial subtotal, as the
+MCP read states it. The explanation (perimeter, effective knowledge boundary,
 policies, the position and valuation observations it read linked to their
 observation pages, and each price with its source claim) is requested only
 when the report says it may be explained; a restricted or unavailable report

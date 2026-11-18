@@ -108,6 +108,7 @@ export function partialDetail(
       },
     ],
     view: "body",
+    partition: "partial-verified-scope",
     body: {
       schemaVersion: "report-holdings-v1",
       purpose: "holdings-view",
@@ -157,6 +158,7 @@ export function completeDetail(): Extract<ReportDetail, { view: "body" }> {
   const detail = partialDetail(COMPLETE_ID);
   detail.report = summary(COMPLETE_ID, 2, "artifact-preserved");
   detail.events = [detail.events[0]!];
+  detail.partition = "complete";
   detail.body = {
     ...detail.body,
     contextId: detail.report.contextId,
@@ -171,10 +173,12 @@ export function completeDetail(): Extract<ReportDetail, { view: "body" }> {
 /**
  * A body stored `complete` although the job cut its positions at the row
  * bound, as the report job wrote it before a truncated report was partial.
+ * The reader states it `partial-verified-scope` beside the stored body.
  */
 export function truncatedCompleteDetail(): Extract<ReportDetail, { view: "body" }> {
   const detail = completeDetail();
   detail.report = summary(TRUNCATED_ID, 7, "artifact-preserved");
+  detail.partition = "partial-verified-scope";
   detail.body = {
     ...detail.body,
     contextId: detail.report.contextId,

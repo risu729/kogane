@@ -835,7 +835,10 @@ and explanation are the operator route's answer with one difference, ADR
 run and without its body, is `403 evidence_restricted` on both views, and a
 report whose body has left R2 is `404 not_found`, the codes `/export`
 answers; the operator page re-displays the first and shows the second as
-`unavailable`. No argument reaches `/export`.
+`unavailable`. No argument reaches `/export`. The detail carries `partition`
+beside the stored `body`, the partition the page shows: a body stored
+`complete` with `truncated: true` is answered `partial-verified-scope`
+([ADR 0072, amendment of 2026-11-18](adr/0072-report-artifact-pages.md#amendment-a-report-cut-at-its-row-bound-is-not-complete-2026-11-18)).
 
 `kogane.collection-quality.read` takes `{ source?, view?, offset? }`:
 without `source` the summary (which takes no `offset` and no `view`), with it

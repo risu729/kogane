@@ -12,12 +12,14 @@
 // not-computable body can never present a whole-portfolio subtotal; and the
 // capabilities a report states must be the ones its replayability implies,
 // so a restricted report cannot claim it may still be explained.
+import type { ResultPartition } from "../../domain/src/calculation.ts";
 import { REPLAYABILITY, type Replayability } from "../../domain/src/context.ts";
 import { PRICE_KINDS, type PriceKind } from "../../domain/src/metrics.ts";
 import {
   REPORT_EVENT_KINDS,
   REPORT_PURPOSES,
   replayCapabilities,
+  reportPartition,
   reportStorageRef,
   validReportBody,
   type ReportBody,
@@ -103,6 +105,12 @@ export type ReportDetail =
       interpretationContext: InterpretationContext;
       events: ReportEventRow[];
       view: "body";
+      /**
+       * The partition the report states, derived by the reader from the body
+       * (`reportPartition`): a body stored `complete` with `truncated: true`
+       * states `partial-verified-scope`. The body is shown as stored.
+       */
+      partition: ResultPartition;
       body: ReportBody;
     }
   | {
@@ -311,12 +319,15 @@ function validReportDetail(value: unknown, reportId: string): value is ReportDet
       value.report.replayability === "unavailable"
     );
   return (
-    exactKeys(value, ["report", "interpretationContext", "events", "view", "body"]) &&
+    exactKeys(value, ["report", "interpretationContext", "events", "view", "partition", "body"]) &&
     value.view === "body" &&
     Array.isArray(value.events) &&
     value.events.length <= EVENT_BOUND &&
     value.events.every((event) => validEventRow(event, reportId)) &&
     validReportBody(value.body) &&
+    // The stated partition is the one the body implies, so a truncated body
+    // can never be shown as complete (INV05).
+    value.partition === reportPartition(value.body.partition, value.body.coverage.truncated) &&
     value.body.contextId === value.report.contextId &&
     value.body.purpose === value.report.purpose &&
     value.body.schemaVersion === value.report.schemaVersion

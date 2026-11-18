@@ -39,8 +39,17 @@ const racing = pageReadHarness("report-read-racing", {
   }),
 });
 
-/** One stored report of `context`, its run complete, its body and explanation in R2. */
-async function storeReport(reportId: string, context: string): Promise<string> {
+/**
+ * One stored report of `context`, its run complete, its body and explanation in
+ * R2. `truncatedComplete` stores the body the report job wrote before ADR 0072's
+ * amendment of 2026-11-18: `complete` although its positions were cut at the
+ * row bound.
+ */
+async function storeReport(
+  reportId: string,
+  context: string,
+  truncatedComplete = false,
+): Promise<string> {
   const body: ReportBody = {
     schemaVersion: "report-holdings-v1",
     purpose: "holdings-view",
@@ -48,7 +57,7 @@ async function storeReport(reportId: string, context: string): Promise<string> {
     calculationRunId: `run-${reportId}`,
     policyRefs: ["decimal-v1", "instrument-valuation-v1"],
     unitRef: "JPY",
-    partition: "partial-verified-scope",
+    partition: truncatedComplete ? "complete" : "partial-verified-scope",
     subtotal: { coefficient: "10000", scale: 0 },
     rows: [
       {
@@ -60,7 +69,11 @@ async function storeReport(reportId: string, context: string): Promise<string> {
         value: { coefficient: "10000", scale: 0 },
       },
     ],
-    coverage: { scopeRef: "perimeter:test", coveredRef: "positions:1", truncated: false },
+    coverage: {
+      scopeRef: "perimeter:test",
+      coveredRef: "positions:1",
+      truncated: truncatedComplete,
+    },
   };
   const bytes = new TextEncoder().encode(canonicalJson(body));
   const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (byte) =>
@@ -94,6 +107,7 @@ beforeAll(async () => {
   await seedRegistry();
   vanishing = await storeReport("rpt:synthetic-open", "ctx-open");
   await storeReport("rpt:synthetic-restricted", "ctx-restricted");
+  await storeReport("rpt:synthetic-truncated", "ctx-truncated", true);
   // Its run is complete, but its body has left R2.
   await env.EVIDENCE.delete(await storeReport("rpt:synthetic-gone", "ctx-gone"));
   await env.DB.prepare(
@@ -173,8 +187,34 @@ describe("report page reads", () => {
       "rpt:synthetic-gone",
       "rpt:synthetic-open",
       "rpt:synthetic-restricted",
+      "rpt:synthetic-truncated",
     ]);
     expect(await tableCounts()).toEqual(before);
+  });
+
+  it("state a body stored complete but cut at its row bound as partial, as the page does", async () => {
+    // The stored body is shown as stored; the partition the reader states
+    // beside it is the one the page shows, over HTTP and MCP alike (INV05;
+    // ADR 0072, amendment of 2026-11-18).
+    const served = await page.expectSameAnswer(
+      `/api/v2/reports/${encodeURIComponent("rpt:synthetic-truncated")}`,
+      REPORTS,
+      { reportId: "rpt:synthetic-truncated" },
+    );
+    expect(served.status).toBe(200);
+    expect(served.body.body).toMatchObject({
+      partition: "complete",
+      coverage: { truncated: true },
+    });
+    expect(served.body.partition).toBe("partial-verified-scope");
+    expect(
+      validApiResponse(
+        `/api/v2/reports/${encodeURIComponent("rpt:synthetic-truncated")}`,
+        served.body,
+      ),
+    ).toBe(true);
+    const open = await page.mcp(REPORTS, { reportId: "rpt:synthetic-open" });
+    expect(open.body.data.partition).toBe("partial-verified-scope");
   });
 
   it("refuse a restricted report on every view, where the operator page still shows its body", async () => {
@@ -456,7 +496,7 @@ describe("the audit rows of the report and collection quality reads", () => {
     });
     expect(rows).toEqual([
       read("mcp", "reports.read", 50, true),
-      read("agent-http", "reports.read", 3),
+      read("agent-http", "reports.read", 4),
       // One report, not its events.
       read("agent-http", "reports.read", 1),
       read("mcp", "reports.read", 1),

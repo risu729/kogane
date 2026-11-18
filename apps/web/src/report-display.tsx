@@ -7,11 +7,7 @@ import type { ReactNode } from "react";
 import { decimalToString, type ExactDecimal } from "../../../packages/domain/src/values.ts";
 import type { Replayability } from "../../../packages/domain/src/context.ts";
 import type { ResultPartition, UnvaluedReason } from "../../../packages/domain/src/calculation.ts";
-import type {
-  ReportBody,
-  ReportEventKind,
-  ReportPurpose,
-} from "../../../packages/domain/src/reports.ts";
+import type { ReportEventKind, ReportPurpose } from "../../../packages/domain/src/reports.ts";
 import { minorUnitExponent } from "./money.ts";
 import { Amount, Badge, type Tone } from "./ui.tsx";
 import { Link } from "./router.tsx";
@@ -112,19 +108,6 @@ export function ReportAmount({ value, unit }: { value: ExactDecimal; unit: strin
       neutral
     />
   );
-}
-
-/**
- * The partition the page states. A body cut at the report job's row bound
- * left positions unread, so its figure is a subtotal of part of the scope even
- * when every row it holds is valued. A body stored before the job said so
- * itself still reads `complete`; it is shown as the partial scope it is
- * (INV05). The stored body is not changed.
- */
-export function shownPartition(body: Pick<ReportBody, "partition" | "coverage">): ResultPartition {
-  return body.partition === "complete" && body.coverage.truncated
-    ? "partial-verified-scope"
-    : body.partition;
 }
 
 export function PartitionBadge({ partition }: { partition: ResultPartition }): ReactNode {

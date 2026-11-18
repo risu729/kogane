@@ -18,6 +18,7 @@ import {
 import {
   replayabilityFor,
   replayCapabilities,
+  reportPartition,
   reportStorageRef,
   validReportBody,
   type Replayability,
@@ -243,6 +244,12 @@ export async function readReportRoute(
     interpretationContext: interpretation,
     events,
     view: route.view,
+    // The partition the report states, beside the body as stored: a body the
+    // job wrote `complete` with `truncated: true` (before ADR 0072's amendment
+    // of 2026-11-18) is a subtotal of part of its scope (INV05). The page and
+    // `kogane.reports.read` both read it here; the body and its digest stay
+    // as stored.
+    partition: reportPartition(body.partition, body.coverage.truncated),
     body,
   };
 }
