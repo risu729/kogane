@@ -116,14 +116,16 @@ When retiring the PoC, delete only the Worker. Keep shared DATA because other co
 
 Collection failures emit a structured `*-collection-failure` event before teardown
 or the DATA write. Join on `runId`; use `phase` to distinguish collection from
-teardown, relay and shared-persist events. A `partial` run's collector manifest
-in DATA retains the same three failure fields (`operation`, `errorType`,
-`message`). Its bounded message includes the safe stage and available HTTP
-status; structured logs expose these as `diagnostics` fields. A `failed` run
-stores no artifact, not even `manifest.json`, so its terminal's closed
-`safeErrorCode` and the Worker logs are the only diagnosis. Every core
-collection failure produces such a run (see the open limit at the end of this
-page).
+teardown, relay and shared-persist events. Sony emits that event only for a
+core collection failure. A core failure always makes the core run `failed`,
+and a `failed` run stores no artifact, not even `manifest.json`, so its
+terminal's closed `safeErrorCode` and the Worker logs are the only diagnosis
+(see the open limit at the end of this page). A supplementary run's failure
+emits no `*-collection-failure` event; when that run kept an artifact
+(`partial`), its collector manifest in DATA retains the three failure fields
+(`operation`, `errorType`, `message`), and its terminal carries the closed
+`safeErrorCode`. The bounded message includes the safe stage and available HTTP
+status; structured logs expose these as `diagnostics` fields.
 
 No exception message, stack, cause, request URL, credential, response body, or
 unrecognized provider text is logged. Sony logs only fixed operation IDs/currencies
@@ -162,15 +164,17 @@ Log emission is best effort and cannot replace a collection result or failure.
 
 Core artifacts are persisted only after the whole core collection (login,
 balance, both history ranges and WALLET) returns. Open limit: a failure at any
-core step discards every core artifact fetched before it, and the core run is
-stored as `failed` with no artifact (`src/worker.ts`, `runSharedCollection`;
-`sonyBankRunPlan` in `src/shared-collection.ts` keeps none for a failed run).
-Such a run leaves no manifest, and the `transactionCount` of 0 in its returned
-result is a default, not evidence that JPY history was empty; use the validated
-progress count instead. The two
-supplementary runs differ: each keeps the artifacts it fetched before its own
-failure (`partial`, or `failed` when it fetched none), and neither changes the
-core run's terminal. Because the documents run always records a failure,
-`runSharedCollection` reports `partial` even when the core run succeeded; the
+core step discards every core artifact fetched before it, so the core run is
+never `partial`: it is stored as `failed` with no artifact (`src/worker.ts`,
+`runSharedCollection`; `sonyBankRunPlan` in `src/shared-collection.ts` keeps
+none for a failed run). Such a run leaves no manifest, and the
+`transactionCount` of 0 in its returned result is a default, not evidence that
+JPY history was empty; use the validated progress count instead. The two
+supplementary runs are read only after the core steps succeed, so a core
+failure leaves neither of them. They differ from the core run: each keeps the
+artifacts it fetched before its own failure (`partial`, or `failed` when it
+fetched none), and neither changes the core run's terminal. Because the
+documents run always records a failure, `runSharedCollection` reports
+`partial` whenever the core run succeeded (and `failed` when it did not); the
 alarm records a persisted `partial` result as completed (`scheduledResult`,
 `packages/collection/src/schedule-result.ts`).

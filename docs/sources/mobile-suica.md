@@ -792,7 +792,8 @@ Artifacts are `sf-history-page-NNNN.html`, one per fetched page (role
 and `collection-summary.json` (role `collector_summary`). The terminal records the
 `as-of-selector` range (selector/date/request) and sanitizer/normalizer transformations.
 `coverageStatus` becomes `complete` only on success with a proven history boundary;
-otherwise it is `partial` with `history_boundary_unproven`. Cookies, session envelopes,
+a run that kept pages without proving it is `partial` with `history_boundary_unproven`,
+and a run that kept nothing is `failed` with coverage `unknown`. Cookies, session envelopes,
 and browser bootstrap are not artifacts.
 
 Worker names, Browser bindings, and secrets do not change. The Processor's

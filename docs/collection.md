@@ -407,17 +407,21 @@ yesterday, whose files are the parser input (`runSharedCollection`,
 `src/worker.ts`). The terminal states the retained request: `request-window`
 has a null start and yesterday as its end, and `requestedScope.scopeKind` is
 `full_snapshot` over the same bounds, so a later successful run recovers a day
-an earlier missed run did not read. `coverageStatus` is `complete` for a
-successful run, `partial` for a partial run and `unknown` for a failure; the
-null start names the provider's retention, not proved account-opening coverage.
+an earlier missed run did not read, as long as the provider still retains it
+and each currency's retained history fits the 1,000-page walk (beyond it the
+run fails with `history_page_limit_exceeded`). `coverageStatus` is `complete`
+for a successful run and `unknown` for a failure; the core run is never
+`partial`, because a core failure keeps no artifact. The null start names the
+provider's retention, not proved account-opening coverage.
 
-The realised-gains and documents runs share the core run's ID as
-`acquisitionSessionRef`. The realised-gains run has no `request-window`
-(`full_snapshot` with null bounds) and units `realised-evidence` and
-`realised-year-YYYY`; the documents run requests the five-year `date_range`
-ending yesterday, and each stored PDF has its own complete `document` unit
-(`delivered-document-NNNN`) with a unit `terminal` report, while the run stays
-`partial` (`sonyBankRunPlan`, `src/shared-collection.ts`).
+The realised-gains and documents runs, read only after the core steps succeed,
+share the core run's ID as `acquisitionSessionRef`. The realised-gains run has
+no `request-window` (`full_snapshot` with null bounds); its units are
+`realised-evidence` and `realised-year-YYYY` for what it stored. The documents
+run requests the five-year `date_range` ending yesterday, and each stored PDF
+has its own complete `document` unit (`delivered-document-NNNN`) with a unit
+`terminal` report, while the run itself is `partial` (`failed` when it stored
+nothing) (`sonyBankRunPlan`, `src/shared-collection.ts`).
 
 In every run with an artifact, `manifest.json` is the collector manifest with
 the central-safe failure messages (`manifestFailure`) and each artifact's
@@ -969,13 +973,16 @@ Terminal: `source: mobile-suica`, `producer: collector-mobile-suica`,
 `producerVersion: COLLECTOR_SCHEMA_VERSION` (`mobile-suica-worker-poc-v2`),
 `requestedScope: full_snapshot` over unit `account` with the requested day as
 an `as-of-selector` range (`selector`/`date`/`request`) — the date selects the
-page, it is not the extent of what came back. The transformations are one
+first page, it is not the extent of what came back. The transformations are one
 `redacted` step per page by `mobile-suica-history-sanitizer` producing the HTML
 (with no input artifact, because the unredacted page is deliberately not
 retained) and one `extracted` step by `mobile-suica-history-normalizer` from
 the HTML pages to
 `sf-history.json`. A run that stopped mid-walk keeps its sanitized pages
-without `sf-history.json` ([ADR 0104](adr/0104-mobile-suica-retained-history.md)).
+without `sf-history.json` or `collection-summary.json` and is `partial` with
+`history_boundary_unproven`; one that stopped before any page was sanitized
+keeps nothing and is `failed` (`collection_failed`)
+([ADR 0104](adr/0104-mobile-suica-retained-history.md)).
 
 `coverageStatus` is `complete` only when the run succeeded **and** the
 collector proved it reached the end of the history; an unproven boundary is
