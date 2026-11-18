@@ -694,6 +694,80 @@ the snapshot unservable does not reopen the stage. Requests of the other
 kinds never reach `adopted` through an executor, so their `projected` stays a
 plain `pending`; a rebuild request is still not traced.
 
+#### Checking `projected` in production (read-only)
+
+What production has shown so far is under
+[what was verified](#what-was-verified-locally-and-what-was-not). To check it
+again, read; never send a request just to check (no
+`kogane.ops.collection.request`). Counts and closed codes only: record no
+operation id beyond its first eight hex characters, and no source data.
+
+1. **Route.** Kogane MCP through the MCP Portal
+   ([agent API](agent-api.md#which-client-connects-and-how)), tools
+   `kogane.ops.operation.list` and `kogane.ops.operation.get`, both read-only
+   (`operations.read`). The operator may read the same records over
+   `GET /api/ops/v1/operations` and `GET /api/ops/v1/operations/{id}`, or on
+   the 依頼の経過 page. Only the one-operation read (that tool, that route or
+   the page) derives `projected`; the list shows stored status.
+2. **List.** `kogane.ops.operation.list` with `kind: "collection"` and
+   `limit: 50`, following `nextCursor` to the end. Count the summaries by
+   stored `status`. A request that `get` reads `completed` is listed `running`,
+   because the stored row never turns `completed` for a collection.
+3. **Read each candidate.** `kogane.ops.operation.get` for every summary listed
+   `running` or `failed`. From each record take `execution.state`, the
+   `adopted` stage's `state`, the `projected` stage's `state`, `failureCode`
+   and whether `evidenceRef` starts with `read-snapshot:`, and the record's
+   `status`. Tally the tuples.
+4. **Compare.** The trace is consistent when every rule holds:
+   - `projected` `completed` only with `adopted` `completed`, `failureCode`
+     null and `evidenceRef` `read-snapshot:<id>`; the record reads
+     `completed` exactly when all five stages do.
+   - Records read with no READ publication between them name one
+     `read-snapshot:` id: the derivation reads the one READ pointer.
+   - `projected` `pending` with a `failureCode` only with `adopted`
+     `completed`, and the code is one of `projection_behind`,
+     `read_model_unavailable`, `read_model_context_changed` and
+     `projection_revision_unrecorded`. Without `adopted` `completed`, the stage
+     is a plain `pending` with no code (so it stays on `prestia-bank`'s first
+     request, which reads `failed` with `publication_not_observed`).
+   - `execution.state` `published` implies `adopted` `completed`. Expect
+     `projection_revision_unrecorded` only on `sony-bank`'s first request
+     (published before this stage shipped); on any other it is a finding.
+   - `projection_behind` should clear after the next READ publication; read
+     the record again later. `read_model_unavailable` or
+     `read_model_context_changed` on any record means READ is lost or another
+     CORE epoch is current: report it, do not rebuild.
+5. **Optional CORE cross-check.** With Cloudflare access, the owner can run
+   this read-only aggregate in the D1 console of the CORE database or with
+   `wrangler d1 execute kogane-raw-evidence --remote --config services/processor/wrangler.jsonc --command "<sql>"`:
+
+   ```sql
+   SELECT d.state AS execution_state,
+          coalesce(a.state, 'no_row') AS adopted_row,
+          coalesce(p.state, 'no_row') AS projected_row,
+          CASE WHEN p.evidence_ref LIKE 'core-revision:%' THEN 'requirement'
+               WHEN p.evidence_ref IS NULL THEN 'none' ELSE 'other' END AS projected_ref,
+          count(*) AS n
+   FROM ops_collector_dispatches d
+   LEFT JOIN ops_request_stages a ON a.operation_id = d.operation_id AND a.stage = 'adopted'
+   LEFT JOIN ops_request_stages p ON p.operation_id = d.operation_id AND p.stage = 'projected'
+   WHERE d.action = 'collect'
+   GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3, 4;
+   ```
+
+   Expected: every `published` execution has `adopted_row` `completed`,
+   `projected_row` `pending` and `projected_ref` `requirement`, except the
+   one published before this stage shipped, which has no `projected` row
+   (`no_row`, `none`); no other state has a `projected` row; and no
+   `projected` row is `completed`, since nothing stores it so. The number of
+   `published` executions with a requirement is the most `get` can read as
+   `completed`.
+
+6. **Record** the UTC time of the reads, the counts from steps 2–5 and any
+   rule that failed, in the
+   [verification record](#what-was-verified-locally-and-what-was-not) and in
+   [current status](current-status.md).
+
 ## Storage
 
 Every request to the seven routes, and every operations MCP tool call, is
@@ -896,8 +970,14 @@ registered with every parse-selected artifact published, and the execution
 ended `published` with no reason code. Four of them also reached `projected`
 and request `status: completed`; `sony-bank`'s was published before
 `projected` tracing was deployed, so its `projected` reads
-`projection_revision_unrecorded`. Dated MCP client connection evidence is in
-the [recovery runbook](mcp-recovery.md).
+`projection_revision_unrecorded`. On 2026-11-09 (11:18–11:40 UTC) one more
+request each for `sbi-securities` and `mobile-suica` was read through
+`kogane.ops.operation.get` with every stage `completed` through `projected`
+against a READ snapshot
+([roadmap, Phase 3 outcome](roadmap.md#phase-3-outcome)). That is the last
+recorded production read of the stage; `projected` is derived on each read,
+so these records say what READ covered then, not now. Dated MCP client
+connection evidence is in the [recovery runbook](mcp-recovery.md).
 The later enablement of `st-george`, `sbi-vc-trade` and `sbi-vc-keepalive`
 has not yet been verified by a post-deployment operation request.
 
