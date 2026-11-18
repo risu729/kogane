@@ -641,7 +641,10 @@ a snapshot whose rows do not change.
   application deadlines and later hops are judged from it.
 - An offer whose validity (a date, period or `open-ended` value) or whose date
   or period application deadline names a zone other than `Asia/Tokyo` is
-  rejected as `needs_rule_verification` at every hour. Before, it was compared
+  rejected as `needs_rule_verification` at every hour, unless a reason earlier
+  in the rejection order rejects it first (an `Asia/Tokyo` validity that does
+  not cover the Tokyo day is `offer_not_valid_at_clock` before another zone's
+  deadline is read). Before, it was compared
   with the UTC date. An instant deadline is read on the Tokyo calendar
   (`civilDateOfInstant`), not on its own zone's. An offer with a `null` zone
   is compatible and judged on the Tokyo day.
