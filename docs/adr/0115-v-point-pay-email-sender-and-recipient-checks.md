@@ -95,9 +95,11 @@ For forwarded events stored before this change, which record no From:
   itself when direct, the inner forwarded part otherwise). For provenance v2
   the parser requires `messageFrom` to be the official sender in both forms.
   The official sender is a public provider address and stays a parser
-  constant. The collector also refuses a candidate whose recorded From is not
-  the official sender (`vpoint_pay_email_message_sender_invalid`) before
-  storage.
+  constant. At receipt, mail whose From is not the official sender is never
+  parsed as a candidate, as before; the collector
+  also throws `vpoint_pay_email_message_sender_invalid` before storage if a
+  candidate's recorded From is not the official sender, a guard that
+  receipt-time parsing already makes unreachable.
 - **Provenance v1 keeps its reading.** A v1 direct event is checked by its
   envelope sender, as before. A v1 forwarded event carries no sender the
   parser could check; it is accepted on the collector's check at receipt.
