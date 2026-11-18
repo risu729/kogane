@@ -83,6 +83,20 @@ policy_version)`).
    cannot be established (an ordinal card or reward-bucket reference is
    `unresolved` and keyed by `fetch-run`), and re-identify foreign positions
    captures only.** Chosen.
+6. **Require policy 2 only for a positions capture that holds the shape.**
+   No observed capture would then be re-identified, so no unchanged identity
+   would gain a revision (see Consequences). Not taken: the required-policy
+   SQL is evaluated per artifact by the sweep and the audit, so it would have
+   to restate the resolver's test (a RIC, a country at either level, the
+   resolver's whitespace rule) over the provider's `extra_json` of every
+   position, and the other policy modules select on stored evidence or the
+   dataset, never on provider text. It stays open if the revisions below are
+   not acceptable.
+7. **Carry an existing rule mapping forward when the new plan equals it.**
+   Not taken: the store appends one rule revision per identifier and source
+   account for each newer policy version (ADR 0012), and the SBI Shinsei and
+   MyJCB bumps (ADR 0076, ADR 0089) relied on that; changing it would change
+   every source's re-identification, not this rule.
 
 ## Decision
 
@@ -135,13 +149,27 @@ policy_version)`).
   them. The placeholder then has no current use, so the candidate read and
   per-source coverage stop listing it. A manual decision recorded on the
   placeholder stays on it and is not carried to the new identifiers; it has
-  to be made again on them. For every parse whose rows all state a RIC or a
-  country (every observed one), the plan is unchanged: its source account and
-  its identifiers (`ric//<RIC>`, `sbi-security-code/<country>/<code>`, the
-  currencies) gain a policy-2 rule revision equal to the policy-1 one except
-  for its version, with a new mapping id. An open candidate plan that pinned
-  one of those identifiers' revisions reads as stale and is planned again;
-  no card-settlement evidence cites an SBI Securities mapping.
+  to be made again on them.
+- Revisions of unchanged identities, which is every observed one: for a parse
+  whose rows all state a RIC or a country the plan is unchanged, yet the
+  first policy-2 run that uses a subject appends one policy-2 rule revision
+  to it, equal to the policy-1 one except for its id, revision and
+  version. The subjects are the foreign brokerage source accounts and every
+  `ric//<RIC>` and `sbi-security-code/<country>/<code>` identifier a
+  positions capture names, and the shared currency identifiers
+  (`iso4217/global/USD`, `iso4217/global/JPY`) unless another source's
+  policy-2 run already revised them. The account entity and the instrument
+  stay the same, so balances, valuations and candidate statuses read the
+  same values. A subject whose current mapping is manual, or a rule adoption
+  onto another instrument, gains no revision. A foreign trade parse, which
+  stays at policy 1, keeps citing the policy-1 revision it recorded for the
+  same identifier, while the identifier's current mapping becomes the
+  policy-2 one. An open plan that pinned the policy-1 revision (an
+  instrument candidate's `identity.assign`, say) is refused at approval with
+  `stale_context` and marked stale; it has to be planned again. No
+  card-settlement evidence cites an SBI Securities mapping, and
+  `instrument-auto-v1` adopts only domestic identifiers, which positions
+  captures do not use.
 - Every other SBI Securities parse (domestic, trades, cash, account assets)
   stays at policy 1 and gains no revision, including the domestic codes rule
   `instrument-auto-v1` adopts.
@@ -154,9 +182,11 @@ policy_version)`).
   country; no observed capture does, and the capture states nothing that
   could tell them apart. A future SBI parser that can emit this shape needs
   its dataset added to the module, or its parses keep policy 1's placeholder.
-  Valuation and the report job key holdings by
-  `instrument:<source>:<market>:<code>`, not by identity; that key is
-  unchanged here.
+  Valuation and the report job key holdings and prices by
+  `instrument:<source>:<market>:<code>` (`instrumentRef` in
+  `services/processor/src/report-job.ts`, built from the position row's
+  `market` and `security_code`), not by identity; that key is unchanged
+  here, so two such securities with no market code still share it there.
 
 ## Verification
 
@@ -178,6 +208,10 @@ Synthetic inputs only:
   positions parses sharing the placeholder are re-identified once at policy 2
   onto two capture-scoped unresolved identifiers; the placeholder and every
   earlier revision stay; a domestic parse is not re-identified and its listing
-  gains no revision.
+  gains no revision. An observed-shape positions parse (country and RIC)
+  gives its source account and an unchanged RIC identifier one policy-2
+  revision each, equal but for id, revision and version; a manually mapped
+  identifier gains none; a foreign trade parse keeps citing the policy-1
+  revision while the current mapping moves to the policy-2 one.
 - `services/processor/test/identity-audit.test.ts`: only the positions
   capture counts as pending; `missing-security-scope` is an audited code.

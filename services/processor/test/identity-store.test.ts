@@ -1048,6 +1048,151 @@ test("SBI foreign positions parses are re-identified at policy 2; a scopeless co
   ).toBe(0);
 });
 
+test("re-identifying an observed-shape positions parse revises unchanged identities with new mapping ids (ADR 0113)", async () => {
+  // Every observed capture states a country and a RIC, so policy 2 plans it
+  // exactly as policy 1 did. The re-identification still appends a policy-2
+  // rule revision, with a new id, for each source account and identifier the
+  // parse uses whose current mapping is the rule's policy-1 one. A manual
+  // mapping is not revised. A policy-1 parse of another dataset that uses the
+  // same identifier keeps citing the revision it recorded, while the current
+  // mapping of that identifier becomes the policy-2 one.
+  const element = (code: string, ric: string) => ({
+    specificAccountCode: "OBSERVED",
+    countryCode: "US",
+    securities: {
+      securitiesCode: code,
+      securitiesName: `Synthetic ${code}`,
+      countryCode: "US",
+      ric,
+    },
+  });
+  await seed(
+    163,
+    0,
+    "sbi-securities",
+    true,
+    (id) =>
+      [
+        ["SYNO", "SYNO.O"],
+        ["SYNP", "SYNP.O"],
+      ].map(([code, ric]) =>
+        db
+          .prepare(
+            "INSERT INTO position_observations(parse_run_id,source_account,security_code,quantity_text,quantity_scale,currency,raw_locator,extra_json) VALUES(?,'sbi-securities:foreign',?,'1',0,'USD','synthetic:position',?)",
+          )
+          .bind(id, code, JSON.stringify(element(code!, ric!))),
+      ),
+    "foreign-cash-positions",
+  );
+  // A trade of the same security, from a dataset that stays at policy 1.
+  await seed(
+    164,
+    0,
+    "sbi-securities",
+    true,
+    (id) => [
+      db
+        .prepare(
+          "INSERT INTO transaction_observations(parse_run_id,source_account,currency,raw_locator,extra_json) VALUES(?,'sbi-securities:foreign','USD','synthetic:trade',?)",
+        )
+        .bind(
+          id,
+          JSON.stringify({
+            ...element("SYNO", "SYNO.O"),
+            tradeCurrencyCode: "USD",
+            settlementCurrencyCode: "USD",
+          }),
+        ),
+    ],
+    "foreign-trade-records",
+  );
+  expect(await identifyParse(db, parse(163, "sbi-securities"), resolveIdentity, 1)).toBe(2);
+  expect(await identifyParse(db, parse(164, "sbi-securities"), resolveIdentity, 1)).toBe(1);
+  const ricId = (value: string) => identityKey("ii", ["ric", "", value]);
+  const tradedId = await ricId("SYNO.O");
+  const decidedId = await ricId("SYNP.O");
+  // A person maps the second security's identifier: a protected manual revision.
+  const decided = await db
+    .prepare("SELECT * FROM current_instrument_mappings WHERE identifier_id=?")
+    .bind(decidedId)
+    .first<{ instrument_id: string; revision: number }>();
+  await reviseIdentity(db, {
+    kind: "instrument",
+    referenceId: decidedId,
+    targetId: decided!.instrument_id,
+    expectedRevision: decided!.revision,
+    reason: "synthetic manual decision",
+  });
+  const sourceAccount = await db
+    .prepare(
+      "SELECT DISTINCT source_account_id id FROM current_identity_observations WHERE parse_run_id=163",
+    )
+    .first<string>("id");
+  type MappingRevision = {
+    id: string;
+    revision: number;
+    policy_version: number | null;
+    [column: string]: unknown;
+  };
+  const instrumentRevisions = (identifier: string) =>
+    db
+      .prepare(
+        "SELECT id,revision,instrument_id,method,reason,label,status,policy_version FROM instrument_mappings WHERE identifier_id=? ORDER BY revision",
+      )
+      .bind(identifier)
+      .all<MappingRevision>();
+  const accountRevisions = () =>
+    db
+      .prepare(
+        "SELECT id,revision,account_id,method,reason,label,status,policy_version FROM account_mappings WHERE source_account_id=? ORDER BY revision",
+      )
+      .bind(sourceAccount)
+      .all<MappingRevision>();
+  const tradedBefore = (await instrumentRevisions(tradedId)).results;
+  const decidedBefore = (await instrumentRevisions(decidedId)).results;
+  const accountBefore = (await accountRevisions()).results;
+  expect(tradedBefore).toHaveLength(1);
+  expect(accountBefore).toHaveLength(1);
+
+  // Only the positions parse is a candidate again.
+  expect(await identitySweep(db, resolveIdentity, 8, "sbi-securities")).toEqual({
+    processedRuns: 1,
+    identifiedRuns: 1,
+    identifiedObservations: 2,
+  });
+  const revised = (before: MappingRevision[], after: MappingRevision[]) => {
+    expect(after.slice(0, before.length)).toEqual(before);
+    expect(after).toHaveLength(before.length + 1);
+    const { id: oldId, revision: _r1, policy_version: v1, ...was } = before.at(-1)!;
+    const { id: newId, revision: _r2, policy_version: v2, ...now } = after.at(-1)!;
+    // Equal except for its id, revision and policy version.
+    expect(now).toEqual(was);
+    expect([v1, v2]).toEqual([1, 2]);
+    expect(newId).not.toBe(oldId);
+    return newId;
+  };
+  const tradedNow = revised(tradedBefore, (await instrumentRevisions(tradedId)).results);
+  revised(accountBefore, (await accountRevisions()).results);
+  // The manual decision is untouched.
+  expect((await instrumentRevisions(decidedId)).results).toEqual(decidedBefore);
+  // The trade parse's sealed policy-1 run keeps citing the first revision;
+  // the identifier's current mapping, which a pinned plan expects, moved on.
+  expect(
+    await db
+      .prepare(
+        "SELECT DISTINCT u.instrument_mapping_id id FROM current_identity_observations o JOIN identity_instrument_uses u ON u.identity_observation_id=o.id WHERE o.parse_run_id=164 AND u.identifier_id=?",
+      )
+      .bind(tradedId)
+      .first<string>("id"),
+  ).toBe(tradedBefore[0]!.id);
+  expect(
+    await db
+      .prepare("SELECT id FROM current_instrument_mappings WHERE identifier_id=?")
+      .bind(tradedId)
+      .first<string>("id"),
+  ).toBe(tradedNow);
+});
+
 test("all four observation kinds preserve their instrument roles and provenance", async () => {
   await seed(108);
   await db.batch([

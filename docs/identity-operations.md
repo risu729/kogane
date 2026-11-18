@@ -618,8 +618,14 @@ policy-2 run; the current views select the newer sealed run. A position that
 used the placeholder moves to its capture's unresolved identifier; the
 placeholder identifier, its revisions and the policy-1 runs stay as recorded,
 and a manual decision on the placeholder is not carried over. Every other
-identifier and the source account those parses use gain a policy-2 rule
-revision equal to the policy-1 one except for its version.
+identifier and the source account those parses use, including the shared
+currency identifiers if no other source's policy-2 run revised them yet, gain
+one policy-2 rule revision equal to the policy-1 one except for its id,
+revision and version, unless a manual mapping or a rule adoption onto another
+instrument holds it. Their account entity and instrument do not change, but an
+open plan that pinned the policy-1 revision is refused at approval with
+`stale_context` and has to be planned again; a foreign trade parse kept at
+policy 1 still cites the policy-1 revision it recorded.
 
 Nothing is configured to enable it. After deployment the five-minute pipeline
 sweep picks the parses up on its own; each positions parse is re-identified

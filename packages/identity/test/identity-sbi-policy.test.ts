@@ -7,9 +7,11 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { ArtifactMeta, Observation } from "../../parsers/src/types.ts";
 import { sbiAccountAssetsCurrent } from "../../parsers/src/parsers/sbi-account-assets-current.ts";
+import { sbiAccountAssetsHistory } from "../../parsers/src/parsers/sbi-account-assets-history.ts";
 import { sbiDomesticCashPositions } from "../../parsers/src/parsers/sbi-domestic-cash-positions.ts";
 import { sbiDomesticTradeRecords } from "../../parsers/src/parsers/sbi-domestic-trade-records.ts";
 import { sbiForeignCashBalances } from "../../parsers/src/parsers/sbi-foreign-cash-balances.ts";
+import { sbiForeignCashHistory } from "../../parsers/src/parsers/sbi-foreign-cash-history.ts";
 import { sbiForeignCashPositions } from "../../parsers/src/parsers/sbi-foreign-cash-positions.ts";
 import { sbiForeignTradeRecords } from "../../parsers/src/parsers/sbi-foreign-trade-records.ts";
 import { sbiYenDetailHistory } from "../../parsers/src/parsers/sbi-yen-detail-history.ts";
@@ -223,6 +225,10 @@ describe("SBI Securities identity policy versions", () => {
       [sbiForeignTradeRecords, "sbi-parser-boundaries/foreign-trade-records.json"],
       [sbiYenDetailHistory, "sbi-parser-boundaries/yen-detail-history.json"],
       [sbiAccountAssetsCurrent, "sbi-parser-boundaries/account-assets-current.json"],
+      // Foreign cash history rows are `sbi-securities:foreign` transactions;
+      // their schema admits no security, so they never reach the rule.
+      [sbiForeignCashHistory, "sbi-parser-boundaries/foreign-cash-history.json"],
+      [sbiAccountAssetsHistory, "sbi-parser-boundaries/account-assets-history.json"],
     ] as const;
     for (const [parser, path] of cases) {
       const observations = parser.parse(fixture(path), artifact(null)).observations;
