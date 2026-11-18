@@ -8,7 +8,7 @@ Daily execution uses only this path.
 2. Start Cloudflare Browser Rendering and temporarily register the credential in a CDP virtual authenticator.
 3. Navigate from the official Mobile Suica entrypoint to JRE ID, running the page's own Fingerprint/Fraud Defense processing and WebAuthn ceremony.
 4. Click `SF（電子マネー）利用履歴` ("SF electronic-money usage history") in the member menu, receiving the history screen's short-lived cookies and `baseVariable` only inside the Worker.
-5. Fetch only 1 history page with plain Worker `fetch`. After parsing HTML, replace its sole `baseVariable` with `__KOGANE_REDACTED_BASE_VARIABLE__`, re-encode sanitized HTML as CP932, and save it, normalized JSON and summary to shared DATA (`kogane-raw-evidence`).
+5. Fetch history pages with plain Worker `fetch`: the first search on or before the run's JST date, then, while a page returns 100 rows, an inclusive search on that page's oldest date (see Retained SF history below). After parsing each page's HTML, replace its sole `baseVariable` with `__KOGANE_REDACTED_BASE_VARIABLE__`, re-encode sanitized HTML as CP932, and save the pages, normalized JSON and summary to shared DATA (`kogane-raw-evidence`).
 6. Writes the run's `terminal-v1` manifest last (`src/shared-run.ts`, `packages/collection`);
    the Processor registers the terminal in process. There is no Service Binding import any
    more (see Captured artifacts below).
@@ -40,7 +40,7 @@ Bitwarden vaults, master passwords, `BW_SESSION`, JRE ID passwords, cookies and 
 ## Captured artifacts
 
 ```text
-objects/<2 hex>/<sha256>                    sf-history-page-0001.html, sf-history.json, collection-summary.json
+objects/<2 hex>/<sha256>                    sf-history-page-NNNN.html (one per fetched page), sf-history.json, collection-summary.json
 runs/mobile-suica/<run-id>/terminal.json    run completion record written last (artifact key/object mapping)
 ```
 
@@ -48,7 +48,7 @@ runs/mobile-suica/<run-id>/terminal.json    run completion record written last (
 
 HTML and JSON contain the owner's transport/purchase history, balances and amounts. The R2 bucket must not be public. Stored HTML already has `baseVariable` replaced by a fixed sentinel; the original value is not saved to R2. Cookies, passkeys and WebAuthn assertions are not stored either.
 
-Date search uses `指定日以前` ("on or before the specified day"), with at most 100 records per 1 page. v2 captures only 1 page: fewer than 100 records is complete success; exactly 100 saves the 3 artifacts, then returns `partial` / `history_boundary_unproven`. It does not move to a previous-day cursor or claim complete capture.
+Date search uses `指定日以前` ("on or before the specified day"), with at most 100 records per 1 page. A page with fewer than 100 records ends the walk as complete success; a page of exactly 100 is followed by a search on its oldest date (`collectMobileSuica`, `src/mobile-suica.ts`). If the walk stops before such a page (a capped single day, the 183-page or ten-minute bound, a byte limit, an invalid or expired response), the pages already sanitized are kept without `sf-history.json` and the run is `partial` / `history_boundary_unproven` (`src/worker.ts`); it does not claim complete capture.
 The alarm entry point (`alarmCollection`, `src/worker.ts`) reports a persisted `partial`
 run as completed (`packages/collection/src/schedule-result.ts`); the `partial` status and
 its issue code stay on the terminal. A run whose terminal was not written is reported as failed.

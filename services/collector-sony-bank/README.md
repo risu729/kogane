@@ -38,6 +38,23 @@ On 2026-08-30, the following were verified with the owner's real account using a
 - `collection-summary.json`: non-secret summary containing only period, page/record counts and cookie names.
 - `manifest.json`: R2 key, SHA-256, bytes and success/failure per artifact.
 
+The same session then reads two supplements, each persisted as its own terminal
+run with the core run's ID as `acquisitionSessionRef` (`collectSonyBank` and
+`runSharedCollection`, `src/sony-bank.ts` and `src/worker.ts`):
+
+- Realised gains: `realised-gains-response.json` (the raw current/previous-year
+  summary), `realised-gains.csv` (the official 15-column detail CSV, kept only
+  after its row count matches the stated total) and one
+  `realised-gains-YYYY.json` per year. Only the per-year files carry a parser
+  dataset (`realised-gains`); the response and CSV stay evidence.
+- Delivered documents: `delivered-documents.json` (the foreign-deposit document
+  list for the five years ending yesterday) and `delivered-document-NNNN.pdf`
+  for each listed contract document. PDFs are fetched only when the list's
+  stated total equals its rows and is at most ten (one observed page); otherwise
+  the run ends with `document_list_incomplete`. Full provider retention is
+  unconfirmed, so even a run that stored every listed PDF ends `partial` with
+  `document_retention_unconfirmed` ([ADR 0100](../../docs/adr/0100-sony-realised-gains-documents.md)).
+
 The Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`). The Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the `sony-bank` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), daily at 06:00 JST (21:00 UTC). Each run collects from the first day of the JST month that contains yesterday through yesterday (JST): the run on the 1st requests the whole previous month (`defaultWindow`, `src/worker.ts`). In the same authenticated session, it also requests all retained history for JPY and all ten foreign currencies, omitting `inquiryStrtdtCat` and ending yesterday, with observed `sortSelect=00002`. Every later successful run recovers a missed month-end. It exhausts the three-row pager (at most 1,000 pages per currency/range), checks any declared returned count and the stable total against every page, then requires CSV rows to equal that total. It keeps no cursor and adds no request-window input. The full-history terminal carries `full_snapshot` with a null lower bound and yesterday as the upper bound; it claims the provider's retained history, not independently proved account-opening coverage. Normal collection uses the existing fixed-action private RPC path. Public `/trigger` and arbitrary-period selection are retired (404); no equivalent override path is added.
 
 After collection, `packages/collection` writes the run to shared DATA. Each artifact above is content-addressed at `objects/<2 hex>/<sha256>`, followed by a terminal manifest after every object. Objects and terminals use immutable conditional puts with R2 native SHA-256; a run without a terminal is not treated as completely stored. The Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). The dedicated source bucket, Service Binding to the central raw-evidence importer, `deferred` responses and `scripts/backfill-raw-evidence.sh` were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)).
@@ -49,7 +66,7 @@ runs/sony-bank/<run-id>/terminal.json    run completion record written last (art
 
 Login responses (including names), cookie values, CSRF, passwords, temporary WALLET SSO values, JSESSIONID and hidden-form values are not stored in R2. JSESSIONID and hidden-form values are removed from WALLET HTML immediately before storage. Body text is retained (personal names may be stored: ADR 0029, amendment 2). Captured balances/history contain personal financial information, so the bucket must not be public.
 
-WALLET obtains a temporary SSO value each time from bank BFF `/jada/debit-sso/login-usage-dtl-inq`, then connects over ordinary HTTP through `igw.sonybank.jp` to monthly lists at `dc.sonybank.jp`. The list contains every detail field; there is no separate detail endpoint. Month changes use `RW1313010201`, and the PDF entrypoint is `RW1313010301`. Official JavaScript rejects consecutive month changes within 10 seconds, so the Worker also observes a 10.25-second interval. This PoC does not store PDFs.
+WALLET obtains a temporary SSO value each time from bank BFF `/jada/debit-sso/login-usage-dtl-inq`, then connects over ordinary HTTP through `igw.sonybank.jp` to monthly lists at `dc.sonybank.jp`. The list contains every detail field; there is no separate detail endpoint. Month changes use `RW1313010201`, and the PDF entrypoint is `RW1313010301`. Official JavaScript rejects consecutive month changes within 10 seconds, so the Worker also observes a 10.25-second interval. The collector does not store WALLET PDFs; the only PDFs it stores are the delivered documents above.
 
 Cloudflare production verification on 2026-08-31 saved 34 artifacts for 2025-09-01 through 2026-08-31: 10 yen transactions, 6 foreign-currency transactions across 11 pages and 15 months of WALLET, with failure 0. Requesting official CSV for a foreign currency with 0 transactions can make Sony return 500 to Cloudflare egress, so empty CSV with no information is omitted when the JSON count is 0. Balances and 0-record history JSON are retained.
 
@@ -99,11 +116,14 @@ When retiring the PoC, delete only the Worker. Keep shared DATA because other co
 
 Collection failures emit a structured `*-collection-failure` event before teardown
 or the DATA write. Join on `runId`; use `phase` to distinguish collection from
-teardown, relay and shared-persist events. The collector manifest stored in DATA
-retains the same three failure fields (`operation`, `errorType`, `message`). Its
-bounded message includes the safe stage and available HTTP status; structured logs
-expose these as `diagnostics` fields. Use that manifest or the Worker logs for
-diagnosis.
+teardown, relay and shared-persist events. A `partial` run's collector manifest
+in DATA retains the same three failure fields (`operation`, `errorType`,
+`message`). Its bounded message includes the safe stage and available HTTP
+status; structured logs expose these as `diagnostics` fields. A `failed` run
+stores no artifact, not even `manifest.json`, so its terminal's closed
+`safeErrorCode` and the Worker logs are the only diagnosis. Every core
+collection failure produces such a run (see the open limit at the end of this
+page).
 
 No exception message, stack, cause, request URL, credential, response body, or
 unrecognized provider text is logged. Sony logs only fixed operation IDs/currencies
@@ -140,7 +160,17 @@ counts are logged before requesting CSV, even if a later step fails. No URLs,
 credentials, financial bodies or free-text provider errors enter these records.
 Log emission is best effort and cannot replace a collection result or failure.
 
-Artifacts are still persisted after full collection returns. A failure midway
-does not yet preserve earlier fetched artifacts, so the failure manifest's
-default transaction count is not evidence that JPY history was empty; use the
-validated progress count instead.
+Core artifacts are persisted only after the whole core collection (login,
+balance, both history ranges and WALLET) returns. Open limit: a failure at any
+core step discards every core artifact fetched before it, and the core run is
+stored as `failed` with no artifact (`src/worker.ts`, `runSharedCollection`;
+`sonyBankRunPlan` in `src/shared-collection.ts` keeps none for a failed run).
+Such a run leaves no manifest, and the `transactionCount` of 0 in its returned
+result is a default, not evidence that JPY history was empty; use the validated
+progress count instead. The two
+supplementary runs differ: each keeps the artifacts it fetched before its own
+failure (`partial`, or `failed` when it fetched none), and neither changes the
+core run's terminal. Because the documents run always records a failure,
+`runSharedCollection` reports `partial` even when the core run succeeded; the
+alarm records a persisted `partial` result as completed (`scheduledResult`,
+`packages/collection/src/schedule-result.ts`).

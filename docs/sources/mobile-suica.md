@@ -787,8 +787,8 @@ were retired on 2026-09-13 (`docs/collection.md`). It stores sanitized bytes unc
 at `objects/<2hex>/<sha256>`, writing
 `runs/mobile-suica/<runId>/terminal.json` last.
 
-Artifacts are `sf-history-page-0001.html` (role `sanitized_provider_capture`, CP932 HTML
-with `baseVariable` replaced by a sentinel), `sf-history.json` (role `collector_derived`),
+Artifacts are `sf-history-page-NNNN.html`, one per fetched page (role
+`sanitized_provider_capture`, CP932 HTML with `baseVariable` replaced by a sentinel), `sf-history.json` (role `collector_derived`),
 and `collection-summary.json` (role `collector_summary`). The terminal records the
 `as-of-selector` range (selector/date/request) and sanitizer/normalizer transformations.
 `coverageStatus` becomes `complete` only on success with a proven history boundary;

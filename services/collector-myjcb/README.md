@@ -194,7 +194,7 @@ remain unsupported (ADR 0101).
 
 The initial credit menu is grouped by the last `h2` or `h3` before each link (ADR 0005 amendment (j)). Under `h2`, `最新のご利用明細` ("latest usage details") and `過去の明細` ("past details") contain months; under `h3`, `ボーナス#回払い・ショッピングスキップ払い` ("bonus # installment / shopping skip payment") contains payment-schedule pages. Other headings (or links preceding any heading) stop with `credit_menu_group_unrecognized`. Payment-schedule pages are captured/saved after months and recorded in manifest `schedulePages`. Only a page with exactly 1 observed h1 `ショッピングスキップ払いご利用明細(未確定分)` ("shopping skip-payment usage details, unconfirmed") is saved as `credit-skip-payment-NN.html`; registration assigns dataset `credit-schedule`, read by `myjcb-skip-payment-schedule` (ADR 0005 amendment (e)). Others, such as bonus-payment pages, are saved unread as `credit-schedule-NN.html`. They do not count toward month coverage (ADR 0005 amendment (c)). Even at a month position, a page with exactly 1 such h1 is likewise saved as `credit-skip-payment-NN.html`, recorded in `schedulePages` and excluded from months (ADR 0005 amendment (h)). A page with exactly 1 h1 `ボーナス#回払いご利用代金明細(未確定分)` ("bonus # installment billing details, unconfirmed") is also saved as `credit-schedule-NN.html` at any position, recorded in `schedulePages` and excluded from months (amendment (j)). Only observed months are captured; among `detailPastJson` candidates 9–17, only `detailAvailableFlag=true` candidates are added. In the example, only offsets 10 and 13 among the 9 older candidates were available, so offsets are not exhaustively tried. API failure or missing hidden `generalJsonShikibetuId` stops processing. JSON-RPC uses `method=execute`, `params=[{generalJsonShikibetuId}]` and IDs matching official JS: `0301006` plus a 2-digit counter.
 
-`detailMonth=0` is a mutable `unconfirmed` snapshot; its export-free `.detail-list-01` is saved as HTML plus parsed JSON. Confirmed months use the same ledger component. Export links (relative hrefs without `detailMonth` on confirmed months) resolve against the detail page's own URL and count as that month's CSV/PDF/OFX offers; links naming a different `detailMonth` do not count. Notice PDFs are excluded. The Worker does not fetch exports, recording them only in manifest `exportOffers` (the shared bucket refuses export datasets; ADR 0005 amendment (b)). Only `collectCredit` with `exports: "fetch"` captures them; CSV searches for the exact 12-column header after metadata lines and retains CP932 bytes unchanged. If a position has rows under ledger header `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額` ("usage date / merchant etc.; payment date / future payment amount", observed on a shopping skip-payment schedule page; live DOM has 3 cells), save only the page as `unknown` and continue to the next month without reading rows (`scheduled_payments_page`).
+`detailMonth=0` is a mutable `unconfirmed` snapshot; its export-free `.detail-list-01` is saved as HTML plus parsed JSON. Confirmed months use the same ledger component. Export links (relative hrefs without `detailMonth` on confirmed months) resolve against the detail page's own URL and count as that month's CSV/PDF/OFX offers; links naming a different `detailMonth` do not count. Notice PDFs are excluded. Offers are recorded in manifest `exportOffers`, and every run calls `collectCredit` with `exports: "fetch"` (`src/collector.ts`), so a confirmed month's offered files are also fetched (see the original credit documents section below); CSV searches for the exact 12-column header after metadata lines and retains CP932 bytes unchanged. If a position has rows under ledger header `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額` ("usage date / merchant etc.; payment date / future payment amount", observed on a shopping skip-payment schedule page; live DOM has 3 cells), save only the page as `unknown` and continue to the next month without reading rows (`scheduled_payments_page`).
 
 Monthly statement state comes from the page itself, rather than export-link presence (`creditStatementState` in `src/parsers.ts`). The investigated connection never yielded export links (a relative-href resolution bug fixed on 2026-09-27), so the old rule, "no exports at `detailMonth<=1` means `unconfirmed`", recorded closed position-1 statements as `unconfirmed`.
 
@@ -233,21 +233,28 @@ Existing raw evidence and manifests are not rewritten. `myjcb-credit-statement-t
     credit-ledger-00.json
     credit-detail-10.html
     credit-ledger-10.json
-    credit-10.csv
-    credit-10.pdf
-    credit-10.ofx
+    credit-schedule-NN.html | credit-skip-payment-NN.html
+    credit-document-YYYY-MM.csv
+    credit-document-YYYY-MM.pdf
+    credit-document-YYYY-MM.ofx
     debit-menu.html
     debit-detail-00.html
     ...
     debit-detail-14.html
+    debit-other-menu.html
+    debit-other-detail-NN.html
+    jpoint-balance.json
+    jpoint-inquiry.html
+    jpoint-history.html
+    jpoint-history.json
     discovery.json
 ```
 
 Debit menu and detail HTML are admitted to shared storage. Debit details use
-the observed parser; menus remain evidence only. CSV/PDF/OFX export datasets
-remain unobserved in the central contract. Runs containing them are refused
-with `artifact_dataset_unobserved`; neither objects nor terminals are written
-to `DATA`.
+the observed parser; menus remain evidence only. Credit statement files are
+named by the statement's payment month (`documentFilename`, `src/documents.ts`)
+and register as the `credit-csv`, `credit-pdf` and `credit-ofx` datasets
+(ADR 0107).
 
 Captured HTML source is decoded to UTF-8. Scripts/styles/meta, embedded elements, event/data attributes, navigation URLs, form actions, all value/textarea contents, token/session-like attributes and 16-digit card numbers are deterministically removed/replaced before storage. Login/mypage HTML is not stored. Object R2 metadata contains only `sha256` and `byteSize` written by `packages/collection`. Manifests contain only run/connection/artifact/failure metadata; neither cookie values nor actual detail values enter logs. The bucket must not be public.
 
