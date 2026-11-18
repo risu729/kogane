@@ -143,6 +143,10 @@ describe.if(runnable)("reported state on a date", () => {
     const main = await page.locator("main").innerText();
     expect(main).toContain("負債は一部だけです。");
     expect(main).toContain("まだ請求に載っていないカード利用");
+    // The statements the window leaves out are counted, never listed.
+    const older = await page.getByRole("list", { name: "一覧にない期間外の請求" }).innerText();
+    expect(older).toContain("vpass · 引落予定日が基準日の31日より前: 1 件");
+    expect(older).toContain("vpass · 引落予定日が不明で、基準日の45日より前に取得: 1 件");
     await page.close();
   }, 30_000);
 

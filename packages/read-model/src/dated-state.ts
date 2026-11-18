@@ -315,6 +315,40 @@ FROM dated_statements s LEFT JOIN ownership ON ownership.observation_id=s.id
 ORDER BY s.source_id,s.source_account,s.period,s.id
 LIMIT ${DATED_STATE_ROW_BOUND + 1}`;
 
+/** Why a statement as of the cutoff is not a payable of the date. */
+export interface DatedStatementsBeforeWindowRow {
+  source_id: string;
+  account_id: string | null;
+  /** `due_before_window` or `undated_captured_before_window`. */
+  reason_code: string;
+  statements: number;
+}
+
+/**
+ * The statements `DATED_STATEMENTS_SQL` leaves out, counted (ADR 0019,
+ * amendment of 2026-11-18): of the statements as of the cutoff (`?1`), those
+ * due before `?2`, and those without a readable due date captured before
+ * `?3`, per source, resolved account (the same keyed ownership CTEs) and
+ * reason. Exactly the complement of the payable window over the same
+ * statement facts: a statement is listed by one read or counted by this one,
+ * never both and never neither (dated-state.test.ts). It counts rows and
+ * reads no amount.
+ */
+export const DATED_STATEMENTS_BEFORE_WINDOW_SQL = `WITH ${DATED_STATEMENT_FACTS_CTE}, dated_statements_before AS MATERIALIZED (
+ SELECT id,source_id,
+ CASE WHEN payment_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+  THEN 'due_before_window' ELSE 'undated_captured_before_window' END AS reason_code
+ FROM dated_statement_facts
+ WHERE CASE WHEN payment_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+  THEN payment_date<?2 ELSE fetched_at<?3 END
+), observed AS (SELECT id AS observation_id FROM dated_statements_before),
+${cardSettlementOwnershipCtes("balance")}
+SELECT s.source_id,ownership.account_id,s.reason_code,count(*) AS statements
+FROM dated_statements_before s LEFT JOIN ownership ON ownership.observation_id=s.id
+GROUP BY s.source_id,ownership.account_id,s.reason_code
+ORDER BY s.source_id,ownership.account_id,s.reason_code
+LIMIT ${DATED_STATE_ROW_BOUND + 1}`;
+
 /** The decimal policy a dated position's quantity is read under. */
 export const DATED_POSITION_QUANTITY_POLICY = "decimal-v1";
 

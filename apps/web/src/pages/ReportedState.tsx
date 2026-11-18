@@ -70,6 +70,10 @@ const LIABILITY_GAPS: Record<string, string> = {
   statements_before_window:
     "引落予定日が基準日の31日より前の請求と、引落予定日が不明で45日より前に取得した請求",
 };
+const WINDOW_REASONS: Record<string, string> = {
+  due_before_window: "引落予定日が基準日の31日より前",
+  undated_captured_before_window: "引落予定日が不明で、基準日の45日より前に取得",
+};
 
 const label = (labels: Record<string, string>, code: string): string =>
   Object.hasOwn(labels, code) ? labels[code]! : code;
@@ -307,6 +311,22 @@ function CoverageNotes({ state }: { state: ReportedState }): ReactNode {
         負債は一部だけです。次のものは含まれていません:{" "}
         {coverage.liabilitiesMissing.map((code) => label(LIABILITY_GAPS, code)).join("、")}。
       </p>
+      {coverage.statementsBeforeWindow.length === 0 ? null : (
+        <>
+          <p>
+            次の請求は期間外のため一覧にありません。引落済みかどうかはここでは確認していません。
+          </p>
+          <ul className="warning-list" aria-label="一覧にない期間外の請求">
+            {coverage.statementsBeforeWindow.map((entry) => (
+              <li key={`${entry.sourceId}/${entry.reasonCode}`}>
+                {entry.sourceId}{" "}
+                <span className="dim">· {label(WINDOW_REASONS, entry.reasonCode)}</span>:{" "}
+                {entry.count} 件
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       <details className="inline-disclosure">
         <summary>対象外にしているもの</summary>
         <ul className="warning-list">

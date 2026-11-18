@@ -188,7 +188,13 @@ describe("reported state on a date", () => {
         },
       ],
       payables: [],
-      coverage: { liabilitiesCoverage: "partial", netAssets: "not-computed" },
+      // No statement is stored, so none is left out and the gap is not named.
+      coverage: {
+        liabilitiesCoverage: "partial",
+        liabilitiesMissing: ["unbilled_card_usage", "installment_remaining", "loan_balances"],
+        statementsBeforeWindow: [],
+        netAssets: "not-computed",
+      },
     });
     // The day before the capture: nothing held, the container named as missing.
     const earlier = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000)

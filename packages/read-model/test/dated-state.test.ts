@@ -12,6 +12,7 @@ import {
   DATED_POSITIONS_SQL,
   DATED_SNAPSHOT_UNITS_SQL,
   DATED_SNAPSHOTS_SQL,
+  DATED_STATEMENTS_BEFORE_WINDOW_SQL,
   DATED_STATEMENTS_SQL,
   type DatedBalanceRow,
   type DatedPositionQuantityRow,
@@ -19,6 +20,7 @@ import {
   type DatedSnapshotRow,
   type DatedSnapshotUnitRow,
   type DatedStatementRow,
+  type DatedStatementsBeforeWindowRow,
 } from "../src/dated-state";
 import { parserModules } from "../../parsers/scripts/parser-digests";
 import { PARSERS } from "../../parsers/src/parsers/registry";
@@ -438,6 +440,150 @@ describe("statements as of the cutoff", () => {
         (row) => row.coefficient,
       ),
     ).toEqual(["2", "4"]);
+  });
+});
+
+describe("statements the payable window leaves out", () => {
+  const listed = (store: DatedStore, date: string, from: string, undated: string) =>
+    all<DatedStatementRow>(store, DATED_STATEMENTS_SQL, reportedStateCutoff(date), from, undated);
+  const counted = (store: DatedStore, date: string, from: string, undated: string) =>
+    all<DatedStatementsBeforeWindowRow>(
+      store,
+      DATED_STATEMENTS_BEFORE_WINDOW_SQL,
+      reportedStateCutoff(date),
+      from,
+      undated,
+    );
+  const DUE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u;
+
+  test("counted per source, account and reason, and never listed", () => {
+    const store = new DatedStore();
+    // Due before the window, resolved; due before it, unresolved; undated and
+    // captured before the undated bound; one listed of each kind.
+    const old = store.statement({
+      card: "card-a",
+      period: "2026-06",
+      paymentDate: "2026-06-26",
+      minor: 1,
+      fetchedAt: "2026-06-05T01:00:00Z",
+    });
+    store.identify(old, "vpass", "acct-card", "identified");
+    store.statement({
+      card: "card-b",
+      period: "2026-07",
+      paymentDate: "2026-07-26",
+      minor: 2,
+      fetchedAt: "2026-07-05T01:00:00Z",
+    });
+    store.statement({
+      card: "card-b",
+      period: "2026-05",
+      paymentDate: null,
+      minor: 3,
+      fetchedAt: "2026-05-05T01:00:00Z",
+    });
+    store.statement({
+      card: "card-a",
+      period: "2026-09",
+      paymentDate: "2026-09-26",
+      minor: 4,
+      fetchedAt: "2026-09-05T01:00:00Z",
+    });
+    store.statement({
+      card: "card-b",
+      period: "2026-09",
+      paymentDate: null,
+      minor: 5,
+      fetchedAt: "2026-09-05T01:00:00Z",
+    });
+    const window = ["2026-09-10", "2026-08-10", "2026-07-27T15:00:00.000Z"] as const;
+    expect(listed(store, ...window).map((row) => row.coefficient)).toEqual(["4", "5"]);
+    expect(counted(store, ...window)).toEqual([
+      {
+        source_id: "vpass",
+        account_id: null,
+        reason_code: "due_before_window",
+        statements: 1,
+      },
+      {
+        source_id: "vpass",
+        account_id: null,
+        reason_code: "undated_captured_before_window",
+        statements: 1,
+      },
+      {
+        source_id: "vpass",
+        account_id: "acct-card",
+        reason_code: "due_before_window",
+        statements: 1,
+      },
+    ]);
+    // A window that reaches every statement leaves none out.
+    expect(counted(store, "2026-09-10", "0000-00-00", "")).toEqual([]);
+  });
+
+  test("on random stores, listed and counted split the statements as of the cutoff exactly", () => {
+    // mulberry32: a fixed seed, so a failure replays.
+    let seed = 0x5eed;
+    const random = (n: number): number => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return Math.floor((((t ^ (t >>> 14)) >>> 0) / 4_294_967_296) * n);
+    };
+    const seen = { listed: 0, due: 0, undated: 0, resolved: 0 };
+    for (let round = 0; round < 6; round += 1) {
+      const store = new DatedStore();
+      for (let index = 0; index < 24; index += 1) {
+        const month = String(1 + random(10)).padStart(2, "0");
+        const card = `card-${random(4)}`;
+        const due = random(4);
+        const capture = store.statement({
+          card,
+          period: `2026-${month}`,
+          // A readable due date, none, or text that is not one.
+          paymentDate: due === 0 ? null : due === 1 ? "unknown" : `2026-${month}-26`,
+          minor: 1 + random(9_000),
+          fetchedAt: `2026-${month}-${String(1 + random(28)).padStart(2, "0")}T0${random(10)}:00:00Z`,
+        });
+        if (random(3) > 0) store.identify(capture, "vpass", `acct-${card}`, "identified");
+      }
+      for (const [date, from, undated] of [
+        ["2026-09-10", "2026-08-10", "2026-07-27T15:00:00.000Z"],
+        ["2026-05-20", "2026-04-19", "2026-04-05T15:00:00.000Z"],
+        ["2026-11-01", "2026-10-01", "2026-09-17T15:00:00.000Z"],
+      ] as const) {
+        const every = listed(store, date, "0000-00-00", "");
+        const shown = new Set(listed(store, date, from, undated).map((row) => row.id));
+        const expected = new Map<string, number>();
+        for (const row of every) {
+          if (shown.has(row.id)) continue;
+          const reason =
+            row.payment_date !== null && DUE.test(row.payment_date)
+              ? "due_before_window"
+              : "undated_captured_before_window";
+          const key = JSON.stringify([row.source_id, row.account_id, reason]);
+          expected.set(key, (expected.get(key) ?? 0) + 1);
+          seen[reason === "due_before_window" ? "due" : "undated"] += 1;
+          if (row.account_id !== null) seen.resolved += 1;
+        }
+        seen.listed += shown.size;
+        const rows = counted(store, date, from, undated);
+        expect(
+          Object.fromEntries(
+            rows.map((row) => [
+              JSON.stringify([row.source_id, row.account_id, row.reason_code]),
+              row.statements,
+            ]),
+          ),
+        ).toEqual(Object.fromEntries(expected));
+        expect(shown.size + rows.reduce((total, row) => total + row.statements, 0)).toBe(
+          every.length,
+        );
+      }
+    }
+    // The rounds exercise every branch, not only an empty split.
+    for (const value of Object.values(seen)) expect(value).toBeGreaterThan(0);
   });
 });
 

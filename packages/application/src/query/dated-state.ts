@@ -1,10 +1,10 @@
 // Reported state on a date (docs/reported-state.md, ADR 0019): per account,
 // what the provider last reported in a complete container snapshot captured
 // before the end of the date, and the card statements due around it with where
-// each stands. One bounded read path; it never writes and never adds two
-// amounts. A container without a snapshot is named in the coverage, never
-// shown as a zero balance, and a statement without a readable due date is its
-// own status, never a guess.
+// each stands, the older ones only counted. One bounded read path; it never
+// writes and never adds two amounts. A container without a snapshot is named
+// in the coverage, never shown as a zero balance, and a statement without a
+// readable due date is its own status, never a guess.
 import { validCardSettlementFacts } from "../../../domain/src/card-settlement.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
 import { resolveMetric } from "../../../domain/src/metrics.ts";
@@ -12,7 +12,7 @@ import {
   DATED_STATE_FRESHNESS_POLICY,
   DATED_STATE_PERIMETER_POLICY,
   IDENTITY_STATUSES,
-  LIABILITY_GAPS,
+  liabilityGaps,
   payablesFromPaymentDate,
   payableStatus,
   REPORTED_STATE_EXCLUSIONS,
@@ -20,6 +20,7 @@ import {
   REPORTED_STATE_ZONE,
   reportedStateCutoff,
   snapshotFreshness,
+  STATEMENTS_BEFORE_WINDOW_REASONS,
   UNDATED_STATEMENT_WINDOW_DAYS,
   type ExclusionReason,
   type IdentityStatus,
@@ -31,6 +32,8 @@ import {
   type ReportedSettlement,
   type ReportedSnapshot,
   type ReportedState,
+  type StatementsBeforeWindow,
+  type StatementsBeforeWindowReason,
 } from "../../../domain/src/reported-state.ts";
 import { parseLocalDate } from "../../../domain/src/time.ts";
 import {
@@ -44,11 +47,13 @@ import {
   DATED_POSITIONS_SQL,
   DATED_SNAPSHOTS_SQL,
   DATED_STATE_ROW_BOUND,
+  DATED_STATEMENTS_BEFORE_WINDOW_SQL,
   DATED_STATEMENTS_SQL,
   type DatedBalanceRow,
   type DatedPositionRow,
   type DatedSnapshotRow,
   type DatedStatementRow,
+  type DatedStatementsBeforeWindowRow,
 } from "../../../read-model/src/dated-state.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { SETTLEMENT_SQL } from "./card-purchases.ts";
@@ -80,6 +85,7 @@ interface SettlementRow {
 
 const DAY_MS = 86_400_000;
 const IDENTITY = new Set<string>(IDENTITY_STATUSES);
+const REASONS = new Set<string>(STATEMENTS_BEFORE_WINDOW_REASONS);
 
 function identityStatus(recorded: number, status: string | null): IdentityStatus {
   if (recorded !== 1) return "not-recorded";
@@ -137,15 +143,21 @@ export async function queryDatedState(
   const source = input.source ?? null;
   const account = input.account ?? null;
 
-  const [positionRows, balanceRows, perimeter, statementRows] = await Promise.all([
+  const [positionRows, balanceRows, perimeter, statementRows, omittedRows] = await Promise.all([
     sql.all<DatedPositionRow>(DATED_POSITIONS_SQL, [cutoff]),
     sql.all<DatedBalanceRow>(DATED_BALANCES_SQL, [cutoff]),
     sql.all<DatedSnapshotRow>(DATED_SNAPSHOTS_SQL, [cutoff]),
     sql.all<DatedStatementRow>(DATED_STATEMENTS_SQL, [cutoff, fromPaymentDate, undatedFrom]),
+    sql.all<DatedStatementsBeforeWindowRow>(DATED_STATEMENTS_BEFORE_WINDOW_SQL, [
+      cutoff,
+      fromPaymentDate,
+      undatedFrom,
+    ]),
   ]);
   bounded(positionRows);
   bounded(balanceRows);
   bounded(statementRows);
+  bounded(omittedRows);
 
   const wanted = (sourceId: string, accountId: string | null): boolean =>
     (source === null || sourceId === source) && (account === null || accountId === account);
@@ -331,6 +343,26 @@ export async function queryDatedState(
     };
   });
 
+  // The statements the window leaves out, counted under the same filters as
+  // the payables (an unresolved statement has no account to match).
+  const omitted = new Map<string, StatementsBeforeWindow>();
+  for (const row of omittedRows) {
+    if (!wanted(row.source_id, row.account_id)) continue;
+    if (!REASONS.has(row.reason_code)) throw new Error("unknown_statement_window_reason");
+    const reasonCode = row.reason_code as StatementsBeforeWindowReason;
+    const key = JSON.stringify([row.source_id, reasonCode]);
+    const entry = omitted.get(key) ?? {
+      sourceId: row.source_id,
+      reasonCode,
+      count: 0,
+    };
+    entry.count += row.statements;
+    omitted.set(key, entry);
+  }
+  const statementsBeforeWindow = [...omitted.values()].sort(
+    (a, b) => a.sourceId.localeCompare(b.sourceId) || a.reasonCode.localeCompare(b.reasonCode),
+  );
+
   const chosen = [...snapshots.values()].filter(
     (snapshot) => source === null || snapshot.sourceId === source,
   );
@@ -379,8 +411,9 @@ export async function queryDatedState(
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([reasonCode, count]) => ({ reasonCode, count })),
       liabilitiesCoverage: "partial",
-      liabilitiesMissing: [...LIABILITY_GAPS],
+      liabilitiesMissing: liabilityGaps(statementsBeforeWindow),
       payablesFromPaymentDate: fromPaymentDate,
+      statementsBeforeWindow,
       netAssets: "not-computed",
     },
     manifest: { ...manifest, policies: [...manifest.policies] },

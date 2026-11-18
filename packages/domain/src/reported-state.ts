@@ -22,10 +22,16 @@ const ZONE_OFFSET_MS = 9 * 3_600_000;
  * Statements listed as payables: due on or after the date minus this many
  * days, or, without a readable due date, captured within
  * `UNDATED_STATEMENT_WINDOW_DAYS` before the cutoff. An older bill is not
- * listed; the coverage says so.
+ * listed; the coverage counts it under one of `STATEMENTS_BEFORE_WINDOW_REASONS`.
  */
 const PAYABLE_WINDOW_DAYS = 31;
 export const UNDATED_STATEMENT_WINDOW_DAYS = 45;
+/** Why a statement as of the cutoff is left out of the payables. */
+export const STATEMENTS_BEFORE_WINDOW_REASONS = [
+  "due_before_window",
+  "undated_captured_before_window",
+] as const;
+export type StatementsBeforeWindowReason = (typeof STATEMENTS_BEFORE_WINDOW_REASONS)[number];
 
 export const FRESHNESS_STATES = ["same-day", "recent", "stale"] as const;
 export type Freshness = (typeof FRESHNESS_STATES)[number];
@@ -54,7 +60,11 @@ export const REPORTED_STATE_EXCLUSIONS = [
   { scope: "unit:reward", reasonCode: "reward_units" },
 ] as const;
 export type ExclusionReason = (typeof REPORTED_STATE_EXCLUSIONS)[number]["reasonCode"];
-/** What a reported state knows it does not show about what is owed. */
+/**
+ * What a reported state knows it does not show about what is owed. The first
+ * three are named on every answer; `statements_before_window` only when the
+ * answer leaves at least one statement out (`statementsBeforeWindow`).
+ */
 export const LIABILITY_GAPS = [
   "unbilled_card_usage",
   "installment_remaining",
@@ -62,6 +72,22 @@ export const LIABILITY_GAPS = [
   "statements_before_window",
 ] as const;
 type LiabilityGap = (typeof LIABILITY_GAPS)[number];
+
+/** Statements left out of the payables, per source and reason (never per amount). */
+export interface StatementsBeforeWindow {
+  sourceId: string;
+  reasonCode: StatementsBeforeWindowReason;
+  count: number;
+}
+
+/**
+ * The liability gaps of an answer: every gap but `statements_before_window`,
+ * and that one too when `omitted` names a statement.
+ */
+export function liabilityGaps(omitted: readonly StatementsBeforeWindow[]): LiabilityGap[] {
+  const leftOut = omitted.some((entry) => entry.count > 0);
+  return LIABILITY_GAPS.filter((gap) => gap !== "statements_before_window" || leftOut);
+}
 
 export interface ReportedSnapshot {
   /** `artifact:<id>` of the newest artifact of the snapshot. */
@@ -161,6 +187,12 @@ interface ReportedStateCoverage {
   liabilitiesCoverage: "partial";
   liabilitiesMissing: LiabilityGap[];
   payablesFromPaymentDate: string;
+  /**
+   * The statements as of the cutoff that the payable window leaves out,
+   * counted per source and reason (only counts above zero); empty when the
+   * answer lists every statement.
+   */
+  statementsBeforeWindow: StatementsBeforeWindow[];
   /** Nothing is totalled: a reported state is never a net-asset figure. */
   netAssets: "not-computed";
 }

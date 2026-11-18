@@ -52,14 +52,68 @@ describe("reported state HTTP contract", () => {
     expect(mutate((copy) => delete copy["coverage"])).toBe(false);
   });
 
-  test("the capability, the feature and the route", () => {
-    expect(validApiCapabilities({ ...CENTRAL_STORE_CAPABILITIES, reportedStateOnDate: true })).toBe(
-      true,
+  test("the left-out statements are counts by closed reason, named as a gap exactly when present", async () => {
+    const body = await reportedStateBody(reportedStateWorld(), "2026-09-10");
+    expect(body.coverage.statementsBeforeWindow).toEqual([
+      { sourceId: "vpass", reasonCode: "due_before_window", count: 1 },
+      {
+        sourceId: "vpass",
+        reasonCode: "undated_captured_before_window",
+        count: 1,
+      },
+    ]);
+    expect(body.coverage.liabilitiesMissing).toContain("statements_before_window");
+    const mutate = (change: (coverage: Record<string, any>) => void): boolean => {
+      const copy = structuredClone(body) as Record<string, any>;
+      change(copy["coverage"]);
+      return validReportedState(copy);
+    };
+    expect(mutate(() => {})).toBe(true);
+    expect(mutate((coverage) => delete coverage["statementsBeforeWindow"])).toBe(false);
+    expect(mutate((coverage) => (coverage["statementsBeforeWindow"][0]["count"] = 0))).toBe(false);
+    expect(mutate((coverage) => (coverage["statementsBeforeWindow"][0]["count"] = 1.5))).toBe(
+      false,
     );
+    expect(
+      mutate((coverage) => (coverage["statementsBeforeWindow"][0]["reasonCode"] = "old")),
+    ).toBe(false);
+    // An amount is not part of the count.
+    expect(mutate((coverage) => (coverage["statementsBeforeWindow"][0]["amount"] = "20000"))).toBe(
+      false,
+    );
+    // Counted but not named, or named but not counted, is refused.
+    expect(
+      mutate(
+        (coverage) =>
+          (coverage["liabilitiesMissing"] = coverage["liabilitiesMissing"].filter(
+            (gap: string) => gap !== "statements_before_window",
+          )),
+      ),
+    ).toBe(false);
+    expect(mutate((coverage) => (coverage["statementsBeforeWindow"] = []))).toBe(false);
+    // One entry per source and reason.
+    expect(
+      mutate((coverage) =>
+        coverage["statementsBeforeWindow"].push({
+          ...coverage["statementsBeforeWindow"][0],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  test("the capability, the feature and the route", () => {
+    expect(
+      validApiCapabilities({
+        ...CENTRAL_STORE_CAPABILITIES,
+        reportedStateOnDate: true,
+      }),
+    ).toBe(true);
     expect(clientFeatures(CENTRAL_STORE_CAPABILITIES).reportedStateOnDate).toBe(false);
     expect(
-      clientFeatures({ ...CENTRAL_STORE_CAPABILITIES, reportedStateOnDate: true })
-        .reportedStateOnDate,
+      clientFeatures({
+        ...CENTRAL_STORE_CAPABILITIES,
+        reportedStateOnDate: true,
+      }).reportedStateOnDate,
     ).toBe(true);
     expect(matchRoute("/state")).toEqual({ name: "reportedState" });
     expect(matchRoute("/state/2026-09-10")).toEqual({

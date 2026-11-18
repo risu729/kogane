@@ -14,6 +14,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import {
   DATED_POSITION_QUANTITIES_SQL,
   DATED_SNAPSHOT_UNITS_SQL,
+  DATED_STATEMENTS_BEFORE_WINDOW_SQL,
   DATED_STATEMENTS_SQL,
 } from "../../read-model/src/dated-state.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
@@ -125,8 +126,14 @@ describe("holdings changes on a scaled store without statistics", () => {
       for (const [text, args] of sql.statements)
         expect(
           // Ranking every captured statement total before the cutoff reads
-          // every balance observation once, as `card_statement_facts` does.
-          unboundedScans(explain(db, text, args), text === DATED_STATEMENTS_SQL ? ["b"] : []),
+          // every balance observation once, as `card_statement_facts` does;
+          // the listed statements and the count of the rest each rank them.
+          unboundedScans(
+            explain(db, text, args),
+            text === DATED_STATEMENTS_SQL || text === DATED_STATEMENTS_BEFORE_WINDOW_SQL
+              ? ["b"]
+              : [],
+          ),
         ).toEqual([]);
       // The keyed reads, with keys this store does hold.
       expect(unboundedScans(explain(db, DATED_POSITION_QUANTITIES_SQL, ["[1,2,3]"]))).toEqual([]);

@@ -10,6 +10,7 @@ import {
   REPORTED_STATE_EXCLUSIONS,
   REPORTED_STATE_SCHEMA,
   REPORTED_STATE_ZONE,
+  STATEMENTS_BEFORE_WINDOW_REASONS,
 } from "../../domain/src/reported-state.ts";
 import {
   AGGREGATION_RULES,
@@ -236,6 +237,7 @@ function validCoverage(value: unknown): boolean {
       "liabilitiesCoverage",
       "liabilitiesMissing",
       "payablesFromPaymentDate",
+      "statementsBeforeWindow",
       "netAssets",
     ]) &&
     list(
@@ -279,6 +281,25 @@ function validCoverage(value: unknown): boolean {
     list(value.liabilitiesMissing, member(LIABILITY_GAPS)) &&
     value.liabilitiesMissing.length > 0 &&
     date(value.payablesFromPaymentDate) &&
+    list<Record<string, unknown>>(
+      value.statementsBeforeWindow,
+      (entry) =>
+        record(entry) &&
+        exactKeys(entry, ["sourceId", "reasonCode", "count"]) &&
+        text(entry.sourceId) &&
+        member(STATEMENTS_BEFORE_WINDOW_REASONS)(entry.reasonCode) &&
+        count(entry.count) &&
+        entry.count > 0,
+    ) &&
+    // One entry per source and reason.
+    new Set(
+      value.statementsBeforeWindow.map((entry) =>
+        JSON.stringify([entry["sourceId"], entry["reasonCode"]]),
+      ),
+    ).size === value.statementsBeforeWindow.length &&
+    // The gap is named exactly when the answer leaves a statement out.
+    value.liabilitiesMissing.includes("statements_before_window") ===
+      value.statementsBeforeWindow.length > 0 &&
     value.netAssets === "not-computed"
   );
 }

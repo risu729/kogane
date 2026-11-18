@@ -16,6 +16,7 @@ import {
   DATED_BALANCES_SQL,
   DATED_POSITIONS_SQL,
   DATED_SNAPSHOTS_SQL,
+  DATED_STATEMENTS_BEFORE_WINDOW_SQL,
   DATED_STATEMENTS_SQL,
 } from "../../read-model/src/dated-state.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
@@ -156,6 +157,31 @@ describe("reported state on a scaled store without statistics", () => {
           )
           .get(cutoff, payablesFromPaymentDate(date)) as { n: number };
         expect(state.payables.filter((p) => p.paymentDate !== null)).toHaveLength(expected.n);
+        // Independently: the dated statement keys due before the window are
+        // the ones counted as left out.
+        const before = db
+          .query(
+            `SELECT count(DISTINCT statement_key) AS n FROM (
+               SELECT json_array(a.source_id,b.source_account,
+                 coalesce(json_extract(b.extra_json,'$._kogane.period'),
+                  substr(json_extract(b.extra_json,'$._kogane.statementMonth'),1,4)||'-'||
+                  substr(json_extract(b.extra_json,'$._kogane.statementMonth'),5,2))) AS statement_key
+               FROM balance_observations b
+               JOIN published_parse_runs pub ON pub.parse_run_id=b.parse_run_id
+               JOIN parse_runs p ON p.id=b.parse_run_id
+               JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
+               WHERE b.metric='credit_statement_payment_amount' AND a.fetched_at<?
+                 AND p.parser_name IN ('vpass-statement-page','myjcb-credit-statement-total')
+                 AND json_extract(b.extra_json,'$._kogane.snapshotSemantics')='provider-reported-monthly-payment-amount'
+                 AND json_extract(b.extra_json,'$._kogane.paymentDate')<?)`,
+          )
+          .get(cutoff, payablesFromPaymentDate(date)) as { n: number };
+        expect(before.n).toBeGreaterThan(0);
+        expect(
+          state.coverage.statementsBeforeWindow
+            .filter((entry) => entry.reasonCode === "due_before_window")
+            .reduce((total, entry) => total + entry.count, 0),
+        ).toBe(before.n);
         expect(state.payables.some((p) => p.status === "settled_on_or_before_date")).toBe(true);
         expect(state.payables.some((p) => p.status === "due_after_date")).toBe(true);
       }
@@ -180,6 +206,16 @@ describe("reported state on a scaled store without statistics", () => {
           ["b"],
         ),
       ).toEqual([]);
+      expect(
+        unboundedScans(
+          explain(db, DATED_STATEMENTS_BEFORE_WINDOW_SQL, [
+            cutoff,
+            payablesFromPaymentDate(date),
+            cutoff,
+          ]),
+          ["b"],
+        ),
+      ).toEqual([]);
       expect(unboundedScans(explain(db, SETTLEMENT_SQL, [keys]))).toEqual([]);
     },
     TIMEOUT,
@@ -199,6 +235,11 @@ describe("reported state on a scaled store without statistics", () => {
           statements: await timed(() =>
             db
               .query(DATED_STATEMENTS_SQL)
+              .all(cutoff, payablesFromPaymentDate(OPTIONS.today), cutoff),
+          ),
+          statementsBeforeWindow: await timed(() =>
+            db
+              .query(DATED_STATEMENTS_BEFORE_WINDOW_SQL)
               .all(cutoff, payablesFromPaymentDate(OPTIONS.today), cutoff),
           ),
         };

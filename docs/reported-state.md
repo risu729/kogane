@@ -114,9 +114,22 @@ A perimeter container with no snapshot before the cutoff is listed in
 
 - `coverage`: containers without a snapshot, stale snapshots, the excluded
   perimeter and excluded row counts, `liabilitiesCoverage: "partial"` with
-  `liabilitiesMissing` (`unbilled_card_usage`, `installment_remaining`,
-  `loan_balances`, `statements_before_window`), the payable window, and
-  `netAssets: "not-computed"`.
+  `liabilitiesMissing` (`unbilled_card_usage`, `installment_remaining` and
+  `loan_balances` always; `statements_before_window` when the answer leaves a
+  statement out), the payable window (`payablesFromPaymentDate`),
+  `statementsBeforeWindow`, and `netAssets: "not-computed"`.
+  `statementsBeforeWindow` counts the statements as of the cutoff that the
+  window leaves out, per source and reason: `due_before_window` (a readable
+  due date before `D − 31` days) or `undated_captured_before_window` (no
+  readable due date, captured more than 45 days before the cutoff). Each
+  statement is either a payable or counted there, never both
+  (`DATED_STATEMENTS_BEFORE_WINDOW_SQL`, the complement of the window over
+  the same statement facts). Only counts above zero are listed, under the same
+  `source` and `account` filters as the payables, so a statement whose account
+  is unresolved is counted only without an `account` filter. The entry carries
+  no amount and no settlement status, and it is not part of the manifest.
+  The `/state` page lists the counts under 一覧にない期間外の請求 in its
+  coverage notes; `kogane.reported-state.read` answers the same body.
 - `manifest` (schema, date, cutoff, policy ids, snapshot, statement and
   settlement refs) and `contextId = canonicalDigest(manifest)`.
 
@@ -241,24 +254,28 @@ answer is not paged, so a filter change has no page to reset.
 Measured on `bun:sqlite` with every CORE migration and no table statistics, on
 the statement-scale store of `packages/read-model/test/card-usage-scale-fixture.ts`
 (`STATEMENT_SCALE`: 730 daily captures of three Vpass cards, a MyJCB
-connection, SMBC and St.George; 27,006 artifacts, 16,056 published parses,
-628,171 transaction and 16,790 balance observations, 5,840 statement totals,
-3,763 settlement candidates), with `KOGANE_DATED_STATE_SCALE=full`:
+connection, SMBC and St.George; 27,736 artifacts, 16,786 published parses,
+632,599 transaction and 18,250 balance observations, 5,840 statement totals,
+3,763 settlement candidates), with `KOGANE_DATED_STATE_SCALE=full`, on
+2026-11-18 (median of three, one run on a machine shared with other test
+processes):
 
 | Read                                  | Median |
 | ------------------------------------- | ------ |
-| `queryDatedState`, today              | 398 ms |
-| `queryDatedState`, a date a year back | 346 ms |
-| `DATED_POSITIONS_SQL`                 | 93 ms  |
-| `DATED_BALANCES_SQL`                  | 92 ms  |
-| `DATED_SNAPSHOTS_SQL`                 | 83 ms  |
-| `DATED_STATEMENTS_SQL`                | 105 ms |
+| `queryDatedState`, today              | 507 ms |
+| `queryDatedState`, a date a year back | 455 ms |
+| `DATED_POSITIONS_SQL`                 | 92 ms  |
+| `DATED_BALANCES_SQL`                  | 113 ms |
+| `DATED_SNAPSHOTS_SQL`                 | 126 ms |
+| `DATED_STATEMENTS_SQL`                | 76 ms  |
+| `DATED_STATEMENTS_BEFORE_WINDOW_SQL`  | 79 ms  |
 
-The four reads are issued concurrently through the executor, one statement
+The five reads are issued concurrently through the executor, one statement
 each, plus the settlement read. What grows with history: the snapshot CTEs
 read every artifact once per read (through
 `idx_fetch_artifacts_source_dataset_time`), as the current-state reads do, and
-the statement read ranks every captured statement total before the cutoff, as
+the statement read and the count of the statements before the window each
+rank every captured statement total before the cutoff, as
 `card_statement_facts` does. Everything else is reached by key: parses through
 `published_parse_runs`, observations through their `parse_run_id` indexes,
 identities through the identity runs of the chosen parses only, owners through
@@ -293,9 +310,10 @@ answer under two seconds.
   was captured; the bank capture itself is not bounded by the cutoff.
 - Statements due before `D − 31` days, and statements without a readable due
   date captured more than 45 days before the cutoff, are not listed, whatever
-  their status. The window is ADR 0019's choice (the plan named none); every
-  answer names the gap (`statements_before_window`) but does not count what it
-  leaves out.
+  their status. The window is ADR 0019's choice (the plan named none). The
+  answer counts them per source and reason (`statementsBeforeWindow`) but does
+  not say whether any was settled: it bounds how many older captured
+  statements could still be unpaid and is not a figure of what is owed.
 - Only the Vpass and MyJCB statement parsers supply payables; unbilled usage,
   installment remainders and loans are not shown (`liabilitiesMissing`).
 - Adoption and overlap across sources (`selectAdoptedSet`) are not applied:
