@@ -507,6 +507,9 @@ Limits:
   without a candidate when each page is read: a statement that gains a
   candidate leaves the list and the later ones move back one place, so paging
   on can pass over one of them until the list is read again from the start.
+  A later page read again after statements left the list can be empty: the
+  page then says that this page lists no statement and keeps its pager, and
+  says `照合候補のない請求はありません。` only for an empty first page.
 - A debit without a resolved account has no alias class, so the planner
   excludes it (`identity_not_admitted`).
 - A window row the sweep never compares (no exact amount, or a debit date

@@ -260,6 +260,9 @@ describe.if(runnable)("card settlement review", () => {
   let related: CardSettlementReview[] = [];
   const relatedReads: URLSearchParams[] = [];
   let unmatchedPage: unknown = unmatched;
+  /** The unmatched pages by `offset`, when a test serves more than one. */
+  let unmatchedPages: Map<string, unknown> | null = null;
+  const unmatchedReads: string[] = [];
   let debitAccountsPage: unknown = debitAccounts;
   const debitAccountReads: string[] = [];
   /** Why the grouped list has no next page. */
@@ -277,6 +280,8 @@ describe.if(runnable)("card settlement review", () => {
     related = [];
     relatedReads.length = 0;
     unmatchedPage = unmatched;
+    unmatchedPages = null;
+    unmatchedReads.length = 0;
     debitAccountsPage = debitAccounts;
     debitAccountReads.length = 0;
     statementsEnd = "none";
@@ -381,8 +386,11 @@ describe.if(runnable)("card settlement review", () => {
               limit: 50,
             },
           });
-        if (url.pathname === "/api/v2/reconciliation/card-statements-unmatched")
-          return Response.json(unmatchedPage);
+        if (url.pathname === "/api/v2/reconciliation/card-statements-unmatched") {
+          const offset = url.searchParams.get("offset") ?? "0";
+          unmatchedReads.push(offset);
+          return Response.json(unmatchedPages?.get(offset) ?? unmatchedPage);
+        }
         if (url.pathname === "/api/v2/reconciliation/card-debit-accounts") {
           debitAccountReads.push(url.search);
           return Response.json(debitAccountsPage);
@@ -634,6 +642,50 @@ describe.if(runnable)("card settlement review", () => {
     expect(await section.locator(".unmatched-allocation").count()).toBe(50);
     expect(await section.innerText()).toContain("組み合わせが一つに決まりません");
     expect(await section.getByRole("button", { name: /採用/u }).count()).toBe(0);
+    await page.close();
+  });
+
+  test("a later page the list no longer reaches keeps its pager and never says no statement is left", async () => {
+    // A statement leaves this list once the sweep pairs it with a debit, so a
+    // later page read again can come back empty while the first still lists
+    // statements. Every value is invented.
+    const later = (refs: number[]) => ({
+      ...unmatched,
+      query: { offset: 50 },
+      items: refs.map((ref) => ({
+        ...unmatched.items[1]!,
+        statement: {
+          ...unmatched.items[1]!.statement,
+          ref: { kind: "balance", id: `balance:${ref}`, revision: "parse_run:5" },
+          period: "2098-03",
+        },
+      })),
+    });
+    unmatchedPages = new Map<string, unknown>([
+      ["0", { ...unmatched, nextOffset: 50, nextPage: "offered" }],
+      ["50", later([71])],
+    ]);
+    const page = await open();
+    const section = page.getByRole("region", { name: "照合候補のない請求" });
+    await section.getByText("2098-01", { exact: false }).waitFor();
+    await section.getByRole("button", { name: "次の請求", exact: true }).click();
+    await section.getByText("2098-03", { exact: false }).waitFor();
+    // The sweep pairs the statements of the later page; the page is read again.
+    unmatchedPages.set("50", later([]));
+    const reads = unmatchedReads.length;
+    await page.getByRole("button", { name: "表示を更新", exact: true }).click();
+    await section.getByText("2098-03", { exact: false }).waitFor({ state: "detached" });
+    expect(unmatchedReads.length).toBeGreaterThan(reads);
+    expect(unmatchedReads.at(-1)).toBe("50");
+    const text = await section.innerText();
+    expect(text).not.toContain("照合候補のない請求はありません。");
+    expect(text).toContain("このページに表示する請求はありません。");
+    // The way back to the statements the first page still lists stays.
+    const back = section.getByRole("button", { name: "先頭に戻る", exact: true });
+    expect(await back.isDisabled()).toBe(false);
+    await back.click();
+    await section.getByText("2098-01", { exact: false }).waitFor();
+    expect(await auditView(page)).toEqual([]);
     await page.close();
   });
 

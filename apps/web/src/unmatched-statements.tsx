@@ -160,16 +160,25 @@ export function UnmatchedStatements(): ReactNode {
         <QueryBoundary
           query={query}
           label="照合候補のない請求"
-          isEmpty={(data) => data.items.length === 0}
+          // A statement leaves this list once a candidate pairs it, so a later
+          // page read again can be empty while earlier pages still list some:
+          // only the first page's emptiness says the list is empty.
+          isEmpty={(data) => data.items.length === 0 && offset === 0}
           empty="照合候補のない請求はありません。"
         >
           {(data) => (
             <>
-              <ul className="unmatched-list">
-                {data.items.map((item) => (
-                  <UnmatchedRow key={item.statement.ref.id} item={item} />
-                ))}
-              </ul>
+              {data.items.length === 0 ? (
+                <p>
+                  このページに表示する請求はありません。照合候補ができた請求は一覧から外れるため、一覧が短くなった可能性があります。先頭に戻って確認してください。
+                </p>
+              ) : (
+                <ul className="unmatched-list">
+                  {data.items.map((item) => (
+                    <UnmatchedRow key={item.statement.ref.id} item={item} />
+                  ))}
+                </ul>
+              )}
               <nav className="pagination" aria-label="照合候補のない請求のページ">
                 <button
                   className="button"
