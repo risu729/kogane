@@ -233,7 +233,7 @@ if (invokedDirectly()) {
       const worker = order.workers.find((entry) => entry.name === baselinePath);
       const artifact = JSON.parse(
         readFileSync(
-          resolve(root, worker.path, ".cloudflare/output/v0/workers/default/worker.config.json"),
+          resolve(root, worker.path, ".cloudflare/output/v1/workers/default/worker.config.json"),
           "utf8",
         ),
       );

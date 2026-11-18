@@ -126,7 +126,7 @@ caller ever drops it again.
 for thirteen compatible Workers; [ADR 0042](adr/0042-prestia-bank-worker.md) adds the
 PRESTIA bank Worker, bringing the compatible fleet to fourteen Workers using
 the `cf` pin in `package.json` and the pinned
-`wrangler-deploy-action` v3 (no step uses `worker-preview`). ADR 0040's
+`wrangler-deploy-action` v4, which reads cf's Build Output v1 (no step uses `worker-preview`). ADR 0040's
 2026-11-13 amendment moves them to `cf deploy` in three phases,
 because `cf workers versions create` never applies declared `observability`.
 Phases 1 (PRESTIA), 2 (the other Workers on cf's versions-API path, including
