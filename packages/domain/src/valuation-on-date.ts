@@ -155,7 +155,12 @@ export interface ValuationOnDateInput {
     cutoff: string;
     filters: { source: string | null; account: string | null };
     quantityPolicy: string;
-    /** The reported state's own context id, so a different dated answer is a different context. */
+    /**
+     * The reported state's own context id, so a different dated answer is a
+     * different context. It is the id of the state read without the count of
+     * the statements before the payable window (ADR 0019, amendment of
+     * 2026-11-18), never the `/state` answer's.
+     */
     contextId: string;
     /**
      * Containers of the perimeter that report positions and have no snapshot

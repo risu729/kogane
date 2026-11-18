@@ -55,7 +55,9 @@ stored.
   balances with their metric id, measurement kind, sign meaning, decimal-v1
   value or its absence, snapshot ref and capture instant; positions with the
   instrument id (or none) and quantity; the requested accounts no reported
-  container lists; the reported-state `contextId`.
+  container lists; the reported-state `contextId` (of the dated read without
+  the count of statements before the payable window, so not the `/state`
+  answer's).
 - **Request**: accounts, start and end date, basis `cash`, `trade-date` or
   `settlement-date`, `knowledgeAt` and the cut it was resolved to.
 

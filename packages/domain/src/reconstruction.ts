@@ -267,7 +267,12 @@ export interface ReconstructionReportedPosition {
   snapshotRef: string;
   capturedAt: string;
 }
-/** One reported side (start or end): the reported state of one date, pinned by its context id. */
+/**
+ * One reported side (start or end): the reported state of one date, pinned by
+ * its context id (of the state read without the count of the statements
+ * before the payable window, never the `/state` answer's: ADR 0019, amendment
+ * of 2026-11-18).
+ */
 export interface ReconstructionReportedSide {
   contextId: string;
   date: string;

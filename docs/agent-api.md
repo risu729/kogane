@@ -666,6 +666,17 @@ request gets the same answer on the route, the agent HTTP path and MCP
 answer, field for field, `apiVersion: 2` included (`validReportedState` in
 `packages/observation-shared/src/reported-state-contract.ts`).
 
+Its `contextId` is the digest of a manifest that records the statements the
+payable window leaves out. The reported context ids that
+`kogane.reported-holdings-change.read` and `kogane.reconstructed-state.read`
+pin are digests of the same date's state read without that count, so they
+never equal a `kogane.reported-state.read` answer's `contextId`, even for the
+same date and filters
+([ADR 0019](adr/0019-dated-reported-state.md#statements-before-the-window-amendment--2026-11-18)
+decision 6). No read, cursor or `context.open` takes either id as an input, so
+the difference is never a `stale_context` refusal; an agent that compares them
+to match one answer to another compares ids of different manifests.
+
 Input, a closed object (published in `src/read-tools.ts` with the service's
 patterns; the service decides):
 

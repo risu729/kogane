@@ -7,6 +7,7 @@ import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { canonicalDigest } from "../../domain/src/context.ts";
 import { payableStatus, snapshotFreshness } from "../../domain/src/reported-state.ts";
+import { validReportedState } from "../../observation-shared/src/reported-state-contract.ts";
 import {
   DATED_STATEMENTS_BEFORE_WINDOW_SQL,
   DATED_STATEMENTS_SQL,
@@ -512,6 +513,95 @@ describe("card payables on the date", () => {
     expect(uncounted.payables).toEqual(counted.payables);
     expect(uncounted.accounts).toEqual(counted.accounts);
     expect(uncounted.contextId).not.toBe(counted.contextId);
+  });
+
+  test("on random stores, every answer meets the wire contract and the counts agree", async () => {
+    // mulberry32: a fixed seed, so a failure replays.
+    let seed = 0x0c0de;
+    const random = (n: number): number => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return Math.floor((((t ^ (t >>> 14)) >>> 0) / 4_294_967_296) * n);
+    };
+    const seen = { answers: 0, counted: 0, split: 0, refused: 0 };
+    for (let round = 0; round < 8; round += 1) {
+      const store = new DatedStore();
+      store.capture({
+        ...SMBC,
+        fetchedAt: `2026-0${1 + random(9)}-10T02:00:00Z`,
+        balances: [{ account: "smbc-a", metric: "account_balance", instrument: "JPY", minor: 1 }],
+      });
+      for (let index = 0; index < 24; index += 1) {
+        const month = String(1 + random(11)).padStart(2, "0");
+        const card = `card-${random(4)}`;
+        const due = random(4);
+        const capture = store.statement({
+          card,
+          period: `2026-${month}`,
+          paymentDate: due === 0 ? null : due === 1 ? "unknown" : `2026-${month}-26`,
+          minor: 1 + random(9_000),
+          fetchedAt: `2026-${month}-0${1 + random(9)}T0${random(10)}:00:00Z`,
+        });
+        if (random(3) === 0) continue;
+        // Two cards share an account, so one account can hold several cards' counts.
+        const account = `acct-${card === "card-3" ? "card-0" : card}`;
+        store.identify(capture, "vpass", account, "identified");
+        if (random(3) === 0)
+          store.settle(capture, {
+            account,
+            period: `2026-${month}`,
+            debitDate: `2026-${month}-26`,
+            ...(random(2) === 0 ? { decision: "accepted" as const } : {}),
+          });
+      }
+      const filters = [
+        {},
+        { source: "vpass" },
+        { source: SMBC.source },
+        { account: "acct-card-0" },
+        { account: "acct-card-1" },
+        { source: "vpass", account: "acct-card-2" },
+        { account: "acct-none" },
+      ];
+      for (const date of ["2026-03-31", "2026-07-15", "2026-11-30"])
+        for (const filter of filters) {
+          const state = await queryDatedState(executor(store), { date, ...filter });
+          // What both adapters send (services/app), as JSON text read back.
+          const wire = JSON.parse(JSON.stringify({ apiVersion: 2, ...state })) as Record<
+            string,
+            any
+          >;
+          expect(validReportedState(wire)).toBe(true);
+          expect(state.contextId).toBe(await canonicalDigest(state.manifest));
+          seen.answers += 1;
+          const recorded = state.manifest.statementsBeforeWindow;
+          if (recorded.length > 0) seen.counted += 1;
+          if (new Set(recorded.map((entry) => entry.accountId)).size > 1) seen.split += 1;
+          // Any one count changed in the manifest alone is refused.
+          if (recorded.length > 0) {
+            const copy = structuredClone(wire);
+            copy["manifest"]["statementsBeforeWindow"][random(recorded.length)]["count"] += 1;
+            expect(validReportedState(copy)).toBe(false);
+            seen.refused += 1;
+          }
+          // The uncounted state is the counted one without the count.
+          const uncounted = await queryDatedState(executor(store), {
+            date,
+            ...filter,
+            includeStatementsBeforeWindow: false,
+          });
+          const { statementsBeforeWindow: _counts, ...rest } = state.manifest;
+          expect(uncounted.manifest).toEqual(rest);
+          expect(uncounted.payables).toEqual(state.payables);
+          expect(uncounted.contextId).toBe(await canonicalDigest(rest));
+        }
+    }
+    // The random worlds reach answers with counts, and counts split across accounts.
+    expect(seen.answers).toBe(8 * 3 * 7);
+    expect(seen.counted).toBeGreaterThan(20);
+    expect(seen.split).toBeGreaterThan(5);
+    expect(seen.refused).toBe(seen.counted);
   });
 
   test("the pure rule: settled only by an accepted review debited on or before the date", () => {

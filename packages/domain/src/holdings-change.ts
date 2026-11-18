@@ -97,7 +97,12 @@ export interface HoldingsChangeObservation {
 /** One date's reported holdings, unfiltered by account. */
 export interface HoldingsChangeSide {
   date: string;
-  /** The reported state's `contextId` on this date. */
+  /**
+   * The `contextId` of the reported state read on this date without the count
+   * of the statements before the payable window (ADR 0019, amendment of
+   * 2026-11-18): never the `/state` answer's `contextId`, whose manifest
+   * records that count.
+   */
   reportedContextId: string;
   /** Every snapshot chosen on the date. */
   snapshots: HoldingsChangeSnapshot[];
