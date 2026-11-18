@@ -9,7 +9,13 @@ import {
   MAX_MAILBOX_ROWS,
   type MailboxRow,
 } from "../src/mailbox-contract";
-import { mailboxRow, mailboxList, mailboxSummary, mailboxDetailFixture } from "./mailbox-fixture";
+import {
+  mailboxRow,
+  mailboxList,
+  mailboxSummary,
+  mailboxDetailFixture,
+  mailboxEnvelope,
+} from "./mailbox-fixture";
 
 test("corroborates the complete current list, preserving provider strings verbatim", () => {
   const rows = [mailboxRow(), mailboxRow("synthetic-sequence-2")];
@@ -69,6 +75,15 @@ test("a well-formed list beyond the terminal's unit capacity has its own closed 
   expect(() => mailboxInventory(mailboxList(fits), mailboxSummary(MAX_MAILBOX_ROWS + 1))).toThrow(
     "sbi_mailbox_rows_over_bound",
   );
+  // Groups that each fit but together issue more than the bound name it too.
+  const group = { busiSys: "synthetic-business", mikaifuKensu: 0 };
+  const split = mailboxEnvelope({
+    summaryList: [
+      { ...group, userTokuteiId: "synthetic-user", kofuKensu: MAX_MAILBOX_ROWS },
+      { ...group, userTokuteiId: "synthetic-other-user", kofuKensu: 1 },
+    ],
+  });
+  expect(() => mailboxInventory(mailboxList(fits), split)).toThrow("sbi_mailbox_rows_over_bound");
   // Malformed counts and lists are still unobserved shapes, not a bound.
   for (const allCountKen of [-1, 1.5, "1"])
     expect(() => mailboxInventory({ ...mailboxList(), allCountKen }, mailboxSummary())).toThrow(

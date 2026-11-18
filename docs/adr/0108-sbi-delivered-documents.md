@@ -133,14 +133,21 @@ Options considered:
    carries their inventory.
 
 Decision: option 2. A well-formed list of more than 999 rows, or a declared
-`allCountKen` or group `kofuKensu` above 999, is refused with
-`sbi_mailbox_rows_over_bound`; malformed lists and counts stay
-`sbi_mailbox_response_unobserved`. The refusal is the `mailbox-index` unit's
+`allCountKen` or issued summary (the sum of the groups' `kofuKensu`) above
+999, is refused with `sbi_mailbox_rows_over_bound`; malformed lists and counts stay
+`sbi_mailbox_response_unobserved`. The declared and issued counts are checked
+even when fewer rows came back: they are the provider's own statement of the
+mailbox's size, and the list was observed unpaged
+([SBI Securities source notes](../sources/sbi-securities.md)), so no page is
+assumed and a mailbox the terminal cannot hold is named as such rather than as
+an incomplete inventory. The refusal is the `mailbox-index` unit's
 code in its own mailbox terminal. With no document archived, that terminal's
 provider outcome is `failed` and the same code is its run-level safe error
 code, registered as the run's provider failure code and as the failed
-`mailbox-index` unit report; the operation's status is at most `partial` and the
-financial terminal is unaffected. No document is walked, so no pointer is
+`mailbox-index` unit report. The financial terminal is unaffected: when it
+succeeded, the collection reports `partial` and its scheduled or operation
+result is `completed` with both run ids and no failure code, so the refusal is
+read from the mailbox run's registration. No document is walked, so no pointer is
 reported and the stored cursor is left unchanged.
 
 Consequences: a mailbox of 1,000 or more current rows is not archived, on
@@ -152,6 +159,8 @@ rows are counted.
 
 Verification: `test/mailbox-terminal-bound.test.ts` persists synthetic 999-
 and 1,000-row lists (the first fills 1,000 units and reports a `null` pointer for a finished cycle, the
-second persists the refusal and reports none), and `test/mailbox-contract.test.ts`
-covers the row, total and group bounds and the malformed counts that stay
+second persists the refusal, reports none and still yields a `completed`
+scheduled result), and `test/mailbox-contract.test.ts`
+covers the row, declared-total and issued-summary bounds (one group past it,
+or groups that each fit but sum past it) and the malformed counts that stay
 unobserved; no provider was contacted.

@@ -49,7 +49,7 @@ const COMMON = ["ctt", "code", "message"];
 /**
  * The mailbox terminal carries one unit per listed row plus `mailbox-index`,
  * and a terminal holds at most 1,000 units (`packages/collection` manifest).
- * A list, declared total or group count above this is refused with its own
+ * A list, declared total or issued summary above this is refused with its own
  * closed code, persisted on the index unit, instead of making the whole
  * terminal unplannable or reading like an unobserved response shape.
  */
@@ -95,11 +95,13 @@ export function mailboxInventory(listValue: unknown, summaryValue: unknown): Mai
   for (const value of summary.summaryList) {
     const group = object(value, ["busiSys", "userTokuteiId", "kofuKensu", "mikaifuKensu"]);
     const key = groupIdentity(string(group.busiSys), string(group.userTokuteiId));
-    const issued = bounded(count(group.kofuKensu));
+    const issued = count(group.kofuKensu);
+    // The issued summary is bounded as a whole, not only per group: groups
+    // that each fit can still issue more rows than the terminal holds. The
+    // running total stays at most the bound, so it is always a safe integer.
+    issuedTotal = bounded(issuedTotal + issued);
     if (count(group.mikaifuKensu) > issued || groups.has(key)) refuse();
     groups.set(key, { issued, listed: 0 });
-    issuedTotal += issued;
-    if (!Number.isSafeInteger(issuedTotal)) refuse();
   }
   if (issuedTotal !== total) incomplete();
   const identities = new Set<string>();

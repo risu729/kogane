@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { scheduledResult } from "../../../packages/collection/src/schedule-result";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import { persistSbiAcquisition } from "../src/acquisition";
 import { collectMailbox, MAILBOX_INDEX_UNIT, type MailboxUnit } from "../src/mailbox";
@@ -102,4 +103,12 @@ test("a list one row past the terminal's unit capacity is a persisted refusal, n
   expect(result.runIds).toEqual(["synthetic-bound", "synthetic-bound-mailbox"]);
   expect(result.status).toBe("partial");
   expect(result.failureCode).toBeUndefined();
+  // The financial terminal succeeded, so the collection's scheduled or
+  // operation result stays completed with both runs; the refusal is read from
+  // the mailbox run's own registration, not from a failed collection.
+  expect(scheduledResult({ status: result.status, runIds: result.runIds })).toEqual({
+    status: "completed",
+    runIds: ["synthetic-bound", "synthetic-bound-mailbox"],
+    failureCode: null,
+  });
 });
