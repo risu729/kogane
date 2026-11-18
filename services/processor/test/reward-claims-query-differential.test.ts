@@ -636,7 +636,16 @@ test("reward candidate plan on real CORE views preserves indexed probes without 
   }
 });
 
-type HistoryMode = "complete" | "partial" | "failed" | "mismatch";
+/** `window` is a complete claim of another coverage mode; `history-only-partial`
+ * is a capture with a partial history and no total. Neither is drawn by the
+ * randomized cases below. */
+type HistoryMode =
+  | "complete"
+  | "partial"
+  | "failed"
+  | "mismatch"
+  | "window"
+  | "history-only-partial";
 function seedHistoryCapture(
   store: QualityStore,
   index: number,
@@ -644,15 +653,24 @@ function seedHistoryCapture(
   mode: HistoryMode,
 ): number[] {
   const at = new Date(Date.UTC(2099, 0, 1, 0, 0, index)).toISOString();
+  const withTotal = mode !== "history-only-partial";
   const capture = store.run({
     source: "myjcb",
     at,
     units: {
-      [`${conn}:j-point`]: { outcome: "success" },
+      ...(withTotal ? { [`${conn}:j-point`]: { outcome: "success" as const } } : {}),
       [`${conn}:j-point-history`]: { outcome: mode === "failed" ? "failed" : "success" },
     },
     artifacts: [
-      { key: `${conn}/jpoint-balance.json`, dataset: "jpoint-balance", unit: `${conn}:j-point` },
+      ...(withTotal
+        ? [
+            {
+              key: `${conn}/jpoint-balance.json`,
+              dataset: "jpoint-balance",
+              unit: `${conn}:j-point`,
+            },
+          ]
+        : []),
       {
         key: `${conn}/jpoint-history.json`,
         dataset: "jpoint-history",
@@ -660,11 +678,7 @@ function seedHistoryCapture(
       },
     ],
   });
-  const totalParse = store.parse(capture.artifacts[0]!, "myjcb-jpoint-balance", {
-    kind: "published",
-    version: "1.0.1",
-  });
-  if (totalParse === null) throw new Error("synthetic_total_parse_missing");
+  const historyArtifact = capture.artifacts[withTotal ? 1 : 0]!;
   const insert = (
     parse: number,
     account: string,
@@ -679,35 +693,60 @@ function seedHistoryCapture(
       VALUES(?,?,?,?,0,?,?,'json:synthetic',?) RETURNING id`)
         .get(parse, account, metric, amount, instrument, at, extra) as { id: number }
     ).id;
-  const totalFact = insert(
-    totalParse,
-    `myjcb:${conn}:j-point:total`,
-    "displayed_jpoint_total",
-    mode === "mismatch" ? "200" : "100",
-  );
-  claim(
-    store.db,
-    {
-      id: totalFact,
-      parse_run_id: totalParse,
-      parser_name: "myjcb-jpoint-balance",
-      source_id: "myjcb",
-    },
-    REWARD_PROMOTION_RELEASE,
-  );
+  if (withTotal) {
+    const totalParse = store.parse(capture.artifacts[0]!, "myjcb-jpoint-balance", {
+      kind: "published",
+      version: "1.0.1",
+    });
+    if (totalParse === null) throw new Error("synthetic_total_parse_missing");
+    const totalFact = insert(
+      totalParse,
+      `myjcb:${conn}:j-point:total`,
+      "displayed_jpoint_total",
+      mode === "mismatch" ? "200" : "100",
+    );
+    claim(
+      store.db,
+      {
+        id: totalFact,
+        parse_run_id: totalParse,
+        parser_name: "myjcb-jpoint-balance",
+        source_id: "myjcb",
+      },
+      REWARD_PROMOTION_RELEASE,
+    );
+  }
   if (mode === "failed") return [];
   const data = syntheticJPointHistory();
-  const historyParse = store.parse(capture.artifacts[1]!, myJcbJPointHistory.name, {
+  const observed = data.rows.length * 4;
+  const historyParse = store.parse(historyArtifact, myJcbJPointHistory.name, {
     kind: "published",
     version: myJcbJPointHistory.version,
-    claim: {
-      completeness: mode === "partial" ? "partial" : "complete",
-      observed: data.rows.length * 4,
-    },
+    ...(mode === "window"
+      ? {}
+      : {
+          claim: {
+            completeness:
+              mode === "partial" || mode === "history-only-partial" ? "partial" : "complete",
+            observed,
+          },
+        }),
   });
   if (historyParse === null) throw new Error("synthetic_history_parse_missing");
+  if (mode === "window")
+    store.db.run(
+      `INSERT INTO parse_coverage_claims(parse_run_id,claim_id,scope_key,mode,completeness,membership_complete,observed_count,
+        evidence_refs_json,policy_version,failure_cause,absence_meaning,parent_run_status,parent_run_failure_count)
+       VALUES(?,?,?,'window','complete',1,?,'[]','coverage-v1',NULL,'not-applicable','success',0)`,
+      [
+        historyParse,
+        `claim-${historyParse}`,
+        `myjcb/jpoint-history/unit=${conn}:j-point-history`,
+        observed,
+      ],
+    );
   const parsed = myJcbJPointHistory.parse(new TextEncoder().encode(JSON.stringify(data)), {
-    id: capture.artifacts[1]!,
+    id: historyArtifact,
     sourceId: "myjcb",
     dataset: "jpoint-history",
     artifactKey: `${conn}/jpoint-history.json`,
@@ -812,3 +851,27 @@ for (const randomSeed of [null, 1, 2, 3, 4])
       store.db.close();
     }
   });
+// The candidate's own claim check is mode-agnostic and looks only at the
+// candidate's own parse run. Two history captures therefore depend on the
+// shared cohort's complete-container check: a complete claim of another mode,
+// and a later uncovered capture that would otherwise take the history rank of
+// the covered capture its total belongs to.
+test("history candidates follow the cohort's complete-container coverage check", () => {
+  const store = new QualityStore();
+  try {
+    expect(seedHistoryCapture(store, 1, "synthetic-window", "window")).toEqual([]);
+    const covered = seedHistoryCapture(store, 2, "synthetic-ranked", "complete");
+    expect(covered).toHaveLength(3);
+    expect(seedHistoryCapture(store, 3, "synthetic-ranked", "history-only-partial")).toEqual([]);
+    const actual = current(store.db, 5000);
+    expect(
+      actual.filter((row) => row.parser_name === myJcbJPointHistory.name).map((row) => row.id),
+    ).toEqual(covered);
+    expect(actual.filter((row) => row.parser_name !== myJcbJPointHistory.name)).toEqual(
+      frozen(store.db, 5000),
+    );
+    expect(drain(store.db, 1)).toEqual(actual);
+  } finally {
+    store.db.close();
+  }
+});
