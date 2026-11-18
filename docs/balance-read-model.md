@@ -77,7 +77,10 @@ writer fencing and captured CORE references; the contract is in
    read.
    Adoption reads `same` as an equivalence: two scopes each accepted as the
    same account as a third are one measurement with it, so at most one of
-   the three is adopted whatever order the candidates come in (scope
+   the three is adopted whatever order the candidates come in, even when
+   the disjointness policy below declares the first two apart (two lines of
+   one source); a pair that is both accepted `same` and policy-disjoint
+   still reads unknown (scope
    relation release `scope-relations-v3`,
    [ADR 0001's amendment of 2026-11-18](adr/0001-domain-axes.md#amendment-2026-11-18-same-is-an-equivalence-in-adoption)).
 5. **Disjointness policy** (`distinct-identified-accounts-v2`). Within one

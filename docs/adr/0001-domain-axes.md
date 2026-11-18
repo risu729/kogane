@@ -375,8 +375,12 @@ was `same` as it, or into a new group. That rule depends on the order. With
 (the better rank) for `{a, c}` and `b` for `{b}`. Step 7 skips `same`
 pairs, on the premise that step 4 settled them, so `b` and `c` were both
 adopted: one balance twice in the adopted set, the known-assets subtotal and
-`holdings`, with `completeness: "complete"` (INV06). In another order the
-same input adopted one of them.
+`holdings`, with `completeness: "complete"` (INV06). The input order does
+not matter (the candidates are sorted by ref first); which ref the shared
+scope has does. Had `c` sorted first or between, the same claims made one
+group. With equal ranks the walk above kept `a` and `b` as representatives, which no claim
+joins, so step 7 left both unresolved (`overlap_unknown`): agreeing evidence
+of one measurement adopted nothing.
 
 In the balance projection the claims are accepted `same_account` relations,
 which a person or an MCP client decides through the change lifecycle
@@ -407,6 +411,14 @@ account) are enough. Whether production holds such a pair was not checked.
 - A component may hold two members that another claim calls `disjoint`,
   `subset` or `overlaps` (contradictory claims); they are still one
   measurement, as the first-match rule already made them in some orders.
+  In the balance projection this is the usual shape, not an edge: two lines
+  of one source are declared disjoint by the within-source policy
+  (`distinct-identified-accounts-v2`), so two of its lines each accepted as
+  the same account as one direct account form such a component. Accepted
+  `same` decisions therefore outweigh a policy `disjoint` claim between two
+  other members of their component. A single pair claimed both `same` and
+  `disjoint` still reads unknown (`relation_conflict`) and joins no
+  component, as before.
 - The rule changes what the projection makes of an input, so the scope
   relation release moves to `scope-relations-v3`, which is part of the build
   digest and the stored input manifest.
@@ -419,8 +431,11 @@ account) are enough. Whether production holds such a pair was not checked.
   of the READ database: the active snapshot's `input_manifest_json` names
   `scope-relations-v3`.
 - An input whose `same` claims form no chain of three or more scopes adopts
-  exactly what it adopted before. A chain now adopts one member, or none when
-  its members disagree.
+  exactly what it adopted before (in a component of two scopes every pair of
+  members is `same`, so first-match grouped it whole). A chain now adopts one
+  member, or none when its members disagree (the projection's default
+  `conflictRule`); where it left two representatives unresolved as unknown
+  overlaps of each other before, it now adopts one.
 - `selectAdoptedSet` still compares candidates pairwise, within the 250-scope
   build bound (`ADOPTION_SUBJECT_BOUND`).
 
@@ -428,9 +443,15 @@ account) are enough. Whether production holds such a pair was not checked.
 
 Synthetic data only. `packages/domain/test/scope.test.ts` ("same is an
 equivalence") adopts one of three scopes joined by two `same` claims, in all
-six candidate orders and both claim orders, and leaves the whole chain a
+six input orders and both claim orders, and leaves the whole chain a
 conflict when one member disagrees; it fails on the first-match rule (200
-adopted for a balance of 100). `packages/read-model/test/balance-projection.test.ts`
-("two routes each accepted as the same account as a third") builds the
-projection from two accepted `same_account` rows and fails on the first-match
-rule, which adopted one route next to the direct account.
+adopted for a balance of 100). "whatever ref each scope of the chain has"
+puts the shared scope at each ref position, with and without a rank
+difference, plus a path of four scopes, and fails on the first-match rule
+(two adopted, or both unresolved). "a component holds members another claim
+calls disjoint" pins the contradictory-claims bullet above, and that a pair
+claimed both `same` and `disjoint` joins nothing.
+`packages/read-model/test/balance-projection.test.ts` ("two routes each accepted as the same account as a third") builds the
+projection from two accepted `same_account` rows of two lines of one source
+(which the policy declares disjoint) and fails on the first-match rule, which
+adopted one route next to the direct account.

@@ -203,7 +203,10 @@ describe("balance projection builder", () => {
     // one direct account, and nothing between the two routes. Read in scope
     // key order (route 1, route 2, direct), the first-match grouping put route
     // 2 apart from {route 1, direct} and adopted both route 2 and the direct
-    // reading: one balance twice in the adopted set and the subtotal.
+    // reading: one balance twice in the adopted set and the subtotal. The two
+    // routes come from one source, so the within-source policy also declares
+    // them disjoint; the accepted `same` claims still make one measurement of
+    // the three (ADR 0001's amendment of 2026-11-18).
     const route = (scopeKey: string, subject: string) =>
       deposit(scopeKey, subject, "100000", {
         subjectStatus: "unresolved",
@@ -231,6 +234,13 @@ describe("balance projection builder", () => {
       ],
       relations,
     );
+    expect(
+      build.relations.filter(
+        (relation) =>
+          relation.fromScopeKey === "source_account:route:1" &&
+          relation.toScopeKey === "source_account:route:2",
+      ),
+    ).toMatchObject([{ relation: "disjoint", source: "policy" }]);
     expect(stateOf(build, "m-shared").state).toBe("adopted");
     for (const scopeKey of ["m-route-1", "m-route-2"])
       expect(stateOf(build, scopeKey)).toMatchObject({

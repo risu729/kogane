@@ -204,6 +204,78 @@ describe("selectAdoptedSet", () => {
     ]);
   });
 
+  test("same is an equivalence whatever ref each scope of the chain has (INV06)", () => {
+    // Candidates are walked in ref order whatever the input order, so the
+    // order the first-match rule depended on is which ref the shared scope
+    // has. Every position of the shared scope, with and without a rank
+    // difference, and a path of four, give one adopted member.
+    const refs = ["r1", "r2", "r3"];
+    for (const [hub, hubRef] of refs.entries())
+      for (const spokeRank of [0, 1]) {
+        const candidates = refs.map((ref, position) =>
+          candidate(ref, `s:${ref}`, "100", {
+            authorityRank: position === hub ? 0 : spokeRank,
+          }),
+        );
+        const claims = refs
+          .filter((ref) => ref !== hubRef)
+          .map((ref) => relation(`s:${ref}`, `s:${hubRef}`, "same"));
+        const result = selectAdoptedSet(target, candidates, claims);
+        const kept = spokeRank === 0 ? "r1" : hubRef;
+        expect(result.adopted.map((a) => a.ref)).toEqual([kept]);
+        expect(result.excluded).toEqual(
+          refs
+            .filter((ref) => ref !== kept)
+            .map((ref) => ({ ref, reasonCode: "duplicate_evidence" })),
+        );
+        expect(result.unresolved).toEqual([]);
+        expect(quantityText(result.adoptedTotal)).toBe("100");
+      }
+    // r1 ≡ r3 ≡ r4 ≡ r2: the first-match rule left r2 apart from {r1, r3, r4}.
+    const path = selectAdoptedSet(
+      target,
+      ["r1", "r2", "r3", "r4"].map((ref) => candidate(ref, `s:${ref}`, "100")),
+      [
+        relation("s:r1", "s:r3", "same"),
+        relation("s:r3", "s:r4", "same"),
+        relation("s:r4", "s:r2", "same"),
+      ],
+    );
+    expect(path.adopted.map((a) => a.ref)).toEqual(["r1"]);
+    expect(quantityText(path.adoptedTotal)).toBe("100");
+    expect(path.completeness).toBe("complete");
+  });
+
+  test("a component holds members another claim calls disjoint; a contradicted pair never joins", () => {
+    // ADR 0001's amendment of 2026-11-18: a ≡ c and b ≡ c make one
+    // measurement even when a claim (in the balance projection, the
+    // within-source disjointness policy) calls a and b disjoint.
+    const candidates = [
+      candidate("a", "s:a", "100", { authorityRank: 1 }),
+      candidate("b", "s:b", "100", { authorityRank: 1 }),
+      candidate("c", "s:c", "100"),
+    ];
+    const chained = selectAdoptedSet(target, candidates, [
+      relation("s:a", "s:c", "same"),
+      relation("s:b", "s:c", "same"),
+      relation("s:a", "s:b", "disjoint"),
+    ]);
+    expect(chained.adopted.map((a) => a.ref)).toEqual(["c"]);
+    expect(quantityText(chained.adoptedTotal)).toBe("100");
+    // A pair claimed both `same` and `disjoint` reads unknown, so it joins no
+    // component: b stays apart from {a, c} and is an unknown overlap, never
+    // adopted beside c.
+    const contradicted = selectAdoptedSet(target, candidates, [
+      relation("s:a", "s:c", "same"),
+      relation("s:b", "s:c", "same"),
+      relation("s:b", "s:c", "disjoint"),
+    ]);
+    expect(contradicted.adopted.map((a) => a.ref)).toEqual(["c"]);
+    expect(contradicted.unresolved).toEqual([{ ref: "b", reasonCode: "overlap_unknown" }]);
+    expect(contradicted.warnings).toEqual([{ code: "relation_conflict", refs: ["s:b", "s:c"] }]);
+    expect(contradicted.completeness).toBe("partial");
+  });
+
   test("a total and its breakdown are alternatives; preference chooses, mismatch adopts neither", () => {
     const candidates = [
       candidate("p1", "s:p1", "60"),
