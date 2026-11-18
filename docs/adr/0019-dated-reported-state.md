@@ -206,3 +206,49 @@ read; wrong types; the row bound) and
 `services/app/test/reported-state-api.test.ts` ("refuses with the route's
 codes and the same status on the route and both agent paths": the route,
 `POST /api/agent/v1/reported-state.read` and `/mcp` on the same requests).
+
+## Account entries amendment — 2026-11-18
+
+- Status: proposed
+- Date: 2026-11-18
+
+**Context.** `queryDatedState` listed one account entry per (source,
+provider account) and named it after the first row that had an account
+mapping, in row-id order. Identities map a source account per provider
+reference, so one provider account can map to two resolved accounts (a
+domestic and a foreign container of the same broker account, each with its
+own identity). The rows of the second account were then listed under the
+first one's id, and the holdings change between two dates, which takes each
+holding's account from its entry, read a holding whose mapping never changed
+as `account_differs` and kept it under the `account` filter of an account
+its mapping does not name.
+
+**Options considered.** (1) Leave the entry per provider account with no
+account when its rows disagree: rejected, the holdings change's `account`
+filter would then lose rows that do name the account. (2) Carry an account
+on each position and balance: rejected, a wider wire contract for what an
+entry already states. (3) One entry per (source, provider account, resolved
+account): chosen; it is what the `account` filter already listed for each
+account.
+
+**Decision.** An entry is keyed by the source, the provider account and the
+resolved account of its rows (null when a row has no mapping). Entries of one
+provider account are ordered by account id, the entry without one first. A
+provider account whose rows all map to one account is listed exactly as
+before.
+
+**Consequences.** The answer, its manifest and its context id are unchanged
+for every store in which a provider account maps to one account. A provider
+account with rows of two accounts is two entries; a capture whose identity is
+not recorded yet beside a mapped one of the same provider account is listed
+apart as `not-recorded` instead of under the mapped account. The page keys
+its account cards by the three values. The holdings change takes each
+holding's account from its own entry, so it no longer reports
+`account_differs` for such a holding.
+
+**Verification.** `packages/application/test/dated-state-query.test.ts` (a
+provider account whose containers map to two accounts is listed under each,
+and each entry equals the `account`-filtered answer) and
+`packages/application/test/holdings-change-query.test.ts` (each holding keeps
+its own row's account, is `compared`, and the `account` filter keeps only
+the holdings of that account); both fail on the previous keying.

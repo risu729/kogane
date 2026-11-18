@@ -234,8 +234,9 @@ describe.if(runnable)("reported holdings change between two dates", () => {
       ["changeSource", "sbi-securities"],
       ["changeAccount", "acct-sbi"],
     ]);
-    // Every holding of the world is this source's and maps to this account;
-    // the server's own filters are stated.
+    // Every domestic holding maps to this account; the foreign capture's
+    // identity is not recorded, so no listing names VTX for it (ADR 0019,
+    // account entries amendment). The server's own filters are stated.
     expect((await changes(page)).map(([code]) => code)).toEqual([
       "1001",
       "1002",
@@ -243,7 +244,6 @@ describe.if(runnable)("reported holdings change between two dates", () => {
       "1004",
       "1005",
       "1006",
-      "VTX",
     ]);
     expect(await page.locator("main").innerText()).toContain("sbi-securities · acct-sbi");
     // Another registered source lists no holding: an empty comparison, not a zero.

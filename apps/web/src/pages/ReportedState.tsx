@@ -95,14 +95,30 @@ function SnapshotLine({ snapshot }: { snapshot: ReportedSnapshot }): ReactNode {
   );
 }
 
-function AccountCard({ account, index }: { account: ReportedAccount; index: number }): ReactNode {
+function AccountCard({
+  account,
+  index,
+  split,
+}: {
+  account: ReportedAccount;
+  index: number;
+  /** The provider account is listed more than once (its rows map to several accounts). */
+  split: boolean;
+}): ReactNode {
   const id = `reported-account-${index}`;
-  // Every account has these tables; the account names each one apart.
-  const accountName = `${account.sourceId} · ${account.sourceAccount}`;
+  // Every account has these tables; the account names each one apart, and a
+  // provider account listed once per resolved account is named by that account.
+  const resolved = account.accountId ?? IDENTITY[account.identityStatus];
+  const accountName = `${account.sourceId} · ${account.sourceAccount}${split ? ` · ${resolved}` : ""}`;
   return (
     <Panel
       id={id}
-      title={<SourceAccount source={account.sourceId} account={account.sourceAccount} />}
+      title={
+        <>
+          <SourceAccount source={account.sourceId} account={account.sourceAccount} />
+          {split ? <span className="table-secondary">{resolved}</span> : null}
+        </>
+      }
       count={
         <Badge tone={account.identityStatus === "identified" ? "ok" : "neutral"}>
           {IDENTITY[account.identityStatus]}
@@ -409,9 +425,20 @@ export function ReportedStatePage(): ReactNode {
                   ) : (
                     state.accounts.map((account, index) => (
                       <AccountCard
-                        key={`${account.sourceId}/${account.sourceAccount}`}
+                        key={JSON.stringify([
+                          account.sourceId,
+                          account.sourceAccount,
+                          account.accountId,
+                        ])}
                         account={account}
                         index={index}
+                        split={
+                          state.accounts.filter(
+                            (other) =>
+                              other.sourceId === account.sourceId &&
+                              other.sourceAccount === account.sourceAccount,
+                          ).length > 1
+                        }
                       />
                     ))
                   )}

@@ -83,9 +83,14 @@ A perimeter container with no snapshot before the cutoff is listed in
   included, each with its capture time, the capture's Tokyo date, its age in
   days and its freshness under `dated-state-freshness-v1`: `same-day` (age 0),
   `recent` (1–3 days), `stale` (more).
-- `accounts`: one per (source, provider account), with the snapshots its rows
-  came from, its resolved account and identity status (the current account
-  mapping of the row's identity, or `not-recorded`), and:
+- `accounts`: one per (source, provider account, resolved account), with the
+  snapshots its rows came from, its resolved account and identity status (the
+  current account mapping of its rows' identities, or `not-recorded`). A
+  provider account whose rows map to two accounts (the identity of each
+  container names its own) is listed once under each, and its rows without a
+  mapping once more with no account, so no row is listed under an account its
+  own mapping does not name; entries of one provider account are ordered by
+  account id, the one without first. Each entry lists:
   - `positions`: the provider quantity as decimal text, the instrument mapping,
     and the provider valuations matched as `POSITION_VALUATIONS_SQL` matches
     them (same parse run, account and code, and the locator guard

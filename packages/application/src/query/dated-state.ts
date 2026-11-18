@@ -172,24 +172,28 @@ export async function queryDatedState(
 
   const accounts = new Map<string, ReportedAccount>();
   const accountOf = (row: DatedPositionRow | DatedBalanceRow): ReportedAccount => {
-    const key = JSON.stringify([row.source_id, row.source_account]);
+    // One entry per resolved account a provider account's rows map to: a
+    // provider account whose containers map to two accounts (a reference per
+    // container or currency) is two entries, so no row is listed under an
+    // account its own mapping does not name.
+    const key = JSON.stringify([row.source_id, row.source_account, row.account_id]);
     let entry = accounts.get(key);
     if (entry === undefined) {
       entry = {
         sourceId: row.source_id,
         sourceAccount: row.source_account,
-        accountId: null,
-        identityStatus: "not-recorded",
+        accountId: row.account_id,
+        identityStatus:
+          row.account_id === null
+            ? "not-recorded"
+            : identityStatus(row.identity_recorded, row.account_status),
         snapshots: [],
         positions: [],
         balances: [],
       };
       accounts.set(key, entry);
     }
-    if (entry.accountId === null && row.account_id !== null) {
-      entry.accountId = row.account_id;
-      entry.identityStatus = identityStatus(row.identity_recorded, row.account_status);
-    } else if (entry.identityStatus === "not-recorded" && row.identity_recorded === 1)
+    if (entry.identityStatus === "not-recorded" && row.identity_recorded === 1)
       entry.identityStatus = identityStatus(row.identity_recorded, row.account_status);
     // Four reads are four statements: a snapshot sealed between them is
     // still described from its own row rather than dropped.
@@ -334,9 +338,21 @@ export async function queryDatedState(
   const chosen = [...snapshots.values()].filter(
     (snapshot) => source === null || snapshot.sourceId === source,
   );
+  // Entries of one provider account follow their resolved account, an
+  // unresolved one first, so the order never depends on row ids.
   const listedAccounts = [...accounts.values()].sort(
     (a, b) =>
-      a.sourceId.localeCompare(b.sourceId) || a.sourceAccount.localeCompare(b.sourceAccount),
+      a.sourceId.localeCompare(b.sourceId) ||
+      a.sourceAccount.localeCompare(b.sourceAccount) ||
+      (a.accountId === b.accountId
+        ? 0
+        : a.accountId === null
+          ? -1
+          : b.accountId === null
+            ? 1
+            : a.accountId < b.accountId
+              ? -1
+              : 1),
   );
   const manifest = {
     schemaVersion: REPORTED_STATE_SCHEMA,
