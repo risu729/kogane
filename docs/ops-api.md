@@ -640,16 +640,39 @@ failure and the current publication result in Japanese.
 Limits: only the connections `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names are
 started; the requested window is not applied; one collector call is awaited
 per Processor invocation, inside the tick. The web UI requests only a
-collection, from `/schedules`, and no page lists operations: the list route
-([ADR 0086](adr/0086-operator-operations-list.md)) is read over HTTP and MCP
-only.
+collection, from `/schedules`; it lists requests on the 依頼の一覧 page below
+and follows one on the 依頼の経過 page.
+
+**The 依頼の一覧 page.** `/operations` in the observation client reads the
+list route above, read-only
+([ADR 0086, amendment of 2026-11-18](adr/0086-operator-operations-list.md#amendment-2026-11-18-the-依頼の一覧-page-reads-the-list)).
+It is in the navigation for every caller, and the server's operator check is
+the only gate. It sends the closed `kind` and `status` from its own URL and
+the cursor of the page it pages to, and no `limit`, so a page is the route's
+20 rows. A filter outside the closed lists is refused on the page and sends
+nothing; a new filter, or 最新の依頼から読み直す, starts from the newest
+request. Each row shows the accepted time, kind, stored status, failure
+code, source, dispatch state and attempts, and last update, and links its
+operation id to its 依頼の経過 page. Neither the principal nor the request
+payload is shown, as the summary carries neither. The status is the stored
+one: a collection whose `projected` stage the 依頼の経過 page derives as
+completed can still be `running` here, and the page says so. The browser
+validates each page first (`validOperationListPage` in
+`packages/observation-shared/src/operation-contract.ts`: exact keys, closed
+values, at most 50 rows in the list's order, each once, a cursor that is the
+last row's id or null, and rows of the kind and status asked for); a page
+outside it is an error. A `403` says the list is the operator's; a `404`
+says this deployment does not provide it, which covers `OPS_API_ENABLED`
+off. Every page read is one audited `ops.operation.list`, and the page reads
+again only when asked.
 
 **The 依頼の経過 page.** `/operations/op_<id>` in the observation client
 shows this record read-only: status, stages with their evidence (a fetch run
 links to its 取得記録), the execution and every reported run with its counts,
 each closed code by Japanese name beside the code. It reads once per opening
 and again only when asked. The 監査ログ page links each `op_` target to it,
-and the schedules page links a request it has just sent
+the 依頼の一覧 page links every request, its breadcrumb leads back to that
+list, and the schedules page links a request it has just sent
 ([schedules](schedules.md#収集を依頼-collection-request)). The browser validates the record first
 (`packages/observation-shared/src/operation-contract.ts`); a record outside
 the contract is an error. A `403` says the trail is the operator's; a `404`

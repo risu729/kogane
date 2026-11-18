@@ -161,8 +161,9 @@ compound SELECT"; seen in the `services/app` workerd tests).
 - The catalogue entry is on `ui` and `mcp` and its tool is published to every
   MCP client, so the catalogue guard of
   `services/app/test/ui-mcp-parity.test.ts` passes with no new known gap. No
-  web page names the route yet, so the read-route guard has nothing to map;
-  a page that does maps it to this tool.
+  web page named the route when this ADR merged; the 依頼の一覧 page does
+  since the [2026-11-18 amendment](#amendment-2026-11-18-the-依頼の一覧-page-reads-the-list),
+  and the read-route guard maps it to this tool.
 - A request's id is shown to every caller the transport authenticated. It
   confirms nothing beyond what the audit log already shows those callers,
   and it grants no write: a re-send under another principal is that
@@ -209,3 +210,100 @@ compound SELECT"; seen in the `services/app` workerd tests).
   - One audit record of `rows` and `truncated` per list request.
   - The same plan assertions on D1, the thirty arms of an unfiltered page
     included.
+
+## Amendment 2026-11-18: the 依頼の一覧 page reads the list
+
+- Status: proposed (accepted when its pull request merges)
+- Date: 2026-11-18
+
+### Context
+
+Decision 7 gave `ops.operation.list` the paths `ui` and `mcp`, and the
+consequences above said that no web page named the route yet. The operator
+could follow one request on its 依頼の経過 page (`/operations/op_<id>`), but
+reached that page only from the audit log's `op_` targets or from the
+schedules page right after sending a collection request. A request whose id
+was lost had to be found again in the audit log, which also holds reads,
+refusals and lane records (option 5 above). The list route and the MCP tool
+already answered "which requests exist" over one service, `listOperations`.
+
+### Options considered
+
+1. **A read-only page at `/operations` over the list route, with the route's
+   closed filters in the URL and the cursor kept per paging session
+   (chosen).** The audit log page pages the same way.
+2. **Leave the audit log as the only index of requests.** This keeps the
+   catalogue's `ui` path without a screen that uses it.
+3. **Put the cursor in the URL too.** A cursor names a row of one paging
+   session. A reload after new requests would then show the rows after an old
+   position under a URL that reads like a first page.
+
+### Decision
+
+1. **Page.** `依頼の一覧` at `/operations`, in the navigation of every caller
+   like `監査ログ` (the server's operator check is the only gate), drawn
+   outside the observation metadata guard as the audit log and 依頼の経過
+   are. It reads `GET /api/ops/v1/operations` only, through
+   `useOperationList` in `apps/web/src/operations-api.ts`, and writes nothing.
+2. **Query.** The page sends `kind` and `status` from its URL
+   (`?kind=…&status=…`, each at most once and only a closed value; anything
+   else is refused on the page without a request) and the cursor of the page
+   it pages to. It sends no `limit`, so a page is the route's default of 20
+   rows. A new filter or 最新の依頼から読み直す starts from the newest
+   request again.
+3. **Shown.** Per row: accepted time, kind, stored status, failure code, source,
+   dispatch state and attempts, last update and the operation id, each closed
+   code by its Japanese name beside the code, and the id as the link to its
+   依頼の経過 page. The 依頼の経過 page's breadcrumb leads back to the list
+   instead of the audit log. Neither the principal nor the request payload is
+   shown, because the summary carries neither (decision 5). The page says
+   that the status is the stored one (READ is not consulted, decision 5) and
+   that each read is recorded once in the audit log (decision 7).
+4. **Checks in the browser.** `validOperationListPage`
+   (`packages/observation-shared/src/operation-contract.ts`) accepts a page
+   only with the exact summary keys and closed values of decision 5, at most
+   50 rows, in the list's order (accepted time, then id, both descending, each
+   row once), and a cursor that is the last row's id or null. The page also
+   refuses a page with a row of another kind or status than it asked for.
+   A refused page is shown as an error, never as a partial list.
+5. **Refusals.** `401` and `403` say the list is the operator's; a `404`
+   without a code the page knows says this deployment does not provide it
+   (`OPS_API_ENABLED` off); `404 receipt_not_found` on a cursor offers to
+   start from the newest request again.
+
+### Consequences
+
+- The read-route guard of `services/app/test/ui-mcp-parity.test.ts` maps
+  `/api/ops/v1/operations` to `kogane.ops.operation.list`. The catalogue, the
+  MCP tool list, the route and `listOperations` are unchanged, so this adds no
+  operation or capability and no migration.
+- Every opening and every page turn is one audited `ops.operation.list` read,
+  as for an MCP client's call; the page does not poll.
+- A request a reader saw as `running` on the list can be `completed` on its
+  依頼の経過 page, where the `projected` stage is derived from READ. The list
+  says so rather than deriving it per row.
+- Paging keeps decision 3's limits: a request accepted while a reader pages
+  appears at the head of the list and is not met on a later page.
+
+### Verification
+
+- `packages/observation-shared/test/operation-list-contract.test.ts`: the
+  order with tied accepted times, a repeated row, the cursor rule, the
+  50-row bound, unknown keys, open vocabulary and the record's own fields,
+  and the filter agreement.
+- `packages/application/test/operations-list.test.ts`: every page of every
+  filter shape on the three random stores is one the contract accepts for its
+  filters. `packages/application/test/operation-record-contract.test.ts` pins
+  the 50-row bound to `OPERATION_LIST_MAX_LIMIT`.
+- `services/app/test/ops-api.test.ts` (workerd, real migrations): the route's
+  first, second and filtered pages are accepted by the same contract.
+- `apps/web/test/operations.browser.test.ts`, against pages `listOperations`
+  reads from a synthetic store with every migration, on a desktop and a phone
+  viewport: the navigation entry, the labels, no total, no principal and no
+  payload text, the link to each request, cursor paging and its tie order,
+  filters sent as closed query parameters that reset paging, a deep-linked
+  filter, a refused URL that sends nothing, one read per page and a re-read
+  only when asked, the non-operator and not-provided answers, a malformed
+  page and a page that answers other filters, and the accessibility audit.
+- `apps/web/test/operation.browser.test.ts`: the 依頼の経過 breadcrumb leads
+  to `/operations`.

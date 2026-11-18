@@ -85,7 +85,7 @@ are separate claims. Historical acceptance records are linked from the
   and a trail from the request id to the reported runs, their registration,
   parse and CORE publication or a closed reason
   (`GET /api/ops/v1/operations/{id}`, shown read-only on the operator's
-  依頼の経過 page, opened from the audit log or from a request just sent on the schedules page, and `kogane.ops.operation.get`,
+  依頼の経過 page, opened from the 依頼の一覧 page (`GET /api/ops/v1/operations`, `kogane.ops.operation.list`), the audit log or a request just sent on the schedules page, and `kogane.ops.operation.get`,
   whole-store on both; the browser requests no operation). The committed
   `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, `sbi-securities`, `mobile-suica`,
   `moneyforward-me`, `myjcb`, `st-george`, `sbi-vc-trade`, `sbi-vc-keepalive` and `prestia-bank`; requests for

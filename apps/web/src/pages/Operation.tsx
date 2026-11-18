@@ -7,7 +7,6 @@
 // time. The page sends no request of its own and re-reads only when asked.
 import type { ReactNode } from "react";
 import { ApiError } from "../api.ts";
-import { AUDIT_ROUTE } from "../audit-api.ts";
 import { displayLabel } from "../labels.ts";
 import {
   EVIDENCE_RUN_ID,
@@ -18,6 +17,7 @@ import {
   OPERATION_STAGE_LABELS,
   OPERATION_STAGE_STATE_LABELS,
   OPERATION_STATUS_LABELS,
+  OPERATIONS_ROUTE,
   PROVIDER_OUTCOME_LABELS,
   RUN_STATE_LABELS,
   useOperation,
@@ -422,7 +422,7 @@ export function OperationPage({ operationId }: { operationId: string }): ReactNo
     <section>
       <div className="page-head">
         <div className="breadcrumb">
-          <Link to={AUDIT_ROUTE}>監査ログ</Link> / 依頼の経過
+          <Link to={OPERATIONS_ROUTE}>依頼の一覧</Link> / 依頼の経過
         </div>
         <h1>依頼の経過</h1>
         <p className="lede">

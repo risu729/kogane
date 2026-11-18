@@ -128,6 +128,9 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   ],
   "/api/raw/:sha256": ["kogane.evidence.raw.read"],
   "/api/evidence/v1/runs/:run/artifacts/:artifact/raw": ["kogane.evidence.raw.read"],
+  // The 依頼の一覧 page: one page of every principal's requests, from
+  // `listOperations` (ADR 0086 and its 2026-11-18 amendment).
+  "/api/ops/v1/operations": ["kogane.ops.operation.list"],
   // The 依頼の経過 page: one operation's receipt, `execution` block included,
   // from `readOperation`, whichever principal requested it (ADR 0086).
   "/api/ops/v1/operations/:id": ["kogane.ops.operation.get"],

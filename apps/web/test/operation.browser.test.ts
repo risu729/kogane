@@ -411,13 +411,13 @@ describe.if(runnable)("the operator's 依頼の経過 page", () => {
         // Three stages and the published run name the same fetch run.
         expect(await runLinks.count()).toBe(4);
         expect(await runLinks.last().getAttribute("href")).toBe("/runs/r_12");
-        // Back to where operations are found.
+        // Back to where operations are listed.
         expect(
           await page
-            .getByRole("link", { name: "監査ログ", exact: true })
-            .first()
+            .locator(".breadcrumb")
+            .getByRole("link", { name: "依頼の一覧", exact: true })
             .getAttribute("href"),
-        ).toBe("/audit");
+        ).toBe("/operations");
         expect(await noPageOverflow(page)).toBe(true);
         const prefix = process.env["OPERATION_SCREENSHOT_PREFIX"];
         if (prefix)

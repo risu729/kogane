@@ -1,23 +1,37 @@
-// The client half of the operator's 依頼の経過 page (docs/ops-api.md,
-// ADR 0048). The read is the server's `GET /api/ops/v1/operations/{id}`: one
-// accepted operations request, its stages and — for a collection or a session
-// refresh — the collector execution and the runs it reported, each followed to
+// The client half of the operator's 依頼の一覧 and 依頼の経過 pages
+// (docs/ops-api.md, ADR 0048, ADR 0086). The list is the server's
+// `GET /api/ops/v1/operations`: one page of every accepted operations request,
+// newest first, as summaries. The record is `GET /api/ops/v1/operations/{id}`:
+// one request, its stages and — for a collection or a session refresh — the
+// collector execution and the runs it reported, each followed to
 // registration, parsing and publication or a closed reason. This module names
 // every closed code in Japanese; a code without a name is shown as itself.
 // Nothing here writes or requests an operation.
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { getJson } from "./api.ts";
+import { ApiError, getJson } from "./api.ts";
 import {
   OPERATION_ID,
+  OPERATION_LIST_PATH,
+  OPERATION_RECORD_KINDS,
+  OPERATION_RECORD_STATUSES,
+  validOperationListPage,
+  type OperationListFilterWire,
+  type OperationListPageWire,
   type OperationRecordWire,
 } from "../../../packages/observation-shared/src/operation-contract.ts";
+import { isOneOf } from "../../../packages/domain/src/guards.ts";
 
 export type {
+  OperationListPageWire,
   OperationRecordExecutionWire,
   OperationRecordRunWire,
   OperationRecordWire,
+  OperationSummaryWire,
 } from "../../../packages/observation-shared/src/operation-contract.ts";
 export { EVIDENCE_RUN_ID } from "../../../packages/observation-shared/src/operation-contract.ts";
+
+/** The 依頼の一覧 page. Its filters are query parameters, so a filtered view deep-links. */
+export const OPERATIONS_ROUTE = "/operations";
 
 /** The page of one operation: `/operations/op_<64 hex>`. */
 export function operationRoute(operationId: string): string {
@@ -40,8 +54,83 @@ export function useOperation(operationId: string): UseQueryResult<OperationRecor
     queryFn: ({ signal }) =>
       // Spelled out, not built from OPERATION_RECORD_PATH_PREFIX: the UI/MCP
       // parity guard reads this as `/api/ops/v1/operations/:id`, while the bare
-      // prefix would name the list route, which no page reads (ADR 0086).
+      // prefix would name the list route, which `useOperationList` reads.
       getJson<OperationRecordWire>(`/api/ops/v1/operations/${operationId}`, signal),
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+}
+
+/** The filters the list offers: the route's closed `kind` and `status` (ADR 0086). */
+export const OPERATION_LIST_FILTER_KEYS = ["kind", "status"] as const;
+export type OperationListFilterKey = (typeof OPERATION_LIST_FILTER_KEYS)[number];
+export type OperationListFilters = OperationListFilterWire;
+
+/** The closed values each select offers, in the server's own order. */
+export const OPERATION_LIST_FILTER_CHOICES: Readonly<
+  Record<OperationListFilterKey, readonly string[]>
+> = {
+  kind: OPERATION_RECORD_KINDS,
+  status: OPERATION_RECORD_STATUSES,
+};
+
+/**
+ * The filters of a page URL's query string, or null when it holds anything the
+ * page may not send: an unknown or repeated key, or a value outside its closed
+ * list. A cursor and a page size are never part of the URL: a cursor belongs
+ * to one session of paging, and the page reads the route's own page size.
+ */
+export function parseOperationListFilters(search: string): OperationListFilters | null {
+  const params = new URLSearchParams(search);
+  const filters: OperationListFilters = {};
+  for (const key of new Set(params.keys())) {
+    const values = params.getAll(key);
+    if (values.length !== 1) return null;
+    const value = values[0]!;
+    if (key === "kind" && isOneOf(OPERATION_RECORD_KINDS)(value)) filters.kind = value;
+    else if (key === "status" && isOneOf(OPERATION_RECORD_STATUSES)(value)) filters.status = value;
+    else return null;
+  }
+  return filters;
+}
+
+/** The query string for filters, in one fixed key order so equal filters are equal text. */
+export function operationListSearch(filters: OperationListFilters): string {
+  const params = new URLSearchParams();
+  for (const key of OPERATION_LIST_FILTER_KEYS) {
+    const value = filters[key];
+    if (value !== undefined) params.set(key, value);
+  }
+  return params.toString();
+}
+
+/**
+ * One page of the list, after `cursor` (null for the first). Read once per
+ * page and again only when asked, like the record: every read is an audited
+ * `ops.operation.list`, so nothing here polls. A page that holds a row of
+ * another kind or status than its filters is refused, as a page outside the
+ * contract is (`getJson` checks the rest).
+ */
+export function useOperationList(
+  filters: OperationListFilters,
+  cursor: string | null,
+): UseQueryResult<OperationListPageWire, Error> {
+  const search = operationListSearch(filters);
+  const params = new URLSearchParams(search);
+  if (cursor !== null) params.set("cursor", cursor);
+  const suffix = params.size ? `?${params}` : "";
+  return useQuery({
+    queryKey: ["operations", search, cursor],
+    queryFn: async ({ signal }) => {
+      const page = await getJson<OperationListPageWire>(`${OPERATION_LIST_PATH}${suffix}`, signal);
+      if (!validOperationListPage(page, filters))
+        throw new ApiError(
+          200,
+          "受信したデータの形式が対応していません。接続先を確認してください。",
+        );
+      return page;
+    },
     retry: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,

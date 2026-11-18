@@ -2,6 +2,7 @@ import { SchedulesPage } from "./pages/Schedules";
 import { CollectionQualityPage } from "./pages/CollectionQuality.tsx";
 import { AuditPage } from "./pages/Audit.tsx";
 import { OperationPage } from "./pages/Operation.tsx";
+import { OperationsPage } from "./pages/Operations.tsx";
 // Read-only navigation. Connection metadata describes the API, not freshness
 // of financial observations or whether a collector is currently running.
 
@@ -78,6 +79,7 @@ const NAV: { to: string; label: string; icon: string; feature?: keyof ClientFeat
   { to: "/rewards", label: "ポイント・前払式残高", icon: NAV_ICONS.rewards, feature: "rewards" },
   { to: "/schedules", label: "収集スケジュール", icon: NAV_ICONS.evidence },
   { to: "/collection-quality", label: "収集品質", icon: NAV_ICONS.evidence },
+  { to: "/operations", label: "依頼の一覧", icon: NAV_ICONS.evidence },
   { to: "/audit", label: "監査ログ", icon: NAV_ICONS.audit },
   { to: "/evidence", label: "取得履歴", icon: NAV_ICONS.evidence, feature: "evidenceHistory" },
 ];
@@ -106,6 +108,8 @@ function View({ route }: { route: Route }): ReactNode {
       return <CollectionQualityPage />;
     case "audit":
       return <AuditPage />;
+    case "operations":
+      return <OperationsPage />;
     case "operation":
       return <OperationPage key={route.operationId} operationId={route.operationId} />;
     case "overview":
@@ -197,8 +201,10 @@ export function App(): ReactNode {
   // caption; one trailing slash names it too, as in matchRoute.
   const schedulesRoute = trimTrailingSlash(path) === "/schedules";
   const auditRoute = trimTrailingSlash(path) === "/audit";
-  // One operation's trail is the operator's too: like the audit log it reads
-  // no observation capability, so it is drawn outside the metadata boundary.
+  // The operations list and one operation's trail are the operator's too: like
+  // the audit log they read no observation capability, so they are drawn
+  // outside the metadata boundary.
+  const operationsRoute = route.name === "operations";
   const operationRoute = route.name === "operation";
   const navItems: NavItem[] = NAV.filter((item) => !item.feature || features[item.feature]).map(
     (item) => ({
@@ -221,9 +227,11 @@ export function App(): ReactNode {
           ? "収集スケジュール"
           : auditRoute
             ? "監査ログ"
-            : operationRoute
-              ? "依頼の経過"
-              : "保存された記録"
+            : operationsRoute
+              ? "依頼の一覧"
+              : operationRoute
+                ? "依頼の経過"
+                : "保存された記録"
       }
       modeLabel={schedulesRoute ? "管理者による設定変更" : "閲覧専用"}
       connection={{
@@ -278,6 +286,8 @@ export function App(): ReactNode {
       ) : auditRoute ? (
         // The operator's own record: it reads no observation capability.
         <AuditPage />
+      ) : route.name === "operations" ? (
+        <OperationsPage />
       ) : route.name === "operation" ? (
         <OperationPage key={route.operationId} operationId={route.operationId} />
       ) : (
