@@ -127,11 +127,32 @@ A perimeter container with no snapshot before the cutoff is listed in
   the same statement facts). Only counts above zero are listed, under the same
   `source` and `account` filters as the payables, so a statement whose account
   is unresolved is counted only without an `account` filter. The entry carries
-  no amount and no settlement status, and it is not part of the manifest.
-  The `/state` page lists the counts under 一覧にない期間外の請求 in its
-  coverage notes; `kogane.reported-state.read` answers the same body.
+  no amount and no settlement status. The `/state` page lists the counts
+  under 一覧にない期間外の請求 in its coverage notes;
+  `kogane.reported-state.read` answers the same body.
 - `manifest` (schema, date, cutoff, policy ids, snapshot, statement and
-  settlement refs) and `contextId = canonicalDigest(manifest)`.
+  settlement refs, and `statementsBeforeWindow`) and
+  `contextId = canonicalDigest(manifest)`. The manifest's
+  `statementsBeforeWindow` lists `{sourceId, accountId, reasonCode, count}`
+  per source, resolved account (`null` when none resolves) and reason, only
+  counts above zero, ordered by those three; the coverage's counts are these
+  added per source and reason, and the wire contract refuses an answer where
+  they disagree. So a changed count, or a statement left out whose resolved
+  account changes, gives a new `contextId` (INV09). Since the
+  [ADR 0019 amendment of 2026-11-18](adr/0019-dated-reported-state.md#statements-before-the-window-amendment--2026-11-18)
+  every manifest carries the key (`[]` when nothing is left out), so every
+  reported-state `contextId` changed once with it.
+
+`queryDatedState` counts the statements before the window unless it is called
+with `includeStatementsBeforeWindow: false`. The holdings change below, the
+[reconstructed state](reconstructed-state.md) and the
+[valuation on a date](calculation-and-reports.md#valuation-on-a-date) pass
+`false`: they do not run `DATED_STATEMENTS_BEFORE_WINDOW_SQL`, and the state
+they build on has no `statementsBeforeWindow` in its coverage or manifest and
+names every liability gap. The reported context ids they pin are the digests
+of that manifest without the count: they record no count they did not read,
+they differ from the `/state` answer's `contextId` for the same date and
+filters, and they stayed as they were before the amendment.
 
 `source` narrows accounts, payables and coverage to one source; `account` to
 one resolved account id. The answer has no total, subtotal or net worth, and
@@ -196,7 +217,8 @@ holdings in key order with counts per status, the position containers
 without a capture on either date and the stale snapshots, and states
 `total: "not-computed"` and `valuation: "not-computed"`: holdings are never
 added or valued. The change is between the two chosen captures; a stale one is
-shown with its age. The manifest pins both reported context ids and every
+shown with its age. The manifest pins both reported context ids (of the dated reads without the
+count of statements before the window, above) and every
 key's side refs, status and reasons; `contextId` is its digest. More than 500
 positions on a date is refused (`holding_limit_exceeded`), as is a reported
 state past its own bound (`dated_state_limit_exceeded`); a malformed request,
@@ -291,11 +313,12 @@ concurrently through the executor) plus two keyed reads: the position
 quantities by primary key and `DATED_SNAPSHOT_UNITS_SQL` (artifacts and fetch
 units by primary key; its plan is checked in
 `packages/read-model/test/dated-state.test.ts`). At `STATEMENT_SCALE`, a month
-ending today took 951 ms on 2026-11-18, each answer with its count of the
+ending today took 915 ms on 2026-11-18, neither answer counting the
 statements before the window (median of three, one run on `bun:sqlite` on a
 machine shared with other test processes; the store holds no position
 container). `packages/application/test/holdings-change-scale.test.ts` records
-every statement one answer runs on `STATEMENT_CI_SCALE` and fails on a whole
+every statement one answer runs on `STATEMENT_CI_SCALE` and fails on
+`DATED_STATEMENTS_BEFORE_WINDOW_SQL` or a whole
 scan beyond what the dated reads' own scale test accepts, and requires an
 answer under two seconds.
 
@@ -315,6 +338,11 @@ answer under two seconds.
   answer counts them per source and reason (`statementsBeforeWindow`) but does
   not say whether any was settled: it bounds how many older captured
   statements could still be unpaid and is not a figure of what is owed.
+- The manifest records how many statements were left out per source, resolved
+  account and reason, not which ones. A swap that keeps every count keeps the
+  `contextId`: a newer capture of an older statement that takes the place of
+  the counted one under the same source, account and reason, or one statement
+  leaving a count as another enters it.
 - Only captured statements are listed or counted. A card or a month whose
   statement was never captured before the cutoff (or whose capture has no
   published parse) is neither, and no coverage entry names it: an empty

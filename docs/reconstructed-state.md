@@ -121,7 +121,8 @@ by precedence `indeterminate` (`log_empty`, `cut_before_log_start`,
 `revision_chain_inconsistent`, `writer_unsupported`, `revision_left_out`),
 `incomplete` (every other cell gap, `nothing_to_reconstruct`,
 `positions_not_folded`) or `complete`, listing every reason. It returns the
-cut, the selector's diagnostics, both reported context ids, the fold's state,
+cut, the selector's diagnostics, both reported context ids (of dated reads without the count of statements
+before the payable window, so not the `/state` answer's; [reported state](reported-state.md#the-answer)), the fold's state,
 the late part (at the cut of the end capture, when the account's end balances
 share one capture), and an outer manifest pinning the releases, the cut, the
 set version, the identity epoch and pins, alias rule versions, the coverage
