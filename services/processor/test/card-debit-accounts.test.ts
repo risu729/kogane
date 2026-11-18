@@ -555,7 +555,7 @@ test("more cards than the bound are said, never listed as a complete answer", as
     const outcome = await reviewCardDebitAccounts({
       grant: WHOLE,
       sql: {
-        all: async <T>(sql: string, binds: unknown[] = []) => {
+        all: async <T>(sql: string, binds: readonly unknown[] = []) => {
           if (sql === CARD_DEBIT_ACCOUNT_READINGS_SQL) return [] as T[];
           if (sql === CARD_DEBIT_ACCOUNT_CANDIDATES_SQL)
             return candidates.map(candidate) as unknown as T[];
