@@ -2,7 +2,7 @@
 
 - Status: accepted; the
   [2026-11-06 amendment](#amendment-2026-11-06-the-settlement-sweep-counts-its-unmatched-statements)
-  is proposed until the PR that carries it merges
+  is accepted (#947)
 - Date: 2026-09-25
 - Implemented by: #249
 - Carried by: [processor §6.1](../processor.md#61-tick-records),

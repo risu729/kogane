@@ -66,12 +66,12 @@ Which card pays from which bank: no setting names a card's debit account. A
 card and a bank are paired only as a candidate (equal amount, due date ±3
 days) and only an accepted review with shared ownership makes the pairing a
 decision. [Debit account per card](#debit-account-per-card) answers it per
-card from those records: the account the provider states first, else the
+card: the account the provider's statement names, else the account of the
 newest accepted settlement, else `unknown`; a candidate nobody decided never
-answers ([ADR 0114](adr/0114-card-debit-account-answer.md)). In production
-at the time of writing (2026-09-26), every proposed review pairs a Vpass or MyJCB statement with an
-SMBC debit, none is accepted, and there is no published SBI Shinsei
-transaction: every stored capture of the SBI Shinsei activity page was
+answers ([ADR 0114](adr/0114-card-debit-account-answer.md)). In production at
+the time of writing (2026-09-26), every proposed review pairs a Vpass or MyJCB
+statement with an SMBC debit, none is accepted, and there is no published SBI
+Shinsei transaction: every stored capture of the SBI Shinsei activity page was
 rejected by its parser (closed code `parser_rejected`), so the SBI Shinsei
 adapter admits nothing until the parser accepts them. A card provider's own
 statement of the debit account is recorded beside each MyJCB candidate as

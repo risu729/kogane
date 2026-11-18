@@ -22,7 +22,7 @@
   [amendment (j)](#amendment-2026-10-04-j-the-menus-schedule-heading-is-an-h3-and-the-bonus-page-is-known-by-its-h1)
   is accepted (#407); the
   [amendment (k)](#amendment-2026-10-08-k-the-skip-payment-empty-row-inside-one-more-div)
-  is proposed
+  is accepted (#569)
 - Date: 2026-09-25
 - Implemented by: #248
 - Carried by:
