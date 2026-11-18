@@ -22,12 +22,18 @@ interface VPointPayEmailEvent {
 }
 
 interface VPointPayEmailSourceProvenance {
-  schemaVersion: "vpoint-pay-email-source-provenance-v1";
+  schemaVersion: "vpoint-pay-email-source-provenance-v2";
   delivery: "direct" | "forwarded-rfc822";
   storedMessageScope: "smtp-message" | "forwarded-rfc822-part";
   sourceVerification: "source_unverified";
   envelopeFrom: string;
   envelopeTo: string;
+  /**
+   * RFC 5322 From of the stored message: the official notification itself
+   * for direct delivery, the inner forwarded part otherwise. Recorded so the
+   * parser can check the sender of both forms (ADR 0115).
+   */
+  messageFrom: string;
   outerMessageSha256: string;
   authenticationProvenance: "not-exposed-by-cloudflare-email-event";
 }
@@ -36,6 +42,8 @@ export interface ParsedVPointPayEmail {
   event: VPointPayEmailEvent;
   raw: Uint8Array;
   delivery: "direct" | "forwarded-rfc822";
+  /** RFC 5322 From of `raw`, canonicalized; `normalize` accepts only the official sender. */
+  messageFrom: string;
   outerMessageSha256: string;
 }
 
@@ -86,23 +94,29 @@ export async function prepareVPointPayEmail(options: {
   const envelopeFrom = canonicalMailbox(options.envelopeFrom);
   const envelopeTo = canonicalMailbox(options.envelopeTo);
   const expectedRecipient = canonicalMailbox(options.expectedRecipient);
+  // The only recipient check: the parser records the recipient but takes no
+  // configuration to compare it with (ADR 0115).
   if (!envelopeFrom || !envelopeTo || !expectedRecipient || envelopeTo !== expectedRecipient) {
     throw new Error("vpoint_pay_email_envelope_invalid");
   }
   if (options.parsed.delivery === "direct" && envelopeFrom !== VPOINT_PAY_SENDER) {
     throw new Error("vpoint_pay_email_envelope_sender_invalid");
   }
+  if (canonicalMailbox(options.parsed.messageFrom) !== VPOINT_PAY_SENDER) {
+    throw new Error("vpoint_pay_email_message_sender_invalid");
+  }
   const event: VPointPayEmailEvent = {
     ...options.parsed.event,
     schemaVersion: EVENT_SCHEMA_V2,
     sourceProvenance: {
-      schemaVersion: "vpoint-pay-email-source-provenance-v1",
+      schemaVersion: "vpoint-pay-email-source-provenance-v2",
       delivery: options.parsed.delivery,
       storedMessageScope:
         options.parsed.delivery === "direct" ? "smtp-message" : "forwarded-rfc822-part",
       sourceVerification: "source_unverified",
       envelopeFrom,
       envelopeTo,
+      messageFrom: VPOINT_PAY_SENDER,
       outerMessageSha256: options.parsed.outerMessageSha256,
       // EmailEvent exposes the SMTP envelope and raw MIME, but no trusted SPF/DKIM result.
       authenticationProvenance: "not-exposed-by-cloudflare-email-event",
@@ -260,7 +274,8 @@ async function normalize(
   depth: number,
   outerMessageSha256: string,
 ): Promise<ParsedVPointPayEmail | null> {
-  if (senderAddress(email) !== VPOINT_PAY_SENDER) return null;
+  const messageFrom = senderAddress(email);
+  if (messageFrom !== VPOINT_PAY_SENDER) return null;
   const subject = email.subject?.trim() ?? "";
   const eventType = classifySubject(subject);
   if (!eventType || !email.text || !email.date) return null;
@@ -299,6 +314,7 @@ async function normalize(
     event,
     raw,
     delivery: depth === 0 ? "direct" : "forwarded-rfc822",
+    messageFrom,
     outerMessageSha256,
   };
 }

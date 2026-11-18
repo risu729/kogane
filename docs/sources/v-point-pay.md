@@ -157,17 +157,24 @@ collapse identity replays; current balances select latest event time in successf
 Anonymous fixtures pin four types, dual-route refusal, notice status-signs, no funding split inference,
 declined amounts, balance account separation, schema/provenance drift, failed runs.
 
-**Limit: the parser pins the routing address.** A v2 event's `sourceProvenance.envelopeTo` must equal,
-after trimming and lowercasing, a constant in `packages/parsers/src/parsers/v-point-pay.ts`: the real V Point
-Pay routing address, the same value as `VPOINT_PAY_EMAIL_RECIPIENT` in the collector's deployed config. The
-collector already compares against that configured value; parsers take no configuration (`parse` reads only
-the bytes and the artifact metadata). So the address stays in the parser source and in
-`experiments/observation-pipeline-local/test/v-point-pay-parser.test.ts`, which accepts a v2 event;
-`packages/parsers/test/v-point-pay-refusals.test.ts` reads it from the collector's `wrangler.jsonc`, so a parser
-constant that drifts from the deployed recipient fails that test. The collector tests use synthetic
-`example.invalid` addresses. Moving the check out of the parser, or giving parsers configuration, is an open
-design decision: a parser release whose result depends on deployed configuration would no longer be a function of
-the stored evidence alone.
+**Sender and recipient checks** ([ADR 0115](../adr/0115-v-point-pay-email-sender-and-recipient-checks.md);
+owner, 2026-11-18 04:42 and 04:47 UTC). The sender is the parser's provenance check: a direct v2 event needs
+the official sender as `envelopeFrom`, and provenance `vpoint-pay-email-source-provenance-v2` records the
+stored message's RFC 5322 From as `messageFrom` (the inner forwarded part when forwarded), which
+`v-point-pay-notification-event@1.1.0` requires to be the official sender in both forms. The official sender
+is a public provider address and stays a parser constant. The recipient is checked only at receipt:
+`services/collector-vpoint` parses V Point Pay mail only when the SMTP recipient is its configured
+`VPOINT_PAY_EMAIL_RECIPIENT`, and `prepareVPointPayEmail` refuses any other recipient before storage
+(`vpoint_pay_email_envelope_invalid`). The parser takes no configuration; it requires `envelopeTo` to be a
+bounded mailbox, so the evidence records where the mail went, but does not compare it. The routing address
+is therefore only in the collector's deployed config. No test copies it: the parser and collector unit tests
+use synthetic recipients, and `services/collector-vpoint/worker-test/vpoint-pay-recipient.test.ts` reads the
+configured binding to check that the guard applies to it. EmailEvent
+exposes no trusted SPF/DKIM/DMARC results, so both sender checks compare what the envelope and message say;
+they are shape checks, not authentication. Limits: a forwarded event stored with provenance v1 records no
+From, so the parser accepts it on the collector's check at receipt (the paired `notification.eml` holds the
+From); a legacy v1 event has no provenance at all; and a defect in the collector's recipient check is no
+longer caught by the parser.
 
 `services/collector-r2-importer/scripts/audit-v-point-pay-layer-b-r2.sh` was a production canary running Layer B
 after pair validation (retired with Importer 2026-09-13). Localhost-only Worker/remote read-only R2, returning
