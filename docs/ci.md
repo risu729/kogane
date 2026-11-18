@@ -153,6 +153,20 @@ Success, rejection, synchronous outcomes, detached calls, mutable arrays and
 cleanup are also checked independently. No operation is retried and existing
 test deadlines are unchanged.
 
+When a case times out, Bun's test runner sends SIGTERM to every child process
+a hook or a case of the file spawned (it prints `killed 1 dangling process`)
+and leaves the ones spawned while the module loaded;
+`services/processor/test/bun-timeout-kill.test.ts` pins both on a fixture. A
+Miniflare started in `beforeAll` is such a process, so one timeout kills its
+workerd: the timed-out case's request fails with `ECONNRESET` and every later
+case of the file with `ECONNREFUSED`. The timed-out case's body also keeps
+running against the shared store while later cases read it.
+`services/processor/test/card-debit-accounts.test.ts` therefore starts its
+runtime at module load and lets each case begin only once the previous case's
+body has settled, so a timeout fails that case alone; Bun still reports a late
+rejection as an error between tests. The other processor files that start
+Miniflare in `beforeAll` still lose their runtime at a timeout.
+
 hk's `repository` check
 invokes this graph, never `check` or `verify`, avoiding recursion. Selected root aliases for old operational `<short>:<verb>` names keep the
 deployment ledger and existing operational instructions working. Workspace
