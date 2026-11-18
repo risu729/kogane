@@ -192,7 +192,13 @@ protocol-1 row can be retried and only the claim batch that carries the
 record inserts one. The retry itself is named by the row's `retry_claimed_at`
 and the `retry_claimed` log line, not in this log. The record's
 `schedule:<job id>@<revision>` and `recorded_at` are the first claim's, even
-when a settings edit in between fenced the retry on a later revision.
+when a settings edit in between fenced the retry on a later revision. Nothing
+names the revision the retry was fenced on: the `retry_claimed` line carries
+the job and occurrence ids only, and the occurrence row has no revision. The
+settings edit's own record gives its time, which does not settle whether the
+edit landed before or after the retry's fence. The retry calls the collector
+with the original nominal, so that revision only decided that the job was
+still enabled with the same next reservation.
 
 **A lane record** is not in the lane's batches, because a lane writes in
 many. `runScheduled` (`src/worker.ts`, `src/lane-audit.ts`) reads a
@@ -372,7 +378,8 @@ occurrence of that job.
 
 - The `processor` tick and `keepalive` alarm occurrences, an alarm dispatch's
   outcome (it stays in the occurrence row), the retry claim of a
-  `not_dispatched` occurrence (its first claim's record stands for it,
+  `not_dispatched` occurrence (its first claim's record stands for it, and
+  no record or log names the schedule revision the retry was fenced on,
   [above](#the-processors-own-records-alarm-and-lane)), lane ticks that wrote no decision,
   commit or proposal, and the lanes that write none of them (parsing,
   identity, projections, prices, rewards, reports, operations dispatch, the

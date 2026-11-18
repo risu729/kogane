@@ -227,13 +227,14 @@ test("a retry claim keeps its occurrence's one claim record, named by the first 
       "SELECT o.id,o.started_at,s.revision FROM collection_schedule_occurrences o JOIN collection_schedules s ON s.id=o.schedule_id WHERE o.schedule_id='mizuho-bank'",
     )
     .first<{ id: string; started_at: string; revision: number }>();
+  // Every record that names the occurrence, whatever its path or operation.
   const records = () =>
     db
       .prepare(
-        "SELECT a.recorded_at,a.refs_json FROM audit_records a WHERE a.path='alarm' AND a.operation='alarm.occurrence.claim' AND EXISTS(SELECT 1 FROM json_each(a.refs_json) r WHERE r.atom=?)",
+        "SELECT a.path,a.operation,a.recorded_at,a.refs_json FROM audit_records a WHERE EXISTS(SELECT 1 FROM json_each(a.refs_json) r WHERE r.atom=?)",
       )
       .bind(`occurrence:${first!.id}`)
-      .all<{ recorded_at: string; refs_json: string }>()
+      .all<{ path: string; operation: string; recorded_at: string; refs_json: string }>()
       .then((result) => result.results);
   expect(await records()).toHaveLength(1);
   await markAbandonedOccurrences(db, futureCutoff());
@@ -256,6 +257,8 @@ test("a retry claim keeps its occurrence's one claim record, named by the first 
   // No second record: the first claim's record stands for the retry too.
   expect(await records()).toEqual([
     {
+      path: "alarm",
+      operation: "alarm.occurrence.claim",
       recorded_at: first!.started_at,
       refs_json: JSON.stringify([
         `occurrence:${first!.id}`,
