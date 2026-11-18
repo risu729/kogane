@@ -276,6 +276,26 @@ test("only SBI foreign positions captures sealed at policy 1 count as pending (A
     db.close();
   }
 });
+test("only SMBC AUD balance captures sealed at policy 1 count as pending (ADR 0118)", () => {
+  const db = fixture();
+  try {
+    db.exec(`INSERT INTO sources VALUES ('smbc-bank');
+      INSERT INTO fetch_artifacts(id,source_id,fetch_run_id,dataset) VALUES (30,'smbc-bank',1,'foreign-ordinary-aud-balance'),(31,'smbc-bank',1,'foreign-ordinary-aud-history'),(32,'smbc-bank',1,'balance-normalized');
+      INSERT INTO parse_runs VALUES (30,30,'ok',NULL),(31,31,'ok',NULL),(32,32,'ok',NULL);
+      INSERT INTO published_parse_runs VALUES (30,'parser-30',30),(31,'parser-31',31),(32,'parser-32',32);
+      INSERT INTO identity_runs VALUES ('sm30',30,1,'2099'),('sm31',31,1,'2099'),('sm32',32,1,'2099');
+      INSERT INTO identity_run_seals VALUES ('sm30',0,'2099'),('sm31',0,'2099'),('sm32',0,'2099');`);
+    const query = IDENTITY_AUDIT_QUERIES.find((q) => q.name === "pending_parses")!;
+    expect(db.query(query.sql).all()).toContainEqual({
+      source: "smbc-bank",
+      lineage: "current",
+      eligible_parses: 3,
+      pending_parses: 1,
+    });
+  } finally {
+    db.close();
+  }
+});
 test("the scopeless security issue is an audited code, not `other`", () => {
   const db = fixture();
   try {

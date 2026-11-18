@@ -13,6 +13,7 @@ The planning snapshot in `data/account-inventory.csv` cannot prove a product is 
 | MyJCB        | `myjcb:{connection}:root`                          | Statement aggregate without physical/subcard assignment                                                                      |
 | MyJCB        | `myjcb:{connection}:j-point:total`                 | Displayed J-POINT total of the connection's login: `reward-account`, provider-local, label `MyJCB J-POINT` (policy 2)        |
 | SMBC         | `smbc-bank:ordinary-yen`                           | Audited ordinary JPY deposit only; not Olive credit liability or AUD deposit                                                 |
+| SMBC         | `smbc-bank:ordinary-foreign-aud`                   | AUD balance of the login's one foreign ordinary account: `deposit`, provider-local, own label (policy 2, ADR 0118)           |
 | Mizuho       | `mizuho-bank:ordinary:{branch 3}:{account 7}`      | Provider branch and account number of an ordinary JPY deposit; balance and history rows share it (policy 2)                  |
 | Sony         | `sony-bank:deposit:{currency}`                     | Currency-specific deposit scope                                                                                              |
 | Sony         | `sony-bank:wallet`                                 | Debit-card activity; not another stored-value deposit                                                                        |

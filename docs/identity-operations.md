@@ -678,3 +678,54 @@ reads zero, and its `account_status` counts the board and stage observations
 under `aggregate`. No reimport or B reparse is needed. Rolling back the code
 leaves the policy-2 runs current: an older build cannot replace a newer sealed
 decision.
+
+## Policy 2: SMBC AUD foreign ordinary deposit
+
+The resolver had no rule for the AUD balance parser's reference
+`smbc-bank:ordinary-foreign-aud` (`smbc-foreign-ordinary-balance`), so every
+policy-1 run mapped it as `unresolved` / `unrecognized-source-account` under
+the source's yen-deposit label `三井住友銀行 円普通預金`. From policy 2 the rule
+accepts that exact reference as a provider-local `deposit`
+(`collector-single-foreign-ordinary-aud-scope`, label
+`三井住友銀行 外貨普通預金（AUD）`): the AUD balance of the login's one foreign
+ordinary account, which the collector selects from the only foreign ordinary
+detail link on the top page and the only `通貨：A$` section of that detail
+([sources](sources/smbc-bank.md)). The key is unchanged, so each observation
+keeps its source account, apart from the yen ordinary deposit's. Any other
+`smbc-bank:` shape stays unresolved
+([ADR 0118](adr/0118-smbc-aud-deposit-identity.md)).
+
+The rule reads the identity run's own version, so an explicit policy-1 run
+still records the policy-1 mapping. The `smbc-bank` policy module
+(`identity-policies/smbc-bank.ts`) requires version 2 only for AUD balance
+captures (artifact dataset `foreign-ordinary-aud-balance`), with family
+`identity-default`, release `identity-default-v2` and an empty dependency set.
+Every other SMBC parse falls back to the base policy
+(`not-a-foreign-ordinary-aud-balance-capture`): yen parses are never
+re-identified, so the yen deposit keeps its current mapping revision and id,
+which card-settlement ownership evidence (`account_mapping:<id>`) cites and
+readiness compares by id, and the explicit-empty AUD history parses, which
+publish no observation, gain no run. The bounded sweep treats the sealed
+policy-1 AUD balance parses as candidates again and appends a policy-2 run, a
+policy-2 mapping revision of the AUD source account and, unless another
+source's policy-2 run already revised it, a policy-2 rule revision of
+`iso4217/global/AUD` equal to the policy-1 one except for its id, revision and
+version; the current views select the newer sealed run. The account entity
+keeps the role, label and status it was first written with (`source-account`,
+the yen fallback label, `unresolved`); the classification is on the policy-2
+mapping revision, and the ownership declaration's single-account check, which
+also reads the entity's role and status, still refuses the account.
+Policy-1 runs, their rows and revisions and Layer A/B stay as recorded, and a
+manual decision on the reference is not replaced. SBI Securities income and
+realised-gains references are not changed: their `accountType` names no
+established account scope, so they stay `unresolved`.
+
+Nothing is configured to enable it. After deployment the five-minute pipeline
+sweep picks the parses up on its own; each AUD balance parse is re-identified
+once. To finish sooner run `node scripts/identity-ops.ts catchup 100
+smbc-bank` and continue only if the bounded run reports more candidates. Then
+run the read-only [identity audit](identity-audit.md): `pending_parses` for
+`smbc-bank` reads zero, and `kogane.identity.read` (`accounts`, source
+`smbc-bank`) lists the AUD reference as `provider-local`. No reimport or B
+reparse is needed. Rolling back the code leaves the policy-2 runs current: an
+older build cannot replace a newer sealed decision.
