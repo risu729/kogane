@@ -129,7 +129,8 @@ the `cf` pin in `package.json` and the pinned
 `wrangler-deploy-action` v3 (no step uses `worker-preview`). ADR 0040's
 2026-11-13 amendment (proposed) proposes moving them to `cf deploy` in three phases,
 because `cf workers versions create` never applies declared `observability`.
-Phases 1 (PRESTIA) and 2 (the other code-only Workers, Processor and the App)
+Phases 1 (PRESTIA) and 2 (the other Workers on cf's versions-API path except
+V Point and V Point Pay, including Processor and the App)
 use `production-strategy: deploy`; only V Point and V Point Pay, phase 3, still
 use the versions strategy. Their native
 `cloudflare.config.ts` and
@@ -226,8 +227,9 @@ partial failure and resume accounting. Exactly one backend runs per target.
 The release sha is stamped before building, so both deployment artifacts carry
 the same identity. The manifest digests the native source and build config and
 every file in cf Build Output, including assets and Worker metadata. It is
-rechecked before the first upload. v2 uploads that prebuilt artifact, deploys
-the returned version at 100%, and reads that exact deployment back. Trigger
+rechecked before the first upload. For V Point and V Point Pay the Action uploads
+that prebuilt artifact, deploys the returned version at 100%, and reads that
+exact deployment back; the full-deploy Workers publish it with `cf deploy`. Trigger
 synchronization is disabled for the versions-strategy Workers (V Point and
 V Point Pay). The full-deploy Workers explicitly enable it as described above.
 No preview lane, route/domain addition or bank-secret synchronization
@@ -472,9 +474,8 @@ the pinned Action reads the exact active deployment and the declared
 observability settings back; V Point and V Point Pay still create one version,
 deploy that exact version at 100%, and read the allocation back.
 
-The three v1 Workers still re-bundle during deployment, so their recorded bundle
-digest proves the validated build identity and unchanged inputs. The Workers API
-does not expose the uploaded script's content digest. The existing
+The Workers API does not expose the uploaded script's content digest, so the
+recorded digests prove the validated build identity and unchanged inputs. The existing
 `<short>:bundle` tasks retain reproducible Wrangler bundles for all Workers, and
 the manifest's deterministic hashes and tamper checks remain covered offline.
 
