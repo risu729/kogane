@@ -20,20 +20,22 @@ The table identifies each collector by its Worker name, which survives directory
 | [SBI VC Trade](../services/collector-sbi-vc-trade/README.md)                    | `kogane-sbi-vc-session-poc`         | **None**                       | Worker `fetch` + cryptography + Durable Object        | Not needed: passkey login and session keepalive are ordinary HTTP; the session is retained in a DO                                                    | Passkey login, 15-minute keepalive, read allowlist, R2                  |
 | [SMBC Direct](../services/collector-smbc-direct/README.md)                      | `kogane-smbc-direct-backfill-poc`   | **None**                       | Worker `fetch` over TAMIA VPC + Durable Object alarms | Not needed: a person approves the QR in the SMBC app; login and monthly reads are ordinary HTTP                                                       | QR session, monthly backfill chunks, R2                                 |
 | [St.George](../services/collector-st-george/README.md)                          | `kogane-st-george-collector`        | **Entire collection**          | **Container Playwright Chromium**                     | Submits the bank's normal login form through its own field and button handling, then reads the portfolio and history pages                            | Worker orchestration, TAMIA relay, DO serialization, R2                 |
-| [V Point Pay](../services/collector-vpoint-pay/README.md)                       | `kogane-vpoint-pay-collector-poc`   | **None** (collection disabled) | Worker `fetch` + Durable Object, neither reachable    | Not needed: the disabled app-API path is ordinary HTTP, and no route runs it                                                                          | None while disabled; only `GET /health` answers                         |
+| [V Point Pay](../services/collector-vpoint-pay/README.md)                       | `kogane-vpoint-pay-collector-poc`   | **None** (collection disabled) | Worker `fetch` + Durable Object, neither reachable    | Not needed: the disabled app-API path is ordinary HTTP, and no route runs it                                                                          | None while disabled; only `GET /health` succeeds                        |
 
-Each row summarizes the `Runtime profile` section of that collector's README,
-which also records its schedule, execution lease, Durable Objects, storage,
-retries and budgets as its `wrangler.jsonc`, `cloudflare.config.ts`,
-`src/schedule-entrypoint.ts`, `Dockerfile` (where one exists) and
-[`config/alarm-jobs.json`](../config/alarm-jobs.json) entry define them. No
-collector's `wrangler.jsonc` sets `limits`, so the CPU and subrequest budgets in
-effect are not recorded in the repository.
+Each row summarizes the `Runtime profile` section of that collector's README.
+For the nine collectors from Mizuho Bank down, that section also records the
+schedule, execution lease, Durable Objects, storage, retries and budgets as the
+collector's `wrangler.jsonc`, `src/schedule-entrypoint.ts`, `Dockerfile` (where
+one exists) and [`config/alarm-jobs.json`](../config/alarm-jobs.json) entry
+define them; the sections of the first six do not yet. No collector's
+`wrangler.jsonc` sets `limits`, so the CPU and subrequest budgets in effect are
+not recorded in the repository.
 
 Two rules are shared by every collector that the Processor's `ScheduleAlarm`
 calls. The execution lease (`withCollectionLease`,
 `packages/collection/src/schedule-lease.ts`) lets one execution per source run
-at a time and stops it 13 minutes after its claim. The alarm retries a
+at a time and aborts it 13 minutes after its claim (`LEASE_TIMING`,
+[ADR 0085](adr/0085-collection-lease-heartbeat.md)). The alarm retries a
 collection occurrence at most once, and only one that was never dispatched
 (`retryableOccurrence`, `services/processor/src/schedule-store.ts`).
 

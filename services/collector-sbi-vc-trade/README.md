@@ -25,8 +25,9 @@ A temporary PoC that logs into VCTRADE using an existing Bitwarden passkey entir
   stop aborts the Durable Object. Collection writes shared DATA
   (`kogane-raw-evidence`) with the terminal last (`src/shared-collection.ts`).
   There is no Cron Trigger.
-- Retries: a login is attempted only on HTTP 401/403, a gateway refusal or a
-  missing seed, at most every 6 hours, or every hour for 72 hours while a terms
+- Retries: a login is attempted only on HTTP 401/403, a gateway refusal, a
+  missing seed or, while a terms agreement is pending, a redirect, at most
+  every 6 hours, or every hour for 72 hours while a terms
   agreement is pending (`src/session-policy.ts`); a requested session refresh
   may skip that spacing once per hour (`FORCED_REAUTH_SPACING_MS`,
   `src/worker.ts`).

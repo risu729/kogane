@@ -29,8 +29,8 @@ import statements.
 - Execution: entrypoint `src/schedule-entrypoint.ts`, whose
   `ScheduledCollection.runScheduled` accepts only the `st-george` alarm job's
   cron `35 21 * * *` ([`config/alarm-jobs.json`](../../config/alarm-jobs.json));
-  `runOperation` runs an accepted operations request the same way. Each
-  collection holds the `st-george` execution lease (`withCollectionLease` in
+  `runOperation` runs an accepted operations request the same way, except
+  that it may also lift a login pause (see below). Each collection holds the `st-george` execution lease (`withCollectionLease` in
   `src/worker.ts`, D1 `SCHEDULE_DB`) and writes shared DATA
   (`kogane-raw-evidence`) with the terminal last (`src/shared-collection.ts`).
   The Container is destroyed in a `finally` and sleeps after 30 seconds idle.

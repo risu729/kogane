@@ -8,8 +8,9 @@ This independent PoC captures `VポイントPay` (V Point Pay) prepaid balances 
   external browser session is used; `wrangler.jsonc` declares no browser or
   container binding.
 - **Collection is disabled.** The deployed `src/worker.ts` answers only
-  `GET /health` (`collectionEnabled: false`); `/trigger`, `/probe` and
-  `/reset-credentials` return 410, and `scheduled` only logs. The app-API
+  `GET /health` (`collectionEnabled: false`); `POST /trigger`, `/probe` and
+  `/reset-credentials` return 410, every other request returns 404, and
+  `scheduled` only logs. The app-API
   collection code (`src/vpoint-pay.ts`, Worker `fetch`) and the SQLite Durable
   Object `VPointPayCredentialState` (binding `VPOINT_PAY_STATE`,
   `src/state.ts`) remain, but no route calls them.
