@@ -324,3 +324,58 @@ only where the reported state's views exist, as the route does
 route's `from`, `to`, `source` and `account` and answers under `data`; each call
 is an R0 read in the audit log. `services/app/test/page-read-rewards.test.ts`
 compares its answer with the route's.
+
+## Amendment 2026-11-18: the page's source and account filters
+
+- Status: proposed
+- Date: 2026-11-18
+
+### Context
+
+The route and `kogane.reported-holdings-change.read` take `source` and
+`account`, but the panel sent only `from` and `to`, so a comparison narrowed
+to one source or account existed over HTTP and MCP but not on the screen.
+
+### Options considered
+
+1. **Filters in view state, like the start date.** Rejected: a narrowed
+   comparison could not be linked, unlike the other filtered lists, whose
+   filters live in the URL.
+2. **Filters in the URL as `source` and `account`.** Rejected: on `/state`
+   they would read as filters of the whole page, whose reported state panel
+   does not use them.
+3. **Filters in the URL as `changeSource` and `changeAccount`, sent as the
+   route's `source` and `account`.** Chosen.
+
+### Decision
+
+The panel has 取得元 and 口座 ID fields beside 比較の開始日. They are kept in
+the page URL as `changeSource` and `changeAccount` and applied with 比べる;
+絞り込みを解除 removes them. The fields suggest the sources and account ids
+the page's date lists holdings for (the page's own reported state) and take
+any other. The route's query shape rule moves into the wire contract as
+`holdingsChangeQueryRefusal`, with the route's parameter list and source and
+account patterns; the route applies it unchanged, and the page applies it
+before it asks, so the page sends only the route's parameters in shapes the
+route accepts. A URL holding a repeated, empty or malformed filter asks
+nothing and offers to remove it, rather than widening the comparison.
+`unknown_source` and `unknown_account` are stated in words.
+
+### Consequences
+
+- No route, tool, contract body, capability or MCP change: the parity
+  mapping of `/api/v2/reported-holdings-change` to
+  `kogane.reported-holdings-change.read` stays as it is.
+- The answer is not paged, so a filter change has no page to reset.
+- A filter change reloads the view, as on every page whose URL carries its
+  filters (the app keys each view by its URL), so the page's reported state
+  is asked again.
+
+### Verification
+
+`apps/web/test/reported-holdings-change.browser.test.ts` checks the sent
+parameters, the URL, back navigation, the suggestions, refused shapes, the
+unknown source and account notices and the accessibility audit of the
+filtered panel; `apps/web/test/reported-holdings-change-contract.test.ts`
+checks the shared request rule; the route's refusal tests in
+`services/app/test/reported-holdings-change-api.test.ts` run unchanged.

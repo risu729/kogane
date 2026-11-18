@@ -10,22 +10,22 @@ container without a capture is named, never shown as zero.
 What adopted events imply from a start snapshot, compared with these figures,
 is [reconstructed state](reconstructed-state.md) (served by `GET /api/v2/reconstructed-state`, an agent read and the `/reconstruction` page).
 
-| Layer               | Where                                                                                                                       |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Snapshot CTE        | `SnapshotCteOptions.cutoffParam` in `packages/parsers/src/snapshot-query.ts`                                                |
-| SQL                 | `packages/read-model/src/dated-state.ts`                                                                                    |
-| Policies            | `packages/domain/src/reported-state.ts` (cutoff, freshness, payable status, perimeter)                                      |
-| Query               | `queryDatedState` in `packages/application/src/query/dated-state.ts`                                                        |
-| HTTP                | `GET /api/v2/reported-state?date=YYYY-MM-DD` (`services/app/src/reported-state-api.ts`)                                     |
-| Request rules       | `readReportedStateRequest` in `packages/application/src/query/reported-state-read.ts`, for the route and the tool           |
-| Agent tool          | `kogane.reported-state.read` (`services/app/src/read-tools.ts`), the route's `readReportedState`                            |
-| Contract            | `validReportedState` in `packages/observation-shared/src/reported-state-contract.ts`                                        |
-| Page                | 基準日の保有状況 at `/state` (`apps/web/src/pages/ReportedState.tsx`), capability `reportedStateOnDate`                     |
-| Two dates           | `queryHoldingsChange` in `packages/application/src/query/holdings-change.ts` ([below](#holdings-changes-between-two-dates)) |
-| Two dates, HTTP     | `GET /api/v2/reported-holdings-change` (`services/app/src/reported-holdings-change-api.ts`)                                 |
-| Two dates, agent    | `kogane.reported-holdings-change.read` (`services/app/src/page-read-tools.ts`), the route's `readHoldingsChange`            |
-| Two dates, contract | `validReportedHoldingsChange` in `packages/observation-shared/src/reported-holdings-change-contract.ts`                     |
-| Two dates, page     | panel 保有数量の変化 on `/state` (`apps/web/src/pages/ReportedHoldingsChange.tsx`)                                          |
+| Layer               | Where                                                                                                                                                                                          |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Snapshot CTE        | `SnapshotCteOptions.cutoffParam` in `packages/parsers/src/snapshot-query.ts`                                                                                                                   |
+| SQL                 | `packages/read-model/src/dated-state.ts`                                                                                                                                                       |
+| Policies            | `packages/domain/src/reported-state.ts` (cutoff, freshness, payable status, perimeter)                                                                                                         |
+| Query               | `queryDatedState` in `packages/application/src/query/dated-state.ts`                                                                                                                           |
+| HTTP                | `GET /api/v2/reported-state?date=YYYY-MM-DD` (`services/app/src/reported-state-api.ts`)                                                                                                        |
+| Request rules       | `readReportedStateRequest` in `packages/application/src/query/reported-state-read.ts`, for the route and the tool                                                                              |
+| Agent tool          | `kogane.reported-state.read` (`services/app/src/read-tools.ts`), the route's `readReportedState`                                                                                               |
+| Contract            | `validReportedState` in `packages/observation-shared/src/reported-state-contract.ts`                                                                                                           |
+| Page                | 基準日の保有状況 at `/state` (`apps/web/src/pages/ReportedState.tsx`), capability `reportedStateOnDate`                                                                                        |
+| Two dates           | `queryHoldingsChange` in `packages/application/src/query/holdings-change.ts` ([below](#holdings-changes-between-two-dates))                                                                    |
+| Two dates, HTTP     | `GET /api/v2/reported-holdings-change` (`services/app/src/reported-holdings-change-api.ts`)                                                                                                    |
+| Two dates, agent    | `kogane.reported-holdings-change.read` (`services/app/src/page-read-tools.ts`), the route's `readHoldingsChange`                                                                               |
+| Two dates, contract | `validReportedHoldingsChange` in `packages/observation-shared/src/reported-holdings-change-contract.ts`, with the request shape rule `holdingsChangeQueryRefusal` the route and the page apply |
+| Two dates, page     | panel 保有数量の変化 on `/state` (`apps/web/src/pages/ReportedHoldingsChange.tsx`)                                                                                                             |
 
 ## The cutoff
 
@@ -221,6 +221,20 @@ and capture date, the server's change with its sign (`+2.5`, `±0`, `-3.5`)
 for `compared` rows, `数値なし` for rows listed on one date only and for
 `not_comparable` rows, whose reasons it states in words. It shows counts per
 status and the coverage notes, never a total, valuation or sum of changes.
+
+The panel also takes the route's `source` and `account` filters (取得元 and
+口座 ID). They live in the page URL as `changeSource` and `changeAccount`, so a
+narrowed comparison is a link, and are applied with 比べる; 絞り込みを解除
+removes them. The fields suggest the sources and account ids the page's date
+lists holdings for (the page's own reported state, no request of its own) and
+take any other. The page sends exactly the route's parameters and checks them
+with the route's own shape rule, `holdingsChangeQueryRefusal` in the wire
+contract, before it asks: a field of the wrong shape is named and nothing is
+sent, and a URL holding a repeated, empty or malformed filter asks nothing and
+offers to remove it rather than widening the comparison. `404 unknown_source`
+and `unknown_account` are stated in words, never shown as an empty
+comparison, and the answer's own `filters` are shown beside its dates. The
+answer is not paged, so a filter change has no page to reset.
 
 ## Cost
 

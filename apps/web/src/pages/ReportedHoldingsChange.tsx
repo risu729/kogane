@@ -5,7 +5,14 @@
 // a compared holding shows the exact change the server returned, a holding
 // listed on one date only shows a status and no number (never a zero), and a
 // holding that cannot be compared shows its reasons. Nothing is totalled.
+// The route's source and account filters live in the page URL
+// (`changeSource`, `changeAccount`), so a narrowed comparison is a link.
 import { useState, type ReactNode } from "react";
+import { validLocalDateText } from "../../../../packages/domain/src/time.ts";
+import {
+  HOLDINGS_CHANGE_ACCOUNT,
+  HOLDINGS_CHANGE_SOURCE,
+} from "../../../../packages/observation-shared/src/reported-holdings-change-contract.ts";
 import { ApiError } from "../api.ts";
 import { QuantityChange } from "../reconciliation-display.tsx";
 import {
@@ -16,7 +23,8 @@ import {
   type HoldingSide,
   type HoldingsChange,
 } from "../reported-holdings-change-api.ts";
-import { Link } from "../router.tsx";
+import { useReportedState, type ReportedAccount } from "../reported-state-api.ts";
+import { Link, navigate, useLocation } from "../router.tsx";
 import {
   Badge,
   EmptyState,
@@ -30,7 +38,17 @@ import {
 } from "../ui.tsx";
 import { useViewState } from "../view-state.tsx";
 
-const DATE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u;
+/** The page URL's parameter for each of the route's filters. */
+const URL_KEYS = { source: "changeSource", account: "changeAccount" } as const;
+const PATTERNS = { source: HOLDINGS_CHANGE_SOURCE, account: HOLDINGS_CHANGE_ACCOUNT } as const;
+type Filters = Record<keyof typeof URL_KEYS, string>;
+const NO_FILTERS: Filters = { source: "", account: "" };
+const FILTER_NAMES = Object.keys(URL_KEYS) as (keyof Filters)[];
+/** The route's refusals a filter can cause, each with a fixed message. */
+const UNKNOWN: Record<string, string> = {
+  unknown_source: "この取得元は登録されていません。",
+  unknown_account: "この口座 ID は登録されていません。",
+};
 
 const STATUS: Record<HoldingChangeStatus, { label: string; tone: Tone }> = {
   compared: { label: "比較済み", tone: "ok" },
@@ -146,6 +164,9 @@ function ChangeResult({ change }: { change: HoldingsChange }): ReactNode {
           <KvRow label="比較した日">
             {change.from} → {change.to}
           </KvRow>
+          <KvRow label="絞り込み">
+            {change.filters.source ?? "すべての取得元"} · {change.filters.account ?? "すべての口座"}
+          </KvRow>
           <KvRow label="銘柄">
             比較済み {counts.compared} 件 · 開始日だけ {counts.listed_at_start_only} 件 · 基準日だけ{" "}
             {counts.listed_at_end_only} 件 · 比較できない {counts.not_comparable} 件
@@ -233,49 +254,221 @@ function keyOf(holding: HoldingChange): string {
   ]);
 }
 
+/**
+ * The panel's filters in the page URL, or null when the URL holds one the
+ * route would refuse (repeated, empty or not of the route's shape): such a
+ * URL asks nothing rather than dropping the filter and widening the answer.
+ */
+function urlFilters(search: string): Filters | null {
+  const params = new URLSearchParams(search);
+  const filters = { ...NO_FILTERS };
+  for (const name of FILTER_NAMES) {
+    const values = params.getAll(URL_KEYS[name]);
+    if (values.length === 0) continue;
+    if (values.length > 1 || !PATTERNS[name].test(values[0]!)) return null;
+    filters[name] = values[0]!;
+  }
+  return filters;
+}
+
+/** This page's URL with these filters and every other parameter kept. */
+function withFilters(location: string, filters: Filters): string {
+  const [path, search = ""] = location.split("?", 2) as [string, string?];
+  const params = new URLSearchParams(search);
+  for (const name of FILTER_NAMES) {
+    params.delete(URL_KEYS[name]);
+    if (filters[name] !== "") params.set(URL_KEYS[name], filters[name]);
+  }
+  return params.size === 0 ? path : `${path}?${params}`;
+}
+
+/** Each field's problem in words, or null when it may be sent. */
+function problems(draft: Filters & { from: string }, to: string) {
+  return {
+    from:
+      draft.from !== "" && (!validLocalDateText(draft.from) || draft.from >= to)
+        ? `比較の開始日は基準日（${to}）より前の日付を指定してください。`
+        : null,
+    source:
+      draft.source !== "" && !HOLDINGS_CHANGE_SOURCE.test(draft.source)
+        ? "取得元は sbi-securities のように英小文字、数字とハイフンで指定してください。"
+        : null,
+    account:
+      draft.account !== "" && !HOLDINGS_CHANGE_ACCOUNT.test(draft.account)
+        ? "口座 ID の形式が正しくありません。"
+        : null,
+  };
+}
+
+/**
+ * The comparison's start date and filters. The app keys each view by its URL
+ * (app.tsx), so a filter change, back or forward mounts the page again and
+ * the fields start from the URL; the start date is kept in view state.
+ */
+function ChangeForm({
+  to,
+  filters,
+  holders,
+}: {
+  to: string;
+  filters: Filters;
+  /** The accounts the page's date lists holdings for: the fields' suggestions. */
+  holders: readonly ReportedAccount[];
+}): ReactNode {
+  const location = useLocation();
+  const [from, setFrom] = useViewState("reportedState.changeFrom");
+  const [draft, setDraft] = useState({ from, ...filters });
+  const problem = problems(draft, to);
+  const blocked =
+    draft.from === "" ||
+    problem.from !== null ||
+    problem.source !== null ||
+    problem.account !== null;
+  const sources = [...new Set(holders.map((account) => account.sourceId))].sort();
+  const accounts = [
+    ...new Set(
+      holders.flatMap((account) =>
+        account.accountId === null || (draft.source !== "" && account.sourceId !== draft.source)
+          ? []
+          : [account.accountId],
+      ),
+    ),
+  ].sort();
+  const filtered = FILTER_NAMES.some((name) => filters[name] !== "");
+  return (
+    <form
+      className="filter-grid"
+      aria-label="保有数量の変化の条件"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (blocked) return;
+        setFrom(draft.from);
+        navigate(withFilters(location, { source: draft.source, account: draft.account }));
+      }}
+    >
+      <label className="filter-field">
+        比較の開始日
+        <input
+          type="date"
+          name="holdings-change-from"
+          value={draft.from}
+          max={to}
+          aria-invalid={problem.from !== null || undefined}
+          onChange={(event) => setDraft({ ...draft, from: event.target.value })}
+        />
+      </label>
+      <label className="filter-field">
+        取得元
+        <input
+          type="text"
+          name="holdings-change-source"
+          list="holdings-change-sources"
+          value={draft.source}
+          placeholder="すべての取得元"
+          autoComplete="off"
+          spellCheck={false}
+          aria-invalid={problem.source !== null || undefined}
+          onChange={(event) => setDraft({ ...draft, source: event.target.value.trim() })}
+        />
+        <datalist id="holdings-change-sources">
+          {sources.map((source) => (
+            <option key={source} value={source} />
+          ))}
+        </datalist>
+      </label>
+      <label className="filter-field">
+        口座 ID
+        <input
+          type="text"
+          name="holdings-change-account"
+          list="holdings-change-accounts"
+          value={draft.account}
+          placeholder="すべての口座"
+          autoComplete="off"
+          spellCheck={false}
+          aria-invalid={problem.account !== null || undefined}
+          onChange={(event) => setDraft({ ...draft, account: event.target.value.trim() })}
+        />
+        <datalist id="holdings-change-accounts">
+          {accounts.map((account) => (
+            <option key={account} value={account} />
+          ))}
+        </datalist>
+      </label>
+      <button className="button" type="submit" disabled={blocked}>
+        比べる
+      </button>
+      {filtered ? (
+        <button
+          className="button"
+          type="button"
+          onClick={() => navigate(withFilters(location, NO_FILTERS))}
+        >
+          絞り込みを解除
+        </button>
+      ) : null}
+      {[problem.from, problem.source, problem.account]
+        .filter((message) => message !== null)
+        .map((message) => (
+          <p key={message} role="alert">
+            {message}
+          </p>
+        ))}
+    </form>
+  );
+}
+
 /** Compares a chosen start date with `to`, the page's 基準日. */
 export function HoldingsChangePanel({ to }: { to: string }): ReactNode {
-  const [from, setFrom] = useViewState("reportedState.changeFrom");
-  const [draft, setDraft] = useState(from);
-  const invalid = !DATE.test(draft) || draft >= to;
-  const request = from !== "" && from < to ? { from, to } : null;
+  const location = useLocation();
+  const filters = urlFilters(location.split("?", 2)[1] ?? "");
+  const [from] = useViewState("reportedState.changeFrom");
+  const request =
+    filters === null || from === "" || from >= to
+      ? null
+      : {
+          from,
+          to,
+          ...(filters.source === "" ? {} : { source: filters.source }),
+          ...(filters.account === "" ? {} : { account: filters.account }),
+        };
   const query = useReportedHoldingsChange(request);
+  // The sources and account ids the page's date lists holdings for, to choose
+  // from: the page's own reported state (the same query, so no request of its
+  // own); the fields take any other.
+  const reported = useReportedState(to);
+  const holders = (reported.data?.accounts ?? []).filter((account) => account.positions.length > 0);
   const tooLarge = query.error instanceof ApiError && query.error.status === 413;
+  const unknown =
+    query.error instanceof ApiError &&
+    query.error.status === 404 &&
+    query.error.code !== null &&
+    Object.hasOwn(UNKNOWN, query.error.code)
+      ? query.error.code
+      : null;
   return (
     <Panel
       id="reported-holdings-change"
       title="保有数量の変化"
       note="開始日と基準日のそれぞれで最新の完全な取得結果を、取得元の銘柄ごとに並べます。合計・評価額は計算しません。"
     >
-      <div className="panel-body">
-        <form
-          className="filter-grid"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (invalid) return;
-            setFrom(draft);
-          }}
-        >
-          <label className="filter-field">
-            比較の開始日
-            <input
-              type="date"
-              name="holdings-change-from"
-              value={draft}
-              max={to}
-              aria-invalid={(draft !== "" && invalid) || undefined}
-              onChange={(event) => setDraft(event.target.value)}
-            />
-          </label>
-          <button className="button" type="submit" disabled={invalid}>
-            比べる
+      {filters === null ? (
+        <Notice tone="bad" role="alert">
+          このURLの保有数量の変化の絞り込み条件は指定できません。{" "}
+          <button
+            className="button"
+            type="button"
+            onClick={() => navigate(withFilters(location, NO_FILTERS))}
+          >
+            絞り込みを解除
           </button>
-          {draft !== "" && invalid ? (
-            <p role="alert">比較の開始日は基準日（{to}）より前の日付を指定してください。</p>
-          ) : null}
-        </form>
-      </div>
-      {request === null ? (
+        </Notice>
+      ) : (
+        <div className="panel-body">
+          <ChangeForm to={to} filters={filters} holders={holders} />
+        </div>
+      )}
+      {filters === null ? null : request === null ? (
         <div className="panel-body">
           <p className="footnote">
             開始日を選ぶと、その日から基準日までの保有数量の変化を表示します。
@@ -284,6 +477,10 @@ export function HoldingsChangePanel({ to }: { to: string }): ReactNode {
       ) : tooLarge ? (
         <Notice tone="warn" role="note">
           この期間の保有は多すぎて、一度に比べられません。一部だけの表示はしません。
+        </Notice>
+      ) : unknown !== null ? (
+        <Notice tone="warn" role="alert">
+          {UNKNOWN[unknown]} <code className="dim">{unknown}</code>
         </Notice>
       ) : (
         <QueryBoundary query={query} label="保有数量の変化">

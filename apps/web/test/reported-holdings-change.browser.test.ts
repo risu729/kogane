@@ -14,7 +14,9 @@ import {
   reportedStateBody,
   reportedStateWorld,
 } from "../../../packages/application/test/reported-state-world.ts";
+import { HoldingsChangeError } from "../../../packages/application/src/query/holdings-change.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { holdingsChangeQueryRefusal } from "../../../packages/observation-shared/src/reported-holdings-change-contract.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -33,6 +35,8 @@ describe.if(runnable)("reported holdings change between two dates", () => {
   const requests: URL[] = [];
   const state = reportedStateWorld();
   const holdings = holdingsChangeWorld();
+  // The world's minimal registry lacks the broker; the source filter needs it.
+  holdings.db.run("INSERT INTO sources(id,provider) VALUES('sbi-securities','synthetic')");
   beforeEach(() => {
     tooMany = false;
     requests.length = 0;
@@ -54,12 +58,25 @@ describe.if(runnable)("reported holdings change between two dates", () => {
         if (url.pathname === "/api/v2/reported-holdings-change") {
           requests.push(url);
           if (tooMany) return Response.json({ error: "result_limit_exceeded" }, { status: 413 });
-          return Response.json(
-            await holdingsChangeBody(holdings, {
-              from: url.searchParams.get("from")!,
-              to: url.searchParams.get("to")!,
-            }),
-          );
+          // The route's own shape rule: the page must never send what it refuses.
+          const refusal = holdingsChangeQueryRefusal(url.searchParams);
+          if (refusal !== null) return Response.json({ error: refusal }, { status: 400 });
+          const source = url.searchParams.get("source");
+          const account = url.searchParams.get("account");
+          try {
+            return Response.json(
+              await holdingsChangeBody(holdings, {
+                from: url.searchParams.get("from")!,
+                to: url.searchParams.get("to")!,
+                ...(source === null ? {} : { source }),
+                ...(account === null ? {} : { account }),
+              }),
+            );
+          } catch (error) {
+            if (error instanceof HoldingsChangeError && error.code.startsWith("unknown_"))
+              return Response.json({ error: error.code }, { status: 404 });
+            throw error;
+          }
         }
         if (url.pathname.startsWith("/api/"))
           return Response.json({ error: "not_found" }, { status: 404 });
@@ -78,9 +95,9 @@ describe.if(runnable)("reported holdings change between two dates", () => {
   });
 
   /** The /state page on 2026-09-10, before any comparison is asked. */
-  async function open(viewport = DESKTOP): Promise<Page> {
+  async function open(viewport = DESKTOP, path = "/state"): Promise<Page> {
     const page = await browser.newPage({ viewport });
-    await page.goto(`${origin}/state`);
+    await page.goto(`${origin}${path}`);
     await page.getByRole("heading", { name: "基準日の保有状況", exact: true }).waitFor();
     await page.getByRole("textbox", { name: "基準日", exact: true }).fill("2026-09-10");
     await page.getByRole("button", { name: "表示する", exact: true }).click();
@@ -194,6 +211,148 @@ describe.if(runnable)("reported holdings change between two dates", () => {
       if (prefix) await page.screenshot({ path: `${prefix}-${name}.png`, fullPage: true });
       await page.close();
     }, 30_000);
+
+  /** Types the panel's filters; an input with suggestions is a combobox. */
+  async function filter(page: Page, source: string, account: string): Promise<void> {
+    await page.getByRole("combobox", { name: "取得元", exact: true }).fill(source);
+    await page.getByRole("combobox", { name: "口座 ID", exact: true }).fill(account);
+  }
+  const pageSearch = (page: Page): [string, string][] => [...new URL(page.url()).searchParams];
+
+  test("the source and account filters are the route's parameters and live in the page URL", async () => {
+    const page = await open();
+    await filter(page, "sbi-securities", "acct-sbi");
+    await compare(page, "2026-09-01");
+    expect(requests).toHaveLength(1);
+    expect([...requests[0]!.searchParams]).toEqual([
+      ["from", "2026-09-01"],
+      ["to", "2026-09-10"],
+      ["source", "sbi-securities"],
+      ["account", "acct-sbi"],
+    ]);
+    expect(pageSearch(page)).toEqual([
+      ["changeSource", "sbi-securities"],
+      ["changeAccount", "acct-sbi"],
+    ]);
+    // Every holding of the world is this source's and maps to this account;
+    // the server's own filters are stated.
+    expect((await changes(page)).map(([code]) => code)).toEqual([
+      "1001",
+      "1002",
+      "1003",
+      "1004",
+      "1005",
+      "1006",
+      "VTX",
+    ]);
+    expect(await page.locator("main").innerText()).toContain("sbi-securities · acct-sbi");
+    // Another registered source lists no holding: an empty comparison, not a zero.
+    await filter(page, "smbc-bank", "");
+    await page.getByRole("button", { name: "比べる", exact: true }).click();
+    await page.getByText("smbc-bank · すべての口座").waitFor();
+    expect(await page.locator("main").innerText()).toContain(
+      "どちらの日の取得結果にも記載された銘柄はありません。",
+    );
+    expect([...requests.at(-1)!.searchParams]).toEqual([
+      ["from", "2026-09-01"],
+      ["to", "2026-09-10"],
+      ["source", "smbc-bank"],
+    ]);
+    expect(pageSearch(page)).toEqual([["changeSource", "smbc-bank"]]);
+    // Clearing the filters asks again from the same start date, for every holding.
+    await page.getByRole("button", { name: "絞り込みを解除", exact: true }).click();
+    await page.getByText("すべての取得元 · すべての口座").waitFor();
+    expect(pageSearch(page)).toEqual([]);
+    expect([...requests.at(-1)!.searchParams]).toEqual([
+      ["from", "2026-09-01"],
+      ["to", "2026-09-10"],
+    ]);
+    expect(requests).toHaveLength(3);
+    expect(await changes(page)).toHaveLength(7);
+    expect(await page.getByRole("combobox", { name: "取得元", exact: true }).inputValue()).toBe("");
+    await page.close();
+  }, 30_000);
+
+  test("a filtered URL fills the fields, and going back restores the earlier filters", async () => {
+    const page = await open(DESKTOP, "/state?changeSource=sbi-securities");
+    expect(await page.getByRole("combobox", { name: "取得元", exact: true }).inputValue()).toBe(
+      "sbi-securities",
+    );
+    expect(requests).toHaveLength(0);
+    await compare(page, "2026-09-01");
+    expect([...requests[0]!.searchParams]).toEqual([
+      ["from", "2026-09-01"],
+      ["to", "2026-09-10"],
+      ["source", "sbi-securities"],
+    ]);
+    await page.getByRole("combobox", { name: "口座 ID", exact: true }).fill("acct-sbi");
+    await page.getByRole("button", { name: "比べる", exact: true }).click();
+    await page.getByText("sbi-securities · acct-sbi").waitFor();
+    await page.goBack();
+    await page.getByText("sbi-securities · すべての口座").waitFor();
+    expect(pageSearch(page)).toEqual([["changeSource", "sbi-securities"]]);
+    expect(await page.getByRole("combobox", { name: "口座 ID", exact: true }).inputValue()).toBe(
+      "",
+    );
+    await page.close();
+  }, 30_000);
+
+  test("the fields suggest the sources and accounts the page's date lists holdings for", async () => {
+    const page = await open();
+    const values = (selector: string) =>
+      page
+        .locator(`${selector} option`)
+        .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value));
+    expect(await values("#holdings-change-sources")).toEqual(["sbi-securities"]);
+    expect(await values("#holdings-change-accounts")).toEqual(["acct-sbi"]);
+    await page.close();
+  }, 30_000);
+
+  test("a filter the route would refuse is not sent", async () => {
+    const page = await open();
+    await page.getByRole("textbox", { name: "比較の開始日", exact: true }).fill("2026-09-01");
+    await filter(page, "SBI Securities", "acct sbi");
+    await page
+      .getByText("取得元は sbi-securities のように英小文字、数字とハイフンで指定してください。")
+      .waitFor();
+    await page.getByText("口座 ID の形式が正しくありません。").waitFor();
+    expect(await page.getByRole("button", { name: "比べる", exact: true }).isDisabled()).toBe(true);
+    expect(requests).toHaveLength(0);
+    await page.close();
+    // A URL that holds one asks nothing rather than widening the comparison.
+    const linked = await open(DESKTOP, "/state?changeSource=SBI&changeAccount=acct-sbi");
+    await linked.getByText("このURLの保有数量の変化の絞り込み条件は指定できません。").waitFor();
+    expect(await linked.getByRole("textbox", { name: "比較の開始日" }).count()).toBe(0);
+    await linked.getByRole("button", { name: "絞り込みを解除", exact: true }).click();
+    await linked.getByRole("textbox", { name: "比較の開始日", exact: true }).waitFor();
+    expect(pageSearch(linked)).toEqual([]);
+    expect(requests).toHaveLength(0);
+    await linked.close();
+  }, 30_000);
+
+  test("an unknown source or account is named, never shown as an empty comparison", async () => {
+    const page = await open();
+    await filter(page, "no-such-source", "");
+    await page.getByRole("textbox", { name: "比較の開始日", exact: true }).fill("2026-09-01");
+    await page.getByRole("button", { name: "比べる", exact: true }).click();
+    await page.getByText("この取得元は登録されていません。").waitFor();
+    await filter(page, "sbi-securities", "acct-none");
+    await page.getByRole("button", { name: "比べる", exact: true }).click();
+    await page.getByText("この口座 ID は登録されていません。").waitFor();
+    expect(requests).toHaveLength(2);
+    const main = await page.locator("main").innerText();
+    expect(main).not.toContain("どちらの日の取得結果にも記載された銘柄はありません。");
+    expect(main).not.toContain("読み込めませんでした");
+    await page.close();
+  }, 30_000);
+
+  test("the filtered panel passes the accessibility audit", async () => {
+    const page = await open();
+    await filter(page, "sbi-securities", "acct-sbi");
+    await compare(page, "2026-09-01");
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
 
   test("the compared panel passes the accessibility audit", async () => {
     const page = await open();
