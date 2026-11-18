@@ -441,6 +441,13 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
             .getByRole("button", { name: `${label}を再試行`, exact: true })
             .count(),
         ).toBe(1);
+      // Those four, and no other retry.
+      expect(
+        await page
+          .locator("main")
+          .getByRole("button", { name: /再試行/ })
+          .count(),
+      ).toBe(4);
       expect(await page.locator("main").innerText()).not.toContain("読み込んでいます");
     } finally {
       await page.close();

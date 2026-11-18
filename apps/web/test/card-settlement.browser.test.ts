@@ -697,16 +697,32 @@ describe.if(runnable)("card settlement review", () => {
     for (const label of ["カードの引落口座", "照合候補のない請求"])
       await page.getByText(`${label}を読み込めませんでした`, { exact: false }).waitFor();
     expect(await auditView(page)).toEqual([]);
-    // Each retry repeats its own read and no other.
-    const debits = debitAccountReads.length;
-    const unmatchedBefore = unmatchedReads.length;
-    await page.getByRole("button", { name: "照合候補のない請求を再試行", exact: true }).click();
-    // The page's own fetch, observed at the server.
-    await page.waitForResponse((response) =>
-      response.url().includes("/api/v2/reconciliation/card-statements-unmatched"),
-    );
-    expect(unmatchedReads.length).toBe(unmatchedBefore + 1);
-    expect(debitAccountReads.length).toBe(debits);
+    // Each retry repeats its own read and no other. The response is awaited
+    // from before the click, so a fast answer is never missed.
+    for (const [label, path, own, other] of [
+      [
+        "照合候補のない請求",
+        "/api/v2/reconciliation/card-statements-unmatched",
+        unmatchedReads,
+        debitAccountReads,
+      ],
+      [
+        "カードの引落口座",
+        "/api/v2/reconciliation/card-debit-accounts",
+        debitAccountReads,
+        unmatchedReads,
+      ],
+    ] as const) {
+      const ownBefore = own.length;
+      const otherBefore = other.length;
+      const answered = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === path,
+      );
+      await page.getByRole("button", { name: `${label}を再試行`, exact: true }).click();
+      await answered;
+      expect(own.length).toBe(ownBefore + 1);
+      expect(other.length).toBe(otherBefore);
+    }
     await page.close();
   });
 
