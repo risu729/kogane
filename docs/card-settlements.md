@@ -321,10 +321,13 @@ settlement candidate is listed, by source and source account, at most 100
   `card_debit_account_statement` rows under `CARD_INFORMATION_READER_VERSION`
   that `card_settlement_debit_account_evidence` cites under
   `CARD_DEBIT_ACCOUNT_POLICY`). The newest one (by the page's capture time,
-  then id) gives the status: `named` when its rows name exactly one account
-  (`supports` and `names_other_account` both name the account the provider
-  states), `conflicting` when they name more than one, `not_named` with the
-  rule's reasons when they name none. `lastNamed` is the newest reading
+  then id) gives the status from its current rows, one per candidate (the
+  sweep appends a row each time a candidate's outcome changes, so only the
+  newest row per candidate, reading and policy counts): `named` when they
+  name exactly one account (`supports` and `names_other_account` both name
+  the account the provider states), `conflicting` when different candidates
+  were given different accounts, `not_named` with the rule's reasons when
+  they name none. `lastNamed` is the newest reading
   naming exactly one account, even when older. With no such reading the
   status is `absent`: `source_has_no_debit_account_statement` for Vpass,
   `evidence_not_recorded` for a MyJCB card;

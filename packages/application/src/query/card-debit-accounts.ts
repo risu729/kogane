@@ -160,13 +160,17 @@ interface ReadingRow {
 }
 
 /**
- * The stated side (`?1` the rule policy, `?2` the reader version): every
- * `card_settlement_debit_account_evidence` row under the policy whose cited
- * `card_debit_account_statement` reading was made under the reader version,
+ * The stated side (`?1` the rule policy, `?2` the reader version): the
+ * current `card_settlement_debit_account_evidence` row under the policy for
+ * each candidate and reading (the sweep appends a row whenever the outcome
+ * changes, so only the newest one per candidate, reading and policy counts),
+ * whose cited `card_debit_account_statement` reading was made under the reader version,
  * for at most two readings per card: the newest one with evidence, and the
  * newest one whose rows name exactly one account. Readings are ordered by
  * the page's capture time, then id. The evidence is reached by a scan of its
- * table (one row per candidate and changed outcome), each reading by key.
+ * table (one row per candidate and changed outcome), each reading by key, and
+ * a newer row for the same candidate, reading and policy by the
+ * `(candidate_id,statement_id,policy,id)` index.
  */
 export const CARD_DEBIT_ACCOUNT_READINGS_SQL = `WITH cited AS MATERIALIZED (
  SELECT s.id AS reading_id,s.source_id,s.card_source_account,s.observed_at,s.reader_version,
@@ -174,7 +178,8 @@ export const CARD_DEBIT_ACCOUNT_READINGS_SQL = `WITH cited AS MATERIALIZED (
   CASE WHEN e.outcome<>'not_proposed' THEN json_extract(e.proposal_json,'$.bankSourceId')||char(10)||json_extract(e.proposal_json,'$.bankSourceAccount') END AS named
  FROM card_settlement_debit_account_evidence e
  JOIN card_debit_account_statement s ON s.id=e.statement_id AND s.reader_version=?2
- WHERE e.policy=?1
+ WHERE e.policy=?1 AND NOT EXISTS (SELECT 1 FROM card_settlement_debit_account_evidence n
+  WHERE n.candidate_id=e.candidate_id AND n.statement_id=e.statement_id AND n.policy=e.policy AND n.id>e.id)
 ), readings AS (
  SELECT reading_id,card_source_account,observed_at,count(DISTINCT named) AS named_accounts
  FROM cited GROUP BY reading_id,card_source_account,observed_at

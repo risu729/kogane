@@ -259,6 +259,17 @@ async function candidateOf(card: string): Promise<string> {
   return row!.id;
 }
 
+/** Every candidate of `card`, newest first. */
+async function candidatesOf(card: string): Promise<string[]> {
+  const rows = await db
+    .prepare(
+      "SELECT id FROM card_settlement_candidates WHERE json_extract(facts_json,'$.statement.sourceAccount')=? ORDER BY created_at DESC,id DESC",
+    )
+    .bind(card)
+    .all<{ id: string }>();
+  return rows.results.map((row) => row.id);
+}
+
 async function review(grant: Grant = WHOLE) {
   const outcome = await reviewCardDebitAccounts({ grant, sql: d1Executor(db) });
   if (!outcome.ok) throw new Error(JSON.stringify(outcome.error));
@@ -409,11 +420,13 @@ test("an accepted settlement answers a card without a stated account, until it i
 });
 
 test("a reading that names two accounts is conflicting and never chosen; a later single one is", async () => {
-  const candidate = await candidateOf(MYJCB);
+  const [candidate, other] = await candidatesOf(MYJCB);
+  expect(other).toBeDefined();
   await seedArtifact(env, 830, "myjcb", "synthetic", "synthetic-830", { id: 830 });
   const both = await reading(830, "2098-02-15T00:00:00Z");
-  await evidence(candidate, both, "supports", BANK);
-  await evidence(candidate, both, "names_other_account", OTHER_BANK);
+  // Two different candidates were given two different accounts by one reading.
+  await evidence(candidate!, both, "supports", BANK);
+  await evidence(other!, both, "names_other_account", OTHER_BANK);
   let item = byCard((await review()).items).get(MYJCB)!;
   expect(item.stated).toMatchObject({
     status: "conflicting",
@@ -434,13 +447,53 @@ test("a reading that names two accounts is conflicting and never chosen; a later
   });
   await seedArtifact(env, 831, "myjcb", "synthetic", "synthetic-831", { id: 831 });
   const single = await reading(831, "2098-02-16T00:00:00Z");
-  await evidence(candidate, single, "names_other_account", OTHER_BANK);
+  await evidence(candidate!, single, "names_other_account", OTHER_BANK);
   item = byCard((await review()).items).get(MYJCB)!;
   expect(item.stated.status).toBe("named");
   expect(item.answer).toMatchObject({
     basis: "provider-stated",
     account: { bankSourceAccount: OTHER_BANK },
     observedAt: "2098-02-16T00:00:00Z",
+    codes: [],
+  });
+});
+
+test("only a candidate's newest row for a reading counts: a changed outcome replaces the old one", async () => {
+  const candidate = await candidateOf(MYJCB);
+  await seedArtifact(env, 832, "myjcb", "synthetic", "synthetic-832", { id: 832 });
+  const page = await reading(832, "2098-02-20T00:00:00Z");
+  await evidence(candidate, page, "supports", BANK);
+  // The sweep appends a row when the outcome changes; the older row is no
+  // longer what the rule says about this candidate and reading.
+  await evidence(candidate, page, "not_proposed", null, "ambiguous_accounts");
+  let item = byCard((await review()).items).get(MYJCB)!;
+  expect(item.stated).toMatchObject({
+    status: "not_named",
+    latest: { observedAt: "2098-02-20T00:00:00Z", accounts: [], reasons: ["ambiguous_accounts"] },
+    lastNamed: { observedAt: "2098-02-16T00:00:00Z" },
+  });
+  expect(item.answer).toMatchObject({
+    basis: "provider-stated",
+    account: { bankSourceAccount: OTHER_BANK },
+    observedAt: "2098-02-16T00:00:00Z",
+    codes: ["newer_reading_unresolved"],
+  });
+  // One candidate whose outcome moved from one account to another names one
+  // account, not two.
+  await evidence(candidate, page, "supports", BANK);
+  await evidence(candidate, page, "names_other_account", OTHER_BANK);
+  item = byCard((await review()).items).get(MYJCB)!;
+  expect(item.stated).toMatchObject({
+    status: "named",
+    latest: {
+      observedAt: "2098-02-20T00:00:00Z",
+      accounts: [{ bankSourceId: "smbc-bank", bankSourceAccount: OTHER_BANK }],
+    },
+  });
+  expect(item.answer).toMatchObject({
+    basis: "provider-stated",
+    account: { bankSourceAccount: OTHER_BANK },
+    observedAt: "2098-02-20T00:00:00Z",
     codes: [],
   });
 });

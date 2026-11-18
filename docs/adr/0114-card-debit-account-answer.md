@@ -55,9 +55,11 @@ rule `card-debit-account-answer-v1`
 1. **Stated side.** The readings are the `card_debit_account_statement` rows
    made under the current reader version that the settlement sweep cited in
    `card_settlement_debit_account_evidence` under the current policy. The
-   newest reading (capture time, then id) decides the status: `named` (its
-   rows name exactly one account), `conflicting` (more than one), `not_named`
-   (none, with the rule's closed reasons); `absent` when no reading has
+   newest reading (capture time, then id) decides the status from its
+   current rows, the newest one per candidate (the sweep appends a row each
+   time a candidate's outcome changes): `named` (they name exactly one
+   account), `conflicting` (more than one), `not_named` (none, with the
+   rule's closed reasons); `absent` when no reading has
    evidence (`source_has_no_debit_account_statement` for Vpass,
    `evidence_not_recorded` otherwise). The newest reading that names exactly
    one account is kept as `lastNamed`, even when older.
