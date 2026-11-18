@@ -21,8 +21,9 @@
 //   are said, `cardsTruncated`). Only the statement read has that bound: the
 //   stated side returns, for every card, the evidence rows of at most two
 //   readings; the candidate side one row per card, bank account and decision
-//   state; cards past the bound are dropped after reading. The grant's `maxRows` below the card bound is
-//   `budget_exceeded`, before any read.
+//   state; cards past the bound are dropped after reading. Those two reads
+//   grow with the cards the store holds, not with `maxRows`. The grant's
+//   `maxRows` below the card bound is `budget_exceeded`, before any read.
 import {
   CARD_DEBIT_ACCOUNT_POLICY,
   CARD_DEBIT_ACCOUNT_REASONS,

@@ -636,10 +636,11 @@ distinct statements and the candidate with the latest debit date), and the
 `accepted-settlement` (account, proposal id and debit date) or `unknown`
 with a closed reason, with closed `codes` on the first two. An
 `accepted-settlement` answer is an amount match a person accepted, weaker
-than a stated account; a `provider-stated` answer with
-`newer_reading_unresolved` is the last account the provider was seen to
-state, which a newer reading does not confirm, so the account may have
-changed. Undecided candidates are listed, never used as the answer (INV07).
+than a stated account. A `provider-stated` answer with any code is not
+confirmed, and the page shows it as a warning, so an agent reads the same
+`codes` the page does: with `newer_reading_unresolved` it is the last account
+the provider was seen to state, which a newer reading does not confirm, so the
+account may have changed. Undecided candidates are listed, never used as the answer (INV07).
 
 Authorization: `records.read`, else `403 unauthorized`; sources and accounts
 both `"*"`, else `403 evidence_restricted`; `maxRows` of at least 100, else

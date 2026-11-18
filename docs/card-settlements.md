@@ -366,15 +366,21 @@ Limits:
   the newer reading may show an account Kogane cannot name (a bank it does not
   model, `bank_not_resolved`, or digits no known account starts with,
   `no_matching_account`), so the debit account may have changed. The page
-  shows such an answer as a warning with that note and the newer reading's
-  reasons beside it.
+  shows a stated answer with any code as a warning, with the note and the
+  newer reading's reasons beside it; the answer's `codes` are what an agent
+  reads to tell the same.
 - A `refused` reading is not considered: only readings the sweep cited carry
   evidence, so a newer page whose 「カード情報」 table was refused leaves the
   answer on the older reading.
-- Only the statement read is bounded by the card count: the reading and
-  candidate reads return every card's rows (at most two readings per card,
-  one row per card, bank account and decision state), and the cards past the
-  bound are dropped after reading.
+- Only the statement read is bounded by the card count. The reading and
+  candidate reads return the rows of every card the store holds, and the
+  cards past the bound are dropped after reading: per card, the evidence rows
+  of at most two readings (one per candidate of the statements parsed with
+  the reading, and one more each time a candidate's outcome changed),
+  and one candidate row per bank account and decision state. Nothing else
+  bounds them: the grant's `maxRows` bounds the cards listed, not the rows
+  read, and the store's card count is what Kogane collects (one MyJCB card
+  per connection, Vpass's `card-00N`).
 - Nothing is stored: the answer is read from the evidence, decisions and
   candidates each time.
 

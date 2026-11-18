@@ -522,6 +522,10 @@ describe.if(runnable)("card settlement review", () => {
     expect(await cards.count()).toBe(3);
     const stated = await cards.nth(0).innerText();
     expect(stated).toContain("カード会社の表示");
+    // A stated answer with no note is the confirmed one.
+    expect(
+      await cards.nth(0).locator(".badge", { hasText: "カード会社の表示" }).getAttribute("class"),
+    ).toContain("badge-ok");
     expect(stated).toContain("三井住友銀行 · smbc-bank:synthetic-a");
     expect(stated).toContain("2098-01-12T00:00:00Z に取得した明細");
     // The newest statement is a zero total, and the last known account still shows.
@@ -576,9 +580,13 @@ describe.if(runnable)("card settlement review", () => {
     expect(text).toContain("より新しいカード情報ではこの口座を確認できませんでした");
     expect(text).toContain("引落口座が変わった可能性があります");
     expect(text).toContain("口座を特定できず");
+    // The stated answer is a warning, not the confirmed badge.
+    const badge = section.locator(".badge", { hasText: "カード会社の表示" });
+    expect(await badge.getAttribute("class")).toContain("badge-warn");
     expect(await section.getByRole("note").innerText()).toBe(
       "カードが多いため、先頭の1枚だけを表示しています。",
     );
+    expect(await auditView(page)).toEqual([]);
     await page.close();
   });
 

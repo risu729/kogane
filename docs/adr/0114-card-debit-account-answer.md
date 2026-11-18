@@ -92,8 +92,9 @@ writer or command is added, and no candidate's eligibility changes.
   the newer reading's reasons beside it; the wire and MCP answer carry the
   code and the capture time.
 - Only the statement read is bounded by the card count; the reading and
-  candidate reads return every card's rows, and cards past the bound are
-  dropped after reading, with `cardsTruncated` set.
+  candidate reads return every card's rows (proportional to the cards the
+  store holds, not bounded by the grant's `maxRows`), and cards past the
+  bound are dropped after reading, with `cardsTruncated` set.
 - Vpass cards are answered only by accepted settlements; until one is
   accepted they read `unknown` (`only_unreviewed_candidates` when candidates
   exist). Card product names are not shown: Vpass accounts stay
@@ -124,6 +125,9 @@ writer or command is added, and no candidate's eligibility changes.
 - `packages/observation-shared/test/card-debit-accounts-contract.test.ts`: the
   wire contract refuses an answer, a note or an unknown reason its evidence
   does not carry.
+- `packages/application/test/card-debit-accounts-contract.test.ts`: every
+  answer the service makes from random synthetic evidence rows passes that
+  contract, so it refuses no answer the server can give.
 - `services/app/test/card-debit-accounts-api.test.ts` and
   `services/app/test/ui-mcp-parity.test.ts`: the route and the MCP tool give
   the same answer, are graded alike and are mapped.
