@@ -172,6 +172,7 @@ export {
   CURRENT_REWARD_BUCKETS_SQL,
   expiryRule,
   EXPIRY_RULES_SQL,
+  HOLDING_CUT_BY_PAGE,
   membershipState,
   MEMBERSHIP_SQL,
   observedAtValue,

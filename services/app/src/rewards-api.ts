@@ -31,6 +31,7 @@ import {
 import { d1Executor } from "../../../packages/read-model/src/d1";
 import {
   createRewardReader,
+  HOLDING_CUT_BY_PAGE,
   type Page,
   type RewardHoldingView,
 } from "../../../packages/read-model/src/index";
@@ -64,8 +65,28 @@ function bucketDto(bucket: RewardBucket): BucketDto {
   };
 }
 
-function holdingDto(view: RewardHoldingView, membership: readonly MembershipState[]) {
+/**
+ * A holding's totals, or the reason there are none: when the page holds only
+ * some of the holding's buckets, a sum of them is a part of the holding and
+ * is never given as its consumable quantity or a per-kind subtotal (INV05).
+ * The buckets themselves are still listed.
+ */
+function holdingTotals(view: RewardHoldingView) {
   const summary = summarizeHolding(view.holding, view.qualification);
+  if (!view.cutByPage) return summary;
+  const cut = (unitRef: string): Quantity => ({
+    unitRef,
+    value: { status: "missing", reasonCode: HOLDING_CUT_BY_PAGE },
+  });
+  return {
+    ...summary,
+    consumable: cut(summary.consumable.unitRef),
+    byKind: summary.byKind.map((entry) => ({ ...entry, quantity: cut(entry.quantity.unitRef) })),
+  };
+}
+
+function holdingDto(view: RewardHoldingView, membership: readonly MembershipState[]) {
+  const summary = holdingTotals(view);
   return {
     programId: view.program.programId,
     programRef: view.program.programRef,

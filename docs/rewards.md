@@ -248,6 +248,12 @@ All are GET routes, with no writes or external communications. `Page<T>` = `{row
 `/offers/simulate` is not paged: it reads at most 200 offers and reports the bound in
 `offerCoverage`, refusing with `offer_set_too_large` beyond it (§4).
 `offset` traverses bucket rows. Reads see only claims linked to published parse runs, so rolling back a publication pointer also removes them from reward presentation.
+A holding whose buckets a page cuts is listed on each page that holds some of them, with
+those buckets, but its `consumable` and every `byKind` quantity are `missing` with
+`holding_cut_by_page`, never the sum of the buckets on that page (INV05; 2026-11-18). The
+reader marks the last holding of a page cut when the row past the page is that holding's,
+and the first holding of a page whose `offset` is not 0 cut always, since it cannot see the
+row before the page.
 The holdings and expiry pages are also the MCP page read `kogane.rewards.read`,
 answered by the routes' own reader `readRewardRoute`
 ([agent API](agent-api.md#ui-read-pages)); no agent tool runs `/offers/simulate`.
@@ -265,7 +271,8 @@ answered by the routes' own reader `readRewardRoute`
   connection does not offer rewards and sends no reward request.
 - The page reads only the first page of each route (`offset=0`). When the server's
   page bound cuts a list, that block says how many rows it shows and that it did not
-  read the rest; it offers no link to a next page.
+  read the rest; it offers no link to a next page. A holding the bound cuts shows its
+  totals as `未確定` with `holding_cut_by_page`, never the sum of the buckets shown.
 - Each expiry panel is named by what tells it apart: a published-snapshot row by its
   programme, bucket kind, bucket reference and rule (the snapshot holds one row per
   bucket for every rule version of the programme); a provider display section by its
