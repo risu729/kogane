@@ -617,7 +617,8 @@ clock's named zone.
 4. Search each offer on its own zone's today. The search takes one clock and
    carries one day per state through every hop's processing delay; one day per
    offer zone would be a new traversal (a `CONVERSION_SEARCH_RELEASE` bump) for
-   offers nobody has stored; rejected.
+   offers of another zone, of which no stored or seeded offer is known
+   (`docs/rewards.md`: no `conversion_offers` rows are seeded); rejected.
 
 ### Decision
 
@@ -627,7 +628,12 @@ Option 3. The route's clock is `searchClock(Date.now())` in
 computed as the UTC date of `now + 9 h` (Asia/Tokyo has no daylight saving
 time), as the reported-state reads compute it. Nothing in `packages/domain`
 changes, so `CONVERSION_SEARCH_RELEASE` stays `conversion-search-v5`: the
-traversal is the same and only its input day changes.
+traversal is the same and only its input day changes. Because the release names
+the traversal and not its input, a computed goal-search answer carries the
+clock it started from as `clock`, so two answers of the same release that
+differ name the day and zone each was judged on. A bump would also change the
+reward READ projection's build digest, which includes the release, and rebuild
+a snapshot whose rows do not change.
 
 ### Consequences
 
@@ -647,12 +653,16 @@ traversal is the same and only its input day changes.
   evaluation instant) is part of the projection's build digest and is not
   changed here.
 - No client in the repository reads this route's body (first amendment
-  above); the response shape is unchanged.
+  above), and no agent tool runs this route. A computed goal-search answer
+  gains one field, `clock`; the refusals (`offer_set_too_large`,
+  `no_stored_offer`, `source_unit_not_selected`) and the named-offer answer are
+  unchanged.
 
 ### Verification
 
 `services/app/test/rewards-api.test.ts` ("starts a goal search on today's
-Asia/Tokyo day, ...") stores three synthetic offers and fakes the clock. At
+Asia/Tokyo day, ...") stores three synthetic offers and fakes the clock, and
+checks every answer's `clock`. At
 16:00 UTC on a day (01:00 JST the next day), an `Asia/Tokyo` offer valid from
 the Tokyo day is a path whose hop is applied on the Tokyo day and credited
 three days later, and one whose deadline is the previous Tokyo day is

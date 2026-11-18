@@ -541,7 +541,10 @@ at every hour, and an `Asia/Tokyo` offer's first and last day and its applicatio
 deadline are judged on that day. An offer whose validity, or whose date or period
 deadline, names another zone is not compared with the Tokyo date
 (`needs_rule_verification`); one with a `null` zone is compatible and is judged on it.
-Before the [ADR 0049 amendment of 2026-11-18](adr/0049-reward-expiry-basis.md#amendment-a-goal-searchs-clock-is-todays-asiatokyo-day)
+A computed goal-search answer carries that clock as `clock`, beside `budget`: the
+search release names the traversal, not the day it started on, so two answers of the
+same release that differ name the day each was judged from. Before the
+[ADR 0049 amendment of 2026-11-18](adr/0049-reward-expiry-basis.md#amendment-a-goal-searchs-clock-is-todays-asiatokyo-day)
 the clock was the UTC date with zone `null`: between 00:00 and 09:00 JST that was the
 previous Tokyo day, and an offer of any zone was judged against it.
 

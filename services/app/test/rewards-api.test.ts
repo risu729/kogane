@@ -599,6 +599,15 @@ describe("reward reads", () => {
     type Search = {
       paths: { hops: { offerRef: string; appliedOn: string; creditExpectedOn: string }[] }[];
       rejected: { offerRef: string; reasonCode: string }[];
+      clock: unknown;
+    };
+    // 01:00 JST on 2 December is 16:00 UTC on 1 December; 14:59:59 UTC is one
+    // second before Tokyo midnight, still the Tokyo day of 1 December.
+    const afterTokyoMidnight = "2026-12-01T16:00:00.000Z";
+    const beforeTokyoMidnight = "2026-12-01T14:59:59.000Z";
+    const tokyoDay: Record<string, string> = {
+      [afterTokyoMidnight]: "2026-12-02",
+      [beforeTokyoMidnight]: "2026-12-01",
     };
     const search = async (id: string, at: string) => {
       vi.useFakeTimers({ toFake: ["Date"] });
@@ -609,14 +618,20 @@ describe("reward reads", () => {
         );
         expect(response.status).toBe(200);
         const body = (await response.json()) as Search;
+        // Every answer names the day and zone it was searched from.
+        expect(body.clock).toEqual({
+          kind: "local-date",
+          value: tokyoDay[at],
+          zone: "Asia/Tokyo",
+          basis: "derived",
+        });
         return { paths: body.paths, rejected: body.rejected };
       } finally {
         vi.useRealTimers();
       }
     };
-    // 01:00 JST on 2 December is 16:00 UTC on 1 December: the search's day is
-    // the Tokyo one, so the opening offer applies and the closing one is shut.
-    const afterTokyoMidnight = "2026-12-01T16:00:00.000Z";
+    // At 01:00 JST the search's day is the Tokyo one, so the opening offer
+    // applies and the closing one is shut.
     expect(await search("offer:synthetic-tokyo-opens", afterTokyoMidnight)).toEqual({
       paths: [
         expect.objectContaining({
@@ -638,7 +653,6 @@ describe("reward reads", () => {
       ],
     });
     // One second before Tokyo midnight both answers are the other way round.
-    const beforeTokyoMidnight = "2026-12-01T14:59:59.000Z";
     expect(await search("offer:synthetic-tokyo-opens", beforeTokyoMidnight)).toEqual({
       paths: [],
       rejected: [

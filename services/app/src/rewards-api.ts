@@ -275,13 +275,14 @@ export async function readRewardRoute(
         release: CONVERSION_SEARCH_RELEASE,
       };
     const quantity = decimalQuantity(unitRef ?? sourceUnits[0]!, quantityText);
+    const clock = searchClock(Date.now());
     // Every stored version is its own candidate here, named by its offerRef.
-    const result = findConversionPaths(
-      matching,
-      { quantity, clock: searchClock(Date.now()) },
-      goal,
-      { maxDepth: depth, maxCandidates: 8, maxExpansions: 500, requiredCompletionBy: null },
-    );
+    const result = findConversionPaths(matching, { quantity, clock }, goal, {
+      maxDepth: depth,
+      maxCandidates: 8,
+      maxExpansions: 500,
+      requiredCompletionBy: null,
+    });
     return {
       paths: result.paths,
       // The search is bounded by depth and candidate caps, so no path is
@@ -295,6 +296,9 @@ export async function readRewardRoute(
       expansions: result.expansions,
       stoppedBy: result.stoppedBy,
       budget: result.budget,
+      // The day and zone the search was judged from: the release names the
+      // traversal, not its input, so an answer names the clock it started on.
+      clock,
       basis: "policy-estimated",
       release: result.release,
     };
