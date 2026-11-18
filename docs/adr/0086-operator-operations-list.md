@@ -257,8 +257,10 @@ already answered "which requests exist" over one service, `listOperations`.
    依頼の経過 page. The 依頼の経過 page's breadcrumb leads back to the list
    instead of the audit log. Neither the principal nor the request payload is
    shown, because the summary carries neither (decision 5). The page says
-   that the status is the stored one (READ is not consulted, decision 5) and
-   that each read is recorded once in the audit log (decision 7).
+   that the status, and the status filter, are the stored ones (READ is not
+   consulted, decision 5), so a collection its 依頼の経過 page shows as 完了
+   can be listed 進行中, and that each read is recorded once in the audit log
+   (decision 7).
 4. **Checks in the browser.** `validOperationListPage`
    (`packages/observation-shared/src/operation-contract.ts`) accepts a page
    only with the exact summary keys and closed values of decision 5, at most

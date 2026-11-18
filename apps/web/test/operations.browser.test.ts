@@ -237,6 +237,14 @@ describe.if(runnable)("the operator's 依頼の一覧 page", () => {
         expect(shown).not.toContain("synthetic-client");
         expect(shown).not.toContain(PRINCIPAL.id);
         expect(shown).not.toContain("synthetic rebuild reason");
+        // Nor in any attribute or accessible name: the whole document holds neither.
+        const html = await page.content();
+        for (const hidden of ["synthetic-client", PRINCIPAL.id, "synthetic rebuild reason"])
+          expect(html).not.toContain(hidden);
+        // The page says the status is the stored one, so a 完了 trail can be listed 進行中.
+        expect(shown).toContain(
+          "依頼の経過で「完了」と表示される収集の依頼が、ここでは「進行中」のことがあります。",
+        );
         // Each row links to its 依頼の経過 page by its id.
         const first = rows(page).first().getByRole("link", { name: NEWEST, exact: true });
         expect(await first.getAttribute("href")).toBe(`/operations/${NEWEST}`);

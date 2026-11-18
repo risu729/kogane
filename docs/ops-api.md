@@ -655,8 +655,10 @@ request. Each row shows the accepted time, kind, stored status, failure
 code, source, dispatch state and attempts, and last update, and links its
 operation id to its 依頼の経過 page. Neither the principal nor the request
 payload is shown, as the summary carries neither. The status is the stored
-one: a collection whose `projected` stage the 依頼の経過 page derives as
-completed can still be `running` here, and the page says so. The browser
+one, and so is the one the `status` filter matches: a collection whose
+`projected` stage the 依頼の経過 page derives as completed, and which that
+page shows as 完了, can still be `running` (進行中) here, and the page says
+so above the list. The browser
 validates each page first (`validOperationListPage` in
 `packages/observation-shared/src/operation-contract.ts`: exact keys, closed
 values, at most 50 rows in the list's order, each once, a cursor that is the
