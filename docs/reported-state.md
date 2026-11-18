@@ -291,7 +291,8 @@ concurrently through the executor) plus two keyed reads: the position
 quantities by primary key and `DATED_SNAPSHOT_UNITS_SQL` (artifacts and fetch
 units by primary key; its plan is checked in
 `packages/read-model/test/dated-state.test.ts`). At `STATEMENT_SCALE`, a month
-ending today took 1,198 ms (median of three, one run on `bun:sqlite` on a
+ending today took 951 ms on 2026-11-18, each answer with its count of the
+statements before the window (median of three, one run on `bun:sqlite` on a
 machine shared with other test processes; the store holds no position
 container). `packages/application/test/holdings-change-scale.test.ts` records
 every statement one answer runs on `STATEMENT_CI_SCALE` and fails on a whole
