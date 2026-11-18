@@ -5,7 +5,12 @@ import {
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
 import { atStage, emitDiagnostic, failure } from "./diagnostics";
-import { persistSharedRun, sharedBucket, sharedRunDiagnostic } from "./shared-collection";
+import {
+  persistRefusalCode,
+  persistSharedRun,
+  sharedBucket,
+  sharedRunDiagnostic,
+} from "./shared-collection";
 import { collectSonyBank, coreProgress, parseCredential, type Supplement } from "./sony-bank";
 import type { CollectionFailure, CollectionManifest, RawArtifact } from "./types";
 export default {
@@ -123,7 +128,20 @@ export async function runSharedCollection(
       acquisitionSessionRef: runId,
       ...(progress.stopped === undefined ? {} : { coreSteps: progress.stopped }),
     } as const;
-    const outcome = await persistSharedRun(sharedBucket(env.DATA), input);
+    const outcome = await persistSharedRun(sharedBucket(env.DATA), input).catch(
+      (error: unknown) => {
+        // A refused plan (central safety, or a stopped core run's scope) writes
+        // no terminal and the alarm reports only `collection_failed`; the
+        // closed code is logged here, then the run fails as before.
+        emitDiagnostic("error", {
+          event: "sony-bank-shared-persistence-refused",
+          runId,
+          status,
+          reason: persistRefusalCode(error),
+        });
+        throw error;
+      },
+    );
     emitDiagnostic(
       outcome.result.outcome === "persisted" || outcome.result.outcome === "already_persisted"
         ? "log"

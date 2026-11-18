@@ -6,6 +6,7 @@ import { collectSonyBank } from "../src/sony-bank";
 import { failure, SonyBankDiagnostics } from "../src/diagnostics";
 import { alarmCollection, runSharedCollection } from "../src/worker";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
+import { artifactDataset } from "../../../packages/application/src/collection/descriptors";
 
 const runId = "123e4567-e89b-42d3-a456-426614174000";
 const privateValue = "synthetic-private-financial-value";
@@ -830,6 +831,173 @@ describe("a core failure keeps the steps that finished (ADR 0099 amendment 2026-
     });
     expect(terminal.artifacts).toEqual([]);
     expect(mock.historyRequests).toEqual([]);
+  });
+});
+
+describe("a stop after each core step keeps exactly the real artifact names (ADR 0099 amendment 2026-11-18)", () => {
+  // Every currency the collector walks, several pages in some and no
+  // transaction (so no CSV) in one: the full set of names a real run stores.
+  const totals: Record<string, number> = {
+    JPY: 7,
+    USD: 4,
+    EUR: 1,
+    GBP: 1,
+    AUD: 1,
+    NZD: 1,
+    CAD: 1,
+    CHF: 1,
+    HKD: 1,
+    ZAR: 0,
+    SEK: 5,
+  };
+  const pageCount = (total: number) => Math.max(1, Math.ceil(total / 3));
+  const canonical = Object.entries(totals).flatMap(([currency, total]) => {
+    const stem = currency === "JPY" ? "yen-history" : `foreign-history-${currency.toLowerCase()}`;
+    return [
+      ...Array.from(
+        { length: pageCount(total) },
+        (_, index) => `${stem}-page-${String(index + 1).padStart(4, "0")}.json`,
+      ),
+      ...(total > 0 ? [`${stem}.csv`] : []),
+    ];
+  });
+  const monthly = canonical.map((name) => `monthly-${name}`);
+  const steps = ["login", "gross-balance", "monthly-history", "retained-history", "wallet"];
+  const env = (data: FakeR2Bucket) =>
+    ({
+      COLLECTOR_SCHEMA_VERSION: "sony-bank-worker-poc-v3",
+      SONY_BANK_CREDENTIAL_JSON: JSON.stringify({
+        branchNum: "001",
+        accountNum: "1234567",
+        loginPwd: privateValue,
+      }),
+      DATA: data,
+    }) as unknown as Env;
+  // The last currency's CSV in one range, so every earlier request of the
+  // step has already succeeded when the step throws.
+  const lastCsv = (retained: boolean) => (path: string, body: Record<string, unknown>) =>
+    path.endsWith("csv/load") &&
+    body.currencyCd === "SEK" &&
+    (body.inquiryStrtdtCat === undefined) === retained;
+  const cases: readonly {
+    step: string;
+    fails: (path: string, body: Record<string, unknown>) => boolean;
+    status: "failed" | "partial";
+    keys: readonly string[];
+  }[] = [
+    {
+      step: "login",
+      fails: (path) => path.endsWith("to-customers/login"),
+      status: "failed",
+      keys: [],
+    },
+    {
+      step: "gross-balance",
+      fails: (path) => path.endsWith("gross-balance/acq"),
+      status: "failed",
+      keys: [],
+    },
+    {
+      step: "monthly-history",
+      fails: lastCsv(false),
+      status: "partial",
+      keys: ["gross-balance.json"],
+    },
+    {
+      step: "retained-history",
+      fails: lastCsv(true),
+      status: "partial",
+      keys: ["gross-balance.json", ...monthly],
+    },
+    {
+      step: "wallet",
+      fails: (path) => path.endsWith("debit-sso/login-usage-dtl-inq"),
+      status: "partial",
+      keys: ["gross-balance.json", ...canonical, ...monthly],
+    },
+  ];
+
+  for (const entry of cases) {
+    test(`a stop at ${entry.step} is persisted with its finished steps' files`, async () => {
+      const mock = provider(0, 200, false, { currencyTotals: totals });
+      const data = new FakeR2Bucket();
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+        return entry.fails(path, body)
+          ? Response.json({ errors: [{ code: privateValue }] }, { status: 500 })
+          : mock.fetcher(input, init);
+      }) as typeof fetch;
+      try {
+        const { value, records } = await capture(() =>
+          runSharedCollection(env(data), { from: "2099-04-01", to: "2099-04-02" }),
+        );
+        expect(JSON.stringify(records)).not.toContain(privateValue);
+        // The plan was accepted: the run's terminal is written.
+        expect(value.persistence).toBe("persisted");
+        expect(value.status).toBe(entry.status);
+        const terminal = coreTerminal(data, value.terminalKey);
+        const keys: string[] = terminal.artifacts.map(
+          (artifact: { artifactKey: string }) => artifact.artifactKey,
+        );
+        expect(keys.filter((key) => key !== "manifest.json").sort()).toEqual(
+          [...entry.keys].sort(),
+        );
+        if (entry.status === "failed") return;
+        const manifest = storedManifest(data, terminal);
+        const stopped = steps.indexOf(entry.step);
+        expect(manifest.coreSteps).toEqual({
+          completed: steps.slice(0, stopped),
+          failed: entry.step,
+          notAttempted: steps.slice(stopped + 1),
+        });
+        // Each kept canonical name is the dataset the Processor derives for
+        // it; no `monthly-*` name selects a dataset.
+        const datasets = manifest.artifacts.map((item: { dataset: string }) => item.dataset);
+        for (const artifact of terminal.artifacts as {
+          artifactKey: string;
+          role: string;
+          mediaType: string;
+        }[]) {
+          if (artifact.artifactKey === "manifest.json") continue;
+          const dataset = artifactDataset("sony-bank", artifact);
+          if (artifact.artifactKey.startsWith("monthly-")) expect(dataset).toBeNull();
+          else expect(datasets).toContain(dataset);
+        }
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  }
+
+  test("a refused stopped-run plan logs its closed code and fails the occurrence", async () => {
+    const mock = provider(0, 200, false, { currencyTotals: totals });
+    const data = new FakeR2Bucket();
+    const originalFetch = globalThis.fetch;
+    // The balance carries a field central safety refuses, and WALLET stops the core.
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("gross-balance/acq")) return Response.json({ csrf: privateValue });
+      if (path.endsWith("debit-sso/login-usage-dtl-inq"))
+        return Response.json({ errors: [{ code: privateValue }] }, { status: 500 });
+      return mock.fetcher(input, init);
+    }) as typeof fetch;
+    try {
+      const { value, records } = await capture(() => alarmCollection(env(data), "cron", 0));
+      expect(value).toEqual({ status: "failed", runIds: [], failureCode: "collection_failed" });
+      expect(records).toContainEqual(
+        expect.objectContaining({
+          event: "sony-bank-shared-persistence-refused",
+          status: "partial",
+          reason: "artifact_secret_field_present",
+        }),
+      );
+      expect(JSON.stringify(records)).not.toContain(privateValue);
+      expect([...data.entries.keys()].some((key) => key.endsWith("/terminal.json"))).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 

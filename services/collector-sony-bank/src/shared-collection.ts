@@ -512,6 +512,30 @@ export async function persistSharedRun(
   return { result, artifactCount: plan.artifacts.length };
 }
 
+/**
+ * The closed codes `sonyBankRunPlan` refuses a run with. A refused plan writes
+ * no terminal, so the code would otherwise reach nothing but the alarm's
+ * generic `collection_failed`.
+ */
+const PLAN_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  "artifact_pdf_invalid",
+  "artifact_html_encoding_invalid",
+  "artifact_html_redaction_invalid",
+  "artifact_json_invalid",
+  "artifact_secret_field_present",
+  "core_partial_scope_invalid",
+  "shared_operation_id_invalid",
+  "shared_session_ref_invalid",
+  "shared_attempt_id_invalid",
+]);
+
+/** The closed code of an error `persistSharedRun` threw; any other text is never logged. */
+export function persistRefusalCode(error: unknown): string {
+  return error instanceof Error && PLAN_REFUSAL_CODES.has(error.message)
+    ? error.message
+    : "persistence_failed";
+}
+
 /** Safe, code-only diagnostics for a persist attempt: no keys of provider
  * origin, no amounts, no bodies. */
 export function sharedRunDiagnostic(

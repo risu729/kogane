@@ -115,9 +115,9 @@ day's final transaction. Unrelated sources keep their existing ordering.
   [ADR 0092](0092-sony-history-csv-only.md#amendment-2026-11-18-a-refused-window-stops-a-partial-core-run)
 - Carried by: `CORE_STEPS`, `CoreProgress` and `collectSonyBank` in
   `services/collector-sony-bank/src/sony-bank.ts`; `runSharedCollection` in
-  `src/worker.ts`; `CORE_STEP_CODES`, `assertStoppedCoreScope` and
-  `sonyBankRunPlan` in `src/shared-collection.ts`; `CoreStepOutcome` in
-  `src/types.ts`
+  `src/worker.ts`; `CORE_STEP_CODES`, `assertStoppedCoreScope`,
+  `sonyBankRunPlan` and `persistRefusalCode` in `src/shared-collection.ts`;
+  `CoreStepOutcome` in `src/types.ts`
 
 ### Context
 
@@ -210,7 +210,11 @@ A stopped core run states its scope:
   WALLET page. It checks the stored file name, which is what the Processor
   derives the dataset from, and requires exactly the name the artifact's
   dataset is stored under, with no unit of its own; a stopped run claiming
-  `success` is refused too.
+  `success` is refused too. A refused plan, like a central-safety refusal,
+  writes no terminal: the Worker logs `sony-bank-shared-persistence-refused`
+  with the closed code (`persistRefusalCode`) and the alarm records the
+  occurrence `failed` with `collection_failed`. Every name a real stop
+  produces is accepted, for a stop at each step with all eleven currencies.
 
 ### Consequences
 
@@ -229,12 +233,20 @@ amendment the same failure recorded the occurrence `failed`. The alarm retries
 only an occurrence that was never dispatched (`retryableOccurrence`), so this
 changes no retry. Collection quality loses `occurrence_failed` for such a run
 and shows `acquisition_partial`, `coverage_partial` and
-`latest_run_not_successful` instead. Because the stopped run now registers a
-fetch run (a `failed` run with no provider bytes did not,
+`latest_run_not_successful` instead. These source reasons do not set a stopped
+core apart from a complete day: the documents run of every complete day is
+always `partial` (ADR 0100, `document_retention_unconfirmed`), so a complete
+day already shows `acquisition_partial` and `coverage_partial`, and
+`latest_run_not_successful` whenever that run is the newest registered one.
+What tells a stopped core apart is the occurrence's terminal list, where the
+core run itself is `partial` with its `core_*` or history code and no
+supplement run follows it, and the dataset cells. Because the stopped run now
+registers a fetch run (a `failed` run with no provider bytes did not,
 `provider_run_failed`), the source-level freshness, which is the age of the
-newest registered run whatever its outcome, counts from it; each dataset
-cell's freshness is still the age of its current capture, so a balance or
-history that no successful run refreshed keeps ageing. A later successful run
+newest registered run whatever its outcome (the web page labels it so), counts
+from it and can read `same-day` while the balance is old; each dataset cell's
+freshness is still the age of its current capture, so a balance or history
+that no successful run refreshed keeps ageing there. A later successful run
 still recovers the whole retained range.
 
 ### Verification
@@ -246,7 +258,12 @@ CSV keeps only the balance (`partial`, the CSV reason, `coreSteps` stopped at
 files with no canonical history name; a WALLET failure keeps the balance and
 both ranges with `core_wallet_failed`, no WALLET page, summary or
 `wallet-months` range, and a `completed` scheduled result; a balance failure
-stays `failed` with no artifact. Plan tests pin the manifest fields, the
+stays `failed` with no artifact. A stop at each of the five steps, with all
+eleven currencies collected (several pages in some, no CSV in one), is
+persisted with exactly the names of the steps that finished, each canonical
+name mapping to its dataset in the Processor's table and no `monthly-*` name
+mapping to any; a stopped run whose plan is refused logs its closed code and
+fails the occurrence with no terminal. Plan tests pin the manifest fields, the
 reason precedence and each `core_partial_scope_invalid` refusal, including a
 balance or history stored under another file name, a core artifact in a unit
 of its own and a stopped run claiming `success`. The

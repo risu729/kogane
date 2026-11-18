@@ -397,8 +397,10 @@ there is one, else `core_monthly_history_failed`,
 `coverageStatus` is `partial` and it carries that code (so its registered unit
 report is `failed`). `sonyBankRunPlan` refuses a stopped run carrying an
 artifact no finished step produced, or one stored under any name other than
-the one its dataset is stored under (`core_partial_scope_invalid`). A partial
-core run is never parsed: every Sony core dataset has run-scoped eligibility,
+the one its dataset is stored under (`core_partial_scope_invalid`); a refused
+plan writes no terminal, the Worker logs
+`sony-bank-shared-persistence-refused` with the closed code, and the
+occurrence fails with `collection_failed`. A partial core run is never parsed: every Sony core dataset has run-scoped eligibility,
 so it is evidence only, and the scheduler records it `completed` like any
 persisted `partial` run
 ([ADR 0099, amendment 2026-11-18](adr/0099-sony-retained-history.md#amendment-2026-11-18-a-mid-core-failure-keeps-the-finished-steps-as-a-partial-run)).

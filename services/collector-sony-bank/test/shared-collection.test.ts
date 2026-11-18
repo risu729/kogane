@@ -19,6 +19,7 @@ import {
 import {
   artifactRole,
   assertCentralSafe,
+  persistRefusalCode,
   persistSharedRun,
   sharedRunDiagnostic,
   sonyBankRunPlan,
@@ -320,90 +321,104 @@ describe("a core run that stopped at a step keeps only the finished steps (ADR 0
     expect(plan.run.units[0]?.safeErrorCode).toBe("history_csv_count_mismatch");
   });
 
-  test("a step-stopped core run never writes what a finished step did not produce", async () => {
-    for (const [name, artifacts, coreSteps] of [
-      // A canonical history name is the parser input; only the retained step writes it.
-      ["canonical history before retained", [balance, monthlyCsv, retainedCsv], stoppedAtRetained],
-      // An unprefixed month-window file would read as the retained range.
+  // Each refusal is its own test, so a check that stops refusing one of them
+  // fails that test alone.
+  for (const [name, artifacts, coreSteps] of [
+    // A canonical history name is the parser input; only the retained step writes it.
+    ["canonical history before retained", [balance, monthlyCsv, retainedCsv], stoppedAtRetained],
+    // An unprefixed month-window file would read as the retained range.
+    [
+      "unprefixed month window",
+      [balance, { ...monthlyCsv, filename: "yen-history.csv" }],
+      stoppedAtRetained,
+    ],
+    [
+      "summary",
       [
-        "unprefixed month window",
-        [balance, { ...monthlyCsv, filename: "yen-history.csv" }],
-        stoppedAtRetained,
-      ],
-      [
-        "summary",
-        [
-          balance,
-          {
-            dataset: "collection-summary",
-            filename: "collection-summary.json",
-            mediaType: "application/json",
-            body: "{}",
-          },
-        ],
-        stoppedAtRetained,
-      ],
-      [
-        "WALLET month",
-        [
-          balance,
-          {
-            dataset: "wallet-history-202609",
-            filename: "wallet-history-2026-09.html",
-            mediaType: "text/html; charset=UTF-8",
-            body: "<html></html>",
-          },
-        ],
-        stoppedAtRetained,
-      ],
-      [
-        "month window before it finished",
-        [balance, monthlyCsv],
+        balance,
         {
-          completed: ["login", "gross-balance"],
-          failed: "monthly-history",
-          notAttempted: ["retained-history", "wallet"],
+          dataset: "collection-summary",
+          filename: "collection-summary.json",
+          mediaType: "application/json",
+          body: "{}",
         },
       ],
-      // The Processor reads the stored name, not the dataset: a balance
-      // stored under a history name would register as that history.
+      stoppedAtRetained,
+    ],
+    [
+      "WALLET month",
       [
-        "balance under another name",
-        [{ ...balance, filename: "yen-history.csv" }],
-        stoppedAtRetained,
-      ],
-      // A `monthly-` prefix on a name that is not the dataset's own.
-      [
-        "month window under a foreign name",
-        [balance, { ...monthlyCsv, filename: "monthly-foreign-history-usd.csv" }],
-        stoppedAtRetained,
-      ],
-      [
-        "canonical history under another dataset's name",
-        [balance, { ...retainedCsv, filename: "foreign-history-usd.csv" }],
+        balance,
         {
-          completed: ["login", "gross-balance", "monthly-history", "retained-history"],
-          failed: "wallet",
-          notAttempted: [],
+          dataset: "wallet-history-202609",
+          filename: "wallet-history-2026-09.html",
+          mediaType: "text/html; charset=UTF-8",
+          body: "<html></html>",
         },
       ],
-      // A core artifact belongs to the account unit; a unit of its own could
-      // be reported complete apart from the stopped run.
-      [
-        "core artifact in its own unit",
-        [{ ...balance, unitKey: "document-0001" }],
-        stoppedAtRetained,
-      ],
-    ] as const) {
-      await expect(sonyBankRunPlan(stopped({ artifacts, coreSteps })), name).rejects.toThrow(
+      stoppedAtRetained,
+    ],
+    [
+      "month window before it finished",
+      [balance, monthlyCsv],
+      {
+        completed: ["login", "gross-balance"],
+        failed: "monthly-history",
+        notAttempted: ["retained-history", "wallet"],
+      },
+    ],
+    // The Processor reads the stored name, not the dataset: a balance
+    // stored under a history name would register as that history.
+    [
+      "balance under another name",
+      [{ ...balance, filename: "yen-history.csv" }],
+      stoppedAtRetained,
+    ],
+    // A `monthly-` prefix on a name that is not the dataset's own.
+    [
+      "month window under a foreign name",
+      [balance, { ...monthlyCsv, filename: "monthly-foreign-history-usd.csv" }],
+      stoppedAtRetained,
+    ],
+    [
+      "canonical history under another dataset's name",
+      [balance, { ...retainedCsv, filename: "foreign-history-usd.csv" }],
+      {
+        completed: ["login", "gross-balance", "monthly-history", "retained-history"],
+        failed: "wallet",
+        notAttempted: [],
+      },
+    ],
+    // A core artifact belongs to the account unit; a unit of its own could
+    // be reported complete apart from the stopped run.
+    [
+      "core artifact in its own unit",
+      [{ ...balance, unitKey: "document-0001" }],
+      stoppedAtRetained,
+    ],
+  ] as const)
+    test(`a step-stopped core run never writes what a finished step did not produce: ${name}`, async () => {
+      await expect(sonyBankRunPlan(stopped({ artifacts, coreSteps }))).rejects.toThrow(
         "core_partial_scope_invalid",
       );
-    }
-    // A stopped run is never a success: that outcome would make it parseable.
-    await expect(
-      sonyBankRunPlan(stopped({ status: "success", failures: [] })),
-      "stopped run claiming success",
-    ).rejects.toThrow("core_partial_scope_invalid");
+    });
+
+  test("a refusal is logged by its closed code only", async () => {
+    const refusal = await sonyBankRunPlan(stopped({ status: "success", failures: [] })).catch(
+      (error: unknown) => error,
+    );
+    expect(persistRefusalCode(refusal)).toBe("core_partial_scope_invalid");
+    expect(persistRefusalCode(new Error("storage unavailable"))).toBe("persistence_failed");
+    expect(persistRefusalCode("core_partial_scope_invalid")).toBe("persistence_failed");
+  });
+
+  test("a stopped core run is never a success: that outcome would make it parseable", async () => {
+    await expect(sonyBankRunPlan(stopped({ status: "success", failures: [] }))).rejects.toThrow(
+      "core_partial_scope_invalid",
+    );
+  });
+
+  test("a stopped core run keeping exactly its finished steps' names is planned", async () => {
     const finished = await sonyBankRunPlan(
       stopped({
         artifacts: [balance, retainedCsv, monthlyCsv],
