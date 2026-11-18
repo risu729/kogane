@@ -320,7 +320,13 @@ async function rowCounts(): Promise<Record<string, number>> {
   );
   const counts: Record<string, number> = {};
   chunks.forEach((chunk, n) =>
-    chunk.forEach(({ name }, column) => (counts[name] = results[n]!.results[0]![`c${column}`]!)),
+    chunk.forEach(({ name }, column) => {
+      const count = results[n]!.results[0]![`c${column}`];
+      // A count read under the wrong column would compare equal before and
+      // after any write, so it fails here instead.
+      if (typeof count !== "number") throw new Error(`no row count for ${name}`);
+      counts[name] = count;
+    }),
   );
   return counts;
 }

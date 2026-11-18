@@ -6,16 +6,25 @@
 // either, this fails and names which.
 import { expect, test } from "bun:test";
 
-test("a timeout kills the process a hook spawned and spares the one spawned at load", () => {
+// The nested `bun test` took up to 4 s on a loaded 4-core host, close to the
+// 5 s default, which a blocking spawnSync does not escape either: Bun fails a
+// synchronous case that runs past its deadline. The case therefore awaits the
+// process and has its own deadline, covering the fixture's 10 s window.
+test("a timeout kills the process a hook spawned and spares the one spawned at load", async () => {
   const fixture = new URL("./fixtures/bun-timeout-kill.ts", import.meta.url).pathname;
-  const run = Bun.spawnSync([process.execPath, "test", fixture], {
+  const run = Bun.spawn([process.execPath, "test", fixture], {
     cwd: new URL("./fixtures/", import.meta.url).pathname,
     stdout: "pipe",
     stderr: "pipe",
   });
-  const output = run.stdout.toString() + run.stderr.toString();
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(run.stdout).text(),
+    new Response(run.stderr).text(),
+    run.exited,
+  ]);
+  const output = stdout + stderr;
   const fate = /^FATE (.*)$/mu.exec(output)?.[1];
-  expect({ exitCode: run.exitCode, fate: fate === undefined ? null : JSON.parse(fate) }).toEqual({
+  expect({ exitCode, fate: fate === undefined ? null : JSON.parse(fate) }).toEqual({
     // The deliberate timeout is the one failing case.
     exitCode: 1,
     fate: {
@@ -25,4 +34,4 @@ test("a timeout kills the process a hook spawned and spares the one spawned at l
   });
   expect(output).toContain("killed 1 dangling process");
   expect(output).toMatch(/\(fail\) times out/u);
-});
+}, 30_000);

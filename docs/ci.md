@@ -162,10 +162,13 @@ workerd: the timed-out case's request fails with `ECONNRESET` and every later
 case of the file with `ECONNREFUSED`. The timed-out case's body also keeps
 running against the shared store while later cases read it.
 `services/processor/test/card-debit-accounts.test.ts` therefore starts its
-runtime at module load and lets each case begin only once the previous case's
-body has settled, so a timeout fails that case alone; Bun still reports a late
-rejection as an error between tests. The other processor files that start
-Miniflare in `beforeAll` still lose their runtime at a timeout.
+runtime at module load and has `afterEach` wait for the case's body to settle
+before the next case begins, so a timeout fails that case alone; Bun still
+reports a late rejection as an error between tests. The wait is bounded by
+`afterEach`'s default 5 s deadline: a body that has not settled by then fails
+its case at the hook and goes on running while the next case reads the store.
+The other processor files that start Miniflare in `beforeAll` still lose their
+runtime at a timeout.
 
 hk's `repository` check
 invokes this graph, never `check` or `verify`, avoiding recursion. Selected root aliases for old operational `<short>:<verb>` names keep the
