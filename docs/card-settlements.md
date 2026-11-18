@@ -302,6 +302,71 @@ Limits:
   is why acceptance stays with the operator.
 - The mask length is recorded but not compared with the bank account's length.
 
+### Debit account per card
+
+Design: [ADR 0113](adr/0113-card-debit-account-answer.md) (proposed).
+`reviewCardDebitAccounts`
+(`packages/application/src/query/card-debit-accounts.ts`) answers which bank
+account each card is debited from, under rule `card-debit-account-answer-v1`
+(`packages/domain/src/card-debit-account-answer.ts`). A card is a statement's
+source and source account (`myjcb:<connection>:root`, `vpass:card-00N`); every
+card with a current statement total, a stated reading with evidence or a
+settlement candidate is listed, by source and source account, at most 100
+(`cardsTruncated` says when more exist). Per card:
+
+- `latestStatement`: its newest current statement total (by period, then due
+  date), with the provider's total and due date, so a card whose last
+  statement is zero still shows how old its answer is;
+- `stated`: the readings the settlement sweep compared with a candidate (the
+  `card_debit_account_statement` rows under `CARD_INFORMATION_READER_VERSION`
+  that `card_settlement_debit_account_evidence` cites under
+  `CARD_DEBIT_ACCOUNT_POLICY`). The newest one (by the page's capture time,
+  then id) gives the status: `named` when its rows name exactly one account
+  (`supports` and `names_other_account` both name the account the provider
+  states), `conflicting` when they name more than one, `not_named` with the
+  rule's reasons when they name none. `lastNamed` is the newest reading
+  naming exactly one account, even when older. With no such reading the
+  status is `absent`: `source_has_no_debit_account_statement` for Vpass,
+  `evidence_not_recorded` for a MyJCB card;
+- `settled`: per bank account, the candidates whose latest decision is
+  `accepted`, with the number of distinct statements and the one with the
+  latest debit date. A withdrawn or rejected candidate is not counted;
+- `proposed`: the same for candidates still `proposed`, of statements no
+  accepted candidate covers. They are listed for the reviewer and never
+  answer (INV07);
+- `answer`: `provider-stated` from `lastNamed` (the account, the reading and
+  its capture time); else `accepted-settlement` from the newest accepted
+  settlement (the account, the candidate and its debit date), which is an
+  amount match a person accepted and so weaker than a stated account; else
+  `unknown` with `stated_reading_conflicting`, `only_unreviewed_candidates`
+  or `no_debit_account_evidence`. Closed `codes` say what disagrees:
+  `settled_account_differs` (a stated answer, and the newest accepted
+  settlement was debited elsewhere), `newer_reading_unresolved` (a stated
+  answer from an older reading, and a newer one names none or two),
+  `settled_accounts_differ` and `stated_reading_conflicting` (on a settled
+  answer).
+
+The page shows it as `カードの引落口座` above `照合候補のない請求`, from
+`GET /api/v2/reconciliation/card-debit-accounts` (operator-only, no
+parameter: any is `400 invalid_query`); agents read the same answer through
+`kogane.card-settlements.debit-accounts` ([agent API](agent-api.md#each-cards-debit-account)).
+A malformed evidence or candidate row fails the read
+(`card_debit_accounts_row_invalid`), never an answer.
+
+Limits:
+
+- Only MyJCB states a debit account; Vpass cards are answered only by an
+  accepted settlement, and cards Kogane does not collect are not listed.
+- Vpass cards are named by their source account (`vpass:card-00N`), not by
+  the card product: no collected field names it.
+- A stated answer is the ADR 0032 rule's proposal over the bank accounts
+  Kogane knows; an uncollected account at the same bank cannot be named.
+- A `refused` reading is not considered: only readings the sweep cited carry
+  evidence, so a newer page whose 「カード情報」 table was refused leaves the
+  answer on the older reading.
+- Nothing is stored: the answer is read from the evidence, decisions and
+  candidates each time.
+
 ## Candidate and decision lifecycle
 
 A bounded Processor sweep reads published observations, retaining provider
@@ -1031,6 +1096,18 @@ checked without statistics in
 `services/processor/test/card-statements-unmatched.test.ts`). In production
 on 2026-11-07, 8 of 35 current statements had no candidate (5 of them refund
 or zero totals), and no window held more than 10 debits.
+
+Each card's debit account costs one ranking of `card_statement_facts` (the
+same as the sweep's page, with each card's resolved account through the
+ownership CTEs for its newest statement only), one scan of
+`card_settlement_debit_account_evidence` under the current policy with each
+cited reading found by its primary key, and one scan of the candidates with
+each latest decision found by `card_settlement_decisions`' key
+(`(proposal_id, revision)`); the evidence returned is that of at most two
+readings per card, and the candidates one row per card, bank account and
+decision state. `services/processor/test/card-debit-accounts.test.ts` checks
+without table statistics that readings and decisions are reached by key. Not
+measured on the scale store or on D1.
 
 ### Readiness
 

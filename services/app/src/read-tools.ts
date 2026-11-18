@@ -1,8 +1,8 @@
 // Additional read adapters over the existing history, instrument coverage
 // (ADR 0073), dated reported state, account correspondence candidates and
 // one source account's correction history (ADR 0077), card statements
-// without a settlement candidate (ADR 0074's 2026-11-07 amendment) and common
-// audit readers.
+// without a settlement candidate (ADR 0074's 2026-11-07 amendment), each
+// card's debit account (ADR 0113) and common audit readers.
 import { z } from "zod";
 import {
   type Grant,
@@ -33,6 +33,7 @@ import {
   reviewUnmatchedCardStatements,
   UNMATCHED_MAX_OFFSET,
 } from "../../../packages/application/src/query/card-statements-unmatched.ts";
+import { reviewCardDebitAccounts } from "../../../packages/application/src/query/card-debit-accounts.ts";
 import { readInstrumentCoverage } from "../../../packages/application/src/query/instrument-coverage.ts";
 import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
 import { readAccountHistoryForGrant } from "../../../packages/application/src/query/account-history-read.ts";
@@ -59,7 +60,8 @@ export const REPORTED_STATE_TOOL_NAME = "kogane.reported-state.read";
 /**
  * The カード照合 reads: served exactly while
  * `GET /api/v2/reconciliation/card-settlements` and
- * `GET /api/v2/reconciliation/card-statements-unmatched` are (both need the
+ * `GET /api/v2/reconciliation/card-statements-unmatched` and
+ * `GET /api/v2/reconciliation/card-debit-accounts` are (all need the
  * settlement views, `cardSettlementsAvailable`); otherwise the path is 404 and
  * the MCP name `unknown_tool`.
  */
@@ -68,6 +70,7 @@ export const CARD_SETTLEMENT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "kogane.card-settlements.statements",
   "kogane.card-settlements.ownership",
   "kogane.card-settlements.unmatched",
+  "kogane.card-settlements.debit-accounts",
 ]);
 
 const schemas = {
@@ -104,6 +107,8 @@ const schemas = {
   "kogane.card-settlements.unmatched": z.strictObject({
     offset: z.number().int().min(0).max(UNMATCHED_MAX_OFFSET).optional(),
   }),
+  // The route takes no parameter.
+  "kogane.card-settlements.debit-accounts": z.strictObject({}),
   "kogane.economic-readiness.read": z.strictObject({
     schema: z.literal(ECONOMIC_ROW_READINESS_SCHEMA),
     family: z.enum(["bank-movement", "securities-execution"]),
@@ -161,6 +166,8 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "The append-only correction history of one source account, the same answer as GET /api/identity/account-history on the 口座の対応候補 page: every revision of its account mapping, every assignment or override release decided about it, and every relation row naming it on either side (connection_contains acceptances and withdrawals, same_account decisions), each with its decision kind, reason and closed origin, oldest first. Under records.read and a whole-store read grant; refused past the grant's maxRows, never truncated. Read-only; correcting it is a plan through the change lifecycle.",
   "kogane.card-settlements.unmatched":
     "One page of the card statement totals no settlement candidate cites, the same answer as the operator's カード照合 page: each statement's closed reason (statement_total_refund_or_zero, statement_not_comparable, no_debit_in_window, no_equal_amount_debit, equal_amount_debit_awaiting_sweep) and, for no_equal_amount_debit, the ADR 0074 planner's read-only answer (window three days either side of the due date, at most three debits) with closed codes, listing at most the first 50 exact allocations per statement with allocationCount and allocationsTruncated. Under records.read and a whole-store read grant. Read-only; no allocation listed is acceptable, since the acceptance writer claims one debit.",
+  "kogane.card-settlements.debit-accounts":
+    "Which bank account each credit card is debited from, the same answer as the operator's カード照合 page: per card (a current statement total, a stated debit-account reading or a settlement candidate; at most 100 cards, cardsTruncated says when more exist), its newest statement, the provider-stated side (the newest MyJCB 「カード情報」 reading the settlement sweep compared, and the newest one naming exactly one account; status named, conflicting, not_named or absent with source_has_no_debit_account_statement or evidence_not_recorded), the accepted settlements per bank account, the undecided candidates per bank account, and the answer: basis provider-stated when a reading names one account, else accepted-settlement from the newest accepted settlement (weaker: an amount match a person accepted), else unknown with stated_reading_conflicting, only_unreviewed_candidates or no_debit_account_evidence, with closed notes (settled_account_differs, newer_reading_unresolved, settled_accounts_differ, stated_reading_conflicting). Undecided candidates never answer. Under records.read and a whole-store read grant. Read-only; it changes no candidate and no setting at any provider.",
   "kogane.economic-readiness.read":
     "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled.",
   "kogane.card-settlements.read":
@@ -213,6 +220,7 @@ export function readMcpTools(
       case "kogane.card-settlements.statements":
       case "kogane.card-settlements.ownership":
       case "kogane.card-settlements.unmatched":
+      case "kogane.card-settlements.debit-accounts":
         return served.cardSettlements && grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.audit.search":
       case "kogane.audit.get":
@@ -330,6 +338,15 @@ export async function callReadTool(
           sql: d1Executor(env.DB),
           request: { offset: input.offset ?? 0 },
         });
+        return outcome.ok
+          ? { status: 200, body: { apiVersion: 2, ...outcome.review } }
+          : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+      }
+      case "kogane.card-settlements.debit-accounts": {
+        // The page's own service: capability, perimeter and bound are
+        // decided there, once for both transports.
+        parseRequest(schemas[name], body ?? {});
+        const outcome = await reviewCardDebitAccounts({ grant, sql: d1Executor(env.DB) });
         return outcome.ok
           ? { status: 200, body: { apiVersion: 2, ...outcome.review } }
           : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };

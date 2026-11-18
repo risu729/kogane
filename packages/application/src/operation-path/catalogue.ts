@@ -306,6 +306,15 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
+  // Which bank account each card is debited from (ADR 0113): the
+  // カード照合 page's service.
+  "card-settlements.debit-accounts": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   "card-settlements.ownership": {
     risk: ["R0"],
     effect: null,
