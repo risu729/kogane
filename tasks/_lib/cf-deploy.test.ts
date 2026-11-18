@@ -278,6 +278,16 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       (step) => step.name === "Verify the existing DO namespaces and lifecycle",
     )!;
     expect(capture.body).toContain("cf-do-identity.mjs capture");
+    // A rollback target that predates the exports lifecycle cannot publish V Point.
+    const gate = steps.find(
+      (step) => step.name === "Refuse a V Point rollback without its namespace check",
+    )!;
+    expect(gate.body).toContain("inputs.mode == 'rollback'");
+    for (const name of targets
+      .filter((entry) => entry.doLifecycle === "exports")
+      .map((entry) => entry.name))
+      expect(gate.body).toContain(name);
+    expect(steps.indexOf(gate)).toBeLessThan(steps.indexOf(capture));
     expect(verify.body).toContain("cf-do-identity.mjs verify");
     expect(steps.indexOf(capture)).toBeLessThan(
       steps.findIndex((step) => step.name === "Open the deployment record"),

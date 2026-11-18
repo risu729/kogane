@@ -255,7 +255,12 @@ Decision: every cf Worker uses `production-strategy: deploy` with
    `cf-do-identity`. They are recorded as `doLifecycle: "exports"`: the build
    guard requires exactly one SQLite export per bound class and no
    migrations, the live migration tag must stay empty, and the active
-   namespace IDs are captured before publication and verified after it.
+   namespace IDs are captured before publication and verified after it. cf
+   sends the same `exports` map as `cf workers versions create` did, without
+   migrations, but through the script upload, which reconciles the declared
+   exports. Because the identity steps run the target's own check and ledger,
+   a rollback whose target predates this lifecycle is refused before any
+   production write when it selects V Point or V Point Pay.
 
 Each phase moves its ledger entries to `productionStrategy: "deploy"` and its
 dry runs to `cf deploy --prebuilt --dry-run`. Before each phase, the

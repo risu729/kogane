@@ -89,8 +89,22 @@ describe("code-only DO publication preserves live lifecycle and namespace", () =
     expect(before).toEqual([
       { ...exportsTarget, bindings: [{ ...target.bindings[0], namespaceId: namespace }] },
     ]);
+    for (const tag of [undefined, ""]) {
+      const fetchImpl = async (url: string, init: RequestInit) =>
+        url.endsWith("/services/kogane-session")
+          ? Response.json({
+              success: true,
+              result: { default_environment: { script: { migration_tag: tag } } },
+            })
+          : api.fetchImpl(url, init);
+      expect(await readDoIdentity({ ...exportsOptions, fetchImpl })).toEqual(before);
+    }
     await expect(
       readDoIdentity({ ...exportsOptions, fetchImpl: mock({ tag: "v1" }).fetchImpl }),
+    ).rejects.toThrow("pending_lifecycle");
+    // A legacy owner never accepts an empty live tag.
+    await expect(
+      readDoIdentity({ ...options, fetchImpl: mock({ tag: "" }).fetchImpl }),
     ).rejects.toThrow("pending_lifecycle");
   });
   test("an exports owner's artifact declares exactly its bound SQLite classes", () => {

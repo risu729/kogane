@@ -147,9 +147,10 @@ Cloudflare API, retrying a lagging deployment list within 30 seconds
 Since v3.2.0 it also reads the script settings back, so the declared
 `observability`, including Workers Issues, must be live
 ([risu729/wrangler-deploy-action#327](https://github.com/risu729/wrangler-deploy-action/pull/327)).
-These Container Workers send `observability` with the script upload, where a
-failure fails `cf deploy`; for Workers without Containers, `cf deploy` writes it
-in a separate settings request whose failure is only a warning.
+These Container Workers, and V Point and V Point Pay (whose Durable Object
+exports also take the script upload), send `observability` with the script
+upload, where a failure fails `cf deploy`; for the other Workers, `cf deploy`
+writes it in a separate settings request whose failure is only a warning.
 They retain the default scheduling policy, existing app/namespaces and
 APAC/basic/max-instance settings. Their image manifest binds the Docker image,
 daemon and source measurement; identity, immutable registry digest and complete
@@ -168,7 +169,10 @@ upload. A build guard checks the actual artifacts of both kinds (no lifecycle
 payload for the legacy owners; exactly the bound SQLite exports and no
 migrations for the exports owners); before publication the live migration tag
 must match the latest canonical tag (empty for the exports owners), and after
-publication all active namespace IDs must match the captured baseline. A refused check prints only its closed `cf_do_…`
+publication all active namespace IDs must match the captured baseline. A
+rollback whose target ledger predates the exports lifecycle is refused before
+any production write if it selects V Point or V Point Pay; the other Workers
+can still be rolled back with a `targets` subset. A refused check prints only its closed `cf_do_…`
 code, and an unexpected error prints `cf_do_internal_error`. Pending DO
 lifecycle work requires a separate Wrangler rollout. Every full-deploy step
 explicitly consents to trigger synchronization, which `cf deploy` performs
