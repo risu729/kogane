@@ -284,7 +284,14 @@ export function InstrumentCandidatesPage(): ReactNode {
                   </div>
                   {page.items.length === 0 ? (
                     <div className="panel-body">
-                      <EmptyState>{current.empty}</EmptyState>
+                      {/* A decision can move an item out of its view, so a later
+                          page can be empty while the view still holds items:
+                          only a total of zero says the view is empty. */}
+                      <EmptyState>
+                        {page.total === 0
+                          ? current.empty
+                          : "このページに表示する項目はありません。判断などで一覧の件数が減った可能性があります。先頭に戻って確認してください。"}
+                      </EmptyState>
                     </div>
                   ) : (
                     <div className="identity-grid">
@@ -301,7 +308,9 @@ export function InstrumentCandidatesPage(): ReactNode {
                     <span role="status" aria-live="polite">
                       {page.total === 0
                         ? "0 件"
-                        : `${String(offset + 1)}–${String(offset + page.items.length)} 件目 / ${String(page.total)} 件`}
+                        : page.items.length === 0
+                          ? `表示なし / ${String(page.total)} 件`
+                          : `${String(offset + 1)}–${String(offset + page.items.length)} 件目 / ${String(page.total)} 件`}
                     </span>
                     <button
                       className="button"

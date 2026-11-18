@@ -203,7 +203,10 @@ policy, bounds and closed codes; the summary counts of the whole read.
   proposed candidate's buttons plan its own `identity.assign` or
   `relation.reject` payload with the reason a person writes, and open the
   confirmation screen; approval and commit happen there. A held candidate
-  offers keeping apart only.
+  offers keeping apart only. A decision moves a candidate out of its view,
+  so a later page can come back empty while the view still holds items: the
+  page then says that this page lists nothing, shows the view's total and
+  keeps 先頭に戻る, and says the view is empty only when its total is zero.
 
 Each request walks every current identity observation once, so its cost is
 linear in captured history (about 0.8 to 0.95 s per 100,000 on workerd and
@@ -340,6 +343,8 @@ store: `GET /api/identity/account-candidates?view=&offset=&sourceAccountId=`
 and the page `/identities/account-candidates` (`口座の対応候補`), whose
 buttons plan the named payload with the reason a person writes after reading
 the candidate again; approval and commit happen on the confirmation screen.
+As on the instrument page, an emptied later page says that it lists nothing
+and keeps its pager; only a view total of zero says the view is empty.
 Views `open`, `held`, `decided`, `connections`, `unreviewed`; 50 items a page.
 Bounds: 64 current reviews, 1,000 aggregator source accounts, 10,000 current
 relation rows (and 10,000 backfilled relations under a rewritten key),

@@ -47,6 +47,8 @@ describe.if(runnable)("instrument candidate review", () => {
   let stale = false;
   const posted: { operation: string; body: Record<string, any> }[] = [];
   const read: URL[] = [];
+  /** Rewrites the served page, when a test needs a shape the world does not hold. */
+  let reshape: ((review: Awaited<ReturnType<typeof page>>) => unknown) | null = null;
 
   async function page(
     view: InstrumentCandidateView,
@@ -68,6 +70,7 @@ describe.if(runnable)("instrument candidate review", () => {
     stale = false;
     posted.length = 0;
     read.length = 0;
+    reshape = null;
   });
   beforeAll(async () => {
     main = await world();
@@ -98,13 +101,12 @@ describe.if(runnable)("instrument candidate review", () => {
           });
         if (url.pathname === "/api/identity/instrument-candidates") {
           read.push(url);
-          return Response.json(
-            await page(
-              (url.searchParams.get("view") ?? "open") as InstrumentCandidateView,
-              Number(url.searchParams.get("offset") ?? "0"),
-              url.searchParams.get("identifierId"),
-            ),
+          const review = await page(
+            (url.searchParams.get("view") ?? "open") as InstrumentCandidateView,
+            Number(url.searchParams.get("offset") ?? "0"),
+            url.searchParams.get("identifierId"),
           );
+          return Response.json(reshape === null ? review : reshape(review));
         }
         if (url.pathname === "/api/identity/instrument-history") {
           read.push(url);
@@ -199,6 +201,29 @@ describe.if(runnable)("instrument candidate review", () => {
     // Every request is a GET of the read: nothing was planned by opening the page.
     expect(posted).toEqual([]);
     expect(read.every((url) => url.searchParams.get("view") === "open")).toBe(true);
+    await tab.close();
+  });
+
+  test("a later page the open list no longer reaches never says no candidate is waiting", async () => {
+    // A decided candidate leaves the open view, so a later page can come back
+    // empty while the first still lists candidates. The world holds one page;
+    // its first page is served as if a second followed.
+    reshape = (review) => (review.query.offset === 0 ? { ...review, nextOffset: 50 } : review);
+    const first = await page("open", 0);
+    const tab = await open();
+    const panel = tab.getByRole("region", { name: "確認待ち", exact: true });
+    await panel.getByRole("button", { name: "次の候補", exact: true }).click();
+    await tab.locator(".identity-card").first().waitFor({ state: "detached" });
+    const text = await panel.innerText();
+    expect(text).not.toContain("確認待ちの候補はありません。");
+    expect(text).toContain("このページに表示する項目はありません。");
+    expect(text).toContain(`表示なし / ${String(first.total)} 件`);
+    expect(text).not.toContain("51–50");
+    const back = panel.getByRole("button", { name: "先頭に戻る", exact: true });
+    expect(await back.isDisabled()).toBe(false);
+    await back.click();
+    await tab.locator(".identity-card").first().waitFor();
+    expect(await auditView(tab)).toEqual([]);
     await tab.close();
   });
 
