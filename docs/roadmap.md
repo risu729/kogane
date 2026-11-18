@@ -147,8 +147,8 @@ Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
 (2026-11-07) no delegation entry or grant is needed: an MCP client the MCP Access
 application admits acts with the UI's authority, as itself. Both decisions were first exercised
 in production on 2026-11-07: an MCP client recorded the owner default on the
-ten accounts the candidates name and accepted one MyJCB and one Vpass settlement (both paid by
-bank debits), withdrawing one Vpass acceptance on the way; purchase totals did not change and only
+ten accounts the candidates name and accepted one MyJCB and one Vpass settlement (both SMBC
+debits), withdrawing one Vpass acceptance on the way; purchase totals did not change and only
 the accepted debits hold a cash-movement claim
 ([verification](card-settlements.md#first-production-decisions-2026-11-07)). On 2026-11-08
 the cash-movement view itself was read through `kogane.events.read` (#1094): it lists each

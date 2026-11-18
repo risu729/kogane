@@ -1348,8 +1348,8 @@ below is in the audit log under the one MCP client principal that made them.
 1. **Before.** 426 candidates, all `proposed`, every one blocked by
    `owner_not_established`. Ten resolved accounts had no ownership claim and
    empty `ownerDefaultBlockers`: seven card accounts (the MyJCB connection root
-   under two identities and five Vpass cards) and three debit accounts at two
-   banks (one account under two identities, one account at the other bank).
+   under two identities and five Vpass cards) and three debit accounts (one
+   SMBC account under two identities, one SBI Shinsei account).
 2. **Owner default.** Ten `relation.accept` decisions with the marker
    `ownership-declaration:owner-default-v1:<role>:<date>` and party
    `party:owner`: `liable_party` on the seven card accounts,
@@ -1362,12 +1362,12 @@ below is in the audit log under the one MCP client principal that made them.
    MyJCB, 41 Vpass). Earlier candidates keep their blockers; the sweep
    appends, it does not rewrite them.
 4. **Decisions.** Accepted one MyJCB candidate (a `collector-myjcb` statement
-   paid by a bank debit, debit-account statement `supports`) and one Vpass
-   candidate (an importer-era statement of one Vpass card, paid by a bank
+   paid by an SMBC debit, debit-account statement `supports`) and one Vpass
+   candidate (an importer-era statement of one Vpass card, paid by an SMBC
    debit). Then withdrew the Vpass acceptance; it keeps its history
    (`accepted` then `withdrawn`), and that statement's lead became the next
    proposed candidate, which is left undecided. Then accepted a Vpass
-   candidate for the same card's next statement (paid by a bank debit,
+   candidate for the same card's next statement (paid by an SMBC debit,
    proposed by the second sweep), so one Vpass and one MyJCB settlement stay
    accepted. Both accepted statements belong to the same statement period;
    the withdrawn one belongs to the period before it.
