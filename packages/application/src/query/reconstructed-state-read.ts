@@ -315,7 +315,7 @@ export function reconstructedStateBodyFromQuery(
 }
 
 /** ?1 a JSON list of distinct account ids: how many name an `accounts` row (each by primary key). */
-const RECONSTRUCTED_STATE_ACCOUNTS_SQL =
+export const RECONSTRUCTED_STATE_ACCOUNTS_SQL =
   "SELECT count(*) AS present FROM json_each(?1) w CROSS JOIN accounts a ON a.id=w.value";
 
 /** The refusal codes the query's own errors become; null for an error that is not a refusal. */

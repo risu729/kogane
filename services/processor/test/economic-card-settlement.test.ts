@@ -785,7 +785,7 @@ describe("future SBI Shinsei posting dates", () => {
       const beforeReplay = await snapshot();
       expect(await accept()).toMatchObject({ ok: true, replayed: true });
       expect(await snapshot()).toEqual(beforeReplay);
-      const input = { account: bank.account_id, from, to, basis: "cash", cut: null, now };
+      const input = { accounts: [bank.account_id], from, to, basis: "cash", cut: null, now };
       const result = await queryReconstructedState(d1Executor(db), input);
       const cell = result.reconstruction!.cells.find(
         (row) => row.accountId === bank.account_id && row.unitRef === "JPY",

@@ -723,6 +723,68 @@ describe("plans on the complete CORE schema without statistics", () => {
     expect(grouped).toHaveLength(sources.length);
   });
 
+  test("the accounts' sources equal the frozen one-account read on random and scaled mapping tables, remappings included", () => {
+    // The shipped one-account text, frozen (as above).
+    const LEGACY_ACCOUNT_SOURCES_SQL = `SELECT DISTINCT sa.source_id FROM current_account_mappings m
+ CROSS JOIN source_accounts sa ON sa.id=m.source_account_id WHERE m.account_id=?1 ORDER BY sa.source_id`;
+    const SOURCES = ["smbc-bank", "sbi-shinsei-bank", "vpass", "mizuho-bank"];
+    // A seeded generator, so a failure names the store it was found on.
+    const random = (seed: number) => () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    const mappingTable = (seed: number, sourceAccounts: number, accounts: number) => {
+      const next = random(seed);
+      const db = new DatedStore().db;
+      const ids = Array.from({ length: accounts }, (_, index) => `acct-${String(index)}`);
+      for (const id of ids)
+        db.run("INSERT INTO accounts VALUES(?,'Synthetic','synthetic','identified')", [id]);
+      for (let index = 0; index < sourceAccounts; index += 1) {
+        const ref = `sa-${String(index)}`;
+        db.run("INSERT INTO source_accounts VALUES(?,?,'collector-r2-importer',?)", [
+          ref,
+          SOURCES[Math.floor(next() * SOURCES.length)]!,
+          JSON.stringify([ref]),
+        ]);
+        // One to three revisions: only the last names the account the source account maps to now.
+        const revisions = 1 + Math.floor(next() * 3);
+        for (let revision = 1; revision <= revisions; revision += 1)
+          db.run(
+            "INSERT INTO account_mappings VALUES(?,?,?,?,'rule','synthetic',1,'2098-01-01','Synthetic','identified')",
+            [`${ref}-r${String(revision)}`, ref, revision, ids[Math.floor(next() * ids.length)]!],
+          );
+      }
+      return { db, ids, next };
+    };
+    for (const [seed, sourceAccounts, accounts] of [
+      ...Array.from({ length: 40 }, (_, index): [number, number, number] => [
+        index + 1,
+        1 + (index % 12),
+        2 + (index % 6),
+      ]),
+      // Scaled: a mapping table far larger than the operator curates.
+      [101, 2_000, 60],
+      [102, 4_000, 25],
+    ] as [number, number, number][]) {
+      const { db, ids, next } = mappingTable(seed, sourceAccounts, accounts);
+      // A scope of one to 20 accounts, an unmapped one among them now and then.
+      const pool = [...ids, "acct-unmapped"].sort(() => next() - 0.5);
+      const scope = pool.slice(0, 1 + Math.floor(next() * Math.min(20, pool.length)));
+      const grouped = db.query(ACCOUNTS_SOURCES_SQL).all(JSON.stringify(scope)) as {
+        account_id: string;
+        source_id: string;
+      }[];
+      const legacy = [...scope]
+        .sort()
+        .flatMap((account) =>
+          (db.query(LEGACY_ACCOUNT_SOURCES_SQL).all(account) as { source_id: string }[]).map(
+            (row) => ({ account_id: account, source_id: row.source_id }),
+          ),
+        );
+      expect([seed, grouped]).toEqual([seed, legacy]);
+    }
+  });
+
   test("the key and alias holder reads use their indexes", () => {
     const db = fullCoreSchema();
     const keys = explain(db, KEY_HOLDERS_SQL, [JSON.stringify([["cash-movement", "[]"]]), 10]).map(

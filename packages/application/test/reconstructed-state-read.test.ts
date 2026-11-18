@@ -5,11 +5,14 @@
 // amount and date is invented.
 import { describe, expect, test } from "bun:test";
 import { DATED_BALANCES_SQL, DATED_STATE_ROW_BOUND } from "../../read-model/src/dated-state.ts";
+import { explain } from "../../read-model/test/card-usage-plan.ts";
+import { fullCoreSchema } from "../../read-model/test/card-usage-scale-fixture.ts";
 import { storeExecutor } from "../../read-model/test/economic-history-fixture.ts";
 import { ERROR_STATUS } from "../src/errors.ts";
 import {
   parseReconstructedStateRequest,
   readReconstructedState,
+  RECONSTRUCTED_STATE_ACCOUNTS_SQL,
   RECONSTRUCTED_STATE_REFUSALS,
   reconstructedStateBodyFromQuery,
   reconstructedStateError,
@@ -436,5 +439,61 @@ describe("refusals read nothing, bounds are refused, and today is Tokyo's", () =
     // 16:00 UTC on 4/30 is 01:00 on 5/1 in Tokyo; 14:59:59 UTC is still 4/30.
     expect(refusal(await ask("2026-04-30T16:00:00Z"))).toBe("answered");
     expect(refusal(await ask("2026-04-30T14:59:59Z"))).toBe("range_in_future");
+  });
+});
+
+describe("the scope's account check (ADR 0116)", () => {
+  // The shipped one-account text, frozen: ADR 0116 replaced it with one count for the list.
+  const LEGACY_ACCOUNT_SQL = "SELECT 1 AS present FROM accounts WHERE id=?1";
+
+  test("counts, for random and scaled lists of distinct ids, what the frozen one-account check finds", () => {
+    let state = 7;
+    const next = () => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return state / 2_147_483_648;
+    };
+    for (const size of [3, 40, 5_000]) {
+      const db = fullCoreSchema();
+      const insert = db.prepare(
+        "INSERT INTO accounts(id,label,role,status) VALUES(?,'Synthetic','asset','identified')",
+      );
+      const known: string[] = [];
+      for (let index = 0; index < size; index += 1) {
+        // Ids of the route's pattern, some of them reading as numbers.
+        const id = next() < 0.2 ? String(index) : `acct-${String(index)}`;
+        insert.run(id);
+        known.push(id);
+      }
+      const pool = [...known, "acct-missing", "0x1", "1.0", "01"];
+      for (let round = 0; round < 50; round += 1) {
+        const list = [
+          ...new Set(
+            Array.from(
+              { length: 1 + Math.floor(next() * 20) },
+              () => pool[Math.floor(next() * pool.length)]!,
+            ),
+          ),
+        ];
+        const legacy = list.filter((id) => db.query(LEGACY_ACCOUNT_SQL).get(id) !== null).length;
+        const counted = db.query(RECONSTRUCTED_STATE_ACCOUNTS_SQL).get(JSON.stringify(list)) as {
+          present: number;
+        };
+        expect([size, list, counted.present]).toEqual([size, list, legacy]);
+      }
+    }
+  });
+
+  test("reads each id by the primary key, without table statistics", () => {
+    const db = fullCoreSchema();
+    expect(
+      db.query("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'sqlite_stat%'").get(),
+    ).toEqual({ n: 0 });
+    const steps = explain(db, RECONSTRUCTED_STATE_ACCOUNTS_SQL, [JSON.stringify(["a", "b"])]);
+    expect(
+      steps.filter(
+        (step) => step.detail.startsWith("SCAN ") && !step.detail.includes("VIRTUAL TABLE"),
+      ),
+    ).toEqual([]);
+    expect(steps.some((step) => /^SEARCH a USING /u.test(step.detail))).toBe(true);
   });
 });

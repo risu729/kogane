@@ -192,6 +192,22 @@ Synthetic data only; no production data, D1 or Workers deployment.
 - `services/app/test/reconstructed-state-api.test.ts`: over the Worker, the
   route with `account` repeated and the MCP tool with `accounts` give the same
   answer; the new refusals; `agent-api.test.ts` pins the tool's input schema.
+- Rewrite proofs added by the independent review (AGENTS.md, toolchain):
+  `ACCOUNTS_SOURCES_SQL` equals the frozen one-account text per account on 40
+  random mapping tables and two scaled ones (2,000 and 4,000 source accounts,
+  up to three mapping revisions each, scopes of up to 20 with an unmapped id);
+  the one-statement account check (`RECONSTRUCTED_STATE_ACCOUNTS_SQL`) counts
+  what the frozen `SELECT 1 … WHERE id=?1` finds for random lists over 3, 40
+  and 5,000 accounts, and searches `accounts` by primary key without table
+  statistics; the dated read's `accounts` filter equals the `account` read for
+  a one-account list and lists each account's rows and payables as its own
+  read does, on 100 random stores and on the statement scale store for every
+  mapped account. On 60 random stores with economic history, each account's
+  cells in a scope are its one-account cells, except `lateRecorded`, which is
+  null when the scope has no late part (decision 5), and the scope's reasons
+  hold every account's. A one-off differential against `main` (`ae2708b`) on
+  200 random stores (687 one-account answers) found every field equal except
+  the context id, the schema version and `account` → `accounts`.
 - `apps/web/test/reconstructed-state-contract.test.ts`,
   `reconstruction-form.test.ts` and `reconstructed-state.browser.test.ts`: the
   scope rules of the wire contract, the field's parsing and checks, and the

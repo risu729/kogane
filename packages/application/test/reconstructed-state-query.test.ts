@@ -532,4 +532,152 @@ describe("a scope of several accounts (ADR 0116)", () => {
         "invalid_query",
       );
   });
+
+  test("on random stores, each account's cells in a scope are its own answer's, except a late part the scope does not have", async () => {
+    const BANKS = [SMBC, SHINSEI];
+    const STATUS_ORDER = ["unavailable", "indeterminate", "needs_review", "incomplete", "complete"];
+    let lateOnlyCells = 0;
+    let checkedCells = 0;
+    for (let seed = 1; seed <= 60; seed += 1) {
+      let state = seed;
+      const next = () => {
+        state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+        return state / 2_147_483_648;
+      };
+      const pick = <T>(values: readonly T[]): T => values[Math.floor(next() * values.length)]!;
+      const someDay = () =>
+        new Date(Date.UTC(2026, 1, 26) + Math.floor(next() * 37) * 86_400_000)
+          .toISOString()
+          .slice(0, 10);
+      const store = new DatedStore();
+      const accounts = Array.from(
+        { length: 1 + Math.floor(next() * 4) },
+        (_, index) => `acct-r${String(index)}`,
+      );
+      for (const [index, account] of accounts.entries()) {
+        // Now and then an account no reported container lists.
+        if (next() < 0.2) continue;
+        const bank = pick(BANKS);
+        for (let capture = Math.floor(next() * 4); capture > 0; capture -= 1) {
+          const date = next() < 0.5 ? pick(["2026-02-28", "2026-03-01", "2026-03-31"]) : someDay();
+          const captured = store.capture({
+            ...bank,
+            fetchedAt: `${date}T${pick(["03:00:00Z", "12:00:00Z", "14:59:59Z", "15:00:00Z"])}`,
+            balances: [
+              {
+                account: `p-${String(index)}`,
+                metric: "account_balance",
+                instrument: "JPY",
+                minor: next() < 0.1 ? null : Math.floor(next() * 100_000),
+              },
+            ],
+          });
+          store.identify(captured, bank.source, account, pick(["identified", "provider-local"]));
+        }
+      }
+      const h = new EconomicHistory(store);
+      for (const account of [...accounts, CARD])
+        if (h.db.query("SELECT 1 FROM accounts WHERE id=?").get(account) === null)
+          h.account(account);
+      let clock = Date.parse("2026-03-02T00:00:00.000Z");
+      for (let event = Math.floor(next() * 7); event > 0; event -= 1) {
+        const account = pick(accounts);
+        const other = pick([...accounts, CARD]);
+        const revisions = next() < 0.25 ? 2 : 1;
+        const logged = next() < 0.85;
+        for (let revision = 1; revision <= revisions; revision += 1) {
+          clock += Math.floor(next() * 5 * 86_400_000);
+          const time = next();
+          h.adopt({
+            eventId: `ev-${String(event)}`,
+            revision,
+            legs:
+              next() < 0.3 && other !== account
+                ? [
+                    {
+                      subject: account,
+                      amount: String(Math.floor(next() * 5_000)),
+                      role: "decrease",
+                      basis: "cash-movement",
+                    },
+                    {
+                      subject: other,
+                      amount: next() < 0.5 ? null : String(Math.floor(next() * 5_000)),
+                      role: "increase",
+                      basis: "cash-movement",
+                    },
+                  ]
+                : [
+                    {
+                      subject: account,
+                      amount: next() < 0.1 ? null : String(Math.floor(next() * 5_000)),
+                      role: pick(["decrease", "increase"] as const),
+                      basis: "cash-movement",
+                    },
+                    { subject: CARD, amount: null, role: "unresolved", basis: "obligation-change" },
+                  ],
+            times:
+              time < 0.1
+                ? []
+                : [["posting", day(time < 0.3 ? pick(["2026-03-01", "2026-03-31"]) : someDay())]],
+            knownAt: new Date(clock).toISOString(),
+            writerRelease: SETTLEMENT_RELEASE,
+            logged: revision === revisions ? logged : true,
+          });
+        }
+      }
+      const sql = storeExecutor(h.db);
+      const scope = [...accounts, CARD];
+      const all = await queryReconstructedState(sql, input({ accounts: scope }));
+      // Never a total: the fold's net worth stays not computed.
+      expect(all.reconstruction?.netWorth ?? "not-computed").toBe("not-computed");
+      for (const account of scope) {
+        const alone = await queryReconstructedState(sql, input({ accounts: [account] }));
+        // The scope's reasons hold every account's, and its status is at least as grave.
+        for (const reason of alone.reasons)
+          expect([seed, account, reason, all.reasons.includes(reason)]).toEqual([
+            seed,
+            account,
+            reason,
+            true,
+          ]);
+        expect(STATUS_ORDER.indexOf(all.status)).toBeLessThanOrEqual(
+          STATUS_ORDER.indexOf(alone.status),
+        );
+        const mine = (cells: readonly ReconstructedCell[] | undefined) =>
+          (cells ?? []).filter((cell) => cell.accountId === account);
+        const scoped = mine(all.reconstruction?.cells);
+        const own = mine(alone.reconstruction?.cells);
+        expect([seed, account, scoped.length]).toEqual([seed, account, own.length]);
+        for (const [index, cell] of scoped.entries()) {
+          checkedCells += 1;
+          const ownCell = own[index]!;
+          // The late part is the scope's: with end captures at different
+          // instants it is not computed for the scope (ADR 0116, decision 5).
+          if (all.lateUnavailable !== null && alone.lateUnavailable === null) {
+            if (
+              JSON.stringify(cell.explanation.lateRecorded) !==
+              JSON.stringify(ownCell.explanation.lateRecorded)
+            )
+              lateOnlyCells += 1;
+            expect(cell.explanation.lateRecorded).toBeNull();
+            expect([
+              seed,
+              account,
+              { ...cell, explanation: { ...cell.explanation, lateRecorded: null } },
+            ]).toEqual([
+              seed,
+              account,
+              { ...ownCell, explanation: { ...ownCell.explanation, lateRecorded: null } },
+            ]);
+          } else expect([seed, account, cell]).toEqual([seed, account, ownCell]);
+        }
+        expect(all.reconstruction?.accounts.find((entry) => entry.accountId === account)).toEqual(
+          alone.reconstruction?.accounts[0],
+        );
+      }
+    }
+    expect(checkedCells).toBeGreaterThan(40);
+    expect(lateOnlyCells).toBeGreaterThan(0);
+  }, 120_000);
 });

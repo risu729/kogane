@@ -164,6 +164,49 @@ describe("reported state on a scaled store without statistics", () => {
   );
 
   test(
+    "an accounts scope lists, per account, what each one-account read lists (ADR 0116)",
+    async () => {
+      const accounts = (
+        db
+          .query(
+            "SELECT DISTINCT account_id FROM current_account_mappings ORDER BY account_id LIMIT 20",
+          )
+          .all() as { account_id: string }[]
+      ).map((row) => row.account_id);
+      expect(accounts.length).toBeGreaterThan(2);
+      for (const date of [OPTIONS.today, middle()]) {
+        const scoped = await queryDatedState(executor(), { date, accounts });
+        let listed = 0;
+        let payables = 0;
+        for (const account of accounts) {
+          const alone = await queryDatedState(executor(), { date, account });
+          // A one-account list is the `account` read, context id included.
+          expect({
+            ...(await queryDatedState(executor(), { date, accounts: [account] })),
+            filters: null,
+          }).toEqual({ ...alone, filters: null });
+          expect(scoped.accounts.filter((entry) => entry.accountId === account)).toEqual(
+            alone.accounts,
+          );
+          expect(scoped.payables.filter((entry) => entry.accountId === account)).toEqual(
+            alone.payables,
+          );
+          listed += alone.accounts.length;
+          payables += alone.payables.length;
+        }
+        expect(scoped.accounts).toHaveLength(listed);
+        expect(scoped.payables).toHaveLength(payables);
+        expect(listed).toBeGreaterThan(0);
+        expect(payables).toBeGreaterThan(0);
+      }
+      // The scope's settlement read names every account's statements in one key list.
+      const keys = JSON.stringify(accounts.map((account) => [account, "vpass", "2026-09"]));
+      expect(unboundedScans(explain(db, SETTLEMENT_SQL, [keys]))).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  test(
     "no read walks an observation, parse, run or identity table whole",
     () => {
       const date = OPTIONS.today;

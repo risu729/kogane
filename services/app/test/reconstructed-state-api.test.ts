@@ -387,6 +387,46 @@ describe("the agent tool", () => {
     expect(viaMcp.result.structuredContent).toMatchObject(expected);
   });
 
+  it("refuses 21 accounts on the route, the agent path and /mcp with one code and ref (ADR 0116)", async () => {
+    const ids = Array.from({ length: 21 }, (_, index) => `acct-${String(index)}`);
+    const route = await call(
+      `${PATH}?${ids.map((id) => `account=${id}`).join("&")}&from=2026-03-01&to=2026-03-31`,
+    );
+    expect(route.status).toBe(400);
+    expect(await route.json()).toMatchObject({
+      error: "too_many_accounts",
+      refs: ["maxAccounts:20"],
+    });
+    const expected = {
+      schemaVersion: "financial-error-v1",
+      code: "invalid_query",
+      refs: ["refusal:too_many_accounts", "maxAccounts:20"],
+    };
+    const arguments_ = { accounts: ids, from: "2026-03-01", to: "2026-03-31" };
+    const http = await call(TOOL_PATH, {
+      subject: "agent-principal",
+      body: arguments_,
+      environment: granted,
+    });
+    expect(http.status).toBe(400);
+    expect(await http.json()).toMatchObject(expected);
+    // The published schema's maxItems only describes: the service refuses.
+    const viaMcp = (await (
+      await call("/mcp", {
+        subject: "agent-principal",
+        body: {
+          jsonrpc: "2.0",
+          id: 6,
+          method: "tools/call",
+          params: { name: RECONSTRUCTED_STATE_TOOL_NAME, arguments: arguments_ },
+        },
+        environment: granted,
+      })
+    ).json()) as { result: { isError: boolean; structuredContent: Record<string, unknown> } };
+    expect(viaMcp.result.isError).toBe(true);
+    expect(viaMcp.result.structuredContent).toMatchObject(expected);
+  });
+
   it("is neither a tool nor a path where the route is absent, and needs Access", async () => {
     const absent = (await (
       await call("/mcp", {

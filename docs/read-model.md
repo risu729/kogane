@@ -505,7 +505,7 @@ method; `GET /api/v2/reconstructed-state` and the agent tool
 | `KEY_HOLDERS_SQL`, `ALIAS_HOLDERS_SQL`               | every event holding a given (book, key) in any of the view's three sources, or a given (book, alias class)                            |
 | `LEGS_SQL`, `TIMES_SQL`, `EFFECTS_SQL`, `SEALS_SQL`  | the children of the given events                                                                                                      |
 | `COMMITS_SQL`, `SUBJECTS_SQL`, `PINS_SQL`            | the commits seals name; the account each leg subject names; the current revision of `account_mapping:` and `instrument_mapping:` pins |
-| `ACCOUNT_SOURCES_SQL`                                | the sources an account's current mappings come from, for the query's reported-container check                                         |
+| `ACCOUNTS_SOURCES_SQL`                               | the sources each listed account's current mappings come from, for the query's reported-container check                                |
 | `LOT_INSTRUMENT_IDENTIFIERS_SQL` (application, lots) | every identifier any of whose mapping revisions names a given instrument, with whether its current one does (ADR 0059)                |
 
 The closure (supersession both ways, claim holders) repeats until it adds
@@ -521,8 +521,9 @@ CORE schema without table statistics: each reads by primary key or by
 `card_purchase_recognition_keys_key`, `card_settlement_candidates_bank` and
 `card_settlement_decisions_event`; the view's arms are each searched by event
 id. The whole reads left are the JSON argument, the schema catalogue, the
-identity epochs read newest first (one row) and, in `ACCOUNT_SOURCES_SQL`, the
-operator-curated mapping table (no index by account). Two reads grow with
+identity epochs read newest first (one row) and, in `ACCOUNTS_SOURCES_SQL`, the
+operator-curated mapping table, once for the whole scope (no index by account;
+ADR 0116). Two reads grow with
 history: the seed reads every leg ever written on the account, and
 `INSTANT_CUT_SQL` walks the commits made after the instant along the primary
 key (no index orders `known_at`). Measured once on `bun:sqlite`, not
@@ -536,7 +537,7 @@ workerd over a local D1 by `services/app/scripts/reconstructed-state-workerd.ts`
 
 `LOT_INSTRUMENT_IDENTIFIERS_SQL`
 (`packages/application/src/query/lots-on-selection.ts`, ADR 0059) is, like
-`ACCOUNT_SOURCES_SQL`, one pass over a mapping table: no index orders
+`ACCOUNTS_SOURCES_SQL`, one pass over a mapping table: no index orders
 `instrument_mappings` by instrument, and adding one would be a migration. Its
 currency check searches the `(identifier_id, revision)` key, and its plan
 without statistics is tested (one scan of the table, nothing else whole).

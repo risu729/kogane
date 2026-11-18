@@ -279,6 +279,115 @@ describe("coverage", () => {
     ).rejects.toThrow("invalid_query");
   });
 
+  test("on random stores, a one-account list is the `account` read and a scope lists each account's rows as its own read does", async () => {
+    const FOREIGN = {
+      source: SBI.source,
+      dataset: "foreign-cash-positions",
+      parser: "sbi-foreign-cash-positions",
+      version: "0.3.1",
+    };
+    const ACCOUNTS = ["acct-a", "acct-b", "acct-c", "acct-d"];
+    for (let seed = 1; seed <= 100; seed += 1) {
+      let state = seed;
+      const next = () => {
+        state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+        return state / 2_147_483_648;
+      };
+      const pick = <T>(values: readonly T[]): T => values[Math.floor(next() * values.length)]!;
+      const store = new DatedStore();
+      const captures = 3 + Math.floor(next() * 8);
+      for (let index = 0; index < captures; index += 1) {
+        const fetchedAt = `2026-09-${String(1 + Math.floor(next() * 12)).padStart(2, "0")}T0${String(Math.floor(next() * 10))}:00:00Z`;
+        const provider = pick(["p-1", "p-2"]);
+        const kind = pick(["domestic", "foreign", "smbc", "shinsei", "statement"] as const);
+        const account = pick(ACCOUNTS);
+        if (kind === "statement") {
+          const statement = store.statement({
+            card: `card-${provider}`,
+            period: "2026-09",
+            paymentDate: pick(["2026-09-26", "2026-10-26", null]),
+            minor: Math.floor(next() * 50_000),
+            fetchedAt,
+          });
+          if (next() < 0.8) store.identify(statement, "vpass", account, "identified");
+          continue;
+        }
+        const capture =
+          kind === "domestic" || kind === "foreign"
+            ? store.capture({
+                ...(kind === "domestic" ? SBI : FOREIGN),
+                fetchedAt,
+                positions: [
+                  { account: provider, code: pick(["1001", "2002"]), quantity: "3", value: 900 },
+                ],
+              })
+            : store.capture({
+                ...(kind === "smbc" ? SMBC : SHINSEI),
+                fetchedAt,
+                balances: [
+                  {
+                    account: provider,
+                    metric: pick(["account_balance", "activity_current_balance"]),
+                    instrument: "JPY",
+                    minor: next() < 0.2 ? null : Math.floor(next() * 90_000),
+                  },
+                ],
+              });
+        // Now and then a capture no identity run maps to an account.
+        const source = kind === "smbc" ? SMBC : kind === "shinsei" ? SHINSEI : SBI;
+        if (next() < 0.85)
+          store.identify(capture, source.source, account, pick(["identified", "provider-local"]));
+      }
+      const sql = executor(store);
+      const date = `2026-09-${String(5 + Math.floor(next() * 8)).padStart(2, "0")}`;
+      const one = new Map(
+        await Promise.all(
+          [...ACCOUNTS, "acct-none"].map(
+            async (account) => [account, await queryDatedState(sql, { date, account })] as const,
+          ),
+        ),
+      );
+      for (const [account, state] of one)
+        expect([
+          seed,
+          account,
+          { ...(await queryDatedState(sql, { date, accounts: [account] })), filters: null },
+        ]).toEqual([seed, account, { ...state, filters: null }]);
+      const scope = ACCOUNTS.filter(() => next() < 0.6);
+      if (scope.length === 0) continue;
+      const scoped = await queryDatedState(sql, { date, accounts: scope });
+      expect(scoped.accounts.every((entry) => scope.includes(entry.accountId!))).toBe(true);
+      for (const account of scope) {
+        const alone = one.get(account)!;
+        expect([
+          seed,
+          account,
+          scoped.accounts.filter((entry) => entry.accountId === account),
+        ]).toEqual([seed, account, alone.accounts]);
+        expect([
+          seed,
+          account,
+          scoped.payables.filter((entry) => entry.accountId === account),
+        ]).toEqual([seed, account, alone.payables]);
+      }
+      expect(scoped.payables.length).toBe(
+        scope.reduce((sum, account) => sum + one.get(account)!.payables.length, 0),
+      );
+      expect(scoped.snapshots).toEqual(one.get(scope[0]!)!.snapshots);
+      expect(scoped.coverage.containersWithoutSnapshot).toEqual(
+        one.get(scope[0]!)!.coverage.containersWithoutSnapshot,
+      );
+      expect(scoped.coverage.excludedRows.reduce((sum, row) => sum + row.count, 0)).toBe(
+        scope.reduce(
+          (sum, account) =>
+            sum +
+            one.get(account)!.coverage.excludedRows.reduce((total, row) => total + row.count, 0),
+          0,
+        ),
+      );
+    }
+  }, 60_000);
+
   test("the context id is a digest of the manifest", async () => {
     const executorFor = executor(holdings());
     const first = await queryDatedState(executorFor, { date: "2026-09-10" });
