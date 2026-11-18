@@ -19,8 +19,10 @@
     },
     {
       // The Workers toolchain is version-coupled: wrangler, its runtime and the
-      // test runtime have to move together or the dry runs disagree.
-      matchPackageNames: ["wrangler", "miniflare", "@cloudflare/**"],
+      // test runtime have to move together or the dry runs disagree. cf checks
+      // the installed wrangler before it builds (cf 1.0.0-rc.0 needs wrangler
+      // 4.163.0, which cf 1.0.0-beta.32 cannot build with), so it moves too.
+      matchPackageNames: ["wrangler", "miniflare", "@cloudflare/**", "cf"],
       groupName: "cloudflare workers",
       addLabels: ["workers"],
     },
