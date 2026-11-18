@@ -44,8 +44,13 @@ export const BALANCE_PROJECTION_RELEASE = "balance-projection-v1";
  * acceptance; v1 read every stored row. The release is part of the build
  * digest, so the first tick after a deploy captures afresh instead of serving
  * a v1 snapshot as current (ADR 0001's amendment of 2026-11-06).
+ *
+ * v3: adoption reads `same` as an equivalence, so two scopes each accepted as
+ * the same account as a third are one measurement whatever the candidate
+ * order; v2's grouping depended on the order and could adopt two of them
+ * (INV06; ADR 0001's amendment of 2026-11-18).
  */
-export const SCOPE_RELATION_RELEASE = "scope-relations-v2";
+export const SCOPE_RELATION_RELEASE = "scope-relations-v3";
 /** The disjointness the policy asserts, and the evidence it rests on. */
 export const DISJOINT_ACCOUNTS_POLICY = "distinct-identified-accounts-v2";
 

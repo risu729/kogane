@@ -156,6 +156,54 @@ describe("selectAdoptedSet", () => {
     expect(tie.adopted).toEqual([]);
   });
 
+  test("same is an equivalence: two routes that are each the same as a third are one measurement (INV06)", () => {
+    // a ≡ c and b ≡ c, with no claim between a and b. Read a, b, c, a
+    // first-match grouping put b in a group of its own beside {a, c} and
+    // adopted both representatives: 200 for a 100 balance, `complete`.
+    const candidates = [
+      candidate("a", "s:a", "100", { authorityRank: 1 }),
+      candidate("b", "s:b", "100", { authorityRank: 1 }),
+      candidate("c", "s:c", "100"),
+    ];
+    const claims = [relation("s:a", "s:c", "same"), relation("s:b", "s:c", "same")];
+    const result = selectAdoptedSet(target, candidates, claims);
+    expect(result.adopted.map((a) => a.ref)).toEqual(["c"]);
+    expect(result.excluded).toEqual([
+      { ref: "a", reasonCode: "duplicate_evidence" },
+      { ref: "b", reasonCode: "duplicate_evidence" },
+    ]);
+    expect(quantityText(result.adoptedTotal)).toBe("100");
+    expect(result.completeness).toBe("complete");
+    // Every input order and claim order gives the same answer.
+    const orders = [
+      [0, 1, 2],
+      [0, 2, 1],
+      [1, 0, 2],
+      [1, 2, 0],
+      [2, 0, 1],
+      [2, 1, 0],
+    ];
+    for (const order of orders) {
+      const permuted = order.map((position) => candidates[position]!);
+      expect(selectAdoptedSet(target, permuted, claims)).toEqual(result);
+      expect(selectAdoptedSet(target, permuted, [...claims].reverse())).toEqual(result);
+    }
+    // A disagreeing member anywhere in the chain leaves the whole component a
+    // conflict, never one side adopted next to the other.
+    const conflict = selectAdoptedSet(
+      target,
+      [candidates[0]!, candidate("b", "s:b", "90", { authorityRank: 1 }), candidates[2]!],
+      claims,
+    );
+    expect(conflict.adopted).toEqual([]);
+    expect(conflict.adoptedTotal).toBeNull();
+    expect(conflict.unresolved).toEqual([
+      { ref: "a", reasonCode: "conflicting_evidence" },
+      { ref: "b", reasonCode: "conflicting_evidence" },
+      { ref: "c", reasonCode: "conflicting_evidence" },
+    ]);
+  });
+
   test("a total and its breakdown are alternatives; preference chooses, mismatch adopts neither", () => {
     const candidates = [
       candidate("p1", "s:p1", "60"),

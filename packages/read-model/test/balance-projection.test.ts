@@ -198,6 +198,50 @@ describe("balance projection builder", () => {
     expect(sc06.expected.unresolved).toEqual({ "m-mf-line-1": "overlap_unknown" });
   });
 
+  test("two routes each accepted as the same account as a third are one measurement (INV06)", () => {
+    // A reviewer accepted `same_account` for each of two second routes against
+    // one direct account, and nothing between the two routes. Read in scope
+    // key order (route 1, route 2, direct), the first-match grouping put route
+    // 2 apart from {route 1, direct} and adopted both route 2 and the direct
+    // reading: one balance twice in the adopted set and the subtotal.
+    const route = (scopeKey: string, subject: string) =>
+      deposit(scopeKey, subject, "100000", {
+        subjectStatus: "unresolved",
+        sourceId: "sbi-shinsei-bank",
+        parser: "sbi-shinsei-top-balances-and-activity@1",
+        parserName: "sbi-shinsei-top-balances-and-activity",
+        sourceAccount: `synthetic:${scopeKey}`,
+        authorityRank: AUTHORITY_RANKS.aggregator,
+      });
+    const relations = scopeRelationsFromEntityRelations(
+      ["source_account:route:1", "source_account:route:2"].map((from, index) => ({
+        id: `relation:synthetic:${String(index)}`,
+        kind: "same_account",
+        from_ref: from,
+        to_ref: "source_account:direct:shared",
+        status: "accepted",
+        decision_revision_id: `rev:synthetic:${String(index)}`,
+      })),
+    );
+    const build = buildBalanceProjection(
+      [
+        route("m-route-1", "source_account:route:1"),
+        route("m-route-2", "source_account:route:2"),
+        deposit("m-shared", "source_account:direct:shared", "100000"),
+      ],
+      relations,
+    );
+    expect(stateOf(build, "m-shared").state).toBe("adopted");
+    for (const scopeKey of ["m-route-1", "m-route-2"])
+      expect(stateOf(build, scopeKey)).toMatchObject({
+        state: "excluded",
+        reasonCode: "duplicate_evidence",
+      });
+    expect(
+      build.rows.filter((row) => row.state === "adopted").map((row) => row.quantityCoefficient),
+    ).toEqual(["100000"]);
+  });
+
   test("a provider-local Mizuho account adopts as before and never sums with an aggregator line", () => {
     // Identity policy 2 moved Mizuho ordinary deposits from `unresolved` to
     // `provider-local`. Adoption and overlap must not change: two accounts the

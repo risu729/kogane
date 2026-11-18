@@ -2,8 +2,10 @@
 
 - Status: accepted (implementation step A01); the
   [2026-11-06 amendment](#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision)
-  is accepted (owner approved 2026-11-07 13:39 UTC)
-- Date: 2026-09-09; amended 2026-11-06
+  is accepted (owner approved 2026-11-07 13:39 UTC); the
+  [2026-11-18 amendment](#amendment-2026-11-18-same-is-an-equivalence-in-adoption)
+  is proposed
+- Date: 2026-09-09; amended 2026-11-06 and 2026-11-18
 - Review basis: whole-architecture addendum 00, 04 (AR01–AR18), 05, 06, 13 §1–§3
   of the design review of commit `130912af`
 
@@ -350,3 +352,85 @@ decided triples onto one reference, read in linear time and equal to the
 model. The suite fails when the ranking drops the decision precedence, the
 `id` tie-break, the `to_ref` or `kind` partition, the `id` order or the bound
 (mutations run by hand in review).
+
+## Amendment 2026-11-18: `same` is an equivalence in adoption
+
+- Status: proposed
+- Date: 2026-11-18
+- Carried by: `selectAdoptedSet` (step 4) in `packages/domain/src/scope.ts`,
+  `SCOPE_RELATION_RELEASE` (`scope-relations-v3`) in
+  `packages/read-model/src/balance-projection.ts`,
+  [domain contracts](../domain-contracts.md#scopets--what-set-a-number-covers-and-adoption),
+  [balance read model](../balance-read-model.md#how-a-row-gets-its-state)
+
+### Context
+
+Step 4 of `selectAdoptedSet` bundles the candidates of one measurement:
+those whose scopes a `same` claim joins. It walked the candidates in ref
+order and put each one into the first existing group holding a member that
+was `same` as it, or into a new group. That rule depends on the order. With
+`a ≡ c` and `b ≡ c` and no claim between `a` and `b`, read in the order
+`a, b, c`, `a` opened a group, `b` opened a second one (it is not `same` as
+`a`), and `c` joined the first. Each group then had a representative: `c`
+(the better rank) for `{a, c}` and `b` for `{b}`. Step 7 skips `same`
+pairs, on the premise that step 4 settled them, so `b` and `c` were both
+adopted: one balance twice in the adopted set, the known-assets subtotal and
+`holdings`, with `completeness: "complete"` (INV06). In another order the
+same input adopted one of them.
+
+In the balance projection the claims are accepted `same_account` relations,
+which a person or an MCP client decides through the change lifecycle
+(`relation.accept`); no rule proposes one. Two such acceptances that share a
+scope (two second routes, each accepted as the same account as one direct
+account) are enough. Whether production holds such a pair was not checked.
+
+### Options considered
+
+1. **Keep first-match grouping.** Rejected: the answer depends on candidate
+   order and can count one measurement twice.
+2. **Leave a scope that is `same` as members of two groups unresolved.**
+   Rejected: `same` means one measurement, so its closure is already what
+   the claims say; refusing it would turn agreeing evidence into an unknown
+   for no reason.
+3. **A group is a connected component of `same` claims.** Chosen. It is
+   order-independent, and it is what the first-match rule already did in the
+   orders where it worked.
+
+### Decision
+
+- Step 4 groups the live candidates (the target's metric and unit, exact,
+  complete coverage) into the connected components of their `same` claims.
+  A component whose members agree keeps its best-ranked member and excludes
+  the rest as `duplicate_evidence`; a component whose members disagree is
+  `conflicting_evidence` as a whole, or resolved by rank under
+  `prefer-lowest-rank`, as before. Every other step is unchanged.
+- A component may hold two members that another claim calls `disjoint`,
+  `subset` or `overlaps` (contradictory claims); they are still one
+  measurement, as the first-match rule already made them in some orders.
+- The rule changes what the projection makes of an input, so the scope
+  relation release moves to `scope-relations-v3`, which is part of the build
+  digest and the stored input manifest.
+
+### Consequences
+
+- No migration and no operator step. After deploy the build digest differs,
+  so the first projection tick builds and publishes a new snapshot, as for
+  the 2026-11-06 amendment. An operator can confirm it with an aggregate read
+  of the READ database: the active snapshot's `input_manifest_json` names
+  `scope-relations-v3`.
+- An input whose `same` claims form no chain of three or more scopes adopts
+  exactly what it adopted before. A chain now adopts one member, or none when
+  its members disagree.
+- `selectAdoptedSet` still compares candidates pairwise, within the 250-scope
+  build bound (`ADOPTION_SUBJECT_BOUND`).
+
+### Verification
+
+Synthetic data only. `packages/domain/test/scope.test.ts` ("same is an
+equivalence") adopts one of three scopes joined by two `same` claims, in all
+six candidate orders and both claim orders, and leaves the whole chain a
+conflict when one member disagrees; it fails on the first-match rule (200
+adopted for a balance of 100). `packages/read-model/test/balance-projection.test.ts`
+("two routes each accepted as the same account as a third") builds the
+projection from two accepted `same_account` rows and fails on the first-match
+rule, which adopted one route next to the direct account.

@@ -69,13 +69,17 @@ writer fencing and captured CORE references; the contract is in
    (kind, `from_ref`, `to_ref`): its newest decision (`accepted`, `rejected`
    or `released`) by `created_at` and then `id`, newest first, or, for a
    triple with no decision, its newest proposal (`projectionRelationsSql` in
-   `packages/read-model/src/balance-projection-sql.ts`; scope relation
-   release `scope-relations-v2`,
+   `packages/read-model/src/balance-projection-sql.ts`;
    [ADR 0001's amendment](adr/0001-domain-axes.md#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision)).
    A `relation.reject` after a `relation.accept` withdraws the acceptance, a
    later acceptance overrides an earlier rejection, and a later proposal
    changes nothing. The validity window (`valid_from`, `valid_to`) is not
    read.
+   Adoption reads `same` as an equivalence: two scopes each accepted as the
+   same account as a third are one measurement with it, so at most one of
+   the three is adopted whatever order the candidates come in (scope
+   relation release `scope-relations-v3`,
+   [ADR 0001's amendment of 2026-11-18](adr/0001-domain-axes.md#amendment-2026-11-18-same-is-an-equivalence-in-adoption)).
 5. **Disjointness policy** (`distinct-identified-accounts-v2`). Within one
    source, two distinct non-aggregate scopes are disjoint, because the
    provider listed them as separate accounts. Across sources, identified

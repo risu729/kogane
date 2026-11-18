@@ -316,15 +316,32 @@ export function selectAdoptedSet(
     else live.push(candidate);
   }
 
-  // Step 4: bundle evidence of the same measurement.
-  const groups: MeasureCandidate[][] = [];
-  for (const candidate of live) {
-    const group = groups.find((members) =>
-      members.some((member) => index.relation(member.scopeRef, candidate.scopeRef) === "same"),
-    );
-    if (group) group.push(candidate);
-    else groups.push([candidate]);
+  // Step 4: bundle evidence of the same measurement. `same` is an
+  // equivalence, so a group is a connected component of `same` claims, not
+  // the first group one member of which is `same` as the candidate: with
+  // `a ≡ c` and `b ≡ c` read in the order a, b, c, that first-match rule left
+  // b in a group of its own beside {a, c}, and both representatives were
+  // adopted for one measurement (INV06). Components are merged in ref order,
+  // so the grouping does not depend on the input order.
+  const parent = live.map((_, position) => position);
+  const root = (position: number): number => {
+    let at = position;
+    while (parent[at] !== at) at = parent[at]!;
+    return at;
+  };
+  for (const [left, a] of live.entries())
+    for (const [offset, b] of live.slice(left + 1).entries())
+      if (index.relation(a.scopeRef, b.scopeRef) === "same") {
+        const [x, y] = [root(left), root(left + 1 + offset)];
+        if (x !== y) parent[Math.max(x, y)] = Math.min(x, y);
+      }
+  const components = new Map<number, MeasureCandidate[]>();
+  for (const [position, candidate] of live.entries()) {
+    const members = components.get(root(position)) ?? [];
+    members.push(candidate);
+    components.set(root(position), members);
   }
+  const groups = [...components.values()];
   const representatives: MeasureCandidate[] = [];
   for (const group of groups) {
     const ranked = [...group].sort((a, b) => a.authorityRank - b.authorityRank || byRef(a, b));
@@ -405,8 +422,9 @@ export function selectAdoptedSet(
   }
 
   // Step 7: everything adopted must be explicitly disjoint from every other
-  // contender still in play (adopted or unresolved). `same`, `subset` and
-  // `superset` were settled in steps 4–5; `overlaps` and unknown relations leave
+  // contender still in play (adopted or unresolved). `same` (every `same`
+  // claim joins one step-4 component), `subset` and `superset` were settled
+  // in steps 4–5; `overlaps` and unknown relations leave
   // the candidate with the worse authority rank unresolved, and equal ranks
   // leave both unresolved. Unknown is never read as disjoint (INV06).
   const contenders = sorted.filter(
