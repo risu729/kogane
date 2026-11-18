@@ -50,6 +50,7 @@ import {
 } from "../../../packages/application/src/query/reported-state-read.ts";
 import { readReportedState } from "./reported-state-api";
 import { mcpInputSchema } from "./mcp-input-schema";
+import { catalogueTool } from "./read";
 
 /**
  * `kogane.reported-state.read` (plan D5): `GET /api/v2/reported-state` for an
@@ -228,7 +229,20 @@ export function readMcpTools(
     }
   });
 }
-export async function callReadTool(
+/**
+ * Call one read tool for `grant`. A store failure inside its read is its
+ * route's `503 catalogue_read_failed`, answered as the tool's result.
+ */
+export function callReadTool(
+  name: ReadToolName,
+  body: unknown,
+  env: Env,
+  grant: Grant,
+): Promise<ToolResult> {
+  return catalogueTool(() => readTool(name, body, env, grant));
+}
+
+async function readTool(
   name: ReadToolName,
   body: unknown,
   env: Env,

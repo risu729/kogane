@@ -780,6 +780,7 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
         return typeof value === "function" ? value.bind(target) : value;
       },
     });
+    // A proposal writes: its store failure is an exception, not a read's 503.
     const thrown = await call("/mcp", {
       via: "mcp",
       subject: AGENT,
@@ -787,7 +788,17 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
         jsonrpc: "2.0",
         id: 1,
         method: "tools/call",
-        params: { name: "kogane.financial.query", arguments: { intent: "activity" } },
+        params: {
+          name: "kogane.reconcile.propose",
+          arguments: {
+            kind: "same_account",
+            from: `source_account:${sourceAccounts[0]}`,
+            to: `source_account:${sourceAccounts[1]}`,
+            evidenceRefs: [`fetch_artifact:${artifactId}`],
+            reason: "synthetic proposal while the store fails",
+            method: "ai",
+          },
+        },
       },
       headers: MCP_HEADERS,
       environment: { DB: failing },
@@ -799,9 +810,38 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
         subject: AGENT,
         principal: MCP_AGENT,
         principalKind: "agent",
-        operation: "financial.query",
+        operation: "reconcile.propose",
         result: "failed",
         resultCode: "internal_error",
+      },
+    ]);
+    // A read tool answers its store failure as its route does, as its result,
+    // and is recorded once with that code (ADR 0081, amendment of 2026-11-18).
+    const read = await call("/mcp", {
+      via: "mcp",
+      subject: AGENT,
+      body: {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "kogane.financial.query", arguments: { intent: "activity" } },
+      },
+      headers: MCP_HEADERS,
+      environment: { DB: failing },
+    });
+    expect(read.response.status).toBe(200);
+    expect(await read.response.json()).toMatchObject({
+      result: { isError: true, structuredContent: { error: "catalogue_read_failed" } },
+    });
+    expect((await recordsOf(read.requestId)).map(brief)).toEqual([
+      {
+        path: "mcp",
+        subject: AGENT,
+        principal: MCP_AGENT,
+        principalKind: "agent",
+        operation: "financial.query",
+        result: "failed",
+        resultCode: "catalogue_read_failed",
       },
     ]);
   });

@@ -492,7 +492,7 @@ expired confirmation on an expired plan is `confirmation_expired`.
 
 ## Amendment: no card settlement page offers a next page its budget refuses (2026-11-08)
 
-- Status: proposed
+- Status: accepted (merged 2026-11-10 in [#1274](https://github.com/risu729/kogane/pull/1274))
 - Date: 2026-11-08
 
 ### Context
@@ -579,3 +579,110 @@ the grouped and unmatched pagers, the disabled button and the accessibility
 audit, and `apps/web/test/card-settlement-contract.test.ts` and
 `packages/observation-shared/test/card-statements-unmatched-contract.test.ts`
 the validators.
+
+## Amendment: a read tool's store failure is its route's answer (2026-11-18)
+
+- Status: proposed
+- Date: 2026-11-18
+
+### Context
+
+The Worker runs every UI read route in `catalogue` (`services/app/src/read.ts`),
+so a store failure inside a route's read is `503 catalogue_read_failed`. The
+MCP page reads (`page-read-tools.ts`) run their route's reader the same way
+and answer that code as the tool's result. Since 2026-11-08 the checks that a
+read's tables exist answer it too, on the route and on both agent paths. The
+other read tools did not: once their check passed, a store failure inside the
+read was an exception. On `/api/agent/v1/*` it was `500 internal_error`; on
+`/mcp` the SDK's answer was replaced by the Worker's `500 internal_error`
+for the whole request. The UI route over the same service answered `503
+catalogue_read_failed`. [Agent API](../agent-api.md) recorded this as a
+limit. It covered every read tool with a UI route outside the page reads:
+the card settlement reads, the purchase explanation, the reported and
+reconstructed state, the identity and audit reads, economic readiness and the
+shared query.
+
+Point 2 asks the route and the tool to answer alike, since both are adapters
+over one service. Here they did not. An MCP client got a failed request where
+the page got a closed, retryable code.
+
+### Options considered
+
+1. **Keep the limit.** The exception is logged with a closed code and nothing
+   leaks, but the two paths disagree. A client cannot tell a transient store
+   failure from a bug, and on `/mcp` it gets no tool result.
+2. **Answer the whole request `503 catalogue_read_failed`**, as a failing
+   table check does. The paths would share the code, but on `/mcp` a store
+   failure inside a read would still not be a tool result. A page read already
+   answers the same failure as a tool result, so two read tools would differ
+   in shape.
+3. **Run each read tool's read in `catalogue` and answer the code as the
+   tool's result (chosen)**, as the page reads do.
+
+### Decision
+
+Option 3. `catalogueTool` in `services/app/src/read.ts` runs a read tool's
+read in `catalogue`, the function the Worker wraps each route in. Any
+`HttpError` the read ends in becomes the tool's result: `{ status, body:
+{ error } }`. A store failure is `503 catalogue_read_failed`, an `isError:
+true` result on `/mcp` and that status and body on `/api/agent/v1/*`. The
+failure's text is dropped, and the call is recorded once as `failed` with
+that code. `callReadTool` (`read-tools.ts`) runs every tool of its file
+through it. `callTool` (`agent-service.ts`) runs `kogane.capabilities`,
+`.context.open`, `.financial.query`, `.explain`, `.instruments.candidates`,
+`.purchases.explain` and `.reconstructed-state.read` through it.
+`kogane.reconcile.propose` is left out: it writes a proposal, so a failure
+there is not a read's. It stays an exception, `500 internal_error`.
+
+A refusal a read raises as an `HttpError` is answered the same way, with its
+status and code alone. An example is the observation reader's `413
+result_limit_exceeded` past 5,000 rows, which the shared query, the context
+and the explanation can raise. Before, on `/mcp` such a refusal was the
+whole request's answer with that status. `callReadTool` and the page reads
+already answered theirs as results.
+
+A read whose service answers its own store failure keeps that answer:
+`kogane.economic-readiness.read` is `503` with `readiness_store_unavailable`
+on its route and its tool alike, as before. The schedule reads and the
+operations tools are out of scope too. Their routes (`/api/ops/v1/*`) are not
+run in `catalogue`, so route and tool already agree.
+
+### Consequences
+
+- A client reads a store failure inside any read tool as a tool result with
+  a closed code it can retry, the same code the page shows. Before, it got a
+  failed request.
+- The request log line of such a call carries the transport's status (`200`
+  on `/mcp`, `503` on the HTTP path) and no `errorCode`, as for a page read;
+  the audit record carries `catalogue_read_failed`. Before, the line carried
+  `500 internal_error`.
+- As on the routes, `catalogue` does not tell a store failure from a bug
+  inside the read: an unexpected exception there is also `503
+  catalogue_read_failed`. Nothing of it reaches the answer, log or record.
+- An exception outside a read tool's read is still the Worker's `500
+  internal_error`. That covers a proposal, an operations or decision tool,
+  and the dispatcher or SDK itself (ADR 0047). So does a failure of the
+  delegation figures `kogane.capabilities` adds for an MCP client after its
+  read.
+- No wire field is added. The change is the status and code of an answer that
+  was a failed request; the owner approves it before this merges.
+
+### Verification
+
+`services/app/test/agent-read-store-failure.test.ts` covers every read tool
+outside the page reads; a guard fails when a tool is added without being
+covered. Its store fails every statement except the audit record's writes
+and the table checks; for `kogane.capabilities`, whose only reads are those
+checks, the checks fail too. Each tool must then answer `503
+catalogue_read_failed` on `/api/agent/v1/*` and as an `isError: true` result
+on `/mcp`, and its UI route, where one exists, answers the same code. The
+economic readiness tool must answer its route's own `503` body. Each call
+must be recorded once, `failed` with that code, and the failure's text must
+reach no answer, log line or record. A proposal under the same store must
+stay `500 internal_error`. `catalogueTool` must answer a raised `413
+result_limit_exceeded` with that status and code alone. Before the fix, the
+test of every tool but economic readiness failed (19 of 20); the coverage
+guard and the proposal passed. `test/mcp-client.test.ts` (G3-08) now throws through a proposal in
+both eras and on the HTTP path, and checks a read's tool result in both eras.
+`test/audit.test.ts` records the proposal's exception once and the read's
+`catalogue_read_failed` once.

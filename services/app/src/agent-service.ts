@@ -56,6 +56,7 @@ import type { OperationCall } from "../../../packages/application/src/audit/call
 
 import { callReadTool, isReadToolName, type ReadToolName } from "./read-tools";
 import { callPageReadTool, isPageReadToolName, type PageReadToolName } from "./page-read-tools";
+import { catalogueTool } from "./read";
 
 /** The tools every configured deployment serves. */
 export const AGENT_TOOL_NAMES = [
@@ -163,6 +164,12 @@ async function resultRef(value: unknown): Promise<string> {
   return `result:${await canonicalDigest(value)}`;
 }
 
+/** The tools of this file that only read: each runs as its route does, in `catalogue`. */
+type AgentReadToolName = Exclude<
+  AgentToolName,
+  ReadToolName | PageReadToolName | "kogane.reconcile.propose"
+>;
+
 export async function callTool(
   name: AgentToolName,
   body: unknown,
@@ -170,6 +177,35 @@ export async function callTool(
 ): Promise<ToolResult> {
   if (isReadToolName(name)) return callReadTool(name, body, context.env, context.grant);
   if (isPageReadToolName(name)) return callPageReadTool(name, body, context.env, context.grant);
+  // A proposal writes: a store failure there is not a read's, and stays the
+  // Worker's `500 internal_error`.
+  if (name === "kogane.reconcile.propose") return proposeTool(body, context);
+  // Every other tool here reads, and a store failure inside its read is its
+  // route's `503 catalogue_read_failed`, answered as the tool's result.
+  return catalogueTool(() => agentRead(name, body, context));
+}
+
+async function proposeTool(body: unknown, context: ToolContext): Promise<ToolResult> {
+  const parsed = parseProposalRequest(body, context.grant.budget.maxProposalTargets);
+  if (!parsed.ok) return failure(parsed.code, "reconcile.propose", parsed.refs);
+  const overview = await context.reader.overview();
+  const opened = await openContext(context.grant, await contextInputs(context, overview));
+  const outcome = await proposeReconciliation({
+    grant: context.grant,
+    opened,
+    store: commandProposalStore(d1CommandStore(context.db), context.audit),
+    request: parsed.value,
+    now: context.now,
+  });
+  if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+  return { status: 200, body: outcome.receipt };
+}
+
+async function agentRead(
+  name: AgentReadToolName,
+  body: unknown,
+  context: ToolContext,
+): Promise<ToolResult> {
   switch (name) {
     case "kogane.capabilities": {
       if (body !== undefined && body !== null && Object.keys(body as object).length > 0)
@@ -226,21 +262,6 @@ export async function callTool(
       });
       if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       return { status: 200, body: outcome.graph };
-    }
-    case "kogane.reconcile.propose": {
-      const parsed = parseProposalRequest(body, context.grant.budget.maxProposalTargets);
-      if (!parsed.ok) return failure(parsed.code, "reconcile.propose", parsed.refs);
-      const overview = await context.reader.overview();
-      const opened = await openContext(context.grant, await contextInputs(context, overview));
-      const outcome = await proposeReconciliation({
-        grant: context.grant,
-        opened,
-        store: commandProposalStore(d1CommandStore(context.db), context.audit),
-        request: parsed.value,
-        now: context.now,
-      });
-      if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
-      return { status: 200, body: outcome.receipt };
     }
     case "kogane.instruments.candidates": {
       // The candidate review of the identity page, under this caller's grant:

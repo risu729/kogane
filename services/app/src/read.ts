@@ -1,4 +1,5 @@
 import type { EvidenceArtifactRow } from "../../../packages/application/src/query/evidence-catalogue.ts";
+import type { ToolResult } from "./agent-service";
 import { HttpError } from "./http";
 
 export async function catalogue<T>(operation: () => Promise<T>): Promise<T> {
@@ -7,6 +8,23 @@ export async function catalogue<T>(operation: () => Promise<T>): Promise<T> {
   } catch (error) {
     if (error instanceof HttpError) throw error;
     throw new HttpError(503, "catalogue_read_failed");
+  }
+}
+
+/**
+ * A read tool's own read, run as the Worker runs the tool's route: in
+ * `catalogue`, so a store failure is the route's `503 catalogue_read_failed`.
+ * The tool answers it, as any `HttpError` its read ends in, as its result
+ * (`isError: true` on `/mcp`), never as an exception of the whole request, and
+ * the failure's text reaches neither the answer nor the log (ADR 0081,
+ * amendment of 2026-11-18).
+ */
+export async function catalogueTool(read: () => Promise<ToolResult>): Promise<ToolResult> {
+  try {
+    return await catalogue(read);
+  } catch (error) {
+    if (!(error instanceof HttpError)) throw error;
+    return { status: error.status, body: { error: error.code } };
   }
 }
 
