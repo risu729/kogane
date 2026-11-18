@@ -13,8 +13,7 @@ const allTargets = order.workers.filter((worker) => worker.deployBackend === "cf
 const containerNames = CONTAINER_TARGETS.map((target: { name: string }) => target.name);
 const targets = allTargets.filter((worker) => !containerNames.includes(worker.name));
 const triggerSynchronized = (target: (typeof targets)[number]) =>
-  target.productionStrategy === "deploy" ||
-  ["app", "processor", "prestia-bank-worker"].includes(target.name);
+  target.productionStrategy === "deploy";
 const workflow = readFileSync(`${REPO_ROOT}/.github/workflows/_deploy-workers.yml`, "utf8");
 const steps = workflowSteps(workflow);
 const camel = (value: unknown): any =>
@@ -76,7 +75,7 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       "app",
     ]);
   });
-  test("App, Processor, PRESTIA and full-deploy Workers opt into trigger synchronization", async () => {
+  test("full-deploy Workers opt into trigger synchronization", async () => {
     const opted = targets.filter((target) =>
       steps
         .find((step) => step.body.includes(`id: cf-deploy-${target.name}\n`))

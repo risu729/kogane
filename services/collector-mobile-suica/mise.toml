@@ -39,7 +39,7 @@ description = "Build and validate the prebuilt cf production artifact without cr
 depends = ["//services/collector-mobile-suica:types"]
 run = [
 	"./node_modules/.bin/cf build --mode production",
-	"./node_modules/.bin/cf workers versions create --prebuilt --mode production --worker kogane-mobile-suica-collector-poc --dry-run",
+	"./node_modules/.bin/cf deploy --prebuilt --mode production --worker kogane-mobile-suica-collector-poc --dry-run",
 ]
 
 [tasks."cf-typecheck"]

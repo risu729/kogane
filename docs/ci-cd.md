@@ -129,14 +129,16 @@ the `cf` pin in `package.json` and the pinned
 `wrangler-deploy-action` v3 (no step uses `worker-preview`). ADR 0040's
 2026-11-13 amendment (proposed) proposes moving them to `cf deploy` in three phases,
 because `cf workers versions create` never applies declared `observability`.
-Phase 1, PRESTIA, uses `production-strategy: deploy`; the other thirteen still
+Phases 1 (PRESTIA) and 2 (the other Workers on cf's versions-API path except
+V Point and V Point Pay, including Processor and the App)
+use `production-strategy: deploy`; only V Point and V Point Pay, phase 3, still
 use the versions strategy. Their native
 `cloudflare.config.ts` and
 `wrangler.config.ts` retain the canonical Wrangler settings; parity guards
 cover bindings, variables, observability, assets and the two already-declared
 V Point exports. Existing Wrangler tests, bundles and dry runs remain, with
-credential-free cf builds and prebuilt dry runs added: version uploads, and
-`cf deploy` for PRESTIA.
+credential-free cf builds and prebuilt dry runs added: `cf deploy`, and version
+uploads for V Point and V Point Pay.
 
 The three Container deployments (GlobalPass, SBI Shinsei, St.George) use the
 pinned Action's full-deploy strategy under [ADR 0043](adr/0043-cf-container-deployment.md),
@@ -166,11 +168,12 @@ actual artifacts; before publication the live migration tag must match the
 latest canonical tag, and after publication all active namespace IDs must
 match the captured baseline. A refused check prints only its closed `cf_do_…`
 code, and an unexpected error prints `cf_do_internal_error`. Pending DO
-lifecycle work requires a separate Wrangler rollout. Processor opts into trigger synchronization on the
-versions strategy and preserves its Queue consumer settings. The full-deploy
-steps (the three Container owners and PRESTIA) explicitly consent to
-synchronization, which `cf deploy` performs itself; PRESTIA applies workers.dev
-(on by default without routes or domains) and its checked-in previewUrls:false.
+lifecycle work requires a separate Wrangler rollout. Every full-deploy step
+explicitly consents to trigger synchronization, which `cf deploy` performs
+itself: Processor keeps its Queue consumer settings and its declared
+workersDev:false, the App its declared workersDev:true and Custom Domain under
+the Action's domain guard, and the collectors workers.dev (on by default without
+routes or domains) with their checked-in previewUrls:false.
 All 17 deployed Workers keep ADR 0039's order and the authenticated
 App/Processor release and schema postcheck.
 
@@ -224,11 +227,12 @@ partial failure and resume accounting. Exactly one backend runs per target.
 The release sha is stamped before building, so both deployment artifacts carry
 the same identity. The manifest digests the native source and build config and
 every file in cf Build Output, including assets and Worker metadata. It is
-rechecked before the first upload. v2 uploads that prebuilt artifact, deploys
-the returned version at 100%, and reads that exact deployment back. Trigger
-synchronization is disabled for the other code-only Workers. Processor and
-the full-deploy Workers (the three Container owners and PRESTIA) explicitly
-enable it as described above. No preview lane, route/domain addition or bank-secret synchronization
+rechecked before the first upload. For V Point and V Point Pay the Action uploads
+that prebuilt artifact, deploys the returned version at 100%, and reads that
+exact deployment back; the full-deploy Workers publish it with `cf deploy`. Trigger
+synchronization is disabled for the versions-strategy Workers (V Point and
+V Point Pay). The full-deploy Workers explicitly enable it as described above.
+No preview lane, route/domain addition or bank-secret synchronization
 is introduced.
 
 ### What the release job does, in order
@@ -462,15 +466,16 @@ first upload; a difference names the field that moved and stops the deployment.
 That is what the pipeline can honestly assert: **nothing changed between the
 build that was validated and the upload that was performed**.
 
-The thirteen cf Workers upload their validated prebuilt artifacts. The manifest also
+The cf Workers upload their validated prebuilt artifacts. The manifest also
 hashes each native source and build configuration and every cf build-output file,
 including Worker metadata, modules, maps and App assets. Missing metadata or an
-empty entry module fails before upload. The pinned v2 Action creates one version,
-deploys that exact version at 100%, and reads the allocation back.
+empty entry module fails before upload. Full-deploy Workers run `cf deploy` and
+the pinned Action reads the exact active deployment and the declared
+observability settings back; V Point and V Point Pay still create one version,
+deploy that exact version at 100%, and read the allocation back.
 
-The three v1 Workers still re-bundle during deployment, so their recorded bundle
-digest proves the validated build identity and unchanged inputs. The Workers API
-does not expose the uploaded script's content digest. The existing
+The Workers API does not expose the uploaded script's content digest, so the
+recorded digests prove the validated build identity and unchanged inputs. The existing
 `<short>:bundle` tasks retain reproducible Wrangler bundles for all Workers, and
 the manifest's deterministic hashes and tamper checks remain covered offline.
 
