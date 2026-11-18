@@ -1061,7 +1061,7 @@ rows of `infra/bootstrap/ingest-clients.sql`, which an operator applies by hand
 those rows were applied on 2026-11-11 (11:10 UTC). The collection scan registered
 the stored run on 2026-11-12 (07:50 UTC) as fetch run 1673, and its one
 balance-summary artifact was parsed and published. The operation itself reads
-`failed` with `publication_not_observed`, because its 24-hour window ended first.
+`failed` with `publication_not_observed`, because its 48-hour publication horizon ended first.
 No new login was needed. Enabling the daily alarm is the next, separate step.
 The remaining connections (`prestia-globalpass`, `sbi-shinsei`, `vpass`,
 `mizuho-bank`, `vpoint`) come after their open fixes. `mobile-suica` and
