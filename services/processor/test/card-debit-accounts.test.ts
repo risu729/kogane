@@ -470,6 +470,73 @@ test("a grant without records.read or the whole store is refused before anything
   }
 });
 
+test("more cards than the bound are said, never listed as a complete answer", async () => {
+  const statement = (n: number) => ({
+    id: n,
+    parse_run_id: n,
+    source_id: "vpass",
+    source_account: `vpass:card-${String(n).padStart(3, "0")}`,
+    unit_ref: "JPY",
+    value_status: "exact",
+    coefficient: "0",
+    scale: 0,
+    payment_date: "2098-01-10",
+    as_of: null,
+    period: "2098-01",
+    account_id: null,
+    owner_ref: null,
+    evidence_refs_json: null,
+  });
+  const candidate = (sourceAccount: string) => ({
+    status: "proposed",
+    card_source_id: "vpass",
+    card_source_account: sourceAccount,
+    bank_source_id: "smbc-bank",
+    bank_source_account: BANK,
+    statements: 1,
+    latest_key: "2098-01-10\ncs_synthetic",
+    latest_period: "2098-01",
+  });
+  const run = async (statements: number, candidates: string[]) => {
+    const limits: unknown[] = [];
+    const outcome = await reviewCardDebitAccounts({
+      grant: WHOLE,
+      sql: {
+        all: async <T>(sql: string, binds: unknown[] = []) => {
+          if (sql === CARD_DEBIT_ACCOUNT_READINGS_SQL) return [] as T[];
+          if (sql === CARD_DEBIT_ACCOUNT_CANDIDATES_SQL)
+            return candidates.map(candidate) as unknown as T[];
+          limits.push(binds[0]);
+          // The statement read honours its bound, as the SQL's LIMIT does.
+          return Array.from({ length: Math.min(statements, Number(binds[0])) }, (_, n) =>
+            statement(n + 1),
+          ) as unknown as T[];
+        },
+        first: () => Promise.reject(new Error("read")),
+      },
+    });
+    if (!outcome.ok) throw new Error(outcome.error.code);
+    expect(limits).toEqual([101]);
+    return outcome.review;
+  };
+  // Exactly the bound: complete.
+  let review = await run(100, []);
+  expect([review.items.length, review.cardsTruncated]).toEqual([100, false]);
+  // One more statement card: the first 100 are listed and the cut is said.
+  review = await run(150, ["vpass:card-120"]);
+  expect([review.items.length, review.cardsTruncated]).toEqual([100, true]);
+  expect(review.items.at(-1)?.card.sourceAccount).toBe("vpass:card-100");
+  // A card known only by a candidate beyond the bound is said too.
+  review = await run(100, ["vpass:card-999"]);
+  expect([review.items.length, review.cardsTruncated]).toEqual([100, true]);
+  expect(review.items.some((item) => item.card.sourceAccount === "vpass:card-999")).toBe(false);
+  // A candidate-only card before the cut is listed; the last statement card gives way.
+  review = await run(150, ["vpass:card-050a"]);
+  expect([review.items.length, review.cardsTruncated]).toEqual([100, true]);
+  expect(review.items.some((item) => item.card.sourceAccount === "vpass:card-050a")).toBe(true);
+  expect(review.items.at(-1)?.card.sourceAccount).toBe("vpass:card-099");
+});
+
 test("readings and decisions are reached by key, without table statistics", async () => {
   // docs/card-settlements.md, Cost: the evidence and the candidates are each
   // scanned once; a reading and a candidate's latest decision are keyed.

@@ -65,7 +65,9 @@ function validStated(value: unknown): value is Record<string, any> {
     return false;
   const named = value.latest.accounts.length;
   return value.status === "named"
-    ? named === 1 && value.lastNamed !== null
+    ? named === 1 &&
+        value.lastNamed !== null &&
+        value.lastNamed.readingRef.id === value.latest.readingRef.id
     : value.status === "conflicting"
       ? named > 1
       : value.status === "not_named" && named === 0;
@@ -79,32 +81,56 @@ const validMatched = (value: unknown): boolean =>
   nullableText(value.latest.debitDate) &&
   nullableText(value.latest.period);
 
-/** The answer agrees with the evidence it names: the client never decides it. */
+/** Exactly the notes whose condition holds, in the closed list's order. */
+const exactCodes = (value: unknown, holds: Record<string, boolean>): boolean =>
+  codes(CARD_DEBIT_ACCOUNT_ANSWER_CODES, value) &&
+  (value as string[]).join() ===
+    CARD_DEBIT_ACCOUNT_ANSWER_CODES.filter((code) => holds[code] === true).join();
+
+/**
+ * The answer, its notes and its unknown reason agree with the evidence beside
+ * it: the client never decides an answer, and one the evidence does not carry
+ * is refused, never shown.
+ */
 function validAnswer(value: unknown, item: Record<string, any>): boolean {
   if (!record(value)) return false;
-  if (value.basis === "unknown")
-    return (
-      oneOf(CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS, value.reason) &&
-      item.stated.lastNamed === null &&
-      item.settled.length === 0
-    );
-  if (!validAccount(value.account) || !codes(CARD_DEBIT_ACCOUNT_ANSWER_CODES, value.codes))
-    return false;
+  const stated = item.stated;
+  const newestSettled = item.settled[0];
+  if (value.basis === "unknown") {
+    if (stated.lastNamed !== null || newestSettled !== undefined) return false;
+    const reason =
+      stated.status === "conflicting"
+        ? "stated_reading_conflicting"
+        : item.proposed.length > 0
+          ? "only_unreviewed_candidates"
+          : "no_debit_account_evidence";
+    return oneOf(CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS, value.reason) && value.reason === reason;
+  }
+  if (!validAccount(value.account)) return false;
   if (value.basis === "provider-stated")
     return (
-      item.stated.lastNamed !== null &&
-      sameAccount(value.account, item.stated.lastNamed.accounts[0]) &&
+      stated.lastNamed !== null &&
+      sameAccount(value.account, stated.lastNamed.accounts[0]) &&
       validSourceFactRef(value.readingRef) &&
-      value.readingRef.id === item.stated.lastNamed.readingRef.id &&
-      text(value.observedAt)
+      value.readingRef.id === stated.lastNamed.readingRef.id &&
+      value.observedAt === stated.lastNamed.observedAt &&
+      exactCodes(value.codes, {
+        settled_account_differs:
+          newestSettled !== undefined && !sameAccount(newestSettled, value.account),
+        newer_reading_unresolved: stated.latest.readingRef.id !== stated.lastNamed.readingRef.id,
+      })
     );
   return (
     value.basis === "accepted-settlement" &&
-    item.stated.lastNamed === null &&
-    item.settled.length > 0 &&
-    sameAccount(value.account, item.settled[0]) &&
-    value.proposalId === item.settled[0].latest.proposalId &&
-    nullableText(value.debitDate)
+    stated.lastNamed === null &&
+    newestSettled !== undefined &&
+    sameAccount(value.account, newestSettled) &&
+    value.proposalId === newestSettled.latest.proposalId &&
+    value.debitDate === newestSettled.latest.debitDate &&
+    exactCodes(value.codes, {
+      settled_accounts_differ: item.settled.length > 1,
+      stated_reading_conflicting: stated.status === "conflicting",
+    })
   );
 }
 

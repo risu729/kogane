@@ -361,9 +361,20 @@ Limits:
   the card product: no collected field names it.
 - A stated answer is the ADR 0032 rule's proposal over the bank accounts
   Kogane knows; an uncollected account at the same bank cannot be named.
+- A stated answer from an older reading (`newer_reading_unresolved`) is the
+  last account the provider was seen to state, not the account it states now:
+  the newer reading may show an account Kogane cannot name (a bank it does not
+  model, `bank_not_resolved`, or digits no known account starts with,
+  `no_matching_account`), so the debit account may have changed. The page
+  shows such an answer as a warning with that note and the newer reading's
+  reasons beside it.
 - A `refused` reading is not considered: only readings the sweep cited carry
   evidence, so a newer page whose 「カード情報」 table was refused leaves the
   answer on the older reading.
+- Only the statement read is bounded by the card count: the reading and
+  candidate reads return every card's rows (at most two readings per card,
+  one row per card, bank account and decision state), and the cards past the
+  bound are dropped after reading.
 - Nothing is stored: the answer is read from the evidence, decisions and
   candidates each time.
 

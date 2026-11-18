@@ -46,7 +46,7 @@ const UNKNOWN_REASONS: Record<string, string> = {
 const ANSWER_CODES: Record<string, string> = {
   settled_account_differs: "最新の採用済み照合は別の口座から引き落とされています。",
   newer_reading_unresolved:
-    "より新しい明細のカード情報からは口座を一つに決められませんでした（表示はそれ以前の明細のものです）。",
+    "より新しいカード情報ではこの口座を確認できませんでした。表示しているのはそれ以前に取得した明細の口座で、引落口座が変わった可能性があります。",
   settled_accounts_differ: "採用済みの照合に、別の口座からの引落もあります。",
   stated_reading_conflicting: "カード会社の最新の表示に合う口座が複数あります。",
 };
@@ -79,7 +79,9 @@ function Answer({ item }: { item: CardDebitAccountCard }): ReactNode {
     <>
       <p>
         {answer.basis === "provider-stated" ? (
-          <Badge tone="ok">カード会社の表示</Badge>
+          // A note (a newer reading that does not confirm the account, or an
+          // accepted debit from another one) makes the stated answer a warning.
+          <Badge tone={answer.codes.length === 0 ? "ok" : "warn"}>カード会社の表示</Badge>
         ) : (
           <Badge tone="warn">採用済みの照合から</Badge>
         )}{" "}

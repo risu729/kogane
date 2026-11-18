@@ -17,10 +17,11 @@
 // - The grant decides. `records.read` over the whole store: a card is
 //   compared with accounts of any bank, so a grant listed on either axis is
 //   refused before anything is read.
-// - Bounded. At most `CARD_DEBIT_ACCOUNTS_CARDS_MAX` cards (more are said,
-//   `cardsTruncated`); the stated side returns the evidence rows of at most
-//   two readings per card; the candidate side one row per card, bank account
-//   and decision state. The grant's `maxRows` below the card bound is
+// - Bounded. At most `CARD_DEBIT_ACCOUNTS_CARDS_MAX` cards are listed (more
+//   are said, `cardsTruncated`). Only the statement read has that bound: the
+//   stated side returns, for every card, the evidence rows of at most two
+//   readings; the candidate side one row per card, bank account and decision
+//   state; cards past the bound are dropped after reading. The grant's `maxRows` below the card bound is
 //   `budget_exceeded`, before any read.
 import {
   CARD_DEBIT_ACCOUNT_POLICY,

@@ -98,7 +98,25 @@ test("a stated answer, a settled answer and an unknown one are each valid", () =
     proposed: [matched(SMBC, "p-3")],
     answer: { basis: "unknown", reason: "only_unreviewed_candidates" },
   });
-  expect(validApiResponse(CARD_DEBIT_ACCOUNTS_PATH, page([card(), settled, unknown]))).toBe(true);
+  // The last named account answers while a newer reading names none, and says so.
+  const older = card({
+    stated: {
+      status: "not_named",
+      reason: null,
+      latest: reading(8, []),
+      lastNamed: reading(7, [SMBC]),
+    },
+    answer: {
+      basis: "provider-stated",
+      account: SMBC,
+      readingRef: reading(7, [SMBC]).readingRef,
+      observedAt: "2098-01-12T00:00:00Z",
+      codes: ["settled_account_differs", "newer_reading_unresolved"],
+    },
+  });
+  expect(validApiResponse(CARD_DEBIT_ACCOUNTS_PATH, page([card(), settled, unknown, older]))).toBe(
+    true,
+  );
 });
 
 test("an answer its evidence does not carry, or an unknown code, is refused", () => {
@@ -149,6 +167,66 @@ test("an answer its evidence does not carry, or an unknown code, is refused", ()
       },
     }),
     card({ card: { sourceId: "smbc-bank", sourceAccount: "x", accountId: null } }),
+    // A named status whose newest reading is not the one that names the account.
+    card({
+      stated: {
+        status: "named",
+        reason: null,
+        latest: reading(8, [SMBC]),
+        lastNamed: reading(7, [SMBC]),
+      },
+    }),
+    // A note the evidence does not carry, or one it carries left out.
+    card({
+      answer: {
+        basis: "provider-stated",
+        account: SMBC,
+        readingRef: reading(7, [SMBC]).readingRef,
+        observedAt: "2098-01-12T00:00:00Z",
+        codes: [],
+      },
+    }),
+    card({
+      stated: {
+        status: "not_named",
+        reason: null,
+        latest: reading(8, []),
+        lastNamed: reading(7, [SMBC]),
+      },
+    }),
+    // The stated answer's capture time is not its reading's.
+    card({
+      answer: {
+        basis: "provider-stated",
+        account: SMBC,
+        readingRef: reading(7, [SMBC]).readingRef,
+        observedAt: "2098-02-12T00:00:00Z",
+        codes: ["settled_account_differs"],
+      },
+    }),
+    // A settled answer with a note its evidence does not carry.
+    card({
+      stated: { status: "absent", reason: "evidence_not_recorded", latest: null, lastNamed: null },
+      answer: {
+        basis: "accepted-settlement",
+        account: SHINSEI,
+        proposalId: "p-2",
+        debitDate: "2098-01-10",
+        codes: ["settled_accounts_differ"],
+      },
+    }),
+    // An unknown reason the evidence contradicts.
+    card({
+      stated: { status: "absent", reason: "evidence_not_recorded", latest: null, lastNamed: null },
+      settled: [],
+      proposed: [matched(SMBC, "p-3")],
+      answer: { basis: "unknown", reason: "no_debit_account_evidence" },
+    }),
+    card({
+      stated: { status: "absent", reason: "evidence_not_recorded", latest: null, lastNamed: null },
+      settled: [],
+      answer: { basis: "unknown", reason: "stated_reading_conflicting" },
+    }),
   ];
   for (const item of invalid) expect(validCardDebitAccountsReview(page([item]))).toBe(false);
   expect(

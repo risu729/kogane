@@ -542,6 +542,46 @@ describe.if(runnable)("card settlement review", () => {
     await page.close();
   });
 
+  test("an older stated account says a newer reading does not confirm it, and a cut list says so", async () => {
+    const unresolved = {
+      ...namedReading,
+      readingRef: { ...namedReading.readingRef, id: "card_debit_account_statement:8" },
+      observedAt: "2098-02-12T00:00:00Z",
+      accounts: [],
+      visibleDigitCount: null,
+      reasons: ["bank_not_resolved"],
+    };
+    const first = debitAccounts.items[0]!;
+    debitAccountsPage = {
+      ...debitAccounts,
+      items: [
+        {
+          ...first,
+          stated: {
+            status: "not_named",
+            reason: null,
+            latest: unresolved,
+            lastNamed: namedReading,
+          },
+          answer: { ...first.answer, codes: ["newer_reading_unresolved"] },
+        },
+      ],
+      cardsTruncated: true,
+    };
+    const page = await open();
+    const section = page.getByRole("region", { name: "カードの引落口座" });
+    await section.getByText("myjcb:synthetic:root").waitFor();
+    const text = await section.innerText();
+    expect(text).toContain("2098-01-12T00:00:00Z に取得した明細");
+    expect(text).toContain("より新しいカード情報ではこの口座を確認できませんでした");
+    expect(text).toContain("引落口座が変わった可能性があります");
+    expect(text).toContain("口座を特定できず");
+    expect(await section.getByRole("note").innerText()).toBe(
+      "カードが多いため、先頭の1枚だけを表示しています。",
+    );
+    await page.close();
+  });
+
   test("an answer the evidence beside it does not carry is refused before it renders", async () => {
     debitAccountsPage = {
       ...debitAccounts,

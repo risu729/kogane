@@ -634,8 +634,12 @@ one naming exactly one account), `settled` and `proposed` (per bank account:
 distinct statements and the candidate with the latest debit date), and the
 `answer`: `provider-stated` (account, reading ref and capture time),
 `accepted-settlement` (account, proposal id and debit date) or `unknown`
-with a closed reason, with closed `codes` on the first two. Undecided
-candidates are listed, never used as the answer (INV07).
+with a closed reason, with closed `codes` on the first two. An
+`accepted-settlement` answer is an amount match a person accepted, weaker
+than a stated account; a `provider-stated` answer with
+`newer_reading_unresolved` is the last account the provider was seen to
+state, which a newer reading does not confirm, so the account may have
+changed. Undecided candidates are listed, never used as the answer (INV07).
 
 Authorization: `records.read`, else `403 unauthorized`; sources and accounts
 both `"*"`, else `403 evidence_restricted`; `maxRows` of at least 100, else

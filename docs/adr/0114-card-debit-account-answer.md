@@ -84,6 +84,16 @@ writer or command is added, and no candidate's eligibility changes.
 
 - A card whose newest statement is zero keeps its last known account and the
   date it was seen (the reading's capture time, or the accepted debit date).
+- A stated answer kept from an older reading while a newer one names no
+  account (`newer_reading_unresolved`) is the last account the provider was
+  seen to state, not the one it states now: the newer reading may show an
+  account Kogane cannot name (`bank_not_resolved`, `no_matching_account`).
+  The page shows it as a warning saying the account may have changed, with
+  the newer reading's reasons beside it; the wire and MCP answer carry the
+  code and the capture time.
+- Only the statement read is bounded by the card count; the reading and
+  candidate reads return every card's rows, and cards past the bound are
+  dropped after reading, with `cardsTruncated` set.
 - Vpass cards are answered only by accepted settlements; until one is
   accepted they read `unknown` (`only_unreviewed_candidates` when candidates
   exist). Card product names are not shown: Vpass accounts stay
@@ -108,12 +118,15 @@ writer or command is added, and no candidate's eligibility changes.
   schema, a stated MyJCB account whose newer reading names none or two
   accounts, a Vpass card answered by an accepted settlement and unanswered
   again after its withdrawal, undecided candidates that never answer, a read
-  that writes nothing, refusal before reading, and keyed lookups of readings
-  and decisions without table statistics.
+  that writes nothing, refusal before reading, more cards than the bound
+  flagged `cardsTruncated` and never listed past the cut, and keyed lookups of
+  readings and decisions without table statistics.
 - `packages/observation-shared/test/card-debit-accounts-contract.test.ts`: the
-  wire contract refuses an answer its evidence does not carry.
+  wire contract refuses an answer, a note or an unknown reason its evidence
+  does not carry.
 - `services/app/test/card-debit-accounts-api.test.ts` and
   `services/app/test/ui-mcp-parity.test.ts`: the route and the MCP tool give
   the same answer, are graded alike and are mapped.
 - `apps/web/test/card-settlement.browser.test.ts`: the section names each
-  basis and offers no action.
+  basis and offers no action, warns that an older stated account may have
+  changed, and says when the list is cut.
