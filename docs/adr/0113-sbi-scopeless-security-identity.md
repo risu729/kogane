@@ -1,6 +1,6 @@
 # ADR 0113: Map an SBI Securities code with no RIC, MIC or country as unresolved under identity policy 2, for foreign positions captures only
 
-- Status: proposed
+- Status: accepted (merged 2026-11-18 in [#1385](https://github.com/risu729/kogane/pull/1385))
 - Date: 2026-11-18
 - Carried by:
   `packages/identity/src/sbi.ts` (`SBI_SECURITIES_POLICY_VERSION`),

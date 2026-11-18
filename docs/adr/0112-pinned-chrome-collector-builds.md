@@ -1,6 +1,6 @@
 # ADR 0112: Pin the branded Stable Chrome payload in collector images
 
-- Status: proposed
+- Status: accepted (merged 2026-11-13 in [#1327](https://github.com/risu729/kogane/pull/1327))
 - Date: 2026-11-12
 - Tracking: [issue 1326](https://github.com/risu729/kogane/issues/1326)
 

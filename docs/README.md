@@ -95,6 +95,7 @@ with real data; do not infer product completion from a schema or a pure function
 - [Continuous integration](ci.md)
 - [Test coverage](coverage.md)
 - [CI/CD automation](ci-cd.md)
+- [Pinned Google Chrome Stable builds for collector images](pinned-chrome-builds.md)
 - [Infrastructure ledgers](infra-ledgers.md)
 - [Operations: health signals, load budgets, retention and recovery drills](operations.md)
 - [Production rollout and feature controls](rollout.md)

@@ -145,7 +145,7 @@ synthetic acquisition times.
 
 ## Amendment 2026-11-10: independent AUD retention evidence
 
-Status: proposed.
+Status: accepted (merged 2026-11-11 in [#1289](https://github.com/risu729/kogane/pull/1289)).
 
 The approved manual session now reads the observed AUD foreign ordinary
 balance and its retained history as separate `foreign-ordinary-aud-balance`

@@ -1,6 +1,6 @@
 # ADR 0115: V Point Pay notification provenance: the parser checks the sender, the collector checks the recipient
 
-- Status: proposed
+- Status: accepted (merged 2026-11-18 in [#1391](https://github.com/risu729/kogane/pull/1391))
 - Date: 2026-11-18
 - Decided by: owner, 2026-11-18 04:42 UTC (the recipient check moves out of
   the parser; the collector checks at receipt) and owner, 2026-11-18 04:47 UTC

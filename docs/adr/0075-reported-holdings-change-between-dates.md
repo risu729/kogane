@@ -327,7 +327,7 @@ compares its answer with the route's.
 
 ## Amendment 2026-11-18: the page's source and account filters
 
-- Status: proposed
+- Status: accepted (merged 2026-11-18 in [#1388](https://github.com/risu729/kogane/pull/1388))
 - Date: 2026-11-18
 - Replaces: the 2026-11-06 amendment's limit that the page "does not offer
   the `source` or `account` filters the route takes"

@@ -1,6 +1,6 @@
 # ADR 0094: Keep observed SBI foreign unit-price precision as an exact decimal
 
-- Status: proposed
+- Status: accepted (merged 2026-11-10 in [#1259](https://github.com/risu729/kogane/pull/1259))
 - Date: 2026-11-10
 - Issue: [#1220](https://github.com/risu729/kogane/issues/1220)
 

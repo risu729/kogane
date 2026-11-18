@@ -1,6 +1,6 @@
 # ADR 0110: Keep the coherent Workers stack while the upstream CTE expansion regression is unresolved
 
-- Status: proposed; retired 2026-11-16: the fixed toolchain is on main and the exclusions and probe are removed (see [Retirement](#retirement-2026-11-16))
+- Status: accepted (merged 2026-11-14 in [#1307](https://github.com/risu729/kogane/pull/1307)); retired 2026-11-16: the fixed toolchain is on main and the exclusions and probe are removed (see [Retirement](#retirement-2026-11-16))
 - Date: 2026-11-11
 - Related: [D1 compatibility investigation](https://github.com/risu729/kogane/issues/1294), [Workers dependency update](https://github.com/risu729/kogane/pull/1213)
 

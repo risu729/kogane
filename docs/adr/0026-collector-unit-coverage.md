@@ -2,7 +2,7 @@
 
 ## Amendment: leverage execution evidence cannot assert unverified transport coverage (2026-11-12)
 
-Status: proposed.
+Status: accepted (merged 2026-11-13 in [#1318](https://github.com/risu729/kogane/pull/1318)).
 
 Context. Trader Socket.IO navigation established four leverage execution filters
 and empty acknowledgements. The collector uses a different, existing HTTP
@@ -45,7 +45,7 @@ and exclusion from every registered publishing parser. See the
 
 ## Amendment: SBI VC waits for a replacement after a refused session (2026-11-11)
 
-Status: proposed.
+Status: accepted (merged 2026-11-13 in [#1311](https://github.com/risu729/kogane/pull/1311)).
 
 Context. A read-only log review found intermittent HTTP 403 keepalives and
 successful automatic passkey replacement, not a continuous outage. During the
@@ -77,7 +77,7 @@ and remaining cause uncertainty are in the [source note](../sources/sbi-vc-trade
 
 ## Amendment: SBI VC document evidence is independent of account and CSV checks (2026-11-10)
 
-Status: proposed.
+Status: accepted (merged 2026-11-11 in [#1290](https://github.com/risu729/kogane/pull/1290)).
 
 Authenticated normal navigation confirmed monthly PDF and P&L ZIP reads on the
 same simple-mode HTTP host/session as the existing collector. Downloads use JSON Buffer envelopes;
@@ -111,7 +111,7 @@ cannot borrow admission, and document metadata emits zero economic rows. See
 
 ## Amendment: SBI VC's unfiltered evidence is independent of its classic account unit (2026-11-10)
 
-Status: proposed.
+Status: accepted (merged 2026-11-11 in [#1287](https://github.com/risu729/kogane/pull/1287)).
 
 Context. The new all-type cash-flow request has only been observed on the
 trader UI's Socket.IO transport. A failure of that additional request must not

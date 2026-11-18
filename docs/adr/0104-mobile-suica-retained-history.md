@@ -1,6 +1,6 @@
 # ADR 0104: Walk retained Mobile Suica history with inclusive date overlap
 
-- Status: proposed
+- Status: accepted (merged 2026-11-11 in [#1279](https://github.com/risu729/kogane/pull/1279))
 - Date: 2026-11-10
 
 ## Context

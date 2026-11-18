@@ -1,6 +1,6 @@
 # ADR 0109: Isolate SBI supplementary completeness from core publication
 
-- Status: proposed
+- Status: accepted (merged 2026-11-13 in [#1310](https://github.com/risu729/kogane/pull/1310))
 - Date: 2026-11-11
 
 ## Context

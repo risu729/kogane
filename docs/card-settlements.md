@@ -62,11 +62,14 @@ the row's fields and its position (`mizuho:<fingerprint>:<occurrence>`,
 payment re-observed after the page changed could carry another id and count
 twice. They need a stable row identity first.
 
-Which card pays from which bank: the code does not know, and no setting names
-a card's debit account. A card and a bank are paired only as a candidate
-(equal amount, due date ±3 days) and only an accepted review with shared
-ownership makes the pairing a decision. In production at the time of writing
-(2026-09-26), every proposed review pairs a Vpass or MyJCB statement with an
+Which card pays from which bank: no setting names a card's debit account. A
+card and a bank are paired only as a candidate (equal amount, due date ±3
+days) and only an accepted review with shared ownership makes the pairing a
+decision. [Debit account per card](#debit-account-per-card) answers it per
+card from those records: the account the provider states first, else the
+newest accepted settlement, else `unknown`; a candidate nobody decided never
+answers ([ADR 0114](adr/0114-card-debit-account-answer.md)). In production
+at the time of writing (2026-09-26), every proposed review pairs a Vpass or MyJCB statement with an
 SMBC debit, none is accepted, and there is no published SBI Shinsei
 transaction: every stored capture of the SBI Shinsei activity page was
 rejected by its parser (closed code `parser_rejected`), so the SBI Shinsei
@@ -138,7 +141,7 @@ statement are not handled.
 Design: [ADR 0032](adr/0032-provider-stated-debit-accounts.md), its
 2026-09-27 amendment and its
 [2026-11-07 amendment](adr/0032-provider-stated-debit-accounts.md#amendment-2026-11-07-the-review-shows-the-evidence-under-the-current-reader)
-(proposed). What the code does today:
+(accepted). What the code does today:
 
 **The page.** Every MyJCB credit detail page observed in round 4 (the
 confirmed statement and the ショッピングスキップ払い page, live and in the
@@ -304,7 +307,7 @@ Limits:
 
 ### Debit account per card
 
-Design: [ADR 0114](adr/0114-card-debit-account-answer.md) (proposed).
+Design: [ADR 0114](adr/0114-card-debit-account-answer.md).
 `reviewCardDebitAccounts`
 (`packages/application/src/query/card-debit-accounts.ts`) answers which bank
 account each card is debited from, under rule `card-debit-account-answer-v1`

@@ -733,7 +733,7 @@ change that records its result removes `prestia-bank` until the cause is fixed.
 
 ## Amendment 2026-11-12: Retryable registration visibility
 
-Status: proposed (accepted when its pull request merges).
+Status: accepted (merged 2026-11-12 in [#1314](https://github.com/risu729/kogane/pull/1314)).
 
 ### Context
 
@@ -775,7 +775,7 @@ outranks historical retryable refusals. Malformed legacy failure text becomes
 
 ## Amendment 2026-11-12: Current publication after the tracking horizon
 
-Status: proposed (accepted when its pull request merges).
+Status: accepted (merged 2026-11-13 in [#1324](https://github.com/risu729/kogane/pull/1324)).
 
 ### Context
 

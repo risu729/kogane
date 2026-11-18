@@ -1,6 +1,6 @@
 # ADR 0095: SBI Shinsei selected-period savings history
 
-- Status: proposed
+- Status: accepted (merged 2026-11-11 in [#1262](https://github.com/risu729/kogane/pull/1262))
 - Date: 2026-11-10
 - Issue: [#1230](https://github.com/risu729/kogane/issues/1230)
 

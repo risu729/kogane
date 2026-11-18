@@ -1,6 +1,6 @@
 # ADR 0102: Preserve retained SBI cash history with checked page coverage
 
-- Status: proposed
+- Status: accepted (merged 2026-11-11 in [#1277](https://github.com/risu729/kogane/pull/1277))
 - Date: 2026-11-10
 - Issue: [#1226](https://github.com/risu729/kogane/issues/1226)
 

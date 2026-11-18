@@ -1,6 +1,6 @@
 # ADR 0099: Sony Bank scheduled collection includes all retained deposit history
 
-- Status: proposed
+- Status: accepted (merged 2026-11-13 in [#1271](https://github.com/risu729/kogane/pull/1271))
 - Date: 2026-11-10
 - Issue: [1231](https://github.com/risu729/kogane/issues/1231)
 

@@ -1,6 +1,6 @@
 # ADR 0105: Preserve Vpass credit snapshots as overlapping provider reports
 
-- Status: proposed
+- Status: accepted (merged 2026-11-11 in [#1280](https://github.com/risu729/kogane/pull/1280))
 - Date: 2026-11-10
 - Issue: [#1256](https://github.com/risu729/kogane/issues/1256)
 

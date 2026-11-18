@@ -1,6 +1,6 @@
 # ADR 0100: Sony annual realised gains and delivered PDF evidence
 
-- Status: proposed
+- Status: accepted (merged 2026-11-13 in [#1275](https://github.com/risu729/kogane/pull/1275))
 - Date: 2026-11-10
 
 ## Context

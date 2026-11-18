@@ -1,6 +1,6 @@
 # ADR 0097: SBI Shinsei monthly reports are immutable documents with metadata-only coverage
 
-Status: proposed
+Status: accepted (merged 2026-11-10 in [#1268](https://github.com/risu729/kogane/pull/1268))
 Date: 2026-11-09
 Issue: [#1247](https://github.com/risu729/kogane/issues/1247)
 

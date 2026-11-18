@@ -1,6 +1,6 @@
 # ADR 0108: SBI delivered-document evidence and bounded continuation
 
-- Status: proposed
+- Status: accepted (merged 2026-11-13 in [#1281](https://github.com/risu729/kogane/pull/1281))
 - Date: 2026-11-11
 
 ## Context

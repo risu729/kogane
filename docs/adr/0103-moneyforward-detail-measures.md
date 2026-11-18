@@ -1,6 +1,6 @@
 # ADR 0103: MoneyForward detail-page reported measures
 
-- Status: proposed
+- Status: accepted (merged 2026-11-11 in [#1278](https://github.com/risu729/kogane/pull/1278))
 - Date: 2026-11-10
 
 ## Context
