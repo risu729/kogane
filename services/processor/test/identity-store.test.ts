@@ -1389,6 +1389,80 @@ test("empty SBI Securities parses take the empty fast path at their dataset's re
   ]);
 });
 
+test("a shared currency identifier gains one policy-3 revision in all, which later runs of every source cite (ADR 0117)", async () => {
+  // CHF stands in for USD and JPY: no other test here names it.
+  await db.prepare("INSERT OR IGNORE INTO sources VALUES('sbi-securities','synthetic')").run();
+  const chf = (account: string, extra: unknown) => (id: number) => [
+    db
+      .prepare(
+        "INSERT INTO balance_observations(parse_run_id,source_account,metric,instrument,raw_locator,extra_json) VALUES(?,?,'synthetic_balance','CHF','synthetic:chf',?)",
+      )
+      .bind(id, account, JSON.stringify(extra)),
+  ];
+  const identifier = await identityKey("ii", ["iso4217", "global", "CHF"]);
+  const revisions = async () =>
+    (
+      await db
+        .prepare(
+          "SELECT id,revision,instrument_id,method,reason,policy_version,label,status FROM instrument_mappings WHERE identifier_id=? ORDER BY revision",
+        )
+        .bind(identifier)
+        .all<{ id: string; policy_version: number }>()
+    ).results;
+  const cited = async (parseId: number) =>
+    (
+      await db
+        .prepare(
+          `SELECT DISTINCT u.instrument_mapping_id id FROM identity_runs r
+           JOIN identity_observations o ON o.identity_run_id=r.id
+           JOIN identity_instrument_uses u ON u.identity_observation_id=o.id
+           WHERE r.parse_run_id=? AND u.identifier_id=?`,
+        )
+        .bind(parseId, identifier)
+        .all<{ id: string }>()
+    ).results.map((row) => row.id);
+  // Another source names CHF first, at the base version.
+  await seed(3900, 0, "smbc-bank", true, chf("smbc-bank:ordinary-yen", {}));
+  expect(await identifyParse(db, parse(3900), resolveIdentity)).toBe(1);
+  // An SBI foreign cash balance names it under policy 1, before the release.
+  await seed(
+    3901,
+    0,
+    "sbi-securities",
+    true,
+    chf("sbi-securities:foreign", { account: { accountKind: "SYNTHETIC" } }),
+    "foreign-cash-balances",
+  );
+  expect(await identifyParse(db, parse(3901, "sbi-securities"), resolveIdentity, 1)).toBe(1);
+  const before = await revisions();
+  expect(before.map((row) => row.policy_version)).toEqual([1]);
+
+  await identitySweep(db, resolveIdentity, 40, "sbi-securities");
+  const after = await revisions();
+  // One policy-3 rule revision, equal except for its id, revision and version.
+  expect(after).toHaveLength(2);
+  const { id: _old, revision: _r1, policy_version: _v1, ...was } = before[0]!;
+  const { id: current, revision: _r2, policy_version: v3, ...now } = after[1]!;
+  expect(now).toEqual(was);
+  expect(v3).toBe(3);
+
+  // Later runs of other sources, at their own versions, append nothing and
+  // cite the policy-3 revision; the earlier runs keep citing what they recorded.
+  await seed(3902, 0, "smbc-bank", true, chf("smbc-bank:ordinary-yen", {}));
+  expect(await identifyParse(db, parse(3902), resolveIdentity)).toBe(1);
+  await seed(3903, 0, "mizuho-bank", true, chf("mizuho-bank:ordinary:001:1234567", {}));
+  expect(await identifyParse(db, parse(3903, "mizuho-bank"), resolveIdentity)).toBe(1);
+  expect(
+    await db
+      .prepare("SELECT policy_version FROM identity_runs WHERE parse_run_id=3903")
+      .first<number>("policy_version"),
+  ).toBe(2);
+  expect(await revisions()).toEqual(after);
+  expect(await cited(3902)).toEqual([current]);
+  expect(await cited(3903)).toEqual([current]);
+  expect(await cited(3900)).toEqual([before[0]!.id]);
+});
+
 test("all four observation kinds preserve their instrument roles and provenance", async () => {
   await seed(108);
   await db.batch([

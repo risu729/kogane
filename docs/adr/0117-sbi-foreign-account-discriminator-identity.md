@@ -142,8 +142,10 @@ was 2).
     the standard request, and a module that falls back would otherwise store
     a default-family run at version 2 instead of the base version.
     Manual decisions and `instrument-auto-v1` adoptions are stamped with the
-    build's highest version (`policy_version` 3 instead of 2); the store's rule
-    guards read only rule revisions, so this changes no mapping.
+    build's highest version (`policy_version` 3 instead of 2). This changes no
+    mapping: the store's rule guards never read a manual revision, and an
+    adoption maps its identifier onto another instrument, which the
+    instrument guard holds at any version.
 - **Re-identification is append-only** and limited to sealed parses of those
   three datasets below policy 3. Layer A/B, earlier runs, the bare source
   account and every earlier revision stay as recorded, and a manual decision
@@ -193,7 +195,15 @@ was 2).
   positions capture names (positions subjects that ADR 0113 revised at
   policy 2 are revised again), and the shared currency identifiers
   `iso4217/global/USD` and `iso4217/global/JPY`, which every source uses and
-  no other source's run has revised at 3. A subject whose current mapping is
+  no other source's run has revised at 3. Each of those two gains one
+  revision in all, not one per source: from then on a new identity run of
+  any source that names USD or JPY cites the policy-3 revision (same
+  instrument, label, status and reason), and a run of another source at its
+  own version (1 or 2) appends none, since the current rule revision is
+  newer; earlier runs of every source keep citing the revision they
+  recorded. Avoiding even that one revision needs the store to carry an
+  equal rule revision forward (option 8), a change for every source and
+  every subject. A subject whose current mapping is
   manual, or a rule adoption onto another instrument, gains no revision. A
   foreign cash history parse kept at policy 1 keeps citing the USD revision it
   recorded while the current USD mapping becomes the policy-3 one. An open
@@ -247,9 +257,23 @@ Synthetic inputs only:
   ADR 0113 tests now re-identify at policy 3 with the same outcome; an
   observed-shape trade parse is re-identified too and its policy-1 run keeps
   citing the revision it recorded. The existing Vpass candidate-cost test
-  holds with the per-source ceiling.
+  holds with the per-source ceiling. Empty trade, positions and cash balances
+  parses take the empty fast path to a sealed `identity-default-v3` run
+  without the resolver; an empty cash history parse gets the base version.
+  A shared currency identifier (CHF standing in for USD and JPY) that
+  another source mapped at policy 1 gains exactly one policy-3 revision from
+  the SBI sweep; later SMBC (policy 1) and Mizuho (policy 2) runs append
+  none and cite it, and the earlier SMBC run keeps citing its own.
 - `services/processor/test/identity-audit.test.ts`: trades and balances
   sealed at 1 and positions sealed at 1 or 2 count as pending; positions at
   3, the cash history and a domestic capture do not.
 - `packages/storage-d1/test/identity-sweep-query.test.ts`: the candidate SQL
-  still equals the frozen legacy text on scaled random stores.
+  still equals the frozen legacy text (its required-policy CASE follows the
+  shipped expression, MyJCB and SBI Securities branches included) on scaled
+  random stores, plus a fixed grid of every SBI Securities and MyJCB dataset
+  the policies tell apart, and a source with and without a module, each with
+  no identity run and sealed at 1, 2 and 3, empty and not. The grid's
+  candidates are asserted: SBI trade, positions and cash balances parses
+  sealed below 3 are candidates, the cash history sealed at 1 is not, MyJCB
+  J-POINT sealed at 2 is not. Restoring the old shortcut against the build's
+  highest version of 2 fails the test.

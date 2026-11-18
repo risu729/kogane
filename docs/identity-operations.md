@@ -681,7 +681,8 @@ including the shared currency identifiers `iso4217/global/USD` and
 `iso4217/global/JPY` (no other source's run has revised them at policy 3),
 gains one policy-3 rule revision equal to the current one except for its id,
 revision and version, unless a manual mapping or a rule adoption onto another
-instrument holds it. Their account entity and instrument do not change, but
+instrument holds it. For USD and JPY that is one revision in all: later runs
+of any source that name them cite it and append none. Their account entity and instrument do not change, but
 an open plan that pinned the earlier revision is refused at approval with
 `stale_context` and has to be planned again; a cash history parse kept at
 policy 1 still cites the revisions it recorded.
