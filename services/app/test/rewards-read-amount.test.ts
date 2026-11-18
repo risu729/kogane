@@ -2,9 +2,10 @@
 // snapshot (`GET /api/v2/rewards/expiry`, services/app/src/rewards-read.ts).
 // READ 0002 and 0004 CHECK that a row is `exact` exactly when both decimal-v1
 // columns are set (packages/storage-d1/test/reward-read-writer.test.ts proves
-// the table refuses anything else), so any other pairing is a READ store the
-// schema never admits: the read fails rather than serving a value nobody
-// stored or an `exact` status with a reason. The rows come from a stand-in
+// the table refuses the other pairings), so a pairing that CHECK refuses is a
+// READ store the schema never admits: the read fails rather than serving a
+// value nobody stored or an `exact` status with a reason. A status that is not
+// exact with one stray column is admitted, and keeps its reason. The rows come from a stand-in
 // READ database that returns them as given. Every value is synthetic.
 import { describe, expect, it } from "vitest";
 import type { D1Like, RewardEstimateRow } from "../../../packages/storage-d1/src/read/index";
@@ -80,6 +81,10 @@ describe("the amount at risk on a reward expiry row", () => {
         row({}),
         row({ amount_status: "unparsed", amount_coefficient: null, amount_scale: null }),
         row({ amount_status: "missing", amount_coefficient: null, amount_scale: null }),
+        // The CHECK admits a status that is not exact with one column; the
+        // writer never stores it, and the stray column is never a value.
+        row({ amount_status: "conflict", amount_coefficient: "500", amount_scale: null }),
+        row({ amount_status: "missing", amount_coefficient: null, amount_scale: 0 }),
       ]),
     ).toEqual([
       {
@@ -98,6 +103,14 @@ describe("the amount at risk on a reward expiry row", () => {
         unitRef: "points:synthetic",
         value: { status: "missing", reasonCode: "decimal-v1:missing" },
       },
+      {
+        unitRef: "points:synthetic",
+        value: { status: "conflict", reasonCode: "decimal-v1:conflict" },
+      },
+      {
+        unitRef: "points:synthetic",
+        value: { status: "missing", reasonCode: "decimal-v1:missing" },
+      },
     ]);
   });
 
@@ -108,7 +121,7 @@ describe("the amount at risk on a reward expiry row", () => {
       row({ amount_coefficient: null }),
       // `exact` with a coefficient and no scale: once served with a null scale.
       row({ amount_scale: null }),
-      // A status that is not exact but keeps a value.
+      // A status that is not exact but keeps both columns, a value.
       row({ amount_status: "missing" }),
       // A status outside decimal-v1.
       row({ amount_status: "estimated", amount_coefficient: null, amount_scale: null }),

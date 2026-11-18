@@ -141,6 +141,11 @@ writer or command is added, and no candidate's eligibility changes.
 
 - Status: proposed
 - Date: 2026-11-18
+- Owner approval: required before merge. The published answer of
+  `kogane.card-settlements.debit-accounts` changes for a non-exact total, and
+  a change to a published tool's answer is the owner's to approve
+  ([ADR 0081](0081-ui-parity-through-mcp.md)'s `nextPage` amendment,
+  [ADR 0088](0088-collection-quality-per-account.md)).
 
 ### Context
 
@@ -180,13 +185,22 @@ the page renders the total through `SettlementQuantity` only.
 
 - The route body and the `kogane.card-settlements.debit-accounts` result
   change shape for a non-exact total (`null` becomes a quantity with its
-  status and reason); every other answer is unchanged byte for byte. The
-  tool's name, description and input schema are unchanged, and the catalogue
-  is not touched. `schemaVersion` stays `kogane-card-debit-accounts-v1`: an
-  older browser client accepts the new shape (it already validated a
-  non-null amount as a quantity), and client and Worker deploy together.
-- An MCP client that relied on `amount === null` to mean "not exact" now
-  reads `amount.value.status`.
+  status and reason); every answer whose totals are exact is unchanged byte
+  for byte, and a row CORE 0024 never stores fails the read where it
+  answered `null`. The tool's name, description and input schema are
+  unchanged, and the catalogue is not touched.
+- `schemaVersion` stays `kogane-card-debit-accounts-v1`. The v1 wire
+  contract already admitted any quantity there, a non-exact one included
+  (`amount === null || validQuantity(amount)`), so the new answers are v1
+  answers; what is withdrawn is `null`, which the new contract refuses. An
+  older browser client accepts the new shape, and client and Worker deploy
+  together, so no client meets `null` from a newer Worker.
+- An MCP client that relied on `amount === null` to mean "not exact" (what
+  the service type's comment said; the tool description,
+  `docs/agent-api.md` and `docs/card-settlements.md` did not) now reads
+  `amount.value.status`. One that read `amount.value.value` without checking
+  the status was already wrong against the v1 contract, which admitted a
+  non-exact quantity.
 
 ### Verification
 

@@ -3,7 +3,8 @@
 // operator's カード照合 page and `kogane.card-settlements.debit-accounts` for
 // an agent answer one read (docs/card-settlements.md, Debit account per card;
 // ADR 0114). The store holds two MyJCB statement totals, one exact and one
-// the decimal-v1 projection could not read, no reading and no candidate. The answers are exercised on the complete schema in
+// the decimal-v1 projection could not read, no reading and no candidate. The
+// answers are exercised on the complete schema in
 // services/processor/test/card-debit-accounts.test.ts. Every value is
 // invented.
 import { env } from "cloudflare:test";

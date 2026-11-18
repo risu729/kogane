@@ -363,3 +363,45 @@ describe("where the store lacks the reported state's views", () => {
     expect(await audited()).toBe(before);
   });
 });
+
+/**
+ * A READ store whose expiry page answers each row's `amount_scale` as null:
+ * an `exact` row without both decimal-v1 columns, which READ 0004's CHECK
+ * never stores and the read refuses (`reward_estimate_amount_invalid`).
+ */
+function withoutAmountScale(db: D1Database): D1Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare")
+        return (sql: string) =>
+          target.prepare(
+            sql.includes("FROM reward_expiry_estimates_v2")
+              ? sql.replace(
+                  "amount_coefficient, amount_scale,",
+                  "amount_coefficient, NULL AS amount_scale,",
+                )
+              : sql,
+          );
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+describe("where a READ expiry row pairs its amount as the schema never stores", () => {
+  const broken = pageReadHarness("reward-read-amount-invalid", {
+    get READ() {
+      return withoutAmountScale((env as unknown as { READ: D1Database }).READ);
+    },
+  });
+
+  it("the route, the agent route and MCP fail the read alike, never serving the row", async () => {
+    const failed = await broken.expectSameAnswer("/api/v2/rewards/expiry", REWARDS, {
+      collection: "expiry",
+    });
+    expect(failed.status).toBe(503);
+    expect(failed.body).toMatchObject({ error: "catalogue_read_failed" });
+    // The other page does not read the estimates.
+    expect((await broken.http(REWARDS, { collection: "holdings" })).status).toBe(200);
+  });
+});

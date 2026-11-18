@@ -228,11 +228,15 @@ function expiryBasis(value: string | null): RewardExpiryBasis | null {
 }
 
 /**
- * The row's amount at risk. READ 0002 and 0004 CHECK that a row is `exact`
- * exactly when both decimal-v1 columns are set, and that the status is one of
- * the four, so any other pairing is a READ store the schema never admits: it
- * fails the read (`reward_estimate_amount_invalid`) rather than being shown
- * as a value nobody stored or a reason nobody recorded.
+ * The row's amount at risk. READ 0002 and 0004 CHECK that the status is one
+ * of the four and that a row is `exact` exactly when both decimal-v1 columns
+ * are set. A pairing that CHECK refuses (`exact` without both columns, a
+ * status that is not exact with both, or another status) is a READ store the
+ * schema never admits: it fails the read (`reward_estimate_amount_invalid`)
+ * rather than being shown as a value nobody stored or a reason nobody
+ * recorded. A status that is not exact with one stray column is one the CHECK
+ * admits (the writer never stores it); it keeps its reason, and the stray
+ * column is never shown as a value.
  */
 function estimateQuantity(row: RewardEstimateRow) {
   const columns = row.amount_coefficient !== null && row.amount_scale !== null;
@@ -246,11 +250,7 @@ function estimateQuantity(row: RewardEstimateRow) {
         normalizationVersion: "decimal-v1",
       },
     };
-  if (
-    (status === "missing" || status === "unparsed" || status === "conflict") &&
-    row.amount_coefficient === null &&
-    row.amount_scale === null
-  )
+  if ((status === "missing" || status === "unparsed" || status === "conflict") && !columns)
     return { unitRef: row.unit_ref, value: { status, reasonCode: `decimal-v1:${status}` } };
   throw new Error("reward_estimate_amount_invalid");
 }
