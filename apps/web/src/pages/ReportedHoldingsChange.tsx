@@ -111,6 +111,16 @@ function SideCell({ side }: { side: HoldingSide }): ReactNode {
   }
 }
 
+/**
+ * A holding as its row header shows it: the code and market, then the source,
+ * provider account and parser. Two accounts or sources can hold the same code,
+ * so a name per row carries all of them.
+ */
+function holdingName({ key }: HoldingChange): string {
+  const code = key.market === null ? key.securityCode : `${key.securityCode} · ${key.market}`;
+  return `${code}（${key.sourceId} · ${key.sourceAccount} · ${key.parserName}）`;
+}
+
 function HoldingRow({ holding }: { holding: HoldingChange }): ReactNode {
   const status = STATUS[holding.status];
   return (
@@ -141,10 +151,7 @@ function HoldingRow({ holding }: { holding: HoldingChange }): ReactNode {
       <td>
         <Badge tone={status.tone}>{status.label}</Badge>
         {holding.reasons.length === 0 ? null : (
-          <ul
-            className="warning-list"
-            aria-label={`${holding.key.securityCode} を比較できない理由`}
-          >
+          <ul className="warning-list" aria-label={`${holdingName(holding)}を比較できない理由`}>
             {holding.reasons.map((reason) => (
               <li key={reason}>{label(REASON, reason)}</li>
             ))}

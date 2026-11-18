@@ -58,6 +58,28 @@ export function holdingsChangeWorld(): DatedStore {
   return store;
 }
 
+/**
+ * From 2026-09-01 to 2026-09-10: two provider accounts of one source that
+ * both hold 1004, each listed on both dates with an unreadable end quantity.
+ * Two not comparable rows carry the same code and differ by account only.
+ */
+export function sharedCodeHoldingsWorld(): DatedStore {
+  const store = new DatedStore();
+  for (const [fetchedAt, quantity] of [
+    ["2026-08-31T23:30:00Z", "7"],
+    ["2026-09-09T23:30:00Z", "unreadable"],
+  ] as const)
+    store.capture({
+      ...DOMESTIC,
+      fetchedAt,
+      positions: [
+        { account: "sbi-a", code: "1004", quantity },
+        { account: "sbi-b", code: "1004", quantity },
+      ],
+    });
+  return store;
+}
+
 /** The API body, as `GET /api/v2/reported-holdings-change` returns it. */
 export async function holdingsChangeBody(
   store: DatedStore,
