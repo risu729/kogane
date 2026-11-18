@@ -8,6 +8,7 @@ import {
   DEFAULT_POLICY_FAMILY,
   dependencyDigest,
   IDENTITY_POLICY_VERSION,
+  identityPolicyCeilingSql,
   MIZUHO_POLICY_VERSION,
   MYJCB_POLICY_VERSION,
   NO_EVIDENCE,
@@ -152,26 +153,30 @@ test("every SBI Shinsei parse requires policy 2 of the default family, with no e
   });
 });
 
-test("only SBI Securities foreign positions captures require policy 2 of the default family", () => {
-  expect(SBI_SECURITIES_POLICY_VERSION).toBe(2);
-  // Policy-1 runs gave a code with no RIC, MIC or country the shared
-  // `unknown-country` scope (ADR 0113); only the positions parser can emit
-  // that shape, so only its parses are re-identified append-only.
-  const positions = { ...NO_EVIDENCE, sbiForeignPositionsArtifact: true };
-  expect(selectIdentityPolicy(parse("sbi-securities"), positions)).toEqual({
+test("only SBI Securities captures whose rows carry an account discriminator require policy 3", () => {
+  expect(SBI_SECURITIES_POLICY_VERSION).toBe(3);
+  expect(IDENTITY_POLICY_VERSION).toBe(3);
+  // Policy 2 (ADR 0113) scoped a code with no RIC, MIC or country to its
+  // capture; policy 3 (ADR 0117) scopes a foreign trade, position, valuation
+  // or cash balance with no account discriminator to its capture. The foreign
+  // trade, positions and cash balances parsers can emit that shape, so their
+  // parses are re-identified append-only.
+  const discriminated = { ...NO_EVIDENCE, sbiForeignDiscriminatedArtifact: true };
+  expect(selectIdentityPolicy(parse("sbi-securities"), discriminated)).toEqual({
     policyFamily: DEFAULT_POLICY_FAMILY,
-    release: "identity-default-v2",
-    policyVersion: 2,
+    release: "identity-default-v3",
+    policyVersion: 3,
     dependencySet: [],
     eligibility: { status: "eligible" },
   });
-  // An explicit policy-1 run is stored as requested and keeps policy 1's rule.
-  expect(selectIdentityPolicy(parse("sbi-securities"), positions, 1)).toMatchObject({
-    release: "identity-default-v1",
-    policyVersion: 1,
-  });
-  // Every other SBI Securities capture keeps the base policy, so its source
-  // accounts and identifiers gain no revision.
+  // An explicit earlier run is stored as requested and keeps that version's rules.
+  for (const version of [1, 2])
+    expect(selectIdentityPolicy(parse("sbi-securities"), discriminated, version)).toMatchObject({
+      release: `identity-default-v${version}`,
+      policyVersion: version,
+    });
+  // Every other SBI Securities capture, the foreign cash history included,
+  // keeps the base policy, so its source accounts and identifiers gain no revision.
   expect(selectIdentityPolicy(parse("sbi-securities"), NO_EVIDENCE)).toEqual({
     policyFamily: DEFAULT_POLICY_FAMILY,
     release: "identity-default-v1",
@@ -180,20 +185,41 @@ test("only SBI Securities foreign positions captures require policy 2 of the def
     eligibility: {
       status: "fallback",
       family: DEFAULT_POLICY_FAMILY,
-      reason: "not-a-foreign-positions-capture",
+      reason: "not-a-discriminated-foreign-capture",
     },
   });
   expect(
     selectIdentityPolicy(parse("sbi-securities"), {
       ...NO_EVIDENCE,
-      sbiForeignPositionsArtifact: false,
+      sbiForeignDiscriminatedArtifact: false,
     }),
   ).toMatchObject({ policyVersion: BASE_IDENTITY_POLICY_VERSION });
   // Another source never consumes the flag.
-  expect(selectIdentityPolicy(parse("smbc-bank"), positions)).toMatchObject({
+  expect(selectIdentityPolicy(parse("smbc-bank"), discriminated)).toMatchObject({
     policyVersion: BASE_IDENTITY_POLICY_VERSION,
     eligibility: { status: "eligible" },
   });
+});
+
+test("raising the build's highest version to 3 leaves every other source's selection unchanged", () => {
+  // A standard request still runs each source family at its own version and
+  // the default family at the base version (ADR 0117).
+  expect(selectIdentityPolicy(parse("vpass"), { vpassBindings: [binding()] })).toMatchObject({
+    release: "vpass-card-binding-v2",
+    policyVersion: 2,
+  });
+  for (const source of ["mizuho-bank", "sbi-shinsei-bank"])
+    expect(selectIdentityPolicy(parse(source), NO_EVIDENCE)).toMatchObject({
+      release: "identity-default-v2",
+      policyVersion: 2,
+    });
+  expect(
+    selectIdentityPolicy(parse("myjcb"), { ...NO_EVIDENCE, myJcbJPointArtifact: true }),
+  ).toMatchObject({ release: "identity-default-v2", policyVersion: 2 });
+  // A fallback is the base version, never the build's highest.
+  expect(
+    selectIdentityPolicy(parse("vpass"), { vpassBindings: [binding("a"), binding("b")] }),
+  ).toMatchObject({ release: "identity-default-v1", policyVersion: 1 });
 });
 
 test("only MyJCB J-POINT captures require policy 2 of the default family", () => {
@@ -253,8 +279,16 @@ test("the same release over a different evidence set has a different dependency 
 
 test("the required-policy SQL keeps the audited eligibility expression and validates its alias", () => {
   expect(requiredIdentityPolicySql("a").replace(/\s+/gu, " ")).toBe(
-    "CASE WHEN a.source_id='vpass' AND EXISTS( SELECT 1 FROM trusted_vpass_card_bindings binding WHERE binding.financial_artifact_id=a.id) THEN 2 WHEN a.source_id='mizuho-bank' THEN 2 WHEN a.source_id='sbi-shinsei-bank' THEN 2 WHEN a.source_id='myjcb' AND a.dataset='jpoint-balance' THEN 2 WHEN a.source_id='sbi-securities' AND a.dataset='foreign-cash-positions' THEN 2 ELSE 1 END",
+    "CASE WHEN a.source_id='vpass' AND EXISTS( SELECT 1 FROM trusted_vpass_card_bindings binding WHERE binding.financial_artifact_id=a.id) THEN 2 WHEN a.source_id='mizuho-bank' THEN 2 WHEN a.source_id='sbi-shinsei-bank' THEN 2 WHEN a.source_id='myjcb' AND a.dataset='jpoint-balance' THEN 2 WHEN a.source_id='sbi-securities' AND a.dataset IN ('foreign-cash-balances','foreign-cash-positions','foreign-trade-records') THEN 3 ELSE 1 END",
   );
   for (const alias of ["", "1a", "a.b", "a;", "a b"])
     expect(() => requiredIdentityPolicySql(alias)).toThrow("identity_sql_alias_invalid");
+});
+
+test("each source's ceiling is its module's version, read without evidence (ADR 0117)", () => {
+  expect(identityPolicyCeilingSql("a")).toBe(
+    "CASE a.source_id WHEN 'vpass' THEN 2 WHEN 'mizuho-bank' THEN 2 WHEN 'sbi-shinsei-bank' THEN 2 WHEN 'myjcb' THEN 2 WHEN 'sbi-securities' THEN 3 ELSE 1 END",
+  );
+  for (const alias of ["", "1a", "a.b", "a;", "a b"])
+    expect(() => identityPolicyCeilingSql(alias)).toThrow("identity_sql_alias_invalid");
 });

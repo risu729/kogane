@@ -1,4 +1,4 @@
-import { IDENTITY_POLICY_VERSION, requiredIdentityPolicySql } from "./identity-policies/index.ts";
+import { identityPolicyCeilingSql, requiredIdentityPolicySql } from "./identity-policies/index.ts";
 
 export const EMPTY_IDENTITY_PARSE_SQL = ["transaction", "balance", "position", "valuation"]
   .map(
@@ -9,8 +9,10 @@ export const EMPTY_IDENTITY_PARSE_SQL = ["transaction", "balance", "position", "
 
 /**
  * One acquisition eligibility join, with emptiness checked only for the page.
- * IDENTITY_POLICY_VERSION is the highest policy this build can require:
- * a sealed version at least that high never needs the trusted-binding lookup.
+ * The source's ceiling (its module's version, else the base version) is the
+ * highest policy any of its artifacts can require: a sealed version at least
+ * that high never needs the trusted-binding lookup, so raising one source's
+ * version does not send every other source's sealed parses through it.
  * The aggregate includes sealed runs only, so unfinished upgrades cannot hide
  * candidates. CASE keeps auxiliary evidence reads out of the completed path.
  */
@@ -23,7 +25,7 @@ export function identitySweepCandidatesSql(sourceScoped: boolean): string {
     WHERE p.status='ok' AND f.status='success' AND f.failure_count=0
       ${sourceScoped ? "AND a.source_id=?1" : ""}
       AND (SELECT CASE
-          WHEN max(i.policy_version)>=${IDENTITY_POLICY_VERSION} THEN 0
+          WHEN max(i.policy_version)>=${identityPolicyCeilingSql("a")} THEN 0
           WHEN max(i.policy_version) IS NULL THEN 1
           ELSE max(i.policy_version)<${requiredIdentityPolicySql("a")} END
         FROM identity_runs i JOIN identity_run_seals s ON s.identity_run_id=i.id

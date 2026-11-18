@@ -930,7 +930,9 @@ test("MyJCB J-POINT parses are re-identified at policy 2; statement parses stay 
   ]);
 });
 
-test("SBI foreign positions parses are re-identified at policy 2; a scopeless code no longer merges", async () => {
+test("SBI foreign positions parses are re-identified at the newest policy; a scopeless code no longer merges", async () => {
+  // Policy 2's rule (ADR 0113); the sweep now runs these parses at policy 3
+  // (ADR 0117), which keeps that rule.
   await db.prepare("INSERT OR IGNORE INTO sources VALUES('sbi-securities','synthetic')").run();
   // Two foreign positions captures, each with a different synthetic security
   // that states the same code and neither a country nor a RIC.
@@ -1015,11 +1017,11 @@ test("SBI foreign positions parses are re-identified at policy 2; a scopeless co
     identifiedRuns: 0,
     identifiedObservations: 0,
   });
-  // Policy 2: each security is unresolved on an identifier scoped to its own
-  // capture; the domestic parse keeps its policy-1 run.
+  // From policy 2: each security is unresolved on an identifier scoped to its
+  // own capture; the domestic parse keeps its policy-1 run.
   const unresolved = (id: number) => ({
     parse_run_id: id,
-    policy_version: 2,
+    policy_version: 3,
     namespace: "sbi-security-code",
     scope: `fetch-run:${id}`,
     value: "SYNX",
@@ -1043,19 +1045,19 @@ test("SBI foreign positions parses are re-identified at policy 2; a scopeless co
   expect(
     await count(
       "instrument_mappings",
-      "identifier_id IN (SELECT id FROM instrument_identifiers WHERE namespace='mic-symbol' AND value='1234') AND policy_version=2",
+      "identifier_id IN (SELECT id FROM instrument_identifiers WHERE namespace='mic-symbol' AND value='1234') AND policy_version>1",
     ),
   ).toBe(0);
 });
 
-test("re-identifying an observed-shape positions parse revises unchanged identities with new mapping ids (ADR 0113)", async () => {
-  // Every observed capture states a country and a RIC, so policy 2 plans it
-  // exactly as policy 1 did. The re-identification still appends a policy-2
-  // rule revision, with a new id, for each source account and identifier the
-  // parse uses whose current mapping is the rule's policy-1 one. A manual
-  // mapping is not revised. A policy-1 parse of another dataset that uses the
-  // same identifier keeps citing the revision it recorded, while the current
-  // mapping of that identifier becomes the policy-2 one.
+test("re-identifying observed-shape positions and trade parses revises unchanged identities with new mapping ids (ADR 0113, ADR 0117)", async () => {
+  // Every observed capture states a country, a RIC and its custody code, so
+  // policy 3 plans it exactly as policy 1 did. The re-identification still
+  // appends a policy-3 rule revision, with a new id, for each source account
+  // and identifier the parses use whose current mapping is the rule's
+  // policy-1 one. A manual mapping is not revised. Each parse's sealed
+  // policy-1 run keeps citing the revision it recorded, while the current
+  // mapping of that identifier becomes the policy-3 one.
   const element = (code: string, ric: string) => ({
     specificAccountCode: "OBSERVED",
     countryCode: "US",
@@ -1084,7 +1086,7 @@ test("re-identifying an observed-shape positions parse revises unchanged identit
       ),
     "foreign-cash-positions",
   );
-  // A trade of the same security, from a dataset that stays at policy 1.
+  // A trade of the same security: trades are re-identified at policy 3 too.
   await seed(
     164,
     0,
@@ -1154,11 +1156,11 @@ test("re-identifying an observed-shape positions parse revises unchanged identit
   expect(tradedBefore).toHaveLength(1);
   expect(accountBefore).toHaveLength(1);
 
-  // Only the positions parse is a candidate again.
+  // Both parses are candidates again.
   expect(await identitySweep(db, resolveIdentity, 8, "sbi-securities")).toEqual({
-    processedRuns: 1,
-    identifiedRuns: 1,
-    identifiedObservations: 2,
+    processedRuns: 2,
+    identifiedRuns: 2,
+    identifiedObservations: 3,
   });
   const revised = (before: MappingRevision[], after: MappingRevision[]) => {
     expect(after.slice(0, before.length)).toEqual(before);
@@ -1167,7 +1169,7 @@ test("re-identifying an observed-shape positions parse revises unchanged identit
     const { id: newId, revision: _r2, policy_version: v2, ...now } = after.at(-1)!;
     // Equal except for its id, revision and policy version.
     expect(now).toEqual(was);
-    expect([v1, v2]).toEqual([1, 2]);
+    expect([v1, v2]).toEqual([1, 3]);
     expect(newId).not.toBe(oldId);
     return newId;
   };
@@ -1176,21 +1178,166 @@ test("re-identifying an observed-shape positions parse revises unchanged identit
   // The manual decision is untouched.
   expect((await instrumentRevisions(decidedId)).results).toEqual(decidedBefore);
   // The trade parse's sealed policy-1 run keeps citing the first revision;
-  // the identifier's current mapping, which a pinned plan expects, moved on.
-  expect(
-    await db
+  // its current policy-3 run, and the identifier's current mapping, which a
+  // pinned plan expects, moved on.
+  const cited = (current: boolean) =>
+    db
       .prepare(
-        "SELECT DISTINCT u.instrument_mapping_id id FROM current_identity_observations o JOIN identity_instrument_uses u ON u.identity_observation_id=o.id WHERE o.parse_run_id=164 AND u.identifier_id=?",
+        current
+          ? "SELECT DISTINCT u.instrument_mapping_id id FROM current_identity_observations o JOIN identity_instrument_uses u ON u.identity_observation_id=o.id WHERE o.parse_run_id=164 AND u.identifier_id=?"
+          : "SELECT DISTINCT u.instrument_mapping_id id FROM identity_runs r JOIN identity_observations o ON o.identity_run_id=r.id JOIN identity_instrument_uses u ON u.identity_observation_id=o.id WHERE r.parse_run_id=164 AND r.policy_version=1 AND u.identifier_id=?",
       )
       .bind(tradedId)
-      .first<string>("id"),
-  ).toBe(tradedBefore[0]!.id);
+      .first<string>("id");
+  expect(await cited(false)).toBe(tradedBefore[0]!.id);
+  expect(await cited(true)).toBe(tradedNow);
   expect(
     await db
       .prepare("SELECT id FROM current_instrument_mappings WHERE identifier_id=?")
       .bind(tradedId)
       .first<string>("id"),
   ).toBe(tradedNow);
+});
+
+test("SBI foreign rows with no account discriminator leave the cash ledger's account at policy 3; history keeps its key (ADR 0117)", async () => {
+  await db.prepare("INSERT OR IGNORE INTO sources VALUES('sbi-securities','synthetic')").run();
+  const insert = (sql: string, extra: unknown) => (id: number) => [
+    db.prepare(sql).bind(id, JSON.stringify(extra)),
+  ];
+  // The foreign cash history: its schema states no discriminator.
+  await seed(
+    170,
+    0,
+    "sbi-securities",
+    true,
+    insert(
+      "INSERT INTO transaction_observations(parse_run_id,source_account,currency,raw_locator,extra_json) VALUES(?,'sbi-securities:foreign','USD','synthetic:history',?)",
+      {
+        valueDate: "2099-01-01",
+        tradeType: "synthetic",
+        _kogane: { identityOrigin: "row-occurrence" },
+      },
+    ),
+    "foreign-cash-history",
+  );
+  // A trade stating the field empty, as the trade parser accepts.
+  await seed(
+    171,
+    0,
+    "sbi-securities",
+    true,
+    insert(
+      "INSERT INTO transaction_observations(parse_run_id,source_account,currency,raw_locator,extra_json) VALUES(?,'sbi-securities:foreign','USD','synthetic:trade',?)",
+      {
+        specificAccountCode: "",
+        tradeCurrencyCode: "USD",
+        settlementCurrencyCode: "USD",
+        securities: { securitiesCode: "SYNQ", countryCode: "US", ric: "SYNQ.O" },
+      },
+    ),
+    "foreign-trade-records",
+  );
+  // A position and a cash balance not stating theirs, as those parsers accept.
+  await seed(
+    172,
+    0,
+    "sbi-securities",
+    true,
+    insert(
+      "INSERT INTO position_observations(parse_run_id,source_account,security_code,quantity_text,quantity_scale,currency,raw_locator,extra_json) VALUES(?,'sbi-securities:foreign','SYNQ','1',0,'USD','synthetic:position',?)",
+      { countryCode: "US", securities: { securitiesCode: "SYNQ", ric: "SYNQ.O" } },
+    ),
+    "foreign-cash-positions",
+  );
+  await seed(
+    173,
+    0,
+    "sbi-securities",
+    true,
+    insert(
+      "INSERT INTO balance_observations(parse_run_id,source_account,metric,instrument,raw_locator,extra_json) VALUES(?,'sbi-securities:foreign','synthetic_balance','USD','synthetic:balance',?)",
+      { account: {}, currencyEntry: { currencyCode: "USD" }, row: {} },
+    ),
+    "foreign-cash-balances",
+  );
+  for (const id of [170, 171, 172, 173])
+    expect(await identifyParse(db, parse(id, "sbi-securities"), resolveIdentity, 1)).toBe(1);
+  type Organized = {
+    parse_run_id: number;
+    policy_version: number;
+    source_account_id: string;
+    reference_json: string;
+    account_id: string;
+    reason: string;
+    status: string;
+  };
+  const organized = async () =>
+    (
+      await db
+        .prepare(
+          `SELECT o.parse_run_id,o.policy_version,o.source_account_id,sa.reference_json,m.account_id,m.reason,m.status
+           FROM effective_identity_observations o JOIN source_accounts sa ON sa.id=o.source_account_id
+           JOIN account_mappings m ON m.id=o.effective_account_mapping_id
+           WHERE o.parse_run_id IN (170,171,172,173) ORDER BY o.parse_run_id`,
+        )
+        .all<Organized>()
+    ).results;
+  const bare = JSON.stringify(["sbi-securities:foreign"]);
+  // What policy 1 recorded: all four datasets on one source account and entity.
+  const before = await organized();
+  expect(before.map((row) => row.reference_json)).toEqual([bare, bare, bare, bare]);
+  expect(new Set(before.map((row) => row.account_id)).size).toBe(1);
+  const ledger = before[0]!;
+  const ledgerRevisions = () =>
+    db
+      .prepare("SELECT * FROM account_mappings WHERE source_account_id=? ORDER BY revision")
+      .bind(ledger.source_account_id)
+      .all();
+  const ledgerBefore = (await ledgerRevisions()).results;
+
+  // Only the trade, positions and balances parses are candidates again.
+  expect(await identitySweep(db, resolveIdentity, 8, "sbi-securities")).toEqual({
+    processedRuns: 3,
+    identifiedRuns: 3,
+    identifiedObservations: 3,
+  });
+  expect(await identitySweep(db, resolveIdentity, 8, "sbi-securities")).toEqual({
+    processedRuns: 0,
+    identifiedRuns: 0,
+    identifiedObservations: 0,
+  });
+  const after = await organized();
+  // History keeps its policy-1 run, key, source account, entity and mapping.
+  expect(after[0]).toEqual(ledger);
+  expect((await ledgerRevisions()).results).toEqual(ledgerBefore);
+  // The other three are unresolved on accounts scoped to their own capture,
+  // each with its own entity, none of them the cash ledger's.
+  const scoped = (id: number, field: string) =>
+    expect.objectContaining({
+      parse_run_id: id,
+      policy_version: 3,
+      reference_json: JSON.stringify([
+        "sbi-securities:foreign",
+        `missing-${field}`,
+        "fetch-run",
+        String(id),
+      ]),
+      reason: `missing-${field}`,
+      status: "unresolved",
+    });
+  expect(after.slice(1)).toEqual([
+    scoped(171, "specificAccountCode"),
+    scoped(172, "specificAccountCode"),
+    scoped(173, "accountKind"),
+  ]);
+  expect(new Set(after.map((row) => row.account_id)).size).toBe(4);
+  // Append-only: every policy-1 run still names the bare source account.
+  expect(
+    await count(
+      "identity_observations",
+      `source_account_id='${ledger.source_account_id}' AND identity_run_id IN (SELECT id FROM identity_runs WHERE parse_run_id IN (170,171,172,173) AND policy_version=1)`,
+    ),
+  ).toBe(4);
 });
 
 test("all four observation kinds preserve their instrument roles and provenance", async () => {

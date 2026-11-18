@@ -607,14 +607,14 @@ rows are always country `JP` and the foreign trade parser refuses a row
 without a country. No observed capture does.
 
 The rule reads the identity run's own version, so an explicit policy-1 run
-still records the placeholder. The `sbi-securities` policy module
-(`identity-policies/sbi-securities.ts`) requires version 2 only for foreign
-positions captures (artifact dataset `foreign-cash-positions`), with family
-`identity-default`, release `identity-default-v2` and an empty dependency set.
-Every other SBI Securities parse falls back to the base policy
-(`not-a-foreign-positions-capture`) and gains no revision. The bounded sweep
-treats the sealed policy-1 positions parses as candidates again and appends a
-policy-2 run; the current views select the newer sealed run. A position that
+still records the placeholder. The rule applies from version 2, so it holds
+in the policy-3 runs the `sbi-securities` policy module now requires for
+foreign positions captures (with foreign trade and cash balances captures,
+[below](#policy-3-sbi-securities-foreign-rows-with-no-account-discriminator));
+when it was introduced the module required version 2 for positions captures
+only. The bounded sweep treats sealed positions parses below the required
+version as candidates again and appends a run at that version; the current
+views select the newer sealed run. A position that
 used the placeholder moves to its capture's unresolved identifier; the
 placeholder identifier, its revisions and the policy-1 runs stay as recorded,
 and a manual decision on the placeholder is not carried over. Every other
@@ -634,8 +634,81 @@ sbi-securities` and continue only if the bounded run reports more candidates.
 Then run the read-only [identity audit](identity-audit.md): `pending_parses`
 for `sbi-securities` reads zero, and its `issues` count
 `missing-security-scope` for any observation that reached the rule. No
-reimport or B reparse is needed. Rolling back the code leaves the policy-2
-runs current: an older build cannot replace a newer sealed decision.
+reimport or B reparse is needed. Rolling back the code leaves the newer runs
+current: an older build cannot replace a newer sealed decision.
+
+## Policy 3: SBI Securities foreign rows with no account discriminator
+
+Policies 1 and 2 keyed a foreign SBI Securities row whose discriminator is
+missing (`specificAccountCode` for a trade, position or valuation,
+`account.accountKind` for a cash balance; a value that is not a string, is
+empty or is whitespace only) on the bare `["sbi-securities:foreign"]`
+reference. Every foreign cash history row is on that reference too (its
+schema states no discriminator), and the account entity is derived from the
+source account, so such a row joined the USD cash ledger's account. The
+foreign trade parser accepts `specificAccountCode: ""`, and the positions and
+cash balances parsers do not require their field. From policy 3 the resolver
+maps such a row `unresolved` on a source account scoped to its fetch run,
+`["sbi-securities:foreign", "missing-<field>", "fetch-run", "<id>"]`, with the
+reason `missing-<field>` (also in the plan's issues, as before), and plans
+every other shape exactly as policy 2 did
+([ADR 0117](adr/0117-sbi-foreign-account-discriminator-identity.md)). A
+foreign transaction that does not state `specificAccountCode` at all is a cash
+history row and keeps the bare reference under every version. No observed
+capture omits a discriminator.
+
+The rule reads the identity run's own version, so an explicit policy-1 or
+policy-2 run still records the bare reference. The `sbi-securities` policy
+module requires version 3 for foreign trade, positions and cash balances
+captures (artifact datasets `foreign-trade-records`, `foreign-cash-positions`
+and `foreign-cash-balances`), with family `identity-default`, release
+`identity-default-v3` and an empty dependency set. Every other SBI Securities
+parse, the foreign cash history included, falls back to the base policy
+(`not-a-discriminated-foreign-capture`) and gains no revision. The build's
+highest version (`IDENTITY_POLICY_VERSION`) is 3; every other source's
+module keeps its own version, and the sweep compares a sealed run with its
+source's highest version before it reads any evidence.
+
+The bounded sweep treats sealed trade and cash balances parses (policy 1) and
+positions parses (policy 1 or 2) as candidates again and appends one policy-3
+run each; the current views select it. The cash history keeps its policy-1
+runs, and its bare source account, account entity and mapping revisions gain
+nothing. A row that was on the bare reference moves to its capture's
+unresolved account, with an entity of its own; its earlier runs still name
+the bare reference, and a manual decision on the bare reference is not
+carried over. Every other source account and identifier those parses use,
+including the shared currency identifiers `iso4217/global/USD` and
+`iso4217/global/JPY` (no other source's run has revised them at policy 3),
+gains one policy-3 rule revision equal to the current one except for its id,
+revision and version, unless a manual mapping or a rule adoption onto another
+instrument holds it. Their account entity and instrument do not change, but
+an open plan that pinned the earlier revision is refused at approval with
+`stale_context` and has to be planned again; a cash history parse kept at
+policy 1 still cites the revisions it recorded.
+
+Whether any production observation outside the cash history is on the bare
+reference was not read. A read-only aggregate answers it:
+
+```sql
+SELECT a.dataset, count(*) AS observations
+FROM identity_observations o
+JOIN identity_runs r ON r.id = o.identity_run_id
+JOIN parse_runs p ON p.id = r.parse_run_id
+JOIN fetch_artifacts a ON a.id = p.fetch_artifact_id
+JOIN source_accounts sa ON sa.id = o.source_account_id
+WHERE a.source_id = 'sbi-securities' AND sa.reference_json = '["sbi-securities:foreign"]'
+GROUP BY a.dataset;
+```
+
+Nothing is configured to enable it. After deployment the five-minute pipeline
+sweep picks the parses up on its own; each trade, positions and cash balances
+parse is re-identified once. To finish sooner run `node
+scripts/identity-ops.ts catchup 100 sbi-securities` and continue only if the
+bounded run reports more candidates. Then run the read-only
+[identity audit](identity-audit.md): `pending_parses` for `sbi-securities`
+reads zero. No reimport or B reparse is needed. Rolling back the code leaves
+the policy-3 runs current: an older build cannot replace a newer sealed
+decision.
 
 ## Policy 2: SBI Shinsei non-account references
 

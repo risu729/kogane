@@ -39,9 +39,22 @@ const CUSTODY_LABELS: ReadonlyMap<string, string> = new Map([
  * (ADR 0113). Policy 1 gave that shape the placeholder scope
  * `unknown-country`, so two different securities sharing such a code shared
  * one identifier; a run recorded under policy 1 keeps that identifier as
- * evidence, and a policy-2 run of the same parse appends the correction.
+ * evidence, and a newer run of the same parse appends the correction.
  */
-export const SBI_SECURITIES_POLICY_VERSION = 2;
+export const SBI_SCOPELESS_SECURITY_POLICY_VERSION = 2;
+/**
+ * The version from which a foreign custody row (trade, position, valuation)
+ * with no `specificAccountCode`, or a foreign cash balance with no
+ * `accountKind`, is `unresolved` on a source account scoped to its fetch run
+ * (ADR 0117). Policies 1 and 2 left it on the bare `sbi-securities:foreign`
+ * reference, which every capture of the foreign cash history also uses, so
+ * such a row shared one account with the USD cash ledger. The foreign cash
+ * history itself states no discriminator by schema and keeps the bare
+ * reference under every version.
+ */
+export const SBI_UNDISCRIMINATED_ACCOUNT_POLICY_VERSION = 3;
+/** The newest SBI Securities identity policy version. */
+export const SBI_SECURITIES_POLICY_VERSION = 3;
 
 /** Provider references are evidence of identity, not an external security-master match. */
 export function sbiIdentity(input: IdentityInput): IdentityPlan {
@@ -54,8 +67,10 @@ export function sbiIdentity(input: IdentityInput): IdentityPlan {
     input.sourceAccount === "sbi-securities:domestic" ||
     input.sourceAccount.startsWith("sbi-securities:domestic:deposit-type=");
   const yen = input.sourceAccount === "sbi-securities:yen-cash";
+  const version = input.policyVersion ?? SBI_SECURITIES_POLICY_VERSION;
   const issues: string[] = [];
   const key = [input.sourceAccount];
+  let undiscriminated: string | null = null;
   // Preserve exact discriminator namespaces and values. Similar tax labels do
   // not establish equality between the domestic and foreign provider systems.
   if (foreign) {
@@ -65,7 +80,20 @@ export function sbiIdentity(input: IdentityInput): IdentityPlan {
         : string(extra.specificAccountCode);
     const field = input.kind === "balance" ? "accountKind" : "specificAccountCode";
     if (discriminator !== null) key.push(field, discriminator);
-    else issues.push(`missing-${field}`);
+    else {
+      issues.push(`missing-${field}`);
+      // A foreign transaction that does not state the field at all is a
+      // foreign cash history row: that schema has no discriminator, and the
+      // trade parser requires the field. It keeps the bare reference. From
+      // policy 3 any other row missing its discriminator is scoped to its
+      // fetch run, so it never shares an account with the cash ledger, and
+      // the custody and cash namespaces stay apart.
+      const ledger = input.kind === "transaction" && !Object.hasOwn(extra, field);
+      if (!ledger && version >= SBI_UNDISCRIMINATED_ACCOUNT_POLICY_VERSION) {
+        undiscriminated = `missing-${field}`;
+        key.push(undiscriminated, "fetch-run", String(input.fetchRunId));
+      }
+    }
   } else if (domestic && input.kind === "transaction") {
     const label = string(extra.accountLabel);
     if (label !== null) key.push("accountLabel", label);
@@ -128,7 +156,7 @@ export function sbiIdentity(input: IdentityInput): IdentityPlan {
       ric === null &&
       mic === null &&
       country === null &&
-      (input.policyVersion ?? SBI_SECURITIES_POLICY_VERSION) >= SBI_SECURITIES_POLICY_VERSION;
+      version >= SBI_SCOPELESS_SECURITY_POLICY_VERSION;
     if (value !== null) {
       const displayName =
         string(input.securityName) ?? string(security.securitiesName) ?? string(extra.issueName);
@@ -205,7 +233,7 @@ export function sbiIdentity(input: IdentityInput): IdentityPlan {
           : "unresolved",
       reason: aggregate
         ? "provider-portfolio-summary-not-separate-account"
-        : "exact-provider-account-reference",
+        : (undiscriminated ?? "exact-provider-account-reference"),
     },
     instruments,
     issues,

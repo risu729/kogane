@@ -207,11 +207,21 @@ every SBI Shinsei parse, no evidence, so parses sealed while policy 1 mapped
 the exchange-rate board and the stage category as deposits are re-identified
 ([ADR 0076](adr/0076-sbi-shinsei-non-account-identity.md),
 [identity-operations.md](identity-operations.md#policy-2-sbi-shinsei-non-account-references)).
+The `myjcb` module selects `identity-default-v2` for J-POINT captures only
+([ADR 0089](adr/0089-myjcb-jpoint-identity.md)), and the `sbi-securities`
+module selects `identity-default-v3` for foreign trade, positions and cash
+balances captures only
+([ADR 0113](adr/0113-sbi-scopeless-security-identity.md),
+[ADR 0117](adr/0117-sbi-foreign-account-discriminator-identity.md)).
 Sources without a module get `identity-default`. The standard request
-(`IDENTITY_POLICY_VERSION`) runs the default family at the base version, as
+(`IDENTITY_POLICY_VERSION`, the build's highest version, 3) runs each source
+module at its own version and the default family at the base version, as
 before; an explicit other version is stored as requested, so the numeric
-ordering tests are unchanged. `requiredIdentityPolicySql` is composed from the
-modules and produces the same expression audits used before.
+ordering tests are unchanged. The sweep's row path and empty fast path both
+make the standard request. `requiredIdentityPolicySql` is composed from the
+modules and produces the same expression audits used before;
+`identityPolicyCeilingSql` gives each source's highest version, which the
+sweep compares a sealed run with before reading any evidence.
 
 The store saves the selection: `identity_run_policies` records the family,
 release, dependency digest and set for every new run (row path and the empty

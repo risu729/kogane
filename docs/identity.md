@@ -29,7 +29,12 @@ carry their connection/account keys). Changing the principal in that slot
 requires a new producer/connection epoch, not silently reusing it. No rule
 claims multi-login identity from a parser constant. Provider-local accounts
 remain visibly provider-local until evidence or an explicit correction links
-them. Ordinal-only card/reward references are scoped to the fetch run.
+them. Ordinal-only card/reward references are scoped to the fetch run, and
+so, from identity policy 3, is an SBI Securities foreign custody or cash
+balance row that states no account discriminator, so it never joins the
+foreign cash history's account
+([ADR 0117](adr/0117-sbi-foreign-account-discriminator-identity.md),
+[SBI](identity-sbi.md)).
 
 `source_accounts` preserve the exact reference; `accounts` are the independent
 targets. Append-only `account_mappings` can link several references to one

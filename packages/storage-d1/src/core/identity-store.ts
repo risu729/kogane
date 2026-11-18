@@ -504,12 +504,14 @@ export async function identitySweep(
     const values = JSON.stringify(
       await Promise.all(
         empty.map(async (parse) => {
-          // The same selector as the row path decides the release and evidence
-          // digest; the SQL below still rechecks the required version itself.
+          // The same selector and standard request as the row path decide the
+          // release and evidence digest, so a module that falls back selects
+          // the base version here too, not the required one (ADR 0117); the
+          // SQL below still rechecks the required version itself.
           const selection = selectIdentityPolicy(
             parse,
-            await loadIdentityEvidence(db, parse, parse.required_policy),
-            parse.required_policy,
+            await loadIdentityEvidence(db, parse, IDENTITY_POLICY_VERSION),
+            IDENTITY_POLICY_VERSION,
           );
           const [runId, , family, release, digest, dependencies] = await policyRecord(
             await identityKey("ir", [parse.id, selection.policyVersion]),
