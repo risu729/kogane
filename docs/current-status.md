@@ -93,7 +93,14 @@ are separate claims. Historical acceptance records are linked from the
   request per original connection (`sony-bank`, `sbi-securities`, `mobile-suica`,
   `moneyforward-me`, `myjcb`) to publication. Of the four additional connections,
   `prestia-bank`'s first production collection was followed to publication
-  (2026-11-12); the other three still need their post-deployment request checks. Collectors run their daily
+  (2026-11-12); the other three still need their post-deployment request checks. The
+  derived `projected` stage was seen `completed` in production: on four of the five first
+  requests (2026-11-08; `sony-bank`'s, published before the stage shipped, reads
+  `projection_revision_unrecorded`) and on one more `sbi-securities` and `mobile-suica`
+  request each (2026-11-09, the [Phase 3 outcome](roadmap.md#phase-3-outcome)), all read
+  through `kogane.ops.operation.get`. No later read is recorded, and `prestia-bank`'s
+  request ended `failed` without `adopted` completing, so it never reached the stage; the read-only
+  re-check is in [ops API](ops-api.md#checking-projected-in-production-read-only). Collectors run their daily
   scope, not a requested window; READ projection of a run is derived from the READ pointer each time the record is read, not stored; only
   SBI VC's keepalive is an unattended session refresh. An accepted operation is
   still not an executed collection. The schedules page's **収集を依頼** sends the
