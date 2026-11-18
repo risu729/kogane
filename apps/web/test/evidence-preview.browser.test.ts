@@ -198,7 +198,7 @@ describe.if(runnable)("inline original preview under production CSP", () => {
     await page.getByRole("alert").waitFor();
     expect(await page.locator(".preview-code").count()).toBe(0);
     rawStatus = 503;
-    await page.getByRole("button", { name: "再試行", exact: true }).click();
+    await page.getByRole("button", { name: "原本の内容を再試行", exact: true }).click();
     await page
       .getByText("ファイルを表示できませんでした。再試行してください。", { exact: false })
       .waitFor();

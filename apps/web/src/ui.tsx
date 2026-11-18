@@ -404,7 +404,15 @@ export function ErrorState({
       </span>
       <p>{known ? error.message : "接続先の API が利用できるか確認し、もう一度お試しください。"}</p>
       {onRetry && !(error instanceof CommandError && error.final) ? (
-        <button className="button" onClick={onRetry} disabled={retrying}>
+        // Two failed loads on one page are two alerts: each retry says which
+        // load it repeats (docs/ui-guidelines.md#accessibility), its name
+        // ending in the words it shows.
+        <button
+          className="button"
+          onClick={onRetry}
+          disabled={retrying}
+          aria-label={`${label}を${retrying ? "再試行中…" : "再試行"}`}
+        >
           {retrying ? "再試行中…" : "再試行"}
         </button>
       ) : null}
@@ -524,7 +532,12 @@ export function QueryBoundary<T>({
       {query.isError ? (
         <div className="query-notice query-warning" role="alert">
           <span>更新できませんでした。前回読み込んだ{label}を表示しています。</span>
-          <button className="button" onClick={retry} disabled={query.isFetching}>
+          <button
+            className="button"
+            onClick={retry}
+            disabled={query.isFetching}
+            aria-label={`${label}を${query.isFetching ? "再試行中…" : "再試行"}`}
+          >
             {query.isFetching ? "再試行中…" : "再試行"}
           </button>
         </div>

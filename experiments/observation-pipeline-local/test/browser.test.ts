@@ -432,7 +432,7 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       expect(await page.locator("body").innerText()).not.toContain("private-upstream-diagnostic");
       expect(await page.locator("tbody").count()).toBe(0);
       fail = false;
-      await page.locator("main").getByRole("button", { name: "再試行", exact: true }).click();
+      await page.locator("main").getByRole("button", { name: "取引を再試行", exact: true }).click();
       await page.getByText("BROWSER_FRESH", { exact: false }).waitFor();
       await page.close();
     },
@@ -519,7 +519,7 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       expect(await page.locator("main").getByRole("alert").innerText()).toContain("前回");
       expect(await page.locator("tbody").innerText()).toContain("BROWSER_FRESH");
       fail = false;
-      await page.locator("main").getByRole("button", { name: "再試行", exact: true }).click();
+      await page.locator("main").getByRole("button", { name: "取引を再試行", exact: true }).click();
       await page.locator("main").getByRole("alert").waitFor({ state: "detached" });
       await page.close();
     },
@@ -534,6 +534,8 @@ describe.if(runnable)("evidence browser in a real browser", () => {
           const page = await browser.newPage();
           let fail = false;
           let failureStatus = status;
+          // The retry names the read that failed: the records, or the metadata.
+          const retry = endpoint === "meta" ? "接続情報を再試行" : "取引を再試行";
           await page.route(`**/api/${endpoint}`, async (route) => {
             if (!fail) return route.continue();
             return route.fulfill({
@@ -551,7 +553,7 @@ describe.if(runnable)("evidence browser in a real browser", () => {
             expect(await page.locator("main").innerText()).not.toContain("BROWSER_FRESH");
             expect(await page.locator("main tbody").count()).toBe(0);
             failureStatus = 503;
-            await page.locator("main").getByRole("button", { name: "再試行", exact: true }).click();
+            await page.locator("main").getByRole("button", { name: retry, exact: true }).click();
             await page
               .locator("main")
               .getByText(/HTTP 503/)
@@ -559,7 +561,7 @@ describe.if(runnable)("evidence browser in a real browser", () => {
             expect(await page.locator("main").innerText()).not.toContain("BROWSER_FRESH");
             expect(await page.locator("main tbody").count()).toBe(0);
             fail = false;
-            await page.locator("main").getByRole("button", { name: "再試行", exact: true }).click();
+            await page.locator("main").getByRole("button", { name: retry, exact: true }).click();
             await page.locator("tbody").waitFor();
             expect(await page.locator("tbody").innerText()).toContain("BROWSER_FRESH");
           } finally {

@@ -689,6 +689,27 @@ describe.if(runnable)("card settlement review", () => {
     await page.close();
   });
 
+  test("two sections that fail to load each offer a retry named for its own read", async () => {
+    // Shapes the client refuses, so both reads fail on one page.
+    debitAccountsPage = { schemaVersion: "synthetic-invalid" };
+    unmatchedPage = { schemaVersion: "synthetic-invalid" };
+    const page = await open();
+    for (const label of ["カードの引落口座", "照合候補のない請求"])
+      await page.getByText(`${label}を読み込めませんでした`, { exact: false }).waitFor();
+    expect(await auditView(page)).toEqual([]);
+    // Each retry repeats its own read and no other.
+    const debits = debitAccountReads.length;
+    const unmatchedBefore = unmatchedReads.length;
+    await page.getByRole("button", { name: "照合候補のない請求を再試行", exact: true }).click();
+    // The page's own fetch, observed at the server.
+    await page.waitForResponse((response) =>
+      response.url().includes("/api/v2/reconciliation/card-statements-unmatched"),
+    );
+    expect(unmatchedReads.length).toBe(unmatchedBefore + 1);
+    expect(debitAccountReads.length).toBe(debits);
+    await page.close();
+  });
+
   test("the bank is named by its adapter, and an unlabelled source is shown as stored", async () => {
     review.facts.bankDebit.sourceId = "sbi-shinsei-bank";
     let page = await open();
