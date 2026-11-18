@@ -19,7 +19,10 @@ describe("the trusted workflow rejects targets that write cf Build Output v0", (
     expect(command).not.toBe("");
     expect(gate?.body).not.toContain("if:");
     expect(gate?.body).not.toContain("secrets.");
+    expect(gate?.body).toContain("GH_TOKEN: ${{ github.token }}");
+    expect(gate?.body).toContain("SHA: ${{ inputs.sha }}");
     const index = names.indexOf(gate!.name);
+    expect(index).toBeGreaterThan(names.indexOf("Confirm the commit is on the release branch"));
     for (const name of [
       "Load the trusted Container compatibility adapter",
       "Checkout the exact commit",
@@ -89,6 +92,7 @@ describe("the trusted workflow rejects targets that write cf Build Output v0", (
               SHA: "a".repeat(40),
               GITHUB_REPOSITORY: "owner/repository",
               API_EXIT_CODE: String(scenario.apiExit ?? 0),
+              GITHUB_STEP_SUMMARY: join(root, "summary"),
               TARGET_STARTED: marker,
             },
           },

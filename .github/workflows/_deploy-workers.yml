@@ -155,6 +155,9 @@ jobs:
               echo "The target pins cf ${cf}, which writes Build Output v0; no production change was made." >&2
               exit 1
               ;;
+            *)
+              echo "The target pins cf '${cf}', which writes Build Output v1 or uses the Wrangler steps." | tee -a "${GITHUB_STEP_SUMMARY}"
+              ;;
           esac
       - name: Load the trusted Container compatibility adapter
         env:
