@@ -615,7 +615,7 @@ nothing it lists can be accepted.
 `kogane.card-settlements.debit-accounts` answers which bank account each
 credit card is debited from, with the evidence the answer rests on
 ([card settlements](card-settlements.md#debit-account-per-card),
-[ADR 0113](adr/0113-card-debit-account-answer.md)). It is the `カード照合`
+[ADR 0114](adr/0114-card-debit-account-answer.md)). It is the `カード照合`
 page's own service (`reviewCardDebitAccounts`), so an agent and the page's
 `カードの引落口座` section read one answer. It is listed on `/mcp` only to a
 grant holding `records.read` over the whole store, and it exists exactly

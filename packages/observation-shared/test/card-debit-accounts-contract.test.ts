@@ -1,4 +1,4 @@
-// The wire contract of the per-card debit account answer (ADR 0113): closed
+// The wire contract of the per-card debit account answer (ADR 0114): closed
 // codes only, and an answer that agrees with the evidence it names, so the
 // page never shows an account its own evidence does not carry. Every value is
 // invented.

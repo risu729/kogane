@@ -2,7 +2,7 @@
 // migrations: `GET /api/v2/reconciliation/card-debit-accounts` for the
 // operator's カード照合 page and `kogane.card-settlements.debit-accounts` for
 // an agent answer one read (docs/card-settlements.md, Debit account per card;
-// ADR 0113). The store holds one MyJCB statement total, no reading and no
+// ADR 0114). The store holds one MyJCB statement total, no reading and no
 // candidate. The answers are exercised on the complete schema in
 // services/processor/test/card-debit-accounts.test.ts. Every value is
 // invented.

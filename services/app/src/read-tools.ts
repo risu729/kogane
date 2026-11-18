@@ -2,7 +2,7 @@
 // (ADR 0073), dated reported state, account correspondence candidates and
 // one source account's correction history (ADR 0077), card statements
 // without a settlement candidate (ADR 0074's 2026-11-07 amendment), each
-// card's debit account (ADR 0113) and common audit readers.
+// card's debit account (ADR 0114) and common audit readers.
 import { z } from "zod";
 import {
   type Grant,

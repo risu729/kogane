@@ -1,5 +1,5 @@
 // The カード照合 page's list of each card's debit account (docs/card-settlements.md,
-// Debit account per card; ADR 0113). The read is the server's
+// Debit account per card; ADR 0114). The read is the server's
 // (`GET /api/v2/reconciliation/card-debit-accounts`, the same service as
 // `kogane.card-settlements.debit-accounts`); `getJson` checks its shape before
 // it renders, and the page shows the server's answer, which kind of evidence it

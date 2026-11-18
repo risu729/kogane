@@ -1,5 +1,5 @@
 // The wire shape of `GET /api/v2/reconciliation/card-debit-accounts`
-// (docs/card-settlements.md, Debit account per card; ADR 0113), checked by the
+// (docs/card-settlements.md, Debit account per card; ADR 0114), checked by the
 // browser before it renders the cards. Every code is checked against the
 // domain's closed lists, and every answer against the evidence beside it, so
 // the page never shows an answer its own evidence does not carry; the client

@@ -1,7 +1,7 @@
 // `GET /api/v2/reconciliation/card-debit-accounts`: which bank account each
 // credit card is debited from, with the evidence each answer rests on, for
 // the `カード照合` page (docs/card-settlements.md, Debit account per card;
-// ADR 0113). Operator-only, like the candidate list it sits beside. The
+// ADR 0114). Operator-only, like the candidate list it sits beside. The
 // answer is the application service's (`reviewCardDebitAccounts`), the one an
 // agent gets from `kogane.card-settlements.debit-accounts` under its own
 // grant, so a page and an agent read one answer. It plans, approves and

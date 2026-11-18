@@ -1,4 +1,4 @@
-// Which bank account each credit card is debited from (ADR 0113,
+// Which bank account each credit card is debited from (ADR 0114,
 // docs/card-settlements.md, Debit account per card). One answer per card,
 // decided only from evidence Kogane already holds, and saying which kind of
 // evidence it rests on:

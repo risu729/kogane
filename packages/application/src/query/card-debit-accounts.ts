@@ -1,4 +1,4 @@
-// Which bank account each credit card is debited from (#1357, ADR 0113,
+// Which bank account each credit card is debited from (#1357, ADR 0114,
 // docs/card-settlements.md, Debit account per card). One answer per card
 // that has a current statement total, a stated debit-account reading or a
 // settlement candidate: the provider-stated account when the card provider

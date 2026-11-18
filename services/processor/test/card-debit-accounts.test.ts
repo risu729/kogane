@@ -1,5 +1,5 @@
 // Which bank account each card is debited from
-// (packages/application/src/query/card-debit-accounts.ts, ADR 0113,
+// (packages/application/src/query/card-debit-accounts.ts, ADR 0114,
 // docs/card-settlements.md, Debit account per card) on the complete CORE
 // schema: a stated MyJCB account whose newest reading no longer resolves, a
 // Vpass card answered by an accepted settlement and unanswered again after

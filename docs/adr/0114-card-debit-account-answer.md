@@ -1,4 +1,4 @@
-# ADR 0113: Answer each card's debit account from stated evidence first, then accepted settlements
+# ADR 0114: Answer each card's debit account from stated evidence first, then accepted settlements
 
 - Status: proposed
 - Date: 2026-11-18

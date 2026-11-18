@@ -447,7 +447,7 @@ another candidate's acceptance
 the same list through `kogane.card-settlements.read` (`relatedTo`). Each card's debit account is answered on `カード照合` (and to agents through
 `kogane.card-settlements.debit-accounts`): the provider-stated account first,
 else an accepted settlement's, never an undecided candidate's
-([ADR 0113](adr/0113-card-debit-account-answer.md)). Source ownership is
+([ADR 0114](adr/0114-card-debit-account-answer.md)). Source ownership is
 recorded by the owner default (ADR 0082) for the accounts the candidates name.
 Installments, revolving and bonus payments, partial payments and refund
 allocation are shown as unsupported with closed reasons and still need support

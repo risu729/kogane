@@ -304,7 +304,7 @@ Limits:
 
 ### Debit account per card
 
-Design: [ADR 0113](adr/0113-card-debit-account-answer.md) (proposed).
+Design: [ADR 0114](adr/0114-card-debit-account-answer.md) (proposed).
 `reviewCardDebitAccounts`
 (`packages/application/src/query/card-debit-accounts.ts`) answers which bank
 account each card is debited from, under rule `card-debit-account-answer-v1`

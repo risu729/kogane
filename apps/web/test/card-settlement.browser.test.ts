@@ -22,7 +22,7 @@ const yen = (coefficient: string) => ({
     normalizationVersion: "exact-arith-v1",
   },
 });
-/** Each card's debit account, as the service answers it (ADR 0113); every value invented. */
+/** Each card's debit account, as the service answers it (ADR 0114); every value invented. */
 const SMBC_ACCOUNT = { bankSourceId: "smbc-bank", bankSourceAccount: "smbc-bank:synthetic-a" };
 const SHINSEI_ACCOUNT = {
   bankSourceId: "sbi-shinsei-bank",
