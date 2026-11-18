@@ -128,4 +128,45 @@ describe("the amount at risk on a reward expiry row", () => {
     ])
       await expect(quantitiesOf([stored])).rejects.toThrow("reward_estimate_amount_invalid");
   });
+
+  it("serves exactly the pairings the READ CHECK admits, over every status and column", async () => {
+    // READ 0002 and 0004, written out: the status is one of the four, and
+    // `(amount_status='exact') = (amount_coefficient IS NOT NULL AND amount_scale IS NOT NULL)`.
+    const admitted = (status: string, coefficient: string | null, scale: number | null) =>
+      ["exact", "missing", "unparsed", "conflict"].includes(status) &&
+      (status === "exact") === (coefficient !== null && scale !== null);
+    let cells = 0;
+    for (const status of ["exact", "missing", "unparsed", "conflict", "estimated"])
+      for (const coefficient of [null, "500"])
+        for (const scale of [null, 0]) {
+          cells++;
+          const stored = row({
+            amount_status: status,
+            amount_coefficient: coefficient,
+            amount_scale: scale,
+          });
+          if (!admitted(status, coefficient, scale)) {
+            await expect(quantitiesOf([stored])).rejects.toThrow("reward_estimate_amount_invalid");
+            continue;
+          }
+          // An admitted row is its value when exact, else its status and
+          // reason: a stray column is never shown.
+          expect(await quantitiesOf([stored])).toEqual([
+            status === "exact"
+              ? {
+                  unitRef: "points:synthetic",
+                  value: {
+                    status: "exact",
+                    value: { coefficient: "500", scale: 0 },
+                    normalizationVersion: "decimal-v1",
+                  },
+                }
+              : {
+                  unitRef: "points:synthetic",
+                  value: { status, reasonCode: `decimal-v1:${status}` },
+                },
+          ]);
+        }
+    expect(cells).toBe(20);
+  });
 });
