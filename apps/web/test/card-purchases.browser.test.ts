@@ -182,9 +182,18 @@ describe.if(runnable)("card purchase explanation", () => {
     await page.getByRole("heading", { name: "2026-09 請求分の状態ごとの利用額" }).waitFor();
     expect(requests.at(-1)?.searchParams.get("period")).toBe("2026-09");
     expect(requests.at(-1)?.searchParams.get("offset")).toBe("0");
+    // The unfiltered answer is cached from the first load, so its heading can
+    // render before the refetch reaches the server. Wait for that refetch's
+    // answer instead; by then the server has recorded the request.
+    const unfiltered = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/v2/card-purchases" && !url.searchParams.has("period");
+    });
     await page.getByRole("button", { name: "すべて表示", exact: true }).click();
+    await unfiltered;
     await page.getByRole("heading", { name: "状態ごとの利用額", exact: true }).waitFor();
     expect(requests.at(-1)?.searchParams.has("period")).toBe(false);
+    expect(requests.at(-1)?.searchParams.get("offset")).toBe("0");
     await page.close();
   }, 30_000);
 
