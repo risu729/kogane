@@ -11,6 +11,32 @@ rates are not guessed. This is partial progress on
 [issue 1245](https://github.com/risu729/kogane/issues/1245), not its completion.
 See the [dated observation](../../docs/sources/smbc-bank.md#authenticated-aud-observations-2026-11-10).
 
+## Runtime profile
+
+- **Browser: none.** No Cloudflare Browser Run, Container Chrome/Chromium or
+  external browser session is used; `wrangler.jsonc` declares no browser or
+  container binding. A person approves the QR in the SMBC app.
+- Worker `fetch` through the `TAMIA` VPC network binding runs the QR login and
+  every read (`src/smbc.ts`, `src/session.ts`). There is no browser-to-`fetch`
+  handoff.
+- State and scheduling: one SQLite Durable Object, `SmbcBackfillSession`
+  (binding `BACKFILL_SESSION`), per hashed Cloudflare Access identity holds the
+  encrypted session and progress. Its own Durable Object alarms process three
+  monthly chunks each, and wait for the next JST midnight before a chunk whose
+  last day has not ended (`src/session.ts`).
+- Execution: entrypoint `src/worker.ts`; every route requires a Cloudflare
+  Access identity. There is no `ScheduledCollection` entrypoint, no Cron
+  Trigger, no D1 binding and no `withCollectionLease`; the `smbc-direct` entry
+  in [`config/alarm-jobs.json`](../../config/alarm-jobs.json) is `manual`,
+  disabled and unsupported. Writes go to shared DATA (`kogane-raw-evidence`),
+  staged per chunk and finished with the terminal last
+  (`src/shared-collection.ts`).
+- Retries: a failed chunk is retried by the Durable Object alarm up to three
+  times in a row, after 2^n × 2 seconds, before the run fails (`MAX_RETRIES`,
+  `src/session.ts`).
+- Budgets: `wrangler.jsonc` sets no `limits`; the CPU and subrequest budgets in
+  effect are not recorded in the repository.
+
 <a id="操作"></a>
 
 ## Operation

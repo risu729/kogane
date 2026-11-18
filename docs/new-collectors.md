@@ -77,8 +77,9 @@ and give its README the `Runtime profile` section that page asks for.
 
 The PRESTIA bank collector (`services/collector-prestia-bank`,
 [ADR 0042](adr/0042-prestia-bank-worker.md)) is the smallest complete example
-of a balance source; it has no README and has not passed its production check
-yet (its schedule is disabled and it is not in the dispatch list). V Point
+of a balance source; its README holds only the `Runtime profile`, and its
+alarm job is seeded disabled, although operations requests may dispatch it
+(`OPS_COLLECTOR_DISPATCH_CONNECTIONS` in `services/processor/wrangler.jsonc`). V Point
 (`services/collector-vpoint`) is the example of a reward source. Search the
 repository for `prestia-bank` and `prestia` (its CORE id), or `vpoint` and
 `v-point`, and add the new source next to each hit. The guard tests named below

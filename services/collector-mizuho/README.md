@@ -23,6 +23,28 @@ and the daily scheduled runs (password login and authenticated cloud collection)
 registered in production since 2026-09-24. Health success alone does not
 establish successful bank access.
 
+## Runtime profile
+
+- **Browser: none.** No Cloudflare Browser Run, Container Chrome/Chromium or
+  external browser session is used; `wrangler.jsonc` declares no browser,
+  container or Durable Object binding.
+- Worker `fetch` submits the customer number and login password
+  (`src/login.ts`), then reads the account list and history pages over
+  ordinary HTTP and parses their HTML as responses (`src/client.ts`). There is
+  no browser-to-`fetch` handoff.
+- Execution: entrypoint `src/schedule-entrypoint.ts`, whose
+  `ScheduledCollection.runScheduled` accepts only the `mizuho-bank` alarm
+  job's cron `25 21 * * *` ([`config/alarm-jobs.json`](../../config/alarm-jobs.json));
+  `runOperation` runs an accepted operations request the same way. Each run
+  holds the `mizuho-bank` execution lease (`withCollectionLease` in
+  `src/worker.ts`, D1 `SCHEDULE_DB`) and writes shared DATA
+  (`kogane-raw-evidence`) with the terminal last (`src/storage.ts`).
+- Retries: the collector never resubmits the password. Its `scheduled`
+  handler calls `controller.noRetry()`, but no Cron Trigger invokes it
+  (`triggers.crons` is empty).
+- Budgets: `wrangler.jsonc` sets no `limits`; the CPU and subrequest budgets in
+  effect are not recorded in the repository.
+
 ## Operations
 
 - `GET /health` returns source and schema version, without account information.
