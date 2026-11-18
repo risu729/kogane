@@ -10,10 +10,12 @@ import { env } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import {
   AGENT_TOOL_NAMES,
+  isAgentToolName,
   PURCHASES_TOOL_NAME,
   RECONSTRUCTED_STATE_TOOL_NAME,
 } from "../src/agent-service";
 import { HttpError } from "../src/http";
+import { isPageReadToolName } from "../src/page-read-tools";
 import { catalogueTool } from "../src/read";
 import { READ_MCP_TOOLS } from "../src/read-tools";
 import { pageReadHarness } from "./page-read-harness";
@@ -150,11 +152,13 @@ const harness = (schema: boolean) =>
     },
   });
 const pages = { reads: harness(false), schema: harness(true) };
+// A store that answers, to list every tool a deployment publishes.
+const served = pageReadHarness("agent-read-store-failure-served");
 
 const REFUSAL = { error: "catalogue_read_failed" };
 
 describe("a read tool whose store fails inside its read", () => {
-  it("covers every read tool outside the page reads", () => {
+  it("covers every read tool outside the page reads", async () => {
     expect(READS.map(({ tool }) => tool).sort()).toEqual(
       [
         ...AGENT_TOOL_NAMES.filter((name) => name !== "kogane.reconcile.propose"),
@@ -163,6 +167,13 @@ describe("a read tool whose store fails inside its read", () => {
         ...READ_MCP_TOOLS.map(({ name }) => name),
       ].sort(),
     );
+    // Every published tool `callTool` runs, whatever list it was added to: a
+    // read tool is covered here, a page read by page-read-probe.test.ts.
+    const published = (await served.listed()).filter(
+      (name) =>
+        isAgentToolName(name) && !isPageReadToolName(name) && name !== "kogane.reconcile.propose",
+    );
+    expect(published.sort()).toEqual(READS.map(({ tool }) => tool).sort());
   });
 
   for (const { tool, args, route, schema, own } of READS)

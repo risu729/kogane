@@ -639,7 +639,10 @@ status and code alone. An example is the observation reader's `413
 result_limit_exceeded` past 5,000 rows, which the shared query, the context
 and the explanation can raise. Before, on `/mcp` such a refusal was the
 whole request's answer with that status. `callReadTool` and the page reads
-already answered theirs as results.
+already answered theirs as results. Like `callReadTool` before it, the
+wrapper drops the error's `refs` (`invalid_request` names the fields it
+refuses on the route and on a page read, not on these tools): an existing
+difference this amendment keeps, since closing it adds a wire field.
 
 A read whose service answers its own store failure keeps that answer:
 `kogane.economic-readiness.read` is `503` with `readiness_store_unavailable`
@@ -671,8 +674,9 @@ run in `catalogue`, so route and tool already agree.
 
 `services/app/test/agent-read-store-failure.test.ts` covers every read tool
 outside the page reads; a guard fails when a tool is added without being
-covered. Its store fails every statement except the audit record's writes
-and the table checks; for `kogane.capabilities`, whose only reads are those
+covered, whether to a tool list of `agent-service.ts` or `read-tools.ts` or
+as any other tool `/mcp` publishes and `callTool` runs. Its store fails every
+statement except the audit record's writes and the table checks; for `kogane.capabilities`, whose only reads are those
 checks, the checks fail too. Each tool must then answer `503
 catalogue_read_failed` on `/api/agent/v1/*` and as an `isError: true` result
 on `/mcp`, and its UI route, where one exists, answers the same code. The
