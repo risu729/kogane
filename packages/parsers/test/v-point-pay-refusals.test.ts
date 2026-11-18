@@ -34,6 +34,12 @@ const parse = (value: unknown, overrides: Partial<ArtifactMeta> = {}) =>
   vPointPayNotificationEvent.parse(encode(value), meta(overrides));
 const usage = (change: Record<string, unknown> = {}) => ({ ...fixture("usage"), ...change });
 
+// The parser pins the schema-v2 envelope recipient to the deployed V Point Pay
+// routing address in its source (parsers take no configuration), so an accepted
+// v2 event must carry that address. Documented as a limit in
+// docs/sources/v-point-pay.md (Layer B).
+const PINNED_RECIPIENT = "vpointpay@takuk.me";
+
 // The Layer A provenance block of a schema-v2 event, in its direct form.
 const direct = (id: string) => ({
   schemaVersion: "vpoint-pay-email-source-provenance-v1",
@@ -41,7 +47,7 @@ const direct = (id: string) => ({
   storedMessageScope: "smtp-message",
   sourceVerification: "source_unverified",
   envelopeFrom: "info@prepaid.smbc-card.com",
-  envelopeTo: "vpointpay@takuk.me",
+  envelopeTo: PINNED_RECIPIENT,
   outerMessageSha256: id,
   authenticationProvenance: "not-exposed-by-cloudflare-email-event",
 });
@@ -204,7 +210,8 @@ describe("v-point-pay notification events refuse drift", () => {
     expect(parse(v2(forwarded)).observations).toHaveLength(2);
     // Mailboxes are compared case-insensitively after trimming.
     expect(
-      parse(v2((id) => ({ ...direct(id), envelopeTo: " VPointPay@Takuk.me " }))).observations,
+      parse(v2((id) => ({ ...direct(id), envelopeTo: ` ${PINNED_RECIPIENT.toUpperCase()} ` })))
+        .observations,
     ).toHaveLength(2);
 
     expect(() => parse(v2(() => "direct"))).toThrow("sourceProvenance must be an object");

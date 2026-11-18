@@ -84,8 +84,8 @@ describe("V Point Pay notification email", () => {
       bucket,
       parsed: parsed!,
       envelopeFrom: "info@prepaid.smbc-card.com",
-      envelopeTo: "vpointpay@takuk.me",
-      expectedRecipient: "vpointpay@takuk.me",
+      envelopeTo: "synthetic-vpoint-pay@example.invalid",
+      expectedRecipient: "synthetic-vpoint-pay@example.invalid",
     });
     expect(puts).toHaveLength(2);
     expect(puts[0]!.key).toEndWith(".eml");
@@ -100,7 +100,7 @@ describe("V Point Pay notification email", () => {
         storedMessageScope: "smtp-message",
         sourceVerification: "source_unverified",
         envelopeFrom: "info@prepaid.smbc-card.com",
-        envelopeTo: "vpointpay@takuk.me",
+        envelopeTo: "synthetic-vpoint-pay@example.invalid",
         authenticationProvenance: "not-exposed-by-cloudflare-email-event",
       },
     });
@@ -121,8 +121,8 @@ describe("V Point Pay notification email", () => {
         bucket,
         parsed: parsed!,
         envelopeFrom: "attacker@example.invalid",
-        envelopeTo: "vpointpay@takuk.me",
-        expectedRecipient: "vpointpay@takuk.me",
+        envelopeTo: "synthetic-vpoint-pay@example.invalid",
+        expectedRecipient: "synthetic-vpoint-pay@example.invalid",
       }),
     ).rejects.toThrow("vpoint_pay_email_envelope_sender_invalid");
     expect(puts).toHaveLength(0);
@@ -217,8 +217,8 @@ describe("V Point Pay notification email", () => {
       bucket,
       parsed: parsed!,
       envelopeFrom: "info@prepaid.smbc-card.com",
-      envelopeTo: "vpointpay@takuk.me",
-      expectedRecipient: "vpointpay@takuk.me",
+      envelopeTo: "synthetic-vpoint-pay@example.invalid",
+      expectedRecipient: "synthetic-vpoint-pay@example.invalid",
     });
     expect(stored.event.sourceProvenance).toMatchObject({
       sourceVerification: "source_unverified",
@@ -257,8 +257,8 @@ function store(
     bucket,
     parsed,
     envelopeFrom: "info@prepaid.smbc-card.com",
-    envelopeTo: "vpointpay@takuk.me",
-    expectedRecipient: "vpointpay@takuk.me",
+    envelopeTo: "synthetic-vpoint-pay@example.invalid",
+    expectedRecipient: "synthetic-vpoint-pay@example.invalid",
   });
 }
 

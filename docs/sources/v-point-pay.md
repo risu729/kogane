@@ -157,6 +157,17 @@ collapse identity replays; current balances select latest event time in successf
 Anonymous fixtures pin four types, dual-route refusal, notice status-signs, no funding split inference,
 declined amounts, balance account separation, schema/provenance drift, failed runs.
 
+**Limit: the parser pins the routing address.** A v2 event's `sourceProvenance.envelopeTo` must equal,
+after trimming and lowercasing, a constant in `packages/parsers/src/parsers/v-point-pay.ts`: the real V Point
+Pay routing address, the same value as `VPOINT_PAY_EMAIL_RECIPIENT` in the collector's deployed config. The
+collector already compares against that configured value; parsers take no configuration (`parse` reads only
+the bytes and the artifact metadata). So the address stays in the parser source and in the two parser tests
+that accept a v2 event (`packages/parsers/test/v-point-pay-refusals.test.ts`,
+`experiments/observation-pipeline-local/test/v-point-pay-parser.test.ts`); the collector tests use synthetic
+`example.invalid` addresses. Moving the check out of the parser, or giving parsers configuration, is an open
+design decision: a parser release whose result depends on deployed configuration would no longer be a function of
+the stored evidence alone.
+
 `services/collector-r2-importer/scripts/audit-v-point-pay-layer-b-r2.sh` was a production canary running Layer B
 after pair validation (retired with Importer 2026-09-13). Localhost-only Worker/remote read-only R2, returning
 only aggregate object/observation types, no keys/hashes/bodies/amounts/balances/points/authentication.

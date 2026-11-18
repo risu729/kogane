@@ -3,10 +3,13 @@ import { extractVPointEmailCode, isCollectorRecipient, VPOINT_EMAIL_SUBJECT } fr
 
 describe("V Point authentication email", () => {
   test("accepts the Web OTP and V Point Pay recipient aliases", () => {
-    const recipients = ["vpoint@takuk.me", "vpointpay@takuk.me"];
-    expect(isCollectorRecipient("VPOINT@TAKUK.ME", recipients)).toBeTrue();
-    expect(isCollectorRecipient("vpointpay@takuk.me", recipients)).toBeTrue();
-    expect(isCollectorRecipient("other@takuk.me", recipients)).toBeFalse();
+    const recipients = [
+      "synthetic-vpoint-auth@example.invalid",
+      "synthetic-vpoint-pay@example.invalid",
+    ];
+    expect(isCollectorRecipient("SYNTHETIC-VPOINT-AUTH@EXAMPLE.INVALID", recipients)).toBeTrue();
+    expect(isCollectorRecipient("synthetic-vpoint-pay@example.invalid", recipients)).toBeTrue();
+    expect(isCollectorRecipient("other@example.invalid", recipients)).toBeFalse();
   });
 
   test("extracts the only code from the message preamble", async () => {
