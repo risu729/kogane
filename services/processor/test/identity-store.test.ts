@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import { otherIdentity as providerIdentity } from "../../../packages/identity/src/other.ts";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import type { IdentityInput, IdentityPlan } from "../../../packages/identity/src/types.ts";
@@ -927,6 +928,124 @@ test("MyJCB J-POINT parses are re-identified at policy 2; statement parses stay 
     { parse_run_id: 140, v: 2 },
     { parse_run_id: 141, v: 1 },
   ]);
+});
+
+test("SBI foreign positions parses are re-identified at policy 2; a scopeless code no longer merges", async () => {
+  await db.prepare("INSERT OR IGNORE INTO sources VALUES('sbi-securities','synthetic')").run();
+  // Two foreign positions captures, each with a different synthetic security
+  // that states the same code and neither a country nor a RIC.
+  const position = (name: string) => (id: number) => [
+    db
+      .prepare(
+        "INSERT INTO position_observations(parse_run_id,source_account,security_code,security_name,quantity_text,quantity_scale,currency,raw_locator,extra_json) VALUES(?,'sbi-securities:foreign','SYNX',?,'1',0,'USD','synthetic:position',?)",
+      )
+      .bind(
+        id,
+        name,
+        JSON.stringify({
+          specificAccountCode: "SPECIFIC",
+          securities: { securitiesCode: "SYNX", securitiesName: name },
+        }),
+      ),
+  ];
+  await seed(160, 0, "sbi-securities", true, position("Synthetic one"), "foreign-cash-positions");
+  await seed(161, 0, "sbi-securities", true, position("Synthetic two"), "foreign-cash-positions");
+  // A domestic positions capture: its code is always scoped JP.
+  await seed(
+    162,
+    0,
+    "sbi-securities",
+    true,
+    (id) => [
+      db
+        .prepare(
+          "INSERT INTO position_observations(parse_run_id,source_account,security_code,market,quantity_text,quantity_scale,currency,raw_locator,extra_json) VALUES(?,'sbi-securities:domestic:deposit-type=0','1234','XTKS','1',0,'JPY','synthetic:position','{}')",
+        )
+        .bind(id),
+    ],
+    "domestic-cash-positions",
+  );
+  for (const id of [160, 161, 162])
+    expect(await identifyParse(db, parse(id, "sbi-securities"), resolveIdentity, 1)).toBe(1);
+  const securities = () =>
+    db
+      .prepare(
+        `SELECT o.parse_run_id,o.policy_version,d.namespace,d.scope,d.value,m.status,m.reason
+         FROM current_identity_observations o
+         JOIN identity_instrument_uses u ON u.identity_observation_id=o.id AND u.role='security'
+         JOIN instrument_identifiers d ON d.id=u.identifier_id
+         JOIN instrument_mappings m ON m.id=u.instrument_mapping_id
+         WHERE o.parse_run_id IN (160,161,162) ORDER BY o.parse_run_id`,
+      )
+      .all();
+  const unknownCountry = {
+    namespace: "sbi-security-code",
+    scope: "unknown-country",
+    value: "SYNX",
+    status: "provider-local",
+    reason: "provider-code-without-global-crosswalk",
+  };
+  const domestic = {
+    parse_run_id: 162,
+    policy_version: 1,
+    namespace: "mic-symbol",
+    scope: "XTKS",
+    value: "1234",
+    status: "provider-local",
+    reason: "provider-reported-listing",
+  };
+  // What policy 1 recorded: both securities on one placeholder identifier.
+  expect((await securities()).results).toEqual([
+    { parse_run_id: 160, policy_version: 1, ...unknownCountry },
+    { parse_run_id: 161, policy_version: 1, ...unknownCountry },
+    domestic,
+  ]);
+  const placeholder = await count("instrument_identifiers", "scope='unknown-country'");
+  expect(placeholder).toBe(1);
+  const mappingsBefore = (await db.prepare("SELECT * FROM instrument_mappings ORDER BY id").all())
+    .results;
+  // Only the two positions parses are candidates again.
+  expect(await identitySweep(db, resolveIdentity, 8, "sbi-securities")).toEqual({
+    processedRuns: 2,
+    identifiedRuns: 2,
+    identifiedObservations: 2,
+  });
+  expect(await identitySweep(db, resolveIdentity, 8, "sbi-securities")).toEqual({
+    processedRuns: 0,
+    identifiedRuns: 0,
+    identifiedObservations: 0,
+  });
+  // Policy 2: each security is unresolved on an identifier scoped to its own
+  // capture; the domestic parse keeps its policy-1 run.
+  const unresolved = (id: number) => ({
+    parse_run_id: id,
+    policy_version: 2,
+    namespace: "sbi-security-code",
+    scope: `fetch-run:${id}`,
+    value: "SYNX",
+    status: "unresolved",
+    reason: "missing-security-scope",
+  });
+  expect((await securities()).results).toEqual([unresolved(160), unresolved(161), domestic]);
+  // Append-only: the placeholder identifier and every earlier mapping revision
+  // stay as recorded; the policy-1 runs still name them.
+  expect(await count("instrument_identifiers", "scope='unknown-country'")).toBe(placeholder);
+  const mappingsAfter = (await db.prepare("SELECT * FROM instrument_mappings ORDER BY id").all())
+    .results;
+  for (const mapping of mappingsBefore) expect(mappingsAfter).toContainEqual(mapping);
+  expect(
+    await count(
+      "identity_runs",
+      "parse_run_id IN (160,161) AND policy_version=1 AND id IN (SELECT identity_run_id FROM identity_run_seals)",
+    ),
+  ).toBe(2);
+  // The domestic listing gained no revision.
+  expect(
+    await count(
+      "instrument_mappings",
+      "identifier_id IN (SELECT id FROM instrument_identifiers WHERE namespace='mic-symbol' AND value='1234') AND policy_version=2",
+    ),
+  ).toBe(0);
 });
 
 test("all four observation kinds preserve their instrument roles and provenance", async () => {

@@ -33,6 +33,16 @@ const CUSTODY_LABELS: ReadonlyMap<string, string> = new Map([
   ["J", "ジュニアNISA預り"],
 ]);
 
+/**
+ * The SBI Securities identity policy version from which a security code with
+ * no RIC, no MIC and no country is `unresolved` and scoped to its fetch run
+ * (ADR 0113). Policy 1 gave that shape the placeholder scope
+ * `unknown-country`, so two different securities sharing such a code shared
+ * one identifier; a run recorded under policy 1 keeps that identifier as
+ * evidence, and a policy-2 run of the same parse appends the correction.
+ */
+export const SBI_SECURITIES_POLICY_VERSION = 2;
+
 /** Provider references are evidence of identity, not an external security-master match. */
 export function sbiIdentity(input: IdentityInput): IdentityPlan {
   if (input.sourceId !== "sbi-securities")
@@ -111,6 +121,14 @@ export function sbiIdentity(input: IdentityInput): IdentityPlan {
     if (rawMarket !== null) details.providerMarket = rawMarket;
     if (ric !== null) details.ric = ric;
     const value = ric ?? code;
+    // No RIC, MIC or country states where the code is valid. From policy 2 the
+    // code is not given a shared placeholder scope: it is unresolved, scoped
+    // to the capture it came from, as other unresolvable references are.
+    const unscoped =
+      ric === null &&
+      mic === null &&
+      country === null &&
+      (input.policyVersion ?? SBI_SECURITIES_POLICY_VERSION) >= SBI_SECURITIES_POLICY_VERSION;
     if (value !== null) {
       const displayName =
         string(input.securityName) ?? string(security.securitiesName) ?? string(extra.issueName);
@@ -118,19 +136,27 @@ export function sbiIdentity(input: IdentityInput): IdentityPlan {
         role: "security",
         kind: "security",
         namespace: ric !== null ? "ric" : mic !== null ? "mic-symbol" : "sbi-security-code",
-        scope: ric !== null ? "" : (mic ?? country ?? "unknown-country"),
+        scope:
+          ric !== null
+            ? ""
+            : unscoped
+              ? `fetch-run:${input.fetchRunId}`
+              : (mic ?? country ?? "unknown-country"),
         value,
         label: displayName ?? value,
-        status: "provider-local",
+        status: unscoped ? "unresolved" : "provider-local",
         reason:
           ric !== null
             ? "provider-reported-ric"
             : mic !== null
               ? "provider-reported-listing"
-              : "provider-code-without-global-crosswalk",
+              : unscoped
+                ? "missing-security-scope"
+                : "provider-code-without-global-crosswalk",
         details,
       });
       if (ric === null && mic === null) issues.push("security-without-global-crosswalk");
+      if (unscoped) issues.push("missing-security-scope");
     } else {
       issues.push("missing-security-identifier");
     }

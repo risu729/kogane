@@ -592,6 +592,45 @@ as `provider-local` with no `unresolved` reference left. No reimport or B
 reparse is needed. Rolling back the code leaves the policy-2 runs current: an
 older build cannot replace a newer sealed decision.
 
+## Policy 2: SBI Securities codes with no scope
+
+Policy 1 gave an SBI Securities security code with no RIC, no MIC and no
+country the placeholder identifier `sbi-security-code/unknown-country/<code>`
+(`provider-local`), so two different securities stating the same code shared
+one identifier and one instrument. From policy 2 the resolver maps that shape
+`unresolved` (`missing-security-scope`, also added to the plan's issues) on an
+identifier scoped to its fetch run, `sbi-security-code/fetch-run:<id>/<code>`,
+and plans every other shape exactly as policy 1 did
+([ADR 0113](adr/0113-sbi-scopeless-security-identity.md)). Only the foreign
+positions parser (`sbi-foreign-cash-positions`) can emit the shape: domestic
+rows are always country `JP` and the foreign trade parser refuses a row
+without a country. No observed capture does.
+
+The rule reads the identity run's own version, so an explicit policy-1 run
+still records the placeholder. The `sbi-securities` policy module
+(`identity-policies/sbi-securities.ts`) requires version 2 only for foreign
+positions captures (artifact dataset `foreign-cash-positions`), with family
+`identity-default`, release `identity-default-v2` and an empty dependency set.
+Every other SBI Securities parse falls back to the base policy
+(`not-a-foreign-positions-capture`) and gains no revision. The bounded sweep
+treats the sealed policy-1 positions parses as candidates again and appends a
+policy-2 run; the current views select the newer sealed run. A position that
+used the placeholder moves to its capture's unresolved identifier; the
+placeholder identifier, its revisions and the policy-1 runs stay as recorded,
+and a manual decision on the placeholder is not carried over. Every other
+identifier and the source account those parses use gain a policy-2 rule
+revision equal to the policy-1 one except for its version.
+
+Nothing is configured to enable it. After deployment the five-minute pipeline
+sweep picks the parses up on its own; each positions parse is re-identified
+once. To finish sooner run `node scripts/identity-ops.ts catchup 100
+sbi-securities` and continue only if the bounded run reports more candidates.
+Then run the read-only [identity audit](identity-audit.md): `pending_parses`
+for `sbi-securities` reads zero, and its `issues` count
+`missing-security-scope` for any observation that reached the rule. No
+reimport or B reparse is needed. Rolling back the code leaves the policy-2
+runs current: an older build cannot replace a newer sealed decision.
+
 ## Policy 2: SBI Shinsei non-account references
 
 Policy 1 mapped every `sbi-shinsei:` reference as a provider-local `deposit`,
