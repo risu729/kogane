@@ -63,8 +63,8 @@ function errorName(error: unknown): string {
 }
 /**
  * One structured line per alarm decision (ADR 0085 follow-up): which job,
- * which occurrence, and what the alarm did with it. Identifiers, instants and
- * closed codes only.
+ * which occurrence, and what the alarm did with it. Identifiers, schedule
+ * revisions, instants, durations and closed codes only.
  */
 function logAlarm(record: Record<string, unknown>): void {
   try {
