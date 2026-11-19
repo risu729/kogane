@@ -344,11 +344,13 @@ describe("the entity label rule", () => {
     await expect(
       readAccountLabelDecorations(labelStore([], refs), refs.slice(0, 1)),
     ).rejects.toThrow("connection_reference_limit");
-    // At the bound the read answers.
+    // At the bound the read answers, and its last row still counts: the
+    // 1,000th reference shares the first one's entity and names its label.
+    const atBound = [...refs.slice(0, 999), aggregator("sa_999", "collector", "k999", "account_0")];
     const decorations = await readAccountLabelDecorations(
-      labelStore([], refs.slice(0, 1_000)),
-      refs.slice(0, 1),
+      labelStore([review("collector", "k999", "合成銀行Z")], atBound),
+      atBound.slice(0, 1),
     );
-    expect(decorations.size).toBe(0);
+    expect(decorations.get("sa_0")?.entity?.label).toBe("合成銀行Z（個別口座未確定）");
   });
 });

@@ -706,7 +706,7 @@ stored. A connection is never a leaf account.
   2. Otherwise, the entity's automatic `moneyforward-me` references may show
      exactly one eligible connection label. If they do, every automatic
      reference of the entity shows it, with the `（個別口座未確定）` suffix,
-     and carries that connection as its `connection`.
+     and carries a review that names it as its `connection` (below).
   3. Otherwise, the reference's own connection label, as before.
   4. Otherwise, its mapping label.
 
@@ -719,7 +719,8 @@ stored. A connection is never a leaf account.
     order so the limit ends the walk, and keyed mapping lookups. The read is
     bounded to 1,000 rows and refused whole past it.
   - A reference whose own review names the entity's label carries its own
-    review as `connection`; the others carry the review that named it.
+    review as `connection`; the others carry the first review that named it,
+    in the read's index order (producer, then reference).
   - The read runs only when an organized reference is an automatic
     `moneyforward-me` one.
   - Nothing is written. No mapping, row or total moves.

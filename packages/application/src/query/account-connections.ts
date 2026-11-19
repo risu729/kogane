@@ -195,6 +195,8 @@ async function readEntityConnectionLabels(
     if (!connection || connection.status === "evidence-ineligible") continue;
     const label = connectionAccountLabel("", "rule", AGGREGATOR_SOURCE, connection);
     const entity = labels.get(row.targetId) ?? new Map<string, AccountConnection>();
+    // The first review of a label in the read's index order (producer, then
+    // reference; unique, so stable) names it for the references without one.
     if (!entity.has(label)) entity.set(label, connection);
     labels.set(row.targetId, entity);
   }

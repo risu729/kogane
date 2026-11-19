@@ -400,8 +400,10 @@ filter options. The label of a reference is chosen in this order:
 1. A manual mapping keeps its own label.
 2. Otherwise, if the entity's automatic `moneyforward-me` references show
    exactly one eligible connection label, every automatic reference of that
-   entity shows it, as `<review label>（個別口座未確定）`, with that
-   connection.
+   entity shows it, as `<review label>（個別口座未確定）`. Its `connection`
+   is its own review where that review names the label, else the first
+   review that named it in the read's index order (producer, then
+   reference).
 3. Otherwise, the reference's own connection label.
 4. Otherwise, the mapping label.
 
