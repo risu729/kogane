@@ -654,8 +654,18 @@ It is a recorded decision per account, planned and committed like any other
 claim, by the operator or by an MCP client
 ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)); nothing is
 defaulted at read time. The
-confirmation page shows its provenance and approves it; the card-ownership
-page does not yet offer to plan one, so it is planned through the command API.
+confirmation page shows its provenance and approves it. The card-ownership
+page plans it as the basis 所有者の既定 (ADR 0082, amendment of 2026-11-18): no
+name is typed, the plan names `party:owner` with the marker dated on the day it
+is planned (Asia/Tokyo), it needs the side's confirmation checkbox and a
+reason, and it is disabled while `ownerDefaultBlockers` is non-empty, listing
+each blocker's reason; the command refuses the same plan
+(`needs_scope_resolution`). It is only ever accepted there; a default is
+withdrawn by an explicit review. The page posts the same `relation.accept`
+payload an MCP client sends to `kogane.command.plan`. The command checks the
+marker's date only as a calendar date, not against the plan or commit day: a
+plan committed on a later day keeps the plan's date, and an MCP client's date
+is not checked.
 
 The self-declared fallback also refuses any recorded ownership-role history for the
 same resolved account, including rejected or dated claims and the other role.
