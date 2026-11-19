@@ -23,7 +23,6 @@ export const CHANGES_SINCE_RUN_STATUSES = [
   "unknown",
   "open",
 ] as const;
-export type ChangesSinceRunStatus = (typeof CHANGES_SINCE_RUN_STATUSES)[number];
 
 /**
  * A new parse run's state now: `published` (adopted), `superseded` (replaced
@@ -38,7 +37,6 @@ export const CHANGES_SINCE_PARSE_STATES = [
   "failed",
   "pending",
 ] as const;
-export type ChangesSinceParseState = (typeof CHANGES_SINCE_PARSE_STATES)[number];
 
 /**
  * The observation kinds counted: the store overview's four (rows of the new
@@ -51,7 +49,6 @@ export const CHANGES_SINCE_OBSERVATION_KINDS = [
   "position",
   "valuation",
 ] as const;
-export type ChangesSinceObservationKind = (typeof CHANGES_SINCE_OBSERVATION_KINDS)[number];
 
 /** The per-source sections; each is counted, or null when the grant cannot read its handler. */
 export const CHANGES_SINCE_SECTIONS = ["runs", "captures", "parses", "observations"] as const;
@@ -59,7 +56,7 @@ export type ChangesSinceSection = (typeof CHANGES_SINCE_SECTIONS)[number];
 
 /** Why a section or the events line has no count. */
 export const CHANGES_SINCE_UNAVAILABLE = ["unauthorized", "not_served"] as const;
-export type ChangesSinceUnavailable = (typeof CHANGES_SINCE_UNAVAILABLE)[number];
+type ChangesSinceUnavailable = (typeof CHANGES_SINCE_UNAVAILABLE)[number];
 
 /** How far back `since` may be (days of 24 hours before the read). */
 export const CHANGES_SINCE_MAX_DAYS = 31;

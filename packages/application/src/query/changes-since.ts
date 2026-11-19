@@ -74,10 +74,10 @@ export const CHANGES_SINCE_HANDLER_CAPABILITIES: Record<ChangesSinceHandlerName,
   };
 
 /** An instant with a date, a time and a zone (`Z` or an offset): no bare date, no local time. */
-export const CHANGES_SINCE_INSTANT =
+const CHANGES_SINCE_INSTANT =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/u;
 /** A source id, in the evidence browser's charset. */
-export const CHANGES_SINCE_SOURCE = /^[a-z0-9][a-z0-9-]{0,99}$/u;
+const CHANGES_SINCE_SOURCE = /^[a-z0-9][a-z0-9-]{0,99}$/u;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** The ISO form every compared time is normalized to (`toISOString`). */
