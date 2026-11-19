@@ -602,7 +602,8 @@ describe("untrusted provider content (AT71)", () => {
         name: "kogane.identity.read",
         required: ["collection"],
         closed: false,
-        properties: ["collection", "identityRead", "offset", "source"],
+        // `kind`: the account list's filter (ADR 0077 amendment 2026-11-19).
+        properties: ["collection", "identityRead", "kind", "offset", "source"],
         annotations: readOnly,
       },
       {

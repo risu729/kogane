@@ -146,7 +146,7 @@ JOIN account_mappings m ON m.source_account_id=s.id
 WHERE s.source_id='${AGGREGATOR_SOURCE}' ORDER BY s.id LIMIT ${String(ENTITY_REFERENCE_BOUND + 1)}`;
 
 /** The connection label one entity shows, with the connection that names it. */
-export interface EntityConnectionLabel {
+interface EntityConnectionLabel {
   label: string;
   connection: AccountConnection;
 }
@@ -162,7 +162,7 @@ export interface EntityConnectionLabel {
  * labels on one entity name no label (`null`): each reference keeps its own.
  * A manual mapping is never relabelled.
  */
-export async function readEntityConnectionLabels(
+async function readEntityConnectionLabels(
   sql: SqlExecutor,
   targetIds: ReadonlySet<string>,
 ): Promise<Map<string, EntityConnectionLabel | null>> {

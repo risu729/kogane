@@ -55,7 +55,7 @@ export const IDENTITY_PAGE_LIMIT = 100;
  * an aggregator entity no current review names (its institution is not
  * recorded), and null for an entity no connection concerns.
  */
-export const ACCOUNT_LIST_CONNECTIONS = [
+const ACCOUNT_LIST_CONNECTIONS = [
   "confirmed",
   "unresolved",
   "evidence-ineligible",

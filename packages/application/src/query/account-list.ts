@@ -20,7 +20,7 @@ import { decoratedAccountLabel, readAccountLabelDecorations } from "./account-co
  * The source references one read may hold before it is refused whole
  * (`identity_account_list_limit`, a store failure on the route and the tool).
  */
-export const ACCOUNT_LIST_REFERENCE_BOUND = 5_000;
+const ACCOUNT_LIST_REFERENCE_BOUND = 5_000;
 
 /**
  * Every source reference current published identity observations use, with
