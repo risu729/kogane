@@ -191,7 +191,8 @@ function balances(
  * - card-002: 20,000 due 09-26, debited from bank B (accepted, 08-26);
  * - card-003: 5,000 due 10-05, no debit-account evidence;
  * - card-004: an unreadable total due 09-28, debited from bank A (accepted);
- * - card-005: a statement the provider gave no due date;
+ * - card-005: a statement the provider gave no due date, which an accepted
+ *   settlement from bank B (09-10) pays;
  * - card-006: its newest statement was due 08-27, debited from bank A;
  * - bank A reports 50,000 and bank B 10,000, captured 09-19.
  */
@@ -239,7 +240,19 @@ function scenario(
     { minor: null, paymentDate: "2026-09-28" },
     { bank: BANK_A, debitDate: "2026-08-27" },
   );
-  card("card-005", { minor: 4_000, paymentDate: null }, null);
+  const undated = statement(store, {
+    card: "vpass:card-005",
+    period: "2026-09",
+    paymentDate: null,
+    minor: 4_000,
+  });
+  store.identify(undated, "vpass", "acct-card-005", "provider-local");
+  accept(store, undated, {
+    card: "vpass:card-005",
+    period: "2026-09",
+    bank: BANK_B,
+    debitDate: "2026-09-10",
+  });
   card("card-006", null, { bank: BANK_A, debitDate: "2026-08-27" });
   bank(store);
   return store;
@@ -402,6 +415,82 @@ describe("covers", () => {
         notes: ["other_debits_not_modelled"],
       },
     ]);
+  });
+
+  test("a statement with no due date that no settlement pays makes its account's lines unknown", async () => {
+    // card-007's newest statement states no due date and is debited from bank A.
+    const store = scenario();
+    const august = statement(store, {
+      card: "vpass:card-007",
+      period: "2026-08",
+      paymentDate: "2026-08-27",
+      minor: 1000,
+    });
+    store.identify(august, "vpass", "acct-card-007", "provider-local");
+    accept(store, august, {
+      card: "vpass:card-007",
+      period: "2026-08",
+      bank: BANK_A,
+      debitDate: "2026-08-27",
+    });
+    const september = statement(store, {
+      card: "vpass:card-007",
+      period: "2026-09",
+      paymentDate: null,
+      minor: 7_000,
+    });
+    store.identify(september, "vpass", "acct-card-007", "provider-local");
+    const answer = await review(store);
+    expect(answer.notListed.find((card) => card.card === "vpass:card-007")).toEqual({
+      card: "vpass:card-007",
+      source: "vpass",
+      reason: "payment_date_not_published",
+      last: { period: "2026-09", debitDate: null },
+    });
+    expect(
+      answer.byDebitAccount
+        .filter((line) => line.account !== null)
+        .map((line) => [line.account, line.debitDate, line.covers, line.reasons]),
+    ).toEqual([
+      ["acct-bank-b", "2026-09-26", "no", []],
+      ["acct-bank-a", "2026-09-27", "unknown", ["cards_with_unknown_due_date"]],
+      ["acct-bank-a", "2026-09-28", "unknown", ["bill_not_exact", "cards_with_unknown_due_date"]],
+    ]);
+  });
+
+  test("an account entity's balance is its newest reference's, never a sum (INV06)", async () => {
+    // A second source account of bank A's entity, captured on its own.
+    const alias = "smbc-bank:synthetic-a-second";
+    const line = async (aliasAt: string) =>
+      (
+        await review(
+          scenario((store) => {
+            balances(store, aliasAt, [[alias, 70_000, "acct-bank-a"]]);
+            balances(store, "2026-09-19T01:00:00Z", [
+              [BANK_A, 50_000, "acct-bank-a"],
+              [BANK_B, 10_000, "acct-bank-b"],
+            ]);
+          }),
+        )
+      ).byDebitAccount.find(
+        (entry) => entry.account === "acct-bank-a" && entry.debitDate === "2026-09-27",
+      );
+    // The older reference is neither taken nor added.
+    expect(await line("2026-09-18T01:00:00Z")).toMatchObject({
+      balance: { value: "50000", status: "exact", capturedAt: "2026-09-19T01:00:00.000Z" },
+      covers: "yes",
+    });
+    // Two references captured together that disagree are a conflict, not a choice.
+    expect(await line("2026-09-19T01:00:00Z")).toMatchObject({
+      balance: {
+        unit: "JPY",
+        status: "conflict",
+        reason: "balances_disagree",
+        capturedAt: "2026-09-19T01:00:00.000Z",
+      },
+      covers: "unknown",
+      reasons: ["balance_not_exact"],
+    });
   });
 
   test("a balance captured before the previous debit, or not reported, is never compared", async () => {

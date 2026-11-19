@@ -58,7 +58,11 @@ export type NotListedReason = (typeof NOT_LISTED_REASONS)[number];
  *   the date of a card debit already due from the account, so it may not show
  *   that debit;
  * - `cards_with_unknown_account`: a bill due on or before the line's date has
- *   no known debit account and might be debited from this one.
+ *   no known debit account and might be debited from this one;
+ * - `cards_with_unknown_due_date`: a card debited from this account, or from
+ *   an unknown one, has a newest statement with no readable due date that no
+ *   accepted settlement pays, so it might be debited by the line's date
+ *   (INV05: its total is never left out as if it were zero).
  */
 export const COVERS_UNKNOWN_REASONS = [
   "debit_account_unknown",
@@ -66,6 +70,7 @@ export const COVERS_UNKNOWN_REASONS = [
   "balance_not_exact",
   "balance_before_previous_debit",
   "cards_with_unknown_account",
+  "cards_with_unknown_due_date",
 ] as const;
 export type CoversUnknownReason = (typeof COVERS_UNKNOWN_REASONS)[number];
 export const COVERS = ["yes", "no", "unknown"] as const;
@@ -195,8 +200,17 @@ export function upcomingCardBills(input: {
   const { date } = input;
   const listed: { card: UpcomingCardInput; debitDate: string; amount: Quantity }[] = [];
   const notListed: NotListedCard[] = [];
+  // The debit-account keys (null: unknown) of cards whose newest statement
+  // has no readable due date and is not paid by an accepted settlement.
+  const undated: (string | null)[] = [];
   for (const card of input.cards) {
     const decided = billOrReason(card, date);
+    if (
+      !decided.bill &&
+      decided.reason === "payment_date_not_published" &&
+      !(card.statement!.period !== null && card.settledPeriods.includes(card.statement!.period))
+    )
+      undated.push(card.debitAccount.key);
     if (decided.bill)
       listed.push({
         card,
@@ -282,6 +296,8 @@ export function upcomingCardBills(input: {
           reasons.add("balance_before_previous_debit");
         if (unknownDates.some((unknown) => unknown <= debitDate))
           reasons.add("cards_with_unknown_account");
+        if (undated.some((other) => other === null || other === key))
+          reasons.add("cards_with_unknown_due_date");
         if (sum.ok && reasons.size === 0) {
           const compared = compareQuantities(account.balance, sum.quantity);
           if (compared.ok) order = compared.order;

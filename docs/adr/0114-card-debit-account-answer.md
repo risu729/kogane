@@ -321,10 +321,14 @@ answers for today's date in Asia/Tokyo, under rule `card-upcoming-bills-v1`
    Asia/Tokyo date of the latest card debit from the account due on or before
    the date: an accepted settlement's debit, or the due date of a statement
    already due of a card the account answers for, so the balance may not show
-   it), and `cards_with_unknown_account` (a bill due on or before the line's
-   date has no known account and might be debited from this one). Every line
-   carries the note `other_debits_not_modelled`: only known card bills are
-   compared with the provider's balance.
+   it), `cards_with_unknown_account` (a bill due on or before the line's
+   date has no known account and might be debited from this one) and
+   `cards_with_unknown_due_date` (a card debited from this account, or from
+   an unknown one, has a newest statement with no readable due date that no
+   accepted settlement pays: whether and when it is debited is unknown, so
+   its total is never left out of the comparison as if it were zero,
+   INV05). Every line carries the note `other_debits_not_modelled`: only
+   known card bills are compared with the provider's balance.
 
 The `カード照合` page's `次回の引落` section
 (`GET /api/v2/reconciliation/card-debit-accounts?view=upcoming`, operator-only)
@@ -350,6 +354,16 @@ command or catalogue operation is added.
 - A Vpass card without an accepted settlement is on the unknown line, and its
   bill makes the account lines due on or after it `unknown`
   (`cards_with_unknown_account`).
+- A card whose newest statement has no readable due date (an importer-era
+  Vpass row) and no accepted settlement makes every line of its account, or
+  every line when its account is unknown, `unknown`
+  (`cards_with_unknown_due_date`). Added in review: before it, such a
+  statement was left out of the comparison, so its account could read `yes`.
+- A bank source account is joined to its entity only through the reported
+  state; one with no balance or position there keeps its own line, so an
+  entity's line does not count bills named through it. A statement due
+  before the date is taken as debited on its due date; a later debit (the
+  next business day) is not modelled.
 - Cost: the debit-account read (this ADR's cost), the reported state for the
   date (ADR 0019's reads, each bounded by `DATED_STATE_ROW_BOUND`) with its
   settlement read, and `ACCOUNT_LABELS_SQL` (one primary-key lookup per entity
@@ -365,17 +379,21 @@ command or catalogue operation is added.
 - `packages/domain/test/card-upcoming-bills.test.ts`: which statements are
   bills, and each `notListed` reason; `yes` and `no` on exact figures, with an
   equal balance covering; a later line counting the earlier bills; each
-  `unknown` reason and their order; the unknown-account line.
+  `unknown` reason and their order; the unknown-account line; a statement
+  with no due date that no settlement pays, on its own account and on an
+  unknown one.
 - `packages/application/test/card-upcoming-bills.test.ts`: on a synthetic
   store with the CORE migrations, an exact bill its account covers, one it
   does not, one with no known account, one not exact, a provider that
-  published no due date, a card with no statement due, a balance captured
-  before the previous debit and one not reported. The answer passes the wire
-  contract through the route's dispatch, and a contradicting `covers` or a
-  silent `unknown` is refused; ten cards stay under 8 KB; the read writes
-  nothing, issues only the reads it composes, is refused before reading
-  under a narrowed grant, and reaches labels by key without table
-  statistics.
+  published no due date (paid by a settlement, and not), a card with no
+  statement due, a balance captured before the previous debit and one not
+  reported, and an entity with two references: the newest capture is taken,
+  never the sum, and two disagreeing captures at once are a conflict. The
+  answer passes the wire contract through the route's dispatch, and a
+  contradicting `covers` or a silent `unknown` is refused; ten cards stay
+  under 8 KB; the read writes nothing, issues only the reads it composes, is
+  refused before reading under a narrowed grant, and reaches labels by key
+  without table statistics.
 - `services/app/test/card-debit-accounts-api.test.ts`: the route, the agent
   route and the MCP tool give the same answer; other views and parameters
   are refused on both; the audit record counts the bills and the cards not

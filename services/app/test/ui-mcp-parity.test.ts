@@ -58,6 +58,16 @@ import {
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 import { routeServes, uiApiPatterns } from "./ui-routes";
 import { READ_MCP_TOOLS } from "../src/read-tools";
+import {
+  CARD_DEBIT_ACCOUNT_ANSWER_CODES,
+  CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS,
+  STATED_ABSENT_REASONS,
+} from "../../../packages/domain/src/card-debit-account-answer";
+import {
+  COVERS_UNKNOWN_REASONS,
+  NOT_LISTED_REASONS,
+  UPCOMING_BILL_NOTES,
+} from "../../../packages/domain/src/card-upcoming-bills";
 
 // ── 1. catalogue operations on `ui` ──────────────────────────────────────
 
@@ -310,6 +320,16 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
     const published = (await publishedDefinitions()).find((entry) => entry.name === tool)!;
     for (const term of ["次回の引落", "?view=upcoming", "covers", "other_debits_not_modelled"])
       expect(published.description).toContain(term);
+    // The condensed description still names every closed code of both views.
+    for (const code of [
+      ...STATED_ABSENT_REASONS,
+      ...CARD_DEBIT_ACCOUNT_ANSWER_CODES,
+      ...CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS,
+      ...COVERS_UNKNOWN_REASONS,
+      ...NOT_LISTED_REASONS,
+      ...UPCOMING_BILL_NOTES,
+    ])
+      expect(published.description, code).toContain(code);
   });
 
   it("publishes the self-contained account catalogue and named-capture freshness contract", async () => {

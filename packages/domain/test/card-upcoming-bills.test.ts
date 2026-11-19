@@ -259,10 +259,42 @@ describe("covers", () => {
     expect(unknown.cardBills).toEqual({ value: "300", unit: "JPY", status: "exact" });
   });
 
+  test("a statement with no readable due date makes its account's lines unknown, unless a settlement pays it", () => {
+    const run = (key: string | null, settled: string[] = []) =>
+      upcomingCardBills({
+        date: DATE,
+        cards: [
+          card("one", bill("2098-03-26", yen(100)), "a"),
+          card("two", bill("2098-03-27", yen(100)), "b"),
+          card("undated", bill(null, yen(5000)), key, settled),
+        ],
+        accounts: new Map([
+          ["entity:a", balance(yen(1000))],
+          ["entity:b", balance(yen(1000))],
+        ]),
+      }).byDebitAccount.map((line) => [line.account, line.covers, line.reasons]);
+    // Debited from a: it might come before either of a's bills.
+    expect(run("a")).toEqual([
+      ["a", "unknown", ["cards_with_unknown_due_date"]],
+      ["b", "yes", []],
+    ]);
+    // Debited from an unknown account: it might come from any.
+    expect(run(null)).toEqual([
+      ["a", "unknown", ["cards_with_unknown_due_date"]],
+      ["b", "unknown", ["cards_with_unknown_due_date"]],
+    ]);
+    // An accepted settlement pays it: nothing is left to debit.
+    expect(run("a", ["2098-03"])).toEqual([
+      ["a", "yes", []],
+      ["b", "yes", []],
+    ]);
+  });
+
   test("reasons follow the closed list's order", () => {
     const line = upcomingCardBills({
       date: DATE,
       cards: [
+        card("undated", bill(null, yen(1)), null),
         card("unknown", bill("2098-03-25", yen(1)), null),
         card("one", bill("2098-03-26", absentQuantity("JPY", "missing", "stored:missing")), "a"),
       ],
@@ -278,6 +310,7 @@ describe("covers", () => {
       "balance_not_exact",
       "balance_before_previous_debit",
       "cards_with_unknown_account",
+      "cards_with_unknown_due_date",
     ]);
     expect(COVERS_UNKNOWN_REASONS.filter((reason) => line.reasons.includes(reason))).toEqual(
       line.reasons,

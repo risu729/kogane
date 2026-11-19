@@ -38,6 +38,8 @@ const COVERS_REASONS: Record<string, string> = {
     "残高は前回の引落より前に取得したもので、その引落を含まない可能性があります。",
   cards_with_unknown_account:
     "引落口座が分からないカードの請求が、この口座から引き落とされる可能性があります。",
+  cards_with_unknown_due_date:
+    "引落日が分からない未照合の請求があり、この日までにこの口座から引き落とされる可能性があります。",
 };
 const NOT_LISTED_REASONS: Record<string, string> = {
   no_statement: "請求がありません",

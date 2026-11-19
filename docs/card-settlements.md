@@ -422,8 +422,14 @@ date, and nothing else but the account entities' labels.
   with no reason; otherwise `unknown` with `debit_account_unknown`,
   `bill_not_exact`, `balance_not_exact`, `balance_before_previous_debit` (the
   balance was captured on or before the latest card debit from the account
-  due by the date) or `cards_with_unknown_account` (a bill with no known
-  account is due by the line's date).
+  due by the date), `cards_with_unknown_account` (a bill with no known
+  account is due by the line's date) or `cards_with_unknown_due_date` (a card
+  of this account, or of an unknown one, has a newest statement with no
+  readable due date that no accepted settlement pays, so its total may be
+  debited by then: it is never left out as if it were zero).
+- An account entity's balance comes from the newest capture among its
+  references; two references captured together that disagree are
+  `conflict` / `balances_disagree`, and references are never added.
 
 The page shows it as `次回の引落` above `カードの引落口座`, from
 `GET /api/v2/reconciliation/card-debit-accounts?view=upcoming` (operator-only;
@@ -445,6 +451,15 @@ Limits:
   card; the source account (`vpass:card-00N`) tells them apart.
 - The reported state reads every account to find the debit accounts. Past its
   row bound every balance is `missing` / `reported_state_limit_exceeded`.
+- A bank source account is joined to its account entity only through the
+  reported state's entries. A source account the answer names that has no
+  balance or position in the reported state for the date keeps a line of its
+  own (`balance_not_reported`), even if an identity mapping puts it under an
+  entity another line names; that entity's line then does not count its bills.
+- A statement already due before the date is taken as debited on its due
+  date (`no_statement_due`). A bank that debits it later, for example on the
+  next business day, is not modelled; `balance_before_previous_debit` only
+  covers a balance captured on or before the due date itself.
 
 ## Candidate and decision lifecycle
 

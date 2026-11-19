@@ -680,8 +680,8 @@ Output `kogane-card-upcoming-bills-v1` for `date` (today, Asia/Tokyo):
   date with `capturedAt` (null on the line of bills with no known account);
   `covers` is `yes` or `no` only when both are exact and no reason holds,
   else `unknown` with `reasons` from `debit_account_unknown`,
-  `bill_not_exact`, `balance_not_exact`, `balance_before_previous_debit` and
-  `cards_with_unknown_account`; `notes` is always
+  `bill_not_exact`, `balance_not_exact`, `balance_before_previous_debit`,
+  `cards_with_unknown_account` and `cards_with_unknown_due_date`; `notes` is always
   `["other_debits_not_modelled"]`: only known card bills are compared with
   the provider's balance, so `yes` is not a forecast.
 - `notListed`: every other card, with `no_statement`,
