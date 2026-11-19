@@ -1,5 +1,5 @@
 // Synthetic collector -> shared R2 -> registration -> publication -> promotion -> reader.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
@@ -35,19 +35,23 @@ import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import { identitySweep } from "../src/identity-store.ts";
 import { captureRewardInput } from "../src/reward-read-projection.ts";
 import { applyTestReadMigrations, applyTestSql } from "./migration-setup.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
+// Started while the module loads, never in a hook (test/support/settle.ts).
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {};",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB", "READ"],
+    r2Buckets: ["EVIDENCE"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default {};",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB", "READ"],
-      r2Buckets: ["EVIDENCE"],
-    }),
-  );
   const DB = await mf.getD1Database("DB");
   const READ = await mf.getD1Database("READ");
   for (const file of migrationFiles(CORE_MIGRATIONS_URL))

@@ -1,10 +1,11 @@
-import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, expect } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { LAYER_A_SQL, layerBMigrations, applyMigration } from "./harness.ts";
 import { loadBundleFixture } from "./bundle-module-fixture.ts";
 import { markAbandonedOccurrences, retryableOccurrence } from "../src/schedule-store.ts";
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease.ts";
+import { settledTest } from "./support/settle.ts";
 
 interface State {
   storage: {
@@ -23,15 +24,18 @@ interface Alarm {
 let mf: Miniflare, db: D1Database;
 let AlarmClass: new (state: State, env: Env) => Alarm;
 let fixture: { dispose(): Promise<void> };
+// Started while the module loads, never in a hook (test/support/settle.ts).
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {fetch(){return new Response('synthetic')}}",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB", "UPGRADE"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default {fetch(){return new Response('synthetic')}}",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB", "UPGRADE"],
-    }),
-  );
   db = (await mf.getD1Database("DB")) as unknown as D1Database;
   await db.exec(LAYER_A_SQL);
   for (const name of layerBMigrations()) await applyMigration(db, name);

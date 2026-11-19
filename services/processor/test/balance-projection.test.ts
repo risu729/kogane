@@ -2,7 +2,7 @@
 // A07) on the production schema, including migration 0030 and every
 // append-only trigger. Synthetic evidence only: no real account, balance or
 // provider body appears here.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { scopeRelationsFromEntityRelations } from "../../../packages/read-model/src/index";
 import {
@@ -17,6 +17,7 @@ import {
   type OutboxRow,
 } from "../src/decision-outbox.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -24,9 +25,9 @@ let env: Env;
 const on = (): Env => ({ ...env, BALANCE_PROJECTION_ENABLED: "1" }) as unknown as Env;
 const off = (): Env => ({ ...env, BALANCE_PROJECTION_ENABLED: "0" }) as unknown as Env;
 
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

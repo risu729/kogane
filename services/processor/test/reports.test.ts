@@ -1,7 +1,7 @@
 // A12: migration 0034, the report job, and the facts the review asks these to
 // keep. Every fixture is synthetic: made-up security codes, made-up prices and
 // a made-up account. Nothing is copied from real evidence.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { canonicalJson } from "../../../packages/domain/src/index.ts";
 import { validReportBody } from "../../../packages/domain/src/reports.ts";
@@ -22,14 +22,15 @@ import {
   startPipeline,
 } from "./harness.ts";
 import { fullCoreDatabase } from "../../../packages/storage-d1/test/sqlite.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
 let jobEnv: ReportJobEnv;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  jobEnv = { DB: env.DB, EVIDENCE: env.EVIDENCE, REPORTS_ENABLED: "true" };
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+jobEnv = { DB: env.DB, EVIDENCE: env.EVIDENCE, REPORTS_ENABLED: "true" };
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

@@ -1,21 +1,22 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { scheduleRoute, jobs } from "../src/schedule-store.ts";
 import { startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 const sha = "a".repeat(40),
   old = "b".repeat(40);
 let mf: Miniflare, env: Env;
-beforeAll(async () => {
-  const started = await startPipeline();
-  mf = started.mf;
-  env = {
-    ...started.env,
-    RELEASE_SHA: sha,
-    SCHEDULES_ENABLED: "true",
-    SCHEDULE_ALARMS: { getByName: () => ({ reconcile: async () => null }) },
-  } as unknown as Env;
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+const started = await startPipeline();
+mf = started.mf;
+env = {
+  ...started.env,
+  RELEASE_SHA: sha,
+  SCHEDULES_ENABLED: "true",
+  SCHEDULE_ALARMS: { getByName: () => ({ reconcile: async () => null }) },
+} as unknown as Env;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

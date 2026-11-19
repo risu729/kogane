@@ -1,6 +1,6 @@
 // A response larger than the fixed 2 MiB parse budget, partitioned locally.
 // All values are generated from the synthetic two-week fixture.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
@@ -22,6 +22,7 @@ import { parseJob } from "../src/worker.ts";
 import { createD1ObservationReader } from "../../../packages/read-model/src/d1.ts";
 import type { Artifact } from "../../collector-sbi-securities/src/types.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -54,16 +55,19 @@ const meta: ArtifactMeta = {
 
 // Migration/bootstrap and bounded publication are fixture setup, separately
 // budgeted like the existing Processor integration harnesses.
+// Started while the module loads, never in a hook (test/support/settle.ts).
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {};",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB"],
+    r2Buckets: ["EVIDENCE"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default {};",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB"],
-      r2Buckets: ["EVIDENCE"],
-    }),
-  );
   const db = await mf.getD1Database("DB");
   for (const file of migrationFiles(CORE_MIGRATIONS_URL))
     await applyTestSql(db, migrationSql(CORE_MIGRATIONS_URL, file));

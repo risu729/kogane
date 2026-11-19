@@ -5,27 +5,28 @@
 // or a lease guard that matches nothing leaves neither the effect nor a
 // record, and the route refuses a request that carries no audit envelope.
 // Every value is synthetic.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { scheduleRoute } from "../src/schedule-store.ts";
 import { auditOverflowStage } from "../src/audit-overflow.ts";
 import { envelopeHeaders } from "./audit-envelope.ts";
 import { maskRandomTokens } from "../../../packages/application/test/random-tokens.ts";
 import { startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  const started = await startPipeline();
-  mf = started.mf;
-  env = {
-    ...started.env,
-    SCHEDULES_ENABLED: "true",
-    SCHEDULE_ALARMS: {
-      getByName: () => ({ reconcile: async () => null, alarmTime: async () => null }),
-    },
-  } as unknown as Env;
-}, 60_000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+const started = await startPipeline();
+mf = started.mf;
+env = {
+  ...started.env,
+  SCHEDULES_ENABLED: "true",
+  SCHEDULE_ALARMS: {
+    getByName: () => ({ reconcile: async () => null, alarmTime: async () => null }),
+  },
+} as unknown as Env;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

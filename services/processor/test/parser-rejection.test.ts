@@ -2,7 +2,7 @@
 // (scripts/parser-rejection.ts). Every payload here is synthetic, built from
 // the repository's synthetic SBI Shinsei fixtures; SENTINEL strings stand in
 // for values so the test can prove no value reaches a category.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { sbiShinseiExchangeRate } from "../../../packages/parsers/src/parsers/sbi-shinsei-exchange-rate.ts";
@@ -33,6 +33,23 @@ import {
   type RejectionCategory,
 } from "../scripts/parser-rejection.ts";
 import { LAYER_A_SQL, applyMigration, layerBMigrations, publishParse } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
+
+// Started while the module loads, never in a hook (test/support/settle.ts);
+// the cases of "replay selection against the migrated CORE schema" read it.
+const mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {fetch(){return new Response('local')}}",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
+afterAll(async () => {
+  await mf.dispose();
+});
 
 const FIXTURES = new URL(
   "../../../tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/",
@@ -1100,17 +1117,8 @@ describe("top activity shape summary", () => {
 });
 
 describe("replay selection against the migrated CORE schema", () => {
-  let mf: Miniflare;
   let db: D1Database;
   beforeAll(async () => {
-    mf = new Miniflare(
-      convertV4MiniflareOptions({
-        modules: true,
-        script: "export default {fetch(){return new Response('local')}}",
-        compatibilityDate: "2026-09-07",
-        d1Databases: ["DB"],
-      }),
-    );
     const binding: unknown = await mf.getD1Database("DB");
     if (!binding || typeof binding !== "object" || !("prepare" in binding))
       throw new Error("missing DB");
@@ -1258,13 +1266,10 @@ describe("replay selection against the migrated CORE schema", () => {
       }
     }
     await run(22, "sbi-foreign-trade-records", "1.0.1", "error");
-    // Starting Miniflare and applying every CORE migration in order is a
-    // one-time cost that grows with each migration and crossed the 5 s default
-    // hook budget; the budget matches every other schema hook in this suite.
+    // Applying every CORE migration in order is a one-time cost that grows
+    // with each migration and crossed the 5 s default hook budget; the budget
+    // matches every other schema hook in this suite.
   }, 30_000);
-  afterAll(async () => {
-    await mf?.dispose();
-  });
   const select = async (filter: Parameters<typeof replaySelectionSql>[0]) =>
     (await db.prepare(replaySelectionSql(filter)).all<Record<string, unknown>>()).results;
 

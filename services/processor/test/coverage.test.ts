@@ -3,7 +3,7 @@
 // written in the pending phase and published with the parse run, legacy
 // parsers write nothing, an invalid contract is a terminal parser failure,
 // and the shadow comparison route exposes identifiers only.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { parseJob, sweep } from "../src/worker.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
@@ -12,6 +12,7 @@ import { EXPECTED_UNIT_POLICIES } from "./expected-unit-policies.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import { smbcDirectBalance } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
+import { settledTest } from "./support/settle.ts";
 
 // The reader's relations on the production schema (packages/read-model concepts).
 const RELATIONS = {
@@ -23,9 +24,9 @@ const RELATIONS = {
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

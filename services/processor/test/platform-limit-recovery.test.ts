@@ -1,16 +1,17 @@
 // Synthetic binding failures through the actual parse and registration recovery paths.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { collectionScanStage, meteredInvocation, runScheduled, parseJob } from "../src/worker.ts";
 import { collectionHarness, persistSyntheticRun } from "./collection-harness.ts";
 import { seedArtifact, startPipeline } from "./harness.ts";
 import { smbcDirectBalance } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

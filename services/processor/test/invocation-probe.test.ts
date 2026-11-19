@@ -9,7 +9,7 @@
 // constants, never a key, a statement or an exception message.
 //
 // Synthetic throughout: `kogane-synthetic`, no amount, no account, no token.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import type { Miniflare } from "miniflare";
 import {
@@ -38,6 +38,7 @@ import {
   type CollectionHarness,
 } from "./collection-harness.ts";
 import { startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 // The first build of the migrated CORE image runs every migration; pay it
 // here under its own budget, not inside whichever test first asks for a copy
@@ -49,9 +50,9 @@ beforeAll(() => {
 let mf: Miniflare;
 let pipelineEnv: Env;
 
-beforeAll(async () => {
-  ({ mf, env: pipelineEnv } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env: pipelineEnv } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

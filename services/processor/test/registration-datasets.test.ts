@@ -7,7 +7,7 @@ import { applyTestReadMigrations, applyTestSql } from "./migration-setup.ts";
 // statement pages, and only a successful card run's pages are parsed.
 //
 // Synthetic bytes only: the shared parser fixtures and the Mizuho fixture.
-import { afterAll, beforeAll, expect, test, spyOn } from "bun:test";
+import { afterAll, beforeAll, expect, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
@@ -57,20 +57,24 @@ import {
 } from "../../../packages/read-model/src/sql.ts";
 import { currentCardUsageSql } from "../../../packages/read-model/src/card-usage.ts";
 import { PAGE_LIMIT } from "../../../packages/read-model/src/scope.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
 
+// Started while the module loads, never in a hook (test/support/settle.ts).
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {};",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB", "READ"],
+    r2Buckets: ["EVIDENCE"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default {};",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB", "READ"],
-      r2Buckets: ["EVIDENCE"],
-    }),
-  );
   const db = await mf.getD1Database("DB");
   const read = await mf.getD1Database("READ");
   for (const file of migrationFiles(CORE_MIGRATIONS_URL))

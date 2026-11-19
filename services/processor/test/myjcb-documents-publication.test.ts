@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, setSystemTime, test } from "bun:test";
+import { afterAll, beforeAll, expect, setSystemTime } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
@@ -19,18 +19,22 @@ import { myJcbCreditLedger } from "../../../packages/parsers/src/parsers/myjcb.t
 import { creditExportBytes } from "../../../packages/parsers/test/myjcb-document-fixture.ts";
 import { createD1ObservationReader } from "../../../packages/read-model/src/d1.ts";
 import type { ReadResponse } from "../../collector-myjcb/src/client.ts";
+import { settledTest } from "./support/settle.ts";
 let mf: Miniflare;
 let env: Env;
+// Started while the module loads, never in a hook (test/support/settle.ts).
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {};",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB"],
+    r2Buckets: ["EVIDENCE"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default {};",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB"],
-      r2Buckets: ["EVIDENCE"],
-    }),
-  );
   const DB = await mf.getD1Database("DB");
   for (const file of migrationFiles(CORE_MIGRATIONS_URL))
     await applyTestSql(DB, migrationSql(CORE_MIGRATIONS_URL, file));

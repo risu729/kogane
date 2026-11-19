@@ -12,13 +12,14 @@
 // does not have) is not checked here.
 //
 // Synthetic throughout: one balance capture of a synthetic amount.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { fullCoreDatabase } from "../../../packages/storage-d1/test/sqlite.ts";
 import { createSqliteReadDatabase } from "../../../packages/storage-d1/test/sqlite-read-database.ts";
 import { planOf, tableScans } from "../../../packages/storage-d1/test/plan-check.ts";
 import { runScheduled } from "../src/worker.ts";
 import { seedArtifact, startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 /** The flags production sets (wrangler.jsonc `vars`), so every lane it runs runs here. */
 const PRODUCTION_FLAGS = {
@@ -141,9 +142,11 @@ function recording(binding: D1Database, name: "CORE" | "READ"): D1Database {
   });
 }
 
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline(undefined, PRODUCTION_FLAGS));
+const test = settledTest();
 beforeAll(async () => {
   fullCoreDatabase().close();
-  ({ mf, env } = await startPipeline(undefined, PRODUCTION_FLAGS));
   await seedArtifact(env, 300, "smbc-bank", "balance-normalized", "balance.normalized.json", {
     amount: 1,
     currency: "JPY",

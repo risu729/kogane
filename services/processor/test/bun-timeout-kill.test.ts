@@ -1,6 +1,6 @@
 // What Bun's test runner does to child processes when a case times out, which
 // a file sharing one Miniflare across its cases relies on (docs/ci.md,
-// Miniflare under Bun; test/card-debit-accounts.test.ts): it SIGTERMs every
+// Miniflare under Bun; test/support/settle.ts): it SIGTERMs every
 // process a hook or a case spawned, such as a workerd started in beforeAll,
 // and leaves one started while the module loaded. Should a Bun upgrade change
 // either, this fails and names which.

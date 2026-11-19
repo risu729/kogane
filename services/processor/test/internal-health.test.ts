@@ -5,7 +5,7 @@
 //
 // Synthetic data only: the harness applies the real migrations to a local D1
 // and seeds nothing from a provider.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import {
   DATA_MARKER_KEY,
@@ -20,13 +20,14 @@ import {
 import { laneTick, type LaneTickResult } from "../src/lane-ticks.ts";
 import { recordLaneTick } from "../../../packages/storage-d1/src/core/lane-ticks.ts";
 import { startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
 
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline(undefined, { RELEASE_SHA: "b".repeat(40) }));
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline(undefined, { RELEASE_SHA: "b".repeat(40) }));
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

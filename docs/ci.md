@@ -161,14 +161,28 @@ Miniflare started in `beforeAll` is such a process, so one timeout kills its
 workerd: the timed-out case's request fails with `ECONNRESET` and every later
 case of the file with `ECONNREFUSED`. The timed-out case's body also keeps
 running against the shared store while later cases read it.
-`services/processor/test/card-debit-accounts.test.ts` therefore starts its
-runtime at module load and has `afterEach` wait for the case's body to settle
-before the next case begins, so a timeout fails that case alone; Bun still
-reports a late rejection as an error between tests. The wait is bounded by
-`afterEach`'s default 5 s deadline: a body that has not settled by then fails
-its case at the hook and goes on running while the next case reads the store.
-The other processor files that start Miniflare in `beforeAll` still lose their
-runtime at a timeout.
+Every processor test file that shares one Miniflare across its cases, but
+the one named below, therefore starts it while the module loads (a top-level
+`await`), keeps its one-time schema setup and seeding in `beforeAll`, disposes
+it in `afterAll`, and declares its cases with `settledTest()` from
+`services/processor/test/support/settle.ts`. That `test`
+keeps each case's body, and its `afterEach` waits for the body to settle before
+the next case begins, so a timeout fails that case alone; Bun still reports a
+late rejection as an error between tests. The wait is bounded by `afterEach`'s
+default 5 s deadline: a body that has not settled by then fails its case at
+the hook and goes on running while the next case reads the store. Files that
+start a runtime per case, in `beforeEach` or in the case itself
+(`unit-scope.test.ts`, `sbi-supplemental-snapshot-compatibility.test.ts`, the
+card purchase worlds), lose only that case's runtime at a timeout.
+`miniflare-d1-lifetime.test.ts` still starts its two runtimes in `beforeAll`;
+only its last case reads them.
+
+The browser tests of `apps/web` and `experiments/observation-pipeline-local`,
+and `experiments/st-george-automation/test/probe.test.ts`, launch Chromium
+through Playwright in `beforeAll` (`activity-semantics.browser.test.ts` and
+`synthetic-display.browser.test.ts` launch it in their case). A timeout kills
+that browser the same way, and every later case of the file then fails to open
+a page; these files still start it in the hook.
 
 hk's `repository` check
 invokes this graph, never `check` or `verify`, avoiding recursion. Selected root aliases for old operational `<short>:<verb>` names keep the

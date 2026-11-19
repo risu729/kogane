@@ -6,7 +6,7 @@ import { transactionsSql } from "../../../packages/read-model/src/sql.ts";
 // the deployed `sbi-shinsei-top-balances-and-activity` parser. The statement is
 // a synthetic MyJCB total, as in card-settlement.test.ts. Every value is
 // synthetic.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { Miniflare } from "miniflare";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
@@ -25,6 +25,7 @@ import {
 import { cardSettlementDebitIdentity } from "../../../packages/application/src/operations/card-settlement-target.ts";
 import type { CardSettlementFacts } from "../../../packages/domain/src/card-settlement.ts";
 import { changeMutationPlanners } from "../src/change-commands.ts";
+import { settledTest } from "./support/settle.ts";
 
 const FIXTURE = new URL(
   "../../../tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/top-accounts-balance-and-activity.json",
@@ -42,10 +43,10 @@ const actor: Principal = {
 };
 const now = "2098-01-01T00:00:00.000Z";
 let sequence = 0;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  db = env.DB;
-}, 60000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+db = env.DB;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

@@ -2,7 +2,7 @@
 // assign / release-override lifecycle, idempotent resend, conflict detection,
 // protection of manual decisions, the migration of legacy manuals, typed
 // relations, and the per-run policy record. Synthetic rows only.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { otherIdentity as providerIdentity } from "../../../packages/identity/src/other.ts";
@@ -25,14 +25,15 @@ import {
   splitSql,
   startPipeline,
 } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
 let db: D1Database;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  db = env.DB;
-}, 60_000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+db = env.DB;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

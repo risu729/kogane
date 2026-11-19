@@ -1,6 +1,6 @@
 // Synthetic capture -> real registration -> parse/publication -> production
 // reader. No test-only selection SQL stands in for the live deduplication.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
@@ -22,16 +22,19 @@ import { artifactDataset } from "../../../packages/application/src/collection/de
 
 let mf: Miniflare;
 let env: Env;
+// Started while the module loads, never in a hook (test/support/settle.ts).
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {};",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB"],
+    r2Buckets: ["EVIDENCE"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default {};",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB"],
-      r2Buckets: ["EVIDENCE"],
-    }),
-  );
   const db = await mf.getD1Database("DB");
   for (const file of migrationFiles(CORE_MIGRATIONS_URL))
     await applyTestSql(db, migrationSql(CORE_MIGRATIONS_URL, file));
@@ -61,6 +64,7 @@ const fixture = () =>
   ) as unknown;
 
 import type { PortfolioValuationHistoryRow } from "../../../packages/read-model/src/portfolio-valuation-history.ts";
+import { settledTest } from "./support/settle.ts";
 let first = 0;
 let second = 0;
 let after: PortfolioValuationHistoryRow[] = [];

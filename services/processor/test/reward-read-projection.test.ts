@@ -13,7 +13,7 @@
 //   G0-09  dropping the reward READ tables leaves every CORE claim, rule and
 //          offer untouched, and old cursors expire.
 //   The flag is off by default, and with it off the lane never runs.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import {
   captureRewardInput,
@@ -34,6 +34,7 @@ import {
   type BucketExpiryBasis,
 } from "../../../packages/domain/src/rewards.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -71,8 +72,10 @@ const readCount = async (sql: string, ...args: unknown[]): Promise<number> =>
     .bind(...args)
     .first<{ n: number }>())!.n;
 
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
   // One published V Point parse with two unclassified buckets: one the
   // provider dated and one it did not. All three datasets are
   // published in the same capture; zero history rows are still a parse.

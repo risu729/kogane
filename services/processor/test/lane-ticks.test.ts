@@ -5,7 +5,7 @@
 // Synthetic stage results only: every count below is invented, and the
 // "provider text" in the failing stage is a made-up string that must never
 // reach a row.
-import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import { afterAll, beforeEach, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import {
   LANE_TICK_RETENTION,
@@ -15,12 +15,13 @@ import { LANE_TICK_COUNTS, laneTick } from "../src/lane-ticks.ts";
 import { runScheduled, type ScheduledStages } from "../src/worker.ts";
 import { startPipeline } from "./harness.ts";
 import { maskRandomTokens } from "../../../packages/application/test/random-tokens.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

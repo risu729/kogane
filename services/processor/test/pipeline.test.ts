@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import type { Miniflare } from "miniflare";
@@ -14,14 +14,15 @@ import {
   sonyBankHistoryCsv,
   sonyBankWalletHistory,
 } from "../../../packages/parsers/src/parsers/sony-bank.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  // Minimal synthetic Layer A plus every Layer B migration in order (0017 to
-  // the newest); the full production chain is validated separately below.
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+// Minimal synthetic Layer A plus every Layer B migration in order (0017 to
+// the newest); the full production chain is validated separately below.
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

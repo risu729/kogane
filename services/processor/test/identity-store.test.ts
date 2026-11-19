@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import { otherIdentity as providerIdentity } from "../../../packages/identity/src/other.ts";
@@ -14,6 +14,7 @@ import {
 } from "../src/identity-store.ts";
 import { publishParse } from "./harness.ts";
 import { identitySweepCandidatesSql } from "../../../packages/storage-d1/src/core/identity-sweep-sql.ts";
+import { settledTest } from "./support/settle.ts";
 const legacyCandidates = readFileSync(
   new URL("../../../packages/storage-d1/test/fixtures/identity-sweep-legacy.sql", import.meta.url),
   "utf8",
@@ -76,15 +77,18 @@ function assertDb(value: unknown): asserts value is D1Database {
   if (!value || typeof value !== "object" || !("prepare" in value) || !("batch" in value))
     throw new Error("invalid D1 binding");
 }
+// Started while the module loads, never in a hook (test/support/settle.ts).
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default { fetch() { return new Response('test'); } };",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default { fetch() { return new Response('test'); } };",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB"],
-    }),
-  );
   const binding: unknown = await mf.getD1Database("DB");
   assertDb(binding);
   db = binding;

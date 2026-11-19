@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { startPipeline, seedArtifact, publishParse } from "./harness.ts";
 import { identifyParse, type IdentityResolver } from "../src/identity-store.ts";
@@ -24,6 +24,7 @@ import {
 } from "../../../packages/domain/src/ownership-declaration.ts";
 import type { CardOwnershipSide } from "../../../packages/domain/src/card-ownership-review.ts";
 import { queryCardOwnership } from "../../../packages/application/src/query/card-ownership.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare,
   env: Env,
@@ -54,10 +55,10 @@ const resolver: IdentityResolver = (input) => ({
   instruments: [],
   issues: [],
 });
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  db = env.DB;
-}, 60000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+db = env.DB;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

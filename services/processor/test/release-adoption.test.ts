@@ -7,7 +7,7 @@
 //
 // Every fixture is synthetic. The smbc-direct parsers are used because their
 // inputs are small JSON documents; no provider data is involved.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { parseJob } from "../src/worker.ts";
 import { candidateBatch } from "../src/release-adoption.ts";
@@ -21,14 +21,15 @@ import {
   smbcDirectBalance,
   smbcDirectTransactions,
 } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline(layerBMigrations(), {
-    RELEASE_CANDIDATES_ENABLED: "true",
-  }));
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline(layerBMigrations(), {
+  RELEASE_CANDIDATES_ENABLED: "true",
+}));
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

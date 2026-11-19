@@ -1,7 +1,8 @@
-import { afterAll, beforeAll, expect, spyOn, test } from "bun:test";
+import { afterAll, beforeAll, expect, spyOn } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { loadBundleFixture } from "./bundle-module-fixture.ts";
 import { startPipeline } from "./harness";
+import { settledTest } from "./support/settle.ts";
 interface Storage {
   get<T>(key: string): Promise<T | undefined>;
   put(key: string, value: unknown): Promise<void>;
@@ -19,10 +20,12 @@ interface Alarm {
 let mf: Miniflare, env: Env, AlarmClass: new (state: State, env: Env) => Alarm;
 let errorKind: (error: unknown) => string;
 let bundleFixture: { dispose(): Promise<void> } | undefined;
+// Started while the module loads, never in a hook (test/support/settle.ts).
+const started = await startPipeline();
+mf = started.mf;
+env = started.env;
+const test = settledTest();
 beforeAll(async () => {
-  const started = await startPipeline();
-  mf = started.mf;
-  env = started.env;
   // Every CI date is valid: the synthetic alarm test is independent of the
   // seed's real recurring maintenance, disabled here by a new revision.
   await env.DB.prepare(

@@ -5,7 +5,7 @@
 // the 0026 upgrade on existing rows.
 // Every fixture is synthetic; the smbc-direct balance parser is used only
 // because its input is a three-field JSON document.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { Miniflare } from "miniflare";
 import { parseJob } from "../src/worker.ts";
@@ -21,12 +21,13 @@ import {
   startPipeline,
 } from "./harness.ts";
 import { smbcDirectBalance } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

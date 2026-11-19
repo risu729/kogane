@@ -3,7 +3,7 @@
 // summary of the same collection run states. Synthetic boards and pages are
 // parsed by the deployed parsers through the sweep, then promoted; every value
 // is synthetic.
-import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { Miniflare } from "miniflare";
 import { SBI_SHINSEI_FX_PER_UNIT_CURRENCIES } from "../../../packages/domain/src/price-sources.ts";
@@ -11,12 +11,13 @@ import { pricePromotionSweep, STAGE_SQL } from "../src/price-promotion-job.ts";
 import { sweep } from "../src/worker.ts";
 import { seedArtifact, startPipeline } from "./harness.ts";
 import { fullCoreDatabase } from "../../../packages/storage-d1/test/sqlite.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

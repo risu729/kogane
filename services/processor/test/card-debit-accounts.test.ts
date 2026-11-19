@@ -7,7 +7,7 @@
 // nothing; that the read writes nothing, is graded before it reads, and
 // reaches readings and decisions by key without table statistics. Every
 // value is synthetic.
-import { afterAll, afterEach, beforeAll, expect, test as bunTest } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import {
   CARD_DEBIT_ACCOUNT_CANDIDATES_SQL,
   CARD_DEBIT_ACCOUNT_READINGS_SQL,
@@ -30,31 +30,16 @@ import { cardSettlementSweep } from "../src/card-settlement-job.ts";
 import { changeMutationPlanners } from "../src/change-commands.ts";
 import { identifyParse, type IdentityResolver } from "../src/identity-store.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 // The cases share one store and build on each other's writes, so one case
-// that times out must fail alone. Two things used to spread it to the rest of
-// the file (docs/ci.md, Miniflare under Bun):
-// - At a timeout Bun's runner SIGTERMs every process a hook or a case spawned
-//   ("killed 1 dangling process"). Miniflare's workerd, started in beforeAll,
-//   was one: the timed-out case's request failed with ECONNRESET and every
-//   later one with ECONNREFUSED. The runtime therefore starts while the module
-//   loads, which Bun does not track (test/bun-timeout-kill.test.ts pins both).
-// - A timeout fails a case but cannot stop its body, which went on writing to
-//   the store while the next case read it. Each case's body is kept and the
-//   next case starts only once it has settled (within afterEach's default
-//   deadline); a late rejection is still reported by Bun as an error between
-//   tests.
+// that times out must fail alone (docs/ci.md, Miniflare under Bun): the
+// runtime starts while the module loads and each case settles before the next
+// begins (test/support/settle.ts).
 const { mf, env } = await startPipeline();
 const db = env.DB;
-let body: Promise<void> = Promise.resolve();
-const test = (name: string, run: () => Promise<void>) => bunTest(name, () => (body = run()));
+const test = settledTest();
 beforeAll(seed, 60000);
-afterEach(() =>
-  body.then(
-    () => undefined,
-    () => undefined,
-  ),
-);
 afterAll(async () => {
   await mf.dispose();
 });

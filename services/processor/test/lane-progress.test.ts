@@ -4,19 +4,20 @@
 // a Worker killed between them leaves the jobs and the old cursor. The next
 // sweep re-examines the same artifacts, its inserts are no-ops, and what the
 // progress row says about the jobs must still be true.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { sweep } from "../src/worker.ts";
 import { REPLAY_STEP_PROGRESS_SQL, WORK_ITEM_PROGRESS_SQL } from "../src/lane-progress-sql.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import { fullCoreDatabase } from "../../../packages/storage-d1/test/sqlite.ts";
 import { seedArtifact, startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

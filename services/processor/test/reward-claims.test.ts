@@ -1,7 +1,7 @@
 // Reward bucket promotion (A11): migration 0033 plus the promotion job.
 // Every value here is synthetic. The job promotes rows that are already
 // published; no parser is invoked and no observation is rewritten.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { runScheduled } from "../src/worker.ts";
 import {
@@ -18,12 +18,13 @@ import {
   seedArtifact,
   startPipeline,
 } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

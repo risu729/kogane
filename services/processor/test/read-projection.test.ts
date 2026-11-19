@@ -14,7 +14,7 @@
 //          the stored inputs survive it.
 //   The U10 known limit: content that was retired is built again instead of
 //   wedging the pointer at `skipped(snapshot_retired)`.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import {
   balanceProjectionOutboxProcessor,
@@ -28,6 +28,7 @@ import { applyTestReadMigrations } from "./migration-setup.ts";
 import { checkReadCursor } from "../../../packages/storage-d1/src/read/index.ts";
 import { sha256Hex } from "../../../packages/domain/src/context.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -40,9 +41,9 @@ const on = (base: Env = env): Env =>
     READ_PROJECTION_ENABLED: "true",
   }) as unknown as Env;
 
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

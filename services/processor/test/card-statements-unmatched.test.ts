@@ -6,7 +6,7 @@
 // debits (ADR 0074, amendment 2026-11-07), that a swept statement leaves the list,
 // that the read writes nothing, and that its own lookups are keyed without
 // table statistics. Every value is synthetic.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import {
   reviewUnmatchedCardStatements,
@@ -23,11 +23,14 @@ import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { cardSettlementSweep } from "../src/card-settlement-job.ts";
 import { identifyParse, type IdentityResolver } from "../src/identity-store.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare, env: Env, db: D1Database;
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+db = env.DB;
+const test = settledTest();
 beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  db = env.DB;
   await seed();
 }, 60000);
 afterAll(async () => {
