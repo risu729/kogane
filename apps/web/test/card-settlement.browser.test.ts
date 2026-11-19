@@ -665,14 +665,14 @@ describe.if(runnable)("card settlement review", () => {
     });
     let page = await open();
     let section = page.getByRole("region", { name: "照合候補のない請求" });
-    await section.getByText("請求総額", { exact: false }).waitFor();
+    await section.getByText("MyJCB · 対象月 2098-01", { exact: false }).waitFor();
     expect(await section.innerText()).toContain("請求総額 不明（stored:unparsed） · JPY");
     await page.close();
     unmatchedPage = withTotal(null);
     page = await open();
     section = page.getByRole("region", { name: "照合候補のない請求" });
     await section.getByRole("alert").waitFor();
-    expect(await section.innerText()).not.toContain("請求総額");
+    expect(await section.innerText()).not.toContain("対象月 2098-01");
     await page.close();
   });
 
