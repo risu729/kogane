@@ -278,8 +278,9 @@ before; only the `proposed` filter changes.
   `only_unreviewed_candidates` when it has no other evidence; the accepted
   settlement stays on the old ordinal's entry.
 - Every other answer is unchanged: where no proposal's card month is
-  accepted under another statement key, the rows are the shipped text's. `schemaVersion`, the wire contract,
-  the page and the tool description are unchanged.
+  accepted under another statement key, the rows are the shipped text's.
+  `schemaVersion`, the wire contract, the page and the tool description are
+  unchanged.
 - Cost: the covered months are built once from the candidates already
   scanned, and each proposal probes them by an automatic index; no base table
   is read again.
@@ -289,8 +290,9 @@ before; only the `proposed` filter changes.
 - `services/processor/test/card-debit-accounts.test.ts`: on the complete CORE
   schema with the real sweep, a Vpass month accepted under one ordinal and
   re-read under a new one resolving to the same account: the guard refuses
-  the new candidate, the read writes nothing, and the new ordinal's entry
-  lists no proposal and reads `no_debit_account_evidence` (it listed the
+  the new candidate for the month alone (every other readiness flag holds,
+  and the command layer's plan answers `stale_context`), the read writes
+  nothing, and the new ordinal's entry lists no proposal and reads `no_debit_account_evidence` (it listed the
   proposal and read `only_unreviewed_candidates` before the change); the
   plan reaches the months by key without table statistics on D1.
 - `packages/application/test/card-debit-account-candidates-differential.test.ts`:
@@ -299,7 +301,9 @@ before; only the `proposed` filter changes.
   proposals the guard's month term reserves, which equals the shipped rows
   on seeds without such a proposal; every proposal it drops has
   `allocation_available` 0 in the real view; dropping any of the three month
-  terms fails some seed.
+  terms fails some seed. The expected rows use the guard's month term, which
+  `card-debit-account-candidates-guard.ts` checks is byte for byte the one in
+  migration 0044 and in the keyed readiness CTEs the acceptance plans with.
 - `packages/application/test/card-settlement-review-scale.test.ts`: on the
   scaled store without statistics, the same equality (the store draws no
   such proposal, so the shipped rows too), and a plan whose only whole read of

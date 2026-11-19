@@ -2,6 +2,9 @@
 // text (card-debit-account-candidates-legacy-sql.ts) and the acceptance
 // guard's own month term, for the differential tests on random and scaled
 // stores. Never import it outside tests.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { cardSettlementReadinessCtes } from "../../read-model/src/card-settlement-readiness.ts";
 import { LEGACY_CARD_DEBIT_ACCOUNT_CANDIDATES_SQL } from "./card-debit-account-candidates-legacy-sql.ts";
 
 /**
@@ -12,6 +15,22 @@ import { LEGACY_CARD_DEBIT_ACCOUNT_CANDIDATES_SQL } from "./card-debit-account-c
 const GUARD_MONTH_TERM = `(json_extract(used.facts_json,'$.statement.sourceId')=json_extract(c.facts_json,'$.statement.sourceId')
     AND json_extract(used.facts_json,'$.statement.accountId')=json_extract(c.facts_json,'$.statement.accountId')
     AND json_extract(used.facts_json,'$.statement.period')=json_extract(c.facts_json,'$.statement.period'))`;
+// Copied, not written: the migration's view and the keyed readiness CTEs the
+// acceptance command plans with (`ready_candidate` for `c`) carry the term
+// byte for byte.
+if (
+  !readFileSync(
+    join(import.meta.dir, "../../storage-d1/migrations/core/0044_card_statement_settlements.sql"),
+    "utf8",
+  ).includes(GUARD_MONTH_TERM)
+)
+  throw new Error("the guard's month term is not migration 0044's");
+if (
+  !cardSettlementReadinessCtes().includes(
+    GUARD_MONTH_TERM.replaceAll("c.facts_json", "ready_candidate.facts_json"),
+  )
+)
+  throw new Error("the guard's month term is not the readiness CTEs'");
 
 /**
  * The proposed candidates an accepted one reserves by card month, though no

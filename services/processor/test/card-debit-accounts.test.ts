@@ -572,13 +572,29 @@ test("a card month settled under one card ordinal is not proposed again under th
     ...settledMonth,
     statement_key: null,
   });
-  // The guard refuses it.
+  // The guard refuses it for the reserved month alone: every other readiness
+  // flag holds, and the command layer's own plan refuses the acceptance.
   expect(
     await db
-      .prepare("SELECT allocation_available FROM card_settlement_readiness WHERE id=?")
+      .prepare(
+        "SELECT statement_current,bank_current,ownership_current,allocation_available FROM card_settlement_readiness WHERE id=?",
+      )
       .bind(reproposed)
       .first(),
-  ).toEqual({ allocation_available: 0 });
+  ).toEqual({
+    statement_current: 1,
+    bank_current: 1,
+    ownership_current: 1,
+    allocation_available: 0,
+  });
+  expect(
+    await createPlan(
+      "card-settlement.accept",
+      { proposalId: reproposed, reason: "synthetic" },
+      { actor, baseContextId: "identity-current-v1", now, ttlSeconds: 600 },
+      d1CommandStore(db),
+    ),
+  ).toMatchObject({ ok: false, error: "stale_context" });
   const before = await rowCounts();
   const cards = byCard((await review()).items);
   expect(await rowCounts()).toEqual(before);
