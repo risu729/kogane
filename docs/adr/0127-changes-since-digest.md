@@ -194,6 +194,12 @@ tool off the parity guard's list of tools without a UI route.
   without table statistics (every table by key or one index range, the two
   rowid walks under their LIMIT, no sort of a table); every answer against the
   wire contract.
+- `packages/observation-shared/test/changes-since-contract.test.ts`: the wire
+  contract admits what the service produces and refuses a code, order, bound
+  or handler outside the domain's lists, a newest value without its count,
+  rows of no recorded parse, an unchanged source listed as a line, run
+  sections counted for a grant that cannot read them, and a continuation that
+  is not the last source listed.
 - `services/processor/test/changes-since-cost.test.ts`: on workerd's SQLite
   with every CORE migration, each query's `rows_read` is equal over two
   histories past every walk, the answers are equal, and the queries run under
