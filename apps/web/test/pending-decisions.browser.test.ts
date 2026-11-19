@@ -124,6 +124,7 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let refuse = false;
+  let current: unknown = answer;
   beforeAll(async () => {
     server = Bun.serve({
       hostname: "127.0.0.1",
@@ -140,7 +141,7 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
         if (url.pathname === PENDING_DECISIONS_PATH)
           return refuse
             ? Response.json({ error: "operator_required" }, { status: 403 })
-            : Response.json(answer);
+            : Response.json(current);
         if (url.pathname.startsWith("/api/"))
           return Response.json({ error: "not_found" }, { status: 404 });
         return new Response(
@@ -185,6 +186,51 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
       await page.close();
     }
   }, 30_000);
+
+  test("the total says 以上 exactly when some line is cut or could not be counted", async () => {
+    refuse = false;
+    // Every line counted and complete but for the change lifecycle, which
+    // this deployment does not serve: the total is exact. Each other way a
+    // line can fall short, on its own, makes it a lower bound (INV05).
+    const unavailable = { state: "unavailable", count: null, complete: false, ids: [] };
+    const cases: [Partial<Record<string, object>>, string][] = [
+      [{}, "8件"],
+      [{ "account-candidate.open": { ...unavailable, reason: "budget_exceeded" } }, "8件以上"],
+      [{ "card-ownership.account": { ...unavailable, reason: "unauthorized" } }, "8件以上"],
+      [
+        { "pending-posted.link": { count: PENDING_DECISIONS_COUNT_BOUND, complete: false } },
+        `${String(3 + PENDING_DECISIONS_COUNT_BOUND)}件以上`,
+      ],
+    ];
+    try {
+      for (const [changes, total] of cases) {
+        const kinds = lines.map((line) => ({
+          ...line,
+          ...(line.kind === "maintenance-survey.proposal"
+            ? { state: "counted", reason: null, count: 0, complete: true }
+            : {}),
+          ...(line.kind === "pending-posted.link" ? { count: 5, complete: true } : {}),
+          ...(line.kind === "change-plan.open"
+            ? { ...unavailable, reason: "not_served", oldestAt: null }
+            : {}),
+          ...changes[line.kind],
+        }));
+        current = { ...answer, kinds };
+        expect(validPendingDecisions(current), total).toBe(true);
+        const page = await browser.newPage();
+        try {
+          await page.goto(`${origin}/`);
+          const panel = page.locator('section[aria-labelledby="pending-decisions"]');
+          await panel.getByText("カード請求と引落の照合").waitFor();
+          expect(await panel.locator(".panel-head .count").textContent()).toBe(total);
+        } finally {
+          await page.close();
+        }
+      }
+    } finally {
+      current = answer;
+    }
+  }, 60_000);
 
   test("a caller the route refuses sees no panel", async () => {
     refuse = true;

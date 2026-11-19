@@ -804,7 +804,7 @@ the first ids, the oldest creation time and the page and tool that handle it;
 it decides nothing. The plans line needs `interpretation.propose`, as
 `simulate` does, so a reader without a command grant sees no plan id. The
 panel's total says `以上` when a line is cut at its bound or could not be
-counted. Not listed, with a closed reason in the answer's
+counted; a kind the deployment does not serve leaves it exact. Not listed, with a closed reason in the answer's
 `notCovered`: the economic-event and card purchase review kinds above
 (`no_decision_path`: refused at `plan` until a planner exists), relations an
 agent proposed with `kogane.reconcile.propose` (`no_list`) and unresolved

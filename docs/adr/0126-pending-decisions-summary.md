@@ -72,7 +72,10 @@ recorded with `kogane.reconcile.propose` (no page or tool lists them, and
    `pending-posted.link`, `maintenance-survey.proposal`, `change-plan.open`.
    The route (operator-only, the operator reading with the authority of
    ADR 0084), the agent HTTP route and the MCP tool are adapters over it, and
-   the panel reads the route (ADR 0081 point 2).
+   the panel reads the route (ADR 0081 point 2). The answer carries no total;
+   the panel's header sums the counted lines and says `以上` when a line is
+   cut at its bound or is `unavailable` for any reason but `not_served`, so
+   it never reads as complete when it is not (INV05).
 2. **A line.** `count`, `complete` (false when the count reached
    `countBound`, 1,000: at least that many), the first `ids` (at most 5 and
    640 bytes), `oldestAt` with `timeBasis` (`created`, or `not_recorded` for
@@ -174,5 +177,7 @@ recorded with `kogane.reconcile.propose` (no page or tool lists them, and
   to the tool.
 - `apps/web/test/pending-decisions.browser.test.ts`: the panel lists every
   kind, links to the deciding page, says why a line is unavailable, passes the
-  accessibility audit, and is absent for a caller the route refuses; the wire
-  contract refuses lines the summary cannot produce.
+  accessibility audit, and is absent for a caller the route refuses; its total
+  is exact with every line complete or `not_served`, and says `以上` for a cut
+  line, a `budget_exceeded` line and an `unauthorized` line, each on its own;
+  the wire contract refuses lines the summary cannot produce.
