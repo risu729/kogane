@@ -1,4 +1,4 @@
-import type { IdentityStatus, IdentityOrigin } from "./identity-contract.ts";
+import type { AccountLabelEvidence, IdentityStatus, IdentityOrigin } from "./identity-contract.ts";
 import type { AccountConnection } from "./account-connection-contract.ts";
 import type { DecisionOrigin } from "./decision-origin-contract.ts";
 import type { FinancialProductClaim } from "./financial-products.ts";
@@ -6,6 +6,7 @@ import type { FinancialProductClaim } from "./financial-products.ts";
 /** Effective interpretation alongside, never in place of, the stored source fields. */
 export interface OrganizedAccount {
   connection?: AccountConnection;
+  labelEvidence?: AccountLabelEvidence;
   referenceId: string;
   targetId: string;
   label: string;
@@ -16,7 +17,10 @@ export interface OrganizedAccount {
   decisionOrigin?: DecisionOrigin;
   reason: string;
 }
-export interface OrganizedInstrument extends Omit<OrganizedAccount, "connection"> {
+export interface OrganizedInstrument extends Omit<
+  OrganizedAccount,
+  "connection" | "labelEvidence"
+> {
   role: "unit" | "security" | "trade-unit" | "usage-unit";
   namespace: string;
   scope: string;

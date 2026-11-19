@@ -257,7 +257,7 @@ policy releases of the runs behind the rows (joined with `+`, or
 `as-recorded:none`). Each organized row carries `mappingRevision` (the account
 mapping revision used) and `identityRelease`; identity catalogue rows report
 the mapping revision in `revision`. Display-only overlays (preferred
-instrument names, connection labels) stay current in both modes and carry
+instrument names, connection labels, Vpass card names) stay current in both modes and carry
 their own evidence; they never change which account or instrument a row is
 attributed to.
 

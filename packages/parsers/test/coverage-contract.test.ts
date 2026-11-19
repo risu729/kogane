@@ -83,6 +83,18 @@ const RELEASE_DELTAS: Record<string, (frozen: Observation[]) => Observation[]> =
       );
       return { ...observation, extra: { ...observation.extra, _kogane: withOrigin } };
     }),
+  // 1.1.0 (#1357): its cases were frozen under 1.0.1/1.0.2. 1.1.0 adds the
+  // response's own card name as `_kogane.cardName`, last, to every row, and
+  // changes nothing else. The synthetic fixture's name is "Synthetic card".
+  "vpass-credit-snapshot@1.1.0": (frozen) =>
+    frozen.map((observation) => {
+      const kogane = observation.extra["_kogane"] as Record<string, unknown>;
+      expect(Object.keys(kogane)).not.toContain("cardName");
+      return {
+        ...observation,
+        extra: { ...observation.extra, _kogane: { ...kogane, cardName: "Synthetic card" } },
+      };
+    }),
 };
 
 interface Expectation {

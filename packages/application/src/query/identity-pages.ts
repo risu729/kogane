@@ -22,6 +22,7 @@ import {
   readAccountConnections,
 } from "./account-connections.ts";
 import { preferredInstrumentNames } from "./preferred-instrument-names.ts";
+import { vpassCardAccountLabel, vpassCardLabels } from "./vpass-card-labels.ts";
 
 const LIMIT = IDENTITY_PAGE_LIMIT;
 // Evaluate the canonical eligibility view once, before joining instrument roles.
@@ -191,6 +192,10 @@ export async function readIdentityPage(
         sourceAccount: String(row.sourceAccount),
       })),
     );
+    const cards = await vpassCardLabels(
+      sql,
+      results.map((row) => ({ referenceId: String(row.referenceId), source: String(row.source) })),
+    );
     for (const row of results) {
       const connection = connections.get(String(row.referenceId));
       if (connection) {
@@ -201,6 +206,17 @@ export async function readIdentityPage(
           String(row.source),
           connection,
         );
+      }
+      const card = cards.get(String(row.referenceId));
+      const label = vpassCardAccountLabel(
+        String(row.label),
+        row.method as "rule" | "manual",
+        String(row.source),
+        card,
+      );
+      if (card && label !== row.label) {
+        row.label = label;
+        row.labelEvidence = { reason: "provider-card-name", origin: card.origin };
       }
       delete row.producer;
       delete row.sourceAccount;

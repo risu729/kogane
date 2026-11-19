@@ -122,3 +122,14 @@ normal Authori module and empty Revo responses without changing its assertions
 or deadline. Migration tests verify exact default advancement, idempotence and
 preservation of every operator-selected field. Production reprocessing and
 daily publication verification are separate from this compatibility change.
+
+## Amendment 2026-11-19: Keep the card's product name as a display label
+
+Reader 1.1.0 copies each response's own `cardName` into
+`extra._kogane.cardName` of every row it emits (Authori rows from Authori,
+Revo rows from Revo), and leaves out a name with four or more digits in a
+row, a control character, or more than 64 characters, without refusing the
+snapshot. `userName` is never read. No metric, amount, precision or catalogue
+status changes. Migration 0103 advances the complete 0102 default pin to
+1.1.0 under the same guard. How the name labels a card at read time is
+[ADR 0124](0124-vpass-card-name-labels.md).

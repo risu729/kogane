@@ -693,11 +693,14 @@ statement sanitizer v1 output remains unchanged. Registration v8 maps only
 these two new JSON keys to `credit-snapshot`; versions v1-v7 keep their
 old meaning.
 
-The `vpass-credit-snapshot` 1.0.2 reader accepts only the observed normal
-`vp.member.pages.info` module or an empty transition for Authori; Revo remains
-empty-only. Its successful result-code, true-login and financial validation
-guards remain mandatory. Migration 0102 advances only the complete shipped
-default version pin, preserving operator choices and stored evidence.
+The `vpass-credit-snapshot` reader (1.0.2 onward) accepts only the observed
+normal `vp.member.pages.info` module or an empty transition for Authori; Revo
+remains empty-only. Its successful result-code, true-login and financial
+validation guards remain mandatory. Migration 0102 advanced only the complete
+shipped default version pin, preserving operator choices and stored evidence;
+migration 0103 advances it the same way to 1.1.0, which adds each response's
+own card name as `extra._kogane.cardName`, a display label only
+([ADR 0124](adr/0124-vpass-card-name-labels.md)).
 
 The parser publishes visible overall/card/revolving/
 installment-twice-bonus reported limit, outstanding and availability at

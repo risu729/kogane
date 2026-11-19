@@ -13,6 +13,7 @@ import {
   organizationSql,
 } from "../../../read-model/src/index";
 import { connectionAccountLabel, readAccountConnections } from "./account-connections.ts";
+import { vpassCardAccountLabel, vpassCardLabels } from "./vpass-card-labels.ts";
 import {
   preferredInstrumentNames,
   type PreferredInstrumentName,
@@ -81,8 +82,9 @@ const unavailable = (): ObservationOrganization => ({
  * Organizes already-authorized observation references. `latest` decorates
  * with current mapping revisions; `as-recorded` with the revisions the sealed
  * identity run pinned. Display-only overlays (preferred instrument names,
- * connection labels) are current in both modes and carry their own evidence;
- * they never change which account or instrument a row is attributed to.
+ * connection labels, Vpass card names) are current in both modes and carry
+ * their own evidence; they never change which account or instrument a row is
+ * attributed to.
  */
 export async function observationOrganizations(
   reads: SqlExecutor,
@@ -196,18 +198,21 @@ export async function observationOrganizations(
   const connections = accountRefs.size
     ? await readAccountConnections(reads, [...accountRefs.values()])
     : new Map();
+  const cards = await vpassCardLabels(reads, [...accountRefs.values()]);
   for (const organization of output.values()) {
     if (organization.account) {
       const account = organization.account;
+      const source = accountRefs.get(account.referenceId)!.source;
       const connection = connections.get(account.referenceId);
       if (connection) {
         account.connection = connection;
-        account.label = connectionAccountLabel(
-          account.label,
-          account.method,
-          accountRefs.get(account.referenceId)!.source,
-          connection,
-        );
+        account.label = connectionAccountLabel(account.label, account.method, source, connection);
+      }
+      const card = cards.get(account.referenceId);
+      const label = vpassCardAccountLabel(account.label, account.method, source, card);
+      if (card && label !== account.label) {
+        account.label = label;
+        account.labelEvidence = { reason: "provider-card-name", origin: card.origin };
       }
     }
     for (const instrument of organization.instruments) {

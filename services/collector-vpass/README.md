@@ -36,6 +36,12 @@ empty transition. Revo stays empty-only; unsuccessful sessions and unknown
 transitions still fail closed. Migration 0102 advances only the complete
 shipped default snapshot policy and preserves operator alternatives.
 
+Reader 1.1.0 also copies each response's own `cardName` into
+`extra._kogane.cardName` as a display label, leaving out any name with four
+or more digits in a row; `userName` is never read. Migration 0103 advances the
+same default pin to 1.1.0. The collector and its sanitizer are unchanged
+([ADR 0124](../../docs/adr/0124-vpass-card-name-labels.md)).
+
 Authori integer values represent thousands of JPY, checked against the
 display in 万円; they are explicitly reported at 1,000 JPY precision.
 Separate revolving `revoZan`/`hensaiAmount` are signed reported yen.

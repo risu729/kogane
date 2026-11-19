@@ -2,6 +2,7 @@ import type { ArtifactMeta, BalanceObservation, Parser, ParseResult } from "../t
 import { containerClaim } from "./coverage.ts";
 import { decodeUtf8, unitScopeAdmitted } from "./util.ts";
 import { exactKeys, strictObject } from "./sbi-strict.ts";
+import { vpassCardName } from "../../../domain/src/vpass-card-name.ts";
 
 const AUTHORI_KEYS =
   "dataNotFindFlag,shokaiDate,allBalance,allLimit,allLimitInExpansion,allPossible,allReply,allReservation,authoriEntryFlg,authoriReservationFlg,balanceCodeCs,balanceCodeShopping,cardBalance,cardLimit,cardLimitInExpansion,cardName,cardPossible,cardReply,cardReservation,cashingBalance,cashingLimit,cashingOnceBalance,cashingOnceLimit,cashingOncePossible,cashingOnceReply,cashingPossible,cashingReply,cashingRevoBalance,cashingRevoBalanceFlg,cashingRevoLimit,cashingRevoPossible,cashingRevoReply,crevoLimitCode,csLimitCode,customerCsCode,divisionBalance,divisionLimit,divisionPossible,divisionReply,edificeCode,overseasCashingBalance,overseasCashingLimit,overseasCashingPossible,overseasCashingReply,overseasCashingLimitCode,divisionLimitCode,revoBalance,revoLimit,revoPossible,revoReply,revoLimitCode".split(
@@ -116,6 +117,7 @@ function reported(
   locator: string,
   precision: number,
   extra: Record<string, unknown>,
+  cardName: string | undefined,
   asOf?: string,
 ): BalanceObservation {
   const card = artifact.fetchUnitKey;
@@ -132,13 +134,21 @@ function reported(
     rawLocator: locator,
     extra: {
       ...extra,
-      _kogane: { reportedPrecisionJPY: precision, nonAdditive: true, sharedCredit: true },
+      _kogane: {
+        reportedPrecisionJPY: precision,
+        nonAdditive: true,
+        sharedCredit: true,
+        // The card's product name (#1357), a display label only. A value
+        // that could be a card number is left out rather than refused, so
+        // the snapshot is kept; `userName` is never read.
+        ...(cardName === undefined ? {} : { cardName }),
+      },
     },
   };
 }
 export const vpassCreditSnapshot: Parser = {
   name: "vpass-credit-snapshot",
-  version: "1.0.2",
+  version: "1.1.0",
   accepts: (artifact) =>
     artifact.sourceId === "vpass" &&
     artifact.dataset === "credit-snapshot" &&
@@ -172,6 +182,7 @@ export const vpassCreditSnapshot: Parser = {
         if (!["dataNotFindFlag", "shokaiDate"].includes(key) && typeof vo[key] !== "string")
           throw new Error("vpass_credit_vo_type");
       const asOf = new Date(vo["shokaiDate"]).toISOString();
+      const cardName = vpassCardName(vo["cardName"]);
       const display = rows(bean["authoriShokaiDisplayVo"]);
       for (const [title, prefix, scope] of GROUPS) {
         const row = display.get(title);
@@ -194,6 +205,7 @@ export const vpassCreditSnapshot: Parser = {
               `json:$.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo.${prefix}${suffix}`,
               1000,
               { providerField: `${prefix}${suffix}`, providerDisplay: text },
+              cardName,
               asOf,
             ),
           );
@@ -228,6 +240,9 @@ export const vpassCreditSnapshot: Parser = {
         )
           throw new Error("vpass_revo_type");
       }
+      // Revo states the same card name; it names the card when Authori has
+      // no visible row (every group hidden) and so no observation.
+      const cardName = vpassCardName(bean["cardName"]);
       for (const [field, metric] of [
         ["revoZan", "reported_revolving_outstanding_yen"],
         ["hensaiAmount", "reported_revolving_repayment_yen"],
@@ -240,6 +255,7 @@ export const vpassCreditSnapshot: Parser = {
             `json:$.body.content.CustomizedRevoShokaiAnsPcDisplayServiceBean.${field}`,
             1,
             { providerField: field },
+            cardName,
           ),
         );
     } else throw new Error("vpass_credit_artifact_invalid");

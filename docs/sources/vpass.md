@@ -152,3 +152,34 @@ false login flags, unsuccessful result codes and malformed financial content
 remain rejected. This compatibility correction adds no new financial meaning,
 precision or provider-data catalogue coverage. Production publication after
 release remains a separate verification step.
+
+## 2026-11-19: Card product names as read-time labels
+
+A counts-only production read of the stored credit artifacts found
+`cardName` in `credit/authori.json` (`authoriShokaiVo`) and
+`credit/revo.json` (`CustomizedRevoShokaiAnsPcDisplayServiceBean`) of every
+daily credit run: both files of all seven cards, the two agreeing on every
+card, seven distinct names, none containing a digit or a masked number. No
+name, holder name or other value left the read. Revo's `userName` is the
+holder's name and is not read.
+
+Reader 1.1.0 (`vpass-credit-snapshot`) copies the response's own name into
+`extra._kogane.cardName` of every row: Authori rows from Authori, Revo rows
+from Revo, so a card whose Authori groups are all hidden (no Authori row) is
+still named by Revo. A name is left out, and the snapshot kept, when it is
+empty after trimming, longer than 64 characters, holds a control character,
+or holds four or more decimal digits in a row in any script. A non-string
+`cardName` remains a shape failure. Migration 0103 advances the complete
+default policy pin from 1.0.2 to 1.1.0.
+
+At read time the card's account shows `<cardName>（card-NNN）` instead of
+`Vpassカード明細`, from the newest bound credit observation, Authori first
+([identity: display-only labels](../identity.md#display-only-labels),
+[ADR 0124](../adr/0124-vpass-card-name-labels.md)). The identity rule, its
+label and every stored mapping are unchanged; a manual label wins.
+
+Limits: names are display text only and are never compared across cards or
+used to bind a card. Until the repair lane re-parses a card's newest credit
+artifact at 1.1.0 (or the next daily run is parsed), that card keeps the
+stored label. Production publication of the names after release is a
+separate verification step.

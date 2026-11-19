@@ -24,7 +24,7 @@ import { validRewardExpiryBasis, validRewardBucketKind } from "./reward-contract
 // Shape<T> requires a validator for every declared field when contracts evolve.
 import { isDecimalMinorUnit } from "../../parsers/src/money.ts";
 import { validFinancialResult } from "../../domain/src/result.ts";
-import { validIdentityResponse } from "./identity-contract.ts";
+import { validIdentityResponse, validLabelEvidence } from "./identity-contract.ts";
 import {
   ACCOUNT_CANDIDATES_PATH,
   validAccountCandidateReview,
@@ -159,7 +159,7 @@ const organizationAccountFields = {
   method: literal("rule", "manual"),
   decisionOrigin: optional(isDecisionOrigin),
   reason: text,
-} satisfies Shape<Omit<OrganizedAccount, "connection">>;
+} satisfies Shape<Omit<OrganizedAccount, "connection" | "labelEvidence">>;
 const organizationShape = object<ObservationOrganization>({
   product: optional(validFinancialProductClaimWire),
   mappingRevision: optional((value: unknown): value is number => identifier(value) && value > 0),
@@ -170,6 +170,7 @@ const organizationShape = object<ObservationOrganization>({
     object<OrganizedAccount>({
       ...organizationAccountFields,
       connection: optional(validAccountConnection),
+      labelEvidence: optional(validLabelEvidence),
     }),
   ),
   instruments: array(

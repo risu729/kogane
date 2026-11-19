@@ -88,6 +88,32 @@ the store. Readers can ask for `latest` (current mapping revisions) or
 `as-recorded` (the revisions the run pinned) and every organized response
 names the interpretation it was computed under.
 
+## Display-only labels
+
+A mapping's label is the rule's or the owner's claim. Three read-time
+overlays replace it on screen and in the matching MCP reads, current in both
+read modes, each with its own evidence; none changes a mapping or which
+account or instrument a row belongs to, and a manual label always wins:
+
+| Overlay                                                                                    | Applies to                                                           | Label                                  | Evidence on the row                                       |
+| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- | -------------------------------------- | --------------------------------------------------------- |
+| Connection label (`connectionAccountLabel`, [account connections](account-connections.md)) | a rule-mapped `moneyforward-me` reference with a reviewed connection | `<connection label>（個別口座未確定）` | `connection`                                              |
+| Preferred instrument name ([instrument display names](instrument-display-names.md))        | instruments                                                          | the observed name                      | `nameEvidence`                                            |
+| Vpass card name (`vpassCardLabels`, [ADR 0124](adr/0124-vpass-card-name-labels.md))        | a rule-mapped bound Vpass card reference (`["vpass:card", <token>]`) | `<cardName>（card-NNN）`               | `labelEvidence: { reason: "provider-card-name", origin }` |
+
+The Vpass card name comes from the newest credit observation that the
+reference's current sealed identity organizes: the newest credit fetch run,
+Authori before Revo, then the lowest observation id. Its own `card-NNN`
+ordinal completes the label. When that observation has no kept name
+(`vpass-credit-snapshot` before 1.1.0, or a name the parser left out because
+it holds four or more digits in a row), or the card has no credit
+observation, the stored `Vpassカード明細` stays; an older name is never
+reused. A run-scoped ordinal reference keeps the stored label. The overlay is
+applied in the organization step (balances, observation lists and details),
+the identity accounts page and the filter options, so `kogane.balances.read`,
+`kogane.identity.read`, `kogane.observations.list`/`get` and
+`kogane.store.read` show what their screens show.
+
 ## Cross-identifier instrument candidates
 
 One instrument can be stored under several identifiers: a listing identifier

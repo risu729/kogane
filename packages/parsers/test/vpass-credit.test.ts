@@ -141,3 +141,60 @@ test("unobserved shapes, flags, numbers, dates and sessions fail closed", () => 
     "vpass_credit_amount_invalid",
   );
 });
+
+// #1357: the card's product name as a display label. Every name is invented.
+const kogane = (row: { extra?: Record<string, unknown> }) =>
+  row.extra?.["_kogane"] as Record<string, unknown>;
+const revoMeta = { ...meta, artifactKey: "credit/revo.json" };
+test("every Authori observation carries Authori's card name", () => {
+  const result = parse(authori("123", "テストカードA"));
+  expect(result.observations).toHaveLength(12);
+  for (const row of result.observations) expect(kogane(row)["cardName"]).toBe("テストカードA");
+});
+test("Revo carries its own card name, so a card with no visible Authori row is still named", () => {
+  const hidden = authori("123", "テストカードA");
+  const display = hidden.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiDisplayVo;
+  display.hyoujiFlg = "1";
+  for (const row of display.autoriShokaiDisplayList) row.hyoujiFlg = "1";
+  expect(parse(hidden).observations).toEqual([]);
+  const result = parse(revo("+1", "テストカードB"), revoMeta);
+  expect(result.observations).toHaveLength(2);
+  for (const row of result.observations) expect(kogane(row)["cardName"]).toBe("テストカードB");
+});
+test("a name that could hold a card number, or is not a name, is omitted and the snapshot kept", () => {
+  for (const name of [
+    "テストカード1234",
+    "テスト****-1234",
+    // Full-width digits are digits too.
+    "テスト１２３４",
+    "",
+    "   ",
+    "テスト\u0007カード",
+    "x".repeat(65),
+  ]) {
+    for (const [value, artifact, count] of [
+      [authori("123", name), meta, 12],
+      [revo("+1", name), revoMeta, 2],
+    ] as const) {
+      const result = parse(value, artifact);
+      expect(result.observations, name).toHaveLength(count);
+      expect(result.coverage?.[0]?.completeness).toBe("complete");
+      for (const row of result.observations) expect(kogane(row)).not.toHaveProperty("cardName");
+    }
+  }
+  // Three digits are not a card number; surrounding space is not the name.
+  const kept = parse(authori("123", " テストカード123 ")).observations[0]!;
+  expect(kogane(kept)["cardName"]).toBe("テストカード123");
+  // A non-string name is a shape change and still fails closed.
+  const numeric = authori();
+  numeric.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo["cardName"] = 1;
+  expect(() => parse(numeric)).toThrow("vpass_credit_vo_type");
+});
+test("the Revo holder name is never copied", () => {
+  const value = revo("+1", "テストカードA");
+  value.body.content.CustomizedRevoShokaiAnsPcDisplayServiceBean.userName = "テスト太郎";
+  const result = parse(value, revoMeta);
+  expect(JSON.stringify(result)).not.toContain("テスト太郎");
+  expect(JSON.stringify(result)).not.toContain("userName");
+  expect(JSON.stringify(parse(revo(), revoMeta))).not.toContain("Synthetic person");
+});

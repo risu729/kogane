@@ -40,6 +40,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "1bde32f526bd4bf2e4036cdcee83ce87b64cffb79aa4cd343f965817e91d2795",
     "packages/domain/src/values.ts":
       "8dbd56b587a436b5c6809b399e6b444e08835f89d176f3bcd0a03a170068c987",
+    "packages/domain/src/vpass-card-name.ts":
+      "04570266961cd534497d349ffa283cbcf460c0c2bed14f8caee87bb3ce7402e3",
     "packages/observation-shared/src/normalized-decimal.ts":
       "2c2ffee7636e5c0be5957db53c57c439e6b125fa5428cc29c9d1814cc284cbcd",
     "poc/observation-pipeline/src/money.ts":
@@ -167,7 +169,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/v-point.ts":
       "67e8b851360f2da7046967231407dfe2e0c01ee87e58a670d7a1f355efe2bb7d",
     "poc/observation-pipeline/src/parsers/vpass-credit.ts":
-      "16d015a0832a0688149664a137d5baaaff200ae7b4dd18e332bb9e44e24529ee",
+      "3fa331a0708b5f40faa01f4c322a1e501647d7988e46d399b5cffc00f58d471c",
     "poc/observation-pipeline/src/parsers/vpass.ts":
       "5a1ce5cb855a7e2df17e392c957b8337d74273bdaadb074a2b77c48ad88ffa1a",
     "poc/observation-pipeline/src/sbi-shinsei-period-contract.ts":
@@ -1067,11 +1069,12 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "vpass-credit-snapshot": {
-      version: "1.0.2",
-      codeDigest: "ea83622dc7036c82f72671a120e4cec7f9a796ab19a660b21ddb82025183c47c",
+      version: "1.1.0",
+      codeDigest: "dc2ea874b8bad6b566be8876fb7c966ab4a576c669d1bf77e476d71cf6fa108d",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
+        "packages/domain/src/vpass-card-name.ts",
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/coverage.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",

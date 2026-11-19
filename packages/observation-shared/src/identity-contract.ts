@@ -4,8 +4,18 @@ export type IdentityOrigin = {
   kind: "transaction" | "balance" | "position" | "valuation";
   id: number;
 };
+/**
+ * Where a display-only account label came from when it is not the mapping's
+ * own: `provider-card-name` is a Vpass card's product name from its newest
+ * bound credit observation (#1357). It never changes the mapping.
+ */
+export interface AccountLabelEvidence {
+  reason: "provider-card-name";
+  origin: IdentityOrigin;
+}
 export interface IdentityAccountRow {
   connection?: AccountConnection;
+  labelEvidence?: AccountLabelEvidence;
   referenceId: string;
   targetId: string;
   label: string;
@@ -59,6 +69,19 @@ const object = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
 const count = (v: unknown): v is number =>
   typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+/** The evidence of a display-only account label (#1357). */
+export function validLabelEvidence(value: unknown): value is AccountLabelEvidence {
+  return (
+    object(value) &&
+    Object.keys(value).length === 2 &&
+    value.reason === "provider-card-name" &&
+    object(value.origin) &&
+    Object.keys(value.origin).length === 2 &&
+    value.origin.kind === "balance" &&
+    count(value.origin.id) &&
+    value.origin.id > 0
+  );
+}
 export function validIdentityResponse(path: string, value: unknown): boolean {
   if (path === "/api/identity/connections")
     return (
@@ -114,6 +137,9 @@ export function validIdentityResponse(path: string, value: unknown): boolean {
       (path !== "/api/identity/accounts" ||
         row.connection === undefined ||
         validAccountConnection(row.connection)) &&
+      (path !== "/api/identity/accounts" ||
+        row.labelEvidence === undefined ||
+        validLabelEvidence(row.labelEvidence)) &&
       [...fields, "referenceId", "targetId", "label", "reason"].every(
         (k) => typeof row[k] === "string",
       ) &&
