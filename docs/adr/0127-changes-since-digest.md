@@ -94,7 +94,10 @@ order is its recording order.
    `unavailable` with `not_served` where the projection is absent. Closed codes,
    counts, times and ids only: no amount, label or provider text, and nothing is
    compared by value (`notCovered` names `value.change`, which
-   `kogane.reported-holdings-change.read` answers).
+   `kogane.reported-holdings-change.read` answers). A section the grant cannot
+   read is not counted: without `evidence.read`, a source whose only new rows
+   are runs and captures is listed in `unchanged`, and `sections` says those
+   two were not counted.
 4. **Handlers.** Each count names the existing read that lists its items and
    the argument a line's value goes in (ADR 0126's pattern): runs
    `kogane.evidence.read` (`page: runs`, `source`); captures
@@ -104,10 +107,17 @@ order is its recording order.
    (`source`, `kind` per position); events `kogane.events.read`
    (`collection: activity`); an unchanged source
    `kogane.collection-quality.read` (`source`), which says why nothing came.
+   `kogane.evidence.read` serves only the configured evidence source
+   (`EVIDENCE_SOURCE_ID`, which only `sony-bank` may be), so for any other
+   source the runs and captures handlers answer `404 not_found`; no read lists
+   another source's runs by id yet (Consequences).
 5. **The grant decides first.** `records.read` over the whole store, refused
    (`unauthorized`, `evidence_restricted`) before the request is checked or
-   anything is read. `runs` and `captures` also need `evidence.read`, the
-   catalogue capability of their handler: without it both are `null` with
+   anything is read: the tool grades it before its body's form
+   (`changesSinceGrantRefusal`), and the service asks whether the events
+   projection exists (a schema read) only once the grant and the request pass.
+   `runs` and `captures` also need `evidence.read`, the catalogue capability of
+   their handler: without it both are `null` with
    `sections` saying `unauthorized`, and their tables are not read. Each
    handler's capability is its tool's catalogue capability
    (`CHANGES_SINCE_HANDLER_CAPABILITIES`, held equal by a test).
@@ -132,10 +142,20 @@ order is its recording order.
    count that reached its row bound cuts the same way. A walk relies on
    recording order (the writers stamp the time when they insert, and nothing is
    deleted); clock skew between Workers can move a row near `since` by that
-   skew.
+   skew, and so can a writer that stamps a batch with the instant it started:
+   the card purchase sweep (`cardPurchaseSweep`, a Processor lane) stamps every
+   event revision it writes with the instant the sweep started, so a revision
+   it records after `since` with an earlier stamp is not new, and one recorded
+   after a later-stamped row can sit past a walk's boundary by at most one
+   sweep's duration.
 8. **8 KB.** The answer is cut between sources before it passes 8,192 bytes
    (`maxBytes`, measured with the continuation it would carry); `next.after`
    names the last source listed, and the same request with `after` continues.
+   `after` is a place in source id order, not a source the registry must hold:
+   an id no source has continues from where it sorts. Each answer is a fresh
+   read: a source's counts are those of the call that lists it, a walk's cut
+   is judged again, and a source registered before `after` between two calls is
+   listed only by a new first call.
 9. **Reads only (INV07).** The service decides, proposes and writes nothing;
    each served agent call records one R0 audit read (catalogue entry
    `changes.since`, `records.read`) with the sources it covers, truncated when
@@ -162,6 +182,11 @@ order is its recording order.
   list only the new ones.
 - New published tool and route: one more adapter each; the parity guard lists
   the tool with the route no screen reads.
+- The runs and captures handlers list items only for the configured evidence
+  source: `kogane.evidence.read` answers `404 not_found` for any other source
+  (decision 4). Another source's new captures are listed by
+  `kogane.observations.list` (`kind: artifacts`, `source`) once their run is
+  sealed; its new runs by id are not listed by any read yet.
 
 ### Next slice
 
@@ -193,7 +218,7 @@ tool off the parity guard's list of tools without a UI route.
   each handler's capability equal to its tool's catalogue capability; plans
   without table statistics (every table by key or one index range, the two
   rowid walks under their LIMIT, no sort of a table); every answer against the
-  wire contract.
+  wire contract; what the deployment serves is not asked before a refusal.
 - `packages/observation-shared/test/changes-since-contract.test.ts`: the wire
   contract admits what the service produces and refuses a code, order, bound
   or handler outside the domain's lists, a newest value without its count,
@@ -203,10 +228,14 @@ tool off the parity guard's list of tools without a UI route.
 - `services/processor/test/changes-since-cost.test.ts`: on workerd's SQLite
   with every CORE migration, each query's `rows_read` is equal over two
   histories past every walk, the answers are equal, and the queries run under
-  D1's limit of five terms in a compound SELECT.
+  D1's limit of five terms in a compound SELECT; D1's own `EXPLAIN QUERY PLAN`
+  with no `sqlite_stat` table scans only the two rowid walks, uses every index
+  named above, and sorts only the newest-parse window's own rows.
 - `services/app/test/changes-since-api.test.ts`: the route, the agent HTTP
   route and MCP give the same answer (but `asOf`), valid against the contract
   and under 8 KB; GET-only, a signed-in subject, `since` and `after` only and
-  once each; the grant refusals and the unauthorized run sections; the audit
-  read; no write. The UI/MCP parity guard lists the tool; the published tool
-  lists include it; its description is under 2,048 characters.
+  once each; the grant refusals, before the body's form and before any
+  statement (the events projection probe included), and the unauthorized run
+  sections; the audit read; no write. The UI/MCP parity guard lists the tool;
+  the published tool lists include it; its description is under 2,048
+  characters.
