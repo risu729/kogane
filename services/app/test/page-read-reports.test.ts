@@ -297,6 +297,13 @@ describe("collection quality page reads", () => {
         { source: "sony-bank", view: "cells", offset: 0 },
       ],
       ["/api/collection-quality/sony-bank/accounts", { source: "sony-bank", view: "accounts" }],
+      // The full answers the summaries are shaped from (ADR 0123).
+      ["/api/collection-quality?detail=full", { detail: "full" }],
+      ["/api/collection-quality/sony-bank?detail=full", { source: "sony-bank", detail: "full" }],
+      [
+        "/api/collection-quality/sony-bank?offset=0&detail=full",
+        { source: "sony-bank", offset: 0, detail: "full" },
+      ],
     ] as const) {
       const route = await page.route(query);
       expect(route.status, query).toBe(200);
@@ -435,7 +442,7 @@ describe("the audit rows of the report and collection quality reads", () => {
     expect(
       (await page.mcp(REPORTS, { reportId: "rpt:synthetic-open", view: "explanation" })).isError,
     ).toBe(false);
-    const cells = await page.http(QUALITY, { source: "sony-bank" }, EVIDENCE_GRANT);
+    const cells = await page.http(QUALITY, { source: "sony-bank", detail: "full" }, EVIDENCE_GRANT);
     expect(cells.status).toBe(200);
     const accounts = await page.mcp(QUALITY, { source: "sony-bank", view: "accounts" });
     expect(accounts.isError).toBe(false);

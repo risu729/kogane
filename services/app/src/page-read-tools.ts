@@ -38,9 +38,10 @@ import { ACTIVITY_BASES } from "../../../packages/read-model/src/index";
 import { readReportRoute, reportArtifactsAvailable } from "./reports-api";
 import { collectionQualityAvailable, readCollectionQuality } from "./collection-quality-api";
 import { catalogue, rawBytes } from "./read";
+import { BALANCE_READ_DETAILS } from "../../../packages/application/src/query/read-detail.ts";
 import { mcpInputSchema } from "./mcp-input-schema";
 import { schedulesServed } from "./schedule-tools";
-import { relayScheduleSnapshot } from "./schedules-api";
+import { scheduleSnapshotResponse } from "./schedules-api";
 import { EVIDENCE_PREFIX, readEvidenceRoute } from "./evidence-browser-api";
 
 /** The result envelope of every page read: the route's answer, under `data`. */
@@ -59,6 +60,8 @@ const ROUTE_TEXT = routeText(128);
 const FILTER_TEXT = routeText(512);
 const IDENTITY_READ = z.enum(["latest", "as-recorded"]);
 const MEASURE_VIEW = z.enum(["balances", "summaries"]);
+/** How much each row or line says (ADR 0123); absent is `summary`, as on the routes. */
+const READ_DETAIL = z.enum(BALANCE_READ_DETAILS);
 const OFFSET = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
 interface PageReadTool<Schema extends z.ZodType> {
@@ -167,7 +170,7 @@ const TOOLS = {
   "kogane.balances.read": tool({
     title: "Latest balances and balance history of the published snapshot",
     description:
-      "One page of the v2 balance read: `latest` (each adopted balance of the published snapshot with its quantity, metric, adoption state, evidence, freshness, coverage and known-asset subtotals) or `history` (the visible balance observations up to that snapshot). The same answer as GET /api/v2/balances/latest or /api/v2/balances/history, under records.read and a whole-store read grant. Filters `source`, `account`, `instrument`, `metric`, `view`; `limit` is one of the route's page sizes; `cursor` is the previous page's `nextCursor`. 503 read_model_unavailable while no snapshot is published. Read-only.",
+      "One page of the v2 balance read: `latest` (each adopted balance of the published snapshot, with the page's coverage and known-asset subtotals) or `history` (the visible balance observations up to that snapshot). `detail: summary` (the default) answers one line per row: observationId, source, account and its label, metric (registry id and provider name), amount {value, unit, status, scale} (a value that is not exact has no value and keeps its status as the reason, never a zero), asOf, and for `latest` freshness and adoption; 25 rows by default. `detail: full` answers each row with its whole provenance (organization, product, instruments, interpretation, quantity, metric, adoption evidence, temporal reference); 100 rows by default. The same answer as GET /api/v2/balances/latest or /api/v2/balances/history with the same `detail`, under records.read and a whole-store read grant. Filters `source`, `account`, `instrument`, `metric`, `view`; `limit` is one of 25, 50, 100, 200 or 500; `cursor` is the previous page's `nextCursor` and continues at any offered `limit` and either `detail`. A cursor read with other filters is 400 cursor_mismatch with `mustMatch`, the arguments that must repeat. 503 read_model_unavailable while no snapshot is published. Read-only.",
     schema: z.strictObject({
       collection: z.enum(["latest", "history"]),
       source: FILTER_TEXT.optional(),
@@ -178,6 +181,7 @@ const TOOLS = {
       identityRead: IDENTITY_READ.optional(),
       limit: z.number().int().min(1).max(1000).optional(),
       cursor: FILTER_TEXT.optional(),
+      detail: READ_DETAIL.optional(),
     }),
     capability: "records.read",
     routes: ["/api/v2/balances/latest", "/api/v2/balances/history"],
@@ -276,7 +280,7 @@ const TOOLS = {
   "kogane.collection-quality.read": tool({
     title: "Collection quality per job, source, dataset and account",
     description:
-      "Collection stages in closed codes: without `source`, job/source summaries (schedules, known alarm, latest runs and stages); with `source`, cells by unit, dataset and period (`view: cells`, the default; `offset` pages them) or the same cells regrouped by the accounts the observations of their newest or current capture name (`view: accounts`, unpaged: per account its stored label, mapping statuses and data types with their periods, standing and reasons, and apart the cells no observation attributes to an account; a fetch unit key is never read as an account, and a period no capture has is not listed). Each source and cell carries its freshness under `collection-freshness-v1`, counted to the answer's `freshnessAsOf` (Asia/Tokyo civil days): `same-day`, `recent` (1-3 days), `stale`, or for data that is not fresh `human-required` (collection waits on the owner) or `disabled` (no collecting job enabled), and `no-capture`; in `view: accounts` each period carries the freshness of its named capture, independent of standing, and each data type and account that of its newest named capture. The account answer is self-contained: `dataTypesVersion` and source-level `dataTypes` describe the provider catalogue, and each parser entry's `providerTypes` reverses that catalogue's parser membership (unknown parsers have an empty array). Each summary source with a collector also lists the data types its provider offers under `provider-data-types-v1` (balances, movements, card usage and statements, positions, executions, income, documents, points, ...), each `collected`, `partial` or `not_collected` with its parsers and the issue that tracks the rest. Identifiers, capture times, counts, labels and codes only, no amount. The same answer as GET /api/collection-quality, /api/collection-quality/{source} and /api/collection-quality/{source}/accounts, under evidence.read and a whole-store read grant, as on the route. Served while the store has the scheduling tables. Read-only.",
+      "Collection stages in closed codes. `detail: summary` (the default) or `full`. Without `source`: summary is one line per source (freshness, newest fetch run, reasons, each job's newest receipt status and failure code, unregistered collectors, provider data types counted collected/partial/not collected; equal lines share one with `sourceIds`); full is the job/source summaries (schedules, alarm, latest runs and stages, terminals, provider data types under `provider-data-types-v1` each `collected`, `partial` or `not_collected` with parsers and tracking issue). With `source`, `view: cells` (default): summary reads every cell and answers one line per dataset, parser and unit collapsed over periods (cell count, first and last period, counts by state, newest capture, freshness of the newest current capture, reasons), 20 lines a page (`offset` counts lines); full answers the cells by unit, dataset and period (`offset` pages 500). `view: accounts` (no `offset`, no `detail`) regroups the cells by the accounts their newest or current capture's observations name: per account its label, mapping statuses and data types with periods, standing and reasons, and apart the cells no observation attributes; a fetch unit key is never read as an account. Freshness is `collection-freshness-v1`, counted to `freshnessAsOf` (Asia/Tokyo days): `same-day`, `recent` (1-3 days), `stale`, `human-required`, `disabled` or `no-capture`; in `view: accounts` each period carries its named capture's freshness, independent of standing, and the answer is self-contained (`dataTypesVersion`, source `dataTypes`, each parser's `providerTypes`). Identifiers, capture times, counts, labels and codes only, no amount. The same answer as GET /api/collection-quality, /api/collection-quality/{source} and /api/collection-quality/{source}/accounts with the same `detail`, under evidence.read and a whole-store read grant. Served while the store has the scheduling tables. Read-only.",
     schema: z.strictObject({
       source: z
         .string()
@@ -284,6 +288,7 @@ const TOOLS = {
         .optional(),
       view: z.enum(["cells", "accounts"]).optional(),
       offset: OFFSET.optional(),
+      detail: READ_DETAIL.optional(),
     }),
     capability: "evidence.read",
     routes: [
@@ -296,8 +301,12 @@ const TOOLS = {
       // A view names one source's page; the account view is unpaged.
       if (source === undefined && view !== undefined)
         throw new HttpError(400, "invalid_request", ["view"]);
-      if (view === "accounts" && params.offset !== undefined)
-        throw new HttpError(400, "invalid_request", ["offset"]);
+      // The account view has one detail, its full answer (ADR 0123).
+      const wrong = [
+        ...(view === "accounts" && params.offset !== undefined ? ["offset"] : []),
+        ...(view === "accounts" && params.detail !== undefined ? ["detail"] : []),
+      ];
+      if (wrong.length > 0) throw new HttpError(400, "invalid_request", wrong);
       return readCollectionQuality(env, {
         pathname:
           source === undefined
@@ -425,8 +434,8 @@ const TOOLS = {
   "kogane.schedules.read": tool({
     title: "Collection schedules page",
     description:
-      "The schedules page as the operator sees it: each configured collection job (enabled, times, next run, the actual alarm and its reservation, the source's maintenance status, the latest run, and `collectionRequest`: the CORE source a kogane.ops.collection.request names for the job and whether the Processor would dispatch it — `enabled`, `lane_disabled` or `connection_disabled`, null when no collector serves a request for it), the maintenance windows, recent occurrences and held execution leases. The same answer as GET /api/ops/v1/schedules without its `survey` part (the maintenance re-survey's proposals, read by kogane.schedules.survey.read), under schedules.read over every schedule source and evidence.read over the whole store (its occurrences carry run and evidence ids). Served while schedule settings are on. Read-only: nothing is edited, released or relayed as an operator.",
-    schema: z.strictObject({}),
+      "The schedules page as the operator sees it. `detail: summary` (the default) answers one line per configured job (id, source, kind, enabled, next run, reservation, and its newest occurrence's nominal time, status and closed failure code), each source's maintenance reference status with its number of maintenance rules, and the held execution leases. `detail: full` answers each job in full (times, the actual alarm, the maintenance reference, the latest run with its run ids, and `collectionRequest`: the CORE source a kogane.ops.collection.request names for the job and whether the Processor would dispatch it — `enabled`, `lane_disabled` or `connection_disabled`, null when no collector serves a request for it), the maintenance windows, the recent occurrences with their run and evidence ids, and the held leases. The same answer as GET /api/ops/v1/schedules with the same `detail`, without its `survey` part (the maintenance re-survey's proposals, read by kogane.schedules.survey.read), under schedules.read over every schedule source and evidence.read over the whole store (its occurrences carry run and evidence ids). Served while schedule settings are on. Read-only: nothing is edited, released or relayed as an operator.",
+    schema: z.strictObject({ detail: READ_DETAIL.optional() }),
     // The jobs are `schedules.read`'s, over every schedule source; the
     // occurrences' run and evidence ids (`runIds`, `runLinks`) and the held
     // leases are what `schedules.read` alone never reaches (ADR 0046), so the
@@ -436,8 +445,8 @@ const TOOLS = {
     scheduleScope: true,
     routes: ["/api/ops/v1/schedules"],
     needs: "schedules",
-    read: async (env) => {
-      const upstream = await relayScheduleSnapshot(env);
+    read: async (env, { detail }) => {
+      const upstream = await scheduleSnapshotResponse(env, detail ?? "summary");
       let body: unknown;
       try {
         body = await upstream.json();
@@ -603,7 +612,11 @@ export async function callPageReadTool(
     if (error instanceof HttpError)
       return {
         status: error.status,
-        body: { error: error.code, ...(error.refs.length > 0 ? { refs: error.refs } : {}) },
+        body: {
+          error: error.code,
+          ...(error.refs.length > 0 ? { refs: error.refs } : {}),
+          ...error.hints,
+        },
       };
     throw error;
   }

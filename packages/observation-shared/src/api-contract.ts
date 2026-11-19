@@ -459,3 +459,88 @@ export interface BalanceHistoryPage {
   dataCoverage: SnapshotDataCoverage;
   interpretationContext: import("./api-schema.ts").InterpretationContext;
 }
+
+/**
+ * How much a balance read answers per row (ADR 0123): `summary`, one short
+ * line per row (the default of the routes and of `kogane.balances.read`), or
+ * `full`, the row with its whole provenance. The rows, their order, the page,
+ * its cursor, the coverage and the subtotals are the same under both.
+ */
+export const BALANCE_READ_DETAILS = ["summary", "full"] as const;
+export type BalanceReadDetail = (typeof BALANCE_READ_DETAILS)[number];
+
+/**
+ * One value in a summary line. `value` is the exact decimal text and `scale`
+ * its scale; a value that is not exact has neither, and `status` is its
+ * reason (`missing`, `unparsed`, `conflict`), never a zero (INV05).
+ */
+export interface SummaryAmount {
+  value: string | null;
+  unit: string | null;
+  status: import("./normalized-decimal.ts").NormalizedDecimal["status"];
+  scale: number | null;
+}
+
+/**
+ * One provider account a summary page's lines name, once per page. `ref`
+ * (`a1`, `a2`, ... in order of first appearance) is local to the page;
+ * `sourceAccount` is the provider's account key (what the read's `account`
+ * filter takes); `account` and `label` are its organized account entity and
+ * label, both null when the row's organization is unavailable.
+ */
+export interface SummaryAccount {
+  ref: string;
+  source: string;
+  sourceAccount: string;
+  account: string | null;
+  label: string | null;
+}
+
+/** One provider metric a summary page's lines name, once per page, with the registry's id for it. */
+export interface SummaryMetric {
+  ref: string;
+  source: string;
+  metric: string;
+  providerMetric: string;
+}
+
+/** One summary line of a balance history row; `observationId` reads it in full or as evidence. */
+export interface BalanceHistorySummaryItem {
+  observationId: number;
+  /** The `ref` of the page's `accounts` entry. */
+  account: string;
+  /** The `ref` of the page's `metrics` entry. */
+  metric: string;
+  amount: SummaryAmount;
+  asOf: string | null;
+}
+
+/**
+ * One summary line of a latest balance: the adoption and freshness states,
+ * and their reason codes as `adoption:<code>` and `freshness:<code>`.
+ */
+export interface LatestBalanceSummaryItem extends BalanceHistorySummaryItem {
+  freshness: LatestBalanceItem["freshness"]["state"];
+  adoption: BalanceAdoptionState;
+  reasons: string[];
+}
+
+export interface LatestBalanceSummaryPage extends Omit<
+  LatestBalancePage,
+  "items" | "interpretationContext"
+> {
+  detail: "summary";
+  accounts: SummaryAccount[];
+  metrics: SummaryMetric[];
+  items: LatestBalanceSummaryItem[];
+}
+
+export interface BalanceHistorySummaryPage extends Omit<
+  BalanceHistoryPage,
+  "items" | "interpretationContext"
+> {
+  detail: "summary";
+  accounts: SummaryAccount[];
+  metrics: SummaryMetric[];
+  items: BalanceHistorySummaryItem[];
+}

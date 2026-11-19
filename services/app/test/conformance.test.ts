@@ -177,6 +177,7 @@ describe("shared contract pin", () => {
         identityRead: "identityReadModes",
         cursor: "balancesV2",
         limit: "balancesV2",
+        detail: "balancesV2",
       },
       "/api/v2/balances/history": {
         source: "collectionFilters",
@@ -187,6 +188,7 @@ describe("shared contract pin", () => {
         identityRead: "identityReadModes",
         cursor: "balancesV2",
         limit: "balancesV2",
+        detail: "balancesV2",
       },
     });
     expect(CENTRAL_STORE_CAPABILITIES).toEqual({

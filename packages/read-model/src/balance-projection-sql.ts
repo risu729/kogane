@@ -10,9 +10,12 @@ import { BALANCE_HISTORY_SQL } from "./sql";
 import { scopePredicates, type CollectionScope, type PageSql, type ScopeKey } from "./scope";
 
 /** Page sizes: one page plus one row, so `hasMore` needs no COUNT. */
-export const PROJECTION_PAGE_LIMITS = [50, 100, 200, 500] as const;
+export const PROJECTION_PAGE_LIMITS = [25, 50, 100, 200, 500] as const;
 export type ProjectionPageLimit = (typeof PROJECTION_PAGE_LIMITS)[number];
+/** The page size of a `full` read (each row with its provenance). */
 export const DEFAULT_PROJECTION_PAGE_LIMIT: ProjectionPageLimit = 100;
+/** The page size of a `summary` read (ADR 0123): one short line per row. */
+export const DEFAULT_SUMMARY_PAGE_LIMIT: ProjectionPageLimit = 25;
 /** Rows the subtotal may read for one filter scope before it reports itself unavailable. */
 export const SUBTOTAL_ROW_BOUND = 5000;
 

@@ -776,11 +776,180 @@ export function validAccountCoverage(value: unknown): value is AccountCoverage {
   return accountCoverage.safeParse(value).success;
 }
 
-/** The three routes, by path; any other path under the prefix is not this contract. */
+/**
+ * The three routes, by path; any other path under the prefix is not this
+ * contract. The summary and cell routes answer either detail (ADR 0123).
+ */
 export function validCollectionQualityResponse(path: string, value: unknown): boolean {
-  if (path === COLLECTION_QUALITY_PATH) return validCollectionQualitySummary(value);
+  if (path === COLLECTION_QUALITY_PATH)
+    return validCollectionQualitySummary(value) || summaryLines.safeParse(value).success;
   const accounts = /^\/api\/collection-quality\/([^/]+)\/accounts$/u.exec(path);
   if (accounts !== null) return validAccountCoverage(value) && value.sourceId === accounts[1];
   const match = /^\/api\/collection-quality\/([^/]+)$/u.exec(path);
-  return match !== null && validCollectionQualityCells(value) && value.sourceId === match[1];
+  if (match === null) return false;
+  if (validCollectionQualityCells(value)) return value.sourceId === match[1];
+  const parsed = cellSummary.safeParse(value);
+  return parsed.success && parsed.data.sourceId === match[1];
 }
+
+/**
+ * The `summary` detail of the collection quality reads (ADR 0123), the
+ * default of the summary and cell routes and of
+ * `kogane.collection-quality.read`; `full` is the answer above. A summary is
+ * derived from the full answer alone: it adds no state, keeps every closed
+ * code and count it collapses, and says how much it collapsed. The account
+ * view (ADR 0088) has its full answer only.
+ */
+export const COLLECTION_QUALITY_DETAILS = ["summary", "full"] as const;
+export type CollectionQualityDetail = (typeof COLLECTION_QUALITY_DETAILS)[number];
+/** Summary lines of one source's cells per page. */
+export const COLLECTION_QUALITY_LINE_PAGE = 20;
+/** More cells than this in one source's summary is refused (413), never cut. */
+export const COLLECTION_QUALITY_SUMMARY_CELL_BOUND = ACCOUNT_COVERAGE_CELL_BOUND;
+
+type Freshness = z.output<typeof freshness>;
+
+/**
+ * One line of the summary: a source's freshness, newest fetch run, reasons,
+ * jobs and data type counts. Sources whose lines are otherwise the same
+ * share one, and `sourceIds` names each of them.
+ */
+export interface CollectionQualitySourceLine {
+  sourceIds: string[];
+  freshness: Freshness;
+  latestFetchRun: CollectionQualityFetchRun | null;
+  reasons: CollectionQualitySource["reasons"];
+  /** Each job with its newest receipt's nominal time, status and closed failure code. */
+  schedules: CollectionQualityScheduleLine[];
+  /** How many collectors registered runs under no CORE source. */
+  unregistered: number;
+  /** The provider data types by status; null where the catalogue does not describe the source. */
+  dataTypes: { collected: number; partial: number; notCollected: number } | null;
+}
+
+export interface CollectionQualityScheduleLine {
+  id: string;
+  enabled: boolean;
+  latest: Pick<CollectionQualityOccurrence, "nominalAt" | "status" | "failureCode"> | null;
+}
+
+export interface CollectionQualitySummaryLines {
+  apiVersion: typeof COLLECTION_QUALITY_API_VERSION;
+  detail: "summary";
+  freshnessAsOf: CollectionQualitySummary["freshnessAsOf"];
+  sources: CollectionQualitySourceLine[];
+  otherSchedules: CollectionQualityScheduleLine[];
+}
+
+/**
+ * One dataset, parser and fetch unit of a source, collapsed over its periods:
+ * how many cells (periods) it has and in which state, the named periods it
+ * spans, its newest capture, the freshness of its newest current capture,
+ * and the union of its cells' reasons.
+ */
+export interface CollectionQualityCellLine {
+  dataset: string | null;
+  parser: string | null;
+  unitKey: string | null;
+  cells: number;
+  /** The smallest and largest named period value; both null when no cell names one. */
+  periods: { first: string | null; last: string | null };
+  current: number;
+  olderCurrent: number;
+  noCurrent: number;
+  newestCapturedAt: string;
+  /** That of the cell whose current capture is newest; with none, that of its first cell. */
+  freshness: Freshness;
+  reasons: CollectionQualityCell["reasons"];
+}
+
+export interface CollectionQualityCellSummary {
+  apiVersion: typeof COLLECTION_QUALITY_API_VERSION;
+  detail: "summary";
+  freshnessAsOf: CollectionQualityCells["freshnessAsOf"];
+  sourceId: string;
+  latestFetchRun: CollectionQualityCells["latestFetchRun"];
+  lines: CollectionQualityCellLine[];
+  /** Every cell of the source was read; `offset` pages the lines. */
+  coverage: {
+    cells: number;
+    lines: number;
+    limit: typeof COLLECTION_QUALITY_LINE_PAGE;
+    truncated: boolean;
+    nextOffset: number | null;
+  };
+}
+
+const scheduleLine = z.strictObject({
+  id: sourceId,
+  enabled: z.boolean(),
+  latest: z.nullable(
+    z.strictObject({
+      nominalAt: instant,
+      status: z.enum(OCCURRENCE_STATUSES),
+      failureCode: z.nullable(code),
+    }),
+  ),
+});
+const summaryLines = z.strictObject({
+  apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
+  detail: z.literal("summary"),
+  freshnessAsOf,
+  sources: z.array(
+    z.strictObject({
+      sourceIds: z.array(sourceId).check(z.minLength(1), z.maxLength(COLLECTION_QUALITY_BOUND)),
+      freshness,
+      latestFetchRun: fetchRun,
+      reasons: distinct(z.enum(SOURCE_REASONS)),
+      schedules: z.array(scheduleLine).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
+      unregistered: count,
+      dataTypes: z.nullable(
+        z.strictObject({ collected: count, partial: count, notCollected: count }),
+      ),
+    }),
+  ),
+  otherSchedules: z.array(scheduleLine).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
+});
+const cellSummary = z
+  .strictObject({
+    apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
+    detail: z.literal("summary"),
+    freshnessAsOf,
+    sourceId,
+    latestFetchRun: fetchRun,
+    lines: z
+      .array(
+        z
+          .strictObject({
+            dataset: z.nullable(text),
+            parser: z.nullable(text),
+            unitKey: z.nullable(text),
+            cells: id,
+            periods: z.strictObject({ first: z.nullable(text), last: z.nullable(text) }),
+            current: count,
+            olderCurrent: count,
+            noCurrent: count,
+            newestCapturedAt: instant,
+            freshness,
+            reasons: distinct(z.enum(CELL_REASONS)),
+          })
+          .check(
+            // Every collapsed cell is counted once, under its state.
+            z.refine(
+              (value) => value.current + value.olderCurrent + value.noCurrent === value.cells,
+            ),
+          ),
+      )
+      .check(z.maxLength(COLLECTION_QUALITY_LINE_PAGE)),
+    coverage: z.strictObject({
+      cells: count,
+      lines: count,
+      limit: z.literal(COLLECTION_QUALITY_LINE_PAGE),
+      truncated: z.boolean(),
+      nextOffset: z.nullable(count),
+    }),
+  })
+  .check(
+    z.refine((value) => (value.coverage.nextOffset === null) === !value.coverage.truncated),
+    z.refine((value) => value.coverage.lines <= value.coverage.cells),
+  );

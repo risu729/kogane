@@ -317,7 +317,8 @@ function SourceCells({ sourceId, offset }: { sourceId: string; offset: number })
     queryKey: ["collection-quality", sourceId, offset],
     queryFn: ({ signal }) =>
       getJson<CollectionQualityCells>(
-        `${COLLECTION_QUALITY_PATH}/${encodeURIComponent(sourceId)}?offset=${offset}`,
+        // The page shows every cell; the route's default is the summary (ADR 0123).
+        `${COLLECTION_QUALITY_PATH}/${encodeURIComponent(sourceId)}?offset=${offset}&detail=full`,
         signal,
       ),
   });
@@ -522,7 +523,8 @@ export function CollectionQualityPage(): ReactNode {
   const validOffset = /^(?:0|[1-9][0-9]{0,6})$/u.test(offsetText);
   const query = useQuery({
     queryKey: ["collection-quality", "summary"],
-    queryFn: ({ signal }) => getJson<CollectionQualitySummary>(COLLECTION_QUALITY_PATH, signal),
+    queryFn: ({ signal }) =>
+      getJson<CollectionQualitySummary>(`${COLLECTION_QUALITY_PATH}?detail=full`, signal),
   });
   return (
     <div className="wrap-any">

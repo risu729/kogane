@@ -164,7 +164,8 @@ describe("collection quality", () => {
       },
     } satisfies Fetcher;
     const sourceEnv: Env = { ...env, SCHEDULES_ENABLED: "true", PIPELINE: pipeline };
-    const url = new URL(`https://fixture.test${PATH}`);
+    // The alarms are part of the full summary (ADR 0123).
+    const url = new URL(`https://fixture.test${PATH}?detail=full`);
     const before = await counts();
     const read = async () =>
       (await (await collectionQualityApi(
@@ -194,9 +195,20 @@ describe("collection quality", () => {
   });
   it("serves a signed-in reader the validated summary and writes nothing", async () => {
     const before = await counts();
-    const response = await call(PATH);
+    const response = await call(`${PATH}?detail=full`);
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
+    // The default is one line per source, of the same summary (ADR 0123).
+    const lines = (await (await call(PATH)).json()) as {
+      detail: string;
+      sources: { sourceIds: string[]; latestFetchRun: { id: number } | null; reasons: string[] }[];
+    };
+    expect(validApiResponse(PATH, lines)).toBe(true);
+    expect(lines.detail).toBe("summary");
+    expect(lines.sources.find((source) => source.sourceIds.includes("sony-bank"))).toMatchObject({
+      latestFetchRun: { id: runId },
+      reasons: expect.arrayContaining(["schedule_never_ran"]),
+    });
     const body = (await response.json()) as {
       sources: { sourceId: string; latestFetchRun: { id: number } | null; reasons: string[] }[];
       otherSchedules: { id: string }[];
@@ -211,10 +223,18 @@ describe("collection quality", () => {
   });
 
   it("serves one source's cells, paged, and refuses what it does not know", async () => {
-    const response = await call(`${PATH}/sony-bank`);
+    const response = await call(`${PATH}/sony-bank?detail=full`);
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(validApiResponse(`${PATH}/sony-bank`, body)).toBe(true);
+    // The default collapses the cells into lines (ADR 0123).
+    const lines = await (await call(`${PATH}/sony-bank`)).json();
+    expect(validApiResponse(`${PATH}/sony-bank`, lines)).toBe(true);
+    expect(lines).toMatchObject({
+      detail: "summary",
+      lines: [{ dataset: "yen-history-page-0001", cells: 1, current: 1 }],
+      coverage: { cells: 1, lines: 1, truncated: false, nextOffset: null },
+    });
     expect(body).toMatchObject({
       sourceId: "sony-bank",
       cells: [
@@ -228,7 +248,7 @@ describe("collection quality", () => {
       ],
       coverage: { limit: 500, truncated: false, nextOffset: null },
     });
-    expect((await call(`${PATH}/sony-bank?offset=500`)).status).toBe(200);
+    expect((await call(`${PATH}/sony-bank?offset=500&detail=full`)).status).toBe(200);
     for (const [path, status, code] of [
       [`${PATH}/no-such-source`, 404, "not_found"],
       [`${PATH}/kogane-synthetic`, 404, "not_found"],
@@ -239,6 +259,8 @@ describe("collection quality", () => {
       [`${PATH}/sony-bank?offset=01`, 400, "invalid_offset"],
       [`${PATH}/sony-bank?offset=1&offset=2`, 400, "invalid_query"],
       [`${PATH}/sony-bank?limit=5`, 400, "invalid_query"],
+      [`${PATH}/sony-bank?detail=compact`, 400, "invalid_query"],
+      [`${PATH}?detail=full&detail=full`, 400, "invalid_query"],
     ] as const) {
       const refused = await call(path);
       expect(refused.status, path).toBe(status);

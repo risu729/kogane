@@ -363,6 +363,8 @@ export const LIST_REQUEST_SCHEMA = {
     identityRead: "identityReadModes",
     cursor: "balancesV2",
     limit: "balancesV2",
+    // `summary` (the default) or `full` (ADR 0123).
+    detail: "balancesV2",
   },
   "/api/v2/balances/history": {
     source: "collectionFilters",
@@ -373,6 +375,8 @@ export const LIST_REQUEST_SCHEMA = {
     identityRead: "identityReadModes",
     cursor: "balancesV2",
     limit: "balancesV2",
+    // `summary` (the default) or `full` (ADR 0123).
+    detail: "balancesV2",
   },
 } as const satisfies Record<string, Record<string, CapabilityRequirement>>;
 export type ListPath = keyof typeof LIST_REQUEST_SCHEMA;

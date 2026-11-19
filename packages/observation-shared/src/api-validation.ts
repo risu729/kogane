@@ -90,9 +90,16 @@ import type {
   BalanceEvidenceMember,
   BalanceHistoryItem,
   BalanceHistoryPage,
+  BalanceHistorySummaryItem,
+  BalanceHistorySummaryPage,
   KnownAssetsSubtotals,
   LatestBalanceItem,
   LatestBalancePage,
+  LatestBalanceSummaryItem,
+  LatestBalanceSummaryPage,
+  SummaryAccount,
+  SummaryAmount,
+  SummaryMetric,
   MeasureDescriptor,
   ObservedQuantityWire,
   SnapshotDataCoverage,
@@ -609,6 +616,109 @@ const balanceHistoryPage: Check<BalanceHistoryPage> = (value): value is BalanceH
   withoutNetWorth(value) &&
   value.items.length <= value.page.limit;
 
+// The summary detail of the same pages (ADR 0123): one line per row, the page,
+// coverage and subtotals as the full page has them. A value that is not exact
+// carries no value and no scale, only its status (INV05).
+const summaryAmount: Check<SummaryAmount> = (value): value is SummaryAmount =>
+  object<SummaryAmount>({
+    value: nullableText,
+    unit: nullableText,
+    status: literal("exact", "missing", "unparsed", "conflict"),
+    scale: nullable(identifier),
+  })(value) &&
+  (value.status === "exact"
+    ? value.value !== null && value.scale !== null
+    : value.value === null && value.scale === null);
+const summaryAccount = object<SummaryAccount>({
+  ref: text,
+  source: text,
+  sourceAccount: text,
+  account: nullableText,
+  label: nullableText,
+});
+const summaryMetric = object<SummaryMetric>({
+  ref: text,
+  source: text,
+  metric: text,
+  providerMetric: text,
+});
+const historySummaryFields = {
+  observationId: identifier,
+  account: text,
+  metric: text,
+  amount: summaryAmount,
+  asOf: nullableText,
+};
+const historySummaryItem = object<BalanceHistorySummaryItem>(historySummaryFields);
+const latestSummaryItem = object<LatestBalanceSummaryItem>({
+  ...historySummaryFields,
+  freshness: literal("current", "stale", "unknown"),
+  adoption: literal("adopted", "excluded", "unresolved", "conflict", "stale"),
+  reasons: array(text),
+});
+/** Every line names an account and a metric of its page, and every one is named. */
+function refsNamed(entries: readonly { ref: string }[], named: readonly string[]): boolean {
+  const refs = entries.map((entry) => entry.ref);
+  return (
+    new Set(refs).size === refs.length &&
+    named.every((ref) => refs.includes(ref)) &&
+    refs.every((ref) => named.includes(ref))
+  );
+}
+function accountsNamed(value: {
+  accounts: SummaryAccount[];
+  metrics: SummaryMetric[];
+  items: { account: string; metric: string }[];
+}): boolean {
+  return (
+    refsNamed(
+      value.accounts,
+      value.items.map((item) => item.account),
+    ) &&
+    refsNamed(
+      value.metrics,
+      value.items.map((item) => item.metric),
+    )
+  );
+}
+const latestBalanceSummaryPage: Check<LatestBalanceSummaryPage> = (
+  value,
+): value is LatestBalanceSummaryPage =>
+  object<LatestBalanceSummaryPage>({
+    schemaVersion: literal("snapshot-page-v1"),
+    detail: literal("summary"),
+    accounts: array(summaryAccount),
+    metrics: array(summaryMetric),
+    items: array(latestSummaryItem),
+    page: pageInfo,
+    dataCoverage: snapshotCoverage,
+    subtotals,
+  })(value) &&
+  withoutNetWorth(value) &&
+  withoutNetWorth(value.subtotals) &&
+  accountsNamed(value) &&
+  value.items.length <= value.page.limit;
+const balanceHistorySummaryPage: Check<BalanceHistorySummaryPage> = (
+  value,
+): value is BalanceHistorySummaryPage =>
+  object<BalanceHistorySummaryPage>({
+    schemaVersion: literal("snapshot-page-v1"),
+    detail: literal("summary"),
+    accounts: array(summaryAccount),
+    metrics: array(summaryMetric),
+    items: array(historySummaryItem),
+    page: pageInfo,
+    dataCoverage: snapshotCoverage,
+  })(value) &&
+  withoutNetWorth(value) &&
+  accountsNamed(value) &&
+  value.items.length <= value.page.limit;
+/** A full page carries no `detail`; a summary page says it is one. */
+const fullPage =
+  <T>(check: Check<T>): Check<T> =>
+  (value): value is T =>
+    check(value) && !Object.hasOwn(value as object, "detail");
+
 const rewardBucket = object<RewardBucketRow>({
   bucketRef: text,
   kind: validRewardBucketKind,
@@ -775,8 +885,10 @@ const endpoints: Record<string, Check<unknown>> = {
   "/api/artifacts": object<{ artifacts: ArtifactRow[] }>({
     artifacts: array(artifact),
   }),
-  "/api/v2/balances/latest": latestBalancePage,
-  "/api/v2/balances/history": balanceHistoryPage,
+  "/api/v2/balances/latest": (value): value is LatestBalancePage | LatestBalanceSummaryPage =>
+    fullPage(latestBalancePage)(value) || latestBalanceSummaryPage(value),
+  "/api/v2/balances/history": (value): value is BalanceHistoryPage | BalanceHistorySummaryPage =>
+    fullPage(balanceHistoryPage)(value) || balanceHistorySummaryPage(value),
 };
 
 /**

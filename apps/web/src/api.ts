@@ -279,6 +279,8 @@ export function useLatestBalances(
   const request = useListRequest("/api/v2/balances/latest", {
     ...(view ? { view } : {}),
     ...(cursor ? { cursor } : {}),
+    // The page shows each row's provenance; the route's default is the summary (ADR 0123).
+    detail: "full",
   });
   const enabled = request.enabled && features.balanceReadModel;
   return useQuery({
@@ -302,6 +304,8 @@ export function useBalanceHistory(
   const request = useListRequest("/api/v2/balances/history", {
     ...(view ? { view } : {}),
     ...(cursor ? { cursor } : {}),
+    // The page shows each row's provenance; the route's default is the summary (ADR 0123).
+    detail: "full",
   });
   const enabled = request.enabled && features.balanceReadModel;
   return useQuery({

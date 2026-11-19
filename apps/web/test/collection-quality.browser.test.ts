@@ -97,6 +97,13 @@ describe.if(runnable)("collection quality browser", () => {
             source: { kind: "central-store", classification: "financial" },
             capabilities: CENTRAL_STORE_CAPABILITIES,
           });
+        // The page reads the full summary and cells; the routes' default is the summary (ADR 0123).
+        if (
+          url.pathname.startsWith("/api/collection-quality") &&
+          !url.pathname.endsWith("/accounts") &&
+          url.searchParams.get("detail") !== "full"
+        )
+          return Response.json({ error: "synthetic_summary_not_served" }, { status: 400 });
         if (url.pathname === "/api/collection-quality")
           return Response.json(await queryCollectionQualitySummary(executor, { asOf: AS_OF }));
         if (
