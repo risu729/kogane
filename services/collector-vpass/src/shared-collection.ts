@@ -241,9 +241,13 @@ function monthCheck(capture: VpassMonthCapture): MonthCheck {
     const customized = objectField(content, "CustomizedMeisaiAnsDisplayServiceBean");
     const bean = finalized ?? customized;
     const rows = objectField(bean, "meisaiList");
+    // Header rows are left out only of rows read from the finalized bean: a
+    // `WebMeisaiTopDisplayServiceBean` that is present but `null` leaves the
+    // customized bean's rows all counted.
+    const finalizedRows = finalized !== undefined && bean === finalized;
     if (Array.isArray(rows)) {
       for (const row of rows) {
-        if (finalized !== undefined && isFinalizedHeaderRow(row)) excludedHeaderRows += 1;
+        if (finalizedRows && isFinalizedHeaderRow(row)) excludedHeaderRows += 1;
         else countedRows += 1;
       }
     }

@@ -859,6 +859,16 @@ describe("ADR 0023 2026-11-19 amendment (D1): a finalized page's `45` and `4C` h
       unit: "partial",
       month: { countedRows: 3, excludedHeaderRows: 0, coverage: "stated_total_mismatch" },
     });
+    // A `null` finalized bean beside a customized one does not make the
+    // customized rows finalized ones (the parser refuses the page as well).
+    const mixed = envelope({
+      WebMeisaiTopDisplayServiceBean: null,
+      CustomizedMeisaiAnsDisplayServiceBean: { meisaiList: rows, total: 1, pageFlg: "3" },
+    });
+    expect(await checked(month(mixed))).toMatchObject({
+      unit: "partial",
+      month: { countedRows: 3, excludedHeaderRows: 0 },
+    });
   });
 });
 

@@ -820,7 +820,8 @@ expected from the code and the observation above, not yet seen in production:
   non-empty `data[1]`, a row without data) is counted, never excluded; a month
   whose `allCnt` counts an unknown `4K/006` row is `complete` and the stored
   page is still refused by the deployed parser; a customized page counts every
-  row, header-shaped or not. ("statement shape diagnostics"): one `45` row
+  row, header-shaped or not, also beside a `null` finalized bean. ("statement
+  shape diagnostics"): one `45` row
   plus one `4K/005` row with `allCnt` 1, which was `stated_total_mismatch`,
   is now `complete`, with bytes, calls and the diagnostic record unchanged.
 - `services/collector-vpass/test/statement-walk.test.ts` ("header rows change
