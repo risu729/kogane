@@ -824,6 +824,27 @@ every other tool, the five above included, answers `500 internal_error` for
 the whole request on both agent paths, where the UI route of the same read
 answers `503 catalogue_read_failed`.
 
+`kogane.rewards.read` with `collection: "expiry"` also takes `from`, `before`
+and `detail` ([ADR 0049, amendment of 2026-11-19](adr/0049-reward-expiry-basis.md#amendment-a-deadline-window-and-a-summary-on-the-expiry-read),
+proposed; [rewards: deadline window and summary](rewards.md#deadline-window-and-summary)).
+`from` (inclusive, default today's Asia/Tokyo date) and `before` (exclusive)
+are `YYYY-MM-DD` and window each row's `expiresOn`; a windowed page lists the
+rows inside and counts the rest under `window.rows`, and its cursor is bound
+to the window (`400 cursor_mismatch` under another). `detail: "summary"`
+(unpaged; `limit` or `cursor` is `400 invalid_query`) answers "which points
+expire soon" in one call: per programme and unit the buckets inside the
+window with their total, added with `sumQuantities` once per bucket (not once
+per rule) and `not-exact` with reasons when an amount is not exact; the
+earliest 20 bucket lines; up to 3 provider-displayed portions, never added;
+and counts inside, before, after and left out by closed reason
+(`deadline_unknown`, `deadline_differs_by_rule`, `display_date_unknown`,
+`provider_expiry_not_displayed`, `provider_expiry_unavailable`). A malformed
+date is `400 invalid_date`, a window with no day `400 invalid_date_range`, a
+snapshot over 1,000 rows `413 result_limit_exceeded`. Without these arguments
+the answer is the page as before. A summary of the synthetic store in
+`test/reward-expiry-window.test.ts` is under 2 KB, against about 71 KB for the
+default 50-row page.
+
 `kogane.reports.read` takes `{ reportId?, view?, offset?, decimalPolicy? }`:
 without `reportId` it is the list (`offset` only), with it the detail
 (`view: "body"`, the default) or the explanation (`view: "explanation"`);
