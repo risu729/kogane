@@ -256,20 +256,32 @@ last statement of the claim batch, joined to the occurrence row it inserted;
 a claim whose record cannot be written is rolled back with it and retried by
 the same bookkeeping wakeup. The outcome stays in the occurrence row. The
 `processor-tick` and `sbi-vc-keepalive` occurrences record nothing
-([audit log](audit-log.md#the-processors-own-records-alarm-and-lane)).
+([audit log](audit-log.md#the-processors-own-records-alarm-and-lane)). The
+single retry of a `not_dispatched` occurrence (the one-retry rule above)
+claims the same occurrence again and appends no record: the first claim's
+record, with that claim's time and schedule revision, stays its only one, and
+the retry shows as the row's `retry_claimed_at` and the `retry_claimed` log
+line below. Only that log line names the revision the retry was fenced on
+(after a settings edit in between, the edit's); no record or row does, so it
+lasts only as long as Workers Logs keep the line.
 
 ### Alarm and lease log lines
 
 Each alarm writes structured lines to Workers Logs for
 `kogane-observation-pipeline` (`services/processor/src/schedule-alarm.ts`).
-They hold job and occurrence ids, instants, closed codes and counts only:
+They hold job and occurrence ids, schedule revisions, instants, closed codes
+and counts only:
 
 - `schedule_alarm` with `outcome`: `claimed` (with `nominalAt`, `lagMs`,
   `claimMs` and the next reservation `nextDueAt`), `deferred` (with the
   nominal, the stored run time and the maintenance-adjusted `dueAt`), `early`,
-  `disabled`, `no_job`, or `claim_conflict` (the claim inserted no occurrence
-  row; a `started` row already there for that occurrence is marked
-  `uncertain`/`dispatch_uncertain`, and nothing is dispatched).
+  `disabled`, `no_job`, `retry_claimed` (the single retry of a
+  `not_dispatched` occurrence took it over; with `scheduleRevision`, the
+  schedule revision its UPDATE was fenced on, written only when that UPDATE
+  claimed the row; no audit record), or `claim_conflict` (with
+  `scheduleRevision`, the revision the claim's INSERT required; it inserted
+  no occurrence row; a `started` row already there for that occurrence is
+  marked `uncertain`/`dispatch_uncertain`, and nothing is dispatched).
 - `schedule_dispatch_start`, written just before the collector call, with the
   target workspace.
 - `schedule_dispatch_result` with `status`, `failureCode`, `runCount` and

@@ -4,6 +4,37 @@
 
 A PoC independently implementing an SBI Shinsei Bank PowerDirect read-only collector in Kogane. It does not depend on `mnie`; it adopts only the shared DATA raw-store / terminal-manifest / Processor-alarm-schedule boundaries used by existing Kogane collectors.
 
+## Runtime profile
+
+- **Browser: entire collection.** Each run starts one Cloudflare Container
+  (`SbiShinseiCollectorContainer`, `basic` instance, at most 2 instances, APAC;
+  `wrangler.jsonc`) from the Playwright base image in [`Dockerfile`](Dockerfile).
+  Inside it, headed Google Chrome Stable (pinned in
+  `container/chrome-manifest.json`) runs under Xvfb and Playwright attaches over
+  CDP (`container/browser-launch.mjs`, `container/server.mjs`).
+- In the browser: CAFIS generation, the bank page's own form and `login()`,
+  login Authorization/CSRF and every read, within one page. Login rebuilt with
+  direct `fetch` returned HTTP 403 where the page's own login returned 200
+  (see the limitations below). Direct HTTP transport is refused even for
+  production routes; there is no handoff to Worker `fetch`.
+- Outside the browser: the Worker starts the Container, hands it the
+  credential and a relay token, relays its port-443 CONNECT traffic for five
+  allowlisted hosts through the authenticated `/tcp` WebSocket and the `MESH`
+  VPC network binding (TAMIA tunnel), validates the single JSON handoff and
+  writes R2 (`src/worker.ts`). The Worker is placed in `aws:ap-northeast-1`.
+- Execution: entrypoint `src/schedule-entrypoint.ts`, whose
+  `ScheduledCollection.runScheduled` accepts only the `sbi-shinsei` alarm job's
+  cron `0 21 * * *` ([`config/alarm-jobs.json`](../../config/alarm-jobs.json));
+  `runOperation` runs an accepted operations request the same way. Each run
+  holds the `sbi-shinsei` execution lease (`withCollectionLease` in
+  `src/worker.ts`, D1 `SCHEDULE_DB`) and writes shared DATA
+  (`kogane-raw-evidence`) with the terminal last (`src/shared-collection.ts`).
+  The Container sleeps after 30 seconds idle. There is no Cron Trigger.
+- Retries and budgets: credentials are not retried; the Container is stopped
+  after success, refusal or an unknown response. `wrangler.jsonc` sets no
+  `limits`; the CPU, subrequest and Container budgets in effect are not
+  recorded in the repository.
+
 <a id="現在の重要な制限"></a>
 
 ## Current important limitations

@@ -3,7 +3,7 @@
 // Processor and the schedule alarms write it. Sources, datasets and parsers
 // are the registered ids; every key, unit, run id and time is invented, and no
 // amount, merchant or provider text is written anywhere.
-import type { Database } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { fullCoreSchema } from "./card-usage-scale-fixture";
 
 const CLIENT = "synthetic-quality";
@@ -54,13 +54,23 @@ export class QualityStore {
   private readonly routes = new Set<string>();
 
   constructor() {
-    this.db.run("INSERT INTO ingest_clients(id,display_name,active) VALUES(?,'Quality client',1)", [
+    this.exec("INSERT INTO ingest_clients(id,display_name,active) VALUES(?,'Quality client',1)", [
       CLIENT,
     ]);
-    this.db.run(
+    this.exec(
       "INSERT INTO raw_objects(sha256,byte_size,blob_key,first_stored_at_ms) VALUES(?,3,'objects/synthetic-quality',0)",
       [SHA],
     );
+  }
+
+  /**
+   * Runs `sql` through the statement `Database.query` caches for this store.
+   * `Database.run` prepares afresh on every call, and preparing a write to a
+   * CORE fetch or parse table compiles its triggers, which costs more than the
+   * write: a scaled store spent most of its seeding time preparing.
+   */
+  private exec(sql: string, args: readonly SQLQueryBindings[] = []): void {
+    this.db.query<unknown, SQLQueryBindings[]>(sql).run(...args);
   }
 
   id(): number {
@@ -72,16 +82,16 @@ export class QualityStore {
     const key = `${producer}/${source}`;
     if (this.routes.has(key)) return;
     this.routes.add(key);
-    this.db.run("INSERT OR IGNORE INTO producers(id) VALUES(?)", [producer]);
-    this.db.run("INSERT OR IGNORE INTO producer_sources(producer_id,source_id) VALUES(?,?)", [
+    this.exec("INSERT OR IGNORE INTO producers(id) VALUES(?)", [producer]);
+    this.exec("INSERT OR IGNORE INTO producer_sources(producer_id,source_id) VALUES(?,?)", [
       producer,
       source,
     ]);
-    this.db.run(
+    this.exec(
       "INSERT OR IGNORE INTO ingest_client_producers(ingest_client_id,producer_id) VALUES(?,?)",
       [CLIENT, producer],
     );
-    this.db.run(
+    this.exec(
       "INSERT OR IGNORE INTO ingest_client_routes(ingest_client_id,producer_id,source_id) VALUES(?,?,?)",
       [CLIENT, producer, source],
     );
@@ -89,18 +99,17 @@ export class QualityStore {
 
   /** One sealed run with its units and artifacts; returns the run and artifact ids in order. */
   run(spec: RunSpec): { run: number; artifacts: number[] } {
-    const db = this.db;
     const producer = spec.producer ?? "collector-r2-importer";
     this.route(producer, spec.source);
     const at = Date.parse(spec.at);
     const session = this.id();
-    db.run(
+    this.exec(
       `INSERT INTO acquisition_sessions(id,producer_id,first_recorded_by_client_id,external_id_namespace,external_session_id,first_recorded_at_ms)
        VALUES(?,?,?,'synthetic-quality',?,?)`,
       [session, producer, CLIENT, `quality-session-${session}`, at],
     );
     const run = this.id();
-    db.run(
+    this.exec(
       `INSERT INTO fetch_runs(id,acquisition_session_id,producer_id,source_id,first_recorded_by_client_id,source_run_key,first_recorded_at_ms)
        VALUES(?,?,?,?,?,'default',?)`,
       [run, session, producer, spec.source, CLIENT, at],
@@ -109,12 +118,12 @@ export class QualityStore {
     for (const [key, unit] of Object.entries(spec.units ?? {})) {
       const unitId = this.id();
       units.set(key, unitId);
-      db.run(
+      this.exec(
         `INSERT INTO fetch_units(id,fetch_run_id,unit_kind,unit_key,recorded_by_client_id,recorded_at_ms)
          VALUES(?,?,'account',?,?,?)`,
         [unitId, run, key, CLIENT, at],
       );
-      db.run(
+      this.exec(
         `INSERT INTO fetch_unit_reports(fetch_unit_id,report_key,report_kind,recorded_by_client_id,normalized_outcome,safe_failure_code,recorded_at_ms)
          VALUES(?,'terminal','terminal',?,?,?,?)`,
         [unitId, CLIENT, unit.outcome, unit.code ?? null, at],
@@ -126,7 +135,7 @@ export class QualityStore {
       const unit = artifact.unit === undefined ? null : units.get(artifact.unit);
       if (unit === undefined) throw new Error(`undeclared unit ${artifact.unit}`);
       const role = artifact.role ?? "provider_response";
-      db.run(
+      this.exec(
         `INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,producer_id,first_ingested_by_client_id,fetch_unit_id,artifact_key,artifact_role,
           payload_fidelity,container_kind,lineage_disposition,dataset,format_id,format_version,declared_media_type,media_type_basis,
           fetched_at_ms,fetched_at_basis,sha256,byte_size,descriptor_version,descriptor_sha256,recorded_at_ms)
@@ -152,30 +161,30 @@ export class QualityStore {
         ],
       );
       if (artifact.period !== undefined || artifact.state !== undefined)
-        db.run(
+        this.exec(
           "INSERT INTO observation_artifact_metadata(fetch_artifact_id,statement_state,period) VALUES(?,?,?)",
           [artifactId, artifact.state ?? null, artifact.period ?? null],
         );
       stored.push({ key: artifact.key, id: artifactId });
     }
     const inventory = this.id();
-    db.run(
+    this.exec(
       `INSERT INTO run_inventories(id,fetch_run_id,inventory_sha256,expected_artifact_count,declaration_basis,created_at_ms,created_by_client_id)
        VALUES(?,?,?,?,'operator',?,?)`,
       [inventory, run, inventory.toString(16).padStart(64, "0"), stored.length, at, CLIENT],
     );
     for (const { key, id } of stored)
-      db.run(
+      this.exec(
         "INSERT INTO run_inventory_items(inventory_id,fetch_run_id,artifact_key,sha256,descriptor_sha256) VALUES(?,?,?,?,?)",
         [inventory, run, key, SHA, id.toString(16).padStart(64, "0")],
       );
-    db.run(
+    this.exec(
       `INSERT INTO fetch_run_reports(fetch_run_id,report_key,report_kind,recorded_by_client_id,normalized_outcome,
         started_at_ms,started_at_basis,completed_at_ms,completed_at_basis,recorded_at_ms)
        VALUES(?,'terminal','terminal',?,?,?,'manifest',?,'manifest',?)`,
       [run, CLIENT, spec.outcome ?? "success", at, at, at],
     );
-    db.run(
+    this.exec(
       "INSERT INTO fetch_run_seals(inventory_id,fetch_run_id,sealed_at_ms,sealed_by_client_id) VALUES(?,?,?,?)",
       [inventory, run, at, CLIENT],
     );
@@ -184,7 +193,6 @@ export class QualityStore {
 
   /** One parse of `artifact` by `parser`, in the given state; returns the parse run id when one exists. */
   parse(artifact: number, parser: string, spec: ParseSpec): number | null {
-    const db = this.db;
     // Published St.George examples represent the currently admitted snapshot;
     // a historical release remains available through the explicit override.
     const version =
@@ -192,7 +200,7 @@ export class QualityStore {
         ? (spec.version ?? (parser === "st-george-balances" ? "1.0.1" : "1.0.0"))
         : "1.0.0";
     const job = (status: string, code: string | null = null) =>
-      db.run(
+      this.exec(
         `INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,last_error_code,created_at_ms)
          VALUES(?,?,?,?,?,?)`,
         [artifact, parser, version, status, code, this.id()],
@@ -207,42 +215,42 @@ export class QualityStore {
     }
     if (spec.kind === "failed" || spec.kind === "error-run") {
       const parse = this.id();
-      db.run(
+      this.exec(
         "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,error,warnings_json) VALUES(?,?,?,?,'2099-01-01','error',?,'[]')",
         [parse, artifact, parser, version, spec.code],
       );
       return parse;
     }
     const parse = this.id();
-    db.run(
+    this.exec(
       "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,?,?,'2099-01-01','pending','[]')",
       [parse, artifact, parser, version],
     );
     if (spec.kind === "published" && spec.claim !== undefined)
       this.claim(parse, artifact, spec.claim);
-    db.run("UPDATE parse_runs SET status='ok' WHERE id=?", [parse]);
+    this.exec("UPDATE parse_runs SET status='ok' WHERE id=?", [parse]);
     if (spec.kind === "superseded") {
       // Replaced by a later successful run that is not adopted (a candidate,
       // invisible to every read): the superseded run is a recorded,
       // unpublished result with no job pending or failed.
       const later = this.id();
-      db.run(
+      this.exec(
         "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,?,'1.1.0','2099-01-02','pending','[]')",
         [later, artifact, parser],
       );
-      db.run("UPDATE parse_runs SET status='ok' WHERE id=?", [later]);
-      db.run("UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE id=?", [later, parse]);
+      this.exec("UPDATE parse_runs SET status='ok' WHERE id=?", [later]);
+      this.exec("UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE id=?", [later, parse]);
       return parse;
     }
-    db.run(
+    this.exec(
       "INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status) VALUES(?,?,?,'done')",
       [artifact, parser, version],
     );
-    db.run(
+    this.exec(
       "INSERT INTO publication_events(fetch_artifact_id,parser_name,previous_parse_run_id,new_parse_run_id,kind,actor,reason,occurred_at) VALUES(?,?,NULL,?,'normal','pipeline','parse_ok','2099-01-01')",
       [artifact, parser, parse],
     );
-    db.run(
+    this.exec(
       "INSERT INTO published_parse_runs(fetch_artifact_id,parser_name,parse_run_id,parser_version,published_at,publication_kind) VALUES(?,?,?,?,'2099-01-01','normal')",
       [artifact, parser, parse, version],
     );
@@ -265,7 +273,7 @@ export class QualityStore {
       `${row.source_id}/${row.dataset ?? ""}${row.fetch_unit_key === null ? "" : `/unit=${row.fetch_unit_key}`}`;
     const observed = spec.observed ?? 1;
     const complete = spec.completeness === "complete" && (spec.cause ?? null) === null;
-    this.db.run(
+    this.exec(
       `INSERT INTO parse_coverage_claims(parse_run_id,claim_id,scope_key,mode,completeness,membership_complete,observed_count,
         evidence_refs_json,policy_version,failure_cause,absence_meaning,parent_run_status,parent_run_failure_count)
        VALUES(?,?,?,'complete-container',?,?,?,'[]','coverage-v1',?,?,'success',0)`,
@@ -294,7 +302,7 @@ export class QualityStore {
       runIds?: string[];
     },
   ): void {
-    this.db.run(
+    this.exec(
       `INSERT INTO collection_schedule_occurrences(id,schedule_id,nominal_at,started_at,finished_at,status,run_ids_json,failure_code)
        VALUES(?,?,?,?,?,?,?,?)`,
       [
@@ -311,7 +319,7 @@ export class QualityStore {
   }
 
   lease(source: string, startedAt: string): void {
-    this.db.run(
+    this.exec(
       "INSERT INTO collection_execution_leases(source,lease_ref,started_at) VALUES(?,?,?)",
       [source, "00000000-0000-4000-8000-000000000000", startedAt],
     );
@@ -332,7 +340,7 @@ export class QualityStore {
   }): number {
     const id = this.id();
     const blocked = spec.blockedCode ?? (spec.outcome === null ? "manifest_invalid" : null);
-    this.db.run(
+    this.exec(
       `INSERT INTO collection_runs(id,source,run_id,terminal_key,terminal_digest,registration_contract_version,provider_outcome,
         coverage_status,first_seen_at,blocked_code,provider_failure_code) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
       [
@@ -353,13 +361,13 @@ export class QualityStore {
       const session = this.db
         .query("SELECT acquisition_session_id AS s FROM fetch_runs WHERE id=?")
         .get(spec.fetchRun) as { s: number };
-      this.db.run(
+      this.exec(
         "UPDATE collection_runs SET fetch_run_id=?,acquisition_session_id=?,registered_at='2099-01-01T00:00:00.000Z' WHERE id=?",
         [spec.fetchRun, session.s, id],
       );
     }
     if (spec.stage !== undefined)
-      this.db.run(
+      this.exec(
         "INSERT INTO collection_run_stages(collection_run_id,stage,state,failure_code,recorded_at) VALUES(?,'registered',?,?,'2099-01-01T00:00:00.000Z')",
         [id, spec.stage.state, spec.stage.failureCode ?? null],
       );

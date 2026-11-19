@@ -15,6 +15,10 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CardOwnershipReview } from "../../../packages/domain/src/card-ownership-review";
 import { canonicalDigest } from "../../../packages/domain/src/context";
+import {
+  OWNER_DEFAULT_PARTY,
+  ownershipDeclarationRef,
+} from "../../../packages/domain/src/ownership-declaration";
 import { smbcDirectTransactions } from "../../../packages/parsers/src/parsers/smbc-direct";
 import {
   identifyParse,
@@ -414,8 +418,63 @@ afterEach(() => {
 });
 
 describe("card settlement decisions over the page's path and MCP (ADR 0081, unit 2g.2)", () => {
-  it("records the ownership review over either path, with the same receipt", async () => {
+  it("plans the page's owner default over either path into the same plan, and decides nothing", async () => {
     expect(await cardSettlementSweep(env.DB)).toMatchObject({ proposed: 1, written: 1 });
+    const proposalId = (await env.DB.prepare("SELECT id FROM card_settlement_reviews").first<{
+      id: string;
+    }>())!.id;
+    const read = await send(
+      `/api/v2/reconciliation/card-settlements/ownership?proposalId=${proposalId}`,
+      { method: "GET" },
+      APP_AUD,
+    );
+    const review = (await read.json()) as CardOwnershipReview;
+    const decisions = await count("decision_revisions");
+    for (const side of review.sides) {
+      // Nothing is recorded for either account yet, so the default applies.
+      expect(side.ownerDefaultBlockers).toEqual([]);
+      // The payload the card-ownership page posts for 所有者の既定 (ADR 0082).
+      const payload = {
+        relationKind: side.role,
+        fromRef: `account:${side.accountId}`,
+        toRef: OWNER_DEFAULT_PARTY,
+        validFrom: null,
+        validTo: null,
+        evidenceRefs: [
+          ...side.evidenceRefs,
+          ownershipDeclarationRef(side.role, "2026-11-18", "owner-default")!,
+        ],
+        reason: "synthetic owner default",
+      };
+      const baseContextId = `card-ownership:${proposalId}:${side.role}`;
+      const overHttp = await http("plan", { kind: "relation.accept", payload, baseContextId });
+      const overMcp = await mcp("kogane.command.plan", {
+        kind: "relation.accept",
+        payload,
+        baseContextId,
+        idempotencyKey: `owner-default-${side.role}`,
+      });
+      expect(overHttp.failed).toBe(false);
+      expect(overMcp.failed).toBe(false);
+      const plan = (answer: Answer) => ({
+        kind: answer.body.plan.kind,
+        expectedRevisions: answer.body.plan.expectedRevisions,
+        simulation: answer.body.plan.simulation,
+      });
+      expect(plan(overMcp)).toEqual(plan(overHttp));
+      expect(overHttp.body.plan.simulation.ownershipDeclaration).toMatchObject({
+        scope: "owner-default",
+        role: side.role,
+        declaredOn: "2026-11-18",
+      });
+    }
+    // A plan is not a decision (INV07): approval and commit stay separate.
+    expect(await count("decision_revisions")).toBe(decisions);
+  });
+
+  it("records the ownership review over either path, with the same receipt", async () => {
+    // The candidate the previous test's sweep proposed, still unowned: its
+    // owner-default plans decided nothing.
     const unowned = await env.DB.prepare("SELECT id FROM card_settlement_reviews").first<{
       id: string;
     }>();
@@ -463,6 +522,45 @@ describe("card settlement decisions over the page's path and MCP (ADR 0081, unit
     owned = fresh!.id;
     expect(await statusOf(owned)).toBe("proposed");
     expect(await currentAllocations()).toBe(0);
+  });
+
+  it("refuses the page's owner default alike on both paths once a claim is recorded", async () => {
+    // The page disables the default while `ownerDefaultBlockers` is non-empty;
+    // the server refuses the same payload too, so the page is not the only guard.
+    const read = await send(
+      `/api/v2/reconciliation/card-settlements/ownership?proposalId=${owned}`,
+      { method: "GET" },
+      APP_AUD,
+    );
+    const review = (await read.json()) as CardOwnershipReview;
+    const before = [await count("change_plans"), await count("decision_revisions")];
+    for (const side of review.sides) {
+      expect(side.blockers).toEqual([]);
+      expect(side.ownerDefaultBlockers).toContain("ownership_claims_require_review");
+      const payload = {
+        relationKind: side.role,
+        fromRef: `account:${side.accountId}`,
+        toRef: OWNER_DEFAULT_PARTY,
+        validFrom: null,
+        validTo: null,
+        evidenceRefs: [
+          ...side.evidenceRefs,
+          ownershipDeclarationRef(side.role, "2026-11-18", "owner-default")!,
+        ],
+        reason: "synthetic owner default",
+      };
+      const baseContextId = `card-ownership:${owned}:${side.role}`;
+      const overHttp = await http("plan", { kind: "relation.accept", payload, baseContextId });
+      const overMcp = await mcp("kogane.command.plan", {
+        kind: "relation.accept",
+        payload,
+        baseContextId,
+        idempotencyKey: `owner-default-refused-${side.role}`,
+      });
+      expect(overHttp).toMatchObject({ failed: true, body: { error: "needs_scope_resolution" } });
+      expect(overMcp).toEqual(overHttp);
+    }
+    expect([await count("change_plans"), await count("decision_revisions")]).toEqual(before);
   });
 
   it("accepts and withdraws over either path with the same receipts, and refuses alike", async () => {

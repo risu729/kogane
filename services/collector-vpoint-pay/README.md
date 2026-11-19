@@ -2,6 +2,27 @@
 
 This independent PoC captures `VポイントPay` (V Point Pay) prepaid balances and usage details for every available month from the official Android app's first-party JSON API, storing raw responses and a manifest in private R2. The `Vポイント` (V Point)/`Vマネー` (V Money) Web ledger belongs to `services/collector-vpoint/`, and `三井住友カード` (Sumitomo Mitsui Card) billing statements belong to the Vpass collector; they are not mixed.
 
+## Runtime profile
+
+- **Browser: none.** No Cloudflare Browser Run, Container Chrome/Chromium or
+  external browser session is used; `wrangler.jsonc` declares no browser or
+  container binding.
+- **Collection is disabled.** The deployed `src/worker.ts` answers only
+  `GET /health` (`collectionEnabled: false`); `POST /trigger`, `/probe` and
+  `/reset-credentials` return 410, every other request returns 404, and
+  `scheduled` only logs. The app-API
+  collection code (`src/vpoint-pay.ts`, Worker `fetch`) and the SQLite Durable
+  Object `VPointPayCredentialState` (binding `VPOINT_PAY_STATE`,
+  `src/state.ts`) remain, but no route calls them.
+- Execution: there is no `ScheduledCollection` entrypoint, no Cron Trigger, no
+  D1 binding and no `withCollectionLease`; the `vpoint-pay` entry in
+  [`config/alarm-jobs.json`](../../config/alarm-jobs.json) is an `email` job,
+  disabled and unsupported. V Point Pay notification emails are collected by
+  `services/collector-vpoint/`. The shared DATA binding
+  (`kogane-raw-evidence`) is declared, but nothing writes to it today.
+- Retries and budgets: none apply while collection is disabled.
+  `wrangler.jsonc` sets no `limits`.
+
 <a id="静的解析で確認したread-surface"></a>
 
 ## Read surface confirmed by static analysis

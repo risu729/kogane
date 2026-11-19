@@ -63,8 +63,8 @@ function errorName(error: unknown): string {
 }
 /**
  * One structured line per alarm decision (ADR 0085 follow-up): which job,
- * which occurrence, and what the alarm did with it. Identifiers, instants and
- * closed codes only.
+ * which occurrence, and what the alarm did with it. Identifiers, schedule
+ * revisions, instants, durations and closed codes only.
  */
 function logAlarm(record: Record<string, unknown>): void {
   try {
@@ -193,11 +193,15 @@ export class ScheduleAlarm extends DurableObject<Env> {
           )
           .run();
         if (claimed.meta.changes !== 1) return null;
+        // The fence above bound `row.revision`, and the UPDATE changed the row
+        // only if the stored revision still equalled it, so this is the
+        // revision the retry was fenced on. A log line, not an audit record.
         logAlarm({
           event: "schedule_alarm",
           jobId: id,
           occurrenceId: retry.id,
           outcome: "retry_claimed",
+          scheduleRevision: row.revision,
         });
         return {
           job: jobFor(id),

@@ -5,14 +5,30 @@ import type {
   CardOwnershipSide,
 } from "../../../../packages/domain/src/card-ownership-review.ts";
 import { ownershipReviewPartyRef } from "../../../../packages/domain/src/ownership-review.ts";
-import { ownershipDeclarationRef } from "../../../../packages/domain/src/ownership-declaration.ts";
+import {
+  OWNER_DEFAULT_PARTY,
+  ownershipDeclarationRef,
+} from "../../../../packages/domain/src/ownership-declaration.ts";
 import { useCardOwnership } from "../card-ownership-api.ts";
-import { CardOwnershipDetails, OWNERSHIP_ROLES, ownerLabel } from "../card-ownership-display.tsx";
+import {
+  CardOwnershipDetails,
+  OWNERSHIP_ROLES,
+  ownerLabel,
+  ownershipBlockerText,
+} from "../card-ownership-display.tsx";
 import { useFeatures } from "../api.ts";
 import { tokyoToday } from "../reported-state-api.ts";
 import { postCommand, type ChangePlanView } from "../command-api.ts";
 import { Link, navigate } from "../router.tsx";
 import { EmptyState, Loading, Notice, Panel, QueryBoundary } from "../ui.tsx";
+
+/**
+ * How the relation is grounded: an explicit evidence review, the
+ * sole-personal self-declaration, or the owner default (ADR 0082), which
+ * names `party:owner` for an account with no recorded owner.
+ */
+type OwnershipBasis = "reviewed" | "self-declared" | "owner-default";
+const BASES: readonly OwnershipBasis[] = ["reviewed", "self-declared", "owner-default"];
 
 function OwnershipForm({
   review,
@@ -25,15 +41,25 @@ function OwnershipForm({
   const [label, setLabel] = useState("");
   const [reason, setReason] = useState("");
   const [evidence, setEvidence] = useState(false);
-  const [basis, setBasis] = useState<"reviewed" | "self-declared">("reviewed");
+  const [basis, setBasis] = useState<OwnershipBasis>("reviewed");
   // The declaration is dated on the owner's calendar day, not UTC's.
   const [declaredOn, setDeclaredOn] = useState(() => tokyoToday());
   const declarationRef = ownershipDeclarationRef(side.role, declaredOn);
   const selfDeclared = basis === "self-declared";
-  const partyRef = "party:" + label.trim();
+  // The owner default names one party for every account, so a card and its
+  // debit account defaulted separately name the same owner (ADR 0082).
+  const ownerDefault = basis === "owner-default";
+  const partyRef = ownerDefault ? OWNER_DEFAULT_PARTY : "party:" + label.trim();
   const existing = side.claims.some((c) => c.partyRef === partyRef && c.status === "accepted");
   const plan = useMutation({
     mutationFn: async (action: "accept" | "reject") => {
+      // The owner default is dated on the day it is applied (ADR 0082), on
+      // the owner's calendar, taken when the plan is made.
+      const marker = ownerDefault
+        ? ownershipDeclarationRef(side.role, tokyoToday(), "owner-default")
+        : selfDeclared
+          ? declarationRef
+          : null;
       const value = await postCommand<{ plan: ChangePlanView }>(
         "plan",
         {
@@ -46,7 +72,7 @@ function OwnershipForm({
             validTo: null,
             evidenceRefs: [
               ...side.evidenceRefs,
-              ...(selfDeclared && declarationRef && action === "accept" ? [declarationRef] : []),
+              ...(marker && action === "accept" ? [marker] : []),
             ],
             reason: reason.trim(),
           },
@@ -77,58 +103,83 @@ function OwnershipForm({
     reason.trim().length > 0 &&
     ownershipReviewPartyRef(partyRef) &&
     (!selfDeclared || (declarationRef !== null && side.selfDeclarationBlockers.length === 0)) &&
+    (!ownerDefault || side.ownerDefaultBlockers.length === 0) &&
     !plan.isPending;
   const suggestions = [
     ...new Set(
       review.sides.flatMap((s) => s.claims.map((c) => c.partyRef)).filter(ownershipReviewPartyRef),
     ),
   ];
-  const invalidLabel = label.length > 0 && !ownershipReviewPartyRef(partyRef);
+  const invalidLabel = !ownerDefault && label.length > 0 && !ownershipReviewPartyRef(partyRef);
+  const chooseBasis = (value: string) => {
+    setBasis(BASES.find((b) => b === value) ?? "reviewed");
+    setEvidence(false);
+  };
   return (
     <div className="ownership-form">
-      <div className="field">
-        <label htmlFor={`owner-${side.role}`}>保有者の識別名</label>
-        <input
-          id={`owner-${side.role}`}
-          value={label}
-          maxLength={128}
-          list={`owners-${side.role}`}
-          autoComplete="off"
-          onChange={(event) => {
-            setLabel(event.target.value);
-            setEvidence(false);
-          }}
-          aria-invalid={invalidLabel ? true : undefined}
-          aria-describedby={`owner-help-${side.role}`}
-        />
-        <datalist id={`owners-${side.role}`}>
-          {suggestions.map((ref) => (
-            <option key={ref} value={ownerLabel(ref)} />
-          ))}
-        </datalist>
-        <p id={`owner-help-${side.role}`} className="footnote">
-          誰の記録かを区別する名前です。同じ人には両方の口座で同じ識別名を使ってください。名前だけでは保有者の証明になりません。本人確認番号やパスワードは入力しないでください。
-        </p>
-      </div>
-      {invalidLabel ? (
-        <Notice tone="bad" inline role="alert">
-          識別名は128文字以内とし、縦線・スラッシュ・制御文字を含めないでください。
-        </Notice>
-      ) : null}
       <div className="field">
         <label htmlFor={`ownership-basis-${side.role}`}>根拠の種類</label>
         <select
           id={`ownership-basis-${side.role}`}
           value={basis}
-          onChange={(event) => {
-            setBasis(event.target.value === "self-declared" ? "self-declared" : "reviewed");
-            setEvidence(false);
-          }}
+          onChange={(event) => chooseBasis(event.target.value)}
         >
           <option value="reviewed">原本などの根拠を確認した判断</option>
           <option value="self-declared">本人申告（名義は未確認）</option>
+          <option value="owner-default">所有者の既定（記録のない口座は本人のもの）</option>
         </select>
       </div>
+      {ownerDefault ? (
+        <>
+          <Notice tone="warn" inline role="note">
+            保有者の記録がない口座は本人のものとみなす、2026-11-07
+            の決定をこの口座に適用します。保有者は「
+            {ownerLabel(OWNER_DEFAULT_PARTY)}
+            」として記録され、適用日は計画を作成した日（日本時間）です。銀行・カード会社の名義確認や本人確認が済んだ証明ではありません。
+          </Notice>
+          {side.ownerDefaultBlockers.length > 0 ? (
+            <Notice tone="warn" inline role="note">
+              所有者の既定は次の理由で適用できません。
+              <ul className="warning-list">
+                {/* A side's own blocker (an unresolved mapping) can repeat here. */}
+                {[...new Set(side.ownerDefaultBlockers)].map((code) => (
+                  <li key={code}>{ownershipBlockerText(code)}</li>
+                ))}
+              </ul>
+            </Notice>
+          ) : null}
+        </>
+      ) : (
+        <div className="field">
+          <label htmlFor={`owner-${side.role}`}>保有者の識別名</label>
+          <input
+            id={`owner-${side.role}`}
+            value={label}
+            maxLength={128}
+            list={`owners-${side.role}`}
+            autoComplete="off"
+            onChange={(event) => {
+              setLabel(event.target.value);
+              setEvidence(false);
+            }}
+            aria-invalid={invalidLabel ? true : undefined}
+            aria-describedby={`owner-help-${side.role}`}
+          />
+          <datalist id={`owners-${side.role}`}>
+            {suggestions.map((ref) => (
+              <option key={ref} value={ownerLabel(ref)} />
+            ))}
+          </datalist>
+          <p id={`owner-help-${side.role}`} className="footnote">
+            誰の記録かを区別する名前です。同じ人には両方の口座で同じ識別名を使ってください。名前だけでは保有者の証明になりません。本人確認番号やパスワードは入力しないでください。
+          </p>
+        </div>
+      )}
+      {invalidLabel ? (
+        <Notice tone="bad" inline role="alert">
+          識別名は128文字以内とし、縦線・スラッシュ・制御文字を含めないでください。
+        </Notice>
+      ) : null}
       {selfDeclared ? (
         <>
           <Notice tone="warn" inline role="note">
@@ -165,16 +216,24 @@ function OwnershipForm({
           onChange={(event) => setEvidence(event.target.checked)}
         />
         <span>
-          {selfDeclared
+          {ownerDefault
             ? side.role === "beneficial_owner"
-              ? "この原本と口座の対応を確認し、入力した識別名は私本人で、この銀行口座の資金を私が単独で保有し、共同・第三者・法人の口座ではないと申告する"
-              : "この原本と口座の対応を確認し、入力した識別名は私本人で、このカード請求の支払義務を私が負い、家族・第三者・法人が支払義務者ではないと申告する"
-            : "この原本と口座の対応を、入力した保有者の関係を判断する根拠として確認した"}
+              ? "この原本と口座の対応を確認し、保有者の記録がないこの銀行口座の資金を本人が保有するものとして記録する"
+              : "この原本と口座の対応を確認し、保有者の記録がないこのカード請求の支払義務を本人が負うものとして記録する"
+            : selfDeclared
+              ? side.role === "beneficial_owner"
+                ? "この原本と口座の対応を確認し、入力した識別名は私本人で、この銀行口座の資金を私が単独で保有し、共同・第三者・法人の口座ではないと申告する"
+                : "この原本と口座の対応を確認し、入力した識別名は私本人で、このカード請求の支払義務を私が負い、家族・第三者・法人が支払義務者ではないと申告する"
+              : "この原本と口座の対応を、入力した保有者の関係を判断する根拠として確認した"}
         </span>
       </label>
       <div className="field">
         <label htmlFor={`ownership-reason-${side.role}`}>
-          {selfDeclared ? "本人申告の補足・判断の理由" : "判断の理由・原本で確認した箇所"}
+          {ownerDefault
+            ? "既定を適用する理由"
+            : selfDeclared
+              ? "本人申告の補足・判断の理由"
+              : "判断の理由・原本で確認した箇所"}
         </label>
         <textarea
           id={`ownership-reason-${side.role}`}
@@ -197,7 +256,7 @@ function OwnershipForm({
         <button
           type="button"
           className="button"
-          disabled={!enabled || !existing || selfDeclared}
+          disabled={!enabled || !existing || selfDeclared || ownerDefault}
           onClick={() => plan.mutate("reject")}
         >
           この保有者の関係を却下する内容を確認

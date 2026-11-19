@@ -357,13 +357,17 @@ carried over unchanged, so no capture is parsed twice.
 
 ### Sony Bank (`services/collector-sony-bank`, `kogane-sony-bank-collector-poc`)
 
-| Artifact key                                     | Role                         |
-| ------------------------------------------------ | ---------------------------- |
-| `gross-balance.json`, `*-history-page-NNNN.json` | `provider_response`          |
-| `yen-history.csv`, `foreign-history-<ccy>.csv`   | `provider_export`            |
-| `wallet-history-YYYY-MM.html`                    | `sanitized_provider_capture` |
-| `collection-summary.json`                        | `collector_summary`          |
-| `manifest.json`                                  | `collector_manifest`         |
+| Artifact key                                                                              | Role                         |
+| ----------------------------------------------------------------------------------------- | ---------------------------- |
+| `gross-balance.json`, `*-history-page-NNNN.json` (month-window pages prefixed `monthly-`) | `provider_response`          |
+| `yen-history.csv`, `foreign-history-<ccy>.csv` (month-window CSVs prefixed `monthly-`)    | `provider_export`            |
+| `wallet-history-YYYY-MM.html`                                                             | `sanitized_provider_capture` |
+| `collection-summary.json`                                                                 | `collector_summary`          |
+| `realised-gains-response.json`, `realised-gains-YYYY.json` (realised-gains run)           | `provider_response`          |
+| `realised-gains.csv` (realised-gains run)                                                 | `provider_export`            |
+| `delivered-documents.json` (documents run)                                                | `provider_response`          |
+| `delivered-document-NNNN.pdf` (documents run)                                             | `provider_export`            |
+| `manifest.json`                                                                           | `collector_manifest`         |
 
 For each currency/window, the first JSON history page's `countCnt` is the
 expected total, already checked against every walked JSON page. A zero total
@@ -417,22 +421,37 @@ enforced on the way to central storage: a wallet page that still carries a
 field (`loginPwd`, `password`, `csrf`, …), throws a stable code and the run
 writes no terminal instead of publishing the value (G3-08).
 
-Terminal fields: `producer: collector-sony-bank`; one unit `account`
-(`unitKind: account`) whose `artifactCount` counts every artifact but
+Terminal fields of the core run: `producer: collector-sony-bank`; one unit
+`account` (`unitKind: account`) whose `artifactCount` counts every artifact but
 `manifest.json`, which belongs to the run and names no unit (ADR 0021; until
 then the manifest named the unit and was counted in it); ranges
-`request-window` (the requested `from`/`to`; every run, from the alarm or
+`request-window` and, when wallet statements were collected, `wallet-months`;
+one `terminal` report carrying the outcome. Every core run, from the alarm or
 from an operations-API `collect`, neither of which carries a window, requests
-yesterday's JST date, the last finished JST day, from the first of its JST
-month, `defaultWindow`, so a run on the 1st requests the whole previous month
-and each day is requested after it ends; an open limit: the previous month's
-last day is requested only by a run on the 1st, so if that run is missed or
-fails, no later run requests that day, because a window that crosses a month
-boundary is a request shape nobody has observed, ADR 0004) and, when wallet
-statements were collected, `wallet-months`; one `terminal` report carrying the outcome;
-`requestedScope.scopeKind = date_range` over the same window;
-`coverageStatus` `complete` for a successful window, `partial` for a partial
-run, `unknown` for a failure. `manifest.json` is the collector manifest with
+the month window from the first of yesterday's JST month through yesterday
+(`defaultWindow`) and also the provider's whole retained history through
+yesterday, whose files are the parser input (`runSharedCollection`,
+`src/worker.ts`). The terminal states the retained request: `request-window`
+has a null start and yesterday as its end, and `requestedScope.scopeKind` is
+`full_snapshot` over the same bounds, so a later successful run recovers a day
+an earlier missed run did not read, as long as the provider still retains it
+and each currency's retained history fits the 1,000-page walk (beyond it the
+retained step stops the core run, `partial`, with
+`history_page_limit_exceeded`). `coverageStatus` is `complete` for a successful
+run, `partial` for a core run that stopped after a step that stores an
+artifact, and `unknown` for a failure. The null start names the
+provider's retention, not proved account-opening coverage.
+
+The realised-gains and documents runs, read only after the core steps succeed,
+share the core run's ID as `acquisitionSessionRef`. The realised-gains run has
+no `request-window` (`full_snapshot` with null bounds); its units are
+`realised-evidence` and `realised-year-YYYY` for what it stored. The documents
+run requests the five-year `date_range` ending yesterday, and each stored PDF
+has its own complete `document` unit (`delivered-document-NNNN`) with a unit
+`terminal` report, while the run itself is `partial` (`failed` when it stored
+nothing) (`sonyBankRunPlan`, `src/shared-collection.ts`).
+
+In every run with an artifact, `manifest.json` is the collector manifest with
 the central-safe failure messages (`manifestFailure`) and each artifact's
 `key` pointing at the content-addressed object that was actually written; the
 terminal's `artifacts[]` stays authoritative.
@@ -503,14 +522,14 @@ provider was contacted and no production bucket was read or written.
 
 ### MyJCB (`services/collector-myjcb`, `kogane-myjcb-collector-poc`)
 
-| Artifact key                                                                                                                                 | Role                         | Step (ADR 0021)                            |
-| -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------ |
-| `<connectionId>/credit-menu.html`, `…/credit-detail-NN.html`, `…/credit-schedule-NN.html`, `…/credit-skip-payment-NN.html`, `…/debit-*.html` | `sanitized_provider_capture` | `redacted` by `myjcb-sanitizer`, no input  |
-| `<connectionId>/credit-past-months.json`                                                                                                     | `provider_response`          | none                                       |
-| `<connectionId>/credit-document-YYYY-MM.{csv,pdf,ofx}`                                                                                       | `provider_export`            | none                                       |
-| `<connectionId>/credit-ledger-NN.json`                                                                                                       | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
-| `<connectionId>/discovery.json`                                                                                                              | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
-| `manifest.json`                                                                                                                              | `collector_manifest`         | none; names no unit                        |
+| Artifact key                                                                                                                                                                                   | Role                         | Step (ADR 0021)                            |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------ |
+| `<connectionId>/credit-menu.html`, `…/credit-detail-NN.html`, `…/credit-schedule-NN.html`, `…/credit-skip-payment-NN.html`, `…/debit-*.html`, `…/jpoint-inquiry.html`, `…/jpoint-history.html` | `sanitized_provider_capture` | `redacted` by `myjcb-sanitizer`, no input  |
+| `<connectionId>/credit-past-months.json`, `…/jpoint-balance.json`                                                                                                                              | `provider_response`          | none                                       |
+| `<connectionId>/credit-document-YYYY-MM.{csv,pdf,ofx}`                                                                                                                                         | `provider_export`            | none                                       |
+| `<connectionId>/credit-ledger-NN.json`                                                                                                                                                         | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
+| `<connectionId>/discovery.json`, `…/jpoint-history.json`                                                                                                                                       | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
+| `manifest.json`                                                                                                                                                                                | `collector_manifest`         | none; names no unit                        |
 
 A ledger is parsed from the statement page of the same `detailMonth` before
 that page is redacted, and `discovery.json` from the login and mypage
@@ -966,11 +985,11 @@ unchanged (G3-14), and nothing here adds a scheduler.
 
 ### `mobile-suica` (`services/collector-mobile-suica`)
 
-| Artifact key                | Role                         | Bytes                                           |
-| --------------------------- | ---------------------------- | ----------------------------------------------- |
-| `sf-history-page-0001.html` | `sanitized_provider_capture` | the CP932 history page, `baseVariable` redacted |
-| `sf-history.json`           | `collector_derived`          | the rows parsed from that page                  |
-| `collection-summary.json`   | `collector_summary`          | the collector's own counts and cookie names     |
+| Artifact key                | Role                         | Bytes                                                                           |
+| --------------------------- | ---------------------------- | ------------------------------------------------------------------------------- |
+| `sf-history-page-NNNN.html` | `sanitized_provider_capture` | one CP932 history page per search, `baseVariable` redacted                      |
+| `sf-history.json`           | `collector_derived`          | the rows merged from those pages (with each page's rows when there are several) |
+| `collection-summary.json`   | `collector_summary`          | the as-of date, page and row counts and the completeness flag                   |
 
 Sanitizer: `src/sanitize.ts` (`sanitizeHistoryHtml`) replaces the hidden
 `baseVariable` session field with the redaction sentinel and proves the CP932
@@ -982,11 +1001,16 @@ Terminal: `source: mobile-suica`, `producer: collector-mobile-suica`,
 `producerVersion: COLLECTOR_SCHEMA_VERSION` (`mobile-suica-worker-poc-v2`),
 `requestedScope: full_snapshot` over unit `account` with the requested day as
 an `as-of-selector` range (`selector`/`date`/`request`) — the date selects the
-page, it is not the extent of what came back. Two transformations are stated:
-`redacted` by `mobile-suica-history-sanitizer` producing the HTML (with no
-input artifact, because the unredacted page is deliberately not retained) and
-`extracted` by `mobile-suica-history-normalizer` from the HTML to
-`sf-history.json`.
+first page, it is not the extent of what came back. The transformations are one
+`redacted` step per page by `mobile-suica-history-sanitizer` producing the HTML
+(with no input artifact, because the unredacted page is deliberately not
+retained) and one `extracted` step by `mobile-suica-history-normalizer` from
+the HTML pages to
+`sf-history.json`. A run that stopped mid-walk keeps its sanitized pages
+without `sf-history.json` or `collection-summary.json` and is `partial` with
+`history_boundary_unproven`; one that stopped before any page was sanitized
+keeps nothing and is `failed` (`collection_failed`)
+([ADR 0104](adr/0104-mobile-suica-retained-history.md)).
 
 `coverageStatus` is `complete` only when the run succeeded **and** the
 collector proved it reached the end of the history; an unproven boundary is
