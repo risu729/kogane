@@ -263,7 +263,7 @@ refuses a detail whose `partition` is not its body's, and
 - Date: 2026-11-19
 - Owner approval: required before merge. The report ids, context ids and run
   ids the published `kogane.reports.read` answer names are minted from a
-  manifest with four more fields, and the explanation view's `inputManifest`
+  manifest with five more fields, and the explanation view's `inputManifest`
   carries them (see Consequences)
 
 ### Context
@@ -288,14 +288,22 @@ code that turns those inputs into the body:
 A change to any of these that gives another body for the same stored inputs
 left the id unchanged, so the job kept serving the body the old code
 computed unless someone bumped `report-inputs-v1` by hand. Nobody did when
-the amendment of 2026-11-18 changed `reportPartition`: a truncated report
-already stored as `complete` is reused under the new rule. The chosen price
+the amendment of 2026-11-18 changed `reportPartition`: the job reuses a
+truncated report already stored as `complete` instead of writing the body
+the new rule gives (the reader states the new partition beside it). The chosen price
 ids do cover a selection change that picks another set of prices, but not
 one that keeps the set (a rule added to the list that matches no stored
 claim, or the same prices given to other holdings). The rebuildable
 projections already fold their code into their ids: `projectionBuildDigest`
 and `rewardProjectionBuildDigest` digest their release constants into
 `snapshotIdentity` (INV09).
+
+One input the body depends on was missing too: whether positions were cut at
+the row bound. The manifest lists the kept positions only, so the same first
+`maxRows` positions with and without positions past the bound gave one id,
+and the job reused whichever body was stored first: a body stored `complete`
+and `truncated: false` was served for a scope that had grown past the bound
+(INV05; the limit the amendment of 2026-11-18 records).
 
 ### Options considered
 
@@ -310,14 +318,16 @@ and `rewardProjectionBuildDigest` digest their release constants into
 
 ### Decision
 
-Option 3. The manifest gains four fields, `ReportBuildReleases`:
+Option 3. The manifest gains the four releases, `ReportBuildReleases`, and
+the cut:
 
-| Field                   | Value today                   | Covers                                                              |
-| ----------------------- | ----------------------------- | ------------------------------------------------------------------- |
-| `priceSelectionRelease` | `report-snapshot-price-v1`    | `SNAPSHOT_PRICE_SQL` and `priceObservation`                         |
-| `priceRuleIds`          | `PRICE_RULE_IDS`, sorted      | the closed rule list; the selection binds this same list            |
-| `valuationRelease`      | `holding-valuation-v1`        | `valueHolding`, `valueAtPrice` as it calls it, `summarizeValuation` |
-| `reportBuildRelease`    | `report-holdings-v1:build-v1` | the job's assembly, `reportPartition`, the body schema              |
+| Field                   | Value today                     | Covers                                                              |
+| ----------------------- | ------------------------------- | ------------------------------------------------------------------- |
+| `priceSelectionRelease` | `report-snapshot-price-v1`      | `SNAPSHOT_PRICE_SQL` and `priceObservation`                         |
+| `priceRuleIds`          | `PRICE_RULE_IDS`, sorted        | the closed rule list; the selection binds this same list            |
+| `valuationRelease`      | `holding-valuation-v1`          | `valueHolding`, `valueAtPrice` as it calls it, `summarizeValuation` |
+| `reportBuildRelease`    | `report-holdings-v1:build-v1`   | the job's assembly, `reportPartition`, the body schema              |
+| `truncated`             | the body's `coverage.truncated` | more positions were in scope than the bound kept                    |
 
 `SNAPSHOT_PRICE_RELEASE` and `REPORT_BUILD_RELEASE` live in the report job,
 `HOLDING_VALUATION_RELEASE` in `packages/domain/src/calculation.ts`;
@@ -325,8 +335,10 @@ Option 3. The manifest gains four fields, `ReportBuildReleases`:
 schema bump changes it. The manifest schema is `report-inputs-v2`. The wire
 contract (`packages/observation-shared/src/report-artifact-contract.ts`)
 accepts a `report-inputs-v1` manifest with exactly its old fields, as stored,
-and a `report-inputs-v2` manifest with exactly the v1 fields and the four
-releases, the rule list sorted.
+and a `report-inputs-v2` manifest with exactly the v1 fields, the four
+releases (the rule list sorted) and `truncated` (a boolean). `maxRows` itself
+is not named: the kept ids and `truncated` fix the body whatever the bound
+was.
 
 ### Consequences
 
@@ -342,7 +354,8 @@ releases, the rule list sorted.
 - The answer's shape does not change for the list, the body or the ids, but
   the ids of every report written after the deploy differ from what the old
   manifest would have given, and the explanation view's `inputManifest` has
-  `schemaVersion: "report-inputs-v2"` and the four release fields. The MCP
+  `schemaVersion: "report-inputs-v2"`, the four release fields and
+  `truncated`. The MCP
   tool's definition is unchanged; its result changes, which the owner
   approves before this merges, as for `partition` above. A client that
   checks the manifest's keys exactly must accept both versions.
@@ -355,9 +368,11 @@ releases, the rule list sorted.
   to its release by a frozen digest; a change to `valueHolding`,
   `summarizeValuation`, `reportPartition` or the job's assembly that does not
   bump its release is not caught by a test. The 評価レポート page does not
-  show the four releases; they are in the explanation answer. The limit of
-  the amendment of 2026-11-18 (truncation is not in the manifest) is
-  unchanged.
+  show the four releases or `truncated`; they are in the explanation answer
+  (the page states the cut from the body). The limit the amendment of
+  2026-11-18 records is closed: a cut and a whole report over the same kept
+  positions are two reports, and the job never reuses a report written
+  before this amendment, whose v1 manifest gives another id.
 - The [historical next-milestone plan](../plans/2026-09-next-milestone.md)
   named `report-inputs-v2` for a dated valuation job (P2-4). That plan was
   never accepted; this amendment takes the name, and a later manifest takes
@@ -373,7 +388,14 @@ report, and each of the four releases changed in turn (a rule added that
 matches no claim, so the same price is chosen) gives a new report id and
 context id, a new `report_artifacts` row and no reuse, while the earlier
 report keeps its id, context and body. With the release fields removed from
-the manifest digest, that test fails on reuse. `apps/web/test/report-artifacts-contract.test.ts`
-accepts a v2 manifest and the stored v1 one, and refuses a v2 manifest
-missing a release, with an unsorted rule list or an extra field, a v1
-manifest with the v2 fields, and an unknown version.
+the manifest digest, that test fails on reuse.
+`services/processor/test/report-job-truncated.test.ts` reads every position
+into a `complete` report, then adds one whose code sorts past the bound and
+runs the job with `maxRows` at the earlier count: the kept position ids are
+the same, and the job writes a new `partial-verified-scope` report with
+`truncated: true` in its manifest instead of reusing the `complete` one;
+with `truncated` held `false` in the manifest that test fails on reuse.
+`apps/web/test/report-artifacts-contract.test.ts` accepts a v2 manifest and
+the stored v1 one, and refuses a v2 manifest missing one of its added
+fields, with an unsorted rule list, a `truncated` that is not a boolean or
+an extra field, a v1 manifest with the v2 fields, and an unknown version.

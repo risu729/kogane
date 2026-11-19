@@ -530,8 +530,9 @@ view and never offering `/export`
 `services/processor/src/report-job.ts` builds a
 `ReportInputManifest` — the perimeter, the base unit, the effective knowledge
 boundary, the decimal and instrument-valuation policy ids, the release of the
-code that turns those inputs into the body, and the sorted ids of every
-position observation, valuation observation and price observation it used.
+code that turns those inputs into the body, whether positions past the row
+bound were left out (`truncated`), and the sorted ids of every position
+observation, valuation observation and price observation it used.
 The releases (`report-inputs-v2`,
 [ADR 0072, amendment of 2026-11-19](adr/0072-report-artifact-pages.md#amendment-a-report-id-names-the-code-that-computed-its-body-2026-11-19))
 are `priceSelectionRelease` (`SNAPSHOT_PRICE_RELEASE`, the snapshot price
@@ -557,7 +558,13 @@ id is the digest of that manifest, so:
   serves a body the earlier code computed (INV09). Reports already stored keep
   their ids and bodies; nothing is recomputed. A manifest stored before the
   releases were recorded stays `report-inputs-v1`, and the report contract
-  reads both versions.
+  reads both versions;
+- a report cut at `maxRows` and one that read every position over the same
+  kept positions differ in `truncated`, so they are two reports: a body
+  stored `complete` is never reused once the scope has grown past the bound
+  (this closes the limit the
+  [amendment of 2026-11-18](adr/0072-report-artifact-pages.md#amendment-a-report-cut-at-its-row-bound-is-not-complete-2026-11-18)
+  recorded).
 
 ## 6. Replayability and evidence-use restrictions
 
@@ -670,7 +677,9 @@ would discard later collection and later decisions (docs/operations.md).
   `services/processor/test/report-job-releases.test.ts` — the manifest's
   releases, the snapshot price query pinned to its release, and each release
   changed in turn giving a new report with no reuse while the earlier one
-  keeps its id and body.
+  keeps its id and body; `services/processor/test/report-job-truncated.test.ts`
+  — a truncated report is `partial-verified-scope`, and the same kept
+  positions with and without positions past the bound give two reports.
 - `services/app/test/reports-api.test.ts` — re-display, Access and
   method gates, refusal of explanation and export under a restriction, the
   decimal policy selection contract, the list's order, paging and query

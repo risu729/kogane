@@ -338,6 +338,13 @@ interface ReportInputManifest extends ReportBuildReleases {
   knowledgeCutoffEffective: string;
   decimalPolicyRelease: string;
   instrumentValuationPolicyId: string;
+  /**
+   * More positions were in scope than the bound kept (the body's
+   * `coverage.truncated`). The position ids name only the kept rows, so the
+   * same first `maxRows` positions with and without positions past the bound
+   * would otherwise give one id for a whole body and a cut one (INV05, INV09).
+   */
+  truncated: boolean;
   positionObservationIds: number[];
   valuationObservationIds: number[];
   priceObservationIds: string[];
@@ -479,6 +486,7 @@ export async function runReportJob(
     priceRuleIds: [...releases.priceRuleIds].sort(),
     valuationRelease: releases.valuationRelease,
     reportBuildRelease: releases.reportBuildRelease,
+    truncated,
     positionObservationIds: [...positionIds].sort((a, b) => a - b),
     valuationObservationIds: [...valuationIds].sort((a, b) => a - b),
     priceObservationIds: [...new Set([...prices.values()].map((price) => price.id))].sort(),

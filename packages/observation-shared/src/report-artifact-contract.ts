@@ -138,7 +138,8 @@ interface ReportInputManifestV1 {
 /**
  * The manifest of a report stored since 2026-11-19: the v1 fields and the
  * release of the price selection, the admitted price rules, the valuation and
- * the body build (ADR 0072, amendment of 2026-11-19). A v1 node stays valid:
+ * the body build, and whether the positions were cut at the row bound (ADR
+ * 0072, amendment of 2026-11-19). A v1 node stays valid:
  * stored explanation nodes are never rewritten.
  */
 interface ReportInputManifestV2 extends Omit<ReportInputManifestV1, "schemaVersion"> {
@@ -147,6 +148,8 @@ interface ReportInputManifestV2 extends Omit<ReportInputManifestV1, "schemaVersi
   priceRuleIds: string[];
   valuationRelease: string;
   reportBuildRelease: string;
+  /** More positions were in scope than the report kept (its body's `coverage.truncated`). */
+  truncated: boolean;
 }
 
 type ReportInputManifest = ReportInputManifestV1 | ReportInputManifestV2;
@@ -369,16 +372,18 @@ const MANIFEST_V2_KEYS = [
   "priceRuleIds",
   "valuationRelease",
   "reportBuildRelease",
+  "truncated",
 ] as const;
 
-/** The releases a v2 manifest names; the rule list is sorted as the job writes it. */
+/** The fields v2 adds: the releases (the rule list sorted as the job writes it) and the cut. */
 function validManifestReleases(value: Record<string, unknown>): boolean {
   return (
     text(value.priceSelectionRelease, 128) &&
     textList(value.priceRuleIds, 100) &&
     value.priceRuleIds.every((id, index, ids) => index === 0 || ids[index - 1]! < id) &&
     text(value.valuationRelease, 128) &&
-    text(value.reportBuildRelease, 128)
+    text(value.reportBuildRelease, 128) &&
+    typeof value.truncated === "boolean"
   );
 }
 
