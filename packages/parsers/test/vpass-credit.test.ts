@@ -170,6 +170,9 @@ test("a name that could hold a card number, or is not a name, is omitted and the
     "",
     "   ",
     "テスト\u0007カード",
+    // A format character hides a digit run or reorders the text.
+    "テスト1\u200b2\u200b3\u200b4",
+    "テスト\u202eカード",
     "x".repeat(65),
   ]) {
     for (const [value, artifact, count] of [

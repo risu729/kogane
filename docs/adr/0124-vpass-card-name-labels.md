@@ -72,8 +72,10 @@ a name that could be sensitive:
 - `vpass-credit-snapshot` 1.1.0 copies the response's own `cardName` into
   `extra._kogane.cardName` of every row it emits: Authori rows from Authori,
   Revo rows from Revo. `vpassCardName` keeps a name only when it is a string
-  of 1–64 characters after trimming, with no control character and no run of
-  four or more decimal digits in any script (masked card numbers included).
+  of 1–64 characters after trimming, with no control or format character
+  (`\p{Cc}`, `\p{Cf}`: a zero-width character could hide a digit run, a
+  bidirectional override could reorder the label) and no run of four or more
+  decimal digits in any script (masked card numbers included).
   Anything else is left out, never thrown: the snapshot is kept. A non-string
   `cardName` is still a shape change and fails as before. `userName` is never
   read.
@@ -108,17 +110,35 @@ a name that could be sensitive:
   every other label. Logs and operational records are unchanged: the parser
   emits no new log line, and nothing records the name outside the
   observation's `extra`.
-- After deploy the repair lane re-parses the stored credit artifacts at
-  1.1.0 ([observation lanes](../observation-lanes.md#repair-budget-and-drain-rate)).
-  Until a card's newest credit artifact is re-parsed or a new daily run is
-  parsed, that card shows `Vpassカード明細`; and while the 0103 pin waits for a
-  card's first 1.1.0 parse, that card has no selected credit snapshot. The
-  backlog is two credit artifacts per card per day since the snapshots began
-  (ADR 0105), far below the repair lane's 336 artifacts an hour.
-- Each organized page reads the requested Vpass references' own balance
-  identity observations (index `identity_observation_account`) and ranks
-  their credit rows. That grows with each card's credit history (about 14
-  rows a day per card); no catalogue scan is added.
+- After deploy the incremental lane parses each new daily credit run at
+  1.1.0, and the repair lane's cyclic scan re-parses the stored credit
+  artifacts at 1.1.0
+  ([observation lanes](../observation-lanes.md#repair-budget-and-drain-rate)).
+  Until one of them gives a card a complete 1.1.0 credit run, that card
+  shows `Vpassカード明細`. Because the 0103 pin is matched exactly
+  ([parser coverage: snapshot policies](../parser-coverage.md#snapshot-policies)),
+  the card also has no selected credit snapshot in that window (a temporary
+  INV05 gap): its reported limit, outstanding and availability rows are not
+  listed by `balances.read` or the reported state, and are never shown as
+  zero (they are non-additive and enter no subtotal, ADR 0105). The reported
+  state names the gap only per dataset: `coverage.containersWithoutSnapshot`
+  carries `vpass-credit-snapshot` with `no_complete_snapshot_before_cutoff`
+  while no card has a 1.1.0 snapshot, and once one card has one, a card still
+  waiting is absent with no per-card reason. That per-card silence is an open
+  limit shared by every exact parser pin (0059, 0084, 0102). The window
+  closes for a card at its next successful daily credit run at the latest;
+  the repair backlog (two credit artifacts per card per day since the
+  snapshots began, ADR 0105) is far below the 28 jobs a tick the repair lane
+  executes, but when the scan reaches them depends on where its cyclic cursor
+  stands.
+- Each organized page reads, through index `identity_observation_account`,
+  every identity observation of each requested Vpass card reference (every
+  kind, parse run and identity policy version: the card's statement rows
+  included), keeps the balance rows of published `vpass-credit-snapshot`
+  parses, and ranks them. No catalogue scan is added, but the rows read grow
+  with each card's whole identity history, not only its credit rows; a
+  composite index or a narrower access path is a follow-up if that read
+  shows in the read budget.
 - Units that list cards (the planned `upcoming` debit view and the
   `account-list` identity collection) reuse `vpassCardLabels` and show the
   same label.
@@ -128,7 +148,8 @@ a name that could be sensitive:
 - `packages/parsers/test/vpass-credit.test.ts`: Authori rows carry Authori's
   name; Revo rows carry Revo's (a card with no visible Authori row is still
   named); names with four or more digits (ASCII, full-width, masked), empty,
-  control-character and over-long names are omitted with the snapshot kept;
+  control-character, format-character (a zero-width space between digits, a
+  bidirectional override) and over-long names are omitted with the snapshot kept;
   `userName` never appears in the output.
 - `packages/parsers/test/coverage-contract.test.ts`: the frozen 1.0.x output
   plus exactly `_kogane.cardName` (`vpass-credit-snapshot@1.1.0` delta).

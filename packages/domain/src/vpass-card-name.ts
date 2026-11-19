@@ -7,6 +7,10 @@
 // changes a mapping (identity rules and their labels are unchanged). A card
 // number is never a name, so a value with a run of four or more decimal
 // digits (ASCII or any other script, masked numbers included) is not kept.
+// Nor is one with a control or format character: a format character (a
+// zero-width space or joiner, a bidirectional override) can hide a digit run
+// from the rule above or reorder what a reader sees, and no observed name
+// holds one.
 
 /** Longest card name kept; longer text is not a product name. */
 const VPASS_CARD_NAME_MAX = 64;
@@ -16,7 +20,7 @@ export function vpassCardName(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const name = value.trim();
   if (name.length < 1 || name.length > VPASS_CARD_NAME_MAX) return undefined;
-  if (/\p{Decimal_Number}{4,}/u.test(name) || /\p{Cc}/u.test(name)) return undefined;
+  if (/\p{Decimal_Number}{4,}/u.test(name) || /[\p{Cc}\p{Cf}]/u.test(name)) return undefined;
   return name;
 }
 

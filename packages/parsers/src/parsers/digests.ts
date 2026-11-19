@@ -41,7 +41,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "packages/domain/src/values.ts":
       "8dbd56b587a436b5c6809b399e6b444e08835f89d176f3bcd0a03a170068c987",
     "packages/domain/src/vpass-card-name.ts":
-      "04570266961cd534497d349ffa283cbcf460c0c2bed14f8caee87bb3ce7402e3",
+      "113fe50853d4d083455321816f20bb0d4a0f08a04a0b08c032e4709cb7b28c0f",
     "packages/observation-shared/src/normalized-decimal.ts":
       "2c2ffee7636e5c0be5957db53c57c439e6b125fa5428cc29c9d1814cc284cbcd",
     "poc/observation-pipeline/src/money.ts":
@@ -1070,7 +1070,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "vpass-credit-snapshot": {
       version: "1.1.0",
-      codeDigest: "dc2ea874b8bad6b566be8876fb7c966ab4a576c669d1bf77e476d71cf6fa108d",
+      codeDigest: "2bc36bb02d1bb20d97715c104760f91769eff86cff44357b772f2cb9106cf3d1",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

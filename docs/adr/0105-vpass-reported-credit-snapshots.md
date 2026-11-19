@@ -128,8 +128,8 @@ daily publication verification are separate from this compatibility change.
 Reader 1.1.0 copies each response's own `cardName` into
 `extra._kogane.cardName` of every row it emits (Authori rows from Authori,
 Revo rows from Revo), and leaves out a name with four or more digits in a
-row, a control character, or more than 64 characters, without refusing the
-snapshot. `userName` is never read. No metric, amount, precision or catalogue
+row, a control or format character, or more than 64 characters, without
+refusing the snapshot. `userName` is never read. No metric, amount, precision or catalogue
 status changes. Migration 0103 advances the complete 0102 default pin to
 1.1.0 under the same guard. How the name labels a card at read time is
 [ADR 0124](0124-vpass-card-name-labels.md).

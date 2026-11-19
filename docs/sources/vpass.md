@@ -167,8 +167,9 @@ Reader 1.1.0 (`vpass-credit-snapshot`) copies the response's own name into
 `extra._kogane.cardName` of every row: Authori rows from Authori, Revo rows
 from Revo, so a card whose Authori groups are all hidden (no Authori row) is
 still named by Revo. A name is left out, and the snapshot kept, when it is
-empty after trimming, longer than 64 characters, holds a control character,
-or holds four or more decimal digits in a row in any script. A non-string
+empty after trimming, longer than 64 characters, holds a control or format
+character (a zero-width or bidirectional control included), or holds four or
+more decimal digits in a row in any script. A non-string
 `cardName` remains a shape failure. Migration 0103 advances the complete
 default policy pin from 1.0.2 to 1.1.0.
 
@@ -181,5 +182,10 @@ label and every stored mapping are unchanged; a manual label wins.
 Limits: names are display text only and are never compared across cards or
 used to bind a card. Until the repair lane re-parses a card's newest credit
 artifact at 1.1.0 (or the next daily run is parsed), that card keeps the
-stored label. Production publication of the names after release is a
-separate verification step.
+stored label and, because migration 0103 pins the selected snapshot to 1.1.0
+exactly, has no selected credit snapshot: its credit rows are not listed (never
+shown as zero), and the reported state names the gap only per dataset
+(`no_complete_snapshot_before_cutoff` while no card has a 1.1.0 snapshot), not
+per card ([ADR 0124](../adr/0124-vpass-card-name-labels.md#consequences)).
+Production publication of the names after release is a separate verification
+step.
