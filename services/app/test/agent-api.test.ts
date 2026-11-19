@@ -609,7 +609,7 @@ describe("untrusted provider content (AT71)", () => {
         name: "kogane.store.read",
         required: ["page"],
         closed: false,
-        properties: ["kind", "page", "view"],
+        properties: ["detail", "kind", "page", "view"],
         annotations: readOnly,
       },
       {
