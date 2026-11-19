@@ -22,7 +22,8 @@ import type { SqlExecutor } from "../../../read-model/src/reader.ts";
  * run, then Authori before Revo (Revo names the card only when Authori has no
  * visible row, so no observation), then the lowest observation id. The rows
  * read are the requested references' own balance identity observations
- * (index `identity_observation_account`), never a catalogue scan.
+ * (index `identity_observation_account`), never a catalogue scan. "Current"
+ * is membership in the publication projection (docs/publication-gate.md).
  */
 export const VPASS_CARD_LABELS_SQL = `WITH requested AS MATERIALIZED (
   SELECT DISTINCT s.id reference_id FROM json_each(?1) j
@@ -38,7 +39,7 @@ export const VPASS_CARD_LABELS_SQL = `WITH requested AS MATERIALIZED (
   CROSS JOIN parse_runs p ON p.id=pub.parse_run_id
   CROSS JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
   CROSS JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
-  WHERE p.parser_name='vpass-credit-snapshot' AND p.status='ok'
+  WHERE p.parser_name='vpass-credit-snapshot'
    AND f.status='success' AND f.failure_count=0
    AND NOT EXISTS(SELECT 1 FROM eligible_identity_runs n
     CROSS JOIN identity_run_seals ns ON ns.identity_run_id=n.id
