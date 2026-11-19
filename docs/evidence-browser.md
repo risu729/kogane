@@ -167,7 +167,11 @@ shared CORE migrations, which are not counted), the source registry
 with artifact counts, every fetch run, and every parse run with its parser
 and version, status, warning count, and whether it is current or
 superseded. Answers: what is in here, where did it come from, and which
-parser versions are live.
+parser versions are live. On the central store the route's default is a
+summary that collapses the run lists by status, so the page asks for
+`/api/overview?detail=full`; the local store takes no parameter and answers
+in full ([ADR 0123](adr/0123-summary-detail-for-large-reads.md), amendment
+of 2026-11-19).
 
 ### Transactions — `/transactions`
 

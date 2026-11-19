@@ -780,12 +780,12 @@ the reader is the route's status with `{ error, refs? }`, as the Worker
 answers it, without the request id. A store read that fails is
 `503 catalogue_read_failed`, as on the route.
 
-Three reads answer one short line per row by default
+Four reads answer one short line per row by default
 ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)), on the route and
-the tool alike: `kogane.balances.read`, `kogane.schedules.read` and
-`kogane.collection-quality.read` (its summary and `view: "cells"`) take
-`detail`, `summary` (the default) or `full`, as does the route
-(`?detail=`). `full` is the answer these reads gave before 2026-11-19,
+the tool alike: `kogane.balances.read`, `kogane.schedules.read`,
+`kogane.collection-quality.read` (its summary and `view: "cells"`) and
+`kogane.store.read` with `page: "overview"` take `detail`, `summary` (the
+default) or `full`, as does the route (`?detail=`). `full` is the answer these reads gave before 2026-11-19,
 unchanged; the web UI asks for it. A `summary` is derived from that same
 answer by one function in `packages/application` or
 `packages/collection`, so the route and the tool give the same summary, and
@@ -818,7 +818,28 @@ repeat (`collection`, `source`, `account`, `instrument`, `metric`,
 `program` on `kogane.rewards.read`), on the route and the tool alike.
 `test/mcp-answer-size.test.ts` measures every read tool's default answer on
 a store at the scale of [issue 1414](https://github.com/risu729/kogane/issues/1414)
-and keeps the three summaries under the 8 KB a client shows.
+and keeps the summaries under the 8 KB a client shows, with the overview
+and the maintenance read (below) also at their realistic worst.
+
+The overview summary (`GET /api/overview`, `kogane.store.read`
+`{page: "overview"}`; ADR 0123, amendment of 2026-11-19) is
+`{ detail: "summary", counts, sources, fetchRuns, parseRuns, unitUpdates?,
+coverage }`, shaped by `overviewSummary`
+(`packages/application/src/query/overview-detail.ts`): the counts and the
+coverage as the full page has them; the sources as `{ sourceIds, artifacts }`,
+sources with the same artifact count sharing a line; `fetchRuns.byStatus`
+and `parseRuns.byStatus`, one line per status of the newest-500 window
+(`success`, `partial`; `ok`, `pending`, `error`) with its run count, its
+source or parser count, the parse lines' superseded, warning and
+unreadable-warning counts, and the newest run's ids and times;
+`fetchRuns.notSuccessful` and `parseRuns.notOk`, one line per source or
+parser and status that is not a success, with its run count and newest run;
+and `unitUpdates`, when the page has them, per source and dataset. It drops
+provider names, producers, session ids, parser versions, warnings and parse
+error text. `detail` on `meta` or `filter-options` is the route's
+`400 invalid_query`, and another value `400 invalid_detail` (the tool's
+schema: `400 invalid_request`). The parameter exists where a store advertises
+`sharedQuery`; the local store answers its full overview alone.
 
 Authorization, in order, after the Access check and the grant lookup: the
 tool's capability, else `403 unauthorized` (`capability:<name>`); then sources
@@ -1078,7 +1099,13 @@ none), so financial scope and maintenance scope never stand in for each other:
 It is listed on `/mcp` to a grant holding `schedules.read`, after the other
 tools, and served on `POST /api/agent/v1/schedules.maintenance.read` as well:
 one function answers both, so the two return the same object, each recorded as
-a `read` on its own path. Without the capability it is `403 unauthorized`; a
+a `read` on its own path. It takes `{ source?, detail?, offset? }`
+([ADR 0123](adr/0123-summary-detail-for-large-reads.md), amendment of
+2026-11-19): `detail: "full"` is the Processor's read as it is, and
+`detail: "summary"`, the default, is `maintenanceReadSummary` of it, 16 lines
+(jobs and rules) a page with `offset` the previous page's
+`coverage.nextOffset`; `offset` with `full` is `400 invalid_request`. The
+summary's fields are in [schedules](schedules.md#agent-maintenance-tools). Without the capability it is `403 unauthorized`; a
 source outside `scheduleSources`, existing or not, is
 `403 source_not_granted`. What it reads back is in
 [schedules](schedules.md#agent-maintenance-tools). `kogane.capabilities`
