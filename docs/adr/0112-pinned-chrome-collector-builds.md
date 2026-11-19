@@ -35,9 +35,9 @@ session logic and delayed attachment behavior must stay unchanged.
 ## Decision
 
 `tasks/_lib/pinned-chrome/manifest.json` pins Google Chrome Stable
-(first `157.0.8103.78-1`; the manifest names the current version), amd64, its exact official HTTPS URL, length and SHA-256. The
-committed public provenance snapshot carries Google's key, signed Release and
-Packages index. The signature was verified under Google's [documented primary
+(first `157.0.8103.78-1`; the manifest names the current version), amd64,
+its exact official HTTPS URL, length and SHA-256. The committed public
+provenance snapshot carries Google's key, signed Release and Packages index. The signature was verified under Google's [documented primary
 fingerprint](https://www.google.com/linuxrepositories/), and the Release's index
 hash/length and the downloaded package's hash/length matched. The package was
 inspected without executing its control scripts. This does not establish which
