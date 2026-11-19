@@ -55,6 +55,7 @@ import {
 } from "./card-binding";
 import { providerCount } from "./provider-count";
 import { logStatementCountDiagnostic } from "./statement-count-diagnostic";
+import { isFinalizedHeaderRow } from "./statement-rows";
 
 export const SOURCE = "vpass";
 /** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
@@ -192,7 +193,10 @@ type VpassMonthCoverage = "complete" | "stated_total_unverified" | "stated_total
 type VpassCardCoverage = VpassMonthCoverage | "statement_months_absent";
 
 interface MonthCheck {
-  readonly capturedRows: number;
+  /** The rows compared with the stated total. */
+  readonly countedRows: number;
+  /** A finalized page's `45` and `4C` header rows, which the stated total does not count. */
+  readonly excludedHeaderRows: number;
   readonly statedTotal: number | null;
   readonly coverage: VpassMonthCoverage;
 }
@@ -204,17 +208,21 @@ function objectField(value: unknown, key: string): unknown {
 }
 
 /**
- * Compare a month's captured rows with the provider's stated total, read from
- * the raw pages the walk kept. A finalized statement page
+ * Compare a month's rows with the provider's stated total, read from the raw
+ * pages the walk kept. A finalized statement page
  * (`WebMeisaiTopDisplayServiceBean`) states `webMeisaiTopK3Vo.allCnt`; a
  * customized page (`CustomizedMeisaiAnsDisplayServiceBean`) states `total`.
- * The rows are the pages' `meisaiList` entries, as the walk counts them. The
- * stated total is the last one the pages carry, which is the value the walk
- * itself stopped on; a page that carries the field unparsable leaves the
+ * The rows are the pages' `meisaiList` entries, except a finalized page's
+ * `45` and `4C` header rows, which `allCnt` does not count (ADR 0023,
+ * 2026-11-19 amendment): every other entry counts, whatever its shape, so a
+ * row of an unknown kind can only make a month disagree, never complete one.
+ * The stated total is the last one the pages carry, which is the value the
+ * walk itself stopped on; a page that carries the field unparsable leaves the
  * month unverified. Nothing else is inferred from the count.
  */
 function monthCheck(capture: VpassMonthCapture): MonthCheck {
-  let capturedRows = 0;
+  let countedRows = 0;
+  let excludedHeaderRows = 0;
   let statedTotal: number | null = null;
   let readable = true;
   for (const page of capture.pages) {
@@ -230,7 +238,12 @@ function monthCheck(capture: VpassMonthCapture): MonthCheck {
     const customized = objectField(content, "CustomizedMeisaiAnsDisplayServiceBean");
     const bean = finalized ?? customized;
     const rows = objectField(bean, "meisaiList");
-    if (Array.isArray(rows)) capturedRows += rows.length;
+    if (Array.isArray(rows)) {
+      const headers =
+        finalized !== undefined ? rows.filter((row) => isFinalizedHeaderRow(row)).length : 0;
+      excludedHeaderRows += headers;
+      countedRows += rows.length - headers;
+    }
     const stated =
       finalized !== undefined
         ? objectField(objectField(finalized, "webMeisaiTopK3Vo"), "allCnt")
@@ -243,10 +256,15 @@ function monthCheck(capture: VpassMonthCapture): MonthCheck {
   const coverage: VpassMonthCoverage =
     !readable || statedTotal === null
       ? "stated_total_unverified"
-      : capturedRows === statedTotal
+      : countedRows === statedTotal
         ? "complete"
         : "stated_total_mismatch";
-  return { capturedRows, statedTotal: readable ? statedTotal : null, coverage };
+  return {
+    countedRows,
+    excludedHeaderRows,
+    statedTotal: readable ? statedTotal : null,
+    coverage,
+  };
 }
 
 /** The card unit's coverage: `complete` only when every walked month is. */
@@ -275,7 +293,8 @@ function manifestBytes(
     summary[month] = {
       pages: capture.pages.length,
       transactions: capture.transactionCount,
-      capturedRows: check.capturedRows,
+      countedRows: check.countedRows,
+      excludedHeaderRows: check.excludedHeaderRows,
       statedTotal: check.statedTotal,
       coverage: check.coverage,
     };
@@ -566,13 +585,13 @@ export async function persistCardRun(
         (c) =>
           c.coverage === "stated_total_mismatch" &&
           c.statedTotal !== null &&
-          c.capturedRows < c.statedTotal,
+          c.countedRows < c.statedTotal,
       ).length,
       excessMonthCount: checks.filter(
         (c) =>
           c.coverage === "stated_total_mismatch" &&
           c.statedTotal !== null &&
-          c.capturedRows > c.statedTotal,
+          c.countedRows > c.statedTotal,
       ).length,
     },
   };

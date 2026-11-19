@@ -752,7 +752,7 @@ integer or a string of ASCII digits only); otherwise it is
 `partial`, which makes registration record the whole fetch run as `partial`,
 which neither identity nor the trusted card binding reads
 ([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented),
-[ADR 0026](adr/0026-collector-unit-coverage.md)). `manifest.json` records each month's `capturedRows`, `statedTotal`
+[ADR 0026](adr/0026-collector-unit-coverage.md)). `manifest.json` records each month's `countedRows` (the rows compared with the stated total: every row except a finalized page's `45` and `4C` header rows, which `allCnt` does not count, [ADR 0023's 2026-11-19 amendment](adr/0023-vpass-collector-card-binding.md#amendment-2026-11-19-allcnt-does-not-count-the-finalized-pages-header-rows)), `excludedHeaderRows`, `statedTotal`
 and closed `coverage` code (`complete`, `stated_total_unverified`,
 `stated_total_mismatch`) and the card's code, which the persist diagnostic
 also logs (`statement_months_absent` when no month was walked). The month

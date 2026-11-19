@@ -46,6 +46,10 @@ are separate claims. Historical acceptance records are linked from the
   2026-11-07 two of seven cards had ever reached `complete` and every card's
   newest run was `partial` (`stated_total_mismatch`), so five cards still show
   only importer-era statements and the others their newest successful capture.
+  The mismatch was the month check counting each finalized page's `45` and
+  `4C` header rows, which `allCnt` does not count; the check leaves them out
+  from the first run after the fix deploys
+  ([ADR 0023's 2026-11-19 amendment](adr/0023-vpass-collector-card-binding.md#amendment-2026-11-19-allcnt-does-not-count-the-finalized-pages-header-rows)).
   See [card identity](vpass-card-identity.md).
 - MyJCB partial/unsafe unit coverage is not promoted into complete statement
   evidence. GLOBAL PASS pagination support does not by itself prove that a

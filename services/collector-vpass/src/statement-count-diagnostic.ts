@@ -1,11 +1,13 @@
 // Counts-only investigation. No network, storage, identifiers or provider text
-// leave this reducer. It never supplies or modifies collection coverage.
+// leave this reducer. It never supplies or modifies collection coverage; the
+// row classifier it shares with the coverage check lives in `statement-rows.ts`.
 import { providerCount } from "./provider-count";
 import { logVpassDiagnostic } from "./log-diagnostic";
+import { finalizedRowKind, type FinalizedRowKind } from "./statement-rows";
 
 type Family = "finalized" | "customized" | "unknown";
 type Relation = "equal" | "short" | "excess" | "unverified";
-type RowKind = "45" | "4C" | "4K002" | "4K005" | "4K007" | "other";
+type RowKind = FinalizedRowKind;
 type Page = { readonly rawJson: string };
 type Month = { readonly pages: readonly Page[] };
 
@@ -37,19 +39,6 @@ function relation(rows: number, total: number | null): Relation {
       : rows < total
         ? "short"
         : "excess";
-}
-
-function rowKind(value: unknown): RowKind {
-  const row = object(value);
-  const data = row?.["data"];
-  if (!Array.isArray(data) || row?.["rowType"] !== data[0]) return "other";
-  if (data[0] === "45" && data.length === 5) return "45";
-  if (data[0] === "4C" && data.length === 4 && data[1] === "") return "4C";
-  if (data[0] !== "4K") return "other";
-  if (data[1] === "002" && data.length === 4) return "4K002";
-  if (data[1] === "005" && data.length === 11) return "4K005";
-  if (data[1] === "007" && data.length === 14) return "4K007";
-  return "other";
 }
 
 /** Caller supplies ordered pages grouped privately by month, for one card.
@@ -107,7 +96,7 @@ export function diagnoseStatementCounts(months: readonly Month[]) {
         if (rowBudget < 0) throw new Error("vpass_count_diagnostic_bounds");
         item.rows += rows.length;
         for (const row of rows)
-          item.rowKinds[pageFamily === "finalized" ? rowKind(row) : "other"] += 1;
+          item.rowKinds[pageFamily === "finalized" ? finalizedRowKind(row) : "other"] += 1;
       }
       const detail = object(finalized?.["webMeisaiTopK3Vo"]);
       const total = providerCount(

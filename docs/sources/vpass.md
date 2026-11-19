@@ -152,3 +152,20 @@ false login flags, unsuccessful result codes and malformed financial content
 remain rejected. This compatibility correction adds no new financial meaning,
 precision or provider-data catalogue coverage. Production publication after
 release remains a separate verification step.
+
+## 2026-11-19: What the finalized statement's `allCnt` counts
+
+Read from production, counts only: the counts-only shape diagnostic of the
+2026-11-18 21:00 UTC daily run, and a bounded projection over that run's
+stored finalized pages that returned per page only row-kind counts and their
+differences from `allCnt`. No value, text, month or identifier was retained.
+
+In all 30 finalized months of the 7 cards (one page each), `allCnt` equals the
+number of `4K/002`, `4K/005` and `4K/007` rows in `meisaiList`. Each page also
+carries exactly one `45` row and one `4C` row, which `allCnt` does not count.
+The collector's month check now leaves those two header kinds out
+([ADR 0023's 2026-11-19 amendment](../adr/0023-vpass-collector-card-binding.md#amendment-2026-11-19-allcnt-does-not-count-the-finalized-pages-header-rows)).
+What a `4K/002` row means is not observed; the statement parser keeps it as a
+non-transaction row. Months spanning several pages were not seen in this run,
+so whether the header rows repeat on later pages is unknown; the check
+excludes them wherever they appear.

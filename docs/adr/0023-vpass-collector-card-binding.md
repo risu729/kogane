@@ -657,3 +657,82 @@ runs ([ADR 0083](0083-release-vpass-collector-statement-pages.md)). Condition
 (b) is replaced by the per-run rule the run-scope eligibility already
 enforces: a run whose card unit is `partial` is never parsed, so it neither
 binds nor displaces the importer-era snapshot of its card-month.
+
+## Amendment (2026-11-19): `allCnt` does not count the finalized page's header rows
+
+Status: proposed (accepted when its PR merges).
+
+### Context
+
+Every Vpass card run since the collector took over registered its card unit
+`partial` with `stated_total_mismatch`, so under ADR 0083 no collector
+statement page was parsed after 2026-09-10 (fetch run 721), and the Vpass
+2026-11 statements, their `credit_statement_payment_amount` and payment dates
+never reached the read model ([#1415](https://github.com/risu729/kogane/issues/1415)).
+The schedule occurrence was `completed` every day.
+
+Read in production on 2026-11-19 (UTC), counts only:
+
+- The `vpass-statement-count-shapes` records of the 2026-11-18 21:00 UTC run
+  (Workers Logs): every finalized month of the 7 cards (30 months, each one
+  page) had raw rows in `excess` of `allCnt`, one `45` and one `4C` row per
+  page, a stable total and `allCnt` below the last cursor. Customized months
+  were not mismatched.
+- A bounded projection over that run's stored finalized pages of three cards
+  (the 13 months that the diagnostic could not settle because they hold
+  `4K/002` rows), run inside the Cloudflare API sandbox and returning only,
+  per page, the differences between `allCnt` and row-kind counts and the
+  row-kind counts themselves (no amount, text, month, card, run or object id
+  left it): `allCnt` equalled the number of `4K/002`, `4K/005` and `4K/007`
+  rows in every one, and each page carried exactly one `45` and one `4C` row.
+
+So across all 30 finalized months `allCnt` counts every row except the two
+header kinds. ADR 0023 option 8 counted every `meisaiList` entry, and the
+2026-10-10 amendment called counting only some rows a guess under ADR 0004;
+it is now observed, and the owner approved the rule on 2026-11-19 03:29 UTC.
+The two cards that had reached `complete` under the old rule (2026-11-07
+read) are consistent with it only if those runs held no finalized page with
+header rows; that was not re-read.
+
+### Decision
+
+- On a finalized page (`WebMeisaiTopDisplayServiceBean`) the month check does
+  not count the `45` row with 5 data cells and the `4C` row with 4 data cells
+  and an empty `data[1]`, the exact shapes the statement parser accepts as
+  headers. Every other entry counts, whatever its shape. Customized pages are
+  unchanged.
+- The row classifier lives in `services/collector-vpass/src/statement-rows.ts`
+  and the counts-only diagnostic uses the same one. The diagnostic itself
+  still decides nothing.
+- `manifest.json` names the compared count `countedRows` (was
+  `capturedRows`) and adds `excludedHeaderRows`. No reader parses these
+  fields; the schema version stays `vpass-worker-card-v1`, which also names
+  the binding's source namespace.
+
+### Consequences
+
+- A row of a kind `allCnt` might not count can only make a month disagree,
+  never complete one it would otherwise not; and the statement parser refuses
+  any row kind other than `45`, `4C`, `4K/002`, `4K/005` and `4K/007`, so a
+  new kind fails the parse instead of publishing a short month. The walk's
+  stop rule is unchanged, and a walk that stops early is still a mismatch.
+- From the first run after deploy, cards whose months all agree register
+  `complete`, their pages are parsed, and under ADR 0083 option 2 each
+  card-month switches at once from the importer-era snapshot to the
+  collector's: importer-era purchase events retire and are recognized again
+  under the collector's statement keys, and settlement candidates on importer
+  statements stop being current. An accepted settlement on an importer
+  statement stays `accepted` with the `statement_changed` blocker; moving it
+  is a withdrawal and a new acceptance through the change lifecycle.
+
+### Verification
+
+- `services/collector-vpass/test/shared-collection.test.ts`: header rows are
+  excluded on every page of a month, `4K/002` rows count, rows of any other
+  shape (including a malformed `45`) count, header-shaped rows on a customized
+  page count, the manifest names both counts, and the diagnostic still leaves
+  persistence and coverage unchanged.
+- In production after deploy: the next run's `vpass-shared-collection` lines
+  show `coverage: complete`, `kogane.collection-quality.read` shows current
+  2026-11 `statement-page` cells for the Vpass cards, and Vpass payables appear
+  in `kogane.reported-state.read`.

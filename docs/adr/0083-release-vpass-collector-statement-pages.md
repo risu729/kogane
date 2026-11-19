@@ -154,9 +154,10 @@ What a released page would do, read from the code:
   `partial` shows its newest successful capture, which can be weeks old, and
   five cards show only importer-era data. Nothing marks a snapshot as older
   than the card's last collection; the collection-quality read shows the
-  `partial` coverage per run. Fixing `stated_total_mismatch` is separate work
-  (the counts-only shape diagnostic of ADR 0023's 2026-10-10 amendment gives
-  its evidence once runs resume).
+  `partial` coverage per run. The cause of `stated_total_mismatch` was the
+  month check counting the finalized page's `45` and `4C` header rows, which
+  `allCnt` does not count; fixed in
+  [ADR 0023's 2026-11-19 amendment](0023-vpass-collector-card-binding.md#amendment-2026-11-19-allcnt-does-not-count-the-finalized-pages-header-rows).
 - **Settlements.** A collector statement observation is a different statement
   key (it carries the producer) for the same account and period. Once it has
   an owner, a settlement candidate built on the importer's statement for that

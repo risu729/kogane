@@ -208,14 +208,16 @@ describe("G1-02/G1-08/G1-16 a card run persists its sanitized set and then the t
           "202608": {
             pages: 1,
             transactions: 1,
-            capturedRows: 1,
+            countedRows: 1,
+            excludedHeaderRows: 0,
             statedTotal: 1,
             coverage: "complete",
           },
           "202609": {
             pages: 1,
             transactions: 1,
-            capturedRows: 1,
+            countedRows: 1,
+            excludedHeaderRows: 0,
             statedTotal: 1,
             coverage: "complete",
           },
@@ -585,6 +587,100 @@ describe("ADR 0023 option 8 / ADR 0026 the card unit is complete only when every
     expect(await cardUnit({ "202609": month(customized(2, "2")) })).toBe("complete");
   });
 
+  // The live finalized page's row kinds (ADR 0023, 2026-11-19 amendment): one
+  // `45` and one `4C` header row per page, which `allCnt` does not count, and
+  // `4K/002`, `4K/005` and `4K/007` rows, which it does.
+  const header45 = { rowType: "45", data: ["45", "SYNTHETIC", "", "", ""] };
+  const header4C = { rowType: "4C", data: ["4C", "", "SYNTHETIC", ""] };
+  const row002 = { rowType: "4K", data: ["4K", "002", "", "SYNTHETIC"] };
+  const row005 = { rowType: "4K", data: ["4K", "005", ...Array(9).fill("SYNTHETIC")] };
+  const row007 = { rowType: "4K", data: ["4K", "007", ...Array(12).fill("SYNTHETIC")] };
+  const finalizedRows = (rows: unknown[], allCnt: string) =>
+    envelope({
+      WebMeisaiTopDisplayServiceBean: {
+        meisaiList: rows,
+        webMeisaiTopK3Vo: { allCnt, nextPageRow: String(rows.length + 1) },
+      },
+    });
+
+  test("a finalized page's 45 and 4C header rows are not counted against allCnt", async () => {
+    expect(
+      await cardUnit({
+        "202609": month(finalizedRows([header45, header4C, row005, row007, row005], "3")),
+        "202608": month(finalizedRows([header45, header4C, row002, row005, row002], "3")),
+        "202607": month(finalizedRows([header45, header4C], "0")),
+      }),
+    ).toBe("complete");
+  });
+
+  test("header rows on every page of a two-page month are excluded on each page", async () => {
+    expect(
+      await cardUnit({
+        "202609": month(
+          finalizedRows([header45, header4C, row005, row005], "3"),
+          finalizedRows([header45, header4C, row007], "3"),
+        ),
+        "202608": month(
+          finalizedRows([header45, header4C, row005, row005], "3"),
+          finalizedRows([row007], "3"),
+        ),
+      }),
+    ).toBe("complete");
+  });
+
+  test("a 4K/002 row counts, so leaving it out of allCnt is a mismatch", async () => {
+    expect(
+      await cardUnit({ "202609": month(finalizedRows([header45, header4C, row002, row005], "1")) }),
+    ).toBe("partial");
+  });
+
+  test("a row of any other shape still counts, so it can only make a month disagree", async () => {
+    const malformed45 = { rowType: "45", data: ["45", "SYNTHETIC"] };
+    const unknown = { rowType: "4Z", data: ["4Z", "SYNTHETIC"] };
+    for (const extra of [malformed45, unknown, { amount: 1 }])
+      expect(
+        await cardUnit({
+          "202609": month(finalizedRows([header45, header4C, extra, row005], "1")),
+        }),
+      ).toBe("partial");
+  });
+
+  test("header-shaped rows on a customized page count as rows", async () => {
+    expect(
+      await cardUnit({
+        "202609": month(
+          envelope({
+            CustomizedMeisaiAnsDisplayServiceBean: {
+              meisaiList: [header45, header4C, row005],
+              total: 1,
+              pageFlg: "3",
+            },
+          }),
+        ),
+      }),
+    ).toBe("partial");
+  });
+
+  test("the manifest names the counted and the excluded rows", async () => {
+    const plan = await vpassCardRunPlan(
+      run({ months: { "202609": month(finalizedRows([header45, header4C, row005], "1")) } }),
+    );
+    expect(plan.run.units[0]!.coverageStatus).toBe("complete");
+    const summary = plan.artifacts.find((entry) => entry.artifactKey === "manifest.json")!;
+    if (summary.body.kind !== "bytes") throw new Error("manifest_not_bytes");
+    const body = JSON.parse(new TextDecoder().decode(summary.body.bytes)) as {
+      months: Record<string, unknown>;
+    };
+    expect(body.months["202609"]).toEqual({
+      pages: 1,
+      transactions: 0,
+      countedRows: 1,
+      excludedHeaderRows: 2,
+      statedTotal: 1,
+      coverage: "complete",
+    });
+  });
+
   test("diagnostics distinguish short, excess and unverified months without leaking month or row values", async () => {
     const outcome = await persistCardRun(
       new FakeR2Bucket(),
@@ -656,7 +752,8 @@ describe("statement shape diagnostics do not change persistence or coverage", ()
       const page = envelope({
         WebMeisaiTopDisplayServiceBean: {
           meisaiList: [{ rowType: "45", data: ["45", "", "", "", ""] }, detailRow],
-          webMeisaiTopK3Vo: { allCnt: "1", nextPageRow: "2" },
+          // One detail row against a stated total of two: short, so partial.
+          webMeisaiTopK3Vo: { allCnt: "2", nextPageRow: "3" },
         },
       });
       const card = run({
@@ -715,8 +812,8 @@ describe("statement shape diagnostics do not change persistence or coverage", ()
             status: "available",
             report: {
               finalized: {
-                rawRowsVersusLastTotal: { excess: 1 },
-                detailRowsVersusLastTotal: { equal: 1 },
+                rawRowsVersusLastTotal: { equal: 1 },
+                detailRowsVersusLastTotal: { short: 1 },
               },
             },
           });

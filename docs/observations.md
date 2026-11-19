@@ -1210,9 +1210,10 @@ one exact reader, and the synthetic fixtures state `allCnt` as a string and
 `pageNo`, `lastPage`, `rowCnt`, `limitCnt`, `dispCnt`, `prevPageRow` and
 `responseCnt`, which the walk therefore does not read; the type and meaning
 of `nextPageRow`, which the walk compares with `allCnt` and sends back as the
-next page's cursor, as it did before; and whether any live month logs
-`stated_total_unverified` or `stated_total_mismatch`, which the next
-collection's persist diagnostic shows.
+next page's cursor, as it did before. Live months did log
+`stated_total_mismatch`: every finalized page carries a `45` and a `4C` header
+row that `allCnt` does not count, and since 2026-11-19 the month check leaves
+them out ([ADR 0023's 2026-11-19 amendment](adr/0023-vpass-collector-card-binding.md#amendment-2026-11-19-allcnt-does-not-count-the-finalized-pages-header-rows)).
 
 ## SBI Shinsei stored-capture shapes (activity parser 0.1.2, board parser 1.0.1)
 
