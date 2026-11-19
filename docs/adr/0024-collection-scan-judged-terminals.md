@@ -634,7 +634,15 @@ never continued.
   runs are continued from the next tick on.
 - Each such run costs three operations of the invocation's 500 on every
   tick, and shares the 25 pending runs read with the runs whose terminal is
-  missing. **Open limit:** when more than 20 of the 25 oldest pending runs are
+  missing. Any answer from a row costs at most five, as it does in the
+  listing (four for an unreadable terminal already recorded, five for a
+  retryable refusal within its interval), so the continuations answered from
+  rows cost at most 125 of the 500 per tick, the same bound as a listed page
+  of 25 judged terminals; 25 digest conflicts measure 75 (50 D1 statements and
+  25 R2 reads). Every registration still starts only while its reserve fits
+  the invocation's budget (ADR 0010), so the registrations of the five
+  continuations that spend one and of the listing stay within the 500.
+  **Open limit:** when more than 20 of the 25 oldest pending runs are
   missing or answered from a row, fewer than five continuations do new work,
   as the amendment of 2026-11-08 states for missing terminals alone.
 - **Open limit:** the old pending row is never closed. It stays in the health
@@ -659,5 +667,17 @@ never continued.
 - "a continuation answered from its row spends none of a single
   continuation": with one continuation, the run after a conflict is continued
   and seals on the second tick (it failed before the change).
+- "a continuation answered already_registered spends none of a single
+  continuation": the queue registers a pending run between the pending read
+  and its continuation (simulated at the continuation's terminal read); with
+  one continuation, the run after it is continued and seals on the same tick
+  (`continued: 2, alreadyRegistered: 1, registered: 1`; it failed before the
+  change).
+- "25 pending runs answered from their rows cost three operations each, and a
+  26th is not read": the worst case at the deployed bounds. Five ticks record
+  five conflicts each; the sixth answers all 25 from their rows
+  (`continued: 25, alreadyJudged: 25`) for 50 D1 statements and 25 R2
+  operations, writes no stage row, and does not read the 26th pending run
+  (it failed before the change).
 
 The existing collection scan suites pass unchanged.

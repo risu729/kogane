@@ -942,6 +942,91 @@ test("a continuation answered from its row spends none of a single continuation"
   expect(digestConflicts(harness)).toBe(1);
 });
 
+test("a continuation answered already_registered spends none of a single continuation", async () => {
+  // The other answer from a row: the queue registers a pending run between
+  // the scan's pending read and its continuation. Simulated by registering
+  // run-001 in full when the continuation first reads its terminal.
+  const harness = collectionHarness();
+  await persistPending(harness, "run-001");
+  await persistPending(harness, "run-002");
+  walkPast(harness, "run-002");
+  const at = START_MS + HOUR_MS;
+  const raceKey = terminalKey(SOURCE, "run-001");
+  let raced = false;
+  const evidence = new Proxy(harness.bucket, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property, target);
+      if (typeof value !== "function") return value;
+      if (property !== "get") return value.bind(target);
+      return async (key: string) => {
+        if (!raced && key === raceKey) {
+          raced = true;
+          const queued = await registerCollectionRun(
+            harness.env,
+            { source: SOURCE, runId: "run-001" },
+            { now: () => new Date(at) },
+          );
+          expect(queued).toMatchObject({ outcome: "registered" });
+        }
+        return target.get(key);
+      };
+    },
+  });
+  const summary = await collectionScan(
+    { ...harness.env, EVIDENCE: evidence as unknown as CollectionHarness["env"]["EVIDENCE"] },
+    { budget: new RegistrationBudget(), now: () => new Date(at), maxContinuations: 1 },
+  );
+  expect(raced).toBe(true);
+  // Before the amendment of 2026-11-19: `continued: 1, registered: 0`.
+  expect(summary).toMatchObject({
+    continued: 2,
+    alreadyRegistered: 1,
+    alreadyJudged: 0,
+    registered: 1,
+    pending: 0,
+  });
+  expect(sealed(harness)).toBe(2);
+});
+
+test("25 pending runs answered from their rows cost three operations each, and a 26th is not read", async () => {
+  // The worst case of the amendment of 2026-11-19 at the deployed bounds:
+  // every one of the 25 pending runs read is answered from its row, so the
+  // continuations cost 25 terminal reads and 50 statements, 75 of the
+  // invocation's 500, and write nothing. A 26th pending run is not read.
+  const harness = collectionHarness();
+  for (let n = 1; n <= 25; n += 1) await pendingWithOtherBytes(harness, runId(n));
+  await persistPending(harness, "run-026");
+  // Five first verdicts per tick, each spending one of the five continuations;
+  // the conflicts recorded on earlier ticks are answered and spend none.
+  // (`blocked` counts both; `alreadyJudged` the answers alone.)
+  for (let i = 0; i < 5; i += 1) {
+    walkPast(harness, "run-026");
+    const summary = await tick(harness, START_MS + HOUR_MS + i * 5 * 60 * 1000);
+    expect(summary).toMatchObject({
+      continued: 5 * (i + 1),
+      blocked: 5 * (i + 1),
+      alreadyJudged: 5 * i,
+    });
+    expect(digestConflicts(harness)).toBe(5 * (i + 1));
+  }
+  expect(digestConflicts(harness)).toBe(25);
+
+  walkPast(harness, "run-026");
+  const stagesBefore = stageRows(harness);
+  const budget = new RegistrationBudget();
+  const worst = await tick(harness, START_MS + 2 * HOUR_MS, { budget });
+  expect(worst).toMatchObject({
+    continued: 25,
+    alreadyJudged: 25,
+    blocked: 25,
+    registered: 0,
+    budgetExhausted: false,
+  });
+  expect({ ...budget.meter }).toEqual({ d1Statements: 50, d1Batches: 0, r2Operations: 25 });
+  expect(stageRows(harness)).toBe(stagesBefore);
+  expect(sealed(harness)).toBe(0);
+});
+
 test("a pending run whose continuation throws still spends a continuation", async () => {
   // The other open limit of the amendment of 2026-11-08: a throw records
   // nothing either, but unlike a missing terminal it is not a one-read cost,

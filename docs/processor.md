@@ -388,8 +388,15 @@ nothing written, and none of the five spent, so the runs after it are
 continued in its place. The same holds for any continuation CORE answers from
 its row (`already_registered`, for a run the queue registered between the
 pending read and the continuation). Such runs share the 25 pending runs read
-with the missing ones above. **Open limit:** the pending row of such a run is
-never closed; it stays in `registration.pending` and is read on every tick.
+with the missing ones above. An answer from a row costs at most five
+operations (§2: four for an unreadable terminal already recorded, five
+for a retryable refusal within its interval), so the continuations answered
+from rows cost at most 125 of the 500 per tick, as a listed page of 25 judged
+terminals does; 25 digest conflicts measure 75 (50 D1 statements, 25 R2
+reads). Every registration still starts only while its reserve fits the
+budget, so the registrations of the five continuations that spend one and of
+the listing stay within the 500. **Open limit:** the pending row of such a run
+is never closed; it stays in `registration.pending` and is read on every tick.
 A pending run whose continuation throws on every tick records nothing either,
 and still spends one (the amendment of 2026-11-08 keeps it bounded by the
 five, because a throw can come after any number of operations).
