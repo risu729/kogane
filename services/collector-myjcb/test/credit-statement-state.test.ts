@@ -1071,8 +1071,14 @@ describe("a refused past-month response names the check that refused it", () => 
       const error = await collectCredit(
         {
           ...inner,
-          postCreditPastJson: async () =>
-            response(typeof past === "string" ? past : JSON.stringify(past), "application/json"),
+          postCreditPastJson:
+            typeof past === "function"
+              ? (past as CreditReadClient["postCreditPastJson"])
+              : async () =>
+                  response(
+                    typeof past === "string" ? past : JSON.stringify(past),
+                    "application/json",
+                  ),
         },
         "x",
       ).then(
@@ -1153,6 +1159,24 @@ describe("a refused past-month response names the check that refused it", () => 
     expect(lines).toEqual([
       '{"event":"myjcb-credit-past-months-refused","reason":"schedule_overlap","itemCount":2,"overlapPositions":[8],"schedulePositions":[8],"menuMonthPositions":[0]}',
     ]);
+  });
+
+  test("a body that is not UTF-8 is refused as utf8_invalid", async () => {
+    const { error, lines } = await refusal(async () => ({
+      ...response("", "application/json"),
+      body: new Uint8Array([0x7b, 0xff, 0x7d]).buffer,
+    }));
+    expect(error).toMatchObject({ code: "collect-credit-past-months" });
+    expect(lines).toEqual(['{"event":"myjcb-credit-past-months-refused","reason":"utf8_invalid"}']);
+  });
+
+  test("an error that is not a refusal is logged as unclassified, without its message", async () => {
+    const { error, lines } = await refusal(async () => {
+      throw new TypeError("synthetic failure text");
+    });
+    expect(error).toMatchObject({ code: "collect-credit-past-months" });
+    expect(connectionStopCode(error)).toBe("credit_past_months");
+    expect(lines).toEqual(['{"event":"myjcb-credit-past-months-refused","reason":"unclassified"}']);
   });
 
   test("an accepted response logs no refusal", async () => {

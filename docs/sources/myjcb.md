@@ -1046,11 +1046,13 @@ The read now logs `myjcb-credit-past-months-refused` with one closed
 `reason` before it stops: `request_invalid`, `http_status` (with `status`),
 `content_type_not_json` (with `contentTypeFamily`: `empty`, `html`, `text`
 or `other`), `response_oversize`, `utf8_invalid`, `json_invalid`,
-`result_missing`, `error_reported` (with `errIdType`), `info_missing`,
-`item_malformed`, `month_out_of_range`, `month_duplicate`, `flag_malformed`,
-`settlement_malformed` (with the item's position and the JavaScript type of
-the refused field), `schedule_overlap` (with the overlapping, schedule and
-menu month positions), or `unclassified` for any other error. It carries
-counts, `detailMonth` positions and type names only, never the response, an
-error id or a label. The checks themselves are unchanged; the fix follows
+`result_missing` (with `topLevelType`), `error_reported` (with `errIdType`),
+`info_missing` (with `infoType`), `item_malformed`, `month_out_of_range`,
+`flag_malformed` or `settlement_malformed` (each with `itemCount`, the item's
+position and the JavaScript type of the refused value), `month_duplicate`
+(with `itemCount`, the item's position and the repeated `detailMonth`),
+`schedule_overlap` (with `itemCount` and the overlapping, schedule and menu
+month positions), or `unclassified` for any other error. It carries counts,
+`detailMonth` positions and type names only, never the response, an error id
+or a label. The checks themselves are unchanged; the fix follows
 once a run names the reason.
