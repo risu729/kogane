@@ -377,6 +377,65 @@ describe("the instrument_auto_adoption lane", () => {
     ).toBe(1);
   });
 
+  test("each reference the guard reads stops the write alone, and nothing else does", async () => {
+    // One `listed_as` row per case, recorded after the read, whose other end
+    // is a synthetic identifier or instrument the pair does not involve: the
+    // target instrument, the subject's own instrument, the anchor and the
+    // subject each stop the write on their own; a row naming none of them, or
+    // another relation kind naming the subject, changes nothing.
+    const cases = [
+      { name: "from the target instrument", from: "target", to: "identifier:synthetic-other" },
+      { name: "from the subject's instrument", from: "own", to: "identifier:synthetic-other" },
+      { name: "to the anchor", from: "instrument:synthetic-other", to: "anchor" },
+      { name: "to the subject", from: "instrument:synthetic-other", to: "subject" },
+      { name: "unrelated", from: "instrument:synthetic-other", to: "identifier:synthetic-other" },
+      { name: "another kind", kind: "same_underlying", from: "target", to: "subject" },
+    ] as const;
+    const outcomes: Record<string, unknown> = {};
+    for (const [index, entry] of cases.entries()) {
+      const { w } = await sbiWorld([{ code: "0Z0A" }]);
+      const [planned] = await queryInstrumentAutoAdoptions(w.sql);
+      const own = (
+        w.db
+          .query("SELECT instrument_id FROM current_instrument_mappings WHERE identifier_id=?")
+          .get(planned!.subjectIdentifierId) as { instrument_id: string }
+      ).instrument_id;
+      const ref = (end: string) =>
+        ({
+          target: `instrument:${planned!.targetInstrumentId}`,
+          own: `instrument:${own}`,
+          anchor: `identifier:${planned!.anchorIdentifierId}`,
+          subject: `identifier:${planned!.subjectIdentifierId}`,
+        })[end] ?? end;
+      w.db.run(
+        `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+         VALUES(?,'relation',?,1,'propose','ai','mcp-client:synthetic',NULL,'synthetic proposal','[]',NULL,NULL,'2026-11-08T03:00:00.000Z')`,
+        [`dr_case_${String(index)}`, `rel_case_${String(index)}`],
+      );
+      w.db.run(
+        `INSERT INTO entity_relations(id,kind,from_ref,to_ref,valid_from,valid_to,status,decision_revision_id,evidence_refs_json,created_at)
+         VALUES(?,?,?,?,NULL,NULL,'proposed',?,'[]','2026-11-08T03:00:00.000Z')`,
+        [
+          `rel_case_${String(index)}`,
+          "kind" in entry ? entry.kind : "listed_as",
+          ref(entry.from),
+          ref(entry.to),
+          `dr_case_${String(index)}`,
+        ],
+      );
+      const outcome = await adoptInstrument(sqliteD1(w.db) as unknown as D1Database, planned!);
+      outcomes[entry.name] = outcome.ok ? "adopted" : outcome.error;
+    }
+    expect(outcomes).toEqual({
+      "from the target instrument": "target_missing",
+      "from the subject's instrument": "target_missing",
+      "to the anchor": "target_missing",
+      "to the subject": "target_missing",
+      unrelated: "adopted",
+      "another kind": "adopted",
+    });
+  });
+
   test("the adoption guard reads entity_relations by key only", () => {
     const w = new World();
     const plan = (
