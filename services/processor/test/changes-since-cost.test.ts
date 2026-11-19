@@ -4,12 +4,18 @@
 // past every walk. The digest answers the same on both, and each query reads
 // the same number of rows on both, so what it reads is bounded by its walks,
 // not by the store. It also runs every query on D1 itself, whose limits (five
-// terms in a compound SELECT) bun:sqlite does not have. Every value is
-// synthetic.
+// terms in a compound SELECT) bun:sqlite does not have, and reads D1's own
+// plans without table statistics. Every value is synthetic.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import type { Grant } from "../../../packages/application/src/index.ts";
-import { readChangesSince } from "../../../packages/application/src/query/changes-since.ts";
+import {
+  CHANGES_SINCE_EVENTS_SQL,
+  CHANGES_SINCE_PARSES_SQL,
+  CHANGES_SINCE_RUNS_SQL,
+  CHANGES_SINCE_SOURCES_SQL,
+  readChangesSince,
+} from "../../../packages/application/src/query/changes-since.ts";
 import { ChangesWorld } from "../../../packages/application/test/changes-since-world.ts";
 import {
   CHANGES_SINCE_EVENT_WALK,
@@ -43,7 +49,7 @@ beforeAll(() => {
       modules: true,
       script: "export default {fetch(){return new Response('local')}}",
       compatibilityDate: "2026-09-07",
-      d1Databases: ["SMALL", "LARGE"],
+      d1Databases: ["SMALL", "LARGE", "PLANS"],
     }),
   );
 });
@@ -182,3 +188,81 @@ test("each query reads the same rows over a history three times larger, and answ
   expect(answer.sources.every((line) => line.cut.length === 0)).toBe(true);
   expect(answer.events).toMatchObject({ complete: true, new: [1, 0, 0, 0, 0, 0, 0, 0] });
 }, 300_000);
+
+test("D1 plans every query by key or one index range, with no table statistics", async () => {
+  const db = await mf.getD1Database("PLANS");
+  for (const file of migrationFiles(CORE_MIGRATIONS_URL)) {
+    const statements = splitSqlStatements(migrationSql(CORE_MIGRATIONS_URL, file));
+    await db.batch(statements.map((sql) => db.prepare(sql)));
+  }
+  expect(
+    await db
+      .prepare("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'sqlite_stat%'")
+      .first<number>("n"),
+  ).toBe(0);
+  // The relations a plan may scan whole: its own CTEs and subqueries, the
+  // request's source list, and the two rowid walks under their LIMIT (`p`,
+  // parse runs; `e`, event revisions).
+  const allowed = new Set(["b", "f", "c", "w", "r", "o", "fresh", "recorded"]);
+  const since = iso(SINCE_MS);
+  for (const [name, text, binds, walks, required] of [
+    ["sources", CHANGES_SINCE_SOURCES_SQL, ["", 201], [], ["sqlite_autoindex_sources_1 (id>?)"]],
+    [
+      "runs",
+      CHANGES_SINCE_RUNS_SQL,
+      ['["vpass"]', SINCE_MS, CHANGES_SINCE_RUN_WALK, 20_001],
+      [],
+      [
+        "idx_fetch_runs_source (source_id=?)",
+        "idx_fetch_runs_source (source_id=? AND id>?)",
+        "idx_fetch_artifacts_run_role (fetch_run_id=?)",
+        "idx_fetch_run_reports_one_terminal (fetch_run_id=?)",
+      ],
+    ],
+    [
+      "parses",
+      CHANGES_SINCE_PARSES_SQL,
+      ['["vpass"]', since, CHANGES_SINCE_PARSE_WALK, 50_001],
+      ["p"],
+      [
+        "SEARCH a USING INTEGER PRIMARY KEY (rowid=?)",
+        "published_parse_runs_run (parse_run_id=?)",
+        "idx_txn_obs_parse_run (parse_run_id=?)",
+        "idx_bal_obs_parse_run (parse_run_id=?)",
+        "idx_pos_obs_parse_run (parse_run_id=?)",
+        "idx_val_obs_parse_run (parse_run_id=?)",
+      ],
+    ],
+    ["events", CHANGES_SINCE_EVENTS_SQL, [since, CHANGES_SINCE_EVENT_WALK], ["e"], []],
+  ] as const) {
+    const steps = (
+      await db
+        .prepare(`EXPLAIN QUERY PLAN ${text}`)
+        .bind(...binds)
+        .all<{ detail: string }>()
+    ).results.map((row) => row.detail);
+    const scans = steps
+      // The request's source list (json_each) is a virtual table.
+      .filter(
+        (detail) =>
+          detail.startsWith("SCAN ") &&
+          !detail.startsWith("SCAN CONSTANT ROW") &&
+          !detail.includes(" VIRTUAL TABLE "),
+      )
+      .map((detail) => detail.slice(5).split(" ")[0]!)
+      .filter((target) => !allowed.has(target) && !target.startsWith("(subquery-"));
+    // Each rowid walk is scanned twice: the walk and the row just past it.
+    expect({ name, scans }).toEqual({ name, scans: walks.flatMap((walk) => [walk, walk]) });
+    for (const index of required)
+      expect({ name, index, used: steps.some((detail) => detail.includes(index)) }).toEqual({
+        name,
+        index,
+        used: true,
+      });
+    // Only the parses' newest-per-source window sorts, over its own CTE.
+    expect({
+      name,
+      sorted: steps.filter((detail) => detail.includes("TEMP B-TREE FOR ORDER BY")).length,
+    }).toEqual({ name, sorted: name === "parses" ? 1 : 0 });
+  }
+}, 120_000);
