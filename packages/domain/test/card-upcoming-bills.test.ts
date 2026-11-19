@@ -171,6 +171,94 @@ describe("covers", () => {
     expect(run(599)).toBe("no");
   });
 
+  test("a refund statement is not a bill: it never offsets another card's bill to the account", () => {
+    const answer = upcomingCardBills({
+      date: DATE,
+      cards: [
+        card("refund", bill("2098-03-26", yen(-5000)), "a"),
+        card("charge", bill("2098-03-26", yen(30000)), "a"),
+      ],
+      accounts: new Map([["entity:a", balance(yen(26000))]]),
+    });
+    // The bank debits 30,000; summing the refund in would read 25,000 and `yes`.
+    expect(answer.bills.map((item) => item.card.sourceAccount)).toEqual(["vpass:charge"]);
+    expect(answer.byDebitAccount).toHaveLength(1);
+    expect(answer.byDebitAccount[0]).toMatchObject({
+      bills: 1,
+      cardBills: { value: "30000", unit: "JPY", status: "exact" },
+      covers: "no",
+      reasons: [],
+    });
+    expect(answer.notListed).toEqual([
+      {
+        card: "vpass:refund",
+        source: "vpass",
+        reason: "statement_total_refund_or_zero",
+        last: { period: "2098-03", debitDate: "2098-03-26" },
+      },
+    ]);
+  });
+
+  test("a zero total is not a bill; a positive total still is", () => {
+    const answer = upcomingCardBills({
+      date: DATE,
+      cards: [
+        card("zero", bill("2098-03-26", yen(0)), "a"),
+        card("charge", bill("2098-03-27", yen(700)), "a"),
+      ],
+      accounts: new Map([["entity:a", balance(yen(1000))]]),
+    });
+    expect(answer.bills.map((item) => [item.card.sourceAccount, item.amount])).toEqual([
+      ["vpass:charge", { value: "700", unit: "JPY", status: "exact" }],
+    ]);
+    // No line for the zero statement's due date: only the bill's own.
+    expect(
+      answer.byDebitAccount.map((line) => [
+        line.debitDate,
+        line.bills,
+        line.cardBills,
+        line.covers,
+      ]),
+    ).toEqual([["2098-03-27", 1, { value: "700", unit: "JPY", status: "exact" }, "yes"]]);
+    expect(answer.notListed).toEqual([
+      {
+        card: "vpass:zero",
+        source: "vpass",
+        reason: "statement_total_refund_or_zero",
+        last: { period: "2098-03", debitDate: "2098-03-26" },
+      },
+    ]);
+  });
+
+  test("a refund leaves, but a total that is not exact stays a bill, its sign unknown", () => {
+    const answer = upcomingCardBills({
+      date: DATE,
+      cards: [
+        card("refund", bill("2098-03-26", yen(-100)), "a"),
+        card(
+          "unread",
+          bill("2098-03-26", absentQuantity("JPY", "unparsed", "stored:unparsed")),
+          "a",
+        ),
+      ],
+      accounts: new Map([["entity:a", balance(yen(1_000_000))]]),
+    });
+    expect(answer.notListed.map((item) => [item.card, item.reason])).toEqual([
+      ["vpass:refund", "statement_total_refund_or_zero"],
+    ]);
+    expect(answer.bills.map((item) => [item.card.sourceAccount, item.amount])).toEqual([
+      ["vpass:unread", { unit: "JPY", status: "unparsed", reason: "stored:unparsed" }],
+    ]);
+    expect(answer.byDebitAccount).toEqual([
+      expect.objectContaining({
+        bills: 1,
+        cardBills: { unit: "JPY", status: "missing", reason: "bill_not_exact" },
+        covers: "unknown",
+        reasons: ["bill_not_exact"],
+      }),
+    ]);
+  });
+
   test("a bill that is not exact makes the line's sum not exact and covers unknown", () => {
     const answer = upcomingCardBills({
       date: DATE,

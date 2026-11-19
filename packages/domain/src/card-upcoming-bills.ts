@@ -9,13 +9,16 @@
 // cannot.
 //
 // - A bill is a card's newest current statement whose provider due date is
-//   on or after the date (Asia/Tokyo). Any other card is listed in
-//   `notListed` with a closed reason, never as a zero bill (INV05).
+//   on or after the date (Asia/Tokyo) and whose total is not an exact zero
+//   or below. Any other card is listed in `notListed` with a closed reason,
+//   never as a zero bill (INV05). A refund total is never summed into a
+//   line: it would offset other cards' bills the bank debits in full.
 // - Amounts are added with `sumQuantities` and compared with
 //   `compareQuantities`: exact decimals only, one unit only (INV03). A total
 //   or a balance that is not exact makes `covers` `unknown`, never a guess.
 // - Nothing here writes, adopts or proposes anything (INV07): `covers`
 //   compares the bills Kogane knows with what the bank last reported.
+import { refundOrZeroTotal } from "./card-settlement-unmatched.ts";
 import { captureDate } from "./reported-state.ts";
 import {
   compareQuantities,
@@ -37,13 +40,20 @@ export const CARD_UPCOMING_BILLS_SCHEMA = "kogane-card-upcoming-bills-v1";
  *   provider due date, so whether it is still to be paid is unknown;
  * - `no_statement_due`: its newest statement was due before the date;
  * - `statement_settled`: its newest statement is due on or after the date,
- *   but an accepted settlement already pays it.
+ *   but an accepted settlement already pays it;
+ * - `statement_total_refund_or_zero`: its newest statement is due on or after
+ *   the date with an exact total of zero or below (a refund, or nothing to
+ *   pay; the code of `card-settlement-unmatched.ts`). Nothing is debited for
+ *   it, and whether the bank credits a refund is not modelled, so it never
+ *   offsets another card's bill. A total that is not exact has no known sign
+ *   and stays a bill (`bill_not_exact`).
  */
 export const NOT_LISTED_REASONS = [
   "no_statement",
   "payment_date_not_published",
   "no_statement_due",
   "statement_settled",
+  "statement_total_refund_or_zero",
 ] as const;
 export type NotListedReason = (typeof NOT_LISTED_REASONS)[number];
 
@@ -184,6 +194,8 @@ function billOrReason(
   if (statement.paymentDate < date) return { bill: false, reason: "no_statement_due" };
   if (statement.period !== null && input.settledPeriods.includes(statement.period))
     return { bill: false, reason: "statement_settled" };
+  if (refundOrZeroTotal(statement.amount))
+    return { bill: false, reason: "statement_total_refund_or_zero" };
   return { bill: true };
 }
 

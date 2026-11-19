@@ -685,8 +685,10 @@ Output `kogane-card-upcoming-bills-v1` for `date` (today, Asia/Tokyo):
   `["other_debits_not_modelled"]`: only known card bills are compared with
   the provider's balance, so `yes` is not a forecast.
 - `notListed`: every other card, with `no_statement`,
-  `payment_date_not_published`, `no_statement_due` or `statement_settled`,
-  and its last statement's period and due date.
+  `payment_date_not_published`, `no_statement_due`, `statement_settled` or
+  `statement_total_refund_or_zero` (an exact total of zero or below, never
+  netted against another card's bill), and its last statement's period and
+  due date.
 - `cardsMax` and `cardsTruncated` as above.
 
 Ten cards are about 5.7 KB. Each served agent call records one audit read

@@ -398,6 +398,55 @@ describe("covers", () => {
     });
   });
 
+  test("a refund statement to bank B never offsets card-002's bill", async () => {
+    // card-007, debited from bank B (accepted 08-26), has a September refund
+    // of 15,000 due 09-26: netted in, card-002's 20,000 would read 5,000 and
+    // fit bank B's 10,000.
+    const store = scenario((store) => {
+      const august = statement(store, {
+        card: "vpass:card-007",
+        period: "2026-08",
+        paymentDate: "2026-08-26",
+        minor: 1000,
+      });
+      store.identify(august, "vpass", "acct-card-007", "provider-local");
+      accept(store, august, {
+        card: "vpass:card-007",
+        period: "2026-08",
+        bank: BANK_B,
+        debitDate: "2026-08-26",
+      });
+      const refund = statement(store, {
+        card: "vpass:card-007",
+        period: "2026-09",
+        paymentDate: "2026-09-26",
+        minor: -15_000,
+      });
+      store.identify(refund, "vpass", "acct-card-007", "provider-local");
+      balances(store, "2026-09-19T01:00:00Z", [
+        [BANK_A, 50_000, "acct-bank-a"],
+        [BANK_B, 10_000, "acct-bank-b"],
+      ]);
+    });
+    const answer = await review(store);
+    expect(answer.bills.map((bill) => bill.card.sourceAccount)).not.toContain("vpass:card-007");
+    expect(answer.byDebitAccount.filter((line) => line.account === "acct-bank-b")).toEqual([
+      expect.objectContaining({
+        debitDate: "2026-09-26",
+        bills: 1,
+        cardBills: { value: "20000", unit: "JPY", status: "exact" },
+        covers: "no",
+        reasons: [],
+      }),
+    ]);
+    expect(answer.notListed.find((card) => card.card === "vpass:card-007")).toEqual({
+      card: "vpass:card-007",
+      source: "vpass",
+      reason: "statement_total_refund_or_zero",
+      last: { period: "2026-09", debitDate: "2026-09-26" },
+    });
+  });
+
   test("the bill with no known debit account has its own line, unknown", async () => {
     const unknown = (await review(scenario())).byDebitAccount.filter(
       (line) => line.account === null,

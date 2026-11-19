@@ -286,12 +286,20 @@ answers for today's date in Asia/Tokyo, under rule `card-upcoming-bills-v1`
 (`packages/domain/src/card-upcoming-bills.ts`, pure):
 
 1. **Bills.** A bill is a card's newest current statement (this ADR's
-   `latestStatement`) whose provider due date is on or after the date. Every
-   other card is in `notListed` with its last statement and a closed reason:
-   `no_statement`, `payment_date_not_published`, `no_statement_due`, or
-   `statement_settled` (an accepted settlement of the card already covers
-   that statement month). A total that is not exact keeps its status and
-   reason (the 2026-11-18 amendment), never zero (INV05).
+   `latestStatement`) whose provider due date is on or after the date and
+   whose total is not an exact zero or below. Every other card is in
+   `notListed` with its last statement and a closed reason: `no_statement`,
+   `payment_date_not_published`, `no_statement_due`, `statement_settled` (an
+   accepted settlement of the card already covers that statement month), or
+   `statement_total_refund_or_zero` (an exact total of zero or below: a
+   refund, or nothing to pay; the code and predicate `refundOrZeroTotal` of
+   the [unmatched statements](../card-settlements.md#unmatched-statements),
+   reused rather than restated). Nothing is debited for such a statement, and
+   whether a refund reaches the bank account is not observed (ADR 0004), so
+   it is never summed into a line. A total that is not exact has no known
+   sign: it keeps its status and reason (the 2026-11-18 amendment), stays a
+   bill, never zero (INV05), and makes its lines `unknown`
+   (`bill_not_exact`).
 2. **Debit account.** Each bill carries the card's answer: `answer` (the
    basis, or `unknown`), the bank `sourceAccount` it names, the account
    entity and its label, `since` (the stated page's capture date or the
@@ -368,6 +376,21 @@ command or catalogue operation is added.
   statement is an importer-era row with no due date does this, and a Vpass
   card with no accepted settlement has no known account, so every line reads
   `unknown`.
+- A refund or zero statement is not a bill (`statement_total_refund_or_zero`).
+  Fixed in review: before it, a negative exact total was summed into
+  `cardBills` and offset the other cards' bills to the same account, so a
+  refund of 5,000 beside a bill of 30,000 read 25,000 and `yes` against a
+  balance of 26,000, though the bank debits the 30,000. Leaving the credit
+  out can only raise a line's `cardBills`, so it never makes a `yes` the
+  figures do not carry. A line that read `unknown` only because a refund
+  with no known account was a bill due by its date
+  (`cards_with_unknown_account`) can now read `yes` or `no`: nothing is
+  debited for the refund. If a provider were seen to credit a
+  refund to the bank account, the balance would understate what pays the
+  bills and a line could read `no` where the bank pays: conservative, and
+  unmodelled until observed. A refund statement whose due date is not
+  readable still counts as `payment_date_not_published` and makes its lines
+  `unknown` (`cards_with_unknown_due_date`), as any undated statement does.
 - A bank source account is joined to its entity only through the reported
   state; one with no balance or position there keeps its own line, so an
   entity's line does not count bills named through it. A statement due
@@ -386,20 +409,24 @@ command or catalogue operation is added.
 ### Verification
 
 - `packages/domain/test/card-upcoming-bills.test.ts`: which statements are
-  bills, and each `notListed` reason; `yes` and `no` on exact figures, with an
-  equal balance covering; a later line counting the earlier bills; each
-  `unknown` reason and their order; the unknown-account line; a statement
-  with no due date that no settlement pays, on its own account and on an
-  unknown one.
+  bills, and each `notListed` reason; a refund beside a bill on one account
+  (the bill alone is summed and the line reads `no`, the refund is in
+  `notListed`), a zero total that is not a bill beside a positive one that
+  is, and a total that is not exact staying a bill beside a refund that does
+  not; `yes` and `no` on exact figures, with an equal balance covering; a
+  later line counting the earlier bills; each `unknown` reason and their
+  order; the unknown-account line; a statement with no due date that no
+  settlement pays, on its own account and on an unknown one.
 - `packages/application/test/card-upcoming-bills.test.ts`: on a synthetic
   store with the CORE migrations, an exact bill its account covers, one it
   does not, one with no known account, one not exact, a provider that
   published no due date (paid by a settlement, and not), a card with no
-  statement due, a balance captured before the previous debit and one not
-  reported, and an entity with two references: the newest capture is taken,
-  never the sum, and two disagreeing captures at once are a conflict. The
-  answer passes the wire contract through the route's dispatch, and a
-  contradicting `covers` or a silent `unknown` is refused; ten cards stay
+  statement due, a refund statement beside another card's bill to an account
+  that does not cover the bill, a balance captured before the previous debit
+  and one not reported, and an entity with two references: the newest
+  capture is taken, never the sum, and two disagreeing captures at once are
+  a conflict. The answer passes the wire contract through the route's
+  dispatch, and a contradicting `covers` or a silent `unknown` is refused; ten cards stay
   under 8 KB; the read writes nothing, issues only the reads it composes, is
   refused before reading under a narrowed grant, and reaches labels by key
   without table statistics.

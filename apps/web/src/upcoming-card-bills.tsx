@@ -52,6 +52,8 @@ const NOT_LISTED_REASONS: Record<NotListedReason, string> = {
   payment_date_not_published: "カード会社が引落日を示していません",
   no_statement_due: "これから引き落とされる請求はありません",
   statement_settled: "最新の請求は採用済みの照合で支払済みです",
+  statement_total_refund_or_zero:
+    "最新の請求総額が0円以下（返金など）のため、引落額に含めず、他の請求とも相殺しません",
 };
 const ANSWERS: Record<UpcomingDebitAnswer, string> = {
   "provider-stated": "カード会社の表示",

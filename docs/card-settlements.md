@@ -406,12 +406,17 @@ the per-card answer above and the [reported state](reported-state.md) for the
 date, and nothing else but the account entities' labels.
 
 - A bill is a card's newest current statement whose provider due date is on
-  or after the date. Any other card is listed with a closed reason and its
-  last statement: `no_statement`, `payment_date_not_published` (a statement
-  with no readable due date, such as an importer-era Vpass row),
-  `no_statement_due`, or `statement_settled` (an accepted settlement of the
-  card covers that month). A total that is not exact keeps its status and
-  reason.
+  or after the date and whose total is not an exact zero or below. Any other
+  card is listed with a closed reason and its last statement: `no_statement`,
+  `payment_date_not_published` (a statement with no readable due date, such
+  as an importer-era Vpass row), `no_statement_due`, `statement_settled` (an
+  accepted settlement of the card covers that month), or
+  `statement_total_refund_or_zero` (an exact total of zero or below, the
+  [unmatched statements](#unmatched-statements) code: nothing is debited for
+  it, so it is never summed into a line, where a refund would offset the
+  bills of other cards debited from the same account). A total that is not
+  exact has no known sign: it stays a bill with its status and reason, and
+  makes its lines `unknown` (`bill_not_exact`).
 - The debit account is the per-card answer's, with its basis and codes. The
   bank source account is mapped to the account entity the reported state maps
   it to, when it maps it to exactly one.
@@ -445,6 +450,10 @@ Limits:
   not modelled (`other_debits_not_modelled` on every line).
 - No closing date is answered: neither card source stores one, only the
   statement month and the due date.
+- Whether a refund statement's credit reaches the bank account, or is carried
+  into the card's next statement, is not observed: a refund is never netted
+  against a bill or added to a balance, so a line can read `no` where the
+  bank would have paid.
 - A card whose debit account is unknown (every Vpass card without an accepted
   settlement) makes the account lines due on or after its bill `unknown`.
 - A card whose newest statement has no readable due date and no accepted

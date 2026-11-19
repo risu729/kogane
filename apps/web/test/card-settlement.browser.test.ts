@@ -121,6 +121,12 @@ const upcomingBills = {
       reason: "payment_date_not_published",
       last: { period: "2098-03", debitDate: null },
     },
+    {
+      card: "vpass:card-004",
+      source: "vpass",
+      reason: "statement_total_refund_or_zero",
+      last: { period: "2098-03", debitDate: "2098-03-26" },
+    },
   ],
   cardsTruncated: false,
 };
@@ -653,6 +659,8 @@ describe.if(runnable)("card settlement review", () => {
     expect(unknown).toContain("請求額が確定していない請求があります。");
     expect(text).toContain("ほかの引落や入金は含みません");
     expect(text).toContain("カード会社が引落日を示していません");
+    // A refund statement is listed apart, never netted against a bill.
+    expect(text).toContain("最新の請求総額が0円以下（返金など）のため");
     expect(await section.getByRole("button").count()).toBe(0);
     expect(await auditView(page)).toEqual([]);
     await page.close();
