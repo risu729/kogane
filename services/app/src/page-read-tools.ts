@@ -276,13 +276,13 @@ const TOOLS = {
   "kogane.collection-quality.read": tool({
     title: "Collection quality per job, source, dataset and account",
     description:
-      "Collection stages in closed codes: without `source`, job/source summaries (schedules, known alarm, latest runs and stages); with `source`, cells by unit, dataset and period (`view: cells`, the default; `offset` pages them) or the same cells regrouped by the accounts the observations of their newest or current capture name (`view: accounts`, unpaged: per account its stored label, mapping statuses and data types with their periods, standing and reasons, and apart the cells no observation attributes to an account; a fetch unit key is never read as an account, and a period no capture has is not listed). Each source and cell carries its freshness under `collection-freshness-v1`, counted to the answer's `freshnessAsOf` (Asia/Tokyo civil days): `same-day`, `recent` (1-3 days), `stale`, or for data that is not fresh `human-required` (collection waits on the owner) or `disabled` (no collecting job enabled), and `no-capture`; in `view: accounts` each period carries the freshness of its named capture, independent of standing, and each data type and account that of its newest named capture. The account answer is self-contained: `dataTypesVersion` and source-level `dataTypes` describe the provider catalogue, and each parser entry's `providerTypes` reverses that catalogue's parser membership (unknown parsers have an empty array). Each summary source with a collector also lists the data types its provider offers under `provider-data-types-v1` (balances, movements, card usage and statements, positions, executions, income, documents, points, ...), each `collected`, `partial` or `not_collected` with its parsers and the issue that tracks the rest. Identifiers, capture times, counts, labels and codes only, no amount. The same answer as GET /api/collection-quality, /api/collection-quality/{source} and /api/collection-quality/{source}/accounts, under evidence.read and a whole-store read grant, as on the route. Served while the store has the scheduling tables. Read-only.",
+      "Collection stages in closed codes: without `source`, job/source summaries (schedules, known alarm, latest runs and stages), or with `view: status` (no `source`) the compact answer to whether anything is stuck: one line per configured job with `enabled`, `lastRun` (`at`, `status`, `failureCode`, and `recovered` when a succeeded fetch run of the job's source that published something completed after the failed receipt and before the next one), `lastSuccessAt` (the newer of the newest completed receipt and such a run), `failuresSinceSuccess` (unrecovered failed receipts after the newest success, read from the newest 100 receipts, else `100+`), `failureCode`, a closed `state` (`ok`; `degraded`: a dataset's newest parsed capture is more than 3 Asia/Tokyo days old; `failing`; `needs-owner`: the `user_action_required` rule; `disabled`) and `notPublishing` (each dataset whose newest capture has no published parse: its units, newest parsed capture, that capture's age and the cells' reasons); with `source`, cells by unit, dataset and period (`view: cells`, the default; `offset` pages them) or the same cells regrouped by the accounts the observations of their newest or current capture name (`view: accounts`, unpaged: per account its stored label, mapping statuses and data types with their periods, standing and reasons, and apart the cells no observation attributes to an account; a fetch unit key is never read as an account, and a period no capture has is not listed). Each source and cell carries its freshness under `collection-freshness-v1`, counted to the answer's `freshnessAsOf` (Asia/Tokyo civil days): `same-day`, `recent` (1-3 days), `stale`, or for data that is not fresh `human-required` (collection waits on the owner) or `disabled` (no collecting job enabled), and `no-capture`; in `view: accounts` each period carries the freshness of its named capture, independent of standing, and each data type and account that of its newest named capture. The account answer is self-contained: `dataTypesVersion` and source-level `dataTypes` describe the provider catalogue, and each parser entry's `providerTypes` reverses that catalogue's parser membership (unknown parsers have an empty array). Each summary source with a collector also lists the data types its provider offers under `provider-data-types-v1` (balances, movements, card usage and statements, positions, executions, income, documents, points, ...), each `collected`, `partial` or `not_collected` with its parsers and the issue that tracks the rest. Identifiers, capture times, counts, labels and codes only, no amount. The same answer as GET /api/collection-quality (and ?view=status), /api/collection-quality/{source} and /api/collection-quality/{source}/accounts, under evidence.read and a whole-store read grant, as on the route. Served while the store has the scheduling tables. Read-only.",
     schema: z.strictObject({
       source: z
         .string()
         .regex(/^[a-z0-9][a-z0-9-]{0,99}$/u)
         .optional(),
-      view: z.enum(["cells", "accounts"]).optional(),
+      view: z.enum(["cells", "accounts", "status"]).optional(),
       offset: OFFSET.optional(),
     }),
     capability: "evidence.read",
@@ -293,7 +293,19 @@ const TOOLS = {
     ],
     needs: "collectionQuality",
     read: (env, { source, view, ...params }) => {
-      // A view names one source's page; the account view is unpaged.
+      // The status view is the summary's: no source and no offset.
+      if (view === "status") {
+        const wrong = [
+          ...(source === undefined ? [] : ["source"]),
+          ...(params.offset === undefined ? [] : ["offset"]),
+        ];
+        if (wrong.length > 0) throw new HttpError(400, "invalid_request", wrong);
+        return readCollectionQuality(env, {
+          pathname: "/api/collection-quality",
+          searchParams: new URLSearchParams({ view: "status" }),
+        });
+      }
+      // Any other view names one source's page; the account view is unpaged.
       if (source === undefined && view !== undefined)
         throw new HttpError(400, "invalid_request", ["view"]);
       if (view === "accounts" && params.offset !== undefined)

@@ -365,7 +365,15 @@ the compatibility adapter uses. See
 holds the SQL behind `GET /api/collection-quality`,
 `GET /api/collection-quality/<sourceId>` and
 `GET /api/collection-quality/<sourceId>/accounts`
-([ADR 0088](adr/0088-collection-quality-per-account.md));
+([ADR 0088](adr/0088-collection-quality-per-account.md)), and the two bounded
+reads of the status view `GET /api/collection-quality?view=status`
+([ADR 0045, amendment of 2026-11-19](adr/0045-collection-quality-read.md#amendment-2026-11-19-a-status-view-one-line-per-configured-job)):
+`STATUS_OCCURRENCES_SQL` (the newest 101 receipts per job, by
+`UNIQUE(schedule_id, nominal_at)`) and `STATUS_RUNS_SQL` (the newest 100
+visible fetch runs per source, by `idx_fetch_runs_source`, with success and
+publication), whose plans `test/collection-quality-status.test.ts` checks
+without statistics; `packages/application/src/query/collection-quality-status.ts`
+composes them with `SCHEDULE_QUALITY_SQL` and the cell page;
 `packages/application/src/query/collection-quality.ts`
 maps its rows to the contract and the closed reason codes. It is not an
 `ObservationReader` method: like the dated reads it is composed by an

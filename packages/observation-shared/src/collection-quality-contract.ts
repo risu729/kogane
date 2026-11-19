@@ -412,6 +412,148 @@ const summary = z
     ),
   );
 
+// ── status view (ADR 0045, amendment 2026-11-19) ─────────────────────────
+
+/** `GET /api/collection-quality?view=status`: one line per configured job. */
+export const COLLECTION_STATUS_VIEW = "status";
+export const COLLECTION_STATUS_API_VERSION = 1;
+/** A `failuresSinceSuccess` past the receipts the view reads per job. */
+export const FAILURES_BEYOND_WINDOW = "100+";
+/** A dataset whose newest parsed capture is older than this many Tokyo days is `degraded`. */
+export const STATUS_DEGRADED_AFTER_DAYS = 3;
+/**
+ * A job's state, most urgent first after `disabled`: `disabled` (the job is
+ * not enabled), `needs-owner` (its newest unrecovered failure, or a dataset
+ * it captures, waits on the owner: the `user_action_required` rule),
+ * `failing` (failures since its newest success), `degraded` (its attempts
+ * succeed, but a dataset's newest parsed capture is more than
+ * STATUS_DEGRADED_AFTER_DAYS old) and `ok`.
+ */
+export const COLLECTION_STATUS_STATES = [
+  "disabled",
+  "needs-owner",
+  "failing",
+  "degraded",
+  "ok",
+] as const;
+/** Cell reasons a not-publishing dataset does not repeat: on every cell, or about identity. */
+export const NOT_PUBLISHING_OMITTED_REASONS: readonly CellReason[] = [
+  "retention_not_assessed",
+  "identity_unresolved",
+  "identity_not_recorded",
+  "published_without_observations",
+];
+const FAILED_STATUSES: readonly OccurrenceStatus[] = ["failed", "uncertain", "not_dispatched"];
+export type CollectionStatusState = (typeof COLLECTION_STATUS_STATES)[number];
+
+const jobRun = z
+  .strictObject({
+    at: instant,
+    status: z.enum(OCCURRENCE_STATUSES),
+    failureCode: z.optional(code),
+    /** A succeeded, published fetch run of the job's source after the failure and before the next receipt. */
+    recovered: z.optional(z.strictObject({ at: instant, by: z.literal("fetch_run") })),
+  })
+  .check(
+    z.refine(
+      (value) =>
+        value.recovered === undefined ||
+        (FAILED_STATUSES.includes(value.status) &&
+          Date.parse(value.recovered.at) > Date.parse(value.at)),
+    ),
+  );
+
+const notPublishing = z.strictObject({
+  dataset: text,
+  /** Distinct fetch units among the dataset's cells that do not publish (0 when it has none). */
+  units: count,
+  newestParsedCapture: z.nullable(instant),
+  ageDays: count,
+  reasons: distinct(z.enum(CELL_REASONS)).check(
+    z.refine(
+      (values) =>
+        values.every((value) => !NOT_PUBLISHING_OMITTED_REASONS.includes(value)) &&
+        values.every(
+          (value, index) =>
+            index === 0 || CELL_REASONS.indexOf(values[index - 1]!) < CELL_REASONS.indexOf(value),
+        ),
+    ),
+  ),
+});
+
+const statusRow = z
+  .strictObject({
+    job: sourceId,
+    /** The job's source, in the job vocabulary of `config/alarm-jobs.json`; null for the Processor tick. */
+    source: z.nullable(sourceId),
+    enabled: z.boolean(),
+    lastRun: z.nullable(jobRun),
+    lastSuccessAt: z.nullable(instant),
+    failuresSinceSuccess: z.union([count, z.literal(FAILURES_BEYOND_WINDOW)]),
+    failureCode: z.nullable(code),
+    state: z.enum(COLLECTION_STATUS_STATES),
+    notPublishing: z.array(notPublishing).check(
+      z.maxLength(COLLECTION_QUALITY_BOUND),
+      z.refine((values) =>
+        values.every((value, index) => index === 0 || values[index - 1]!.dataset < value.dataset),
+      ),
+    ),
+  })
+  .check(
+    z.refine((value) => {
+      const failing = value.failuresSinceSuccess !== 0;
+      if (failing !== (value.failureCode !== null)) return false;
+      if ((value.state === "disabled") === value.enabled) return false;
+      if (value.state === "failing" && !failing) return false;
+      if ((value.state === "ok" || value.state === "degraded") && failing) return false;
+      const stale = value.notPublishing.some((entry) => entry.ageDays > STATUS_DEGRADED_AFTER_DAYS);
+      const owner = value.notPublishing.some((entry) =>
+        entry.reasons.includes("user_action_required"),
+      );
+      if (value.state === "degraded" && !stale) return false;
+      if (value.state === "ok" && (stale || owner)) return false;
+      return true;
+    }),
+  );
+
+const collectionStatus = z
+  .strictObject({
+    apiVersion: z.literal(COLLECTION_STATUS_API_VERSION),
+    view: z.literal(COLLECTION_STATUS_VIEW),
+    asOf: instant,
+    sources: z.array(statusRow).check(
+      z.maxLength(COLLECTION_QUALITY_BOUND),
+      z.refine((values) =>
+        values.every((value, index) => index === 0 || values[index - 1]!.job < value.job),
+      ),
+    ),
+  })
+  .check(
+    z.refine((value) => {
+      const date = tokyoDate(value.asOf);
+      return (
+        date !== null &&
+        value.sources.every((row) =>
+          row.notPublishing.every(
+            (entry) =>
+              entry.newestParsedCapture === null ||
+              ageOf(entry.newestParsedCapture, date, entry.ageDays),
+          ),
+        )
+      );
+    }),
+  );
+
+export type CollectionStatusRun = z.output<typeof jobRun>;
+export type CollectionStatusNotPublishing = z.output<typeof notPublishing>;
+export type CollectionStatusRow = z.output<typeof statusRow>;
+export type CollectionStatus = z.output<typeof collectionStatus>;
+
+/** `GET /api/collection-quality?view=status`. */
+export function validCollectionStatus(value: unknown): value is CollectionStatus {
+  return collectionStatus.safeParse(value).success;
+}
+
 const period = z
   .strictObject({
     kind: z.enum(PERIOD_KINDS),
@@ -778,7 +920,9 @@ export function validAccountCoverage(value: unknown): value is AccountCoverage {
 
 /** The three routes, by path; any other path under the prefix is not this contract. */
 export function validCollectionQualityResponse(path: string, value: unknown): boolean {
-  if (path === COLLECTION_QUALITY_PATH) return validCollectionQualitySummary(value);
+  // The summary and its status view (`?view=status`) share the path; each answer names its shape.
+  if (path === COLLECTION_QUALITY_PATH)
+    return validCollectionQualitySummary(value) || validCollectionStatus(value);
   const accounts = /^\/api\/collection-quality\/([^/]+)\/accounts$/u.exec(path);
   if (accounts !== null) return validAccountCoverage(value) && value.sourceId === accounts[1];
   const match = /^\/api\/collection-quality\/([^/]+)$/u.exec(path);

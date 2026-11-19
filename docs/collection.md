@@ -335,6 +335,41 @@ underscores, and codes outside the display grammar become `unclassified`.
 This read adds no provider call or automatic retry. See
 [collection quality](read-model.md#collection-quality).
 
+### Is anything stuck? (the collection status view)
+
+`GET /api/collection-quality?view=status` and `kogane.collection-quality.read`
+with `{ view: "status" }` answer, one line per configured job, whether its
+collection works
+([ADR 0045, amendment of 2026-11-19](adr/0045-collection-quality-read.md#amendment-2026-11-19-a-status-view-one-line-per-configured-job);
+the collection quality page shows it as a table at its top). The rules, as
+the code applies them:
+
+- A receipt that `failed`, was `uncertain` or `not_dispatched` is
+  **recovered** when a visible fetch run of the job's CORE source succeeded,
+  has at least one published parse, and completed strictly after the
+  receipt finished (its start when it has none) and strictly before the job's
+  next receipt started. V Point's daily `reauthentication_pending`, which its
+  email follow-up run repairs about 20 seconds later, is such a receipt: its
+  code stays under `lastRun` and the job reads `ok`. A run that only
+  re-authenticates and publishes nothing does not recover it.
+- `failuresSinceSuccess` counts the receipts after the newest one that
+  completed or was recovered, from the newest 100, and says `"100+"` past
+  them. `failureCode` is the newest counted receipt's code.
+- `state` is the first of `disabled` (not enabled), `needs-owner` (the newest
+  counted code is `human_required…`, `manual_agreement_required`, or an
+  unrecovered V Point session code; or a dataset's cells say
+  `user_action_required`), `failing` (any counted receipt), `degraded` (a
+  dataset's newest parsed capture is more than 3 Asia/Tokyo days old while
+  newer captures are not published) and `ok`. A maintenance window defers a
+  job's next receipt; it writes no failed receipt, so it is none of these.
+- `notPublishing` lists, per dataset some parser reads, the cells whose newest
+  capture has no published parse, with their stored reasons (`unit_failed`,
+  `run_not_successful`, `not_parse_eligible`, `parse_pending`, ...). A
+  published parse with no observation (#450) is published and not listed.
+
+Limits: a recovery is seen only within the source's newest 100 runs; a
+keepalive is reported on its own line; a disabled job's datasets are not read.
+
 ### Artifact datasets at registration (ADR 0022)
 
 A terminal names no parser dataset, and no collector adds one: the Processor

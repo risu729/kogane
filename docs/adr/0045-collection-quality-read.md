@@ -527,3 +527,194 @@ agreement and the shared job bound. Native collector tests exercise expired
 read, challenge, email and successful separate persistence while retaining the
 original failed terminal. The [dated source note](../sources/v-point.md#2026-11-11-scheduled-session-refusal-and-automatic-email-recovery)
 records production evidence and the unproven scheduled-success acceptance.
+
+## Amendment 2026-11-19: a status view, one line per configured job
+
+- Status: proposed (until this amendment's PR merges)
+- Date: 2026-11-19
+- Issue: [#1414](https://github.com/risu729/kogane/issues/1414) ("which sources
+  are failing, and is anything stuck?" in one or two calls, each under 8 KB),
+  with the owner's recovered rule from #1301 in its comment of 2026-11-19, and
+  the owner's reviewed design "proposal v2", Unit B.
+- Builds on: [ADR 0081](0081-ui-parity-through-mcp.md) (one reader for the
+  page and its MCP read), [ADR 0088](0088-collection-quality-per-account.md)
+  (`view` on this tool), and this ADR's
+  [V Point amendment](#amendment-v-point-recovery-is-current-state-while-failed-receipts-remain-history-2026-11-11).
+- Owner approval: required before merge. It changes the published input
+  schema and description of `kogane.collection-quality.read` (a new `view`
+  value) and adds a query to its route: decision D3 of proposal v2. No
+  catalogue operation, capability, grant, table or migration is added.
+
+### Context
+
+To tell whether collection is stuck, a client read `kogane.schedules.read`
+(about 95 KB) for each job's newest receipt and combined it with that job's
+occurrences and runs by hand. The collection quality summary carries only the
+newest receipt, and the cells, which say which datasets stopped publishing,
+are over 200 KB for Vpass. Vpass's finalized statements stopped publishing
+for more than two months while every receipt read `completed`, and V Point's
+daily `reauthentication_pending` receipt, which its email follow-up run
+recovers about 20 seconds later, read as a failure.
+
+### Options considered
+
+1. **A new tool and catalogue operation (`kogane.collection.status`).** First
+   drafted for this issue, then rejected in proposal v2's review: a second
+   catalogue entry, audit label and listing for an answer composed from this
+   tool's own reads.
+2. **Relay the Processor's schedule store**, as `kogane.schedules.read` does.
+   Rejected: the Processor's snapshot is the large answer this replaces, and
+   the receipts and runs are in CORE already.
+3. **A `status` view of this tool and its summary route (chosen).**
+
+### Decision
+
+1. **Route and tool.** `GET /api/collection-quality?view=status` (that query
+   exactly; any other query on the summary path stays `400 invalid_query`) and
+   `kogane.collection-quality.read` with `{ view: "status" }` (no `source`, no
+   `offset`; either is `400 invalid_request` with its ref) call
+   `readCollectionQuality`, which calls `queryCollectionQualityStatus`
+   (`packages/application/src/query/collection-quality-status.ts`). Same
+   Access gate, reader grant, `evidence.read` over the whole store, store
+   feature and audit label as the summary; the audit record counts the job
+   lines.
+2. **Reads**, all in CORE, never the Processor:
+   - every configured job through the unchanged `SCHEDULE_QUALITY_SQL`;
+   - `STATUS_OCCURRENCES_SQL`: the newest 101 receipts of each job
+     (`STATUS_OCCURRENCE_WINDOW` 100, plus one that only says more exist),
+     through `UNIQUE(schedule_id, nominal_at)`: an `OFFSET 100` on that index
+     finds the window's edge and the window is a range of it;
+   - `STATUS_RUNS_SQL`: the newest 100 visible fetch runs of each CORE source
+     a collecting job names (`STATUS_RUN_WINDOW`), through
+     `idx_fetch_runs_source`, with whether each succeeded
+     (`successfulFetchRuns`) and whether any of its artifacts has a published
+     parse;
+   - the unchanged `CELL_QUALITY_SQL` of each CORE source an enabled
+     collecting job names, page by page and mapped by the cell page's own
+     `cell()`, so its reasons are the cell page's; more than 2,000 cells (the
+     account view's bound) is `413 result_limit_exceeded`, never cut.
+
+   Row bound: at most 200 configured jobs (`COLLECTION_QUALITY_ROW_BOUND`,
+   refused past it), so at most 101 receipts per job, 100 runs per source and
+   2,000 cells per source are read.
+
+3. **Answer** (`COLLECTION_STATUS_API_VERSION` 1, wire check
+   `validCollectionStatus`): `{ apiVersion, view: "status", asOf, sources }`,
+   one line per configured job in id order:
+   - `job`, `source` (the job's source in the alarm-job vocabulary; null for
+     the Processor tick), `enabled`. Proposal v2 named the line by `source`
+     alone; `job` is added because two configured jobs share a source
+     (`sbi-vc-trade`) and the Processor tick has none;
+   - `lastRun`: the newest receipt's `at` (its actual start), `status`,
+     `failureCode` when it has one, and `recovered: { at, by: "fetch_run" }`
+     when the rule below recovered it; null when the job has no receipt;
+   - `lastSuccessAt`: the newer of the newest completed receipt in the window
+     (its finish, else its start) and the newest succeeded, publishing fetch
+     run of the job's source in the run window; null when the read holds
+     neither;
+   - `failuresSinceSuccess`: the failed receipts (`failed`, `uncertain`,
+     `not_dispatched`; a `started` one is skipped) newer than the newest
+     receipt that completed or was recovered, read from the newest 100; when
+     none of those 100 is a success and the job holds more, `"100+"`;
+   - `failureCode`: the newest counted failure's code (`unclassified` when it
+     stored none), null when nothing is counted;
+   - `state`, closed, the first that holds: `disabled` (the job is not
+     enabled); `needs-owner` (the newest counted failure's code is one of the
+     `user_action_required` codes, an unrecovered V Point
+     `reauthentication_pending` or `human_required_session_refresh` reading as
+     `human_required_session_refresh` as the summary reads it, or a
+     not-publishing dataset carries the cell reason `user_action_required`);
+     `failing` (any counted failure); `degraded` (a not-publishing dataset's
+     `ageDays` is more than 3); `ok`;
+   - `notPublishing`: for an enabled collecting job, each dataset of its
+     source that some parser names (a cell of it has a parse job or a
+     recorded parse) and that has cells whose newest capture has no published
+     parse: `dataset`, `units` (distinct unit keys among those cells),
+     `newestParsedCapture` (the newest current capture, or newest capture with
+     a published parse, among the dataset's cells; null when none),
+     `ageDays` (Asia/Tokyo civil days from it, or, when it is null, from the
+     oldest of those unpublished captures, to `asOf`) and `reasons` (those
+     cells' stored reasons, without `retention_not_assessed` and the identity
+     reasons). No new reason code. A disabled job, a keepalive and the
+     Processor tick list none, because nothing of theirs is read; the page
+     says so for a disabled job.
+4. **Recovered rule** (the owner's, #1414): a failed receipt is recovered when
+   a visible fetch run of the job's CORE source that succeeded and has at
+   least one published parse completed strictly after the receipt finished
+   (its start when it has no finish) and strictly before the next receipt of
+   the job started (or at any later time, for the newest receipt). The
+   earliest such run is `recovered.at`. A recovered receipt keeps its code in
+   `lastRun`, is not counted, and ends the count as a success does. A run that
+   only re-authenticates and publishes nothing, a partial run, or one at or
+   before the failure's finish recovers nothing. Nominal times decide
+   nothing. Only collecting jobs (`collection`, `manual`, `email`) are
+   recovered by runs; a keepalive or the Processor tick only by its own
+   completed receipt.
+5. **Page.** The collection quality page shows the view as a table at its
+   top (`収集の状況（実行予定ごと）`), from the same route.
+
+### Consequences
+
+- An assistant answers "which sources are failing, is anything stuck?" with
+  one call. The synthetic store with all 17 configured jobs, three weeks of
+  receipts each and several not-publishing datasets answers in about 4.6 KB
+  including the page-read envelope.
+- V Point's daily failure followed by its email follow-up reads `ok` with the
+  code under `lastRun`; a run of failures reads `failing` with its count; a
+  Vpass-style stop of one dataset under completed receipts reads `degraded`
+  once its newest parsed capture is more than 3 days old.
+- Open limits:
+  - a recovery is seen only within the newest 100 runs of the source; an older
+    failure that the run window does not reach is counted as unrecovered;
+  - run ids follow registration order, so a run registered far out of its
+    completion order may fall outside the run window;
+  - `lastSuccessAt` is null when neither window holds a success, which says
+    nothing about older history;
+  - a run that succeeded while its parses are still pending recovers a
+    failure only once a parse publishes;
+  - a dataset no parser names (no parse job, no recorded parse) is never
+    listed; a dataset whose newest capture is published with no observation
+    (`published_without_observations`, #450) is published, so it is not listed
+    either;
+  - a keepalive's failure is on its own line, not on the collecting job's.
+- Each request runs one cell read per enabled collecting source (13 on the
+  configured jobs), so the view costs about as much as reading each source's
+  first cell page.
+
+### Verification
+
+Synthetic stores only, no production access:
+
+- `packages/application/test/collection-quality-status.test.ts`: every
+  configured job listed in order; `ok`, `failing`, `needs-owner` (MyJCB's
+  `human_required`, SBI VC's `manual_agreement_required`, an unrecovered V
+  Point session, a unit waiting on the owner), `degraded` and `disabled`;
+  failed, uncertain and not-dispatched receipts counted and a running one
+  skipped; 100, 101 and 140 failures (`100`, `"100+"`) and a success inside
+  the window bounding the count; the recovered rule (recovered and `ok`; daily
+  recoveries; no run; a run that publishes nothing, a partial run, a run at or
+  before the failure's finish; a success after the next receipt started; an
+  uncertain receipt anchored at its start; the earliest qualifying run);
+  `lastSuccessAt` as the newer of the two; datasets listed, aged and reasoned,
+  a dataset never published aged from its capture, a disabled job's none;
+  every answer passes `validCollectionStatus` and the route's path check; all
+  17 configured jobs with history stay under 8 KB including the envelope; the
+  store is unchanged.
+- `packages/read-model/test/collection-quality-status.test.ts`: the windows'
+  rows (101 receipts per job, 100 runs per source with success and
+  publication flags, a short history whole) and their plans on a store with a
+  year of receipts and runs and no statistics: receipts by
+  `UNIQUE(schedule_id, nominal_at)` for the window and its edge, runs by
+  `idx_fetch_runs_source`, publications by key, no full scan but the
+  request's JSON array, no observation table.
+- `services/app/test/collection-quality-api.test.ts`: the route at
+  `?view=status` (every configured job, the wire check, nothing written) and
+  its refusals (`?view=cells`, a repeated or extra parameter, Access, POST, a
+  store without the scheduling tables).
+- `services/app/test/page-read-reports.test.ts`: the route, `/api/agent/v1/*`
+  and `/mcp` give one body for `{ view: "status" }`; `source` or `offset` with
+  it is `400 invalid_request`; the audit record counts the job lines.
+- `apps/web/test/collection-quality.browser.test.ts`: Chromium at 375 px on the
+  production build: the table at the top, its failing, ok and disabled lines,
+  a dataset waiting for its parse, one status request, no page-wide
+  horizontal scroll, and the accessibility audit.

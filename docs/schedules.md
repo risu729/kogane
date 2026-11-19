@@ -8,6 +8,14 @@ shows the original next occurrence, maintenance-adjusted due time, actual alarm
 reservation and the latest scheduling receipt separately. All displayed timestamps use Japan time;
 daily configuration defaults to Japan time and can use Sydney or UTC explicitly.
 
+To ask whether any job is failing or stuck, read the collection quality
+status view instead of combining this page's receipts by hand:
+`kogane.collection-quality.read` with `{ view: "status" }`, or the table at
+the top of `/collection-quality`. It reads the same receipts from CORE, counts
+failures since the newest success, and treats a failed receipt that a
+successful, publishing collection of the same source followed before the next
+receipt as recovered ([collection](collection.md#is-anything-stuck-the-collection-status-view)).
+
 Save a daily time/weekdays or an interval and enable/disable the job. A version
 conflict requires refreshing before another edit. A successful database save with
 pending reservation is not an armed alarm. The five-minute processor job repairs
