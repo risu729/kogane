@@ -137,6 +137,7 @@ describe("overviewSummary", () => {
             },
           },
         ],
+        notSuccessfulOmitted: [],
       },
       parseRuns: {
         byStatus: [
@@ -147,6 +148,7 @@ describe("overviewSummary", () => {
             withWarnings: 1,
             unreadableWarnings: 1,
             parsers: 2,
+            failureCodes: [],
             newest: {
               id: 8,
               artifactId: 108,
@@ -161,6 +163,8 @@ describe("overviewSummary", () => {
             withWarnings: 0,
             unreadableWarnings: 0,
             parsers: 1,
+            // Every failure code of the status, newest first.
+            failureCodes: ["parser_rejected", "unclassified"],
             newest: {
               id: 7,
               artifactId: 107,
@@ -175,6 +179,7 @@ describe("overviewSummary", () => {
             withWarnings: 0,
             unreadableWarnings: 0,
             parsers: 1,
+            failureCodes: [],
             newest: {
               id: 5,
               artifactId: 105,
@@ -191,6 +196,7 @@ describe("overviewSummary", () => {
             superseded: 1,
             // The closed code of each failure, newest first; text is never a code.
             failureCodes: ["parser_rejected", "unclassified"],
+            moreFailureCodes: 0,
             newest: { id: 7, artifactId: 107, parsedAt: "2099-01-07T21:10:00.000Z" },
           },
           {
@@ -199,9 +205,12 @@ describe("overviewSummary", () => {
             runs: 1,
             superseded: 0,
             failureCodes: [],
+            moreFailureCodes: 0,
             newest: { id: 5, artifactId: 105, parsedAt: "2099-01-05T21:10:00.000Z" },
           },
         ],
+        // Every line is listed: nothing is left out.
+        notOkOmitted: [],
       },
       coverage: full.coverage,
     });
@@ -224,6 +233,7 @@ describe("overviewSummary", () => {
 
   test("collapses partial-unit updates per source and dataset, and leaves them absent when the page has none", () => {
     expect(overviewSummary(page())).not.toHaveProperty("unitUpdates");
+    expect(overviewSummary(page())).not.toHaveProperty("unitUpdatesOmitted");
     const summary = overviewSummary(
       page({
         unitUpdates: [
@@ -259,9 +269,15 @@ describe("overviewSummary", () => {
         },
       },
     ]);
+    expect(summary.unitUpdatesOmitted).toEqual({ lines: 0, runs: 0 });
+    expect(validApiResponse("/api/overview", summary, "summary")).toBe(true);
+    const bare = structuredClone(summary);
+    delete bare.unitUpdatesOmitted;
+    expect(validApiResponse("/api/overview", bare, "summary")).toBe(false);
   });
 
   test("keeps every failure code of a failing parser, newest first, and never its text", () => {
+    // Three codes on the line, the fourth counted there; all four on its status's line.
     const summary = overviewSummary(
       page({
         parseRuns: [
@@ -279,6 +295,13 @@ describe("overviewSummary", () => {
         parser: "card-c-statement",
         status: "error",
         runs: 6,
+        failureCodes: ["raw_checksum_mismatch", "parser_rejected", "parse_interrupted"],
+        moreFailureCodes: 1,
+      }),
+    ]);
+    expect(summary.parseRuns.byStatus).toEqual([
+      expect.objectContaining({
+        status: "error",
         failureCodes: [
           "raw_checksum_mismatch",
           "parser_rejected",
@@ -291,8 +314,102 @@ describe("overviewSummary", () => {
     expect(validApiResponse("/api/overview", summary, "summary")).toBe(true);
     // A summary that carries text where a code belongs is not a summary.
     const text = structuredClone(summary);
-    text.parseRuns.notOk[0]!.failureCodes.push("Provider said: no rows");
+    text.parseRuns.byStatus[0]!.failureCodes.push("Provider said: no rows");
     expect(validApiResponse("/api/overview", text, "summary")).toBe(false);
+    // A line over its cap, a code its status's line lacks, or more codes
+    // counted than its status has, is not a summary either.
+    const over = structuredClone(summary);
+    over.parseRuns.notOk[0]!.failureCodes.push("unclassified");
+    over.parseRuns.notOk[0]!.moreFailureCodes = 0;
+    expect(validApiResponse("/api/overview", over, "summary")).toBe(false);
+    const missing = structuredClone(summary);
+    missing.parseRuns.byStatus[0]!.failureCodes.splice(1, 1);
+    expect(validApiResponse("/api/overview", missing, "summary")).toBe(false);
+    const counted = structuredClone(summary);
+    counted.parseRuns.notOk[0]!.moreFailureCodes = 2;
+    expect(validApiResponse("/api/overview", counted, "summary")).toBe(false);
+  });
+
+  test("lists the newest five sources and parsers of each list and counts the rest, never dropping them", () => {
+    const parsers = Array.from({ length: 8 }, (_, index) => `parser-${index}`);
+    const summary = overviewSummary(
+      page({
+        // Eight parsers failing and one pending, newest first.
+        parseRuns: [
+          parseRun(20, "parser-pending", "pending"),
+          ...parsers.flatMap((parser, index) => [
+            parseRun(19 - index * 2, parser, "error", { error: `code_${index}` }),
+            parseRun(18 - index * 2, parser, "error", { error: "parser_rejected" }),
+          ]),
+        ],
+        // Seven sources with partial runs, one run each.
+        fetchRuns: Array.from({ length: 7 }, (_, index) =>
+          fetchRun(30 - index, `source-${index}`, "partial"),
+        ),
+        unitUpdates: Array.from({ length: 7 }, (_, index) => ({
+          source_id: `source-${index}`,
+          dataset: "statement",
+          fetch_run_id: 30 - index,
+          fetched_at: "2099-01-05T21:02:00.000Z",
+          updated_units: 1,
+          stale_units: 1,
+        })),
+      }),
+    );
+    expect(summary.parseRuns.notOk.map((line) => line.parser)).toEqual([
+      "parser-pending",
+      "parser-0",
+      "parser-1",
+      "parser-2",
+      "parser-3",
+    ]);
+    expect(summary.parseRuns.notOkOmitted).toEqual([{ status: "error", lines: 4, runs: 8 }]);
+    // The lines left out keep their failure codes on the status's line.
+    expect(
+      summary.parseRuns.byStatus.find((line) => line.status === "error")?.failureCodes,
+    ).toEqual([
+      "code_0",
+      "parser_rejected",
+      ...parsers.slice(1).map((_, index) => `code_${index + 1}`),
+    ]);
+    expect(summary.fetchRuns.notSuccessful.map((line) => line.sourceId)).toEqual([
+      "source-0",
+      "source-1",
+      "source-2",
+      "source-3",
+      "source-4",
+    ]);
+    expect(summary.fetchRuns.notSuccessfulOmitted).toEqual([
+      { status: "partial", lines: 2, runs: 2 },
+    ]);
+    expect(summary.unitUpdates?.map((line) => line.sourceId)).toEqual([
+      "source-0",
+      "source-1",
+      "source-2",
+      "source-3",
+      "source-4",
+    ]);
+    expect(summary.unitUpdatesOmitted).toEqual({ lines: 2, runs: 2 });
+    expect(validApiResponse("/api/overview", summary, "summary")).toBe(true);
+    // Lines left out without being counted, a sixth line, or lines counted
+    // out of a list that is not full, are not a summary.
+    const silent = structuredClone(summary);
+    silent.parseRuns.notOkOmitted = [];
+    expect(validApiResponse("/api/overview", silent, "summary")).toBe(false);
+    const sixth = structuredClone(summary);
+    sixth.fetchRuns.notSuccessful.push({
+      ...sixth.fetchRuns.notSuccessful[0]!,
+      sourceId: "source-5",
+    });
+    sixth.fetchRuns.notSuccessfulOmitted = [{ status: "partial", lines: 1, runs: 1 }];
+    expect(validApiResponse("/api/overview", sixth, "summary")).toBe(false);
+    const early = structuredClone(summary);
+    early.fetchRuns.notSuccessful.pop();
+    early.fetchRuns.notSuccessfulOmitted = [{ status: "partial", lines: 3, runs: 3 }];
+    expect(validApiResponse("/api/overview", early, "summary")).toBe(false);
+    const units = structuredClone(summary);
+    units.unitUpdates!.push(units.unitUpdates![0]!);
+    expect(validApiResponse("/api/overview", units, "summary")).toBe(false);
   });
 
   test("refuses a status outside the closed sets, never passing it on as one", () => {

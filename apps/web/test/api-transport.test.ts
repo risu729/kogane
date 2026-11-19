@@ -153,8 +153,8 @@ describe("browser JSON transport", () => {
       detail: "summary",
       counts: [],
       sources: [],
-      fetchRuns: { byStatus: [], notSuccessful: [] },
-      parseRuns: { byStatus: [], notOk: [] },
+      fetchRuns: { byStatus: [], notSuccessful: [], notSuccessfulOmitted: [] },
+      parseRuns: { byStatus: [], notOk: [], notOkOmitted: [] },
       coverage,
     };
     serve(Response.json(summary));

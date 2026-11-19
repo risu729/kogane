@@ -482,7 +482,8 @@ was partial and which unit report allowed it.
    ```
 
 4. Read `/api/overview?detail=full` (the default summary collapses
-   `unitUpdates` to the newest run per source and dataset,
+   `unitUpdates` to the newest run per source and dataset, and lists only
+   the five with the newest runs,
    [ADR 0123](adr/0123-summary-detail-for-large-reads.md)). A partial run that rescued units appears in
    `unitUpdates` with `updated_units` and `stale_units`; that key is the
    reader's statement that the dataset was refreshed in part. It is absent

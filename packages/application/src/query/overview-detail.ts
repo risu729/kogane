@@ -3,12 +3,16 @@
 // and `kogane.store.read` `{page: overview}` (ADR 0081) shape it once. The
 // full answer lists up to 500 fetch runs and 500 parse runs; the summary
 // collapses each window by status and keeps, for every status that is not a
-// success, one line per source or parser with its newest run's ids. It drops
-// text and provenance, never a state: every status is counted, with how many
-// rows it collapsed.
+// success, a line per source or parser with its newest run's ids, for the
+// `OVERVIEW_SUMMARY_LINES` with the newest runs, and counts the rest. It
+// drops text and provenance, never a state: every status is counted, with how
+// many rows it collapsed, and every failure code is on its status's line.
 import {
   OVERVIEW_FETCH_RUN_STATUSES,
+  OVERVIEW_LINE_FAILURE_CODES,
   OVERVIEW_PARSE_RUN_STATUSES,
+  OVERVIEW_SUMMARY_LINES,
+  type OverviewOmitted,
   type OverviewPage,
   type OverviewSummary,
 } from "../../../observation-shared/src/api-contract.ts";
@@ -41,7 +45,7 @@ function newest<Row extends { id: number }>(rows: readonly Row[]): Row {
 }
 
 /**
- * The distinct failure codes of a line's runs, newest first. The Processor
+ * The distinct failure codes of some runs, newest first. The Processor
  * writes `parse_runs.error` as a closed code (a pipeline or metadata error's
  * code, the failing stage, or `parse_interrupted`), never the parser's text,
  * so the summary keeps it as the failure code it is (ADR 0123: every closed
@@ -55,6 +59,28 @@ function failureCodes(rows: readonly OverviewPage["parseRuns"][number][]): strin
     if (code !== null && !codes.includes(code)) codes.push(code);
   }
   return codes;
+}
+
+/**
+ * The `OVERVIEW_SUMMARY_LINES` lines with the newest runs, newest first, and
+ * per status the lines left out with their runs: a list grows with the
+ * number of failing sources or parsers, so it is bounded, and what it leaves
+ * out is counted, never dropped silently (INV05).
+ */
+function capped<Line extends { status: string; runs: number }>(
+  lines: readonly Line[],
+  newestId: (line: Line) => number,
+): { listed: Line[]; omitted: OverviewOmitted<Line["status"]>[] } {
+  const ordered = [...lines].sort((left, right) => newestId(right) - newestId(left));
+  const omitted: OverviewOmitted<Line["status"]>[] = [];
+  for (const line of ordered.slice(OVERVIEW_SUMMARY_LINES)) {
+    const entry = omitted.find((candidate) => candidate.status === line.status);
+    if (entry) {
+      entry.lines += 1;
+      entry.runs += line.runs;
+    } else omitted.push({ status: line.status, lines: 1, runs: line.runs });
+  }
+  return { listed: ordered.slice(0, OVERVIEW_SUMMARY_LINES), omitted };
 }
 
 /** The summary of one overview page; it reads nothing the page does not. */
@@ -85,6 +111,67 @@ export function overviewSummary(page: OverviewPage): OverviewSummary {
       "overview_parse_run_status_unknown",
     ),
   }));
+  const notSuccessful = capped(
+    groups(
+      fetchRuns.filter((run) => run.status !== "success"),
+      (run) => [run.source_id, run.status],
+    ).map((group) => {
+      const run = newest(group);
+      return {
+        sourceId: run.source_id,
+        status: run.status,
+        runs: group.length,
+        newest: { id: run.id, startedAt: run.started_at, completedAt: run.completed_at },
+      };
+    }),
+    (line) => line.newest.id,
+  );
+  const notOk = capped(
+    groups(
+      parseRuns.filter((run) => run.status !== "ok"),
+      (run) => [run.parser_name, run.status],
+    ).map((group) => {
+      const run = newest(group);
+      const codes = failureCodes(group);
+      return {
+        parser: run.parser_name,
+        status: run.status,
+        runs: group.length,
+        superseded: group.filter((entry) => entry.superseded_by_parse_run_id !== null).length,
+        failureCodes: codes.slice(0, OVERVIEW_LINE_FAILURE_CODES),
+        moreFailureCodes: Math.max(0, codes.length - OVERVIEW_LINE_FAILURE_CODES),
+        newest: { id: run.id, artifactId: run.fetch_artifact_id, parsedAt: run.parsed_at },
+      };
+    }),
+    (line) => line.newest.id,
+  );
+  const unitUpdates =
+    page.unitUpdates === undefined
+      ? undefined
+      : capped(
+          groups(page.unitUpdates, (row) => [row.source_id, row.dataset]).map((group) => {
+            const row = group.reduce((best, entry) =>
+              entry.fetch_run_id > best.fetch_run_id ? entry : best,
+            );
+            return {
+              // `capped` counts per status; unit updates have none.
+              status: "unit" as const,
+              line: {
+                sourceId: row.source_id,
+                dataset: row.dataset,
+                runs: group.length,
+                newest: {
+                  fetchRunId: row.fetch_run_id,
+                  fetchedAt: row.fetched_at,
+                  updatedUnits: row.updated_units,
+                  staleUnits: row.stale_units,
+                },
+              },
+              runs: group.length,
+            };
+          }),
+          (entry) => entry.line.newest.fetchRunId,
+        );
   return {
     detail: "summary",
     counts: page.counts,
@@ -104,18 +191,8 @@ export function overviewSummary(page: OverviewPage): OverviewSummary {
           },
         };
       }),
-      notSuccessful: groups(
-        fetchRuns.filter((run) => run.status !== "success"),
-        (run) => [run.source_id, run.status],
-      ).map((group) => {
-        const run = newest(group);
-        return {
-          sourceId: run.source_id,
-          status: run.status,
-          runs: group.length,
-          newest: { id: run.id, startedAt: run.started_at, completedAt: run.completed_at },
-        };
-      }),
+      notSuccessful: notSuccessful.listed,
+      notSuccessfulOmitted: notSuccessful.omitted,
     },
     parseRuns: {
       byStatus: groups(parseRuns, (run) => run.status).map((group) => {
@@ -127,6 +204,7 @@ export function overviewSummary(page: OverviewPage): OverviewSummary {
           withWarnings: group.filter((entry) => entry.warnings.list.length > 0).length,
           unreadableWarnings: group.filter((entry) => !entry.warnings.parsed).length,
           parsers: new Set(group.map((entry) => entry.parser_name)).size,
+          failureCodes: failureCodes(group),
           newest: {
             id: run.id,
             artifactId: run.fetch_artifact_id,
@@ -135,42 +213,17 @@ export function overviewSummary(page: OverviewPage): OverviewSummary {
           },
         };
       }),
-      notOk: groups(
-        parseRuns.filter((run) => run.status !== "ok"),
-        (run) => [run.parser_name, run.status],
-      ).map((group) => {
-        const run = newest(group);
-        return {
-          parser: run.parser_name,
-          status: run.status,
-          runs: group.length,
-          superseded: group.filter((entry) => entry.superseded_by_parse_run_id !== null).length,
-          failureCodes: failureCodes(group),
-          newest: { id: run.id, artifactId: run.fetch_artifact_id, parsedAt: run.parsed_at },
-        };
-      }),
+      notOk: notOk.listed,
+      notOkOmitted: notOk.omitted,
     },
-    ...(page.unitUpdates === undefined
+    ...(unitUpdates === undefined
       ? {}
       : {
-          unitUpdates: groups(page.unitUpdates, (row) => [row.source_id, row.dataset]).map(
-            (group) => {
-              const row = group.reduce((best, entry) =>
-                entry.fetch_run_id > best.fetch_run_id ? entry : best,
-              );
-              return {
-                sourceId: row.source_id,
-                dataset: row.dataset,
-                runs: group.length,
-                newest: {
-                  fetchRunId: row.fetch_run_id,
-                  fetchedAt: row.fetched_at,
-                  updatedUnits: row.updated_units,
-                  staleUnits: row.stale_units,
-                },
-              };
-            },
-          ),
+          unitUpdates: unitUpdates.listed.map((entry) => entry.line),
+          unitUpdatesOmitted: {
+            lines: unitUpdates.omitted[0]?.lines ?? 0,
+            runs: unitUpdates.omitted[0]?.runs ?? 0,
+          },
         }),
     coverage: page.coverage,
   };

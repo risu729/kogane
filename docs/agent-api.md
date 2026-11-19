@@ -819,24 +819,30 @@ repeat (`collection`, `source`, `account`, `instrument`, `metric`,
 `test/mcp-answer-size.test.ts` measures every read tool's default answer on
 a store at the scale of [issue 1414](https://github.com/risu729/kogane/issues/1414)
 and keeps the summaries under the 8 KB a client shows, with the overview
-and the maintenance read (below) also at their realistic worst.
+and the maintenance read (below) also at their realistic worst (the
+overview under 7 KB there) and the overview at its bound.
 
 The overview summary (`GET /api/overview`, `kogane.store.read`
 `{page: "overview"}`; ADR 0123, amendment of 2026-11-19) is
 `{ detail: "summary", counts, sources, fetchRuns, parseRuns, unitUpdates?,
-coverage }`, shaped by `overviewSummary`
+unitUpdatesOmitted?, coverage }`, shaped by `overviewSummary`
 (`packages/application/src/query/overview-detail.ts`): the counts and the
 coverage as the full page has them; the sources as `{ sourceIds, artifacts }`,
 sources with the same artifact count sharing a line; `fetchRuns.byStatus`
 and `parseRuns.byStatus`, one line per status of the newest-500 window
 (`success`, `partial`; `ok`, `pending`, `error`) with its run count, its
 source or parser count, the parse lines' superseded, warning and
-unreadable-warning counts, and the newest run's ids and times;
-`fetchRuns.notSuccessful` and `parseRuns.notOk`, one line per source or
-parser and status that is not a success, with its run count and newest run
-(a parse line also with `failureCodes`, the closed codes the Processor
-writes as `parse_runs.error`, newest first);
-and `unitUpdates`, when the page has them, per source and dataset. It drops
+unreadable-warning counts and `failureCodes` (every distinct closed code the
+Processor wrote as `parse_runs.error` for the status's runs, newest first),
+and the newest run's ids and times; `fetchRuns.notSuccessful` and
+`parseRuns.notOk`, one line per source or parser and status that is not a
+success, with its run count and newest run (a parse line also with its
+newest three `failureCodes` and `moreFailureCodes`, how many more it has);
+and `unitUpdates`, when the page has them, per source and dataset. Each of
+those three lists holds the five lines with the newest runs
+(`OVERVIEW_SUMMARY_LINES`); the lines left out are counted per status, with
+their runs, in `notSuccessfulOmitted`, `notOkOmitted` and
+`unitUpdatesOmitted`, and listed by `detail: "full"`. It drops
 provider names, producers, session ids, parser versions and warnings. `detail` on `meta` or `filter-options` is the route's
 `400 invalid_query`, and another value `400 invalid_detail` (the tool's
 schema: `400 invalid_request`). The parameter exists where a store advertises

@@ -518,14 +518,58 @@ const instant = (minutes: number) =>
   new Date(Date.UTC(2026, 10, 18, 21) - minutes * 60_000).toISOString();
 
 /**
+ * Every code the Processor writes to `parse_runs.error` today (its pipeline
+ * and metadata errors, the failing stage, `parse_interrupted`), and the
+ * `unclassified` the summary writes for a value that is not a code.
+ */
+const PARSE_FAILURE_CODES = [
+  "artifact_not_eligible",
+  "artifact_too_large",
+  "metadata_release_unknown",
+  "observation_limit_exceeded",
+  "observation_payload_too_large",
+  "observation_row_too_large",
+  "parse_contract_invalid",
+  "parse_lease_expired",
+  "parse_run_insert_failed",
+  "parser_no_longer_accepts",
+  "parser_release_conflict",
+  "parser_version_invalid",
+  "raw_checksum_mismatch",
+  "raw_object_missing",
+  "raw_size_mismatch",
+  "release_manifest_mismatch",
+  "manifest_artifact_ambiguous",
+  "manifest_artifact_mismatch",
+  "manifest_dataset_mismatch",
+  "manifest_media_type_mismatch",
+  "manifest_period_invalid",
+  "manifest_shape_invalid",
+  "manifest_state_invalid",
+  "metadata_manifest_missing",
+  "metadata_projection_missing",
+  "metadata_or_raw_read_failed",
+  "parser_rejected",
+  "persistence_failed",
+  "parse_interrupted",
+  "unclassified",
+] as const;
+
+/**
  * A full overview at the worst its window allows: 38 sources (as many as the
  * registry declares today), every one with artifacts and runs among the
  * newest 500 fetch runs, `partialSources` of them with partial runs, and the
  * newest 500 parse runs over 57 parsers (as many as the parser registry has),
- * `failingParsers` of them failing and three pending, with warnings and
- * failure codes.
+ * `failingParsers` of them failing (their runs taking `codes` in turn) and
+ * three pending, with warnings; and `unitLines` sources' datasets with three
+ * partial-unit updates each.
  */
-function worstOverview(options: { partialSources: number; failingParsers: number }): OverviewPage {
+function worstOverview(options: {
+  partialSources: number;
+  failingParsers: number;
+  unitLines: number;
+  codes: readonly string[];
+}): OverviewPage {
   const sources = Array.from({ length: 38 }, (_, index) => `synthetic-source-${nn(index)}`);
   const parsers = Array.from(
     { length: 57 },
@@ -580,10 +624,18 @@ function worstOverview(options: { partialSources: number; failingParsers: number
             ? { list: ["synthetic warning text"], raw: '["synthetic warning text"]', parsed: true }
             : { list: [], raw: "[]", parsed: true },
         // The Processor writes a closed code here, never the parser's text.
-        error: status === "error" ? "parser_rejected" : null,
+        error: status === "error" ? options.codes[(index / 2) % options.codes.length]! : null,
         superseded_by_parse_run_id: index % 9 === 0 ? 700_600 - index : null,
       };
     }),
+    unitUpdates: Array.from({ length: options.unitLines * 3 }, (_, index) => ({
+      source_id: sources[index % options.unitLines]!,
+      dataset: `synthetic-dataset-${nn(index % options.unitLines)}`,
+      fetch_run_id: 900_500 - index * 3,
+      fetched_at: instant(index * 90),
+      updated_units: 3,
+      stale_units: 1,
+    })),
     coverage: { limit: 500, truncated: true },
   };
 }
@@ -650,34 +702,62 @@ describe("kogane.store.read overview summary (ADR 0123, amendment 2026-11-19)", 
     }
   });
 
-  it("stays under 8 KB at the window's realistic worst, and measures past it", () => {
-    const worst = worstOverview({ partialSources: 10, failingParsers: 10 });
+  it("stays under 7 KB at the window's realistic worst and under 8 KB at its bound", () => {
+    const worst = worstOverview({
+      partialSources: 10,
+      failingParsers: 10,
+      unitLines: 10,
+      codes: ["parser_rejected"],
+    });
     expect(validApiResponse("/api/overview", worst, "full")).toBe(true);
     expect(bytes(worst)).toBeGreaterThan(25 * CLIENT_BYTES);
     const summary = overviewSummary(worst);
     expect(validApiResponse("/api/overview", summary, "summary")).toBe(true);
     const size = bytes({ schemaVersion: "kogane-page-read-v1", data: summary });
-    expect(size).toBeLessThan(CLIENT_BYTES);
-    // Every run is counted once, under its status, and every status that is
-    // not a success names its sources or parsers with their newest run.
+    expect(size).toBeLessThan(7 * 1024);
+    // Every run is counted once, under its status; each status that is not a
+    // success names the five sources or parsers with the newest runs and
+    // counts the rest, with their runs.
     expect(summary.fetchRuns.byStatus.map((line) => [line.status, line.runs])).toEqual([
       ["partial", worst.fetchRuns.filter((run) => run.status === "partial").length],
       ["success", worst.fetchRuns.filter((run) => run.status === "success").length],
     ]);
-    expect(summary.fetchRuns.notSuccessful).toHaveLength(10);
-    expect(summary.parseRuns.notOk.filter((line) => line.status === "error")).toHaveLength(10);
+    expect(summary.fetchRuns.notSuccessful).toHaveLength(5);
+    expect(summary.fetchRuns.notSuccessfulOmitted).toEqual([
+      { status: "partial", lines: 5, runs: expect.any(Number) },
+    ]);
+    expect(summary.parseRuns.notOk).toHaveLength(5);
+    // Ten failing parsers and three pending ones: thirteen lines.
+    expect(
+      summary.parseRuns.notOk.length +
+        summary.parseRuns.notOkOmitted.reduce((lines, line) => lines + line.lines, 0),
+    ).toBe(13);
     for (const line of summary.parseRuns.notOk)
       expect(line.failureCodes).toEqual(line.status === "error" ? ["parser_rejected"] : []);
-    expect(summary.parseRuns.notOk.filter((line) => line.status === "pending")).toHaveLength(3);
+    expect(summary.unitUpdates).toHaveLength(5);
+    expect(summary.unitUpdatesOmitted).toEqual({ lines: 5, runs: 15 });
     expect(summary.sources).toHaveLength(38);
-    // Past that worst (an open limit of the ADR): every source with a partial
-    // run and twenty parsers failing.
-    const beyond = bytes({
-      schemaVersion: "kogane-page-read-v1",
-      data: overviewSummary(worstOverview({ partialSources: 38, failingParsers: 20 })),
-    });
+    // The bound: every source partial, every parser failing with every code
+    // the Processor writes, every source with unit updates. Nothing grows
+    // further with the store; only the source registry and the Processor's
+    // codes would.
+    const bound = overviewSummary(
+      worstOverview({
+        partialSources: 38,
+        failingParsers: 57,
+        unitLines: 38,
+        codes: PARSE_FAILURE_CODES,
+      }),
+    );
+    expect(validApiResponse("/api/overview", bound, "summary")).toBe(true);
+    expect(bound.parseRuns.byStatus.find((line) => line.status === "error")?.failureCodes).toEqual(
+      expect.arrayContaining([...PARSE_FAILURE_CODES]),
+    );
+    expect(bound.parseRuns.notOk.every((line) => line.moreFailureCodes > 0)).toBe(true);
+    const bounded = bytes({ schemaVersion: "kogane-page-read-v1", data: bound });
+    expect(bounded).toBeLessThan(CLIENT_BYTES);
     console.log(
-      `overview summary at the realistic worst: ${size} bytes (full ${bytes(worst)}); beyond it: ${beyond}`,
+      `overview summary at the realistic worst: ${size} bytes (full ${bytes(worst)}); at its bound: ${bounded}`,
     );
   });
 });
