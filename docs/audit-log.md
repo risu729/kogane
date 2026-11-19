@@ -192,11 +192,17 @@ protocol-1 row can be retried and only the claim batch that carries the
 record inserts one. The retry itself is named by the row's `retry_claimed_at`
 and the `retry_claimed` log line, not in this log. The record's
 `schedule:<job id>@<revision>` and `recorded_at` are the first claim's, even
-when a settings edit in between fenced the retry on a later revision. Nothing
-names the revision the retry was fenced on: the `retry_claimed` line carries
-the job and occurrence ids only, and the occurrence row has no revision. The
-settings edit's own record gives its time, which does not settle whether the
-edit landed before or after the retry's fence. The retry calls the collector
+when a settings edit in between fenced the retry on a later revision. The
+`retry_claimed` log line names the revision the retry was fenced on, as
+`scheduleRevision` (the field `claim_conflict` uses): the value the retry's
+UPDATE compared the schedule's stored revision with, logged only when that
+UPDATE claimed the row. No record names it, and the occurrence row has no
+revision, so it lasts only as long as Workers Logs keep the line (seven days,
+[schedules](schedules.md#alarm-and-lease-log-lines)): a log line is not
+durable evidence. The settings edit's own record gives its time and its new
+revision, which the line's `scheduleRevision` can be matched against while
+the line is kept; after that, nothing settles whether the edit landed before
+or after the retry's fence. The retry calls the collector
 with the original nominal, so that revision only decided that the job was
 still enabled with the same next reservation.
 
@@ -379,7 +385,8 @@ occurrence of that job.
 - The `processor` tick and `keepalive` alarm occurrences, an alarm dispatch's
   outcome (it stays in the occurrence row), the retry claim of a
   `not_dispatched` occurrence (its first claim's record stands for it, and
-  no record or log names the schedule revision the retry was fenced on,
+  no record names the schedule revision the retry was fenced on; only the
+  `retry_claimed` log line does, for as long as Workers Logs keep it,
   [above](#the-processors-own-records-alarm-and-lane)), lane ticks that wrote no decision,
   commit or proposal, and the lanes that write none of them (parsing,
   identity, projections, prices, rewards, reports, operations dispatch, the
@@ -456,7 +463,9 @@ page's contract),
 `services/processor/test/schedule-alarm-audit.test.ts` (one record per claimed
 collection occurrence, none for the processor tick and keepalive, a claim
 rolled back with its record), `services/processor/test/schedule-dispatch-marker.test.ts`
-(a retry claim adds no second record; the first claim's revision stays), `services/processor/test/lane-audit.test.ts`
+(a retry claim adds no second record; the first claim's revision stays; the
+`retry_claimed` line names the revision the retry was fenced on, and a lost
+fence logs none), `services/processor/test/lane-audit.test.ts`
 (ranges that name exactly the lane's rows with other writers' rows in between,
 idle, off and unaudited lanes, a failed tick, a record that cannot be written),
 `services/processor/test/lane-audit-plans.test.ts` (every lane audit read is a

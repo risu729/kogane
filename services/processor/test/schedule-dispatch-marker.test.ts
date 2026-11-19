@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { LAYER_A_SQL, layerBMigrations, applyMigration } from "./harness.ts";
@@ -242,10 +242,28 @@ test("a retry claim keeps its occurrence's one claim record, named by the first 
   await db
     .prepare("UPDATE collection_schedules SET revision=revision+1 WHERE id='mizuho-bank'")
     .run();
-  await new AlarmClass(
-    state(),
-    environment(db, async () => {}),
-  ).alarm();
+  const info = spyOn(console, "log").mockImplementation(() => {});
+  let lines: Record<string, unknown>[];
+  try {
+    await new AlarmClass(
+      state(),
+      environment(db, async () => {}),
+    ).alarm();
+    lines = info.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+  } finally {
+    info.mockRestore();
+  }
+  // The log line names the revision the retry's fence compared against (the
+  // edit's), in claim_conflict's field; the audit record below still does not.
+  expect(lines.filter((line) => line["event"] === "schedule_alarm")).toEqual([
+    {
+      event: "schedule_alarm",
+      jobId: "mizuho-bank",
+      occurrenceId: first!.id,
+      outcome: "retry_claimed",
+      scheduleRevision: first!.revision + 1,
+    },
+  ]);
   const retried = await db
     .prepare(
       "SELECT status,started_at,retry_claimed_at FROM collection_schedule_occurrences WHERE id=?",
@@ -447,13 +465,23 @@ test.each(["disabled", "revision_changed", "reservation_changed"] as const)(
           )
           .run();
     });
-    await new AlarmClass(
-      context,
-      environment(db, async () => {
-        calls++;
-      }),
-    ).alarm();
+    const info = spyOn(console, "log").mockImplementation(() => {});
+    let lines: Record<string, unknown>[];
+    try {
+      await new AlarmClass(
+        context,
+        environment(db, async () => {
+          calls++;
+        }),
+      ).alarm();
+      lines = info.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    } finally {
+      info.mockRestore();
+    }
     expect(calls).toBe(0);
+    // A lost fence logs no retry_claimed line, so a logged revision is always
+    // one the fence matched, never the one read before the edit.
+    expect(lines.filter((line) => line["outcome"] === "retry_claimed")).toEqual([]);
     expect(
       await db
         .prepare("SELECT * FROM collection_schedule_occurrences WHERE id='synthetic-stopped'")
