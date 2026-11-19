@@ -50,15 +50,10 @@ import {
 } from "./instrument-candidates-review.ts";
 
 export {
-  PENDING_DECISION_HANDLERS,
   PENDING_DECISIONS_COUNT_BOUND,
   PENDING_DECISIONS_ID_BYTES,
   PENDING_DECISIONS_IDS_SHOWN,
   PENDING_DECISIONS_MAX_BYTES,
-  PENDING_DECISIONS_NOT_COVERED,
-  type PendingDecisionKind,
-  type PendingDecisionLine,
-  type PendingDecisions,
 };
 
 const REQUEST_ID = "decisions.pending";

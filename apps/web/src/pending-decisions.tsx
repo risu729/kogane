@@ -17,7 +17,7 @@ import { PENDING_DECISIONS_PATH } from "../../../packages/observation-shared/src
 import { Link } from "./router.tsx";
 import { Badge, Panel } from "./ui.tsx";
 
-export function usePendingDecisions() {
+function usePendingDecisions() {
   return useQuery({
     queryKey: ["decisions", "pending"],
     // getJson checks the shape (`validApiResponse`) before anything renders.

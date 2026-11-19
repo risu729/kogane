@@ -478,7 +478,7 @@ describe("pending-to-posted links, survey proposals and open plans", () => {
       const [loaded] = await loadPendingPostedCandidates(sql, { proposalId: id });
       if (loaded?.view.proposalStatus === "proposed") open.push(id);
     }
-    expect(open.length).toBe(links.count);
+    expect(links.count).toBe(open.length);
 
     expect(line(answer, "maintenance-survey.proposal")).toMatchObject({
       count: 2,

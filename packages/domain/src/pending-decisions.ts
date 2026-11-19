@@ -59,7 +59,7 @@ export const PENDING_DECISION_UNAVAILABLE = [
 export type PendingDecisionUnavailable = (typeof PENDING_DECISION_UNAVAILABLE)[number];
 
 /** Who decides a line's items. */
-export const PENDING_DECISION_PATHS = [
+const PENDING_DECISION_PATHS = [
   "kogane.command.plan",
   "kogane.command.approve",
   "kogane.schedules.survey.decide",
