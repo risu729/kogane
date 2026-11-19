@@ -81,10 +81,18 @@ recorded with `kogane.reconcile.propose` (no page or tool lists them, and
    id goes in, fixed arguments, and the path that decides it
    (`kogane.command.plan`, `kogane.command.approve` or
    `kogane.schedules.survey.decide`). A line the deployment does not serve,
-   the grant cannot read (the survey line without `schedules.read`) or whose
-   own read refuses past its bounds is `unavailable` with `not_served`,
+   the grant cannot read or whose own read refuses past its bounds is `unavailable` with `not_served`,
    `unauthorized` or `budget_exceeded`; the other lines still answer. Closed
-   codes only; no amount, label or provider text.
+   codes only; no amount, label or provider text. A line needs the capability
+   the catalogue gives its handler's read tool
+   (`PENDING_DECISION_CAPABILITIES`): `records.read` for the card settlement,
+   ownership, candidate and pending-to-posted lines, `schedules.read` for the
+   survey line (`kogane.schedules.survey.read`) and `interpretation.propose`
+   for the plans line (`kogane.command.simulate`). Without it the line is
+   `unauthorized` and its table is not read, so the summary shows no id the
+   grant could not read through the line's own tool: the HTTP agent route's
+   reader grant (a browser subject in neither `OPERATOR_SUBJECTS` nor
+   `AGENT_GRANTS`) sees no plan id, as the command routes refuse it.
 3. **Each line counts its own list.** The account and instrument lines run
    their reviews' own bounded reads and view filters
    (`accountCandidateView`, `instrumentCandidateView`, exported for this). The
@@ -149,7 +157,10 @@ recorded with `kogane.reconcile.propose` (no page or tool lists them, and
   purchase page's candidate reader; survey proposals for every source and a
   grant's sources; plans planned, approved, committed, stale and expired, and
   a plan expiring between two reads; the count bound; grant refusals before
-  any read; `not_served` and `unauthorized` lines; the id bounds and the
+  any read; `not_served` and `unauthorized` lines, each line's capability
+  equal to its handler tool's catalogue capability, and a reader grant's
+  plans and survey lines refused without reading their tables; the id bounds
+  and the
   8 KB worst case; every answer against the wire contract; plans without
   table statistics; and that no read changes the store.
 - `services/processor/test/pending-decisions.test.ts`: on workerd's SQLite

@@ -7,6 +7,7 @@ import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
+  PENDING_DECISION_HANDLERS,
   PENDING_DECISION_KINDS,
   type PendingDecisionKind,
   type PendingDecisionLine,
@@ -16,6 +17,7 @@ import { IDENTITY_OBSERVATION_COUNT_SQL } from "../../read-model/src/instrument-
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { randomSettlementStore } from "../../read-model/test/card-settlement-random-store.ts";
 import type { Grant } from "../src/grants.ts";
+import { OPERATION_CATALOGUE } from "../src/operation-path/catalogue.ts";
 import { reviewAccountCandidates } from "../src/query/account-candidates.ts";
 import { loadPendingPostedCandidates } from "../src/query/card-purchase-candidates.ts";
 import {
@@ -30,6 +32,7 @@ import {
   PENDING_CARD_OWNERSHIP_SQL,
   PENDING_CARD_SETTLEMENTS_SQL,
   PENDING_CHANGE_PLANS_SQL,
+  PENDING_DECISION_CAPABILITIES,
   PENDING_DECISIONS_COUNT_BOUND,
   PENDING_DECISIONS_ID_BYTES,
   PENDING_DECISIONS_IDS_SHOWN,
@@ -54,7 +57,13 @@ import { migratedDatabase } from "./sqlite-store.ts";
 const FULL: Grant = {
   principal: "synthetic-owner",
   scopes: { sources: "*", accounts: "*", scheduleSources: "*" },
-  capabilities: ["summary.read", "records.read", "evidence.read", "schedules.read"],
+  capabilities: [
+    "summary.read",
+    "records.read",
+    "evidence.read",
+    "interpretation.propose",
+    "schedules.read",
+  ],
   budget: { maxRows: 1000, maxProposalTargets: 1, maxExplainDepth: 6 },
 };
 const SERVED: PendingDecisionsServed = {
@@ -571,6 +580,46 @@ describe("grant and deployment", () => {
     });
     const off = await pending(executor(db), { served: { schedules: false } });
     expect(line(off, "maintenance-survey.proposal").reason).toBe("not_served");
+  });
+
+  test("a line needs its own read tool's capability, so no id reaches a grant that tool refuses", async () => {
+    // Each line is graded by the catalogue capability of the tool its
+    // handler names.
+    for (const kind of PENDING_DECISION_KINDS) {
+      const operation = PENDING_DECISION_HANDLERS[kind].tool.slice("kogane.".length);
+      expect(
+        (OPERATION_CATALOGUE as Record<string, { capability: string }>)[operation]?.capability,
+        kind,
+      ).toBe(PENDING_DECISION_CAPABILITIES[kind]);
+    }
+    // The HTTP agent route's reader grant (records.read, no proposal, no
+    // schedules) with every kind served: the plans and survey lines are
+    // refused, and neither table is read.
+    const db = migratedDatabase();
+    const sql = executor(db);
+    const seen: string[] = [];
+    const watching: SqlExecutor = {
+      all: async (text, args) => {
+        seen.push(text);
+        return sql.all(text, args);
+      },
+      first: async (text, args) => {
+        seen.push(text);
+        return sql.first(text, args);
+      },
+    };
+    const answer = await pending(watching, {
+      grant: { ...FULL, capabilities: ["summary.read", "records.read", "evidence.read"] },
+    });
+    expect(line(answer, "change-plan.open")).toMatchObject({
+      state: "unavailable",
+      reason: "unauthorized",
+      count: null,
+      ids: [],
+    });
+    expect(line(answer, "maintenance-survey.proposal").reason).toBe("unauthorized");
+    expect(seen.some((text) => text.includes("change_plans"))).toBe(false);
+    expect(seen.some((text) => text.includes("maintenance_survey_proposals"))).toBe(false);
   });
 });
 

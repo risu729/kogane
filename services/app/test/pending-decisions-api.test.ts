@@ -261,6 +261,27 @@ describe("kogane.decisions.pending", () => {
       (line) => line["kind"] === "maintenance-survey.proposal",
     );
     expect(surveyLine).toMatchObject({ state: "unavailable", reason: "unauthorized" });
+    // A browser subject outside both lists holds the reader grant, which
+    // cannot read a plan (`kogane.command.simulate` needs
+    // interpretation.propose): the plans line names no plan id for it. A
+    // subject in AGENT_GRANTS, which may plan and simulate, reads it.
+    const planLine = async (subject: string) => {
+      const response = await call(AGENT_PATH, { subject, body: {} });
+      expect(response.status, subject).toBe(200);
+      const answer = (await response.json()) as { kinds: Record<string, unknown>[] };
+      return answer.kinds.find((line) => line["kind"] === "change-plan.open");
+    };
+    expect(await planLine("synthetic-reader")).toMatchObject({
+      state: "unavailable",
+      reason: "unauthorized",
+      count: null,
+      ids: [],
+    });
+    expect(await planLine("synthetic-agent")).toMatchObject({
+      state: "counted",
+      count: 1,
+      ids: [PLAN],
+    });
     const unknownKey = await call(AGENT_PATH, {
       subject: "synthetic-agent",
       body: { kind: "x" },

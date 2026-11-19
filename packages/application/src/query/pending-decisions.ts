@@ -12,8 +12,12 @@
 //
 // - The grant decides. `records.read` over the whole store, as the candidate
 //   reads it counts: a narrowed grant is refused before anything is read.
-//   The survey line also needs `schedules.read` and counts only the grant's
-//   `scheduleSources`, as the survey read does.
+//   Each line also needs the capability its own read tool needs
+//   (`PENDING_DECISION_CAPABILITIES`, the catalogue's capability for the
+//   handler's tool), so the summary shows no id the grant could not read
+//   through that tool: the survey line needs `schedules.read` and counts only
+//   the grant's `scheduleSources`, as the survey read does; the plans line
+//   needs `interpretation.propose`, as `kogane.command.simulate` does.
 // - Each line counts its own list's items. The account and instrument lines
 //   run their reviews' own bounded reads and view filters
 //   (`accountCandidateView`, `instrumentCandidateView`); the others are the
@@ -42,7 +46,7 @@ import {
 import { AccountCandidateLimitError } from "../../../domain/src/account-candidates.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
-import { type Grant, grantAllows } from "../grants.ts";
+import { type AgentCapability, type Grant, grantAllows } from "../grants.ts";
 import { accountCandidateView, queryAccountCandidates } from "./account-candidates.ts";
 import {
   boundedInstrumentResolution,
@@ -57,6 +61,24 @@ export {
 };
 
 const REQUEST_ID = "decisions.pending";
+
+/**
+ * The capability each line's own read tool needs: the catalogue capability
+ * of `PENDING_DECISION_HANDLERS[kind].tool` (a test holds the two equal). A
+ * grant without it gets the line `unavailable` with `unauthorized`, and its
+ * store is not read for that line.
+ */
+export const PENDING_DECISION_CAPABILITIES: Record<PendingDecisionKind, AgentCapability> = {
+  "card-settlement.statement": "records.read",
+  "card-ownership.account": "records.read",
+  "account-candidate.open": "records.read",
+  "account-candidate.held": "records.read",
+  "instrument-candidate.open": "records.read",
+  "instrument-candidate.held": "records.read",
+  "pending-posted.link": "records.read",
+  "maintenance-survey.proposal": "schedules.read",
+  "change-plan.open": "interpretation.propose",
+};
 
 /** How long a plan may live (plan.ts `PLAN_TTL_SECONDS_MAX`): older plans are expired. */
 const PLAN_LIFETIME_MAX_MS = 24 * 60 * 60 * 1000;
@@ -362,7 +384,7 @@ export async function readPendingDecisions(input: {
   lines.push(
     !served.schedules
       ? unavailable("maintenance-survey.proposal", "not_served", true)
-      : !grantAllows(grant, "schedules.read")
+      : !grantAllows(grant, PENDING_DECISION_CAPABILITIES["maintenance-survey.proposal"])
         ? unavailable("maintenance-survey.proposal", "unauthorized", true)
         : await sqlLine(
             sql,
@@ -373,20 +395,22 @@ export async function readPendingDecisions(input: {
           ),
   );
   lines.push(
-    served.commands
-      ? await sqlLine(
-          sql,
-          "change-plan.open",
-          PENDING_CHANGE_PLANS_SQL,
-          [
-            bound,
-            shown,
-            new Date(instant - PLAN_LIFETIME_MAX_MS).toISOString(),
-            new Date(instant).toISOString(),
-          ],
-          true,
-        )
-      : unavailable("change-plan.open", "not_served", true),
+    !served.commands
+      ? unavailable("change-plan.open", "not_served", true)
+      : !grantAllows(grant, PENDING_DECISION_CAPABILITIES["change-plan.open"])
+        ? unavailable("change-plan.open", "unauthorized", true)
+        : await sqlLine(
+            sql,
+            "change-plan.open",
+            PENDING_CHANGE_PLANS_SQL,
+            [
+              bound,
+              shown,
+              new Date(instant - PLAN_LIFETIME_MAX_MS).toISOString(),
+              new Date(instant).toISOString(),
+            ],
+            true,
+          ),
   );
   return {
     ok: true,
