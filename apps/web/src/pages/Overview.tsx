@@ -22,6 +22,7 @@ import {
 import { pageWindow } from "../filters.ts";
 import { Pager } from "./ViewControls.tsx";
 import { displayLabel } from "../labels.ts";
+import { PendingDecisionsPanel } from "../pending-decisions.tsx";
 const TABLE_LABELS: Record<string, string> = {
   source: "取得元",
   sources: "取得元",
@@ -153,6 +154,7 @@ function OverviewBody({ data }: { data: Overview }): ReactNode {
   return (
     <>
       <Counts data={data} />
+      <PendingDecisionsPanel />
       <Panel
         id="sources"
         title="取得元"

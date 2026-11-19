@@ -62,6 +62,7 @@ import {
   CARD_DEBIT_ACCOUNTS_PATH,
   validCardDebitAccountsReview,
 } from "./card-debit-accounts-contract.ts";
+import { PENDING_DECISIONS_PATH, validPendingDecisions } from "./pending-decisions-contract.ts";
 import { validAccountConnection } from "./account-connection-contract.ts";
 import { validFinancialProductClaimWire } from "./financial-products.ts";
 import { validBalanceInterpretation } from "./balance-semantics.ts";
@@ -815,6 +816,7 @@ export function validApiResponse(path: string, value: unknown): boolean {
     return validCardSettlementReviewPage(value);
   if (path === CARD_STATEMENTS_UNMATCHED_PATH) return validUnmatchedCardStatementsReview(value);
   if (path === CARD_DEBIT_ACCOUNTS_PATH) return validCardDebitAccountsReview(value);
+  if (path === PENDING_DECISIONS_PATH) return validPendingDecisions(value);
   if (path === "/api/v2/card-purchases") return validCardPurchasePage(value);
   if (path === "/api/v2/reported-state") return validReportedState(value);
   if (path === "/api/v2/reported-holdings-change") return validReportedHoldingsChange(value);

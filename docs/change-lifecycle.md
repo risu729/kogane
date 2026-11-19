@@ -786,6 +786,27 @@ offered disables Approve and Commit.
 One operation id is derived per approval, so a resend of the same confirmation
 is the same operation and a lost response never commits twice.
 
+### What waits for a decision
+
+The ホーム page's `判断待ち` panel and `kogane.decisions.pending` list, in one
+answer, every queue this lifecycle and the review pages decide
+([ADR 0126](adr/0126-pending-decisions-summary.md),
+[agent API](agent-api.md#what-waits-for-a-decision)): card settlement
+statements with an undecided candidate and no live acceptance; the accounts
+those candidates need an ownership decision for; account and instrument
+candidates (`open` and `held`); undecided stage-B pending-to-posted proposals;
+undecided re-survey proposals; and plans `planned` or `approved` whose
+`expires_at` is after now, which wait for `approve` or `commit` here. A plan
+row stays `planned` or `approved` after it expires (only `status` moves, and
+nothing reopens it), so the list reads the 24 hours before now through
+`change_plans_status` and keeps the unexpired ones. Each line gives a count,
+the first ids, the oldest creation time and the page and tool that handle it;
+it decides nothing. Not listed, with a closed reason in the answer's
+`notCovered`: the economic-event and card purchase review kinds above
+(`no_decision_path`: refused at `plan` until a planner exists), relations an
+agent proposed with `kogane.reconcile.propose` (`no_list`) and unresolved
+account mappings (`no_proposal`).
+
 ## Capability
 
 `commands` is a new field of `ApiCapabilities`

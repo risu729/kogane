@@ -315,6 +315,15 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
+  // What waits for the owner's decision (ADR 0126): the ホーム page's
+  // service, one line per kind of open proposal.
+  "decisions.pending": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   "card-settlements.ownership": {
     risk: ["R0"],
     effect: null,

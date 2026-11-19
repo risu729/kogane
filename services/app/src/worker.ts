@@ -37,6 +37,7 @@ import {
   cardStatementsUnmatchedApi,
 } from "./card-statements-unmatched-api";
 import { CARD_DEBIT_ACCOUNTS_PATH, cardDebitAccountsApi } from "./card-debit-accounts-api";
+import { PENDING_DECISIONS_PATH, pendingDecisionsApi } from "./pending-decisions-api";
 import { instrumentCandidatesApi } from "./instrument-candidates-api";
 import { instrumentHistoryApi } from "./instrument-history-api";
 import { accountHistoryApi } from "./account-history-api";
@@ -62,6 +63,7 @@ function classify(path: string): string {
   )
     return "card_settlement_review";
   if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
+  if (path === PENDING_DECISIONS_PATH) return "pending_decisions";
   if (path === REPORTED_STATE_PATH) return "reported_state";
   if (path === REPORTED_HOLDINGS_CHANGE_PATH) return "reported_holdings_change";
   if (path === RECONSTRUCTED_STATE_PATH) return "reconstructed_state";
@@ -136,6 +138,9 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     cardDebitAccountsApi(request, env, url, subject),
   );
   if (debitAccountsResponse) return debitAccountsResponse;
+  // Operator-only and read-only: what waits for a decision (ADR 0126).
+  const pendingResponse = await catalogue(() => pendingDecisionsApi(request, env, url, subject));
+  if (pendingResponse) return pendingResponse;
   // Operator-only and read-only; 404 unless CORE 0047 exists
   // (docs/economic-events.md, HTTP).
   const purchaseResponse = await catalogue(() => cardPurchasesApi(request, env, url, subject));
