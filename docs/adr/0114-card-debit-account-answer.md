@@ -382,7 +382,9 @@ command or catalogue operation is added.
   refund of 5,000 beside a bill of 30,000 read 25,000 and `yes` against a
   balance of 26,000, though the bank debits the 30,000. Leaving the credit
   out can only raise a line's `cardBills`, so it never makes a `yes` the
-  figures do not carry. A line that read `unknown` only because a refund
+  figures do not carry. The page's wire contract
+  (`validUpcomingCardBills`) refuses a bill with an exact total of zero or
+  below. A line that read `unknown` only because a refund
   with no known account was a bill due by its date
   (`cards_with_unknown_account`) can now read `yes` or `no`: nothing is
   debited for the refund. If a provider were seen to credit a
@@ -412,8 +414,9 @@ command or catalogue operation is added.
   bills, and each `notListed` reason; a refund beside a bill on one account
   (the bill alone is summed and the line reads `no`, the refund is in
   `notListed`), a zero total that is not a bill beside a positive one that
-  is, and a total that is not exact staying a bill beside a refund that does
-  not; `yes` and `no` on exact figures, with an equal balance covering; a
+  is, a total that is not exact staying a bill beside a refund that does
+  not, and a refund with no known debit account leaving no line `unknown`
+  while an undated one keeps `cards_with_unknown_due_date`; `yes` and `no` on exact figures, with an equal balance covering; a
   later line counting the earlier bills; each `unknown` reason and their
   order; the unknown-account line; a statement with no due date that no
   settlement pays, on its own account and on an unknown one.
@@ -426,8 +429,8 @@ command or catalogue operation is added.
   and one not reported, and an entity with two references: the newest
   capture is taken, never the sum, and two disagreeing captures at once are
   a conflict. The answer passes the wire contract through the route's
-  dispatch, and a contradicting `covers` or a silent `unknown` is refused; ten cards stay
-  under 8 KB; the read writes nothing, issues only the reads it composes, is
+  dispatch, and a contradicting `covers`, a silent `unknown` or a bill with
+  an exact total of zero or below is refused; ten cards stay under 8 KB; the read writes nothing, issues only the reads it composes, is
   refused before reading under a narrowed grant, and reaches labels by key
   without table statistics.
 - `services/app/test/card-debit-accounts-api.test.ts`: the route, the agent

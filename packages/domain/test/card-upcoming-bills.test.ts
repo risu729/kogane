@@ -259,6 +259,36 @@ describe("covers", () => {
     ]);
   });
 
+  test("a refund with no known debit account makes no line unknown; an undated refund still does", () => {
+    const run = (refundDate: string | null) =>
+      upcomingCardBills({
+        date: DATE,
+        cards: [
+          card("refund", bill(refundDate, yen(-5000)), null),
+          card("charge", bill("2098-03-27", yen(700)), "a"),
+        ],
+        accounts: new Map([["entity:a", balance(yen(1000))]]),
+      });
+    // Due before the bill: nothing is debited for it, so it is no
+    // `cards_with_unknown_account` bill and has no line of its own.
+    const dated = run("2098-03-26");
+    expect(dated.notListed.map((item) => [item.card, item.reason])).toEqual([
+      ["vpass:refund", "statement_total_refund_or_zero"],
+    ]);
+    expect(dated.byDebitAccount.map((line) => [line.account, line.covers, line.reasons])).toEqual([
+      ["a", "yes", []],
+    ]);
+    // No readable due date: its sign is not read before the date is, so it
+    // stays `payment_date_not_published` and keeps the line unknown.
+    const undated = run(null);
+    expect(undated.notListed.map((item) => [item.card, item.reason])).toEqual([
+      ["vpass:refund", "payment_date_not_published"],
+    ]);
+    expect(undated.byDebitAccount.map((line) => [line.account, line.covers, line.reasons])).toEqual(
+      [["a", "unknown", ["cards_with_unknown_due_date"]]],
+    );
+  });
+
   test("a bill that is not exact makes the line's sum not exact and covers unknown", () => {
     const answer = upcomingCardBills({
       date: DATE,

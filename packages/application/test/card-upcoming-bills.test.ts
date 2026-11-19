@@ -582,6 +582,12 @@ describe("the answer as served", () => {
     const zero = structuredClone(answer);
     zero.bills[2].amount = { value: "0", unit: "JPY", status: "unparsed" };
     expect(validUpcomingCardBills(zero)).toBe(false);
+    // A refund served as a bill, where it would offset other bills, is refused.
+    const refund = structuredClone(answer);
+    refund.bills[0].amount = { value: "-5000", unit: "JPY", status: "exact" };
+    expect(validUpcomingCardBills(refund)).toBe(false);
+    refund.bills[0].amount = { value: "0", unit: "JPY", status: "exact" };
+    expect(validUpcomingCardBills(refund)).toBe(false);
   });
 
   test("ten cards with bills and labels stay under 8 KB", async () => {

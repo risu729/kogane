@@ -41,6 +41,13 @@ function validQuantity(value: unknown): value is Record<string, any> {
     : text(value.reason) && !("value" in value);
 }
 
+/** An exact bill is above zero: a refund or zero total is not a bill, so never netted. */
+function positiveIfExact(value: Record<string, any>): boolean {
+  if (value.status !== "exact") return true;
+  const decimal = decimalFromString(value.value);
+  return decimal.ok && BigInt(decimal.value.coefficient) > 0n;
+}
+
 function validBill(value: unknown, asked: string): boolean {
   if (!record(value) || !record(value.card) || !record(value.debitAccount)) return false;
   const account = value.debitAccount;
@@ -53,6 +60,7 @@ function validBill(value: unknown, asked: string): boolean {
     date(value.debitDate) &&
     value.debitDate >= asked &&
     validQuantity(value.amount) &&
+    positiveIfExact(value.amount) &&
     oneOf(UPCOMING_DEBIT_ANSWERS, account.answer) &&
     nullableText(account.account) &&
     nullableText(account.label) &&
