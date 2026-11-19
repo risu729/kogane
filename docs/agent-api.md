@@ -358,11 +358,13 @@ which pending-to-posted candidates are open".
 
 Input, a closed object (every key optional):
 
-| Key       | Shape                                    | Means                                                                                                  |
-| --------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `period`  | `YYYY-MM`                                | Only the events of that statement period, and figures over them                                        |
-| `eventId` | `purchase_<sha256>` or `refund_<sha256>` | One event, exactly; never beside `period` or `offset`                                                  |
-| `offset`  | integer, 0 to 1,000,000                  | Page start; a page is 50 events, `data.nextOffset` names the next one this grant may read (`nextPage`) |
+| Key          | Shape                                    | Means                                                                                                  |
+| ------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `view`       | `events` (default) or `cards`            | The page of explained events, or the per-card answer ([below](#per-card-view-adr-0125))                |
+| `period`     | `YYYY-MM`                                | Only the events of that statement period, and figures over them                                        |
+| `usageMonth` | `YYYY-MM`                                | `view: cards` only: the events whose provider usage date is in that month                              |
+| `eventId`    | `purchase_<sha256>` or `refund_<sha256>` | One event, exactly; never beside `period` or `offset`; not with `view: cards`                          |
+| `offset`     | integer, 0 to 1,000,000                  | Page start; a page is 50 events, `data.nextOffset` names the next one this grant may read (`nextPage`) |
 
 Output:
 
@@ -459,6 +461,91 @@ and `rawLocator` is the parser's position inside an artifact, not a
 `fetch_artifact:` or `raw:` locator; reaching those still takes `explain` and
 `evidence.read`. The operator route itself is unchanged and still refuses an
 agent principal (`403 operator_required`).
+
+#### Per-card view (ADR 0125)
+
+`view: cards` answers "how much was each card used" in one compact read
+([ADR 0125](adr/0125-card-purchases-per-card-view.md); proposed, a published
+tool change awaiting the owner's approval). It takes exactly one of `period`
+(a statement month) and `usageMonth` (a month of provider usage dates, so
+purchases not yet on a statement count too), and no `eventId` or `offset`;
+anything else is `400 invalid_query` naming the keys. It is the operator
+route's `GET /api/v2/card-purchases?view=cards` answer, from the same
+`queryCardPurchaseCards`:
+
+```jsonc
+{
+  "schemaVersion": "kogane-card-purchases-cards-v1",
+  "query": { "view": "cards", "period": null, "usageMonth": "2026-09" },
+  "decisions": "operator-only",
+  "data": {
+    "view": "cards",
+    "frame": "usage-month", // or "statement-period"
+    "cards": [
+      {
+        "accountId": "account_…",
+        "sourceId": "vpass",
+        "label": "…",
+        "events": 12,
+        "unresolved": 0,
+        "figures": [
+          {
+            "unit": "JPY",
+            "captured": "…",
+            "authorized": "…",
+            "capturedRefunds": "0",
+            "authorizedRefunds": "0",
+          },
+        ],
+        "withoutStatement": [{ "reasonCode": "not_posted", "events": 3 }],
+        "statements": [
+          {
+            "period": "2026-10",
+            "total": { "unit": "JPY", "value": "…" },
+            "paymentDate": "2026-11-…",
+            "settlement": "accepted",
+            "debit": { "sourceId": "…", "date": "2026-11-…" },
+          },
+        ],
+      },
+    ],
+    "cardsTruncated": false,
+    "totals": [/* the page's summary.units for the same filter, as decimal text */],
+    "events": 12,
+    "unresolved": 0,
+    "settlementAddsPurchaseExpense": false,
+    "coverage": {/* the page's coverage without `limit` */},
+  },
+}
+```
+
+- A card is a resolved account and its card source; `label` is the stored
+  `accounts.label` (null without a row). At most 100 cards are listed, by
+  source then account; `cardsTruncated` says when more have events, and
+  `totals` still covers them.
+- `figures` per card and `totals` are `cardPurchaseSummary` sums (INV03) as
+  decimal text, states apart and no combined total, exactly the page's
+  figures regrouped. `withoutStatement` counts the events without a statement
+  figure by the page's closed reasons (`not_posted`,
+  `statement_not_collected`, `period_unrecognized`).
+- `statements` are the statements the card's posted events belong to, through
+  the page's own statement and settlement reads: the provider total (decimal
+  text when exact, else `status` and `reason`, never a zero), the payment date
+  (`YYYY-MM-DD` or `{ "reason": … }`), the settlement review's status and, only
+  while it is accepted, the bank debit's source and date.
+- No counterparty, provider row, candidate or evidence is in it: "on what"
+  still needs `view: events`.
+- Bounds: the page's 10,000-event summary bound
+  (`413 budget_exceeded`, `budget:cardPurchaseEvents=10000`); the usage month
+  is applied in SQL, so it bounds that month's events only. A grant whose
+  `maxRows` is below 100 is `413 budget_exceeded` before anything is read.
+  The answer grows with the cards, about 650 bytes per card with two settled
+  statements and an identity-store account id, so ten cards stay under 8 KB
+  (`packages/application/test/card-purchase-cards.test.ts`); a store with more
+  than about eleven card accounts exceeds it.
+- The audit record counts the listed cards and is truncated when
+  `cardsTruncated` is true.
+- The operator page does not render the view yet (ADR 0125, web parity).
 
 ### Instrument candidates
 

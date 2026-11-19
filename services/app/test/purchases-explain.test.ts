@@ -15,7 +15,10 @@ import {
 } from "../../../packages/domain/src/card-purchase";
 import { exactQuantity, integerDecimal } from "../../../packages/domain/src/values";
 import { GRANT_LIMITS, withoutReviewAffordances } from "../../../packages/application/src/index";
-import { queryCardPurchases } from "../../../packages/application/src/query/card-purchases";
+import {
+  queryCardPurchaseCards,
+  queryCardPurchases,
+} from "../../../packages/application/src/query/card-purchases";
 import { validAgentCardPurchasePage } from "../../../packages/observation-shared/src/card-purchase-contract";
 import { d1Executor } from "../../../packages/read-model/src/d1";
 import { cardPurchaseRecognitionWrites } from "../../../packages/storage-d1/src/atomic/card-purchase-recognition";
@@ -534,6 +537,121 @@ describe("request and result bounds", () => {
     // Refused before the store is read.
     expect(statements).toHaveLength(1);
     expect(isSchemaProbe(statements[0]!)).toBe(true);
+    expect(await tables()).toEqual(before);
+  });
+});
+
+describe("the per-card view (ADR 0125)", () => {
+  it("answers the operator route's per-card page on both agent paths, compact and without provider text", async () => {
+    const before = await tables();
+    for (const request of [
+      { view: "cards", period: "2026-09" },
+      { view: "cards", usageMonth: "2026-08" },
+    ] as const) {
+      const response = await explain(request);
+      expect(response.status, JSON.stringify(request)).toBe(200);
+      const body = (await response.json()) as Record<string, any>;
+      const data = await queryCardPurchaseCards(d1Executor(env.DB), request);
+      expect(body).toEqual({
+        schemaVersion: "kogane-card-purchases-cards-v1",
+        query: {
+          view: "cards",
+          period: "period" in request ? request.period : null,
+          usageMonth: "usageMonth" in request ? request.usageMonth : null,
+        },
+        decisions: "operator-only",
+        data,
+      });
+      // The operator route serves the same page from the same reader.
+      const params = new URLSearchParams(request);
+      const operator = (await (
+        await call(`/api/v2/card-purchases?${params}`, { subject: "synthetic-operator" })
+      ).json()) as Record<string, any>;
+      const { apiVersion, ...operatorPage } = operator;
+      expect(apiVersion).toBe(2);
+      expect(operatorPage).toEqual(body["data"]);
+      // And MCP the same object.
+      const overMcp = await mcp({
+        method: "tools/call",
+        params: { name: "kogane.purchases.explain", arguments: request },
+      });
+      expect(overMcp["result"].isError).toBe(false);
+      expect(overMcp["result"].structuredContent).toEqual(body);
+      // Counterparties are not part of it, and the whole answer stays small.
+      expect(pathsContaining(body, HOSTILE)).toEqual([]);
+      expect(new TextEncoder().encode(JSON.stringify(body)).length).toBeLessThan(8 * 1024);
+    }
+    const august = (await (await explain({ view: "cards", usageMonth: "2026-08" })).json()) as {
+      data: { cards: unknown[]; events: number };
+    };
+    expect(august.data).toMatchObject({
+      frame: "usage-month",
+      events: 2,
+      cards: [
+        {
+          accountId: "acct-card",
+          sourceId: "myjcb",
+          label: "Synthetic card",
+          events: 2,
+          figures: [
+            {
+              unit: "JPY",
+              captured: "1234",
+              authorized: "1200",
+              capturedRefunds: "0",
+              authorizedRefunds: "0",
+            },
+          ],
+        },
+      ],
+    });
+    // `view: events` is the page itself.
+    expect(await (await explain({ view: "events", period: "2026-09" })).json()).toEqual(
+      await (await explain({ period: "2026-09" })).json(),
+    );
+    expect(await tables()).toEqual(before);
+  });
+
+  it("refuses what the per-card view does not take, on the agent paths and the route", async () => {
+    const before = await tables();
+    const cases: [unknown, string[]][] = [
+      [{ view: "summary" }, ["view"]],
+      [{ view: 1 }, ["view"]],
+      [{ usageMonth: "2026-09" }, ["usageMonth"]],
+      [{ view: "events", usageMonth: "2026-09" }, ["usageMonth"]],
+      [{ view: "cards", usageMonth: "202609" }, ["usageMonth"]],
+      [{ view: "cards", period: "2026-09", usageMonth: "2026-09" }, ["period", "usageMonth"]],
+      [{ view: "cards", period: "2026-09", offset: 0 }, ["offset"]],
+      [{ view: "cards", period: "2026-09", eventId: postedEvent }, ["eventId"]],
+      [{ view: "cards" }, ["period", "usageMonth"]],
+    ];
+    for (const [body, refs] of cases) {
+      const response = await explain(body);
+      expect(response.status, JSON.stringify(body)).toBe(400);
+      expect(await response.json()).toMatchObject({ code: "invalid_query", refs });
+    }
+    const full = await explain({ view: "cards", usageMonth: "2026-08" }, { full: true });
+    expect(full.status).toBe(413);
+    expect(await full.json()).toMatchObject({
+      code: "budget_exceeded",
+      refs: ["budget:cardPurchaseEvents=10000"],
+    });
+    const operator = (query: string) =>
+      call(`/api/v2/card-purchases?${query}`, { subject: "synthetic-operator" });
+    for (const [query, code] of [
+      ["view=summary", "invalid_query"],
+      ["usageMonth=2026-09", "invalid_query"],
+      ["view=cards", "invalid_query"],
+      ["view=cards&period=2026-09&offset=0", "invalid_query"],
+      [`view=cards&period=2026-09&eventId=${postedEvent}`, "invalid_query"],
+      ["view=cards&period=2026-09&usageMonth=2026-09", "invalid_query"],
+      ["view=cards&usageMonth=202609", "invalid_period"],
+      ["view=cards&period=2026-13", "invalid_period"],
+    ] as const) {
+      const response = await operator(query);
+      expect(response.status, query).toBe(400);
+      expect(await response.json()).toMatchObject({ error: code });
+    }
     expect(await tables()).toEqual(before);
   });
 });

@@ -252,7 +252,19 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       rows: Array.isArray(value["operations"]) ? value["operations"].length : 0,
       truncated: typeof value["nextCursor"] === "string",
     };
-  if (operation === "purchases.explain") return { rows: countOf(value["data"]), truncated: false };
+  // A page of events counts its items; the per-card view (ADR 0125) its cards,
+  // truncated when more cards exist than it lists.
+  if (operation === "purchases.explain") {
+    const data = value["data"];
+    const page =
+      data !== null && typeof data === "object" && !Array.isArray(data)
+        ? (data as Record<string, unknown>)
+        : {};
+    const cards = page["cards"];
+    if (Array.isArray(cards))
+      return { rows: cards.length, truncated: page["cardsTruncated"] === true };
+    return { rows: countOf(data), truncated: false };
+  }
   // One account's reconstructed state, when there is one to show.
   if (operation === "reconstructed-state.read")
     return { rows: value["reconstruction"] ? 1 : 0, truncated: false };

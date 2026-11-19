@@ -16,10 +16,15 @@ import {
   unboundedScans,
 } from "../../read-model/test/card-usage-plan.ts";
 import { CI_SCALE, scaledStore } from "../../read-model/test/card-usage-scale-fixture.ts";
+import { cardFigures } from "../../domain/src/card-purchase-view.ts";
 import {
+  ACCOUNT_LABELS_SQL,
   CARD_PURCHASE_PAGE_SIZE,
   CURRENT_SQL,
+  queryCardPurchaseCards,
   queryCardPurchases,
+  SELECTION_SQL,
+  USAGE_MONTH_SELECTION_SQL,
 } from "../src/query/card-purchases.ts";
 import { LEGACY_CURRENT_SQL } from "./card-purchase-current-legacy-sql.ts";
 
@@ -127,5 +132,60 @@ describe("card purchases on a scaled store without statistics", () => {
     const steps = explain(db, usage[0]!, [0, -1, "[]", 1000]);
     expect(unboundedScans(steps, ["usage", "u", "json_each", "ranked"])).toEqual([]);
     expect(currentRowsDriver(steps)).toMatch(/^SCAN candidate\b/u);
+  });
+
+  test("the per-card view (ADR 0125) regroups the page's figures and selection", async () => {
+    const sql = executor(false);
+    const everything = db.query(SELECTION_SQL).all(null, null, 10_001) as {
+      event_id: string;
+      usage_date: string;
+      statement_period: string | null;
+    }[];
+    // Every statement period: the page's figures and event count, regrouped by card.
+    const periods = [
+      ...new Set(everything.flatMap((row) => (row.statement_period ? [row.statement_period] : []))),
+    ];
+    expect(periods.length).toBeGreaterThan(1);
+    let multiCard = false;
+    for (const period of periods) {
+      const page = await queryCardPurchases(sql, { period });
+      const cards = await queryCardPurchaseCards(sql, { period });
+      multiCard ||= cards.cards.length > 1;
+      expect(cards.events).toBe(page.summary.events);
+      expect(cards.totals).toEqual(page.summary.units.map(cardFigures));
+      expect(cards.cards.reduce((sum, card) => sum + card.events, 0)).toBe(page.summary.events);
+      expect(cards.coverage.unrecognizedCurrentRows).toBe(page.coverage.unrecognizedCurrentRows);
+    }
+    expect(multiCard).toBe(true);
+    // The usage-month selection is the page's selection narrowed by usage date.
+    const months = [...new Set(everything.map((row) => row.usage_date.slice(0, 7)))];
+    expect(months.length).toBeGreaterThan(1);
+    for (const month of months) {
+      const narrowed = db.query(USAGE_MONTH_SELECTION_SQL).all(null, month, 10_001);
+      expect(narrowed.map((row) => JSON.stringify(row)).sort()).toEqual(
+        everything
+          .filter((row) => row.usage_date.startsWith(`${month}-`))
+          .map((row) => JSON.stringify(row))
+          .sort(),
+      );
+      const answer = await queryCardPurchaseCards(sql, { usageMonth: month });
+      expect(answer.events).toBe(
+        new Set(
+          everything
+            .filter((row) => row.usage_date.startsWith(`${month}-`))
+            .map((row) => row.event_id),
+        ).size,
+      );
+    }
+    // Without statistics the usage month walks the live revisions exactly as the
+    // page's selection does, and the labels are primary-key lookups.
+    const steps = (query: string, args: unknown[]) =>
+      explain(db, query, args).map((step) => step.detail);
+    expect(steps(USAGE_MONTH_SELECTION_SQL, [null, months[0], 10_001])).toEqual(
+      steps(SELECTION_SQL, [null, null, 10_001]),
+    );
+    expect(steps(ACCOUNT_LABELS_SQL, ['["a","b"]']).filter((d) => d.startsWith("SCAN a"))).toEqual(
+      [],
+    );
   });
 });

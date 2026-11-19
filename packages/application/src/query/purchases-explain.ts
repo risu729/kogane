@@ -26,14 +26,22 @@
 //   may total is `budget_exceeded` (the route's `413 result_limit_exceeded`); an event id
 //   that names nothing gets the answer an out-of-scope ref gets.
 //
+// `view: cards` (ADR 0125) is the route's per-card answer
+// (`queryCardPurchaseCards`, `GET /api/v2/card-purchases?view=cards`) under
+// the same grant rules: the whole-filter figures grouped by card for one
+// statement period or one usage month, with no per-event explanation, so a
+// single compact answer says how much each card was used.
+//
 // It reads, and nothing else: no path here writes a row, and a refusal reads
 // nothing at all.
-import type {
-  AgentCardPurchaseCandidate,
-  AgentCardPurchasePage,
-  AgentCardPurchaseView,
-  CardPurchaseCandidate,
-  CardPurchasePage,
+import {
+  CARD_PURCHASE_CARDS_MAX,
+  type AgentCardPurchaseCandidate,
+  type AgentCardPurchasePage,
+  type AgentCardPurchaseView,
+  type CardPurchaseCandidate,
+  type CardPurchaseCardsPage,
+  type CardPurchasePage,
 } from "../../../domain/src/card-purchase-view.ts";
 import { CARD_SETTLEMENT_NEXT_PAGE } from "../../../domain/src/card-settlement-review.ts";
 import { isRecord } from "../../../domain/src/guards.ts";
@@ -47,7 +55,9 @@ import {
   CARD_PURCHASE_PERIOD,
   CARD_PURCHASE_SUMMARY_LIMIT,
   CardPurchaseLimitError,
+  type CardPurchaseCardsQuery,
   type CardPurchaseQuery,
+  queryCardPurchaseCards,
   queryCardPurchases,
 } from "./card-purchases.ts";
 import { pageBeyondBudget } from "./page-budget.ts";
@@ -55,7 +65,23 @@ import { pageBeyondBudget } from "./page-budget.ts";
 /** The capability the explanation needs. */
 export const PURCHASES_EXPLAIN_CAPABILITY: AgentCapability = "records.read";
 /** Every key a request may carry; any other key is refused, never ignored. */
-export const PURCHASES_EXPLAIN_KEYS = ["period", "eventId", "offset"] as const;
+export const PURCHASES_EXPLAIN_KEYS = [
+  "view",
+  "period",
+  "usageMonth",
+  "eventId",
+  "offset",
+] as const;
+/**
+ * `events` (the default): the page of explained events. `cards`: the same
+ * whole-filter figures grouped by card, without the per-event explanation
+ * (ADR 0125).
+ */
+export const PURCHASES_EXPLAIN_VIEWS = ["events", "cards"] as const;
+/** The per-card view's request: exactly one of a statement period and a usage month. */
+type PurchasesCardsRequest = { view: "cards" } & CardPurchaseCardsQuery;
+/** A validated request: the page's own query, or the per-card view's. */
+export type PurchasesExplainRequest = CardPurchaseQuery | PurchasesCardsRequest;
 /** The largest offset a request may ask for, as on the operator route. */
 export const PURCHASES_EXPLAIN_MAX_OFFSET = 1_000_000;
 /** Errors of this service carry this request id: no context is opened for it. */
@@ -91,21 +117,50 @@ export interface PurchasesExplanation {
 export const PURCHASES_NEXT_PAGE = CARD_SETTLEMENT_NEXT_PAGE;
 export type PurchasesNextPage = (typeof PURCHASES_NEXT_PAGE)[number];
 
-export type PurchasesExplainOutcome =
-  | { ok: true; explanation: PurchasesExplanation }
-  | { ok: false; error: FinancialError };
+/**
+ * The per-card view (ADR 0125): the operator page's per-card answer
+ * (`queryCardPurchaseCards`, the route's `?view=cards`) as `data`, unchanged.
+ * It is one bounded answer, never paged: at most `CARD_PURCHASE_CARDS_MAX`
+ * cards, and `data.cardsTruncated` says when more exist.
+ */
+export interface PurchasesCardsAnswer {
+  schemaVersion: "kogane-card-purchases-cards-v1";
+  query: { view: "cards"; period: string | null; usageMonth: string | null };
+  decisions: "operator-only";
+  data: CardPurchaseCardsPage;
+}
+
+export type PurchasesExplainOutcome<
+  Answer extends PurchasesExplanation | PurchasesCardsAnswer = PurchasesExplanation,
+> = { ok: true; explanation: Answer } | { ok: false; error: FinancialError };
+
+/** The refusal of a grant that may not read the purchases, decided before anything is read. */
+function grantRefusal(grant: Grant): FinancialError | null {
+  if (!grantAllows(grant, PURCHASES_EXPLAIN_CAPABILITY))
+    return financialError("unauthorized", REQUEST_ID, [
+      `capability:${PURCHASES_EXPLAIN_CAPABILITY}`,
+    ]);
+  const narrowed = [
+    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
+    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
+  ];
+  return narrowed.length > 0 ? financialError("evidence_restricted", REQUEST_ID, narrowed) : null;
+}
 
 type Rejection = { ok: false; code: FinancialErrorCode; refs: string[] };
 
 /**
- * Validate an untrusted body: at most `period`, `eventId` and `offset`. An
- * unknown key is `unsupported_semantics`; a malformed value, or an event id
- * beside a period or an offset (one event is an exact read), is
- * `invalid_query`. An absent body is the first page of every period.
+ * Validate an untrusted body: at most `view`, `period`, `usageMonth`,
+ * `eventId` and `offset`. An unknown key is `unsupported_semantics`; a
+ * malformed value, an event id beside a period or an offset (one event is an
+ * exact read), a usage month outside the per-card view, an event id or an
+ * offset inside it, or not exactly one of period and usage month inside it
+ * is `invalid_query`. An absent body is the first page of every period;
+ * `view: "events"` is the same request as no view.
  */
 export function parsePurchasesExplainRequest(
   value: unknown,
-): { ok: true; value: CardPurchaseQuery } | Rejection {
+): { ok: true; value: PurchasesExplainRequest } | Rejection {
   if (value === undefined || value === null) return { ok: true, value: {} };
   if (!isRecord(value)) return { ok: false, code: "invalid_query", refs: [] };
   const unknown = Object.keys(value).filter(
@@ -117,13 +172,40 @@ export function parsePurchasesExplainRequest(
       code: "unsupported_semantics",
       refs: unknown.slice(0, 10).map((key) => key.slice(0, 64)),
     };
-  const request: CardPurchaseQuery = {};
-  const { period, eventId, offset } = value;
-  if (period !== undefined) {
-    if (typeof period !== "string" || !CARD_PURCHASE_PERIOD.test(period))
-      return { ok: false, code: "invalid_query", refs: ["period"] };
-    request.period = period;
+  const { view, period, usageMonth, eventId, offset } = value;
+  if (
+    view !== undefined &&
+    (typeof view !== "string" || !(PURCHASES_EXPLAIN_VIEWS as readonly string[]).includes(view))
+  )
+    return { ok: false, code: "invalid_query", refs: ["view"] };
+  if (period !== undefined && (typeof period !== "string" || !CARD_PURCHASE_PERIOD.test(period)))
+    return { ok: false, code: "invalid_query", refs: ["period"] };
+  if (
+    usageMonth !== undefined &&
+    (typeof usageMonth !== "string" || !CARD_PURCHASE_PERIOD.test(usageMonth))
+  )
+    return { ok: false, code: "invalid_query", refs: ["usageMonth"] };
+  if (view === "cards") {
+    // One bounded answer over exactly one month, a statement period or a
+    // usage month: no event id and no paging.
+    const wrong = [
+      ...((period === undefined) === (usageMonth === undefined) ? ["period", "usageMonth"] : []),
+      ...(eventId === undefined ? [] : ["eventId"]),
+      ...(offset === undefined ? [] : ["offset"]),
+    ];
+    if (wrong.length > 0) return { ok: false, code: "invalid_query", refs: wrong };
+    return {
+      ok: true,
+      value: {
+        view: "cards",
+        ...(period === undefined ? {} : { period: period as string }),
+        ...(usageMonth === undefined ? {} : { usageMonth: usageMonth as string }),
+      },
+    };
   }
+  if (usageMonth !== undefined) return { ok: false, code: "invalid_query", refs: ["usageMonth"] };
+  const request: CardPurchaseQuery = {};
+  if (period !== undefined) request.period = period as string;
   if (eventId !== undefined) {
     if (typeof eventId !== "string" || !CARD_PURCHASE_EVENT_ID.test(eventId))
       return { ok: false, code: "invalid_query", refs: ["eventId"] };
@@ -170,6 +252,71 @@ export function withoutReviewAffordances(page: CardPurchasePage): AgentCardPurch
 }
 
 /**
+ * The per-card view an agent gets (ADR 0125), or the typed refusal. The
+ * capability and the whole-store perimeter are the page's; it lists up to
+ * `CARD_PURCHASE_CARDS_MAX` cards, so a grant whose `maxRows` is below that
+ * is refused before anything is read, as the debit-account read refuses it.
+ * A filter past the summary bound is refused, never partially summed.
+ */
+export async function explainCardPurchaseCards(input: {
+  grant: Grant;
+  sql: SqlExecutor;
+  request: CardPurchaseCardsQuery;
+}): Promise<PurchasesExplainOutcome<PurchasesCardsAnswer>> {
+  const { grant, sql, request } = input;
+  const refused = grantRefusal(grant);
+  if (refused !== null) return { ok: false, error: refused };
+  if (pageBeyondBudget(0, CARD_PURCHASE_CARDS_MAX, grant))
+    return {
+      ok: false,
+      error: financialError("budget_exceeded", REQUEST_ID, [
+        `budget:maxRows=${String(grant.budget.maxRows)}`,
+      ]),
+    };
+  let data: CardPurchaseCardsPage;
+  try {
+    data = await queryCardPurchaseCards(sql, request);
+  } catch (error) {
+    if (error instanceof CardPurchaseLimitError)
+      return {
+        ok: false,
+        error: financialError("budget_exceeded", REQUEST_ID, [
+          `budget:cardPurchaseEvents=${String(CARD_PURCHASE_SUMMARY_LIMIT)}`,
+        ]),
+      };
+    throw error;
+  }
+  return {
+    ok: true,
+    explanation: {
+      schemaVersion: "kogane-card-purchases-cards-v1",
+      query: {
+        view: "cards",
+        period: request.period ?? null,
+        usageMonth: request.usageMonth ?? null,
+      },
+      decisions: "operator-only",
+      data,
+    },
+  };
+}
+
+/**
+ * `kogane.purchases.explain` for one validated request: the per-card view
+ * when it names `view: cards`, else the page of explained events.
+ */
+export function answerPurchasesExplain(input: {
+  grant: Grant;
+  sql: SqlExecutor;
+  request: PurchasesExplainRequest;
+}): Promise<PurchasesExplainOutcome<PurchasesExplanation | PurchasesCardsAnswer>> {
+  const { grant, sql, request } = input;
+  return "view" in request
+    ? explainCardPurchaseCards({ grant, sql, request })
+    : explainCardPurchases({ grant, sql, request });
+}
+
+/**
  * The explanation an agent gets for one validated request, or the typed
  * refusal. Every refusal is decided before the store is read, except the
  * two that only the read can know: a filter past the summary bound and an
@@ -185,13 +332,8 @@ export async function explainCardPurchases(input: {
     ok: false,
     error: financialError(code, REQUEST_ID, refs),
   });
-  if (!grantAllows(grant, PURCHASES_EXPLAIN_CAPABILITY))
-    return fail("unauthorized", [`capability:${PURCHASES_EXPLAIN_CAPABILITY}`]);
-  const narrowed = [
-    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
-  ];
-  if (narrowed.length > 0) return fail("evidence_restricted", narrowed);
+  const refused = grantRefusal(grant);
+  if (refused !== null) return { ok: false, error: refused };
   const offset = request.offset ?? 0;
   // Items this answer reaches: one for an exact read, else the page past the
   // offset. The same rule withholds the next page below.
