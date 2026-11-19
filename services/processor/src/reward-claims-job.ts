@@ -249,7 +249,7 @@ export const REWARD_CLAIM_INSERT_SQL = `INSERT INTO reward_bucket_claims_v2
 /**
  * A claim batch the schema refused (a CHECK, NOT NULL, foreign key or trigger
  * failure). The scheduler records the class name as the lane's failure code;
- * the SQLite text stays in `cause` and is never logged.
+ * the SQLite text is dropped, never kept or logged.
  */
 export class RewardClaimWriteRefused extends Error {}
 
@@ -457,7 +457,7 @@ export async function promoteRewardClaims(
       results = await db.batch(statements.slice(index, index + 50));
     } catch (error) {
       if (error instanceof Error && CONSTRAINT_FAILURE.test(error.message))
-        throw new RewardClaimWriteRefused("reward_claim_write_refused", { cause: error });
+        throw new RewardClaimWriteRefused("reward_claim_write_refused");
       throw error;
     }
     promoted += results.filter((result) => result.meta.changes > 0).length;
