@@ -275,7 +275,7 @@ describe("kogane.instruments.coverage", () => {
                 : []),
               // Served exactly while the カード照合 routes are, like the two below.
               ...(cardSettlements && capabilities.includes("records.read") && whole
-                ? ["kogane.card-settlements.unmatched"]
+                ? ["kogane.card-settlements.unmatched", "kogane.card-settlements.debit-accounts"]
                 : []),
               ...(capabilities.includes("records.read") && whole
                 ? ["kogane.economic-readiness.read"]

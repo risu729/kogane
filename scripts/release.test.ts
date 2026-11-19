@@ -801,11 +801,11 @@ describe("the release manifest (G5-11)", () => {
       "workers/default/bundle/worker.js",
       "workers/default/assets/index.html",
     ]) {
-      write(cfRoot, `services/processor/.cloudflare/output/v0/${file}`, "synthetic original\n");
+      write(cfRoot, `services/processor/.cloudflare/output/v1/${file}`, "synthetic original\n");
     }
     write(
       cfRoot,
-      "services/processor/.cloudflare/output/v0/workers/default/worker.config.json",
+      "services/processor/.cloudflare/output/v1/workers/default/worker.config.json",
       JSON.stringify({
         manifest: { mainModule: "worker.js", modules: { "worker.js": { type: "esm" } } },
       }),
@@ -815,10 +815,10 @@ describe("the release manifest (G5-11)", () => {
     for (const file of [
       "cloudflare.config.ts",
       "wrangler.config.ts",
-      ".cloudflare/output/v0/config.json",
-      ".cloudflare/output/v0/workers/default/worker.config.json",
-      ".cloudflare/output/v0/workers/default/bundle/worker.js",
-      ".cloudflare/output/v0/workers/default/assets/index.html",
+      ".cloudflare/output/v1/config.json",
+      ".cloudflare/output/v1/workers/default/worker.config.json",
+      ".cloudflare/output/v1/workers/default/bundle/worker.js",
+      ".cloudflare/output/v1/workers/default/assets/index.html",
     ]) {
       const path = join(cfRoot, "services/processor", file);
       const original = readFileSync(path);

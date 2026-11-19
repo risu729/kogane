@@ -68,7 +68,7 @@ const DEBIT_ACCOUNT_REASONS: Record<string, string> = {
   raw_object_unreadable: "明細の原本を読み出せません",
 };
 
-function debitAccountReason(code: string): string {
+export function debitAccountReason(code: string): string {
   return Object.hasOwn(DEBIT_ACCOUNT_REASONS, code) ? DEBIT_ACCOUNT_REASONS[code]! : code;
 }
 

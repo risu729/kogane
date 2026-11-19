@@ -36,6 +36,7 @@ import {
   CARD_STATEMENTS_UNMATCHED_PATH,
   cardStatementsUnmatchedApi,
 } from "./card-statements-unmatched-api";
+import { CARD_DEBIT_ACCOUNTS_PATH, cardDebitAccountsApi } from "./card-debit-accounts-api";
 import { instrumentCandidatesApi } from "./instrument-candidates-api";
 import { instrumentHistoryApi } from "./instrument-history-api";
 import { accountHistoryApi } from "./account-history-api";
@@ -56,7 +57,8 @@ function classify(path: string): string {
     path === CARD_SETTLEMENT_PATH ||
     path === CARD_OWNERSHIP_PATH ||
     path === CARD_SETTLEMENT_STATEMENTS_PATH ||
-    path === CARD_STATEMENTS_UNMATCHED_PATH
+    path === CARD_STATEMENTS_UNMATCHED_PATH ||
+    path === CARD_DEBIT_ACCOUNTS_PATH
   )
     return "card_settlement_review";
   if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
@@ -130,6 +132,10 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     cardStatementsUnmatchedApi(request, env, url, subject),
   );
   if (unmatchedResponse) return unmatchedResponse;
+  const debitAccountsResponse = await catalogue(() =>
+    cardDebitAccountsApi(request, env, url, subject),
+  );
+  if (debitAccountsResponse) return debitAccountsResponse;
   // Operator-only and read-only; 404 unless CORE 0047 exists
   // (docs/economic-events.md, HTTP).
   const purchaseResponse = await catalogue(() => cardPurchasesApi(request, env, url, subject));

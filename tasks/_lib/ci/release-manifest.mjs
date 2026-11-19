@@ -243,7 +243,7 @@ export function buildManifest({ root, sha, bundles = true }) {
         config: `${worker.path}/cloudflare.config.ts`,
         configSha256: sha256(readFileSync(join(root, worker.path, "cloudflare.config.ts"))),
         buildConfigSha256: sha256(readFileSync(join(root, worker.path, "wrangler.config.ts"))),
-        files: bundles ? cfArtifactFiles(join(root, worker.path, ".cloudflare/output/v0")) : [],
+        files: bundles ? cfArtifactFiles(join(root, worker.path, ".cloudflare/output/v1")) : [],
       })),
     workers: deployed.map((worker) => ({
       name: worker.name,

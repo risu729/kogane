@@ -328,6 +328,12 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       rows: Array.isArray(value["items"]) ? value["items"].length : 0,
       truncated: rowsFollow(value),
     };
+  // Cards listed; truncated when more cards exist than the answer lists.
+  if (operation === "card-settlements.debit-accounts")
+    return {
+      rows: Array.isArray(value["items"]) ? value["items"].length : 0,
+      truncated: value["cardsTruncated"] === true,
+    };
   if (operation === "instruments.candidates" || operation === "accounts.candidates") {
     const items = Array.isArray(value["items"]) ? value["items"].length : 0;
     return {

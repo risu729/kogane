@@ -92,7 +92,7 @@ describe("only the three admitted Container configurations change deployment bac
       expect(deploy.body).toContain("production-strategy: deploy");
       expect(deploy.body).toContain("deploy-triggers: 'true'");
       expect(deploy.body).toMatch(
-        /^\s*uses: risu729\/wrangler-deploy-action@[a-f0-9]{40} # v3\.\d+\.\d+$/mu,
+        /^\s*uses: risu729\/wrangler-deploy-action@[a-f0-9]{40} # v4\.\d+\.\d+$/mu,
       );
       const between = steps.slice(steps.indexOf(deploy) + 1, steps.indexOf(verify));
       expect(
@@ -311,7 +311,7 @@ describe("immutable local image and application identity", () => {
   test("build output requires exact app/policy/resources and one local image", () => {
     const root = mkdtempSync(resolve(tmpdir(), "container-guard-"));
     try {
-      const dir = resolve(root, target.path, ".cloudflare/output/v0/containers/app");
+      const dir = resolve(root, target.path, ".cloudflare/output/v1/containers/app");
       mkdirSync(dir, { recursive: true });
       const path = resolve(dir, "container.config.json");
       const config = {
@@ -797,7 +797,7 @@ test("real Node CLI binds and rechecks the image manifest, daemon, source and ta
       "FROM scratch\nCOPY container/source.mjs /source.mjs\n",
     );
     writeFileSync(resolve(service, "container/source.mjs"), "synthetic source");
-    const output = resolve(service, ".cloudflare/output/v0/containers/app");
+    const output = resolve(service, ".cloudflare/output/v1/containers/app");
     mkdirSync(output, { recursive: true });
     writeFileSync(
       resolve(output, "container.config.json"),

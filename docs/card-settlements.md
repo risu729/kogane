@@ -302,6 +302,91 @@ Limits:
   is why acceptance stays with the operator.
 - The mask length is recorded but not compared with the bank account's length.
 
+### Debit account per card
+
+Design: [ADR 0114](adr/0114-card-debit-account-answer.md) (proposed).
+`reviewCardDebitAccounts`
+(`packages/application/src/query/card-debit-accounts.ts`) answers which bank
+account each card is debited from, under rule `card-debit-account-answer-v1`
+(`packages/domain/src/card-debit-account-answer.ts`). A card is a statement's
+source and source account (`myjcb:<connection>:root`, `vpass:card-00N`); every
+card with a current statement total, a stated reading with evidence or a
+settlement candidate is listed, by source and source account, at most 100
+(`cardsTruncated` says when more exist). Per card:
+
+- `latestStatement`: its newest current statement total (by period, then due
+  date), with the provider's total and due date, so a card whose last
+  statement is zero still shows how old its answer is;
+- `stated`: the readings the settlement sweep compared with a candidate (the
+  `card_debit_account_statement` rows under `CARD_INFORMATION_READER_VERSION`
+  that `card_settlement_debit_account_evidence` cites under
+  `CARD_DEBIT_ACCOUNT_POLICY`). The newest one (by the page's capture time,
+  then id) gives the status from its current rows, one per candidate (the
+  sweep appends a row each time a candidate's outcome changes, so only the
+  newest row per candidate, reading and policy counts): `named` when they
+  name exactly one account (`supports` and `names_other_account` both name
+  the account the provider states), `conflicting` when different candidates
+  were given different accounts, `not_named` with the rule's reasons when
+  they name none. `lastNamed` is the newest reading
+  naming exactly one account, even when older. With no such reading the
+  status is `absent`: `source_has_no_debit_account_statement` for Vpass,
+  `evidence_not_recorded` for a MyJCB card;
+- `settled`: per bank account, the candidates whose latest decision is
+  `accepted`, with the number of distinct statements and the one with the
+  latest debit date. A withdrawn or rejected candidate is not counted;
+- `proposed`: the same for candidates still `proposed`, of statements no
+  accepted candidate covers. They are listed for the reviewer and never
+  answer (INV07);
+- `answer`: `provider-stated` from `lastNamed` (the account, the reading and
+  its capture time); else `accepted-settlement` from the newest accepted
+  settlement (the account, the candidate and its debit date), which is an
+  amount match a person accepted and so weaker than a stated account; else
+  `unknown` with `stated_reading_conflicting`, `only_unreviewed_candidates`
+  or `no_debit_account_evidence`. Closed `codes` say what disagrees:
+  `settled_account_differs` (a stated answer, and the newest accepted
+  settlement was debited elsewhere), `newer_reading_unresolved` (a stated
+  answer from an older reading, and a newer one names none or two),
+  `settled_accounts_differ` and `stated_reading_conflicting` (on a settled
+  answer).
+
+The page shows it as `カードの引落口座` above `照合候補のない請求`, from
+`GET /api/v2/reconciliation/card-debit-accounts` (operator-only, no
+parameter: any is `400 invalid_query`); agents read the same answer through
+`kogane.card-settlements.debit-accounts` ([agent API](agent-api.md#each-cards-debit-account)).
+A malformed evidence or candidate row fails the read
+(`card_debit_accounts_row_invalid`), never an answer.
+
+Limits:
+
+- Only MyJCB states a debit account; Vpass cards are answered only by an
+  accepted settlement, and cards Kogane does not collect are not listed.
+- Vpass cards are named by their source account (`vpass:card-00N`), not by
+  the card product: no collected field names it.
+- A stated answer is the ADR 0032 rule's proposal over the bank accounts
+  Kogane knows; an uncollected account at the same bank cannot be named.
+- A stated answer from an older reading (`newer_reading_unresolved`) is the
+  last account the provider was seen to state, not the account it states now:
+  the newer reading may show an account Kogane cannot name (a bank it does not
+  model, `bank_not_resolved`, or digits no known account starts with,
+  `no_matching_account`), so the debit account may have changed. The page
+  shows a stated answer with any code as a warning, with the note and the
+  newer reading's reasons beside it; the answer's `codes` are what an agent
+  reads to tell the same.
+- A `refused` reading is not considered: only readings the sweep cited carry
+  evidence, so a newer page whose 「カード情報」 table was refused leaves the
+  answer on the older reading.
+- Only the statement read is bounded by the card count. The reading and
+  candidate reads return the rows of every card the store holds, and the
+  cards past the bound are dropped after reading: per card, the evidence rows
+  of at most two readings (one per candidate of the statements parsed with
+  the reading, and one more each time a candidate's outcome changed),
+  and one candidate row per bank account and decision state. Nothing else
+  bounds them: the grant's `maxRows` bounds the cards listed, not the rows
+  read, and the store's card count is what Kogane collects (one MyJCB card
+  per connection, Vpass's `card-00N`).
+- Nothing is stored: the answer is read from the evidence, decisions and
+  candidates each time.
+
 ## Candidate and decision lifecycle
 
 A bounded Processor sweep reads published observations, retaining provider
@@ -569,18 +654,37 @@ It is a recorded decision per account, planned and committed like any other
 claim, by the operator or by an MCP client
 ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)); nothing is
 defaulted at read time. The
-confirmation page shows its provenance and approves it; the card-ownership
-page does not yet offer to plan one, so it is planned through the command API.
+confirmation page shows its provenance and approves it. The card-ownership
+page plans it as the basis 所有者の既定 (ADR 0082, amendment of 2026-11-18): no
+name is typed, the plan names `party:owner` with the marker dated on the day it
+is planned (Asia/Tokyo), it needs the side's confirmation checkbox and a
+reason, and it is disabled while `ownerDefaultBlockers` is non-empty, listing
+each blocker's reason; the command refuses the same plan
+(`needs_scope_resolution`). It is only ever accepted there; a default is
+withdrawn by an explicit review. The page posts the same `relation.accept`
+payload an MCP client sends to `kogane.command.plan`. The command checks the
+marker's date only as a calendar date, not against the plan or commit day: a
+plan committed on a later day keeps the plan's date, and an MCP client's date
+is not checked.
 
 The self-declared fallback also refuses any recorded ownership-role history for the
 same resolved account, including rejected or dated claims and the other role.
 It also refuses recorded `contradicts` relations touching the account,
 source-account reference or review evidence. The read response exposes these
-as separate `selfDeclarationBlockers`; explicit evidence review is still
-available. These checks do not infer relationships through account aliases or
-provider text, nor detect an unrecorded conflict. Commit repeats the exact
-checks atomically. Corrections append through explicit review rather than
-overwriting the declaration.
+as separate `selfDeclarationBlockers`, together with the side's own blockers
+(a decided candidate, a changed source, an unresolved account, an unresolved
+or changed mapping); explicit evidence review is still available. The
+card-ownership page disables 本人申告 while `selfDeclarationBlockers` is
+non-empty and lists each code once with its reason in Japanese, so an
+unconfirmed scope does not hide a recorded claim; the scope reason names the
+individual card statement or deposit account the self-declaration needs, not
+the owner default's wider scope. The command refuses a self-declaration blocked
+by an unadmitted scope (such as a MyJCB connection root), a recorded claim or a
+contradiction with `needs_scope_resolution`, the same answer on the page's path
+and over MCP, and writes no plan. These checks do not infer relationships
+through account aliases or provider text, nor detect an unrecorded conflict.
+Commit repeats the exact checks atomically. Corrections append through explicit
+review rather than overwriting the declaration.
 
 The existing `relation.accept` / `relation.reject` lifecycle then plans,
 simulates, obtains verified human approval and commits the decision. The
@@ -1031,6 +1135,18 @@ checked without statistics in
 `services/processor/test/card-statements-unmatched.test.ts`). In production
 on 2026-11-07, 8 of 35 current statements had no candidate (5 of them refund
 or zero totals), and no window held more than 10 debits.
+
+Each card's debit account costs one ranking of `card_statement_facts` (the
+same as the sweep's page, with each card's resolved account through the
+ownership CTEs for its newest statement only), one scan of
+`card_settlement_debit_account_evidence` under the current policy with each
+cited reading found by its primary key, and one scan of the candidates with
+each latest decision found by `card_settlement_decisions`' key
+(`(proposal_id, revision)`); the evidence returned is that of at most two
+readings per card, and the candidates one row per card, bank account and
+decision state. `services/processor/test/card-debit-accounts.test.ts` checks
+without table statistics that readings and decisions are reached by key. Not
+measured on the scale store or on D1.
 
 ### Readiness
 
