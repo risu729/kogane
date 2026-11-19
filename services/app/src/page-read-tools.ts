@@ -32,6 +32,7 @@ import {
   readHoldingsChange,
   reportedHoldingsChangeAvailable,
 } from "./reported-holdings-change-api";
+import { HOLDINGS_CHANGE_DETAILS } from "../../../packages/domain/src/holdings-change-summary.ts";
 import { readRewardRoute } from "./rewards-api";
 import { eventsV2Available, readEventsRoute } from "./events-api";
 import { ACTIVITY_BASES } from "../../../packages/read-model/src/index";
@@ -206,12 +207,15 @@ const TOOLS = {
   "kogane.reported-holdings-change.read": tool({
     title: "Reported holdings of two dates side by side",
     description:
-      "The holdings each provider reported on two dates (YYYY-MM-DD, Asia/Tokyo, not after today), side by side per provider holding key, with the exact change where both dates list a holding; optionally one source or one account. The same answer as GET /api/v2/reported-holdings-change, under records.read and a whole-store read grant. Provider figures only: nothing is added up, valued or netted. Served where GET /api/v2/reported-state is. Read-only.",
+      "How the holdings each provider reported changed between two dates (YYYY-MM-DD, Asia/Tokyo, not after today), per provider holding key; optionally one source or one account. `detail` is `summary` (default) or `full`. The summary lists changed lines only: `compared` with a nonzero exact change, `listed_at_start_only` (removed), `listed_at_end_only` (added) and `not_comparable` with its reasons, in that order; a `compared` holding with a zero change is counted in `unchanged`, not listed. A quantity that is not exact is its `quantityStatus` (`missing`, `unparsed`, `conflict`) with no number, never unchanged. Each line keeps its unit and its `position:` and `artifact:` refs (read them with kogane.observations.get); `containers` maps a line's `container` ref to its source, parser and dataset; `reasonCounts` counts each reason. `limit` is 10 (default), 25, 50 or 100 lines; `cursor` is the previous page's `nextCursor` (any `limit`): `cursor_mismatch` for other dates or filters, `context_expired` (410) once the comparison's inputs moved, `invalid_cursor` otherwise. `full` is the unpaged comparison with each side's capture, identity and provider text and the manifest; it takes no `limit` or `cursor`. `contextId` is the comparison's in both. The same answer as GET /api/v2/reported-holdings-change, under records.read and a whole-store read grant. Provider figures only: nothing is added up, valued or netted (`total: not-computed`). Served where GET /api/v2/reported-state is. Read-only.",
     schema: z.strictObject({
       from: ROUTE_TEXT,
       to: ROUTE_TEXT,
       source: ROUTE_TEXT.optional(),
       account: ROUTE_TEXT.optional(),
+      detail: z.enum(HOLDINGS_CHANGE_DETAILS).optional(),
+      limit: z.number().int().min(1).max(1000).optional(),
+      cursor: FILTER_TEXT.optional(),
     }),
     capability: "records.read",
     routes: ["/api/v2/reported-holdings-change"],
