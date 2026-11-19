@@ -833,10 +833,11 @@ and `parseRuns.byStatus`, one line per status of the newest-500 window
 source or parser count, the parse lines' superseded, warning and
 unreadable-warning counts, and the newest run's ids and times;
 `fetchRuns.notSuccessful` and `parseRuns.notOk`, one line per source or
-parser and status that is not a success, with its run count and newest run;
+parser and status that is not a success, with its run count and newest run
+(a parse line also with `failureCodes`, the closed codes the Processor
+writes as `parse_runs.error`, newest first);
 and `unitUpdates`, when the page has them, per source and dataset. It drops
-provider names, producers, session ids, parser versions, warnings and parse
-error text. `detail` on `meta` or `filter-options` is the route's
+provider names, producers, session ids, parser versions and warnings. `detail` on `meta` or `filter-options` is the route's
 `400 invalid_query`, and another value `400 invalid_detail` (the tool's
 schema: `400 invalid_request`). The parameter exists where a store advertises
 `sharedQuery`; the local store answers its full overview alone.

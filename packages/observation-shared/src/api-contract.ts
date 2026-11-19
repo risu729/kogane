@@ -588,9 +588,9 @@ export const OVERVIEW_PARSE_RUN_STATUSES = ["ok", "pending", "error"] as const;
  * coverage as the full answer has them, the sources as their artifact counts
  * (sources with the same count share one line), and the fetch and parse run
  * windows collapsed by status, with one line per source or parser for every
- * status that is not a success. Provenance (producer, session id, parser
- * version, the superseding parse's id) and text (provider names, warnings,
- * parse errors) are in `full` only.
+ * status that is not a success, a failing parser's line with its failure
+ * codes. Provenance (producer, session id, parser version, the superseding
+ * parse's id) and text (provider names, warnings) are in `full` only.
  */
 export interface OverviewSummary {
   detail: "summary";
@@ -627,12 +627,18 @@ export interface OverviewSummary {
       parsers: number;
       newest: { id: number; artifactId: number; parser: string; parsedAt: string };
     }[];
-    /** One line per parser and status other than `ok`, with its newest such run. */
+    /** One line per parser and status other than `ok`, with its failure codes and newest such run. */
     notOk: {
       parser: string;
       status: (typeof OVERVIEW_PARSE_RUN_STATUSES)[number];
       runs: number;
       superseded: number;
+      /**
+       * The distinct failure codes (`parse_runs.error`, a closed code the
+       * Processor writes) of the line's runs, newest first; a value that is
+       * not code-shaped is `unclassified`. Empty for a line with none.
+       */
+      failureCodes: string[];
       newest: { id: number; artifactId: number; parsedAt: string };
     }[];
   };

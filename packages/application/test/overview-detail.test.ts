@@ -68,7 +68,7 @@ function page(extra: Partial<OverviewPage> = {}): OverviewPage {
       parseRun(8, "bank-a-statement", "ok", {
         warnings: { list: ["synthetic warning"], raw: '["synthetic warning"]', parsed: true },
       }),
-      parseRun(7, "card-c-statement", "error"),
+      parseRun(7, "card-c-statement", "error", { error: "parser_rejected" }),
       parseRun(6, "card-c-statement", "error", { superseded_by_parse_run_id: 9 }),
       parseRun(5, "bank-a-statement", "pending"),
       parseRun(4, "card-c-statement", "ok", {
@@ -189,6 +189,8 @@ describe("overviewSummary", () => {
             status: "error",
             runs: 2,
             superseded: 1,
+            // The closed code of each failure, newest first; text is never a code.
+            failureCodes: ["parser_rejected", "unclassified"],
             newest: { id: 7, artifactId: 107, parsedAt: "2099-01-07T21:10:00.000Z" },
           },
           {
@@ -196,6 +198,7 @@ describe("overviewSummary", () => {
             status: "pending",
             runs: 1,
             superseded: 0,
+            failureCodes: [],
             newest: { id: 5, artifactId: 105, parsedAt: "2099-01-05T21:10:00.000Z" },
           },
         ],
@@ -256,6 +259,40 @@ describe("overviewSummary", () => {
         },
       },
     ]);
+  });
+
+  test("keeps every failure code of a failing parser, newest first, and never its text", () => {
+    const summary = overviewSummary(
+      page({
+        parseRuns: [
+          parseRun(9, "card-c-statement", "error", { error: "raw_checksum_mismatch" }),
+          parseRun(8, "card-c-statement", "error", { error: "parser_rejected" }),
+          parseRun(7, "card-c-statement", "error", { error: "raw_checksum_mismatch" }),
+          parseRun(6, "card-c-statement", "error", { error: "parse_interrupted" }),
+          parseRun(5, "card-c-statement", "error", { error: "Provider said: no rows" }),
+          parseRun(4, "card-c-statement", "error", { error: null }),
+        ],
+      }),
+    );
+    expect(summary.parseRuns.notOk).toEqual([
+      expect.objectContaining({
+        parser: "card-c-statement",
+        status: "error",
+        runs: 6,
+        failureCodes: [
+          "raw_checksum_mismatch",
+          "parser_rejected",
+          "parse_interrupted",
+          "unclassified",
+        ],
+      }),
+    ]);
+    expect(JSON.stringify(summary)).not.toContain("Provider said");
+    expect(validApiResponse("/api/overview", summary, "summary")).toBe(true);
+    // A summary that carries text where a code belongs is not a summary.
+    const text = structuredClone(summary);
+    text.parseRuns.notOk[0]!.failureCodes.push("Provider said: no rows");
+    expect(validApiResponse("/api/overview", text, "summary")).toBe(false);
   });
 
   test("refuses a status outside the closed sets, never passing it on as one", () => {

@@ -513,7 +513,10 @@ and the routes above refuse every agent and every MCP-audience caller. The tools
   status and failure code; per rule its current revision (timezone, pattern,
   enabled, scope) with how many revisions are listed, their distinct actor
   kinds and change reasons and how many the reader wrote; and the limits. A
-  source whose lines continue is listed on the next page too. It returns no
+  source whose lines continue is listed on the next page too. Each page is a
+  fresh read, not a cursor: a rule or job added between two pages moves the
+  lines after it, so a page can repeat or skip one, and `coverage.lines`
+  differs between the pages when it does. It returns no
   run or evidence ids, no lease and no principal's
   identity, and nothing about another source. The Processor serves it on
   `/internal/schedules/agent/read`, which refuses a request that also carries

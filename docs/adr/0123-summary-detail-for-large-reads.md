@@ -342,7 +342,7 @@ understates the overview: its run lists hold the newest 500 fetch runs and
 the newest 500 parse runs of the whole store, and the synthetic store has 12
 of each. At the window's bound (500 and 500 over 38 sources and 57 parsers,
 the counts the source and parser registries declare today) the full overview
-is about 263 KB. The maintenance read grows with rules: each rule lists up to
+is about 261 KB. The maintenance read grows with rules: each rule lists up to
 20 revisions, and a delegated principal that adds a `once` window adds a rule.
 At 30 sources with two jobs and four rules of 20 revisions each it is about
 1 MB.
@@ -409,7 +409,10 @@ At 30 sources with two jobs and four rules of 20 revisions each it is about
      not be read, the number of parsers, and the newest run (`id`,
      `artifactId`, `parser`, `parsedAt`). `parseRuns.notOk`: per parser and
      status other than `ok`, its number of runs, how many were superseded,
-     and its newest run.
+     `failureCodes` (the distinct `parse_runs.error` values of its runs,
+     newest first: the Processor writes that column as a closed code, so it
+     is the failure code the full answer carries; a value that is not
+     code-shaped is `unclassified`), and its newest run.
    - `unitUpdates` (only when the full page has it): per source and dataset,
      the number of partial runs and the newest one's run id, time and unit
      counts.
@@ -419,8 +422,9 @@ At 30 sources with two jobs and four rules of 20 revisions each it is about
      runs.
    - Dropped: each source's provider name and ingestion; each fetch run's
      producer (`tool`) and session id (`external_run_id`); each parse run's
-     parser version, warning text, error text and superseding parse id; and
-     every run but the newest of each line (their states are counted).
+     parser version, warning text and superseding parse id; and every run
+     but the newest of each line (their states and failure codes are
+     counted).
 5. **The maintenance summary.** `{ detail: "summary", sources, limits,
    coverage }`:
    - Per source on the page: `source`, `reference` (the registered
@@ -442,7 +446,11 @@ At 30 sources with two jobs and four rules of 20 revisions each it is about
      then its rules); a source whose lines continue on the next page is
      listed on both, each with the lines that page holds. `coverage` is
      `{ sources, lines, limit: 16, offset, nextOffset }`, `nextOffset` null
-     on the last page.
+     on the last page. Each page is a fresh read: an offset is not a cursor
+     over one snapshot, so a rule or job added or removed between two pages
+     moves the lines after it, and the next page can repeat or skip a line
+     there. `coverage.lines` and `coverage.sources` then differ between the
+     pages, which is how a reader sees it and reads again from `offset: 0`.
    - Dropped: the reference's URL and verification time; each job's `source`
      (the entry names it), `timezone`, `pattern` and actual alarm time
      (`reservation` is the state read from it), and its newest receipt's start
@@ -462,8 +470,8 @@ Measured as the bytes of the MCP result's structured content
 | Read                                                                                                           |      Full | Summary                         |
 | -------------------------------------------------------------------------------------------------------------- | --------: | ------------------------------- |
 | `kogane.store.read` `{page: overview}`, synthetic store                                                        |     9,234 | 1,437                           |
-| the same at the window's realistic worst (38 sources, 10 with partial runs; 57 parsers, 10 failing, 3 pending) |   262,894 | 7,577                           |
-| the same past it (all 38 sources with partial runs, 20 parsers failing)                                        |         — | 13,658                          |
+| the same at the window's realistic worst (38 sources, 10 with partial runs; 57 parsers, 10 failing, 3 pending) |   261,409 | 7,981                           |
+| the same past it (all 38 sources with partial runs, 20 parsers failing)                                        |         — | 14,412                          |
 | `kogane.schedules.maintenance.read` `{}`, synthetic store (15 sources, 16 jobs, 14 rules)                      |    15,258 | 4,909 and 4,172 (2 pages)       |
 | the same with 30 sources, each with two jobs and four rules of 20 revisions                                    | 1,042,886 | at most 6,268 a page (12 pages) |
 | one source with two jobs and 30 rules                                                                          |         — | 6,173 and 6,321 (2 pages)       |
@@ -478,11 +486,12 @@ Measured as the bytes of the MCP result's structured content
   the conformance checks, which sample `detail=full` and validate it under
   that detail.
 - Open limits. The overview summary is unpaged: at the realistic worst above
-  it is about 7.6 KB, and each further source with a non-successful status
-  costs about 130 bytes and each further parser with one about 165, so past
-  roughly four more such lines (or with longer source ids and parser names
-  than the synthetic ones) it passes 8 KB; all 38 sources partial and 20
-  parsers failing is about 13.7 KB. No argument shortens it; a follow-up
+  it is about 7.9 KB, and each further source with a non-successful status
+  costs about 130 bytes and each further parser with one about 200 (its
+  line with one failure code), so one more such line, a second failure code
+  on a few lines, or longer source ids and parser names than the synthetic
+  ones pass 8 KB; all 38 sources partial and 20 parsers failing is about
+  14.4 KB. No argument shortens it; a follow-up
   would page its `notSuccessful` and `notOk` lines. A maintenance page is
   bounded by its 16 lines: a rule line is about 300 bytes with its 20
   revisions' codes, so a page passes 8 KB only when most of its lines are
@@ -498,8 +507,10 @@ Measured as the bytes of the MCP result's structured content
 - `packages/application/test/overview-detail.test.ts`: the summary of a
   synthetic page, line for line (equal artifact counts sharing a line, every
   status counted, the newest run's ids, a run that has not completed kept as
-  null, superseded, warning and unreadable-warning counts); provider names,
-  producers, session ids, warnings and error text are not in it; unit
+  null, superseded, warning and unreadable-warning counts, each failing
+  parser's failure codes newest first); provider names, producers, session
+  ids, warnings and error text that is not a code are not in it, and a
+  summary carrying text where a failure code belongs fails the validator; unit
   updates collapse per source and dataset and stay absent when the page has
   none; a status outside the closed sets is refused; each shape passes the
   validator only under its own detail, and a summary whose lines do not

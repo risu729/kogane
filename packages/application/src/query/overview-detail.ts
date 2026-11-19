@@ -12,6 +12,7 @@ import {
   type OverviewPage,
   type OverviewSummary,
 } from "../../../observation-shared/src/api-contract.ts";
+import { safeCode } from "./collection-quality.ts";
 
 type FetchStatus = (typeof OVERVIEW_FETCH_RUN_STATUSES)[number];
 type ParseStatus = (typeof OVERVIEW_PARSE_RUN_STATUSES)[number];
@@ -37,6 +38,23 @@ function groups<Row>(rows: readonly Row[], key: (row: Row) => unknown): Row[][] 
 /** The row with the highest id: the newest of a window that is ordered by id. */
 function newest<Row extends { id: number }>(rows: readonly Row[]): Row {
   return rows.reduce((best, row) => (row.id > best.id ? row : best));
+}
+
+/**
+ * The distinct failure codes of a line's runs, newest first. The Processor
+ * writes `parse_runs.error` as a closed code (a pipeline or metadata error's
+ * code, the failing stage, or `parse_interrupted`), never the parser's text,
+ * so the summary keeps it as the failure code it is (ADR 0123: every closed
+ * reason and failure code stays). A value that is not code-shaped is
+ * `unclassified`, never passed on as text.
+ */
+function failureCodes(rows: readonly OverviewPage["parseRuns"][number][]): string[] {
+  const codes: string[] = [];
+  for (const row of [...rows].sort((left, right) => right.id - left.id)) {
+    const code = safeCode(row.error);
+    if (code !== null && !codes.includes(code)) codes.push(code);
+  }
+  return codes;
 }
 
 /** The summary of one overview page; it reads nothing the page does not. */
@@ -127,6 +145,7 @@ export function overviewSummary(page: OverviewPage): OverviewSummary {
           status: run.status,
           runs: group.length,
           superseded: group.filter((entry) => entry.superseded_by_parse_run_id !== null).length,
+          failureCodes: failureCodes(group),
           newest: { id: run.id, artifactId: run.fetch_artifact_id, parsedAt: run.parsed_at },
         };
       }),

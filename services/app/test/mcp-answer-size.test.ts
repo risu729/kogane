@@ -523,7 +523,7 @@ const instant = (minutes: number) =>
  * newest 500 fetch runs, `partialSources` of them with partial runs, and the
  * newest 500 parse runs over 57 parsers (as many as the parser registry has),
  * `failingParsers` of them failing and three pending, with warnings and
- * error text.
+ * failure codes.
  */
 function worstOverview(options: { partialSources: number; failingParsers: number }): OverviewPage {
   const sources = Array.from({ length: 38 }, (_, index) => `synthetic-source-${nn(index)}`);
@@ -579,7 +579,8 @@ function worstOverview(options: { partialSources: number; failingParsers: number
           index % 4 === 0
             ? { list: ["synthetic warning text"], raw: '["synthetic warning text"]', parsed: true }
             : { list: [], raw: "[]", parsed: true },
-        error: status === "error" ? "synthetic parse error text of a realistic length" : null,
+        // The Processor writes a closed code here, never the parser's text.
+        error: status === "error" ? "parser_rejected" : null,
         superseded_by_parse_run_id: index % 9 === 0 ? 700_600 - index : null,
       };
     }),
@@ -665,6 +666,8 @@ describe("kogane.store.read overview summary (ADR 0123, amendment 2026-11-19)", 
     ]);
     expect(summary.fetchRuns.notSuccessful).toHaveLength(10);
     expect(summary.parseRuns.notOk.filter((line) => line.status === "error")).toHaveLength(10);
+    for (const line of summary.parseRuns.notOk)
+      expect(line.failureCodes).toEqual(line.status === "error" ? ["parser_rejected"] : []);
     expect(summary.parseRuns.notOk.filter((line) => line.status === "pending")).toHaveLength(3);
     expect(summary.sources).toHaveLength(38);
     // Past that worst (an open limit of the ADR): every source with a partial

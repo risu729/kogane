@@ -456,6 +456,9 @@ const overview = object<Overview>({
 // parser names a status other than the success one, and those lines count
 // exactly the runs of their status.
 type OverviewFetchLine = OverviewSummary["fetchRuns"]["byStatus"][number];
+/** A closed failure code, as `safeCode` in the collection quality read writes one. */
+const failureCode: Check<string> = (value): value is string =>
+  typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/u.test(value);
 type OverviewParseLine = OverviewSummary["parseRuns"]["byStatus"][number];
 const overviewSummaryShape = object<OverviewSummary>({
   detail: literal("summary"),
@@ -513,6 +516,7 @@ const overviewSummaryShape = object<OverviewSummary>({
         status: literal(...OVERVIEW_PARSE_RUN_STATUSES.filter((status) => status !== "ok")),
         runs: identifier,
         superseded: number,
+        failureCodes: array(failureCode),
         newest: object<OverviewSummary["parseRuns"]["notOk"][number]["newest"]>({
           id: identifier,
           artifactId: identifier,
