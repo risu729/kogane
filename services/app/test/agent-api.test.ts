@@ -661,7 +661,16 @@ describe("untrusted provider content (AT71)", () => {
         name: "kogane.rewards.read",
         required: ["collection"],
         closed: false,
-        properties: ["collection", "cursor", "limit", "offset", "program"],
+        properties: [
+          "before",
+          "collection",
+          "cursor",
+          "detail",
+          "from",
+          "limit",
+          "offset",
+          "program",
+        ],
         annotations: readOnly,
       },
       {
