@@ -1486,7 +1486,10 @@ rows only: the lane, run over a database that records a person's keep-apart
 write, writes no mapping revision, decision or ledger row and leaves the candidate
 `rejected` and the subject `kept-separate`; the same with an agent's
 `listed_as` proposal in the other orientation; both fail on the guard this
-amendment replaces (the rule adopted the pair). The guard's plan without
-table statistics is key searches only, of `entity_relations_to`,
+amendment replaces (the rule adopted the pair). A `listed_as` row from the
+target instrument, from the subject's instrument, to the anchor or to the
+subject, each with an unrelated other end, refuses the write on its own; one
+naming none of them, or another relation kind naming the pair, does not. The
+guard's plan without table statistics is key searches only, of `entity_relations_to`,
 `entity_relations_from` and the mappings' `(identifier_id, revision)` key.
 The anchor-moved test now runs through `adoptInstrument`.
