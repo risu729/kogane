@@ -83,7 +83,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/prestia-bank-html.ts":
       "aa24f5018ae32b1019713dfc675de63e137b1f9c16f2622e2d66c8fec4e6f861",
     "poc/observation-pipeline/src/parsers/sbi-account-assets-current.ts":
-      "5c3fac4fdb4b0af4b1cafc6580790e45c212b095089764e8240d8ad064058c58",
+      "7ab988c41f52eece2d71b046ce27885bb73456d08782a2037fe9ecafdee73405",
     "poc/observation-pipeline/src/parsers/sbi-account-assets-history.ts":
       "f8061e4def8cd5e01ccdce3d6eb53e0c470369ac14c4ac6e8b18de9d5579a00b",
     "poc/observation-pipeline/src/parsers/sbi-asset-history-json.ts":
@@ -495,8 +495,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "sbi-account-assets-current": {
-      version: "1.0.1",
-      codeDigest: "f5e26090d217ee7088b86e71005e867eb9a1c3c7b7b21451b717d932e68c6983",
+      version: "1.0.2",
+      codeDigest: "f53243f65334a667c082cf93d9a36af29c4e64a10692fcc9f0daf667a5a8deb1",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
