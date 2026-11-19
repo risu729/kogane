@@ -444,6 +444,32 @@ describe("a row the schema refuses", () => {
     expect(count(sqlite, "reward_expiry_estimates_v2", snapshotId)).toEqual({
       n: rows.estimates.length,
     });
+    expect(await rewardCheckpoint(db, snapshotId, "estimates")).toBe(rows.estimates.length - 1);
+  });
+
+  test("a new replay at a written position is refused, not skipped", async () => {
+    // The simulation table has the same order index; a targetless `ON CONFLICT
+    // DO NOTHING` would skip this row as `OR IGNORE` did.
+    const { db, sqlite, snapshotId, rows, context } = await writing("lease-order-sim");
+    expect(await writeRewardSimulationChunk(db, snapshotId, rows.simulations, context)).toBe(
+      "written",
+    );
+    const displaced: RewardSimulationProjectionRow = {
+      ...rows.simulations[0]!.row,
+      requestDigest: "2".repeat(64),
+    };
+    await expect(
+      writeRewardSimulationChunk(
+        db,
+        snapshotId,
+        [{ row: displaced, digest: await rewardSimulationDigest(displaced) }],
+        { ...context, rowsWritten: rows.simulations.length },
+      ),
+    ).rejects.toThrow(/UNIQUE constraint failed/u);
+    expect(count(sqlite, "reward_conversion_simulations", snapshotId)).toEqual({
+      n: rows.simulations.length,
+    });
+    expect(await rewardCheckpoint(db, snapshotId, "simulations")).toBe(rows.simulations.length - 1);
   });
 
   test("a re-sent replay chunk is a no-op, and different content for a written row is a conflict", async () => {

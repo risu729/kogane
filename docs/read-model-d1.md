@@ -169,7 +169,9 @@ A build writes rows while `building`, and:
   Limit: the balance writer's `INSERT OR IGNORE` skips such a row without an
   error and moves the checkpoint past it; the build then stops at the
   verification before the seal (`projection_rows_unverified`) on each later tick,
-  and nothing names the row;
+  and nothing names the row. Its input refs (`snapshot_input_refs`) are inserted
+  the same way, so a ref that fails a CHECK is left out and the build starts
+  without it; no step compares the stored refs with the plan;
 - a writer holds a 60 s lease and a fence; a writer whose lease was taken can no
   longer write, seal or publish (G2-09);
 - the seal and the pointer switch are one batch. The pointer moves only to a
