@@ -4,10 +4,9 @@
   published input schema and the default answer of three MCP tools and of
   their HTTP routes (decisions D2 and D3 of the 2026-11-19 proposal for
   [issue 1414](https://github.com/risu729/kogane/issues/1414)). The owner
-  asked for a compact default on issue 1414 and chose D2's recommended form
-  (the routes' default is the summary too; the web UI asks for `full`) when
-  the proposal was handed over; this ADR records that design for the owner's
-  approval of the merge.
+  asked for a compact default on issue 1414; this ADR implements the
+  proposal's recommended D2 (the routes' default is the summary too, and the
+  web UI asks for `full`), which the owner decides before merge.
 - Date: 2026-11-19
 - Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414)
   (points 1, "Responses are huge and get truncated", and 2, "Paging is
@@ -44,25 +43,27 @@ the migrations configure; every value invented), as the bytes of the MCP
 result's structured content (`test/mcp-answer-size.test.ts`, run with
 `--silent=false`):
 
-| Tool and arguments                                                                                                                                                  | Before (main + ADR 0119) | After (default `summary`) | `detail: full` |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -----------------------: | ------------------------: | -------------: |
-| `kogane.balances.read` `{collection: latest}`                                                                                                                       |                  290,590 |                     7,428 |        297,410 |
-| `kogane.balances.read` `{collection: history}`                                                                                                                      |                  275,240 |                     7,392 |        281,410 |
-| `kogane.schedules.read` `{}`                                                                                                                                        |                   75,585 |                     4,249 |         75,585 |
-| `kogane.collection-quality.read` `{}`                                                                                                                               |                   28,235 |                     6,434 |         28,235 |
-| `kogane.collection-quality.read` `{source}` (one synthetic cell)                                                                                                    |                    1,044 |                       689 |          1,044 |
-| the same, 301 cells shaped like Vpass's (pure, in the test)                                                                                                         |                > 163,840 |   < 8,192 a page, 3 pages |              — |
-| `kogane.observations.list` `{kind: balances}`                                                                                                                       |                  523,959 |                 unchanged |              — |
-| `kogane.schedules.maintenance.read` `{}`                                                                                                                            |                   15,258 |                 unchanged |              — |
-| `kogane.store.read` `{page: overview}`                                                                                                                              |                    9,234 |                 unchanged |              — |
-| `kogane.audit.search` `{}`                                                                                                                                          |                    7,528 |                 unchanged |              — |
-| every other read tool's default (capabilities, context, explain, identity, card settlements, reported state, rewards, events, reports, evidence, survey, purchases) |                 65–4,764 |                 unchanged |              — |
+| Tool and arguments                                                                                                                                                                                                                                                                                | Before (default) | After (default `summary`) | After, `detail: full` |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------: | ------------------------: | --------------------: |
+| `kogane.balances.read` `{collection: latest}` (100 rows before, 25 after)                                                                                                                                                                                                                         |          297,410 |                     7,428 |               297,410 |
+| `kogane.balances.read` `{collection: latest, limit: 50}`                                                                                                                                                                                                                                          |          148,821 |                         — |                     — |
+| `kogane.balances.read` `{collection: history}`                                                                                                                                                                                                                                                    |          281,410 |                     7,392 |               281,410 |
+| `kogane.schedules.read` `{}`                                                                                                                                                                                                                                                                      |           75,585 |                     4,249 |                75,585 |
+| `kogane.collection-quality.read` `{}`                                                                                                                                                                                                                                                             |           28,235 |                     6,434 |                28,235 |
+| `kogane.collection-quality.read` `{source}` (one synthetic cell)                                                                                                                                                                                                                                  |            1,044 |                       689 |                 1,044 |
+| the same, 301 cells shaped like Vpass's (pure, in the test)                                                                                                                                                                                                                                       |        > 163,840 |   < 8,192 a page, 3 pages |                     — |
+| `kogane.observations.list` `{kind: balances}`                                                                                                                                                                                                                                                     |          538,779 |                 unchanged |                     — |
+| `kogane.schedules.maintenance.read` `{}`                                                                                                                                                                                                                                                          |           15,258 |                 unchanged |                     — |
+| `kogane.store.read` `{page: overview}`                                                                                                                                                                                                                                                            |            9,234 |                 unchanged |                     — |
+| `kogane.audit.search` `{}`                                                                                                                                                                                                                                                                        |            6,915 |                 unchanged |                     — |
+| every other read tool's default (capabilities, context, explain, instrument candidates and coverage, account candidates, identity, card settlements, reported state, store meta and filter options, observations other than balances, rewards, events, reports, evidence meta, survey, purchases) |         65–4,764 |                 unchanged |                     — |
 
-The full balance answer grew by about 2% after the change only because
-ADR 0119's branch was measured before the
-[balance basis](https://github.com/risu729/kogane/pull/1423) change merged
-into this branch; the full answers are otherwise byte for byte what each read
-answered before.
+"Before" is this branch's base (main with ADR 0119 and the
+[balance basis](https://github.com/risu729/kogane/pull/1423) and
+[read-tool store failure](https://github.com/risu729/kogane/pull/1402) changes
+merged) on the same store. Each `detail: full` answer is byte for byte the
+answer before. The 50-row balance page (about 149 KB) is the shape issue 1414
+measured in production (about 160 KB).
 
 Paging (point 2): a cursor re-sent with another `limit` was
 `cursor_mismatch` with no hint. ADR 0119 already lets a cursor continue at any
@@ -184,9 +185,14 @@ offered page size; what remains is that the refusal says nothing.
   `{page: overview}` (about 9 KB); the collection quality account view (about
   107 KB for Vpass in production, issue 1414's proposal). Each is a follow-up
   of its own.
-- Unit B of the proposal (`collection-quality.read` `view: status`) adds a
-  view to the same tool and route; the two compose (`detail` applies to the
-  summary and cells views only).
+- Unit B of the proposal (`collection-quality.read` `view: status`, its own
+  branch) adds a view to the same tool and route. `detail` is defined only
+  for the summary without a source and for `view: cells`; every other view
+  has one detail, its own answer, and refuses `detail` as the account view
+  does here. The status view is already one short line per job, so it gets
+  no `summary`/`full` pair; whichever of the two lands second applies that
+  rule to it (a refusal of `detail` with `view: status`) and keeps the
+  tool's description under the 2,048 characters a client accepts.
 
 ## Verification
 
@@ -206,7 +212,11 @@ offered page size; what remains is that the refusal says nothing.
   older capture, seven current datasets each) validate against the cell
   contract, collapse into 56 lines over three pages each under 8 KB, keep
   every cell's state count and every reason.
-- The existing route and parity tests read `detail=full` where they pin the
-  full shape (`balances-v2*.test.ts`, `page-read-*.test.ts`,
-  `collection-quality-api.test.ts`, `schedules.test.ts`, `conformance.test.ts`),
-  and `ui-mcp-parity.test.ts` passes unchanged: no route or tool was added.
+- The existing tests that pin the full shape read `detail=full`
+  (`balances-v2.test.ts`, `collection-quality-api.test.ts`,
+  `page-read-reports.test.ts`, `page-read-schedules.test.ts`,
+  `schedules.test.ts`, `audit.test.ts`); the published schema pins
+  (`agent-api.test.ts`) and the request schema pins (`conformance.test.ts`,
+  `apps/web/test/api-schema.test.ts`) gain `detail`; the browser tests'
+  synthetic servers answer the three pages only when asked for `full`; and
+  `ui-mcp-parity.test.ts` passes unchanged: no route or tool was added.
