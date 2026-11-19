@@ -414,8 +414,10 @@ function linesQuery(request: CardPurchaseLinesQuery): Pick<PurchasesLinesAnswer,
  * The line view an agent gets (ADR 0125 amendment), or the typed refusal.
  * The capability and the whole-store perimeter are the page's. The grant's
  * `maxRows` bounds how many lines a caller pages through, as it bounds the
- * page of events: a page that would reach past it (counting the lines the
- * cursor says were listed before) is refused before anything is read, and a
+ * page of events: a page that would reach past it counting the lines the
+ * cursor says were listed before is refused before anything is read, one that
+ * would reach past it by the depth its key has in the month (the cursor is not
+ * signed) is refused after the read and before anything is answered, and a
  * next page past it is withheld and said. A filter past the summary bound is
  * refused, never partly read.
  */

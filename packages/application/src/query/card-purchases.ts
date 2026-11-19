@@ -1062,8 +1062,10 @@ export interface CardPurchaseLinesQuery extends CardPurchaseCardsQuery {
 /**
  * What a line cursor carries: the request it continues, the key of the last
  * line listed (the next page starts strictly after it in the total order),
- * and how many lines the earlier pages listed (the agent API's row budget
- * counts them). It is opaque to callers, and a cursor whose request differs
+ * and the depth of the next page: the lines the earlier pages listed, or more
+ * when more now sort at or before the key (the agent API's row budget counts
+ * it). It is opaque to callers but not signed, so the read recounts the depth
+ * from the key (`readCardPurchaseLines`). A cursor whose request differs
  * from the one it is sent with is refused, never read as another request's.
  */
 export interface CardPurchaseLinesCursor {
@@ -1294,7 +1296,9 @@ export async function readCardPurchaseLines(
     const text = encodeLinesCursor({
       query,
       after: listed[count - 1]!.key,
-      listed: before + count,
+      // Held at the summary bound, past every grant's maxRows: a cursor that
+      // claims a deeper count still continues rather than failing the read.
+      listed: Math.min(before + count, CARD_PURCHASE_SUMMARY_LIMIT),
     });
     // A cursor this read would refuse is never handed out.
     if (decodeLinesCursor(text) === null) throw new Error("card_purchase_cursor_invalid");

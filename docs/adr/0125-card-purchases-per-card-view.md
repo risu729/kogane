@@ -199,7 +199,8 @@ the month and a client-side sort of decimal amounts, which INV03 keeps out of th
     would pass `CARD_PURCHASE_LINES_BYTES` = 7,168 bytes. One line is always listed.
   - `nextCursor` is base64url of the canonical JSON of the request (account, period, usage month, sort), the last
     listed line's key (date, event id and, for the amount order, its unit and canonical decimal text), and the
-    page's depth: the lines listed so far, or more when more lines now sort at or before the previous key. It is at
+    page's depth: the lines listed so far, or more when more lines now sort at or before the previous key, held at
+    the summary bound (10,000, past every grant's `maxRows`) so a cursor claiming more still continues. It is at
     most 2,048 characters. It is not signed.
   - A cursor is taken only with the request that issued it (`linesCursorFits`, which the route and the agent
     service check before reading). Another request's cursor, a malformed one or one with a non-canonical amount
@@ -262,6 +263,9 @@ the month and a client-side sort of decimal amounts, which INV03 keeps out of th
   - Keyset walks without a duplicate or a skip: both orders, with and without an account, by period and by usage
     month, and with events recognised between pages.
   - Cursor refusals before any read: another sort, account or month; a malformed or non-canonical cursor.
+  - A cursor's depth counted from its key: a count rewritten lower is raised to the key's depth and the next cursor
+    counts from it, a deeper claim is kept and held at the summary bound, and a key past every line has the whole
+    selection before it.
   - Every page within 7,168 bytes, and the agent answer around it under 8 KB, on the largest line shape, with
     counterparties cut and flagged.
   - Query plans without `sqlite_stat1`: no scan of legs, keys, observations or accounts; keys and observations by

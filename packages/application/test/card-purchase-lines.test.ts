@@ -24,6 +24,7 @@ import {
 import { compareDecimals, decimalFromString, decimalLiteral } from "../../domain/src/values.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import {
+  CARD_PURCHASE_SUMMARY_LIMIT,
   CardPurchaseLimitError,
   type CardPurchaseLinesQuery,
   decodeLinesCursor,
@@ -31,6 +32,7 @@ import {
   queryCardPurchaseCards,
   queryCardPurchaseLines,
   queryCardPurchases,
+  readCardPurchaseLines,
 } from "../src/query/card-purchases.ts";
 import { PurchaseWorld } from "./card-purchase-world.ts";
 import { migratedDatabase } from "./sqlite-store.ts";
@@ -517,6 +519,52 @@ describe("the line view", () => {
     await expect(
       queryCardPurchaseLines(overfull, { usageMonth: "2026-08", account: "acct-card" }),
     ).rejects.toBeInstanceOf(CardPurchaseLimitError);
+  });
+
+  test("counts a cursor's depth from its key, whatever count the cursor claims", async () => {
+    const { w } = await threeCards();
+    // Enough lines for three pages.
+    for (let row = 0; row < 20; row += 1)
+      await w.recognise(
+        w.usage({
+          externalId: `vpass:card-001:202609:web:deep-${row}:0`,
+          amount: -(200 + row),
+          usageDate: "2026-08-20",
+        }),
+      );
+    const query = { usageMonth: "2026-08", sort: "amount" } as const;
+    const { pages } = await walk(w.sql, query);
+    expect(pages.length).toBeGreaterThan(2);
+    const [first, second] = pages as [CardPurchaseLinesPage, CardPurchaseLinesPage];
+    const issued = decodeLinesCursor(first.nextCursor!)!;
+    const depth = first.lines.length;
+    expect(issued.listed).toBe(depth);
+    expect(second.nextCursor).not.toBeNull();
+    for (const [claimed, before, next] of [
+      // A count rewritten lower is raised to the key's depth, and the next cursor counts from it.
+      [1, depth, depth + second.lines.length],
+      // A count claimed deeper than the key is kept; past the summary bound it is held there.
+      [depth + 3, depth + 3, depth + 3 + second.lines.length],
+      [CARD_PURCHASE_SUMMARY_LIMIT, CARD_PURCHASE_SUMMARY_LIMIT, CARD_PURCHASE_SUMMARY_LIMIT],
+    ] as const) {
+      const read = await readCardPurchaseLines(w.sql, {
+        ...query,
+        cursor: encodeLinesCursor({ ...issued, listed: claimed }),
+      });
+      expect(read.before, String(claimed)).toBe(before);
+      expect(read.page.lines).toEqual(second.lines);
+      expect(decodeLinesCursor(read.page.nextCursor!)!.listed).toBe(next);
+    }
+    // A key no line has is placed where it sorts: past every line, the whole month is before it.
+    const past = await readCardPurchaseLines(w.sql, {
+      ...query,
+      cursor: encodeLinesCursor({
+        ...issued,
+        after: { date: "1900-01-01", eventId: `purchase_${"0".repeat(64)}`, amount: null },
+        listed: 1,
+      }),
+    });
+    expect(past).toMatchObject({ before: first.events, page: { lines: [], nextCursor: null } });
   });
 
   test("cuts a counterparty by code point, never inside a surrogate pair", () => {
