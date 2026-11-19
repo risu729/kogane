@@ -629,13 +629,20 @@ const summaryAmount: Check<SummaryAmount> = (value): value is SummaryAmount =>
   (value.status === "exact"
     ? value.value !== null && value.scale !== null
     : value.value === null && value.scale === null);
-const summaryAccount = object<SummaryAccount>({
-  ref: text,
-  source: text,
-  sourceAccount: text,
-  account: nullableText,
-  label: nullableText,
-});
+const summaryAccount: Check<SummaryAccount> = (value): value is SummaryAccount =>
+  object<SummaryAccount>({
+    ref: text,
+    source: text,
+    sourceAccount: text,
+    account: nullableText,
+    label: nullableText,
+    status: nullable(literal("identified", "provider-local", "aggregate", "unresolved")),
+    lineage: nullable(literal("current", "historical")),
+  })(value) &&
+  // An organized row names all four; an unavailable organization none.
+  (value.account === null
+    ? value.label === null && value.status === null && value.lineage === null
+    : value.label !== null && value.status !== null && value.lineage !== null);
 const summaryMetric = object<SummaryMetric>({
   ref: text,
   source: text,
@@ -649,18 +656,26 @@ const historySummaryFields = {
   amount: summaryAmount,
   asOf: nullableText,
 };
-const historySummaryItem = object<BalanceHistorySummaryItem>(historySummaryFields);
+const historySummaryItem = object<BalanceHistorySummaryItem>({
+  ...historySummaryFields,
+  reasons: array(text),
+});
 const latestSummaryItem = object<LatestBalanceSummaryItem>({
   ...historySummaryFields,
   freshness: literal("current", "stale", "unknown"),
   adoption: literal("adopted", "excluded", "unresolved", "conflict", "stale"),
   reasons: array(text),
 });
-/** Every line names an account and a metric of its page, and every one is named. */
+/**
+ * Every line names an account and a metric of its page, every one is named,
+ * and each entry is listed once: no two refs name the same entry.
+ */
 function refsNamed(entries: readonly { ref: string }[], named: readonly string[]): boolean {
   const refs = entries.map((entry) => entry.ref);
+  const contents = entries.map(({ ref: _ref, ...entry }) => JSON.stringify(entry));
   return (
     new Set(refs).size === refs.length &&
+    new Set(contents).size === contents.length &&
     named.every((ref) => refs.includes(ref)) &&
     refs.every((ref) => named.includes(ref))
   );

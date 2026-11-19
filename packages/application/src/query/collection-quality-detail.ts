@@ -35,7 +35,9 @@ function scheduleLine(schedule: CollectionQualitySchedule): CollectionQualitySch
             status: schedule.latest.status,
             failureCode: schedule.latest.failureCode,
             // The receipt's terminals collapse to their closed blocked and
-            // failure codes; which stage each stands at is the source's reasons.
+            // failure codes; which stage each stands at is the source's
+            // reasons. A job under no CORE source (`otherSchedules`) has no
+            // source line: its terminals' stages are in `full` only.
             terminalCodes: distinctCodes(
               schedule.latest.terminals.flatMap((terminal) => [
                 terminal.blockedCode,

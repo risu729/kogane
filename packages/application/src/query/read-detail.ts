@@ -7,10 +7,10 @@
 import { decimalToString } from "../../../domain/src/values.ts";
 import type {
   BalanceHistoryPage,
-  BalanceHistorySummaryItem,
   BalanceHistorySummaryPage,
   BalanceReadDetail,
   BalanceRow,
+  BalanceSummaryLine,
   LatestBalancePage,
   LatestBalanceSummaryPage,
   ObservedQuantityWire,
@@ -82,27 +82,37 @@ function lines<Item extends LineInput, Line>(
 ): {
   accounts: SummaryAccount[];
   metrics: SummaryMetric[];
-  items: (BalanceHistorySummaryItem & Line)[];
+  items: (BalanceSummaryLine & Line)[];
 } {
   const accounts = refTable<Omit<SummaryAccount, "ref">>("a");
   const metrics = refTable<Omit<SummaryMetric, "ref">>("m");
   const out = items.map((item) => {
-    const account = item.row.organization?.account?.targetId ?? null;
-    const label = item.row.organization?.account?.label ?? null;
+    const organized = item.row.organization?.account ?? null;
+    const entry: Omit<SummaryAccount, "ref"> = {
+      source: item.row.source_id,
+      sourceAccount: item.row.source_account,
+      account: organized?.targetId ?? null,
+      label: organized?.label ?? null,
+      status: organized?.status ?? null,
+      lineage: item.row.organization?.lineage ?? null,
+    };
     return {
       observationId: item.observationId,
       // Keyed by everything the entry says: two rows of one provider account
       // organized differently (a history row recorded under an older mapping,
       // or one whose organization is unavailable) get two refs, so a line
-      // never resolves to an account or a label its row does not carry.
+      // never resolves to an account, a label or a mapping state its row
+      // does not carry.
       account: accounts.refOf(
-        [item.row.source_id, item.row.source_account, account, label],
-        () => ({
-          source: item.row.source_id,
-          sourceAccount: item.row.source_account,
-          account,
-          label,
-        }),
+        [
+          entry.source,
+          entry.sourceAccount,
+          entry.account,
+          entry.label,
+          entry.status,
+          entry.lineage,
+        ],
+        () => entry,
       ),
       metric: metrics.refOf([item.row.source_id, item.row.metric, item.metric.metricId], () => ({
         source: item.row.source_id,
@@ -139,8 +149,23 @@ export function latestBalanceSummary(page: LatestBalancePage): LatestBalanceSumm
   };
 }
 
-/** The summary of one balance history page. */
+/**
+ * The summary of one balance history page. History keeps superseded and
+ * failed parses' rows beside current ones, so each line says which it is
+ * (`parse:superseded`, `parse:<status>`); a line with neither is a row of a
+ * current successful parse.
+ */
 export function balanceHistorySummary(page: BalanceHistoryPage): BalanceHistorySummaryPage {
   const { items, schemaVersion, interpretationContext: _context, ...rest } = page;
-  return { schemaVersion, detail: "summary", ...lines(items, () => ({})), ...rest };
+  return {
+    schemaVersion,
+    detail: "summary",
+    ...lines(items, (item) => ({
+      reasons: [
+        ...(item.row.superseded_by_parse_run_id === null ? [] : ["parse:superseded"]),
+        ...(item.row.parse_status === "ok" ? [] : [`parse:${item.row.parse_status}`]),
+      ],
+    })),
+    ...rest,
+  };
 }

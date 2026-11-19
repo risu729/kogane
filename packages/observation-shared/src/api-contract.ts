@@ -485,8 +485,10 @@ export interface SummaryAmount {
  * One provider account a summary page's lines name, once per page. `ref`
  * (`a1`, `a2`, ... in order of first appearance) is local to the page;
  * `sourceAccount` is the provider's account key (what the read's `account`
- * filter takes); `account` and `label` are its organized account entity and
- * label, both null when the row's organization is unavailable.
+ * filter takes); `account`, `label` and `status` are its organized account
+ * entity, label and mapping status, and `lineage` whether the row was
+ * organized under the current or a historical mapping, all four null when the
+ * row's organization is unavailable.
  */
 export interface SummaryAccount {
   ref: string;
@@ -494,6 +496,8 @@ export interface SummaryAccount {
   sourceAccount: string;
   account: string | null;
   label: string | null;
+  status: import("./organization-contract.ts").OrganizedAccount["status"] | null;
+  lineage: import("./organization-contract.ts").ObservationOrganization["lineage"];
 }
 
 /** One provider metric a summary page's lines name, once per page, with the registry's id for it. */
@@ -504,8 +508,8 @@ export interface SummaryMetric {
   providerMetric: string;
 }
 
-/** One summary line of a balance history row; `observationId` reads it in full or as evidence. */
-export interface BalanceHistorySummaryItem {
+/** One summary line of a balance row; `observationId` reads it in full or as evidence. */
+export interface BalanceSummaryLine {
   observationId: number;
   /** The `ref` of the page's `accounts` entry. */
   account: string;
@@ -516,10 +520,21 @@ export interface BalanceHistorySummaryItem {
 }
 
 /**
+ * One summary line of a balance history row. History carries superseded and
+ * failed parses' rows beside current ones, so `reasons` says which a row is:
+ * `parse:superseded` when a later parse replaced its parse, and
+ * `parse:<status>` when its parse is not `ok` (`parse:error`); none for a row
+ * of a current successful parse.
+ */
+export interface BalanceHistorySummaryItem extends BalanceSummaryLine {
+  reasons: string[];
+}
+
+/**
  * One summary line of a latest balance: the adoption and freshness states,
  * and their reason codes as `adoption:<code>` and `freshness:<code>`.
  */
-export interface LatestBalanceSummaryItem extends BalanceHistorySummaryItem {
+export interface LatestBalanceSummaryItem extends BalanceSummaryLine {
   freshness: LatestBalanceItem["freshness"]["state"];
   adoption: BalanceAdoptionState;
   reasons: string[];

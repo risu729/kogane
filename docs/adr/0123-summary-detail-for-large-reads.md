@@ -45,9 +45,9 @@ result's structured content (`test/mcp-answer-size.test.ts`, run with
 
 | Tool and arguments                                                                                                                                                                                                                                                                                | Before (default) | After (default `summary`) | After, `detail: full` |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------: | ------------------------: | --------------------: |
-| `kogane.balances.read` `{collection: latest}` (100 rows before, 25 after)                                                                                                                                                                                                                         |          297,410 |                     7,428 |               297,410 |
+| `kogane.balances.read` `{collection: latest}` (100 rows before, 25 after)                                                                                                                                                                                                                         |          297,410 |                     7,566 |               297,410 |
 | `kogane.balances.read` `{collection: latest, limit: 50}`                                                                                                                                                                                                                                          |          148,821 |                         — |                     — |
-| `kogane.balances.read` `{collection: history}`                                                                                                                                                                                                                                                    |          281,410 |                     7,392 |               281,410 |
+| `kogane.balances.read` `{collection: history}`                                                                                                                                                                                                                                                    |          281,410 |                     7,855 |               281,410 |
 | `kogane.schedules.read` `{}`                                                                                                                                                                                                                                                                      |           75,585 |                     4,955 |                75,585 |
 | `kogane.collection-quality.read` `{}`                                                                                                                                                                                                                                                             |           28,235 |                     7,049 |                28,235 |
 | `kogane.collection-quality.read` `{source}` (one synthetic cell)                                                                                                                                                                                                                                  |            1,044 |                       727 |                 1,044 |
@@ -116,23 +116,38 @@ offered page size; what remains is that the refusal says nothing.
    what it collapses, and how many rows it collapsed; a value that is not
    exact as its status (`missing`, `unparsed`, `conflict`) with no value and
    no scale, never a zero (INV05). It drops provenance: evidence members,
-   temporal references, interpretation and organization records, policy
-   releases (`interpretationContext`), occurrence lists, maintenance
-   patterns, provider data type parser lists, terminals.
+   temporal references, interpretation and organization records (beyond
+   the account fields below), policy releases (`interpretationContext`),
+   occurrence lists, maintenance patterns, provider data type parser lists,
+   terminals. The closed states it drops besides are listed with each read
+   below.
    - **Balances.** `{ schemaVersion, detail: "summary", accounts, metrics,
      items, page, dataCoverage, subtotals }`. An item is `{ observationId,
-     account, metric, amount: { value, unit, status, scale }, asOf }`, with
-     `freshness`, `adoption` (states) and `reasons` (`adoption:<code>`,
-     `freshness:<code>`) on `latest`. `account` and `metric` are page-local
+     account, metric, amount: { value, unit, status, scale }, asOf,
+     reasons }`, with `freshness` and `adoption` (states) on `latest`, whose
+     reasons are `adoption:<code>` and `freshness:<code>`. History carries
+     superseded and failed parses' rows beside current ones, so a `history`
+     line's reasons are `parse:superseded` when a later parse replaced its
+     row's parse and `parse:<status>` when that parse is not `ok`
+     (`parse:error`); a line with no reason is a current successful parse's
+     row, and two lines of one measurement are never both read as current
+     (INV06). `account` and `metric` are page-local
      refs (`a1`, `m1`, in order of first appearance) into `accounts`
      (`source`, `sourceAccount` — the key the `account` filter takes —,
-     account entity id and label, both null when the organization is
-     unavailable) and `metrics` (`source`, registry metric id, provider
-     metric). An `accounts` entry is keyed by all four of its fields, so one
-     provider account organized two ways on a page (a history row recorded
-     under an older mapping, or a row whose organization is unavailable) is
-     two entries, and a line never resolves to an entity or label its own
-     row does not carry. A 64-hex account id, a label and a provider metric are written
+     account entity id, label, mapping `status` (`identified`,
+     `provider-local`, `aggregate`, `unresolved`) and `lineage` (`current`
+     or `historical`: the mapping the row was organized under), the last
+     four null exactly when the organization is unavailable) and `metrics`
+     (`source`, registry metric id, provider metric). An `accounts` entry is
+     keyed by all six of its fields, so one provider account organized two
+     ways on a page (a history row recorded under an older mapping, or a row
+     whose organization is unavailable) is two entries, and a line never
+     resolves to an entity, label or mapping state its own row does not
+     carry; the validator refuses a page that lists one entry under two
+     refs. Dropped: the instrument organization, the product claim, the
+     metric's definition release, measurement kind and aggregation rule
+     (the registry's, under its id) and the adoption's evidence count. A
+     64-hex account id, a label and a provider metric are written
      once per page, not once per row: a row then costs about 200 bytes. The
      page sizes become 25, 50, 100, 200 and 500; a summary defaults to 25
      rows, `full` to 100 as before. The page, its cursor, the coverage and the
@@ -144,7 +159,9 @@ offered page size; what remains is that the refusal says nothing.
      newest occurrence (`nominalAt`, `status`, `failureCode`); per source its
      maintenance reference status and number of rules; every held lease.
      `kogane.schedules.read` still leaves out the route's `survey`, which the
-     summary does not carry.
+     summary does not carry. Dropped: each rule's `enabled` and `scope` (a
+     source's `rules` counts every rule, enabled or not) and the actual
+     alarm time (`reservation` is the state read from it).
    - **Collection quality.** Without a source, one line per source (its
      freshness, newest fetch run, reasons, each job's newest receipt status
      and failure code with the distinct blocked and failure codes of its
@@ -152,6 +169,14 @@ offered page size; what remains is that the refusal says nothing.
      their distinct codes (`unregisteredCodes`), the provider data types
      counted as collected, partial and not collected); sources
      whose lines would be equal share one line whose `sourceIds` names each.
+     A job line drops its kind, `supported`, next run, alarm, held lease and
+     its terminals' registration, outcome and coverage: under a source they
+     are that source's reasons (`schedule_unsupported`, `lease_held`,
+     `terminal_*`, `acquisition_*`, `coverage_*`), and `kogane.schedules.read`
+     names them per job. A job under no CORE source (`otherSchedules`, today
+     only the Processor tick, which names no terminal) has no source line,
+     so its terminals' stages are in `full` only (an open limit). A source
+     line counts its data types by status without naming them.
      With a source, every cell is read (the cell read's pages at one instant,
      refused past 2,000 cells with `413 result_limit_exceeded`, never cut)
      and answered as one line per dataset, parser and fetch unit, collapsed
@@ -161,9 +186,9 @@ offered page size; what remains is that the refusal says nothing.
      captures' unit and parse failure codes (`failureCodes`) and of their
      coverage causes (`coverageCauses`); 20 lines a page, `offset` counting
      lines, and `coverage` giving the cell and line counts. A line drops a
-     cell's period state (MyJCB's `confirmed`/`unconfirmed`), its current
-     rule and its per-artifact parse counts; its reasons say which of those
-     stages is not complete. The pages are separate reads at one `asOf`,
+     cell's period kind and state (MyJCB's `confirmed`/`unconfirmed`), its
+     current rule and its per-artifact parse counts; its reasons say which
+     of those stages is not complete. The pages are separate reads at one `asOf`,
      not one transaction: a capture registered between two pages of a
      source with more than 500 cells can shift a cell across the page
      boundary, as it can between two pages a client reads (an open limit).
@@ -196,13 +221,21 @@ offered page size; what remains is that the refusal says nothing.
   cells; without one it accepts either. The web UI's `getJson` and the
   conformance checks pass it, so a page that asked for `full` refuses a
   summary instead of rendering it. A full page has no `detail`.
-- Measured headroom: the default balance summary is about 7.4 KB with three
-  accounts and ten metrics on the page; a page whose 25 rows name 25
-  different accounts would pass 8 KB. A smaller `limit` is the remedy; the
-  default stays at the proposal's 25. The collection quality summary is
-  about 7.0 KB with its terminal and unregistered codes, all empty on the
-  synthetic store: a store whose every source fails with several codes has
-  less room, and no `limit` shortens it (a follow-up would page its lines).
+- Measured headroom (open limits): the default latest balance summary is
+  about 7.6 KB with three accounts and ten metrics on the page, and the
+  history summary about 7.9 KB with three accounts and 25 metrics. An
+  `accounts` entry costs about 250 bytes and a `metrics` entry about 100,
+  so a history page naming five accounts, or a latest page naming six,
+  passes 8 KB. 25 is already the smallest offered `limit`, so no argument
+  shortens such a page; a smaller offered size is a follow-up. The
+  collection quality summary is about 7.0 KB: a source line with a job
+  costs about 400 to 490 bytes, so two or three more sources with a
+  collection job (each source that gains a collector leaves the shared
+  line and costs a line of its own), or two or three codes of about 20
+  characters on every job line (all empty on the synthetic store), pass
+  8 KB, and no argument shortens it (a follow-up would page its lines).
+  The synthetic store configures every job the migrations configure, so a
+  migration that adds one fails `mcp-answer-size.test.ts` once it does.
 - Left as they are, and over 8 KB at this scale: `kogane.observations.list`
   `{kind: balances}` (the v1 grouped list, about 520 KB),
   `kogane.schedules.maintenance.read` (about 15 KB) and `kogane.store.read`
@@ -238,7 +271,10 @@ offered page size; what remains is that the refusal says nothing.
   every cell's state count, every reason and the units' failure code.
 - `packages/application/test/read-detail.test.ts`: one provider account
   organized two ways on a page is two `accounts` entries and each line
-  resolves to its own row's entity and label; a value that is not exact is
+  resolves to its own row's entity, label, mapping status and lineage, and a
+  page listing one entry under two refs fails the validator; a history line
+  says `parse:superseded` and `parse:error`, and one without `reasons`
+  fails the validator; a value that is not exact is
   its status with no value and no scale; a latest line keeps its adoption
   and freshness reason codes; a summary page fails the validator when
   `full` was asked for.
