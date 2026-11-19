@@ -552,7 +552,7 @@ describe("untrusted provider content (AT71)", () => {
         name: "kogane.card-settlements.debit-accounts",
         required: [],
         closed: false,
-        properties: [],
+        properties: ["view"],
         annotations: readOnly,
       },
       {

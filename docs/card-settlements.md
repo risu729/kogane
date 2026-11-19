@@ -358,7 +358,8 @@ settlement candidate is listed, by source and source account, at most 100
 
 The page shows it as `カードの引落口座` above `照合候補のない請求`, from
 `GET /api/v2/reconciliation/card-debit-accounts` (operator-only, no
-parameter: any is `400 invalid_query`); agents read the same answer through
+parameter but `view=upcoming`, [below](#upcoming-bills): any other is
+`400 invalid_query`); agents read the same answer through
 `kogane.card-settlements.debit-accounts` ([agent API](agent-api.md#each-cards-debit-account)).
 A malformed evidence, candidate or statement-total row fails the read
 (`card_debit_accounts_row_invalid`), never an answer.
@@ -393,6 +394,57 @@ Limits:
   per connection, Vpass's `card-00N`).
 - Nothing is stored: the answer is read from the evidence, decisions and
   candidates each time.
+
+### Upcoming bills
+
+Design: [ADR 0114's 2026-11-19 amendment](adr/0114-card-debit-account-answer.md#amendment-2026-11-19-the-upcoming-view-answers-each-cards-next-bill-and-whether-its-account-covers-it).
+`reviewUpcomingCardBills` (`packages/application/src/query/card-upcoming-bills.ts`,
+rule `card-upcoming-bills-v1` in `packages/domain/src/card-upcoming-bills.ts`)
+answers, for today in Asia/Tokyo, each card's next bill, the account it is
+debited from and whether that account's reported balance covers it. It reads
+the per-card answer above and the [reported state](reported-state.md) for the
+date, and nothing else but the account entities' labels.
+
+- A bill is a card's newest current statement whose provider due date is on
+  or after the date. Any other card is listed with a closed reason and its
+  last statement: `no_statement`, `payment_date_not_published` (a statement
+  with no readable due date, such as an importer-era Vpass row),
+  `no_statement_due`, or `statement_settled` (an accepted settlement of the
+  card covers that month). A total that is not exact keeps its status and
+  reason.
+- The debit account is the per-card answer's, with its basis and codes. The
+  bank source account is mapped to the account entity the reported state maps
+  it to, when it maps it to exactly one.
+- One line per debit account and debit date counts every bill to the account
+  due by then, summed with `sumQuantities`. The balance is the
+  `deposit.balance` of the entity's references from the newest capture,
+  never a sum of references. `covers` is `yes` or `no` only on exact figures
+  with no reason; otherwise `unknown` with `debit_account_unknown`,
+  `bill_not_exact`, `balance_not_exact`, `balance_before_previous_debit` (the
+  balance was captured on or before the latest card debit from the account
+  due by the date) or `cards_with_unknown_account` (a bill with no known
+  account is due by the line's date).
+
+The page shows it as `次回の引落` above `カードの引落口座`, from
+`GET /api/v2/reconciliation/card-debit-accounts?view=upcoming` (operator-only;
+`view=upcoming` is the route's one parameter, and any other parameter or
+value is `400 invalid_query`); agents read the same answer through
+`kogane.card-settlements.debit-accounts` with `view: "upcoming"`
+([agent API](agent-api.md#next-card-bills)).
+
+Limits:
+
+- `covers` compares known card bills with the provider's latest balance only:
+  other debits, deposits before the debit date and unbilled card usage are
+  not modelled (`other_debits_not_modelled` on every line).
+- No closing date is answered: neither card source stores one, only the
+  statement month and the due date.
+- A card whose debit account is unknown (every Vpass card without an accepted
+  settlement) makes the account lines due on or after its bill `unknown`.
+- Vpass cards are labelled by their account entity, the same for every Vpass
+  card; the source account (`vpass:card-00N`) tells them apart.
+- The reported state reads every account to find the debit accounts. Past its
+  row bound every balance is `missing` / `reported_state_limit_exceeded`.
 
 ## Candidate and decision lifecycle
 
@@ -1135,6 +1187,13 @@ readings per card, and the candidates one row per card, bank account and
 decision state. `services/processor/test/card-debit-accounts.test.ts` checks
 without table statistics that readings and decisions are reached by key. Not
 measured on the scale store or on D1.
+
+Upcoming bills cost that read, the reported state for the date (its four
+reads, each bounded by `DATED_STATE_ROW_BOUND`, and its settlement read), and
+`ACCOUNT_LABELS_SQL`, one primary-key lookup per account entity named.
+`packages/application/test/card-upcoming-bills.test.ts` checks that the view
+issues only those reads and, without table statistics, that labels are
+reached by `accounts`' key. Not measured on the scale store or on D1.
 
 ### Readiness
 

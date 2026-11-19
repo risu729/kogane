@@ -57,6 +57,7 @@ import {
 } from "../src/delegated-decision-tools";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 import { routeServes, uiApiPatterns } from "./ui-routes";
+import { READ_MCP_TOOLS } from "../src/read-tools";
 
 // ── 1. catalogue operations on `ui` ──────────────────────────────────────
 
@@ -294,6 +295,23 @@ describe("catalogue operations on ui are published on mcp (ADR 0081, point 4)", 
 });
 
 describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
+  it("serves the カード照合 page's 次回の引落 view as the debit-accounts tool's one view", async () => {
+    // The page reads `?view=upcoming` of the mapped route (ADR 0114's
+    // 2026-11-19 amendment); the tool takes the same view, and nothing else.
+    const route = "/api/v2/reconciliation/card-debit-accounts";
+    const tool = "kogane.card-settlements.debit-accounts";
+    expect(READ_ROUTE_TOOLS[route]).toEqual([tool]);
+    expect([...uiApiPatterns().keys()].some((pattern) => routeServes(route, pattern))).toBe(true);
+    const schema = READ_MCP_TOOLS.find((entry) => entry.name === tool)!.inputSchema as {
+      properties: Record<string, unknown>;
+    };
+    expect(Object.keys(schema.properties)).toEqual(["view"]);
+    expect(JSON.stringify(schema.properties["view"])).toContain('"upcoming"');
+    const published = (await publishedDefinitions()).find((entry) => entry.name === tool)!;
+    for (const term of ["次回の引落", "?view=upcoming", "covers", "other_debits_not_modelled"])
+      expect(published.description).toContain(term);
+  });
+
   it("publishes the self-contained account catalogue and named-capture freshness contract", async () => {
     expect(READ_ROUTE_TOOLS["/api/collection-quality/:source/accounts"]).toEqual([
       "kogane.collection-quality.read",

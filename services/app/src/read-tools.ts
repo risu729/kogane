@@ -34,6 +34,10 @@ import {
   UNMATCHED_MAX_OFFSET,
 } from "../../../packages/application/src/query/card-statements-unmatched.ts";
 import { reviewCardDebitAccounts } from "../../../packages/application/src/query/card-debit-accounts.ts";
+import {
+  reviewUpcomingCardBills,
+  tokyoDate,
+} from "../../../packages/application/src/query/card-upcoming-bills.ts";
 import { readInstrumentCoverage } from "../../../packages/application/src/query/instrument-coverage.ts";
 import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
 import { readAccountHistoryForGrant } from "../../../packages/application/src/query/account-history-read.ts";
@@ -107,8 +111,10 @@ const schemas = {
   "kogane.card-settlements.unmatched": z.strictObject({
     offset: z.number().int().min(0).max(UNMATCHED_MAX_OFFSET).optional(),
   }),
-  // The route takes no parameter.
-  "kogane.card-settlements.debit-accounts": z.strictObject({}),
+  // The route's one optional parameter (`?view=upcoming`).
+  "kogane.card-settlements.debit-accounts": z.strictObject({
+    view: z.literal("upcoming").optional(),
+  }),
   "kogane.economic-readiness.read": z.strictObject({
     schema: z.literal(ECONOMIC_ROW_READINESS_SCHEMA),
     family: z.enum(["bank-movement", "securities-execution"]),
@@ -167,7 +173,7 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
   "kogane.card-settlements.unmatched":
     "One page of the card statement totals no settlement candidate cites, the same answer as the operator's カード照合 page: each statement's closed reason (statement_total_refund_or_zero, statement_not_comparable, no_debit_in_window, no_equal_amount_debit, equal_amount_debit_awaiting_sweep) and, for no_equal_amount_debit, the ADR 0074 planner's read-only answer (window three days either side of the due date, at most three debits) with closed codes, listing at most the first 50 exact allocations per statement with allocationCount and allocationsTruncated. Under records.read and a whole-store read grant. Read-only; no allocation listed is acceptable, since the acceptance writer claims one debit.",
   "kogane.card-settlements.debit-accounts":
-    "Which bank account each credit card is debited from, the same answer as the operator's カード照合 page: per card (a current statement total, a stated debit-account reading or a settlement candidate; at most 100 cards, cardsTruncated says when more exist), its newest statement, the provider-stated side (the newest MyJCB 「カード情報」 reading the settlement sweep compared, and the newest one naming exactly one account; status named, conflicting, not_named or absent with source_has_no_debit_account_statement or evidence_not_recorded), the accepted settlements per bank account, the undecided candidates per bank account, and the answer: basis provider-stated when a reading names one account, else accepted-settlement from the newest accepted settlement (weaker: an amount match a person accepted), else unknown with stated_reading_conflicting, only_unreviewed_candidates or no_debit_account_evidence, with closed notes (settled_account_differs, newer_reading_unresolved, settled_accounts_differ, stated_reading_conflicting); a provider-stated answer with any code is not confirmed, and the page shows it as a warning: with newer_reading_unresolved the stated account is the last one the provider was seen to state, which a newer reading does not confirm, so it may have changed. Undecided candidates never answer. Under records.read and a whole-store read grant. Read-only; it changes no candidate and no setting at any provider.",
+    "Which bank account each credit card is debited from, the same answer as the operator's カード照合 page. Default view: per card (at most 100; cardsTruncated says when more exist) its newest statement, the provider-stated side (the newest MyJCB 「カード情報」 readings; status named, conflicting, not_named or absent with a reason), accepted and undecided candidates per bank account, and the answer: provider-stated, else accepted-settlement (weaker: an amount match a person accepted), else unknown with stated_reading_conflicting, only_unreviewed_candidates or no_debit_account_evidence, with closed codes (settled_account_differs, newer_reading_unresolved, settled_accounts_differ, stated_reading_conflicting). A provider-stated answer with any code is not confirmed: with newer_reading_unresolved the account may have changed. Undecided candidates never answer. view: upcoming (the page's 次回の引落, ?view=upcoming) is compact: bills (each card whose newest statement is due today or later, Asia/Tokyo: card label, statementPeriod, debitDate, amount as exact decimal text or status and reason, debitAccount with answer, account, label, since, codes); byDebitAccount, one line per account and debit date counting every bill to it due by then (cardBills summed exactly) with the account's reported balance and capturedAt, and covers: yes or no only on exact figures, else unknown with reasons debit_account_unknown, bill_not_exact, balance_not_exact, balance_before_previous_debit or cards_with_unknown_account; the note other_debits_not_modelled is always there (only known card bills are compared); notListed, other cards with no_statement, payment_date_not_published, no_statement_due or statement_settled and their last statement, never a zero bill. Under records.read and a whole-store read grant. Read-only; it changes no candidate and no setting at any provider.",
   "kogane.economic-readiness.read":
     "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled.",
   "kogane.card-settlements.read":
@@ -345,7 +351,17 @@ export async function callReadTool(
       case "kogane.card-settlements.debit-accounts": {
         // The page's own service: capability, perimeter and bound are
         // decided there, once for both transports.
-        parseRequest(schemas[name], body ?? {});
+        const input = parseRequest(schemas[name], body ?? {});
+        if (input.view === "upcoming") {
+          const bills = await reviewUpcomingCardBills({
+            grant,
+            sql: d1Executor(env.DB),
+            date: tokyoDate(Date.now()),
+          });
+          return bills.ok
+            ? { status: 200, body: { apiVersion: 2, ...bills.review } }
+            : { status: ERROR_STATUS[bills.error.code], body: bills.error };
+        }
         const outcome = await reviewCardDebitAccounts({ grant, sql: d1Executor(env.DB) });
         return outcome.ok
           ? { status: 200, body: { apiVersion: 2, ...outcome.review } }

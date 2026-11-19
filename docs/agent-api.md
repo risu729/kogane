@@ -621,7 +621,8 @@ page's own service (`reviewCardDebitAccounts`), so an agent and the page's
 grant holding `records.read` over the whole store, and it exists exactly
 while the route does, as for `kogane.card-settlements.read`.
 
-Input: an empty object; any key is `400 invalid_request`. Output:
+Input: an empty object, or `{ "view": "upcoming" }` ([below](#next-card-bills));
+any other key or value is `400 invalid_request`. Output without a view:
 `kogane-card-debit-accounts-v1` with the manifest (`rule`
 `card-debit-account-answer-v1`, the stated side's `statedPolicy` and
 `readerVersion`, `bases` `["provider-stated", "accepted-settlement"]` and
@@ -649,6 +650,47 @@ both `"*"`, else `403 evidence_restricted`; `maxRows` of at least 100, else
 `413 budget_exceeded`; all decided before the store is read. It reads and
 never writes; each served agent call records one audit read with the number
 of cards, truncated when `cardsTruncated` is true.
+
+### Next card bills
+
+`kogane.card-settlements.debit-accounts` with `{ "view": "upcoming" }`
+answers "how much is my next card bill, from which account, and will that
+account cover it?" in one compact call (issue 1414;
+[card settlements](card-settlements.md#upcoming-bills),
+[ADR 0114's 2026-11-19 amendment](adr/0114-card-debit-account-answer.md#amendment-2026-11-19-the-upcoming-view-answers-each-cards-next-bill-and-whether-its-account-covers-it)).
+It is the `カード照合` page's `次回の引落` section's service
+(`reviewUpcomingCardBills`, route
+`GET /api/v2/reconciliation/card-debit-accounts?view=upcoming`), graded as
+above. The view is a published tool schema change (decision D3 of the
+2026-11-19 MCP proposal v2), an owner approval item before merge; no
+catalogue operation is added.
+
+Output `kogane-card-upcoming-bills-v1` for `date` (today, Asia/Tokyo):
+
+- `bills`: each card whose newest current statement is due on or after the
+  date, by debit date: `card` (source, source account, label),
+  `statementPeriod`, `debitDate`, `amount` (`{value, unit, status: "exact"}`
+  or `{unit, status, reason}`, never zero) and `debitAccount` (`answer`: the
+  ADR 0114 basis or `unknown`; the account entity, the bank `sourceAccount`,
+  `label`, `since`, and `codes`: the answer's notes or its unknown reason).
+- `byDebitAccount`: one line per debit account and debit date. `bills` and
+  `cardBills` count every bill to that account due on or before the line's
+  date (summed with `sumQuantities`; not exact when one bill is not);
+  `balance` is the account's `deposit.balance` in the reported state for the
+  date with `capturedAt` (null on the line of bills with no known account);
+  `covers` is `yes` or `no` only when both are exact and no reason holds,
+  else `unknown` with `reasons` from `debit_account_unknown`,
+  `bill_not_exact`, `balance_not_exact`, `balance_before_previous_debit` and
+  `cards_with_unknown_account`; `notes` is always
+  `["other_debits_not_modelled"]`: only known card bills are compared with
+  the provider's balance, so `yes` is not a forecast.
+- `notListed`: every other card, with `no_statement`,
+  `payment_date_not_published`, `no_statement_due` or `statement_settled`,
+  and its last statement's period and due date.
+- `cardsMax` and `cardsTruncated` as above.
+
+Ten cards are about 5.7 KB. Each served agent call records one audit read
+whose row count is the bills plus the cards not listed.
 
 ### Reported state on a date
 
