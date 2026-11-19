@@ -4,7 +4,7 @@ import {
 } from "../../../packages/domain/src/myjcb-jpoint-response";
 import { CookieJar } from "./cookie-jar";
 import { allowedUrl, assertAllowedRequest, type ReadOperation } from "./policy";
-import { StopConditionError } from "./types";
+import { PastMonthsRefusalError, StopConditionError } from "./types";
 
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 type GetOperation = Exclude<ReadOperation, "login-submit" | "credit-past-json" | "jpoint-json">;
@@ -168,13 +168,22 @@ export class MyJcbReadClient {
     readonly detailMonth: number;
   }): Promise<ReadResponse> {
     if (!input.generalJsonShikibetuId || input.generalJsonShikibetuId.length > 512) {
-      throw new StopConditionError("Rejected invalid MyJCB JSON discriminator");
+      throw new PastMonthsRefusalError(
+        "Rejected invalid MyJCB JSON discriminator",
+        "request_invalid",
+      );
     }
     if (!/^0301006\d{2}$/u.test(input.id)) {
-      throw new StopConditionError("Rejected invalid MyJCB JSON-RPC request ID");
+      throw new PastMonthsRefusalError(
+        "Rejected invalid MyJCB JSON-RPC request ID",
+        "request_invalid",
+      );
     }
     if (!Number.isInteger(input.detailMonth) || input.detailMonth < 0 || input.detailMonth > 17) {
-      throw new StopConditionError("Rejected invalid MyJCB JSON-RPC referer month");
+      throw new PastMonthsRefusalError(
+        "Rejected invalid MyJCB JSON-RPC referer month",
+        "request_invalid",
+      );
     }
     const operation = "credit-past-json" as const;
     const url = allowedUrl(operation);
@@ -206,20 +215,40 @@ export class MyJcbReadClient {
     this.jar.updateFromResponse(response, url);
     if (response.status !== 200) {
       throw Object.assign(
-        new StopConditionError(`MyJCB ${operation} returned HTTP ${response.status}`),
+        new PastMonthsRefusalError(
+          `MyJCB ${operation} returned HTTP ${response.status}`,
+          "http_status",
+          { status: response.status },
+        ),
         { httpStatus: response.status },
       );
     }
     const contentType = response.headers.get("content-type") ?? "";
     if (!/^application\/json(?:;|$)/iu.test(contentType)) {
-      throw new StopConditionError(`MyJCB ${operation} returned a non-JSON response`);
+      throw new PastMonthsRefusalError(
+        `MyJCB ${operation} returned a non-JSON response`,
+        "content_type_not_json",
+        { contentTypeFamily: mediaTypeFamily(contentType) },
+      );
     }
     const body = await response.arrayBuffer();
     if (body.byteLength > MAX_RESPONSE_BYTES) {
-      throw new StopConditionError(`MyJCB ${operation} response exceeds the size limit`);
+      throw new PastMonthsRefusalError(
+        `MyJCB ${operation} response exceeds the size limit`,
+        "response_oversize",
+      );
     }
     return { url, status: response.status, contentType, body };
   }
+}
+
+/** A closed family for a response media type; the header text is never logged. */
+function mediaTypeFamily(contentType: string): string {
+  const type = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (type === "") return "empty";
+  if (type === "text/html") return "html";
+  if (type.startsWith("text/")) return "text";
+  return "other";
 }
 
 function refererFor(operation: GetOperation, query?: URLSearchParams): string {
