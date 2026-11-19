@@ -92,8 +92,8 @@ A perimeter container with no snapshot before the cutoff is listed in
   each, and its rows without a mapping once more with no account, so no row
   is listed under an account its own mapping does not name; entries of one
   provider account are ordered by account id, the one without first. The
-  manifest names no entry, so this keying leaves the context id as it was.
-  Each entry lists:
+  manifest pins each row with the account it was read under, so the entries
+  an answer lists are fixed by its context id. Each entry lists:
   - `positions`: the provider quantity as decimal text, the instrument mapping,
     and the provider valuations matched as `POSITION_VALUATIONS_SQL` matches
     them (same parse run, account and code, and the locator guard
@@ -125,8 +125,22 @@ A perimeter container with no snapshot before the cutoff is listed in
   `liabilitiesMissing` (`unbilled_card_usage`, `installment_remaining`,
   `loan_balances`, `statements_before_window`), the payable window, and
   `netAssets: "not-computed"`.
-- `manifest` (schema, date, cutoff, policy ids, snapshot, statement and
-  settlement refs) and `contextId = canonicalDigest(manifest)`.
+- `manifest` and `contextId = canonicalDigest(manifest)`. Under
+  `reported-state-v2` the manifest pins every input the answer reads (INV09;
+  [ADR 0019, context amendment](adr/0019-dated-reported-state.md#context-amendment--2026-11-19)):
+  the schema, date and cutoff; the policy ids and `metricRegistryRelease`; the
+  request's `filters`; the chosen `snapshotRefs` and the
+  `containersWithoutSnapshot` (`source/parser/dataset`); `rows`, every
+  position and balance listed or counted as excluded, each as
+  `[ref, accountId, accountIdentity, instrumentId, instrumentIdentity]` (the
+  row id names its parse run, so a parse activated over the same artifact
+  changes it); the `statementRefs` and `statementAccounts`
+  (`[ref, accountId]`); and `settlementRefs`, each review as
+  `card-settlement:<id>@decision:<decision revision id>`, or `@proposed`
+  before any decision. Another filter, a mapping revision or identity run
+  that changes what a row shows, a review decision, an activated parse or a
+  registry release is therefore a new context id; an unchanged store keeps
+  its id.
 
 `source` narrows accounts, payables and coverage to one source; `account` to
 one resolved account id. The answer has no total, subtotal or net worth, and
@@ -302,7 +316,10 @@ answer under two seconds.
   read's timing there reflects the snapshot CTEs, not many positions.
 - Identity, account mappings and settlement reviews are read as they are today,
   not as they were on `D`: a later mapping correction or review changes an
-  earlier date's answer (and its `contextId`).
+  earlier date's answer and its `contextId` (the manifest pins each row's
+  identity and each review's decision). A correction that changes nothing the
+  answer shows (a mapping revision to the same account and status) keeps the
+  id.
 - A settlement's debit date is the reviewed bank row's date, whenever that row
   was captured; the bank capture itself is not bounded by the cutoff.
 - Statements due before `D − 31` days, and statements without a readable due

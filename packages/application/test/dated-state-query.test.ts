@@ -5,6 +5,7 @@
 // is not shown. Every account, code and amount is invented.
 import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { canonicalDigest } from "../../domain/src/context.ts";
 import { payableStatus, snapshotFreshness } from "../../domain/src/reported-state.ts";
 import { FOREIGN_POSITION_SNAPSHOT_VERSION } from "../../parsers/src/snapshot-query.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
@@ -290,6 +291,137 @@ describe("coverage", () => {
       "dated-state-perimeter-v1",
     ]);
     expect(first.manifest.snapshotRefs).toHaveLength(3);
+    expect(first.contextId).toBe(await canonicalDigest(first.manifest));
+    expect(first.manifest.filters).toEqual({ source: null, account: null });
+    // Every listed or counted row, with the identity the answer shows for it.
+    expect(first.manifest.rows).toHaveLength(6);
+    expect(first.manifest.rows).toContainEqual([
+      first.accounts[0]!.positions[0]!.ref,
+      "acct-sbi",
+      "identified",
+      "inst-1001",
+      "identified",
+    ]);
+  });
+});
+
+// INV09: every input that can change the answer is pinned by the manifest, so
+// a change of any of them is a new context id. Each case changes one input
+// the answer reads, and each failed on the manifest of snapshot, statement
+// and settlement ids alone, which left the context id equal.
+describe("the context id moves with every input the answer reads", () => {
+  const SBI_ACCOUNT_REF = `sa-acct-sbi-${SBI.source}`;
+
+  test("the account filter", async () => {
+    const executorFor = executor(holdings());
+    const one = await queryDatedState(executorFor, { date: "2026-09-10", account: "acct-sbi" });
+    const other = await queryDatedState(executorFor, {
+      date: "2026-09-10",
+      account: "acct-elsewhere",
+    });
+    expect(one.accounts.map((a) => a.accountId)).toEqual(["acct-sbi"]);
+    expect(other.accounts).toEqual([]);
+    expect(other.contextId).not.toBe(one.contextId);
+    expect(one.manifest.filters).toEqual({ source: null, account: "acct-sbi" });
+  });
+
+  test("a later account mapping revision", async () => {
+    const store = holdings();
+    const before = await queryDatedState(executor(store), { date: "2026-09-10" });
+    store.db.run(
+      "INSERT INTO accounts VALUES('acct-sbi-corrected','Synthetic','synthetic','identified')",
+    );
+    store.db.run(
+      "INSERT INTO account_mappings VALUES(?,?,2,'acct-sbi-corrected','manual','synthetic',1,'2098-01-02','Synthetic','identified')",
+      [`${SBI_ACCOUNT_REF}-r2`, SBI_ACCOUNT_REF],
+    );
+    const after = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(after.accounts[0]!.accountId).toBe("acct-sbi-corrected");
+    expect(before.accounts[0]!.accountId).toBe("acct-sbi");
+    expect(after.contextId).not.toBe(before.contextId);
+  });
+
+  test("a later instrument mapping revision", async () => {
+    const store = holdings();
+    const before = await queryDatedState(executor(store), { date: "2026-09-10" });
+    store.db.run(
+      "INSERT INTO instruments VALUES('inst-1001-corrected','security','Synthetic','identified')",
+    );
+    store.db.run(
+      "INSERT INTO instrument_mappings VALUES('im-inst-1001-r2','ii-inst-1001',2,'inst-1001-corrected','manual','synthetic',1,'2098-01-02','Synthetic','identified')",
+    );
+    const after = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(after.accounts[0]!.positions[0]!.instrument.instrumentId).toBe("inst-1001-corrected");
+    expect(after.contextId).not.toBe(before.contextId);
+  });
+
+  test("another parse run of the same artifact activated in place of the first", async () => {
+    const store = new DatedStore();
+    const capture = store.capture({
+      ...SMBC,
+      fetchedAt: "2026-09-10T02:00:00Z",
+      balances: [{ account: "smbc-a", metric: "account_balance", instrument: "JPY", minor: 100 }],
+    });
+    const before = await queryDatedState(executor(store), { date: "2026-09-10" });
+    const reparse = 9_001;
+    store.db.run(
+      "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,?,'1.0.1','2026-09-11','ok','[]')",
+      [reparse, capture.artifact, SMBC.parser],
+    );
+    store.db.run(
+      `INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,observed_at,raw_locator,extra_json)
+       VALUES(?,'smbc-a','account_balance',200,'200',0,'JPY',NULL,NULL,'$.balances[0]','{}')`,
+      [reparse],
+    );
+    store.db.run(
+      "UPDATE published_parse_runs SET parse_run_id=?,parser_version='1.0.1',publication_kind='activation' WHERE fetch_artifact_id=?",
+      [reparse, capture.artifact],
+    );
+    const after = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(after.snapshots.map((s) => s.ref)).toEqual(before.snapshots.map((s) => s.ref));
+    expect(after.accounts[0]!.balances[0]!.providerText).toBe("200");
+    expect(before.accounts[0]!.balances[0]!.providerText).toBe("100");
+    expect(after.contextId).not.toBe(before.contextId);
+  });
+
+  test("a decision on a listed settlement review", async () => {
+    const store = new DatedStore();
+    const statement = store.statement({
+      card: "card-a",
+      period: "2026-09",
+      paymentDate: "2026-09-26",
+      minor: 30_000,
+      fetchedAt: "2026-09-05T01:00:00Z",
+    });
+    store.identify(statement, "vpass", "acct-card", "identified");
+    const proposal = store.settle(statement, {
+      account: "acct-card",
+      period: "2026-09",
+      debitDate: "2026-09-26",
+    });
+    const before = await queryDatedState(executor(store), { date: "2026-09-27" });
+    store.db.run(
+      `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+       VALUES('dr-late','relation',?,1,'accept','manual','synthetic-operator',NULL,'synthetic review','[]',NULL,NULL,'2026-09-28T00:00:00Z')`,
+      [`card-settlement:${proposal}`],
+    );
+    store.db.run(
+      `INSERT INTO card_settlement_decisions(proposal_id,revision,status,decision_revision_id,event_id,obligation_id,settlement_id,created_at)
+       VALUES(?,1,'accepted','dr-late',?,NULL,?,'2026-09-28T00:00:00Z')`,
+      [proposal, `event-${proposal}`, `allocation-${proposal}`],
+    );
+    const after = await queryDatedState(executor(store), { date: "2026-09-27" });
+    expect(before.payables[0]!.status).toBe("due_unsettled");
+    expect(after.payables[0]!.status).toBe("settled_on_or_before_date");
+    expect(after.contextId).not.toBe(before.contextId);
+  });
+
+  test("an unchanged store keeps its context id", async () => {
+    const store = holdings();
+    const first = await queryDatedState(executor(store), { date: "2026-09-10" });
+    const again = await queryDatedState(executor(store), { date: "2026-09-10" });
+    expect(again.contextId).toBe(first.contextId);
+    expect(again.manifest).toEqual(first.manifest);
   });
 });
 

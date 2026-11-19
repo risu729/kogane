@@ -165,7 +165,7 @@ describe("reported state on a date", () => {
     expect(validApiResponse(PATH, body)).toBe(true);
     expect(body).toMatchObject({
       apiVersion: 2,
-      schemaVersion: "reported-state-v1",
+      schemaVersion: "reported-state-v2",
       date: today,
       zone: "Asia/Tokyo",
       accounts: [
