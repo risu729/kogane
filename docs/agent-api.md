@@ -828,9 +828,10 @@ answers `503 catalogue_read_failed`.
 and `detail` ([ADR 0049, amendment of 2026-11-19](adr/0049-reward-expiry-basis.md#amendment-a-deadline-window-and-a-summary-on-the-expiry-read),
 proposed; [rewards: deadline window and summary](rewards.md#deadline-window-and-summary)).
 `from` (inclusive, default today's Asia/Tokyo date) and `before` (exclusive)
-are `YYYY-MM-DD` and window each row's `expiresOn`; a windowed page lists the
-rows inside and counts the rest under `window.rows`, and its cursor is bound
-to the window (`400 cursor_mismatch` under another). `detail: "summary"`
+are `YYYY-MM-DD` and window each row's `expiresOn`. With neither there is no
+window: a summary then counts every dated bucket inside, past deadlines too.
+A windowed page lists the rows inside and counts the rest under
+`window.rows`, and its cursor is bound to the window (`400 cursor_mismatch` under another). `detail: "summary"`
 (unpaged; `limit` or `cursor` is `400 invalid_query`) answers "which points
 expire soon" in one call: per programme and unit the buckets inside the
 window with their total, added with `sumQuantities` once per bucket (not once

@@ -325,6 +325,8 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
       "`before`",
       "Asia/Tokyo",
       "`detail: summary`",
+      // Without `from` or `before` nothing is windowed: `from` is not today then.
+      "with neither there is no window",
       `earliest ${String(REWARD_EXPIRY_SUMMARY_BUCKET_LINES)} bucket lines`,
       `up to ${String(REWARD_EXPIRY_SUMMARY_DISPLAY_LINES)} provider-displayed portions`,
       `${REWARD_EXPIRY_WINDOW_ROW_BOUND.toLocaleString("en-US")} rows`,

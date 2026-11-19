@@ -799,7 +799,7 @@ by `rewardExpiryFromRead` (`services/app/src/rewards-read.ts`), which both
    needed and no migration is added.
 6. **Tool.** `kogane.rewards.read` takes `from`, `before` and `detail`; its
    description names the window, the summary, its line limits and every
-   closed code above (about 1,540 characters of the 2,048 allowed), and
+   closed code above (about 1,640 characters of the 2,048 allowed), and
    `test/ui-mcp-parity.test.ts` fails if one is missing. The shared request
    schema (`REWARD_REQUEST_SCHEMA`) and response check (`api-validation.ts`)
    accept the new parameters, the windowed page and the summary.
@@ -853,4 +853,5 @@ Limits:
   refusals on every path; a source- or account-scoped grant refused; a
   snapshot over 1,000 rows `413` on both forms.
 - `services/app/test/ui-mcp-parity.test.ts`: the tool description names every
-  closed code and stays within 2,048 characters.
+  closed code, says that without `from` or `before` nothing is windowed, and
+  stays within 2,048 characters.
