@@ -310,12 +310,17 @@ any decision. The wire contract checks the new keys and that the manifest's
 filters are the body's.
 
 **Consequences.** Every reported-state context id changes once, and with it
-the `reportedContextIds` of the holdings change between two dates and the
-reported state's `contextId` inside a valuation on a date, so their context
-ids change once too. Nothing stores a reported-state context id, so nothing is
-rebuilt; the cost is a larger manifest (at most one row entry per position and
-balance, inside the existing 5,000-row bounds). A correction that changes
-nothing the answer shows keeps the id. A stale client that validates
+the `reportedContextIds` of the holdings change between two dates, the
+reported state's `contextId` inside a valuation on a date, and the
+`startContextId` and `endContextId` of a reconstructed state, so their context
+ids change once too. Nothing stores a reported-state context id, so
+nothing is rebuilt; the cost is a larger manifest (at most one row entry per
+position and balance, inside the existing 5,000-row bounds). A mapping
+correction that leaves every pinned row's account, instrument and statuses as
+they were keeps the id. A balance counted as excluded is pinned with its
+identity too, although the answer shows only its count (its account decides
+whether an `account` filter counts it), so a correction to its instrument
+alone is a new id over an unchanged answer. A stale client that validates
 `reported-state-v1` refuses a v2 body instead of displaying it. Identity and
 reviews are still today's, not as of `D` (Consequences above): the id now
 says which ones were read.
@@ -325,7 +330,9 @@ says which ones were read.
 an account mapping revision, an instrument mapping revision, another parse of
 the same artifact activated, and a decision on a listed review each change the
 id; an unchanged store keeps it; each case failed on the v1 manifest) and
-"the context id is a digest of the manifest";
+"the context id is a digest of the manifest" (which also checks that the
+manifest names the registry release and the coverage's containers without a
+snapshot);
 `apps/web/test/reported-state-contract.test.ts` (a manifest whose filters are
 not the body's, without `rows`, with an unknown identity status or a short
 statement account is refused).

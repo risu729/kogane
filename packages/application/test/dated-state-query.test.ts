@@ -6,6 +6,7 @@
 import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { canonicalDigest } from "../../domain/src/context.ts";
+import { METRIC_REGISTRY_RELEASE } from "../../domain/src/metrics.ts";
 import { payableStatus, snapshotFreshness } from "../../domain/src/reported-state.ts";
 import { FOREIGN_POSITION_SNAPSHOT_VERSION } from "../../parsers/src/snapshot-query.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
@@ -293,6 +294,15 @@ describe("coverage", () => {
     expect(first.manifest.snapshotRefs).toHaveLength(3);
     expect(first.contextId).toBe(await canonicalDigest(first.manifest));
     expect(first.manifest.filters).toEqual({ source: null, account: null });
+    // The code release that decides each balance's metric and exclusion, and
+    // each coverage container without a snapshot.
+    expect(first.manifest.metricRegistryRelease).toBe(METRIC_REGISTRY_RELEASE);
+    expect(first.manifest.containersWithoutSnapshot.length).toBeGreaterThan(0);
+    expect(first.manifest.containersWithoutSnapshot).toEqual(
+      first.coverage.containersWithoutSnapshot
+        .map((entry) => `${entry.sourceId}/${entry.parserName}/${entry.dataset}`)
+        .sort(),
+    );
     // Every listed or counted row, with the identity the answer shows for it.
     expect(first.manifest.rows).toHaveLength(6);
     expect(first.manifest.rows).toContainEqual([

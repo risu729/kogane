@@ -317,9 +317,10 @@ answer under two seconds.
 - Identity, account mappings and settlement reviews are read as they are today,
   not as they were on `D`: a later mapping correction or review changes an
   earlier date's answer and its `contextId` (the manifest pins each row's
-  identity and each review's decision). A correction that changes nothing the
-  answer shows (a mapping revision to the same account and status) keeps the
-  id.
+  identity and each review's decision). A correction that leaves every pinned
+  row's account, instrument and statuses as they were (a mapping revision to
+  the same account and status) keeps the id; one to a balance counted as
+  excluded moves it although the answer shows only the count.
 - A settlement's debit date is the reviewed bank row's date, whenever that row
   was captured; the bank capture itself is not bounded by the cutoff.
 - Statements due before `D − 31` days, and statements without a readable due
