@@ -1,6 +1,6 @@
 import { MYJCB_ORIGIN } from "./policy";
 import type { CreditExportKind, DiscoveredCard, DiscoveredPeriod, StatementState } from "./types";
-import { StopConditionError } from "./types";
+import { PastMonthsRefusalError, StopConditionError } from "./types";
 import { parse, serialize, type DefaultTreeAdapterMap } from "parse5";
 import {
   CONFIRMED_STATEMENT_HEADING,
@@ -249,33 +249,60 @@ export function parsePastMonthAvailability(json: string): PastMonthAvailability[
   try {
     parsed = JSON.parse(json);
   } catch {
-    throw new StopConditionError("MyJCB past-month response was not valid JSON");
+    throw new PastMonthsRefusalError(
+      "MyJCB past-month response was not valid JSON",
+      "json_invalid",
+    );
   }
   if (!isRecord(parsed) || !isRecord(parsed.result)) {
-    throw new StopConditionError("MyJCB past-month response omitted result");
+    throw new PastMonthsRefusalError("MyJCB past-month response omitted result", "result_missing", {
+      topLevelType: jsonType(parsed),
+    });
   }
   if (parsed.result.errId !== undefined && !isSuccessErrorId(parsed.result.errId)) {
-    throw new StopConditionError("MyJCB past-month response reported an error");
+    throw new PastMonthsRefusalError(
+      "MyJCB past-month response reported an error",
+      "error_reported",
+      { errIdType: jsonType(parsed.result.errId) },
+    );
   }
   const items = parsed.result.detailPastJsonInfo;
   if (!Array.isArray(items)) {
-    throw new StopConditionError("MyJCB past-month response omitted detailPastJsonInfo");
+    throw new PastMonthsRefusalError(
+      "MyJCB past-month response omitted detailPastJsonInfo",
+      "info_missing",
+      { infoType: jsonType(items) },
+    );
   }
+  const itemCount = items.length;
   const seen = new Set<number>();
   return items
     .map((item, index) => {
+      const position = index + 1;
       if (!isRecord(item)) {
-        throw new StopConditionError(`MyJCB past-month item ${index + 1} was malformed`);
+        throw new PastMonthsRefusalError(
+          `MyJCB past-month item ${position} was malformed`,
+          "item_malformed",
+          { itemCount, itemIndex: position, itemType: jsonType(item) },
+        );
       }
-      const detailMonth = numericMonth(item.detailMonth);
+      const detailMonth = numericMonth(item.detailMonth, itemCount, position);
       if (seen.has(detailMonth)) {
-        throw new StopConditionError("MyJCB past-month response contained duplicate months");
+        throw new PastMonthsRefusalError(
+          "MyJCB past-month response contained duplicate months",
+          "month_duplicate",
+          { itemCount, itemIndex: position, detailMonth },
+        );
       }
       seen.add(detailMonth);
-      const available = availabilityFlag(item.detailAvailableFlag);
+      const available = availabilityFlag(item.detailAvailableFlag, itemCount, position);
       const settlementYM = item.settlementYM;
       if (settlementYM !== undefined && typeof settlementYM !== "string") {
-        throw new StopConditionError("MyJCB past-month settlementYM was malformed");
+        throw new PastMonthsRefusalError(
+          "MyJCB past-month settlementYM was malformed",
+          "settlement_malformed",
+          { itemCount, itemIndex: position, settlementType: jsonType(settlementYM) },
+        );
       }
       return {
         detailMonth,
@@ -286,6 +313,13 @@ export function parsePastMonthAvailability(json: string): PastMonthAvailability[
       };
     })
     .sort((left, right) => left.detailMonth - right.detailMonth);
+}
+
+/** The JSON type of a value, as a closed name; never the value itself. */
+function jsonType(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
 }
 
 /**
@@ -888,7 +922,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function numericMonth(value: unknown): number {
+function numericMonth(value: unknown, itemCount: number, itemIndex: number): number {
   const number =
     typeof value === "number"
       ? value
@@ -896,15 +930,23 @@ function numericMonth(value: unknown): number {
         ? Number(value)
         : Number.NaN;
   if (!Number.isInteger(number) || number < 0 || number > 17) {
-    throw new StopConditionError("MyJCB past-month detailMonth was outside 0..17");
+    throw new PastMonthsRefusalError(
+      "MyJCB past-month detailMonth was outside 0..17",
+      "month_out_of_range",
+      { itemCount, itemIndex, monthType: jsonType(value) },
+    );
   }
   return number;
 }
 
-function availabilityFlag(value: unknown): boolean {
+function availabilityFlag(value: unknown, itemCount: number, itemIndex: number): boolean {
   if (value === true || value === 1 || value === "1" || value === "true") return true;
   if (value === false || value === 0 || value === "0" || value === "false") return false;
-  throw new StopConditionError("MyJCB past-month availability flag was malformed");
+  throw new PastMonthsRefusalError(
+    "MyJCB past-month availability flag was malformed",
+    "flag_malformed",
+    { itemCount, itemIndex, flagType: jsonType(value) },
+  );
 }
 
 function isSuccessErrorId(value: unknown): boolean {

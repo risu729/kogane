@@ -1029,3 +1029,28 @@ root-card switching, scheduled production capture, a complete fifteen-month
 archive and live parser validation remain unproved. The document catalogue
 therefore stays partial and [issue 1251](https://github.com/risu729/kogane/issues/1251)
 remains open.
+
+## Past-month refusals from 2026-11-15 (diagnostic)
+
+Every scheduled run from 2026-11-15 21:00 UTC through 2026-11-18 21:00 UTC
+failed before the first month with stop code `credit_past_months`
+(Workers Logs: `collector-diagnostic`, stage `connection-collection`,
+category `response`, `StopConditionError`, no HTTP status), and stored no
+artifact. The runs of 2026-11-12 to 2026-11-14 passed this stage. A stop
+before the month loop keeps nothing (see "Stops"), and the earlier log line
+did not say which check refused, so the cause could not be placed: a
+non-JSON answer, an error id, an item of an unobserved shape, or a schedule
+position offered as a month all ended the same way.
+
+The read now logs `myjcb-credit-past-months-refused` with one closed
+`reason` before it stops: `request_invalid`, `http_status` (with `status`),
+`content_type_not_json` (with `contentTypeFamily`: `empty`, `html`, `text`
+or `other`), `response_oversize`, `utf8_invalid`, `json_invalid`,
+`result_missing`, `error_reported` (with `errIdType`), `info_missing`,
+`item_malformed`, `month_out_of_range`, `month_duplicate`, `flag_malformed`,
+`settlement_malformed` (with the item's position and the JavaScript type of
+the refused field), `schedule_overlap` (with the overlapping, schedule and
+menu month positions), or `unclassified` for any other error. It carries
+counts, `detailMonth` positions and type names only, never the response, an
+error id or a label. The checks themselves are unchanged; the fix follows
+once a run names the reason.

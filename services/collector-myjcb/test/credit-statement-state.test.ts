@@ -1019,7 +1019,154 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
     expect(blockers(pastStop)).toEqual([
       { connectionId: "account-one", code: "credit_past_months" },
     ]);
+    // The refusal names its check in closed codes; the body never reaches the log.
+    expect(pastStop.logs).toContain(
+      '{"event":"myjcb-credit-past-months-refused","reason":"content_type_not_json","contentTypeFamily":"empty"}',
+    );
     expectNoLeak(pastStop);
+    const textPast = await run((url) =>
+      url.pathname.endsWith("/detailPastJson.json")
+        ? new Response(leak, { headers: { "content-type": "text/plain; charset=utf-8" } })
+        : undefined,
+    );
+    expect(textPast.logs).toContain('"reason":"content_type_not_json","contentTypeFamily":"text"');
+    expectNoLeak(textPast);
+    const htmlPast = await run((url) =>
+      url.pathname.endsWith("/detailPastJson.json") ? html(leak) : undefined,
+    );
+    expect(htmlPast.logs).toContain('"reason":"content_type_not_json","contentTypeFamily":"html"');
+    expectNoLeak(htmlPast);
+    const errorPast = await run((url) =>
+      url.pathname.endsWith("/detailPastJson.json")
+        ? Response.json({ jsonrpc: "2.0", result: { errId: leak, errMessage: leak }, id: "x" })
+        : undefined,
+    );
+    expect(blockers(errorPast)).toEqual([
+      { connectionId: "account-one", code: "credit_past_months" },
+    ]);
+    expect(errorPast.logs).toContain('"reason":"error_reported","errIdType":"string"');
+    expectNoLeak(errorPast);
+    const statusPast = await run((url) =>
+      url.pathname.endsWith("/detailPastJson.json")
+        ? new Response(leak, { status: 503 })
+        : undefined,
+    );
+    expect(statusPast.logs).toContain('"reason":"http_status","status":503');
+    expectNoLeak(statusPast);
+  });
+});
+
+describe("a refused past-month response names the check that refused it", () => {
+  /** The refusal line `collectCredit` logs for the past-month response `past`. */
+  async function refusal(
+    past: unknown,
+    schedules: Readonly<Record<number, string>> = {},
+  ): Promise<{ error: unknown; lines: string[] }> {
+    const lines: string[] = [];
+    const spy = spyOn(console, "warn").mockImplementation((...values: unknown[]) => {
+      lines.push(values.map(String).join(" "));
+    });
+    try {
+      const inner = client({ 0: mutable }, [], schedules);
+      const error = await collectCredit(
+        {
+          ...inner,
+          postCreditPastJson: async () =>
+            response(typeof past === "string" ? past : JSON.stringify(past), "application/json"),
+        },
+        "x",
+      ).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+      return {
+        error,
+        lines: lines.filter((line) => line.includes("myjcb-credit-past-months-refused")),
+      };
+    } finally {
+      spy.mockRestore();
+    }
+  }
+  const envelope = (detailPastJsonInfo: unknown) => ({
+    jsonrpc: "2.0",
+    result: { errId: "0", errMessage: "", detailPastJsonInfo },
+    id: "030100601",
+  });
+
+  test.each([
+    ["not JSON", "{", '{"event":"myjcb-credit-past-months-refused","reason":"json_invalid"}'],
+    [
+      "no result",
+      { jsonrpc: "2.0", id: "030100601" },
+      '{"event":"myjcb-credit-past-months-refused","reason":"result_missing","topLevelType":"object"}',
+    ],
+    [
+      "no month list",
+      { jsonrpc: "2.0", result: { errId: "0" }, id: "030100601" },
+      '{"event":"myjcb-credit-past-months-refused","reason":"info_missing","infoType":"undefined"}',
+    ],
+    [
+      "an item that is not an object",
+      envelope([{ detailMonth: "9", detailAvailableFlag: "0" }, "synthetic"]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"item_malformed","itemCount":2,"itemIndex":2,"itemType":"string"}',
+    ],
+    [
+      "a month outside 0..17",
+      envelope([{ detailMonth: "18", detailAvailableFlag: "1" }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","itemCount":1,"itemIndex":1,"monthType":"string"}',
+    ],
+    [
+      "a repeated month",
+      envelope([
+        { detailMonth: "9", detailAvailableFlag: "0" },
+        { detailMonth: 9, detailAvailableFlag: "0" },
+      ]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"month_duplicate","itemCount":2,"itemIndex":2,"detailMonth":9}',
+    ],
+    [
+      "an availability flag of another shape",
+      envelope([{ detailMonth: "9", detailAvailableFlag: "2" }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"flag_malformed","itemCount":1,"itemIndex":1,"flagType":"string"}',
+    ],
+    [
+      "a settlement label that is not a string",
+      envelope([{ detailMonth: "9", detailAvailableFlag: "1", settlementYM: null }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"settlement_malformed","itemCount":1,"itemIndex":1,"settlementType":"null"}',
+    ],
+  ])("%s", async (_name, past, line) => {
+    const { error, lines } = await refusal(past);
+    expect(error).toBeInstanceOf(StopConditionError);
+    expect(error).toMatchObject({ code: "collect-credit-past-months" });
+    expect(lines).toEqual([line]);
+  });
+
+  test("a schedule position the response offers names the positions only", async () => {
+    const skipPage = "<h1>ショッピングスキップ払いご利用明細(未確定分)</h1>";
+    const { error, lines } = await refusal(
+      envelope([
+        { detailMonth: "8", detailAvailableFlag: "1" },
+        { detailMonth: "12", detailAvailableFlag: "1" },
+      ]),
+      { 8: skipPage },
+    );
+    expect(error).toMatchObject({ code: "collect-credit-past-months" });
+    expect(lines).toEqual([
+      '{"event":"myjcb-credit-past-months-refused","reason":"schedule_overlap","itemCount":2,"overlapPositions":[8],"schedulePositions":[8],"menuMonthPositions":[0]}',
+    ]);
+  });
+
+  test("an accepted response logs no refusal", async () => {
+    const pages = { 0: mutable };
+    const lines: string[] = [];
+    const spy = spyOn(console, "warn").mockImplementation((...values: unknown[]) => {
+      lines.push(values.map(String).join(" "));
+    });
+    try {
+      await collectCredit(client(pages, [{ detailMonth: "9", detailAvailableFlag: "0" }]), "x");
+    } finally {
+      spy.mockRestore();
+    }
+    expect(lines.filter((line) => line.includes("myjcb-credit-past-months-refused"))).toEqual([]);
   });
 });
 
