@@ -498,7 +498,7 @@ Measured as the bytes of the MCP result's structured content
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------: | ------------------------------------- |
 | `kogane.store.read` `{page: overview}`, synthetic store                                                                                                        |     9,234 | 1,499                                 |
 | the same at the window's realistic worst (38 sources, 10 with partial runs; 57 parsers, 10 failing, 3 pending; 10 sources' datasets with partial-unit updates) |   266,375 | 6,882 (9,787 with the lists uncapped) |
-| the same at its bound (every source partial and with unit updates, every parser failing with each of the Processor's 29 codes and `unclassified`)              |   283,997 | 7,587 (33,477 uncapped)               |
+| the same at its bound (every list full; all three parse statuses; the longest codes on each line, all 30 on the error line; today's longest names)             |   370,304 | 8,081                                 |
 | `kogane.schedules.maintenance.read` `{}`, synthetic store (15 sources, 16 jobs, 14 rules)                                                                      |    15,258 | 4,909 and 4,172 (2 pages)             |
 | the same with 30 sources, each with two jobs and four rules of 20 revisions                                                                                    | 1,042,886 | at most 6,268 a page (12 pages)       |
 | one source with two jobs and 30 rules                                                                                                                          |         — | 6,173 and 6,321 (2 pages)             |
@@ -524,12 +524,17 @@ Measured as the bytes of the MCP result's structured content
   source registry (each further source with its own artifact count adds a
   `sources` line, about 55 bytes), with the Processor's closed set of
   failure codes (about 25 bytes a code on the status's line), and with
-  longer source ids, parser names and datasets than the synthetic ones; the
-  bound above leaves about 600 bytes under 8 KB for them. A maintenance page is
-  bounded by its 16 lines: a rule line is about 300 bytes with its 20
-  revisions' codes, so a page passes 8 KB only when most of its lines are
-  rules whose revisions carry most of the eight change reasons and each sits
-  under its own source; nothing measured comes near it.
+  longer source ids, parser names and datasets than today's longest (17,
+  40 and 37 characters; the schema allows source ids of 100 characters,
+  datasets of 200 and parser names of any length); the bound above leaves
+  about 110 bytes under 8 KB for them, so three more sources with their own
+  artifact counts, five more codes, or three more characters on every
+  source id pass 8 KB (with 100-character source ids the bound is about
+  12 KB). A maintenance page is bounded by its 16 lines: a rule line is
+  about 300 bytes with its 20 revisions' codes, so a page passes 8 KB only
+  when most of its lines are rules whose revisions carry most of the eight
+  change reasons and each sits under its own source; nothing measured comes
+  near it.
 - The maintenance summary's type (`MaintenanceRead`) mirrors the Processor's
   answer in `packages/collection`; the Processor does not import it, so
   `schedule-tools.test.ts` and `mcp-answer-size.test.ts` check the summary
@@ -579,12 +584,15 @@ Measured as the bytes of the MCP result's structured content
   refused on the route and the tool, and `detail` on `meta` or
   `filter-options` is `invalid_query` on both; the realistic worst above
   validates in full and in summary, stays under 7 KB, and lists five lines
-  a list with the rest counted; the bound above validates, keeps every one
-  of the Processor's codes on the error line, and stays under 8 KB; every maintenance
-  page equals `maintenanceReadSummary` of the full read on `/mcp` and the
-  agent route, is under 8 KB, and together the pages list every source in
-  order and every job and rule once, a failure code kept; the 30-source and
-  crowded-source reads stay under 8 KB a page.
+  a list with the rest counted; the bound above validates in full and in
+  summary, has all three parse statuses, five lines a list each with its
+  newest run completed, the three longest codes and more on every failing
+  line, every one of the Processor's codes on the error line, pending and
+  failing lines left out, and the longest names in use today, and stays
+  under 8 KB; every maintenance page equals `maintenanceReadSummary` of the
+  full read on `/mcp` and the agent route, is under 8 KB, and together the
+  pages list every source in order and every job and rule once, a failure
+  code kept; the 30-source and crowded-source reads stay under 8 KB a page.
 - `services/app/test/schedule-tools.test.ts`: the summary pages on both
   agent paths are the same object and each the full read's summary, every
   page but the last holds 16 lines; `detail: full` is the Processor's read;

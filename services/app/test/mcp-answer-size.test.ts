@@ -640,6 +640,81 @@ function worstOverview(options: {
   };
 }
 
+/**
+ * A full overview at the summary's bound: every part the caps leave growing
+ * at its largest. 38 sources, each with its own artifact count and with
+ * partial runs; every fetch run completed; all three parse statuses, every
+ * one of 57 parsers failing, the five newest lines each with the three
+ * longest codes and more, every code the Processor writes on the error
+ * line, three parsers' pending lines and the older failing ones left out;
+ * every run superseded and half of them with warnings, half unreadable; and
+ * 76 source and dataset lines of unit updates. Source ids, parser names and
+ * datasets are as long as the longest the source and parser registries and
+ * the collectors use today (17, 40 and 37 characters); counts and ids are as
+ * wide as `worstOverview`'s.
+ */
+function boundOverview(): OverviewPage {
+  const sources = Array.from({ length: 38 }, (_, index) => `synthetic-feed-${nn(index)}`);
+  const parsers = Array.from(
+    { length: 57 },
+    (_, index) => `synthetic-provider-${nn(index)}-card-statement-pdf`,
+  );
+  const longest = [...PARSE_FAILURE_CODES].sort((left, right) => right.length - left.length);
+  return {
+    counts: worstOverview({ partialSources: 0, failingParsers: 0, unitLines: 0, codes: [] }).counts,
+    sources: sources.map((id, index) => ({
+      id,
+      provider: `Synthetic Provider ${index}`,
+      ingestion: "collector-r2",
+      artifact_count: 10_000 + index * 101,
+    })),
+    fetchRuns: Array.from({ length: 500 }, (_, index) => ({
+      id: 900_500 - index,
+      source_id: sources[index % sources.length]!,
+      tool: "synthetic-collector",
+      external_run_id: crypto.randomUUID(),
+      status: index % 3 === 0 ? "success" : "partial",
+      started_at: instant(index * 30 + 5),
+      completed_at: instant(index * 30),
+    })),
+    parseRuns: Array.from({ length: 500 }, (_, index) => {
+      const parser = index % parsers.length;
+      // Seven rounds of every parser failing, then three pending and the rest ok.
+      const round = Math.floor(index / parsers.length);
+      const status = round < 7 ? "error" : parser < 3 ? "pending" : "ok";
+      return {
+        id: 700_500 - index,
+        fetch_artifact_id: 800_500 - index,
+        parser_name: parsers[parser]!,
+        parser_version: "3",
+        parsed_at: instant(index * 30),
+        status,
+        warnings:
+          index % 2 === 0
+            ? { list: ["synthetic warning text"], raw: '["synthetic warning text"]', parsed: true }
+            : { list: [], raw: "not json", parsed: false },
+        // The newest three rounds the longest codes, the older ones every code.
+        error:
+          status !== "error"
+            ? null
+            : round < 3
+              ? longest[round]!
+              : PARSE_FAILURE_CODES[index % PARSE_FAILURE_CODES.length]!,
+        superseded_by_parse_run_id: 700_600 - index,
+      };
+    }),
+    unitUpdates: Array.from({ length: 500 }, (_, index) => ({
+      source_id: sources[index % sources.length]!,
+      dataset: `synthetic-dataset-${nn(Math.floor(index / sources.length) % 2)}-statement-detail`,
+      fetch_run_id: 900_500 - index,
+      fetched_at: instant(index * 30),
+      updated_units: 3,
+      stale_units: 1,
+    })),
+    coverage: { limit: 500, truncated: true },
+  };
+}
+
 describe("kogane.store.read overview summary (ADR 0123, amendment 2026-11-19)", () => {
   it("is the full overview shaped by the one shared function, on the route and the tool alike", async () => {
     const summary = await page.route("/api/overview");
@@ -737,27 +812,51 @@ describe("kogane.store.read overview summary (ADR 0123, amendment 2026-11-19)", 
     expect(summary.unitUpdates).toHaveLength(5);
     expect(summary.unitUpdatesOmitted).toEqual({ lines: 5, runs: 15 });
     expect(summary.sources).toHaveLength(38);
-    // The bound: every source partial, every parser failing with every code
-    // the Processor writes, every source with unit updates. Nothing grows
-    // further with the store; only the source registry and the Processor's
-    // codes would.
-    const bound = overviewSummary(
-      worstOverview({
-        partialSources: 38,
-        failingParsers: 57,
-        unitLines: 38,
-        codes: PARSE_FAILURE_CODES,
-      }),
-    );
+    // The bound: every list full and every part the caps leave growing at
+    // its largest. Nothing grows further with the store; only the source
+    // registry, the Processor's codes, longer names and wider numbers would.
+    const boundFull = boundOverview();
+    expect(validApiResponse("/api/overview", boundFull, "full")).toBe(true);
+    const bound = overviewSummary(boundFull);
     expect(validApiResponse("/api/overview", bound, "summary")).toBe(true);
+    expect(
+      [
+        boundFull.sources[0]!.id,
+        boundFull.parseRuns[0]!.parser_name,
+        boundFull.unitUpdates![0]!.dataset,
+      ].map((name) => name.length),
+    ).toEqual([17, 40, 37]);
+    expect(bound.sources).toHaveLength(38);
+    expect(bound.fetchRuns.notSuccessful).toHaveLength(5);
+    expect(bound.fetchRuns.notSuccessful.every((line) => line.newest.completedAt !== null)).toBe(
+      true,
+    );
+    expect(bound.parseRuns.byStatus.map((line) => line.status).sort()).toEqual([
+      "error",
+      "ok",
+      "pending",
+    ]);
     expect(bound.parseRuns.byStatus.find((line) => line.status === "error")?.failureCodes).toEqual(
       expect.arrayContaining([...PARSE_FAILURE_CODES]),
     );
-    expect(bound.parseRuns.notOk.every((line) => line.moreFailureCodes > 0)).toBe(true);
+    const longest = [...PARSE_FAILURE_CODES]
+      .sort((left, right) => right.length - left.length)
+      .slice(0, 3);
+    expect(bound.parseRuns.notOk).toHaveLength(5);
+    for (const line of bound.parseRuns.notOk) {
+      expect(line.failureCodes).toEqual(longest);
+      expect(line.moreFailureCodes).toBeGreaterThan(0);
+    }
+    expect(bound.parseRuns.notOkOmitted.map((entry) => entry.status).sort()).toEqual([
+      "error",
+      "pending",
+    ]);
+    expect(bound.unitUpdates).toHaveLength(5);
+    expect(bound.unitUpdatesOmitted?.lines).toBe(76 - 5);
     const bounded = bytes({ schemaVersion: "kogane-page-read-v1", data: bound });
     expect(bounded).toBeLessThan(CLIENT_BYTES);
     console.log(
-      `overview summary at the realistic worst: ${size} bytes (full ${bytes(worst)}); at its bound: ${bounded}`,
+      `overview summary at the realistic worst: ${size} bytes (full ${bytes(worst)}); at its bound: ${bounded} (full ${bytes(boundFull)})`,
     );
   });
 });
