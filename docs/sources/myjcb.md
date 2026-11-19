@@ -608,7 +608,7 @@ At amendment (b), the collector counted `detailMonth` positions without distingu
 
 **Export links.** Confirmed months have `detailDbPdf.html?output=pdf`, `detail.html?output=csv`, and `detail.html?output=money` as relative hrefs without `detailMonth` (the month is the page containing the link). Former `discoverCreditExports` resolved hrefs against only the origin, producing `/detail.html`, so they never matched. This bug made every stored run record 0 exports; "the investigated connection has no export link in any month" (statement-state determination above) was incorrect. Resolution now uses the detail page's own URL (`https://my.jcb.co.jp/iss-pc/member/details_inquiry/detail.html`), treating relative, `./`, root-relative, and absolute hrefs alike. Count links on the MyJCB origin with export paths (`detail.html` or `detailDbPdf.html` under `/iss-pc/member/details_inquiry/`) and `output` (`csv`, `money`, `pdf`). Links without `detailMonth`, as observed, are exports for their containing page's month. Links naming `detailMonth` count only if they name exactly that month (previously `Number(null)` made monthless links belong to month 0, uncounted in other months).
 
-The Worker does not retrieve discovered exports. The shared bucket rejects `credit-csv`/`credit-pdf`/`credit-ofx` (`artifact_dataset_unobserved`), so retrieving them would make every run containing confirmed months fail at planning, without writing a terminal. Instead, record only `exportOffers: [{ position, kinds }]` (kinds `csv`, `pdf`, `ofx`) in the collector-manifest connection. Offers do not make units `partial`. The rule stopping on export links in non-confirmed pages (`credit_statement_state`) is unchanged; fixing discovery made it work on live pages too.
+The Worker does not retrieve discovered exports. The shared bucket rejects `credit-csv`/`credit-pdf`/`credit-ofx` (`artifact_dataset_unobserved`), so retrieving them would make every run containing confirmed months fail at planning, without writing a terminal. Instead, record only `exportOffers: [{ position, kinds }]` (kinds `csv`, `pdf`, `ofx`) in the collector-manifest connection. Offers do not make units `partial`. The rule stopping on export links in non-confirmed pages (`credit_statement_state`) is unchanged; fixing discovery made it work on live pages too. (Superseded for exports by [ADR 0107, amendment 2026-11-12](../adr/0107-myjcb-point-history-and-document-boundary.md#amendment-2026-11-12-retain-observed-original-credit-files): the Worker now fetches offered statement files as `credit-document-YYYY-MM.{csv,pdf,ofx}`, and `artifact_dataset_unobserved` no longer exists in the code.)
 
 **Third header.** `ご利用日 / ご利用先など お支払日 / 今後のお支払い金額` contains neither of the two amount labels read. It was observed only on shopping-skip-payment schedule pages, so its code is `scheduled_payments_page`. Row meaning is unconfirmed, so do not read it as a statement (ADR 0004). A header is this type if its whitespace-stripped text contains all of `ご利用日`, `ご利用先など`, `お支払日`, `今後のお支払い金額` and none of `支払区分`, `今回のお支払い金額`, `ご利用金額` (`scheduledLedgerRowCount`). Comparison is not per cell, so both observed 3-cell and 4-cell shapes are read alike (neither reads rows).
 
@@ -1029,3 +1029,30 @@ root-card switching, scheduled production capture, a complete fifteen-month
 archive and live parser validation remain unproved. The document catalogue
 therefore stays partial and [issue 1251](https://github.com/risu729/kogane/issues/1251)
 remains open.
+
+## Past-month refusals from 2026-11-15 (diagnostic)
+
+Every scheduled run from 2026-11-15 21:00 UTC through 2026-11-18 21:00 UTC
+failed before the first month with stop code `credit_past_months`
+(Workers Logs: `collector-diagnostic`, stage `connection-collection`,
+category `response`, `StopConditionError`, no HTTP status), and stored no
+artifact. The runs of 2026-11-12 to 2026-11-14 passed this stage. A stop
+before the month loop keeps nothing (see "Stops"), and the earlier log line
+did not say which check refused, so the cause could not be placed: a
+non-JSON answer, an error id, an item of an unobserved shape, or a schedule
+position offered as a month all ended the same way.
+
+The read now logs `myjcb-credit-past-months-refused` with one closed
+`reason` before it stops: `request_invalid`, `http_status` (with `status`),
+`content_type_not_json` (with `contentTypeFamily`: `empty`, `html`, `text`
+or `other`), `response_oversize`, `utf8_invalid`, `json_invalid`,
+`result_missing` (with `topLevelType`), `error_reported` (with `errIdType`),
+`info_missing` (with `infoType`), `item_malformed`, `month_out_of_range`,
+`flag_malformed` or `settlement_malformed` (each with `itemCount`, the item's
+position and the JavaScript type of the refused value), `month_duplicate`
+(with `itemCount`, the item's position and the repeated `detailMonth`),
+`schedule_overlap` (with `itemCount` and the overlapping, schedule and menu
+month positions), or `unclassified` for any other error. It carries counts,
+`detailMonth` positions and type names only, never the response, an error id
+or a label. The checks themselves are unchanged; the fix follows
+once a run names the reason.

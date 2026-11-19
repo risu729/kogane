@@ -1,6 +1,11 @@
 # SBI securities identity interpretation
 
-Layer C consumes the seven existing SBI parser shapes without changing Layer B. The caller scopes every account by source and producer. A producer identifies the collector implementation, not a verified login identity; this currently assumes one login per producer/source. Provider account references alone do not establish equality across separate logins.
+Layer C consumes every SBI Securities parser's observations without changing Layer B; three parsers' references are not classified yet (below). The caller scopes every account by source and producer. A producer identifies the collector implementation, not a verified login identity; this currently assumes one login per producer/source. Provider account references alone do not establish equality across separate logins.
+
+These references stay `unresolved` with a closed issue; no rule classifies them yet, and no account is guessed:
+
+- Foreign cash history (`sbi-foreign-cash-history`) rows are `sbi-securities:foreign` transactions whose schema states neither `specificAccountCode` nor `accountKind`. Each row of every capture maps to the bare reference `sbi-securities:foreign` (`missing-specificAccountCode`, with `missing-trade-currency` and `missing-security-identifier`, since a cash movement names neither), labelled as foreign securities custody with an unconfirmed category. Any other foreign row whose discriminator is missing maps to the same bare reference.
+- Reported income (`sbi-income-payments`) and realised gains (`sbi-realised-gains`) are valuations on `sbi-securities:income:<accountType>` and `sbi-securities:gains:<accountType>` ([ADR 0106](adr/0106-sbi-reported-income-and-gains.md)). The rule knows neither scope: `unknown-sbi-account-scope`, role `unknown`, label `SBI証券（口座区分未確定）`, and no security identifier (the provider product code stays in `extra`).
 
 Display labels distinguish domestic custody categories (retaining the exact code), foreign securities custody, foreign cash account kind, yen cash, and aggregate assets. Security names reported by the provider are display-only; renaming a security does not change its identifier or account mapping key.
 
