@@ -25,7 +25,7 @@ const METRICS = [
   "前回お支払い額",
   "今回ご請求額",
 ] as const;
-export const REALISTIC_ACCOUNTS = 12;
+const REALISTIC_ACCOUNTS = 12;
 export const REALISTIC_BALANCES = REALISTIC_ACCOUNTS * METRICS.length;
 
 async function route(source: string): Promise<void> {

@@ -805,7 +805,7 @@ export type CollectionQualityDetail = (typeof COLLECTION_QUALITY_DETAILS)[number
 /** Summary lines of one source's cells per page. */
 export const COLLECTION_QUALITY_LINE_PAGE = 20;
 /** More cells than this in one source's summary is refused (413), never cut. */
-export const COLLECTION_QUALITY_SUMMARY_CELL_BOUND = ACCOUNT_COVERAGE_CELL_BOUND;
+export const COLLECTION_QUALITY_SUMMARY_CELL_BOUND = 2_000;
 
 type Freshness = z.output<typeof freshness>;
 
