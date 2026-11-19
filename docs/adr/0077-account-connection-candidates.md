@@ -616,8 +616,10 @@ Synthetic data only, no production access.
   2026-11-19 MCP proposal v2). It changes a published tool schema:
   `kogane.identity.read` gains `collection: "account-list"` and `kind`. The
   shared label rule also changes the account labels that
-  `kogane.balances.read`, `kogane.observations.list`, `kogane.identity.read`,
-  `kogane.store.read` (filter options) and the screens show. It adds no
+  `kogane.balances.read`, `kogane.observations.list`,
+  `kogane.observations.get`, `kogane.identity.read` (`accounts`) and
+  `kogane.store.read` (`filter-options`, with its `organization_ambiguous`
+  flag) show, and their routes and screens. It adds no
   catalogue operation.
 - Date: 2026-11-19
 - Issue: [#1414](https://github.com/risu729/kogane/issues/1414) point 3. The
@@ -713,8 +715,11 @@ stored. A connection is never a leaf account.
   - If one entity has two different labels, the entity level names none, and
     each reference keeps its own.
   - The entity's aggregator references are read with one keyed range of
-    `source_accounts` (`source_id='moneyforward-me'`) and keyed mapping
-    lookups. The read is bounded to 1,000 rows and refused whole past it.
+    `source_accounts` (`source_id='moneyforward-me'`), walked in the index's
+    order so the limit ends the walk, and keyed mapping lookups. The read is
+    bounded to 1,000 rows and refused whole past it.
+  - A reference whose own review names the entity's label carries its own
+    review as `connection`; the others carry the review that named it.
   - The read runs only when an organized reference is an automatic
     `moneyforward-me` one.
   - Nothing is written. No mapping, row or total moves.
@@ -760,8 +765,10 @@ stored. A connection is never a leaf account.
 ### Consequences
 
 - The MoneyForward entities with a review read their reviewed institution
-  on their collector rows too. This holds in balances, activity, the filter
-  options and the identity page. In the filter options, the importer and
+  on their collector rows too. This holds in the balance reads, the
+  observation lists and details (transactions, balances, positions), the
+  filter options and the identity page. The economic event reads
+  (`kogane.events.read`) do not organize account labels and are unchanged. In the filter options, the importer and
   collector references of one raw scope no longer disagree, so the scope is
   no longer `organization_ambiguous`.
 - Entities without a review keep `MoneyForward連携口座`, and the list says
@@ -784,7 +791,11 @@ Synthetic data only, no production access.
 - `packages/application/test/account-list.test.ts`:
   - Without table statistics, the entity label read is one keyed range of
     `sqlite_autoindex_source_accounts_2 (source_id=?)` with keyed mapping
-    lookups.
+    lookups, and no sort.
+  - The entity label rule on synthetic reviews: one review label names the
+    collector's reference; two different labels name none; an
+    evidence-ineligible review and a manual mapping's review name none; a
+    reference with its own review of that label carries its own.
   - Without table statistics, the account list scans only the
     current-identity walk and its own CTEs, and reads every table after it by
     key.

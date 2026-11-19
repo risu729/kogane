@@ -829,8 +829,8 @@ answers `503 catalogue_read_failed`.
 `{account, label, kind, sources, mapping, connection, lastObservedAt}`, with
 the filters `source` and `kind` and `offset` paging. A page holds at most 50
 lines and closes early to stay within 8,000 bytes of JSON. `account` is the
-`targetId` that balance and activity rows carry, and `label` is the label
-those rows show. An aggregator account whose institution no connection
+`targetId` that organized balance and transaction rows carry, and `label` is
+the label those rows show. An aggregator account whose institution no connection
 review records says `connection: "not-reviewed"`. `identityRead` is refused
 for this collection, and `kind` for the others
 ([identity](identity.md#account-labels-and-the-account-list),

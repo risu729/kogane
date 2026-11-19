@@ -4,7 +4,12 @@
 // over the real identity pipeline are services/app/test/account-list-api.test.ts.
 // Every value is synthetic.
 import { beforeAll, describe, expect, test } from "bun:test";
-import { ENTITY_AGGREGATOR_REFERENCES_SQL } from "../src/query/account-connections.ts";
+import {
+  decoratedAccountLabel,
+  ENTITY_AGGREGATOR_REFERENCES_SQL,
+  type LabelledReference,
+  readAccountLabelDecorations,
+} from "../src/query/account-connections.ts";
 import { ACCOUNT_LIST_SQL, readAccountList } from "../src/query/account-list.ts";
 import {
   ACCOUNT_LIST_BYTE_BUDGET,
@@ -34,8 +39,11 @@ describe("plans without statistics", () => {
       "SEARCH m USING INDEX sqlite_autoindex_account_mappings_2 (source_account_id=? AND revision=?)",
       "CORRELATED SCALAR SUBQUERY 1",
       "SEARCH n USING COVERING INDEX sqlite_autoindex_account_mappings_2 (source_account_id=?)",
-      "USE TEMP B-TREE FOR ORDER BY",
     ]);
+    // Walked in the index's own order, so the limit ends the walk: no sort.
+    expect(
+      plan(ENTITY_AGGREGATOR_REFERENCES_SQL).some((line) => line.includes("TEMP B-TREE")),
+    ).toBe(false);
   });
 
   test("the account list scans only the current-identity walk; every table after it is keyed", () => {
@@ -175,15 +183,157 @@ describe("paging and the byte budget", () => {
 
   test("a row too large for a page of its own is refused, never skipped", async () => {
     const huge = reference(1, { label: "x".repeat(ACCOUNT_LIST_BYTE_BUDGET) });
-    expect(
+    await expect(
       readAccountList(store([huge, reference(2)]), { source: null, kind: null, offset: 0 }),
     ).rejects.toThrow("identity_account_list_row_budget");
   });
 
   test("a store past the reference bound is refused whole", async () => {
     const rows = Array.from({ length: 5_001 }, (_, i) => reference(i));
-    expect(readAccountList(store(rows), { source: null, kind: null, offset: 0 })).rejects.toThrow(
-      "identity_account_list_limit",
+    await expect(
+      readAccountList(store(rows), { source: null, kind: null, offset: 0 }),
+    ).rejects.toThrow("identity_account_list_limit");
+  });
+});
+
+/** A synthetic review row of `current_account_connection_reviews`. */
+function review(
+  producer: string,
+  key: string,
+  label: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    producer_id: producer,
+    connection_key: key,
+    label,
+    status: "unresolved",
+    related_source_id: null,
+    direct_producer_id: null,
+    reason: "synthetic reason",
+    detail_artifact_id: 1,
+    direct_artifact_id: null,
+    branch_artifact_id: null,
+    direct_reference_ids_json: "[]",
+    evidence_eligible: 1,
+    revision: 1,
+    ...overrides,
+  };
+}
+
+/** One aggregator reference, as both the organization step and the entity read see it. */
+function aggregator(id: string, producer: string, key: string, target: string, method = "rule") {
+  return {
+    referenceId: id,
+    targetId: target,
+    source: "moneyforward-me",
+    producer,
+    sourceAccount: `moneyforward-me:${key}`,
+    method: method as "rule" | "manual",
+  } satisfies LabelledReference;
+}
+
+/** Reviews answer the review read; references answer the entity read. */
+function labelStore(
+  reviews: readonly unknown[],
+  references: readonly LabelledReference[],
+): SqlExecutor {
+  return {
+    all: async <T>(sql: string) =>
+      (sql === ENTITY_AGGREGATOR_REFERENCES_SQL
+        ? references.map(({ source: _source, ...row }) => row)
+        : sql.includes("current_account_connection_reviews")
+          ? [...reviews]
+          : []) as T[],
+    first: async () => null,
+  };
+}
+
+async function shownLabels(
+  reviews: readonly unknown[],
+  references: readonly LabelledReference[],
+  read: readonly LabelledReference[] = references,
+) {
+  const decorations = await readAccountLabelDecorations(labelStore(reviews, references), read);
+  return new Map(
+    read.map((ref) => [
+      ref.referenceId,
+      decoratedAccountLabel(
+        "MoneyForward連携口座",
+        ref.method,
+        ref.source,
+        decorations.get(ref.referenceId),
+      ),
+    ]),
+  );
+}
+
+describe("the entity label rule", () => {
+  const SUFFIX = "（個別口座未確定）";
+  test("one eligible review label names every automatic reference of the entity", async () => {
+    const refs = [
+      aggregator("sa_importer", "importer", "k1", "account_e"),
+      aggregator("sa_collector", "collector", "k1", "account_e"),
+    ];
+    const shown = await shownLabels([review("importer", "k1", "合成銀行A")], refs, [refs[1]!]);
+    expect(shown.get("sa_collector")).toMatchObject({
+      label: `合成銀行A${SUFFIX}`,
+      connection: { label: "合成銀行A" },
+    });
+  });
+
+  test("two different review labels on one entity name none: each reference keeps its own", async () => {
+    const refs = [
+      aggregator("sa_a", "producer-a", "k1", "account_e"),
+      aggregator("sa_b", "producer-b", "k2", "account_e"),
+      aggregator("sa_c", "producer-c", "k3", "account_e"),
+    ];
+    const shown = await shownLabels(
+      [review("producer-a", "k1", "合成銀行A"), review("producer-b", "k2", "合成銀行B")],
+      refs,
     );
+    expect(shown.get("sa_a")!.label).toBe(`合成銀行A${SUFFIX}`);
+    expect(shown.get("sa_b")!.label).toBe(`合成銀行B${SUFFIX}`);
+    // No label is picked for the reference no review names.
+    expect(shown.get("sa_c")).toEqual({ label: "MoneyForward連携口座" });
+  });
+
+  test("an evidence-ineligible review names no entity label", async () => {
+    const refs = [
+      aggregator("sa_importer", "importer", "k1", "account_e"),
+      aggregator("sa_collector", "collector", "k1", "account_e"),
+    ];
+    const shown = await shownLabels(
+      [review("importer", "k1", "合成銀行A", { evidence_eligible: 0 })],
+      refs,
+    );
+    expect(shown.get("sa_importer")!.label).toBe("MoneyForward連携口座");
+    expect(shown.get("sa_collector")).toEqual({ label: "MoneyForward連携口座" });
+  });
+
+  test("a manual mapping keeps its own label, and its review names no entity label", async () => {
+    const refs = [
+      aggregator("sa_importer", "importer", "k1", "account_e", "manual"),
+      aggregator("sa_collector", "collector", "k1", "account_e"),
+    ];
+    const shown = await shownLabels([review("importer", "k1", "合成銀行A")], refs);
+    expect(shown.get("sa_importer")!.label).toBe("MoneyForward連携口座");
+    expect(shown.get("sa_collector")).toEqual({ label: "MoneyForward連携口座" });
+  });
+
+  test("a reference whose own review names the entity label shows its own review", async () => {
+    const refs = [
+      aggregator("sa_a", "producer-a", "k1", "account_e"),
+      aggregator("sa_b", "producer-b", "k1", "account_e"),
+    ];
+    const shown = await shownLabels(
+      [
+        review("producer-a", "k1", "合成銀行A", { status: "confirmed", revision: 1 }),
+        review("producer-b", "k1", "合成銀行A", { revision: 2 }),
+      ],
+      refs,
+    );
+    expect(shown.get("sa_a")!.connection).toMatchObject({ status: "confirmed", revision: 1 });
+    expect(shown.get("sa_b")!.connection).toMatchObject({ status: "unresolved", revision: 2 });
   });
 });

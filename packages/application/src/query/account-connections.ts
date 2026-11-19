@@ -134,16 +134,18 @@ const AGGREGATOR_SOURCE = "moneyforward-me";
 const ENTITY_REFERENCE_BOUND = 1_000;
 /**
  * Every aggregator source account with its current mapping: one keyed range of
- * `UNIQUE(source_id,producer_id,reference_json)` and, per row, the mapping by
- * `UNIQUE(source_account_id,revision)`. One row past the bound is read, so a
- * larger store is refused, never cut (ADR 0077 amendment 2026-11-19).
+ * `UNIQUE(source_id,producer_id,reference_json)`, walked in that index's order
+ * so the limit stops the walk (no sort of the whole range), and, per row, the
+ * mapping by `UNIQUE(source_account_id,revision)`. One row past the bound is
+ * read, so a larger store is refused, never cut (ADR 0077 amendment
+ * 2026-11-19).
  */
 export const ENTITY_AGGREGATOR_REFERENCES_SQL = `SELECT s.id AS referenceId,s.producer_id AS producer,
  json_extract(s.reference_json,'$[0]') AS sourceAccount,m.account_id AS targetId,m.method
 FROM source_accounts s
 JOIN account_mappings m ON m.source_account_id=s.id
  AND m.revision=(SELECT max(n.revision) FROM account_mappings n WHERE n.source_account_id=s.id)
-WHERE s.source_id='${AGGREGATOR_SOURCE}' ORDER BY s.id LIMIT ${String(ENTITY_REFERENCE_BOUND + 1)}`;
+WHERE s.source_id='${AGGREGATOR_SOURCE}' ORDER BY s.producer_id,s.reference_json LIMIT ${String(ENTITY_REFERENCE_BOUND + 1)}`;
 
 /** The connection label one entity shows, with the connection that names it. */
 interface EntityConnectionLabel {
@@ -260,7 +262,8 @@ export async function readAccountLabelDecorations(
  * The label one row of a reference shows: a manual mapping's own label; else
  * its entity's connection label (the entity label rule); else its own
  * connection's (`connectionAccountLabel`); else its mapping label. The
- * connection shown is the one that named the label, or the reference's own.
+ * connection shown is the reference's own where its own review names the
+ * label shown, else the entity's review that named it.
  */
 export function decoratedAccountLabel(
   label: string,
@@ -268,9 +271,18 @@ export function decoratedAccountLabel(
   source: string,
   decoration: AccountLabelDecoration | undefined,
 ): OrganizedAccountLabel {
-  if (method !== "manual" && decoration?.entity)
-    return { label: decoration.entity.label, connection: decoration.entity.connection };
   const own = decoration?.own;
+  if (method !== "manual" && decoration?.entity) {
+    // A reference whose own review names the entity's label shows its own
+    // review, not another reference's review of the same name.
+    const ownNamesIt =
+      own !== undefined &&
+      connectionAccountLabel("", method, source, own) === decoration.entity.label;
+    return {
+      label: decoration.entity.label,
+      connection: ownNamesIt ? own : decoration.entity.connection,
+    };
+  }
   return {
     label: connectionAccountLabel(label, method, source, own),
     ...(own ? { connection: own } : {}),

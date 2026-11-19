@@ -428,7 +428,8 @@ published identity observations reach:
 }
 ```
 
-- `account` is the `targetId` that balance and activity rows carry.
+- `account` is the `targetId` that organized balance and transaction rows
+  carry.
 - `kind` is the entity's role.
 - `mapping` is the current mapping status of its references, or `mixed`.
 - `connection` is `confirmed`, `unresolved`, `evidence-ineligible`, `mixed`,
