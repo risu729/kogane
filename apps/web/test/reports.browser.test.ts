@@ -1,7 +1,7 @@
 // 評価レポート in the production client against a server that answers the
 // fixed report routes with synthetic bodies in the shapes the App Worker
 // writes (apps/web/test/report-fixture.ts).
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
@@ -21,6 +21,7 @@ import {
   RESTRICTED_ID,
   UNEXPLAINED_ID,
 } from "./report-fixture.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -30,8 +31,13 @@ if (!runnable && (!existsSync(join(client, "index.html")) || process.env["CI"] =
 
 const STORED = 60;
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("fixed report artifacts", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let advertised = true;
@@ -99,7 +105,6 @@ describe.if(runnable)("fixed report artifacts", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();

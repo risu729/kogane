@@ -1,5 +1,5 @@
 // Local, synthetic integration only: the production bundle and both API families.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
@@ -7,6 +7,7 @@ import { createApi } from "../src/api.ts";
 import { buildFixture, HOSTILE_DESCRIPTION } from "./fixture.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { auditPage, openDisclosures, tabWalk } from "../../../apps/web/test/a11y-audit.ts";
+import { settledTest } from "../../../apps/web/test/settle.ts";
 
 const client = join(import.meta.dir, "../../../apps/web/dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -15,6 +16,12 @@ if (!runnable) {
   console.log("production browser: build:production and Chromium required");
   if (!existsSync(join(client, "index.html")) || process.env["CI"] === "true") process.exitCode = 1;
 }
+
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (apps/web/test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
 
 describe.if(runnable)("combined production client", () => {
   const fixture = buildFixture();
@@ -27,7 +34,6 @@ describe.if(runnable)("combined production client", () => {
   // Advertised only by the accessibility audit, which visits the rewards page.
   let rewardsAdvertised = false;
   let server: ReturnType<typeof Bun.serve>;
-  let browser: Browser;
   let origin: string;
   beforeAll(async () => {
     const api = createApi(fixture.store);
@@ -222,7 +228,6 @@ describe.if(runnable)("combined production client", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   });
   afterAll(async () => {
     await browser?.close();

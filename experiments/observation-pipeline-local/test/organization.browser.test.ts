@@ -1,6 +1,6 @@
 // Local fixture values simulate the financial API contract for rendering tests.
 // Synthetic local server only; production bundle, no live browser or account.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -13,6 +13,7 @@ import {
   type FinancialProductClaim,
 } from "../../../packages/observation-shared/src/financial-products.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { settledTest } from "../../../apps/web/test/settle.ts";
 
 const client = join(import.meta.dir, "../../../apps/web/dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -111,6 +112,12 @@ const product: FinancialProductClaim = resolveFinancialProduct({
   },
 });
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (apps/web/test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("organized observation labels", () => {
   const fixture = buildFixture();
   const current = fixture.store.db
@@ -119,7 +126,6 @@ describe.if(runnable)("organized observation labels", () => {
   const position = fixture.store.db.query("SELECT id FROM position_observations LIMIT 1").get() as {
     id: number;
   };
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let detailMode: "organized" | "missing" | "unavailable" = "organized";
@@ -206,7 +212,6 @@ describe.if(runnable)("organized observation labels", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   });
   afterAll(async () => {
     await browser?.close();

@@ -1,5 +1,5 @@
 // Local synthetic responses only; exercises the production bundle without live accounts.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -7,6 +7,7 @@ import { auditView } from "./a11y-audit.ts";
 import { classifyBalance } from "../../../packages/observation-shared/src/balance-semantics.ts";
 import type { BalanceRow } from "../../../packages/observation-shared/src/api-contract.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -99,8 +100,13 @@ const history = [row(101), row(102, undefined, undefined, "yen_deposit_savings_b
   (value) => ({ ...value, superseded_by_parse_run_id: null, parse_status: "succeeded" }),
 );
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("balance meaning and evidence display", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let large = false;
@@ -185,7 +191,6 @@ describe.if(runnable)("balance meaning and evidence display", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   });
   afterAll(async () => {
     await browser?.close();

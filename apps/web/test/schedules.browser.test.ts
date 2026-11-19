@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -6,16 +6,19 @@ import { auditView } from "./a11y-audit.ts";
 import jobs from "../../../config/alarm-jobs.json";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema";
 import type { ScheduleSnapshot } from "../../../packages/collection/src/schedule-model";
+import { settledTest } from "./settle.ts";
 const client = join(import.meta.dir, "../dist-production"),
   executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
 if (!runnable && (!existsSync(join(client, "index.html")) || process.env["CI"] === "true"))
   process.exitCode = 1;
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
 describe.if(runnable)("operator schedule administration", () => {
-  let browser: Browser,
-    server: ReturnType<typeof Bun.serve>,
-    origin: string,
-    snapshot: ScheduleSnapshot;
+  let server: ReturnType<typeof Bun.serve>, origin: string, snapshot: ScheduleSnapshot;
   let snapshotReads = 0,
     snapshotStatus = 200,
     leaseResponse: (() => Promise<Response>) | null = null,
@@ -133,7 +136,6 @@ describe.if(runnable)("operator schedule administration", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60000);
   afterAll(async () => {
     await browser?.close();

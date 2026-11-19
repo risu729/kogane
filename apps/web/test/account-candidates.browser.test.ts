@@ -3,7 +3,7 @@
 // world (packages/application/test/account-candidates-world.ts). A decision
 // is a plan of the payload the server named, sent to the change lifecycle;
 // the page never builds one of its own and never approves.
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -17,6 +17,7 @@ import { readAccountHistoryForGrant } from "../../../packages/application/src/qu
 import { world, type Store } from "../../../packages/application/test/account-candidates-world.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { auditView } from "./a11y-audit.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -31,8 +32,13 @@ const GRANT = {
   budget: { maxRows: 1000, maxProposalTargets: 1, maxExplainDepth: 6 },
 } as const;
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("account candidate review", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let store: Store;
@@ -142,7 +148,6 @@ describe.if(runnable)("account candidate review", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();

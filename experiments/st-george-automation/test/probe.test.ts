@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chromium, type Browser, type Page } from "playwright";
+import { afterAll, describe, expect } from "bun:test";
+import { chromium, type Page } from "playwright";
 import { parseArgs } from "../src/cli.ts";
 import { navigateGuarded } from "../src/navigation.ts";
 import {
@@ -13,6 +13,15 @@ import {
   observeStops,
   resolveAccountDetailsHref,
 } from "../src/probe.ts";
+import { settledTest } from "../../../apps/web/test/settle.ts";
+
+// Launched while the module loads, never in a hook: a timeout kills a browser
+// a hook launched (apps/web/test/settle.ts).
+const browser = await chromium.launch({
+  headless: true,
+  ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
+});
+const test = settledTest();
 
 describe("route and command boundaries", () => {
   test("recognizes only exact HTTPS bank routes", () => {
@@ -70,13 +79,6 @@ describe("route and command boundaries", () => {
 });
 
 describe("synthetic browser proof (no bank requests)", () => {
-  let browser: Browser;
-  beforeAll(async () => {
-    browser = await chromium.launch({
-      headless: true,
-      ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
-    });
-  });
   afterAll(async () => {
     await browser?.close();
   });

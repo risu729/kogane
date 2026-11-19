@@ -4,7 +4,7 @@
 // shows each source's counts as served, derives only 未処理 (eligible minus
 // organized) per row, adds no row across sources, and refuses a coverage
 // answer whose status counts do not add up instead of showing its numbers.
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -16,6 +16,7 @@ import type {
   IdentityCoverageRow,
   IdentityInstrumentRow,
 } from "../../../packages/observation-shared/src/identity-contract.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -93,8 +94,13 @@ const page = <T>(rows: T[]) => ({
   coverage: { limit: 100, nextOffset: null, truncated: false },
 });
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("identity coverage page", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   // Which inconsistency the coverage answer carries, if any.
@@ -158,7 +164,6 @@ describe.if(runnable)("identity coverage page", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();

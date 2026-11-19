@@ -4,7 +4,7 @@
 // too, where the cursor it resets to is the one already shown; and the page,
 // which then holds the read model's pager beside the record list's, passes the
 // accessibility audit on both measure views.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -13,6 +13,7 @@ import {
   withBalancesV2,
 } from "../../../packages/observation-shared/src/api-schema.ts";
 import { auditView } from "./a11y-audit.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -57,8 +58,13 @@ function snapshotPage(snapshot: number, complete: boolean) {
   };
 }
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("latest balance read model paging", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   /** Each read of the first page is a newer snapshot: the first is partial, later ones complete. */
@@ -94,7 +100,6 @@ describe.if(runnable)("latest balance read model paging", () => {
       },
     });
     origin = `http://127.0.0.1:${String(server.port)}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();

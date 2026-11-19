@@ -153,6 +153,31 @@ Success, rejection, synchronous outcomes, detached calls, mutable arrays and
 cleanup are also checked independently. No operation is retried and existing
 test deadlines are unchanged.
 
+When a case times out, Bun's test runner sends SIGTERM to every child process
+a hook or a case of the file spawned (it prints `killed 1 dangling process`)
+and leaves the ones spawned while the module loaded. A Chromium launched in
+`beforeAll` is such a process: one timeout killed it, and every later case of
+the file failed to open a page (`Target page, context or browser has been
+closed`). The browser tests of `apps/web` and
+`experiments/observation-pipeline-local`, and
+`experiments/st-george-automation/test/probe.test.ts`, therefore launch their
+one Chromium while the module loads (a top-level `await`), and only when the
+suite will run: a suite that `describe.if` skips for a missing build or
+Chromium launches nothing. Their local server and seeding stay in `beforeAll`,
+the browser is closed in `afterAll`, and their cases are declared with
+`settledTest()` from `apps/web/test/settle.ts`. That `test` keeps each case's
+body, and its `afterEach` waits for the body to settle before the next case
+begins, so a timeout fails that case alone; Bun still reports a late rejection
+as an error between tests. The wait is bounded by `afterEach`'s default 5 s
+deadline: a body that has not settled by then fails its case at the hook and
+goes on driving the browser while the next case runs.
+`activity-semantics.browser.test.ts` and `synthetic-display.browser.test.ts`
+launch Chromium inside their only case, which a timeout fails alone.
+`bun test` loads and runs one file at a time, and each file closes its browser
+before the next one loads, so a workspace's test run holds at most one
+Chromium; with the three browser workspaces' `ci` tasks run in parallel, as
+CI's `MISE_JOBS` allows, at most three are alive at once.
+
 hk's `repository` check
 invokes this graph, never `check` or `verify`, avoiding recursion. Selected root aliases for old operational `<short>:<verb>` names keep the
 deployment ledger and existing operational instructions working. Workspace
