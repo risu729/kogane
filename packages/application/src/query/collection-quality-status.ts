@@ -130,7 +130,7 @@ function newestOf(values: readonly (string | null)[]): string | undefined {
  * When no capture of a listed dataset was ever published, the age is that of
  * its oldest unpublished newest capture.
  */
-export function notPublishing(
+function notPublishing(
   cells: readonly CollectionQualityCellStates[],
   asOfDate: string,
 ): CollectionStatusNotPublishing[] {
@@ -184,7 +184,7 @@ async function sourceCells(
 }
 
 /** One job's line, from its receipts (newest first), its source's successes and cells. */
-export function statusRow(
+function statusRow(
   job: Pick<ScheduleQualityRow, "id" | "source" | "kind" | "enabled">,
   receipts: readonly StatusOccurrenceRow[],
   successes: readonly Success[],

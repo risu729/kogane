@@ -429,7 +429,7 @@ export const STATUS_DEGRADED_AFTER_DAYS = 3;
  * succeed, but a dataset's newest parsed capture is more than
  * STATUS_DEGRADED_AFTER_DAYS old) and `ok`.
  */
-export const COLLECTION_STATUS_STATES = [
+const COLLECTION_STATUS_STATES = [
   "disabled",
   "needs-owner",
   "failing",

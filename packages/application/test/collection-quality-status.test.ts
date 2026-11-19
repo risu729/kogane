@@ -174,7 +174,7 @@ describe("failures since the newest success", () => {
       store.occurrence("st-george", {
         nominalAt: new Date(Date.parse("2098-06-01T20:35:00.000Z") + index * DAY).toISOString(),
         status: index === STATUS_OCCURRENCE_WINDOW + 6 ? "completed" : "failed",
-        failureCode: index === STATUS_OCCURRENCE_WINDOW + 6 ? undefined : "collection_failed",
+        ...(index === STATUS_OCCURRENCE_WINDOW + 6 ? {} : { failureCode: "collection_failed" }),
       });
     expect((await row(store, "st-george")).failuresSinceSuccess).toBe(3);
   });
@@ -440,7 +440,7 @@ describe("the answer stays small", () => {
           startedAt: at(day, "21:00:00.587"),
           finishedAt: at(day, "21:04:11.123"),
           status: day % 3 === 0 ? "failed" : "completed",
-          failureCode: day % 3 === 0 ? "human_required_session_refresh" : undefined,
+          ...(day % 3 === 0 ? { failureCode: "human_required_session_refresh" } : {}),
         });
     // Three Vpass card units and two GLOBAL PASS months that stopped publishing.
     for (const unit of ["card-a", "card-b", "card-c"]) {

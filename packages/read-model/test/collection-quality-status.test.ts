@@ -42,7 +42,7 @@ describe("the status view's reads", () => {
         scaled.occurrence(job, {
           nominalAt: at,
           status: day % 2 === 0 ? "failed" : "completed",
-          failureCode: day % 2 === 0 ? "collection_failed" : undefined,
+          ...(day % 2 === 0 ? { failureCode: "collection_failed" } : {}),
         });
       const run = scaled.run({
         source: "v-point",
