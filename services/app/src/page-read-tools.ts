@@ -21,6 +21,7 @@ import {
   financialError,
   type Grant,
   grantAllows,
+  REWARD_EXPIRY_DETAILS,
 } from "../../../packages/application/src/index";
 import type { ToolResult } from "./agent-service";
 import { HttpError } from "./http";
@@ -187,13 +188,16 @@ const TOOLS = {
   "kogane.rewards.read": tool({
     title: "Reward holdings and expiry",
     description:
-      "One page of the reward read: `holdings` (each programme's provider-observed quantity in its own unit, with membership) or `expiry` (the published reward snapshot's expiry estimates, with the provider's own display sections). The same answer as GET /api/v2/rewards/holdings or /api/v2/rewards/expiry, under records.read and a whole-store read grant. `program` narrows to one programme; `offset` pages holdings, `limit` and `cursor` page expiry. Expiry is 503 while no reward snapshot is published. Read-only; no exchange or simulation is run.",
+      "One page of the reward read: `holdings` (each programme's provider-observed quantity in its own unit, with membership) or `expiry` (the published reward snapshot's expiry estimates, with the provider's own display sections). The same answer as GET /api/v2/rewards/holdings or /api/v2/rewards/expiry, under records.read and a whole-store read grant. `program` narrows to one programme; `offset` pages holdings, `limit` and `cursor` page expiry. Expiry takes a deadline window: `from` (inclusive, YYYY-MM-DD, default today in Asia/Tokyo) and `before` (exclusive); a page then lists the rows inside it and `window.rows` counts the others, a row with no date left out as `deadline_unknown`. A cursor is bound to its window: another window is 400 cursor_mismatch. `detail: summary` (unpaged: no `limit` or `cursor`) answers per programme and unit the buckets inside the window with their exact total (`not-exact` with reasons when an amount is not exact, never a partial sum or zero), the earliest 20 bucket lines, up to 3 provider-displayed portions (listed, never added), and how many buckets and displays fell before, inside and after the window or were left out (`deadline_unknown`, `deadline_differs_by_rule`, `display_date_unknown`, `provider_expiry_not_displayed`, `provider_expiry_unavailable`). A malformed date is 400 invalid_date, a window with no day 400 invalid_date_range, a snapshot over 1,000 rows 413 result_limit_exceeded. Expiry is 503 while no reward snapshot is published. Read-only; no exchange or simulation is run.",
     schema: z.strictObject({
       collection: z.enum(["holdings", "expiry"]),
       program: ROUTE_TEXT.optional(),
       offset: OFFSET.optional(),
       limit: z.number().int().min(1).max(1000).optional(),
       cursor: FILTER_TEXT.optional(),
+      from: ROUTE_TEXT.optional(),
+      before: ROUTE_TEXT.optional(),
+      detail: z.enum(REWARD_EXPIRY_DETAILS).optional(),
     }),
     capability: "records.read",
     routes: ["/api/v2/rewards/holdings", "/api/v2/rewards/expiry"],

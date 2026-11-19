@@ -432,7 +432,10 @@ export const REWARD_REQUEST_SCHEMA = {
   "/api/v2/rewards/holdings": ["program", "offset"],
   // `cursor` and `limit` page a published reward snapshot (U16); `offset`
   // stays for the request-time answer a deployment without one still gives.
-  "/api/v2/rewards/expiry": ["program", "offset", "cursor", "limit"],
+  // `from` (inclusive, default today in Asia/Tokyo) and `before` (exclusive)
+  // window the deadlines; `detail` is `full` (default) or `summary` (ADR 0049,
+  // amendment of 2026-11-19).
+  "/api/v2/rewards/expiry": ["program", "offset", "cursor", "limit", "from", "before", "detail"],
   // The saved simulations of a published snapshot, with their reproducibility
   // (U16, G2-20). Served only where `rewardsV2ReadModel` is `read-d1`; without
   // a snapshot it is `503`, never an empty success.

@@ -82,7 +82,16 @@ describe("shared API schema", () => {
       "/api/v2/rewards/holdings": ["program", "offset"],
       // U16: `cursor` and `limit` page a published reward snapshot; `offset`
       // stays for the request-time answer of a deployment without one.
-      "/api/v2/rewards/expiry": ["program", "offset", "cursor", "limit"],
+      // ADR 0049, amendment of 2026-11-19: a deadline window and a summary.
+      "/api/v2/rewards/expiry": [
+        "program",
+        "offset",
+        "cursor",
+        "limit",
+        "from",
+        "before",
+        "detail",
+      ],
       "/api/v2/rewards/simulations": ["cursor", "limit"],
       "/api/v2/rewards/offers/simulate": ["offer", "version", "quantity", "unit", "goal", "depth"],
     });
