@@ -574,3 +574,102 @@ stored row, and answered `paths: []`; it now answers
 `from_unit_ref` values stored, sorted, and no `paths` or `rejected`. A goal
 search naming one of the two offers, which has one source unit, still finds
 its path without `unit`.
+
+## Amendment: a goal search's clock is today's Asia/Tokyo day
+
+- Status: proposed
+- Date: 2026-11-18
+
+### Context
+
+`GET /api/v2/rewards/offers/simulate` with `goal` starts `findConversionPaths`
+from a clock the route builds. It was
+`{kind: "local-date", value: new Date().toISOString().slice(0, 10), zone: null}`:
+the UTC date, with no zone. `docs/rewards.md` listed this as a limit of the
+route's clock. Two things were wrong with it:
+
+- From 00:00 to 09:00 JST the UTC date is the previous Tokyo day. An
+  `Asia/Tokyo` offer whose validity starts on the Tokyo day was
+  `offer_not_valid_at_clock` until 09:00, an offer whose application deadline
+  was the previous Tokyo day was still offered as a path, and every hop's
+  `appliedOn` and `creditExpectedOn` were a day early.
+- A `null` zone is compatible with any zone (`compareTemporal`, and the
+  search's `coversApplicationDay` and `deadlinePassed`), so an offer whose days
+  are another zone's (`Europe/London`, say) was judged against the UTC date as
+  if the calendars agreed.
+
+The other Tokyo-dated reads of this app (reported state, reported holdings
+change, reconstructed state, collection freshness) already take today as the
+Asia/Tokyo civil date, and the search's domain functions already honour a
+clock's named zone.
+
+### Options considered
+
+1. Keep the UTC date with zone `null` and leave the limit written down. The
+   search would keep answering a day off for nine hours of every Tokyo day;
+   rejected.
+2. The Asia/Tokyo date with zone `null`. The boundary error goes for `Asia/Tokyo`
+   offers, but an offer of another zone would still be judged against a Tokyo
+   date as if the zones agreed: the same error, moved; rejected.
+3. The Asia/Tokyo date with zone `Asia/Tokyo`. The day is right for `Asia/Tokyo`
+   and zoneless offers, and an offer of another named zone is not compared, so
+   its validity or deadline is a review reason (INV05) rather than a guess.
+4. Search each offer on its own zone's today. The search takes one clock and
+   carries one day per state through every hop's processing delay; one day per
+   offer zone would be a new traversal (a `CONVERSION_SEARCH_RELEASE` bump) for
+   offers of another zone, of which no stored or seeded offer is known
+   (`docs/rewards.md`: no `conversion_offers` rows are seeded); rejected.
+
+### Decision
+
+Option 3. The route's clock is `searchClock(Date.now())` in
+`services/app/src/rewards-api.ts`:
+`{kind: "local-date", value: <the Asia/Tokyo civil date>, zone: "Asia/Tokyo", basis: "derived"}`,
+computed as the UTC date of `now + 9 h` (Asia/Tokyo has no daylight saving
+time), as the reported-state reads compute it. Nothing in `packages/domain`
+changes, so `CONVERSION_SEARCH_RELEASE` stays `conversion-search-v5`: the
+traversal is the same and only its input day changes. Because the release names
+the traversal and not its input, a computed goal-search answer carries the
+clock it started from as `clock`, so two answers of the same release that
+differ name the day and zone each was judged on. A bump would also change the
+reward READ projection's build digest, which includes the release, and rebuild
+a snapshot whose rows do not change.
+
+### Consequences
+
+- The first hop's `appliedOn` is the Tokyo day at every hour, and validity,
+  application deadlines and later hops are judged from it.
+- An offer whose validity (a date, period or `open-ended` value) or whose date
+  or period application deadline names a zone other than `Asia/Tokyo` is
+  rejected as `needs_rule_verification` at every hour, unless a reason earlier
+  in the rejection order rejects it first (an `Asia/Tokyo` validity that does
+  not cover the Tokyo day is `offer_not_valid_at_clock` before another zone's
+  deadline is read). Before, it was compared
+  with the UTC date. An instant deadline is read on the Tokyo calendar
+  (`civilDateOfInstant`), not on its own zone's. An offer with a `null` zone
+  is compatible and judged on the Tokyo day.
+- A named-offer simulation without `goal` takes no clock and is unchanged.
+  `availableForOffer` is still called without a clock on that path
+  (`docs/rewards.md`, a limit).
+- The reward READ projection's expiry clock (`evaluationClock` in
+  `packages/read-model/src/reward-projection.ts`, the UTC day of the
+  evaluation instant) is part of the projection's build digest and is not
+  changed here.
+- No client in the repository reads this route's body (first amendment
+  above), and no agent tool runs this route. A computed goal-search answer
+  gains one field, `clock`; the refusals (`offer_set_too_large`,
+  `no_stored_offer`, `source_unit_not_selected`) and the named-offer answer are
+  unchanged.
+
+### Verification
+
+`services/app/test/rewards-api.test.ts` ("starts a goal search on today's
+Asia/Tokyo day, ...") stores three synthetic offers and fakes the clock, and
+checks every answer's `clock`. At
+16:00 UTC on a day (01:00 JST the next day), an `Asia/Tokyo` offer valid from
+the Tokyo day is a path whose hop is applied on the Tokyo day and credited
+three days later, and one whose deadline is the previous Tokyo day is
+`application_deadline_passed`; one second before Tokyo midnight both answers
+are the other way round. A `Europe/London` offer is `needs_rule_verification`
+at both instants. Before this change the 16:00 UTC search answered the first
+offer with `offer_not_valid_at_clock` (the test fails on the old route).
