@@ -357,13 +357,23 @@ carried over unchanged, so no capture is parsed twice.
 
 ### Sony Bank (`services/collector-sony-bank`, `kogane-sony-bank-collector-poc`)
 
-| Artifact key                                     | Role                         |
-| ------------------------------------------------ | ---------------------------- |
-| `gross-balance.json`, `*-history-page-NNNN.json` | `provider_response`          |
-| `yen-history.csv`, `foreign-history-<ccy>.csv`   | `provider_export`            |
-| `wallet-history-YYYY-MM.html`                    | `sanitized_provider_capture` |
-| `collection-summary.json`                        | `collector_summary`          |
-| `manifest.json`                                  | `collector_manifest`         |
+| Artifact key                                                                              | Role                         |
+| ----------------------------------------------------------------------------------------- | ---------------------------- |
+| `gross-balance.json`, `*-history-page-NNNN.json` (month-window pages prefixed `monthly-`) | `provider_response`          |
+| `yen-history.csv`, `foreign-history-<ccy>.csv` (month-window CSVs prefixed `monthly-`)    | `provider_export`            |
+| `wallet-history-YYYY-MM.html`                                                             | `sanitized_provider_capture` |
+| `collection-summary.json`                                                                 | `collector_summary`          |
+| `realised-gains-response.json`, `realised-gains-YYYY.json` (realised-gains run)           | `provider_response`          |
+| `realised-gains.csv` (realised-gains run)                                                 | `provider_export`            |
+| `delivered-documents.json` (documents run)                                                | `provider_response`          |
+| `delivered-document-NNNN.pdf` (documents run)                                             | `provider_export`            |
+| `manifest.json`                                                                           | `collector_manifest`         |
+
+Every run requests two ranges per currency: the month window `defaultWindow`
+names (stored under the `monthly-` keys) and all retained history through the
+same end date, with no start date (stored under the unprefixed keys, which are
+the ones registration maps;
+[ADR 0099](adr/0099-sony-retained-history.md)). Both must pass the checks below.
 
 For each currency/window, the first JSON history page's `countCnt` is the
 expected total, already checked against every walked JSON page. A zero total
@@ -390,22 +400,36 @@ enforced on the way to central storage: a wallet page that still carries a
 field (`loginPwd`, `password`, `csrf`, …), throws a stable code and the run
 writes no terminal instead of publishing the value (G3-08).
 
-Terminal fields: `producer: collector-sony-bank`; one unit `account`
-(`unitKind: account`) whose `artifactCount` counts every artifact but
+Terminal fields of the core run: `producer: collector-sony-bank`; one unit
+`account` (`unitKind: account`) whose `artifactCount` counts every artifact but
 `manifest.json`, which belongs to the run and names no unit (ADR 0021; until
 then the manifest named the unit and was counted in it); ranges
-`request-window` (the requested `from`/`to`; every run, from the alarm or
+`request-window` and, when wallet statements were collected, `wallet-months`;
+one `terminal` report carrying the outcome. Every core run, from the alarm or
 from an operations-API `collect`, neither of which carries a window, requests
-yesterday's JST date, the last finished JST day, from the first of its JST
-month, `defaultWindow`, so a run on the 1st requests the whole previous month
-and each day is requested after it ends; an open limit: the previous month's
-last day is requested only by a run on the 1st, so if that run is missed or
-fails, no later run requests that day, because a window that crosses a month
-boundary is a request shape nobody has observed, ADR 0004) and, when wallet
-statements were collected, `wallet-months`; one `terminal` report carrying the outcome;
-`requestedScope.scopeKind = date_range` over the same window;
-`coverageStatus` `complete` for a successful window, `partial` for a partial
-run, `unknown` for a failure. `manifest.json` is the collector manifest with
+the month window from the first of yesterday's JST month through yesterday
+(`defaultWindow`) and also the provider's whole retained history through
+yesterday, whose files are the parser input (`runSharedCollection`,
+`src/worker.ts`). The terminal states the retained request: `request-window`
+has a null start and yesterday as its end, and `requestedScope.scopeKind` is
+`full_snapshot` over the same bounds, so a later successful run recovers a day
+an earlier missed run did not read, as long as the provider still retains it
+and each currency's retained history fits the 1,000-page walk (beyond it the
+run fails with `history_page_limit_exceeded`). `coverageStatus` is `complete`
+for a successful run and `unknown` for a failure; the core run is never
+`partial`, because a core failure keeps no artifact. The null start names the
+provider's retention, not proved account-opening coverage.
+
+The realised-gains and documents runs, read only after the core steps succeed,
+share the core run's ID as `acquisitionSessionRef`. The realised-gains run has
+no `request-window` (`full_snapshot` with null bounds); its units are
+`realised-evidence` and `realised-year-YYYY` for what it stored. The documents
+run requests the five-year `date_range` ending yesterday, and each stored PDF
+has its own complete `document` unit (`delivered-document-NNNN`) with a unit
+`terminal` report, while the run itself is `partial` (`failed` when it stored
+nothing) (`sonyBankRunPlan`, `src/shared-collection.ts`).
+
+In every run with an artifact, `manifest.json` is the collector manifest with
 the central-safe failure messages (`manifestFailure`) and each artifact's
 `key` pointing at the content-addressed object that was actually written; the
 terminal's `artifacts[]` stays authoritative.
@@ -476,14 +500,14 @@ provider was contacted and no production bucket was read or written.
 
 ### MyJCB (`services/collector-myjcb`, `kogane-myjcb-collector-poc`)
 
-| Artifact key                                                                                                                                 | Role                         | Step (ADR 0021)                            |
-| -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------ |
-| `<connectionId>/credit-menu.html`, `…/credit-detail-NN.html`, `…/credit-schedule-NN.html`, `…/credit-skip-payment-NN.html`, `…/debit-*.html` | `sanitized_provider_capture` | `redacted` by `myjcb-sanitizer`, no input  |
-| `<connectionId>/credit-past-months.json`                                                                                                     | `provider_response`          | none                                       |
-| `<connectionId>/credit-document-YYYY-MM.{csv,pdf,ofx}`                                                                                       | `provider_export`            | none                                       |
-| `<connectionId>/credit-ledger-NN.json`                                                                                                       | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
-| `<connectionId>/discovery.json`                                                                                                              | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
-| `manifest.json`                                                                                                                              | `collector_manifest`         | none; names no unit                        |
+| Artifact key                                                                                                                                                                                   | Role                         | Step (ADR 0021)                            |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------ |
+| `<connectionId>/credit-menu.html`, `…/credit-detail-NN.html`, `…/credit-schedule-NN.html`, `…/credit-skip-payment-NN.html`, `…/debit-*.html`, `…/jpoint-inquiry.html`, `…/jpoint-history.html` | `sanitized_provider_capture` | `redacted` by `myjcb-sanitizer`, no input  |
+| `<connectionId>/credit-past-months.json`, `…/jpoint-balance.json`                                                                                                                              | `provider_response`          | none                                       |
+| `<connectionId>/credit-document-YYYY-MM.{csv,pdf,ofx}`                                                                                                                                         | `provider_export`            | none                                       |
+| `<connectionId>/credit-ledger-NN.json`                                                                                                                                                         | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
+| `<connectionId>/discovery.json`, `…/jpoint-history.json`                                                                                                                                       | `collector_derived`          | `extracted` by `collector-myjcb`, no input |
+| `manifest.json`                                                                                                                                                                                | `collector_manifest`         | none; names no unit                        |
 
 A ledger is parsed from the statement page of the same `detailMonth` before
 that page is redacted, and `discovery.json` from the login and mypage
@@ -528,7 +552,15 @@ position come from the artifact key, as before
 
 Terminal fields: `producer: collector-myjcb`; one unit per connection
 (`<connectionId>`, `unitKind: connection`), so several cards in one run stay distinguishable and
-are never merged into one (G1-16); no ranges, because the statement periods are
+are never merged into one (G1-16); beside it, when the connection reports
+them, `<connectionId>:j-point` (`reward-balance`),
+`<connectionId>:j-point-history` (`reward-history`, holding
+`jpoint-inquiry.html`, `jpoint-history.html` and `jpoint-history.json`),
+`<connectionId>:debit-other` (`debit-other-statements`), one
+`<connectionId>:document:credit:YYYY-MM:<kind>` unit per credit file
+(`statement-document`) and `<connectionId>:document-discovery`
+(`statement-document-discovery`), each with its own coverage and closed code,
+and none of their artifacts counted in the connection unit; no ranges, because the statement periods are
 provider labels rather than machine ranges and stay in the manifest artifact;
 one `terminal` report carrying the outcome; `requestedScope.scopeKind =
 full_snapshot` over the connections. The run's `coverageStatus` is `partial`
@@ -939,11 +971,11 @@ unchanged (G3-14), and nothing here adds a scheduler.
 
 ### `mobile-suica` (`services/collector-mobile-suica`)
 
-| Artifact key                | Role                         | Bytes                                           |
-| --------------------------- | ---------------------------- | ----------------------------------------------- |
-| `sf-history-page-0001.html` | `sanitized_provider_capture` | the CP932 history page, `baseVariable` redacted |
-| `sf-history.json`           | `collector_derived`          | the rows parsed from that page                  |
-| `collection-summary.json`   | `collector_summary`          | the collector's own counts and cookie names     |
+| Artifact key                | Role                         | Bytes                                                                           |
+| --------------------------- | ---------------------------- | ------------------------------------------------------------------------------- |
+| `sf-history-page-NNNN.html` | `sanitized_provider_capture` | one CP932 history page per search, `baseVariable` redacted                      |
+| `sf-history.json`           | `collector_derived`          | the rows merged from those pages (with each page's rows when there are several) |
+| `collection-summary.json`   | `collector_summary`          | the as-of date, page and row counts and the completeness flag                   |
 
 Sanitizer: `src/sanitize.ts` (`sanitizeHistoryHtml`) replaces the hidden
 `baseVariable` session field with the redaction sentinel and proves the CP932
@@ -955,11 +987,16 @@ Terminal: `source: mobile-suica`, `producer: collector-mobile-suica`,
 `producerVersion: COLLECTOR_SCHEMA_VERSION` (`mobile-suica-worker-poc-v2`),
 `requestedScope: full_snapshot` over unit `account` with the requested day as
 an `as-of-selector` range (`selector`/`date`/`request`) — the date selects the
-page, it is not the extent of what came back. Two transformations are stated:
-`redacted` by `mobile-suica-history-sanitizer` producing the HTML (with no
-input artifact, because the unredacted page is deliberately not retained) and
-`extracted` by `mobile-suica-history-normalizer` from the HTML to
-`sf-history.json`.
+first page, it is not the extent of what came back. The transformations are one
+`redacted` step per page by `mobile-suica-history-sanitizer` producing the HTML
+(with no input artifact, because the unredacted page is deliberately not
+retained) and one `extracted` step by `mobile-suica-history-normalizer` from
+the HTML pages to
+`sf-history.json`. A run that stopped mid-walk keeps its sanitized pages
+without `sf-history.json` or `collection-summary.json` and is `partial` with
+`history_boundary_unproven`; one that stopped before any page was sanitized
+keeps nothing and is `failed` (`collection_failed`)
+([ADR 0104](adr/0104-mobile-suica-retained-history.md)).
 
 `coverageStatus` is `complete` only when the run succeeded **and** the
 collector proved it reached the end of the history; an unproven boundary is
@@ -973,7 +1010,12 @@ for this artifact, with the CP932 charset a constant of the source.
 Delivered reports additionally use the exact new-mailbox handoff observed on
 2026-11-11. After ordinary domestic and foreign work, the collector uses the
 remaining shared eleven-minute budget to corroborate the current list and
-archive supported single-file PDFs. The private inventory and per-document
+archive supported single-file PDFs. A list of more than 999 rows (listed,
+declared or issued) is refused with `sbi_mailbox_rows_over_bound` on
+`mailbox-index`: the mailbox terminal has one unit per row plus the index, and
+a terminal holds at most 1,000 units. That terminal then fails with the same
+code, the cursor stays where it was, and nothing in the mailbox is archived
+until it shrinks below the bound (an open limit). The private inventory and per-document
 metadata retain provider fields; no handoff material is persisted. Each original
 PDF has its own `provider_document` artifact/unit and kind/date/identity/hash
 locator, while identical bytes reuse one content-addressed DATA object.
@@ -988,30 +1030,30 @@ after durable terminal persistence. Legacy and unsupported document formats,
 HTTP-only session readiness and scheduled production coverage remain unproved
 or unsupported ([ADR 0108](adr/0108-sbi-delivered-documents.md)).
 
-| Artifact key                                 | Role                | Unit       |
-| -------------------------------------------- | ------------------- | ---------- |
-| `domestic-cash-positions.json`               | `collector_derived` | `domestic` |
-| `account-assets-current.json`                | `collector_derived` | `domestic` |
-| `account-assets-history-source.json`         | `provider_response` | `domestic` |
-| `account-assets-history-inventory.json`      | `collector_derived` | `domestic` |
-| `account-assets-history-<year>.json`         | `collector_derived` | `domestic` |
-| `income-payments-summary-source.json`        | `provider_response` | `domestic` |
-| `income-payments-rows-source.json`           | `provider_response` | `domestic` |
-| `income-payments.json`                       | `collector_derived` | `domestic` |
-| `realised-gains-all-summary-source.json`     | `provider_response` | `domestic` |
-| `realised-gains-summary-source.json`         | `provider_response` | `domestic` |
-| `realised-gains-rows-source.json`            | `provider_response` | `domestic` |
-| `realised-gains.json`                        | `collector_derived` | `domestic` |
-| `yen-detail-history.json`                    | `collector_derived` | `domestic` |
-| `yen-detail-history-page-NNNN-source.json`   | `provider_response` | `domestic` |
-| `foreign-cash-history.json`                  | `collector_derived` | `domestic` |
-| `foreign-cash-history-page-NNNN-source.json` | `provider_response` | `domestic` |
-| `domestic-trade-records.json`                | `collector_derived` | `domestic` |
-| `foreign-cash-positions.json`                | `collector_derived` | `foreign`  |
-| `foreign-cash-balances.json`                 | `collector_derived` | `foreign`  |
-| `foreign-trade-records.json`                 | `collector_derived` | `foreign`  |
-| `domestic-trade-records-<from>-<to>.json`    | `collector_derived` | `domestic` |
-| `foreign-trade-records-<from>-<to>.json`     | `collector_derived` | `foreign`  |
+| Artifact key                                 | Role                | Unit                    |
+| -------------------------------------------- | ------------------- | ----------------------- |
+| `domestic-cash-positions.json`               | `collector_derived` | `domestic`              |
+| `account-assets-current.json`                | `collector_derived` | `domestic`              |
+| `account-assets-history-source.json`         | `provider_response` | `weekly-assets`         |
+| `account-assets-history-inventory.json`      | `collector_derived` | `weekly-assets`         |
+| `account-assets-history-<year>.json`         | `collector_derived` | `weekly-assets`         |
+| `income-payments-summary-source.json`        | `provider_response` | `income-history-income` |
+| `income-payments-rows-source.json`           | `provider_response` | `income-history-income` |
+| `income-payments.json`                       | `collector_derived` | `income-history-income` |
+| `realised-gains-all-summary-source.json`     | `provider_response` | `income-history-gains`  |
+| `realised-gains-summary-source.json`         | `provider_response` | `income-history-gains`  |
+| `realised-gains-rows-source.json`            | `provider_response` | `income-history-gains`  |
+| `realised-gains.json`                        | `collector_derived` | `income-history-gains`  |
+| `yen-detail-history.json`                    | `collector_derived` | `cash-history-yen`      |
+| `yen-detail-history-page-NNNN-source.json`   | `provider_response` | `cash-history-yen`      |
+| `foreign-cash-history.json`                  | `collector_derived` | `cash-history-foreign`  |
+| `foreign-cash-history-page-NNNN-source.json` | `provider_response` | `cash-history-foreign`  |
+| `domestic-trade-records.json`                | `collector_derived` | `domestic`              |
+| `foreign-cash-positions.json`                | `collector_derived` | `foreign`               |
+| `foreign-cash-balances.json`                 | `collector_derived` | `foreign`               |
+| `foreign-trade-records.json`                 | `collector_derived` | `foreign`               |
+| `domestic-trade-records-<from>-<to>.json`    | `collector_derived` | `domestic`              |
+| `foreign-trade-records-<from>-<to>.json`     | `collector_derived` | `foreign`               |
 
 Weekly asset history comes from the observed no-query/no-body GET
 `/account/api/assets/valuations` in the existing main-site session. The
@@ -1021,7 +1063,8 @@ A derived inventory records every expected calendar-year shard
 hash/request/capture time. Yearly shards retain all profiles, native tuples
 and residual rows while keeping at most 53 weeks under the unchanged parser
 output budget. Their transformation inputs name both the source and inventory.
-Missing or changed shards make the domestic unit/run partial. Registration v5
+Missing or changed shards make the `weekly-assets` unit and the run partial
+(`sbi_asset_history_shard_inventory`). Registration v5
 names only yearly derivatives as the history dataset; source/inventory are unparsed;
 v1–v4 stay frozen. The parser separates available window coverage from
 unavailable null profiles and emits no extra points for native ALL tuples.
@@ -1041,7 +1084,8 @@ totals, dates, known codes, exact amounts and unique yen ids. Yen direction
 counts and exact sums match their controls; positive transfer controls stay
 unsupported until observed. USD duplicates retain occurrence identities, and
 the production reader chooses one revision per logical id across overlapping
-runs. Both statements use the domestic main-site session/unit. Registration
+runs. Both statements use the domestic main-site session; their units are
+`cash-history-yen` and `cash-history-foreign`. Registration
 v7 adds only the new USD derivative; raw pages stay unmapped and earlier
 mappings stay frozen. Catalogue status remains partial under #1226 pending
 unobserved semantics and scheduled proof
@@ -1050,9 +1094,11 @@ unobserved semantics and scheduled proof
 Except for the exact weekly/cash-history source bytes above, the bytes are
 `JSON.stringify(artifact.body)` — the collector's re-encoded view
 of each response, exactly what the retired legacy path wrote to the per-source
-bucket and the importer forwarded centrally. A dataset is attributed to a unit
-by the same rule the importer used (`foreign-` prefix → `foreign`), except the
-new main-site foreign cash statement and its raw inputs, which are domestic.
+bucket and the importer forwarded centrally. A core dataset is attributed to a
+unit by the same rule the importer used (`foreign-` prefix → `foreign`). The
+weekly-asset, cash-statement and income/gains datasets and their retained
+inputs belong to their own units instead (table above), so the main-site
+foreign cash statement is never in `foreign`.
 
 Each normal collection walks the historically exercised execution-history
 interval in at most thirteen non-overlapping windows per scope, each at most 90 days,
@@ -1090,7 +1136,8 @@ Terminal: `source: sbi-securities`, `producer: collector-sbi-securities`,
 requested scope (`domestic`, `foreign`, kind `scope`) carrying that scope's own
 artifact count, coverage and error code — a scope that failed does not make the
 other scope's data look incomplete, and a scope that produced nothing is
-`unknown` rather than an observation of zero. `requestedScope` is a
+`unknown` rather than an observation of zero. Each supplementary unit that has
+an artifact or a failure in the run is added the same way, also kind `scope`. `requestedScope` is a
 `date_range` with a matching `requested-window` range when an internal caller
 named a window, and otherwise `full_snapshot`. Every artifact with a window
 also states `<artifactKey>:requested`, attributed to its scope. Registration
@@ -1429,8 +1476,9 @@ keep-alive and the daily collection — both unchanged. Terminal source id
   still excludes that whole account unit. Neither another run's successful
   unit nor the raw lists can rescue it
   ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-sbi-vcs-unfiltered-evidence-is-independent-of-its-classic-account-unit-2026-11-10)).
-- `transformations`: one `redacted` step per dataset (`sbi-vc-trade-worker`);
-  the unredacted envelope carried the session key and is not retained.
+- `transformations`: one `redacted` step per JSON dataset
+  (`sbi-vc-trade-worker`); the unredacted envelope carried the session key and
+  is not retained. Each PDF/ZIP document states an `extracted` step instead.
 - Report evidence adds independent year-index, annual-index, per-document and
   CSV-check units. Monthly and P&L indices cover 2018 through the capture's Tokyo
   year; annual zero is explicit complete-empty index evidence. Unknown annual
