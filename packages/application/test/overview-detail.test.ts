@@ -609,18 +609,15 @@ describe("overviewSummary on random full answers", () => {
       for (const omitted of [
         summary.fetchRuns.notSuccessfulOmitted,
         summary.parseRuns.notOkOmitted,
-      ] as { lines: number }[][])
+      ] as { lines: number; runs: number }[][])
         for (const [index, entry] of omitted.entries())
-          for (const lines of [entry.lines - 1, entry.lines + 1].filter((value) => value > 0)) {
+          for (const lines of [entry.lines - 1, entry.lines + 1]) {
+            // Each left-out line has a run: a count past its runs is refused anyway.
+            if (lines < 1 || lines > entry.runs) continue;
             const miscounted = structuredClone(summary);
-            const copy = (
-              omitted === summary.fetchRuns.notSuccessfulOmitted
-                ? miscounted.fetchRuns.notSuccessfulOmitted
-                : miscounted.parseRuns.notOkOmitted
-            )[index]!;
-            copy.lines = lines;
-            copy.runs = Math.max(copy.runs, lines);
-            if (copy.runs !== entry.runs) continue;
+            (omitted === summary.fetchRuns.notSuccessfulOmitted
+              ? miscounted.fetchRuns.notSuccessfulOmitted
+              : miscounted.parseRuns.notOkOmitted)[index]!.lines = lines;
             expect(validApiResponse("/api/overview", miscounted, "summary"), label).toBe(false);
           }
       // A line's codes, shown and counted, are its runs' distinct codes, newest first.
