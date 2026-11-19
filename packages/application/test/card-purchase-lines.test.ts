@@ -519,6 +519,23 @@ describe("the line view", () => {
     ).rejects.toBeInstanceOf(CardPurchaseLimitError);
   });
 
+  test("cuts a counterparty by code point, never inside a surrogate pair", () => {
+    const max = CARD_PURCHASE_LINE_COUNTERPARTY_MAX;
+    expect(lineCounterparty(null)).toEqual({ text: null, cut: false });
+    expect(lineCounterparty("a".repeat(max))).toEqual({ text: "a".repeat(max), cut: false });
+    // An astral character straddling the bound in UTF-16 is kept whole or dropped whole.
+    const straddle = `${"a".repeat(max - 1)}🛒🛒`;
+    expect(lineCounterparty(straddle)).toEqual({ text: `${"a".repeat(max - 1)}🛒`, cut: true });
+    const cut = lineCounterparty(`${"a".repeat(max - 1)}🛒`.repeat(2)).text!;
+    expect(cut.at(-1)).toBe("\udED2");
+    expect(cut.at(-2)).toBe("\ud83d");
+    // A lone surrogate in stored text is one code point, kept as it is.
+    expect(lineCounterparty(`${"\ud800".repeat(max)}b`)).toEqual({
+      text: "\ud800".repeat(max),
+      cut: true,
+    });
+  });
+
   test("keeps every answer within its byte bound, with counterparties cut and flagged", async () => {
     const w = world();
     // The largest line shape: an identity-store account id on every line (no

@@ -199,7 +199,8 @@ the month and a client-side sort of decimal amounts, which INV03 keeps out of th
     would pass `CARD_PURCHASE_LINES_BYTES` = 7,168 bytes. One line is always listed.
   - `nextCursor` is base64url of the canonical JSON of the request (account, period, usage month, sort), the last
     listed line's key (date, event id and, for the amount order, its unit and canonical decimal text), and the
-    count of lines listed so far. It is at most 2,048 characters.
+    page's depth: the lines listed so far, or more when more lines now sort at or before the previous key. It is at
+    most 2,048 characters. It is not signed.
   - A cursor is taken only with the request that issued it (`linesCursorFits`, which the route and the agent
     service check before reading). Another request's cursor, a malformed one or one with a non-canonical amount
     text is refused.
@@ -212,7 +213,10 @@ the month and a client-side sort of decimal amounts, which INV03 keeps out of th
   refused is withheld (`data.nextCursor: null`, `nextPage: "budget_exceeded"`), as on the page of events.
   - The grant rules are the page's. The grant's `maxRows` counts the lines listed across the walk (the cursor's
     count): a page that would reach past it is `budget_exceeded` before anything is read, so a grant below 25 is
-    refused outright.
+    refused outright. Because the cursor is not signed, the page is also refused after the read, before anything
+    is answered, when its key's depth in the month (the lines that now sort at or before it) reaches past
+    `maxRows`; a cursor rewritten to claim fewer lines reads no deeper. An event recognised before the cursor
+    mid-walk counts toward that depth, so such a walk can be refused a page the previous answer offered.
   - `400 invalid_query`, naming the keys: `account`, `sort` or `cursor` with another view; `eventId` or `offset`
     with this one; not exactly one month; a malformed value; another request's cursor.
 - `GET /api/v2/card-purchases?view=lines&…` serves the same `data` (plus `apiVersion: 2`) to the operator, with the
@@ -269,7 +273,8 @@ the month and a client-side sort of decimal amounts, which INV03 keeps out of th
   read's plan is keyed.
 - `packages/application/test/purchases-explain.test.ts`: the request rules of the line view; the grant, perimeter,
   `maxRows` and summary-bound refusals (a grant that may read one page but not two gets the next page withheld and
-  said, and a cursor past it is refused before any read); the dispatcher.
+  said, and a cursor past it is refused before any read; a cursor rewritten to claim fewer listed lines is
+  refused by its key's depth); the dispatcher.
 - `services/app/test/purchases-explain.test.ts`: the agent HTTP path, MCP and the operator route answer the same
   `data` for a period, for a usage month with an account in amount order, and for every page of a cursor walk in
   both orders. Each answer is under 8 KB, with provider text only in `data.lines[].counterparty`. Refusals on all

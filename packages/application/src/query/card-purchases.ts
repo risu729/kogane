@@ -1202,6 +1202,19 @@ export async function queryCardPurchaseLines(
   sql: SqlExecutor,
   input: CardPurchaseLinesQuery,
 ): Promise<CardPurchaseLinesPage> {
+  return (await readCardPurchaseLines(sql, input)).page;
+}
+
+/**
+ * `queryCardPurchaseLines` with how deep the page starts: the larger of the
+ * lines the cursor says were listed and the lines that now sort at or before
+ * its key. The cursor is not signed, so its count alone could be rewritten;
+ * the position cannot, and the agent API's row budget counts this depth.
+ */
+export async function readCardPurchaseLines(
+  sql: SqlExecutor,
+  input: CardPurchaseLinesQuery,
+): Promise<{ page: CardPurchaseLinesPage; before: number }> {
   const { period, usageMonth } = monthFilter(input);
   const account = input.account ?? null;
   if (account !== null && !CARD_PURCHASE_ACCOUNT.test(account)) throw new Error("invalid_account");
@@ -1226,6 +1239,7 @@ export async function queryCardPurchaseLines(
       ? ordered
       : ordered.filter(({ key }) => compareCardPurchaseLineKeys(sort, key, cursor.after) > 0);
   const listed = after.slice(0, CARD_PURCHASE_LINES_MAX);
+  const before = Math.max(cursor?.listed ?? 0, ordered.length - after.length);
 
   const pinned = (entries: readonly { event: LiveEvent }[]) =>
     JSON.stringify(
@@ -1280,7 +1294,7 @@ export async function queryCardPurchaseLines(
     const text = encodeLinesCursor({
       query,
       after: listed[count - 1]!.key,
-      listed: (cursor?.listed ?? 0) + count,
+      listed: before + count,
     });
     // A cursor this read would refuse is never handed out.
     if (decodeLinesCursor(text) === null) throw new Error("card_purchase_cursor_invalid");
@@ -1312,5 +1326,5 @@ export async function queryCardPurchaseLines(
     count -= 1;
     answer = page(count);
   }
-  return answer;
+  return { page: answer, before };
 }

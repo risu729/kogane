@@ -72,8 +72,8 @@ import {
   decodeLinesCursor,
   linesCursorFits,
   queryCardPurchaseCards,
-  queryCardPurchaseLines,
   queryCardPurchases,
+  readCardPurchaseLines,
 } from "./card-purchases.ts";
 import { pageBeyondBudget } from "./page-budget.ts";
 
@@ -433,12 +433,13 @@ export async function explainCardPurchaseLines(input: {
   });
   const refused = grantRefusal(grant);
   if (refused !== null) return { ok: false, error: refused };
-  const before =
+  const claimed =
     request.cursor === undefined ? 0 : (decodeLinesCursor(request.cursor)?.listed ?? 0);
-  if (pageBeyondBudget(before, CARD_PURCHASE_LINES_MAX, grant)) return budgetRefusal();
+  if (pageBeyondBudget(claimed, CARD_PURCHASE_LINES_MAX, grant)) return budgetRefusal();
   let data: CardPurchaseLinesPage;
+  let before: number;
   try {
-    data = await queryCardPurchaseLines(sql, request);
+    ({ page: data, before } = await readCardPurchaseLines(sql, request));
   } catch (error) {
     if (error instanceof CardPurchaseLimitError)
       return {
@@ -449,6 +450,10 @@ export async function explainCardPurchaseLines(input: {
       };
     throw error;
   }
+  // The cursor's count is not signed: the depth its key really has in the
+  // month counts too, so a rewritten count reads no deeper than maxRows.
+  if (before > claimed && pageBeyondBudget(before, CARD_PURCHASE_LINES_MAX, grant))
+    return budgetRefusal();
   const nextPage: PurchasesNextPage =
     data.nextCursor === null
       ? "none"

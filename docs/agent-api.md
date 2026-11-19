@@ -644,7 +644,11 @@ naming the keys. It is the operator route's
   grant's `maxRows` counts the lines listed across a walk: a page that would
   pass it is `413 budget_exceeded` before anything is read (so a grant below
   25 is refused outright), and a next page past it is withheld
-  (`nextPage: "budget_exceeded"`, `data.nextCursor: null`).
+  (`nextPage: "budget_exceeded"`, `data.nextCursor: null`). The cursor is
+  not signed, so the depth its key has in the month (the lines that now sort
+  at or before it) counts too: a page past `maxRows` by that depth is refused
+  after the read, and an event recognised before the cursor mid-walk counts
+  toward it.
 - The audit record counts the listed lines and is truncated while a next page
   exists or is withheld.
 - The operator page does not render the view yet (ADR 0125, web parity).

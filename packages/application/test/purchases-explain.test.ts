@@ -13,6 +13,8 @@ import {
 } from "../../observation-shared/src/card-purchase-contract.ts";
 import { ERROR_STATUS } from "../src/errors.ts";
 import {
+  decodeLinesCursor,
+  encodeLinesCursor,
   queryCardPurchaseCards,
   queryCardPurchaseLines,
   queryCardPurchases,
@@ -635,6 +637,21 @@ describe("the line view (ADR 0125 amendment)", () => {
       }),
     ).toMatchObject({ ok: false, error: { code: "budget_exceeded", refs: ["budget:maxRows=30"] } });
     expect(probe.queries).toEqual([]);
+    // The cursor is not signed: one rewritten to claim fewer listed lines is
+    // still charged the depth its key has in the month, so it reads no deeper.
+    const issued = decodeLinesCursor(data.nextCursor!)!;
+    expect(issued.listed).toBe(data.lines.length);
+    const rewritten = encodeLinesCursor({ ...issued, listed: 1 });
+    expect(
+      await explainCardPurchaseLines({
+        grant: narrow,
+        sql: w.sql,
+        request: { ...request, cursor: rewritten },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "budget_exceeded", refs: ["budget:maxRows=30"] } });
+    // Under a grant deep enough, the same rewritten cursor reads the page its key names.
+    const healed = await queryCardPurchaseLines(w.sql, { ...request, cursor: rewritten });
+    expect(healed.lines).toEqual(last.ok ? last.explanation.data.lines : []);
     for (const [refused, code, refs] of [
       [grant({ capabilities: ["summary.read"] }), "unauthorized", ["capability:records.read"]],
       [
