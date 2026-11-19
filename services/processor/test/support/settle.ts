@@ -11,7 +11,9 @@
 // The runtime itself must start while the module loads (a top-level `await`),
 // not in `beforeAll`: at a timeout Bun SIGTERMs every process a hook or a case
 // spawned and leaves the ones spawned at load
-// (test/bun-timeout-kill.test.ts). Seeding may stay in `beforeAll`.
+// (test/bun-timeout-kill.test.ts). Seeding may stay in `beforeAll`. Bun loads
+// one file, runs its cases and its `afterAll`, and only then loads the next,
+// so a file's runtime is disposed before the next file starts its own.
 //
 //   const { mf, env } = await startPipeline();
 //   const test = settledTest();
@@ -21,16 +23,12 @@ import { afterEach, test as bunTest } from "bun:test";
 type Callable = (...args: unknown[]) => unknown;
 
 // Modifiers that are themselves a `test`, and the ones that return one.
-const MODIFIERS = new Set(["only", "skip", "todo", "failing", "concurrent", "serial"]);
-const FACTORIES = new Set([
-  "if",
-  "skipIf",
-  "todoIf",
-  "failingIf",
-  "concurrentIf",
-  "serialIf",
-  "each",
-]);
+const MODIFIERS = new Set(["only", "skip", "todo", "failing", "serial"]);
+const FACTORIES = new Set(["if", "skipIf", "todoIf", "failingIf", "serialIf", "each"]);
+// The wrapper keeps one body at a time, so a concurrent case would overwrite
+// a sibling's body and the next case would start while that one still runs;
+// cases sharing one runtime run one after another instead.
+const REFUSED = new Set(["concurrent", "concurrentIf"]);
 
 /** Call once at the top level of a test file, before its cases. */
 export function settledTest(): typeof bunTest {
@@ -64,6 +62,12 @@ export function settledTest(): typeof bunTest {
       get: (target, key) => {
         const value: unknown = Reflect.get(target, key);
         if (typeof key !== "string" || typeof value !== "function") return value;
+        if (REFUSED.has(key))
+          return () => {
+            throw new Error(
+              `settledTest: test.${key} is not supported; settled cases run serially`,
+            );
+          };
         if (MODIFIERS.has(key)) return wrap(value as Callable, target);
         if (FACTORIES.has(key))
           return (...args: unknown[]) =>

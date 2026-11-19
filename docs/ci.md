@@ -163,14 +163,19 @@ case of the file with `ECONNREFUSED`. The timed-out case's body also keeps
 running against the shared store while later cases read it.
 Every processor test file that shares one Miniflare across its cases, but
 the one named below, therefore starts it while the module loads (a top-level
-`await`), keeps its one-time schema setup and seeding in `beforeAll`, disposes
-it in `afterAll`, and declares its cases with `settledTest()` from
+`await`; `startPipeline` also bundles the Worker and applies the schema
+there), keeps its seeding and any schema setup of its own in `beforeAll`,
+disposes it in `afterAll`, and declares its cases with `settledTest()` from
 `services/processor/test/support/settle.ts`. That `test`
 keeps each case's body, and its `afterEach` waits for the body to settle before
 the next case begins, so a timeout fails that case alone; Bun still reports a
 late rejection as an error between tests. The wait is bounded by `afterEach`'s
 default 5 s deadline: a body that has not settled by then fails its case at
-the hook and goes on running while the next case reads the store. Files that
+the hook and goes on running while the next case reads the store.
+`settledTest()` refuses `test.concurrent`, since it keeps one body at a time;
+`services/processor/test/settled-test.test.ts` pins its behaviour on a fixture.
+Bun loads, runs and finishes one test file before it loads the next, so a
+runtime started at load is disposed before the next file starts its own. Files that
 start a runtime per case, in `beforeEach` or in the case itself
 (`unit-scope.test.ts`, `sbi-supplemental-snapshot-compatibility.test.ts`, the
 card purchase worlds), lose only that case's runtime at a timeout.
