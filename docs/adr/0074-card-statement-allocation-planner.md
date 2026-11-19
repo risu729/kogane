@@ -369,3 +369,86 @@ window on the complete CORE schema;
 operator's route, the agent route and the MCP tool answer the same bounded
 page; `apps/web/test/card-settlement.browser.test.ts` shows the note and the
 50 listed combinations.
+
+## Amendment 2026-11-19: a statement total that is not exact keeps its reason
+
+- Status: proposed
+- Date: 2026-11-19
+- Owner approval: required before merge. The published answer of
+  `kogane.card-settlements.unmatched` changes for a non-exact total, and a
+  change to a published tool's answer is the owner's to approve
+  ([ADR 0081](0081-ui-parity-through-mcp.md)'s `nextPage` amendment;
+  [ADR 0114](0114-card-debit-account-answer.md)'s 2026-11-18 amendment, the
+  same change to each card's debit account).
+
+### Context
+
+Each listed statement's `statement.amount` was the provider's total when its
+decimal-v1 value was exact and `null` otherwise. A total the decimal-v1
+projection recorded as `missing`, `unparsed` or `conflict`, or one with no
+decimal-v1 value at all, lost its status and reason: the wire, the MCP tool
+result and the `照合候補のない請求` section showed it only as absent (a bare
+`不明`) beside the code `statement_not_comparable`. INV05 asks that a value
+that is not exact be a reason, and the card purchase read (`providerTotal`)
+and each card's debit account (`latestStatement.amount`, ADR 0114) already
+answer the same view's total as a quantity with its status and reason.
+
+### Options considered
+
+1. **Keep `null`; the code `statement_not_comparable` says enough.** The
+   code says the sweep could not compare the total, not why: a refused parse
+   (`unparsed`), two disagreeing values (`conflict`) and a total never
+   projected read alike. Rejected.
+2. **Always a quantity, with the reasons the other reads of the view give
+   (chosen),** through one shared helper so the answers cannot drift.
+
+### Decision
+
+`statement.amount` is always a `Quantity`, built by `statementTotal`
+(`packages/application/src/query/card-statement-total.ts`), the helper
+`reviewCardDebitAccounts` now shares: an exact total unchanged; `missing`,
+`unparsed` or `conflict` with the reason `stored:<status>`; `missing` with
+`decimal_not_projected` when `card_statement_facts` found no decimal-v1
+value. An `exact` status without both decimal-v1 columns, or a status
+outside decimal-v1, is what CORE 0024's CHECK never stores; the read fails
+(`card_statements_unmatched_row_invalid`) rather than answer it. The closed
+`code`, the window read and the planner are decided from the sweep's own
+reading of the total as before (an exact total, or none), so a non-exact
+total is still `statement_not_comparable` and the planner is not asked. The
+wire contract (`validUnmatchedCardStatementsReview`) requires a quantity and
+refuses `null`, and the page renders the total through `SettlementQuantity`
+only.
+
+### Consequences
+
+- The route body and the `kogane.card-settlements.unmatched` result change
+  for a non-exact total (`null` becomes a quantity with its status and
+  reason); every answer whose totals are exact is unchanged, and a row CORE
+  0024 never stores fails the read where it answered `null`. The tool's
+  name, description and input schema are unchanged, and the catalogue is not
+  touched.
+- `schemaVersion` stays `kogane-card-statements-unmatched-v1`. The v1
+  contract already admitted any quantity there, a non-exact one included, so
+  the new answers are v1 answers; what is withdrawn is `null`, which the new
+  contract refuses. Client and Worker deploy together, so no client meets
+  `null` from a newer Worker.
+- An MCP client that read `amount === null` as "not exact" (what the service
+  type's comment, `docs/agent-api.md` and `docs/card-settlements.md` said)
+  now reads `amount.value.status`.
+
+### Verification
+
+- `packages/application/test/card-statements-unmatched-total.test.ts`: each
+  non-exact status and the missing decimal value give their quantity and
+  reason, keep `statement_not_comparable` with no window read, and pass the
+  wire contract; an `exact` status without its columns, or an unknown status,
+  fails the read. It fails before the change, which answered `null`.
+- `services/app/test/card-statements-unmatched-api.test.ts`: on the real
+  migrations, a MyJCB total that is not a number is `unparsed` /
+  `stored:unparsed` on the route and through the agent tool.
+- `packages/observation-shared/test/card-statements-unmatched-contract.test.ts`:
+  the contract accepts a non-exact quantity and refuses `null`, a missing
+  amount and an `exact` status with a reason.
+- `apps/web/test/card-settlement.browser.test.ts`: the section shows
+  `不明（stored:unparsed） · JPY` and refuses a `null` total before it
+  renders.

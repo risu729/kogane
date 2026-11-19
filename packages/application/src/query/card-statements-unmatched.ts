@@ -69,9 +69,12 @@ import { cardSettlementOwnershipCtes } from "../../../read-model/src/card-settle
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
 import { type Grant, grantAllows } from "../grants.ts";
+import { statementTotal } from "./card-statement-total.ts";
 import { pageBeyondBudget, withinBudget } from "./page-budget.ts";
 
 const REQUEST_ID = "card-settlements.unmatched";
+/** A statement total CORE 0024's CHECK never stores fails the read, never an answer. */
+const invalid = () => new Error("card_statements_unmatched_row_invalid");
 /** Statements one page holds. */
 export const UNMATCHED_PAGE_SIZE = 50;
 /** The largest offset a request may name. */
@@ -129,8 +132,12 @@ export interface UnmatchedCardStatement {
     sourceId: string;
     sourceAccount: string;
     accountId: string | null;
-    /** The provider's total; null when it is not exact (INV05). */
-    amount: Quantity | null;
+    /**
+     * The provider's total. One that is not exact keeps its status and a
+     * closed reason (`stored:<status>`, or `decimal_not_projected` when no
+     * decimal-v1 value was recorded), never zero and never null (INV05).
+     */
+    amount: Quantity;
     /** The provider's due date; null when absent or not a civil date. */
     paymentDate: TemporalValue | null;
     period: string | null;
@@ -479,7 +486,11 @@ export async function reviewUnmatchedCardStatements(input: {
   const items = new Map<number, UnmatchedCardStatement>();
   const pending: Pending[] = [];
   for (const row of page) {
+    // The sweep's own reading decides the code: an exact total, or none.
     const total = sweepRowAmount(row);
+    // The answer shows every total, with its status and reason when not exact.
+    const amount = statementTotal(row);
+    if (amount === null) throw invalid();
     const date =
       row.payment_date !== null && parseLocalDate(row.payment_date) !== null
         ? row.payment_date
@@ -494,7 +505,7 @@ export async function reviewUnmatchedCardStatements(input: {
         sourceId: row.source_id,
         sourceAccount: row.source_account,
         accountId: row.account_id ?? null,
-        amount: total,
+        amount,
         paymentDate:
           date === null
             ? null

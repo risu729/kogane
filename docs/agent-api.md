@@ -598,7 +598,9 @@ grouped list; [card settlements](card-settlements.md#agent-reads)), so no
 card settlement answer offers a page its grant is refused
 ([ADR 0081](adr/0081-ui-parity-through-mcp.md), 2026-11-08 amendment). With the whole-store grant every MCP client holds
 (`maxRows` 1000) the last page offered starts at offset 950. Each item has the statement's ref, source, source account,
-resolved account, total (null when not exact), due date (null when absent),
+resolved account, total (always a quantity: one that is not exact carries
+its status and reason, `stored:<status>` or `decimal_not_projected`, never
+null), due date (null when absent),
 period, `code`, `debitsInWindow`, `planner` (null unless asked) and
 `acceptable: false`. A planner answer lists at most the first 50 allocations
 (`manifest.planner.bounds.allocations`), with `allocationCount` (all of them)

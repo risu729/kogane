@@ -2,7 +2,8 @@
 // real CORE migrations: `GET /api/v2/reconciliation/card-statements-unmatched`
 // for the operator's カード照合 page and `kogane.card-settlements.unmatched`
 // for an agent answer one page of one read (docs/card-settlements.md,
-// Statements without a candidate). The store holds one MyJCB statement total
+// Statements without a candidate). The store holds two MyJCB statement totals,
+// one exact and one the decimal-v1 projection could not read,
 // and no bank debit. The codes and the planner's answers are exercised on the
 // complete schema in services/processor/test/card-statements-unmatched.test.ts.
 // Every value is invented.
@@ -47,19 +48,27 @@ beforeAll(async () => {
     VALUES(?,'myjcb-credit-statement-total','1','2099-01-12T00:00:00Z','ok','[]') RETURNING id`)
       .bind(run.artifacts[0]!.id)
       .first<{ id: number }>();
-  await env.DB.prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
-    VALUES(?,'myjcb:synthetic:root','credit_statement_payment_amount',4000,'4000',0,'JPY','2099-01-01','synthetic-total',?)`)
-    .bind(
-      parse!.id,
-      JSON.stringify({
-        _kogane: {
-          period: "2099-01",
-          paymentDate: "2099-01-10",
-          snapshotSemantics: "provider-reported-monthly-payment-amount",
-        },
-      }),
-    )
-    .run();
+  // The second card's total is not a number: decimal-v1 records it `unparsed`.
+  for (const [card, minor, text] of [
+    ["myjcb:synthetic:root", 4000, "4000"],
+    ["myjcb:synthetic:unreadable", null, "unreadable"],
+  ] as const)
+    await env.DB.prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
+    VALUES(?,?,'credit_statement_payment_amount',?,?,0,'JPY','2099-01-01','synthetic-total',?)`)
+      .bind(
+        parse!.id,
+        card,
+        minor,
+        text,
+        JSON.stringify({
+          _kogane: {
+            period: "2099-01",
+            paymentDate: "2099-01-10",
+            snapshotSemantics: "provider-reported-monthly-payment-amount",
+          },
+        }),
+      )
+      .run();
   await publishParse(parse!.id);
   keys = await generateKeyPair("RS256", { extractable: true });
   jwks = {
@@ -184,6 +193,21 @@ describe("GET /api/v2/reconciliation/card-statements-unmatched", () => {
           planner: null,
           acceptable: false,
         },
+        {
+          statement: {
+            sourceAccount: "myjcb:synthetic:unreadable",
+            period: "2099-01",
+            // Not exact: its status and reason, never null or zero (INV05).
+            amount: {
+              unitRef: "JPY",
+              value: { status: "unparsed", reasonCode: "stored:unparsed" },
+            },
+          },
+          code: "statement_not_comparable",
+          debitsInWindow: null,
+          planner: null,
+          acceptable: false,
+        },
       ],
     });
     expect(await tables()).toEqual(before);
@@ -300,7 +324,7 @@ describe("kogane.card-settlements.unmatched", () => {
         path: "agent-http",
         risk_class: "R0",
         result: "read",
-        diff_json: JSON.stringify({ kind: "read", rows: 1, truncated: false }),
+        diff_json: JSON.stringify({ kind: "read", rows: 2, truncated: false }),
       },
     ]);
   });

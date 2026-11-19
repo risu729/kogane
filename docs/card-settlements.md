@@ -467,8 +467,18 @@ rows, each due date read once per page), or
 `equal_amount_debit_awaiting_sweep` when the window holds a debit the sweep's
 matcher pairs with it, so its candidate appears on the sweep's next pass.
 `debitsInWindow` is the number of rows the read returned (null when none was
-made). Amounts and dates are the provider's; an inexact total is `null`, never
-zero.
+made). Amounts and dates are the provider's. The total is always a quantity
+([ADR 0074, amendment 2026-11-19](adr/0074-card-statement-allocation-planner.md#amendment-2026-11-19-a-statement-total-that-is-not-exact-keeps-its-reason)):
+one that is not exact keeps its decimal-v1 status with the reason
+`stored:<status>` (`missing`, `unparsed`, `conflict`), or `missing` with
+`decimal_not_projected` when no decimal-v1 value was recorded, the reasons
+the card purchase read and each card's debit account give the same view's
+total (one helper, `statementTotal` in
+`packages/application/src/query/card-statement-total.ts`); it is never null
+or zero (INV05), and the page shows it as unknown with that reason. Such a
+statement is still `statement_not_comparable`. An `exact` status without both
+decimal-v1 columns, which CORE 0024's CHECK never stores, fails the read
+(`card_statements_unmatched_row_invalid`).
 
 For `no_equal_amount_debit` only, `planner` is the ADR 0074 planner's answer
 ([amendment 2026-11-07](adr/0074-card-statement-allocation-planner.md#amendment-2026-11-07-a-read-only-caller-on-the-review-page))

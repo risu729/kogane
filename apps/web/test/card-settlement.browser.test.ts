@@ -645,6 +645,37 @@ describe.if(runnable)("card settlement review", () => {
     await page.close();
   });
 
+  test("an unmatched statement total that is not exact shows its reason, and a bare null is refused (INV05)", async () => {
+    const [first] = unmatched.items;
+    const withTotal = (amount: unknown) => ({
+      ...unmatched,
+      items: [
+        {
+          ...first!,
+          statement: { ...first!.statement, amount },
+          code: "statement_not_comparable",
+          debitsInWindow: null,
+          planner: null,
+        },
+      ],
+    });
+    unmatchedPage = withTotal({
+      unitRef: "JPY",
+      value: { status: "unparsed", reasonCode: "stored:unparsed" },
+    });
+    let page = await open();
+    let section = page.getByRole("region", { name: "照合候補のない請求" });
+    await section.getByText("請求総額", { exact: false }).waitFor();
+    expect(await section.innerText()).toContain("請求総額 不明（stored:unparsed） · JPY");
+    await page.close();
+    unmatchedPage = withTotal(null);
+    page = await open();
+    section = page.getByRole("region", { name: "照合候補のない請求" });
+    await section.getByRole("alert").waitFor();
+    expect(await section.innerText()).not.toContain("請求総額");
+    await page.close();
+  });
+
   test("a statement with more combinations than the server lists says how many it does not show", async () => {
     unmatchedPage = truncated;
     const page = await open();

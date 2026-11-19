@@ -49,15 +49,12 @@ import type { SourceFactRef } from "../../../domain/src/events.ts";
 import { CARD_INFORMATION_READER_VERSION } from "../../../domain/src/myjcb-card-information.ts";
 import type { FinancialError } from "../../../domain/src/result.ts";
 import { parseLocalDate, type TemporalValue } from "../../../domain/src/time.ts";
-import { absentQuantity, type Quantity } from "../../../domain/src/values.ts";
-import {
-  sweepRowAmount,
-  type CardSettlementSweepRow,
-} from "../../../read-model/src/card-settlement-bank-debits.ts";
+import type { Quantity } from "../../../domain/src/values.ts";
 import { cardSettlementOwnershipCtes } from "../../../read-model/src/card-settlement-ownership.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
 import { type Grant, grantAllows } from "../grants.ts";
+import { statementTotal, type StatementTotalRow } from "./card-statement-total.ts";
 import { pageBeyondBudget } from "./page-budget.ts";
 
 const REQUEST_ID = "card-settlements.debit-accounts";
@@ -133,12 +130,8 @@ export type CardDebitAccountsOutcome =
   | { ok: true; review: CardDebitAccountsReview }
   | { ok: false; error: FinancialError };
 
-/**
- * A statement row. `value_status` is null when `card_statement_facts` found
- * no decimal-v1 value for the observation (its join is a LEFT JOIN).
- */
-type CardRow = Omit<CardSettlementSweepRow, "value_status"> & {
-  value_status: string | null;
+/** A statement row (./card-statement-total.ts) with its due date and period. */
+type CardRow = StatementTotalRow & {
   payment_date: string | null;
   period: string | null;
 };
@@ -268,24 +261,13 @@ const localDate = (value: string | null): string | null =>
   value !== null && parseLocalDate(value) !== null ? value : null;
 
 /**
- * The statement's total as the provider stated it, with the reasons
- * `queryCardPurchases` gives the same view's total (`providerTotal`): exact,
- * else its stored status with `stored:<status>`, else `missing` with
- * `decimal_not_projected` when no decimal-v1 value was recorded. An `exact`
- * status without its two columns, or a status outside decimal-v1, is what
- * CORE 0024's CHECK refuses to store, so it fails the read.
+ * The statement's total (./card-statement-total.ts). A row CORE 0024's CHECK
+ * refuses to store fails the read.
  */
-function statementTotal(row: CardRow): Quantity {
-  const status = row.value_status;
-  if (status === "exact") {
-    const exact = sweepRowAmount({ ...row, value_status: status });
-    if (exact === null) throw invalid();
-    return exact;
-  }
-  if (status === "missing" || status === "unparsed" || status === "conflict")
-    return absentQuantity(row.unit_ref, status, `stored:${status}`);
-  if (status === null) return absentQuantity(row.unit_ref, "missing", "decimal_not_projected");
-  throw invalid();
+function totalOf(row: CardRow): Quantity {
+  const total = statementTotal(row);
+  if (total === null) throw invalid();
+  return total;
 }
 
 /** The account a `supports` or `names_other_account` row's proposal names. */
@@ -499,7 +481,7 @@ export async function reviewCardDebitAccounts(input: {
                       zone: "Asia/Tokyo",
                       basis: "provider" as const,
                     },
-              amount: statementTotal(row),
+              amount: totalOf(row),
             },
       stated,
       settled,

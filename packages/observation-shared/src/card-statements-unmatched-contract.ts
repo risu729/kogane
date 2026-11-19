@@ -119,7 +119,8 @@ export function validUnmatchedCardStatementsReview(value: unknown): boolean {
       text(statement.sourceAccount) &&
       nullableText(statement.accountId) &&
       nullableText(statement.period) &&
-      (statement.amount === null || validQuantity(statement.amount)) &&
+      // A total that is not exact carries its status and reason (INV05).
+      validQuantity(statement.amount) &&
       (statement.paymentDate === null || validTemporalValue(statement.paymentDate)) &&
       oneOf(UNMATCHED_STATEMENT_CODES, item.code) &&
       (item.debitsInWindow === null || count(item.debitsInWindow)) &&

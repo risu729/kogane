@@ -191,3 +191,28 @@ test("a page's end carries its reason: the last statement, or the reader's budge
     expect(validApiResponse(CARD_STATEMENTS_UNMATCHED_PATH, value)).toBe(valid);
   }
 });
+
+test("a statement total that is not exact carries its status and reason; a bare null is refused (INV05)", () => {
+  const base = page(null);
+  const withTotal = (amount: unknown) => ({
+    ...base,
+    items: [{ ...base.items[0]!, statement: { ...base.items[0]!.statement, amount } }],
+  });
+  for (const value of [
+    { status: "unparsed", reasonCode: "stored:unparsed" },
+    { status: "missing", reasonCode: "decimal_not_projected" },
+  ]) {
+    const answer = withTotal({ unitRef: "JPY", value });
+    expect(validUnmatchedCardStatementsReview(answer)).toBe(true);
+    expect(validApiResponse(CARD_STATEMENTS_UNMATCHED_PATH, answer)).toBe(true);
+  }
+  for (const amount of [
+    null,
+    undefined,
+    // An exact status carries a value, never a reason.
+    { unitRef: "JPY", value: { status: "exact", reasonCode: "stored:exact" } },
+  ]) {
+    expect(validUnmatchedCardStatementsReview(withTotal(amount))).toBe(false);
+    expect(validApiResponse(CARD_STATEMENTS_UNMATCHED_PATH, withTotal(amount))).toBe(false);
+  }
+});
