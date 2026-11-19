@@ -1053,3 +1053,13 @@ total cost or calculate a gain from trades.
 Other menu product/account codes do not prove response semantics. Foreign
 gains, interest/fund/bond income, offset values beyond 1 and totals over 30
 remain unobserved. Production collection/publication was not performed.
+
+## 2026-11-19: foreign cash value-date form
+
+The first scheduled USD statements after the 2026-11-10 observation were
+refused at the row date check. A read-only shape check of one retained
+production page (10 rows; character masks only, no values copied) showed every
+`valueDate` as eight bare digits, `YYYYMMDD`, not the slash form the yen
+statement uses for `payDepDate`. The foreign parser now accepts only that bare
+form and still rejects non-calendar dates; the yen statement keeps
+`YYYY/MM/DD`. Tracked under #1226.
