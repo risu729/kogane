@@ -115,12 +115,15 @@ history, last amounts and candidates of 50 events, which the question does not n
 
 - `packages/application/test/card-purchase-cards.test.ts`: the view equals the page's summary per filter and
   per card on a synthetic world of three cards (statement collected and settled, statement not collected,
-  pending authorisation); the usage-month frame across statement periods; the usage-month SQL against the
-  page's selection filtered by usage date; the summary bound and malformed input; the 8 KB size bound for ten
-  cards; query plans without `sqlite_stat1` (no scan of legs, keys or accounts; the usage-month plan equals the
+  pending authorisation); the cards' figures, events and unresolved counts, parsed and added again in the
+  domain by `card-purchase-cards-sum.ts`, equal the answer's totals (no event under two cards or none, INV06);
+  101 cards list 100 with `cardsTruncated` while the totals keep the unlisted one; the usage-month frame across
+  statement periods; the usage-month SQL against the page's selection filtered by usage date; the summary
+  bound and malformed input; the 8 KB size bound for ten cards; query plans without `sqlite_stat1` (no scan of legs, keys or accounts; the usage-month plan equals the
   page selection's; labels by primary key); nothing written.
 - `packages/application/test/card-purchase-scale.test.ts`: on the scaled store without statistics, the view's
-  totals and per-card event counts equal the page's, the usage-month selection equals the page's selection
+  totals and per-card event counts equal the page's, the cards added again in the domain equal the totals for
+  every statement period and usage month, the usage-month selection equals the page's selection
   filtered by usage month for every month, and the plans match.
 - `packages/application/test/purchases-explain.test.ts`: the request rules of both views; the grant,
   perimeter and `maxRows` refusals; the dispatcher.

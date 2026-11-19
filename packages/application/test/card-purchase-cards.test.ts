@@ -18,6 +18,7 @@ import {
   SELECTION_SQL,
   USAGE_MONTH_SELECTION_SQL,
 } from "../src/query/card-purchases.ts";
+import { cardsAddedUp } from "./card-purchase-cards-sum.ts";
 import { PurchaseWorld } from "./card-purchase-world.ts";
 import { migratedDatabase } from "./sqlite-store.ts";
 
@@ -176,6 +177,12 @@ describe("the per-card view", () => {
     });
     expect(answer.cardsTruncated).toBe(false);
     expect(answer.settlementAddsPurchaseExpense).toBe(false);
+    // The cards, added back together in the domain, are the page's figures.
+    expect(cardsAddedUp(answer)).toEqual({
+      totals: answer.totals,
+      events: answer.events,
+      unresolved: answer.unresolved,
+    });
 
     expect(answer.cards).toEqual([
       {
@@ -411,6 +418,50 @@ describe("the per-card view", () => {
     const page = await queryCardPurchases(w.sql);
     expect(new TextEncoder().encode(JSON.stringify(page)).length).toBeGreaterThan(bytes * 5);
   });
+
+  test("lists at most 100 cards, says more exist, and totals every card", async () => {
+    const w = world();
+    // 101 cards with one purchase each; account ids sort as the card numbers.
+    for (let card = 1; card <= 101; card += 1) {
+      const id = String(card).padStart(3, "0");
+      const accountId = `acct-many-${id}`;
+      w.run(
+        "INSERT INTO accounts(id,label,role,status) VALUES(?,?,'liability','identified')",
+        accountId,
+        `Synthetic card ${id}`,
+      );
+      await w.recognise(
+        w.usage({
+          externalId: `vpass:card-${id}:202609:web:row-a:0`,
+          amount: -(1000 + card),
+          usageDate: "2026-08-10",
+          sourceAccount: `vpass:card-${id}`,
+          accountId,
+        }),
+      );
+    }
+    const answer = await queryCardPurchaseCards(w.sql, { period: "2026-09" });
+    expect(answer.cards).toHaveLength(100);
+    expect(answer.cardsTruncated).toBe(true);
+    expect(answer.cards.at(-1)!.accountId).toBe("acct-many-100");
+    // The totals still cover the card that is not listed; the listed cards
+    // add up to everything but it.
+    expect(answer.events).toBe(101);
+    expect(answer.totals).toEqual([
+      {
+        unit: "JPY",
+        captured: String(101 * 1000 + (101 * 102) / 2),
+        authorized: "0",
+        capturedRefunds: "0",
+        authorizedRefunds: "0",
+      },
+    ]);
+    expect(cardsAddedUp(answer)).toEqual({
+      totals: [{ ...answer.totals[0]!, captured: String(100 * 1000 + (100 * 101) / 2) }],
+      events: 100,
+      unresolved: 0,
+    });
+  }, 60_000);
 
   test("reads the page's statements, labels by primary key and walks no leg or key table", async () => {
     const w = await threeCards();
