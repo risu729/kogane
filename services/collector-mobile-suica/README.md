@@ -15,6 +15,33 @@ Daily execution uses only this path.
 
 Bitwarden vaults, master passwords, `BW_SESSION`, JRE ID passwords, cookies and raw WebAuthn assertions are stored in neither R2, logs, manifests nor Git.
 
+## Runtime profile
+
+- **Browser: login only.** The Cloudflare Browser Run binding (`browser` as
+  `BROWSER` in `wrangler.jsonc`) is launched through `@cloudflare/puppeteer`
+  in `src/browser-bootstrap.ts`. No Container or external browser is used.
+- In the browser: the official Mobile Suica entrypoint, JRE ID's own page
+  processing and its WebAuthn ceremony (the stored credential is registered in
+  a temporary CDP virtual authenticator), and the member menu's
+  JavaScript-generated POST to the SF history screen. Direct JRE API calls from
+  a plain Worker were refused before the WebAuthn challenge (see the
+  2026-08-31 live validation below), which is why login runs in the browser.
+- Handoff: the browser returns only the history screen's cookie header,
+  `baseVariable` form state and User-Agent, and closes in a `finally`. Worker
+  `fetch` then posts the history form (`src/mobile-suica.ts`); sanitizing and
+  storage do not use a browser.
+- Execution: entrypoint `src/schedule-entrypoint.ts`, whose
+  `ScheduledCollection.runScheduled` accepts only the `mobile-suica` alarm
+  job's cron `10 21 * * *` ([`config/alarm-jobs.json`](../../config/alarm-jobs.json));
+  `runOperation` runs an accepted operations request the same way. Each run
+  holds the `mobile-suica` execution lease (`withCollectionLease` in
+  `src/worker.ts`, D1 `SCHEDULE_DB`) and writes shared DATA
+  (`kogane-raw-evidence`) with the terminal last (`src/shared-run.ts`). There
+  is no Durable Object and no Cron Trigger.
+- Retries and budgets: the collector has no retry of its own. `wrangler.jsonc`
+  sets no `limits`; the CPU, subrequest and Browser Run budgets in effect are
+  not recorded in the repository.
+
 ## 2026-08-31 live validation
 
 - Locally verified signatures with the P-256 credential for `id.jreast.co.jp` returned by WSL `bw` CLI.

@@ -2,6 +2,27 @@
 
 A PoC that reads Money Forward ME from a browserless Cloudflare Worker using a Money Forward ID passkey. Connected-service lists, account details and detail fragments for the latest 12 months available on screen are stored as unmodified HTML in private shared DATA (`kogane-raw-evidence`).
 
+## Runtime profile
+
+- **Browser: none.** No Cloudflare Browser Run, Container Chrome/Chromium or
+  external browser session is used; `wrangler.jsonc` declares no browser,
+  container or Durable Object binding.
+- The Money Forward ID passkey assertion is signed with Workers Web Crypto
+  (`src/webauthn.ts`), and Worker `fetch` reads the account list, account
+  details and monthly detail fragments as HTML responses (`src/moneyforward.ts`).
+  The browser-like request headers it sends are not a runtime browser.
+- Execution: entrypoint `src/schedule-entrypoint.ts`, whose
+  `ScheduledCollection.runScheduled` accepts only the `moneyforward-me` alarm
+  job's cron `15 21 * * *` ([`config/alarm-jobs.json`](../../config/alarm-jobs.json));
+  `runOperation` runs an accepted operations request the same way. Each run
+  holds the `moneyforward-me` execution lease (`withCollectionLease` in
+  `src/worker.ts`, D1 `SCHEDULE_DB`) and writes shared DATA
+  (`kogane-raw-evidence`) with the terminal last (`src/shared-collection.ts`).
+  There is no Cron Trigger.
+- Retries and budgets: the collector has no retry of its own. `wrangler.jsonc`
+  sets no `limits`; the CPU and subrequest budgets in effect are not recorded
+  in the repository.
+
 <a id="収集対象"></a>
 
 ## Captured data
