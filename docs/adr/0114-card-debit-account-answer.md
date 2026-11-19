@@ -219,3 +219,88 @@ the page renders the total through `SettlementQuantity` only.
   amount and an `exact` status with a reason.
 - `apps/web/test/card-settlement.browser.test.ts`: the section shows
   `不明（stored:unparsed） · JPY` and refuses a `null` total before it renders.
+
+## Amendment 2026-11-19: a statement is settled by the acceptance guard's identity
+
+- Status: proposed
+- Date: 2026-11-19
+- Owner approval: required before merge. No field or type changes, but for
+  the cards it affects the published answer of
+  `kogane.card-settlements.debit-accounts` lists fewer `proposed` entries and
+  can change `answer.reason` from `only_unreviewed_candidates` to
+  `no_debit_account_evidence`; a change to a published tool's answer is the
+  owner's to approve ([ADR 0081](0081-ui-parity-through-mcp.md)'s `nextPage`
+  amendment, and the 2026-11-18 amendment above).
+
+### Context
+
+Decision 2 lists as `proposed` the undecided candidates "of statements no
+accepted candidate covers". The read took "covers" to mean an accepted
+candidate with the same `statement_key`. That key is
+`[source, producer, namespace, source account, period]`, so one card month
+read through two producers or namespaces, or under a new card ordinal
+(`vpass:card-00N`) that resolves to the same account, has two keys. The
+acceptance guard reads it differently: `card_settlement_readiness.allocation_available`
+(migration 0044) reserves a statement for every other candidate when an
+accepted one has the same `statement_key` or the same
+`statement.sourceId`, `statement.accountId` and `statement.period` in its
+facts. A candidate on the second key of an accepted card month was listed
+as `proposed`, although the guard refuses it (`allocation_already_used`)
+and no decision can ever accept it; a card entry with only such candidates
+read `unknown` / `only_unreviewed_candidates`. A reviewer's synthetic probe
+showed it; nothing was written and no amount moved.
+
+### Options considered
+
+1. **Keep the statement key.** The section offers, as open work, proposals
+   no one can accept. Rejected.
+2. **Cover a statement as the guard reserves it (chosen).** One identity
+   for "settled" on the page, the tool and the acceptance.
+3. **Also hide candidates whose bank debit another statement's accepted
+   candidate holds**, the guard's third term. Their statement is not
+   settled, so `proposed` would no longer say which statements are open.
+   Not taken: the review still shows them with `allocation_already_used`.
+
+### Decision
+
+`CARD_DEBIT_ACCOUNT_CANDIDATES_SQL` counts a statement as covered when an
+accepted candidate has the same `statement_key` (as before) or the same
+`$.statement.sourceId`, `$.statement.accountId` and `$.statement.period`,
+each compared with `=` as the guard compares them, so a fact absent on
+either side covers nothing beyond the key. Accepted candidates are listed as
+before; only the `proposed` filter changes.
+
+### Consequences
+
+- A candidate of a card month already settled under another statement key
+  is no longer listed. Under a new card ordinal it belongs to another card
+  entry, which reads `no_debit_account_evidence` instead of
+  `only_unreviewed_candidates` when it has no other evidence; the accepted
+  settlement stays on the old ordinal's entry.
+- Every other answer is unchanged: where no proposal's card month is
+  accepted under another statement key, the rows are the shipped text's. `schemaVersion`, the wire contract,
+  the page and the tool description are unchanged.
+- Cost: the covered months are built once from the candidates already
+  scanned, and each proposal probes them by an automatic index; no base table
+  is read again.
+
+### Verification
+
+- `services/processor/test/card-debit-accounts.test.ts`: on the complete CORE
+  schema with the real sweep, a Vpass month accepted under one ordinal and
+  re-read under a new one resolving to the same account: the guard refuses
+  the new candidate, the read writes nothing, and the new ordinal's entry
+  lists no proposal and reads `no_debit_account_evidence` (it listed the
+  proposal and read `only_unreviewed_candidates` before the change); the
+  plan reaches the months by key without table statistics on D1.
+- `packages/application/test/card-debit-account-candidates-differential.test.ts`:
+  on random stores, the read returns the frozen shipped text's rows
+  (`card-debit-account-candidates-legacy-sql.ts`) less exactly the
+  proposals the guard's month term reserves, which equals the shipped rows
+  on seeds without such a proposal; every proposal it drops has
+  `allocation_available` 0 in the real view; dropping any of the three month
+  terms fails some seed.
+- `packages/application/test/card-settlement-review-scale.test.ts`: on the
+  scaled store without statistics, the same equality (the store draws no
+  such proposal, so the shipped rows too), and a plan whose only whole read of
+  a base table is the one candidate scan.

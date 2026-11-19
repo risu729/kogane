@@ -5,10 +5,11 @@
 // Vpass card answered by an accepted settlement and unanswered again after
 // its withdrawal, a Vpass card with only an undecided candidate, and one with
 // nothing, and a Vpass card whose total the decimal-v1 projection could not
-// read, which keeps its status and reason; that the read writes nothing, is
-// graded before it reads, and
-// reaches readings and decisions by key without table statistics. Every
-// value is synthetic.
+// read, which keeps its status and reason, and a Vpass month accepted under
+// one card ordinal whose candidate under the next ordinal, which the guard
+// refuses, is not listed as open; that the read writes nothing, is graded
+// before it reads, and reaches readings, decisions and settled months by key
+// without table statistics. Every value is synthetic.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import {
@@ -91,35 +92,46 @@ const DEBITS: [string, string, string][] = [
   ["dd-3", "4000", "2098-01-26"],
 ];
 
-async function seed() {
-  for (const [id, source, parser, card, period, total, due] of STATEMENTS) {
-    await seedArtifact(env, id, source, "synthetic", "synthetic-" + id, { id });
-    await db
-      .prepare(
-        "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,?,'1','2098-02-12','ok','[]')",
-      )
-      .bind(id, id, parser)
-      .run();
-    await db
-      .prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
+/** One statement parse, neither published nor identified. */
+async function seedStatement([
+  id,
+  source,
+  parser,
+  card,
+  period,
+  total,
+  due,
+]: (typeof STATEMENTS)[number]) {
+  await seedArtifact(env, id, source, "synthetic", "synthetic-" + id, { id });
+  await db
+    .prepare(
+      "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,?,'1','2098-02-12','ok','[]')",
+    )
+    .bind(id, id, parser)
+    .run();
+  await db
+    .prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
  VALUES(?,?,'credit_statement_payment_amount',?,?,0,'JPY',?,?,?)`)
-      .bind(
-        id,
-        card,
-        /^-?\d+$/u.test(total) ? Number(total) : null,
-        total,
-        period + "-01",
-        "synthetic-" + period,
-        JSON.stringify({
-          _kogane: {
-            period,
-            paymentDate: due,
-            snapshotSemantics: "provider-reported-monthly-payment-amount",
-          },
-        }),
-      )
-      .run();
-  }
+    .bind(
+      id,
+      card,
+      /^-?\d+$/u.test(total) ? Number(total) : null,
+      total,
+      period + "-01",
+      "synthetic-" + period,
+      JSON.stringify({
+        _kogane: {
+          period,
+          paymentDate: due,
+          snapshotSemantics: "provider-reported-monthly-payment-amount",
+        },
+      }),
+    )
+    .run();
+}
+
+async function seed() {
+  for (const statement of STATEMENTS) await seedStatement(statement);
   await seedArtifact(env, 820, "smbc-bank", "synthetic", "synthetic-820", { id: 820 });
   await db
     .prepare(
@@ -508,6 +520,82 @@ test("only a candidate's newest row for a reading counts: a changed outcome repl
   });
 });
 
+test("a card month settled under one card ordinal is not proposed again under the next", async () => {
+  // The acceptance guard reserves a card month by (source, account, period),
+  // whatever the statement key (migration 0044, `allocation_available`). A
+  // new ordinal of the same card is a new source account and so a new
+  // statement key: its candidate for an accepted month is never acceptable,
+  // and is not listed as an open proposal.
+  await ownership(812, "liable_party");
+  await cardSettlementSweep(db);
+  const accepted = await candidateOf("vpass:card-002");
+  await command("card-settlement.accept", { proposalId: accepted, reason: "synthetic" });
+  // The provider re-reads the same month under a new ordinal, which the
+  // identity rule resolves to the same card account.
+  await seedStatement([
+    815,
+    "vpass",
+    "vpass-statement-page",
+    "vpass:card-005",
+    "2098-01",
+    "4000",
+    "2098-01-26",
+  ]);
+  await publishParse(db, 815);
+  await identifyParse(
+    db,
+    {
+      id: 815,
+      artifact_id: 815,
+      source_id: "vpass",
+      producer_id: "collector-r2-importer",
+      fetch_run_id: 815,
+    },
+    (input) => resolver({ ...input, sourceAccount: "vpass:card-002" }),
+  );
+  await cardSettlementSweep(db);
+  const reproposed = await candidateOf("vpass:card-005");
+  const month = (id: string) =>
+    db
+      .prepare(
+        `SELECT statement_key,json_extract(facts_json,'$.statement.sourceId') AS source,
+          json_extract(facts_json,'$.statement.accountId') AS account,
+          json_extract(facts_json,'$.statement.period') AS period
+         FROM card_settlement_candidates WHERE id=?`,
+      )
+      .bind(id)
+      .first<{ statement_key: string; source: string; account: string; period: string }>();
+  const settledMonth = (await month(accepted))!;
+  const reproposedMonth = (await month(reproposed))!;
+  expect(reproposedMonth.statement_key).not.toBe(settledMonth.statement_key);
+  expect({ ...reproposedMonth, statement_key: null }).toEqual({
+    ...settledMonth,
+    statement_key: null,
+  });
+  // The guard refuses it.
+  expect(
+    await db
+      .prepare("SELECT allocation_available FROM card_settlement_readiness WHERE id=?")
+      .bind(reproposed)
+      .first(),
+  ).toEqual({ allocation_available: 0 });
+  const before = await rowCounts();
+  const cards = byCard((await review()).items);
+  expect(await rowCounts()).toEqual(before);
+  expect(cards.get("vpass:card-002")).toMatchObject({
+    settled: [{ statements: 1, latest: { proposalId: accepted } }],
+    proposed: [],
+    answer: { basis: "accepted-settlement", proposalId: accepted },
+  });
+  // The new ordinal's entry lists its statement, and no open proposal.
+  expect(cards.get("vpass:card-005")).toMatchObject({
+    latestStatement: { period: "2098-01" },
+    settled: [],
+    proposed: [],
+    answer: { basis: "unknown", reason: "no_debit_account_evidence" },
+  });
+});
+
 test("a grant without records.read or the whole store is refused before anything is read", async () => {
   for (const [grant, code, refs] of [
     [{ ...WHOLE, capabilities: ["summary.read"] }, "unauthorized", ["capability:records.read"]],
@@ -600,9 +688,10 @@ test("more cards than the bound are said, never listed as a complete answer", as
   expect(review.items.at(-1)?.card.sourceAccount).toBe("vpass:card-099");
 });
 
-test("readings and decisions are reached by key, without table statistics", async () => {
+test("readings, decisions and settled months are reached by key, without table statistics", async () => {
   // docs/card-settlements.md, Cost: the evidence and the candidates are each
-  // scanned once; a reading and a candidate's latest decision are keyed.
+  // scanned once; a reading and a candidate's latest decision are keyed, and
+  // a proposal probes the settled months through an index, never a scan.
   for (const [name, sql, binds] of [
     [
       "readings",
@@ -620,8 +709,14 @@ test("readings and decisions are reached by key, without table statistics", asyn
     expect({
       name,
       scans: plan.filter((detail) =>
-        /^SCAN (s|card_debit_account_statement|card_settlement_decisions|d|latest)\b/u.test(detail),
+        /^SCAN (s|card_debit_account_statement|card_settlement_decisions|d|latest|m|settled_month)\b/u.test(
+          detail,
+        ),
       ),
     }).toEqual({ name, scans: [] });
+    if (name === "candidates")
+      expect(plan).toContain(
+        "SEARCH m USING AUTOMATIC COVERING INDEX (card_source_id=? AND card_account_id=? AND period=?)",
+      );
   }
 });

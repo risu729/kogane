@@ -343,7 +343,21 @@ settlement candidate is listed, by source and source account, at most 100
   latest debit date. A withdrawn or rejected candidate is not counted;
 - `proposed`: the same for candidates still `proposed`, of statements no
   accepted candidate covers. They are listed for the reviewer and never
-  answer (INV07);
+  answer (INV07). A statement is covered as the acceptance guard reserves it
+  (`card_settlement_readiness.allocation_available`, migration 0044): an
+  accepted candidate with the same `statement_key`, or with the same
+  `statement.sourceId`, `statement.accountId` and `statement.period` in its
+  facts (each compared with `=`, so a fact that is absent on either side
+  covers nothing beyond the key). One card month can have two statement
+  keys, when it is read through two producers or namespaces or under a new
+  card ordinal (`vpass:card-00N`) that resolves to the same account; once a
+  candidate of one is accepted, the guard refuses every candidate of the
+  other, and they are not listed. Under a new ordinal they belong to another
+  card entry, which reads `no_debit_account_evidence` rather than
+  `only_unreviewed_candidates` when it has no other evidence. A
+  candidate whose bank debit another statement's accepted candidate holds is
+  still listed: the guard refuses it too (`allocation_already_used` on the
+  review), but its statement is not settled;
 - `answer`: `provider-stated` from `lastNamed` (the account, the reading and
   its capture time); else `accepted-settlement` from the newest accepted
   settlement (the account, the candidate and its debit date), which is an
@@ -1132,9 +1146,21 @@ cited reading found by its primary key, and one scan of the candidates with
 each latest decision found by `card_settlement_decisions`' key
 (`(proposal_id, revision)`); the evidence returned is that of at most two
 readings per card, and the candidates one row per card, bank account and
-decision state. `services/processor/test/card-debit-accounts.test.ts` checks
-without table statistics that readings and decisions are reached by key. Not
-measured on the scale store or on D1.
+decision state. The settled statement keys and card months (`settled`,
+`settled_month`) are each built once from the scanned candidates, and each
+proposed candidate probes the months through an automatic index on
+`(source, account, period)`. `services/processor/test/card-debit-accounts.test.ts`
+checks without table statistics on D1 that readings, decisions and settled
+months are reached by key, and `card-settlement-review-scale.test.ts` that on
+the scaled store the candidates are the only base table read whole. The
+candidate read returns the rows #1387's text did
+(`packages/application/test/card-debit-account-candidates-legacy-sql.ts`)
+less the proposals an accepted candidate reserves by card month alone:
+`card-debit-account-candidates-differential.test.ts` compares the two on
+random stores, where some seeds draw such proposals and the guard refuses
+each one (`allocation_available` is 0), and the scale test on the scaled
+store, which draws none, so the two texts agree there. Not timed on the
+scale store or on D1.
 
 ### Readiness
 

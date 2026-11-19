@@ -106,7 +106,9 @@ export interface CardDebitAccountCard {
   settled: MatchedDebitAccount[];
   /**
    * Undecided candidates per bank account, of statements no accepted
-   * settlement covers, newest debit first. A proposal only: never an answer.
+   * settlement covers by statement key or card month (the acceptance
+   * guard's reservation), newest debit first. A proposal only: never an
+   * answer.
    */
   proposed: MatchedDebitAccount[];
   answer: CardDebitAccountAnswer;
@@ -226,22 +228,38 @@ interface CandidateRow {
  * as `<debit date>\n<id>` with its period. SQLite takes a bare column from the
  * row of the one `max()` aggregate. Every candidate is read once, its latest
  * decision by key.
+ *
+ * A statement is covered as the acceptance guard reserves it
+ * (`card_settlement_readiness.allocation_available`, migration 0044): an
+ * accepted candidate with the same `statement_key`, or with the same
+ * `$.statement.sourceId`, `$.statement.accountId` and `$.statement.period`,
+ * compared with `=` as the guard compares them, so a fact that is null on
+ * either side reserves nothing beyond its key. One card month read through
+ * two producers, namespaces or card ordinals has two statement keys; once
+ * one of them is accepted, a candidate on the other can never be accepted,
+ * and is not listed as `proposed`. The covered months are read once
+ * (`settled_month`) and probed per proposed candidate.
  */
 export const CARD_DEBIT_ACCOUNT_CANDIDATES_SQL = `WITH live AS MATERIALIZED (
  SELECT r.id,r.status,r.statement_key,
   json_extract(r.facts_json,'$.statement.sourceId') AS card_source_id,
   json_extract(r.facts_json,'$.statement.sourceAccount') AS card_source_account,
+  json_extract(r.facts_json,'$.statement.accountId') AS card_account_id,
   json_extract(r.facts_json,'$.statement.period') AS period,
   json_extract(r.facts_json,'$.bankDebit.sourceId') AS bank_source_id,
   json_extract(r.facts_json,'$.bankDebit.sourceAccount') AS bank_source_account,
   CASE WHEN json_extract(r.facts_json,'$.bankDebit.occurred.kind')='local-date'
    THEN json_extract(r.facts_json,'$.bankDebit.occurred.value') END AS debit_date
  FROM card_settlement_reviews r WHERE r.status IN ('accepted','proposed')
-), settled AS (SELECT DISTINCT statement_key FROM live WHERE status='accepted')
+), settled AS (SELECT DISTINCT statement_key FROM live WHERE status='accepted'),
+settled_month AS MATERIALIZED (SELECT DISTINCT card_source_id,card_account_id,period FROM live
+ WHERE status='accepted' AND card_source_id IS NOT NULL AND card_account_id IS NOT NULL AND period IS NOT NULL)
 SELECT status,card_source_id,card_source_account,bank_source_id,bank_source_account,
  count(DISTINCT statement_key) AS statements,
  max(coalesce(debit_date,'')||char(10)||id) AS latest_key,period AS latest_period
-FROM live WHERE status='accepted' OR statement_key NOT IN (SELECT statement_key FROM settled)
+FROM live WHERE status='accepted' OR (statement_key NOT IN (SELECT statement_key FROM settled)
+ AND NOT EXISTS(SELECT 1 FROM settled_month m WHERE m.card_source_id=live.card_source_id
+  AND m.card_account_id=live.card_account_id AND m.period=live.period))
 GROUP BY status,card_source_id,card_source_account,bank_source_id,bank_source_account
 ORDER BY card_source_id,card_source_account,status,bank_source_id,bank_source_account`;
 
