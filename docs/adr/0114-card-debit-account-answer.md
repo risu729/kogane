@@ -359,6 +359,15 @@ command or catalogue operation is added.
   every line when its account is unknown, `unknown`
   (`cards_with_unknown_due_date`). Added in review: before it, such a
   statement was left out of the comparison, so its account could read `yes`.
+  Only the card's newest statement counts, so it lasts until the card has a
+  newer statement with a due date or a settlement paying that statement is
+  accepted. A card with no newer statement (a closed one) keeps it until the
+  settlement is accepted, and no age bound applies (unlike ADR 0019's
+  `UNDATED_STATEMENT_WINDOW_DAYS` for payables): a statement with no due date
+  is never taken as paid. Until Unit A ships, a Vpass card whose newest parsed
+  statement is an importer-era row with no due date does this, and a Vpass
+  card with no accepted settlement has no known account, so every line reads
+  `unknown`.
 - A bank source account is joined to its entity only through the reported
   state; one with no balance or position there keeps its own line, so an
   entity's line does not count bills named through it. A statement due

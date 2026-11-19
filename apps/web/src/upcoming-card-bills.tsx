@@ -11,7 +11,10 @@ import { getJson, useFeatures } from "./api.ts";
 import type { UpcomingCardBillsReview } from "../../../packages/application/src/query/card-upcoming-bills.ts";
 import type {
   CompactQuantity,
+  CoversUnknownReason,
+  NotListedReason,
   UpcomingDebitAccountLine,
+  UpcomingDebitAnswer,
 } from "../../../packages/domain/src/card-upcoming-bills.ts";
 import { CARD_DEBIT_ACCOUNTS_PATH } from "../../../packages/observation-shared/src/card-debit-accounts-contract.ts";
 import { bankSourceLabel } from "./reconciliation-display.tsx";
@@ -29,8 +32,11 @@ export function useUpcomingCardBills() {
   });
 }
 
-/** Each closed code, in words. A code the page does not know is shown as stored. */
-const COVERS_REASONS: Record<string, string> = {
+/**
+ * Each closed code, in words; the types make every code of the domain's
+ * closed lists have its words. A code the page does not know is shown as stored.
+ */
+const COVERS_REASONS: Record<CoversUnknownReason, string> = {
   debit_account_unknown: "引落口座が分かりません。",
   bill_not_exact: "請求額が確定していない請求があります。",
   balance_not_exact: "口座の残高が分かりません。",
@@ -41,13 +47,13 @@ const COVERS_REASONS: Record<string, string> = {
   cards_with_unknown_due_date:
     "引落日が分からない未照合の請求があり、この日までにこの口座から引き落とされる可能性があります。",
 };
-const NOT_LISTED_REASONS: Record<string, string> = {
+const NOT_LISTED_REASONS: Record<NotListedReason, string> = {
   no_statement: "請求がありません",
   payment_date_not_published: "カード会社が引落日を示していません",
   no_statement_due: "これから引き落とされる請求はありません",
   statement_settled: "最新の請求は採用済みの照合で支払済みです",
 };
-const ANSWERS: Record<string, string> = {
+const ANSWERS: Record<UpcomingDebitAnswer, string> = {
   "provider-stated": "カード会社の表示",
   "accepted-settlement": "採用済みの照合から",
   unknown: "引落口座は不明",

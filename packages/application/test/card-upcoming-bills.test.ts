@@ -192,7 +192,8 @@ function balances(
  * - card-003: 5,000 due 10-05, no debit-account evidence;
  * - card-004: an unreadable total due 09-28, debited from bank A (accepted);
  * - card-005: a statement the provider gave no due date, which an accepted
- *   settlement from bank B (09-10) pays;
+ *   settlement from bank A (09-10) pays (bank A: bank B's previous debit
+ *   stays card-002's 08-26);
  * - card-006: its newest statement was due 08-27, debited from bank A;
  * - bank A reports 50,000 and bank B 10,000, captured 09-19.
  */
@@ -250,7 +251,7 @@ function scenario(
   accept(store, undated, {
     card: "vpass:card-005",
     period: "2026-09",
-    bank: BANK_B,
+    bank: BANK_A,
     debitDate: "2026-09-10",
   });
   card("card-006", null, { bank: BANK_A, debitDate: "2026-08-27" });

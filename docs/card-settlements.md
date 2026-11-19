@@ -447,6 +447,14 @@ Limits:
   statement month and the due date.
 - A card whose debit account is unknown (every Vpass card without an accepted
   settlement) makes the account lines due on or after its bill `unknown`.
+- A card whose newest statement has no readable due date and no accepted
+  settlement paying it makes every line of its account, or every line when
+  its account is unknown, `unknown` (`cards_with_unknown_due_date`), with no
+  age bound: it lasts until the card has a newer statement with a due date or
+  that settlement is accepted, so a closed card's last such statement keeps
+  it until then. Until the Vpass collector's finalized statements are parsed
+  (proposal v2, Unit A), an importer-era Vpass row with no due date as a
+  card's newest statement does this.
 - Vpass cards are labelled by their account entity, the same for every Vpass
   card; the source account (`vpass:card-00N`) tells them apart.
 - The reported state reads every account to find the debit accounts. Past its
