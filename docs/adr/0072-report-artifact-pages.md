@@ -256,3 +256,124 @@ give the same answer, with the body as stored and `partition:
 refuses a detail whose `partition` is not its body's, and
 `apps/web/test/reports.browser.test.ts` shows such a body as
 確認できた範囲のみ評価 with 評価できた保有資産だけの小計, never 評価額の合計.
+
+## Amendment: a report id names the code that computed its body (2026-11-19)
+
+- Status: proposed
+- Date: 2026-11-19
+- Owner approval: required before merge. The report ids, context ids and run
+  ids the published `kogane.reports.read` answer names are minted from a
+  manifest with four more fields, and the explanation view's `inputManifest`
+  carries them (see Consequences)
+
+### Context
+
+The report job (`services/processor/src/report-job.ts`) derives
+`reportId`, `contextId` and the run id from the digest of its input manifest,
+and returns the stored report as soon as a report with that id exists,
+before it values anything. The manifest named the inputs (perimeter, unit,
+knowledge boundary, position, valuation and chosen price ids) and two
+policies: `decimalPolicyRelease` and `instrumentValuationPolicyId`. The
+second names only the instrument-class method table. Nothing named the
+code that turns those inputs into the body:
+
+- the snapshot price selection, `SNAPSHOT_PRICE_SQL` and the closed rule list
+  it admits ([ADR 0020](0020-price-promotion-by-rule.md), `PRICE_RULE_IDS`);
+- the valuation, `valueHolding` (with `valueAtPrice`) and
+  `summarizeValuation` in `packages/domain/src/calculation.ts`;
+- the job's own assembly: the instrument class it values under,
+  `quantityFromNormalizedDecimal`, the row and unvalued-reason mapping, the
+  coverage, `reportPartition` and the body schema.
+
+A change to any of these that gives another body for the same stored inputs
+left the id unchanged, so the job kept serving the body the old code
+computed unless someone bumped `report-inputs-v1` by hand. Nobody did when
+the amendment of 2026-11-18 changed `reportPartition`: a truncated report
+already stored as `complete` is reused under the new rule. The chosen price
+ids do cover a selection change that picks another set of prices, but not
+one that keeps the set (a rule added to the list that matches no stored
+claim, or the same prices given to other holdings). The rebuildable
+projections already fold their code into their ids: `projectionBuildDigest`
+and `rewardProjectionBuildDigest` digest their release constants into
+`snapshotIdentity` (INV09).
+
+### Options considered
+
+1. Keep bumping the manifest version by hand. Rejected: nothing ties it to
+   the code, and the change of 2026-11-18 shows it is forgotten.
+2. Fold one build digest into the ids outside the manifest, as
+   `snapshotIdentity` does. Rejected: the context id would no longer be the
+   digest of the manifest the explanation shows, so a reader could not tell
+   which code computed a report.
+3. Name each release in the manifest and bump its schema to
+   `report-inputs-v2`.
+
+### Decision
+
+Option 3. The manifest gains four fields, `ReportBuildReleases`:
+
+| Field                   | Value today                   | Covers                                                              |
+| ----------------------- | ----------------------------- | ------------------------------------------------------------------- |
+| `priceSelectionRelease` | `report-snapshot-price-v1`    | `SNAPSHOT_PRICE_SQL` and `priceObservation`                         |
+| `priceRuleIds`          | `PRICE_RULE_IDS`, sorted      | the closed rule list; the selection binds this same list            |
+| `valuationRelease`      | `holding-valuation-v1`        | `valueHolding`, `valueAtPrice` as it calls it, `summarizeValuation` |
+| `reportBuildRelease`    | `report-holdings-v1:build-v1` | the job's assembly, `reportPartition`, the body schema              |
+
+`SNAPSHOT_PRICE_RELEASE` and `REPORT_BUILD_RELEASE` live in the report job,
+`HOLDING_VALUATION_RELEASE` in `packages/domain/src/calculation.ts`;
+`REPORT_BUILD_RELEASE` starts with `REPORT_BODY_SCHEMA_VERSION`, so a body
+schema bump changes it. The manifest schema is `report-inputs-v2`. The wire
+contract (`packages/observation-shared/src/report-artifact-contract.ts`)
+accepts a `report-inputs-v1` manifest with exactly its old fields, as stored,
+and a `report-inputs-v2` manifest with exactly the v1 fields and the four
+releases, the rule list sorted.
+
+### Consequences
+
+- Reports already stored keep their ids, context ids, runs and bodies;
+  nothing is rewritten. A request after the deploy names a new manifest, so
+  the first sweep writes one new report for the current inputs even when no
+  evidence changed: one calculation run with its result rows (one per
+  holding and one per provider value), the body and its explanation in R2,
+  one `report_artifacts` row and one `generated` event. Every later bump of
+  a release costs the same: one new report for the inputs the next sweep
+  sees, never a recompute of the reports already stored. The catalogue
+  grows by one row each time.
+- The answer's shape does not change for the list, the body or the ids, but
+  the ids of every report written after the deploy differ from what the old
+  manifest would have given, and the explanation view's `inputManifest` has
+  `schemaVersion: "report-inputs-v2"` and the four release fields. The MCP
+  tool's definition is unchanged; its result changes, which the owner
+  approves before this merges, as for `partition` above. A client that
+  checks the manifest's keys exactly must accept both versions.
+- The Processor deploys before the App
+  ([rollout](../rollout.md#4-deployment-order)). If a sweep writes a report
+  between the two, the web page refuses that report's explanation until the
+  App, with the new contract, is deployed; the body and the MCP read are
+  unaffected.
+- Limits: the releases are kept by hand. Only `SNAPSHOT_PRICE_SQL` is pinned
+  to its release by a frozen digest; a change to `valueHolding`,
+  `summarizeValuation`, `reportPartition` or the job's assembly that does not
+  bump its release is not caught by a test. The 評価レポート page does not
+  show the four releases; they are in the explanation answer. The limit of
+  the amendment of 2026-11-18 (truncation is not in the manifest) is
+  unchanged.
+- The [historical next-milestone plan](../plans/2026-09-next-milestone.md)
+  named `report-inputs-v2` for a dated valuation job (P2-4). That plan was
+  never accepted; this amendment takes the name, and a later manifest takes
+  the next free version.
+
+### Verification
+
+`services/processor/test/report-job-releases.test.ts` checks that the
+shipped releases are the ones the manifest names, pins
+`SNAPSHOT_PRICE_SQL`'s digest to `SNAPSHOT_PRICE_RELEASE`, and stores one
+synthetic valued position: the same inputs under the same releases reuse the
+report, and each of the four releases changed in turn (a rule added that
+matches no claim, so the same price is chosen) gives a new report id and
+context id, a new `report_artifacts` row and no reuse, while the earlier
+report keeps its id, context and body. With the release fields removed from
+the manifest digest, that test fails on reuse. `apps/web/test/report-artifacts-contract.test.ts`
+accepts a v2 manifest and the stored v1 one, and refuses a v2 manifest
+missing a release, with an unsorted rule list or an extra field, a v1
+manifest with the v2 fields, and an unknown version.

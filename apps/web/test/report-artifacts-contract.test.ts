@@ -312,6 +312,60 @@ describe("report explanation contract", () => {
       ),
     ).toBe(false);
   });
+
+  test("a v2 manifest names the code releases; a stored v1 manifest stays readable", () => {
+    // The fixture is a v1 node, as stored before the releases were recorded.
+    expect(explanation.explanation.inputManifest.schemaVersion).toBe("report-inputs-v1");
+    const releases = {
+      priceSelectionRelease: "report-snapshot-price-v1",
+      priceRuleIds: ["rule-a-v1", "rule-b-v1"],
+      valuationRelease: "holding-valuation-v1",
+      reportBuildRelease: "report-holdings-v1:build-v1",
+    };
+    const v2 = mutated(explanation, (copy) =>
+      Object.assign(copy.explanation.inputManifest, {
+        schemaVersion: "report-inputs-v2",
+        ...releases,
+      }),
+    );
+    expect(validApiResponse(path, v2)).toBe(true);
+    // A v2 manifest without one of its releases, with an unsorted rule list or
+    // with an extra field is refused; so is a v1 manifest carrying v2 fields.
+    for (const key of Object.keys(releases))
+      expect(
+        validApiResponse(
+          path,
+          mutated(v2, (copy) => delete copy.explanation.inputManifest[key]),
+        ),
+      ).toBe(false);
+    expect(
+      validApiResponse(
+        path,
+        mutated(
+          v2,
+          (copy) => (copy.explanation.inputManifest.priceRuleIds = ["rule-b-v1", "rule-a-v1"]),
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      validApiResponse(
+        path,
+        mutated(v2, (copy) => (copy.explanation.inputManifest.total = "1500")),
+      ),
+    ).toBe(false);
+    expect(
+      validApiResponse(
+        path,
+        mutated(v2, (copy) => (copy.explanation.inputManifest.schemaVersion = "report-inputs-v1")),
+      ),
+    ).toBe(false);
+    expect(
+      validApiResponse(
+        path,
+        mutated(v2, (copy) => (copy.explanation.inputManifest.schemaVersion = "report-inputs-v3")),
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("report capability, feature and routes", () => {
