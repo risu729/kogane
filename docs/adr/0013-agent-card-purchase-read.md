@@ -118,4 +118,6 @@ on 101 synthetic events.
 Status: proposed. [ADR 0125](0125-card-purchases-per-card-view.md) adds
 `view: cards` (with `usageMonth`) to this tool and to the operator route: the
 same whole-filter figures grouped by card, without the per-event explanation.
-`view: events` (the default) is the page this ADR decided, unchanged.
+Its amendment adds `view: lines` (with `account`, `sort` and `cursor`): one
+month's events as compact lines, keyset-paged. `view: events` (the default) is
+the page this ADR decided, unchanged.

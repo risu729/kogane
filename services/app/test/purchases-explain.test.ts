@@ -17,6 +17,7 @@ import { exactQuantity, integerDecimal } from "../../../packages/domain/src/valu
 import { GRANT_LIMITS, withoutReviewAffordances } from "../../../packages/application/src/index";
 import {
   queryCardPurchaseCards,
+  queryCardPurchaseLines,
   queryCardPurchases,
 } from "../../../packages/application/src/query/card-purchases";
 import { validAgentCardPurchasePage } from "../../../packages/observation-shared/src/card-purchase-contract";
@@ -35,6 +36,17 @@ let jwks: { keys: unknown[] };
 let sequence = 0;
 let pendingEvent = "";
 let postedEvent = "";
+interface RecognisedRow {
+  externalId: string;
+  status: "confirmed" | "unconfirmed";
+  amount: number;
+  usageDate: string;
+  counterparty: string;
+  /** `YYYYMM`; the September statement unless given. */
+  statementPeriod?: string;
+}
+/** One MyJCB row of `acct-card`, recognised through the guarded builder (set up in `beforeAll`). */
+let recognise: (row: RecognisedRow) => Promise<{ eventId: string; observationId: number }>;
 
 beforeAll(async () => {
   await seedRegistry();
@@ -57,13 +69,7 @@ beforeAll(async () => {
     .bind(run.artifacts[0]!.id)
     .first<{ id: number }>();
   await publishParse(parse!.id);
-  const recognise = async (row: {
-    externalId: string;
-    status: "confirmed" | "unconfirmed";
-    amount: number;
-    usageDate: string;
-    counterparty: string;
-  }): Promise<{ eventId: string; observationId: number }> => {
+  recognise = async (row: RecognisedRow): Promise<{ eventId: string; observationId: number }> => {
     const observation = await env.DB.prepare(
       `INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,
         currency,description,counterparty,as_of,raw_locator,extra_json)
@@ -94,7 +100,7 @@ beforeAll(async () => {
       usageDate: row.usageDate,
       // The combined ご利用先など／支払区分 cell; usage equal to payment.
       paymentType: "synthetic merchant 1回払",
-      statementPeriod: "202609",
+      statementPeriod: row.statementPeriod ?? "202609",
       providerSaleCode: null,
       usageAmountText: `${(-row.amount).toLocaleString("en-US")}円`,
       paymentAmountText: `${(-row.amount).toLocaleString("en-US")}円`,
@@ -647,6 +653,171 @@ describe("the per-card view (ADR 0125)", () => {
       ["view=cards&period=2026-09&usageMonth=2026-09", "invalid_query"],
       ["view=cards&usageMonth=202609", "invalid_period"],
       ["view=cards&period=2026-13", "invalid_period"],
+    ] as const) {
+      const response = await operator(query);
+      expect(response.status, query).toBe(400);
+      expect(await response.json()).toMatchObject({ error: code });
+    }
+    expect(await tables()).toEqual(before);
+  });
+});
+
+// Last in this file: its `beforeAll` adds a June statement's purchases, which
+// no earlier test's filter or count sees.
+describe("the line view (ADR 0125 amendment)", () => {
+  const LINES = 30;
+  const june: string[] = [];
+  beforeAll(async () => {
+    for (let row = 0; row < LINES; row += 1)
+      june.push(
+        (
+          await recognise({
+            externalId: `myjcb-credit-ledger:confirmed:row-june-${row}:0`,
+            status: "confirmed",
+            amount: -(1000 + row * 13),
+            usageDate: `2026-05-${String(1 + (row % 28)).padStart(2, "0")}`,
+            // As long as a line carries and more, the instruction-shaped text first.
+            counterparty: `${HOSTILE} ${"合成".repeat(40)}`,
+            statementPeriod: "202606",
+          })
+        ).eventId,
+      );
+  });
+
+  /** The same request on the agent HTTP path, MCP and the operator route. */
+  async function threeWays(request: Record<string, string>) {
+    const response = await explain(request);
+    expect(response.status, JSON.stringify(request)).toBe(200);
+    const body = (await response.json()) as Record<string, any>;
+    const overMcp = await mcp({
+      method: "tools/call",
+      params: { name: "kogane.purchases.explain", arguments: request },
+    });
+    expect(overMcp["result"].isError).toBe(false);
+    expect(overMcp["result"].structuredContent).toEqual(body);
+    expect(JSON.parse(overMcp["result"].content[0].text)).toEqual(body);
+    const operator = (await (
+      await call(`/api/v2/card-purchases?${new URLSearchParams(request)}`, {
+        subject: "synthetic-operator",
+      })
+    ).json()) as Record<string, any>;
+    const { apiVersion, ...route } = operator;
+    expect(apiVersion).toBe(2);
+    expect(route).toEqual(body["data"]);
+    // The whole answer stays under 8 KB, and provider text appears only in the lines.
+    expect(new TextEncoder().encode(JSON.stringify(body)).length).toBeLessThan(8 * 1024);
+    for (const path of pathsContaining(body, HOSTILE))
+      expect(path).toMatch(/^\$\.data\.\.lines\.\[\d+\]\.counterparty\.$/u);
+    return body;
+  }
+
+  it("answers the route's lines on both agent paths, and each walk lists every event once", async () => {
+    const before = await tables();
+    const september = await threeWays({ view: "lines", period: "2026-09" });
+    expect(september).toEqual({
+      schemaVersion: "kogane-card-purchases-lines-v1",
+      query: { view: "lines", account: null, period: "2026-09", usageMonth: null, sort: "date" },
+      decisions: "operator-only",
+      nextPage: "none",
+      data: await queryCardPurchaseLines(d1Executor(env.DB), { period: "2026-09" }),
+    });
+    expect(
+      september["data"].lines.map((line: { eventId: string; accountId: string }) => [
+        line.eventId,
+        line.accountId,
+      ]),
+    ).toEqual([
+      [postedEvent, "acct-card"],
+      [pendingEvent, "acct-card"],
+    ]);
+    const august = await threeWays({
+      view: "lines",
+      usageMonth: "2026-08",
+      account: "acct-card",
+      sort: "amount",
+    });
+    expect(august["data"].lines).toMatchObject([
+      { eventId: postedEvent, state: "captured", amount: { unit: "JPY", value: "1234" } },
+      { eventId: pendingEvent, state: "authorized", amount: { unit: "JPY", value: "1200" } },
+    ]);
+    expect(august["data"].lines[0]).not.toHaveProperty("accountId");
+
+    // The June statement takes more than one answer; the cursor walks it on every path alike.
+    for (const sort of ["date", "amount"] as const) {
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      do {
+        const body = await threeWays({
+          view: "lines",
+          period: "2026-06",
+          account: "acct-card",
+          sort,
+          ...(cursor === null ? {} : { cursor }),
+        });
+        pages += 1;
+        expect(body["nextPage"]).toBe(body["data"].nextCursor === null ? "none" : "offered");
+        for (const line of body["data"].lines) {
+          expect(line).toMatchObject({ counterpartyCut: true });
+          seen.push(line.eventId);
+        }
+        cursor = body["data"].nextCursor;
+      } while (cursor !== null && pages < 10);
+      expect(pages).toBeGreaterThan(1);
+      expect(seen).toHaveLength(LINES);
+      expect([...seen].sort()).toEqual([...june].sort());
+    }
+    expect(await tables()).toEqual(before);
+  });
+
+  it("refuses what the line view does not take, on the agent paths and the route", async () => {
+    const before = await tables();
+    const cursor = (
+      (await (
+        await explain({ view: "lines", period: "2026-06", account: "acct-card" })
+      ).json()) as { data: { nextCursor: string } }
+    ).data.nextCursor;
+    const cases: [Record<string, unknown>, string[]][] = [
+      [{ view: "lines" }, ["period", "usageMonth"]],
+      [{ view: "lines", period: "2026-06", offset: 0 }, ["offset"]],
+      [{ view: "lines", period: "2026-06", eventId: postedEvent }, ["eventId"]],
+      [{ view: "lines", period: "2026-06", account: "bad account" }, ["account"]],
+      [{ view: "lines", period: "2026-06", sort: "merchant" }, ["sort"]],
+      [{ view: "lines", period: "2026-06", cursor: "garbage" }, ["cursor"]],
+      // Another request's cursor.
+      [{ view: "lines", period: "2026-06", cursor }, ["cursor"]],
+      [
+        { view: "lines", period: "2026-06", account: "acct-card", sort: "amount", cursor },
+        ["cursor"],
+      ],
+      [{ view: "cards", period: "2026-06", account: "acct-card" }, ["account"]],
+      [{ period: "2026-06", sort: "amount" }, ["sort"]],
+    ];
+    for (const [body, refs] of cases) {
+      const response = await explain(body);
+      expect(response.status, JSON.stringify(body)).toBe(400);
+      expect(await response.json()).toMatchObject({ code: "invalid_query", refs });
+    }
+    const full = await explain({ view: "lines", usageMonth: "2026-08" }, { full: true });
+    expect(full.status).toBe(413);
+    expect(await full.json()).toMatchObject({
+      code: "budget_exceeded",
+      refs: ["budget:cardPurchaseEvents=10000"],
+    });
+    const operator = (query: string) =>
+      call(`/api/v2/card-purchases?${query}`, { subject: "synthetic-operator" });
+    for (const [query, code] of [
+      ["view=lines", "invalid_query"],
+      ["view=lines&period=2026-06&offset=0", "invalid_query"],
+      [`view=lines&period=2026-06&eventId=${postedEvent}`, "invalid_query"],
+      ["view=lines&period=2026-06&account=bad%20account", "invalid_query"],
+      ["view=lines&period=2026-06&sort=merchant", "invalid_query"],
+      ["view=lines&period=2026-06&cursor=garbage", "invalid_query"],
+      [`view=lines&period=2026-06&cursor=${cursor}`, "invalid_query"],
+      [`view=lines&period=2026-06&account=acct-card&cursor=${"a".repeat(2049)}`, "invalid_query"],
+      ["view=cards&period=2026-06&account=acct-card", "invalid_query"],
+      ["period=2026-06&sort=amount", "invalid_query"],
+      ["view=lines&usageMonth=202606", "invalid_period"],
     ] as const) {
       const response = await operator(query);
       expect(response.status, query).toBe(400);

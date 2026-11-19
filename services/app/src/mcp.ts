@@ -37,9 +37,12 @@ import {
   SUPPORTED_QUERY_INTENTS,
 } from "../../../packages/application/src/index";
 import {
+  CARD_PURCHASE_ACCOUNT,
   CARD_PURCHASE_EVENT_ID,
+  CARD_PURCHASE_LINES_CURSOR_MAX,
   CARD_PURCHASE_PERIOD,
 } from "../../../packages/application/src/query/card-purchases.ts";
+import { CARD_PURCHASE_LINE_SORTS } from "../../../packages/domain/src/card-purchase-view.ts";
 import {
   INSTRUMENT_CANDIDATE_VIEWS,
   INSTRUMENT_CANDIDATES_MAX_OFFSET,
@@ -200,7 +203,7 @@ export const PURCHASES_MCP_TOOLS = [
     name: "kogane.purchases.explain",
     title: "Explain recognised card purchases",
     description:
-      "Recognised card purchases and refunds. `view: events` (default): one page of 50 events, each with its provider rows, statement, reviewed settlement and bank debit and its pending-to-posted candidates, beside figures over the whole filter that keep captured, authorized, refunds and unresolved apart; `period` (statement month), `eventId` or `offset`. `view: cards`: the same whole-filter figures per card in one compact answer, for 'how much did I spend on each card': per card (account id, source, stored label) its event and unresolved counts, usage date range, figures per unit as decimal text (captured, authorized, capturedRefunds, authorizedRefunds; never one combined total), events without a statement figure by closed reason, and the provider statements its posted events belong to with their total, payment date and settlement review; exactly one of `period` (statement month) and `usageMonth` (YYYY-MM of the provider usage date, so purchases not yet on a statement count too); no `eventId` or `offset`. Read-only; a candidate carries no action or plan payload, because every decision about it is the operator's.",
+      "Recognised card purchases and refunds. `view: events` (default): one page of 50 events, each with its provider rows, statement, reviewed settlement and bank debit and its pending-to-posted candidates, beside figures over the whole filter that keep captured, authorized, refunds and unresolved apart; `period` (statement month), `eventId` or `offset`. `view: cards`: the same whole-filter figures per card in one compact answer, for 'how much did I spend on each card': per card (account id, source, stored label) its event and unresolved counts, figures per unit as decimal text (captured, authorized, capturedRefunds, authorizedRefunds; never one combined total), events without a statement figure by closed reason, and the provider statements its posted events belong to with their total, payment date and settlement review; exactly one of `period` (statement month) and `usageMonth` (YYYY-MM of the provider usage date, so purchases not yet on a statement count too); no `eventId` or `offset`. `view: lines`: the same month's events as compact lines, for 'what did I buy on card X' and 'my largest purchases': per line the usage date, amount as decimal text (or, without one, `missing` with its reason and the last known amount), kind, state, the provider counterparty (at most 64 characters, `counterpartyCut` when cut) and event id, plus the figures of the listed events; exactly one of `period` and `usageMonth`, optionally `account` (an account id from `view: cards`; without it every card's lines, each with its `accountId`), `sort` `date` (default, newest first) or `amount` (largest first per unit, lines without an exact amount last), and `cursor` (the previous answer's `data.nextCursor`, with the same filter and sort); at most 25 lines and about 7 KB per answer; no `eventId` or `offset`. Read-only; a candidate carries no action or plan payload, because every decision about it is the operator's.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -210,6 +213,13 @@ export const PURCHASES_MCP_TOOLS = [
         usageMonth: { type: "string", pattern: CARD_PURCHASE_PERIOD.source },
         eventId: { type: "string", pattern: CARD_PURCHASE_EVENT_ID.source },
         offset: { type: "integer", minimum: 0, maximum: PURCHASES_EXPLAIN_MAX_OFFSET },
+        account: { type: "string", pattern: CARD_PURCHASE_ACCOUNT.source },
+        sort: { type: "string", enum: [...CARD_PURCHASE_LINE_SORTS] },
+        cursor: {
+          type: "string",
+          pattern: "^[A-Za-z0-9_-]+$",
+          maxLength: CARD_PURCHASE_LINES_CURSOR_MAX,
+        },
       },
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },

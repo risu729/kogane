@@ -710,8 +710,18 @@ describe("untrusted provider content (AT71)", () => {
         name: "kogane.purchases.explain",
         required: [],
         closed: false,
-        // `view` and `usageMonth`: the per-card view (ADR 0125).
-        properties: ["eventId", "offset", "period", "usageMonth", "view"],
+        // `view` and `usageMonth`: the per-card view (ADR 0125); `account`,
+        // `sort` and `cursor`: the line view (its amendment).
+        properties: [
+          "account",
+          "cursor",
+          "eventId",
+          "offset",
+          "period",
+          "sort",
+          "usageMonth",
+          "view",
+        ],
         annotations: readOnly,
       },
       // Published because this store has the reported state's views.

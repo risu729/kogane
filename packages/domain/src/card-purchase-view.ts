@@ -16,7 +16,7 @@ import type {
 } from "./pending-posted-review.ts";
 import type { ProposalStatus, RationaleCode, RejectionConditionCode } from "./reconcile.ts";
 import type { TemporalValue } from "./time.ts";
-import { decimalToString, type Quantity } from "./values.ts";
+import { compareDecimals, decimalToString, type ExactDecimal, type Quantity } from "./values.ts";
 
 /** A provider row behind a purchase. Counterparty text is read from Layer B, never stored. */
 export interface CardPurchaseSourceRow {
@@ -362,4 +362,135 @@ export interface CardPurchaseCardsPage {
   /** Accepting a card settlement never adds purchase expense. */
   settlementAddsPurchaseExpense: false;
   coverage: Omit<CardPurchasePage["coverage"], "limit">;
+}
+
+// ---------------------------------------------------------------------------
+// Purchase lines (ADR 0125, amendment: gap G2)
+// ---------------------------------------------------------------------------
+
+/**
+ * The orders of the line view: `date`, the page's own (newest usage date
+ * first, the larger event id first on one date), or `amount`: exact amounts
+ * first, by unit and then largest first, every line without an exact amount
+ * after them.
+ */
+export const CARD_PURCHASE_LINE_SORTS = ["date", "amount"] as const;
+export type CardPurchaseLineSort = (typeof CARD_PURCHASE_LINE_SORTS)[number];
+
+/** The most lines one answer lists. */
+export const CARD_PURCHASE_LINES_MAX = 25;
+/**
+ * The most UTF-8 bytes of one line answer's `data` as compact JSON: lines are
+ * listed while the answer stays within it, so the agent tool's whole answer
+ * stays under 8 KB. One line is always listed, so paging always moves on.
+ */
+export const CARD_PURCHASE_LINES_BYTES = 7_168;
+/** The most code points of provider counterparty text one line carries. */
+export const CARD_PURCHASE_LINE_COUNTERPARTY_MAX = 64;
+
+/**
+ * A line's amount: its live purchase-recognition leg in the compact form, or,
+ * for an event in state `unknown` (which has no leg), `missing` with the
+ * event's unknown reason and no unit. Never a zero (INV05).
+ */
+export type CardPurchaseLineAmount =
+  | CompactAmount
+  | { unit: null; status: "missing"; reason: string };
+
+/** One recognised purchase or refund as the line view lists it. */
+export interface CardPurchaseLine {
+  eventId: string;
+  /** The provider usage date (`YYYY-MM-DD`). */
+  date: string;
+  kind: CardPurchaseKind;
+  /** `captured`, `authorized` or `unknown`; with `kind` it names the figure the line is in. */
+  state: EventState;
+  amount: CardPurchaseLineAmount;
+  /** Only on a line without an amount: the amount of its latest revision that had one. */
+  lastKnown?: CompactAmount;
+  /**
+   * The counterparty of the event's provider rows (posted before pending, the
+   * page's order): the first one that has one, cut to
+   * `CARD_PURCHASE_LINE_COUNTERPARTY_MAX` code points. Provider text.
+   */
+  counterparty: string | null;
+  /** Only when the counterparty was cut. */
+  counterpartyCut?: true;
+  /** Only when the request names no account: the event's resolved account. */
+  accountId?: string;
+}
+
+/** Where a line sorts: its keyset position in the line view. */
+export interface CardPurchaseLineKey {
+  date: string;
+  eventId: string;
+  /** The exact amount; null when the line has none, which sorts after every exact one. */
+  amount: { unit: string; value: ExactDecimal } | null;
+}
+
+/** Newest usage date first, then the larger event id: the page's own order. */
+function byDateKey(a: CardPurchaseLineKey, b: CardPurchaseLineKey): number {
+  if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+  return a.eventId < b.eventId ? 1 : a.eventId > b.eventId ? -1 : 0;
+}
+
+/**
+ * The total order of the line view. `amount` compares exact decimals here
+ * (never in SQL, never as a float): exact amounts first, grouped by unit in
+ * code-unit order (two units are never compared), largest first within a
+ * unit, then the date order; every line without an exact amount after them,
+ * in the date order.
+ */
+export function compareCardPurchaseLineKeys(
+  sort: CardPurchaseLineSort,
+  a: CardPurchaseLineKey,
+  b: CardPurchaseLineKey,
+): number {
+  if (sort === "amount") {
+    if (a.amount === null || b.amount === null) {
+      if (a.amount !== b.amount) return a.amount === null ? 1 : -1;
+    } else if (a.amount.unit !== b.amount.unit) {
+      return a.amount.unit < b.amount.unit ? -1 : 1;
+    } else {
+      const order = compareDecimals(b.amount.value, a.amount.value);
+      if (order !== 0) return order;
+    }
+  }
+  return byDateKey(a, b);
+}
+
+/** Provider counterparty text cut to `CARD_PURCHASE_LINE_COUNTERPARTY_MAX` code points. */
+export function lineCounterparty(text: string | null): { text: string | null; cut: boolean } {
+  if (text === null) return { text: null, cut: false };
+  const points = Array.from(text);
+  return points.length > CARD_PURCHASE_LINE_COUNTERPARTY_MAX
+    ? { text: points.slice(0, CARD_PURCHASE_LINE_COUNTERPARTY_MAX).join(""), cut: true }
+    : { text, cut: false };
+}
+
+/**
+ * The line answer of the card purchase read (`view: lines`, ADR 0125
+ * amendment): the whole-filter selection of one statement period or usage
+ * month, optionally one account's events of it, as compact lines in one
+ * order, one keyset page at a time.
+ */
+export interface CardPurchaseLinesPage {
+  view: "lines";
+  frame: "statement-period" | "usage-month";
+  sort: CardPurchaseLineSort;
+  /** The account the lines are of, or null for every card's. */
+  accountId: string | null;
+  lines: CardPurchaseLine[];
+  /** The next page's position, or null when no line follows. */
+  nextCursor: string | null;
+  /** Live purchase and refund events the lines cover, every page together. */
+  events: number;
+  /** Of them, those in state `unknown`: counted, never summed. */
+  unresolved: number;
+  /** `cardPurchaseSummary` of those events per unit, as the per-card view prints it. */
+  figures: CardPurchaseCardFigures[];
+  coverage: Pick<
+    CardPurchasePage["coverage"],
+    "scope" | "completeTransactionHistory" | "unrecognizedCurrentRows" | "refundsAllocated"
+  >;
 }
