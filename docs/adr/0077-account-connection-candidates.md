@@ -795,7 +795,8 @@ Synthetic data only, no production access.
   - The entity label rule on synthetic reviews: one review label names the
     collector's reference; two different labels name none; an
     evidence-ineligible review and a manual mapping's review name none; a
-    reference with its own review of that label carries its own.
+    reference with its own review of that label carries its own; 1,001
+    aggregator references are refused whole.
   - Without table statistics, the account list scans only the
     current-identity walk and its own CTEs, and reads every table after it by
     key.

@@ -336,4 +336,19 @@ describe("the entity label rule", () => {
     expect(shown.get("sa_a")!.connection).toMatchObject({ status: "confirmed", revision: 1 });
     expect(shown.get("sa_b")!.connection).toMatchObject({ status: "unresolved", revision: 2 });
   });
+
+  test("more aggregator references than the bound are refused whole, never cut", async () => {
+    const refs = Array.from({ length: 1_001 }, (_, i) =>
+      aggregator(`sa_${String(i)}`, "collector", `k${String(i)}`, `account_${String(i)}`),
+    );
+    await expect(
+      readAccountLabelDecorations(labelStore([], refs), refs.slice(0, 1)),
+    ).rejects.toThrow("connection_reference_limit");
+    // At the bound the read answers.
+    const decorations = await readAccountLabelDecorations(
+      labelStore([], refs.slice(0, 1_000)),
+      refs.slice(0, 1),
+    );
+    expect(decorations.size).toBe(0);
+  });
 });
