@@ -209,9 +209,12 @@ rebuilt database is never mistaken for the one whose cursors are still in flight
   checkpoint that records it are one D1 batch, so a statement error rolls both
   back and a checkpoint can never claim rows that are not there (G2-08).
 - **A re-sent chunk is decidable.** Every row carries a `row_digest`. The same
-  content is an ignored duplicate; different content for a row that already
-  exists raises `projection chunk conflict` in a trigger, which overrides the
-  statement's `OR IGNORE` (G2-07).
+  content is skipped by the insert's `ON CONFLICT(snapshot_id,scope_key) DO
+  NOTHING`; different content for a row that already exists raises
+  `projection chunk conflict` in a trigger that runs before that conflict
+  check (G2-07). Any other refusal (a CHECK, a NOT NULL, a second scope at a
+  written `row_seq`) raises and rolls the chunk back
+  ([READ database: publication](read-model-d1.md#publication)).
 - **Verify before sealing.** The written rows must match the build in count, in
   dense contract order and in per-row digest, or the build does not seal.
 - **Seal and publish in one batch.** The snapshot becomes `complete` and

@@ -165,6 +165,21 @@ A build writes rows while `building`, and:
   conflict` in a trigger (G2-07);
 - a writer holds a 60 s lease and a fence; a writer whose lease was taken can no
   longer write, seal or publish (G2-09);
+- the balance writer (`packages/storage-d1/src/read/writer.ts`) skips only a
+  row or input ref whose primary key is already written:
+  `ON CONFLICT(snapshot_id,scope_key) DO NOTHING` for
+  `current_balance_projection` and
+  `ON CONFLICT(snapshot_id,ref_kind,ref_id) DO NOTHING` for
+  `snapshot_input_refs`. A row that fails a CHECK or NOT NULL, or a new scope
+  at a `row_seq` already written, raises its constraint: the chunk and its
+  checkpoint roll back, the tick logs `balance_projection_failed` with the
+  error's class as its code, and the build stays `building` and unpublished at
+  the chunk after its checkpoint; the code names neither the row nor the
+  constraint. An input ref that fails a constraint fails the batch that starts
+  the build, so no build starts. Two starts that read the same next attempt
+  name one snapshot id; the second one's refs hit the primary key and are
+  skipped, and the writer lease decides which start builds it
+  (`test/read-writer.test.ts`, "only a re-sent key is skipped");
 - the seal and the pointer switch are one batch. The pointer moves only to a
   snapshot at least as current as the published one under the same epoch, so a
   build that finishes late is complete but not published (G2-10);

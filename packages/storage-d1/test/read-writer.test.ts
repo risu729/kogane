@@ -27,8 +27,10 @@ import {
   writeScopeRelations,
   writerFence,
   writtenRowsMatch,
+  type SnapshotInputRef,
   type SnapshotPlan,
 } from "../src/read/index.ts";
+import type { ProjectionRow } from "../../read-model/src/index.ts";
 import { CURRENT_REVISION_SNAPSHOT_SQL } from "../src/read/sql.ts";
 import { createSqliteReadDatabase } from "./sqlite-read-database.ts";
 import type { D1Like } from "../src/d1.ts";
@@ -267,6 +269,124 @@ describe("writing a build", () => {
     await expect(
       writeScopeRelations(db, snapshotId, [decisionRelation("decision-unknown")], context),
     ).rejects.toThrow(/input refs/u);
+  });
+});
+
+// The writer skips only a re-sent primary key (`ON CONFLICT … DO NOTHING`).
+// Under `INSERT OR IGNORE` SQLite also skipped a row that failed a CHECK, a
+// NOT NULL or another UNIQUE index, with `changes=0`: the chunk's checkpoint
+// moved past it and the build stopped later at `projection_rows_unverified`
+// without naming the row, and a refused input ref was left out of the snapshot.
+describe("only a re-sent key is skipped", () => {
+  async function building() {
+    const { db, sqlite, instanceId } = await claimed();
+    const { snapshotId } = (await beginSnapshot(db, instanceId, await plan(), NOW))!;
+    await claimWriterLease(db, snapshotId, "lease-1", 1_000, 60_000);
+    return { db, sqlite, instanceId, snapshotId };
+  }
+  const context = { lease: "lease-1", fence: 1, now: NOW, rowsWritten: 0 };
+  const stored = (sqlite: Database, snapshotId: string) =>
+    (
+      sqlite
+        .query(
+          "SELECT row_seq FROM current_balance_projection WHERE snapshot_id=? ORDER BY row_seq",
+        )
+        .all(snapshotId) as { row_seq: number }[]
+    ).map((row) => row.row_seq);
+  async function entry(row: ProjectionRow) {
+    return { row, digest: await rowDigest(row) };
+  }
+
+  test("a row that fails a CHECK raises and the checkpoint stays where it was", async () => {
+    const { db, sqlite, snapshotId } = await building();
+    // `exact` without its coefficient: the projection's own CHECK refuses it.
+    const chunk = [
+      ...(await buildRows(2)),
+      await entry(projectionRow(2, { quantityCoefficient: null })),
+    ];
+    await expect(writeRowChunk(db, snapshotId, chunk, context)).rejects.toThrow(
+      /CHECK constraint failed/u,
+    );
+    expect(await rowCheckpoint(db, snapshotId)).toBe(-1);
+    expect(stored(sqlite, snapshotId)).toEqual([]);
+  });
+
+  test("a row that fails a NOT NULL raises", async () => {
+    const { db, sqlite, snapshotId } = await building();
+    const refused = await entry(projectionRow(0, { unitRef: null as unknown as string }));
+    await expect(writeRowChunk(db, snapshotId, [refused], context)).rejects.toThrow(
+      /NOT NULL constraint failed/u,
+    );
+    expect(await rowCheckpoint(db, snapshotId)).toBe(-1);
+    expect(stored(sqlite, snapshotId)).toEqual([]);
+  });
+
+  test("a new scope at a written row_seq raises on the order index", async () => {
+    const { db, sqlite, snapshotId } = await building();
+    const rows = await buildRows(2);
+    expect(await writeRowChunk(db, snapshotId, rows, context)).toBe("written");
+    // Not a re-send: another scope key at position 1, then position 2.
+    const chunk = [
+      await entry(projectionRow(1, { scopeKey: "balsyntheticsetparseracct-otherbalanceJPY" })),
+      await entry(projectionRow(2)),
+    ];
+    await expect(
+      writeRowChunk(db, snapshotId, chunk, { ...context, rowsWritten: 2 }),
+    ).rejects.toThrow(
+      /UNIQUE constraint failed: current_balance_projection.snapshot_id, current_balance_projection.row_seq/u,
+    );
+    expect(await rowCheckpoint(db, snapshotId)).toBe(1);
+    expect(stored(sqlite, snapshotId)).toEqual([0, 1]);
+    // The re-sent first chunk, which hits both keys, is still skipped (G2-07).
+    expect(await writeRowChunk(db, snapshotId, rows, context)).toBe("written");
+    expect(
+      await writtenRowsMatch(
+        db,
+        snapshotId,
+        rows.map((row) => row.digest),
+      ),
+    ).toBe(true);
+  });
+
+  test("an input ref that fails a CHECK or NOT NULL starts no build", async () => {
+    const { db, sqlite, instanceId } = await claimed();
+    for (const refused of [
+      { kind: "decision_revision", id: "decision-2", digest: "not-a-digest" },
+      { kind: "decision_revision", id: "decision-2", digest: null as unknown as string },
+    ] as SnapshotInputRef[]) {
+      const snapshotPlan = await plan({ inputRefs: [await decisionRef("decision-1"), refused] });
+      await expect(beginSnapshot(db, instanceId, snapshotPlan, NOW)).rejects.toThrow(
+        /constraint failed/u,
+      );
+      expect(await snapshotForContent(db, snapshotPlan.contentKey)).toBeNull();
+    }
+    expect(
+      sqlite.query("SELECT count(*) AS n FROM snapshot_input_refs").get() as { n: number },
+    ).toEqual({ n: 0 });
+  });
+
+  test("two starts that race to the same snapshot id record each ref once", async () => {
+    const { db, sqlite, instanceId } = await claimed();
+    const snapshotPlan = await plan({
+      inputRefs: [await decisionRef("decision-1"), await decisionRef("decision-2")],
+    });
+    // Both read the same next attempt before either writes, so both name the
+    // same snapshot: the second row insert matches nothing and its refs hit
+    // the primary key. Which of them builds is the lease's to decide.
+    const [first, second] = await Promise.all([
+      beginSnapshot(db, instanceId, snapshotPlan, NOW),
+      beginSnapshot(db, instanceId, snapshotPlan, NOW),
+    ]);
+    expect(first).toEqual({ snapshotId: first!.snapshotId, attempt: 1 });
+    expect(second).toEqual(first);
+    expect(
+      sqlite
+        .query("SELECT ref_id FROM snapshot_input_refs WHERE snapshot_id=? ORDER BY ref_id")
+        .all(first!.snapshotId),
+    ).toEqual([{ ref_id: "decision-1" }, { ref_id: "decision-2" }]);
+    expect(
+      sqlite.query("SELECT count(*) AS n FROM balance_read_snapshots").get() as { n: number },
+    ).toEqual({ n: 1 });
   });
 });
 

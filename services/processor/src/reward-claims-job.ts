@@ -11,8 +11,11 @@
 //     `qualification` bucket so it stays visible and stays out of every
 //     consumable subtotal (docs/balance-presentation.md, addendum 08 §2).
 //   * The job is idempotent: `claim_digest` is a digest of the source fact
-//     reference and the promotion release, and the insert ignores a conflict.
-//     Re-running it, or running it while another sweep runs, adds nothing new.
+//     reference and the promotion release, and the insert skips a conflict on
+//     that column only (`ON CONFLICT(claim_digest) DO NOTHING`). Re-running it,
+//     or running it while another sweep runs, adds nothing new. Any other
+//     refusal of the schema raises instead of being skipped, and `promoted`
+//     counts the rows the inserts actually wrote.
 import { unitScopedEligibilitySql } from "../../../packages/parsers/src/snapshot-query.ts";
 import {
   JPOINT_PUBLISHED_COHORT_CTES,
@@ -229,11 +232,28 @@ export function rewardCandidateQuery(
 const CURSOR_SQL = `SELECT COALESCE(MAX(source_fact_id),0) AS cursor FROM reward_bucket_claims_v2
  WHERE source_fact_kind='balance' AND promotion_release=?1`;
 
-const INSERT_SQL = `INSERT OR IGNORE INTO reward_bucket_claims_v2
+/**
+ * One claim. The conflict target is `claim_digest`, the only key a retry or a
+ * concurrent sweep can hit (`id` is never supplied, and the table has no other
+ * unique key). Unlike `OR IGNORE`, which SQLite also applies to CHECK and NOT
+ * NULL failures, a claim the schema refuses for any other reason raises; it is
+ * never skipped with `changes=0`.
+ */
+export const REWARD_CLAIM_INSERT_SQL = `INSERT INTO reward_bucket_claims_v2
  (claim_digest,parse_run_id,source_fact_kind,source_fact_id,program_id,holding_ref,bucket_ref,
   bucket_kind,restriction_refs_json,unit_ref,quantity_coefficient,quantity_scale,quantity_status,
   observed_expiry_json,observed_at,promotion_release,recorded_at)
- VALUES(?1,?2,'balance',?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)`;
+ VALUES(?1,?2,'balance',?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
+ ON CONFLICT(claim_digest) DO NOTHING`;
+
+/**
+ * A claim batch the schema refused (a CHECK, NOT NULL, foreign key or trigger
+ * failure). The scheduler records the class name as the lane's failure code;
+ * the SQLite text stays in `cause` and is never logged.
+ */
+export class RewardClaimWriteRefused extends Error {}
+
+const CONSTRAINT_FAILURE = /constraint failed|SQLITE_CONSTRAINT/u;
 
 function matches(rule: PromotionRule, row: CandidateRow): boolean {
   if (rule.sourceId !== row.source_id || rule.metric !== row.metric) return false;
@@ -320,9 +340,20 @@ export async function rewardPromotionPending(db: Pick<RewardReadD1, "prepare">):
 
 export interface RewardPromotionResult {
   enabled: true;
+  /** Candidates the bounded read returned. */
   scanned: number;
+  /** Claims this sweep wrote: the inserts' own `changes`, not the attempts. */
   promoted: number;
+  /** Claims already present under the same `claim_digest` (a concurrent sweep wrote them). */
+  known: number;
+  /** Candidates no promotion rule maps, or whose instrument disagrees with the rule's unit. */
   skipped: number;
+  /**
+   * Candidates whose decimal row says `exact` without a coefficient and scale,
+   * which the claim table's quantity CHECK refuses. Nothing is written for
+   * them, so they stay candidates and are counted again on every sweep.
+   */
+  quantity_incomplete: number;
   cursor: number;
   release: string;
 }
@@ -350,8 +381,8 @@ export async function promoteRewardClaims(
     .all<CandidateRow>();
   const statements: D1PreparedStatement[] = [];
   let cursor = from;
-  let promoted = 0;
   let skipped = 0;
+  let quantityIncomplete = 0;
   for (const row of rows.results) {
     cursor = Math.max(cursor, row.id);
     const rule = PROMOTION_RULES.find((candidate) => matches(candidate, row));
@@ -376,11 +407,19 @@ export async function promoteRewardClaims(
           : null;
     const bucketKind: BucketKind = rule.bucketKind;
     const status = row.decimal_status ?? "unparsed";
+    // The claim's quantity CHECK, decided before the write: a candidate the
+    // schema would refuse is counted by name and passed, so it can neither
+    // abort the batch of every other candidate nor vanish uncounted. CORE's
+    // decimal CHECK forbids such a row, so a migrated store never yields one.
+    if (status === "exact" && (row.coefficient === null || row.scale === null)) {
+      quantityIncomplete += 1;
+      continue;
+    }
     const claimDigest = await digest(
       `balance:${row.id}:${rule.programId}:${row.source_account}:${release}`,
     );
     statements.push(
-      db.prepare(INSERT_SQL).bind(
+      db.prepare(REWARD_CLAIM_INSERT_SQL).bind(
         claimDigest,
         row.parse_run_id,
         row.id,
@@ -405,17 +444,31 @@ export async function promoteRewardClaims(
         now,
       ),
     );
-    promoted += 1;
   }
-  // D1 batches are bounded by the scan limit above; a conflict is ignored, so
-  // a retry after a partial failure re-inserts nothing.
-  for (let index = 0; index < statements.length; index += 50)
-    await db.batch(statements.slice(index, index + 50));
+  // D1 batches are bounded by the scan limit above; a `claim_digest` conflict
+  // is skipped, so a retry after a partial failure re-inserts nothing. Each
+  // statement writes one row or none, so a statement counts once whatever
+  // `changes` a trigger adds. A refused batch rolls back as a whole and fails
+  // the tick under a closed code; the batches before it stay written.
+  let promoted = 0;
+  for (let index = 0; index < statements.length; index += 50) {
+    let results: D1Result[];
+    try {
+      results = await db.batch(statements.slice(index, index + 50));
+    } catch (error) {
+      if (error instanceof Error && CONSTRAINT_FAILURE.test(error.message))
+        throw new RewardClaimWriteRefused("reward_claim_write_refused", { cause: error });
+      throw error;
+    }
+    promoted += results.filter((result) => result.meta.changes > 0).length;
+  }
   return {
     enabled: true,
     scanned: rows.results.length,
     promoted,
+    known: statements.length - promoted,
     skipped,
+    quantity_incomplete: quantityIncomplete,
     cursor,
     release,
   };

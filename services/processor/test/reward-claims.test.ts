@@ -3,13 +3,16 @@
 // published; no parser is invoked and no observation is rewritten.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
-import { runScheduled } from "../src/worker.ts";
+import { runScheduled, type ScheduledStages } from "../src/worker.ts";
 import {
   observedExpiry,
   promoteRewardClaims,
+  rewardCandidateQuery,
   rewardClaimsEnabled,
   rewardPromotionPending,
+  REWARD_CLAIM_INSERT_SQL,
   REWARD_PROMOTION_RELEASE,
+  RewardClaimWriteRefused,
 } from "../src/reward-claims-job.ts";
 import {
   applyMigration,
@@ -390,7 +393,9 @@ test("the scheduled lane never runs while the flag is off", async () => {
     "cursor",
     "enabled",
     "event",
+    "known",
     "promoted",
+    "quantity_incomplete",
     "release",
     "scanned",
     "skipped",
@@ -655,4 +660,205 @@ test("a lower-id observation published later is promoted without replaying compl
       .first<number>("n"),
   ).toBe(2);
   expect(await promoteRewardClaims(env.DB)).toMatchObject({ scanned: 0, promoted: 0 });
+});
+
+/**
+ * `env.DB` with the candidate read's rows passed through `rewrite`, and every
+ * write through `batch`: the promoter's view of a store this test cannot
+ * build, or of a race this test cannot time.
+ */
+function candidatesRewritten(
+  rewrite: (row: Record<string, unknown>) => Record<string, unknown>,
+  batch: (statements: D1PreparedStatement[]) => Promise<D1Result[]> = (statements) =>
+    env.DB.batch(statements),
+): D1Database {
+  const candidateSql = rewardCandidateQuery(REWARD_PROMOTION_RELEASE, 1).sql;
+  return {
+    prepare: (sql: string) => {
+      const statement = env.DB.prepare(sql);
+      if (sql !== candidateSql) return statement;
+      return {
+        bind: (...values: unknown[]) => {
+          const bound = statement.bind(...values);
+          return {
+            all: async () => {
+              const read = await bound.all<Record<string, unknown>>();
+              return { ...read, results: read.results.map(rewrite) };
+            },
+          };
+        },
+      };
+    },
+    batch,
+  } as unknown as D1Database;
+}
+
+const claimCount = async (release: string, ...ids: number[]): Promise<number | null> =>
+  await env.DB.prepare(
+    `SELECT count(*) AS n FROM reward_bucket_claims_v2 WHERE source_fact_kind='balance'
+     AND promotion_release=?1 AND source_fact_id IN (SELECT value FROM json_each(?2))`,
+  )
+    .bind(release, JSON.stringify(ids))
+    .first<number>("n");
+
+test("the claim insert skips only a claim_digest conflict; a CHECK or NOT NULL refusal raises", async () => {
+  const parse = await seedParse(960, "mobile-suica", "mobile-suica-sf-history", "sf-history");
+  const observation = await seedBalance(
+    parse,
+    "mobile-suica:sf",
+    "sf_balance_after_transaction",
+    4,
+    "JPY",
+    {},
+  );
+  await publishParse(env.DB, parse);
+  const release = "reward-promotion-insert-test";
+  const claim = (digest: string, coefficient: string | null, observedAt: string | null) =>
+    env.DB.prepare(REWARD_CLAIM_INSERT_SQL).bind(
+      digest,
+      parse,
+      observation,
+      "program:mobile-suica-sf",
+      "program:mobile-suica-sf:sf",
+      "program:mobile-suica-sf:mobile-suica:sf",
+      "regular",
+      "[]",
+      "JPY",
+      coefficient,
+      coefficient === null ? null : 0,
+      "exact",
+      null,
+      observedAt,
+      release,
+      "2026-09-09T00:00:00.000Z",
+    );
+  // D1's `changes` also counts the revision trigger's update, hence not `1`.
+  expect((await claim("insert-test-claim", "4", "2026-09-08").run()).meta.changes).toBeGreaterThan(
+    0,
+  );
+  // A retry or a concurrent sweep hits the conflict target and writes nothing.
+  expect((await claim("insert-test-claim", "4", "2026-09-08").run()).meta.changes).toBe(0);
+  // `exact` without a coefficient, and a claim without its time: `OR IGNORE`
+  // skipped both with `changes=0`.
+  await expect(claim("insert-test-check", null, "2026-09-08").run()).rejects.toThrow(
+    /CHECK constraint failed/u,
+  );
+  await expect(claim("insert-test-not-null", "4", null).run()).rejects.toThrow(
+    /NOT NULL constraint failed/u,
+  );
+  expect(await claimCount(release, observation)).toBe(1);
+  // The current release has not claimed it yet.
+  expect(await promoteRewardClaims(env.DB)).toMatchObject({ scanned: 1, promoted: 1 });
+});
+
+test("a candidate the quantity CHECK would refuse is counted by name and holds up no other claim", async () => {
+  const parse = await seedParse(961, "mobile-suica", "mobile-suica-sf-history", "sf-history");
+  const refused = await seedBalance(
+    parse,
+    "mobile-suica:sf",
+    "sf_balance_after_transaction",
+    5,
+    "JPY",
+    {},
+  );
+  const accepted = await seedBalance(
+    parse,
+    "mobile-suica:sf",
+    "sf_balance_after_transaction",
+    6,
+    "JPY",
+    {},
+  );
+  await publishParse(env.DB, parse);
+  // CORE's decimal CHECK forbids `exact` without a coefficient, so the row is
+  // changed at the read. Before, the sweep counted it as promoted while the
+  // insert skipped it, and the anti-join re-read it on every tick.
+  const db = candidatesRewritten((row) =>
+    row.id === refused ? { ...row, decimal_status: "exact", coefficient: null, scale: null } : row,
+  );
+  expect(await promoteRewardClaims(db)).toMatchObject({
+    scanned: 2,
+    promoted: 1,
+    known: 0,
+    skipped: 0,
+    quantity_incomplete: 1,
+  });
+  expect(await claimCount(REWARD_PROMOTION_RELEASE, accepted)).toBe(1);
+  expect(await claimCount(REWARD_PROMOTION_RELEASE, refused)).toBe(0);
+  // It stays a candidate, is counted again on the next sweep, and holds the
+  // READ capture at `reward_promotion_incomplete` while it does.
+  expect(await promoteRewardClaims(db)).toMatchObject({
+    scanned: 1,
+    promoted: 0,
+    known: 0,
+    quantity_incomplete: 1,
+  });
+  expect(await rewardPromotionPending(env.DB)).toBe(true);
+  // Read as stored, it is promoted.
+  expect(await promoteRewardClaims(env.DB)).toMatchObject({
+    scanned: 1,
+    promoted: 1,
+    quantity_incomplete: 0,
+  });
+  expect(await rewardPromotionPending(env.DB)).toBe(false);
+});
+
+test("promoted counts the claims written, not the inserts attempted", async () => {
+  const parse = await seedParse(962, "mobile-suica", "mobile-suica-sf-history", "sf-history");
+  const ids = [
+    await seedBalance(parse, "mobile-suica:sf", "sf_balance_after_transaction", 7, "JPY", {}),
+    await seedBalance(parse, "mobile-suica:sf", "sf_balance_after_transaction", 8, "JPY", {}),
+  ];
+  await publishParse(env.DB, parse);
+  // Another sweep commits the same claims between this sweep's read and its
+  // write. Before, this sweep still reported both as promoted.
+  const raced = candidatesRewritten(
+    (row) => row,
+    async (statements) => {
+      await env.DB.batch(statements);
+      return await env.DB.batch(statements);
+    },
+  );
+  expect(await promoteRewardClaims(raced)).toMatchObject({
+    scanned: 2,
+    promoted: 0,
+    known: 2,
+    quantity_incomplete: 0,
+  });
+  expect(await claimCount(REWARD_PROMOTION_RELEASE, ...ids)).toBe(2);
+  expect(await promoteRewardClaims(env.DB)).toMatchObject({ scanned: 0, promoted: 0 });
+});
+
+test("a claim the schema refuses at the write fails the tick under a closed code", async () => {
+  const parse = await seedParse(963, "mobile-suica", "mobile-suica-sf-history", "sf-history");
+  const unpublished = await seedParse(964, "mobile-suica", "mobile-suica-sf-history", "sf-history");
+  const observation = await seedBalance(
+    parse,
+    "mobile-suica:sf",
+    "sf_balance_after_transaction",
+    9,
+    "JPY",
+    {},
+  );
+  await publishParse(env.DB, parse);
+  // The publication moved between the read and the write: the claim's
+  // trigger refuses a parse run that is not published.
+  const db = candidatesRewritten((row) => ({ ...row, parse_run_id: unpublished }));
+  await expect(promoteRewardClaims(db)).rejects.toBeInstanceOf(RewardClaimWriteRefused);
+  await env.DB.prepare("DELETE FROM processor_lane_ticks WHERE lane='reward_claims_sweep'").run();
+  const lines: Record<string, unknown>[] = [];
+  await runScheduled(
+    { ...env, REWARD_CLAIMS_ENABLED: "true" } as unknown as Env,
+    { rewards: () => promoteRewardClaims(db) } as unknown as ScheduledStages,
+    (line) => lines.push(JSON.parse(line)),
+  );
+  // The code is the class name; the SQLite text is never logged or stored.
+  expect(lines).toEqual([{ event: "reward_claims_sweep_failed", code: "RewardClaimWriteRefused" }]);
+  expect(
+    await env.DB.prepare(
+      "SELECT outcome,error_code,counts_json FROM processor_lane_ticks WHERE lane='reward_claims_sweep'",
+    ).first(),
+  ).toEqual({ outcome: "failed", error_code: "RewardClaimWriteRefused", counts_json: "{}" });
+  expect(await claimCount(REWARD_PROMOTION_RELEASE, observation)).toBe(0);
+  expect(await promoteRewardClaims(env.DB)).toMatchObject({ scanned: 1, promoted: 1 });
 });

@@ -114,7 +114,9 @@ const RESULTS = {
     enabled: true,
     scanned: 4,
     promoted: 2,
+    known: 1,
     skipped: 1,
+    quantity_incomplete: 0,
     cursor: 812,
     release: "reward-promotion-v1",
   },
@@ -275,7 +277,13 @@ test("a tick records one row per recorded lane with exactly the counts its log l
   expect(counts["instrument_auto_adoption"]).toEqual(RESULTS.instrumentAutoAdoption);
   // Identifiers, cursors, release names and open-ended outcome keys stay in
   // the log line only.
-  expect(counts["reward_claims_sweep"]).toEqual({ scanned: 4, promoted: 2, skipped: 1 });
+  expect(counts["reward_claims_sweep"]).toEqual({
+    scanned: 4,
+    promoted: 2,
+    known: 1,
+    skipped: 1,
+    quantity_incomplete: 0,
+  });
   expect(counts["price_promotion"]).toEqual(RESULTS.prices);
   expect(counts["operation_dispatch"]).toEqual({
     claimed: 1,
