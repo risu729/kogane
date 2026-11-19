@@ -39,6 +39,7 @@ import {
   reviewUpcomingCardBills,
   tokyoDate,
 } from "../../../packages/application/src/query/card-upcoming-bills.ts";
+import { changesSinceGrantRefusal } from "../../../packages/application/src/query/changes-since.ts";
 import { changesSinceFor } from "./changes-since-api";
 import { readInstrumentCoverage } from "../../../packages/application/src/query/instrument-coverage.ts";
 import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
@@ -393,7 +394,10 @@ async function readTool(
       }
       case "kogane.changes.since": {
         // The route's own service: capability, perimeter and the request's
-        // bounds are decided there, once for both transports.
+        // bounds are decided there, once for both transports; the grant is
+        // decided before this body's form too.
+        const refused = changesSinceGrantRefusal(grant);
+        if (refused) return { status: ERROR_STATUS[refused.code], body: refused };
         const input = parseRequest(schemas[name], body ?? {});
         const outcome = await changesSinceFor(env, grant, input);
         return outcome.ok
