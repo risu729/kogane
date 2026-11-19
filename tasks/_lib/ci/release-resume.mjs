@@ -536,7 +536,7 @@ async function main() {
     for (const bundle of manifest.bundles) paths.add(bundle.directory);
     for (const artifact of manifest.cfArtifacts ?? []) {
       const worker = manifest.workers.find((w) => w.name === artifact.name);
-      paths.add(`${worker.path}/.cloudflare/output/v0`);
+      paths.add(`${worker.path}/.cloudflare/output/v1`);
     }
     for (const path of paths) copyPrepared(resolve(root, path), resolve(stage, "checkout", path));
     for (const path of [

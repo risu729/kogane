@@ -87,6 +87,7 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/reconstructed-state": ["kogane.reconstructed-state.read"],
   "/api/v2/audit": ["kogane.audit.search"],
   "/api/v2/reconciliation/card-statements-unmatched": ["kogane.card-settlements.unmatched"],
+  "/api/v2/reconciliation/card-debit-accounts": ["kogane.card-settlements.debit-accounts"],
   "/api/v2/reconciliation/card-settlements": ["kogane.card-settlements.read"],
   "/api/v2/reconciliation/card-settlements/ownership": ["kogane.card-settlements.ownership"],
   "/api/v2/reconciliation/card-settlements/statements": ["kogane.card-settlements.statements"],

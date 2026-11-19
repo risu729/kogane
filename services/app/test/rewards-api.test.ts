@@ -547,6 +547,134 @@ describe("reward reads", () => {
     ]);
   });
 
+  it("starts a goal search on today's Asia/Tokyo day, and judges no other zone's offer against it", async () => {
+    // Synthetic offers on units no other test converts, each searched by name
+    // so the fixture offer and the others never enter its answer.
+    const out = "points:synthetic-tokyo-out";
+    const tokyoPeriod = (start: string) =>
+      JSON.stringify({
+        kind: "period",
+        start,
+        end: "2027-12-31",
+        endExclusive: false,
+        zone: "Asia/Tokyo",
+        granularity: "day",
+      });
+    const tokyoDeadline = (value: string) =>
+      JSON.stringify({ kind: "local-date", value, zone: "Asia/Tokyo", basis: "provider" });
+    const offer = (id: string, valid: string, deadline: string) => ({
+      ...OFFER,
+      offer_id: id,
+      from_unit_ref: "points:synthetic-tokyo-in",
+      to_unit_ref: out,
+      fixed_fees_json: "[]",
+      valid_time_json: valid,
+      application_deadline_json: deadline,
+    });
+    await storeOffers([
+      // Valid from the first Tokyo day of December.
+      offer("offer:synthetic-tokyo-opens", tokyoPeriod("2026-12-02"), tokyoDeadline("2027-12-31")),
+      // Applications close at the end of the Tokyo day of 1 December.
+      offer("offer:synthetic-tokyo-closes", tokyoPeriod("2026-01-01"), tokyoDeadline("2026-12-01")),
+      // Another zone's calendar: whether its days cover a Tokyo day is not
+      // established by the stored offer.
+      offer(
+        "offer:synthetic-other-zone",
+        JSON.stringify({
+          kind: "period",
+          start: "2026-01-01",
+          end: "2027-12-31",
+          endExclusive: false,
+          zone: "Europe/London",
+          granularity: "day",
+        }),
+        JSON.stringify({
+          kind: "local-date",
+          value: "2027-12-31",
+          zone: "Europe/London",
+          basis: "provider",
+        }),
+      ),
+    ]);
+    type Search = {
+      paths: { hops: { offerRef: string; appliedOn: string; creditExpectedOn: string }[] }[];
+      rejected: { offerRef: string; reasonCode: string }[];
+      clock: unknown;
+    };
+    // 01:00 JST on 2 December is 16:00 UTC on 1 December; 14:59:59 UTC is one
+    // second before Tokyo midnight, still the Tokyo day of 1 December.
+    const afterTokyoMidnight = "2026-12-01T16:00:00.000Z";
+    const beforeTokyoMidnight = "2026-12-01T14:59:59.000Z";
+    const tokyoDay: Record<string, string> = {
+      [afterTokyoMidnight]: "2026-12-02",
+      [beforeTokyoMidnight]: "2026-12-01",
+    };
+    const search = async (id: string, at: string) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(at));
+      try {
+        const response = await get(
+          `/api/v2/rewards/offers/simulate?offer=${id}&goal=${out}&quantity=2000`,
+        );
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as Search;
+        // Every answer names the day and zone it was searched from.
+        expect(body.clock).toEqual({
+          kind: "local-date",
+          value: tokyoDay[at],
+          zone: "Asia/Tokyo",
+          basis: "derived",
+        });
+        return { paths: body.paths, rejected: body.rejected };
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+    // At 01:00 JST the search's day is the Tokyo one, so the opening offer
+    // applies and the closing one is shut.
+    expect(await search("offer:synthetic-tokyo-opens", afterTokyoMidnight)).toEqual({
+      paths: [
+        expect.objectContaining({
+          hops: [
+            expect.objectContaining({
+              offerRef: "offer:synthetic-tokyo-opens@v1",
+              appliedOn: "2026-12-02",
+              creditExpectedOn: "2026-12-05",
+            }),
+          ],
+        }),
+      ],
+      rejected: [],
+    });
+    expect(await search("offer:synthetic-tokyo-closes", afterTokyoMidnight)).toEqual({
+      paths: [],
+      rejected: [
+        { offerRef: "offer:synthetic-tokyo-closes@v1", reasonCode: "application_deadline_passed" },
+      ],
+    });
+    // One second before Tokyo midnight both answers are the other way round.
+    expect(await search("offer:synthetic-tokyo-opens", beforeTokyoMidnight)).toEqual({
+      paths: [],
+      rejected: [
+        { offerRef: "offer:synthetic-tokyo-opens@v1", reasonCode: "offer_not_valid_at_clock" },
+      ],
+    });
+    expect(
+      (await search("offer:synthetic-tokyo-closes", beforeTokyoMidnight)).paths.map((path) =>
+        path.hops.map((hop) => hop.appliedOn),
+      ),
+    ).toEqual([["2026-12-01"]]);
+    // A London-day offer is never compared with the Tokyo date as if the
+    // zones agreed: it stays a review reason at any hour.
+    for (const at of [afterTokyoMidnight, beforeTokyoMidnight])
+      expect(await search("offer:synthetic-other-zone", at)).toEqual({
+        paths: [],
+        rejected: [
+          { offerRef: "offer:synthetic-other-zone@v1", reasonCode: "needs_rule_verification" },
+        ],
+      });
+  });
+
   // Last in the file: it stores 200 more offers, and conversion_offers is
   // append-only, so nothing after it may assume the single fixture offer.
   it("refuses a goal search over an offer set larger than its bound instead of answering from part of it", async () => {
