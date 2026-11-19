@@ -12,7 +12,11 @@ import {
   interpretationContext,
   organizationSql,
 } from "../../../read-model/src/index";
-import { connectionAccountLabel, readAccountConnections } from "./account-connections.ts";
+import {
+  decoratedAccountLabel,
+  type LabelledReference,
+  readAccountLabelDecorations,
+} from "./account-connections.ts";
 import {
   preferredInstrumentNames,
   type PreferredInstrumentName,
@@ -95,10 +99,7 @@ export async function observationOrganizations(
   if (unique.size > 5501) throw new Error("organization_reference_limit");
   const output = new Map([...unique.keys()].map((key) => [key, unavailable()]));
   const refs = [...unique.values()];
-  const accountRefs = new Map<
-    string,
-    { referenceId: string; source: string; producer: string; sourceAccount: string }
-  >();
+  const accountRefs = new Map<string, LabelledReference>();
   const sql = organizationSql(mode);
   for (let start = 0; start < refs.length; start += 500) {
     const rows = await reads.all<OrganizationRow>(sql, [
@@ -107,9 +108,11 @@ export async function observationOrganizations(
     for (const row of rows) {
       accountRefs.set(row.account_reference, {
         referenceId: row.account_reference,
+        targetId: row.account_target,
         source: row.source,
         producer: row.producer,
         sourceAccount: row.source_account,
+        method: row.account_method,
       });
       const key = organizationKey({ kind: row.kind, id: row.observation_id });
       let organization = output.get(key);
@@ -193,21 +196,24 @@ export async function observationOrganizations(
       names.set(id, name);
     }
   }
-  const connections = accountRefs.size
-    ? await readAccountConnections(reads, [...accountRefs.values()])
+  // The shared label step (ADR 0077 amendment 2026-11-19): a reference's own
+  // reviewed connection, then its entity's.
+  const decorations = accountRefs.size
+    ? await readAccountLabelDecorations(reads, [...accountRefs.values()])
     : new Map();
   for (const organization of output.values()) {
     if (organization.account) {
       const account = organization.account;
-      const connection = connections.get(account.referenceId);
-      if (connection) {
-        account.connection = connection;
-        account.label = connectionAccountLabel(
+      const decoration = decorations.get(account.referenceId);
+      if (decoration) {
+        const shown = decoratedAccountLabel(
           account.label,
           account.method,
           accountRefs.get(account.referenceId)!.source,
-          connection,
+          decoration,
         );
+        account.label = shown.label;
+        if (shown.connection) account.connection = shown.connection;
       }
     }
     for (const instrument of organization.instruments) {

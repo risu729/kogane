@@ -350,8 +350,10 @@ MoneyForward identity is derived from the importer producer's reference for
 that identity (`accountEntityId`), so one identity value, v1 or v2, maps to
 one entity whichever producer read it. An operator's re-mapping of the
 importer's source account is not followed, and account connection reviews,
-keyed by producer, do not carry over. A v1 and a v2 identity differ, and so do
-their entities.
+keyed by producer, do not carry over. The label a review gives does carry
+over: it names the whole entity
+([identity](identity.md#account-labels-and-the-account-list)). A v1 and a v2
+identity differ, and so do their entities.
 
 ## One-time identity-value rewrite
 

@@ -383,6 +383,82 @@ candidates sharing one status); the history is per source account, not per
 pair, and records knowledge order, not effective dates; no validity period; no
 leaf-account equivalence and no dedup of aggregator against direct rows.
 
+## Account labels and the account list
+
+**One label per entity.** A connection review is keyed by producer, so only
+the reference read under the review's producer matches it. The collector's
+reference of a MoneyForward identity maps to the same account entity as the
+importer's (the identity-value rewrite,
+[identity operations](identity-operations.md#one-time-identity-value-rewrite)).
+So the one step that labels account rows applies the entity label rule
+([ADR 0077, amendment 2026-11-19](adr/0077-account-connection-candidates.md#amendment-2026-11-19-one-label-per-account-entity-and-the-account-list)).
+That step is `readAccountLabelDecorations` and `decoratedAccountLabel` in
+`packages/application/src/query/account-connections.ts`. It is used by the
+organization of observation and balance rows, the `accounts` page and the
+filter options. The label of a reference is chosen in this order:
+
+1. A manual mapping keeps its own label.
+2. Otherwise, if the entity's automatic `moneyforward-me` references show
+   exactly one eligible connection label, every automatic reference of that
+   entity shows it, as `<review label>（個別口座未確定）`, with that
+   connection.
+3. Otherwise, the reference's own connection label.
+4. Otherwise, the mapping label.
+
+Two different labels on one entity name none at entity level. The entity's
+aggregator references are one keyed range of `source_accounts`, bounded to
+1,000 and refused whole past it.
+
+**Account list.** `GET /api/identity/account-list?source=&kind=&offset=` and
+`kogane.identity.read` with `collection: "account-list"`
+([agent API](agent-api.md#ui-read-pages)) read one function, `readAccountList`
+(`packages/application/src/query/account-list.ts`). The identity page shows it
+as the `口座一覧` table. It has one row per account entity that current
+published identity observations reach:
+
+```json
+{
+  "account": "account_…",
+  "label": "<institution>（MoneyForward連携）（個別口座未確定）",
+  "kind": "aggregator-mirror",
+  "sources": ["moneyforward-me"],
+  "mapping": "provider-local",
+  "connection": "unresolved",
+  "lastObservedAt": "2026-11-18T21:15:00Z"
+}
+```
+
+- `account` is the `targetId` that balance and activity rows carry.
+- `kind` is the entity's role.
+- `mapping` is the current mapping status of its references, or `mixed`.
+- `connection` is `confirmed`, `unresolved`, `evidence-ineligible`, `mixed`,
+  `not-reviewed` (an aggregator entity whose institution no review records)
+  or null.
+- `lastObservedAt` is the newest capture time of its current published
+  observations, to the second, in UTC.
+- The filters are `source` and `kind`. There are at most 50 rows a page, and
+  a page closes early to stay within 8,000 bytes (about 26 to 30 rows).
+  `coverage.nextOffset` and `coverage.total` page on.
+- The read makes the `accounts` collection's walk over the current identity
+  observations, then keyed reads. At most 5,000 references.
+
+What the label can say today, from stored data only:
+
+- **Direct accounts**: the identity rule's label, which names the
+  institution and, for most sources, the account type (`みずほ銀行 普通預金`).
+  No masked account number is added. Several references of one rule label
+  (for example Vpass cards, `Vpassカード明細`) are told apart only by their
+  ids. The card product name is captured, but no parser emits it.
+- **MoneyForward accounts with a review**: the institution that the detail
+  page's heading named, from the verifier's closed list, and never a leaf
+  account. With no review the label stays `MoneyForward連携口座`, and the
+  list says `not-reviewed`.
+- No account type, product or masked number of a MoneyForward connection is
+  stored. The detail parser keeps neither the heading nor the `種類` and
+  `番号` cells, so none is shown.
+- **Unrecognized references** keep the source's fallback label, with
+  `mapping: unresolved`.
+
 ## Acceptance gates
 
 - All merged source patterns exercised with synthetic tests; all seven SBI

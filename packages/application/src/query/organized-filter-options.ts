@@ -2,7 +2,7 @@
 // `services/app/src/organized-filter-options.ts` (ADR 0081 point 2) so
 // `/api/filter-options` and `kogane.store.read` share it.
 import type { FilterOptions } from "../../../observation-shared/src/api-contract";
-import { connectionAccountLabel, readAccountConnections } from "./account-connections.ts";
+import { decoratedAccountLabel, readAccountLabelDecorations } from "./account-connections.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 const KINDS = { transactions: "transaction", balances: "balance", positions: "position" } as const;
 
@@ -40,13 +40,15 @@ export async function organizedFilterOptions(
   // Also bound distinct mapping references, not just raw filter groups. A raw
   // scope may span multiple producers/targets; never label a truncated subset.
   if (rows.length > 5000) throw new Error("filter_organization_budget");
-  const connections = await readAccountConnections(
+  const decorations = await readAccountLabelDecorations(
     reads,
     rows.map((row) => ({
       referenceId: row.reference_id,
+      targetId: row.target_id,
       source: row.source_id,
       producer: row.producer_id,
       sourceAccount: row.source_account,
+      method: row.method,
     })),
   );
   const names = new Map<string, { labels: Set<string>; targets: Set<string> }>();
@@ -54,12 +56,8 @@ export async function organizedFilterOptions(
     const key = JSON.stringify([row.source_id, row.source_account]);
     const group = names.get(key) ?? { labels: new Set<string>(), targets: new Set<string>() };
     group.labels.add(
-      connectionAccountLabel(
-        row.label,
-        row.method,
-        row.source_id,
-        connections.get(row.reference_id),
-      ),
+      decoratedAccountLabel(row.label, row.method, row.source_id, decorations.get(row.reference_id))
+        .label,
     );
     group.targets.add(row.target_id);
     names.set(key, group);

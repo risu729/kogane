@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import { useViewState } from "../view-state.tsx";
 import {
+  useIdentityAccountList,
   useIdentityAccounts,
   useIdentityCoverage,
   useIdentityInstruments,
@@ -9,6 +10,8 @@ import {
 } from "../identity-api.ts";
 import { EmptyState, Kv, KvRow, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
 import {
+  ACCOUNT_LIST_PAGE_SIZE,
+  type AccountListConnection,
   IDENTITY_PAGE_LIMIT,
   type IdentityStatus,
 } from "../../../../packages/observation-shared/src/identity-contract.ts";
@@ -24,12 +27,14 @@ export function IdentitiesPage(): ReactNode {
   const [tab, setTab] = useViewState("identity.tab");
   const [offset, setOffset] = useViewState("identity.offset");
   const [coverageOffset, setCoverageOffset] = useViewState("identity.coverageOffset");
+  const [listOffset, setListOffset] = useViewState("identity.listOffset");
   const coverage = useIdentityCoverage(source, coverageOffset);
   const connections = useIdentityConnections();
   const reset = (value: string): void => {
     setSource(value);
     setOffset(0);
     setCoverageOffset(0);
+    setListOffset(0);
   };
   return (
     <>
@@ -167,6 +172,7 @@ export function IdentitiesPage(): ReactNode {
         </QueryBoundary>
       </Panel>
       <InstrumentCoverage source={source} />
+      <AccountList source={source} offset={listOffset} change={setListOffset} />
       <Panel
         id="identity-list"
         title={tab === "accounts" ? "整理済みの口座" : "整理済みの通貨・銘柄"}
@@ -416,6 +422,101 @@ function Instruments({
         </>
       )}
     </QueryBoundary>
+  );
+}
+const CONNECTION_LABELS: Record<AccountListConnection, string> = {
+  confirmed: "同じ接続先を確認済み",
+  unresolved: "対応未確認",
+  "evidence-ineligible": "根拠が集計対象外",
+  mixed: "複数の状態",
+  "not-reviewed": "連携先の記録なし",
+};
+/**
+ * One line per account entity, labelled as its balance and activity rows are
+ * (ADR 0077 amendment 2026-11-19). The same answer `kogane.identity.read`
+ * gives with `collection: "account-list"`.
+ */
+function AccountList({
+  source,
+  offset,
+  change,
+}: {
+  source: string;
+  offset: number;
+  change: (n: number) => void;
+}): ReactNode {
+  const query = useIdentityAccountList(source, offset);
+  return (
+    <Panel
+      id="identity-account-list"
+      title="口座一覧"
+      note="現在有効な保存記録が対応する口座ごとに1行です。集約サービスの連携名は連携単位の名称で、個別口座は確定していません。"
+    >
+      <QueryBoundary query={query} label="口座一覧" coverageNotice={false}>
+        {(data) =>
+          data.rows.length === 0 ? (
+            <div className="panel-body">
+              <EmptyState>条件に一致する口座がありません。</EmptyState>
+            </div>
+          ) : (
+            <>
+              <div className="table-scroll" role="region" aria-label="口座一覧の表" tabIndex={0}>
+                <table className="identity-coverage-table">
+                  <caption>
+                    口座ごとの名称、区分、取得元、対応状況、取得経路の対応と最終取得日時（全
+                    {data.coverage.total}件）
+                  </caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">口座</th>
+                      <th scope="col">区分</th>
+                      <th scope="col">取得元</th>
+                      <th scope="col">対応状況</th>
+                      <th scope="col">取得経路の対応</th>
+                      <th scope="col">最終取得</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.rows.map((row) => (
+                      <tr key={row.account}>
+                        <td>{row.label}</td>
+                        <td>{row.kind}</td>
+                        <td>{row.sources.join(", ")}</td>
+                        <td>
+                          {row.mapping === "mixed" ? (
+                            "複数の状態"
+                          ) : (
+                            <IdentityStatusBadge status={row.mapping} />
+                          )}
+                        </td>
+                        <td>{row.connection === null ? "—" : CONNECTION_LABELS[row.connection]}</td>
+                        <td>{row.lastObservedAt ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <Pagination
+                label="口座一覧のページ"
+                status={<>{offset + 1}件目から</>}
+                previous={{
+                  label: `前の${String(ACCOUNT_LIST_PAGE_SIZE)}件まで`,
+                  disabled: offset === 0,
+                  onClick: () => change(Math.max(0, offset - ACCOUNT_LIST_PAGE_SIZE)),
+                }}
+                next={{
+                  label: "次のページ",
+                  disabled: data.coverage.nextOffset === null,
+                  onClick: () => {
+                    if (data.coverage.nextOffset !== null) change(data.coverage.nextOffset);
+                  },
+                }}
+              />
+            </>
+          )
+        }
+      </QueryBoundary>
+    </Panel>
   );
 }
 /** The shared pagination row, for lists paged by offset in memory. */

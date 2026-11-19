@@ -88,6 +88,11 @@ describe.if(runnable)("instrument counts on the identity page", () => {
         if (url.pathname === "/api/identity/connections") return Response.json({ connections: [] });
         if (url.pathname === "/api/identity/accounts")
           return Response.json({ rows: [], coverage: PAGE });
+        if (url.pathname === "/api/identity/account-list")
+          return Response.json({
+            rows: [],
+            coverage: { limit: 50, total: 0, nextOffset: null, truncated: false },
+          });
         if (url.pathname.startsWith("/api/"))
           return Response.json({ error: "not_found" }, { status: 404 });
         const file = Bun.file(join(client, url.pathname === "/" ? "/index.html" : url.pathname));

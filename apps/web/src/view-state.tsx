@@ -38,6 +38,7 @@ interface ViewState {
   "identity.tab": "accounts" | "instruments";
   "identity.offset": number;
   "identity.coverageOffset": number;
+  "identity.listOffset": number;
   "purchases.period": string;
   "purchases.draft": string;
   "purchases.offset": number;
@@ -69,6 +70,7 @@ export function ViewStateProvider({ children }: { children: ReactNode }): ReactN
     "identity.tab": "accounts",
     "identity.offset": 0,
     "identity.coverageOffset": 0,
+    "identity.listOffset": 0,
     "purchases.period": "",
     "purchases.draft": "",
     "purchases.offset": 0,

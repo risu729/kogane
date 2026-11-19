@@ -6,8 +6,10 @@
   [second](#amendment-2026-11-08-a-pair-plan-pins-every-reference-of-the-pair)
   is accepted (#1128); the
   [third](#amendment-2026-11-08-the-correction-history-of-a-source-account)
-  is accepted (#1118)
-- Date: 2026-11-06; amended 2026-11-08
+  is accepted (#1118); the
+  [2026-11-19 amendment](#amendment-2026-11-19-one-label-per-account-entity-and-the-account-list)
+  is proposed and needs the owner's approval before merge (decision D3)
+- Date: 2026-11-06; amended 2026-11-08 and 2026-11-19
 - Issue: part of #545
 - Carried by: `packages/domain/src/account-candidates.ts` (policy
   `account-candidates-v1`), `packages/read-model/src/account-candidates.ts`,
@@ -607,3 +609,209 @@ Synthetic data only, no production access.
   and its withdrawal in order, plans nothing and passes the accessibility
   audit; a refused history (`budget_exceeded`) shows the refusal alone, with
   no list, no "no history" line and no footnote.
+
+## Amendment 2026-11-19: one label per account entity, and the account list
+
+- Status: proposed. Merging needs the owner's approval (decision D3 of the
+  2026-11-19 MCP proposal v2). It changes a published tool schema:
+  `kogane.identity.read` gains `collection: "account-list"` and `kind`. The
+  shared label rule also changes the account labels that
+  `kogane.balances.read`, `kogane.observations.list`, `kogane.identity.read`,
+  `kogane.store.read` (filter options) and the screens show. It adds no
+  catalogue operation.
+- Date: 2026-11-19
+- Issue: [#1414](https://github.com/risu729/kogane/issues/1414) point 3. The
+  owner could not tell the aggregator's accounts apart. Part of #545.
+- Carried by:
+  - `packages/application/src/query/account-connections.ts`
+    (`ENTITY_AGGREGATOR_REFERENCES_SQL`, `readEntityConnectionLabels`,
+    `readAccountLabelDecorations`, `decoratedAccountLabel`), and its callers
+    `observation-organization.ts`, `identity-pages.ts` and
+    `organized-filter-options.ts`;
+  - `packages/application/src/query/account-list.ts` (`ACCOUNT_LIST_SQL`,
+    `readAccountList`);
+  - the `account-list` case of `services/app/src/identity-api.ts`
+    (`GET /api/identity/account-list`);
+  - the `kogane.identity.read` schema in `services/app/src/page-read-tools.ts`;
+  - `packages/observation-shared/src/identity-contract.ts` (the wire check);
+  - the `口座一覧` panel of `apps/web/src/pages/Identities.tsx`.
+
+### Context
+
+The owner asked an agent which MoneyForward account is the SMBC one, and the
+tools could not answer it. Every MoneyForward row of `kogane.balances.read`
+read `MoneyForward連携口座` with an opaque id.
+
+The stored data does say more, for some connections. A connection review
+([account connections](../account-connections.md), migration 0023) records
+the institution that the MoneyForward detail page's heading names. The
+verifier takes it from a closed list of four observed headings. The
+organization step shows it as
+`<institution>（MoneyForward連携）（個別口座未確定）`.
+
+But reviews are keyed by producer, and `readAccountConnections` matches a
+reference only under the review's own producer. Since the identity-value
+rewrite (ADR 0030's amendment, migration 0063), the collector's reference of
+a MoneyForward identity maps to the same account entity as the importer's.
+Only the importer's reference carries the review. So the collector's rows,
+which are the current ones, show the plain label.
+
+The identity page's `accounts` collection has one line per source reference.
+It carries the full reference and grows with every producer, so it does not
+answer "which accounts do I have".
+
+What is stored per MoneyForward account, checked on main `c9cd0c9`:
+
+- The reference is a digest of the account and service ids (ADR 0029).
+- The review row holds the heading-derived label, the related source, the
+  status and the pinned artifacts.
+- The detail parser (`moneyforward-detail-balances`, ADR 0103) publishes the
+  bank page's aggregate and the point row. It keeps neither the heading nor
+  the rows' `種類` and `番号` cells.
+
+So no account type, product or masked number of a MoneyForward connection is
+stored. A connection is never a leaf account.
+
+### Options considered
+
+1. **A new catalogue operation `kogane.accounts.list`.** Rejected by the
+   owner's proposal v2. A new view of the existing identity read gives the
+   same answer without a new operation, and ADR 0081 already asks for the
+   route and the tool to be one function.
+2. **Match reviews to references by identity value across producers inside
+   `readAccountConnections`.** Rejected. The account candidates read already
+   treats two producers' reviews of one identity value as one connection.
+   But a reference's mapping can be corrected onto another entity, and the
+   label should follow the entity the rows are attributed to, not the raw
+   value.
+3. **Label by entity (chosen).** Suppose an entity's automatic aggregator
+   references show one eligible connection label. Then the rows of every
+   automatic reference of that entity show it, whichever producer read them.
+4. **Guess the institution from the MoneyForward connection's rows or
+   amounts.** Rejected by ADR 0004, and by this ADR's own rule that a label
+   is never evidence. Where no review names the connection, the answer says
+   so.
+
+### Decision
+
+- **Entity label rule.** It lives in the one step that these share: the
+  organization of observation rows (`kogane.balances.read`,
+  `kogane.observations.list`, the screens), the identity `accounts` page and
+  the filter options (`readAccountLabelDecorations` and
+  `decoratedAccountLabel`). A reference's label is chosen in this order:
+  1. A manual mapping keeps its own label. A person's decision wins, as
+     before.
+  2. Otherwise, the entity's automatic `moneyforward-me` references may show
+     exactly one eligible connection label. If they do, every automatic
+     reference of the entity shows it, with the `（個別口座未確定）` suffix,
+     and carries that connection as its `connection`.
+  3. Otherwise, the reference's own connection label, as before.
+  4. Otherwise, its mapping label.
+
+  More about the rule:
+  - An evidence-ineligible review names no label.
+  - If one entity has two different labels, the entity level names none, and
+    each reference keeps its own.
+  - The entity's aggregator references are read with one keyed range of
+    `source_accounts` (`source_id='moneyforward-me'`) and keyed mapping
+    lookups. The read is bounded to 1,000 rows and refused whole past it.
+  - The read runs only when an organized reference is an automatic
+    `moneyforward-me` one.
+  - Nothing is written. No mapping, row or total moves.
+
+- **Account list.** `GET /api/identity/account-list?source=&kind=&offset=`
+  and `kogane.identity.read` with `collection: "account-list"` call one
+  function, `readAccountList`. It has one row per account entity that current
+  published identity observations reach:
+  `{account, label, kind, sources[], mapping, connection, lastObservedAt}`.
+  - `account` is the entity id, the `targetId` of the rows that use it.
+  - `label` is the label the rule above gives its rows: a manual label of one
+    of its references first, else the newest automatic mapping's decorated
+    label.
+  - `kind` is the entity's role, as the identity rule recorded it.
+  - `sources` lists the sources of its current references, sorted.
+  - `mapping` is their current mapping status, or `mixed`.
+  - `connection` is one of:
+    - the one state of the connections its references show (`confirmed`,
+      `unresolved` or `evidence-ineligible`);
+    - `mixed`, if they show several states;
+    - `not-reviewed`, for an aggregator entity that no current review names
+      (its institution is not recorded);
+    - null, for an entity that no connection concerns.
+  - `lastObservedAt` is the newest capture time of the artifacts that its
+    current published observations came from, to the second, in UTC.
+  - The filters are `source` (any of its references) and `kind`.
+  - Rows are sorted by first source, then label, then id.
+  - Paging is by offset, with at most 50 rows a page. A page closes early so
+    the answer stays within 8,000 bytes of JSON. `coverage.nextOffset`
+    continues, and `coverage.total` counts the filtered entities.
+  - A row too large for a page of its own is refused, never skipped.
+  - Latest mappings only. `identityRead` is refused here, and so is `kind` on
+    the other collections (`invalid_query`, on the route and the tool).
+  - Cost: it makes the `accounts` collection's walk over
+    `current_identity_observations`. The walk is reduced to distinct
+    (reference, parse run) pairs before each parse run and its artifact are
+    read by primary key. Source accounts, mappings and accounts are read by
+    key. At most 5,000 references; past that the read is refused whole, as a
+    store failure (`503`).
+- The identity page shows the list as a `口座一覧` table above the
+  per-reference lists.
+
+### Consequences
+
+- The MoneyForward entities with a review read their reviewed institution
+  on their collector rows too. This holds in balances, activity, the filter
+  options and the identity page. In the filter options, the importer and
+  collector references of one raw scope no longer disagree, so the scope is
+  no longer `organization_ambiguous`.
+- Entities without a review keep `MoneyForward連携口座`, and the list says
+  `not-reviewed` for them.
+- The label names only the connection's institution. No account type,
+  product or masked number of a MoneyForward account is stored, so none is
+  shown.
+- A direct account's label is its rule label, as before. An unrecognized
+  reference keeps the source's fallback label, with `mapping: unresolved`.
+- Rows of synthetic data measured about 250 to 300 bytes each, so a page
+  holds about 26 to 30 entities within the budget.
+- This is a published tool schema change (a new collection value and
+  `kind`) and a change to labels that other tools publish. Both need the
+  owner's approval.
+
+### Verification
+
+Synthetic data only, no production access.
+
+- `packages/application/test/account-list.test.ts`:
+  - Without table statistics, the entity label read is one keyed range of
+    `sqlite_autoindex_source_accounts_2 (source_id=?)` with keyed mapping
+    lookups.
+  - Without table statistics, the account list scans only the
+    current-identity walk and its own CTEs, and reads every table after it by
+    key.
+  - On synthetic rows of 1, 40 and 120 entities, every page is within 8,000
+    bytes and 50 rows, and every entity is listed once.
+  - The first page for 40 accounts is under 8 KB.
+  - Two references of one entity are one row, with `mixed`.
+  - An oversized row, and a store past the reference bound, are refused.
+- `services/app/test/account-list-api.test.ts` on workerd, over the identity
+  pipeline:
+  - a direct bank;
+  - a reviewed MoneyForward identity read by two producers: one row, with
+    the reviewed label and `unresolved`;
+  - an unreviewed one (`not-reviewed`);
+  - an unresolved reference;
+  - the filters, the paging and the route's refusals;
+  - a balance row of the collector's reference, the `accounts` page and the
+    filter options all show the entity's label;
+  - a manual label wins, on its own rows and on the entity's line;
+  - the byte budget.
+- `services/app/test/page-read-identity.test.ts`: the tool answers the new
+  route as the route does, with its filters, and refuses what the route
+  refuses.
+- `services/app/test/ui-mcp-parity.test.ts` maps the route to
+  `kogane.identity.read`.
+- `services/app/test/account-connection-api.test.ts` (unchanged) still
+  passes: one reviewed reference's label, the ineligible case and a manual
+  label.
+- `apps/web/test/identities.browser.test.ts`: the `口座一覧` table shows the
+  served rows.

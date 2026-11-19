@@ -76,7 +76,7 @@ export async function listAccountConnections(sql: SqlExecutor): Promise<AccountC
 /** Exact reference IDs determine which direct accounts a retained proof covers. */
 export async function readAccountConnections(
   sql: SqlExecutor,
-  refs: { referenceId: string; source: string; producer: string; sourceAccount: string }[],
+  refs: readonly { referenceId: string; source: string; producer: string; sourceAccount: string }[],
 ): Promise<Map<string, AccountConnection>> {
   if (refs.length > 5501) throw new Error("connection_reference_limit");
   const parsed = (await reviews(sql)).map((row) => ({
@@ -126,4 +126,153 @@ export function connectionAccountLabel(
     connection.status !== "evidence-ineligible"
     ? `${connection.label}（個別口座未確定）`
     : currentLabel;
+}
+
+/** The source whose references a connection review can label (`connectionAccountLabel`). */
+const AGGREGATOR_SOURCE = "moneyforward-me";
+/** Aggregator source accounts one entity-label read may return (the candidate read's bound). */
+const ENTITY_REFERENCE_BOUND = 1_000;
+/**
+ * Every aggregator source account with its current mapping: one keyed range of
+ * `UNIQUE(source_id,producer_id,reference_json)` and, per row, the mapping by
+ * `UNIQUE(source_account_id,revision)`. One row past the bound is read, so a
+ * larger store is refused, never cut (ADR 0077 amendment 2026-11-19).
+ */
+export const ENTITY_AGGREGATOR_REFERENCES_SQL = `SELECT s.id AS referenceId,s.producer_id AS producer,
+ json_extract(s.reference_json,'$[0]') AS sourceAccount,m.account_id AS targetId,m.method
+FROM source_accounts s
+JOIN account_mappings m ON m.source_account_id=s.id
+ AND m.revision=(SELECT max(n.revision) FROM account_mappings n WHERE n.source_account_id=s.id)
+WHERE s.source_id='${AGGREGATOR_SOURCE}' ORDER BY s.id LIMIT ${String(ENTITY_REFERENCE_BOUND + 1)}`;
+
+/** The connection label one entity shows, with the connection that names it. */
+export interface EntityConnectionLabel {
+  label: string;
+  connection: AccountConnection;
+}
+
+/**
+ * The entity label rule (ADR 0077 amendment 2026-11-19): an account entity
+ * any of whose automatic aggregator references carries an eligible
+ * connection label shows that label, with its `（個別口座未確定）` suffix,
+ * whichever of its references a row was read through. A collector-era
+ * reference of a MoneyForward identity shares its entity with the
+ * importer-era reference the connection review was recorded under (reviews
+ * are keyed by producer), so both read the reviewed label. Two different
+ * labels on one entity name no label (`null`): each reference keeps its own.
+ * A manual mapping is never relabelled.
+ */
+export async function readEntityConnectionLabels(
+  sql: SqlExecutor,
+  targetIds: ReadonlySet<string>,
+): Promise<Map<string, EntityConnectionLabel | null>> {
+  const result = new Map<string, EntityConnectionLabel | null>();
+  if (targetIds.size === 0) return result;
+  const rows = await sql.all<{
+    referenceId: string;
+    producer: string;
+    sourceAccount: string;
+    targetId: string;
+    method: "rule" | "manual";
+  }>(ENTITY_AGGREGATOR_REFERENCES_SQL, []);
+  if (rows.length > ENTITY_REFERENCE_BOUND) throw new Error("connection_reference_limit");
+  const refs = rows.filter((row) => row.method !== "manual" && targetIds.has(row.targetId));
+  if (refs.length === 0) return result;
+  const connections = await readAccountConnections(
+    sql,
+    refs.map((row) => ({
+      referenceId: row.referenceId,
+      source: AGGREGATOR_SOURCE,
+      producer: row.producer,
+      sourceAccount: row.sourceAccount,
+    })),
+  );
+  const labels = new Map<string, Map<string, AccountConnection>>();
+  for (const row of refs) {
+    const connection = connections.get(row.referenceId);
+    if (!connection || connection.status === "evidence-ineligible") continue;
+    const label = connectionAccountLabel("", "rule", AGGREGATOR_SOURCE, connection);
+    const entity = labels.get(row.targetId) ?? new Map<string, AccountConnection>();
+    if (!entity.has(label)) entity.set(label, connection);
+    labels.set(row.targetId, entity);
+  }
+  for (const [targetId, entity] of labels) {
+    const [only] = [...entity];
+    result.set(targetId, entity.size === 1 ? { label: only![0], connection: only![1] } : null);
+  }
+  return result;
+}
+
+/** One organized reference whose display label is decided here. */
+export interface LabelledReference {
+  referenceId: string;
+  targetId: string;
+  source: string;
+  producer: string;
+  sourceAccount: string;
+  method: "rule" | "manual";
+}
+
+/** What may decorate a reference's label: its own reviewed connection, and its entity's label. */
+export interface AccountLabelDecoration {
+  own?: AccountConnection;
+  entity?: EntityConnectionLabel;
+}
+
+/** A reference's display label and the connection it shows, if any. */
+export interface OrganizedAccountLabel {
+  label: string;
+  connection?: AccountConnection;
+}
+
+/**
+ * The decorations of each reference, the one read the organization of
+ * observation rows, the identity pages and the filter options share: the
+ * reference's own reviewed connection, and the entity label of every entity
+ * one of the given automatic aggregator references names. Display only: no
+ * mapping, row or total moves.
+ */
+export async function readAccountLabelDecorations(
+  sql: SqlExecutor,
+  refs: readonly LabelledReference[],
+): Promise<Map<string, AccountLabelDecoration>> {
+  const own = await readAccountConnections(sql, refs);
+  const targets = new Set(
+    refs
+      .filter((ref) => ref.method !== "manual" && ref.source === AGGREGATOR_SOURCE)
+      .map((ref) => ref.targetId),
+  );
+  const entities = await readEntityConnectionLabels(sql, targets);
+  const result = new Map<string, AccountLabelDecoration>();
+  for (const ref of refs) {
+    const connection = own.get(ref.referenceId);
+    const entity = entities.get(ref.targetId) ?? undefined;
+    if (connection || entity)
+      result.set(ref.referenceId, {
+        ...(connection ? { own: connection } : {}),
+        ...(entity ? { entity } : {}),
+      });
+  }
+  return result;
+}
+
+/**
+ * The label one row of a reference shows: a manual mapping's own label; else
+ * its entity's connection label (the entity label rule); else its own
+ * connection's (`connectionAccountLabel`); else its mapping label. The
+ * connection shown is the one that named the label, or the reference's own.
+ */
+export function decoratedAccountLabel(
+  label: string,
+  method: "rule" | "manual",
+  source: string,
+  decoration: AccountLabelDecoration | undefined,
+): OrganizedAccountLabel {
+  if (method !== "manual" && decoration?.entity)
+    return { label: decoration.entity.label, connection: decoration.entity.connection };
+  const own = decoration?.own;
+  return {
+    label: connectionAccountLabel(label, method, source, own),
+    ...(own ? { connection: own } : {}),
+  };
 }

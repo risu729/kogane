@@ -78,12 +78,13 @@ beforeAll(async () => {
 });
 
 describe("kogane.identity.read", () => {
-  it("answers the four identity routes", () => {
+  it("answers the five identity routes", () => {
     expect(PAGE_READ_ROUTES[TOOL]).toEqual([
       "/api/identity/connections",
       "/api/identity/accounts",
       "/api/identity/instruments",
       "/api/identity/coverage",
+      "/api/identity/account-list",
     ]);
   });
 
@@ -125,6 +126,12 @@ describe("kogane.identity.read", () => {
         "/api/identity/coverage?identityRead=as-recorded",
         { collection: "coverage", identityRead: "as-recorded" },
       ],
+      ["/api/identity/account-list", { collection: "account-list" }],
+      [
+        "/api/identity/account-list?source=other-test&kind=cash&offset=0",
+        { collection: "account-list", source: "other-test", kind: "cash", offset: 0 },
+      ],
+      ["/api/identity/account-list?kind=absent", { collection: "account-list", kind: "absent" }],
     ] as const) {
       const served = await page.expectSameAnswer(query, TOOL, args);
       expect(served.status, query).toBe(200);
@@ -133,6 +140,19 @@ describe("kogane.identity.read", () => {
     const accounts = await page.mcp(TOOL, { collection: "accounts" });
     expect(accounts.body.data.rows).toMatchObject([
       { revision: 2, status: "identified", label: "Updated account" },
+    ]);
+    // One line per entity; the manual label speaks for it.
+    const list = await page.mcp(TOOL, { collection: "account-list" });
+    expect(list.body.data.rows).toEqual([
+      {
+        account: "account",
+        label: "Updated account",
+        kind: "cash",
+        sources: ["other-test"],
+        mapping: "identified",
+        connection: null,
+        lastObservedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/u),
+      },
     ]);
     expect(await tableCounts()).toEqual(before);
   });
@@ -152,6 +172,12 @@ describe("kogane.identity.read", () => {
         { collection: "connections", source: "other-test" },
       ],
       ["/api/identity/connections?offset=0", { collection: "connections", offset: 0 }],
+      // The account list reads latest mappings only; `kind` is its own filter.
+      [
+        "/api/identity/account-list?identityRead=latest",
+        { collection: "account-list", identityRead: "latest" },
+      ],
+      ["/api/identity/accounts?kind=cash", { collection: "accounts", kind: "cash" }],
     ] as const) {
       const refused = await page.expectSameAnswer(query, TOOL, args);
       expect(refused.status, query).toBe(400);

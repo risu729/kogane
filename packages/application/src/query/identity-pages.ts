@@ -17,9 +17,9 @@ import {
 } from "../../../read-model/src/index.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import {
-  connectionAccountLabel,
+  decoratedAccountLabel,
   listAccountConnections,
-  readAccountConnections,
+  readAccountLabelDecorations,
 } from "./account-connections.ts";
 import { preferredInstrumentNames } from "./preferred-instrument-names.ts";
 
@@ -148,7 +148,14 @@ function origin(row: Record<string, unknown>): Record<string, unknown> {
   return { ...rest, origin: { kind, id: Number(id) } as IdentityOrigin };
 }
 /** The identity pages, each `GET /api/identity/<collection>`. */
-export const IDENTITY_COLLECTIONS = ["connections", "accounts", "instruments", "coverage"] as const;
+/** `account-list` is one line per account entity (`./account-list.ts`, ADR 0077 amendment 2026-11-19). */
+export const IDENTITY_COLLECTIONS = [
+  "connections",
+  "accounts",
+  "instruments",
+  "coverage",
+  "account-list",
+] as const;
 export type IdentityCollection = (typeof IDENTITY_COLLECTIONS)[number];
 
 /** The query of one non-connection page, already checked by its route. */
@@ -166,7 +173,7 @@ export async function readIdentityConnections(sql: SqlExecutor) {
 /** One page of accounts, instruments or coverage, with its interpretation context. */
 export async function readIdentityPage(
   sql: SqlExecutor,
-  collection: Exclude<IdentityCollection, "connections">,
+  collection: Exclude<IdentityCollection, "connections" | "account-list">,
   { source, offset, mode }: IdentityPageQuery,
 ): Promise<Record<string, unknown>> {
   const bindings = source === null ? [offset] : [source, offset];
@@ -182,25 +189,28 @@ export async function readIdentityPage(
     for (const row of results) row.label = names.get(String(row.referenceId))?.label ?? row.label;
   }
   if (collection === "accounts") {
-    const connections = await readAccountConnections(
+    const decorations = await readAccountLabelDecorations(
       sql,
       results.map((row) => ({
         referenceId: String(row.referenceId),
+        targetId: String(row.targetId),
         source: String(row.source),
         producer: String(row.producer),
         sourceAccount: String(row.sourceAccount),
+        method: row.method as "rule" | "manual",
       })),
     );
     for (const row of results) {
-      const connection = connections.get(String(row.referenceId));
-      if (connection) {
-        row.connection = connection;
-        row.label = connectionAccountLabel(
+      const decoration = decorations.get(String(row.referenceId));
+      if (decoration) {
+        const shown = decoratedAccountLabel(
           String(row.label),
           row.method as "rule" | "manual",
           String(row.source),
-          connection,
+          decoration,
         );
+        row.label = shown.label;
+        if (shown.connection) row.connection = shown.connection;
       }
       delete row.producer;
       delete row.sourceAccount;

@@ -121,6 +121,16 @@ reference cap can be stricter when many references share one raw scope. An exces
 fails explicitly instead of naming a partial subset. This does not alter the
 underlying observation query or persist renamed accounts.
 
+Since the
+[2026-11-19 amendment of ADR 0077](adr/0077-account-connection-candidates.md#amendment-2026-11-19-one-label-per-account-entity-and-the-account-list),
+a review's label names the whole account entity, not only the reference
+under the review's producer. Reviews are keyed by producer, and the
+collector's reference of a MoneyForward identity shares its entity with the
+importer's. So a review recorded under the importer also labels the
+collector's rows, in lists, balances, filters and the identity page's
+`口座一覧`. A manual label still wins. Two different review labels on one
+entity name none at entity level.
+
 The first production dry-run found four reviewed connections, one confirmed
 connection correspondence covering 16 exact direct references, three unresolved
 connections, and zero proven leaf-account equivalences. Publication and protected

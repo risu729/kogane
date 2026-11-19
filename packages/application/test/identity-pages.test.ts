@@ -31,7 +31,10 @@ describe("identity pages", () => {
       connections: [],
     });
   });
-  const collections = IDENTITY_COLLECTIONS.filter((name) => name !== "connections");
+  const collections = IDENTITY_COLLECTIONS.filter(
+    (name): name is Exclude<typeof name, "connections" | "account-list"> =>
+      name !== "connections" && name !== "account-list",
+  );
   for (const collection of collections)
     for (const mode of ["latest", "as-recorded"] as const)
       for (const source of [null, "sony-bank"])

@@ -96,6 +96,7 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/identity/accounts": ["kogane.identity.read"],
   "/api/identity/instruments": ["kogane.identity.read"],
   "/api/identity/coverage": ["kogane.identity.read"],
+  "/api/identity/account-list": ["kogane.identity.read"],
   "/api/meta": ["kogane.store.read"],
   "/api/overview": ["kogane.store.read"],
   "/api/filter-options": ["kogane.store.read"],

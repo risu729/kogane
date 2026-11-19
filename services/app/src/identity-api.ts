@@ -6,6 +6,7 @@ import {
   readIdentityConnections,
   readIdentityPage,
 } from "../../../packages/application/src/query/identity-pages.ts";
+import { readAccountList } from "../../../packages/application/src/query/account-list.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 
 /** Call only after the existing Access authentication gate. No mutations. */
@@ -39,9 +40,15 @@ export async function readIdentityCollection(
     if ([...params.keys()].length > 0) throw new HttpError(400, "invalid_query");
     return readIdentityConnections(d1Executor(env.DB));
   }
+  // The account list reads latest mappings only and takes `kind`; the other
+  // pages take `identityRead`.
+  const keys =
+    collection === "account-list"
+      ? ["source", "kind", "offset"]
+      : ["source", "offset", "identityRead"];
   for (const [key, value] of params) {
     if (
-      !["source", "offset", "identityRead"].includes(key) ||
+      !keys.includes(key) ||
       params.getAll(key).length !== 1 ||
       !value ||
       value.length > 128 ||
@@ -49,14 +56,26 @@ export async function readIdentityCollection(
     )
       throw new HttpError(400, "invalid_query");
   }
-  const mode = identityReadMode({ searchParams: params });
+  const mode = collection === "account-list" ? null : identityReadMode({ searchParams: params });
   const text = params.get("offset") ?? "0";
   const offset = Number(text);
   if (!/^(0|[1-9]\d*)$/u.test(text) || !Number.isSafeInteger(offset))
     throw new HttpError(400, "invalid_offset");
-  return readIdentityPage(d1Executor(env.DB), collection, {
-    source: params.get("source"),
-    offset,
-    mode,
-  });
+  if (mode === null)
+    return {
+      ...(await readAccountList(d1Executor(env.DB), {
+        source: params.get("source"),
+        kind: params.get("kind"),
+        offset,
+      })),
+    };
+  return readIdentityPage(
+    d1Executor(env.DB),
+    collection as Exclude<IdentityCollection, "connections" | "account-list">,
+    {
+      source: params.get("source"),
+      offset,
+      mode,
+    },
+  );
 }

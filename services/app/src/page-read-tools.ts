@@ -97,12 +97,13 @@ function tool<Schema extends z.ZodType>(definition: PageReadTool<Schema>) {
 
 const TOOLS = {
   "kogane.identity.read": tool({
-    title: "Identity pages: connections, account and instrument mappings, coverage",
+    title: "Identity pages: connections, account and instrument mappings, coverage, account list",
     description:
-      "One page of the owner UI's identity read: `connections` (aggregator connections and the source accounts they hold), `accounts` or `instruments` (each source reference with its current mapping, label, status, reason, revision and first observation), or `coverage` (per source, how many eligible observations are organized and how they resolved). The same answer as GET /api/identity/<collection>, under records.read and a whole-store read grant. `identityRead` is `latest` (default) or `as-recorded`; `connections` takes no other argument. Read-only.",
+      "One page of the owner UI's identity read: `connections` (aggregator connections and the source accounts they hold), `accounts` or `instruments` (each source reference with its current mapping, label, status, reason, revision and first observation), `coverage` (per source, how many eligible observations are organized and how they resolved), or `account-list` (one compact line per account entity: `account` id, the label its balance and activity rows show, `kind`, `sources`, `mapping` status, `connection` state with `not-reviewed` for an aggregator account whose institution no review records, and `lastObservedAt`; filters `source` and `kind`; at most 50 a page and never more than 8,000 bytes, `coverage.nextOffset` pages on). The same answer as GET /api/identity/<collection>, under records.read and a whole-store read grant. `identityRead` is `latest` (default) or `as-recorded`, and `account-list` takes none (latest mappings); `kind` is the account list's only; `connections` takes no other argument. Read-only.",
     schema: z.strictObject({
       collection: z.enum(IDENTITY_COLLECTIONS),
       source: ROUTE_TEXT.optional(),
+      kind: ROUTE_TEXT.optional(),
       offset: OFFSET.optional(),
       identityRead: IDENTITY_READ.optional(),
     }),
