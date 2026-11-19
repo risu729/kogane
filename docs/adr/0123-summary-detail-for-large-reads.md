@@ -430,7 +430,10 @@ At 30 sources with two jobs and four rules of 20 revisions each it is about
      counts.
    - Bounded lists: `notSuccessful`, `notOk` and `unitUpdates` each hold the
      five lines with the newest runs (`OVERVIEW_SUMMARY_LINES`), newest
-     first. The lines left out are counted, never dropped silently:
+     first; lines whose newest run is the same run (one fetch run's
+     datasets) are ordered by source and dataset, so which of them is listed
+     does not depend on the order the reader returned them in. The lines
+     left out are counted, never dropped silently:
      `fetchRuns.notSuccessfulOmitted` and `parseRuns.notOkOmitted` hold one
      `{ status, lines, runs }` per status with lines left out (empty when
      none is), and `unitUpdatesOmitted` is `{ lines, runs }`, present
@@ -548,8 +551,14 @@ Measured as the bytes of the MCP result's structured content
   runs, and a summary that leaves lines out without counting them, lists a
   sixth, or counts lines out of a list that is not full fails the validator;
   unit updates collapse per source and dataset and stay absent (with their
-  count) when the page has none; a status outside the closed sets is
-  refused; each shape passes the validator only under its own detail, and a
+  count) when the page has none; on 1,500 seeded random full answers (no
+  lines, under five, exactly five, six and more per list, codes repeated
+  across statuses, datasets sharing a fetch run) the summary validates, lists
+  the five lines a reference ordering picks, its listed and left-out lines and
+  runs add up to the full answer's per status, each line's shown and counted
+  codes are its runs' distinct codes, each status's codes are exactly its
+  runs', and the unit updates in another order give the same summary; a
+  status outside the closed sets is refused; each shape passes the validator only under its own detail, and a
   summary whose lines do not count their status's runs, repeat a status, put
   `success` on a not-successful line or name an unknown status fails it.
 - `packages/collection/test/maintenance-summary.test.ts`: a job keeps its

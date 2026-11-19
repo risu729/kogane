@@ -65,13 +65,20 @@ function failureCodes(rows: readonly OverviewPage["parseRuns"][number][]): strin
  * The `OVERVIEW_SUMMARY_LINES` lines with the newest runs, newest first, and
  * per status the lines left out with their runs: a list grows with the
  * number of failing sources or parsers, so it is bounded, and what it leaves
- * out is counted, never dropped silently (INV05).
+ * out is counted, never dropped silently (INV05). Lines whose newest runs
+ * are the same run (one fetch run's datasets) are ordered by `key`, so which
+ * of them is listed never depends on the order the reader returned them in.
  */
 function capped<Line extends { status: string; runs: number }>(
   lines: readonly Line[],
   newestId: (line: Line) => number,
+  key: (line: Line) => string,
 ): { listed: Line[]; omitted: OverviewOmitted<Line["status"]>[] } {
-  const ordered = [...lines].sort((left, right) => newestId(right) - newestId(left));
+  const ordered = [...lines].sort(
+    (left, right) =>
+      newestId(right) - newestId(left) ||
+      (key(left) < key(right) ? -1 : key(left) > key(right) ? 1 : 0),
+  );
   const omitted: OverviewOmitted<Line["status"]>[] = [];
   for (const line of ordered.slice(OVERVIEW_SUMMARY_LINES)) {
     const entry = omitted.find((candidate) => candidate.status === line.status);
@@ -125,6 +132,7 @@ export function overviewSummary(page: OverviewPage): OverviewSummary {
       };
     }),
     (line) => line.newest.id,
+    (line) => `${line.sourceId} ${line.status}`,
   );
   const notOk = capped(
     groups(
@@ -144,6 +152,7 @@ export function overviewSummary(page: OverviewPage): OverviewSummary {
       };
     }),
     (line) => line.newest.id,
+    (line) => `${line.parser} ${line.status}`,
   );
   const unitUpdates =
     page.unitUpdates === undefined
@@ -171,6 +180,7 @@ export function overviewSummary(page: OverviewPage): OverviewSummary {
             };
           }),
           (entry) => entry.line.newest.fetchRunId,
+          (entry) => `${entry.line.sourceId} ${entry.line.dataset}`,
         );
   return {
     detail: "summary",

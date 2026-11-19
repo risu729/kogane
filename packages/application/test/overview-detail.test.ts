@@ -448,3 +448,208 @@ describe("overviewSummary", () => {
     expect(validApiResponse("/api/overview", unknown, "summary")).toBe(false);
   });
 });
+
+/** A seeded generator, so a failing case repeats. */
+function random(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+/** Each stored error and the failure code the summary must keep for it. */
+const ERRORS: [string | null, string | null][] = [
+  [null, null],
+  ["parser_rejected", "parser_rejected"],
+  ["raw_object_missing", "raw_object_missing"],
+  ["parse_interrupted", "parse_interrupted"],
+  ["manifest-shape-invalid", "manifest_shape_invalid"],
+  ["persistence_failed", "persistence_failed"],
+  ["Synthetic provider text", "unclassified"],
+];
+
+/**
+ * A random full overview: up to nine sources and eleven parsers (so a list
+ * is empty, under five, exactly five, six or past it), any closed status on
+ * any run, any error on any parse run (so a code repeats across statuses),
+ * and unit updates whose datasets share a fetch run.
+ */
+function randomPage(next: () => number): {
+  full: OverviewPage;
+  expected: Map<number, string | null>;
+} {
+  const pick = <T>(choices: readonly T[]): T => choices[Math.floor(next() * choices.length)]!;
+  const sources = Array.from({ length: Math.floor(next() * 10) }, (_, index) => `source-${index}`);
+  const parsers = Array.from(
+    { length: 1 + Math.floor(next() * 11) },
+    (_, index) => `parser-${index}`,
+  );
+  const expected = new Map<number, string | null>();
+  const ids = (count: number) =>
+    [...new Set(Array.from({ length: count }, () => 1 + Math.floor(next() * 10_000)))].sort(
+      (left, right) => right - left,
+    );
+  const fetchRuns = sources.length
+    ? ids(Math.floor(next() * 60)).map((id) =>
+        fetchRun(id, pick(sources), pick(["success", "partial", "partial"]), next() < 0.8),
+      )
+    : [];
+  const parseRuns = ids(Math.floor(next() * 80)).map((id) => {
+    const [error, code] = pick(ERRORS);
+    expected.set(id, code);
+    return parseRun(id, pick(parsers), pick(["ok", "pending", "error", "error"]), { error });
+  });
+  const unitUpdates = sources.length
+    ? ids(Math.floor(next() * 12)).flatMap((fetchRunId) => {
+        const source = pick(sources);
+        // One fetch run can update several datasets: equal run ids across lines.
+        return pick([
+          ["statement"],
+          ["statement", "balance"],
+          ["balance", "card", "statement"],
+        ]).map((dataset) => ({
+          source_id: source,
+          dataset,
+          fetch_run_id: fetchRunId,
+          fetched_at: "2099-01-05T21:02:00.000Z",
+          updated_units: 1 + Math.floor(next() * 3),
+          stale_units: Math.floor(next() * 3),
+        }));
+      })
+    : [];
+  return {
+    full: page({
+      sources: sources.map((id) => ({
+        id,
+        provider: "Synthetic Provider",
+        ingestion: "collector-r2",
+        artifact_count: Math.floor(next() * 4),
+      })),
+      fetchRuns,
+      parseRuns,
+      ...(unitUpdates.length ? { unitUpdates } : {}),
+    }),
+    expected,
+  };
+}
+
+/** Lines per key of `rows`, each with its runs and newest id, newest first, ties by key. */
+function referenceLines<Row>(
+  rows: readonly Row[],
+  key: (row: Row) => string,
+  id: (row: Row) => number,
+): { key: string; runs: number; rows: Row[] }[] {
+  const lines = new Map<string, { key: string; runs: number; newest: number; rows: Row[] }>();
+  for (const row of rows) {
+    const line = lines.get(key(row)) ?? { key: key(row), runs: 0, newest: 0, rows: [] };
+    line.runs += 1;
+    line.newest = Math.max(line.newest, id(row));
+    line.rows.push(row);
+    lines.set(key(row), line);
+  }
+  return [...lines.values()].sort(
+    (left, right) => right.newest - left.newest || (left.key < right.key ? -1 : 1),
+  );
+}
+
+describe("overviewSummary on random full answers", () => {
+  test("lists or counts every line and run, keeps every code, and always validates", () => {
+    // How many lines each list had in full: every edge must come up.
+    const seen = new Set<number>();
+    for (let seed = 1; seed <= 1_500; seed += 1) {
+      const next = random(seed);
+      const { full, expected } = randomPage(next);
+      const summary = overviewSummary(full);
+      const label = `seed ${seed}`;
+      expect(validApiResponse("/api/overview", summary, "summary"), label).toBe(true);
+      const fetchLines = referenceLines(
+        full.fetchRuns.filter((run) => run.status !== "success"),
+        (run) => `${run.source_id} ${run.status}`,
+        (run) => run.id,
+      );
+      expect(
+        summary.fetchRuns.notSuccessful.map((line) => `${line.sourceId} ${line.status}`),
+        label,
+      ).toEqual(fetchLines.slice(0, 5).map((line) => line.key));
+      const parseLines = referenceLines(
+        full.parseRuns.filter((run) => run.status !== "ok"),
+        (run) => `${run.parser_name} ${run.status}`,
+        (run) => run.id,
+      );
+      expect(
+        summary.parseRuns.notOk.map((line) => `${line.parser} ${line.status}`),
+        label,
+      ).toEqual(parseLines.slice(0, 5).map((line) => line.key));
+      for (const lines of [fetchLines.length, parseLines.length]) seen.add(Math.min(lines, 7));
+      // Listed and left-out lines and runs add up to the full answer's, per status.
+      for (const [lines, listed, omitted] of [
+        [fetchLines, summary.fetchRuns.notSuccessful, summary.fetchRuns.notSuccessfulOmitted],
+        [parseLines, summary.parseRuns.notOk, summary.parseRuns.notOkOmitted],
+      ] as const) {
+        for (const status of new Set(lines.map((line) => line.key.split(" ")[1]))) {
+          const all = lines.filter((line) => line.key.endsWith(` ${status}`));
+          const shown = (listed as readonly { status: string; runs: number }[]).filter(
+            (line) => line.status === status,
+          );
+          const left = (omitted as readonly { status: string; lines: number; runs: number }[]).find(
+            (entry) => entry.status === status,
+          ) ?? { lines: 0, runs: 0 };
+          expect(shown.length + left.lines, label).toBe(all.length);
+          expect(shown.reduce((sum, line) => sum + line.runs, 0) + left.runs, label).toBe(
+            all.reduce((sum, line) => sum + line.runs, 0),
+          );
+        }
+      }
+      // A line's codes, shown and counted, are its runs' distinct codes, newest first.
+      const codesOf = (rows: readonly { id: number }[]) => [
+        ...new Set(
+          [...rows]
+            .sort((left, right) => right.id - left.id)
+            .map((row) => expected.get(row.id))
+            .filter((code): code is string => code !== null && code !== undefined),
+        ),
+      ];
+      for (const line of summary.parseRuns.notOk) {
+        const codes = codesOf(
+          parseLines.find((entry) => entry.key === `${line.parser} ${line.status}`)!.rows,
+        );
+        expect(line.failureCodes, label).toEqual(codes.slice(0, 3));
+        expect(line.failureCodes.length + line.moreFailureCodes, label).toBe(codes.length);
+      }
+      // A status's codes are exactly the union of its runs' codes.
+      for (const line of summary.parseRuns.byStatus)
+        expect(line.failureCodes, label).toEqual(
+          codesOf(full.parseRuns.filter((run) => run.status === line.status)),
+        );
+      if (full.unitUpdates === undefined) {
+        expect(summary, label).not.toHaveProperty("unitUpdatesOmitted");
+        continue;
+      }
+      const unitLines = referenceLines(
+        full.unitUpdates,
+        (row) => `${row.source_id} ${row.dataset}`,
+        (row) => row.fetch_run_id,
+      );
+      expect(
+        summary.unitUpdates!.map((line) => `${line.sourceId} ${line.dataset}`),
+        label,
+      ).toEqual(unitLines.slice(0, 5).map((line) => line.key));
+      expect(summary.unitUpdatesOmitted, label).toEqual({
+        lines: unitLines.slice(5).length,
+        runs: unitLines.slice(5).reduce((sum, line) => sum + line.runs, 0),
+      });
+      // The reader orders unit updates by run alone: the rows of one run in
+      // another order are the same summary.
+      expect(
+        overviewSummary({ ...full, unitUpdates: [...full.unitUpdates].reverse() }),
+        label,
+      ).toEqual(summary);
+    }
+    // No lines, under five, exactly five, six, and more than six.
+    expect([...seen].sort()).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+});
