@@ -9,9 +9,9 @@ import { fileURLToPath } from "node:url";
 const fail = (code) => {
   throw new Error(`pinned_chrome_${code}`);
 };
-const pinnedVersion = "157.0.8103.78-1";
+const pinnedVersion = "158.0.8127.36-1";
 const downloadUrl =
-  "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_157.0.8103.78-1_amd64.deb";
+  "https://dl.google.com/linux/chrome/deb/pool/main/g/google-chrome-stable/google-chrome-stable_158.0.8127.36-1_amd64.deb";
 const runtimePrefix = "opt/google/chrome/";
 const skippedLinks = new Map([
   ["etc/cron.daily/google-chrome", "/opt/google/chrome/cron/google-chrome"],

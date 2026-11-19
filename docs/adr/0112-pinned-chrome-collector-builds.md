@@ -1,6 +1,6 @@
 # ADR 0112: Pin the branded Stable Chrome payload in collector images
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-12
 - Tracking: [issue 1326](https://github.com/risu729/kogane/issues/1326)
 
@@ -35,7 +35,7 @@ session logic and delayed attachment behavior must stay unchanged.
 ## Decision
 
 `tasks/_lib/pinned-chrome/manifest.json` pins Google Chrome Stable
-`157.0.8103.78-1`, amd64, its exact official HTTPS URL, length and SHA-256. The
+(first `157.0.8103.78-1`; the manifest names the current version), amd64, its exact official HTTPS URL, length and SHA-256. The
 committed public provenance snapshot carries Google's key, signed Release and
 Packages index. The signature was verified under Google's [documented primary
 fingerprint](https://www.google.com/linuxrepositories/), and the Release's index
@@ -98,8 +98,8 @@ actual image verification. An `ldd` pass or a version string alone is insufficie
 
 The exact package also carries optional Qt5/Qt6 toolkit shims. Qt is absent from
 its dependency declaration, whereas GTK3 or GTK4 is required. The [version-matched
-Linux UI factory](https://raw.githubusercontent.com/chromium/chromium/157.0.8103.78/ui/linux/linux_ui_factory.cc)
-chooses GTK first in the image's default desktop environment; [Qt initialization](https://raw.githubusercontent.com/chromium/chromium/157.0.8103.78/ui/qt/qt_ui.cc)
+Linux UI factory](https://raw.githubusercontent.com/chromium/chromium/158.0.8127.36/ui/linux/linux_ui_factory.cc)
+chooses GTK first in the image's default desktop environment; [Qt initialization](https://raw.githubusercontent.com/chromium/chromium/158.0.8127.36/ui/qt/qt_ui.cc)
 dynamically loads either shim and can fail back to another toolkit. The image audit
 still inspects both shims and requires their exact known Qt-library deficit sets;
 any other unresolved library fails. Each actual headed path must additionally show
@@ -147,3 +147,17 @@ headers, credentials or body. Adversarial loopback tests cover rejected origins,
 credentials, paths, methods and tunnel authorities without invoking a collector.
 The smoke entrypoint remains usable on stdin and can be imported without starting
 an image test, so the tests exercise the same proxy implementation.
+
+## Amendment: Stable 158 payload update (2026-11-19 UTC)
+
+The pin moved to `158.0.8127.36-1` through the maintenance procedure. Google's
+signed `Release` (dated 2026-11-18 18:08:05 UTC) verified under the same primary
+fingerprint and signing subkey, and the downloaded key equals the committed one.
+The package's dependency declaration and `postinst`, `prerm` and `postrm` hashes
+equal the 157 package's; only the `control` file's version and size fields
+changed. The data archive has the same 286 entries with the same paths, modes,
+owners, types and link targets, and the wrapper hash is unchanged, so the archive
+assumptions and the omitted-hook assessment above still hold. The version-matched
+Qt initialization source adds a Wayland-only GTK3 guard; the images run on X11
+under Xvfb, so the GTK-first selection above is unchanged. Image results are in
+the update PR.

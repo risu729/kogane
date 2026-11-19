@@ -144,6 +144,26 @@ test("the offline proxy tunnels only the exact locally allocated TLS endpoint", 
   expect(denied).toBe(8);
 });
 
+test("a refused tunnel's socket error does not escape the proxy", async () => {
+  const pagePort = await listen(http.createServer());
+  const tlsPort = await listen(net.createServer());
+  let denied = 0;
+  const proxy = createSmokeProxy(pagePort, tlsPort, () => {
+    denied += 1;
+  });
+  // Chrome can reset a refused tunnel before the 403 is written. The raw
+  // CONNECT socket must carry an error listener, or the reset is an
+  // unhandled 'error' event that ends the whole smoke process.
+  const socket = new net.Socket();
+  proxy.emit("connect", { url: `localhost:${tlsPort}` }, socket, Buffer.alloc(0));
+  expect(denied).toBe(1);
+  expect(socket.listenerCount("error")).toBeGreaterThan(0);
+  expect(() =>
+    socket.emit("error", Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" })),
+  ).not.toThrow();
+  socket.destroy();
+});
+
 test("the offline proxy refuses invalid locally supplied ports", () => {
   for (const port of [0, -1, 65536, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
     expect(() => createSmokeProxy(port, 443)).toThrow();

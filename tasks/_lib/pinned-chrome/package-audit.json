@@ -1,11 +1,11 @@
 {
   "package": "google-chrome-stable",
-  "version": "157.0.8103.78-1",
+  "version": "158.0.8127.36-1",
   "dataEntries": 286,
   "runtimeEntries": 260,
   "archiveTypes": ["0", "2", "5"],
   "controlSha256": {
-    "control": "68743410ac4674207b35b2a762d22d0f3f72af2afc094d59cbace5f88e72f7a1",
+    "control": "caf6a7da3da73251a3739b08614b2e31070eaef36787ed735be1f22006a2297a",
     "postinst": "0c845d0870abe07ccb8fefc68c0fc576abf9c88c47c3164222658ab274dcaa20",
     "postrm": "71f00158eb5ede95296f9096dcaaa69ab28dcad3396a932cd7b34afd4b53dd95",
     "prerm": "cb6cfdf8edb5876b192590649aa59b41092c5b9c311178c3cf69cf64657cf778"
