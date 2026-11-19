@@ -221,7 +221,6 @@ export function cashPageMetadata(value: unknown, kind: CashHistoryKind, pageNumb
   return { page, records, pageCount, totalCount };
 }
 
-/** Validation is shared at collection and parse boundaries, before any row publishes. */
 /**
  * Yen rows carry `YYYY/MM/DD`; the observed USD statement carries bare
  * `YYYYMMDD` value dates. Each kind accepts only its observed form.
@@ -236,6 +235,7 @@ export function cashRowDate(
   return normalizedDate(`${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6)}`, label);
 }
 
+/** Validation is shared at collection and parse boundaries, before any row publishes. */
 export function validateCashHistory(value: unknown, kind: CashHistoryKind): CashHistoryBundle {
   try {
     const bundle = object(value, [
