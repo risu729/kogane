@@ -204,6 +204,36 @@ describe("failures since the newest success", () => {
     }
   });
 
+  test("a success on the edge receipt ends an exact count of 100", async () => {
+    // Oldest first: the edge receipt (completed, or a failure a run recovered),
+    // then exactly STATUS_OCCURRENCE_WINDOW failures and no running receipt.
+    for (const edge of ["completed", "recovered"] as const) {
+      const store = new QualityStore();
+      const nominal = (index: number) =>
+        new Date(Date.parse("2098-06-01T20:35:00.000Z") + index * DAY).toISOString();
+      for (let index = 0; index <= STATUS_OCCURRENCE_WINDOW; index += 1) {
+        const failed = index > 0 || edge === "recovered";
+        store.occurrence("st-george", {
+          nominalAt: nominal(index),
+          status: failed ? "failed" : "completed",
+          ...(failed ? { failureCode: "collection_failed" } : {}),
+        });
+      }
+      if (edge === "recovered")
+        store.run({
+          source: "st-george",
+          at: new Date(Date.parse(nominal(0)) + 60_000).toISOString(),
+          artifacts: [],
+        });
+      expect(await row(store, "st-george"), edge).toMatchObject({
+        failuresSinceSuccess: STATUS_OCCURRENCE_WINDOW,
+        failureCode: "collection_failed",
+        state: "failing",
+        lastSuccessAt: expect.any(String),
+      });
+    }
+  });
+
   test("a failure code of the owner's kind is needs-owner", async () => {
     const store = new QualityStore();
     store.occurrence("myjcb", {

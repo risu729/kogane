@@ -719,8 +719,9 @@ Synthetic stores only, no production access:
   Point session, a unit waiting on the owner), `degraded` and `disabled`;
   failed, uncertain and not-dispatched receipts counted and a running one
   skipped; 100, 101 and 140 failures (`100`, `"100+"`), a success inside
-  the window bounding the count, and a running newest receipt over 99 or
-  100 failures (`99`, `"100+"`); the recovered rule (recovered and `ok`; daily
+  the window bounding the count, a running newest receipt over 99 or
+  100 failures (`99`, `"100+"`), and a completed or recovered edge receipt
+  under 100 failures (`100`); the recovered rule (recovered and `ok`; daily
   recoveries; no run; a succeeded run whose parse is still pending, or that
   stored nothing, recovers as the summary's V Point recovery reads it; a
   failed run, a partial run, a run at or before the failure's finish do not;
