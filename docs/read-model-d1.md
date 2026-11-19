@@ -179,7 +179,10 @@ A build writes rows while `building`, and:
   the build, so no build starts. Two starts that read the same next attempt
   name one snapshot id; the second one's refs hit the primary key and are
   skipped, and the writer lease decides which start builds it
-  (`test/read-writer.test.ts`, "only a re-sent key is skipped");
+  (`test/read-writer.test.ts`, "only a re-sent key is skipped").
+  `snapshot_input_refs` has no digest-conflict trigger: a `(kind, id)` a plan
+  listed twice would keep its first row, and the balance plan lists each once
+  (`services/processor/src/read-projection.ts` keys decisions by id);
 - the seal and the pointer switch are one batch. The pointer moves only to a
   snapshot at least as current as the published one under the same epoch, so a
   build that finishes late is complete but not published (G2-10);
