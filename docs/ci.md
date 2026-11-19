@@ -161,16 +161,19 @@ the file failed to open a page (`Target page, context or browser has been
 closed`). The browser tests of `apps/web` and
 `experiments/observation-pipeline-local`, and
 `experiments/st-george-automation/test/probe.test.ts`, therefore launch their
-one Chromium while the module loads (a top-level `await`), and only when the
-suite will run: a suite that `describe.if` skips for a missing build or
-Chromium launches nothing. Their local server and seeding stay in `beforeAll`,
-the browser is closed in `afterAll`, and their cases are declared with
-`settledTest()` from `apps/web/test/settle.ts`. That `test` keeps each case's
-body, and its `afterEach` waits for the body to settle before the next case
-begins, so a timeout fails that case alone; Bun still reports a late rejection
-as an error between tests. The wait is bounded by `afterEach`'s default 5 s
-deadline: a body that has not settled by then fails its case at the hook and
-goes on driving the browser while the next case runs.
+one Chromium while the module loads (a top-level `await`). Where `describe.if`
+guards the suite, the launch runs only when the suite will: a suite skipped for
+a missing build or Chromium launches nothing. The probe has no such guard and
+always launches; it keeps a failed launch and rethrows it in its browser
+suite's `beforeAll`, so a missing Chromium fails that suite alone, as it did
+before, and the probe's route cases still run. Their local server and seeding
+stay in `beforeAll`, the browser is closed in `afterAll`, and their cases are
+declared with `settledTest()` from `apps/web/test/settle.ts`. That `test`
+keeps each case's body, and its `afterEach` waits for the body to settle before
+the next case begins, so a timeout fails that case alone; Bun still reports a
+late rejection as an error between tests. The wait is bounded by `afterEach`'s
+default 5 s deadline: a body that has not settled by then fails its case at the
+hook and goes on driving the browser while the next case runs.
 `activity-semantics.browser.test.ts` and `synthetic-display.browser.test.ts`
 launch Chromium inside their only case, which a timeout fails alone.
 `bun test` loads and runs one file at a time, and each file closes its browser
