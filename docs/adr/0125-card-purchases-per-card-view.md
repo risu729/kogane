@@ -197,8 +197,9 @@ the month and a client-side sort of decimal amounts, which INV03 keeps out of th
   - `nextCursor` is base64url of the canonical JSON of the request (account, period, usage month, sort), the last
     listed line's key (date, event id and, for the amount order, its unit and canonical decimal text), and the
     count of lines listed so far. It is at most 2,048 characters.
-  - A cursor is taken only with the request that issued it. Another request's cursor, a malformed one or one with
-    a non-canonical amount text is refused.
+  - A cursor is taken only with the request that issued it (`linesCursorFits`, which the route and the agent
+    service check before reading). Another request's cursor, a malformed one or one with a non-canonical amount
+    text is refused.
   - The next page is every line strictly after the key in the total order. A walk therefore lists no line twice
     and skips none while the month's events stay as they are. An event recognised mid-walk is listed if it sorts
     after the cursor, and not otherwise; an event revised mid-walk may move across the cursor.

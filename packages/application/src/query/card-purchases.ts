@@ -1145,6 +1145,25 @@ export function decodeLinesCursor(text: string): CardPurchaseLinesCursor | null 
   };
 }
 
+/**
+ * Whether `text` is a line cursor this read issued for the request `input`
+ * (the same account, month and sort; an absent sort is `date`). The route and
+ * the agent service refuse any other before reading.
+ */
+export function linesCursorFits(text: string, input: CardPurchaseLinesQuery): boolean {
+  const cursor = decodeLinesCursor(text);
+  return (
+    cursor !== null &&
+    canonicalJson(cursor.query) ===
+      canonicalJson({
+        account: input.account ?? null,
+        period: input.period ?? null,
+        usageMonth: input.usageMonth ?? null,
+        sort: input.sort ?? "date",
+      })
+  );
+}
+
 /** The event's live purchase-recognition leg; an `unknown` revision has none. */
 const purchaseLeg = (event: LiveEvent): EconomicLeg | null =>
   event.legs.find((leg) => leg.basis === "purchase-recognition") ?? null;
@@ -1191,10 +1210,7 @@ export async function queryCardPurchaseLines(
   const query: CardPurchaseLinesCursor["query"] = { account, period, usageMonth, sort };
   const cursor = input.cursor === undefined ? null : decodeLinesCursor(input.cursor);
   // A cursor continues only the request that issued it.
-  if (
-    input.cursor !== undefined &&
-    (cursor === null || canonicalJson(cursor.query) !== canonicalJson(query))
-  )
+  if (input.cursor !== undefined && !linesCursorFits(input.cursor, input))
     throw new Error("invalid_cursor");
 
   const month = await monthEvents(sql, period, usageMonth);

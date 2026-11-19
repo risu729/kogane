@@ -806,11 +806,14 @@ describe("untrusted provider content (AT71)", () => {
       required: [],
       closed: false,
       properties: {
-        view: { type: "string", enum: ["events", "cards"] },
+        view: { type: "string", enum: ["events", "cards", "lines"] },
         period: { type: "string", pattern: "^[0-9]{4}-(?:0[1-9]|1[0-2])$" },
         usageMonth: { type: "string", pattern: "^[0-9]{4}-(?:0[1-9]|1[0-2])$" },
         eventId: { type: "string", pattern: "^(?:purchase|refund)_[0-9a-f]{64}$" },
         offset: { type: "integer", minimum: 0, maximum: 1_000_000 },
+        account: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$" },
+        sort: { type: "string", enum: ["date", "amount"] },
+        cursor: { type: "string", pattern: "^[A-Za-z0-9_-]+$", maxLength: 2048 },
       },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     });

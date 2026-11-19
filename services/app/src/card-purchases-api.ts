@@ -14,6 +14,7 @@ import {
   CARD_PURCHASE_LINES_CURSOR_MAX,
   CARD_PURCHASE_PERIOD,
   CardPurchaseLimitError,
+  linesCursorFits,
   queryCardPurchaseCards,
   queryCardPurchaseLines,
   queryCardPurchases,
@@ -59,21 +60,23 @@ async function linesView(env: Env, params: URLSearchParams): Promise<Response> {
     (sort !== null && !(CARD_PURCHASE_LINE_SORTS as readonly string[]).includes(sort))
   )
     throw new HttpError(400, "invalid_query");
+  const query = {
+    ...(period === null ? {} : { period }),
+    ...(usageMonth === null ? {} : { usageMonth }),
+    ...(account === null ? {} : { account }),
+    ...(sort === null ? {} : { sort: sort as (typeof CARD_PURCHASE_LINE_SORTS)[number] }),
+  };
+  // A cursor this read did not issue for this request is refused before reading.
+  if (cursor !== null && !linesCursorFits(cursor, query)) throw new HttpError(400, "invalid_query");
   let page;
   try {
     page = await queryCardPurchaseLines(d1Executor(env.DB), {
-      ...(period === null ? {} : { period }),
-      ...(usageMonth === null ? {} : { usageMonth }),
-      ...(account === null ? {} : { account }),
-      ...(sort === null ? {} : { sort: sort as (typeof CARD_PURCHASE_LINE_SORTS)[number] }),
+      ...query,
       ...(cursor === null ? {} : { cursor }),
     });
   } catch (error) {
     // A filter too large to read is refused, never partially listed.
     if (error instanceof CardPurchaseLimitError) throw new HttpError(413, "result_limit_exceeded");
-    // A cursor this read did not issue for this request.
-    if (error instanceof Error && error.message === "invalid_cursor")
-      throw new HttpError(400, "invalid_query");
     throw error;
   }
   return json({ apiVersion: 2, ...page });

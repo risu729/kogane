@@ -52,7 +52,6 @@ import {
   type CardPurchaseLinesPage,
   type CardPurchasePage,
 } from "../../../domain/src/card-purchase-view.ts";
-import { canonicalJson } from "../../../domain/src/context.ts";
 import { CARD_SETTLEMENT_NEXT_PAGE } from "../../../domain/src/card-settlement-review.ts";
 import { isRecord } from "../../../domain/src/guards.ts";
 import type { FinancialError, FinancialErrorCode } from "../../../domain/src/result.ts";
@@ -71,6 +70,7 @@ import {
   type CardPurchaseLinesQuery,
   type CardPurchaseQuery,
   decodeLinesCursor,
+  linesCursorFits,
   queryCardPurchaseCards,
   queryCardPurchaseLines,
   queryCardPurchases,
@@ -277,8 +277,7 @@ export function parsePurchasesExplainRequest(
       ...(cursor === undefined ? {} : { cursor: cursor as string }),
     };
     // A cursor continues only the request that issued it.
-    const { view: _view, ...resolved } = linesQuery(request).query;
-    if (resumed !== null && canonicalJson(resumed.query) !== canonicalJson(resolved))
+    if (request.cursor !== undefined && !linesCursorFits(request.cursor, request))
       return { ok: false, code: "invalid_query", refs: ["cursor"] };
     return { ok: true, value: request };
   }

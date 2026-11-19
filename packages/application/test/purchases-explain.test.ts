@@ -616,10 +616,11 @@ describe("the line view (ADR 0125 amendment)", () => {
     });
     // A grant that may read one page but not two: the next page is withheld and said.
     const narrow = grant({ budget: { maxRows: 30, maxProposalTargets: 1, maxExplainDepth: 1 } });
+    if (!ok.ok) throw new Error("refused");
     expect(await explainCardPurchaseLines({ grant: narrow, sql: w.sql, request })).toEqual({
       ok: true,
       explanation: {
-        ...(ok as { explanation: object }).explanation,
+        ...ok.explanation,
         nextPage: "budget_exceeded",
         data: { ...data, nextCursor: null },
       },
