@@ -32,6 +32,7 @@ import {
   captureRewardInput,
   runRewardReadProjection,
 } from "../../processor/src/reward-read-projection";
+import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { decodeReadCursor, encodeReadCursor } from "../../../packages/storage-d1/src/read/index";
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
@@ -327,8 +328,8 @@ describe("the reward routes over the READ database", () => {
     expect([...keys(first), ...keys(widerPage)]).toEqual(keys(whole));
 
     const decoded = decodeReadCursor(next)!;
-    // A cursor that belongs to another query — another programme filter — is
-    // refused rather than reinterpreted.
+    // A cursor that belongs to another query — here a digest no query of the
+    // route has — is refused rather than reinterpreted.
     const mismatch = await call(
       `/api/v2/rewards/expiry?limit=25&cursor=${encodeReadCursor({
         ...decoded,
@@ -337,6 +338,31 @@ describe("the reward routes over the READ database", () => {
     );
     expect(mismatch.status).toBe(400);
     expect(((await mismatch.json()) as { error: string }).error).toBe("cursor_mismatch");
+    // A real programme filter at another size is another query too.
+    const filtered = await call(
+      `/api/v2/rewards/expiry?limit=50&program=program:v-point-pay&cursor=${next}`,
+    );
+    expect(filtered.status).toBe(400);
+    expect(((await filtered.json()) as { error: string }).error).toBe("cursor_mismatch");
+
+    // Simulations page the same `row_seq` keyset. A fresh snapshot carries no
+    // simulation rows, so the cursor is minted here in the route's own form:
+    // the route and the size its page was read at. Read at 25, it continues at
+    // 100; an expiry cursor is another route's query at any size.
+    const simulationCursor = encodeReadCursor({
+      ...decoded,
+      filterDigest: await canonicalDigest({ route: "/api/v2/rewards/simulations", limit: 25 }),
+    });
+    const simulations = await call(
+      `/api/v2/rewards/simulations?limit=100&cursor=${simulationCursor}`,
+    );
+    expect(simulations.status).toBe(200);
+    const simulationPage = (await simulations.json()) as SimulationPage;
+    expect(simulationPage.snapshot.snapshotId).toBe(first.snapshot.snapshotId);
+    expect(simulationPage.rows).toEqual([]);
+    const crossRoute = await call(`/api/v2/rewards/simulations?limit=50&cursor=${next}`);
+    expect(crossRoute.status).toBe(400);
+    expect(((await crossRoute.json()) as { error: string }).error).toBe("cursor_mismatch");
 
     // A cursor from another physical READ database expires; it is never
     // continued against rows that only look like its list.

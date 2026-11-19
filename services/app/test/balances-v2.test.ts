@@ -319,6 +319,12 @@ describe("v2 balance read model", () => {
     );
     expect(filtered.status).toBe(400);
     expect(await filtered.json()).toMatchObject({ error: "cursor_mismatch" });
+    // So is another identity read mode: the cursor was read in the default.
+    const otherMode = await call(
+      `/api/v2/balances/latest?limit=100&identityRead=as-recorded&cursor=${encodeURIComponent(first.page.nextCursor!)}`,
+    );
+    expect(otherMode.status).toBe(400);
+    expect(await otherMode.json()).toMatchObject({ error: "cursor_mismatch" });
   });
 
   it("refuses a cursor from another query and an expired snapshot", async () => {

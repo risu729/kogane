@@ -92,8 +92,13 @@ offered list is still `400 invalid_limit`, and another route, scope,
   continues at 100 and its cursor at 200, and the three pages equal the first
   350 rows of one page of 500 on the same snapshot; a history cursor read at
   50 continues at 100 and equals the first 150 rows of a page of 200; a
-  changed filter at another size, and a latest cursor on the history route,
-  are `cursor_mismatch`.
+  changed filter or identity read mode at another size, and a latest cursor
+  on the history route, are `cursor_mismatch`.
 - `services/app/test/rewards-v2-read.test.ts`: an expiry cursor read at 25
-  continues at 50 and the two pages equal one page of 200.
+  continues at 50 and the two pages equal one page of 200; a `program`
+  filter at another size is `cursor_mismatch`. A simulations cursor in the
+  route's own form read at 25 continues at 100, and an expiry cursor on the
+  simulations route is `cursor_mismatch` (a fresh snapshot has no simulation
+  rows, so this checks the digest list, not the join; simulations read the
+  same `row_seq` keyset as expiry).
 - Each of these fails on main before the change (`400 cursor_mismatch`).
