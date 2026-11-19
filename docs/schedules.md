@@ -444,9 +444,28 @@ ADR 0064) on the `ui` path: the Processor's writer ends its own batch with the
 `applied` record — a job revision, a maintenance revision with its provenance
 update, a survey decision with the revision it accepted, a lease release (whose
 only durable trace this record is) — and the App records each refusal once.
-The maintenance edit, the survey acceptance and the lease release are each one
-batch: an accepted proposal's revision and decision exist together or not at
-all. The page's `GET` is not recorded.
+The job edit, the maintenance edit, the survey acceptance and the lease
+release are each one batch: a job's settings and its history row in
+`collection_schedule_revisions`, or an accepted proposal's revision and
+decision, exist together or not at all. The page's `GET` is not recorded.
+
+A write that loses its version check — another edit saved the job or the rule
+first, including one by the same operator in the same millisecond — writes
+nothing and answers `409 revision_conflict`. The history row and the
+maintenance revision are plain `INSERT` statements, never `INSERT OR IGNORE`
+(which SQLite also applies to CHECK, NOT NULL and UNIQUE failures): a row the
+schema refuses raises, nothing of its batch is written, and the Processor
+answers its closed `503 scheduling_unavailable` (an accepted survey proposal:
+`503 decision_record_failed`), never `409`. The SQLite text is neither
+answered nor logged. The private delegated job and maintenance routes answer the same
+`503 scheduling_unavailable` unless the batch's delegation guard explains the
+failure (an expired delegation, a used confirmation, a spent budget), and the
+MCP tools relay the Processor's answer, as the page's route does (ADR 0081).
+Every constraint of the two tables restates what the writers already validate
+(a history row copies the job row, whose own constraints are the same), so
+a valid request reaches this only on a store that disagrees with the code; the
+tests rebuild the table with one more CHECK to show it
+(`services/processor/test/schedule-write-refusal.test.ts`).
 
 These routes require the configured human Access operator. Writes require
 same-origin JSON, `x-kogane-settings: 1` and strict payload validation
@@ -538,8 +557,11 @@ The reference is stored whole in `decision_ref`, so no delegated revision is
 ever written without the audit record behind it. The writer answers a closed
 code: `invalid_request`, `invalid_reference`, `invalid_reason`,
 `maintenance_rule_not_found` (a delegated principal naming another source's
-rule is answered like a missing one), `revision_conflict`,
-`maintenance_deferral_too_long` or `maintenance_write_budget_exceeded`. For a
+rule is answered like a missing one), `revision_conflict` (a stale expected
+revision, or an INSERT whose version check matched nothing in the batch),
+`maintenance_deferral_too_long` or `maintenance_write_budget_exceeded`. A
+revision the schema refuses is none of these: the batch raises and the writer
+throws, [as above](#settings-api). For a
 delegated principal only, it also requires the rule to be the named source's
 or new, refuses a revision after which the source has a joined deferral
 longer than its bound that its rules did not already cause (every such union
