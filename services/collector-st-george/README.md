@@ -5,6 +5,42 @@ shared DATA storage, and observation-processing path. It reads the authenticated
 portfolio and the current history page of each observed account. It does not
 import statements.
 
+## Runtime profile
+
+- **Browser: entire collection.** Each run starts one Cloudflare Container
+  (`StGeorgeCollectorContainer`, `basic` instance, at most 1 instance, APAC;
+  `wrangler.jsonc`) from the Playwright base image in [`Dockerfile`](Dockerfile).
+  Inside it, Playwright's Chromium runs headed under Xvfb and Playwright
+  attaches over CDP (`container/browser.mjs`).
+- In the browser: the bank's normal login form with its own field blur and
+  Logon handling, then the portfolio and each account's current history page.
+  There is no handoff to Worker `fetch`. Whether the same reads work over
+  direct HTTP has not been observed; the public login JavaScript's dynamic
+  form state and device signals are described in the
+  [source notes](../../docs/sources/st-george.md).
+- Outside the browser: the Worker starts the Container, relays its port-443
+  CONNECT traffic for the bank's allowlisted hosts through the authenticated
+  `/tcp` WebSocket and the `TAMIA` VPC network binding (`EGRESS_MODE` `tamia`),
+  validates the result and writes R2 (`src/worker.ts`).
+- State: one SQLite Durable Object, `StGeorgeCollectionState` (binding
+  `SESSION_STATE`, name `st-george`), serializes every run, keeps a validated
+  snapshot whose storage is incomplete and holds the login pause described
+  below.
+- Execution: entrypoint `src/schedule-entrypoint.ts`, whose
+  `ScheduledCollection.runScheduled` accepts only the `st-george` alarm job's
+  cron `35 21 * * *` ([`config/alarm-jobs.json`](../../config/alarm-jobs.json));
+  `runOperation` runs an accepted operations request the same way, except
+  that it may also lift a login pause (see below). Each collection holds the `st-george` execution lease (`withCollectionLease` in
+  `src/worker.ts`, D1 `SCHEDULE_DB`) and writes shared DATA
+  (`kogane-raw-evidence`) with the terminal last (`src/shared-collection.ts`).
+  The Container is destroyed in a `finally` and sleeps after 30 seconds idle.
+  There is no Cron Trigger.
+- Retries: a refused or challenged login pauses later logins, and a later run
+  retries storing a kept snapshot instead of logging in again (see
+  [Configuration and operations](#configuration-and-operations)).
+- Budgets: `wrangler.jsonc` sets no `limits`; the CPU, subrequest and Container
+  budgets in effect are not recorded in the repository.
+
 ## Runtime
 
 The Worker starts an isolated Chrome container and submits the normal bank login
