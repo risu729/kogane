@@ -33,6 +33,7 @@ import {
   SELECTION_SQL,
   USAGE_MONTH_SELECTION_SQL,
 } from "../src/query/card-purchases.ts";
+import { cardsAddedUp } from "./card-purchase-cards-sum.ts";
 import { LEGACY_CURRENT_SQL } from "./card-purchase-current-legacy-sql.ts";
 
 let db: Database;
@@ -161,6 +162,14 @@ describe("card purchases on a scaled store without statistics", () => {
       expect(cards.events).toBe(page.summary.events);
       expect(cards.totals).toEqual(page.summary.units.map(cardFigures));
       expect(cards.cards.reduce((sum, card) => sum + card.events, 0)).toBe(page.summary.events);
+      // The cards added back together in the domain are the page's figures:
+      // no event is under two cards or under none (INV03, INV06).
+      expect(cards.cardsTruncated).toBe(false);
+      expect(cardsAddedUp(cards)).toEqual({
+        totals: page.summary.units.map(cardFigures),
+        events: page.summary.events,
+        unresolved: page.summary.unresolved,
+      });
       expect(cards.coverage.unrecognizedCurrentRows).toBe(page.coverage.unrecognizedCurrentRows);
     }
     expect(multiCard).toBe(true);
@@ -183,6 +192,11 @@ describe("card purchases on a scaled store without statistics", () => {
             .map((row) => row.event_id),
         ).size,
       );
+      expect(cardsAddedUp(answer)).toEqual({
+        totals: answer.totals,
+        events: answer.events,
+        unresolved: answer.unresolved,
+      });
     }
     // Without statistics the usage month walks the live revisions exactly as the
     // page's selection does, and the labels are primary-key lookups.
