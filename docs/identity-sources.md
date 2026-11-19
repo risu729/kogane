@@ -6,30 +6,32 @@ account aliases. The enclosing identity engine scopes account keys by source and
 producer. Exact provider references stay in key material; labels are not identity.
 The planning snapshot in `data/account-inventory.csv` cannot prove a product is held.
 
-| Source       | Accepted source account                            | Meaning and boundary                                                                                                         |
-| ------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Vpass        | `vpass:card-NNN`                                   | Verified importer sidecar HMAC gives provider-local card identity; absent/ambiguous evidence stays run-scoped                |
-| GLOBAL PASS  | `global-pass:card`                                 | Debit activity, separate from PRESTIA bank deposits                                                                          |
-| MyJCB        | `myjcb:{connection}:root`                          | Statement aggregate without physical/subcard assignment                                                                      |
-| MyJCB        | `myjcb:{connection}:j-point:total`                 | Displayed J-POINT total of the connection's login: `reward-account`, provider-local, label `MyJCB J-POINT` (policy 2)        |
-| SMBC         | `smbc-bank:ordinary-yen`                           | Audited ordinary JPY deposit only; not Olive credit liability or AUD deposit                                                 |
-| Mizuho       | `mizuho-bank:ordinary:{branch 3}:{account 7}`      | Provider branch and account number of an ordinary JPY deposit; balance and history rows share it (policy 2)                  |
-| Sony         | `sony-bank:deposit:{currency}`                     | Currency-specific deposit scope                                                                                              |
-| Sony         | `sony-bank:wallet`                                 | Debit-card activity; not another stored-value deposit                                                                        |
-| Sony         | `sony-bank:gross`, asset 001–011, loan 012–015     | Provider totals/categories, not established product holdings                                                                 |
-| SBI Shinsei  | `sbi-shinsei:{accountNo}`                          | Provider account reference and native unit; source ID is `sbi-shinsei-bank`                                                  |
-| SBI Shinsei  | `sbi-shinsei:fx-board`                             | Exchange-rate board, not an account: `valuation-aggregate`, `aggregate` (policy 2, ADR 0076)                                 |
-| SBI Shinsei  | `sbi-shinsei:customer`                             | Customer stage category, not an account: `qualification-aggregate`, `aggregate` (policy 2, ADR 0076)                         |
-| SBI VC Trade | `sbi-vc-trade:main`                                | Exchange account; separate from SBI Securities and Shinsei                                                                   |
-| V Point      | common bucket indices                              | Provider-local semantic bucket from explicit point type and expiration; missing/conflicting evidence falls back to fetch run |
-| V Point      | store-limited group-item indices                   | Fetch-run-scoped reward buckets, unresolved durable binding                                                                  |
-| V Point      | `v-point:smfg:smbc`, `v-point:smfg:smcc`           | Display aggregates potentially overlapping common points                                                                     |
-| V Point      | `v-point:member`                                   | Member history scope                                                                                                         |
-| V Point Pay  | notification-events / prepaid-yen                  | Separate notification and historical event-balance roles, denominated in yen                                                 |
-| Mobile Suica | `mobile-suica:sf`                                  | SF scope, no physical card binding inferred                                                                                  |
-| MoneyForward | `moneyforward-me:moneyforward-account-v1-{64 hex}` | Verified account/service HMAC (retired importer), aggregator mirror, never mapped by name                                    |
-| MoneyForward | `moneyforward-me:moneyforward-account-v2-{64 hex}` | Verified account/service unkeyed digest (ADR 0029), aggregator mirror, a different account from its v1 identity              |
-| PayPay CSV   | `paypay`                                           | Export scope; does not distinguish money, money-lite or reward buckets                                                       |
+| Source       | Accepted source account                            | Meaning and boundary                                                                                                                                                         |
+| ------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vpass        | `vpass:card-NNN`                                   | One verified trusted card binding (importer or collector, v1 or v2 token; ADR 0023, ADR 0029) gives provider-local card identity; absent/ambiguous evidence stays run-scoped |
+| GLOBAL PASS  | `global-pass:card`                                 | Debit activity, separate from PRESTIA bank deposits                                                                                                                          |
+| MyJCB        | `myjcb:{connection}:root`                          | Statement aggregate without physical/subcard assignment                                                                                                                      |
+| MyJCB        | `myjcb:{connection}:j-point:total`                 | Displayed J-POINT total of the connection's login: `reward-account`, provider-local, label `MyJCB J-POINT` (policy 2)                                                        |
+| MyJCB        | `myjcb:{connection}:j-point:acquired:{YYYY-MM-DD}` | J-POINT history acquisition bucket (ADR 0107): keyed as the connection's `j-point:total`, so it is that source account (`provider-jpoint-acquisition-bucket`)                |
+| SMBC         | `smbc-bank:ordinary-yen`                           | Audited ordinary JPY deposit only; not Olive credit liability or AUD deposit                                                                                                 |
+| SMBC         | `smbc-bank:ordinary-foreign-aud`                   | AUD ordinary deposit (`smbc-foreign-ordinary-balance`): no rule yet, so `unresolved` / `unrecognized-source-account`; labelled as the yen deposit (source fallback)          |
+| Mizuho       | `mizuho-bank:ordinary:{branch 3}:{account 7}`      | Provider branch and account number of an ordinary JPY deposit; balance and history rows share it (policy 2)                                                                  |
+| Sony         | `sony-bank:deposit:{currency}`                     | Currency-specific deposit scope                                                                                                                                              |
+| Sony         | `sony-bank:wallet`                                 | Debit-card activity; not another stored-value deposit                                                                                                                        |
+| Sony         | `sony-bank:gross`, asset 001–011, loan 012–015     | Provider totals/categories, not established product holdings                                                                                                                 |
+| SBI Shinsei  | `sbi-shinsei:{accountNo}`                          | Provider account reference and native unit; source ID is `sbi-shinsei-bank`                                                                                                  |
+| SBI Shinsei  | `sbi-shinsei:fx-board`                             | Exchange-rate board, not an account: `valuation-aggregate`, `aggregate` (policy 2, ADR 0076)                                                                                 |
+| SBI Shinsei  | `sbi-shinsei:customer`                             | Customer stage category, not an account: `qualification-aggregate`, `aggregate` (policy 2, ADR 0076)                                                                         |
+| SBI VC Trade | `sbi-vc-trade:main`                                | Exchange account; separate from SBI Securities and Shinsei                                                                                                                   |
+| V Point      | common bucket indices                              | Provider-local semantic bucket from explicit point type and expiration; missing/conflicting evidence falls back to fetch run                                                 |
+| V Point      | store-limited group-item indices                   | Fetch-run-scoped reward buckets, unresolved durable binding                                                                                                                  |
+| V Point      | `v-point:smfg:smbc`, `v-point:smfg:smcc`           | Display aggregates potentially overlapping common points                                                                                                                     |
+| V Point      | `v-point:member`                                   | Member history scope                                                                                                                                                         |
+| V Point Pay  | notification-events / prepaid-yen                  | Separate notification and historical event-balance roles, denominated in yen                                                                                                 |
+| Mobile Suica | `mobile-suica:sf`                                  | SF scope, no physical card binding inferred                                                                                                                                  |
+| MoneyForward | `moneyforward-me:moneyforward-account-v1-{64 hex}` | Verified account/service HMAC (retired importer), aggregator mirror, never mapped by name                                                                                    |
+| MoneyForward | `moneyforward-me:moneyforward-account-v2-{64 hex}` | Verified account/service unkeyed digest (ADR 0029), aggregator mirror, a different account from its v1 identity                                                              |
+| PayPay CSV   | `paypay`                                           | Export scope; does not distinguish money, money-lite or reward buckets                                                                                                       |
 
 The classifier accepts exact patterns from the checked-in parser registry.
 Unknown source/pattern combinations remain unresolved. Vpass ordinals without trusted sidecars and reward buckets
@@ -55,7 +57,9 @@ account reference keeps the same source account and account entity
 
 Money uses an explicit currency catalog. `CNH` is an offshore-renminbi variant,
 not an ISO 4217 synonym for `CNY`. `V_POINT` is its own reward program. Unknown
-codes are unresolved and source-scoped. SBI VC explicit asset codes are
+codes are unresolved and scoped by source: the rules on this page use the source ID as the
+scope, and the SBI Securities rule uses the scope `provider`, which no other
+source's rule uses. SBI VC explicit asset codes are
 provider-local crypto identities; provider products such as `BTCJPY` remain
 products. Product suffixes never imply base/quote, spot holdings, networks or
 global token identity. Only parser-preserved explicit execution currency pairs
