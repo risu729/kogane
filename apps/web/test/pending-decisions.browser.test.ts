@@ -172,6 +172,10 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
       expect(await panel.getByText("3件", { exact: true }).count()).toBe(1);
       expect(await panel.getByText(`${PENDING_DECISIONS_COUNT_BOUND}件以上`).count()).toBe(1);
       expect(await panel.getByText("この権限では数えられません").count()).toBe(1);
+      // A cut line and an uncounted one leave the total a lower bound.
+      expect(await panel.locator(".panel-head .count").textContent()).toBe(
+        `${String(3 + PENDING_DECISIONS_COUNT_BOUND)}件以上`,
+      );
       const links = panel.getByRole("link", { name: "確認する →" });
       expect(await links.count()).toBe(2);
       expect(await links.nth(0).getAttribute("href")).toBe("/reconciliation/cs_synthetic_1");

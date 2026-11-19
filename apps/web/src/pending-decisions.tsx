@@ -92,11 +92,18 @@ export function PendingDecisionsPanel(): ReactNode {
       (sum, line) => sum + (line.state === "counted" ? (line.count ?? 0) : 0),
       0,
     ) ?? null;
+  // A line cut at its bound, or one that could not be counted (other than a
+  // kind this deployment does not serve), leaves the total a lower bound, so
+  // it says so rather than reading as complete (INV05).
+  const atLeast =
+    query.data?.kinds.some((line) =>
+      line.state === "counted" ? !line.complete : line.reason !== "not_served",
+    ) ?? false;
   return (
     <Panel
       id="pending-decisions"
       title="判断待ち"
-      count={waiting === null ? undefined : `${waiting}件`}
+      count={waiting === null ? undefined : `${waiting}件${atLeast ? "以上" : ""}`}
       note="提案された対応や変更のうち、まだ判断していないものです。判断は各ページで行います。"
     >
       {query.isPending ? (
