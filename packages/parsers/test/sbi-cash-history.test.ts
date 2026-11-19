@@ -127,7 +127,7 @@ test("USD keeps exact signed-direction semantics and identical-row multiplicity 
   // Prepending a different new row leaves each older occurrence unchanged.
   fixture.pages[0].items.unshift({
     ...fixture.pages[0].items[0],
-    valueDate: "2099/09/04",
+    valueDate: "20990904",
     amount: "9.99",
   });
   fixture.totalCount += 1;
@@ -179,6 +179,11 @@ test("schema, unknown codes, numeric rounding, totals, dates and pagination fail
     (b: any) => (b.pages[0].items[0].cometCurrencyCode = "999"),
     (b: any) => (b.pages[0].items[0].cashType = "synthetic-private-unknown"),
     (b: any) => (b.pages[0].items[0].amount = "-1.00"),
+    // Only the observed bare YYYYMMDD value date is accepted (issue 1226).
+    (b: any) => (b.pages[0].items[0].valueDate = "2099/09/03"),
+    (b: any) => (b.pages[0].items[0].valueDate = "2099-09-03"),
+    (b: any) => (b.pages[0].items[0].valueDate = "20990230"),
+    (b: any) => (b.pages[0].items[0].valueDate = 20990903),
     (b: any) => (b.pages[0].totalCount = 4),
     (b: any) => (b.pages[0].unexpected = "synthetic-private"),
   ]) {

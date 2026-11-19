@@ -222,6 +222,20 @@ export function cashPageMetadata(value: unknown, kind: CashHistoryKind, pageNumb
 }
 
 /** Validation is shared at collection and parse boundaries, before any row publishes. */
+/**
+ * Yen rows carry `YYYY/MM/DD`; the observed USD statement carries bare
+ * `YYYYMMDD` value dates. Each kind accepts only its observed form.
+ */
+export function cashRowDate(
+  row: Record<string, unknown>,
+  kind: CashHistoryKind,
+  label: string,
+): string {
+  if (kind === "yen") return normalizedDate(row["payDepDate"], label);
+  const text = strictString(row["valueDate"], label, { max: 8, pattern: /^\d{8}$/u });
+  return normalizedDate(`${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6)}`, label);
+}
+
 export function validateCashHistory(value: unknown, kind: CashHistoryKind): CashHistoryBundle {
   try {
     const bundle = object(value, [
@@ -268,10 +282,7 @@ export function validateCashHistory(value: unknown, kind: CashHistoryKind): Cash
       }
       for (const rawRow of current.records) {
         const row = object(rawRow, kind === "yen" ? YEN_ROW_KEYS : FOREIGN_ROW_KEYS);
-        const asOf = normalizedDate(
-          row[kind === "yen" ? "payDepDate" : "valueDate"],
-          "cash history row date",
-        );
+        const asOf = cashRowDate(row, kind, "cash history row date");
         if (asOf < from || asOf > to || asOf > previousDate)
           throw new CashHistoryError("sbi_cash_history_range");
         previousDate = asOf;
