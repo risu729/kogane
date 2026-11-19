@@ -751,3 +751,25 @@ An older CSV replay cannot displace a newer JSON-only correction. JSON-only
 retained history keeps the legacy same-day/page-order limitation; it is not a
 substitute for the complete official CSV and is not guaranteed to identify a
 day's final transaction. Unrelated sources keep their existing ordering.
+
+## 2026-11-19: currencies outside the minor-unit table
+
+The first scheduled runs of the retained-history query (from fetch run 1923,
+2026-11-18 21:00 UTC) stored one CSV and one first JSON page for each of the
+eight foreign currencies CAD, CHF, EUR, GBP, HKD, NZD, SEK and ZAR. Each held
+a single movement with a blank `為替レート`. A read-only replay (closed
+categories and parser throw sites only, no payload) showed every one of the
+16 artifacts refused at the same place: the amount was "not exactly
+representable" because Kogane's minor-unit table (`packages/parsers/src/money.ts`)
+names only JPY, USD and AUD, so no minor-unit integer could exist for these
+currencies at all. JPY, USD and AUD published unchanged.
+
+History parsers 1.0.5 (JSON) and 1.0.6 (CSV) keep the exact provider decimal as
+`amountText`/`amountScale` and omit `amountMinor` for any currency the table
+does not name, the way the SBI Shinsei parsers record foreign savings. The
+amount must still be an unsigned exact decimal and the balance an exact
+decimal. Known-exponent currencies keep their existing minor-unit checks and
+row identities. For the other currencies the row identity uses canonical exact
+decimals (`1.50` and `1.5` are the same row), so the CSV and a JSON page name
+one row. No exponent is added to the shared table here: that would change
+other parsers' outputs and is a separate decision.

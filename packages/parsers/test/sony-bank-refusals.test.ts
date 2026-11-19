@@ -374,6 +374,68 @@ describe("sony-bank WALLET monthly HTML", () => {
   });
 });
 
+test("currencies outside the minor-unit table keep exact decimals in CSV and JSON (issue 1231)", () => {
+  // Synthetic shape of the observed single-row EUR/GBP/... histories: one
+  // movement, no stated rate, an amount finer than nothing Kogane can scale.
+  const csv =
+    "取引日,摘要,参考情報,通貨,預入額,引出額,差引残高,為替レート\n" +
+    "2026/09/01,x,y,EUR,1.50,,1.50,\n" +
+    "2026/09/02,x,y,EUR,,0.5,1.00,\n";
+  const fromCsv = sonyBankHistoryCsv.parse(
+    encode(csv),
+    meta("foreign-history-eur-csv", { mime: "text/csv" }),
+  );
+  const csvTransactions = fromCsv.observations.filter((o) => o.kind === "transaction");
+  expect(csvTransactions.map((o) => [o.amountText, o.amountMinor])).toEqual([
+    ["1.50", undefined],
+    ["-0.5", undefined],
+  ]);
+  const csvBalances = fromCsv.observations.filter((o) => o.kind === "balance");
+  expect(csvBalances.map((o) => [o.amountText, o.amountMinor])).toEqual([
+    ["1.50", undefined],
+    ["1.00", undefined],
+  ]);
+
+  const value = JSON.parse(text("yen-history-page-0001.json")) as Record<string, unknown> & {
+    transactionHistInfo: Record<string, unknown>[];
+  };
+  const template = value.transactionHistInfo[0]!;
+  value.countCnt = 1;
+  value.returnCnt = 1;
+  value.transactionHistInfo = [
+    {
+      ...template,
+      currencyCd: "EUR",
+      additionAndSubtractionSegment: "1",
+      transactionAmt: "1.5",
+      transactionAftBal: "1.5",
+      transactionDt: "2026-09-01",
+    },
+  ];
+  const fromJson = sonyBankHistoryJson.parse(
+    encode(JSON.stringify(value)),
+    meta("foreign-history-eur-page-0001"),
+  );
+  const jsonTransaction = fromJson.observations.find((o) => o.kind === "transaction")!;
+  expect(jsonTransaction.amountMinor).toBeUndefined();
+  expect(jsonTransaction.amountText).toBe("1.5");
+  // "1.50" in the CSV and "1.5" in JSON are one row, not two.
+  expect(jsonTransaction.externalId).toBe(csvTransactions[0]!.externalId);
+
+  expect(() =>
+    sonyBankHistoryCsv.parse(
+      encode(csv.replace("1.50,,1.50", "-1.50,,1.50")),
+      meta("foreign-history-eur-csv", { mime: "text/csv" }),
+    ),
+  ).toThrow("CSV amount must be unsigned");
+  expect(() =>
+    sonyBankHistoryCsv.parse(
+      encode(csv.replace("1.50,,1.50", "about 1,,1.50")),
+      meta("foreign-history-eur-csv", { mime: "text/csv" }),
+    ),
+  ).toThrow("CSV amount must be an exact decimal");
+});
+
 test("retained Sony JSON and CSV accept an omitted start, retain the end bound and reject missing metadata", () => {
   const json = encode(text("yen-history-page-0001.json"));
   const csv = encode(text("yen-history.csv"));
