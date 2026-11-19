@@ -72,8 +72,9 @@ type LineInput = Pick<
  * A page's lines with its accounts and metrics named once each. An account is
  * one provider account (`sourceAccount`, the key the read's `account` filter
  * takes) within its source, with the entity and label its organization gives,
- * or null for both when that is unavailable. A metric is one provider metric
- * within its source, with the registry's id for it.
+ * or null for both when that is unavailable; the same provider account
+ * organized two ways on one page is two entries. A metric is one provider
+ * metric within its source, with the registry's id for it.
  */
 function lines<Item extends LineInput, Line>(
   items: readonly Item[],
@@ -85,23 +86,34 @@ function lines<Item extends LineInput, Line>(
 } {
   const accounts = refTable<Omit<SummaryAccount, "ref">>("a");
   const metrics = refTable<Omit<SummaryMetric, "ref">>("m");
-  const out = items.map((item) => ({
-    observationId: item.observationId,
-    account: accounts.refOf([item.row.source_id, item.row.source_account], () => ({
-      source: item.row.source_id,
-      sourceAccount: item.row.source_account,
-      account: item.row.organization?.account?.targetId ?? null,
-      label: item.row.organization?.account?.label ?? null,
-    })),
-    metric: metrics.refOf([item.row.source_id, item.row.metric, item.metric.metricId], () => ({
-      source: item.row.source_id,
-      metric: item.metric.metricId,
-      providerMetric: item.row.metric,
-    })),
-    amount: summaryAmount(item.quantity),
-    asOf: item.row.as_of,
-    ...extra(item),
-  }));
+  const out = items.map((item) => {
+    const account = item.row.organization?.account?.targetId ?? null;
+    const label = item.row.organization?.account?.label ?? null;
+    return {
+      observationId: item.observationId,
+      // Keyed by everything the entry says: two rows of one provider account
+      // organized differently (a history row recorded under an older mapping,
+      // or one whose organization is unavailable) get two refs, so a line
+      // never resolves to an account or a label its row does not carry.
+      account: accounts.refOf(
+        [item.row.source_id, item.row.source_account, account, label],
+        () => ({
+          source: item.row.source_id,
+          sourceAccount: item.row.source_account,
+          account,
+          label,
+        }),
+      ),
+      metric: metrics.refOf([item.row.source_id, item.row.metric, item.metric.metricId], () => ({
+        source: item.row.source_id,
+        metric: item.metric.metricId,
+        providerMetric: item.row.metric,
+      })),
+      amount: summaryAmount(item.quantity),
+      asOf: item.row.as_of,
+      ...extra(item),
+    };
+  });
   return { accounts: accounts.entries, metrics: metrics.entries, items: out };
 }
 

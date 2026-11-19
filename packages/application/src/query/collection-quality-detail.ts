@@ -16,6 +16,13 @@ import {
   type CollectionQualitySummaryLines,
 } from "../../../observation-shared/src/collection-quality-contract.ts";
 
+/** Each distinct code of `codes`, in order of first appearance; a null is no code. */
+function distinctCodes(codes: Iterable<string | null>): string[] {
+  const out: string[] = [];
+  for (const code of codes) if (code !== null && !out.includes(code)) out.push(code);
+  return out;
+}
+
 function scheduleLine(schedule: CollectionQualitySchedule): CollectionQualityScheduleLine {
   return {
     id: schedule.id,
@@ -27,14 +34,23 @@ function scheduleLine(schedule: CollectionQualitySchedule): CollectionQualitySch
             nominalAt: schedule.latest.nominalAt,
             status: schedule.latest.status,
             failureCode: schedule.latest.failureCode,
+            // The receipt's terminals collapse to their closed blocked and
+            // failure codes; which stage each stands at is the source's reasons.
+            terminalCodes: distinctCodes(
+              schedule.latest.terminals.flatMap((terminal) => [
+                terminal.blockedCode,
+                terminal.failureCode,
+              ]),
+            ),
           },
   };
 }
 
 /**
  * The summary of the collection quality summary: one line per source with its
- * freshness, newest fetch run, reasons, jobs (newest receipt only) and data
- * type counts, and the jobs under no CORE source. Sources whose lines would
+ * freshness, newest fetch run, reasons, jobs (newest receipt only, with its
+ * terminals' closed codes), its unregistered collectors' count and codes and
+ * its data type counts, and the jobs under no CORE source. Sources whose lines would
  * be the same apart from their id (such as the sources no collector serves)
  * share one line that names them all, in the summary's order.
  */
@@ -49,6 +65,9 @@ export function collectionQualitySummaryLines(
       reasons: source.reasons,
       schedules: source.schedules.map(scheduleLine),
       unregistered: source.unregistered.length,
+      unregisteredCodes: distinctCodes(
+        source.unregistered.flatMap((entry) => [entry.blockedCode, entry.failureCode]),
+      ),
       dataTypes:
         source.dataTypes === null
           ? null
@@ -118,6 +137,11 @@ function collectionQualityCellLines(
         .reduce((newest, at) => (at > newest ? at : newest)),
       freshness: (freshest ?? first).freshness,
       reasons,
+      // The closed codes the newest captures carry, kept as the reasons are.
+      failureCodes: distinctCodes(
+        group.flatMap((cell) => [cell.newest.unitFailureCode, ...cell.newest.failureCodes]),
+      ),
+      coverageCauses: distinctCodes(group.flatMap((cell) => cell.newest.coverageCauses)),
     };
   });
 }

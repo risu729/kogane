@@ -184,6 +184,11 @@ describe("kogane.balances.read summary (ADR 0123)", () => {
       const full = await page.route(`${path}?detail=full&limit=25`);
       expect(full.status).toBe(200);
       expect(validApiResponse(path, full.body)).toBe(true);
+      // A reader that names the detail it asked for takes that shape only.
+      expect(validApiResponse(path, full.body, "full")).toBe(true);
+      expect(validApiResponse(path, summary.body, "summary")).toBe(true);
+      expect(validApiResponse(path, summary.body, "full")).toBe(false);
+      expect(validApiResponse(path, full.body, "summary")).toBe(false);
       // A full page says nothing about detail; it is today's page.
       expect(full.body).not.toHaveProperty("detail");
       const derived =
@@ -479,6 +484,9 @@ describe("kogane.collection-quality.read summary (ADR 0123)", () => {
         "not_parse_eligible",
         "newer_capture_not_current",
       ],
+      // The unit's closed failure code is kept, as its reason is.
+      failureCodes: ["stated_total_mismatch"],
+      coverageCauses: [],
     });
   });
 });

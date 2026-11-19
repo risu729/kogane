@@ -778,18 +778,29 @@ export function validAccountCoverage(value: unknown): value is AccountCoverage {
 
 /**
  * The three routes, by path; any other path under the prefix is not this
- * contract. The summary and cell routes answer either detail (ADR 0123).
+ * contract. The summary and cell routes answer either detail (ADR 0123):
+ * `detail`, when the caller names the one it asked for, accepts that shape
+ * only, so a page that asked for `full` never takes a summary for it.
  */
-export function validCollectionQualityResponse(path: string, value: unknown): boolean {
+export function validCollectionQualityResponse(
+  path: string,
+  value: unknown,
+  detail?: CollectionQualityDetail,
+): boolean {
+  const full = detail !== "summary";
+  const summary = detail !== "full";
   if (path === COLLECTION_QUALITY_PATH)
-    return validCollectionQualitySummary(value) || summaryLines.safeParse(value).success;
+    return (
+      (full && validCollectionQualitySummary(value)) ||
+      (summary && summaryLines.safeParse(value).success)
+    );
   const accounts = /^\/api\/collection-quality\/([^/]+)\/accounts$/u.exec(path);
   if (accounts !== null) return validAccountCoverage(value) && value.sourceId === accounts[1];
   const match = /^\/api\/collection-quality\/([^/]+)$/u.exec(path);
   if (match === null) return false;
-  if (validCollectionQualityCells(value)) return value.sourceId === match[1];
+  if (full && validCollectionQualityCells(value)) return value.sourceId === match[1];
   const parsed = cellSummary.safeParse(value);
-  return parsed.success && parsed.data.sourceId === match[1];
+  return summary && parsed.success && parsed.data.sourceId === match[1];
 }
 
 /**
@@ -823,6 +834,8 @@ export interface CollectionQualitySourceLine {
   schedules: CollectionQualityScheduleLine[];
   /** How many collectors registered runs under no CORE source. */
   unregistered: number;
+  /** Their distinct closed blocked and failure codes. */
+  unregisteredCodes: string[];
   /** The provider data types by status; null where the catalogue does not describe the source. */
   dataTypes: { collected: number; partial: number; notCollected: number } | null;
 }
@@ -830,7 +843,12 @@ export interface CollectionQualitySourceLine {
 export interface CollectionQualityScheduleLine {
   id: string;
   enabled: boolean;
-  latest: Pick<CollectionQualityOccurrence, "nominalAt" | "status" | "failureCode"> | null;
+  latest:
+    | (Pick<CollectionQualityOccurrence, "nominalAt" | "status" | "failureCode"> & {
+        /** The distinct closed blocked and failure codes of the receipt's terminals. */
+        terminalCodes: string[];
+      })
+    | null;
 }
 
 export interface CollectionQualitySummaryLines {
@@ -861,6 +879,10 @@ export interface CollectionQualityCellLine {
   /** That of the cell whose current capture is newest; with none, that of its first cell. */
   freshness: Freshness;
   reasons: CollectionQualityCell["reasons"];
+  /** The distinct unit and parse failure codes of the cells' newest captures. */
+  failureCodes: string[];
+  /** The distinct coverage causes of the cells' newest captures. */
+  coverageCauses: string[];
 }
 
 export interface CollectionQualityCellSummary {
@@ -888,6 +910,7 @@ const scheduleLine = z.strictObject({
       nominalAt: instant,
       status: z.enum(OCCURRENCE_STATUSES),
       failureCode: z.nullable(code),
+      terminalCodes: distinct(code),
     }),
   ),
 });
@@ -903,6 +926,7 @@ const summaryLines = z.strictObject({
       reasons: distinct(z.enum(SOURCE_REASONS)),
       schedules: z.array(scheduleLine).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
       unregistered: count,
+      unregisteredCodes: distinct(code),
       dataTypes: z.nullable(
         z.strictObject({ collected: count, partial: count, notCollected: count }),
       ),
@@ -932,6 +956,8 @@ const cellSummary = z
             newestCapturedAt: instant,
             freshness,
             reasons: distinct(z.enum(CELL_REASONS)),
+            failureCodes: distinct(code),
+            coverageCauses: distinct(code),
           })
           .check(
             // Every collapsed cell is counted once, under its state.

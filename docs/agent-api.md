@@ -798,8 +798,10 @@ dataCoverage, subtotals }`: each item is `{ observationId, account, metric,
 amount: { value, unit, status, scale }, asOf }` (with `freshness`,
 `adoption` and `reasons` on `latest`), and `account` and `metric` are
 page-local refs (`a1`, `m1`) into `accounts` (`source`,
-`sourceAccount`, account entity, label) and `metrics` (`source`, registry
-metric id, provider metric), so a long id or label is written once per page.
+`sourceAccount`, account entity, label; one entry per distinct four, so a
+provider account organized two ways on a page is two entries) and `metrics`
+(`source`, registry metric id, provider metric), so a long id or label is
+written once per page.
 Its page size defaults to 25 (`full`: 100); the offered sizes are 25, 50,
 100, 200 and 500. The page, cursor, coverage and subtotals are the full
 page's. A cursor is bound to neither `detail` nor `limit`
@@ -890,12 +892,15 @@ so `offset` or `detail` with it is `400 invalid_request`;
 [ADR 0088](adr/0088-collection-quality-per-account.md)). With `detail:
 "summary"` (the default; ADR 0123) the summary is one line per source (sources
 whose lines would be equal share one, naming each in `sourceIds`): freshness,
-newest fetch run, reasons, each job's newest receipt status and failure code,
-the count of unregistered collectors, and the provider data types counted by
-status; and a source's cells are read whole (refused past 2,000 cells with
+newest fetch run, reasons, each job's newest receipt status and failure code
+with its terminals' distinct blocked and failure codes (`terminalCodes`), the
+count of unregistered collectors and their distinct codes
+(`unregisteredCodes`), and the provider data types counted by status; and a
+source's cells are read whole (refused past 2,000 cells with
 `413 result_limit_exceeded`, never cut) and answered as one line per dataset,
-parser and fetch unit, collapsed over periods, 20 lines a page (`offset` then
-counts lines, and `coverage` gives the cell and line counts). The account view
+parser and fetch unit, collapsed over periods, with the union of the cells'
+reasons, failure codes (`failureCodes`) and coverage causes, 20 lines a page
+(`offset` then counts lines, and `coverage` gives the cell and line counts). The account view
 carries each account's stored label, under `data` like every page read, and
 its audit record counts the cells it read, never an account.
 Each source of the summary and each cell of `view: "cells"` carries its
@@ -954,8 +959,9 @@ and travel only encoded under `data`. An object over 1 MiB is
 
 `kogane.schedules.read` takes `{ detail? }`. With `detail: "summary"` (the
 default; ADR 0123) it answers one line per job (id, source, kind, enabled,
-next run, reservation, and its newest occurrence's nominal time, status and
-failure code), each source's maintenance reference status with its count of
+supported, next run, reservation, `dispatch` — its `collectionRequest`'s,
+null when no collector serves one, absent when the snapshot does not say —,
+and its newest occurrence's nominal time, status and failure code), each source's maintenance reference status with its count of
 rules, and the held leases, shaped by `scheduleSnapshotSummary`
 (`packages/collection/src/schedule-model.ts`), which
 `GET /api/ops/v1/schedules` applies to the same snapshot. With

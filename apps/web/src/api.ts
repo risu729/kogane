@@ -1,6 +1,9 @@
 // Shared HTTP contracts keep the UI independent of the local store implementation.
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
+import {
+  requestedDetail,
+  validApiResponse,
+} from "../../../packages/observation-shared/src/api-validation.ts";
 import {
   listRequestSearch,
   type ListPath,
@@ -179,7 +182,9 @@ async function readJson<T>(path: string, signal: AbortSignal): Promise<T> {
       "受信したデータを読み取れませんでした。再読み込みしてください。",
     );
   }
-  if (!validApiResponse(path.split("?", 1)[0]!, value)) {
+  // A page that asked for a detail (ADR 0123) accepts that shape only.
+  const [pathname, search = ""] = path.split("?", 2) as [string, string?];
+  if (!validApiResponse(pathname, value, requestedDetail(search))) {
     throw new ApiError(
       response.status,
       "受信したデータの形式が対応していません。接続先を確認してください。",

@@ -891,6 +891,18 @@ const endpoints: Record<string, Check<unknown>> = {
     fullPage(balanceHistoryPage)(value) || balanceHistorySummaryPage(value),
 };
 
+/** Each detail's own check of the balance pages (ADR 0123). */
+const balancePagesByDetail: Record<string, Record<ReadDetail, Check<unknown>>> = {
+  "/api/v2/balances/latest": {
+    full: fullPage(latestBalancePage),
+    summary: latestBalanceSummaryPage,
+  },
+  "/api/v2/balances/history": {
+    full: fullPage(balanceHistoryPage),
+    summary: balanceHistorySummaryPage,
+  },
+};
+
 /**
  * The shared query response (`GET /api/v2/query`, `@kogane/application`). The
  * result itself is checked by the domain contract, so the browser and the
@@ -916,8 +928,29 @@ function validSharedQueryResponse(value: unknown): boolean {
   );
 }
 
-/** Additive fields are allowed; required fields and their nullability are checked. */
-export function validApiResponse(path: string, value: unknown): boolean {
+/** `summary` or `full` (ADR 0123): the detail a request asked for. */
+type ReadDetail = "summary" | "full";
+
+/**
+ * The `detail` a request's query asks for when it names one the reads offer,
+ * for `validApiResponse`'s third argument; absent or anything else is
+ * `undefined` (either shape).
+ */
+export function requestedDetail(search: string): ReadDetail | undefined {
+  const detail = new URLSearchParams(search).get("detail");
+  return detail === "summary" || detail === "full" ? detail : undefined;
+}
+
+/**
+ * Additive fields are allowed; required fields and their nullability are
+ * checked. `detail` names the detail the request asked for (ADR 0123): the
+ * paths that answer one (the v2 balance pages and the collection quality
+ * summary and cells) then accept that shape only; without it they accept
+ * either.
+ */
+export function validApiResponse(path: string, value: unknown, detail?: ReadDetail): boolean {
+  if (detail !== undefined && Object.hasOwn(balancePagesByDetail, path))
+    return balancePagesByDetail[path]![detail](value);
   if (path === AUDIT_PAGE_PATH) return validAuditPage(value);
   if (path === "/api/v2/reconciliation/card-settlements/ownership")
     return validCardOwnershipReview(value);
@@ -935,7 +968,7 @@ export function validApiResponse(path: string, value: unknown): boolean {
   if (path === "/api/v2/reports" || path.startsWith("/api/v2/reports/"))
     return validReportResponse(path, value) ?? false;
   if (path.startsWith("/api/collection-quality"))
-    return validCollectionQualityResponse(path, value);
+    return validCollectionQualityResponse(path, value, detail);
   if (path === INSTRUMENT_CANDIDATES_PATH) return validInstrumentCandidateReview(value);
   if (path === ACCOUNT_CANDIDATES_PATH) return validAccountCandidateReview(value);
   if (path === INSTRUMENT_HISTORY_PATH) return validInstrumentHistoryRead(value);

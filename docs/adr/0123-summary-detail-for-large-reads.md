@@ -128,29 +128,45 @@ offered page size; what remains is that the refusal says nothing.
      (`source`, `sourceAccount` — the key the `account` filter takes —,
      account entity id and label, both null when the organization is
      unavailable) and `metrics` (`source`, registry metric id, provider
-     metric). A 64-hex account id, a label and a provider metric are written
+     metric). An `accounts` entry is keyed by all four of its fields, so one
+     provider account organized two ways on a page (a history row recorded
+     under an older mapping, or a row whose organization is unavailable) is
+     two entries, and a line never resolves to an entity or label its own
+     row does not carry. A 64-hex account id, a label and a provider metric are written
      once per page, not once per row: a row then costs about 200 bytes. The
      page sizes become 25, 50, 100, 200 and 500; a summary defaults to 25
      rows, `full` to 100 as before. The page, its cursor, the coverage and the
      subtotals are the full page's.
    - **Schedules.** `{ detail: "summary", schedules, maintenance, leases }`:
-     per job its id, source, kind, enabled, next run, reservation and newest
-     occurrence (`nominalAt`, `status`, `failureCode`); per source its
+     per job its id, source, kind, enabled, supported, next run, reservation,
+     `dispatch` (its `collectionRequest`'s dispatch state, null when no
+     collector serves a request, absent when the snapshot does not say) and
+     newest occurrence (`nominalAt`, `status`, `failureCode`); per source its
      maintenance reference status and number of rules; every held lease.
      `kogane.schedules.read` still leaves out the route's `survey`, which the
      summary does not carry.
    - **Collection quality.** Without a source, one line per source (its
      freshness, newest fetch run, reasons, each job's newest receipt status
-     and failure code, the number of unregistered collectors, the provider
-     data types counted as collected, partial and not collected); sources
+     and failure code with the distinct blocked and failure codes of its
+     terminals (`terminalCodes`), the number of unregistered collectors and
+     their distinct codes (`unregisteredCodes`), the provider data types
+     counted as collected, partial and not collected); sources
      whose lines would be equal share one line whose `sourceIds` names each.
      With a source, every cell is read (the cell read's pages at one instant,
      refused past 2,000 cells with `413 result_limit_exceeded`, never cut)
      and answered as one line per dataset, parser and fetch unit, collapsed
      over periods: how many cells and in which state, the first and last
      named period, the newest capture, the freshness of the newest current
-     capture, and the union of the cells' reasons; 20 lines a page, `offset`
-     counting lines, and `coverage` giving the cell and line counts.
+     capture, and the union of the cells' reasons, of their newest
+     captures' unit and parse failure codes (`failureCodes`) and of their
+     coverage causes (`coverageCauses`); 20 lines a page, `offset` counting
+     lines, and `coverage` giving the cell and line counts. A line drops a
+     cell's period state (MyJCB's `confirmed`/`unconfirmed`), its current
+     rule and its per-artifact parse counts; its reasons say which of those
+     stages is not complete. The pages are separate reads at one `asOf`,
+     not one transaction: a capture registered between two pages of a
+     source with more than 500 cells can shift a cell across the page
+     boundary, as it can between two pages a client reads (an open limit).
 4. **Cursors.** A cursor is bound to neither `detail` nor `limit` (ADR 0119):
    a page read in one detail continues in the other at any offered size. A
    cursor read with another route, filter or read mode stays
@@ -173,12 +189,20 @@ offered page size; what remains is that the refusal says nothing.
 - A client of the routes that relied on the full default must ask for
   `detail=full`. The repository's only client, the web UI, does. Saved
   reports and the shared query do not read these routes.
-- The summary validators (`packages/observation-shared/src/api-validation.ts`)
-  accept either shape on the balance paths; a full page has no `detail`.
+- The response validator (`validApiResponse` in
+  `packages/observation-shared/src/api-validation.ts`) takes the detail a
+  request asked for (`requestedDetail` of its query) and then accepts that
+  shape only, on the balance paths and the collection quality summary and
+  cells; without one it accepts either. The web UI's `getJson` and the
+  conformance checks pass it, so a page that asked for `full` refuses a
+  summary instead of rendering it. A full page has no `detail`.
 - Measured headroom: the default balance summary is about 7.4 KB with three
   accounts and ten metrics on the page; a page whose 25 rows name 25
   different accounts would pass 8 KB. A smaller `limit` is the remedy; the
-  default stays at the proposal's 25.
+  default stays at the proposal's 25. The collection quality summary is
+  about 6.9 KB with its terminal and unregistered codes, all empty on the
+  synthetic store: a store whose every source fails with several codes has
+  less room, and no `limit` shortens it (a follow-up would page its lines).
 - Left as they are, and over 8 KB at this scale: `kogane.observations.list`
   `{kind: balances}` (the v1 grouped list, about 520 KB),
   `kogane.schedules.maintenance.read` (about 15 KB) and `kogane.store.read`
@@ -211,7 +235,23 @@ offered page size; what remains is that the refusal says nothing.
   Vpass's (seven units, 36 statement months each never current since an
   older capture, seven current datasets each) validate against the cell
   contract, collapse into 56 lines over three pages each under 8 KB, keep
-  every cell's state count and every reason.
+  every cell's state count, every reason and the units' failure code.
+- `packages/application/test/read-detail.test.ts`: one provider account
+  organized two ways on a page is two `accounts` entries and each line
+  resolves to its own row's entity and label; a value that is not exact is
+  its status with no value and no scale; a latest line keeps its adoption
+  and freshness reason codes; a summary page fails the validator when
+  `full` was asked for.
+- `packages/application/test/collection-quality-detail.test.ts` (the
+  synthetic CORE store): every source is on one line that carries its
+  reasons, its jobs' receipt states and codes, its terminals' blocked and
+  failure codes and its unregistered collectors' codes; a source's cells
+  collapse with every state counted once and every reason, failure code and
+  coverage cause kept; each shape fails the validator under the other
+  detail.
+- `packages/collection/test/schedule-summary.test.ts`: a job line keeps
+  `supported`, `dispatch` (null and absent kept apart) and its newest
+  receipt's failure code.
 - The existing tests that pin the full shape read `detail=full`
   (`balances-v2.test.ts`, `collection-quality-api.test.ts`,
   `page-read-reports.test.ts`, `page-read-schedules.test.ts`,

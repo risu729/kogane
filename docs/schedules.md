@@ -430,8 +430,13 @@ login or render with JavaScript cannot be read this way.
 
 ## Settings API
 
-- `GET /api/ops/v1/schedules`: settings, maintenance provenance, reservations
-  and receipts.
+- `GET /api/ops/v1/schedules?detail=full`: settings, maintenance provenance,
+  reservations and receipts, as the Processor's snapshot has them; the page
+  asks for it. Without `detail`, or with `detail=summary`, one line per job
+  with its closed states and newest receipt, each source's maintenance
+  status and rule count, and the held leases
+  ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)). No other query
+  parameter is accepted.
 - `POST /api/ops/v1/schedules/:id`: version-checked job edits.
 - `POST /api/ops/v1/schedules/maintenance`: versioned maintenance edits.
 - `POST /api/ops/v1/schedules/leases/:sourceId`: release the exact stopped
@@ -486,7 +491,8 @@ and the routes above refuse every agent and every MCP-audience caller. The tools
   `"*"`, and `evidence.read` over the whole store because the page's
   occurrences carry run and evidence ids and it lists held leases; on `/mcp`
   and `POST /api/agent/v1/schedules.read`) answers this page's
-  `GET /api/ops/v1/schedules` snapshot without its `survey` part, read from
+  `GET /api/ops/v1/schedules` snapshot without its `survey` part, at the same
+  `detail` (`summary` by default), read from
   the Processor with no operator or agent header
   ([ADR 0081](adr/0081-ui-parity-through-mcp.md);
   [UI read pages](agent-api.md#ui-read-pages)).

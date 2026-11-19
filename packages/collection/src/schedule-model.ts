@@ -113,10 +113,12 @@ export interface ScheduleSnapshot {
 /**
  * The schedules page in one line per job (ADR 0123): the `summary` detail of
  * `GET /api/ops/v1/schedules` and `kogane.schedules.read`. Each job keeps its
- * newest occurrence (its status and closed failure code), each source its
- * maintenance reference status and how many maintenance rules it has, and
- * every held lease is listed. The occurrence list, the rules' patterns and
- * the re-survey are in the `full` detail only.
+ * closed states (kind, enabled, supported, reservation, and whether a
+ * collection request for it would be dispatched, absent where the snapshot
+ * has none) and its newest occurrence (its status and closed failure code),
+ * each source its maintenance reference status and how many maintenance
+ * rules it has, and every held lease is listed. The occurrence list, the
+ * rules' patterns and the re-survey are in the `full` detail only.
  */
 export interface ScheduleSummary {
   detail: "summary";
@@ -125,8 +127,14 @@ export interface ScheduleSummary {
     source: string | null;
     kind: ScheduleView["kind"];
     enabled: boolean;
+    supported: boolean;
     nextRunAt: string | null;
     reservation: ScheduleView["reservation"];
+    /**
+     * `collectionRequest.dispatch`: null when no collector serves a request
+     * for the job, absent when the snapshot does not say (an older Processor).
+     */
+    dispatch?: ScheduleCollectionRequest["dispatch"] | null;
     latest: Pick<ScheduleOccurrence, "nominalAt" | "status" | "failureCode"> | null;
   }[];
   maintenance: { source: string; status: ScheduleView["maintenance"]["status"]; rules: number }[];
@@ -149,8 +157,12 @@ export function scheduleSnapshotSummary(snapshot: ScheduleSnapshot): ScheduleSum
       source: schedule.source,
       kind: schedule.kind,
       enabled: schedule.enabled,
+      supported: schedule.supported,
       nextRunAt: schedule.nextRunAt,
       reservation: schedule.reservation,
+      ...(schedule.collectionRequest === undefined
+        ? {}
+        : { dispatch: schedule.collectionRequest?.dispatch ?? null }),
       latest:
         schedule.latest === null
           ? null
