@@ -477,8 +477,8 @@ total (one helper, `statementTotal` in
 `packages/application/src/query/card-statement-total.ts`); it is never null
 or zero (INV05), and the page shows it as unknown with that reason. Such a
 statement is still `statement_not_comparable`. An `exact` status without both
-decimal-v1 columns, which CORE 0024's CHECK never stores, fails the read
-(`card_statements_unmatched_row_invalid`).
+decimal-v1 columns, or a status outside decimal-v1, which CORE 0024's CHECK
+never stores, fails the read (`card_statements_unmatched_row_invalid`).
 
 For `no_equal_amount_debit` only, `planner` is the ADR 0074 planner's answer
 ([amendment 2026-11-07](adr/0074-card-statement-allocation-planner.md#amendment-2026-11-07-a-read-only-caller-on-the-review-page))
