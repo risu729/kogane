@@ -570,10 +570,12 @@ const overviewSummaryShape = object<OverviewSummary>({
  * Each status once; a capped list holds at most `OVERVIEW_SUMMARY_LINES`
  * lines and leaves lines out only when full, each status's omitted entry
  * once; and a status's per-source or per-parser lines with its omitted ones
- * count exactly its runs.
+ * count exactly its runs and its sources or parsers (`distinct`), one line
+ * each.
  */
-function linesCountStatus(
-  byStatus: readonly { status: string; runs: number }[],
+function linesCountStatus<Line extends { status: string; runs: number }>(
+  byStatus: readonly Line[],
+  distinct: (line: Line) => number,
   lines: readonly { status: string; runs: number }[],
   omitted: readonly { status: string; lines: number; runs: number }[],
   success: string,
@@ -582,12 +584,17 @@ function linesCountStatus(
   if (new Set(statuses).size !== statuses.length) return false;
   if (!capped(lines.length, omitted)) return false;
   if (new Set(omitted.map((entry) => entry.status)).size !== omitted.length) return false;
-  const runsOf = (status: string) =>
-    lines.filter((entry) => entry.status === status).reduce((sum, entry) => sum + entry.runs, 0) +
-    (omitted.find((entry) => entry.status === status)?.runs ?? 0);
+  const listed = (status: string) => lines.filter((entry) => entry.status === status);
+  const left = (status: string) => omitted.find((entry) => entry.status === status);
   return (
-    byStatus.every((line) => line.status === success || runsOf(line.status) === line.runs) &&
-    [...lines, ...omitted].every((entry) => statuses.includes(entry.status))
+    byStatus.every(
+      (line) =>
+        line.status === success ||
+        (listed(line.status).reduce((sum, entry) => sum + entry.runs, 0) +
+          (left(line.status)?.runs ?? 0) ===
+          line.runs &&
+          listed(line.status).length + (left(line.status)?.lines ?? 0) === distinct(line)),
+    ) && [...lines, ...omitted].every((entry) => statuses.includes(entry.status))
   );
 }
 /** At most the cap listed, and lines left out only from a full list, each counting its runs. */
@@ -635,12 +642,14 @@ const overviewSummary: Check<OverviewSummary> = (value): value is OverviewSummar
   overviewSummaryShape(value) &&
   linesCountStatus(
     value.fetchRuns.byStatus,
+    (line) => line.sources,
     value.fetchRuns.notSuccessful,
     value.fetchRuns.notSuccessfulOmitted,
     "success",
   ) &&
   linesCountStatus(
     value.parseRuns.byStatus,
+    (line) => line.parsers,
     value.parseRuns.notOk,
     value.parseRuns.notOkOmitted,
     "ok",

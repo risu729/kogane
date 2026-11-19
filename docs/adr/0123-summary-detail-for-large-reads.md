@@ -442,10 +442,11 @@ At 30 sources with two jobs and four rules of 20 revisions each it is about
    - A status outside the closed sets is refused (the summary throws), never
      passed on as a code. The validator accepts each status once; requires
      the per-source and per-parser lines of a status, with its omitted
-     entry, to count exactly its runs; refuses a list over five lines, lines
-     counted as left out of a list that is not full, a line over three
-     failure codes or counting more than it may, and a line's code missing
-     from its status's line.
+     entry, to count exactly its runs and its sources or parsers (the
+     status's `sources` or `parsers`, one line each); refuses a list over
+     five lines, lines counted as left out of a list that is not full, a
+     line over three failure codes or counting more than it may, and a
+     line's code missing from its status's line.
    - Dropped: each source's provider name and ingestion; each fetch run's
      producer (`tool`) and session id (`external_run_id`); each parse run's
      parser version, warning text and superseding parse id; every run but
@@ -557,9 +558,11 @@ Measured as the bytes of the MCP result's structured content
   the five lines a reference ordering picks, its listed and left-out lines and
   runs add up to the full answer's per status, each line's shown and counted
   codes are its runs' distinct codes, each status's codes are exactly its
-  runs', and the unit updates in another order give the same summary; a
-  status outside the closed sets is refused; each shape passes the validator only under its own detail, and a
-  summary whose lines do not count their status's runs, repeat a status, put
+  runs', the unit updates in another order give the same summary, and an
+  omitted entry that miscounts its lines with its runs right fails the
+  validator; a status outside the closed sets is refused; each shape passes
+  the validator only under its own detail, and a summary whose lines do not
+  count their status's runs, repeat a status, put
   `success` on a not-successful line or name an unknown status fails it.
 - `packages/collection/test/maintenance-summary.test.ts`: a job keeps its
   closed states, revision, run times and newest receipt's failure code, and

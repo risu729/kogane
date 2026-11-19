@@ -604,6 +604,25 @@ describe("overviewSummary on random full answers", () => {
           );
         }
       }
+      // A left-out entry that miscounts its lines is not a summary, even
+      // with its runs right.
+      for (const omitted of [
+        summary.fetchRuns.notSuccessfulOmitted,
+        summary.parseRuns.notOkOmitted,
+      ] as { lines: number }[][])
+        for (const [index, entry] of omitted.entries())
+          for (const lines of [entry.lines - 1, entry.lines + 1].filter((value) => value > 0)) {
+            const miscounted = structuredClone(summary);
+            const copy = (
+              omitted === summary.fetchRuns.notSuccessfulOmitted
+                ? miscounted.fetchRuns.notSuccessfulOmitted
+                : miscounted.parseRuns.notOkOmitted
+            )[index]!;
+            copy.lines = lines;
+            copy.runs = Math.max(copy.runs, lines);
+            if (copy.runs !== entry.runs) continue;
+            expect(validApiResponse("/api/overview", miscounted, "summary"), label).toBe(false);
+          }
       // A line's codes, shown and counted, are its runs' distinct codes, newest first.
       const codesOf = (rows: readonly { id: number }[]) => [
         ...new Set(
