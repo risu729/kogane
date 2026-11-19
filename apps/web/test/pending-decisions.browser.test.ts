@@ -190,9 +190,14 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
     refuse = true;
     const page = await browser.newPage();
     try {
+      // Listen before navigating: the refusal can arrive before the heading
+      // renders, and a listener added after it would wait forever.
+      const refused = page.waitForResponse((response) =>
+        response.url().endsWith(PENDING_DECISIONS_PATH),
+      );
       await page.goto(`${origin}/`);
       await page.getByRole("heading", { name: "ホーム", exact: true }).waitFor();
-      await page.waitForResponse((response) => response.url().endsWith(PENDING_DECISIONS_PATH));
+      await refused;
       await page.waitForTimeout(200);
       expect(await page.locator('section[aria-labelledby="pending-decisions"]').count()).toBe(0);
     } finally {
