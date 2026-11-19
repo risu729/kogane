@@ -383,12 +383,12 @@ the grant's `maxRows` (bound 3 below): the request it would name is refused
 with that code, so `data.nextOffset` is `null` and the answer says why.
 `data.summary.events` still counts every event of the filter, and a
 statement `period` narrows it. With the whole-store grant every MCP client
-holds (`maxRows` 1000) the last page offered starts at offset 950. This is
-the rule of the candidate reviews below, whose `nextOffset` is null where the
-next page would exceed `maxRows`. The card settlement reads and the unmatched
-statements still offer such a page, and refuse it when asked
-([ADR 0081](adr/0081-ui-parity-through-mcp.md), 2026-11-07 amendment): an
-open limit.
+holds (`maxRows` 1000) the last page offered starts at offset 950. The card
+settlement reads and the unmatched statements answer the same `nextPage`
+codes by the same rule (`pageBeyondBudget`;
+[ADR 0081](adr/0081-ui-parity-through-mcp.md), 2026-11-08 amendment), and
+the candidate reviews below null `nextOffset` where the next page would
+exceed `maxRows`.
 
 `data` is the operator page's `CardPurchasePage` (`packages/domain/src/card-purchase-view.ts`),
 field for field but for a `nextOffset` past the grant's bound: the figures
@@ -816,13 +816,25 @@ tables or views: `kogane.reported-state.read` and
 card settlement schema). The page reads' checks run through `catalogue` in
 `pageReadStore`, the others' in `agent-api.ts` (`test/page-read-probe.test.ts`,
 `test/agent-probe.test.ts`). Every store read `tools/list` makes is one of
-these checks, so a store failure there is always `503`. A limit: once a
-tool's check has passed, a store failure inside the tool's own read differs.
-A page read runs its route's reader in `catalogue`, so it is
-`503 catalogue_read_failed` as a tool result (`isError: true` on `/mcp`);
-every other tool, the five above included, answers `500 internal_error` for
-the whole request on both agent paths, where the UI route of the same read
-answers `503 catalogue_read_failed`.
+these checks, so a store failure there is always `503`. Once a tool's check
+has passed, a store failure inside the tool's own read is its route's
+`503 catalogue_read_failed` too, answered as the tool's result
+(`isError: true` on `/mcp`, that status and `{"error":"catalogue_read_failed"}`
+on `/api/agent/v1/*`), and recorded once as `failed` with that code. A page
+read runs its route's reader in `catalogue`, and every other read tool runs
+its read in `catalogueTool` (`src/read.ts`), which is `catalogue` with the
+answer as the result
+([ADR 0081, amendment of 2026-11-18](adr/0081-ui-parity-through-mcp.md#amendment-a-read-tools-store-failure-is-its-routes-answer-2026-11-18);
+`test/agent-read-store-failure.test.ts`). A refusal such a read raises
+(the observation reader's `413 result_limit_exceeded` past 5,000 rows on the
+shared query, the context or the explanation) is likewise the tool's result,
+with its status and code alone. `kogane.economic-readiness.read`
+keeps its service's own `503` (`readiness_store_unavailable`), as its route
+does. `kogane.reconcile.propose` writes, so a store failure there stays
+`500 internal_error` for the whole request, as does any exception outside a
+read tool's read (an operations or decision tool, the dispatcher).
+Until 2026-11-18 every read tool outside the page reads answered a store
+failure inside its read with `500 internal_error`.
 
 `kogane.reports.read` takes `{ reportId?, view?, offset?, decimalPolicy? }`:
 without `reportId` it is the list (`offset` only), with it the detail
@@ -1429,9 +1441,9 @@ are unchanged.
 | no token, expired token, person not in the MCP application's policy                                                                                               | Cloudflare Access                           | Access's own `401` (Managed OAuth) — not this Worker                                                                                              |
 | assertion missing, forged, expired, from another issuer, not for the MCP application (the browser's, both, another), without `sub`, or with an agent-only subject | Worker                                      | `401 authentication_required`                                                                                                                     |
 | Access keys unreachable; `ACCESS_MCP_AUDIENCE` misconfigured                                                                                                      | Worker                                      | `503 identity_keys_unavailable` / `503 auth_not_configured`                                                                                       |
-| an unexpected failure inside a tool (the store outside a page read, a bug) or the tool list (a bug)                                                               | Worker                                      | `500 internal_error`; the exception text never reaches the client or the log                                                                      |
+| an unexpected failure inside a tool outside a read tool's read (a proposal's store, a bug) or the tool list (a bug)                                               | Worker                                      | `500 internal_error`; the exception text never reaches the client or the log                                                                      |
 | a store failure while a tool or the tool list checks that a read's tables or views exist (the page reads, card purchases, card settlements, the reported state)   | Worker                                      | `503 catalogue_read_failed`, as its route answers; the exception text never reaches the client or the log                                         |
-| a store failure inside a page read's own read                                                                                                                     | tool                                        | `isError: true`, `{"error":"catalogue_read_failed"}`, as its route answers                                                                        |
+| a store failure (or a bug) inside a read tool's own read, page reads included                                                                                     | tool                                        | `isError: true`, `{"error":"catalogue_read_failed"}`, as its route answers (economic readiness: its own `503` body, as its route answers)         |
 | `Origin` of another site                                                                                                                                          | Worker                                      | `403 origin_not_allowed`                                                                                                                          |
 | `GET` / `DELETE`; a query string                                                                                                                                  | Worker                                      | `405 method_not_allowed` / `400 invalid_query`                                                                                                    |
 | media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                                         | `415` / `406` / `400` / `400` / `413`                                                                                                             |
@@ -1757,9 +1769,11 @@ reaching a raw locator, and a proposal beyond the published target bound
 refused without a write; a server-derived proposal
 actor that a body or header cannot change, and adopted answers identical
 before and after a proposal; unpublished tools; a store failure inside
-a tool answered `500 internal_error`, and inside the tool list (whose store
-reads are the availability checks) `503 catalogue_read_failed`, in both eras
-with no exception text in the answer or the log; the connection in both eras; the SDK's transport refusals; tool definitions against SEP-986 and
+a proposal answered `500 internal_error`, inside a read tool's read
+answered as an `isError` result `catalogue_read_failed`, and inside the tool
+list (whose store reads are the availability checks) `503
+catalogue_read_failed`, in both eras with no exception text in the answer or
+the log; the connection in both eras; the SDK's transport refusals; tool definitions against SEP-986 and
 Claude Code's load-time checks; and the UI's
 `GET /api/v2/query`, `POST /api/agent/v1/financial.query` and MCP in both
 eras returning deep-equal objects with the same gap reasons.
