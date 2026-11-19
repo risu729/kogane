@@ -209,7 +209,13 @@ A cursor is base64url of `{v, s: snapshotId, f: filterDigest, k: sortKey, t: pos
 It is **opaque but never trusted**:
 
 - `f` is the digest of the route, the resolved scope, the page size and the
-  identity read mode. A different filter set is a different query.
+  identity read mode. A different route, scope or read mode is a different
+  query. The page size is not: the continuation also compares `f` with the
+  same query's digest at each offered size, so a cursor read at one `limit`
+  continues at another from where its page ended, and the next cursor is
+  issued at the size asked now
+  ([ADR 0119](adr/0119-cursor-page-size.md)). The position is a keyset
+  position in the snapshot's fixed order, which no page size moves.
 - `t` is the projection's dense `row_seq`, not a business identifier. A cursor
   therefore contains no account label, no provider metric and no amount.
 - Every continuation request goes through the same Access gate and the same
@@ -218,7 +224,7 @@ It is **opaque but never trusted**:
 | Situation                                | Answer                |
 | ---------------------------------------- | --------------------- |
 | Undecodable or wrong shape               | `400 invalid_cursor`  |
-| Filter digest differs                    | `400 cursor_mismatch` |
+| Filter digest differs at every page size | `400 cursor_mismatch` |
 | Snapshot retired or deleted              | `410 context_expired` |
 | Page size outside `50 / 100 / 200 / 500` | `400 invalid_limit`   |
 

@@ -311,9 +311,24 @@ describe("the reward routes over the READ database", () => {
     const keys = (page: ExpiryPage) => page.rows.map((row) => `${row.ruleRef}|${row.bucketRef}`);
     expect(keys(second).some((key) => keys(first).includes(key))).toBe(false);
 
+    // The page size is not part of the query (ADR 0119): the same cursor
+    // continues at 50, and the two pages join into exactly the list one wider
+    // page reads from the start.
+    const whole = (await (await call("/api/v2/rewards/expiry?limit=200")).json()) as ExpiryPage;
+    const wider = await call(`/api/v2/rewards/expiry?limit=50&cursor=${next}`);
+    expect(wider.status).toBe(200);
+    const widerPage = (await wider.json()) as ExpiryPage;
+    expect(widerPage.page.limit).toBe(50);
+    expect(widerPage.snapshot.snapshotId).toBe(first.snapshot.snapshotId);
+    // The fixture's list fits in 25 + 50 rows, so the wider page reads it to
+    // its end.
+    expect(whole.page.hasMore).toBe(false);
+    expect(widerPage.page.hasMore).toBe(false);
+    expect([...keys(first), ...keys(widerPage)]).toEqual(keys(whole));
+
     const decoded = decodeReadCursor(next)!;
-    // A cursor that belongs to another query — another page size, another
-    // programme filter — is refused rather than reinterpreted.
+    // A cursor that belongs to another query — another programme filter — is
+    // refused rather than reinterpreted.
     const mismatch = await call(
       `/api/v2/rewards/expiry?limit=25&cursor=${encodeReadCursor({
         ...decoded,

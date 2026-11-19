@@ -11,7 +11,8 @@
 // position: no account label, no provider metric, no amount. Every
 // continuation request goes through the same Access gate and the same scope
 // resolution as the first, and a cursor whose filter digest differs is
-// refused rather than reinterpreted.
+// refused rather than reinterpreted. The page size alone is not a different
+// query: a cursor read at another offered size continues (ADR 0119).
 
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { metricById, resolveMetric, UNKNOWN_METRIC } from "../../../packages/domain/src/metrics.ts";
@@ -217,9 +218,10 @@ function pageLimit(url: Pick<URL, "searchParams">): number {
 }
 
 /**
- * What the cursor is bound to: the route, the resolved scope, the page size
- * and the identity read mode. Changing any of them makes a stored cursor
- * belong to a different query, and the continuation is refused.
+ * What the cursor carries: the digest of the route, the resolved scope, the
+ * page size and the identity read mode. Changing the route, the scope or the
+ * mode makes a stored cursor belong to a different query, and the
+ * continuation is refused; another offered page size continues it (ADR 0119).
  */
 async function filterDigest(
   route: string,
@@ -500,12 +502,15 @@ interface Continuation {
  * membership stays fixed while the reader pages. A cursor for another query
  * is `cursor_mismatch` (400) and a snapshot that no longer exists is
  * `context_expired` (410): the reader is never moved silently to a newer
- * list.
+ * list. The page size is not part of the query: a cursor read at another
+ * offered size continues at the size asked now (ADR 0119), so `pageSizes`
+ * gives the same query's digest at each of them, computed only for a cursor.
  */
 async function continuation(
   target: ReadTarget,
   url: Pick<URL, "searchParams">,
   digest: string,
+  pageSizes: () => Promise<readonly string[]>,
 ): Promise<Continuation | null> {
   if (target.contractMismatch) throw new HttpError(503, "read_model_unavailable");
   const text = url.searchParams.get("cursor");
@@ -518,6 +523,7 @@ async function continuation(
   const snapshot = await target.reader.snapshot(cursor.snapshotId);
   const rejection = checkReadCursor(cursor, {
     filterDigest: digest,
+    pageSizeDigests: await pageSizes(),
     // A cursor from another physical read model — a rebuilt READ database, or
     // the CORE projection this deployment no longer serves — expires. Snapshot
     // ids are digests of content and repeat across rebuilds, so the instance
@@ -528,6 +534,11 @@ async function continuation(
   if (rejection === "cursor_mismatch") throw new HttpError(400, "cursor_mismatch");
   if (rejection !== null || snapshot === null) throw new HttpError(410, "context_expired");
   return { snapshot, afterRowSeq: cursor.position, afterSortKey: cursor.sortKey };
+}
+
+/** The digests of one query at every offered page size (`continuation`). */
+function pageSizeDigests(route: string, scope: V2Scope, mode: IdentityReadMode): Promise<string[]> {
+  return Promise.all(PROJECTION_PAGE_LIMITS.map((size) => filterDigest(route, scope, size, mode)));
 }
 
 /**
@@ -583,7 +594,9 @@ export async function latestBalancePage(
   const scope = scopeOf(url);
   const limit = pageLimit(url);
   const digest = await filterDigest(V2_LATEST_PATH, scope, limit, mode);
-  const resolved = await continuation(target, url, digest);
+  const resolved = await continuation(target, url, digest, () =>
+    pageSizeDigests(V2_LATEST_PATH, scope, mode),
+  );
   // No published snapshot at all: the read model is unavailable, which is a
   // different answer from "you hold no balances" (05 §7, G3-01).
   if (!resolved) throw new HttpError(503, "read_model_unavailable");
@@ -670,7 +683,9 @@ export async function balanceHistoryPage(
   const scope = scopeOf(url);
   const limit = pageLimit(url);
   const digest = await filterDigest(V2_HISTORY_PATH, scope, limit, mode);
-  const resolved = await continuation(target, url, digest);
+  const resolved = await continuation(target, url, digest, () =>
+    pageSizeDigests(V2_HISTORY_PATH, scope, mode),
+  );
   if (!resolved) throw new HttpError(503, "read_model_unavailable");
   const refusal = await snapshotRefusal(target, resolved.snapshot);
   if (refusal !== null) throw new HttpError(503, refusal);
