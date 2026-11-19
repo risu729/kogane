@@ -242,7 +242,9 @@ is still answered exactly as stored.
   without positions past the bound gives the same report id, so the job
   reuses whichever body was stored first, with its own `truncated` and
   partition. This is as before this amendment; the reused body states its
-  own truncation, and `partition` follows it.
+  own truncation, and `partition` follows it. The
+  [amendment of 2026-11-19](#amendment-a-report-id-names-the-code-that-computed-its-body-2026-11-19)
+  closes this limit: the manifest names `truncated`.
 
 ### Verification
 
