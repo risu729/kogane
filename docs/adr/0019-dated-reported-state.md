@@ -209,7 +209,7 @@ codes and the same status on the route and both agent paths": the route,
 
 ## Account entries amendment — 2026-11-18
 
-- Status: proposed
+- Status: accepted (merged 2026-11-19 in [#1399](https://github.com/risu729/kogane/pull/1399))
 - Date: 2026-11-18
 
 **Context.** `queryDatedState` listed one account entry per (source,
