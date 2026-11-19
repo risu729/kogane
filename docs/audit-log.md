@@ -181,6 +181,25 @@ bookkeeping retry re-arms it a minute later. The `processor-tick` and
 none, which keeps the volume at about one record per enabled collection
 occurrence.
 
+**A retry claim writes no record.** The single retry of a `not_dispatched`
+occurrence
+([ADR 0039, amendment of 2026-11-08](adr/0039-alarm-schedule-management.md#amendment-a-durable-pre-rpc-dispatch-marker-2026-11-08);
+[schedules](schedules.md)) claims the same occurrence
+again with an UPDATE of its row, not a new claim batch, and appends nothing:
+the first claim's record stays the occurrence's one claim record. That
+record already exists for every retried occurrence, because only a
+protocol-1 row can be retried and only the claim batch that carries the
+record inserts one. The retry itself is named by the row's `retry_claimed_at`
+and the `retry_claimed` log line, not in this log. The record's
+`schedule:<job id>@<revision>` and `recorded_at` are the first claim's, even
+when a settings edit in between fenced the retry on a later revision. Nothing
+names the revision the retry was fenced on: the `retry_claimed` line carries
+the job and occurrence ids only, and the occurrence row has no revision. The
+settings edit's own record gives its time, which does not settle whether the
+edit landed before or after the retry's fence. The retry calls the collector
+with the original nominal, so that revision only decided that the job was
+still enabled with the same next reservation.
+
 **A lane record** is not in the lane's batches, because a lane writes in
 many. `runScheduled` (`src/worker.ts`, `src/lane-audit.ts`) reads a
 high-water mark of `decision_revisions`, `economic_commit_log` (in the current
@@ -358,7 +377,10 @@ occurrence of that job.
 ## Not recorded, and other limits
 
 - The `processor` tick and `keepalive` alarm occurrences, an alarm dispatch's
-  outcome (it stays in the occurrence row), lane ticks that wrote no decision,
+  outcome (it stays in the occurrence row), the retry claim of a
+  `not_dispatched` occurrence (its first claim's record stands for it, and
+  no record or log names the schedule revision the retry was fenced on,
+  [above](#the-processors-own-records-alarm-and-lane)), lane ticks that wrote no decision,
   commit or proposal, and the lanes that write none of them (parsing,
   identity, projections, prices, rewards, reports, operations dispatch, the
   decision outbox, the overflow aggregate).
@@ -433,7 +455,8 @@ a token-shaped value and an amount, and that the served page passes the
 page's contract),
 `services/processor/test/schedule-alarm-audit.test.ts` (one record per claimed
 collection occurrence, none for the processor tick and keepalive, a claim
-rolled back with its record), `services/processor/test/lane-audit.test.ts`
+rolled back with its record), `services/processor/test/schedule-dispatch-marker.test.ts`
+(a retry claim adds no second record; the first claim's revision stays), `services/processor/test/lane-audit.test.ts`
 (ranges that name exactly the lane's rows with other writers' rows in between,
 idle, off and unaudited lanes, a failed tick, a record that cannot be written),
 `services/processor/test/lane-audit-plans.test.ts` (every lane audit read is a
