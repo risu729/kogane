@@ -45,7 +45,11 @@ import {
   processorCall,
   resolveDelegation,
   REVIEW_PLANNERS,
+  REWARD_EXPIRY_SUMMARY_BUCKET_LINES,
+  REWARD_EXPIRY_SUMMARY_DISPLAY_LINES,
+  REWARD_EXPIRY_WINDOW_ROW_BOUND,
 } from "../../../packages/application/src/index";
+import { REWARD_EXPIRY_LEFT_OUT_REASONS } from "../../../packages/observation-shared/src/reward-contract.ts";
 import {
   delegatedDecisionAllowed,
   delegatedPlanAllowed,
@@ -308,6 +312,28 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
       "dataTypesVersion",
       "providerTypes",
       "provider-data-types-v1",
+    ])
+      expect(tool.description).toContain(term);
+  });
+  it("names the reward expiry window, its summary and every closed code they answer", async () => {
+    const tool = (await publishedDefinitions()).find(
+      (entry) => entry.name === "kogane.rewards.read",
+    )!;
+    expect(tool.description.length).toBeLessThanOrEqual(2048);
+    for (const term of [
+      "`from`",
+      "`before`",
+      "Asia/Tokyo",
+      "`detail: summary`",
+      `earliest ${String(REWARD_EXPIRY_SUMMARY_BUCKET_LINES)} bucket lines`,
+      `up to ${String(REWARD_EXPIRY_SUMMARY_DISPLAY_LINES)} provider-displayed portions`,
+      `${REWARD_EXPIRY_WINDOW_ROW_BOUND.toLocaleString("en-US")} rows`,
+      "cursor_mismatch",
+      "invalid_date",
+      "invalid_date_range",
+      "result_limit_exceeded",
+      "not-exact",
+      ...REWARD_EXPIRY_LEFT_OUT_REASONS,
     ])
       expect(tool.description).toContain(term);
   });
