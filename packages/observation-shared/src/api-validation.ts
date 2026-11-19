@@ -81,6 +81,7 @@ import type {
   OrganizedAccount,
   OrganizedInstrument,
 } from "./organization-contract.ts";
+import { BALANCE_HISTORY_REASONS } from "./api-contract.ts";
 import type {
   ApiMetadata,
   ArtifactDetail,
@@ -658,7 +659,10 @@ const historySummaryFields = {
 };
 const historySummaryItem = object<BalanceHistorySummaryItem>({
   ...historySummaryFields,
-  reasons: array(text),
+  // Closed codes, each at most once: a parse status outside the closed set
+  // is not a reason the line can carry.
+  reasons: (value): value is BalanceHistorySummaryItem["reasons"] =>
+    subset(BALANCE_HISTORY_REASONS)(value),
 });
 const latestSummaryItem = object<LatestBalanceSummaryItem>({
   ...historySummaryFields,

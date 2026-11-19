@@ -798,15 +798,17 @@ dataCoverage, subtotals }`: each item is `{ observationId, account, metric,
 amount: { value, unit, status, scale }, asOf, reasons }`, with `freshness`
 and `adoption` on `latest` and its reasons `adoption:<code>` and
 `freshness:<code>`; a `history` line's reasons say when its row is not a
-current successful parse's (`parse:superseded`, `parse:error`), since history
-carries superseded and failed parses' rows beside current ones. `account`
+current successful parse's (`parse:superseded`, `parse:pending`,
+`parse:error`, closed codes), since history carries superseded and failed
+parses' rows beside current ones. `account`
 and `metric` are page-local refs (`a1`, `m1`) into `accounts` (`source`,
 `sourceAccount`, account entity, label, mapping `status` and `lineage`
 (`current` or `historical`), the last four null when the organization is
 unavailable; one entry per distinct six, so a provider account organized two
 ways on a page is two entries) and `metrics` (`source`, registry metric id,
 provider metric), so a long id or label is written once per page.
-Its page size defaults to 25 (`full`: 100); the offered sizes are 25, 50,
+Its page size defaults to 10 (`full`: 100), so a page that names a new
+account on every line still fits 8 KB; the offered sizes are 10, 25, 50,
 100, 200 and 500. The page, cursor, coverage and subtotals are the full
 page's. A cursor is bound to neither `detail` nor `limit`
 ([ADR 0119](adr/0119-cursor-page-size.md)); a cursor read with other filters

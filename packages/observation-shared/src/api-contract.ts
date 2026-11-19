@@ -523,12 +523,21 @@ export interface BalanceSummaryLine {
  * One summary line of a balance history row. History carries superseded and
  * failed parses' rows beside current ones, so `reasons` says which a row is:
  * `parse:superseded` when a later parse replaced its parse, and
- * `parse:<status>` when its parse is not `ok` (`parse:error`); none for a row
- * of a current successful parse.
+ * `parse:<status>` when its parse is not `ok` (`parse:pending`,
+ * `parse:error`: the parse run statuses migration 0017's CHECK allows);
+ * none for a row of a current successful parse.
  */
 export interface BalanceHistorySummaryItem extends BalanceSummaryLine {
-  reasons: string[];
+  reasons: BalanceHistoryReason[];
 }
+
+/** The closed reason codes of a balance history summary line. */
+export const BALANCE_HISTORY_REASONS = [
+  "parse:superseded",
+  "parse:pending",
+  "parse:error",
+] as const;
+export type BalanceHistoryReason = (typeof BALANCE_HISTORY_REASONS)[number];
 
 /**
  * One summary line of a latest balance: the adoption and freshness states,

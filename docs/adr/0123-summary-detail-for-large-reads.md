@@ -45,9 +45,9 @@ result's structured content (`test/mcp-answer-size.test.ts`, run with
 
 | Tool and arguments                                                                                                                                                                                                                                                                                | Before (default) | After (default `summary`) | After, `detail: full` |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------: | ------------------------: | --------------------: |
-| `kogane.balances.read` `{collection: latest}` (100 rows before, 25 after)                                                                                                                                                                                                                         |          297,410 |                     7,566 |               297,410 |
+| `kogane.balances.read` `{collection: latest}` (100 rows before, 10 after)                                                                                                                                                                                                                         |          297,410 |                     4,112 |               297,410 |
 | `kogane.balances.read` `{collection: latest, limit: 50}`                                                                                                                                                                                                                                          |          148,821 |                         — |                     — |
-| `kogane.balances.read` `{collection: history}`                                                                                                                                                                                                                                                    |          281,410 |                     7,855 |               281,410 |
+| `kogane.balances.read` `{collection: history}`                                                                                                                                                                                                                                                    |          281,410 |                     3,528 |               281,410 |
 | `kogane.schedules.read` `{}`                                                                                                                                                                                                                                                                      |           75,585 |                     4,955 |                75,585 |
 | `kogane.collection-quality.read` `{}`                                                                                                                                                                                                                                                             |           28,235 |                     7,049 |                28,235 |
 | `kogane.collection-quality.read` `{source}` (one synthetic cell)                                                                                                                                                                                                                                  |            1,044 |                       727 |                 1,044 |
@@ -129,8 +129,10 @@ offered page size; what remains is that the refusal says nothing.
      superseded and failed parses' rows beside current ones, so a `history`
      line's reasons are `parse:superseded` when a later parse replaced its
      row's parse and `parse:<status>` when that parse is not `ok`
-     (`parse:error`); a line with no reason is a current successful parse's
-     row, and two lines of one measurement are never both read as current
+     (`parse:pending`, `parse:error`: the closed statuses of
+     `parse_runs.status`; another status is refused, never passed on as a
+     code, and the validator takes these three codes only); a line with no
+     reason is a current successful parse's row, and two lines of one measurement are never both read as current
      (INV06). `account` and `metric` are page-local
      refs (`a1`, `m1`, in order of first appearance) into `accounts`
      (`source`, `sourceAccount` — the key the `account` filter takes —,
@@ -148,9 +150,14 @@ offered page size; what remains is that the refusal says nothing.
      metric's definition release, measurement kind and aggregation rule
      (the registry's, under its id) and the adoption's evidence count. A
      64-hex account id, a label and a provider metric are written
-     once per page, not once per row: a row then costs about 200 bytes. The
-     page sizes become 25, 50, 100, 200 and 500; a summary defaults to 25
-     rows, `full` to 100 as before. The page, its cursor, the coverage and the
+     once per page, not once per row: a line costs about 150 to 200 bytes, an
+     `accounts` entry about 250 and a `metrics` entry about 100. The page
+     sizes become 10, 25, 50, 100, 200 and 500; a summary defaults to 10
+     rows, `full` to 100 as before. Ten, not 25: the owner's store has
+     sources with dozens of provider accounts (SBI Shinsei has 62), so a
+     default page can name a new account on every line, and 25 such lines
+     are 11 to 18 KB; ten are under 8 KB even when every line also names a
+     new metric (below). The page, its cursor, the coverage and the
      subtotals are the full page's.
    - **Schedules.** `{ detail: "summary", schedules, maintenance, leases }`:
      per job its id, source, kind, enabled, supported, next run, reservation,
@@ -221,13 +228,18 @@ offered page size; what remains is that the refusal says nothing.
   cells; without one it accepts either. The web UI's `getJson` and the
   conformance checks pass it, so a page that asked for `full` refuses a
   summary instead of rendering it. A full page has no `detail`.
-- Measured headroom (open limits): the default latest balance summary is
-  about 7.6 KB with three accounts and ten metrics on the page, and the
-  history summary about 7.9 KB with three accounts and 25 metrics. An
-  `accounts` entry costs about 250 bytes and a `metrics` entry about 100,
-  so a history page naming five accounts, or a latest page naming six,
-  passes 8 KB. 25 is already the smallest offered `limit`, so no argument
-  shortens such a page; a smaller offered size is a follow-up. The
+- Measured headroom (open limits): the default balance summary is ten
+  lines. On the synthetic store it is about 4.1 KB (latest) and 3.5 KB
+  (history). At the worst a page comes to, every line naming its own
+  account (64-hex id, Japanese label) and its own long provider metric,
+  with every reason set, it is about 7.7 KB (latest) and 6.9 KB (history);
+  the same page at 25 lines is 16 to 18 KB. So the default fits a page
+  that names a new account and metric on every line, with about 500 bytes
+  to spare at that worst: labels,
+  provider account keys or metric names much longer than the synthetic
+  ones (about 40 bytes each), or a nonempty `knownAssetsSubtotal` with
+  several units, could pass 8 KB on such a page, and a `limit` of 25 or
+  more on an account-dense source passes it (the caller asked for it). The
   collection quality summary is about 7.0 KB: a source line with a job
   costs about 400 to 490 bytes, so two or three more sources with a
   collection job (each source that gains a collector leaves the shared
@@ -273,11 +285,14 @@ offered page size; what remains is that the refusal says nothing.
   organized two ways on a page is two `accounts` entries and each line
   resolves to its own row's entity, label, mapping status and lineage, and a
   page listing one entry under two refs fails the validator; a history line
-  says `parse:superseded` and `parse:error`, and one without `reasons`
-  fails the validator; a value that is not exact is
-  its status with no value and no scale; a latest line keeps its adoption
-  and freshness reason codes; a summary page fails the validator when
-  `full` was asked for.
+  says `parse:superseded`, `parse:pending` and `parse:error`, one without
+  `reasons` or with a code outside those three fails the validator, and a
+  parse status outside the closed set is refused; a default page whose
+  every line names its own account and metric is under 8 KB on both
+  collections, and the same page at 25 lines is over it; a value that is
+  not exact is its status with no value and no scale; a latest line keeps
+  its adoption and freshness reason codes; a summary page fails the
+  validator when `full` was asked for.
 - `packages/application/test/collection-quality-detail.test.ts` (the
   synthetic CORE store): every source is on one line that carries its
   reasons, its jobs' receipt states and codes, its terminals' blocked and

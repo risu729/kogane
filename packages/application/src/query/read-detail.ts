@@ -7,6 +7,7 @@
 import { decimalToString } from "../../../domain/src/values.ts";
 import type {
   BalanceHistoryPage,
+  BalanceHistoryReason,
   BalanceHistorySummaryPage,
   BalanceReadDetail,
   BalanceRow,
@@ -150,6 +151,17 @@ export function latestBalanceSummary(page: LatestBalancePage): LatestBalanceSumm
 }
 
 /**
+ * The reason of each parse run status that is not `ok`: the closed set
+ * `parse_runs.status` allows (migration 0017's CHECK). A status outside it is
+ * refused, never passed on as a code nobody defined.
+ */
+const PARSE_STATUS_REASONS: Readonly<Record<string, readonly BalanceHistoryReason[]>> = {
+  ok: [],
+  pending: ["parse:pending"],
+  error: ["parse:error"],
+};
+
+/**
  * The summary of one balance history page. History keeps superseded and
  * failed parses' rows beside current ones, so each line says which it is
  * (`parse:superseded`, `parse:<status>`); a line with neither is a row of a
@@ -160,12 +172,18 @@ export function balanceHistorySummary(page: BalanceHistoryPage): BalanceHistoryS
   return {
     schemaVersion,
     detail: "summary",
-    ...lines(items, (item) => ({
-      reasons: [
-        ...(item.row.superseded_by_parse_run_id === null ? [] : ["parse:superseded"]),
-        ...(item.row.parse_status === "ok" ? [] : [`parse:${item.row.parse_status}`]),
-      ],
-    })),
+    ...lines(items, (item) => {
+      const status = Object.hasOwn(PARSE_STATUS_REASONS, item.row.parse_status)
+        ? PARSE_STATUS_REASONS[item.row.parse_status]!
+        : null;
+      if (status === null) throw new Error("balance_history_parse_status_unknown");
+      return {
+        reasons: [
+          ...(item.row.superseded_by_parse_run_id === null ? [] : ["parse:superseded" as const]),
+          ...status,
+        ],
+      };
+    }),
     ...rest,
   };
 }

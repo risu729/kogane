@@ -181,7 +181,7 @@ describe("kogane.balances.read summary (ADR 0123)", () => {
       const summary = await page.route(path);
       expect(summary.status).toBe(200);
       expect(validApiResponse(path, summary.body)).toBe(true);
-      const full = await page.route(`${path}?detail=full&limit=25`);
+      const full = await page.route(`${path}?detail=full&limit=10`);
       expect(full.status).toBe(200);
       expect(validApiResponse(path, full.body)).toBe(true);
       // A reader that names the detail it asked for takes that shape only.
@@ -205,7 +205,7 @@ describe("kogane.balances.read summary (ADR 0123)", () => {
         summary.body,
       );
       expect(
-        (await page.mcp("kogane.balances.read", { collection, detail: "full", limit: 25 })).body
+        (await page.mcp("kogane.balances.read", { collection, detail: "full", limit: 10 })).body
           .data,
       ).toEqual(full.body);
     }
@@ -238,13 +238,13 @@ describe("kogane.balances.read summary (ADR 0123)", () => {
   it("continues a cursor under either detail and at another offered size", async () => {
     const first = await page.mcp("kogane.balances.read", { collection: "latest" });
     const cursor = first.body.data.page.nextCursor as string;
-    expect(first.body.data.page.limit).toBe(25);
+    expect(first.body.data.page.limit).toBe(10);
     const summary = await page.mcp("kogane.balances.read", { collection: "latest", cursor });
     const full = await page.mcp("kogane.balances.read", {
       collection: "latest",
       cursor,
       detail: "full",
-      limit: 25,
+      limit: 10,
     });
     const ids = (items: { observationId: number }[]) => items.map((item) => item.observationId);
     expect(ids(full.body.data.items)).toEqual(ids(summary.body.data.items));
@@ -256,7 +256,7 @@ describe("kogane.balances.read summary (ADR 0123)", () => {
       cursor,
       limit: 50,
     });
-    expect(ids(wider.body.data.items).slice(0, 25)).toEqual(ids(summary.body.data.items));
+    expect(ids(wider.body.data.items).slice(0, 10)).toEqual(ids(summary.body.data.items));
   });
 
   it("names the inputs a cursor must repeat when it belongs to another query", async () => {

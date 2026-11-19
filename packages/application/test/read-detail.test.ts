@@ -1,7 +1,8 @@
 // The `summary` detail of the balance pages (ADR 0123), on synthetic rows:
 // every line resolves to the account, label and mapping state its own row
-// carries, a history line says when its row is superseded or failed, and a
-// value that is not exact keeps its status with no value and no scale.
+// carries, a history line says when its row is superseded or failed, a
+// value that is not exact keeps its status with no value and no scale, and a
+// default page stays under 8 KB however many accounts it names.
 import { expect, test } from "bun:test";
 import {
   balanceHistorySummary,
@@ -9,6 +10,7 @@ import {
   readDetail,
 } from "../src/query/read-detail.ts";
 import { validApiResponse } from "../../observation-shared/src/api-validation.ts";
+import { DEFAULT_SUMMARY_PAGE_LIMIT } from "../../read-model/src/balance-projection-sql.ts";
 
 const PAGE = {
   limit: 25,
@@ -208,6 +210,10 @@ test("a history line says when its row is superseded or its parse failed, never 
       superseded_by_parse_run_id: 8,
       parse_status: "error",
     }),
+    item(5, { targetId: "acc_synthetic", label: "ラベル", lineage: "current" }, "800", {
+      superseded_by_parse_run_id: null,
+      parse_status: "pending",
+    }),
   ];
   const summary = balanceHistorySummary({
     schemaVersion: "snapshot-page-v1",
@@ -221,9 +227,10 @@ test("a history line says when its row is superseded or its parse failed, never 
     ["parse:superseded"],
     ["parse:error"],
     ["parse:superseded", "parse:error"],
+    ["parse:pending"],
   ]);
   // A row organized under a historical mapping is its own entry.
-  expect(summary.items.map((line) => line.account)).toEqual(["a1", "a1", "a1", "a2"]);
+  expect(summary.items.map((line) => line.account)).toEqual(["a1", "a1", "a1", "a2", "a1"]);
   expect(summary.accounts.map((entry) => entry.lineage)).toEqual(["current", "historical"]);
   expect(validApiResponse("/api/v2/balances/history", summary, "summary")).toBe(true);
   // A history line without its reasons is not a summary line.
@@ -234,6 +241,27 @@ test("a history line says when its row is superseded or its parse failed, never 
       "summary",
     ),
   ).toBe(false);
+  // Reasons are closed codes, each once: no other parse status, no repeat.
+  for (const reasons of [["parse:unknown"], ["parse:error", "parse:error"]])
+    expect(
+      validApiResponse(
+        "/api/v2/balances/history",
+        { ...summary, items: summary.items.map((line) => ({ ...line, reasons })) },
+        "summary",
+      ),
+    ).toBe(false);
+  // A parse status outside the closed set is refused, never passed on as a code.
+  expect(() =>
+    balanceHistorySummary({
+      schemaVersion: "snapshot-page-v1",
+      items: [
+        item(6, null, "1", { superseded_by_parse_run_id: null, parse_status: "synthetic-other" }),
+      ],
+      page: PAGE,
+      dataCoverage: COVERAGE,
+      interpretationContext: {},
+    } as never),
+  ).toThrow("balance_history_parse_status_unknown");
 });
 
 test("a latest line keeps its adoption and freshness states and their reason codes", () => {
@@ -267,4 +295,86 @@ test("a latest line keeps its adoption and freshness states and their reason cod
       reasons: ["adoption:value_not_exact", "freshness:older_than_policy"],
     },
   ]);
+});
+
+test("a default summary page whose every line names its own account and metric stays under 8 KB", () => {
+  // The worst a page of the owner's store comes to: a source with dozens of
+  // provider accounts (SBI Shinsei has 62) puts a new account, and a source
+  // with many provider metrics a new metric, on every line. Each entry has a
+  // 64-hex entity id, a Japanese label and a long provider metric; the cursor
+  // and snapshot id are as long as the route issues them.
+  const page = (limit: number) => {
+    const items = Array.from({ length: limit }, (_, index) => {
+      const base = item(
+        10_000_000 + index,
+        {
+          targetId: `acc_${String(index).padStart(2, "0").repeat(32)}`,
+          label: `合成普通預金口座（支店${index}）`,
+          lineage: "current",
+        },
+        index % 3 === 0 ? null : "123456789012",
+      );
+      return {
+        ...base,
+        row: {
+          ...base.row,
+          source_account: `synthetic-provider-account-${String(index).padStart(4, "0")}`,
+          metric: `合成お支払い予定額_synthetic_metric_${index}`,
+        },
+        metric: { ...base.metric, metricId: `synthetic.deposit.metric-${index}` },
+        adoption: { state: "unresolved", reasonCode: "value_not_exact" },
+        freshness: { state: "stale", reasonCode: "older_than_policy" },
+      };
+    });
+    const pageInfo = {
+      ...PAGE,
+      limit,
+      hasMore: true,
+      nextCursor: "c".repeat(440),
+      snapshotId: "f".repeat(64),
+    };
+    const coverage = {
+      completeness: "partial",
+      stale: true,
+      reasons: ["unresolved:value_not_exact"],
+    };
+    return {
+      history: balanceHistorySummary({
+        schemaVersion: "snapshot-page-v1",
+        items: items.map((entry, index) => ({
+          ...entry,
+          row: { ...entry.row, superseded_by_parse_run_id: index + 1, parse_status: "error" },
+        })),
+        page: pageInfo,
+        dataCoverage: coverage,
+        interpretationContext: {},
+      } as never),
+      latest: latestBalanceSummary({
+        schemaVersion: "snapshot-page-v1",
+        items,
+        page: pageInfo,
+        dataCoverage: coverage,
+        subtotals: {
+          policyRelease: "known-assets-subtotal-v1",
+          knownAssetsSubtotal: [],
+          liabilitiesCoverage: "unknown",
+          reasonCode: null,
+        },
+        interpretationContext: {},
+      } as never),
+    };
+  };
+  // What a client receives: the MCP result's structured content, serialized.
+  const bytes = (data: unknown) =>
+    new TextEncoder().encode(JSON.stringify({ schemaVersion: "kogane-page-read-v1", data })).length;
+  const fitting = page(DEFAULT_SUMMARY_PAGE_LIMIT);
+  for (const summary of [fitting.history, fitting.latest]) {
+    expect(summary.accounts).toHaveLength(DEFAULT_SUMMARY_PAGE_LIMIT);
+    expect(summary.metrics).toHaveLength(DEFAULT_SUMMARY_PAGE_LIMIT);
+    expect(bytes(summary)).toBeLessThan(8 * 1024);
+  }
+  // The next offered size does not fit such a page: why the default is ten.
+  const wider = page(25);
+  for (const summary of [wider.history, wider.latest])
+    expect(bytes(summary)).toBeGreaterThan(8 * 1024);
 });

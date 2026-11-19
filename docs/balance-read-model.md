@@ -137,7 +137,7 @@ observe" is never rendered as "the balance is gone".
 `GET /api/v2/balances/latest` and `GET /api/v2/balances/history` are separate
 routes with separate budgets. With `detail=full` both return the D10
 envelope below, 100 rows by default. Without `detail`, or with
-`detail=summary`, each row is one short line and the page defaults to 25
+`detail=summary`, each row is one short line and the page defaults to 10
 rows; the page, cursor, coverage and subtotals are those of the full page
 ([ADR 0123](adr/0123-summary-detail-for-large-reads.md),
 [agent API: UI read pages](agent-api.md#ui-read-pages)). The full envelope:
@@ -236,13 +236,13 @@ It is **opaque but never trusted**:
 - Every continuation request goes through the same Access gate and the same
   scope resolution as the first. A cursor is never an authorisation.
 
-| Situation                                     | Answer                                 |
-| --------------------------------------------- | -------------------------------------- |
-| Undecodable or wrong shape                    | `400 invalid_cursor`                   |
-| Filter digest differs at every page size      | `400 cursor_mismatch` with `mustMatch` |
-| Snapshot retired or deleted                   | `410 context_expired`                  |
-| Page size outside `25 / 50 / 100 / 200 / 500` | `400 invalid_limit`                    |
-| `detail` other than `summary` or `full`       | `400 invalid_detail`                   |
+| Situation                                          | Answer                                 |
+| -------------------------------------------------- | -------------------------------------- |
+| Undecodable or wrong shape                         | `400 invalid_cursor`                   |
+| Filter digest differs at every page size           | `400 cursor_mismatch` with `mustMatch` |
+| Snapshot retired or deleted                        | `410 context_expired`                  |
+| Page size outside `10 / 25 / 50 / 100 / 200 / 500` | `400 invalid_limit`                    |
+| `detail` other than `summary` or `full`            | `400 invalid_detail`                   |
 
 `cursor_mismatch` names the inputs a continuation must repeat as they were,
 absent included: `mustMatch: ["collection", "source", "account",
