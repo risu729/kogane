@@ -457,15 +457,18 @@ maintenance revision are plain `INSERT` statements, never `INSERT OR IGNORE`
 schema refuses raises, nothing of its batch is written, and the Processor
 answers its closed `503 scheduling_unavailable` (an accepted survey proposal:
 `503 decision_record_failed`), never `409`. The SQLite text is neither
-answered nor logged. The private delegated job and maintenance routes answer the same
-`503 scheduling_unavailable` unless the batch's delegation guard explains the
-failure (an expired delegation, a used confirmation, a spent budget), and the
-MCP tools relay the Processor's answer, as the page's route does (ADR 0081).
-Every constraint of the two tables restates what the writers already validate
-(a history row copies the job row, whose own constraints are the same), so
-a valid request reaches this only on a store that disagrees with the code; the
-tests rebuild the table with one more CHECK to show it
-(`services/processor/test/schedule-write-refusal.test.ts`).
+answered nor logged. The private delegated job and maintenance routes answer
+the same `503 scheduling_unavailable` unless the batch's delegation guard
+explains the failure (an expired delegation, a used confirmation, a spent
+budget), and the MCP tools relay the Processor's answer, as the page's route
+does (ADR 0081). Every constraint of the two tables restates what the writers
+already validate (a history row copies the job row, whose own constraints are
+the same), so a valid request reaches this only on a store that disagrees with
+the code; the tests rebuild the table with one more CHECK to show it
+(`services/processor/test/schedule-write-refusal.test.ts`). The history row is
+copied only when the job's `UPDATE`, the statement before it in the batch,
+changed a row (`changes()=1`); the same file runs the same-millisecond race and
+the refused history row on Miniflare D1 as well as on `bun:sqlite`.
 
 These routes require the configured human Access operator. Writes require
 same-origin JSON, `x-kogane-settings: 1` and strict payload validation

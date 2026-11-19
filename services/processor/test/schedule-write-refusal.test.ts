@@ -20,6 +20,7 @@ import {
   type MaintenanceWrite,
 } from "../src/schedule-store";
 import { envelopeHeaders } from "./audit-envelope";
+import { startPipeline } from "./harness";
 
 const OPERATOR = "operator@synthetic.test";
 /** The actor the rebuilt tables refuse. */
@@ -232,6 +233,114 @@ for (const sameMillisecond of [false, true])
     }
   });
 
+// The history row's `changes()=1` reads the UPDATE before it in the same
+// batch. bun:sqlite runs a batch on one connection, but a D1 batch is
+// workerd's: run the same-actor, same-millisecond race and the refused history
+// row on Miniflare D1 with every CORE migration, so the guard and the rollback
+// are shown on the batch the Processor runs, not only on the test adapter.
+test("on Miniflare D1, a same-millisecond race is one 200 and one 409, and a refused history row writes nothing", async () => {
+  const { mf, env: started } = await startPipeline();
+  setSystemTime(Date.now());
+  try {
+    const env = {
+      ...started,
+      SCHEDULES_ENABLED: "true",
+      SCHEDULE_ALARMS: {
+        getByName: () => ({ reconcile: async () => null, alarmTime: async () => null }),
+      },
+    } as unknown as Env;
+    const current = async () =>
+      (await env.DB.prepare(
+        "SELECT revision,enabled,updated_by,updated_at FROM collection_schedules WHERE id='vpass'",
+      ).first<{ revision: number }>())!;
+    const d1Count = async (sql: string, ...binds: unknown[]) =>
+      (await env.DB.prepare(sql)
+        .bind(...binds)
+        .first<number>("n"))!;
+    let arrivals = 0;
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const racing = {
+      ...env,
+      DB: new Proxy(env.DB, {
+        get(target, key, receiver) {
+          if (key !== "batch") return Reflect.get(target, key, receiver);
+          return async (statements: D1PreparedStatement[]) => {
+            if (++arrivals === 2) release();
+            await ready;
+            return target.batch(statements);
+          };
+        },
+      }),
+    } as Env;
+    const before = await current();
+    const ids = [crypto.randomUUID(), crypto.randomUUID()];
+    const answers = await Promise.all(
+      [false, true].map((enabled, i) =>
+        post(
+          racing,
+          "/vpass",
+          { revision: before.revision, enabled, timezone: "Asia/Tokyo", pattern: DAILY },
+          OPERATOR,
+          ids[i]!,
+        ),
+      ),
+    );
+    expect(answers.map((a) => a.status).sort()).toEqual([200, 409]);
+    expect(answers.find((a) => a.status === 409)!.body).toEqual({ error: "revision_conflict" });
+    const winner = answers.findIndex((a) => a.status === 200);
+    expect((await current()).revision).toBe(before.revision + 1);
+    expect(
+      (
+        await env.DB.prepare(
+          "SELECT enabled,actor FROM collection_schedule_revisions WHERE schedule_id='vpass' AND revision=?",
+        )
+          .bind(before.revision + 1)
+          .all()
+      ).results,
+    ).toEqual([{ enabled: winner === 0 ? 0 : 1, actor: OPERATOR }]);
+    expect(
+      await Promise.all(
+        ids.map((id) => d1Count("SELECT count(*) n FROM audit_records WHERE correlation_id=?", id)),
+      ),
+    ).toEqual(winner === 0 ? [1, 0] : [0, 1]);
+
+    // A history row ahead of its job: the edit's own row raises on the UNIQUE
+    // revision, and the schedule update and the record roll back with it.
+    const moved = await current();
+    await env.DB.prepare(
+      "INSERT INTO collection_schedule_revisions(schedule_id,revision,enabled,timezone,pattern_json,actor,created_at) VALUES('vpass',?,1,'UTC',?,'synthetic-ahead','2026-01-01T00:00:00.000Z')",
+    )
+      .bind(moved.revision + 1, JSON.stringify(DAILY))
+      .run();
+    const refusedId = crypto.randomUUID();
+    expect(
+      await post(
+        env,
+        "/vpass",
+        { revision: moved.revision, enabled: false, timezone: "Asia/Tokyo", pattern: DAILY },
+        OPERATOR,
+        refusedId,
+      ),
+    ).toEqual({ status: 503, body: { error: "scheduling_unavailable" } });
+    expect(await current()).toEqual(moved);
+    expect(
+      await d1Count(
+        "SELECT count(*) n FROM collection_schedule_revisions WHERE schedule_id='vpass' AND revision=? AND actor<>'synthetic-ahead'",
+        moved.revision + 1,
+      ),
+    ).toBe(0);
+    expect(
+      await d1Count("SELECT count(*) n FROM audit_records WHERE correlation_id=?", refusedId),
+    ).toBe(0);
+  } finally {
+    setSystemTime();
+    await mf.dispose();
+  }
+}, 60_000);
+
 /** A maintenance edit of the operator's route for `vpass`, creating `id`. */
 const maintenanceBody = (id: string) => ({
   id,
@@ -324,9 +433,9 @@ test("a delegated revision the schema refuses throws from the writer; it is neit
     const noRecord = () => ({ statements: [], settle: () => {} });
     // A delegated route maps a throw to its closed `scheduling_unavailable`
     // (or the delegation failure the batch explains), never to 409 or 429.
-    await expect(
-      writeMaintenanceRevision(env, write(REFUSED_DELEGATE), noRecord),
-    ).rejects.toThrow();
+    await expect(writeMaintenanceRevision(env, write(REFUSED_DELEGATE), noRecord)).rejects.toThrow(
+      /CHECK constraint failed/u,
+    );
     expect(count(sqlite, "SELECT count(*) n FROM provider_maintenance_rules")).toBe(rules);
     const accepted = await writeMaintenanceRevision(
       env,
