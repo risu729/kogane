@@ -373,6 +373,25 @@ describe("the reward expiry window and summary", () => {
     expect(crossed.body).toMatchObject({ error: "cursor_mismatch" });
   });
 
+  it("binds a cursor to the `from` it resolved, whether defaulted or named", async () => {
+    at(BEFORE_MIDNIGHT);
+    const defaulted = "/api/v2/rewards/expiry?before=2027-02-01&limit=25";
+    const named = "/api/v2/rewards/expiry?from=2026-11-30&before=2027-02-01&limit=25";
+    const first = (await page.route(defaulted)).body as WindowedPage;
+    expect(first.window).toMatchObject({ from: "2026-11-30", fromBasis: "today" });
+    expect(first.page.hasMore).toBe(true);
+    const cursor = encodeURIComponent(first.page.nextCursor!);
+    // Today named explicitly is the same window.
+    expect((await page.route(`${named}&cursor=${cursor}`)).status).toBe(200);
+    // Past Tokyo midnight the default is another day, so another window.
+    at(MIDNIGHT);
+    const crossed = await page.route(`${defaulted}&cursor=${cursor}`);
+    expect(crossed.status).toBe(400);
+    expect(crossed.body).toMatchObject({ error: "cursor_mismatch" });
+    // A walk with an explicit `from` is not moved by the clock.
+    expect((await page.route(`${named}&cursor=${cursor}`)).status).toBe(200);
+  });
+
   it("keeps the unwindowed page as it was, with or without `detail: full`", async () => {
     at(NOON);
     const plain = await page.route("/api/v2/rewards/expiry?limit=50");

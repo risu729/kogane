@@ -849,6 +849,8 @@ Limits:
   a not-exact total and a provider portion apart; the default `from` before
   and after Tokyo midnight; a windowed walk at 25 and 50 rows, its cursor
   refused under another window, without one and from an unwindowed walk;
+  a cursor of a defaulted `from` kept under the same day named explicitly
+  and refused past Tokyo midnight, while one of an explicit `from` is kept;
   the unwindowed page without `window` and equal with `detail=full`; the
   refusals on every path; a source- or account-scoped grant refused; a
   snapshot over 1,000 rows `413` on both forms.
