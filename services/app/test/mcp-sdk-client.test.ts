@@ -144,6 +144,7 @@ describe("the official SDK client against /mcp", () => {
           "kogane.accounts.candidates",
           "kogane.accounts.history",
           "kogane.card-settlements.unmatched",
+          "kogane.card-settlements.debit-accounts",
           "kogane.economic-readiness.read",
           "kogane.card-settlements.read",
           "kogane.card-settlements.statements",

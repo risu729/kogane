@@ -221,7 +221,7 @@ describe("same-run ledger and immutable artifact trust", () => {
   });
   test("prepared archive paths cannot escape the restored checkout/temp trees", () => {
     validatePreparedPaths([
-      "checkout/services/test/.cloudflare/output/v0/a.js",
+      "checkout/services/test/.cloudflare/output/v1/a.js",
       "temp/docker-images.tar",
     ]);
     for (const path of [
@@ -552,7 +552,7 @@ for (const native of [false, true])
         "FROM scratch\nCOPY container/source.mjs /source.mjs\n",
       );
       writeFileSync(resolve(root, target.path, "container/source.mjs"), "synthetic image input");
-      const cf = resolve(root, target.path, ".cloudflare/output/v0");
+      const cf = resolve(root, target.path, ".cloudflare/output/v1");
       mkdirSync(cf, { recursive: true });
       writeFileSync(resolve(cf, "metadata.json"), "synthetic exact cf output");
       const manifest = {
@@ -694,7 +694,7 @@ for (const native of [false, true])
             cpSync(resolve(shared, "checkout"), root, { recursive: true });
             cpSync(resolve(shared, "temp"), temp, { recursive: true });
             const config = resolve(root, target.path, "wrangler.jsonc");
-            const cf = resolve(root, target.path, ".cloudflare/output/v0");
+            const cf = resolve(root, target.path, ".cloudflare/output/v1");
             const env = {
               ...packedEnv,
               RUNNER_TEMP: temp,

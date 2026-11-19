@@ -22,6 +22,101 @@ const yen = (coefficient: string) => ({
     normalizationVersion: "exact-arith-v1",
   },
 });
+/** Each card's debit account, as the service answers it (ADR 0114); every value invented. */
+const SMBC_ACCOUNT = { bankSourceId: "smbc-bank", bankSourceAccount: "smbc-bank:synthetic-a" };
+const SHINSEI_ACCOUNT = {
+  bankSourceId: "sbi-shinsei-bank",
+  bankSourceAccount: "sbi-shinsei:synthetic-b",
+};
+const namedReading = {
+  readingRef: {
+    kind: "typed-claim",
+    id: "card_debit_account_statement:7",
+    revision: "reader:synthetic-1",
+  },
+  observedAt: "2098-01-12T00:00:00Z",
+  accounts: [SMBC_ACCOUNT],
+  visibleDigitCount: 4,
+  reasons: [],
+};
+const noReader = {
+  status: "absent",
+  reason: "source_has_no_debit_account_statement",
+  latest: null,
+  lastNamed: null,
+};
+const debitAccounts = {
+  apiVersion: 2,
+  schemaVersion: "kogane-card-debit-accounts-v1",
+  manifest: {
+    rule: "card-debit-account-answer-v1",
+    statedPolicy: "card-debit-account-statement-v3",
+    readerVersion: "myjcb-card-information-1.0.0",
+    bases: ["provider-stated", "accepted-settlement"],
+    cardsMax: 100,
+  },
+  items: [
+    {
+      card: { sourceId: "myjcb", sourceAccount: "myjcb:synthetic:root", accountId: null },
+      latestStatement: {
+        ref: { kind: "balance", id: "balance:31", revision: "parse_run:9" },
+        period: "2098-02",
+        paymentDate: {
+          kind: "local-date",
+          value: "2098-02-10",
+          zone: "Asia/Tokyo",
+          basis: "provider",
+        },
+        amount: yen("0"),
+      },
+      stated: { status: "named", reason: null, latest: namedReading, lastNamed: namedReading },
+      settled: [],
+      proposed: [],
+      answer: {
+        basis: "provider-stated",
+        account: SMBC_ACCOUNT,
+        readingRef: namedReading.readingRef,
+        observedAt: namedReading.observedAt,
+        codes: [],
+      },
+    },
+    {
+      card: { sourceId: "vpass", sourceAccount: "vpass:card-001", accountId: null },
+      latestStatement: null,
+      stated: noReader,
+      settled: [
+        {
+          ...SHINSEI_ACCOUNT,
+          statements: 2,
+          latest: { proposalId: "cs_settled-1", debitDate: "2098-01-27", period: "2098-01" },
+        },
+      ],
+      proposed: [],
+      answer: {
+        basis: "accepted-settlement",
+        account: SHINSEI_ACCOUNT,
+        proposalId: "cs_settled-1",
+        debitDate: "2098-01-27",
+        codes: [],
+      },
+    },
+    {
+      card: { sourceId: "vpass", sourceAccount: "vpass:card-002", accountId: null },
+      latestStatement: null,
+      stated: noReader,
+      settled: [],
+      proposed: [
+        {
+          ...SMBC_ACCOUNT,
+          statements: 1,
+          latest: { proposalId: "cs_open-1", debitDate: "2098-01-26", period: "2098-01" },
+        },
+      ],
+      answer: { basis: "unknown", reason: "only_unreviewed_candidates" },
+    },
+  ],
+  cardsTruncated: false,
+};
 /** A page of statements without a candidate, as the service answers it; every value invented. */
 const unmatched = {
   apiVersion: 2,
@@ -165,6 +260,8 @@ describe.if(runnable)("card settlement review", () => {
   let related: CardSettlementReview[] = [];
   const relatedReads: URLSearchParams[] = [];
   let unmatchedPage: unknown = unmatched;
+  let debitAccountsPage: unknown = debitAccounts;
+  const debitAccountReads: string[] = [];
   /** Why the grouped list has no next page. */
   let statementsEnd = "none";
   const posted: { operation: string; body: Record<string, unknown> }[] = [];
@@ -180,6 +277,8 @@ describe.if(runnable)("card settlement review", () => {
     related = [];
     relatedReads.length = 0;
     unmatchedPage = unmatched;
+    debitAccountsPage = debitAccounts;
+    debitAccountReads.length = 0;
     statementsEnd = "none";
     posted.length = 0;
   });
@@ -284,6 +383,10 @@ describe.if(runnable)("card settlement review", () => {
           });
         if (url.pathname === "/api/v2/reconciliation/card-statements-unmatched")
           return Response.json(unmatchedPage);
+        if (url.pathname === "/api/v2/reconciliation/card-debit-accounts") {
+          debitAccountReads.push(url.search);
+          return Response.json(debitAccountsPage);
+        }
         if (url.pathname.startsWith("/api/command/v1/")) {
           const operation = url.pathname.split("/").at(-1)!;
           const body = (await request.json()) as Record<string, unknown>;
@@ -408,6 +511,99 @@ describe.if(runnable)("card settlement review", () => {
     expect(posted.some((row) => row.operation === "approve" || row.operation === "commit")).toBe(
       false,
     );
+    await page.close();
+  });
+
+  test("each card's debit account names the evidence it rests on, and offers no action", async () => {
+    const page = await open();
+    const section = page.getByRole("region", { name: "カードの引落口座" });
+    await section.getByText("vpass:card-002").waitFor();
+    const cards = section.locator(".debit-account-card");
+    expect(await cards.count()).toBe(3);
+    const stated = await cards.nth(0).innerText();
+    expect(stated).toContain("カード会社の表示");
+    // A stated answer with no note is the confirmed one.
+    expect(
+      await cards.nth(0).locator(".badge", { hasText: "カード会社の表示" }).getAttribute("class"),
+    ).toContain("badge-ok");
+    expect(stated).toContain("三井住友銀行 · smbc-bank:synthetic-a");
+    expect(stated).toContain("2098-01-12T00:00:00Z に取得した明細");
+    // The newest statement is a zero total, and the last known account still shows.
+    expect(stated).toContain("最新の請求 2098-02");
+    const settled = await cards.nth(1).innerText();
+    expect(settled).toContain("採用済みの照合から");
+    expect(settled).toContain("カード会社が示す口座ではありません");
+    expect(settled).toContain("このカード会社の画面には引落口座の表示がありません");
+    expect(await cards.nth(1).getByRole("link", { name: "照合を見る" }).getAttribute("href")).toBe(
+      "/reconciliation/cs_settled-1",
+    );
+    const open_ = await cards.nth(2).innerText();
+    expect(open_).toContain("引落口座は不明");
+    expect(open_).toContain("まだ誰も採用していません");
+    expect(open_).toContain("未判断の照合候補（判断には使いません）");
+    expect(await section.getByRole("button").count()).toBe(0);
+    expect(debitAccountReads).toEqual([""]);
+    await page.close();
+  });
+
+  test("an older stated account says a newer reading does not confirm it, and a cut list says so", async () => {
+    const unresolved = {
+      ...namedReading,
+      readingRef: { ...namedReading.readingRef, id: "card_debit_account_statement:8" },
+      observedAt: "2098-02-12T00:00:00Z",
+      accounts: [],
+      visibleDigitCount: null,
+      reasons: ["bank_not_resolved"],
+    };
+    const first = debitAccounts.items[0]!;
+    debitAccountsPage = {
+      ...debitAccounts,
+      items: [
+        {
+          ...first,
+          stated: {
+            status: "not_named",
+            reason: null,
+            latest: unresolved,
+            lastNamed: namedReading,
+          },
+          answer: { ...first.answer, codes: ["newer_reading_unresolved"] },
+        },
+      ],
+      cardsTruncated: true,
+    };
+    const page = await open();
+    const section = page.getByRole("region", { name: "カードの引落口座" });
+    await section.getByText("myjcb:synthetic:root").waitFor();
+    const text = await section.innerText();
+    expect(text).toContain("2098-01-12T00:00:00Z に取得した明細");
+    expect(text).toContain("より新しいカード情報ではこの口座を確認できませんでした");
+    expect(text).toContain("引落口座が変わった可能性があります");
+    expect(text).toContain("口座を特定できず");
+    // The stated answer is a warning, not the confirmed badge.
+    const badge = section.locator(".badge", { hasText: "カード会社の表示" });
+    expect(await badge.getAttribute("class")).toContain("badge-warn");
+    expect(await section.getByRole("note").innerText()).toBe(
+      "カードが多いため、先頭の1枚だけを表示しています。",
+    );
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  });
+
+  test("an answer the evidence beside it does not carry is refused before it renders", async () => {
+    debitAccountsPage = {
+      ...debitAccounts,
+      items: [
+        {
+          ...debitAccounts.items[0]!,
+          answer: { ...debitAccounts.items[0]!.answer, account: SHINSEI_ACCOUNT },
+        },
+      ],
+    };
+    const page = await open();
+    const section = page.getByRole("region", { name: "カードの引落口座" });
+    await section.getByRole("alert").waitFor();
+    expect(await section.innerText()).not.toContain("sbi-shinsei:synthetic-b");
     await page.close();
   });
 

@@ -171,7 +171,7 @@ export function sameDockerImageIdentity(recorded, actual) {
 }
 
 export function localContainerImages(root, target, inspect = dockerImageIdentity) {
-  const directory = resolve(root, target.path, ".cloudflare/output/v0/containers");
+  const directory = resolve(root, target.path, ".cloudflare/output/v1/containers");
   let entries;
   try {
     entries = readdirSync(directory, { withFileTypes: true });
