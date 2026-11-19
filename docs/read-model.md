@@ -370,8 +370,8 @@ reads of the status view `GET /api/collection-quality?view=status`
 ([ADR 0045, amendment of 2026-11-19](adr/0045-collection-quality-read.md#amendment-2026-11-19-a-status-view-one-line-per-configured-job)):
 `STATUS_OCCURRENCES_SQL` (the newest 101 receipts per job, by
 `UNIQUE(schedule_id, nominal_at)`) and `STATUS_RUNS_SQL` (the newest 100
-visible fetch runs per source, by `idx_fetch_runs_source`, with success and
-publication), whose plans `test/collection-quality-status.test.ts` checks
+visible fetch runs per source, by `idx_fetch_runs_source`, with whether each
+succeeded), whose plans `test/collection-quality-status.test.ts` checks
 without statistics; `packages/application/src/query/collection-quality-status.ts`
 composes them with `SCHEDULE_QUALITY_SQL` and the cell page;
 `packages/application/src/query/collection-quality.ts`

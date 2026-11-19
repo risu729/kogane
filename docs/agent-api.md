@@ -850,8 +850,8 @@ its audit record counts the cells it read, never an account.
 `400 invalid_request`) and answers `GET /api/collection-quality?view=status`:
 whether anything is stuck, in about 5 KB, one line per configured job with
 `enabled`, `lastRun` (`at`, `status`, `failureCode`, and `recovered` when a
-succeeded fetch run of the job's source that published something completed
-after the failed receipt and before the next one), `lastSuccessAt`,
+successful fetch run of the job's source completed after the failed receipt
+and before the next one, whether or not its parses have published yet), `lastSuccessAt`,
 `failuresSinceSuccess` (from the newest 100 receipts, else `"100+"`),
 `failureCode`, a closed `state` (`ok`, `degraded`, `failing`, `needs-owner`,
 `disabled`) and `notPublishing` (each dataset whose newest capture has no

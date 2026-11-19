@@ -429,13 +429,7 @@ export const STATUS_DEGRADED_AFTER_DAYS = 3;
  * succeed, but a dataset's newest parsed capture is more than
  * STATUS_DEGRADED_AFTER_DAYS old) and `ok`.
  */
-const COLLECTION_STATUS_STATES = [
-  "disabled",
-  "needs-owner",
-  "failing",
-  "degraded",
-  "ok",
-] as const;
+const COLLECTION_STATUS_STATES = ["disabled", "needs-owner", "failing", "degraded", "ok"] as const;
 /** Cell reasons a not-publishing dataset does not repeat: on every cell, or about identity. */
 export const NOT_PUBLISHING_OMITTED_REASONS: readonly CellReason[] = [
   "retention_not_assessed",
@@ -451,7 +445,7 @@ const jobRun = z
     at: instant,
     status: z.enum(OCCURRENCE_STATUSES),
     failureCode: z.optional(code),
-    /** A succeeded, published fetch run of the job's source after the failure and before the next receipt. */
+    /** A successful fetch run of the job's source after the failure and before the next receipt. */
     recovered: z.optional(z.strictObject({ at: instant, by: z.literal("fetch_run") })),
   })
   .check(

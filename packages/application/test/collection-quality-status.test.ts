@@ -22,6 +22,7 @@ import {
   queryCollectionQualityStatus,
   recoveryOf,
 } from "../src/query/collection-quality-status.ts";
+import { queryCollectionQualitySummary } from "../src/query/collection-quality.ts";
 
 const AS_OF = "2099-01-20T00:00:00.000Z";
 const DAY = 86_400_000;
@@ -53,13 +54,13 @@ async function row(store: QualityStore, job: string): Promise<CollectionStatusRo
   return (await status(store)).sources.find((entry) => entry.job === job)!;
 }
 
-/** A V Point run that succeeded, with a published parse unless `publish` is false. */
+/** A V Point run of `outcome`, storing one artifact whose parse is published unless `publish` is false. */
 function vpointRun(store: QualityStore, time: string, publish = true, outcome = "success") {
   const run = store.run({
     source: "v-point",
     at: time,
     outcome: outcome as "success",
-    artifacts: publish ? [{ key: "balance-info.json", dataset: "balance-info" }] : [],
+    artifacts: [{ key: "balance-info.json", dataset: "balance-info" }],
   });
   if (publish) store.parse(run.artifacts[0]!, "v-point-balance-info", { kind: "published" });
   return run;
@@ -179,6 +180,30 @@ describe("failures since the newest success", () => {
     expect((await row(store, "st-george")).failuresSinceSuccess).toBe(3);
   });
 
+  test('a running newest receipt does not push an exact count to "100+"', async () => {
+    // Oldest first: one completed receipt, `failed` failures, then one running.
+    for (const [failed, expected] of [
+      [STATUS_OCCURRENCE_WINDOW - 1, STATUS_OCCURRENCE_WINDOW - 1],
+      [STATUS_OCCURRENCE_WINDOW, "100+"],
+    ] as const) {
+      const store = new QualityStore();
+      for (let index = 0; index < failed + 2; index += 1) {
+        const status = index === 0 ? "completed" : index === failed + 1 ? "started" : "failed";
+        store.occurrence("st-george", {
+          nominalAt: new Date(Date.parse("2098-06-01T20:35:00.000Z") + index * DAY).toISOString(),
+          status,
+          ...(status === "failed" ? { failureCode: "collection_failed" } : {}),
+        });
+      }
+      expect(await row(store, "st-george"), String(failed)).toMatchObject({
+        lastRun: { status: "started" },
+        failuresSinceSuccess: expected,
+        state: "failing",
+        lastSuccessAt: expected === "100+" ? null : expect.any(String),
+      });
+    }
+  });
+
   test("a failure code of the owner's kind is needs-owner", async () => {
     const store = new QualityStore();
     store.occurrence("myjcb", {
@@ -211,7 +236,7 @@ describe("the recovered rule (#1414)", () => {
       failureCode: "reauthentication_pending",
     });
 
-  test("a failure followed by a succeeded, published run before the next receipt is recovered and ok", async () => {
+  test("a failure followed by a succeeded run before the next receipt is recovered and ok", async () => {
     const store = new QualityStore();
     failed(store, 18);
     vpointRun(store, at(18, "21:15:25.000"));
@@ -254,9 +279,39 @@ describe("the recovered rule (#1414)", () => {
     });
   });
 
-  test("a run that publishes nothing, a partial run, or one at the failure's finish does not recover it", async () => {
+  test("a succeeded run whose parse is still pending recovers it, as the summary reads it", async () => {
+    // The follow-up run registers within seconds; its parse publishes on a
+    // later Processor tick. Until then the source has collected: the status
+    // view and the summary's V Point recovery agree that nobody must act.
+    for (const stored of [true, false]) {
+      const store = new QualityStore();
+      failed(store, 18);
+      if (stored) vpointRun(store, at(18, "21:15:25.000"), false);
+      else store.run({ source: "v-point", at: at(18, "21:15:25.000"), artifacts: [] });
+      expect(await row(store, "vpoint"), String(stored)).toMatchObject({
+        lastRun: {
+          failureCode: "reauthentication_pending",
+          recovered: { at: at(18, "21:15:25.000"), by: "fetch_run" },
+        },
+        lastSuccessAt: at(18, "21:15:25.000"),
+        failuresSinceSuccess: 0,
+        state: "ok",
+      });
+      const summary = await queryCollectionQualitySummary(executor(store), { asOf: AS_OF });
+      const source = summary.sources.find((entry) => entry.sourceId === "v-point")!;
+      expect(source.reasons).not.toContain("user_action_required");
+    }
+  });
+
+  test("a failed or partial run (a re-authentication request stores nothing and fails), or one at the failure's finish, does not recover it", async () => {
     for (const make of [
-      (store: QualityStore) => vpointRun(store, at(18, "21:15:25.000"), false),
+      (store: QualityStore) =>
+        store.run({
+          source: "v-point",
+          at: at(18, "21:15:25.000"),
+          outcome: "failed",
+          artifacts: [],
+        }),
       (store: QualityStore) => vpointRun(store, at(18, "21:15:25.000"), true, "partial"),
       (store: QualityStore) => vpointRun(store, at(18, "21:15:05.000")),
       (store: QualityStore) => vpointRun(store, at(18, "21:15:01.000")),

@@ -57,7 +57,13 @@ import {
 /** Receipt statuses that are a failed attempt: it did not complete. */
 const FAILED: readonly string[] = ["failed", "uncertain", "not_dispatched"];
 
-/** One fetch run that counts as a successful collection: it succeeded and published something. */
+/**
+ * One fetch run that counts as a successful collection: a successful fetch
+ * run (`successfulFetchRuns`), the predicate the summary's V Point recovery
+ * (`currentSessionFailure`) reads, so the two answers of one tool agree. A
+ * run that only asks for re-authentication stored nothing and failed, so it
+ * is never one.
+ */
 interface Success {
   at: string;
   time: number;
@@ -74,9 +80,10 @@ export function jobCoreSources(job: Pick<ScheduleQualityRow, "kind" | "source">)
 
 /**
  * The earliest successful collection that recovers a failed receipt: a
- * succeeded fetch run of the job's source that published something and
- * completed strictly after the receipt finished (its start when it has no
- * finish) and strictly before the next receipt started. Nominal times decide
+ * successful fetch run of the job's source that completed strictly after the
+ * receipt finished (its start when it has no finish) and strictly before the
+ * next receipt started. Whether a parse of that run is published yet is the
+ * Processor's later stage, which `notPublishing` reports. Nominal times decide
  * nothing (ADR 0045's V Point amendment).
  */
 export function recoveryOf(
@@ -192,7 +199,11 @@ function statusRow(
   asOfDate: string,
 ): CollectionStatusRow {
   const sources = jobCoreSources(job);
-  const read = receipts.slice(0, STATUS_OCCURRENCE_WINDOW);
+  // Every receipt read, the edge one included: a success there still makes
+  // the count exact (a running newest receipt is not counted, so 100 failures
+  // can sit in 101 receipts); only with no success in all of them and more
+  // than the window is it `"100+"`.
+  const read = receipts.slice(0, STATUS_OCCURRENCE_WINDOW + 1);
   const recovery = (index: number) =>
     recoveryOf(read[index]!, index === 0 ? null : read[index - 1]!.started_at, successes);
   let failures = 0;
@@ -301,7 +312,7 @@ export async function queryCollectionQualityStatus(
     sources: jobs.map((job) => {
       const own = jobCoreSources(job);
       const successes = runs
-        .filter((run) => own.includes(run.source_id) && run.succeeded === 1 && run.published === 1)
+        .filter((run) => own.includes(run.source_id) && run.succeeded === 1)
         .flatMap((run) => {
           const time = Date.parse(run.completed_at ?? "");
           return Number.isFinite(time) ? [{ at: run.completed_at!, time }] : [];

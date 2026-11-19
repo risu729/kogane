@@ -587,8 +587,8 @@ recovers about 20 seconds later, read as a failure.
    - `STATUS_RUNS_SQL`: the newest 100 visible fetch runs of each CORE source
      a collecting job names (`STATUS_RUN_WINDOW`), through
      `idx_fetch_runs_source`, with whether each succeeded
-     (`successfulFetchRuns`) and whether any of its artifacts has a published
-     parse;
+     (`successfulFetchRuns`, the predicate the summary's V Point recovery
+     reads);
    - the unchanged `CELL_QUALITY_SQL` of each CORE source an enabled
      collecting job names, page by page and mapped by the cell page's own
      `cell()`, so its reasons are the cell page's; more than 2,000 cells (the
@@ -596,7 +596,12 @@ recovers about 20 seconds later, read as a failure.
 
    Row bound: at most 200 configured jobs (`COLLECTION_QUALITY_ROW_BOUND`,
    refused past it), so at most 101 receipts per job, 100 runs per source and
-   2,000 cells per source are read.
+   2,000 cells per source are read. Query bound: three queries plus one cell
+   page (500 cells) per 500 cells of each source read, at most five pages a
+   source before the refusal; the sources are those of
+   `COLLECTOR_SOURCE_IDS` (16 CORE sources), so the read runs at most 83
+   queries, under D1's 1,000 queries per Worker invocation. Each cell page is
+   the query the cell page itself runs for that source and offset.
 
 3. **Answer** (`COLLECTION_STATUS_API_VERSION` 1, wire check
    `validCollectionStatus`): `{ apiVersion, view: "status", asOf, sources }`,
@@ -609,13 +614,14 @@ recovers about 20 seconds later, read as a failure.
      `failureCode` when it has one, and `recovered: { at, by: "fetch_run" }`
      when the rule below recovered it; null when the job has no receipt;
    - `lastSuccessAt`: the newer of the newest completed receipt in the window
-     (its finish, else its start) and the newest succeeded, publishing fetch
-     run of the job's source in the run window; null when the read holds
-     neither;
+     (its finish, else its start) and the newest successful fetch run of the
+     job's source in the run window; null when the read holds neither;
    - `failuresSinceSuccess`: the failed receipts (`failed`, `uncertain`,
      `not_dispatched`; a `started` one is skipped) newer than the newest
-     receipt that completed or was recovered, read from the newest 100; when
-     none of those 100 is a success and the job holds more, `"100+"`;
+     receipt that completed or was recovered, read from the newest 101 (the
+     edge receipt included, so a running newest receipt does not turn an
+     exact count of 100 or fewer into `"100+"`); when none of those is a
+     success and the job holds more than 100, `"100+"` (at least 100);
    - `failureCode`: the newest counted failure's code (`unclassified` when it
      stored none), null when nothing is counted;
    - `state`, closed, the first that holds: `disabled` (the job is not
@@ -639,17 +645,38 @@ recovers about 20 seconds later, read as a failure.
      Processor tick list none, because nothing of theirs is read; the page
      says so for a disabled job.
 4. **Recovered rule** (the owner's, #1414): a failed receipt is recovered when
-   a visible fetch run of the job's CORE source that succeeded and has at
-   least one published parse completed strictly after the receipt finished
-   (its start when it has no finish) and strictly before the next receipt of
-   the job started (or at any later time, for the newest receipt). The
-   earliest such run is `recovered.at`. A recovered receipt keeps its code in
-   `lastRun`, is not counted, and ends the count as a success does. A run that
-   only re-authenticates and publishes nothing, a partial run, or one at or
-   before the failure's finish recovers nothing. Nominal times decide
-   nothing. Only collecting jobs (`collection`, `manual`, `email`) are
-   recovered by runs; a keepalive or the Processor tick only by its own
-   completed receipt.
+   a visible successful fetch run (`successfulFetchRuns`: `success` with no
+   failure) of the job's CORE source completed strictly after the receipt
+   finished (its start when it has no finish) and strictly before the next
+   receipt of the job started (or at any later time, for the newest receipt).
+   The earliest such run is `recovered.at`. A recovered receipt keeps its code
+   in `lastRun`, is not counted, and ends the count as a success does. A
+   failed or partial run, or one at or before the failure's finish, recovers
+   nothing. Nominal times decide nothing. Only collecting jobs (`collection`,
+   `manual`, `email`) are recovered by runs; a keepalive or the Processor tick
+   only by its own completed receipt.
+
+   The owner's words are "a successful collection of the same source", and
+   the summary's V Point recovery (this ADR's V Point amendment,
+   `currentSessionFailure`) already reads exactly `successfulFetchRuns`, so
+   the view reads the same predicate and both answers of the tool agree.
+   Requiring a published parse as well (the first draft of this amendment)
+   was rejected in review: V Point's follow-up run (`runCollection` after the
+   email code, `services/collector-vpoint/src/worker.ts`) stores
+   `balance-info`, `smfg-point` and `history-page-NNNN`, which register
+   within seconds through the queue, but their parses publish on a later
+   Processor tick (`observation_sweep` runs before `collection_scan`, every
+   5 minutes, `docs/processor.md` §2 and §6), so every day the view
+   would read `needs-owner` for V Point until that tick, while the summary
+   read nothing waiting: the false alarm the owner asked to remove. Whether
+   the run's data publishes is reported apart, as `notPublishing`, and turns
+   the job `degraded` past 3 days. Proposal v2's "a run that only
+   re-authenticates and publishes nothing does not count" holds without a
+   publication check: V Point's re-authentication request
+   (`ensureEmailChallenge`, then `VPointReauthenticationPendingError`) stores
+   nothing and ends `failed`, and the email handler's own run is a V Point
+   Pay run (`v-point-pay`), not a `v-point` one.
+
 5. **Page.** The collection quality page shows the view as a table at its
    top (`収集の状況（実行予定ごと）`), from the same route.
 
@@ -670,16 +697,17 @@ recovers about 20 seconds later, read as a failure.
     completion order may fall outside the run window;
   - `lastSuccessAt` is null when neither window holds a success, which says
     nothing about older history;
-  - a run that succeeded while its parses are still pending recovers a
-    failure only once a parse publishes;
+  - a successful run recovers a failure whether or not its parses have
+    published yet; a parse that never publishes shows only under
+    `notPublishing` (and `degraded` after 3 days), not as a failure;
   - a dataset no parser names (no parse job, no recorded parse) is never
     listed; a dataset whose newest capture is published with no observation
     (`published_without_observations`, #450) is published, so it is not listed
     either;
   - a keepalive's failure is on its own line, not on the collecting job's.
-- Each request runs one cell read per enabled collecting source (13 on the
-  configured jobs), so the view costs about as much as reading each source's
-  first cell page.
+- Each request runs one cell read per enabled collecting source (12 in
+  `config/alarm-jobs.json`), one page per 500 cells, so the view costs about
+  as much as reading each of those sources' cell pages once.
 
 ### Verification
 
@@ -690,23 +718,26 @@ Synthetic stores only, no production access:
   `human_required`, SBI VC's `manual_agreement_required`, an unrecovered V
   Point session, a unit waiting on the owner), `degraded` and `disabled`;
   failed, uncertain and not-dispatched receipts counted and a running one
-  skipped; 100, 101 and 140 failures (`100`, `"100+"`) and a success inside
-  the window bounding the count; the recovered rule (recovered and `ok`; daily
-  recoveries; no run; a run that publishes nothing, a partial run, a run at or
-  before the failure's finish; a success after the next receipt started; an
-  uncertain receipt anchored at its start; the earliest qualifying run);
+  skipped; 100, 101 and 140 failures (`100`, `"100+"`), a success inside
+  the window bounding the count, and a running newest receipt over 99 or
+  100 failures (`99`, `"100+"`); the recovered rule (recovered and `ok`; daily
+  recoveries; no run; a succeeded run whose parse is still pending, or that
+  stored nothing, recovers as the summary's V Point recovery reads it; a
+  failed run, a partial run, a run at or before the failure's finish do not;
+  a success after the next receipt started; an uncertain receipt anchored at
+  its start; the earliest qualifying run);
   `lastSuccessAt` as the newer of the two; datasets listed, aged and reasoned,
   a dataset never published aged from its capture, a disabled job's none;
   every answer passes `validCollectionStatus` and the route's path check; all
   17 configured jobs with history stay under 8 KB including the envelope; the
   store is unchanged.
 - `packages/read-model/test/collection-quality-status.test.ts`: the windows'
-  rows (101 receipts per job, 100 runs per source with success and
-  publication flags, a short history whole) and their plans on a store with a
-  year of receipts and runs and no statistics: receipts by
-  `UNIQUE(schedule_id, nominal_at)` for the window and its edge, runs by
-  `idx_fetch_runs_source`, publications by key, no full scan but the
-  request's JSON array, no observation table.
+  rows (101 receipts per job, 100 runs per source with their success flag,
+  a short history whole) and their plans on a store with a year of receipts
+  and runs and no statistics: receipts by `UNIQUE(schedule_id, nominal_at)`
+  for the window and its edge, runs by `idx_fetch_runs_source` and each run's
+  visibility by key, no full scan but the request's JSON array, no parse or
+  observation table.
 - `services/app/test/collection-quality-api.test.ts`: the route at
   `?view=status` (every configured job, the wire check, nothing written) and
   its refusals (`?view=cells`, a repeated or extra parameter, Access, POST, a

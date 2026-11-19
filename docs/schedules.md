@@ -13,7 +13,7 @@ status view instead of combining this page's receipts by hand:
 `kogane.collection-quality.read` with `{ view: "status" }`, or the table at
 the top of `/collection-quality`. It reads the same receipts from CORE, counts
 failures since the newest success, and treats a failed receipt that a
-successful, publishing collection of the same source followed before the next
+successful collection (fetch run) of the same source followed before the next
 receipt as recovered ([collection](collection.md#is-anything-stuck-the-collection-status-view)).
 
 Save a daily time/weekdays or an interval and enable/disable the job. A version

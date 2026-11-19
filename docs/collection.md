@@ -345,16 +345,20 @@ the collection quality page shows it as a table at its top). The rules, as
 the code applies them:
 
 - A receipt that `failed`, was `uncertain` or `not_dispatched` is
-  **recovered** when a visible fetch run of the job's CORE source succeeded,
-  has at least one published parse, and completed strictly after the
-  receipt finished (its start when it has none) and strictly before the job's
-  next receipt started. V Point's daily `reauthentication_pending`, which its
-  email follow-up run repairs about 20 seconds later, is such a receipt: its
-  code stays under `lastRun` and the job reads `ok`. A run that only
-  re-authenticates and publishes nothing does not recover it.
+  **recovered** when a visible successful fetch run (`success` with no
+  failure, the predicate the summary's V Point recovery reads) of the job's
+  CORE source completed strictly after the receipt finished (its start when
+  it has none) and strictly before the job's next receipt started. V Point's
+  daily `reauthentication_pending`, which its email follow-up run repairs
+  about 20 seconds later, is such a receipt: its code stays under `lastRun`
+  and the job reads `ok`, also before that run's parses publish on a later
+  Processor tick. A re-authentication request stores nothing and fails, so it
+  does not recover it; a failed or partial run does not either.
 - `failuresSinceSuccess` counts the receipts after the newest one that
-  completed or was recovered, from the newest 100, and says `"100+"` past
-  them. `failureCode` is the newest counted receipt's code.
+  completed or was recovered, from the newest 101 (a running newest receipt
+  is skipped, so the edge receipt can still end an exact count), and says
+  `"100+"` (at least 100) when none of them is a success and the job holds
+  more than 100. `failureCode` is the newest counted receipt's code.
 - `state` is the first of `disabled` (not enabled), `needs-owner` (the newest
   counted code is `human_required…`, `manual_agreement_required`, or an
   unrecovered V Point session code; or a dataset's cells say

@@ -744,24 +744,23 @@ export const STATUS_OCCURRENCES_SQL = `SELECT o.schedule_id, o.nominal_at, o.sta
 export interface StatusRunRow {
   source_id: string;
   id: number;
-  /** 1 when the run is a successful fetch run (`successfulFetchRuns`). */
+  /**
+   * 1 when the run is a successful fetch run (`successfulFetchRuns`), the
+   * predicate the summary's V Point recovery reads. Whether a parse of it is
+   * published yet is the Processor's later stage, which the view's
+   * `notPublishing` reports apart.
+   */
   succeeded: number;
-  /** 1 when at least one of the run's artifacts has a published parse. */
-  published: number;
   completed_at: string | null;
 }
 
 /**
  * The newest STATUS_RUN_WINDOW visible fetch runs of each CORE source in `?1`
  * (a JSON array), newest first per source, through `idx_fetch_runs_source`:
- * whether each succeeded, whether anything of it was published, and when it
- * completed.
+ * whether each succeeded and when it completed.
  */
 export const STATUS_RUNS_SQL = `SELECT f.source_id, f.id,
        CASE WHEN ${successfulFetchRuns.predicate("f")} THEN 1 ELSE 0 END AS succeeded,
-       CASE WHEN EXISTS (SELECT 1 FROM ${visibleEvidence.fetchArtifacts} a
-                           JOIN published_parse_runs pub ON pub.fetch_artifact_id = a.id
-                          WHERE a.fetch_run_id = f.id) THEN 1 ELSE 0 END AS published,
        f.completed_at
   FROM json_each(?1) wanted
   CROSS JOIN ${visibleEvidence.fetchRuns} f ON f.source_id = wanted.value

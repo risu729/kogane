@@ -863,8 +863,8 @@ are answered by one reader, `readCollectionQuality`
 - **Status** (`/api/collection-quality?view=status`, that query exactly;
   [ADR 0045, amendment of 2026-11-19](adr/0045-collection-quality-read.md#amendment-2026-11-19-a-status-view-one-line-per-configured-job)):
   one line per configured job saying whether it is stuck: `lastRun` (with
-  `recovered` when a succeeded, publishing fetch run of its source followed a
-  failed receipt before the next one), `lastSuccessAt`,
+  `recovered` when a successful fetch run of its source followed a failed
+  receipt before the next one), `lastSuccessAt`,
   `failuresSinceSuccess` (from the newest 100 receipts, else `"100+"`),
   `failureCode`, a closed `state` (`ok`, `degraded`, `failing`,
   `needs-owner`, `disabled`) and `notPublishing` (datasets whose newest

@@ -89,17 +89,14 @@ describe("the status view's reads", () => {
     ]);
   });
 
-  test("the newest window of visible runs of each named source, with success and publication", () => {
+  test("the newest window of visible runs of each named source, with success", () => {
     const rows = scaled.all<StatusRunRow>(STATUS_RUNS_SQL, [JSON.stringify(["v-point", "vpass"])]);
     expect(rows).toHaveLength(STATUS_RUN_WINDOW);
     expect(rows.every((row) => row.source_id === "v-point")).toBe(true);
     expect(rows[0]!.completed_at).toBe(iso(START_MS + 364 * DAY_MS));
     for (const row of rows) {
       const day = Math.round((Date.parse(row.completed_at!) - START_MS) / DAY_MS);
-      expect([row.succeeded, row.published], String(day)).toEqual([
-        day % 3 === 0 ? 0 : 1,
-        day % 2 === 0 ? 1 : 0,
-      ]);
+      expect(row.succeeded, String(day)).toBe(day % 3 === 0 ? 0 : 1);
     }
   });
 
@@ -123,7 +120,7 @@ describe("the status view's reads", () => {
     ).toBe(true);
   });
 
-  test("the runs are read by idx_fetch_runs_source and each run's rows by key", () => {
+  test("the runs are read by idx_fetch_runs_source and each run's visibility by key", () => {
     const steps = explain(scaled.db, STATUS_RUNS_SQL, [JSON.stringify(["v-point"])]);
     expect(scans(steps)).toEqual([]);
     const details = steps.map((step) => step.detail);
@@ -131,15 +128,18 @@ describe("the status view's reads", () => {
       "SEARCH run USING INDEX idx_fetch_runs_source (source_id=? AND id>?)",
     );
     expect(details).toContain("SEARCH run USING INDEX idx_fetch_runs_source (source_id=?)");
+    // The visible-run view's own checks are per run, by key; no parse or
+    // observation table is read: publication is the cells' answer.
     expect(
-      details.some((detail) =>
-        /^SEARCH pub USING (?:COVERING )?INDEX sqlite_autoindex_published_parse_runs_1 \(fetch_artifact_id=\?\)$/u.test(
-          detail,
-        ),
-      ),
-    ).toBe(true);
-    // No observation table is read.
-    expect(details.filter((detail) => /_observations\b/u.test(detail))).toEqual([]);
+      details.filter((detail) => /^SEARCH /u.test(detail) && !/\(fetch_run_id=\?/u.test(detail)),
+    ).toEqual([
+      "SEARCH run USING INDEX idx_fetch_runs_source (source_id=? AND id>?)",
+      "SEARCH run USING INDEX idx_fetch_runs_source (source_id=?)",
+      "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)",
+      "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)",
+      "SEARCH ur USING INDEX idx_fetch_unit_reports_one_terminal (fetch_unit_id=?)",
+    ]);
+    expect(details.filter((detail) => /parse|_observations\b/u.test(detail))).toEqual([]);
   });
 
   test("timings on the scaled store (printed, not asserted)", () => {
