@@ -7,7 +7,7 @@
 // own status, never a guess.
 import { validCardSettlementFacts } from "../../../domain/src/card-settlement.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
-import { resolveMetric } from "../../../domain/src/metrics.ts";
+import { METRIC_REGISTRY_RELEASE, resolveMetric } from "../../../domain/src/metrics.ts";
 import {
   DATED_STATE_FRESHNESS_POLICY,
   DATED_STATE_PERIMETER_POLICY,
@@ -31,6 +31,7 @@ import {
   type ReportedSettlement,
   type ReportedSnapshot,
   type ReportedState,
+  type ReportedStateManifestRow,
 } from "../../../domain/src/reported-state.ts";
 import { parseLocalDate } from "../../../domain/src/time.ts";
 import {
@@ -84,6 +85,7 @@ interface SettlementRow {
   id: string;
   facts_json: string;
   status: ReportedSettlement["reviewStatus"];
+  decision_revision_id: string | null;
 }
 
 const DAY_MS = 86_400_000;
@@ -110,6 +112,28 @@ function storedQuantity(
 
 function snapshotKey(row: { parser_name: string; snapshot_artifact_id: number }): string {
   return `${row.parser_name}|artifact:${row.snapshot_artifact_id}`;
+}
+
+const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * A row's pin in the manifest: its ref and the identity the answer shows for
+ * it (the account and instrument mappings and their statuses, as `accountOf`
+ * and `instrument` read them), so a later mapping revision or identity run
+ * that changes what the answer shows changes the context id (INV09).
+ */
+function manifestRow(
+  ref: string,
+  row: DatedPositionRow | DatedBalanceRow,
+): ReportedStateManifestRow {
+  const recorded = row.identity_recorded === 1;
+  return [
+    ref,
+    row.account_id,
+    recorded ? identityStatus(1, row.account_status) : "not-recorded",
+    row.instrument_id,
+    recorded ? identityStatus(1, row.instrument_status) : "not-recorded",
+  ];
 }
 
 function bounded<T>(rows: T[]): T[] {
@@ -230,11 +254,14 @@ export async function queryDatedState(
     status: row.identity_recorded === 1 ? identityStatus(1, row.instrument_status) : "not-recorded",
   });
 
+  // Every position and balance the answer lists or counts, with its identity.
+  const pinnedRows: ReportedStateManifestRow[] = [];
   const positions = new Map<number, ReportedPosition>();
   for (const row of positionRows) {
     if (!wanted(row.source_id, row.account_id)) continue;
     let position = positions.get(row.id);
     if (position === undefined) {
+      pinnedRows.push(manifestRow(`position:${row.id}`, row));
       position = {
         ref: `position:${row.id}`,
         snapshotRef: `artifact:${row.snapshot_artifact_id}`,
@@ -268,6 +295,7 @@ export async function queryDatedState(
   const excludedRows = new Map<ExclusionReason, number>();
   for (const row of balanceRows) {
     if (!wanted(row.source_id, row.account_id)) continue;
+    pinnedRows.push(manifestRow(`balance:${row.id}`, row));
     const metric = resolveMetric({
       family: "balance",
       sourceId: row.source_id,
@@ -366,15 +394,44 @@ export async function queryDatedState(
               ? -1
               : 1),
   );
-  const manifest = {
+  const containersWithoutSnapshot = perimeter
+    .filter((row) => row.snapshot_artifact_id === null)
+    .filter((row) => source === null || row.perimeter_source_id === source)
+    .map((row) => ({
+      sourceId: row.perimeter_source_id,
+      parserName: row.parser_name,
+      dataset: row.dataset,
+      reasonCode: "no_complete_snapshot_before_cutoff" as const,
+    }));
+  // The manifest pins every input the answer reads (INV09): the request's
+  // filters, the releases the code applies, the chosen snapshots and the
+  // containers without one, each listed or counted row (its id names its
+  // parse run) with the identity it was read under, each payable's account,
+  // and each settlement review at its decision. Observations, candidates and
+  // decisions are append-only, so these ids fix what they name.
+  const manifest: ReportedState["manifest"] = {
     schemaVersion: REPORTED_STATE_SCHEMA,
     date,
     cutoff,
     policies: [DATED_STATE_FRESHNESS_POLICY, DATED_STATE_PERIMETER_POLICY],
+    metricRegistryRelease: METRIC_REGISTRY_RELEASE,
+    filters: { source, account },
     snapshotRefs: [...new Set(chosen.map((snapshot) => snapshot.ref))].sort(),
+    containersWithoutSnapshot: containersWithoutSnapshot
+      .map((entry) => `${entry.sourceId}/${entry.parserName}/${entry.dataset}`)
+      .sort(),
+    rows: pinnedRows.sort((a, b) => byText(a[0], b[0])),
     statementRefs: payables.map((payable) => payable.ref).sort(),
-    settlementRefs: settlementRows.map((row) => `card-settlement:${row.id}`).sort(),
-  } as const;
+    statementAccounts: payables
+      .map((payable): [string, string | null] => [payable.ref, payable.accountId])
+      .sort((a, b) => byText(a[0], b[0])),
+    settlementRefs: settlementRows
+      .map(
+        (row) =>
+          `card-settlement:${row.id}@${row.decision_revision_id === null ? "proposed" : `decision:${row.decision_revision_id}`}`,
+      )
+      .sort(),
+  };
   return {
     schemaVersion: REPORTED_STATE_SCHEMA,
     date,
@@ -385,15 +442,7 @@ export async function queryDatedState(
     accounts: listedAccounts,
     payables,
     coverage: {
-      containersWithoutSnapshot: perimeter
-        .filter((row) => row.snapshot_artifact_id === null)
-        .filter((row) => source === null || row.perimeter_source_id === source)
-        .map((row) => ({
-          sourceId: row.perimeter_source_id,
-          parserName: row.parser_name,
-          dataset: row.dataset,
-          reasonCode: "no_complete_snapshot_before_cutoff" as const,
-        })),
+      containersWithoutSnapshot,
       staleSnapshots: chosen
         .filter((snapshot) => snapshot.freshness === "stale")
         .map((snapshot) => ({
@@ -411,7 +460,7 @@ export async function queryDatedState(
       payablesFromPaymentDate: fromPaymentDate,
       netAssets: "not-computed",
     },
-    manifest: { ...manifest, policies: [...manifest.policies] },
+    manifest,
     contextId: await canonicalDigest(manifest),
   };
 }
