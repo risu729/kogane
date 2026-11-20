@@ -97,7 +97,11 @@ writer fencing and captured CORE references; the contract is in
    (`account_mappings.account_id`, read by the build as each candidate's
    `accountEntity`) name one account entity: their overlap stays unknown, so
    step 7 leaves the worse-ranked side unresolved, or both sides at equal
-   rank, with `account_entity_shared` instead of `overlap_unknown`. The
+   rank, with `account_entity_shared` instead of `overlap_unknown`. Towards
+   a scope no decision relates to it directly, a scope also stands for the
+   entities of the scopes an accepted `same` joins it to and of its accepted
+   parts, so a decision cannot carry a shared entity past the policy (a
+   part's entity made disjoint through its whole, or a `same` partner's). The
    entity is then shown and not counted until a decision accepts the two
    references as `same_account` (one is adopted, the other is
    `duplicate_evidence`) or a mapping revision separates them

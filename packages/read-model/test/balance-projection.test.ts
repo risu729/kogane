@@ -583,6 +583,79 @@ describe("balance projection builder", () => {
       });
       expect(stateOf(build, "m-smbc-second").reasonCode).toBe("account_entity_shared");
     });
+
+    // A lower-authority route at another source, provider-local, so no policy
+    // rule relates it to the bank's references by itself.
+    const routeLine = (scopeKey: string, subject: string, entity: string) =>
+      deposit(scopeKey, subject, "1000", {
+        subjectStatus: "provider-local",
+        sourceId: "sbi-shinsei-bank",
+        parser: "sbi-shinsei-top-balances-and-activity@1",
+        parserName: "sbi-shinsei-top-balances-and-activity",
+        sourceAccount: `synthetic:${scopeKey}`,
+        authorityRank: AUTHORITY_RANKS.aggregator,
+        accountEntity: entity,
+      });
+
+    test("a decided part that shares an entity keeps its whole from being declared disjoint", () => {
+      // The route line is decided a part of the bank's first account and
+      // shares the second account's entity. Declaring the two bank accounts
+      // disjoint made the part disjoint from the second account through
+      // step 7's one-step derivation, and both were adopted.
+      const whole = deposit("m-whole", "source_account:smbc:whole", "1000", {
+        accountEntity: "account:synthetic:whole",
+      });
+      const other = deposit("m-other", "source_account:smbc:other", "1000", {
+        accountEntity: "account:synthetic:shared",
+      });
+      const part = routeLine("m-part", "source_account:route:part", "account:synthetic:shared");
+      const build = buildBalanceProjection(
+        [whole, other, part],
+        [relation("source_account:route:part", "source_account:smbc:whole", "subset")],
+      );
+      expect(adopted(build)).toEqual(["m-other"]);
+      expect(stateOf(build, "m-whole").reasonCode).toBe("covered_by_breakdown");
+      expect(stateOf(build, "m-part")).toMatchObject({
+        state: "unresolved",
+        reasonCode: "account_entity_shared",
+      });
+      expect(build.relations.filter((entry) => entry.source === "policy")).toEqual([]);
+    });
+
+    test("a scope decided the same as one that shares an entity is not declared disjoint", () => {
+      // The bank's first account is decided the same account as a route line,
+      // and the route line shares the second account's entity. Declaring the
+      // two bank accounts disjoint adopted both.
+      const first = deposit("m-first", "source_account:smbc:first", "1000", {
+        accountEntity: "account:synthetic:first",
+      });
+      const second = deposit("m-second", "source_account:smbc:second", "1000", {
+        accountEntity: "account:synthetic:shared",
+      });
+      const line = routeLine("m-line", "source_account:route:line", "account:synthetic:shared");
+      const build = buildBalanceProjection(
+        [first, second, line],
+        [relation("source_account:smbc:first", "source_account:route:line", "same")],
+      );
+      expect(adopted(build)).toEqual([]);
+      expect(stateOf(build, "m-line").reasonCode).toBe("duplicate_evidence");
+      for (const scopeKey of ["m-first", "m-second"])
+        expect(stateOf(build, scopeKey)).toMatchObject({
+          state: "unresolved",
+          reasonCode: "account_entity_shared",
+        });
+      // Only a shared entity withholds the policy: beside a third bank
+      // account of its own entity, the first stays declared disjoint from it.
+      const third = deposit("m-third", "source_account:smbc:third", "1000", {
+        accountEntity: "account:synthetic:third",
+      });
+      expect(
+        buildBalanceProjection(
+          [first, third, line],
+          [relation("source_account:smbc:first", "source_account:route:line", "same")],
+        ).relations.filter((entry) => entry.source === "policy"),
+      ).toHaveLength(1);
+    });
   });
 
   test("SC15: the four meanings of an empty fetch stay four different answers", () => {

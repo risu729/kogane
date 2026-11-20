@@ -373,9 +373,82 @@ interface Subject {
   accountEntities: Set<string>;
 }
 
-function shareAccountEntity(left: Subject, right: Subject): boolean {
-  for (const entity of left.accountEntities) if (right.accountEntities.has(entity)) return true;
+function shareAccountEntity(
+  left: ReadonlySet<string> | undefined,
+  right: ReadonlySet<string> | undefined,
+): boolean {
+  for (const entity of left ?? []) if (right?.has(entity)) return true;
   return false;
+}
+
+const pairKey = (a: string, b: string): string => JSON.stringify(a < b ? [a, b] : [b, a]);
+
+/**
+ * The account entities a subject stands for towards a subject no decision
+ * relates to it directly: its own, those of every subject an accepted `same`
+ * joins it to (directly or through others: one measurement), and those of
+ * every subject a decision makes a part of it or of one of those, with that
+ * part's own `same` subjects. Without them a decision carries a shared entity
+ * past the policy: with `a ≡ c` decided and `c` sharing `b`'s entity, `a ⊥ b`
+ * adopted both `a` and `b`; with `a ⊂ w` decided and `a` sharing `b`'s
+ * entity, `w ⊥ b` became `a ⊥ b` by step 7's one-step derivation, and both
+ * were adopted. A pair a decision relates directly keeps its own entities, so
+ * a policy claim that contradicts that decision still degrades it as before.
+ */
+function decidedEntities(
+  subjects: ReadonlyMap<string, Subject>,
+  declared: readonly DerivedScopeRelation[],
+): Map<string, Set<string>> {
+  const parent = new Map<string, string>();
+  const root = (key: string): string => {
+    let at = key;
+    for (let next = parent.get(at); next !== undefined && next !== at; next = parent.get(at))
+      at = next;
+    return at;
+  };
+  for (const relation of declared)
+    if (relation.relation === "same") {
+      const [x, y] = [root(relation.fromScopeKey), root(relation.toScopeKey)];
+      if (x !== y) parent.set(x < y ? y : x, x < y ? x : y);
+    }
+  const components = new Map<string, Set<string>>();
+  for (const [key, subject] of subjects) {
+    const entities = components.get(root(key)) ?? new Set<string>();
+    for (const entity of subject.accountEntities) entities.add(entity);
+    components.set(root(key), entities);
+  }
+  const withParts = new Map<string, Set<string>>();
+  for (const [component, entities] of components) withParts.set(component, new Set(entities));
+  // `subset` reads from ⊂ to: the part is the left side.
+  for (const relation of declared) {
+    if (relation.relation !== "subset") continue;
+    const whole = withParts.get(root(relation.toScopeKey));
+    for (const entity of components.get(root(relation.fromScopeKey)) ?? []) whole?.add(entity);
+  }
+  const result = new Map<string, Set<string>>();
+  for (const key of subjects.keys()) result.set(key, withParts.get(root(key)) ?? new Set());
+  return result;
+}
+
+/**
+ * Whether two subjects share an account entity: directly when a decision
+ * relates the pair, otherwise through their decided `same` subjects and parts.
+ */
+function entitySharing(
+  subjects: ReadonlyMap<string, Subject>,
+  declared: readonly DerivedScopeRelation[],
+): (left: string, right: string) => boolean {
+  const decided = decidedEntities(subjects, declared);
+  const related = new Set(
+    declared.map((relation) => pairKey(relation.fromScopeKey, relation.toScopeKey)),
+  );
+  return (left, right) =>
+    related.has(pairKey(left, right))
+      ? shareAccountEntity(
+          subjects.get(left)?.accountEntities,
+          subjects.get(right)?.accountEntities,
+        )
+      : shareAccountEntity(decided.get(left), decided.get(right));
 }
 
 // Only banks whose own deposit readings are in the deposit.balance registry
@@ -402,19 +475,25 @@ const DEPOSIT_INSTITUTIONS = new Map([
  * entity: being listed apart, being identified or sitting at two
  * institutions says nothing when identity says both references are one
  * account, so their overlap stays unknown until a decision accepts them as
- * the same account or a mapping revision separates them (v3).
+ * the same account or a mapping revision separates them (v3). Towards a
+ * scope no decision relates to it directly, a scope also stands for the
+ * entities of the scopes decided `same` as it and of its decided parts
+ * (`decidedEntities`).
  *
  * Everything else is deliberately absent. An aggregate or total scope, an
  * aggregator line with no terminal account, and a provider-local label seen
  * through a second route all keep an unknown overlap, which is what makes
  * SC01 and SC06 come out as possible duplicates rather than as sums (INV06).
  */
-function policyDisjointness(subjects: Map<string, Subject>): DerivedScopeRelation[] {
+function policyDisjointness(
+  subjects: Map<string, Subject>,
+  sharesEntity: (left: string, right: string) => boolean,
+): DerivedScopeRelation[] {
   const entries = [...subjects.entries()].sort(([a], [b]) => (a < b ? -1 : 1));
   const relations: DerivedScopeRelation[] = [];
   for (const [index, [left, leftSubject]] of entries.entries())
     for (const [right, rightSubject] of entries.slice(index + 1)) {
-      if (shareAccountEntity(leftSubject, rightSubject)) continue;
+      if (sharesEntity(left, right)) continue;
       const sameSource = leftSubject.sourceId === rightSubject.sourceId;
       const listedApart =
         sameSource && leftSubject.status !== "aggregate" && rightSubject.status !== "aggregate";
@@ -482,7 +561,8 @@ function adoptionOutcomes(
       });
     return { outcomes, relations: [] };
   }
-  const policy = policyDisjointness(subjects);
+  const sharesEntity = entitySharing(subjects, declared);
+  const policy = policyDisjointness(subjects, sharesEntity);
   const claims = [...declared.map(claim), ...policy.map(claim)];
   const measures: MeasureCandidate[] = candidates.map((candidate) => ({
     ref: candidate.scopeKey,
@@ -498,17 +578,17 @@ function adoptionOutcomes(
     outcomes.set(adopted.ref, { state: "adopted", reasonCode: null });
   for (const excluded of result.excluded)
     outcomes.set(excluded.ref, { state: "excluded", reasonCode: excluded.reasonCode });
-  const sharesEntity = entitySharingCandidates(
+  const namedShared = entitySharingCandidates(
     candidates,
-    subjects,
     declared,
+    sharesEntity,
     new Set(result.excluded.map((excluded) => excluded.ref)),
   );
   for (const unresolved of result.unresolved)
     outcomes.set(unresolved.ref, {
       state: unresolved.reasonCode === "conflicting_evidence" ? "conflict" : "unresolved",
       reasonCode:
-        unresolved.reasonCode === "overlap_unknown" && sharesEntity.has(unresolved.ref)
+        unresolved.reasonCode === "overlap_unknown" && namedShared.has(unresolved.ref)
           ? ACCOUNT_ENTITY_SHARED
           : unresolved.reasonCode,
     });
@@ -520,31 +600,28 @@ function adoptionOutcomes(
  * because of a contender that is another reference of the same account
  * entity: a candidate of another scope, not excluded, of no worse authority
  * rank (the side step 7 compares against), with no declared relation to it,
- * whose scope shares an entity with this one. Only such a candidate's
+ * whose scope shares an entity with this one (`entitySharing`). Only such a candidate's
  * `overlap_unknown` is named `account_entity_shared`; every other unknown
  * overlap keeps its code.
  */
 function entitySharingCandidates(
   candidates: readonly ProjectionCandidate[],
-  subjects: ReadonlyMap<string, Subject>,
   declared: readonly DerivedScopeRelation[],
+  sharesEntity: (left: string, right: string) => boolean,
   excluded: ReadonlySet<string>,
 ): Set<string> {
-  const pair = (a: string, b: string) => JSON.stringify(a < b ? [a, b] : [b, a]);
   const related = new Set(
-    declared.map((relation) => pair(relation.fromScopeKey, relation.toScopeKey)),
+    declared.map((relation) => pairKey(relation.fromScopeKey, relation.toScopeKey)),
   );
   const found = new Set<string>();
   for (const candidate of candidates) {
-    const subject = subjects.get(candidate.subjectScopeKey)!;
-    if (subject.accountEntities.size === 0) continue;
     const contender = candidates.some(
       (other) =>
         other.subjectScopeKey !== candidate.subjectScopeKey &&
         !excluded.has(other.scopeKey) &&
         other.authorityRank <= candidate.authorityRank &&
-        !related.has(pair(candidate.subjectScopeKey, other.subjectScopeKey)) &&
-        shareAccountEntity(subject, subjects.get(other.subjectScopeKey)!),
+        !related.has(pairKey(candidate.subjectScopeKey, other.subjectScopeKey)) &&
+        sharesEntity(candidate.subjectScopeKey, other.subjectScopeKey),
     );
     if (contender) found.add(candidate.scopeKey);
   }

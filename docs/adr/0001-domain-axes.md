@@ -522,7 +522,17 @@ in one adoption target was not checked.
 - `policyDisjointness` declares no relation between two subjects that share
   an account entity, whichever of its three rules would otherwise apply. A
   subject's entities are those of every witness of it, so a scope whose
-  witnesses disagree shares an entity with each.
+  witnesses disagree shares an entity with each. Towards a subject no
+  decision relates to it directly, a subject also stands for the entities of
+  every subject an accepted `same` joins it to (directly or through others)
+  and of every subject a decision makes a part of it, with that part's own
+  `same` subjects (`decidedEntities`). Without that, a decision carried a
+  shared entity past the policy: with `a ≡ c` accepted and `c` sharing `b`'s
+  entity, `a ⊥ b` adopted both; with `a ⊂ w` accepted and `a` sharing `b`'s
+  entity, `w ⊥ b` made `a ⊥ b` through step 7's one-step derivation, and both
+  were adopted. A pair a decision relates directly is read against its own
+  entities, so a policy claim that contradicts that decision still degrades
+  the pair to unknown as before.
 - The overlap of such a pair is unknown, so step 7 of `selectAdoptedSet`
   decides it as it decides every unknown overlap: the worse-ranked side is
   unresolved and the better-ranked side is adopted; at equal ranks both are
@@ -582,6 +592,13 @@ listed banks sharing an entity adopts neither while a lower-ranked route of
 the entity leaves the direct reading adopted, that SC01's aggregate beside
 its members gives the same states and reasons with and without entities,
 and that an unknown overlap with no shared entity keeps `overlap_unknown`.
+Two more cases there fail on the rule without `decidedEntities`: a route
+line accepted as a part of one bank account and sharing a second account's
+entity leaves the second adopted and the line `account_entity_shared` (both
+the line and the second were adopted), and a bank account accepted as the
+same as a route line that shares a second account's entity leaves both bank
+accounts `account_entity_shared` (both were adopted), while a third account
+of its own entity stays declared disjoint.
 `services/app/test/entity-double-count.test.ts` builds the snapshot through
 the Processor's own job and reads it as the readers do: the latest page with
 its subtotal over the route and `kogane.balances.read`, and `holdings` over
