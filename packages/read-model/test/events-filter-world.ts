@@ -21,7 +21,7 @@ export interface Statement {
   values: SQLQueryBindings[];
 }
 
-export interface WorldLeg {
+interface WorldLeg {
   subjectRef: string;
   basis: string;
   role?: "increase" | "decrease" | "fee" | "unresolved";

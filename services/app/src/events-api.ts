@@ -32,7 +32,7 @@ const DEFAULT_ACTIVITY_BASIS: ActivityBasis = "cash-movement";
 export const EVENTS_PAGE_SIZE = 200;
 
 /** The activity filters, in the order they are checked and echoed. */
-export const ACTIVITY_FILTER_KEYS = ["since", "before", "account", "source"] as const;
+const ACTIVITY_FILTER_KEYS = ["since", "before", "account", "source"] as const;
 /**
  * The arguments a filtered activity cursor is bound to, by
  * `kogane.events.read`'s names (the route's path is `collection`): a cursor
