@@ -21,6 +21,8 @@ import { READ_MCP_TOOLS } from "../src/read-tools";
 import { pageReadHarness } from "./page-read-harness";
 
 const FAILURE = "synthetic store failure inside the read";
+// An hour before the run, well inside the digest's 31-day window.
+const SINCE = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
 /**
  * A store whose every statement fails but the audit record's writes
@@ -122,6 +124,11 @@ const READS: readonly {
     tool: "kogane.card-settlements.ownership",
     args: { proposalId: "proposal-synthetic" },
     route: "/api/v2/reconciliation/card-settlements/ownership?proposalId=proposal-synthetic",
+  },
+  {
+    tool: "kogane.changes.since",
+    args: { since: SINCE },
+    route: `/api/v2/changes?since=${encodeURIComponent(SINCE)}`,
   },
   {
     tool: "kogane.economic-readiness.read",
