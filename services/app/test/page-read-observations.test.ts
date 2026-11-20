@@ -91,6 +91,12 @@ describe("observation page reads", () => {
     const cases: [string, string, Record<string, unknown>][] = [
       ["/api/meta", "kogane.store.read", { page: "meta" }],
       ["/api/overview", "kogane.store.read", { page: "overview" }],
+      ["/api/overview?detail=full", "kogane.store.read", { page: "overview", detail: "full" }],
+      [
+        "/api/overview?detail=summary",
+        "kogane.store.read",
+        { page: "overview", detail: "summary" },
+      ],
       [
         "/api/filter-options?kind=transactions",
         "kogane.store.read",

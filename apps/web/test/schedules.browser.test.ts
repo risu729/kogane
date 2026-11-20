@@ -91,6 +91,9 @@ describe.if(runnable)("operator schedule administration", () => {
             capabilities: CENTRAL_STORE_CAPABILITIES,
           });
         if (url.pathname === "/api/ops/v1/schedules") {
+          // The page reads the full snapshot; the route's default is the summary (ADR 0123).
+          if (url.searchParams.get("detail") !== "full")
+            return Response.json({ error: "synthetic_summary_not_served" }, { status: 400 });
           snapshotReads++;
           if (writes.length && readAfterWrite) await readAfterWrite();
           if (snapshotStatus !== 200)

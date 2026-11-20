@@ -33,7 +33,8 @@ const policy = (
 });
 
 // The closed default opt-ins of migrations 0080, 0088, 0090, 0092, 0094, 0095, 0096,
-// 0097, 0098, 0099, 0100, 0101 and 0102, plus Sony 0089.
+// 0097, 0098, 0099, 0100, 0101 and 0102, plus Sony 0089 and the SBI income
+// parser pin moved by 0104.
 // This expected catalogue is independent of the SQL read under test: an extra
 // source, page, parser, scope, snapshot membership or policy still fails.
 export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
@@ -47,8 +48,8 @@ export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
   ...(["income-payments", "realised-gains"] as const).map((dataset) =>
     policy("sbi-securities", dataset, `sbi-${dataset}`, {
       policy_id: "coverage-v1",
-      required_parser_version: "0.1.2",
-      updated_at_ms: 1794268800000,
+      required_parser_version: "0.1.3",
+      updated_at_ms: 1795132800000,
     }),
   ),
   ...(
@@ -96,11 +97,12 @@ export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
     replaces_previous_on_complete_empty: 0,
     updated_at_ms: 1794268800000,
   }),
+  // 0104 (ADR 0120) advances the reader to the one that keeps the card name.
   policy("vpass", "credit-snapshot", "vpass-credit-snapshot", {
     policy_id: "coverage-v1",
-    required_parser_version: "1.0.2",
+    required_parser_version: "1.1.0",
     replaces_previous_on_complete_empty: 0,
-    updated_at_ms: 1794441600000,
+    updated_at_ms: 1795132800000,
   }),
   policy("myjcb", "debit-detail", "myjcb-debit-ledger", {
     snapshot_selection: 0,

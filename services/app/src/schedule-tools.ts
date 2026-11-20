@@ -8,6 +8,10 @@ import {
 } from "../../../packages/application/src/index";
 import type { ToolResult } from "./agent-service";
 import { mcpInputSchema } from "./mcp-input-schema";
+import {
+  type MaintenanceRead,
+  maintenanceReadSummary,
+} from "../../../packages/collection/src/schedule-model.ts";
 
 /** On `/mcp` and, as `schedules.maintenance.read`, on `/api/agent/v1/*`. */
 export const SCHEDULE_READ_TOOL = "kogane.schedules.maintenance.read";
@@ -23,6 +27,15 @@ export function schedulesServed(env: Pick<Env, "SCHEDULES_ENABLED">): boolean {
 
 const sourceId = z.string().regex(/^[a-z0-9-]{1,100}$/u);
 const scheduleReadSchema = z.strictObject({ source: sourceId.optional() });
+/**
+ * The maintenance read also takes `detail` (ADR 0123, amendment 2026-11-19):
+ * `summary`, the default, paged by line with `offset`, or `full`, the
+ * Processor's read as it is, which takes no `offset`.
+ */
+const maintenanceReadSchema = scheduleReadSchema.extend({
+  detail: z.enum(["summary", "full"]).optional(),
+  offset: z.number().int().min(0).max(1000).optional(),
+});
 
 /** The published JSON Schema of one argument schema, without the meta key. */
 function inputSchema(schema: z.ZodType): Record<string, unknown> {
@@ -35,8 +48,8 @@ export const SCHEDULE_MCP_TOOLS = [
     name: SCHEDULE_READ_TOOL,
     title: "Read maintenance settings of the granted sources",
     description:
-      "Public maintenance rules with their revision history (actor kind and closed reason), the registered maintenance reference, and per schedule the original next occurrence, the maintenance-adjusted due time, the actual alarm, whether the reservation is armed or pending, and the latest receipt's outcome. Only sources in this grant's scheduleSources; no financial data.",
-    inputSchema: inputSchema(scheduleReadSchema),
+      "Public maintenance rules with their revision history (actor kind and closed reason), the registered maintenance reference, and per schedule the original next occurrence, the maintenance-adjusted due time, the actual alarm, whether the reservation is armed or pending, and the latest receipt's outcome. `detail: summary` (the default) answers per source its reference status (`confirmed`, `no-applicable-rule`, `not-found`) and scheduleCount and ruleCount; per job its id, kind, enabled, supported, revision, nextNominalAt, nextRunAt, reservation (`armed`, `pending`, `disabled`) and newest receipt (nominal time, status, closed failure code); per rule its current revision (revision, timezone, pattern, enabled, scope) with how many revisions are listed, their distinct actor kinds and change reasons, and how many the caller wrote; and the delegated write limits. It is paged by line, 16 jobs and rules a page (a source's lines can continue on the next page, where it is listed again): `offset` is the previous page's `coverage.nextOffset`; each page is a fresh read, so a `coverage.lines` that differs from the previous page's means the store changed and a line may repeat or be skipped. `detail: full` answers every listed revision with its reference URL, verification and creation times, the actual alarm and the receipt's start and finish, and takes no `offset`. Only sources in this grant's scheduleSources; no financial data.",
+    inputSchema: inputSchema(maintenanceReadSchema),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
   {
@@ -101,16 +114,47 @@ export async function readScheduleTool(
 ): Promise<ToolResult> {
   if (!grantAllows(grant, "schedules.read")) return refusal(403, "unauthorized");
   if (!ACTOR_PATTERN.test(grant.principal)) return refusal(403, "actor_not_supported");
-  const parsed = scheduleReadSchema.safeParse(body ?? {});
+  const parsed = (path === "read" ? maintenanceReadSchema : scheduleReadSchema).safeParse(
+    body ?? {},
+  );
   if (!parsed.success) return refusal(400, "invalid_request");
-  const { source } = parsed.data;
+  const {
+    source,
+    detail = "summary",
+    offset,
+  } = parsed.data as z.infer<typeof maintenanceReadSchema>;
+  // A full read is one answer; only the summary is paged.
+  if (detail === "full" && offset !== undefined) return refusal(400, "invalid_request");
+  let sources: "*" | string[];
   if (source === undefined) {
     const scope = grant.scopes.scheduleSources ?? [];
-    return relayRead(env, grant.principal, { sources: scope === "*" ? "*" : [...scope] }, path);
+    sources = scope === "*" ? "*" : [...scope];
+  } else {
+    // Any source outside the grant is refused alike, whether or not it exists.
+    if (!grantAllowsScheduleSource(grant, source)) return refusal(403, "source_not_granted");
+    sources = [source];
   }
-  // Any source outside the grant is refused alike, whether or not it exists.
-  if (!grantAllowsScheduleSource(grant, source)) return refusal(403, "source_not_granted");
-  return relayRead(env, grant.principal, { sources: [source] }, path);
+  const answer = await relayRead(env, grant.principal, { sources }, path);
+  if (path !== "read" || detail === "full" || answer.status !== 200) return answer;
+  return maintenanceSummaryOf(answer.body, offset ?? 0);
+}
+
+/**
+ * The summary of the Processor's maintenance read, the one function both
+ * agent paths answer it with (ADR 0081). A read without its lists is not
+ * summarized into an empty page.
+ */
+function maintenanceSummaryOf(body: unknown, offset: number): ToolResult {
+  const read = body as Partial<Record<keyof MaintenanceRead, unknown>> | null;
+  if (
+    read === null ||
+    typeof read !== "object" ||
+    !Array.isArray(read.sources) ||
+    read.limits === null ||
+    typeof read.limits !== "object"
+  )
+    return refusal(503, "scheduling_unavailable");
+  return { status: 200, body: maintenanceReadSummary(body as MaintenanceRead, offset) };
 }
 
 /**
