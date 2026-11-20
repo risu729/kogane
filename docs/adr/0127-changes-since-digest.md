@@ -277,8 +277,12 @@ source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
 4. **Lower bounds (INV05).** Every count of a section in a line's `cut`, and
    every count of an events line that is not `complete`, is shown with 以上
    and an 上限で打ち切り badge; a cut section with no count reads 0件以上, not
-   なし. The panel's header count (sources listed) and the unchanged count
-   read 以上 while the answer continues.
+   なし. A cut section that lists some states adds そのほか 0件以上, and an
+   incomplete events line that lists some kinds adds そのほかの種類: 0件以上,
+   because a state or kind read as 0 may have new records past the bound; an
+   unlisted state reads as exactly none only in a section that is not cut.
+   The panel's header count (sources listed) and the unchanged count read 以上
+   while the answer continues.
 5. **The rest of the answer.** `unchanged` sources in a closed disclosure,
    with a link to 収集の状況 (the collection-quality page, the handler of an
    unchanged source); the events line per kind as 新規 and 更新 counts, or
@@ -320,8 +324,9 @@ source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
 - `apps/web/test/changes-since.browser.test.ts`, against a synthetic server
   whose answers the contract admits (checked in the file): per-source labels
   and counts and the artifact link; the default 24-hour `since` and the
-  7-day window; cut counts and the events line as 以上 with the badge, and
-  なし only for uncut sections; unchanged sources collapsed until opened;
+  7-day window; cut counts and the events line as 以上 with the badge, the
+  states and kinds they do not list as そのほか 0件以上, and なし only for uncut
+  sections; unchanged sources collapsed until opened;
   `notCovered` with its reasons; a continued answer with `after`, its header
   and unchanged counts as 以上 until the last answer; the unauthorized run
   sections and an events line that is not served; no panel on `403` and on

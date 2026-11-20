@@ -179,6 +179,11 @@ function StateCounts<S extends string>({
           </Badge>
         ))
       )}
+      {/* In a cut section a state read as 0 may still have new records past
+          the bound: the states not listed are lower bounds too (INV05). */}
+      {cut && shown.length > 0 && shown.length < order.length ? (
+        <span>そのほか {counted(0, true)}</span>
+      ) : null}
       {cut ? <CutBadge /> : null}
     </span>
   );
@@ -298,6 +303,10 @@ function Events({ events }: { events: ChangesSinceAnswer["events"] }): ReactNode
               {EVENT_LABELS[kind]}: 新規 {counted(created, cut)} · 更新 {counted(revised, cut)}
             </li>
           ))}
+          {/* Past the walk, a kind read as 0 may have new revisions too (INV05). */}
+          {cut && rows.length < ECONOMIC_EVENT_KINDS.length ? (
+            <li>そのほかの種類: {counted(0, true)}</li>
+          ) : null}
         </ul>
       )}
       {cut ? (

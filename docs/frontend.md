@@ -215,7 +215,8 @@ It sends `since` as the browser's clock minus the chosen window (24時間 by
 default, 7日間, 30日間), checks every answer with `validChangesSince`, and
 shows the digest's counts per source by closed state, with labels typed by the
 domain's closed lists. A count the digest cut, and every count of an
-incomplete events line, reads 以上; unchanged sources and what the digest does
+incomplete events line, reads 以上, and the states or kinds such a section or
+line does not list read そのほか 0件以上; unchanged sources and what the digest does
 not cover sit in closed disclosures; 続きを読み込む follows `next.after`. A
 `403` or `404` from the route hides the panel; any other failure, a malformed
 answer included, is the error state with no count.

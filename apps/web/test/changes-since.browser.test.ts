@@ -318,6 +318,12 @@ describe.if(runnable)("the 最近の変化 panel on ホーム", () => {
       // The events walk stopped short: each of its counts is a lower bound.
       expect(await panel.getByText("購入: 新規 3件以上 · 更新 1件以上").count()).toBe(1);
       expect(await panel.getByText("振替: 新規 1件以上 · 更新 0件以上").count()).toBe(1);
+      // A state or kind the cut answer read as 0 is a lower bound too, never
+      // an absence that reads as exactly none (INV05).
+      expect(await cardLine.getByText("そのほか 0件以上", { exact: true }).count()).toBe(2);
+      expect(await panel.getByText("そのほかの種類: 0件以上", { exact: true }).count()).toBe(1);
+      const bankLine = panel.locator("li.changes-source").filter({ hasText: "synthetic-bank" });
+      expect(await bankLine.getByText(/そのほか/u).count()).toBe(0);
     } finally {
       await page.close();
     }
