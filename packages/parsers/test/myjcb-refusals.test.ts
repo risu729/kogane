@@ -60,7 +60,7 @@ describe("myjcb credit ledger", () => {
     expect(() => parse(ledger(), { runStatus: "failed" })).toThrow(
       "require a successful, failure-free fetch run",
     );
-    expect(() => parse(ledger(), { artifactKey: "connection-a/credit-ledger-18.json" })).toThrow(
+    expect(() => parse(ledger(), { artifactKey: "connection-a/credit-ledger-20.json" })).toThrow(
       "credit-ledger artifact key is invalid",
     );
     expect(() => parse(ledger(), { statementState: "unknown" })).toThrow(
@@ -159,7 +159,11 @@ describe("myjcb past-month balances", () => {
   });
 
   test("items: month range, duplicates, flags and amounts", () => {
-    expect(() => parse(withItem({ detailMonth: "18" }))).toThrow("detailMonth is invalid");
+    // Positions count the menu's schedule pages too: since 2026-11-15 the
+    // past-month window is 10..18, so 18 and 19 are months (0..19).
+    expect(() => parse(withItem({ detailMonth: "18" }))).not.toThrow();
+    expect(() => parse(withItem({ detailMonth: "19" }))).not.toThrow();
+    expect(() => parse(withItem({ detailMonth: "20" }))).toThrow("detailMonth is invalid");
     expect(() => parse(withItem({ detailMonth: "09" }))).toThrow("detailMonth is invalid");
     expect(() => parse(withItem({ detailMonth: "10" }))).toThrow("duplicate detailMonth");
     expect(() => parse(withItem({ detailAvailableFlag: "true" }))).toThrow(

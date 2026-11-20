@@ -80,6 +80,22 @@ describe("MyJCB synthetic parsers", () => {
     );
   });
 
+  test("reads the shifted past-month window 10..18 (two schedule pages since 2026-11-15)", () => {
+    const items = Array.from({ length: 9 }, (_, index) => ({
+      detailAvailableFlag: index === 8,
+      detailMonth: String(10 + index),
+    }));
+    const past = parsePastMonthAvailability(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        result: { errId: "0", detailPastJsonInfo: items },
+        id: "x",
+      }),
+    );
+    expect(past.map((month) => month.detailMonth)).toEqual([10, 11, 12, 13, 14, 15, 16, 17, 18]);
+    expect(past.filter((month) => month.available).map((month) => month.detailMonth)).toEqual([18]);
+  });
+
   test("extracts the hidden discriminator and excludes the notice PDF", () => {
     const html = fixture("credit-detail.html");
     expect(extractGeneralJsonDiscriminator(html)).toBe("synthetic-discriminator");
@@ -227,8 +243,8 @@ describe("readCreditMenuGroups (ADR 0005's amendment (c))", () => {
     });
   });
 
-  test("a link past position 17 is not read, and only counted", () => {
-    expect(readCreditMenuGroups(creditMenu([0, 1, 2, 18], [7, 8]))).toEqual({
+  test("a link past position 19 is not read, and only counted", () => {
+    expect(readCreditMenuGroups(creditMenu([0, 1, 2, 20], [7, 8]))).toEqual({
       months: [0, 1, 2],
       schedules: [7, 8],
       linksBeyondRange: 1,

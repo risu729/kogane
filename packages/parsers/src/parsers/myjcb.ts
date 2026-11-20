@@ -36,7 +36,7 @@ const UNCONFIRMED_EXPANDED = new Set([
   "備考",
   "訂正サイン",
 ]);
-const ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/(credit-ledger-(0[0-9]|1[0-7])\.json)$/u;
+const ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/(credit-ledger-(0[0-9]|1[0-9])\.json)$/u;
 const PAST_ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/credit-past-months\.json$/u;
 
 /**
@@ -54,7 +54,7 @@ export const myJcbCreditLedger: Parser = {
   // 1.2.3 reads every page as 1.2.2: only its digest moved, with the shared
   // skip-payment reader that `myjcb-schedule-page-kind.ts` imports (ADR 0005
   // amendment k).
-  version: "1.2.4",
+  version: "1.2.5",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -212,7 +212,7 @@ export const myJcbPastMonthBalances: Parser = {
   // 1.1.6 reads every page as 1.1.5: only its digest moved, with the shared
   // skip-payment reader that `myjcb-schedule-page-kind.ts` imports (ADR 0005
   // amendment k).
-  version: "1.1.7",
+  version: "1.1.8",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -257,7 +257,7 @@ export const myJcbPastMonthBalances: Parser = {
       const item = strictObject(value, `credit-past-months.result.detailPastJsonInfo[${index}]`);
       exactKeys(item, PAST_ITEM_KEYS, `credit-past-months.result.detailPastJsonInfo[${index}]`);
       const monthText = strictString(item["detailMonth"], `${locator}.detailMonth`, { max: 2 });
-      if (!/^(?:[0-9]|1[0-7])$/u.test(monthText)) {
+      if (!/^1?[0-9]$/u.test(monthText)) {
         throw new Error(`${locator}.detailMonth is invalid`);
       }
       const month = Number(monthText);
@@ -402,7 +402,7 @@ export const myJcbCreditStatement: Parser = {
   // 1.4.1 reads every page as 1.4.0: only its digest moved, with the shared
   // skip-payment reader that `myjcb-schedule-page-kind.ts` imports (ADR 0005
   // amendment k).
-  version: "1.4.2",
+  version: "1.4.3",
   accepts: (artifact) =>
     artifact.sourceId === SOURCE &&
     artifact.dataset === "credit-detail" &&
@@ -520,7 +520,7 @@ export const myJcbEvidenceOnly: Parser = {
   // 1.1.6 reads every page as 1.1.5: only its digest moved, with the shared
   // skip-payment reader that `myjcb-schedule-page-kind.ts` imports (ADR 0005
   // amendment k).
-  version: "1.1.7",
+  version: "1.1.8",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -639,7 +639,7 @@ function validateSanitizedHtml(
       throw new Error("myjcb credit-menu metadata is invalid");
     }
   } else {
-    const match = key?.match(/^([a-z0-9][a-z0-9-]{0,63})\/credit-detail-(0[0-9]|1[0-7])\.html$/u);
+    const match = key?.match(/^([a-z0-9][a-z0-9-]{0,63})\/credit-detail-(0[0-9]|1[0-9])\.html$/u);
     if (
       !match ||
       (!(allowMissingStatementMeta && artifact.period == null) &&

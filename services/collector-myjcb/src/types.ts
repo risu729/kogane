@@ -149,6 +149,16 @@ export type CreditExportKind = "csv" | "pdf" | "ofx";
  *
  * Entries are `detailMonth` positions, not calendar months.
  */
+/**
+ * The highest statement-list position (`detailMonth`) the collector reads.
+ * Positions count the menu's schedule pages as well as months: the provider
+ * shows up to 17 statement months, and the menu has shown two schedule pages
+ * (ボーナス払い and ショッピングスキップ払い) since 2026-11-15, which moved the
+ * past-month window from 9..17 to 10..18 (docs/sources/myjcb.md). 19 leaves
+ * room for one more schedule page; anything past it is still refused.
+ */
+export const MAX_DETAIL_POSITION = 19;
+
 export const UNREAD_MONTH_CODES = ["rows_unstated", "scheduled_payments_page"] as const;
 
 export type UnreadMonthCode = (typeof UNREAD_MONTH_CODES)[number];

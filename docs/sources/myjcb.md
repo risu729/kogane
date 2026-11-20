@@ -1081,3 +1081,32 @@ digits or an integer `0..999`). A position is an index into the statement
 list, not an amount or a date. The `0..17` bound (the read allowlist in
 `policy.ts`, the client, both parsers and the shared parsers) stays as it is
 until a run shows the position.
+
+### The position: the window moved to `10..18` (2026-11-20)
+
+The scheduled run of 2026-11-20 21:00 UTC logged `menuMonthPositions`
+`[0..7]`, `schedulePositions` `[8, 9]`, `menuLinksBeyondRange` 0, and for the
+ninth past-month item `monthPosition` 18. Before 2026-11-15 the menu held
+months `0..6` and schedule pages `7, 8`, and the past-month API offered
+`9..17`. The menu gained one month and kept both schedule pages, so every
+later position moved up by one: the past-month window is now `10..18`. The
+provider's 17-month horizon counts statement months; positions also count the
+schedule pages, so 17 months and two schedule pages reach position 18.
+
+**Fix.** One collector bound, `MAX_DETAIL_POSITION` = 19 (17 months and up to
+three schedule pages), replaces every `0..17` check: the read allowlist
+(`policy.ts`, all four `detailMonth` routes), the past-month JSON-RPC referer
+check, the menu reader, the past-month availability check and the manifest
+position check. The shared parsers accept the same positions in
+`credit-ledger-NN.json`, `credit-detail-NN.html`,
+`credit-skip-payment-NN.html` and the past-month items, and the relative
+period label reads `detailMonth-0` to `detailMonth-19`. A position above 19 is
+still refused.
+
+**Release.** The four parsers in `packages/parsers/src/parsers/myjcb.ts` move
+together: `myjcb-credit-ledger@1.2.5`, `myjcb-credit-past-month-balances@1.1.8`,
+`myjcb-credit-statement-total@1.4.3`, `myjcb-canonical-evidence-boundary@1.1.8`;
+and `myjcb-skip-payment-schedule@0.1.4`. None of the five is pinned by a
+snapshot policy (`required_parser_version` is `NULL` for the MyJCB credit
+datasets), so no migration is needed. Observations of positions up to 17 are
+unchanged.

@@ -127,7 +127,7 @@ The active allowlist contains only these operations.
 | login submit       | POST          | `/iss-pc/member/user_manage/Login`                                                   | Validate the form action and submit once inside the browser   |
 | mypage             | GET           | `/iss-pc/member/mypage/mypage.html`                                                  | Login landing/session check                                   |
 | credit menu        | GET           | `/iss-pc/member/details_inquiry/detailMenu.html?link_id=<observed>`                  | Initial `detailMonth` enumeration                             |
-| credit detail      | GET           | `/iss-pc/member/details_inquiry/detail.html?detailMonth=0..17&output=web`            | Confirmed/unconfirmed HTML snapshots                          |
+| credit detail      | GET           | `/iss-pc/member/details_inquiry/detail.html?detailMonth=0..19&output=web`            | Confirmed/unconfirmed HTML snapshots                          |
 | older availability | POST JSON-RPC | `/iss-pc/general_json/member/details_inquiry/detailPastJson.json`                    | Enumerate only available months with the hidden discriminator |
 | credit CSV/OFX     | GET           | `detail.html?detailMonth=N&output=csv                                                | money`                                                        | Official exports for confirmed months |
 | credit PDF         | GET           | `detailDbPdf.html?detailMonth=N&output=pdf`                                          | Official statement PDFs for confirmed months                  |
