@@ -14,6 +14,7 @@ import {
   DATED_POSITION_CONTAINER_PARSERS,
   DATED_POSITION_QUANTITIES_SQL,
   DATED_POSITIONS_SQL,
+  DATED_SCHEDULED_PAYMENTS_SQL,
   DATED_SNAPSHOT_UNITS_SQL,
   DATED_SNAPSHOTS_SQL,
   DATED_STATEMENTS_BEFORE_WINDOW_SQL,
@@ -21,6 +22,7 @@ import {
   type DatedBalanceRow,
   type DatedPositionQuantityRow,
   type DatedPositionRow,
+  type DatedScheduledPaymentRow,
   type DatedSnapshotRow,
   type DatedSnapshotUnitRow,
   type DatedStatementRow,
@@ -773,6 +775,126 @@ describe("the fetch units of chosen snapshots", () => {
     expect(plan.some((line) => /^SEARCH a USING INTEGER PRIMARY KEY/u.test(line))).toBe(true);
     expect(plan.some((line) => /^SEARCH u USING INTEGER PRIMARY KEY/u.test(line))).toBe(true);
     expect(plan.filter((line) => /^SCAN (a|u)\b/u.test(line))).toEqual([]);
+  });
+});
+
+describe("scheduled payments as of the cutoff", () => {
+  const scheduled = (store: DatedStore, date: string) =>
+    all<DatedScheduledPaymentRow>(store, DATED_SCHEDULED_PAYMENTS_SQL, reportedStateCutoff(date));
+  const row = { usageDate: "2026-08-03", dueDate: "2026-10-10", asOf: "2026-09-05" };
+
+  test("per fetch unit, the newest run's published pages before the cutoff, each row as stored", () => {
+    const store = new DatedStore();
+    store.scheduledPage({
+      fetchedAt: "2026-09-01T12:00:00Z",
+      payments: [{ ...row, amount: "100" }],
+    });
+    const newest = store.scheduledPage({
+      fetchedAt: "2026-09-05T12:00:00Z",
+      payments: [
+        { ...row, dueDate: "2026-11-10", amount: "-30" },
+        { ...row, amount: "4500" },
+      ],
+    });
+    // Captured after the end of 2026-09-10 in Tokyo: not as of that date.
+    const late = store.scheduledPage({ fetchedAt: "2026-09-10T15:00:00Z", payments: [] });
+    // Another connection is its own unit, with a page that listed none.
+    const other = store.scheduledPage({ fetchedAt: "2026-09-02T12:00:00Z", connection: "conn-2" });
+    const rows = scheduled(store, "2026-09-10");
+    expect(rows).toEqual([
+      {
+        artifact_id: newest.artifact,
+        source_id: "myjcb",
+        fetched_at: "2026-09-05T12:00:00.000Z",
+        parse_run_id: newest.parse,
+        id: newest.payments[1]!,
+        source_account: "myjcb:conn-1:root",
+        schedule_kind: "card-skip-payment",
+        usage_date: "2026-08-03",
+        due_date: "2026-10-10",
+        amount_text: "4500",
+        amount_scale: 0,
+        currency: "JPY",
+        counterparty: "Synthetic merchant 1",
+        as_of: "2026-09-05",
+      },
+      expect.objectContaining({
+        artifact_id: newest.artifact,
+        id: newest.payments[0]!,
+        amount_text: "-30",
+      }),
+      // The empty page is listed as itself, never dropped.
+      {
+        artifact_id: other.artifact,
+        source_id: "myjcb",
+        fetched_at: "2026-09-02T12:00:00.000Z",
+        parse_run_id: other.parse,
+        id: null,
+        source_account: null,
+        schedule_kind: null,
+        usage_date: null,
+        due_date: null,
+        amount_text: null,
+        amount_scale: null,
+        currency: null,
+        counterparty: null,
+        as_of: null,
+      },
+    ]);
+    // On the next day the later empty page is the capture: it listed none.
+    expect(scheduled(store, "2026-09-11").map((entry) => [entry.artifact_id, entry.id])).toEqual([
+      [late.artifact, null],
+      [other.artifact, null],
+    ]);
+    // Before any capture there is nothing.
+    expect(scheduled(store, "2026-08-31")).toEqual([]);
+  });
+
+  test("an unpublished newer page leaves the older published run current; one run's two pages are both listed", () => {
+    const store = new DatedStore();
+    const older = store.scheduledPage({
+      fetchedAt: "2026-09-01T12:00:00Z",
+      payments: [{ ...row, amount: "100" }],
+    });
+    const second = store.scheduledPage({
+      fetchedAt: "2026-09-01T12:00:01Z",
+      position: 9,
+      run: { run: older.run, unit: older.unit },
+    });
+    store.scheduledPage({
+      fetchedAt: "2026-09-03T12:00:00Z",
+      payments: [{ ...row, amount: "999" }],
+      published: false,
+    });
+    expect(
+      scheduled(store, "2026-09-10").map((entry) => [entry.artifact_id, entry.amount_text]),
+    ).toEqual([
+      [older.artifact, "100"],
+      [second.artifact, null],
+    ]);
+  });
+
+  test("without table statistics it reaches artifacts by primary key and rows by their parse run", () => {
+    const store = new DatedStore();
+    expect(
+      store.db
+        .query("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'sqlite_stat%'")
+        .get(),
+    ).toEqual({ n: 0 });
+    const plan = (
+      store.db
+        .query(`EXPLAIN QUERY PLAN ${DATED_SCHEDULED_PAYMENTS_SQL}`)
+        .all(reportedStateCutoff("2026-09-10")) as { detail: string }[]
+    ).map((entry) => entry.detail);
+    expect(
+      plan.some((line) => /^SEARCH s USING INDEX idx_sched_pay_obs_parse_run/u.test(line)),
+    ).toBe(true);
+    expect(plan.some((line) => /^SEARCH a USING INTEGER PRIMARY KEY/u.test(line))).toBe(true);
+    // Of the stored tables, only the publication pointers are scanned (filtered
+    // by parser name); the rows are never scanned. (The view's correlated
+    // `collector_error` probe scans artifacts here only because this stub has
+    // no `idx_fetch_artifacts_run_role`, and the status it feeds is not read.)
+    expect(plan.filter((line) => /^SCAN (s|pub|u|seal|t)\b/u.test(line))).toEqual(["SCAN pub"]);
   });
 });
 

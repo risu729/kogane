@@ -10,7 +10,10 @@ import { addDays, daysBetween, formatLocalDate, parseLocalDate, type CivilDate }
 import type { Quantity } from "./values.ts";
 
 /**
- * v3: the coverage and the manifest count the statements the payable window
+ * v4: the answer lists the provider's scheduled card payments as of the
+ * cutoff (`scheduledPayments`; ADR 0019's scheduled-payments amendment of
+ * 2026-11-21), and the manifest pins each listed capture's parse and each
+ * listed row. v3: the coverage and the manifest count the statements the payable window
  * leaves out (`statementsBeforeWindow`; ADR 0019's statements-before-window
  * amendment of 2026-11-18, released after v2 and so a version of its own).
  * v2: the manifest pins every input the answer reads (INV09; ADR 0019's
@@ -21,7 +24,7 @@ import type { Quantity } from "./values.ts";
  * ids, so a mapping correction, a review decision, a parse activated over the
  * same artifact or another account filter kept the context id.
  */
-export const REPORTED_STATE_SCHEMA = "reported-state-v3";
+export const REPORTED_STATE_SCHEMA = "reported-state-v4";
 /** `same-day` / `recent` (captured at most `RECENT_DAYS` before the date) / `stale`; `collection-freshness-v1` uses the same thresholds. */
 export const DATED_STATE_FRESHNESS_POLICY = "dated-state-freshness-v1";
 /** Which containers and rows a reported state lists (ADR 0019, decision 2). */
@@ -54,6 +57,23 @@ export const PAYABLE_STATUSES = [
   "payment_date_unknown",
 ] as const;
 export type PayableStatus = (typeof PAYABLE_STATUSES)[number];
+/**
+ * Where a provider-scheduled payment stands against the asked date, from its
+ * due date alone: whether it was paid is not read (no settlement links one).
+ */
+export const SCHEDULED_PAYMENT_DUE_STATUSES = ["due_after_date", "due_on_or_before_date"] as const;
+export type ScheduledPaymentDueStatus = (typeof SCHEDULED_PAYMENT_DUE_STATUSES)[number];
+/** The schedule kinds `scheduled_payment_observations` admits (migration 0061). */
+export const SCHEDULED_PAYMENT_KINDS = ["card-skip-payment"] as const;
+export type ScheduledPaymentKind = (typeof SCHEDULED_PAYMENT_KINDS)[number];
+/**
+ * Whether an answer lists the scheduled payments: `listed` (possibly none),
+ * or `not_listed_account_filter` under an account filter, since a scheduled
+ * payment has no identity run and so no resolved account to match it with
+ * (ADR 0005, amendment e).
+ */
+export const SCHEDULED_PAYMENTS_LISTING = ["listed", "not_listed_account_filter"] as const;
+export type ScheduledPaymentsListing = (typeof SCHEDULED_PAYMENTS_LISTING)[number];
 export const IDENTITY_STATUSES = [
   "identified",
   "provider-local",
@@ -199,6 +219,46 @@ export interface ReportedPayable {
   status: PayableStatus;
   settlement: ReportedSettlement | null;
 }
+/**
+ * One row of a provider's scheduled-payment page (MyJCB ショッピングスキップ払い,
+ * `scheduled_payment_observations`): a payment the provider said, on the
+ * page's as-of date, is still to be made on `dueDate`. What the amount covers
+ * (one deferred payment or the rest of it) and whether a statement month
+ * later carries it are not confirmed, so it is never matched with a
+ * statement, a settlement or a purchase, and never added to anything.
+ */
+export interface ReportedScheduledPayment {
+  /** `scheduled-payment:<observation id>`. */
+  ref: string;
+  sourceAccount: string;
+  scheduleKind: ScheduledPaymentKind;
+  usageDate: string;
+  dueDate: string;
+  /** The provider's 今後のお支払い金額 as an exact decimal; a malformed text stays unparsed. */
+  amount: Quantity;
+  providerText: string;
+  counterparty: string;
+  /** The page's own as-of date. */
+  asOf: string;
+  dueStatus: ScheduledPaymentDueStatus;
+}
+/**
+ * One published capture of a scheduled-payment page: per source and fetch
+ * unit, the pages of the newest fetch run captured before the cutoff. Its
+ * `payments` are what that page listed; an empty list means the page listed
+ * none, not that nothing was scheduled after the capture.
+ */
+export interface ReportedScheduledPaymentCapture {
+  /** `artifact:<id>` of the captured page. */
+  ref: string;
+  sourceId: string;
+  parserName: string;
+  capturedAt: string;
+  captureDate: string;
+  ageDays: number;
+  freshness: Freshness;
+  payments: ReportedScheduledPayment[];
+}
 interface ReportedStateCoverage {
   containersWithoutSnapshot: {
     sourceId: string;
@@ -218,6 +278,8 @@ interface ReportedStateCoverage {
    * answer lists every statement.
    */
   statementsBeforeWindow: StatementsBeforeWindow[];
+  /** Whether `scheduledPayments` lists the scheduled payments (ADR 0019, amendment of 2026-11-21). */
+  scheduledPayments: ScheduledPaymentsListing;
   /** Nothing is totalled: a reported state is never a net-asset figure. */
   netAssets: "not-computed";
 }
@@ -259,6 +321,13 @@ interface ReportedStateManifest {
    * without the count (`UncountedReportedState`).
    */
   statementsBeforeWindow: ManifestStatementsBeforeWindow[];
+  /**
+   * `[captureRef, "parse_run:<id>"]` of each listed scheduled-payment
+   * capture, sorted, so a parse activated over the same page changes it.
+   */
+  scheduledPaymentCaptures: [ref: string, parseRun: string][];
+  /** The refs of the listed scheduled payments, sorted. */
+  scheduledPaymentRefs: string[];
 }
 export interface ReportedState {
   schemaVersion: typeof REPORTED_STATE_SCHEMA;
@@ -270,6 +339,8 @@ export interface ReportedState {
   snapshots: ReportedSnapshot[];
   accounts: ReportedAccount[];
   payables: ReportedPayable[];
+  /** The provider's scheduled card payments as of the cutoff, per capture; never added. */
+  scheduledPayments: ReportedScheduledPaymentCapture[];
   coverage: ReportedStateCoverage;
   manifest: ReportedStateManifest;
   /** `canonicalDigest(manifest)`: the same inputs give the same id. */
@@ -278,15 +349,22 @@ export interface ReportedState {
 
 /**
  * A reported state read without counting the statements the payable window
- * leaves out (`queryDatedState` with `includeStatementsBeforeWindow: false`),
- * for the reads that build on it and never show the count. Its coverage has
- * no `statementsBeforeWindow` and names every liability gap, and its manifest
- * has no `statementsBeforeWindow`, so its `contextId` claims no count it did
- * not read. It is never served as a reported-state answer.
+ * leaves out and without the scheduled payments (`queryDatedState` with
+ * `includeStatementsBeforeWindow: false`), for the reads that build on it and
+ * show neither. Its coverage has no `statementsBeforeWindow` or
+ * `scheduledPayments` and names every liability gap, and its manifest records
+ * neither, so its `contextId` claims nothing it did not read. It is never
+ * served as a reported-state answer.
  */
-export type UncountedReportedState = Omit<ReportedState, "coverage" | "manifest"> & {
-  coverage: Omit<ReportedStateCoverage, "statementsBeforeWindow">;
-  manifest: Omit<ReportedStateManifest, "statementsBeforeWindow">;
+export type UncountedReportedState = Omit<
+  ReportedState,
+  "coverage" | "manifest" | "scheduledPayments"
+> & {
+  coverage: Omit<ReportedStateCoverage, "statementsBeforeWindow" | "scheduledPayments">;
+  manifest: Omit<
+    ReportedStateManifest,
+    "statementsBeforeWindow" | "scheduledPaymentCaptures" | "scheduledPaymentRefs"
+  >;
 };
 
 function civil(date: string): CivilDate {
@@ -356,4 +434,15 @@ export function payableStatus(
   const due = paymentDate === null ? null : parseLocalDate(paymentDate);
   if (due === null) return "payment_date_unknown";
   return daysBetween(due, asked) < 0 ? "due_after_date" : "due_unsettled";
+}
+
+/**
+ * Where a scheduled payment stands on `date`, from its due date alone: due
+ * after the date, or due on or before it. Whether it was paid is not read.
+ */
+export function scheduledPaymentDueStatus(
+  date: string,
+  dueDate: string,
+): ScheduledPaymentDueStatus {
+  return daysBetween(civil(dueDate), civil(date)) < 0 ? "due_after_date" : "due_on_or_before_date";
 }
