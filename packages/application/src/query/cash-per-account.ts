@@ -350,7 +350,7 @@ export function cashPerAccount(
 }
 
 /** How many measurements a line holds, over all its references. */
-export function cashLineMeasurements(line: CashLine): number {
+function cashLineMeasurements(line: CashLine): number {
   return line.references.reduce((sum, reference) => sum + reference.amounts.length, 0);
 }
 
