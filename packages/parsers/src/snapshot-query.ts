@@ -247,7 +247,12 @@ export interface SnapshotCteOptions {
 const CUTOFF_PARAM = /^\?[1-9][0-9]{0,2}$/u;
 
 /** Only witnessed legacy unit names share the successor snapshot partition.
- * Keep raw keys in selected rows and claims; evidence is never rewritten. */
+ * Keep raw keys in selected rows and claims; evidence is never rewritten.
+ * SBI securities income and gains moved from `domestic` to their own units
+ * (ADR 0109). SBI Shinsei's three container datasets were captured under the
+ * retired importer's `primary` unit until 2026-09-10 and with no unit by the
+ * native collector since; without the alias the importer's last capture
+ * stayed current beside the native one (ADR 0109 amendment, 2026-11-19). */
 function snapshotPartitionUnitSql(): string {
   return `CASE
     WHEN source_id = 'sbi-securities' AND fetch_unit_key = 'domestic'
@@ -256,6 +261,12 @@ function snapshotPartitionUnitSql(): string {
     WHEN source_id = 'sbi-securities' AND fetch_unit_key = 'domestic'
       AND parser_name = 'sbi-realised-gains' AND dataset = 'realised-gains'
       THEN 'income-history-gains'
+    WHEN source_id = 'sbi-shinsei-bank' AND fetch_unit_key = 'primary'
+      AND ((parser_name = 'sbi-shinsei-top-balances-and-activity'
+            AND dataset = 'top-accounts-balance-and-activity')
+        OR (parser_name = 'sbi-shinsei-yen-deposit-account' AND dataset = 'yen-deposit-account')
+        OR (parser_name = 'sbi-shinsei-exchange-rate' AND dataset = 'exchange-rate'))
+      THEN NULL
     ELSE fetch_unit_key END`;
 }
 

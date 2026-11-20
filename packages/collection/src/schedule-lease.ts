@@ -176,9 +176,13 @@ export async function withCollectionLease<T>(
   const timing = options.timing ?? LEASE_TIMING;
   const ref = crypto.randomUUID(),
     now = new Date().toISOString();
+  // The source's lease row, written once: a source that has one keeps it
+  // (`ON CONFLICT(source) DO NOTHING`, the table's only key). A row the schema
+  // refuses raises instead of being skipped, which `OR IGNORE` did, leaving
+  // the claim below nothing to claim and answering a busy lease.
   await db
     .prepare(
-      "INSERT OR IGNORE INTO collection_execution_leases(source, lease_ref, started_at) VALUES(?,NULL,NULL)",
+      "INSERT INTO collection_execution_leases(source, lease_ref, started_at) VALUES(?,NULL,NULL) ON CONFLICT(source) DO NOTHING",
     )
     .bind(source)
     .run();

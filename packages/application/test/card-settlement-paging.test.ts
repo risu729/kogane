@@ -61,7 +61,8 @@ const unmatchedRow = (n: number) => ({
   source_account: "synthetic-card",
   unit_ref: "JPY",
   source_id: "myjcb",
-  value_status: "unknown",
+  // A status decimal-v1 stores (CORE 0024): one outside it fails the read.
+  value_status: "missing",
   coefficient: null,
   scale: null,
   payment_date: null,
