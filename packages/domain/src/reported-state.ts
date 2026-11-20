@@ -227,7 +227,7 @@ export interface ReportedPayable {
  * later carries it are not confirmed, so it is never matched with a
  * statement, a settlement or a purchase, and never added to anything.
  */
-export interface ReportedScheduledPayment {
+interface ReportedScheduledPayment {
   /** `scheduled-payment:<observation id>`. */
   ref: string;
   sourceAccount: string;
