@@ -186,7 +186,7 @@ is different from the CORE path:
 | --------------------------------------------- | ----------------------------------------------------- |
 | No published snapshot                         | `503 read_model_unavailable` — never an empty success |
 | Cursor from another read instance or snapshot | `410 context_expired`                                 |
-| Cursor for another query                      | `400 cursor_mismatch`                                 |
+| Cursor for another route, filter or read mode | `400 cursor_mismatch`                                 |
 | CORE restored under a new epoch               | `503 read_model_context_changed`                      |
 | A use restriction changed                     | `503 read_model_restriction_changed`                  |
 
@@ -206,7 +206,12 @@ reason and blocking warning instead of summing a refused snapshot
 The cursor is `{ snapshotId, readInstanceId, filterDigest, position }`
 (`packages/storage-d1/src/read/cursor.ts`), base64url of the same JSON shape the
 CORE path uses. Nothing in it is trusted: every field is compared with what the
-server resolved for this request, and it is never an authorisation.
+server resolved for this request, and it is never an authorisation. Its
+`filterDigest` covers the page size its page was read at, but the page size is
+not part of the query: the balance and reward routes also compare it with the
+same query's digest at each size they offer, so a cursor continues at another
+offered `limit` from where its page ended
+([ADR 0119](adr/0119-cursor-page-size.md)).
 
 `/api/meta` advertises `balancesV2ReadModel`: `none`, `core-d1` or `read-d1`. A
 client is told which store answered rather than inferring it from a cursor that

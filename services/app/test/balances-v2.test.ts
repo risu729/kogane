@@ -274,6 +274,59 @@ describe("v2 balance read model", () => {
     expect((await build()).status).toBe("complete");
   }, 180_000);
 
+  it("continues a cursor at another offered page size, from where its page ended (ADR 0119)", async () => {
+    // The page size is not part of the query: a cursor read at 50 continues
+    // at 100 and at 200, and the pages join into exactly the list one wider
+    // page reads, with no row repeated or skipped, on the same snapshot.
+    const ids = (page: LatestPage) => page.items.map((item) => item.observationId);
+    const whole = (await (await call("/api/v2/balances/latest?limit=500")).json()) as LatestPage;
+    expect(whole.items.length).toBeGreaterThan(350);
+    const first = (await (await call("/api/v2/balances/latest?limit=50")).json()) as LatestPage;
+    expect(first.page.snapshotId).toBe(whole.page.snapshotId);
+    const second = await call(
+      `/api/v2/balances/latest?limit=100&cursor=${encodeURIComponent(first.page.nextCursor!)}`,
+    );
+    expect(second.status).toBe(200);
+    const secondPage = (await second.json()) as LatestPage;
+    expect(validApiResponse("/api/v2/balances/latest", secondPage)).toBe(true);
+    expect(secondPage.page.limit).toBe(100);
+    expect(secondPage.page.snapshotId).toBe(whole.page.snapshotId);
+    // The next cursor is minted at the size asked now, and is itself
+    // continued at another size.
+    const third = (await (
+      await call(
+        `/api/v2/balances/latest?limit=200&cursor=${encodeURIComponent(secondPage.page.nextCursor!)}`,
+      )
+    ).json()) as LatestPage;
+    expect(third.page.limit).toBe(200);
+    expect([...ids(first), ...ids(secondPage), ...ids(third)]).toEqual(ids(whole).slice(0, 350));
+
+    // The same on history, whose cursor is a sort key and an id.
+    type HistoryPage = { items: { observationId: number }[]; page: { nextCursor: string } };
+    const history = async (query: string) =>
+      (await (await call(`/api/v2/balances/history?${query}`)).json()) as HistoryPage;
+    const historyIds = (page: HistoryPage) => page.items.map((item) => item.observationId);
+    const wholeHistory = await history("limit=200");
+    const narrow = await history("limit=50");
+    const wide = await history(`limit=100&cursor=${encodeURIComponent(narrow.page.nextCursor)}`);
+    expect([...historyIds(narrow), ...historyIds(wide)]).toEqual(
+      historyIds(wholeHistory).slice(0, 150),
+    );
+
+    // A changed filter is still another query, whatever the page size.
+    const filtered = await call(
+      `/api/v2/balances/latest?limit=100&source=other-test&cursor=${encodeURIComponent(first.page.nextCursor!)}`,
+    );
+    expect(filtered.status).toBe(400);
+    expect(await filtered.json()).toMatchObject({ error: "cursor_mismatch" });
+    // So is another identity read mode: the cursor was read in the default.
+    const otherMode = await call(
+      `/api/v2/balances/latest?limit=100&identityRead=as-recorded&cursor=${encodeURIComponent(first.page.nextCursor!)}`,
+    );
+    expect(otherMode.status).toBe(400);
+    expect(await otherMode.json()).toMatchObject({ error: "cursor_mismatch" });
+  });
+
   it("refuses a cursor from another query and an expired snapshot", async () => {
     const first = (await (await call("/api/v2/balances/latest?limit=50")).json()) as LatestPage;
     expect(first.page.nextCursor).not.toBeNull();
@@ -285,8 +338,10 @@ describe("v2 balance read model", () => {
     );
     expect(mismatch.status).toBe(400);
     expect(await mismatch.json()).toMatchObject({ error: "cursor_mismatch" });
-    // A different page size is also a different query.
-    expect((await call(`/api/v2/balances/latest?limit=100&cursor=${cursor}`)).status).toBe(400);
+    // Another route is another query too: a latest cursor does not page history.
+    const otherRoute = await call(`/api/v2/balances/history?limit=50&cursor=${cursor}`);
+    expect(otherRoute.status).toBe(400);
+    expect(await otherRoute.json()).toMatchObject({ error: "cursor_mismatch" });
     // A malformed cursor is refused before any read.
     const malformed = await call("/api/v2/balances/latest?cursor=not-a-cursor");
     expect(malformed.status).toBe(400);
