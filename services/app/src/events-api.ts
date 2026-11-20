@@ -210,21 +210,46 @@ export async function readEventsRoute(
   const digest = await activityDigest(basis, filters);
   const after = cursor === null ? null : continuationOf(cursor, digest);
   const page = await reader.filteredActivity({ basis, filters, after });
+  const nextCursor =
+    page.next === null
+      ? null
+      : encodeKeysetCursor({
+          s: ACTIVITY_CURSOR_SCOPE,
+          f: digest,
+          k: page.next.eventId,
+          t: page.next.revision,
+        });
   return {
     apiVersion: 2,
     basis,
     filters,
     walk: { bound: page.walk, walked: page.walked },
     items: page.items,
-    nextCursor:
-      page.next === null
-        ? null
-        : encodeKeysetCursor({
-            s: ACTIVITY_CURSOR_SCOPE,
-            f: digest,
-            k: page.next.eventId,
-            t: page.next.revision,
-          }),
+    nextCursor,
+    ...filteredPaging(page.items.length, nextCursor),
     dataCoverage: page.dataCoverage,
+  };
+}
+
+/**
+ * A filtered page's `next` and `paging`, the one paging surface of ADR 0128
+ * (proposed): the arguments to merge into the same call, and how the page
+ * ended. A page the walk bound ended before it filled says `walk`, a stop
+ * ADR 0128 does not list yet.
+ */
+export function filteredPaging(returned: number, nextCursor: string | null) {
+  return {
+    next: nextCursor === null ? null : { arguments: { cursor: nextCursor } },
+    paging: {
+      limit: EVENTS_PAGE_SIZE,
+      returned,
+      hasMore: nextCursor !== null,
+      stoppedBy:
+        nextCursor === null
+          ? null
+          : returned === EVENTS_PAGE_SIZE
+            ? ("limit" as const)
+            : ("walk" as const),
+    },
   };
 }

@@ -1431,7 +1431,11 @@ next offset as `nextCursor`. With one, the same list in the same order is
 narrowed, and the answer adds `filters` (each in its compared form, null
 when not given) and `walk` (`bound`, `walked`): each call walks at most
 5,000 current revisions, so a page lists at most 200 and may be short or
-empty while `nextCursor` still continues it. That cursor is the `cursor` of
+empty while `nextCursor` still continues it. The answer also carries ADR
+0128's paging surface (proposed): `next` (`{ arguments: { cursor } }`, or
+null at the end) and `paging` (`limit` 200, `returned`, `hasMore`,
+`stoppedBy`: `limit` for a full page, `walk` for a page the walk bound
+ended first, null at the end). That cursor is the `cursor` of
 the next call with the same `basis` and filters (spelled any way that
 compares equal); another basis or filter, or no filter, is `400
 cursor_mismatch` with `mustMatch` (above), a cursor it did not issue is `400

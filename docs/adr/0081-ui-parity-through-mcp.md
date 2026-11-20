@@ -781,7 +781,16 @@ leg by key until `LIMIT` and `OFFSET` are met.
    page holds, else after the last one walked when the walk reached its bound,
    so a page may be short or empty and still continue. The answer adds
    `filters` (each in its compared form, null when absent) and `walk`
-   (`bound`, `walked`).
+   (`bound`, `walked`), and speaks the paging surface ADR 0128 proposes
+   (branch `claude/adoring-faraday-co4por-mcp-consistency`, not merged):
+   `next` is `{ arguments: { cursor } }` while something follows, else null,
+   and `paging` is `{ limit: 200, returned, hasMore, stoppedBy }`, with
+   `stoppedBy` `limit` for a full page, `walk` for a page the walk bound
+   ended before it filled, null at the end. `nextCursor` carries the same
+   cursor, as the unfiltered list's `nextCursor` carries its offset. ADR
+   0128's closed list of stops (`limit`, `bytes`, `budget`) has no stop for
+   a scan bound; `walk` is proposed for it, and its validator must admit it
+   (with `returned` below `limit`) before the two branches merge.
 5. **The cursor binds the filters.** It is the keyset cursor of
    `packages/domain/src/paging.ts` (scope `economic-events:activity`, the
    last key, and the digest of the route, the basis and the four filters in
@@ -845,7 +854,9 @@ leg by key until `LIMIT` and `OFFSET` are met.
 - `services/app/test/page-read-events-filters.test.ts`: the route, the agent
   HTTP route and MCP answer the same for each filter, both account forms and
   an offset-written `since`; the pages of a filtered list join with nothing
-  repeated or skipped; another filter, basis or no filter is
+  repeated or skipped, each page's `next` naming its `cursor` and its
+  `paging` saying how it ended (`walk` for a short page with a cursor);
+  another filter, basis or no filter is
   `cursor_mismatch` with `mustMatch`; each malformed filter, a foreign cursor
   and an `offset` beside a filter are refused with their codes; the grant is
   graded before a filter is read; the unfiltered answer keeps its fields and

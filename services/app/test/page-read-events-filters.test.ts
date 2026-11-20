@@ -9,7 +9,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { CHANGES_SINCE_HANDLERS } from "../../../packages/domain/src/changes-since";
-import { ACTIVITY_CURSOR_INPUTS } from "../src/events-api";
+import { ACTIVITY_CURSOR_INPUTS, filteredPaging } from "../src/events-api";
 import { pageReadMcpTools, pageReadStore } from "../src/page-read-tools";
 import { seedRegistry, seedRun } from "./fixtures";
 import { pageReadHarness, RECORDS_GRANT, tableCounts } from "./page-read-harness";
@@ -159,6 +159,8 @@ describe("the filtered activity list", () => {
       "walk",
       "items",
       "nextCursor",
+      "next",
+      "paging",
       "dataCoverage",
     ]);
     expect(answer.body).toMatchObject({
@@ -173,6 +175,9 @@ describe("the filtered activity list", () => {
       // Every live revision is walked: the three named ones and the bulk.
       walk: { bound: 5000, walked: BULK + 3 },
       nextCursor: null,
+      // ADR 0128's paging surface: nothing follows.
+      next: null,
+      paging: { limit: 200, returned: 1, hasMore: false, stoppedBy: null },
       dataCoverage: { truncated: false },
     });
     expect(ids(answer.body as never)).toEqual(["ev-c"]);
@@ -185,17 +190,37 @@ describe("the filtered activity list", () => {
       EVENTS,
       args,
     );
-    const body = first.body as { items: { eventId: string }[]; nextCursor: string };
+    const body = first.body as {
+      items: { eventId: string }[];
+      nextCursor: string;
+      next: unknown;
+      paging: unknown;
+    };
     expect(body.items).toHaveLength(200);
     expect(typeof body.nextCursor).toBe("string");
+    // ADR 0128: the continuation is the cursor to merge into the same call.
+    expect(body.next).toEqual({ arguments: { cursor: body.nextCursor } });
+    expect(body.paging).toEqual({ limit: 200, returned: 200, hasMore: true, stoppedBy: "limit" });
     const cursor = encodeURIComponent(body.nextCursor);
     const second = await page.expectSameAnswer(
       `/api/v2/activity?account=account_bulk&cursor=${cursor}`,
       EVENTS,
       { ...args, cursor: body.nextCursor },
     );
-    const rest = second.body as { items: { eventId: string }[]; nextCursor: string | null };
+    const rest = second.body as {
+      items: { eventId: string }[];
+      nextCursor: string | null;
+      next: unknown;
+      paging: unknown;
+    };
     expect(rest.nextCursor).toBeNull();
+    expect(rest.next).toBeNull();
+    expect(rest.paging).toEqual({
+      limit: 200,
+      returned: BULK - 200,
+      hasMore: false,
+      stoppedBy: null,
+    });
     expect([...ids(body), ...ids(rest)]).toEqual(
       Array.from({ length: BULK }, (_, n) => `ev-bulk-${String(n).padStart(4, "0")}`),
     );
@@ -228,6 +253,19 @@ describe("the filtered activity list", () => {
       `/api/v2/activity?account=account%3Aaccount_bulk&basis=cash-movement&cursor=${cursor}`,
     );
     expect(respelled).toEqual(second);
+  });
+
+  it("says a page the walk bound ended before it filled stopped by `walk`", () => {
+    expect(filteredPaging(0, "c")).toEqual({
+      next: { arguments: { cursor: "c" } },
+      paging: { limit: 200, returned: 0, hasMore: true, stoppedBy: "walk" },
+    });
+    expect(filteredPaging(37, "c").paging.stoppedBy).toBe("walk");
+    expect(filteredPaging(200, "c").paging.stoppedBy).toBe("limit");
+    expect(filteredPaging(37, null)).toEqual({
+      next: null,
+      paging: { limit: 200, returned: 37, hasMore: false, stoppedBy: null },
+    });
   });
 
   it("refuses a malformed filter, cursor or offset with a closed code naming it", async () => {
