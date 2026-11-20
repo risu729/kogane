@@ -957,7 +957,7 @@ provider names, producers, session ids, parser versions and warnings.
 
 The tool's answer, `{ schemaVersion, data }` as the tool serializes it, is
 at most 8,192 bytes (`OVERVIEW_SUMMARY_BYTES`; the route's `data` alone is
-46 bytes shorter). When the capped summary is over, it leaves out, one at a
+47 bytes shorter). When the capped summary is over, it leaves out, one at a
 time and in this order until the answer fits: sources, the last by id first,
 counted in `sourcesOmitted`; then per-line failure codes, the oldest listed
 `notOk` line's oldest first, counted in its `moreFailureCodes`; then lines,

@@ -16,7 +16,10 @@ import {
   scheduleSnapshotSummary,
 } from "../../../packages/collection/src/schedule-model";
 import { overviewSummary } from "../../../packages/application/src/query/overview-detail";
-import type { OverviewPage } from "../../../packages/observation-shared/src/api-contract";
+import type {
+  OverviewPage,
+  OverviewSummary,
+} from "../../../packages/observation-shared/src/api-contract";
 import {
   balanceHistorySummary,
   latestBalanceSummary,
@@ -1124,6 +1127,51 @@ describe("kogane.schedules.maintenance.read summary (ADR 0123, amendment 2026-11
 // Last in this file: it writes a parse run with a parser name no registry
 // has, which every later overview read of this store would answer with.
 describe("kogane.store.read overview past its byte budget (ADR 0123, amendment 2026-11-20)", () => {
+  it("trims a multibyte answer to 8,192 UTF-8 bytes of the text /mcp sends, the same on every transport", async () => {
+    // A failed parse under a parser name of 1,500 three-byte characters: the
+    // newest of its status, so on the `error` line and its own `notOk` line,
+    // 9,000 bytes of name but 3,000 UTF-16 code units. Measured in bytes,
+    // the budget trims it; measured as a string's length, it would not.
+    const run = await seedRun({ count: 1 });
+    await env.DB.prepare(
+      `INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,error,warnings_json)
+       VALUES (?,?,'1','2099-01-01T00:00:00Z','error','parser_rejected','[]')`,
+    )
+      .bind(run.artifacts[0]!.id, "合成パーサー".padEnd(1_500, "あ"))
+      .run();
+    const message = await page.mcpMessage({
+      method: "tools/call",
+      params: { name: "kogane.store.read", arguments: { page: "overview" } },
+    });
+    const text = message["result"].content[0].text as string;
+    // What the client shows is this text: within the budget, in bytes.
+    expect(new TextEncoder().encode(text).length).toBeLessThanOrEqual(CLIENT_BYTES);
+    expect(JSON.parse(text)).toEqual(message["result"].structuredContent);
+    const answer = message["result"].structuredContent as {
+      schemaVersion: string;
+      data: OverviewSummary;
+    };
+    expect(answer.data.budget).toEqual({ bytes: CLIENT_BYTES, trimmed: true });
+    expect(validApiResponse("/api/overview", answer.data, "summary")).toBe(true);
+    // The status line keeps the name and the code; its own line is counted.
+    const error = answer.data.parseRuns.byStatus.find((line) => line.status === "error")!;
+    expect(error.newest.parser).toHaveLength(1_500);
+    expect(error.failureCodes).toContain("parser_rejected");
+    // The same answer on /api/agent/v1 and, under `data`, on the route.
+    expect(await page.http("kogane.store.read", { page: "overview" })).toEqual({
+      status: 200,
+      body: answer,
+    });
+    const route = await page.routeResponse("/api/overview");
+    expect(route.status).toBe(200);
+    const routeText = await route.text();
+    expect(JSON.parse(routeText)).toEqual(answer.data);
+    // The route's `data` alone is the envelope's 47 bytes shorter.
+    expect(new TextEncoder().encode(routeText).length).toBe(
+      new TextEncoder().encode(text).length - 47,
+    );
+  });
+
   it("refuses with 413 result_limit_exceeded, naming detail full, when its status lines alone pass 8 KB", async () => {
     // Parser names have no schema bound: the newest failed parse under a
     // 9,000-character name is the `error` line's newest, which leaves no

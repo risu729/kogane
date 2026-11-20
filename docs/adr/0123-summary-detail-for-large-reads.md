@@ -670,7 +670,7 @@ asked for.
 1. **The budget.** `OVERVIEW_SUMMARY_BYTES` is 8,192: the UTF-8 bytes of
    the tool's answer `{ schemaVersion: "kogane-page-read-v1", data }`
    serialized as the tool's text content (`JSON.stringify`, as the MCP
-   adapter writes it). The route answers `data` alone, 46 bytes shorter.
+   adapter writes it). The route answers `data` alone, 47 bytes shorter.
    `PAGE_READ_SCHEMA_VERSION` moves to `packages/observation-shared` so the
    summary measures the very envelope the tool sends.
 2. **Untrimmed first.** `overviewSummary` builds the summary under the
@@ -771,6 +771,10 @@ Measured as the bytes of the tool's answer
   bound are untrimmed and under 7 KB and 8 KB; the four extremes above are
   trimmed to at most 8,192 bytes, validate, count every run, line and
   source, and keep every Processor code on the error line; a failed parse
+  under a parser name of 1,500 three-byte characters (4,500 bytes, 1,500
+  UTF-16 code units) is trimmed so that the text `/mcp` sends is at most
+  8,192 UTF-8 bytes, and `/api/agent/v1/*` answers the same and the route
+  the same `data`, 47 bytes shorter; a failed parse
   under a 9,000-character parser name is `413 result_limit_exceeded` with
   `retryWith: { detail: "full" }` on the route, `/mcp` and
   `/api/agent/v1/*`, and `detail=full` still answers it.
