@@ -1050,6 +1050,13 @@ describe("throw sites", () => {
     expect(sites.join()).not.toContain("12345");
     expect(throwSites("SENTINEL")).toEqual([]);
   });
+
+  test("Windows backslash stack frames name the same parser site", () => {
+    const error = new Error("synthetic");
+    error.stack =
+      "Error: synthetic\n    at parse (C:\\repo\\packages\\parsers\\src\\parsers\\sbi-cash-history-schema.ts:271:20)";
+    expect(throwSites(error)).toEqual(["sbi-cash-history-schema.ts:271:20"]);
+  });
 });
 
 describe("top activity shape summary", () => {

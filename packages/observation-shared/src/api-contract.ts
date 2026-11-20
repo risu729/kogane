@@ -459,3 +459,241 @@ export interface BalanceHistoryPage {
   dataCoverage: SnapshotDataCoverage;
   interpretationContext: import("./api-schema.ts").InterpretationContext;
 }
+
+/**
+ * How much a balance read answers per row (ADR 0123): `summary`, one short
+ * line per row (the default of the routes and of `kogane.balances.read`), or
+ * `full`, the row with its whole provenance. The rows, their order, the page,
+ * its cursor, the coverage and the subtotals are the same under both.
+ */
+export const BALANCE_READ_DETAILS = ["summary", "full"] as const;
+export type BalanceReadDetail = (typeof BALANCE_READ_DETAILS)[number];
+
+/**
+ * One value in a summary line. `value` is the exact decimal text and `scale`
+ * its scale; a value that is not exact has neither, and `status` is its
+ * reason (`missing`, `unparsed`, `conflict`), never a zero (INV05).
+ */
+export interface SummaryAmount {
+  value: string | null;
+  unit: string | null;
+  status: import("./normalized-decimal.ts").NormalizedDecimal["status"];
+  scale: number | null;
+}
+
+/**
+ * One provider account a summary page's lines name, once per page. `ref`
+ * (`a1`, `a2`, ... in order of first appearance) is local to the page;
+ * `sourceAccount` is the provider's account key (what the read's `account`
+ * filter takes); `account`, `label` and `status` are its organized account
+ * entity, label and mapping status, and `lineage` whether the row was
+ * organized under the current or a historical mapping, all four null when the
+ * row's organization is unavailable.
+ */
+export interface SummaryAccount {
+  ref: string;
+  source: string;
+  sourceAccount: string;
+  account: string | null;
+  label: string | null;
+  status: import("./organization-contract.ts").OrganizedAccount["status"] | null;
+  lineage: import("./organization-contract.ts").ObservationOrganization["lineage"];
+}
+
+/** One provider metric a summary page's lines name, once per page, with the registry's id for it. */
+export interface SummaryMetric {
+  ref: string;
+  source: string;
+  metric: string;
+  providerMetric: string;
+}
+
+/** One summary line of a balance row; `observationId` reads it in full or as evidence. */
+export interface BalanceSummaryLine {
+  observationId: number;
+  /** The `ref` of the page's `accounts` entry. */
+  account: string;
+  /** The `ref` of the page's `metrics` entry. */
+  metric: string;
+  amount: SummaryAmount;
+  asOf: string | null;
+}
+
+/**
+ * One summary line of a balance history row. History carries superseded and
+ * failed parses' rows beside current ones, so `reasons` says which a row is:
+ * `parse:superseded` when a later parse replaced its parse, and
+ * `parse:<status>` when its parse is not `ok` (`parse:pending`,
+ * `parse:error`: the parse run statuses migration 0017's CHECK allows);
+ * none for a row of a current successful parse.
+ */
+export interface BalanceHistorySummaryItem extends BalanceSummaryLine {
+  reasons: BalanceHistoryReason[];
+}
+
+/** The closed reason codes of a balance history summary line. */
+export const BALANCE_HISTORY_REASONS = [
+  "parse:superseded",
+  "parse:pending",
+  "parse:error",
+] as const;
+export type BalanceHistoryReason = (typeof BALANCE_HISTORY_REASONS)[number];
+
+/**
+ * One summary line of a latest balance: the adoption and freshness states,
+ * and their reason codes as `adoption:<code>` and `freshness:<code>`.
+ */
+export interface LatestBalanceSummaryItem extends BalanceSummaryLine {
+  freshness: LatestBalanceItem["freshness"]["state"];
+  adoption: BalanceAdoptionState;
+  reasons: string[];
+}
+
+export interface LatestBalanceSummaryPage extends Omit<
+  LatestBalancePage,
+  "items" | "interpretationContext"
+> {
+  detail: "summary";
+  accounts: SummaryAccount[];
+  metrics: SummaryMetric[];
+  items: LatestBalanceSummaryItem[];
+}
+
+export interface BalanceHistorySummaryPage extends Omit<
+  BalanceHistoryPage,
+  "items" | "interpretationContext"
+> {
+  detail: "summary";
+  accounts: SummaryAccount[];
+  metrics: SummaryMetric[];
+  items: BalanceHistorySummaryItem[];
+}
+
+/**
+ * `GET /api/overview` as its route answers it in full: the reader's overview,
+ * each list cut to 500 rows, with that bound's coverage.
+ */
+export interface OverviewPage extends Overview {
+  coverage: { limit: number; truncated: boolean };
+}
+
+/** The closed statuses of `observation_fetch_runs.status` (migration 0017's view). */
+export const OVERVIEW_FETCH_RUN_STATUSES = ["success", "partial"] as const;
+/** The closed statuses of `parse_runs.status` (migration 0017's CHECK). */
+export const OVERVIEW_PARSE_RUN_STATUSES = ["ok", "pending", "error"] as const;
+
+/**
+ * At most this many lines in each of the overview summary's per-source and
+ * per-parser lists (`notSuccessful`, `notOk`, `unitUpdates`), those with the
+ * newest runs; the lines left out are counted in the list's `...Omitted`
+ * entry and listed in `full` (ADR 0123, amendment 2026-11-19). It bounds the
+ * summary: no other part of it grows with the number of failing sources or
+ * parsers.
+ */
+export const OVERVIEW_SUMMARY_LINES = 5;
+/**
+ * At most this many failure codes on one `notOk` line, the newest first; the
+ * rest are counted in its `moreFailureCodes`, and every one of them is on its
+ * status's `byStatus` line (ADR 0123, amendment 2026-11-19).
+ */
+export const OVERVIEW_LINE_FAILURE_CODES = 3;
+
+/** The lines of one status that a capped overview summary list left out, and their runs. */
+export interface OverviewOmitted<Status extends string> {
+  status: Status;
+  lines: number;
+  runs: number;
+}
+
+/**
+ * The summary detail of `GET /api/overview` and `kogane.store.read`
+ * `{page: overview}` (ADR 0123, amendment 2026-11-19): the counts and the
+ * coverage as the full answer has them, the sources as their artifact counts
+ * (sources with the same count share one line), and the fetch and parse run
+ * windows collapsed by status, each parse status with every failure code of
+ * its runs. For every status that is not a success, the
+ * `OVERVIEW_SUMMARY_LINES` sources or parsers with the newest runs have a
+ * line of their own (a failing parser's with its newest failure codes), and
+ * the rest are counted, never dropped silently. Provenance (producer,
+ * session id, parser version, the superseding parse's id) and text (provider
+ * names, warnings) are in `full` only.
+ */
+export interface OverviewSummary {
+  detail: "summary";
+  counts: Overview["counts"];
+  sources: { sourceIds: string[]; artifacts: number }[];
+  fetchRuns: {
+    /** One line per status in the window: how many runs, of how many sources, and the newest. */
+    byStatus: {
+      status: (typeof OVERVIEW_FETCH_RUN_STATUSES)[number];
+      runs: number;
+      sources: number;
+      newest: { id: number; sourceId: string; startedAt: string; completedAt: string | null };
+    }[];
+    /**
+     * One line per source and status other than `success`, with its newest
+     * such run: the `OVERVIEW_SUMMARY_LINES` with the newest runs.
+     */
+    notSuccessful: {
+      sourceId: string;
+      status: (typeof OVERVIEW_FETCH_RUN_STATUSES)[number];
+      runs: number;
+      newest: { id: number; startedAt: string; completedAt: string | null };
+    }[];
+    /** Per status, the `notSuccessful` lines left out and their runs; empty when none is. */
+    notSuccessfulOmitted: OverviewOmitted<(typeof OVERVIEW_FETCH_RUN_STATUSES)[number]>[];
+  };
+  parseRuns: {
+    /**
+     * One line per status in the window: how many runs, how many of them a
+     * later parse superseded, carried warnings or carried warnings that could
+     * not be read, how many parsers, every distinct failure code of its runs
+     * (newest first; at most the Processor's closed set), and the newest.
+     */
+    byStatus: {
+      status: (typeof OVERVIEW_PARSE_RUN_STATUSES)[number];
+      runs: number;
+      superseded: number;
+      withWarnings: number;
+      unreadableWarnings: number;
+      parsers: number;
+      failureCodes: string[];
+      newest: { id: number; artifactId: number; parser: string; parsedAt: string };
+    }[];
+    /**
+     * One line per parser and status other than `ok`, with its failure codes
+     * and newest such run: the `OVERVIEW_SUMMARY_LINES` with the newest runs.
+     */
+    notOk: {
+      parser: string;
+      status: (typeof OVERVIEW_PARSE_RUN_STATUSES)[number];
+      runs: number;
+      superseded: number;
+      /**
+       * The distinct failure codes (`parse_runs.error`, a closed code the
+       * Processor writes) of the line's runs, newest first, at most
+       * `OVERVIEW_LINE_FAILURE_CODES`; a value that is not code-shaped is
+       * `unclassified`. Empty for a line with none.
+       */
+      failureCodes: string[];
+      /** How many more distinct failure codes the line's runs have; each is on its `byStatus` line. */
+      moreFailureCodes: number;
+      newest: { id: number; artifactId: number; parsedAt: string };
+    }[];
+    /** Per status, the `notOk` lines left out and their runs; empty when none is. */
+    notOkOmitted: OverviewOmitted<(typeof OVERVIEW_PARSE_RUN_STATUSES)[number]>[];
+  };
+  /**
+   * One line per source and dataset of the full answer's `unitUpdates`: the
+   * `OVERVIEW_SUMMARY_LINES` with the newest runs. Absent when it is.
+   */
+  unitUpdates?: {
+    sourceId: string;
+    dataset: string;
+    runs: number;
+    newest: { fetchRunId: number; fetchedAt: string; updatedUnits: number; staleUnits: number };
+  }[];
+  /** The `unitUpdates` lines left out and their runs; present exactly when `unitUpdates` is. */
+  unitUpdatesOmitted?: { lines: number; runs: number };
+  coverage: OverviewPage["coverage"];
+}

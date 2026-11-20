@@ -129,9 +129,12 @@ it("only an authenticated operator can read or edit schedules", async () => {
   expect((await call({ subject: AGENT })).response.status).toBe(403);
   expect((await call({ subject: "ungranted" })).response.status).toBe(403);
   expect((await call({ serviceToken: TOKEN })).response.status).toBe(401);
-  const read = await call();
+  // The full snapshot is relayed as the Processor answers it (ADR 0123).
+  const read = await call({ suffix: "?detail=full" });
   expect(read.response.status).toBe(200);
   expect(read.seen).toEqual([{ path: "/internal/schedules", actor: null, body: "" }]);
+  // The summary of an answer that is not a snapshot is not an empty page.
+  expect((await call()).response.status).toBe(503);
   const saved = await call({ suffix: "/sony-bank", method: "POST", body: '{"revision":1}' });
   expect(saved.response.status).toBe(200);
   expect(saved.seen[0]?.actor).toBe(OPERATOR);

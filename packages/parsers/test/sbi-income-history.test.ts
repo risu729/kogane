@@ -169,3 +169,59 @@ test("unknown products/accounts/currencies, inconsistent controls and unobserved
   );
   expect(() => validateIncomeHistory(all, "gains")).toThrow("sbi_income_history_unknown_code");
 });
+
+test("a US summary may omit its yen gross and tax totals while the USD totals are present", () => {
+  const nullYen = (summary: string, category: string) => {
+    const body = JSON.parse(summary);
+    const row = body.dividendsSummaries.find((entry: any) => entry.category === category);
+    row.dividendTotal = null;
+    row.taxTotal = null;
+    return JSON.stringify(body);
+  };
+  // Observed 2026-11-19: US rows and their summary carry USD gross/tax only.
+  const bundle = incomeBundle("income");
+  bundle.summaryText = nullYen(bundle.summaryText, "FOREIGN_STOCK_US");
+  const rows = JSON.parse(bundle.rowsText);
+  for (const row of rows.dividends.filter((entry: any) => entry.category === "FOREIGN_STOCK_US"))
+    for (const key of ["dividendUnitCost", "dividendTotal", "taxTotal", "incomeTax", "residentTax"])
+      row[key] = null;
+  bundle.rowsText = JSON.stringify(rows);
+  const result = sbiIncomePayments.parse(bytes(bundle), meta("income-payments"));
+  expect(
+    result.observations
+      .filter((row): row is ValuationObservation => row.kind === "valuation")
+      .filter((row) => row.currency === "USD")
+      .map((row) => row.metric)
+      .sort(),
+  ).toEqual(
+    ["income_gross", "income_tax", "income_income_tax", "income_resident_tax", "income_net"]
+      .flatMap((metric) => [metric, metric])
+      .sort(),
+  );
+
+  const domestic = incomeBundle("income");
+  domestic.summaryText = nullYen(domestic.summaryText, "DOMESTIC_STOCK_SPOT");
+  expect(() => validateIncomeHistory(domestic, "income")).toThrow("sbi_income_history_money");
+  const noUsd = incomeBundle("income");
+  const body = JSON.parse(nullYen(noUsd.summaryText, "FOREIGN_STOCK_US"));
+  body.dividendsSummaries[1].dividendTotalLc = null;
+  noUsd.summaryText = JSON.stringify(body);
+  expect(() => validateIncomeHistory(noUsd, "income")).toThrow("sbi_income_history_money");
+  for (const [field, value] of [
+    ["taxTotal", 12],
+    ["taxTotalLc", null],
+    ["receivedTotalLc", null],
+  ] as const) {
+    const partial = incomeBundle("income");
+    const changed = JSON.parse(nullYen(partial.summaryText, "FOREIGN_STOCK_US"));
+    changed.dividendsSummaries[1][field] = value;
+    partial.summaryText = JSON.stringify(changed);
+    expect(() => validateIncomeHistory(partial, "income")).toThrow("sbi_income_history_money");
+  }
+  const receivedNull = incomeBundle("income");
+  receivedNull.summaryText = receivedNull.summaryText.replace(
+    '"receivedTotal":28',
+    '"receivedTotal":null',
+  );
+  expect(() => validateIncomeHistory(receivedNull, "income")).toThrow("sbi_income_history_schema");
+});

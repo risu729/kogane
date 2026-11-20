@@ -1029,3 +1029,51 @@ root-card switching, scheduled production capture, a complete fifteen-month
 archive and live parser validation remain unproved. The document catalogue
 therefore stays partial and [issue 1251](https://github.com/risu729/kogane/issues/1251)
 remains open.
+
+## Past-month refusals from 2026-11-15 (diagnostic)
+
+Every scheduled run from 2026-11-15 21:00 UTC through 2026-11-18 21:00 UTC
+failed before the first month with stop code `credit_past_months`
+(Workers Logs: `collector-diagnostic`, stage `connection-collection`,
+category `response`, `StopConditionError`, no HTTP status), and stored no
+artifact. The runs of 2026-11-12 to 2026-11-14 passed this stage. A stop
+before the month loop keeps nothing (see "Stops"), and the earlier log line
+did not say which check refused, so the cause could not be placed: a
+non-JSON answer, an error id, an item of an unobserved shape, or a schedule
+position offered as a month all ended the same way.
+
+The read now logs `myjcb-credit-past-months-refused` with one closed
+`reason` before it stops: `request_invalid`, `http_status` (with `status`),
+`content_type_not_json` (with `contentTypeFamily`: `empty`, `html`, `text`
+or `other`), `response_oversize`, `utf8_invalid`, `json_invalid`,
+`result_missing` (with `topLevelType`), `error_reported` (with `errIdType`),
+`info_missing` (with `infoType`), `item_malformed`, `month_out_of_range`,
+`flag_malformed` or `settlement_malformed` (each with `itemCount`, the item's
+position and the JavaScript type of the refused value), `month_duplicate`
+(with `itemCount`, the item's position and the repeated `detailMonth`),
+`schedule_overlap` (with `itemCount` and the overlapping, schedule and menu
+month positions), or `unclassified` for any other error. It carries counts,
+`detailMonth` positions and type names only, never the response, an error id
+or a label. The checks themselves are unchanged; the fix follows
+once a run names the reason.
+
+### First reason: `month_out_of_range` on the ninth item (2026-11-19)
+
+The requested run of 2026-11-19 03:11 UTC and the scheduled run of
+2026-11-19 21:00 UTC both logged `reason` `month_out_of_range` with
+`itemCount` 9, item position 9 and a string `detailMonth`. Items 1 to 8 passed
+every item check. The last stored past-month response (2026-11-10 to
+2026-11-14, one digest) held nine items whose `detailMonth` strings were `9`
+to `17` in order. So the ninth item's `detailMonth` is now a string the check
+refuses; the log did not say what it names. A window shifted to `10..18`
+(the menu gaining a position) fits, but is not observed.
+
+Every refusal line now also carries the menu's own `menuMonthPositions` and
+`schedulePositions`, and `menuLinksBeyondRange`: the number of menu detail
+links naming a position above 17, which the menu reader has always skipped
+without a trace. `month_out_of_range` adds `monthLength` (for a string) and
+`monthPosition` (the position named, when the value is one to three ASCII
+digits or an integer `0..999`). A position is an index into the statement
+list, not an amount or a date. The `0..17` bound (the read allowlist in
+`policy.ts`, the client, both parsers and the shared parsers) stays as it is
+until a run shows the position.
