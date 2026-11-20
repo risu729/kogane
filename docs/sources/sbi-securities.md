@@ -1101,8 +1101,10 @@ copied) found:
   Domestic rows are as before.
 
 The summary audit admitted null only for the `Lc` totals, so the first
-response was refused. A null yen `dividendTotal`/`taxTotal` is now accepted
-only for `FOREIGN_STOCK_US` while the matching USD total is present; the yen
-`receivedTotal` stays required, and a domestic null is still refused. The
+response was refused. Null yen `dividendTotal` and `taxTotal` are now accepted
+only for `FOREIGN_STOCK_US`, only both together, and only while all three USD
+totals are present; the yen `receivedTotal` stays required, and a domestic
+null is still refused. The parsers move to 0.1.3, and migration 0103 moves the
+two snapshot-policy pins from 0.1.2 to 0.1.3 so their parses can become current. The
 parser already publishes US payments in USD from the `Lc` fields, so nothing
 it emits changes. Tracked under #1236.

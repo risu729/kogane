@@ -111,7 +111,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/sbi-foreign-trade-records.ts":
       "dc653e2aca7b42294ef3e6a7c2f674640faa751a769cd9dc0c98dfbb845fec01",
     "poc/observation-pipeline/src/parsers/sbi-income-history-schema.ts":
-      "07a7733ee6cd65d72a86ee1d55ec95685247274e62b3ae2ef3f721c009455c70",
+      "7dd0e1519cb85735d1aac740bb375c45507ed6e495f3a51b3b33d69b161c5907",
     "poc/observation-pipeline/src/parsers/sbi-income-history.ts":
       "918b790cb73605dab05c0f28a7dca729abd193ff6c092944708dd424dfdc5bcd",
     "poc/observation-pipeline/src/parsers/sbi-shinsei-balance-summary-and-stage.ts":
@@ -622,7 +622,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "sbi-income-payments": {
       version: "0.1.3",
-      codeDigest: "d4f4c2fdc610cf6d6ee4c624dd2c587cd8ef0c93235e39740a55155206236106",
+      codeDigest: "0886a5a62d9a97de23143d926ed749c63abd8fd6b1e52b726ece524555477e10",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -640,7 +640,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "sbi-realised-gains": {
       version: "0.1.3",
-      codeDigest: "d4f4c2fdc610cf6d6ee4c624dd2c587cd8ef0c93235e39740a55155206236106",
+      codeDigest: "0886a5a62d9a97de23143d926ed749c63abd8fd6b1e52b726ece524555477e10",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

@@ -297,16 +297,18 @@ function checkedSummary(text: string, kind: IncomeHistoryKind) {
       code(row["category"], ["DOMESTIC_STOCK_SPOT", "FOREIGN_STOCK_US"]);
       code(row["currencyCode"], row["category"] === "FOREIGN_STOCK_US" ? ["USD"] : [null]);
       incomeMoney(row["receivedTotal"], "JPY");
-      for (const key of ["dividendTotal", "taxTotal"]) {
-        // Only a US category may omit its yen gross/tax total, and only while
-        // the USD total it converts is present (observed 2026-11-19).
-        if (row[key] === null) {
-          if (row["category"] !== "FOREIGN_STOCK_US" || row[`${key}Lc`] === null)
-            throw new IncomeHistoryError("sbi_income_history_money");
-          continue;
-        }
-        incomeMoney(row[key], "JPY");
-      }
+      // Only a US category may omit its yen gross and tax totals, both
+      // together, and only while every USD total is present (observed
+      // 2026-11-19).
+      if (row["dividendTotal"] === null || row["taxTotal"] === null) {
+        if (
+          row["category"] !== "FOREIGN_STOCK_US" ||
+          row["dividendTotal"] !== null ||
+          row["taxTotal"] !== null ||
+          ["receivedTotalLc", "dividendTotalLc", "taxTotalLc"].some((key) => row[key] === null)
+        )
+          throw new IncomeHistoryError("sbi_income_history_money");
+      } else for (const key of ["dividendTotal", "taxTotal"]) incomeMoney(row[key], "JPY");
       for (const key of ["receivedTotalLc", "dividendTotalLc", "taxTotalLc"])
         if (row[key] !== null) {
           if (row["category"] === "FOREIGN_STOCK_US") incomeMoney(row[key], "USD");

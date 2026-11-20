@@ -207,6 +207,17 @@ test("a US summary may omit its yen gross and tax totals while the USD totals ar
   body.dividendsSummaries[1].dividendTotalLc = null;
   noUsd.summaryText = JSON.stringify(body);
   expect(() => validateIncomeHistory(noUsd, "income")).toThrow("sbi_income_history_money");
+  for (const [field, value] of [
+    ["taxTotal", 12],
+    ["taxTotalLc", null],
+    ["receivedTotalLc", null],
+  ] as const) {
+    const partial = incomeBundle("income");
+    const changed = JSON.parse(nullYen(partial.summaryText, "FOREIGN_STOCK_US"));
+    changed.dividendsSummaries[1][field] = value;
+    partial.summaryText = JSON.stringify(changed);
+    expect(() => validateIncomeHistory(partial, "income")).toThrow("sbi_income_history_money");
+  }
   const receivedNull = incomeBundle("income");
   receivedNull.summaryText = receivedNull.summaryText.replace(
     '"receivedTotal":28',
