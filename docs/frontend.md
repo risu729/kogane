@@ -218,7 +218,9 @@ a retry included), and a continuation sends its first answer's `since`; the
 retry of a continuation the route refused (`400`) reads the answer again.
 While a window whose continuation failed is read again (that retry, a
 refocus, a return to the window), its answer read and the continuation's
-error stay on screen until the read settles. It
+error stay on screen until the read settles; a continuation refused for
+authentication (`401`) withdraws the answer read, and the panel shows its
+error state. It
 checks every answer with `validChangesSince`, and
 shows the digest's counts per source by closed state, with labels typed by the
 domain's closed lists. A count the digest cut, and every count of an

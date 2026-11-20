@@ -160,6 +160,7 @@ type Mode =
   | "answer"
   | "paged"
   | "continuation_failed"
+  | "continuation_unauthenticated"
   | "bounded"
   | "refused"
   | "not_served"
@@ -256,6 +257,11 @@ describe.if(runnable)("the 最近の変化 panel on ホーム", () => {
               return after === null
                 ? Response.json(firstPage(since))
                 : Response.json({ error: "internal" }, { status: 500 });
+            case "continuation_unauthenticated":
+              // The sign-in lapsed between the first page and its continuation.
+              return after === null
+                ? Response.json(firstPage(since))
+                : Response.json({ error: "unauthenticated" }, { status: 401 });
             default:
               return Response.json(answer(since));
           }
@@ -538,6 +544,26 @@ describe.if(runnable)("the 最近の変化 panel on ホーム", () => {
       // The reread settles with no error, and the continuation is offered again.
       await panel.getByRole("button", { name: "続きを読み込む" }).waitFor({ timeout: 10_000 });
       expect(await panel.getByRole("alert").count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  test("a continuation refused for authentication withdraws the answer and says why", async () => {
+    mode = "continuation_unauthenticated";
+    const page = await browser.newPage();
+    try {
+      const panel = await open(page);
+      await panel.getByRole("button", { name: "続きを読み込む" }).click();
+      // The client withdraws the records of a read refused for authentication
+      // (main.tsx), so no answer is left to keep: the whole panel says why,
+      // never a loading state that no read is running for.
+      await panel
+        .getByRole("alert")
+        .filter({ hasText: "最近の変化を読み込めませんでした (HTTP 401)" })
+        .waitFor({ timeout: 10_000 });
+      expect(await panel.locator("li.changes-source").count()).toBe(0);
+      expect(await panel.getByRole("status").count()).toBe(0);
     } finally {
       await page.close();
     }

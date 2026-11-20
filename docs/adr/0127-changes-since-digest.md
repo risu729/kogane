@@ -305,7 +305,10 @@ source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
    to the window) keeps the answers already read and the error until it
    settles: the panel remembers the failed continuation's error itself,
    which the query holds until a read settles, so a read that fails anew
-   shows the panel's error state.
+   shows the panel's error state. A continuation refused for authentication
+   (`401`, or a redirect to sign in) withdraws the answers already read (the
+   client drops the records of any read so refused), so with nothing left to
+   keep it shows the panel's error state.
 7. **Refusals.** A `403` (the grant refusals, `unauthorized` and
    `evidence_restricted`) or `404` (a deployment without the route, such as
    the local store) shows no panel. Any other failure (`400`, `413
@@ -348,7 +351,9 @@ source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
   beside the button while it reads the 30-day window from the clock again,
   and then continues on the new `since`; a window whose continuation failed,
   read again on a return to it, that keeps the answer read and the error
-  beside the button until the reread settles; the unauthorized run
+  beside the button until the reread settles; a continuation refused with
+  `401` that withdraws the answer and shows the panel's error state, never a
+  loading state; the unauthorized run
   sections and an events line that is not served; no panel on `403` and on
   `404`; the error state, with no count, on a server error and on an answer
   the contract refuses; the accessibility audit at 1280px and 390px with the

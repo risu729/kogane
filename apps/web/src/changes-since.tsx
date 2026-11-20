@@ -419,10 +419,15 @@ export function ChangesSincePanel({ sources }: { sources: Overview["sources"] })
   // still the query's. The error itself is remembered, and the query keeps
   // that object until a read settles, so the answer read and the error beside
   // the button stay while the reread runs (decision 6). A read that fails
-  // anew throws a new error, which only a failed continuation marks.
+  // anew throws a new error, which only a failed continuation marks. A read
+  // refused for authentication withdraws the answer (main.tsx), so with no
+  // answer left to keep, the error is the whole panel's.
   if (query.isFetchNextPageError && query.error !== null) continuationErrors.add(query.error);
   const failedOnContinuation =
-    query.isError && query.error !== null && continuationErrors.has(query.error);
+    query.isError &&
+    query.data !== undefined &&
+    query.error !== null &&
+    continuationErrors.has(query.error);
   // A caller the route refuses (it is the reader's), or a deployment without
   // the route (the local store): the panel is not shown.
   if (query.error instanceof ApiError && (query.error.status === 403 || query.error.status === 404))
