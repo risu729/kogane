@@ -110,12 +110,24 @@ export interface CreditStop {
  * counts and `detailMonth` positions only (the response is never logged).
  * An error that is not a past-month refusal is logged as `unclassified`.
  */
-function logPastMonthsRefusal(error: unknown): void {
+function logPastMonthsRefusal(
+  error: unknown,
+  menu: {
+    readonly menuMonthPositions: readonly number[];
+    readonly schedulePositions: readonly number[];
+    readonly menuLinksBeyondRange: number;
+  },
+): void {
   const refusal = error instanceof PastMonthsRefusalError ? error : undefined;
   console.warn(
     JSON.stringify({
       event: "myjcb-credit-past-months-refused",
       reason: refusal?.reason ?? "unclassified",
+      // The menu's own month and schedule positions, so a refused position
+      // can be read against what the menu offered.
+      menuMonthPositions: menu.menuMonthPositions,
+      schedulePositions: menu.schedulePositions,
+      menuLinksBeyondRange: menu.menuLinksBeyondRange,
       ...refusal?.details,
     }),
   );
@@ -212,18 +224,21 @@ export async function collectCredit(
     budget.remainingBytes > MAX_DOCUMENT_RUN_BYTES
   )
     throw new Error("myjcb_document_budget_invalid");
-  const { menuHtml, initialMonths, schedulePositions } = await collectionStage(
-    "collect-credit-menu",
-    async () => {
+  const { menuHtml, initialMonths, schedulePositions, menuLinksBeyondRange } =
+    await collectionStage("collect-credit-menu", async () => {
       const menu = await client.get("credit-menu", new URLSearchParams({ link_id: linkId }));
       const menuHtml = decodeMyJcbHtml(menu.body, menu.contentType);
       const groups = readCreditMenuGroups(menuHtml);
       if (groups.months.length === 0) {
         throw new Error("MyJCB credit menu did not enumerate detailMonth values");
       }
-      return { menuHtml, initialMonths: groups.months, schedulePositions: groups.schedules };
-    },
-  );
+      return {
+        menuHtml,
+        initialMonths: groups.months,
+        schedulePositions: groups.schedules,
+        menuLinksBeyondRange: groups.linksBeyondRange ?? 0,
+      };
+    });
   const artifacts: RawArtifact[] = [
     {
       dataset: "credit-menu",
@@ -265,7 +280,11 @@ export async function collectCredit(
         }
         return { pastResponse, pastMonths: parsePastMonthAvailability(pastJson) };
       } catch (error) {
-        logPastMonthsRefusal(error);
+        logPastMonthsRefusal(error, {
+          menuMonthPositions: initialMonths,
+          schedulePositions,
+          menuLinksBeyondRange,
+        });
         throw error;
       }
     },
@@ -293,12 +312,14 @@ export async function collectCredit(
       {
         itemCount: pastMonths.length,
         overlapPositions,
-        schedulePositions,
-        menuMonthPositions: initialMonths,
       },
       "collect-credit-past-months",
     );
-    logPastMonthsRefusal(error);
+    logPastMonthsRefusal(error, {
+      menuMonthPositions: initialMonths,
+      schedulePositions,
+      menuLinksBeyondRange,
+    });
     throw error;
   }
 

@@ -708,6 +708,28 @@ Resume implementation when a held contract provides an observed schema; first
 resolve the foreign-time selection boundary. The existing movement collector
 is unchanged, and transfers into or out of deposits are not classified as income.
 
+## 2026-11-20: foreign time-deposit history
+
+Read-only check in the owner's signed-in Chrome for
+[issue 1243](https://github.com/risu729/kogane/issues/1243). The transaction
+menu's `取引履歴 定期預金` leads to `/pages/da/daea0200/`, whose product list
+offers `円定期預金商品`, `外貨定期預金商品`, `積み立て定期預金` and further
+products, and, for foreign products, a currency list. `表示` with blank dates
+(the screen's default period) sent POST
+`/custom-web00/daea/cust-web/timedeposit-transaction/hystorylist-acquisition`
+with private account fields plus `timeAndSavingsBasisProductTyp=02` (foreign),
+`currencyCd` (ISO code), `rescDnTrNUSg=0`, `rescTrNUSg=0`, `maximumAcqCnt=10`,
+`acquisitionStartCount=1`. For each currency queried, the response was the
+empty shape seen on 2026-11-09: only `errors` with code `EFA00005` and
+`responseBizCommon.bizResult` `8`, matching the visible
+`該当する定期預金はありません。`.
+
+This is a history route searched over the default period, not a contract
+list. It shows no foreign time-deposit activity in that period; it does not
+prove that no older contract is still held, and products such as
+`積み立て定期預金` were not queried separately. A held contract still needs an
+observed schema before any parser is added.
+
 ## 2026-11-11: retained history row order and CSV encoding
 
 Read-only owner-browser observation at `/pages/ea/eaba0600/`, with the start

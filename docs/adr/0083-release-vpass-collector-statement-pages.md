@@ -156,7 +156,12 @@ What a released page would do, read from the code:
   than the card's last collection; the collection-quality read shows the
   `partial` coverage per run. Fixing `stated_total_mismatch` is separate work
   (the counts-only shape diagnostic of ADR 0023's 2026-10-10 amendment gives
-  its evidence once runs resume).
+  its evidence once runs resume). (2026-11-19: that evidence showed every
+  finalized month one `45` and one `4C` row above `allCnt`, so every card's
+  runs stayed `partial` and no new statement page was parsed; on 2026-11-19
+  the newest parsed capture of one card was 69 days old. [ADR 0023's 2026-11-19 amendment](0023-vpass-collector-card-binding.md#amendment-2026-11-19-a-finalized-pages-45-and-4c-header-rows-are-not-counted),
+  proposed on the owner's decision D1, leaves those two header kinds out of
+  the count; its Consequences list what switches after deploy.)
 - **Settlements.** A collector statement observation is a different statement
   key (it carries the producer) for the same account and period. Once it has
   an owner, a settlement candidate built on the importer's statement for that
