@@ -18,6 +18,23 @@ export interface IdentityAccountRow {
   observedCount: number;
   origin: IdentityOrigin;
 }
+/**
+ * One account entity of `GET /api/identity/account-list` (ADR 0120): the
+ * entity's readable label and where it came from, the sources and references
+ * that reach it, and when its newest capture was recorded.
+ */
+export interface IdentityAccountListRow {
+  account: string;
+  label: string;
+  labelOrigin: "manual" | "connection" | "card-name" | "mapping";
+  role: string;
+  status: IdentityStatus;
+  sources: string[];
+  references: number;
+  observedCount: number;
+  connection: AccountConnection["status"] | null;
+  lastFetchedAt: string | null;
+}
 export interface IdentityInstrumentRow {
   referenceId: string;
   targetId: string;
@@ -68,9 +85,12 @@ export function validIdentityResponse(path: string, value: unknown): boolean {
       value.connections.every(validAccountConnection)
     );
   if (
-    !["/api/identity/accounts", "/api/identity/instruments", "/api/identity/coverage"].includes(
-      path,
-    )
+    ![
+      "/api/identity/accounts",
+      "/api/identity/account-list",
+      "/api/identity/instruments",
+      "/api/identity/coverage",
+    ].includes(path)
   )
     return false;
   if (
@@ -87,6 +107,7 @@ export function validIdentityResponse(path: string, value: unknown): boolean {
   )
     return false;
   return value.rows.every((row) => {
+    if (path === "/api/identity/account-list") return object(row) && validAccountListRow(row);
     if (!object(row) || typeof row.source !== "string") return false;
     if (path === "/api/identity/coverage") {
       if (
@@ -127,4 +148,25 @@ export function validIdentityResponse(path: string, value: unknown): boolean {
       row.origin.id > 0
     );
   });
+}
+
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+function validAccountListRow(row: Record<string, unknown>): boolean {
+  return (
+    ["account", "label", "role"].every(
+      (k) => typeof row[k] === "string" && (row[k] as string).length > 0,
+    ) &&
+    ["manual", "connection", "card-name", "mapping"].includes(String(row.labelOrigin)) &&
+    ["identified", "provider-local", "aggregate", "unresolved"].includes(String(row.status)) &&
+    Array.isArray(row.sources) &&
+    row.sources.length > 0 &&
+    row.sources.every((source) => typeof source === "string" && source.length > 0) &&
+    count(row.references) &&
+    (row.references as number) >= row.sources.length &&
+    count(row.observedCount) &&
+    (row.connection === null ||
+      ["confirmed", "unresolved", "evidence-ineligible"].includes(String(row.connection))) &&
+    (row.lastFetchedAt === null ||
+      (typeof row.lastFetchedAt === "string" && ISO_INSTANT.test(row.lastFetchedAt)))
+  );
 }

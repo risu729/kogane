@@ -4,7 +4,9 @@
 // (packages/application/src/query/collection-quality.ts, ADR 0045,
 // docs/evidence-browser.md); and `GET /api/collection-quality/<sourceId>/accounts`,
 // the same source's cells regrouped by the accounts their captures'
-// observations name (ADR 0088). Read-only, GET-only, and served under the reader
+// observations name (ADR 0088); and `GET /api/collection-quality?view=status`,
+// one line per configured job saying whether it is stuck (ADR 0045, amendment
+// 2026-11-19). Read-only, GET-only, and served under the reader
 // authority every signed-in subject already has over the evidence routes: it
 // shows identifiers, capture times, counts and codes the evidence pages and
 // the schedule page already hold, and no amount. A store without the
@@ -15,9 +17,11 @@ import {
   queryCollectionQualityCells,
   queryCollectionQualitySummary,
 } from "../../../packages/application/src/query/collection-quality.ts";
+import { queryCollectionQualityStatus } from "../../../packages/application/src/query/collection-quality-status.ts";
 import {
   ACCOUNT_COVERAGE_SUFFIX,
   COLLECTION_QUALITY_PATH,
+  COLLECTION_STATUS_VIEW,
   validCollectionQualityAlarms,
   type CollectionQualitySummary,
 } from "../../../packages/observation-shared/src/collection-quality-contract.ts";
@@ -28,6 +32,8 @@ import { HttpError, json } from "./http";
 
 const SOURCE = /^[a-z0-9][a-z0-9-]{0,99}$/u;
 const OFFSET = /^(?:0|[1-9][0-9]{0,6})$/u;
+/** The status view's query (ADR 0045, amendment 2026-11-19), exactly. */
+const STATUS_SEARCH = "?view=status";
 
 /** Served only where the store has what the read joins: the scheduling and collection tables. */
 export async function collectionQualityAvailable(env: Env): Promise<boolean> {
@@ -52,8 +58,11 @@ export async function collectionQualityApi(
   if (grant.scopes.sources !== "*" || grant.scopes.accounts !== "*")
     throw new HttpError(403, "scope_restricted");
   if (!(await collectionQualityAvailable(env))) throw new HttpError(404, "not_found");
-  // The summary and the account view take no query at all, not even an empty one (`?`).
-  if ((path === COLLECTION_QUALITY_PATH || path.endsWith(ACCOUNT_COVERAGE_SUFFIX)) && url.search)
+  // The account view takes no query at all, not even an empty one (`?`); the
+  // summary only its status view, `?view=status` exactly.
+  if (path.endsWith(ACCOUNT_COVERAGE_SUFFIX) && url.search)
+    throw new HttpError(400, "invalid_query");
+  if (path === COLLECTION_QUALITY_PATH && url.search && url.search !== STATUS_SEARCH)
     throw new HttpError(400, "invalid_query");
   return json(await readCollectionQuality(env, url));
 }
@@ -74,7 +83,14 @@ export async function readCollectionQuality(
   const asOf = new Date().toISOString();
   try {
     if (path === COLLECTION_QUALITY_PATH) {
-      if ([...url.searchParams.keys()].length > 0) throw new HttpError(400, "invalid_query");
+      const keys = [...url.searchParams.keys()];
+      if (
+        keys.length === 1 &&
+        keys[0] === "view" &&
+        url.searchParams.get("view") === COLLECTION_STATUS_VIEW
+      )
+        return await queryCollectionQualityStatus(d1Executor(env.DB), { asOf });
+      if (keys.length > 0) throw new HttpError(400, "invalid_query");
       const summary = await queryCollectionQualitySummary(d1Executor(env.DB), { asOf });
       await readAlarms(env, summary);
       return summary;

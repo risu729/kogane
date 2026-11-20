@@ -9,6 +9,7 @@ export function useIdentityConnections() {
   });
 }
 import type {
+  IdentityAccountListRow,
   IdentityAccountRow,
   IdentityCoverage,
   IdentityInstrumentRow,
@@ -21,6 +22,14 @@ export function useIdentityAccounts(source: string, offset: number) {
     queryKey: ["identity-accounts", source, offset],
     queryFn: ({ signal }) =>
       getJson<IdentityPage<IdentityAccountRow>>(path("accounts", source, offset), signal),
+  });
+}
+/** One line per account entity, with its readable label (ADR 0120). */
+export function useIdentityAccountList(source: string, offset: number) {
+  return useQuery({
+    queryKey: ["identity-account-list", source, offset],
+    queryFn: ({ signal }) =>
+      getJson<IdentityPage<IdentityAccountListRow>>(path("account-list", source, offset), signal),
   });
 }
 export function useIdentityInstruments(source: string, offset: number) {
