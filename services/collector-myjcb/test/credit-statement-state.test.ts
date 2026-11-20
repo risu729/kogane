@@ -1129,18 +1129,18 @@ describe("a refused past-month response names the check that refused it", () => 
       '{"event":"myjcb-credit-past-months-refused","reason":"item_malformed","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":2,"itemIndex":2,"itemType":"string"}',
     ],
     [
-      "a month outside 0..19",
-      envelope([{ detailMonth: "20", detailAvailableFlag: "1" }]),
-      '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"monthType":"string","monthLength":2,"monthPosition":20}',
+      "a month outside 0..18",
+      envelope([{ detailMonth: "19", detailAvailableFlag: "1" }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"monthType":"string","monthLength":2,"monthPosition":19}',
     ],
     [
-      "a numeric month outside 0..19 names its position",
-      envelope([{ detailMonth: 20, detailAvailableFlag: "1" }]),
-      '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"monthType":"number","monthPosition":20}',
+      "a numeric month outside 0..18 names its position",
+      envelope([{ detailMonth: 19, detailAvailableFlag: "1" }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"monthType":"number","monthPosition":19}',
     ],
     [
       "a month that is not digits names its length only",
-      envelope([{ detailMonth: "x20", detailAvailableFlag: "1" }]),
+      envelope([{ detailMonth: "x19", detailAvailableFlag: "1" }]),
       '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"monthType":"string","monthLength":3}',
     ],
     [

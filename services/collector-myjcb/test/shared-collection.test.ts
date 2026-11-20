@@ -900,7 +900,7 @@ describe("ADR 0005 second amendment: unread months and export offers in the mani
       plan([unreadConnection("account-one", [{ position: 2, code: "upstream said no" }])]),
     ).rejects.toThrow("manifest_unread_code_invalid");
     await expect(
-      plan([unreadConnection("account-one", [{ position: 20, code: "scheduled_payments_page" }])]),
+      plan([unreadConnection("account-one", [{ position: 19, code: "scheduled_payments_page" }])]),
     ).rejects.toThrow("manifest_stop_position_invalid");
     await expect(
       plan([
@@ -1024,7 +1024,7 @@ describe("ADR 0005 amendment (c): schedule pages beside the months", () => {
     await expect(plan([{ position: 8, code: "upstream said no" }], 0)).rejects.toThrow(
       "manifest_schedule_code_invalid",
     );
-    await expect(plan([{ position: 20, code: "scheduled_payments_page" }], 1)).rejects.toThrow(
+    await expect(plan([{ position: 19, code: "scheduled_payments_page" }], 1)).rejects.toThrow(
       "manifest_stop_position_invalid",
     );
     await expect(plan([{ position: 8, code: "scheduled_payments_page" }], 2)).rejects.toThrow(

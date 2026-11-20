@@ -1079,8 +1079,8 @@ without a trace. `month_out_of_range` adds `monthLength` (for a string) and
 `monthPosition` (the position named, when the value is one to three ASCII
 digits or an integer `0..999`). A position is an index into the statement
 list, not an amount or a date. The `0..17` bound (the read allowlist in
-`policy.ts`, the client, both parsers and the shared parsers) stays as it is
-until a run shows the position.
+`policy.ts`, the client, both parsers and the shared parsers) changes only
+once a run shows the position; the run below did.
 
 ### The position: the window moved to `10..18` (2026-11-20)
 
@@ -1093,15 +1093,15 @@ later position moved up by one: the past-month window is now `10..18`. The
 provider's 17-month horizon counts statement months; positions also count the
 schedule pages, so 17 months and two schedule pages reach position 18.
 
-**Fix.** One collector bound, `MAX_DETAIL_POSITION` = 19 (17 months and up to
-three schedule pages), replaces every `0..17` check: the read allowlist
+**Fix.** One collector bound, `MAX_DETAIL_POSITION` = 18, the highest position
+a run has shown, replaces every `0..17` check: the read allowlist
 (`policy.ts`, all four `detailMonth` routes), the past-month JSON-RPC referer
 check, the menu reader, the past-month availability check and the manifest
 position check. The shared parsers accept the same positions in
 `credit-ledger-NN.json`, `credit-detail-NN.html`,
 `credit-skip-payment-NN.html` and the past-month items, and the relative
-period label reads `detailMonth-0` to `detailMonth-19`. A position above 19 is
-still refused.
+period label reads `detailMonth-0` to `detailMonth-18`. A position above 18 is
+still refused, and the bound moves again only once a run shows a higher one.
 
 **Release.** The four parsers in `packages/parsers/src/parsers/myjcb.ts` move
 together: `myjcb-credit-ledger@1.2.5`, `myjcb-credit-past-month-balances@1.1.8`,

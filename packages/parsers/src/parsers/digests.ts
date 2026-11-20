@@ -75,9 +75,9 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/myjcb-jpoint.ts":
       "f53f9d187aab2027151a01be3d4aae1f3792006583ffb40045b4cfa2020c1bf8",
     "poc/observation-pipeline/src/parsers/myjcb-skip-payment-schedule.ts":
-      "20dad7891e4d62ad24ac4fc4ae70185cb6e56a318bec2f64174eb1ac45d8e0a4",
+      "138bf7a4e2e967ad9ce940edd92300a59eb24b314b73050bdce98dcb78cd4e8b",
     "poc/observation-pipeline/src/parsers/myjcb.ts":
-      "ac426cf067531e6531d490f74b39bcff62471592a98bb5ec6a1ef289a50d62fd",
+      "eda9addc03cd8f2a1a2b83019f28073f3b2e27d0f86dac032c98b7308125e798",
     "poc/observation-pipeline/src/parsers/paypay-csv.ts":
       "d673e45c5160a6efbc56b930f9f69ca93cf8eb928e05cc8ca2646adbc9ac8fbb",
     "poc/observation-pipeline/src/parsers/prestia-bank-html.ts":
@@ -284,7 +284,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "myjcb-canonical-evidence-boundary": {
       version: "1.1.8",
-      codeDigest: "4abd8076dcf226e38b4072cef159913945931004a2b4fd4ed02ddcfe3e9592dd",
+      codeDigest: "a73f3020471e0b20bea55f4f4cbf1eed08806d3354a6e0199e59d5a605a4288d",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -305,7 +305,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "myjcb-credit-ledger": {
       version: "1.2.5",
-      codeDigest: "4abd8076dcf226e38b4072cef159913945931004a2b4fd4ed02ddcfe3e9592dd",
+      codeDigest: "a73f3020471e0b20bea55f4f4cbf1eed08806d3354a6e0199e59d5a605a4288d",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -326,7 +326,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "myjcb-credit-past-month-balances": {
       version: "1.1.8",
-      codeDigest: "4abd8076dcf226e38b4072cef159913945931004a2b4fd4ed02ddcfe3e9592dd",
+      codeDigest: "a73f3020471e0b20bea55f4f4cbf1eed08806d3354a6e0199e59d5a605a4288d",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -347,7 +347,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "myjcb-credit-statement-total": {
       version: "1.4.3",
-      codeDigest: "4abd8076dcf226e38b4072cef159913945931004a2b4fd4ed02ddcfe3e9592dd",
+      codeDigest: "a73f3020471e0b20bea55f4f4cbf1eed08806d3354a6e0199e59d5a605a4288d",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",
@@ -439,7 +439,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     },
     "myjcb-skip-payment-schedule": {
       version: "0.1.4",
-      codeDigest: "7d08fe59f4a1df383a1ba107011c2b181f7dbcf123185a3dc4b1b77786d7e775",
+      codeDigest: "6967bbe19b9977be67ae21878dbc8e81441a119c2c69ddb06a40e930878d9f77",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

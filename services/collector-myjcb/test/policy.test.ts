@@ -29,15 +29,15 @@ describe("MyJCB read-only allowlist", () => {
   test("permits only the observed credit read/export contracts", () => {
     expect(
       // Positions count the menu's schedule pages too; the past-month window
-      // reached 18 on 2026-11-15, so the bound is 19 (MAX_DETAIL_POSITION).
-      allowedUrl("credit-detail", new URLSearchParams({ detailMonth: "19", output: "web" }))
+      // reached 18 on 2026-11-15, so the bound is 18 (MAX_DETAIL_POSITION).
+      allowedUrl("credit-detail", new URLSearchParams({ detailMonth: "18", output: "web" }))
         .pathname,
     ).toBe("/iss-pc/member/details_inquiry/detail.html");
     expect(
       allowedUrl("credit-pdf", new URLSearchParams({ detailMonth: "10", output: "pdf" })).pathname,
     ).toBe("/iss-pc/member/details_inquiry/detailDbPdf.html");
     expect(() =>
-      allowedUrl("credit-detail", new URLSearchParams({ detailMonth: "20", output: "web" })),
+      allowedUrl("credit-detail", new URLSearchParams({ detailMonth: "19", output: "web" })),
     ).toThrow();
   });
 

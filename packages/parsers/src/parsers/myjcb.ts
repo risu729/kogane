@@ -36,7 +36,7 @@ const UNCONFIRMED_EXPANDED = new Set([
   "備考",
   "訂正サイン",
 ]);
-const ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/(credit-ledger-(0[0-9]|1[0-9])\.json)$/u;
+const ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/(credit-ledger-(0[0-9]|1[0-8])\.json)$/u;
 const PAST_ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/credit-past-months\.json$/u;
 
 /**
@@ -257,7 +257,7 @@ export const myJcbPastMonthBalances: Parser = {
       const item = strictObject(value, `credit-past-months.result.detailPastJsonInfo[${index}]`);
       exactKeys(item, PAST_ITEM_KEYS, `credit-past-months.result.detailPastJsonInfo[${index}]`);
       const monthText = strictString(item["detailMonth"], `${locator}.detailMonth`, { max: 2 });
-      if (!/^1?[0-9]$/u.test(monthText)) {
+      if (!/^(?:[0-9]|1[0-8])$/u.test(monthText)) {
         throw new Error(`${locator}.detailMonth is invalid`);
       }
       const month = Number(monthText);
@@ -639,7 +639,7 @@ function validateSanitizedHtml(
       throw new Error("myjcb credit-menu metadata is invalid");
     }
   } else {
-    const match = key?.match(/^([a-z0-9][a-z0-9-]{0,63})\/credit-detail-(0[0-9]|1[0-9])\.html$/u);
+    const match = key?.match(/^([a-z0-9][a-z0-9-]{0,63})\/credit-detail-(0[0-9]|1[0-8])\.html$/u);
     if (
       !match ||
       (!(allowMissingStatementMeta && artifact.period == null) &&

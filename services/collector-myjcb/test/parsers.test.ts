@@ -243,8 +243,8 @@ describe("readCreditMenuGroups (ADR 0005's amendment (c))", () => {
     });
   });
 
-  test("a link past position 19 is not read, and only counted", () => {
-    expect(readCreditMenuGroups(creditMenu([0, 1, 2, 20], [7, 8]))).toEqual({
+  test("a link past position 18 is not read, and only counted", () => {
+    expect(readCreditMenuGroups(creditMenu([0, 1, 2, 19], [7, 8]))).toEqual({
       months: [0, 1, 2],
       schedules: [7, 8],
       linksBeyondRange: 1,

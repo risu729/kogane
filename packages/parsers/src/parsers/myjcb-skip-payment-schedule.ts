@@ -32,7 +32,7 @@ export const SKIP_PAYMENT_SCHEDULE_PARSER_CODES = [
   ...SKIP_PAYMENT_SCHEDULE_REFUSALS,
 ] as const;
 
-const ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/credit-skip-payment-(0[0-9]|1[0-9])\.html$/u;
+const ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/credit-skip-payment-(0[0-9]|1[0-8])\.html$/u;
 
 /**
  * The MyJCB ショッピングスキップ払い schedule page (ADR 0005 amendment e): each
