@@ -812,11 +812,21 @@ leg by key until `LIMIT` and `OFFSET` are met.
   "this source's events" each take one filtered walk instead of the whole list.
 - A call reads a fixed number of rows whatever the store holds: on workerd's
   D1, the first page reads 15,005 to 35,005 rows (by filter) over a history
-  5,100 or 15,300 revisions long (`events-filters-cost.test.ts`). Listing a
-  sparse filter over a store of N live revisions takes about N / 5,000 calls,
-  most of them short or empty.
+  5,100 or 15,300 revisions long (`events-filters-cost.test.ts`), each
+  revision citing one evidence reference. `source` reads a parse run and a
+  capture for each reference it tests, so its rows grow with the references a
+  revision cites (two for a card settlement, one for each card usage a card
+  purchase recognises), not with the store.
+  Listing a sparse filter over a store of N live revisions takes about
+  N / 5,000 calls, most of them short or empty.
 - The list is in event-id order, not recording order: the revisions recorded
   since are spread over the walk.
+- The pages read the live projection, not a snapshot: each call walks the
+  revisions live at that moment after its key. A revision recorded between
+  calls is listed only if its key sorts after the cursor, and a revision that
+  replaces one already listed, under the same event id, is listed again in its
+  new revision when it sorts after the cursor (the shipped list's offset pages
+  shift the same way).
 - Where one event has two live revisions (an inconsistency
   `economic_event_live_conflicts` lists, which no writer leaves), the item
   view gathers legs and evidence by event id, as the shipped list does, so

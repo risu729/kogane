@@ -1364,7 +1364,10 @@ Cost: a call walks at most 5,000 live revisions (`ACTIVITY_FILTER_WALK`) from
 its key through `economic_event_revisions_current`, reading each walked
 revision's legs, parse runs and captures by primary key, so it reads a fixed
 number of rows whatever the store holds (15,005 to 35,005 rows by filter on
-workerd's D1); a page may be short or empty and still continue. The proof that
+workerd's D1 with one evidence reference a revision; `source` reads a parse
+run and a capture per reference it tests); a page may be short or empty and
+still continue. The pages are not a snapshot: each call walks the revisions
+live when it runs, after its key. The proof that
 it equals the shipped text narrowed in memory (frozen text, random and scaled
 stores, plans without table statistics) is listed in the amendment's
 verification.

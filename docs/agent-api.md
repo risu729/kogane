@@ -1444,7 +1444,10 @@ invalid_query` with `refs: ["offset"]`. A malformed filter is `400
 invalid_query` naming each one refused (`since:format`, `before:format`,
 `account:format`, `source:format`), and `since` at or after `before` is
 `window:empty`. The filters decide nothing on a value: there is no filter on
-the event's own date (`effectiveTime`) yet.
+the event's own date (`effectiveTime`) yet. The pages are not a snapshot:
+each call walks the revisions live when it runs, after its cursor, so a
+revision recorded between calls is listed only if it sorts after the cursor,
+and one that replaces a revision already listed may be listed again.
 
 `kogane.evidence.read` takes `{ page, source?, runId?, artifactId?, cursor? }`.
 `page` picks the route: `meta`; `runs`, which needs `source`; `artifacts`,
