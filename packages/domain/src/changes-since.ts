@@ -94,15 +94,17 @@ export const CHANGES_SINCE_NOT_COVERED = [
 
 /**
  * Where the items behind a count are read: the existing read `tool` with its
- * fixed `arguments`. A line's `source` goes in `sourceArgument`; the value of
- * the line field `idArgument.field` goes in the argument `idArgument.name`;
- * for observations, the value at a kind's position in `kindArgument.values`
- * goes in `kindArgument.name`. A key is absent where it does not apply.
+ * fixed `arguments`. A line's `source` goes in `sourceArgument`; the answer's
+ * `since` goes in `sinceArgument`; the value of the line field
+ * `idArgument.field` goes in the argument `idArgument.name`; for
+ * observations, the value at a kind's position in `kindArgument.values` goes
+ * in `kindArgument.name`. A key is absent where it does not apply.
  */
 export interface ChangesSinceHandler {
   tool: string;
   arguments: Readonly<Record<string, string>>;
   sourceArgument?: string;
+  sinceArgument?: string;
   idArgument?: { name: string; field: "newestSealedRunId" | "newestParsedArtifactId" };
   kindArgument?: { name: string; values: readonly string[] };
 }
@@ -130,7 +132,13 @@ export const CHANGES_SINCE_HANDLERS = {
     sourceArgument: "source",
     kindArgument: { name: "kind", values: ["transactions", "balances", "positions", "positions"] },
   },
-  events: { tool: "kogane.events.read", arguments: { collection: "activity" } },
+  // The current revisions recorded since, one basis a call (ADR 0081,
+  // amendment of 2026-11-20).
+  events: {
+    tool: "kogane.events.read",
+    arguments: { collection: "activity" },
+    sinceArgument: "since",
+  },
   // Why a source has nothing new: its jobs, latest runs and failures.
   unchanged: { tool: "kogane.collection-quality.read", arguments: {}, sourceArgument: "source" },
 } as const satisfies Record<string, ChangesSinceHandler>;

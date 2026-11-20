@@ -210,3 +210,55 @@ tool off the parity guard's list of tools without a UI route.
   once each; the grant refusals and the unauthorized run sections; the audit
   read; no write. The UI/MCP parity guard lists the tool; the published tool
   lists include it; its description is under 2,048 characters.
+
+## Amendment: the events handler names `since` (2026-11-20)
+
+- Status: proposed. The digest's `handlers` are part of its published answer:
+  **the owner's approval is needed before merge**.
+- Date: 2026-11-20
+
+### Context
+
+The next slice above landed as
+[ADR 0081's amendment of 2026-11-20](0081-ui-parity-through-mcp.md#amendment-activity-filters-on-koganeeventsread-2026-11-20):
+`kogane.events.read`'s activity list takes `since` and `before` on when a
+revision was recorded, compared as this digest compares `created_at`, and
+`account` and `source`. The events handler still named only
+`collection: activity`, so a client following it paged every current event.
+It takes no event-date window: a filter on the effective time is left to its
+own amendment.
+
+### Options considered
+
+1. **Leave the handler as it is** and let the client know that the tool takes
+   `since`. The handler is the digest's own statement of which call lists a
+   count's items; a client that follows it should get those items.
+2. **Name the argument the answer's `since` goes in (chosen)**, as
+   `sourceArgument` names where a line's source goes.
+
+### Decision
+
+`ChangesSinceHandler` gains `sinceArgument`: the answer's `since` goes in that
+argument. The events handler is `{ tool: "kogane.events.read", arguments:
+{ collection: "activity" }, sinceArgument: "since" }`. The other handlers are
+unchanged.
+
+### Consequences
+
+- The events line's handler lists the current revisions recorded since, one
+  basis a call (`cash-movement` by default; `basis: purchase-recognition`
+  lists the cost recognised at purchase).
+- It lists fewer than the line counts where a revision recorded since was
+  superseded since (the line counts every revision; the list is of current
+  ones) or has no leg on the basis asked. The list is in event-id order, a
+  walk of at most 5,000 current revisions a call, so it may take several
+  calls whose pages are short or empty.
+
+### Verification
+
+`services/app/test/page-read-events-filters.test.ts`: every argument any
+handler names (`arguments`, `sourceArgument`, `sinceArgument`, the id and
+kind arguments) is in its tool's published input schema, and calling
+`kogane.events.read` with the events handler's arguments and `since` lists
+exactly the revisions recorded since. The contract test holds `handlers`
+equal to `CHANGES_SINCE_HANDLERS`, so the published answer carries the new key.

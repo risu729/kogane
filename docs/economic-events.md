@@ -1344,11 +1344,30 @@ which `GET /api/v2/reconstructed-state` and the agent tool
 gate and the GET-only boundary:
 
 - `GET /api/v2/activity?basis=cash-movement|purchase-recognition&offset=N`
+- `GET /api/v2/activity?basis=…[&since=…][&before=…][&account=…][&source=…][&cursor=…]`
 - `GET /api/v2/obligations?offset=N`
 
 Both return the `Page<T>` envelope (`items`, `nextCursor`, `dataCoverage`) plus
 `apiVersion: 2`, and activity also echoes the `basis` it was read on. Values are
 `Quantity`-shaped (`unitRef` plus a decimal-v1 value state).
+
+Activity takes filters
+([ADR 0081, amendment of 2026-11-20](adr/0081-ui-parity-through-mcp.md#amendment-activity-filters-on-koganeeventsread-2026-11-20);
+the inputs and refusals are in the [agent API](agent-api.md#ui-read-pages)):
+when the revision was recorded (`since` inclusive, `before` exclusive), an
+account a leg names (`account:<id>` or the bare id), and the source of a
+capture a parse run of its evidence was read from. Without one the list is
+the shipped `activityEventsSql`, unchanged, paged by `offset`. With one,
+`filteredActivityEventsSql` lists the same revisions in the same order,
+narrowed, and pages by a keyset `cursor` bound to the basis and the filters.
+Cost: a call walks at most 5,000 live revisions (`ACTIVITY_FILTER_WALK`) from
+its key through `economic_event_revisions_current`, reading each walked
+revision's legs, parse runs and captures by primary key, so it reads a fixed
+number of rows whatever the store holds (15,005 to 35,005 rows by filter on
+workerd's D1); a page may be short or empty and still continue. The proof that
+it equals the shipped text narrowed in memory (frozen text, random and scaled
+stores, plans without table statistics) is listed in the amendment's
+verification.
 
 The routes are served only when the `eventsV2` capability is true, which is
 true when `economic_event_revisions` is present (`present === 1`) in the store
