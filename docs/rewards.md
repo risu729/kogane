@@ -248,6 +248,12 @@ All are GET routes, with no writes or external communications. `Page<T>` = `{row
 `/offers/simulate` is not paged: it reads at most 200 offers and reports the bound in
 `offerCoverage`, refusing with `offer_set_too_large` beyond it (§4).
 `offset` traverses bucket rows. Reads see only claims linked to published parse runs, so rolling back a publication pointer also removes them from reward presentation.
+A holding whose buckets a page cuts is listed on each page that holds some of them, with
+those buckets, but its `consumable` and every `byKind` quantity are `missing` with
+`holding_cut_by_page`, never the sum of the buckets on that page (INV05; 2026-11-18). The
+reader marks the last holding of a page cut when the row past the page is that holding's,
+and the first holding of a page whose `offset` is not 0 cut always, since it cannot see the
+row before the page.
 The holdings and expiry pages are also the MCP page read `kogane.rewards.read`,
 answered by the routes' own reader `readRewardRoute`
 ([agent API](agent-api.md#ui-read-pages)); no agent tool runs `/offers/simulate`.
@@ -265,7 +271,10 @@ answered by the routes' own reader `readRewardRoute`
   connection does not offer rewards and sends no reward request.
 - The page reads only the first page of each route (`offset=0`). When the server's
   page bound cuts a list, that block says how many rows it shows and that it did not
-  read the rest; it offers no link to a next page.
+  read the rest; it offers no link to a next page. A holding the bound cuts shows its
+  total as `未確定` with the reason in words (the code is the badge's title), never the
+  sum of the buckets shown. Every missing quantity's reason is shown through the same
+  labels as the other reason codes, and a code without a label is shown verbatim.
 - Each expiry panel is named by what tells it apart: a published-snapshot row by its
   programme, bucket kind, bucket reference and rule (the snapshot holds one row per
   bucket for every rule version of the programme); a provider display section by its
@@ -361,7 +370,7 @@ CORE migration `0041_reward_revision_triggers.sql` adds the original 5 tables to
 
 All are STRICT, without FKs to CORE. `building` rows are invisible to readers through the pointer.
 
-Limit: the writer inserts estimates, simulations and input refs with `INSERT OR IGNORE` (`packages/storage-d1/src/read/rewards.ts`), so that a resent chunk is a no-op. SQLite's `OR IGNORE` also skips, without raising, a row that fails a CHECK or NOT NULL constraint (a trigger's `RAISE(ABORT)`, a foreign key or a STRICT type error still raises), and the seal records the build's own `estimate_count` and output digest, not the stored rows. A projection row that broke a CHECK would therefore be left out of a snapshot sealed `complete`, silently. The projection builds no such row today (`amountOf` in `packages/read-model/src/reward-projection.ts` pairs the amount status and columns as the CHECK requires).
+Writing rows: the writer inserts estimates, simulations, provider display sections (READ 0005) and input refs with `INSERT … ON CONFLICT(<primary key>) DO NOTHING` (`packages/storage-d1/src/read/rewards.ts`, `reward-provider-expiry.ts`). Only a row whose primary key is already written is skipped, which is the resent chunk of a retried batch; the table's `BEFORE INSERT` chunk-conflict trigger runs first, so a resent row with a different `row_digest` still raises `reward estimate chunk conflict` / `reward simulation chunk conflict` / `provider display chunk conflict`. A row that fails a CHECK or NOT NULL constraint, or a new key at a `row_seq` already written, raises its constraint: the chunk and its checkpoint roll back together, the `reward_read_projection` tick is recorded as failed, and the build stays `building` and unpublished. An input ref that fails a constraint fails the batch that starts the build, so no build starts. Input refs have no digest-conflict trigger: a `(kind, id)` the plan lists twice keeps its first row. The projection builds no row the schema refuses today.
 
 <a id="保存済みsimulationの扱いg2-20"></a>
 
@@ -461,10 +470,10 @@ To stop the writer, deploy processor `REWARD_READ_PROJECTION_ENABLED=false`. No 
 
 ### Synthetic verification (U16)
 
-- `packages/storage-d1/test/reward-read-writer.test.ts` — Identical input rebuilds exactly; changing evaluation time produces a different snapshot; an existing snapshot's evaluation time/calendar are immutable (G2-19). A stored simulation retaining only its digest becomes `not_reproducible` (G2-20). Triggers reject rows naming unfixed rules/offers. Chunk resends, lease loss and forward-only pointers are covered.
+- `packages/storage-d1/test/reward-read-writer.test.ts` — Identical input rebuilds exactly; changing evaluation time produces a different snapshot; an existing snapshot's evaluation time/calendar are immutable (G2-19). A stored simulation retaining only its digest becomes `not_reproducible` (G2-20). Triggers reject rows naming unfixed rules/offers. Chunk resends, lease loss and forward-only pointers are covered. An estimate, simulation or input ref that fails a CHECK, and a new estimate or replay key at a written `row_seq`, fail their batch and leave the checkpoint where it was; `reward-provider-expiry.test.ts` shows the same for a provider display section.
 - `services/processor/test/reward-read-projection.test.ts` — The lane on actual D1: flag-off prevents execution; lane ordering; builds lacking budget stay unpublished and resume with their own time; unstable capture becomes `pending`; dropping all READ reward tables does not change even 1 CORE claim/rule/offer/stored-input row and expires old cursors (G0-09).
 - `services/app/test/rewards-v2-read.test.ts` — Route 503/cursors/reproducibility, `/api/meta` advertisement and 503 without READ.
-- `services/app/test/rewards-read-amount.test.ts` — An expiry row's `quantity` is exact with its value or non-exact with `decimal-v1:<status>`, also when a non-exact row keeps one stray column; every pairing the READ CHECK refuses (an `exact` status without both columns, a non-exact one with both, an unknown status) fails the read instead of being served; over all 20 pairings of five statuses and the two columns set or null, the read serves exactly what the CHECK admits. `services/app/test/page-read-rewards.test.ts` shows the route, `/api/agent/v1/rewards.read` and `/mcp` answer such a row with the same `503 catalogue_read_failed`. `packages/storage-d1/test/reward-read-writer.test.ts` shows the table never stores such a row: a plain insert fails the CHECK, and the writer's `INSERT OR IGNORE` stores nothing (and raises nothing: see the limit below).
+- `services/app/test/rewards-read-amount.test.ts` — An expiry row's `quantity` is exact with its value or non-exact with `decimal-v1:<status>`, also when a non-exact row keeps one stray column; every pairing the READ CHECK refuses (an `exact` status without both columns, a non-exact one with both, an unknown status) fails the read instead of being served; over all 20 pairings of five statuses and the two columns set or null, the read serves exactly what the CHECK admits. `services/app/test/page-read-rewards.test.ts` shows the route, `/api/agent/v1/rewards.read` and `/mcp` answer such a row with the same `503 catalogue_read_failed`. `packages/storage-d1/test/reward-read-writer.test.ts` shows the table never stores such a row: a plain insert fails the CHECK, and so does the writer's own chunk, which stores nothing and leaves the checkpoint where it was (see the writing rows paragraph above).
 
 <a id="合成データで確認したことadr-0049"></a>
 

@@ -496,3 +496,117 @@ export function operationIdOfPath(path: string): string | null {
   const id = path.slice(OPERATION_RECORD_PATH_PREFIX.length);
   return OPERATION_ID.test(id) ? id : null;
 }
+
+// ── the list ────────────────────────────────────────────────────────────
+//
+// `GET /api/ops/v1/operations` (ADR 0086): one page of every principal's
+// requests, newest first, as summaries. A summary is the record's own fields
+// without its stages, bound target or execution (`OperationSummary` in
+// `packages/application/src/operations/list.ts`), so it carries the same
+// closed codes, identifiers, a count and canonical instants, and nothing else.
+
+/** The list route the 依頼の一覧 page reads. */
+export const OPERATION_LIST_PATH = "/api/ops/v1/operations";
+const OPERATION_LIST_SCHEMA = "kogane-operation-list-v1";
+/** `OPERATION_LIST_MAX_LIMIT`: no page holds more rows than this. */
+export const OPERATION_LIST_MAX_ROWS = 50;
+
+export interface OperationSummaryWire {
+  operationId: string;
+  kind: OperationRecordKind;
+  status: OperationRecordStatus;
+  source: string | null;
+  dispatch: { state: (typeof OPERATION_RECORD_DISPATCH_STATES)[number]; attempts: number };
+  failureCode: string | null;
+  acceptedAt: string;
+  updatedAt: string;
+}
+
+export interface OperationListPageWire {
+  schemaVersion: typeof OPERATION_LIST_SCHEMA;
+  operations: OperationSummaryWire[];
+  /** The last row's id when another page follows; null on the last page. */
+  nextCursor: string | null;
+}
+
+/** The filters a page was asked for; a row of another kind or status contradicts them. */
+export interface OperationListFilterWire {
+  kind?: OperationRecordKind | undefined;
+  status?: OperationRecordStatus | undefined;
+}
+
+function validSummary(value: unknown): value is OperationSummaryWire {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "operationId",
+      "kind",
+      "status",
+      "source",
+      "dispatch",
+      "failureCode",
+      "acceptedAt",
+      "updatedAt",
+    ]) ||
+    !matches(OPERATION_ID)(value.operationId) ||
+    !isOneOf(OPERATION_RECORD_KINDS)(value.kind) ||
+    !isOneOf(OPERATION_RECORD_STATUSES)(value.status) ||
+    !orNull(matches(SOURCE_ID))(value.source) ||
+    !code(value.failureCode) ||
+    !validInstantText(value.acceptedAt) ||
+    !validInstantText(value.updatedAt)
+  )
+    return false;
+  const dispatch = value.dispatch;
+  return (
+    isRecord(dispatch) &&
+    hasExactKeys(dispatch, ["state", "attempts"]) &&
+    isOneOf(OPERATION_RECORD_DISPATCH_STATES)(dispatch.state) &&
+    count(dispatch.attempts)
+  );
+}
+
+/**
+ * Whether `before` comes before `after` in the list's order: `created_at`
+ * descending, then `operation_id` descending, compared as the stored text is
+ * (the service's `ORDER BY`). Strict, so a repeated row is out of order too.
+ */
+function listedBefore(before: OperationSummaryWire, after: OperationSummaryWire): boolean {
+  return (
+    before.acceptedAt > after.acceptedAt ||
+    (before.acceptedAt === after.acceptedAt && before.operationId > after.operationId)
+  );
+}
+
+/**
+ * Whether `value` is one page of the operations list: at most 50 summaries in
+ * the list's order, each once, and a cursor that is the last row's id or null.
+ * With `filter`, every row is also of the kind and status the page asked for,
+ * so a page that answers another question is refused rather than shown.
+ */
+export function validOperationListPage(
+  value: unknown,
+  filter: OperationListFilterWire = {},
+): value is OperationListPageWire {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["schemaVersion", "operations", "nextCursor"]) ||
+    value.schemaVersion !== OPERATION_LIST_SCHEMA ||
+    !Array.isArray(value.operations) ||
+    value.operations.length > OPERATION_LIST_MAX_ROWS ||
+    !value.operations.every(validSummary)
+  )
+    return false;
+  const rows = value.operations as OperationSummaryWire[];
+  if (rows.some((row, index) => index > 0 && !listedBefore(rows[index - 1]!, row))) return false;
+  if (
+    rows.some(
+      (row) =>
+        (filter.kind !== undefined && row.kind !== filter.kind) ||
+        (filter.status !== undefined && row.status !== filter.status),
+    )
+  )
+    return false;
+  // The service names the last row as the cursor exactly when a row follows it.
+  return value.nextCursor === null || value.nextCursor === rows.at(-1)?.operationId;
+}

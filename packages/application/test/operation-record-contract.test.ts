@@ -14,12 +14,14 @@ import {
   STAGE_STATES,
   STAGES_BY_KIND,
 } from "../src/operations/requests.ts";
+import { OPERATION_LIST_MAX_LIMIT } from "../src/operations/list.ts";
 import {
   COLLECTOR_ACTIONS,
   COLLECTOR_EXECUTION_STATES,
   RUN_TRAIL_STATES,
 } from "../src/operations/collector-trail.ts";
 import {
+  OPERATION_LIST_MAX_ROWS,
   OPERATION_RECORD_COLLECTOR_ACTIONS,
   OPERATION_RECORD_DISPATCH_STATES,
   OPERATION_RECORD_EXECUTION_STATES,
@@ -42,5 +44,7 @@ describe("operation record vocabulary", () => {
     expect([...OPERATION_RECORD_COLLECTOR_ACTIONS]).toEqual([...COLLECTOR_ACTIONS]);
     expect([...OPERATION_RECORD_EXECUTION_STATES]).toEqual([...COLLECTOR_EXECUTION_STATES]);
     expect([...OPERATION_RECORD_RUN_STATES]).toEqual([...RUN_TRAIL_STATES]);
+    // The list's page bound (ADR 0086).
+    expect(OPERATION_LIST_MAX_ROWS).toBe(OPERATION_LIST_MAX_LIMIT);
   });
 });
