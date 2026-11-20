@@ -305,6 +305,32 @@ describe("reward reads", () => {
     expect(body.coverage).toEqual({ limit: 200, truncated: false, nextOffset: null });
   });
 
+  it("gives no total for a holding whose buckets the page cuts, only the reason", async () => {
+    // The offset walks bucket rows: from row 1 the page holds the restricted
+    // bucket and the qualification measure, not the regular 5,000. Their 3,000
+    // is a part of the holding, never its consumable quantity (INV05).
+    const body = (await (
+      await get("/api/v2/rewards/holdings?program=program:v-point&offset=1")
+    ).json()) as {
+      rows: {
+        consumable: unknown;
+        byKind: { kind: string; quantity: unknown }[];
+        buckets: { kind: string }[];
+      }[];
+    };
+    expect(body.rows).toHaveLength(1);
+    const holding = body.rows[0]!;
+    expect(holding.buckets.map((bucket) => bucket.kind)).toEqual(["restricted"]);
+    const cut = {
+      unitRef: "points:v-point",
+      value: { status: "missing", reasonCode: "holding_cut_by_page" },
+    };
+    expect(holding.consumable).toEqual(cut);
+    expect(holding.byKind).toEqual([
+      { kind: "restricted", quantity: cut, bucketRefs: [expect.any(String)] },
+    ]);
+  });
+
   it("requires a published READ snapshot for expiry even when CORE has holdings", async () => {
     const response = await get("/api/v2/rewards/expiry?program=program:v-point");
     expect(response.status).toBe(503);

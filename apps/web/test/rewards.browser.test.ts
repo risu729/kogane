@@ -225,6 +225,50 @@ describe.if(runnable)("the rewards page", () => {
       }
     }, 30_000);
 
+  test("a holding the page cuts shows its total as unconfirmed, in words, never a sum", async () => {
+    const cut = {
+      unitRef: "points:synthetic",
+      value: { status: "missing" as const, reasonCode: "holding_cut_by_page" },
+    };
+    holdings = page(
+      [
+        {
+          ...holding("a"),
+          consumable: cut,
+          buckets: [
+            {
+              bucketRef: "bucket:a",
+              kind: "regular",
+              restrictionRefs: [],
+              unitRef: "points:synthetic",
+              quantity,
+              observedExpiry: null,
+              observedAt: { kind: "unknown", reasonCode: "synthetic_time" },
+              sourceFactRefs: [],
+            },
+          ],
+        },
+      ],
+      true,
+    );
+    expiry = page([]);
+    expect(validApiResponse("/api/v2/rewards/holdings", holdings)).toBe(true);
+    const tab = await browser.newPage();
+    try {
+      await tab.goto(`${origin}/rewards`);
+      const total = tab.getByRole("row", { name: /利用できる量の合計/u });
+      await total.waitFor();
+      const text = await total.innerText();
+      // The reason is said in words; the bucket's 100 is not given as the total (INV05).
+      expect(text).toContain("未確定");
+      expect(text).toContain("ページの上限で途中までしか読めていない");
+      expect(text).not.toContain("100");
+      expect(text).not.toContain("holding_cut_by_page");
+    } finally {
+      await tab.close();
+    }
+  }, 30_000);
+
   for (const [name, response] of [
     ["published snapshot", readPage],
     ["rule over two holdings", page([legacyExpiry("a"), legacyExpiry("b")])],
