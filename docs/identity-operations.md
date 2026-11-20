@@ -150,6 +150,16 @@ the same history through `kogane.accounts.history`.
   (`apps/web/test/identities.browser.test.ts`, desktop and phone width).
 - `/api/identity/accounts` and `/api/identity/instruments` read effective mapping
   revisions, expose their evidence links, and paginate at 100 rows.
+- `/api/identity/account-list` lists one line per account entity with its
+  readable label and `labelOrigin` (`manual`, `connection`, `card-name`,
+  `mapping`), role, status, sources, reference and observation counts,
+  connection review status and newest capture time, 100 accounts a page; it
+  reads every reference at once (refused past 2,000) so an account is never
+  split across pages. Every account label in the organization, the
+  `accounts` page and the filter options is the account's label, not the
+  reference's, unless the mapping is manual
+  ([ADR 0120](adr/0120-readable-account-labels.md)). The identity page shows
+  it as `口座一覧`.
 - `/api/identity/instrument-candidates` reads the ADR 0055 candidate set and
   pages it at 50 items per view; it writes nothing.
 - `/api/identity/instrument-coverage` runs the same candidate read and counts,

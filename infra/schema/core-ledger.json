@@ -1360,6 +1360,12 @@
       "statementCount": 1,
       "insertStatements": [],
       "sha256": "54e07f3efa8b9f844f6c62e8030390d4a9abf2510f650848c00584b29b8f7823"
+    },
+    {
+      "file": "0103_vpass_credit_card_name_policy.sql",
+      "statementCount": 1,
+      "insertStatements": [],
+      "sha256": "64476ce0e5c03a918938a4c3e72d7e02faf1c0ad7896b12b892b11effba73f24"
     }
   ],
   "tables": [

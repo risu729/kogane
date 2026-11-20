@@ -167,7 +167,7 @@ export const PARSER_DIGESTS: ParserDigests = {
     "poc/observation-pipeline/src/parsers/v-point.ts":
       "67e8b851360f2da7046967231407dfe2e0c01ee87e58a670d7a1f355efe2bb7d",
     "poc/observation-pipeline/src/parsers/vpass-credit.ts":
-      "16d015a0832a0688149664a137d5baaaff200ae7b4dd18e332bb9e44e24529ee",
+      "2c2fa509b9df39c75c854adca077284ef02b34c834cfc7caf5a524eb407b62d7",
     "poc/observation-pipeline/src/parsers/vpass.ts":
       "5a1ce5cb855a7e2df17e392c957b8337d74273bdaadb074a2b77c48ad88ffa1a",
     "poc/observation-pipeline/src/sbi-shinsei-period-contract.ts":
@@ -1067,8 +1067,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       ],
     },
     "vpass-credit-snapshot": {
-      version: "1.0.2",
-      codeDigest: "ea83622dc7036c82f72671a120e4cec7f9a796ab19a660b21ddb82025183c47c",
+      version: "1.1.0",
+      codeDigest: "016155e19558c896b9e3e44d5f4d82c307db203995324420f4b682b86d9b1ed4",
       sources: [
         "packages/domain/src/coverage.ts",
         "packages/domain/src/guards.ts",

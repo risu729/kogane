@@ -1,5 +1,16 @@
 # Vpass
 
+## 2026-11-19: Card product names in the stored credit captures
+
+A counts-only read of the stored `credit/authori.json` and `credit/revo.json`
+of one daily credit run (inside the Cloudflare API sandbox, returning only
+counts and shape flags) found `cardName` on every card in both files: the two
+files agree on seven of seven cards, the seven names are distinct, and no
+name contains a digit or a masked card number. No name, identifier or
+financial value left the sandbox or is recorded here. Reader 1.1.0 keeps the
+name for the account label
+([ADR 0120](../adr/0120-readable-account-labels.md)).
+
 ## 2026-11-10: Daily per-card credit and revolving snapshots
 
 Observed on the owner's machine in the existing authenticated Chrome session,

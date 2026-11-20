@@ -17,6 +17,33 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## Vpass credit snapshots keep the card name (credit-snapshot 1.1.0)
+
+2026-11-20. Owner approval of the readable-label proposal, 2026-11-19 03:29
+UTC ([ADR 0120](adr/0120-readable-account-labels.md)).
+
+`vpass-credit-snapshot@1.1.0` keeps the provider's card product name
+(`cardName` of `authoriShokaiVo` in `credit/authori.json`, of the revolving
+bean in `credit/revo.json`) as `extra._kogane.cardName` on each observation of
+that file, for the read-time account label `<card name>（card-00N）`. A name
+that is empty, over 64 characters, has a control character or a run of four or
+more digits is left out, never thrown. `userName` is never copied. Every
+metric, amount, `asOf` and locator is unchanged.
+
+| Parser                | Previous | Release |
+| --------------------- | -------- | ------- |
+| vpass-credit-snapshot | 1.0.2    | 1.1.0   |
+
+Migration `0103_vpass_credit_card_name_policy.sql` advances the shipped
+credit-snapshot policy's exact `required_parser_version` to `1.1.0`, as 0102
+did, retaining every operator choice. Until a card's newest capture has a
+1.1.0 parse the card has no current credit snapshot: the next daily run is
+parsed under 1.1.0 by the incremental lane, and the repair lane re-parses the
+stored captures; old parse runs and observations stay append-only. Production
+was not read for this release beyond the counts in the ADR. Tests:
+`packages/parsers/test/vpass-credit.test.ts`,
+`packages/storage-d1/test/vpass-credit-card-name-policy.test.ts`.
+
 ## V Point Pay: the parser checks the sender, not the recipient (notification-event 1.1.0)
 
 2026-11-18. Owner decisions, 2026-11-18 04:42 UTC (the recipient check moves
