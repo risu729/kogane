@@ -12,12 +12,7 @@
 // not-computable body can never present a whole-portfolio subtotal; and the
 // capabilities a report states must be the ones its replayability implies,
 // so a restricted report cannot claim it may still be explained.
-import {
-  continuationOf,
-  pagedFieldsAbsentOrValid,
-  type PagedWireFields,
-  type Paging,
-} from "./paging-contract.ts";
+import { pagedFieldsSay, type PagedWireFields } from "./paging-contract.ts";
 import type { ResultPartition } from "../../domain/src/calculation.ts";
 import { REPLAYABILITY, type Replayability } from "../../domain/src/context.ts";
 import { PRICE_KINDS, type PriceKind } from "../../domain/src/metrics.ts";
@@ -231,10 +226,10 @@ function validReportListPage(value: unknown): value is ReportListPage {
     (value.nextCursor === null ||
       (typeof value.nextCursor === "string" && /^[1-9][0-9]{0,15}$/u.test(value.nextCursor))) &&
     // `next` and `paging` (ADR 0128) agree with the deprecated `nextCursor`.
-    pagedFieldsAbsentOrValid(value) &&
-    (!Object.hasOwn(value, "paging") ||
-      (String(continuationOf(value, "offset")) === String(value.nextCursor) &&
-        (value.paging as Paging).returned === value.items.length))
+    pagedFieldsSay(value, {
+      next: value.nextCursor === null ? null : { offset: Number(value.nextCursor) },
+      returned: value.items.length,
+    })
   );
 }
 

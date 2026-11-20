@@ -1,7 +1,6 @@
 import {
-  continuationOf,
   pagedFields,
-  pagedFieldsAbsentOrValid,
+  pagedFieldsSay,
   type PagedFields,
   type PagedWireFields,
   type Paging,
@@ -126,11 +125,13 @@ export function validIdentityResponse(path: string, value: unknown): boolean {
     return false;
   // `next` and `paging` (ADR 0128) agree with the deprecated coverage.
   if (
-    !pagedFieldsAbsentOrValid(value) ||
+    !pagedFieldsSay(value, {
+      next: value.coverage.nextOffset === null ? null : { offset: value.coverage.nextOffset },
+      limit: value.coverage.limit,
+      returned: value.rows.length,
+    }) ||
     (Object.hasOwn(value, "paging") &&
-      (continuationOf(value, "offset") !== value.coverage.nextOffset ||
-        (value.paging as Paging).returned !== value.rows.length ||
-        (value.paging as Paging).hasMore !== value.coverage.truncated))
+      (value.paging as Paging).hasMore !== value.coverage.truncated)
   )
     return false;
   return value.rows.every((row) => {

@@ -1,4 +1,4 @@
-import { continuationOf, pagedFieldsAbsentOrValid, type Paging } from "./paging-contract.ts";
+import { pagedFieldsSay } from "./paging-contract.ts";
 import {
   CARD_SETTLEMENT_DEBIT_ACCOUNT_ABSENCES,
   CARD_SETTLEMENT_LEAD_SEARCHES,
@@ -43,15 +43,14 @@ export function validNextPage(value: Record<string, unknown>, pageSize: number):
  * `stoppedBy: "budget"`.
  */
 function pagedAgreesWithNextPage(value: Record<string, unknown>, pageSize: number): boolean {
-  if (!pagedFieldsAbsentOrValid(value)) return false;
-  if (!Object.hasOwn(value, "paging")) return true;
-  const paging = value.paging as Paging;
-  return (
-    continuationOf(value, "offset") === value.nextOffset &&
-    paging.limit === pageSize &&
-    paging.hasMore === (value.nextPage !== "none") &&
-    (paging.stoppedBy === "budget") === (value.nextPage === "budget_exceeded")
-  );
+  return pagedFieldsSay(value, {
+    next:
+      value.nextPage === "offered" && typeof value.nextOffset === "number"
+        ? { offset: value.nextOffset }
+        : null,
+    limit: pageSize,
+    withheld: value.nextPage === "budget_exceeded",
+  });
 }
 
 /** The provider-stated debit-account evidence: read-only, never a blocker. */

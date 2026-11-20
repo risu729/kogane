@@ -12,12 +12,7 @@
 // not write, a pairing the builder or the table refuses (an `alarm` or `lane`
 // record under another principal, or with a read or a refusal) — fails the
 // whole page rather than being shown as something it is not.
-import {
-  continuationOf,
-  pagedFieldsAbsentOrValid,
-  type PagedWireFields,
-  type Paging,
-} from "./paging-contract.ts";
+import { pagedFieldsSay, type PagedWireFields } from "./paging-contract.ts";
 
 /** The operator's read of the whole store. */
 export const AUDIT_PAGE_PATH = "/api/v2/audit";
@@ -442,10 +437,10 @@ export function validAuditPage(value: unknown): value is AuditPageWire {
     !nullOr(matches(AUDIT_PATTERNS.cursor))(value["cursor"]) ||
     !value["records"].every(validAuditRecord) ||
     // `next` and `paging` (ADR 0128) say what the deprecated `cursor` says.
-    !pagedFieldsAbsentOrValid(value) ||
-    (Object.hasOwn(value, "paging") &&
-      (continuationOf(value, "cursor") !== value["cursor"] ||
-        (value["paging"] as Paging).returned !== value["records"].length))
+    !pagedFieldsSay(value, {
+      next: typeof value["cursor"] === "string" ? { cursor: value["cursor"] } : null,
+      returned: value["records"].length,
+    })
   )
     return false;
   const records = value["records"] as AuditRecordWire[];

@@ -40,6 +40,12 @@ describe("next", () => {
     expect(validContinuation({ arguments: { cursor: "a".repeat(2048) } })).toBe(true);
     expect(validContinuation({ arguments: { cursor: "a".repeat(2049) } })).toBe(false);
   });
+
+  test("a cursor is always a token and an offset always a position", () => {
+    expect(validContinuation({ arguments: { cursor: 50 } })).toBe(false);
+    expect(validContinuation({ arguments: { offset: "50" } })).toBe(false);
+    expect(validContinuation({ arguments: { latestOffset: "0" } })).toBe(false);
+  });
 });
 
 describe("paging", () => {

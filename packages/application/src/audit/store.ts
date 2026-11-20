@@ -271,7 +271,8 @@ export function auditPageFilters(input: Record<string, string>): AuditPageFilter
  * Newest first, filtered in the SQL `WHERE` before the `LIMIT`, 50 records a
  * page; no total is computed. The cursor names the last record shown and
  * binds the filters it was issued under: a cursor presented with other
- * filters is `stale_context`, never a page of a different query.
+ * filters is `cursor_mismatch`, never a page of a different query, and one
+ * this read did not issue is `invalid_cursor` (ADR 0128).
  *
  * The day range and the cursor are one range on `audit_records_by_time`
  * (`recorded_at` from the first day up to the earlier of the cursor and the

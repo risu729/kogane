@@ -8,6 +8,7 @@ import { validAuditPage } from "../src/audit-contract.ts";
 import { validNextPage } from "../src/card-settlement-contract.ts";
 import { validEvidenceResponse } from "../src/evidence-validation.ts";
 import { validIdentityResponse } from "../src/identity-contract.ts";
+import { validOperationListPage } from "../src/operation-contract.ts";
 import { pagedFields } from "../src/paging-contract.ts";
 
 const end = pagedFields({ limit: 50, returned: 0, next: null });
@@ -98,6 +99,46 @@ describe("an answer without next and paging, then with agreeing and disagreeing 
         next: { arguments: { cursor: "abc" } },
         paging: { limit: 50, returned: 0, hasMore: true, stoppedBy: "bytes" },
       }),
+    ).toBe(false);
+  });
+
+  // The new fields say exactly what the old ones say: a continuation the old
+  // fields do not name, under any argument, or rows said to follow (even
+  // withheld) after a last page, is a disagreement, never "absent".
+  test("a continuation under another argument, or rows after a last page, disagrees", () => {
+    const more = pagedFields({ limit: 50, returned: 0, next: null, withheld: true });
+    const audit = { schemaVersion: "kogane-audit-page-v1", records: [], cursor: null };
+    expect(validAuditPage({ ...audit, ...more })).toBe(false);
+    const reports = { apiVersion: 2, items: [], nextCursor: null };
+    expect(validApiResponse("/api/v2/reports", { ...reports, ...more })).toBe(false);
+    // An offset as text, or a cursor where the list continues by offset.
+    for (const next of [{ offset: "50" }, { cursor: "50" }, { offset: 50, cursor: "x" }])
+      expect(
+        validApiResponse("/api/v2/reports", {
+          ...reports,
+          nextCursor: "50",
+          next: { arguments: next },
+          paging: { limit: 50, returned: 0, hasMore: true, stoppedBy: "bytes" },
+        }),
+      ).toBe(false);
+    const operations = {
+      schemaVersion: "kogane-operation-list-v2",
+      statusFilterMatches: "storedStatus",
+      operations: [],
+      nextCursor: null,
+    };
+    expect(validOperationListPage(operations, {})).toBe(true);
+    expect(validOperationListPage({ ...operations, ...end }, {})).toBe(true);
+    expect(validOperationListPage({ ...operations, ...more }, {})).toBe(false);
+    expect(
+      validOperationListPage(
+        {
+          ...operations,
+          next: { arguments: { offset: 20 } },
+          paging: { limit: 20, returned: 0, hasMore: true, stoppedBy: "bytes" },
+        },
+        {},
+      ),
     ).toBe(false);
   });
 });

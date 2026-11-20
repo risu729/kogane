@@ -76,6 +76,11 @@ const count = (value: unknown): value is number =>
 /** A continuation value: a non-empty token without a control character, or a position. */
 function validContinuationValue(value: unknown): value is ContinuationValue {
   if (typeof value === "number") return count(value);
+  return validToken(value);
+}
+
+/** A server-minted token: non-empty text without a control character. */
+function validToken(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length > 0 &&
@@ -86,16 +91,18 @@ function validContinuationValue(value: unknown): value is ContinuationValue {
 
 /**
  * `{ arguments }` with one to three continuation arguments and nothing else.
- * A continuation never names a filter or a page size.
+ * A continuation never names a filter or a page size; `cursor` is always a
+ * token and an offset always a position.
  */
 export function validContinuation(value: unknown): value is Continuation {
   if (!record(value) || Object.keys(value).length !== 1 || !record(value.arguments)) return false;
   const entries = Object.entries(value.arguments);
   return (
     entries.length > 0 &&
-    entries.every(
-      ([key, item]) =>
-        (CONTINUATION_ARGUMENTS as readonly string[]).includes(key) && validContinuationValue(item),
+    entries.every(([key, item]) =>
+      key === "cursor"
+        ? validToken(item)
+        : (CONTINUATION_ARGUMENTS as readonly string[]).includes(key) && count(item),
     )
   );
 }
@@ -137,6 +144,47 @@ export function validPagedFields(value: unknown): value is PagedFields {
 export function pagedFieldsAbsentOrValid(value: Record<string, unknown>): boolean {
   const has = Object.hasOwn(value, "next") || Object.hasOwn(value, "paging");
   return !has || validPagedFields(value);
+}
+
+/**
+ * Whether an answer's `next` and `paging`, when it has them, say exactly what
+ * its deprecated fields say (ADR 0128, until S9): the same continuation
+ * arguments and no other, rows following exactly when the old fields continue
+ * or withhold, a withheld page as `stoppedBy: "budget"`, and the same count
+ * and page size where the old fields state them. An answer without either
+ * field passes; one with only one of them, or with invalid ones, does not.
+ */
+export function pagedFieldsSay(
+  value: Record<string, unknown>,
+  expected: {
+    next: Continuation["arguments"] | null;
+    returned?: number;
+    limit?: number | null;
+    withheld?: boolean;
+  },
+): boolean {
+  if (!Object.hasOwn(value, "next") && !Object.hasOwn(value, "paging")) return true;
+  if (!validPagedFields(value)) return false;
+  const { next, paging } = value;
+  const withheld = expected.withheld === true;
+  if (expected.next === null) {
+    if (next !== null) return false;
+  } else {
+    if (next === null) return false;
+    const want = Object.entries(expected.next);
+    const have = next.arguments as Record<string, unknown>;
+    if (
+      Object.keys(have).length !== want.length ||
+      !want.every(([key, item]) => Object.hasOwn(have, key) && have[key] === item)
+    )
+      return false;
+  }
+  return (
+    paging.hasMore === (expected.next !== null || withheld) &&
+    (paging.stoppedBy === "budget") === withheld &&
+    (expected.returned === undefined || paging.returned === expected.returned) &&
+    (expected.limit === undefined || paging.limit === expected.limit)
+  );
 }
 
 /** The continuation an answer names, or null; for a validator comparing it with an old field. */

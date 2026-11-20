@@ -9,12 +9,7 @@ import type {
   EvidenceRunList,
 } from "./evidence-contract.ts";
 import { EVIDENCE_PAGE_LIMIT } from "./evidence-contract.ts";
-import {
-  continuationOf,
-  pagedFieldsAbsentOrValid,
-  type PagedWireFields,
-  type Paging,
-} from "./paging-contract.ts";
+import { pagedFieldsSay, type PagedWireFields } from "./paging-contract.ts";
 
 type Check<T> = (value: unknown) => value is T;
 type Shape<T> = { [K in keyof T]-?: Check<T[K]> };
@@ -132,15 +127,11 @@ const deferred =
   (_value): _value is T =>
     true;
 function pagedAgrees(list: { items: unknown[]; nextCursor: string | null }): boolean {
-  const value = list as unknown as Record<string, unknown> & typeof list;
-  if (!pagedFieldsAbsentOrValid(value)) return false;
-  if (!Object.hasOwn(value, "paging")) return true;
-  const paging = value.paging as Paging;
-  return (
-    continuationOf(value, "cursor") === value.nextCursor &&
-    paging.limit === EVIDENCE_PAGE_LIMIT &&
-    paging.returned === value.items.length
-  );
+  return pagedFieldsSay(list as unknown as Record<string, unknown>, {
+    next: list.nextCursor === null ? null : { cursor: list.nextCursor },
+    limit: EVIDENCE_PAGE_LIMIT,
+    returned: list.items.length,
+  });
 }
 const runs = object<EvidenceRunList>({
   apiVersion: version,
