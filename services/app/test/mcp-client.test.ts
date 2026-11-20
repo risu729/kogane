@@ -1005,15 +1005,12 @@ describe("an internal failure leaves only a closed code (G3-08)", () => {
       DB: failing(),
     };
     const log = vi.spyOn(console, "log");
+    // A proposal writes, so a store failure inside it is an exception of the
+    // request; a read tool's is its route's 503, answered as its result (below).
+    const propose = { name: "kogane.reconcile.propose", arguments: proposal() };
     const answers: [string, Response][] = [
-      [
-        "2025-11-25 tools/call",
-        await rpc("tools/call", { name: "kogane.context.open", arguments: {} }, { environment }),
-      ],
-      [
-        "2026-07-28 tools/call",
-        await modern("tools/call", { name: "kogane.context.open", arguments: {} }, { environment }),
-      ],
+      ["2025-11-25 tools/call", await rpc("tools/call", propose, { environment })],
+      ["2026-07-28 tools/call", await modern("tools/call", propose, { environment })],
       // The tool list's store reads are the availability checks (the
       // reported state, card settlements, the page reads, card purchases),
       // each one its route makes too: the route's 503 catalogue_read_failed.
@@ -1021,14 +1018,11 @@ describe("an internal failure leaves only a closed code (G3-08)", () => {
       ["2026-07-28 tools/list", await modern("tools/list", {}, { environment })],
       [
         "HTTP agent route",
-        await send(
-          "/api/agent/v1/context.open",
-          {},
-          {
-            environment,
-            identity: { via: "app", subject: OTHER },
-          },
-        ),
+        await send("/api/agent/v1/reconcile.propose", proposal(), {
+          // The browser session as the operator holds the MCP client's grant.
+          environment: { ...environment, OPERATOR_SUBJECTS: JSON.stringify([OTHER]) },
+          identity: { via: "app", subject: OTHER },
+        }),
       ],
     ];
     for (const [label, response] of answers) {
@@ -1047,9 +1041,26 @@ describe("an internal failure leaves only a closed code (G3-08)", () => {
       ["mcp", 500, "internal_error"],
       ["mcp", 503, "catalogue_read_failed"],
       ["mcp", 503, "catalogue_read_failed"],
-      ["agent_context_open", 500, "internal_error"],
+      ["agent_reconcile_propose", 500, "internal_error"],
     ]);
     expect(JSON.stringify(log.mock.calls)).not.toContain(DETAIL);
+  });
+
+  it("answers a read tool's store failure as its result, in either era", async () => {
+    const environment = { DB: failing() };
+    const read = { name: "kogane.context.open", arguments: {} };
+    for (const [label, response] of [
+      ["2025-11-25", await rpc("tools/call", read, { environment })],
+      ["2026-07-28", await modern("tools/call", read, { environment })],
+    ] as const) {
+      expect(response.status, label).toBe(200);
+      const text = await response.text();
+      expect(text, label).not.toContain(DETAIL);
+      expect((JSON.parse(text) as { result: unknown }).result, label).toMatchObject({
+        isError: true,
+        structuredContent: { error: "catalogue_read_failed" },
+      });
+    }
   });
 
   it("writes nothing to the log but the request line, in either era", async () => {

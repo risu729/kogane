@@ -15,6 +15,24 @@ import {
 export const MAILBOX_MAIN_LINK =
   "https://site4.sbisec.co.jp/ETGate/?_ControlID=WPLETsmR001Control&_DataStoreID=DSWPLETsmR001Control&sw_page=Edeliv&cat1=home&cat2=none&getFlg=on";
 const MOBILE_LANDING = "https://m.sbisec.co.jp/switchnaviMain";
+/**
+ * The main-site report link redirects through the mobile site's one-time
+ * `switchnavi?page=Edeliv&parm=...` hand-off before the landing (2026-11-20,
+ * docs/sources/sbi-securities.md). Only that exact path and page are admitted
+ * as an intermediate hop; a 200 there is still refused.
+ */
+function mobileHandoff(url: URL): boolean {
+  return (
+    url.protocol === "https:" &&
+    url.host === "m.sbisec.co.jp" &&
+    !url.username &&
+    !url.password &&
+    !url.hash &&
+    url.pathname === "/switchnavi" &&
+    url.searchParams.getAll("page").length === 1 &&
+    url.searchParams.get("page") === "Edeliv"
+  );
+}
 const USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
 export type MailboxApi = "summary" | "list" | "detail" | "pdf";
@@ -64,6 +82,7 @@ export class MailboxHttp {
       undefined,
       MAILBOX_MAIN_LINK,
       new Set([MOBILE_LANDING]),
+      mobileHandoff,
     );
     await requireHtml(landing);
     await this.read(landing, 256 * 1024);
@@ -166,6 +185,7 @@ export class MailboxHttp {
     body: URLSearchParams | undefined,
     referer: string,
     destinations: ReadonlySet<string>,
+    via: (url: URL) => boolean = () => false,
   ): Promise<Response> {
     let current = initial;
     const visited = new Set<string>();
@@ -189,14 +209,14 @@ export class MailboxHttp {
         await cancel(response);
         fail();
       }
-      let next: string;
+      let next: URL;
       try {
-        next = new URL(location, current).href;
+        next = new URL(location, current);
       } catch {
         await cancel(response);
         fail();
       }
-      if (!destinations.has(next)) {
+      if (!destinations.has(next.href) && !via(next)) {
         await cancel(response);
         fail();
       }
@@ -206,8 +226,9 @@ export class MailboxHttp {
         fail();
       }
       await cancel(response);
-      referer = current;
-      current = next;
+      // A one-time hand-off URL is never sent onward as a referer.
+      if (!via(new URL(current))) referer = current;
+      current = next.href;
       method = "GET";
       body = undefined;
     }

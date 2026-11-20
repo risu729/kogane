@@ -675,18 +675,37 @@ It is a recorded decision per account, planned and committed like any other
 claim, by the operator or by an MCP client
 ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)); nothing is
 defaulted at read time. The
-confirmation page shows its provenance and approves it; the card-ownership
-page does not yet offer to plan one, so it is planned through the command API.
+confirmation page shows its provenance and approves it. The card-ownership
+page plans it as the basis 所有者の既定 (ADR 0082, amendment of 2026-11-18): no
+name is typed, the plan names `party:owner` with the marker dated on the day it
+is planned (Asia/Tokyo), it needs the side's confirmation checkbox and a
+reason, and it is disabled while `ownerDefaultBlockers` is non-empty, listing
+each blocker's reason; the command refuses the same plan
+(`needs_scope_resolution`). It is only ever accepted there; a default is
+withdrawn by an explicit review. The page posts the same `relation.accept`
+payload an MCP client sends to `kogane.command.plan`. The command checks the
+marker's date only as a calendar date, not against the plan or commit day: a
+plan committed on a later day keeps the plan's date, and an MCP client's date
+is not checked.
 
 The self-declared fallback also refuses any recorded ownership-role history for the
 same resolved account, including rejected or dated claims and the other role.
 It also refuses recorded `contradicts` relations touching the account,
 source-account reference or review evidence. The read response exposes these
-as separate `selfDeclarationBlockers`; explicit evidence review is still
-available. These checks do not infer relationships through account aliases or
-provider text, nor detect an unrecorded conflict. Commit repeats the exact
-checks atomically. Corrections append through explicit review rather than
-overwriting the declaration.
+as separate `selfDeclarationBlockers`, together with the side's own blockers
+(a decided candidate, a changed source, an unresolved account, an unresolved
+or changed mapping); explicit evidence review is still available. The
+card-ownership page disables 本人申告 while `selfDeclarationBlockers` is
+non-empty and lists each code once with its reason in Japanese, so an
+unconfirmed scope does not hide a recorded claim; the scope reason names the
+individual card statement or deposit account the self-declaration needs, not
+the owner default's wider scope. The command refuses a self-declaration blocked
+by an unadmitted scope (such as a MyJCB connection root), a recorded claim or a
+contradiction with `needs_scope_resolution`, the same answer on the page's path
+and over MCP, and writes no plan. These checks do not infer relationships
+through account aliases or provider text, nor detect an unrecorded conflict.
+Commit repeats the exact checks atomically. Corrections append through explicit
+review rather than overwriting the declaration.
 
 The existing `relation.accept` / `relation.reject` lifecycle then plans,
 simulates, obtains verified human approval and commits the decision. The

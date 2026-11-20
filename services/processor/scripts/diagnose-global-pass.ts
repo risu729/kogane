@@ -1,5 +1,6 @@
 // Read stored, checksum-verified captures only. No source network requests,
 // raw text, account identifiers, amounts or HTML are logged or written.
+import { fileURLToPath } from "node:url";
 import { getPlatformProxy } from "wrangler";
 import { parse } from "parse5";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
@@ -19,7 +20,7 @@ type Node = {
   childNodes?: Node[];
 };
 const proxy = await getPlatformProxy<{ DB: D1Database; EVIDENCE: R2Bucket }>({
-  configPath: new URL("../wrangler.diagnostic.jsonc", import.meta.url).pathname,
+  configPath: fileURLToPath(new URL("../wrangler.diagnostic.jsonc", import.meta.url)),
   persist: false,
   remoteBindings: true,
 });
