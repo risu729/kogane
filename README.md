@@ -102,7 +102,7 @@ each of them needs, and why, is in the
 - [St.George](services/collector-st-george/README.md)
 - [三井住友銀行 SMBCダイレクト](services/collector-smbc-direct/README.md)
 - [PRESTIA GLOBAL PASS](services/collector-globalpass/README.md)
-- PRESTIA bank (`services/collector-prestia-bank`; see
+- [PRESTIA bank](services/collector-prestia-bank/README.md) (see
   [ADR 0042](docs/adr/0042-prestia-bank-worker.md))
 - [MyJCB](services/collector-myjcb/README.md)
 - [Mobile Suica](services/collector-mobile-suica/README.md)

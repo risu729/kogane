@@ -8,6 +8,14 @@ shows the original next occurrence, maintenance-adjusted due time, actual alarm
 reservation and the latest scheduling receipt separately. All displayed timestamps use Japan time;
 daily configuration defaults to Japan time and can use Sydney or UTC explicitly.
 
+To ask whether any job is failing or stuck, read the collection quality
+status view instead of combining this page's receipts by hand:
+`kogane.collection-quality.read` with `{ view: "status" }`, or the table at
+the top of `/collection-quality`. It reads the same receipts from CORE, counts
+failures since the newest success, and treats a failed receipt that a
+successful collection (fetch run) of the same source followed before the next
+receipt as recovered ([collection](collection.md#is-anything-stuck-the-collection-status-view)).
+
 Save a daily time/weekdays or an interval and enable/disable the job. A version
 conflict requires refreshing before another edit. A successful database save with
 pending reservation is not an armed alarm. The five-minute processor job repairs
@@ -256,20 +264,32 @@ last statement of the claim batch, joined to the occurrence row it inserted;
 a claim whose record cannot be written is rolled back with it and retried by
 the same bookkeeping wakeup. The outcome stays in the occurrence row. The
 `processor-tick` and `sbi-vc-keepalive` occurrences record nothing
-([audit log](audit-log.md#the-processors-own-records-alarm-and-lane)).
+([audit log](audit-log.md#the-processors-own-records-alarm-and-lane)). The
+single retry of a `not_dispatched` occurrence (the one-retry rule above)
+claims the same occurrence again and appends no record: the first claim's
+record, with that claim's time and schedule revision, stays its only one, and
+the retry shows as the row's `retry_claimed_at` and the `retry_claimed` log
+line below. Only that log line names the revision the retry was fenced on
+(after a settings edit in between, the edit's); no record or row does, so it
+lasts only as long as Workers Logs keep the line.
 
 ### Alarm and lease log lines
 
 Each alarm writes structured lines to Workers Logs for
 `kogane-observation-pipeline` (`services/processor/src/schedule-alarm.ts`).
-They hold job and occurrence ids, instants, closed codes and counts only:
+They hold job and occurrence ids, schedule revisions, instants, closed codes
+and counts only:
 
 - `schedule_alarm` with `outcome`: `claimed` (with `nominalAt`, `lagMs`,
   `claimMs` and the next reservation `nextDueAt`), `deferred` (with the
   nominal, the stored run time and the maintenance-adjusted `dueAt`), `early`,
-  `disabled`, `no_job`, or `claim_conflict` (the claim inserted no occurrence
-  row; a `started` row already there for that occurrence is marked
-  `uncertain`/`dispatch_uncertain`, and nothing is dispatched).
+  `disabled`, `no_job`, `retry_claimed` (the single retry of a
+  `not_dispatched` occurrence took it over; with `scheduleRevision`, the
+  schedule revision its UPDATE was fenced on, written only when that UPDATE
+  claimed the row; no audit record), or `claim_conflict` (with
+  `scheduleRevision`, the revision the claim's INSERT required; it inserted
+  no occurrence row; a `started` row already there for that occurrence is
+  marked `uncertain`/`dispatch_uncertain`, and nothing is dispatched).
 - `schedule_dispatch_start`, written just before the collector call, with the
   target workspace.
 - `schedule_dispatch_result` with `status`, `failureCode`, `runCount` and
@@ -418,8 +438,13 @@ login or render with JavaScript cannot be read this way.
 
 ## Settings API
 
-- `GET /api/ops/v1/schedules`: settings, maintenance provenance, reservations
-  and receipts.
+- `GET /api/ops/v1/schedules?detail=full`: settings, maintenance provenance,
+  reservations and receipts, as the Processor's snapshot has them; the page
+  asks for it. Without `detail`, or with `detail=summary`, one line per job
+  with its closed states and newest receipt, each source's maintenance
+  status and rule count, and the held leases
+  ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)). No other query
+  parameter is accepted.
 - `POST /api/ops/v1/schedules/:id`: version-checked job edits.
 - `POST /api/ops/v1/schedules/maintenance`: versioned maintenance edits.
 - `POST /api/ops/v1/schedules/leases/:sourceId`: release the exact stopped
@@ -474,7 +499,8 @@ and the routes above refuse every agent and every MCP-audience caller. The tools
   `"*"`, and `evidence.read` over the whole store because the page's
   occurrences carry run and evidence ids and it lists held leases; on `/mcp`
   and `POST /api/agent/v1/schedules.read`) answers this page's
-  `GET /api/ops/v1/schedules` snapshot without its `survey` part, read from
+  `GET /api/ops/v1/schedules` snapshot without its `survey` part, at the same
+  `detail` (`summary` by default), read from
   the Processor with no operator or agent header
   ([ADR 0081](adr/0081-ui-parity-through-mcp.md);
   [UI read pages](agent-api.md#ui-read-pages)).
@@ -486,7 +512,20 @@ and the routes above refuse every agent and every MCP-audience caller. The tools
   state and latest receipt outcome, each rule with up to 20 revisions (actor
   kind, closed reason, whether the reader wrote it as a delegated principal),
   and the writer's limits on delegated revisions with how many the reader wrote
-  today. It returns no run or evidence ids, no lease and no principal's
+  today. That is its `detail: "full"`; by default (`detail: "summary"`,
+  [ADR 0123](adr/0123-summary-detail-for-large-reads.md), amendment of
+  2026-11-19) the App answers `maintenanceReadSummary` of it, 16 lines a page
+  (`offset`): per source the reference status and its job and rule counts;
+  per job its id, kind, enabled, supported, revision, original next
+  occurrence, due time, reservation state and newest receipt's nominal time,
+  status and failure code; per rule its current revision (timezone, pattern,
+  enabled, scope) with how many revisions are listed, their distinct actor
+  kinds and change reasons and how many the reader wrote; and the limits. A
+  source whose lines continue is listed on the next page too. Each page is a
+  fresh read, not a cursor: a rule or job added between two pages moves the
+  lines after it, so a page can repeat or skip one, and `coverage.lines`
+  differs between the pages when it does. It returns no
+  run or evidence ids, no lease and no principal's
   identity, and nothing about another source. The Processor serves it on
   `/internal/schedules/agent/read`, which refuses a request that also carries
   the operator header or a delegation reference; no write is reachable under

@@ -9,6 +9,7 @@ import { mizuhoPolicy } from "./mizuho.ts";
 import { myJcbPolicy } from "./myjcb.ts";
 import { sbiSecuritiesPolicy } from "./sbi-securities.ts";
 import { sbiShinseiPolicy } from "./sbi-shinsei.ts";
+import { smbcBankPolicy } from "./smbc-bank.ts";
 import { vpassPolicy, type VpassBinding } from "./vpass.ts";
 
 /** Highest policy version the current build can select. */
@@ -57,6 +58,8 @@ export interface AvailableIdentityEvidence {
    * balances capture, whose rows carry an account discriminator. Absent reads as false.
    */
   sbiForeignDiscriminatedArtifact?: boolean;
+  /** SMBC: the parse's artifact is an AUD foreign ordinary balance capture. Absent reads as false. */
+  smbcForeignOrdinaryAudBalanceArtifact?: boolean;
 }
 export const NO_EVIDENCE: AvailableIdentityEvidence = { vpassBindings: [] };
 
@@ -82,6 +85,7 @@ const SOURCE_POLICIES: readonly IdentityPolicyModule[] = [
   sbiShinseiPolicy,
   myJcbPolicy,
   sbiSecuritiesPolicy,
+  smbcBankPolicy,
 ];
 
 function policyModuleFor(sourceId: string): IdentityPolicyModule | undefined {
@@ -181,4 +185,5 @@ export { MIZUHO_POLICY_VERSION } from "./mizuho.ts";
 export { MYJCB_POLICY_VERSION } from "./myjcb.ts";
 export { SBI_SECURITIES_POLICY_VERSION } from "./sbi-securities.ts";
 export { SBI_SHINSEI_POLICY_VERSION } from "./sbi-shinsei.ts";
+export { SMBC_BANK_POLICY_VERSION } from "./smbc-bank.ts";
 export { trustedVpassBinding, VPASS_POLICY_FAMILY, type VpassBinding } from "./vpass.ts";

@@ -930,6 +930,135 @@ test("MyJCB J-POINT parses are re-identified at policy 2; statement parses stay 
   ]);
 });
 
+test("SMBC AUD balance parses are re-identified at policy 2; yen and AUD history parses stay at policy 1", async () => {
+  const aud = (id: number) => [
+    db
+      .prepare(
+        "INSERT INTO balance_observations(parse_run_id,source_account,metric,instrument,raw_locator,extra_json) VALUES(?,'smbc-bank:ordinary-foreign-aud','account_balance','AUD','json:$.amount','{}')",
+      )
+      .bind(id),
+  ];
+  // An AUD balance capture, a yen capture and an explicit-empty AUD history
+  // capture (the history parser publishes no observation).
+  await seed(170, 0, "smbc-bank", true, aud, "foreign-ordinary-aud-balance");
+  await seed(171, 1, "smbc-bank", true, () => [], "balance-normalized");
+  await seed(172, 0, "smbc-bank", true, () => [], "foreign-ordinary-aud-history");
+  // What the policy-1 build recorded. The rule reads the run's version, so
+  // the shipped resolver at version 1 reproduces it: the AUD reference
+  // unresolved under the source's yen fallback label.
+  for (const [id, observations] of [
+    [170, 1],
+    [171, 1],
+    [172, 0],
+  ] as const)
+    expect(await identifyParse(db, parse(id), resolveIdentity, 1)).toBe(observations);
+  const accountMappings = () =>
+    db
+      .prepare(
+        `SELECT json_extract(a.reference_json,'$[0]') reference,m.id,m.revision,m.account_id,m.label,m.status,m.reason,m.policy_version
+         FROM account_mappings m JOIN source_accounts a ON a.id=m.source_account_id
+         WHERE a.source_id='smbc-bank' AND a.producer_id='synthetic-producer' ORDER BY reference,m.revision`,
+      )
+      .all<{ reference: string; revision: number; [column: string]: unknown }>();
+  const audUnit = () =>
+    db
+      .prepare(
+        `SELECT m.id,m.revision,m.instrument_id,m.label,m.status,m.reason,m.policy_version FROM instrument_mappings m
+         JOIN instrument_identifiers d ON d.id=m.identifier_id
+         WHERE d.namespace='iso4217' AND d.scope='global' AND d.value='AUD' ORDER BY m.revision`,
+      )
+      .all<{ revision: number; [column: string]: unknown }>();
+  const recorded = (await accountMappings()).results;
+  const audRecorded = recorded.filter((m) => m.reference === "smbc-bank:ordinary-foreign-aud");
+  expect(audRecorded.map(({ id: _id, account_id: _account, ...mapping }) => mapping)).toEqual([
+    {
+      reference: "smbc-bank:ordinary-foreign-aud",
+      revision: 1,
+      label: "三井住友銀行 円普通預金",
+      status: "unresolved",
+      reason: "unrecognized-source-account",
+      policy_version: 1,
+    },
+  ]);
+  const unitRecorded = (await audUnit()).results;
+  expect(unitRecorded.map((m) => [m.revision, m.policy_version])).toEqual([[1, 1]]);
+  // Only the AUD balance parse is a candidate again. Earlier tests may leave
+  // other SMBC parses pending, so drain the source and read the runs.
+  for (let pass = 0; pass < 10; pass++)
+    if ((await identitySweep(db, resolveIdentity, 8, "smbc-bank")).processedRuns === 0) break;
+  expect(await identitySweep(db, resolveIdentity, 8, "smbc-bank")).toEqual({
+    processedRuns: 0,
+    identifiedRuns: 0,
+    identifiedObservations: 0,
+  });
+  expect(
+    (
+      await db
+        .prepare(
+          `SELECT r.parse_run_id,group_concat(r.policy_version) versions FROM identity_runs r
+           JOIN identity_run_seals s ON s.identity_run_id=r.id
+           WHERE r.parse_run_id IN (170,171,172) GROUP BY r.parse_run_id ORDER BY r.parse_run_id`,
+        )
+        .all()
+    ).results,
+  ).toEqual([
+    { parse_run_id: 170, versions: "1,2" },
+    { parse_run_id: 171, versions: "1" },
+    { parse_run_id: 172, versions: "1" },
+  ]);
+  const after = (await accountMappings()).results;
+  // Append-only: every earlier revision stays as recorded, the yen account's
+  // included, and the yen account gains none, so its mapping id (which
+  // card-settlement ownership evidence cites) is unchanged. Only the AUD
+  // reference gains a policy-2 revision, on the same account entity.
+  for (const mapping of recorded) expect(after).toContainEqual(mapping);
+  expect(after.filter((m) => m.reference === "smbc-bank:ordinary-yen")).toEqual(
+    recorded.filter((m) => m.reference === "smbc-bank:ordinary-yen"),
+  );
+  const added = after.filter((m) => !recorded.some((r) => r.id === m.id));
+  expect(added.map(({ id: _id, ...mapping }) => mapping)).toEqual([
+    {
+      reference: "smbc-bank:ordinary-foreign-aud",
+      revision: 2,
+      account_id: audRecorded[0]!.account_id,
+      label: "三井住友銀行 外貨普通預金（AUD）",
+      status: "provider-local",
+      reason: "collector-single-foreign-ordinary-aud-scope",
+      policy_version: 2,
+    },
+  ]);
+  // No second subject: the AUD reference is still one source account.
+  expect(
+    await count(
+      "source_accounts",
+      "source_id='smbc-bank' AND json_extract(reference_json,'$[0]')='smbc-bank:ordinary-foreign-aud'",
+    ),
+  ).toBe(1);
+  // The AUD currency identifier, which no other policy-2 run here revised,
+  // gains one policy-2 rule revision equal to the policy-1 one except for its
+  // id, revision and version.
+  const unitAfter = (await audUnit()).results;
+  expect(unitAfter[0]).toEqual(unitRecorded[0]!);
+  const { id: _unitId, ...unit } = unitRecorded[0]!;
+  expect(unitAfter.map(({ id: _id, ...mapping }) => mapping)).toEqual([
+    unit,
+    { ...unit, revision: 2, policy_version: 2 },
+  ]);
+  // The current views select the newer sealed run for the AUD parse only.
+  expect(
+    (
+      await db
+        .prepare(
+          "SELECT parse_run_id,min(policy_version) v FROM current_identity_observations WHERE parse_run_id IN (170,171) GROUP BY parse_run_id ORDER BY parse_run_id",
+        )
+        .all()
+    ).results,
+  ).toEqual([
+    { parse_run_id: 170, v: 2 },
+    { parse_run_id: 171, v: 1 },
+  ]);
+});
+
 test("SBI foreign positions parses are re-identified at the newest policy; a scopeless code no longer merges", async () => {
   // Policy 2's rule (ADR 0113); the sweep now runs these parses at policy 3
   // (ADR 0117), which keeps that rule.
@@ -1206,7 +1335,7 @@ test("SBI foreign rows with no account discriminator leave the cash ledger's acc
   ];
   // The foreign cash history: its schema states no discriminator.
   await seed(
-    170,
+    180,
     0,
     "sbi-securities",
     true,
@@ -1222,7 +1351,7 @@ test("SBI foreign rows with no account discriminator leave the cash ledger's acc
   );
   // A trade stating the field empty, as the trade parser accepts.
   await seed(
-    171,
+    181,
     0,
     "sbi-securities",
     true,
@@ -1239,7 +1368,7 @@ test("SBI foreign rows with no account discriminator leave the cash ledger's acc
   );
   // A position and a cash balance not stating theirs, as those parsers accept.
   await seed(
-    172,
+    182,
     0,
     "sbi-securities",
     true,
@@ -1250,7 +1379,7 @@ test("SBI foreign rows with no account discriminator leave the cash ledger's acc
     "foreign-cash-positions",
   );
   await seed(
-    173,
+    183,
     0,
     "sbi-securities",
     true,
@@ -1260,7 +1389,7 @@ test("SBI foreign rows with no account discriminator leave the cash ledger's acc
     ),
     "foreign-cash-balances",
   );
-  for (const id of [170, 171, 172, 173])
+  for (const id of [180, 181, 182, 183])
     expect(await identifyParse(db, parse(id, "sbi-securities"), resolveIdentity, 1)).toBe(1);
   type Organized = {
     parse_run_id: number;
@@ -1278,7 +1407,7 @@ test("SBI foreign rows with no account discriminator leave the cash ledger's acc
           `SELECT o.parse_run_id,o.policy_version,o.source_account_id,sa.reference_json,m.account_id,m.reason,m.status
            FROM effective_identity_observations o JOIN source_accounts sa ON sa.id=o.source_account_id
            JOIN account_mappings m ON m.id=o.effective_account_mapping_id
-           WHERE o.parse_run_id IN (170,171,172,173) ORDER BY o.parse_run_id`,
+           WHERE o.parse_run_id IN (180,181,182,183) ORDER BY o.parse_run_id`,
         )
         .all<Organized>()
     ).results;
@@ -1326,16 +1455,16 @@ test("SBI foreign rows with no account discriminator leave the cash ledger's acc
       status: "unresolved",
     });
   expect(after.slice(1)).toEqual([
-    scoped(171, "specificAccountCode"),
-    scoped(172, "specificAccountCode"),
-    scoped(173, "accountKind"),
+    scoped(181, "specificAccountCode"),
+    scoped(182, "specificAccountCode"),
+    scoped(183, "accountKind"),
   ]);
   expect(new Set(after.map((row) => row.account_id)).size).toBe(4);
   // Append-only: every policy-1 run still names the bare source account.
   expect(
     await count(
       "identity_observations",
-      `source_account_id='${ledger.source_account_id}' AND identity_run_id IN (SELECT id FROM identity_runs WHERE parse_run_id IN (170,171,172,173) AND policy_version=1)`,
+      `source_account_id='${ledger.source_account_id}' AND identity_run_id IN (SELECT id FROM identity_runs WHERE parse_run_id IN (180,181,182,183) AND policy_version=1)`,
     ),
   ).toBe(4);
 });

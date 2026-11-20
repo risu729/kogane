@@ -135,7 +135,12 @@ observe" is never rendered as "the balance is gone".
 ## The API
 
 `GET /api/v2/balances/latest` and `GET /api/v2/balances/history` are separate
-routes with separate budgets. Both return the D10 envelope:
+routes with separate budgets. With `detail=full` both return the D10
+envelope below, 100 rows by default. Without `detail`, or with
+`detail=summary`, each row is one short line and the page defaults to 10
+rows; the page, cursor, coverage and subtotals are those of the full page
+([ADR 0123](adr/0123-summary-detail-for-large-reads.md),
+[agent API: UI read pages](agent-api.md#ui-read-pages)). The full envelope:
 
 ```jsonc
 {
@@ -167,7 +172,17 @@ Each latest item carries:
 - `quantity` — `ObservedQuantity`: the decimal-v1 `normalized` value (the only
   input a calculation may use), the unit reference, and the legacy provider
   columns under `sourceRepresentation` as evidence. An unknown minor-unit
-  exponent stays `null` rather than being guessed;
+  exponent stays `null` rather than being guessed. For an exact value,
+  `normalized.basis` is the stored decimal-v1 basis of the representative
+  observation's value (`agreement`, `minor_units` or `decimal_text`, as
+  [normalized decimals](normalized-decimals.md#入力契約) defines them), the
+  same basis as `row.normalized`; a value that is not exact carries `none`.
+  It says how that one observation's representations normalized, not whether
+  witnesses or scopes agree. The projection row does not store it; the route
+  reads it with the page's stored decimals, and if that stored value differs
+  from the projected one the whole page answers `503 catalogue_read_failed`,
+  as any unreadable store does. A history item's `quantity.normalized` is its
+  observation's stored normalization as is;
 - `metric` — `{ metricId, definitionRelease, measurementKind, aggregationRule }`;
 - `adoption` — `{ state, reasonCode, memberEvidence[], evidenceCount }`. The
   evidence count is the number of witnesses of one measurement, which is not
@@ -209,18 +224,33 @@ A cursor is base64url of `{v, s: snapshotId, f: filterDigest, k: sortKey, t: pos
 It is **opaque but never trusted**:
 
 - `f` is the digest of the route, the resolved scope, the page size and the
-  identity read mode. A different filter set is a different query.
+  identity read mode. A different route, scope or read mode is a different
+  query. The page size is not: the continuation also compares `f` with the
+  same query's digest at each offered size, so a cursor read at one `limit`
+  continues at another from where its page ended, and the next cursor is
+  issued at the size asked now
+  ([ADR 0119](adr/0119-cursor-page-size.md)). The position is a keyset
+  position in the snapshot's fixed order, which no page size moves.
 - `t` is the projection's dense `row_seq`, not a business identifier. A cursor
   therefore contains no account label, no provider metric and no amount.
 - Every continuation request goes through the same Access gate and the same
   scope resolution as the first. A cursor is never an authorisation.
 
-| Situation                                | Answer                |
-| ---------------------------------------- | --------------------- |
-| Undecodable or wrong shape               | `400 invalid_cursor`  |
-| Filter digest differs                    | `400 cursor_mismatch` |
-| Snapshot retired or deleted              | `410 context_expired` |
-| Page size outside `50 / 100 / 200 / 500` | `400 invalid_limit`   |
+| Situation                                          | Answer                                 |
+| -------------------------------------------------- | -------------------------------------- |
+| Undecodable or wrong shape                         | `400 invalid_cursor`                   |
+| Filter digest differs at every page size           | `400 cursor_mismatch` with `mustMatch` |
+| Snapshot retired or deleted                        | `410 context_expired`                  |
+| Page size outside `10 / 25 / 50 / 100 / 200 / 500` | `400 invalid_limit`                    |
+| `detail` other than `summary` or `full`            | `400 invalid_detail`                   |
+
+`cursor_mismatch` names the inputs a continuation must repeat as they were,
+absent included: `mustMatch: ["collection", "source", "account",
+"instrument", "metric", "view", "identityRead"]` (`collection` is the
+route's path; the names are `kogane.balances.read`'s,
+[ADR 0123](adr/0123-summary-detail-for-large-reads.md)). The `detail` of a
+page is not bound to its cursor either: a page read as `summary` continues as
+`full` and the reverse.
 
 The reader is never moved silently to a newer list. "Read the newest
 snapshot" is an explicit action: drop the cursor.
@@ -375,15 +405,15 @@ row depends on the projection tables.
 
 ## Verified locally
 
-| Check                                                                                                                                                      | Where                                                                       |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| SC01 adopted set, SC06 unknown overlap, SC15 four empty meanings, oversized target bound                                                                   | `packages/read-model/test/balance-projection.test.ts`                       |
-| Page envelope, cursor round-trip, mismatch and expiry, `ObservedQuantity`                                                                                  | `packages/domain/test/paging.test.ts`                                       |
-| Seal, resume, immutability, retirement, deterministic snapshot id                                                                                          | `services/processor/test/balance-projection.test.ts`                        |
-| Fixed input capture and resume, budgets, chunk re-send, the writer fence, the active pointer and the four outcomes (G2-02, G2-05 … G2-14)                  | `services/processor/test/projection-input.test.ts`                          |
-| The dependency ledger, the trigger set and the 100 → 150 counter-example (G2-01, G2-03, G2-04)                                                             | `packages/read-model/test/source-revision.test.ts`                          |
-| 1,003-row keyset paging on a fixed snapshot while new evidence lands; 5,002-row history paging; cursor mismatch; 410; v1 parity; no `netWorth`; query plan | `services/app/test/balances-v2.test.ts`                                     |
-| Capability schema pinned on both sides                                                                                                                     | `apps/web/test/api-schema.test.ts`, `services/app/test/conformance.test.ts` |
+| Check                                                                                                                                                                                                             | Where                                                                       |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| SC01 adopted set, SC06 unknown overlap, SC15 four empty meanings, oversized target bound                                                                                                                          | `packages/read-model/test/balance-projection.test.ts`                       |
+| Page envelope, cursor round-trip, mismatch and expiry, `ObservedQuantity`                                                                                                                                         | `packages/domain/test/paging.test.ts`                                       |
+| Seal, resume, immutability, retirement, deterministic snapshot id                                                                                                                                                 | `services/processor/test/balance-projection.test.ts`                        |
+| Fixed input capture and resume, budgets, chunk re-send, the writer fence, the active pointer and the four outcomes (G2-02, G2-05 … G2-14)                                                                         | `services/processor/test/projection-input.test.ts`                          |
+| The dependency ledger, the trigger set and the 100 → 150 counter-example (G2-01, G2-03, G2-04)                                                                                                                    | `packages/read-model/test/source-revision.test.ts`                          |
+| 1,003-row keyset paging on a fixed snapshot while new evidence lands; 5,002-row history paging; cursor mismatch; 410; v1 parity; no `netWorth`; query plan; the stored `quantity.normalized.basis` on both routes | `services/app/test/balances-v2.test.ts`                                     |
+| Capability schema pinned on both sides                                                                                                                                                                            | `apps/web/test/api-schema.test.ts`, `services/app/test/conformance.test.ts` |
 
 Not verified: behaviour on production data volumes, real query-plan timings,
 and incremental per-scope rebuild (not implemented).

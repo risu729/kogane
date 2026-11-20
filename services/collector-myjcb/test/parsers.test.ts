@@ -227,6 +227,14 @@ describe("readCreditMenuGroups (ADR 0005's amendment (c))", () => {
     });
   });
 
+  test("a link past position 17 is not read, and only counted", () => {
+    expect(readCreditMenuGroups(creditMenu([0, 1, 2, 18], [7, 8]))).toEqual({
+      months: [0, 1, 2],
+      schedules: [7, 8],
+      linksBeyondRange: 1,
+    });
+  });
+
   test("the schedule heading as an h3 takes 7 and 8 from the h2 before it (amendment (j))", () => {
     const menu = (schedule: "h2" | "h3", guidance = "") =>
       `<h2>最新のご利用明細</h2>${link(0)}${link(1)}<${schedule}>${MENU_SCHEDULE_HEADING}</${schedule}>${link(7)}${link(8)}<h2>過去の明細</h2>${[2, 3, 4, 5, 6].map(link).join("")}${guidance}`;

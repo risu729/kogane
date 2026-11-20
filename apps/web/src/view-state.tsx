@@ -35,7 +35,7 @@ interface ViewState {
   "positions.page": ListPage;
   "identity.source": string;
   "identity.draft": string;
-  "identity.tab": "accounts" | "instruments";
+  "identity.tab": "account-list" | "accounts" | "instruments";
   "identity.offset": number;
   "identity.coverageOffset": number;
   "purchases.period": string;
