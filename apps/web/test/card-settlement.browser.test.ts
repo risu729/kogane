@@ -892,7 +892,8 @@ describe.if(runnable)("card settlement review", () => {
       await page.getByText(`${label}を読み込めませんでした`, { exact: false }).waitFor();
     expect(await auditView(page)).toEqual([]);
     // Each retry repeats its own read and no other. The response is awaited
-    // from before the click, so a fast answer is never missed.
+    // from before the click, so a fast answer is never missed; 次回の引落 reads
+    // the debit-account path too (view=upcoming), so its answer never counts.
     for (const [label, path, own, other] of [
       [
         "照合候補のない請求",
@@ -909,9 +910,10 @@ describe.if(runnable)("card settlement review", () => {
     ] as const) {
       const ownBefore = own.length;
       const otherBefore = other.length;
-      const answered = page.waitForResponse(
-        (response) => new URL(response.url()).pathname === path,
-      );
+      const answered = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return url.pathname === path && url.searchParams.get("view") !== "upcoming";
+      });
       await page.getByRole("button", { name: `${label}を再試行`, exact: true }).click();
       await answered;
       expect(own.length).toBe(ownBefore + 1);

@@ -186,7 +186,10 @@ describe.if(runnable)("account candidate review", () => {
     const tab = await open();
     const panel = tab.getByRole("region", { name: "確認待ち", exact: true });
     await panel.getByRole("button", { name: "次の候補", exact: true }).click();
+    // The cards leave as soon as the next page starts loading; the pager
+    // returns only with that page's answer, so the panel is read after it.
     await tab.locator(".identity-card").first().waitFor({ state: "detached" });
+    await panel.getByRole("navigation", { name: "候補のページ", exact: true }).waitFor();
     const text = await panel.innerText();
     expect(text).not.toContain("確認待ちの候補はありません。");
     expect(text).toContain("このページに表示する項目はありません。");
