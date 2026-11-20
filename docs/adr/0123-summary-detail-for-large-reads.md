@@ -776,9 +776,14 @@ data }` serialized, the page's own cursor included):
   the bytes end it (nine pages of 30 accounts), and with 512-character
   labels and keys a page holds one account.
 - Open limit: a page that cannot hold its first line within 8,192 bytes
-  (a label of thousands of characters, or a `bySource` of some 80 sources
-  and units, which every page repeats) is `413 result_limit_exceeded`,
-  never cut; no argument shortens the header.
+  is `413 result_limit_exceeded`, never cut, with no hint beside the code
+  (as the 5,000-row refusal: the read has no other `detail` to name, so it
+  carries no `retryWith`). A line passes it with a label of thousands of
+  characters, and nothing shortens a line. The header passes it with about
+  50 source and unit pairs in `bySource` (each about 160 bytes, about 220
+  with two reasons, so about 35 when every amount is stale), which every
+  page repeats; `source` or `instrument` narrows `bySource` and `byUnit`
+  to one source or one unit, and that header fits.
 - Open limit and owner decision: the known-assets subtotal of the latest
   page and `financial.query` `holdings` key on the provider reference, so
   an account entity reached through two references of one source that the
