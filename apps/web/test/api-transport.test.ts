@@ -176,7 +176,7 @@ describe("browser JSON transport", () => {
       metrics: [],
       latest: [],
       history: [],
-      coverage: { ...coverage, limit: 10 },
+      coverage: { ...coverage, limit: 10, next: null },
     };
     serve(Response.json(summary));
     expect((await errorFor("/api/balances?view=balances&detail=full")).message).toContain("形式");
