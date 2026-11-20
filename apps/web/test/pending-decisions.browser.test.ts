@@ -1,7 +1,8 @@
 // The ホーム page's 判断待ち panel (ADR 0126) against a synthetic server: one
 // line per kind with its count, a link to the page that decides the first
 // item, the reason of a line that cannot be counted, and no panel for a
-// caller the route refuses. Every id is synthetic.
+// caller the route refuses or on a store that does not advertise the route.
+// Every id is synthetic.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -124,6 +125,8 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let refuse = false;
+  let advertised = true;
+  let requested = 0;
   let current: unknown = answer;
   beforeAll(async () => {
     server = Bun.serve({
@@ -135,9 +138,10 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
           return Response.json({
             apiVersion: 1,
             source: { kind: "central-store", classification: "financial" },
-            capabilities: CENTRAL_STORE_CAPABILITIES,
+            capabilities: { ...CENTRAL_STORE_CAPABILITIES, pendingDecisions: advertised },
           });
         if (url.pathname === "/api/overview") return Response.json(overview);
+        if (url.pathname === PENDING_DECISIONS_PATH) requested += 1;
         if (url.pathname === PENDING_DECISIONS_PATH)
           return refuse
             ? Response.json({ error: "operator_required" }, { status: 403 })
@@ -247,6 +251,24 @@ describe.if(runnable)("the 判断待ち panel on ホーム", () => {
       await page.waitForTimeout(200);
       expect(await page.locator('section[aria-labelledby="pending-decisions"]').count()).toBe(0);
     } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  test("a store that does not advertise the route is never asked and shows no panel", async () => {
+    refuse = false;
+    advertised = false;
+    requested = 0;
+    const page = await browser.newPage();
+    try {
+      // The local evidence browser serves no such route: probing it would be
+      // a failed request in the console on every visit to ホーム.
+      await page.goto(`${origin}/`, { waitUntil: "networkidle" });
+      await page.getByRole("heading", { name: "ホーム", exact: true }).waitFor();
+      expect(await page.locator('section[aria-labelledby="pending-decisions"]').count()).toBe(0);
+      expect(requested).toBe(0);
+    } finally {
+      advertised = true;
       await page.close();
     }
   }, 30_000);

@@ -72,7 +72,10 @@ recorded with `kogane.reconcile.propose` (no page or tool lists them, and
    `pending-posted.link`, `maintenance-survey.proposal`, `change-plan.open`.
    The route (operator-only, the operator reading with the authority of
    ADR 0084), the agent HTTP route and the MCP tool are adapters over it, and
-   the panel reads the route (ADR 0081 point 2). The answer carries no total;
+   the panel reads the route (ADR 0081 point 2). `/api/meta` advertises the
+   route as the `pendingDecisions` capability, and the panel reads it only
+   where it is advertised, so a store without it (the local evidence
+   browser) is never probed. The answer carries no total;
    the panel's header sums the counted lines and says `以上` when a line is
    cut at its bound or is `unavailable` for any reason but `not_served`, so
    it never reads as complete when it is not (INV05).

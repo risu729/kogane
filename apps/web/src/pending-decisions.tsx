@@ -2,12 +2,13 @@
 // decision, one line per kind, read from `GET /api/v2/decisions/pending` (the
 // same service as `kogane.decisions.pending`). `getJson` checks its shape
 // before it renders. The panel counts nothing and decides nothing: each line
-// links to the page that shows and decides its items. The route is the
-// operator's; for anyone else, and where the route is not served, the panel
-// is not shown.
+// links to the page that shows and decides its items. The panel reads the
+// route only where `/api/meta` advertises it (`pendingDecisions`), so a store
+// without it (the local evidence browser) is never probed. The route is the
+// operator's; for anyone else the panel is not shown.
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ApiError, getJson } from "./api.ts";
+import { ApiError, getJson, useFeatures } from "./api.ts";
 import type {
   PendingDecisionKind,
   PendingDecisionLine,
@@ -17,9 +18,10 @@ import { PENDING_DECISIONS_PATH } from "../../../packages/observation-shared/src
 import { Link } from "./router.tsx";
 import { Badge, Panel } from "./ui.tsx";
 
-function usePendingDecisions() {
+function usePendingDecisions(advertised: boolean) {
   return useQuery({
     queryKey: ["decisions", "pending"],
+    enabled: advertised,
     // getJson checks the shape (`validApiResponse`) before anything renders.
     queryFn: ({ signal }) => getJson<PendingDecisions>(PENDING_DECISIONS_PATH, signal),
     retry: false,
@@ -82,9 +84,11 @@ function Line({ line }: { line: PendingDecisionLine }): ReactNode {
 }
 
 export function PendingDecisionsPanel(): ReactNode {
-  const query = usePendingDecisions();
-  // Not the operator (the route is theirs), or a deployment without the
-  // route (the local evidence browser): the panel is not shown.
+  const features = useFeatures();
+  const query = usePendingDecisions(features.pendingDecisions);
+  // A store that does not advertise the route (the local evidence browser),
+  // or not the operator (the route is theirs): the panel is not shown.
+  if (!features.pendingDecisions) return null;
   if (query.error instanceof ApiError && (query.error.status === 403 || query.error.status === 404))
     return null;
   const waiting =
