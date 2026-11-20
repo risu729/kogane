@@ -82,6 +82,7 @@ describe("kogane.identity.read", () => {
     expect(PAGE_READ_ROUTES[TOOL]).toEqual([
       "/api/identity/connections",
       "/api/identity/accounts",
+      "/api/identity/account-list",
       "/api/identity/instruments",
       "/api/identity/coverage",
     ]);
@@ -119,6 +120,11 @@ describe("kogane.identity.read", () => {
         { collection: "accounts", source: "other-test", offset: 0 },
       ],
       ["/api/identity/accounts?source=absent", { collection: "accounts", source: "absent" }],
+      ["/api/identity/account-list", { collection: "account-list" }],
+      [
+        "/api/identity/account-list?source=other-test&identityRead=as-recorded",
+        { collection: "account-list", source: "other-test", identityRead: "as-recorded" },
+      ],
       ["/api/identity/instruments", { collection: "instruments" }],
       ["/api/identity/coverage", { collection: "coverage" }],
       [
@@ -133,6 +139,20 @@ describe("kogane.identity.read", () => {
     const accounts = await page.mcp(TOOL, { collection: "accounts" });
     expect(accounts.body.data.rows).toMatchObject([
       { revision: 2, status: "identified", label: "Updated account" },
+    ]);
+    const list = await page.mcp(TOOL, { collection: "account-list" });
+    expect(list.body.data.rows).toMatchObject([
+      {
+        account: "account",
+        label: "Updated account",
+        labelOrigin: "manual",
+        role: "cash",
+        status: "provider-local",
+        sources: ["other-test"],
+        references: 1,
+        observedCount: 1,
+        connection: null,
+      },
     ]);
     expect(await tableCounts()).toEqual(before);
   });

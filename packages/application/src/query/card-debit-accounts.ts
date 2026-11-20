@@ -50,14 +50,11 @@ import { CARD_INFORMATION_READER_VERSION } from "../../../domain/src/myjcb-card-
 import type { FinancialError } from "../../../domain/src/result.ts";
 import { parseLocalDate, type TemporalValue } from "../../../domain/src/time.ts";
 import type { Quantity } from "../../../domain/src/values.ts";
-import {
-  sweepRowAmount,
-  type CardSettlementSweepRow,
-} from "../../../read-model/src/card-settlement-bank-debits.ts";
 import { cardSettlementOwnershipCtes } from "../../../read-model/src/card-settlement-ownership.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
 import { type Grant, grantAllows } from "../grants.ts";
+import { statementTotal, type StatementTotalRow } from "./card-statement-total.ts";
 import { pageBeyondBudget } from "./page-budget.ts";
 
 const REQUEST_ID = "card-settlements.debit-accounts";
@@ -94,8 +91,12 @@ export interface CardDebitAccountCard {
     period: string | null;
     /** The provider's due date; null when absent or not a civil date. */
     paymentDate: TemporalValue | null;
-    /** The provider's total; null when it is not exact (INV05). */
-    amount: Quantity | null;
+    /**
+     * The provider's total. One that is not exact keeps its status and a
+     * closed reason (`stored:<status>`, or `decimal_not_projected` when no
+     * decimal-v1 value was recorded), never zero and never dropped (INV05).
+     */
+    amount: Quantity;
   } | null;
   stated: StatedDebitAccount;
   /** Accepted settlements per bank account, newest debit first. */
@@ -129,7 +130,11 @@ export type CardDebitAccountsOutcome =
   | { ok: true; review: CardDebitAccountsReview }
   | { ok: false; error: FinancialError };
 
-type CardRow = CardSettlementSweepRow & { payment_date: string | null; period: string | null };
+/** A statement row (./card-statement-total.ts) with its due date and period. */
+type CardRow = StatementTotalRow & {
+  payment_date: string | null;
+  period: string | null;
+};
 
 /**
  * Each card's newest current statement total (`?1` the card bound plus one),
@@ -254,6 +259,16 @@ const reasonCode = (value: unknown): value is CardDebitAccountReason =>
 const cardKey = (sourceId: string, sourceAccount: string) => sourceId + "\n" + sourceAccount;
 const localDate = (value: string | null): string | null =>
   value !== null && parseLocalDate(value) !== null ? value : null;
+
+/**
+ * The statement's total (./card-statement-total.ts). A row CORE 0024's CHECK
+ * refuses to store fails the read.
+ */
+function totalOf(row: CardRow): Quantity {
+  const total = statementTotal(row);
+  if (total === null) throw invalid();
+  return total;
+}
 
 /** The account a `supports` or `names_other_account` row's proposal names. */
 function namedAccount(json: string | null): { account: DebitBankAccount; digits: number } {
@@ -466,7 +481,7 @@ export async function reviewCardDebitAccounts(input: {
                       zone: "Asia/Tokyo",
                       basis: "provider" as const,
                     },
-              amount: sweepRowAmount(row),
+              amount: totalOf(row),
             },
       stated,
       settled,

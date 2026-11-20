@@ -673,3 +673,190 @@ three days later, and one whose deadline is the previous Tokyo day is
 are the other way round. A `Europe/London` offer is `needs_rule_verification`
 at both instants. Before this change the 16:00 UTC search answered the first
 offer with `offer_not_valid_at_clock` (the test fails on the old route).
+
+## Amendment: a deadline window and a summary on the expiry read
+
+- Status: proposed. **Owner approval is needed before merge**: it changes the
+  published input schema of `kogane.rewards.read` (three new optional
+  arguments) and the query parameters of `GET /api/v2/rewards/expiry`.
+- Date: 2026-11-19
+- Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414)
+  (everyday questions in one or two MCP calls, each answer under 8 KB;
+  question Q8, "Which reward points expire soon?", gap G5 of the
+  everyday-questions audit plan)
+- Builds on: [ADR 0081](0081-ui-parity-through-mcp.md) (a route and its MCP
+  read are two adapters over one reader), [ADR 0119](0119-cursor-page-size.md)
+  (a cursor continues at another offered page size), the amendment of
+  2026-11-18 above (today's Asia/Tokyo day),
+  [ADR 0068](0068-provider-reward-expiry-subsets.md) (provider-displayed
+  portions)
+
+### Context
+
+`kogane.rewards.read` with `collection: "expiry"` answers the published
+snapshot's estimate rows in pages of 25 to 200 (default 50), each row with its
+full `expiryBasis`, beside the snapshot's complete provider display sections.
+It has no date filter and no compact form. An MCP client shows the first 8 KB
+of a result, so to answer Q8 a client had to page through every row and filter
+and add by date itself. Two traps sit in that client arithmetic: the READ build
+writes a row for every rule of a bucket's programme (V Point has two), so
+adding rows counts a V Point bucket twice (INV06); and a J-POINT expiring
+portion is a part of a displayed total, never a bucket (ADR 0068), so adding
+it to anything double counts.
+
+Measured on the synthetic store of `services/app/test/reward-expiry-window.test.ts`
+(23 buckets of V Point, V Point Pay and J-POINT; 45 rows), as the bytes of the
+MCP result's structured content:
+
+| `kogane.rewards.read` arguments                             |  Bytes |
+| ----------------------------------------------------------- | -----: |
+| `{collection: expiry}` (50-row page; unchanged)             | 70,995 |
+| `{collection: expiry, before}` (10 rows in the window)      | 12,447 |
+| `{collection: expiry, detail: summary, before}` (4 buckets) |  1,882 |
+| the same, a wider window (6 buckets, one display)           |  2,663 |
+| `{collection: expiry, detail: summary}` (no window)         |  5,293 |
+
+`packages/application/test/reward-expiry-window.test.ts` builds a summary at
+its line limits with promotion-shaped references (60 V Point buckets under two
+rules, two more programmes, eight J-POINT sections): 6,875 bytes.
+
+### Options considered
+
+1. **A window on the full page only.** Smaller pages, but the client still adds
+   rows itself, with both double-counting traps; rejected.
+2. **A window filter in the page's SQL.** The index
+   `reward_expiry_estimates_v2_deadline` would serve it, but a summary needs
+   every row of a bucket to count it once and to see a bucket whose rules
+   disagree, and the left-out counts need the rows outside the window; a second
+   SQL text would need the rewrite proof (frozen legacy SQL, differential and
+   plan tests) for no saving at this size; not chosen.
+3. **Read the snapshot's rows whole, bounded, and window and summarize them in
+   pure functions the route and the tool share (chosen).** The shipped page
+   query is reused unchanged with a larger `LIMIT`; the build caps a snapshot
+   at 200 buckets, so the read is bounded.
+4. **`summary` the default, as [ADR 0123](0123-summary-detail-for-large-reads.md)
+   makes it for the balance, schedule and collection quality reads.** ADR 0123
+   left the reward reads' defaults unchanged, and the web page reads the full
+   page. Here `detail` defaults to `full`, so no published answer changes; a
+   later change can make the expiry read's default `summary` as ADR 0123 did
+   for its reads.
+
+### Decision
+
+Option 3, in `packages/application/src/query/reward-expiry-window.ts`, called
+by `rewardExpiryFromRead` (`services/app/src/rewards-read.ts`), which both
+`GET /api/v2/rewards/expiry` and `kogane.rewards.read` run.
+
+1. **Window.** `from` and `before` are calendar dates (`YYYY-MM-DD`, a real
+   day), compared as text with each row's `expiresOn`: `from` inclusive,
+   `before` exclusive. Without `from` the window starts on today's Asia/Tokyo
+   date, `tokyoToday(now)`, the function the goal search's clock now calls
+   too; without `before` it has no end. A malformed value is
+   `400 invalid_date`; `from` on or after `before` is `400 invalid_date_range`.
+   The answer states the window it used, with `fromBasis` (`request` or
+   `today`), `today` and `calendar: "Asia/Tokyo"`. `expiresOn` is a date in
+   the rule's or the provider's calendar, which this ADR already records as
+   assumed `Asia/Tokyo`.
+2. **`detail`.** `full` (the default) or `summary`; another value is
+   `400 invalid_query` on the route and `400 invalid_request` on the tool's
+   closed schema. Without a window, `full` is the page exactly as before.
+3. **Windowed page** (`full` with a window): the rows inside the window, in
+   snapshot order, paged by `limit` and `cursor`, plus `window.rows`: how many
+   rows of the read were inside, before and after, and left out with no date
+   (`deadline_unknown`). The cursor's query binds `from` and `before` as
+   resolved: a cursor of one window is `400 cursor_mismatch` under another,
+   with no window, or the reverse. An unwindowed read keeps the scope
+   `{ program }` it had, so its cursors are unchanged, and ADR 0119's
+   page-size continuation holds within a window. `providerDisplaySections`
+   stays the snapshot's complete set.
+4. **Summary** (`detail: summary`; unpaged, so `limit` or `cursor` is
+   `400 invalid_query`): `{ detail, window, programs, providerDisplays,
+   counts, lineLimit, snapshot }`.
+   - A bucket is the rows of one programme, holding and bucket. Its deadline
+     is the one date all its rows carry; rows with no date make it
+     `deadline_unknown`, rows that disagree (two dates, or a date beside none)
+     `deadline_differs_by_rule`. Neither is in or out of a window: each is
+     counted under its reason.
+   - `programs`: per programme and unit, the buckets inside the window, their
+     `total` and the earliest lines (`holdingRef`, `bucketRef`, `kind`,
+     `expiresOn`, `basis`, `amount`), at most 20 across programmes, ordered by
+     date. The total is `sumQuantities` over each bucket's amount once, so two
+     units are never added; when any amount is not exact it is
+     `{ status: "not-exact", value: null, reasonCodes }` with the operands'
+     statuses, never a partial sum or a zero (INV05). A stored "exact" amount
+     that is not a decimal-v1 decimal is `unparsed` (`decimal-v1:invalid`).
+   - `providerDisplays`: the provider-displayed portions inside the window, at
+     most 3, each with its parent bucket and display references; never added
+     to a total or to another portion.
+   - `counts.buckets` and `counts.providerDisplays`: inside, before, after,
+     and `leftOut` by the closed `REWARD_EXPIRY_LEFT_OUT_REASONS`
+     (`deadline_unknown`, `deadline_differs_by_rule`, `display_date_unknown`,
+     `provider_expiry_not_displayed`, `provider_expiry_unavailable`).
+   - Without a window every dated bucket and display counts as inside.
+5. **Bound.** Both forms read every estimate row of the snapshot (narrowed to
+   `program`) through the shipped `REWARD_ESTIMATE_PAGE_SQL` with
+   `LIMIT 1001`; more than 1,000 rows is `413 result_limit_exceeded`, never
+   cut. The query text does not change, so no rewrite proof or index is
+   needed and no migration is added.
+6. **Tool.** `kogane.rewards.read` takes `from`, `before` and `detail`; its
+   description names the window, the summary, its line limits and every
+   closed code above (about 1,640 characters of the 2,048 allowed), and
+   `test/ui-mcp-parity.test.ts` fails if one is missing. The shared request
+   schema (`REWARD_REQUEST_SCHEMA`) and response check (`api-validation.ts`)
+   accept the new parameters, the windowed page and the summary.
+
+### Consequences
+
+- Q8 is one call: `{collection: "expiry", detail: "summary", before: <date>}`.
+- No answer changes for a request without the new parameters; the web page is
+  unchanged.
+- A windowed or summary read costs one read of the whole snapshot's rows (at
+  most 400 rows with today's seeded rules) instead of one page.
+- The grant is unchanged: the reward page read needs `records.read` over the
+  whole store, and a source- or account-scoped grant is refused
+  `403 evidence_restricted`, never served a filtered summary. A grant has no
+  programme scope; every MCP client holds the whole-store grant (ADR 0084).
+- The audit record counts a summary's `programs` as its rows (the page rule of
+  `toolRows` takes the first list of the answer).
+
+Limits:
+
+- `from` defaulted to today is resolved per request: a windowed walk without
+  an explicit `from` that crosses Tokyo midnight is `cursor_mismatch` on its
+  next page.
+- A summary lists at most 20 bucket lines and 3 displays; its totals and
+  counts cover the rest, and a narrower window lists them.
+- `deadline_differs_by_rule` needs a rule that computes a date; no stored
+  holding receives one today (the table above).
+- A windowed full page counts rows (one per bucket and rule), a summary
+  buckets.
+- ADR 0123 merged first: this route's `cursor_mismatch` names `mustMatch:
+  ["collection", "program", "from", "before"]`, absent included. Its
+  `detail` stays opt-in here (absent is `full`), unlike the reads ADR 0123
+  defaults to `summary`.
+
+### Verification
+
+- `packages/application/test/reward-expiry-window.test.ts`: today at
+  14:59:59.999 and 15:00:00.000 UTC; the window's inclusive and exclusive
+  ends; malformed dates and windows with no day; a full page's rows and
+  counts; a bucket under two rules counted once with an exact decimal total;
+  undated and disagreeing buckets left out by reason; unparsed, missing and
+  malformed amounts making a total not exact; two units of one programme as
+  two totals; the line limit with every bucket in the total; displays listed
+  apart and every section reason counted; a summary at its line limits under
+  8 KB; the summaries passing the shared response check.
+- `services/app/test/reward-expiry-window.test.ts`, over a snapshot the
+  Processor's lane builds from synthetic claims: the summary is the same
+  `data` on the route, `/api/agent/v1/rewards.read` and `/mcp`, under 8 KB;
+  a not-exact total and a provider portion apart; the default `from` before
+  and after Tokyo midnight; a windowed walk at 25 and 50 rows, its cursor
+  refused under another window, without one and from an unwindowed walk;
+  a cursor of a defaulted `from` kept under the same day named explicitly
+  and refused past Tokyo midnight, while one of an explicit `from` is kept;
+  the unwindowed page without `window` and equal with `detail=full`; the
+  refusals on every path; a source- or account-scoped grant refused; a
+  snapshot over 1,000 rows `413` on both forms.
+- `services/app/test/ui-mcp-parity.test.ts`: the tool description names every
+  closed code, says that without `from` or `before` nothing is windowed, and
+  stays within 2,048 characters.

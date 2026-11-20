@@ -69,12 +69,21 @@ using the versioned canonical encoding `canonical-json-v1`. Every new parse run
 (candidate or not, successful or not) gets one `parse_input_references` row with
 its projection, its release and its fingerprint. That is what makes a later
 comparison possible at all, which is why it is recorded even with the flag off.
+The row is a plain `INSERT` keyed by the parse run the attempt has just
+inserted, so no earlier row can hold its key; a reference the schema refuses
+fails the attempt as `persistence_failed`, and no parse is published without
+its reference.
 
 Deployment guard: `parser_releases` has a trigger that refuses the same
 `(parser_name, semantic_version)` with a different `code_digest`. Registration
 happens during maintenance and before every parse, so a build that changed a
 parser without changing its version fails loudly instead of writing results
-nobody can identify.
+nobody can identify. A release already registered is skipped by its
+`release_id` (`ON CONFLICT(release_id) DO NOTHING`), after the trigger has
+compared its code digest. A release row the schema refuses (a CHECK or NOT
+NULL failure) raises as well: the parse attempt and `/release/register` answer
+it as `parser_release_conflict`, the same code as the trigger, and in the
+sweep's registration batch it fails the sweep.
 
 **From the first deployment of 0028 onward, changing a parser or a shared
 module it imports requires a version bump.** Before that point the rule is only
@@ -95,10 +104,10 @@ parse of that artifact fail, and no version bump can fix it.
 
 Extraction is now a release (`src/metadata-extractors/`):
 
-| Release                | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `legacy-metadata-v1`   | The pre-A04 `hydrateMeta`, plus the MyJCB shared-manifest lookup for inputs it refused ([ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md)): a stored MyJCB value wins over the manifest, the Sony Bank wallet-history media type is verified on every run, `observation_artifact_metadata` still receives the same `INSERT OR IGNORE`. Records its projection with `input_digest = 'unknown'`. The default for every dataset without an `active_releases` row. |
-| `manifest-metadata-v2` | Re-reads the collector manifest every time, records the exact input evidence and a real input digest, and never writes `observation_artifact_metadata`.                                                                                                                                                                                                                                                                                                             |
+| Release                | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `legacy-metadata-v1`   | The pre-A04 `hydrateMeta`, plus the MyJCB shared-manifest lookup for inputs it refused ([ADR 0025](adr/0025-myjcb-shared-manifest-metadata.md)): a stored MyJCB value wins over the manifest, the Sony Bank wallet-history media type is verified on every run, `observation_artifact_metadata` still keeps only its first row per artifact (`ON CONFLICT(fetch_artifact_id) DO NOTHING`). Records its projection with `input_digest = 'unknown'`. The default for every dataset without an `active_releases` row. |
+| `manifest-metadata-v2` | Re-reads the collector manifest every time, records the exact input evidence and a real input digest, and never writes `observation_artifact_metadata`.                                                                                                                                                                                                                                                                                                                                                            |
 
 `metadata_projections` (migration 0027) is append-only and keyed by
 `(fetch_artifact_id, extractor_release, input_digest)`: reading the same
@@ -108,6 +117,17 @@ runs that used the old one keep pointing at it through
 (a value was produced), `absent` (the inputs say there is none) and `error`
 (the extraction could not complete) - the presence of the row is what separates
 "there is no value" from "no extraction was attempted".
+
+Recomputing a projection skips only its key, and recording its inputs skips
+only an input's key `(projection_id, input_artifact_id, role)`
+(`ON CONFLICT … DO NOTHING`). A projection or an input the schema refuses (a
+CHECK or NOT NULL failure, such as an input without its raw digest) raises:
+the parse attempt fails as `metadata_or_raw_read_failed`, and
+`/metadata/reextract` fails without an answer for the rest of its page. Limit:
+the inputs are one batch written after the projection's own statement, so a
+refused input leaves the projection row without its inputs; every later
+attempt that reaches it raises again at the inputs, so no parse records it as
+its input, but `/metadata/differences` can list it.
 
 `input_digest` and `output_digest` are the literal string `unknown` for the
 rows migration 0027 backfills: the inputs and code digest of the historical
