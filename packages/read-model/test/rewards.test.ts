@@ -348,6 +348,39 @@ describe("reward reader", () => {
       nextOffset: REWARD_PAGE_LIMIT,
     });
     expect(result.rows[0]!.holding.buckets).toHaveLength(REWARD_PAGE_LIMIT);
+    // The row past the page is this holding's: the page holds only part of it.
+    expect(result.rows[0]!.cutByPage).toBe(true);
+  });
+
+  test("a holding is cut by the page only where its buckets run past either edge", async () => {
+    const other = (index: number) => ({
+      ...bucketRow,
+      id: 1000 + index,
+      holding_ref: "program:synthetic:other-holding",
+      bucket_ref: `program:synthetic:other-${index}`,
+    });
+    const own = (index: number) => ({
+      ...bucketRow,
+      id: index + 1,
+      bucket_ref: `program:synthetic:slot-${index}`,
+    });
+    // The page ends exactly where the next holding begins: nothing is cut.
+    const whole = await createRewardReader(
+      executor([...Array.from({ length: REWARD_PAGE_LIMIT }, (_, index) => own(index)), other(0)]),
+    ).holdings({ offset: 0 });
+    expect(whole.coverage.truncated).toBe(true);
+    expect(whole.rows.map((view) => view.cutByPage)).toEqual([false]);
+    // The second holding continues past the page; the first is whole.
+    const tail = await createRewardReader(
+      executor([own(0), ...Array.from({ length: REWARD_PAGE_LIMIT }, (_, index) => other(index))]),
+    ).holdings({ offset: 0 });
+    expect(tail.rows.map((view) => view.cutByPage)).toEqual([false, true]);
+    // A page that starts past row 0 cannot tell whether its first holding
+    // began on the page before; the holdings after it are whole.
+    const head = await createRewardReader(executor([own(0), other(0)])).holdings({ offset: 5 });
+    expect(head.rows.map((view) => view.cutByPage)).toEqual([true, false]);
+    const first = await createRewardReader(executor([own(0), other(0)])).holdings({ offset: 0 });
+    expect(first.rows.map((view) => view.cutByPage)).toEqual([false, false]);
   });
 });
 
