@@ -77,6 +77,7 @@ import {
   CARD_DEBIT_ACCOUNTS_PATH,
   validCardDebitAccountsReview,
 } from "./card-debit-accounts-contract.ts";
+import { PENDING_DECISIONS_PATH, validPendingDecisions } from "./pending-decisions-contract.ts";
 import { validUpcomingCardBills } from "./card-upcoming-bills-contract.ts";
 import { CHANGES_SINCE_PATH, validChangesSince } from "./changes-since-contract.ts";
 import { validAccountConnection } from "./account-connection-contract.ts";
@@ -272,6 +273,7 @@ export const validApiCapabilities: Check<ApiCapabilities> = object<ApiCapabiliti
   reportedStateOnDate: optional(boolean),
   reconstructedStateOnDate: optional(boolean),
   reportArtifacts: optional(boolean),
+  pendingDecisions: optional(boolean),
   opsApi: boolean,
 });
 const globalPassEmptyMonth = object<GlobalPassEmptyMonth>({
@@ -1307,6 +1309,7 @@ export function validApiResponse(path: string, value: unknown, detail?: ReadDeta
     return (value as { view?: unknown } | null)?.view === "upcoming"
       ? validUpcomingCardBills(value)
       : validCardDebitAccountsReview(value);
+  if (path === PENDING_DECISIONS_PATH) return validPendingDecisions(value);
   if (path === CHANGES_SINCE_PATH) return validChangesSince(value);
   if (path === "/api/v2/card-purchases") return validCardPurchasePage(value);
   if (path === "/api/v2/reported-state") return validReportedState(value);
