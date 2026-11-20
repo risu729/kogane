@@ -96,11 +96,12 @@ export const EXPECTED_UNIT_POLICIES: readonly Policy[] = [
     replaces_previous_on_complete_empty: 0,
     updated_at_ms: 1794268800000,
   }),
+  // 0103 (ADR 0120) advances the reader to the one that keeps the card name.
   policy("vpass", "credit-snapshot", "vpass-credit-snapshot", {
     policy_id: "coverage-v1",
-    required_parser_version: "1.0.2",
+    required_parser_version: "1.1.0",
     replaces_previous_on_complete_empty: 0,
-    updated_at_ms: 1794441600000,
+    updated_at_ms: 1795132800000,
   }),
   policy("myjcb", "debit-detail", "myjcb-debit-ledger", {
     snapshot_selection: 0,

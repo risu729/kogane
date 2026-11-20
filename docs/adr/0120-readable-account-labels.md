@@ -64,11 +64,15 @@ account and returns, where one exists:
 1. **Connection label.** If any reference of the account has a connection
    label through `connectionAccountLabel`, and every reference that has one
    agrees, the account shows it, suffix included: a connection is never a leaf
-   account. Origin `connection`.
+   account. An account that also holds a reference of another source (an
+   owner's manual mapping can put one there) is a leaf account and gets no
+   connection label. Origin `connection`.
 2. **Vpass card name.** Otherwise, for each Vpass reference, the newest bound
    credit capture: the highest fetch artifact whose published
-   `vpass-credit-snapshot` parse has observations a sealed identity run
-   attributed to the reference. Its observations' `extra._kogane.cardName`,
+   `vpass-credit-snapshot` parse has observations the current identity
+   attributes to the reference (as `current_identity_observations`: the
+   parse's eligible sealed run of its highest sealed policy version, of a
+   successful fetch run the financial views keep). Its observations' `extra._kogane.cardName`,
    when there is exactly one name and one card in that capture, gives
    `<card name>（card-00N）` with the collector's card unit key. When the
    references agree, the account shows it. Origin `card-name`.
@@ -146,10 +150,12 @@ observations reach.
   Migration 0103 is not reverted by a rollback: a rolled-back 1.0.2 reader
   would not meet the 1.1.0 pin, so a rollback of the parser also needs the
   policy row set back (as 0102's would).
-- Each organized page reads the current references of its accounts, and,
-  when it holds Vpass rows, the credit captures of those references (bounded by
-  the references' identity observations, through the `source_account_id`
-  index). No new index.
+- Each organized page reads the current references of its accounts (one pass
+  over the account mappings, since no index leads from an account to its
+  mappings), and, when it holds Vpass rows, the credit captures of those
+  references (bounded by the references' identity observations, through the
+  `source_account_id` index; the identity-run checks run once per run). No new
+  index.
 - The published `kogane.identity.read` schema gains `account-list`; the MCP
   Portal needs its capabilities synced after the deploy.
 - The label is provider text: it reaches an agent only under `data`, as every
@@ -162,7 +168,9 @@ observations reach.
   organization, the filter options, `accounts` and `account-list` (one line,
   two references), without the review itself; the card name comes from the
   newest capture with its card unit key; a re-parse of an older capture does
-  not win; no name when the newest capture has none, two, or one with digits;
+  not win; a capture the financial views leave out does not name the card; a
+  leaf account that also holds another source's reference gets no connection
+  label; no name when the newest capture has none, two, or one with digits;
   a manual mapping keeps its label.
 - `packages/parsers/test/vpass-credit.test.ts`: both files keep the name; the
   rejected shapes are left out with the snapshot intact.

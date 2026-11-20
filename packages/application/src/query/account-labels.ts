@@ -22,29 +22,49 @@ export const ENTITY_LABEL_ACCOUNT_LIMIT = 5501;
 /** The bound on the current source references of those entities. */
 const REFERENCE_LIMIT = 5501;
 
+/**
+ * No index leads from an account to its mappings, so the ids are an `IN` list:
+ * one pass over the mappings with a lookup in the list, where a join on
+ * `json_each` scans the whole list once per mapping.
+ */
 const REFERENCES_SQL = `SELECT s.id referenceId,m.account_id targetId,s.source_id source,s.producer_id producer,
  json_extract(s.reference_json,'$[0]') sourceAccount,m.method
- FROM json_each(?1) t JOIN current_account_mappings m ON m.account_id=t.value
- JOIN source_accounts s ON s.id=m.source_account_id
+ FROM current_account_mappings m JOIN source_accounts s ON s.id=m.source_account_id
+ WHERE m.account_id IN (SELECT value FROM json_each(?1))
  ORDER BY s.id LIMIT ${REFERENCE_LIMIT + 1}`;
 
 /**
  * For each Vpass reference, the card name of its newest bound credit capture:
  * the published `vpass-credit-snapshot` parse of the highest fetch artifact
- * whose observations a sealed identity run attributed to the reference, and
+ * whose observations the current identity attributes to the reference, and
  * the name that parse recorded (reader 1.1.0 and later). The fetch artifact
  * orders captures; a re-parse of an older capture gets a higher observation id
  * but keeps its artifact id, so it never stands in for the newest capture.
+ *
+ * "Current" is `current_identity_observations` restricted to these
+ * references: an eligible sealed run of the published parse with that parse's
+ * highest sealed policy version, of a successful fetch run. A superseded run
+ * (an older policy that keyed the card by its per-session ordinal) or a
+ * capture every other read leaves out never names the card. The checks run
+ * once per identity run of a reference, not once per observation.
  */
-const CARD_NAMES_SQL = `WITH newest AS MATERIALIZED (
- SELECT io.source_account_id ref,max(p.fetch_artifact_id) artifact
- FROM json_each(?1) t JOIN identity_observations io ON io.source_account_id=t.value AND io.kind='balance'
- JOIN identity_run_seals seal ON seal.identity_run_id=io.identity_run_id
- JOIN balance_observations b ON b.id=io.observation_id
- JOIN parse_runs p ON p.id=b.parse_run_id
- JOIN published_parse_runs pub ON pub.fetch_artifact_id=p.fetch_artifact_id
-  AND pub.parser_name='vpass-credit-snapshot' AND pub.parse_run_id=p.id
- GROUP BY io.source_account_id
+const CARD_NAMES_SQL = `WITH runs AS MATERIALIZED (
+ SELECT DISTINCT io.source_account_id ref,io.identity_run_id run
+ FROM json_each(?1) t CROSS JOIN identity_observations io ON io.source_account_id=t.value AND io.kind='balance'
+), newest AS MATERIALIZED (
+ SELECT x.ref,max(p.fetch_artifact_id) artifact
+ FROM runs x CROSS JOIN identity_runs ir ON ir.id=x.run
+ CROSS JOIN published_parse_runs pub ON pub.parse_run_id=ir.parse_run_id AND pub.parser_name='vpass-credit-snapshot'
+ CROSS JOIN parse_runs p ON p.id=pub.parse_run_id
+ CROSS JOIN identity_run_seals seal ON seal.identity_run_id=ir.id
+ CROSS JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
+ CROSS JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
+ CROSS JOIN eligible_identity_runs r ON r.id=ir.id
+ WHERE p.status='ok' AND f.status='success' AND f.failure_count=0
+  AND r.policy_version=(SELECT max(newer.policy_version) FROM eligible_identity_runs newer
+   JOIN identity_run_seals newer_seal ON newer_seal.identity_run_id=newer.id
+   WHERE newer.parse_run_id=r.parse_run_id)
+ GROUP BY x.ref
 )
 SELECT n.ref referenceId,min(b.source_account) sourceAccount,max(b.source_account) otherAccount,
  min(json_extract(b.extra_json,'$._kogane.cardName')) cardName,
@@ -90,7 +110,8 @@ function single(labels: Set<string>): string | null {
  * 1. An aggregator connection label (`<institution>（MoneyForward連携）（個別口座未確定）`)
  *    when any current reference of the entity has one through
  *    `connectionAccountLabel`, and all that do agree. A connection is never a
- *    leaf account, so the suffix stays.
+ *    leaf account, so the suffix stays; an entity that also holds a reference
+ *    of another source is a leaf account and never gets one.
  * 2. Otherwise, for a Vpass card, `<card name>（card-00N）` from the newest
  *    bound credit capture of any of its references, when they agree.
  *
@@ -109,8 +130,17 @@ export async function entityAccountLabels(
   const references = await sql.all<ReferenceRow>(REFERENCES_SQL, [JSON.stringify(ids)]);
   if (references.length > REFERENCE_LIMIT) throw new Error("account_label_reference_limit");
   const connections = await readAccountConnections(sql, references);
+  // A connection label names an aggregator mirror. An account that also holds
+  // a direct source's reference (an owner's manual mapping can put one there)
+  // is a leaf account, which the `（個別口座未確定）` label would misname.
+  const leaves = new Set(
+    references
+      .filter((reference) => reference.source !== "moneyforward-me")
+      .map((reference) => reference.targetId),
+  );
   const connectionLabels = new Map<string, Set<string>>();
   for (const reference of references) {
+    if (leaves.has(reference.targetId)) continue;
     const connection = connections.get(reference.referenceId);
     // A manual mapping is evaluated as a rule one here: the label describes
     // the connection the reference belongs to, not the owner's choice.

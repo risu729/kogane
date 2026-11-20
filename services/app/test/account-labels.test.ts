@@ -159,6 +159,35 @@ describe("aggregator connection labels", () => {
     expect(list.coverage).toEqual({ limit: 100, truncated: false, nextOffset: null });
   });
 
+  it("never name a leaf account that also holds another source's reference", async () => {
+    // The owner's manual mapping puts the connection's reference onto a direct
+    // account: the account is a leaf, not the aggregator connection.
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO accounts VALUES ('account-leaf','合成銀行 普通預金','deposit','identified')`,
+      ),
+      env.DB.prepare(
+        `INSERT INTO source_accounts VALUES ('sa-leaf-direct','sony-bank','evidence-test','["sony-bank:synthetic-leaf"]')`,
+      ),
+      env.DB.prepare(
+        `INSERT INTO account_mappings VALUES ('am-leaf-direct','sa-leaf-direct',1,'account-leaf','rule','provider-account-reference',1,'2099','合成銀行 普通預金','identified')`,
+      ),
+      env.DB.prepare(
+        `INSERT INTO account_mappings VALUES ('am-leaf-manual',?,2,'account-leaf','manual','owner-merge',1,'2099','合成銀行 普通預金','identified')`,
+      ).bind(direct.reference),
+    ]);
+    try {
+      expect((await entityAccountLabels(sql(), ["account-leaf"])).has("account-leaf")).toBe(false);
+    } finally {
+      // The mapping history is append-only: move the reference back by a later revision.
+      await env.DB.prepare(
+        `INSERT INTO account_mappings VALUES ('am-leaf-back',?,3,?,'rule','identity-value-rewrite',1,'2099','MoneyForward連携口座','provider-local')`,
+      )
+        .bind(direct.reference, direct.account)
+        .run();
+    }
+  });
+
   it("never relabel the owner's manual mapping", () => {
     const entity = { label: "entity", origin: "connection" as const };
     expect(displayAccountLabel("owner", "manual", entity)).toBe("owner");
@@ -177,7 +206,7 @@ describe("Vpass card names", () => {
    */
   async function card(
     key: string,
-    captures: { names: (string | null)[]; card?: string }[],
+    captures: { names: (string | null)[]; card?: string; excluded?: boolean }[],
     reparseFirst = false,
   ) {
     await env.DB.prepare(
@@ -241,6 +270,13 @@ describe("Vpass card names", () => {
       await env.DB.prepare(`INSERT INTO identity_run_seals VALUES (?,?,'2099')`)
         .bind(identityRun, entry.names.length)
         .run();
+      // Excluded after its identity was sealed, as an operator annotation can be.
+      if (entry.excluded)
+        await env.DB.prepare(
+          "INSERT INTO fetch_run_annotations VALUES (?, 'exclude_from_financial_views', 'synthetic-fixture', 0)",
+        )
+          .bind(run.id)
+          .run();
     }
     return `account-${key}`;
   }
@@ -264,6 +300,16 @@ describe("Vpass card names", () => {
     );
     expect((await entityAccountLabels(sql(), [account])).get(account)?.label).toBe(
       "New synthetic card（card-001）",
+    );
+  });
+
+  it("reads the current identity only: a capture the financial views leave out never names the card", async () => {
+    const account = await card("excluded", [
+      { names: ["Bound synthetic card"] },
+      { names: ["Excluded synthetic card"], excluded: true },
+    ]);
+    expect((await entityAccountLabels(sql(), [account])).get(account)?.label).toBe(
+      "Bound synthetic card（card-001）",
     );
   });
 

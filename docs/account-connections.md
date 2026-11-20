@@ -126,8 +126,9 @@ references the review covers: a reference of another producer that a mapping
 revision moved onto the same account (production's `identity-value-rewrite`
 references) shows the same `<institution>（MoneyForward連携）（個別口座未確定）`
 label, while its `connection` object stays absent because the review does not
-name it. References whose connection labels disagree keep their own labels
-([ADR 0120](adr/0120-readable-account-labels.md)).
+name it. References whose connection labels disagree keep their own labels,
+and so does an account that also holds a reference of another source, which
+is a leaf account ([ADR 0120](adr/0120-readable-account-labels.md)).
 
 The first production dry-run found four reviewed connections, one confirmed
 connection correspondence covering 16 exact direct references, three unresolved
