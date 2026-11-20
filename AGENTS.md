@@ -37,6 +37,11 @@ in [ADR 0047](docs/adr/0047-mcp-client-connection.md).
 - [The roadmap](docs/roadmap.md#work-order) is the work order. A merged PR is not a
   stopping point: continue with the next unit of the current phase until its
   done-when holds, then the next phase.
+- When resuming after a pause, start from the current repository, not from
+  memory: fetch the latest `main`, list the open PRs and the PRs merged since the
+  pause, and drop or rebase any planned or in-flight work that someone else has
+  already done or changed. Two PRs for the same change: keep the better one and
+  close the other with a pointer to it.
 - Issues track individual items; the roadmap names which issues belong to which
   phase. Update the issue with progress and the roadmap when a phase's scope or
   order changes. Do not keep a second roadmap in an issue.
