@@ -1,6 +1,6 @@
 # ADR 0096: Walk SBI's retained execution history in every normal collection
 
-- Status: proposed
+- Status: accepted (merged 2026-11-10 in [#1263](https://github.com/risu729/kogane/pull/1263))
 - Date: 2026-11-09
 - Issue: [#1225](https://github.com/risu729/kogane/issues/1225)
 

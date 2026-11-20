@@ -256,7 +256,7 @@ describe.if(runnable)("production evidence navigation", () => {
     expect(await page.getByRole("alert").innerText()).toContain("認証が必要");
     expect(await page.locator("body").innerText()).not.toContain("PRIVATE_RUN_RESPONSE");
     runStatus = 200;
-    await page.getByRole("button", { name: "再試行", exact: true }).click();
+    await page.getByRole("button", { name: "取得履歴を再試行", exact: true }).click();
     await page.getByText("一部取得", { exact: true }).waitFor();
     metadataStatus = 403;
     await page.getByRole("button", { name: "表示を更新", exact: true }).click();
@@ -265,7 +265,7 @@ describe.if(runnable)("production evidence navigation", () => {
     expect(await page.locator("body").innerText()).not.toContain("PRIVATE_AUTH_RESPONSE");
     expect(await page.getByRole("alert").innerText()).toContain("権限がありません");
     metadataStatus = 200;
-    await page.getByRole("button", { name: "再試行", exact: true }).click();
+    await page.getByRole("button", { name: "取得履歴の接続情報を再試行", exact: true }).click();
     await page.getByText("一部取得", { exact: true }).waitFor();
     await page.close();
   }, 60_000);
@@ -314,7 +314,7 @@ describe.if(runnable)("production evidence navigation", () => {
     expect(await page.locator("tbody").innerText()).toContain("一部取得");
     expect(await page.locator("body").innerText()).not.toContain("PRIVATE_RUN_RESPONSE");
     runStatus = 200;
-    await page.getByRole("button", { name: "再試行", exact: true }).click();
+    await page.getByRole("button", { name: "取得履歴を再試行", exact: true }).click();
     await page.getByRole("alert").waitFor({ state: "detached" });
     expect(await page.locator("tbody").innerText()).toContain("一部取得");
     await page.close();

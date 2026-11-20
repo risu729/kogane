@@ -1,19 +1,20 @@
 // The Processor frees a collection execution lease whose holder went silent
 // (ADR 0085), on D1's clock, and records each release on the `alarm` path.
 // Every value is synthetic.
-import { afterAll, beforeAll, expect, spyOn, test } from "bun:test";
+import { afterAll, expect, spyOn } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
 import { expireStaleLeases } from "../src/schedule-store.ts";
 import { startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  const started = await startPipeline();
-  mf = started.mf;
-  env = started.env as unknown as Env;
-}, 60_000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+const started = await startPipeline();
+mf = started.mf;
+env = started.env as unknown as Env;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

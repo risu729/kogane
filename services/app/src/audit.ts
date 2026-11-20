@@ -252,8 +252,28 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       rows: Array.isArray(value["operations"]) ? value["operations"].length : 0,
       truncated: typeof value["nextCursor"] === "string",
     };
-  if (operation === "purchases.explain") return { rows: countOf(value["data"]), truncated: false };
-  // One account's reconstructed state, when there is one to show.
+  // A page of events counts its items; the per-card view (ADR 0125) its cards,
+  // truncated when more cards exist than it lists.
+  if (operation === "purchases.explain") {
+    const data = value["data"];
+    const page =
+      data !== null && typeof data === "object" && !Array.isArray(data)
+        ? (data as Record<string, unknown>)
+        : {};
+    const cards = page["cards"];
+    if (Array.isArray(cards))
+      return { rows: cards.length, truncated: page["cardsTruncated"] === true };
+    // The line view (ADR 0125 amendment) its lines, truncated while lines follow.
+    const lines = page["lines"];
+    if (Array.isArray(lines))
+      return {
+        rows: lines.length,
+        truncated:
+          typeof page["nextCursor"] === "string" || value["nextPage"] === "budget_exceeded",
+      };
+    return { rows: countOf(data), truncated: false };
+  }
+  // One reconstructed state (of one account or a scope, ADR 0116), when there is one to show.
   if (operation === "reconstructed-state.read")
     return { rows: value["reconstruction"] ? 1 : 0, truncated: false };
   // The dated reported state: its accounts and its payables. A read past the
@@ -330,6 +350,20 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     return {
       rows: Array.isArray(value["items"]) ? value["items"].length : 0,
       truncated: rowsFollow(value),
+    };
+  // One row per kind; truncated when a line's count reached its bound.
+  if (operation === "decisions.pending")
+    return {
+      rows: Array.isArray(value["kinds"]) ? value["kinds"].length : 0,
+      truncated:
+        Array.isArray(value["kinds"]) &&
+        value["kinds"].some(
+          (line) =>
+            typeof line === "object" &&
+            line !== null &&
+            (line as Record<string, unknown>)["state"] === "counted" &&
+            (line as Record<string, unknown>)["complete"] === false,
+        ),
     };
   // Sources the answer covers (listed or unchanged); truncated when it
   // continues past the byte bound, a count is a lower bound, or the events

@@ -2,18 +2,19 @@
 // page (501 rows) of positions and some of the first page were recorded after
 // the knowledge cutoff (AT63). Every row is synthetic: made-up accounts,
 // security codes and quantities.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { runReportJob, type ReportJobEnv } from "../src/report-job.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
 let jobEnv: ReportJobEnv;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  jobEnv = { DB: env.DB, EVIDENCE: env.EVIDENCE, REPORTS_ENABLED: "true" };
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+jobEnv = { DB: env.DB, EVIDENCE: env.EVIDENCE, REPORTS_ENABLED: "true" };
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

@@ -71,6 +71,9 @@ describe.if(runnable)("reported holdings change between two dates", () => {
           // The route's own shape rule: the page must never send what it refuses.
           const refusal = holdingsChangeQueryRefusal(url.searchParams);
           if (refusal !== null) return Response.json({ error: refusal }, { status: 400 });
+          // The panel shows every holding: it asks for the full answer, never the summary.
+          if (url.searchParams.get("detail") !== "full")
+            return Response.json({ error: "invalid_query" }, { status: 400 });
           const source = url.searchParams.get("source");
           const account = url.searchParams.get("account");
           try {
@@ -142,6 +145,7 @@ describe.if(runnable)("reported holdings change between two dates", () => {
     expect([...requests[0]!.searchParams]).toEqual([
       ["from", "2026-09-01"],
       ["to", "2026-09-10"],
+      ["detail", "full"],
     ]);
     await page.close();
   }, 30_000);
@@ -282,6 +286,7 @@ describe.if(runnable)("reported holdings change between two dates", () => {
       ["to", "2026-09-10"],
       ["source", "sbi-securities"],
       ["account", "acct-sbi"],
+      ["detail", "full"],
     ]);
     expect(pageSearch(page)).toEqual([
       ["changeSource", "sbi-securities"],
@@ -310,6 +315,7 @@ describe.if(runnable)("reported holdings change between two dates", () => {
       ["from", "2026-09-01"],
       ["to", "2026-09-10"],
       ["source", "smbc-bank"],
+      ["detail", "full"],
     ]);
     expect(pageSearch(page)).toEqual([["changeSource", "smbc-bank"]]);
     // Clearing the filters asks again from the same start date, for every holding.
@@ -319,6 +325,7 @@ describe.if(runnable)("reported holdings change between two dates", () => {
     expect([...requests.at(-1)!.searchParams]).toEqual([
       ["from", "2026-09-01"],
       ["to", "2026-09-10"],
+      ["detail", "full"],
     ]);
     expect(requests).toHaveLength(3);
     expect(await changes(page)).toHaveLength(7);
@@ -337,6 +344,7 @@ describe.if(runnable)("reported holdings change between two dates", () => {
       ["from", "2026-09-01"],
       ["to", "2026-09-10"],
       ["source", "sbi-securities"],
+      ["detail", "full"],
     ]);
     await page.getByRole("combobox", { name: "口座 ID", exact: true }).fill("acct-sbi");
     await page.getByRole("button", { name: "比べる", exact: true }).click();

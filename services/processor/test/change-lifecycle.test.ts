@@ -7,7 +7,7 @@
 // a concurrent change made it rev8, and re-simulating yields a new digest),
 // AT69 (a changed plan is refused), AT70 (parallel commits, lost responses,
 // resends, and an expired approval on an already committed operation).
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import type { IdentityInput, IdentityPlan } from "../../../packages/identity/src/types.ts";
@@ -61,16 +61,17 @@ import {
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { envelopeHeaders, testCall } from "./audit-envelope.ts";
 import { maskRandomTokens } from "../../../packages/application/test/random-tokens.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
 let db: D1Database;
 let store: CommandStore;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  db = env.DB;
-  store = d1CommandStore(db);
-}, 60_000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+db = env.DB;
+store = d1CommandStore(db);
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

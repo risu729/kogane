@@ -556,6 +556,13 @@ describe("untrusted provider content (AT71)", () => {
         annotations: readOnly,
       },
       {
+        name: "kogane.decisions.pending",
+        required: [],
+        closed: false,
+        properties: [],
+        annotations: readOnly,
+      },
+      {
         name: "kogane.changes.since",
         required: ["since"],
         closed: false,
@@ -685,7 +692,7 @@ describe("untrusted provider content (AT71)", () => {
         name: "kogane.reported-holdings-change.read",
         required: ["from", "to"],
         closed: false,
-        properties: ["account", "from", "source", "to"],
+        properties: ["account", "cursor", "detail", "from", "limit", "source", "to"],
         annotations: readOnly,
       },
       {
@@ -727,15 +734,26 @@ describe("untrusted provider content (AT71)", () => {
         name: "kogane.purchases.explain",
         required: [],
         closed: false,
-        properties: ["eventId", "offset", "period"],
+        // `view` and `usageMonth`: the per-card view (ADR 0125); `account`,
+        // `sort` and `cursor`: the line view (its amendment).
+        properties: [
+          "account",
+          "cursor",
+          "eventId",
+          "offset",
+          "period",
+          "sort",
+          "usageMonth",
+          "view",
+        ],
         annotations: readOnly,
       },
       // Published because this store has the reported state's views.
       {
         name: "kogane.reconstructed-state.read",
-        required: ["account", "from", "to"],
+        required: ["from", "to"],
         closed: false,
-        properties: ["account", "basis", "cut", "from", "setVersion", "to"],
+        properties: ["account", "accounts", "basis", "cut", "from", "setVersion", "to"],
         annotations: readOnly,
       },
     ]);
@@ -778,6 +796,7 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.accounts.history",
       "kogane.card-settlements.unmatched",
       "kogane.card-settlements.debit-accounts",
+      "kogane.decisions.pending",
       "kogane.changes.since",
       "kogane.economic-readiness.read",
       "kogane.card-settlements.read",
@@ -813,9 +832,14 @@ describe("untrusted provider content (AT71)", () => {
       required: [],
       closed: false,
       properties: {
+        view: { type: "string", enum: ["events", "cards", "lines"] },
         period: { type: "string", pattern: "^[0-9]{4}-(?:0[1-9]|1[0-2])$" },
+        usageMonth: { type: "string", pattern: "^[0-9]{4}-(?:0[1-9]|1[0-2])$" },
         eventId: { type: "string", pattern: "^(?:purchase|refund)_[0-9a-f]{64}$" },
         offset: { type: "integer", minimum: 0, maximum: 1_000_000 },
+        account: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$" },
+        sort: { type: "string", enum: ["date", "amount"] },
+        cursor: { type: "string", pattern: "^[A-Za-z0-9_-]+$", maxLength: 2048 },
       },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     });
@@ -876,6 +900,7 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.accounts.history",
       "kogane.card-settlements.unmatched",
       "kogane.card-settlements.debit-accounts",
+      "kogane.decisions.pending",
       "kogane.changes.since",
       "kogane.economic-readiness.read",
       "kogane.card-settlements.read",

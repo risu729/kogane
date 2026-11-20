@@ -133,7 +133,13 @@ export const LANE_TICK_COUNTS = {
     ],
     { skipped: CARD_USAGE_EXCLUSIONS },
   ),
-  reward_claims_sweep: countsOf<RewardPromotionResult>(["scanned", "promoted", "skipped"]),
+  reward_claims_sweep: countsOf<RewardPromotionResult>([
+    "scanned",
+    "promoted",
+    "known",
+    "skipped",
+    "quantity_incomplete",
+  ]),
   price_promotion: countsOf<PricePromotionResult>([
     "scanned",
     "promoted",

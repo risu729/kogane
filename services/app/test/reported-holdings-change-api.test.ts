@@ -7,7 +7,9 @@
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { queryHoldingsChange } from "../../../packages/application/src/query/holdings-change.ts";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { reportedHoldingsChangeAvailable } from "../src/reported-holdings-change-api";
 import worker from "../src/worker";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
@@ -168,9 +170,9 @@ async function counts() {
 const RANGE = "?from=2026-09-03&to=2026-09-10";
 
 describe("reported holdings change between two dates", () => {
-  it("serves a signed-in reader the validated change per holding and writes nothing", async () => {
+  it("serves a signed-in reader the validated full change per holding and writes nothing", async () => {
     const before = await counts();
-    const response = await call(PATH + RANGE);
+    const response = await call(`${PATH}${RANGE}&detail=full`);
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     const body = (await response.json()) as {
@@ -213,7 +215,9 @@ describe("reported holdings change between two dates", () => {
       change: null,
     });
     // Before the first capture the container has no snapshot: a reason, not an absence.
-    const early = (await (await call(`${PATH}?from=2026-09-02&to=2026-09-03`)).json()) as {
+    const early = (await (
+      await call(`${PATH}?from=2026-09-02&to=2026-09-03&detail=full`)
+    ).json()) as {
       holdings: { status: string; reasons: string[]; change: unknown }[];
     };
     expect(validApiResponse(PATH, early)).toBe(true);
@@ -222,11 +226,54 @@ describe("reported holdings change between two dates", () => {
       ["not_comparable", ["no_snapshot_at_start"], null],
     ]);
     // Narrowed to the source, the answer is the same holdings and still valid.
-    const narrowed = await call(`${PATH}${RANGE}&source=sbi-securities`);
+    const narrowed = await call(`${PATH}${RANGE}&source=sbi-securities&detail=full`);
     expect(narrowed.status).toBe(200);
     const narrowedBody = (await narrowed.json()) as { holdings: unknown[] };
     expect(validApiResponse(PATH, narrowedBody)).toBe(true);
     expect(narrowedBody.holdings).toHaveLength(3);
+    expect(await counts()).toEqual(before);
+  });
+
+  it("answers the summary of changed lines by default, and `full` byte for byte as before", async () => {
+    const before = await counts();
+    const response = await call(PATH + RANGE);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, any>;
+    expect(validApiResponse(PATH, body)).toBe(true);
+    expect(body).toMatchObject({
+      apiVersion: 2,
+      schemaVersion: "reported-holdings-change-summary-v1",
+      detail: "summary",
+      counts: { compared: 1, listed_at_start_only: 1, listed_at_end_only: 1, not_comparable: 0 },
+      unchanged: 0,
+      reasonCounts: {},
+      containers: {
+        c1: {
+          sourceId: "sbi-securities",
+          parserName: "sbi-domestic-cash-positions",
+          dataset: "domestic-cash-positions",
+        },
+      },
+      page: { offset: 0, limit: 10, listed: 3, hasMore: false, nextCursor: null },
+      coverage: { total: "not-computed", valuation: "not-computed" },
+    });
+    expect(
+      body.items.map((item: Record<string, any>) => [item.securityCode, item.status, item.change]),
+    ).toEqual([
+      ["1001", "compared", "2.5"],
+      ["1002", "listed_at_start_only", null],
+      ["1003", "listed_at_end_only", null],
+    ]);
+    // The full answer is the comparison as the route answered it before `detail`.
+    const full = await call(`${PATH}${RANGE}&detail=full`);
+    const expected = await queryHoldingsChange(d1Executor(env.DB), {
+      from: "2026-09-03",
+      to: "2026-09-10",
+      today: "2026-09-10",
+    });
+    expect(await full.text()).toBe(JSON.stringify({ apiVersion: 2, ...expected }));
+    // Both details name the same comparison.
+    expect(body.contextId).toBe(expected.contextId);
     expect(await counts()).toEqual(before);
   });
 
@@ -256,6 +303,15 @@ describe("reported holdings change between two dates", () => {
       [`${RANGE}&offset=0`, 400, "invalid_query"],
       [`${RANGE}&source=SBI`, 400, "invalid_query"],
       [`${RANGE}&account=%20x`, 400, "invalid_query"],
+      // The detail and the summary's page shape (ADR 0075, 2026-11-19 amendment).
+      [`${RANGE}&detail=compact`, 400, "invalid_query"],
+      [`${RANGE}&detail=summary&detail=full`, 400, "invalid_query"],
+      [`${RANGE}&limit=20`, 400, "invalid_query"],
+      [`${RANGE}&limit=010`, 400, "invalid_query"],
+      [`${RANGE}&detail=full&limit=10`, 400, "invalid_query"],
+      [`${RANGE}&detail=full&cursor=abc`, 400, "invalid_query"],
+      [`${RANGE}&cursor=not%20a%20cursor`, 400, "invalid_query"],
+      [`${RANGE}&cursor=abc`, 400, "invalid_cursor"],
       ["?from=2026-09-10&to=2026-09-10", 400, "invalid_range"],
       ["?from=2026-09-10&to=2026-09-03", 400, "invalid_range"],
       // Tomorrow in Tokyo has no reported state yet.

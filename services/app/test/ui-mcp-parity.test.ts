@@ -30,6 +30,9 @@ import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
+import { HOLDING_CHANGE_STATUSES } from "../../../packages/domain/src/holdings-change.ts";
+import { HOLDINGS_CHANGE_SUMMARY_PAGE_SIZES } from "../../../packages/domain/src/holdings-change-summary.ts";
+import { VALUE_STATUSES } from "../../../packages/domain/src/values.ts";
 import {
   OPERATION_CATALOGUE,
   type OperationName,
@@ -103,6 +106,7 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/audit": ["kogane.audit.search"],
   "/api/v2/reconciliation/card-statements-unmatched": ["kogane.card-settlements.unmatched"],
   "/api/v2/reconciliation/card-debit-accounts": ["kogane.card-settlements.debit-accounts"],
+  "/api/v2/decisions/pending": ["kogane.decisions.pending"],
   "/api/v2/reconciliation/card-settlements": ["kogane.card-settlements.read"],
   "/api/v2/reconciliation/card-settlements/ownership": ["kogane.card-settlements.ownership"],
   "/api/v2/reconciliation/card-settlements/statements": ["kogane.card-settlements.statements"],
@@ -375,6 +379,37 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
     ])
       expect(tool.description).toContain(term);
   });
+
+  it("publishes the holdings change's details, closed statuses and cursor codes (ADR 0075, 2026-11-19)", async () => {
+    expect(READ_ROUTE_TOOLS["/api/v2/reported-holdings-change"]).toEqual([
+      "kogane.reported-holdings-change.read",
+    ]);
+    const tool = (await publishedDefinitions()).find(
+      (entry) => entry.name === "kogane.reported-holdings-change.read",
+    )!;
+    expect(tool.description.length).toBeLessThanOrEqual(2048);
+    for (const term of [
+      "`detail`",
+      "`summary` (default)",
+      "`full`",
+      ...HOLDING_CHANGE_STATUSES.map((status) => `\`${status}\``),
+      "`unchanged`",
+      "`quantityStatus`",
+      ...VALUE_STATUSES.filter((status) => status !== "exact").map((status) => `\`${status}\``),
+      "`reasonCounts`",
+      "`containers`",
+      "`nextCursor`",
+      "`cursor_mismatch`",
+      "`context_expired`",
+      "`invalid_cursor`",
+      "`contextId`",
+      "kogane.observations.get",
+      ...HOLDINGS_CHANGE_SUMMARY_PAGE_SIZES.map(String),
+      "not-computed",
+    ])
+      expect(tool.description, term).toContain(term);
+  });
+
   it("names the reward expiry window, its summary and every closed code they answer", async () => {
     const tool = (await publishedDefinitions()).find(
       (entry) => entry.name === "kogane.rewards.read",

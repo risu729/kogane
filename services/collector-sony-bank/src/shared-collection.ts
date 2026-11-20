@@ -14,9 +14,19 @@
 // credential field), so a sanitizer regression fails the run rather than
 // publishing the value (G3-08). A failed run persists no artifact at all, so a run that collected
 // nothing stays a failure downstream instead of reading like an observation
-// of zero (G1-09).
+// of zero (G1-09). A core run that stopped after some steps finished is
+// `partial`: it keeps those steps' artifacts, states the stopped step in its
+// manifest and code, and claims no complete coverage (ADR 0099, amendment
+// 2026-11-18).
 import { manifestFailure } from "./diagnostics";
-import type { CollectionFailure, CollectionManifest, RawArtifact, StoredArtifact } from "./types";
+import type {
+  CollectionFailure,
+  CollectionManifest,
+  CoreStep,
+  CoreStepOutcome,
+  RawArtifact,
+  StoredArtifact,
+} from "./types";
 import {
   objectKey,
   persistRun,
@@ -48,9 +58,14 @@ export interface SharedRunInput {
   readonly completedAt: string;
   readonly status: CollectionManifest["status"];
   readonly window: { readonly from: string | null; readonly to: string | null };
-  readonly transactionCount: number;
+  readonly transactionCount: number | null;
   readonly artifacts: readonly RawArtifact[];
   readonly failures: readonly CollectionFailure[];
+  /**
+   * Where a core run stopped, when a core step threw (ADR 0099, amendment
+   * 2026-11-18). The artifacts are then exactly those of `completed`.
+   */
+  readonly coreSteps?: CoreStepOutcome;
   /**
    * Set when an operation requested this run (unified plan 02 §5). U08
    * dispatches collection operations; until then the collector's own cron and
@@ -209,8 +224,26 @@ function safeErrorCode(input: SharedRunInput): string | undefined {
     )
       return reason;
   }
+  // A core run kept the steps that finished; without a more specific closed
+  // reason, its code names the step that stopped it.
+  if (status === "partial" && input.coreSteps !== undefined)
+    return CORE_STEP_CODES[input.coreSteps.failed];
   return status === "partial" ? "collector_partial" : "collector_failed";
 }
+
+/**
+ * The closed code of a core run that stopped at a step, when the failure
+ * carries no more specific allowlisted reason. Only the history and WALLET
+ * steps can stop a run that already kept an artifact (`gross-balance.json`
+ * is the first one), so only those three codes can occur on a `partial` run.
+ */
+const CORE_STEP_CODES: Readonly<Record<CoreStep, string>> = {
+  login: "core_login_failed",
+  "gross-balance": "core_gross_balance_failed",
+  "monthly-history": "core_monthly_history_failed",
+  "retained-history": "core_retained_history_failed",
+  wallet: "core_wallet_failed",
+};
 
 function walletMonths(artifacts: readonly RawArtifact[]): string[] {
   return artifacts
@@ -242,8 +275,69 @@ function manifestBytes(input: SharedRunInput, stored: readonly StoredArtifact[])
     transactionCount: input.transactionCount,
     artifacts: [...stored],
     failures: input.failures.map(manifestFailure),
+    ...(input.coreSteps === undefined
+      ? {}
+      : {
+          coreSteps: {
+            completed: [...input.coreSteps.completed],
+            failed: input.coreSteps.failed,
+            notAttempted: [...input.coreSteps.notAttempted],
+          },
+        }),
   };
   return new TextEncoder().encode(JSON.stringify(manifest));
+}
+
+/**
+ * The canonical file name a history dataset is stored under (`collectHistoryRange`
+ * in `src/sony-bank.ts`), or null for any other dataset. The Processor derives
+ * an artifact's dataset from this name alone (`ARTIFACT_DATASETS` in
+ * `packages/application/src/collection/descriptors.ts`), so the name is what
+ * decides whether a parser may ever select the bytes.
+ */
+function canonicalHistoryFilename(dataset: string): string | null {
+  const page = /^((?:yen-history|foreign-history-[a-z]{3})-page-\d{4})$/u.exec(dataset);
+  if (page) return `${page[1]!}.json`;
+  const csv = /^(yen-history|foreign-history-[a-z]{3})-csv$/u.exec(dataset);
+  return csv ? `${csv[1]!}.csv` : null;
+}
+
+/**
+ * A core run that stopped at a step keeps only what its finished steps
+ * produced (ADR 0099, amendment 2026-11-18). In particular a canonical history
+ * name (the parser input) appears only once the retained step finished, the
+ * month window's files keep their `monthly-` prefix, and no collection summary
+ * is written, so nothing in the run reads like a complete collection. The
+ * check is on the stored file name, which is what the Processor reads, and
+ * the name must be exactly the one its dataset is stored under. A stopped run
+ * is never `success`. Throws a stable code, never a name.
+ */
+function assertStoppedCoreScope(
+  status: CollectionManifest["status"],
+  steps: CoreStepOutcome,
+  artifacts: readonly RawArtifact[],
+): void {
+  if (status === "success") throw new Error("core_partial_scope_invalid");
+  const finished = new Set(steps.completed);
+  const retainedPlanned = [...steps.completed, steps.failed, ...steps.notAttempted].includes(
+    "retained-history",
+  );
+  for (const artifact of artifacts) {
+    let allowed = false;
+    const canonical = canonicalHistoryFilename(artifact.dataset);
+    if (artifact.unitKey !== undefined) allowed = false;
+    else if (artifact.dataset === "gross-balance")
+      allowed = artifact.filename === "gross-balance.json" && finished.has("gross-balance");
+    else if (canonical !== null) {
+      if (artifact.filename === `monthly-${canonical}`)
+        allowed = retainedPlanned && finished.has("monthly-history");
+      else if (artifact.filename === canonical)
+        allowed = retainedPlanned
+          ? finished.has("retained-history")
+          : finished.has("monthly-history");
+    }
+    if (!allowed) throw new Error("core_partial_scope_invalid");
+  }
 }
 
 /** Build the persist plan for a finished run. Pure apart from hashing. */
@@ -254,6 +348,7 @@ export async function sonyBankRunPlan(input: SharedRunInput): Promise<PersistRun
   // A failed run keeps no artifact: there is nothing whose persistence could
   // be claimed, and the terminal states the failure on its own.
   const sources = outcome === "failed" ? [] : input.artifacts;
+  if (input.coreSteps !== undefined) assertStoppedCoreScope(input.status, input.coreSteps, sources);
 
   const artifacts: PersistArtifact[] = [];
   const stored: StoredArtifact[] = [];
@@ -415,6 +510,30 @@ export async function persistSharedRun(
   const plan = await sonyBankRunPlan(input);
   const result = await persistRun(bucket, plan);
   return { result, artifactCount: plan.artifacts.length };
+}
+
+/**
+ * The closed codes `sonyBankRunPlan` refuses a run with. A refused plan writes
+ * no terminal, so the code would otherwise reach nothing but the alarm's
+ * generic `collection_failed`.
+ */
+const PLAN_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  "artifact_pdf_invalid",
+  "artifact_html_encoding_invalid",
+  "artifact_html_redaction_invalid",
+  "artifact_json_invalid",
+  "artifact_secret_field_present",
+  "core_partial_scope_invalid",
+  "shared_operation_id_invalid",
+  "shared_session_ref_invalid",
+  "shared_attempt_id_invalid",
+]);
+
+/** The closed code of an error `persistSharedRun` threw; any other text is never logged. */
+export function persistRefusalCode(error: unknown): string {
+  return error instanceof Error && PLAN_REFUSAL_CODES.has(error.message)
+    ? error.message
+    : "persistence_failed";
 }
 
 /** Safe, code-only diagnostics for a persist attempt: no keys of provider

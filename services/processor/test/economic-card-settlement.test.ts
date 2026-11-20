@@ -5,7 +5,7 @@
 // synthetic own-transfer-shaped writer where a second writer is needed (no
 // own-transfer writer exists yet). Every row is synthetic: invented ids,
 // round amounts, invented dates.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 import { cardSettlementSweep } from "../src/card-settlement-job.ts";
@@ -44,6 +44,7 @@ import { queryReconstructedState } from "../../../packages/application/src/query
 import { quantityText } from "../../../packages/domain/test/helpers.ts";
 import type { CardSettlementFacts } from "../../../packages/domain/src/card-settlement.ts";
 import type { EventTimeRecord } from "../../../packages/domain/src/economic-contract.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare, env: Env, db: D1Database;
 const actor: Principal = {
@@ -54,10 +55,10 @@ const actor: Principal = {
 };
 const now = "2098-01-01T00:00:00.000Z";
 let sequence = 0;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  db = env.DB;
-}, 60000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+db = env.DB;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });
@@ -785,7 +786,7 @@ describe("future SBI Shinsei posting dates", () => {
       const beforeReplay = await snapshot();
       expect(await accept()).toMatchObject({ ok: true, replayed: true });
       expect(await snapshot()).toEqual(beforeReplay);
-      const input = { account: bank.account_id, from, to, basis: "cash", cut: null, now };
+      const input = { accounts: [bank.account_id], from, to, basis: "cash", cut: null, now };
       const result = await queryReconstructedState(d1Executor(db), input);
       const cell = result.reconstruction!.cells.find(
         (row) => row.accountId === bank.account_id && row.unitRef === "JPY",

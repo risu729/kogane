@@ -9,10 +9,15 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { canonicalDigest } from "../../domain/src/context.ts";
 import type { FxConversionPolicy, PriceSelectionPolicy } from "../../domain/src/market-data.ts";
 import { decimalToString, type Quantity } from "../../domain/src/values.ts";
+import {
+  DATED_STATEMENTS_BEFORE_WINDOW_SQL,
+  DATED_STATEMENTS_SQL,
+} from "../../read-model/src/dated-state.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { migrated } from "../../read-model/test/card-usage-fixture.ts";
 import { DatedStore, type Capture } from "../../read-model/test/dated-state-fixture.ts";
 import { migratedDatabase } from "../../read-model/test/price-candidates-fixture.ts";
+import { queryDatedState } from "../src/query/dated-state.ts";
 import type { MarketDataPolicies } from "../src/query/market-data.ts";
 import {
   ACCOUNT_EXISTS_SQL,
@@ -553,6 +558,46 @@ describe("queryValuationOnDate", () => {
     expect(second.manifest.reportedState.contextId).toBe(second.reportedState.contextId);
     expect(second.contextId).not.toBe(first.contextId);
     expect(second.total).toEqual(first.total);
+  });
+
+  test("it never counts the statements before the payable window, and its context records no count", async () => {
+    const store = world();
+    const statements: string[] = [];
+    const recording: SqlExecutor = {
+      all: async <T>(text: string, args: readonly unknown[]) => {
+        statements.push(text);
+        return store.db.query(text).all(...(args as SQLQueryBindings[])) as T[];
+      },
+      first: async <T>(text: string, args: readonly unknown[]) => {
+        statements.push(text);
+        return (store.db.query(text).get(...(args as SQLQueryBindings[])) as T | null) ?? null;
+      },
+    };
+    const first = await queryValuationOnDate(recording, REQUEST, POLICIES);
+    expect(statements).toContain(DATED_STATEMENTS_SQL);
+    expect(statements).not.toContain(DATED_STATEMENTS_BEFORE_WINDOW_SQL);
+    // The pinned reported context id is that of the state it read: without the count.
+    const uncounted = await queryDatedState(counting(store), {
+      date: REQUEST.date,
+      includeStatementsBeforeWindow: false,
+    });
+    const counted = await queryDatedState(counting(store), { date: REQUEST.date });
+    expect(first.manifest.reportedState.contextId).toBe(uncounted.contextId);
+    expect(first.manifest.reportedState.contextId).not.toBe(counted.contextId);
+    // A statement the window leaves out changes the reported state's context, not this one.
+    store.statement({
+      card: "card-a",
+      period: "2026-06",
+      paymentDate: "2026-06-26",
+      minor: 25_000,
+      fetchedAt: "2026-06-05T01:00:00Z",
+    });
+    expect((await queryValuationOnDate(counting(store), REQUEST, POLICIES)).contextId).toBe(
+      first.contextId,
+    );
+    expect((await queryDatedState(counting(store), { date: REQUEST.date })).contextId).not.toBe(
+      counted.contextId,
+    );
   });
 });
 
