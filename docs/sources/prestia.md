@@ -1191,3 +1191,83 @@ activity and detail tables, as positions, booleans and pattern classes, and
 compares the page with the newest capture of the same key that has a
 published parse
 ([ADR 0026's amendment of 2026-10-08](../adr/0026-collector-unit-coverage.md#amendment-2026-10-08-global-pass-replay-compares-records-with-detail-tables)).
+
+## 2026-11-20: deposit-account activity on PRESTIA Online (desktop)
+
+Read-only observation for
+[#1235](https://github.com/risu729/kogane/issues/1235), in the owner's own
+browser session on the desktop site (`online.smbctb.co.jp`), with no
+download, no write route and nothing kept but the shapes below. The scheduled
+collector reads the mobile site (`mobile.smbctb.co.jp`, Android WebView
+profile) instead, whose HTML differs from the desktop one: the mobile balance
+page uses `mc_cardTbl*` card markup, and the desktop activity page uses none.
+The desktop shapes are therefore evidence for the request flow and the limits,
+not a parser contract for the mobile pages.
+
+**Flow.** Menu 口座詳細・取引履歴 posts the header form to
+`/ib/top/TOMETOPaccountinfokozashosai.prst`. The page holds form `ACKSDSP`
+with the usual Nablarch hidden fields (`_FRAMEID`, `_TARGETID`, `_LUID`,
+`_TOKEN`, `_FORMID`, `_SUBINDEX`, `LOCALE`) plus `JUMP_PAGE`, `TOTAL_PAGE`,
+`TOTAL_ROW`, `PAGE_INDEX`, `SORT_INDEX`, `SORT_ORDER`, `EVENTID_PREFIX`,
+`selectAccountIndex`, the radio `inquiryPeriodDesignate` (`0` today, `1` last
+30 days, `2` last 180 days, `3` custom) and the texts
+`tradingHistoryPeriodFrom` / `tradingHistoryPeriodTo` (`YYYY/MM/DD`,
+maxlength 10). An account picker lists every deposit account with the columns
+口座, 口座番号, 預入番号, 満期日, 通貨, 金額; picking one posts
+`/ib/accountinfo/ACKSDSPnext1.prst` (account detail and its history for the
+period currently selected). 照会する posts `/ib/accountinfo/ACKSDSPnext2.prst`.
+Paging posts `ACKSDSPpages` (page number), `ACKSDSPpreviouspage` and
+`ACKSDSPnextpage`. The CSV link posts `ACKSDSPtorihikidownload` (not
+exercised). The picker on the observed account listed four rows: yen
+ordinary, MultiMoney yen ordinary, MultiMoney foreign ordinary (one currency)
+and one foreign time deposit.
+
+**Limits stated on the page.** At most 180 days; at most 250 rows for yen
+ordinary, MultiMoney yen ordinary and yen current accounts, and 150 for USD
+ordinary and MultiMoney foreign ordinary accounts. Older activity is in the
+statements (取引明細書).
+
+**Result table.** `table.table-normal.wacs-sortable`, 20 rows per page, newest
+date first, every header sortable. Yen accounts: 日付 | 取引内容 | 出金 | 入金.
+Foreign accounts add 為替レート (`-` on every observed row). 日付 is
+`YYYY/MM/DD`; 取引内容 is bilingual `<Japanese> / <English>` and may carry a
+counter-account reference; exactly one of 出金 / 入金 holds an amount, written
+`9,999 JPY` or `9,999.99 AUD` (thousands separators, the ISO code after the
+number, the currency's minor digits). There is no running-balance column and
+no row identifier. `TOTAL_ROW` and `TOTAL_PAGE` carry the query's row and page
+counts (an 80-row foreign query had 4 pages; a 12-row yen query had 1), and
+the page also prints `N件`. An empty period shows message code `ACKSDSP13`
+(指定された照会期間の取引履歴が存在しません) with zero rows. How a query over the
+cap reports the cut was not reached: no observed query came near 250 or 150.
+
+**Consequences for #1235.** The packaged Android app names the same routes on
+the mobile host (`ACKZDSPkozashosai`, `ACKSDSPpages`, `ACKSDSPnext2`; see
+[Confirmed application architecture](#confirmed-application-architecture-and-read-paths)),
+so the flow above is the likely mobile flow, but the mobile markup of the
+picker, the period form and the result rows is unobserved. A parser needs that
+markup first, from the app's packaged extraction schema or one mobile capture.
+Because rows carry no identifier and two identical rows on one day are
+possible, publication needs an identity of date, description, signed amount
+and the occurrence index among identical rows of the same query.
+
+## 2026-11-20: statement list on PRESTIA Online (desktop)
+
+Read-only observation for
+[#1253](https://github.com/risu729/kogane/issues/1253) in the same session; no
+statement was opened or downloaded. Menu 取引明細書 posts the header form to
+`/ib/top/TOMETOPaccountinfoestatement.prst`, which holds form `ACESLST` with
+the Nablarch hidden fields plus selects `selectOutputYear` (an empty choice
+and seven years, the current year and six before it) and `selectOutputMonth`
+(an empty choice, 1–12 and すべて), and a 検索する button. Without a search the
+page lists the 12 most recent issue months in `table.table-normal` with the
+columns 発行年月 (`YYYY/MM`) | 取引明細書・取引残高報告書, one 閲覧する link per
+row. Each link posts `ACESLST` to `/ib/accountinfo/ACESLSTnext<n>.prst` with
+the row index (`0`–`11`) as the second `doTransaction` argument and target
+`_blank`; the link carries no file name or hash. The page states that a
+statement appears from the 5th business day of the following month (March's
+may take longer), that the transaction statement is monthly and, without
+activity, once a year as of the end of March, that the balance report follows
+the same rule on mutual-fund holdings, and that six years are kept. Whether the search returns every month of a year
+on one page and what the 閲覧する response is (PDF bytes or a viewer page)
+are unobserved, as is the mobile equivalent: the app's packaged routes list
+no statement route.
