@@ -602,17 +602,25 @@ the kind has no identity run, so no resolved account.
 change, the valuation on a date and the reconstructed state pin, since their
 manifest names the schema version, although they read nothing new. Nothing
 stores them, so nothing is rebuilt. A stale client that validates
-`reported-state-v3` refuses a v4 body. The read scans the publication
-pointers (`published_parse_runs`) filtered by parser name and reaches each
-page's artifact by primary key and its rows through
-`idx_sched_pay_obs_parse_run`; its cost is not measured on workerd or D1.
+`reported-state-v3` refuses a v4 body. The upcoming bills view of the card
+debit-account read (ADR 0114) builds on the full reported state for its
+balances, so it runs this read too; it uses only the accounts and pins no
+reported-state context id, so its answer is unchanged. The read scans the
+publication pointers (`published_parse_runs`) filtered by parser name and
+reaches each page's artifact by primary key and its rows through
+`idx_sched_pay_obs_parse_run`: on workerd, D1's own plan without statistics is
+that, and its `rows_read` is the pointers plus a few rows per page
+(`services/processor/test/myjcb-shared-r2.test.ts`, on a small store). It is
+not timed on D1 ([reported state, cost](../reported-state.md#cost)).
 
 Limits: only MyJCB's skip-payment page is read; the bonus page stays unread
 (ADR 0005, amendment e). Production has stored only pages that listed none
 (amendments i and k), so a row shape with payments is the parser's mirror of
-the observed head, exercised by synthetic tests only. A refused newer parse
-leaves an older capture current with its age shown, and the answer does not
-say that a newer capture was refused. A scheduled payment is not a liability
+the observed head, exercised by synthetic tests only. A newer page whose parse
+is not published (pending, refused, or never parsed because its run was not
+failure-free), and a newer run that stored no skip page, leave an older
+capture current with its age shown, and the answer does not say that a newer
+page exists. A scheduled payment is not a liability
 figure: unbilled usage, installment remainders and loans stay named as
 missing.
 
@@ -628,4 +636,10 @@ the random-store test now also holds skip pages); `packages/application/test/pro
 `services/app/test/reported-state-api.test.ts`;
 `apps/web/test/reported-state.browser.test.ts` (the panel lists both
 payments with their due statuses, the empty page as empty, no sum, and before
-any capture says that is not "none scheduled").
+any capture says that is not "none scheduled");
+`packages/application/test/dated-state-scale.test.ts` (on the complete CORE
+schema without statistics, the read walks no stored table whole but the
+publication pointers); `services/processor/test/myjcb-shared-r2.test.ts` (on
+workerd, a skip page the collector's plan registers and the processor parses
+is listed with both rows by the read and by `queryDatedState` through the wire
+contract, with D1's plan and `rows_read` as above).

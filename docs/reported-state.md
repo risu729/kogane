@@ -430,6 +430,19 @@ smaller `STATEMENT_CI_SCALE` in CI, checks each date's snapshot and statements
 against independent queries, fails on a plan that scans an observation, parse,
 run or identity table whole, and requires each answer under one second.
 
+Since `reported-state-v4` a sixth read, `DATED_SCHEDULED_PAYMENTS_SQL`, is
+issued with the five. It walks the publication pointers
+(`published_parse_runs`) once, filtered by parser name, and reaches each
+skip-payment page by primary key and its rows through
+`idx_sched_pay_obs_parse_run`; the scale test accepts that walk and no other.
+At `STATEMENT_SCALE` (16,786 pointers, no skip page) it took 0.6 ms on
+2026-11-20, and the whole answer 379 ms today and 326 ms a year back (median of
+three on `bun:sqlite`, a machine shared with other test processes; the table
+above is the 2026-11-18 run, before this read). On workerd,
+`services/processor/test/myjcb-shared-r2.test.ts` checks D1's own plan without
+statistics (the same walk and keys) and that its `rows_read` stays within the
+pointers plus a few rows per page, on a small store; it is not timed on D1.
+
 A holdings change between two dates is two of these answers (run
 concurrently through the executor) plus two keyed reads: the position
 quantities by primary key and `DATED_SNAPSHOT_UNITS_SQL` (artifacts and fetch
@@ -479,10 +492,11 @@ answer under two seconds.
 - Scheduled payments come from MyJCB's skip-payment page only (its bonus page
   stays unread). Production has stored only pages that listed none (ADR 0005,
   amendments i and k), so a page with payments is exercised by synthetic
-  tests only. A refused newer parse leaves an older page current with its
-  age shown, and the answer does not say a newer page was refused. The read
-  scans the publication pointers filtered by parser name; its cost is not
-  measured on workerd or D1.
+  tests only. A newer page whose parse is not published (pending, refused,
+  or never parsed because its run was not failure-free), and a newer run
+  that stored no skip page, leave an older page current with its age shown,
+  and the answer does not say a newer page exists. The read scans the
+  publication pointers filtered by parser name ([cost](#cost)).
 - Adoption and overlap across sources (`selectAdoptedSet`) are not applied:
   rows are listed per provider account, which is why nothing is added.
   Valuation of the listed positions in a base unit, under an explicit price

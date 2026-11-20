@@ -1281,8 +1281,10 @@ each one (`allocation_available` is 0), and the scale test on the scaled
 store, which draws none, so the two texts agree there. Not timed on the
 scale store or on D1.
 
-Upcoming bills cost that read, the reported state for the date (its four
-reads, each bounded by `DATED_STATE_ROW_BOUND`, and its settlement read), and
+Upcoming bills cost that read, the reported state for the date (its six
+reads: positions, balances, snapshots, statements, the statements before the
+window and the scheduled payments, each bounded by `DATED_STATE_ROW_BOUND`,
+and its settlement read), and
 `ACCOUNT_LABELS_SQL`, one primary-key lookup per account entity named.
 `packages/application/test/card-upcoming-bills.test.ts` checks that the view
 issues only those reads and, without table statistics, that labels are
