@@ -408,3 +408,60 @@ test("lease abort cancels a PDF response and forbids subsequent requests", async
   await expect(client.api("pdf", fields)).rejects.toThrow("sbi_mailbox_lease_lost");
   expect(pdfCalls).toBe(1);
 });
+
+test("a refusal logs its step, hop, status and refused redirect target in closed values only", async () => {
+  const logged: string[] = [];
+  const original = console.log;
+  console.log = (line: string) => logged.push(line);
+  try {
+    const refusedRedirect = new MailboxHttp([], async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString()).href;
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location:
+            url === MAILBOX_MAIN_LINK
+              ? HANDOFF
+              : "https://www.sbisec.co.jp/ETGate/;jsessionid=synthetic?secret=1",
+        },
+      });
+    });
+    await expect(refusedRedirect.open()).rejects.toThrow("sbi_mailbox_transport_failed");
+    expect(refusedRedirect.lastDiagnosis).toEqual({
+      step: "landing",
+      hop: 1,
+      status: 302,
+      refusedHost: "www.sbisec.co.jp",
+      refusedPath: "unsafe",
+    });
+    const { fetcher } = sequence();
+    const badEntry = new MailboxHttp([], async (input, init) =>
+      new URL(input instanceof Request ? input.url : input.toString()).href === MAILBOX_ENTRY
+        ? new Response("{}", { status: 403, headers: { "content-type": "application/json" } })
+        : fetcher(input, init),
+    );
+    await expect(badEntry.open()).rejects.toThrow("sbi_mailbox_transport_failed");
+    expect(badEntry.lastDiagnosis).toEqual({
+      step: "entry",
+      hop: 0,
+      status: 403,
+      contentType: "application/json",
+    });
+    const api = new MailboxHttp(
+      [],
+      sequence(async () => new Response("{}", { status: 500 })).fetcher,
+    );
+    await api.open();
+    await expect(api.api("summary")).rejects.toThrow("sbi_mailbox_transport_failed");
+    expect(api.lastDiagnosis).toMatchObject({ step: "api", api: "summary", status: 500 });
+  } finally {
+    console.log = original;
+  }
+  const records = logged.map((line) => JSON.parse(line) as Record<string, unknown>);
+  expect(records.map((record) => [record.event, record.code, record.step])).toEqual([
+    ["sbi-mailbox-refused", "sbi_mailbox_transport_failed", "landing"],
+    ["sbi-mailbox-refused", "sbi_mailbox_transport_failed", "entry"],
+    ["sbi-mailbox-refused", "sbi_mailbox_transport_failed", "api"],
+  ]);
+  expect(logged.join("\n")).not.toMatch(/synthetic|secret|jsessionid/u);
+});

@@ -51,6 +51,21 @@ export interface MailboxCookie {
   secure: boolean;
 }
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+type MailboxStep = "landing" | "entry" | "connect" | "sso" | "application" | "api";
+/**
+ * Where a refusal happened, in closed values only: the step, the redirect hop,
+ * the last HTTP status and media type, and for a refused redirect its host and
+ * a plain path. Never a query, cookie, form field or body.
+ */
+export interface MailboxDiagnosis {
+  step: MailboxStep;
+  api?: MailboxApi;
+  hop: number;
+  status?: number;
+  contentType?: string;
+  refusedHost?: string;
+  refusedPath?: string;
+}
 
 /** A separate request-local jar; no authorization header is accepted or forwarded. */
 export class MailboxHttp {
@@ -58,6 +73,7 @@ export class MailboxHttp {
   private readonly cookies: MailboxCookie[];
   private csrf = "";
   private riyoCd = "";
+  private diagnosis: MailboxDiagnosis = { step: "landing", hop: 0 };
   constructor(
     cookies: readonly MailboxCookie[],
     private readonly fetcher: Fetcher = fetch,
@@ -76,6 +92,36 @@ export class MailboxHttp {
   }
 
   async open(): Promise<void> {
+    try {
+      await this.opening();
+    } catch (error) {
+      this.report(error);
+      throw error;
+    }
+  }
+
+  /** The closed diagnosis of the latest step, for logs and tests. */
+  get lastDiagnosis(): Readonly<MailboxDiagnosis> {
+    return this.diagnosis;
+  }
+
+  private at(step: MailboxStep, api?: MailboxApi): void {
+    this.diagnosis = { step, hop: 0, ...(api === undefined ? {} : { api }) };
+  }
+
+  private report(error: unknown): void {
+    if (!(error instanceof MailboxError)) return;
+    try {
+      console.log(
+        JSON.stringify({ event: "sbi-mailbox-refused", code: error.code, ...this.diagnosis }),
+      );
+    } catch {
+      /* Logging is best effort. */
+    }
+  }
+
+  private async opening(): Promise<void> {
+    this.at("landing");
     const landing = await this.navigation(
       MAILBOX_MAIN_LINK,
       "GET",
@@ -86,9 +132,11 @@ export class MailboxHttp {
     );
     await requireHtml(landing);
     await this.read(landing, 256 * 1024);
+    this.at("entry");
     const entry = await this.request(MAILBOX_ENTRY, { method: "GET" }, MOBILE_LANDING);
     await requireHtml(entry);
     const entryFields = mailboxForm(await html(entry, this.signals.get(entry)), MAILBOX_ENTRY);
+    this.at("connect");
     const connecting = await this.request(
       MAILBOX_CONNECT,
       { method: "POST", body: entryFields },
@@ -99,6 +147,7 @@ export class MailboxHttp {
       await html(connecting, this.signals.get(connecting)),
       MAILBOX_CONNECT,
     );
+    this.at("sso");
     const bootstrap = await this.navigation(
       MAILBOX_SSO,
       "POST",
@@ -110,6 +159,7 @@ export class MailboxHttp {
     const material = mailboxBootstrap(await html(bootstrap, this.signals.get(bootstrap)));
     this.csrf = material.csrf;
     this.riyoCd = material.riyoCd;
+    this.at("application");
     const application = await this.request(
       MAILBOX_APPLICATION,
       { method: "GET" },
@@ -121,6 +171,19 @@ export class MailboxHttp {
   }
 
   async api(kind: MailboxApi, fields: Readonly<Record<string, string>> = {}): Promise<Uint8Array> {
+    this.at("api", kind);
+    try {
+      return await this.calling(kind, fields);
+    } catch (error) {
+      this.report(error);
+      throw error;
+    }
+  }
+
+  private async calling(
+    kind: MailboxApi,
+    fields: Readonly<Record<string, string>>,
+  ): Promise<Uint8Array> {
     if (!this.csrf || !this.riyoCd) fail();
     const expected =
       kind === "summary" || kind === "list"
@@ -190,6 +253,7 @@ export class MailboxHttp {
     let current = initial;
     const visited = new Set<string>();
     for (let hop = 0; hop < 5; hop++) {
+      this.diagnosis.hop = hop;
       if (visited.has(current)) fail();
       visited.add(current);
       const response = await this.request(
@@ -217,6 +281,8 @@ export class MailboxHttp {
         fail();
       }
       if (!destinations.has(next.href) && !via(next)) {
+        this.diagnosis.refusedHost = providerHost(next);
+        this.diagnosis.refusedPath = plainPath(next);
         await cancel(response);
         fail();
       }
@@ -275,6 +341,10 @@ export class MailboxHttp {
         },
       });
       this.signals.set(response, signal);
+      this.diagnosis.status = response.status;
+      const mime = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+      if (mime && /^[a-z]+\/[a-z0-9.+-]{1,60}$/u.test(mime)) this.diagnosis.contentType = mime;
+      else delete this.diagnosis.contentType;
       if (this.leaseSignal.aborted) {
         await cancel(response);
         throw new MailboxError("sbi_mailbox_lease_lost");
@@ -409,6 +479,14 @@ function matches(cookie: MailboxCookie, url: URL): boolean {
       url.pathname.startsWith(cookie.path.endsWith("/") ? cookie.path : `${cookie.path}/`)) &&
     (!cookie.secure || url.protocol === "https:")
   );
+}
+function providerHost(url: URL): string {
+  return sbiDomain(url.hostname) || url.hostname.endsWith("e-shishobako.ne.jp")
+    ? url.hostname
+    : "other";
+}
+function plainPath(url: URL): string {
+  return /^[A-Za-z0-9/_.-]{1,80}$/u.test(url.pathname) ? url.pathname : "unsafe";
 }
 function sbiDomain(domain: string): boolean {
   return domain === "sbisec.co.jp" || domain.endsWith(".sbisec.co.jp");

@@ -464,6 +464,15 @@ application, whose summary (`DPAW010501030`) and list (`DPAW010501010`)
 answered 200. The application also posts `DPAW010601020`, which the collector
 does not need.
 
+The first scheduled run with that change (2026-11-20 21:00 UTC) still ended
+its mailbox with `sbi_mailbox_transport_failed`, so another step refuses too.
+Every refusal collapses into that one closed code, so the client now logs one
+`sbi-mailbox-refused` line per refusal with closed values only: the step
+(`landing`, `entry`, `connect`, `sso`, `application` or `api` with the API
+name), the redirect hop, the last HTTP status and media type, and for a
+refused redirect its host (an SBI or mailbox host, else `other`) and a plain
+path (else `unsafe`). It never logs a query, cookie, form field or body.
+
 ## Assessment scale
 
 Automation levels are defined as follows.
