@@ -110,6 +110,8 @@ no provider collector execution or deployment is part of these checks.
 
 ## Amendment 2026-11-18: the current list is bounded by the terminal's unit capacity
 
+Status: accepted (merged 2026-11-19 in [#1397](https://github.com/risu729/kogane/pull/1397)).
+
 The mailbox terminal states one unit per listed row plus `mailbox-index`, and
 a terminal manifest holds at most 1,000 units (`packages/collection`). The
 collector accepted lists of up to 1,000 rows, so a list of exactly 1,000 rows
