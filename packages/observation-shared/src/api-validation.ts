@@ -100,6 +100,9 @@ import type {
 } from "./organization-contract.ts";
 import {
   BALANCE_HISTORY_REASONS,
+  CASH_LEFT_OUT_METRICS,
+  CASH_LEFT_OUT_REASONS,
+  CASH_METRIC_IDS,
   OVERVIEW_FETCH_RUN_STATUSES,
   OVERVIEW_LINE_FAILURE_CODES,
   OVERVIEW_PARSE_RUN_STATUSES,
@@ -116,6 +119,14 @@ import type {
   BalanceHistoryPage,
   BalanceHistorySummaryItem,
   BalanceHistorySummaryPage,
+  CashAmount,
+  CashLeftOut,
+  CashLine,
+  CashPageInfo,
+  CashReference,
+  CashPerAccountPage,
+  CashSourceSubtotal,
+  CashSubtotal,
   KnownAssetsSubtotals,
   LatestBalanceItem,
   LatestBalancePage,
@@ -960,6 +971,117 @@ const balanceHistorySummaryPage: Check<BalanceHistorySummaryPage> = (
   withoutNetWorth(value) &&
   accountsNamed(value) &&
   value.items.length <= value.page.limit;
+
+// Cash per account (ADR 0123, amendment 2026-11-20). An exact amount has its
+// value and scale and a value that is not exact neither (INV05); only an
+// adopted exact amount may be counted, and an amount not counted says why. A
+// subtotal with nothing counted has no value, never a zero; a partial one
+// names its reasons. Units and left-out reasons appear once each.
+const unique = (keys: readonly string[]) => new Set(keys).size === keys.length;
+const cashAmount: Check<CashAmount> = (value): value is CashAmount =>
+  object<CashAmount>({
+    observationId: identifier,
+    metric: literal(...CASH_METRIC_IDS),
+    unit: text,
+    value: nullableText,
+    scale: nullable(identifier),
+    status: literal("exact", "missing", "unparsed", "conflict"),
+    adoption: literal("adopted", "excluded", "unresolved", "conflict", "stale"),
+    counted: boolean,
+    asOf: nullableText,
+    reasons: array(text),
+  })(value) &&
+  (value.status === "exact"
+    ? value.value !== null && value.scale !== null
+    : value.value === null && value.scale === null) &&
+  (!value.counted || (value.adoption === "adopted" && value.status === "exact")) &&
+  (value.counted || value.reasons.length > 0);
+const cashReference: Check<CashReference> = (value): value is CashReference =>
+  object<CashReference>({
+    source: text,
+    sourceAccount: text,
+    amounts: array(cashAmount),
+  })(value) && value.amounts.length > 0;
+const cashLine: Check<CashLine> = (value): value is CashLine =>
+  object<CashLine>({
+    account: nullableText,
+    label: nullableText,
+    references: array(cashReference),
+  })(value) &&
+  value.references.length > 0 &&
+  unique(value.references.map((entry) => JSON.stringify([entry.source, entry.sourceAccount]))) &&
+  (value.account === null) === (value.label === null);
+const cashSubtotalFields = {
+  unit: text,
+  value: nullableText,
+  scale: nullable(identifier),
+  counted: identifier,
+  notCounted: identifier,
+  status: literal("complete", "partial"),
+  reasons: array(text),
+};
+function cashSubtotalSound(value: CashSubtotal): boolean {
+  return (
+    (value.counted === 0
+      ? value.value === null && value.scale === null
+      : value.value !== null && value.scale !== null) &&
+    (value.status === "complete" || value.reasons.length > 0) &&
+    (value.notCounted === 0 || value.reasons.length > 0)
+  );
+}
+const cashSubtotal: Check<CashSubtotal> = (value): value is CashSubtotal =>
+  object<CashSubtotal>(cashSubtotalFields)(value) && cashSubtotalSound(value);
+const cashSourceSubtotal: Check<CashSourceSubtotal> = (value): value is CashSourceSubtotal =>
+  object<CashSourceSubtotal>({ ...cashSubtotalFields, source: text })(value) &&
+  cashSubtotalSound(value);
+const cashLeftOut: Check<CashLeftOut> = (value): value is CashLeftOut =>
+  object<CashLeftOut>({
+    reason: literal(...CASH_LEFT_OUT_REASONS),
+    rows: identifier,
+    metrics: array(text),
+    moreMetrics: identifier,
+  })(value) &&
+  value.metrics.length > 0 &&
+  value.metrics.length <= CASH_LEFT_OUT_METRICS &&
+  (value.moreMetrics === 0 || value.metrics.length === CASH_LEFT_OUT_METRICS) &&
+  unique(value.metrics) &&
+  value.rows >= value.metrics.length + value.moreMetrics;
+const cashPageInfo = object<CashPageInfo>({
+  limit: identifier,
+  hasMore: boolean,
+  nextCursor: nullableText,
+  snapshotId: text,
+  paginationVersion: literal("keyset-v2"),
+  lines: identifier,
+});
+const cashPerAccountPage: Check<CashPerAccountPage> = (value): value is CashPerAccountPage =>
+  object<CashPerAccountPage>({
+    schemaVersion: literal("snapshot-page-v1"),
+    collection: literal("cash"),
+    policyRelease: text,
+    lines: array(cashLine),
+    subtotals: object<CashPerAccountPage["subtotals"]>({
+      byUnit: array(cashSubtotal),
+      bySource: array(cashSourceSubtotal),
+    }),
+    leftOut: array(cashLeftOut),
+    liabilitiesCoverage: literal("unknown"),
+    dataCoverage: snapshotCoverage,
+    page: cashPageInfo,
+  })(value) &&
+  withoutNetWorth(value) &&
+  withoutNetWorth(value.subtotals) &&
+  unique(value.subtotals.byUnit.map((entry) => entry.unit)) &&
+  unique(value.subtotals.bySource.map((entry) => JSON.stringify([entry.source, entry.unit]))) &&
+  unique(value.leftOut.map((entry) => entry.reason)) &&
+  // Whole lines up to `limit` measurements; a longer line is a page alone.
+  (value.lines.length <= 1 ||
+    value.lines
+      .flatMap((line) => line.references)
+      .reduce((sum, reference) => sum + reference.amounts.length, 0) <= value.page.limit) &&
+  value.lines.length <= value.page.lines &&
+  value.page.hasMore === (value.page.nextCursor !== null);
+
 /** A full page carries no `detail`; a summary page says it is one. */
 const fullPage =
   <T>(check: Check<T>): Check<T> =>
@@ -1231,6 +1353,7 @@ const endpoints: Record<string, Check<unknown>> = {
     fullPage(latestBalancePage)(value) || latestBalanceSummaryPage(value),
   "/api/v2/balances/history": (value): value is BalanceHistoryPage | BalanceHistorySummaryPage =>
     fullPage(balanceHistoryPage)(value) || balanceHistorySummaryPage(value),
+  "/api/v2/balances/cash": cashPerAccountPage,
 };
 
 /** Each detail's own check of the balance pages and the overview (ADR 0123). */

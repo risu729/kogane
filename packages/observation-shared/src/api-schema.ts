@@ -106,7 +106,7 @@ export interface ApiCapabilities {
   readonly identityReadModes: readonly IdentityReadMode[];
   /** Pagination of the v1 list routes. */
   readonly paginationVersion: PaginationVersion;
-  /** `/api/v2/balances/latest` and `/api/v2/balances/history` are served. */
+  /** `/api/v2/balances/latest`, `/history` and `/cash` are served. */
   readonly balancesV2: boolean;
   /** Pagination of the v2 balance routes; `none` when they are not served. */
   readonly balancesV2Pagination: PaginationVersion;
@@ -387,6 +387,16 @@ export const LIST_REQUEST_SCHEMA = {
     // `summary` (the default) or `full` (ADR 0123).
     detail: "balancesV2",
   },
+  // Cash per account (ADR 0123, amendment 2026-11-20): one detail, its own
+  // lines, so no `metric`, `view` or `detail`.
+  "/api/v2/balances/cash": {
+    source: "collectionFilters",
+    account: "collectionFilters",
+    instrument: "collectionFilters",
+    identityRead: "identityReadModes",
+    cursor: "balancesV2",
+    limit: "balancesV2",
+  },
 } as const satisfies Record<string, Record<string, CapabilityRequirement>>;
 export type ListPath = keyof typeof LIST_REQUEST_SCHEMA;
 
@@ -398,6 +408,7 @@ export type ListPath = keyof typeof LIST_REQUEST_SCHEMA;
 export const LIST_PATH_CAPABILITY: Partial<Record<ListPath, CapabilityRequirement>> = {
   "/api/v2/balances/latest": "balancesV2",
   "/api/v2/balances/history": "balancesV2",
+  "/api/v2/balances/cash": "balancesV2",
 };
 
 export function isListPath(path: string): path is ListPath {
