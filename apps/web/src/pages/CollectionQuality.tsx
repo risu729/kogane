@@ -5,6 +5,11 @@ import { Link, useLocation } from "../router.tsx";
 import { EmptyState, Kv, KvRow, Panel, QueryBoundary } from "../ui.tsx";
 import {
   COLLECTION_QUALITY_PATH,
+  COLLECTION_STATUS_VIEW,
+  STATUS_DEGRADED_AFTER_DAYS,
+  type CollectionStatus,
+  type CollectionStatusRun,
+  type CollectionStatusState,
   type AccountCoverage,
   type AccountCoveragePeriod,
   type AccountStanding,
@@ -317,7 +322,8 @@ function SourceCells({ sourceId, offset }: { sourceId: string; offset: number })
     queryKey: ["collection-quality", sourceId, offset],
     queryFn: ({ signal }) =>
       getJson<CollectionQualityCells>(
-        `${COLLECTION_QUALITY_PATH}/${encodeURIComponent(sourceId)}?offset=${offset}`,
+        // The page shows every cell; the route's default is the summary (ADR 0123).
+        `${COLLECTION_QUALITY_PATH}/${encodeURIComponent(sourceId)}?offset=${offset}&detail=full`,
         signal,
       ),
   });
@@ -514,6 +520,122 @@ function SourceAccounts({ sourceId }: { sourceId: string }): ReactNode {
     </QueryBoundary>
   );
 }
+const STATUS_STATE_LABELS: Record<CollectionStatusState, string> = {
+  disabled: "定期実行を停止中",
+  "needs-owner": "本人の操作待ち",
+  failing: "失敗が続いています",
+  degraded: `取得は成功、${STATUS_DEGRADED_AFTER_DAYS}日を超えて解析・公開されていないデータあり`,
+  ok: "問題は見つかっていません",
+};
+const RUN_STATUS_LABELS: Record<CollectionStatusRun["status"], string> = {
+  started: "実行中",
+  completed: "完了",
+  failed: "失敗",
+  uncertain: "結果不明",
+  not_dispatched: "呼び出し前に停止",
+};
+function StatusRun({ value }: { value: CollectionStatusRun | null }): ReactNode {
+  if (value === null) return "実行記録なし";
+  return (
+    <>
+      {value.at} · {RUN_STATUS_LABELS[value.status]}
+      {value.failureCode !== undefined ? (
+        <>
+          {" "}
+          <code>{value.failureCode}</code>
+        </>
+      ) : null}
+      {value.recovered !== undefined ? <> · {value.recovered.at} の取得で回復</> : null}
+    </>
+  );
+}
+/** The status view (ADR 0045, amendment 2026-11-19): one line per configured job. */
+function StatusTable(): ReactNode {
+  const query = useQuery({
+    queryKey: ["collection-quality", "status"],
+    queryFn: ({ signal }) =>
+      getJson<CollectionStatus>(
+        `${COLLECTION_QUALITY_PATH}?view=${COLLECTION_STATUS_VIEW}`,
+        signal,
+      ),
+  });
+  return (
+    <QueryBoundary query={query} label="収集の状況">
+      {(data) => (
+        <Panel title="収集の状況（実行予定ごと）">
+          <div className="table-scroll" role="region" aria-label="収集の状況" tabIndex={0}>
+            <table className="collection-status-table">
+              <caption>
+                {data.asOf}{" "}
+                時点（日数は日本時間）。失敗の後、次の実行より前に同じ取得元の取得が成功した場合は回復とし（解析・公開の遅れは「公開されていないデータ」に表示します）、失敗に数えません。失敗回数は直近
+                100 件の実行記録まで数えます。
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">実行予定</th>
+                  <th scope="col">状態</th>
+                  <th scope="col">最後の実行</th>
+                  <th scope="col">最後の成功</th>
+                  <th scope="col">成功後の失敗</th>
+                  <th scope="col">公開されていないデータ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.sources.map((line) => (
+                  <tr key={line.job} data-state={line.state}>
+                    <th scope="row">
+                      {line.job}
+                      {line.source !== null && line.source !== line.job ? ` (${line.source})` : ""}
+                    </th>
+                    <td>
+                      {STATUS_STATE_LABELS[line.state]} <code>{line.state}</code>
+                    </td>
+                    <td>
+                      <StatusRun value={line.lastRun} />
+                    </td>
+                    <td>{instant(line.lastSuccessAt)}</td>
+                    <td>
+                      {line.failuresSinceSuccess === 0
+                        ? "なし"
+                        : `${line.failuresSinceSuccess === "100+" ? "100件以上" : `${line.failuresSinceSuccess}件`}`}
+                      {line.failureCode !== null ? (
+                        <>
+                          {" "}
+                          <code>{line.failureCode}</code>
+                        </>
+                      ) : null}
+                    </td>
+                    <td>
+                      {line.notPublishing.length === 0 ? (
+                        line.enabled ? (
+                          "なし"
+                        ) : (
+                          "停止中のため未確認"
+                        )
+                      ) : (
+                        <ul>
+                          {line.notPublishing.map((entry) => (
+                            <li key={entry.dataset}>
+                              <code>{entry.dataset}</code> · 取得単位 {entry.units} ·{" "}
+                              {entry.newestParsedCapture === null
+                                ? `公開された取得なし（${entry.ageDays}日待ち）`
+                                : `最後に公開された取得 ${entry.newestParsedCapture}（${entry.ageDays}日前）`}
+                              <Reasons codes={entry.reasons} />
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+    </QueryBoundary>
+  );
+}
 export function CollectionQualityPage(): ReactNode {
   const params = new URLSearchParams(useLocation().split("?", 2)[1] ?? "");
   const sourceId = params.get("source");
@@ -522,7 +644,8 @@ export function CollectionQualityPage(): ReactNode {
   const validOffset = /^(?:0|[1-9][0-9]{0,6})$/u.test(offsetText);
   const query = useQuery({
     queryKey: ["collection-quality", "summary"],
-    queryFn: ({ signal }) => getJson<CollectionQualitySummary>(COLLECTION_QUALITY_PATH, signal),
+    queryFn: ({ signal }) =>
+      getJson<CollectionQualitySummary>(`${COLLECTION_QUALITY_PATH}?detail=full`, signal),
   });
   return (
     <div className="wrap-any">
@@ -531,6 +654,7 @@ export function CollectionQualityPage(): ReactNode {
         <p className="lede">試行、取得、原本保存、解析、公開、新しさを取得元ごとに確認します。</p>
         <Link to="/schedules">収集スケジュール</Link> · <Link to="/evidence">取得履歴と原本</Link>
       </div>
+      <StatusTable />
       <p>
         空表示は完全取得や取引ゼロの証明ではありません。本人操作待ちや個別復旧は{" "}
         <a href="https://github.com/risu729/kogane/issues/440">収集の復旧記録</a>で追跡します。

@@ -55,6 +55,7 @@ import {
 } from "./card-binding";
 import { providerCount } from "./provider-count";
 import { logStatementCountDiagnostic } from "./statement-count-diagnostic";
+import { isFinalizedHeaderRow } from "./statement-rows";
 
 export const SOURCE = "vpass";
 /** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
@@ -183,16 +184,20 @@ function redaction(artifactKey: string): TerminalTransformation {
 
 /**
  * Whether a month was captured whole, as a closed code (ADR 0023 option 8,
- * ADR 0026). `complete` only when the rows the stored pages carry equal the
- * row count the provider stated for the month; anything else is a reason the
- * card unit is `partial`, never a count to adjust.
+ * ADR 0026). `complete` only when the rows the stored pages carry, less a
+ * finalized page's header rows, equal the row count the provider stated for
+ * the month; anything else is a reason the card unit is `partial`, never a
+ * count to adjust.
  */
 type VpassMonthCoverage = "complete" | "stated_total_unverified" | "stated_total_mismatch";
 /** The card unit's coverage: `complete`, or the first reason it is not. */
 type VpassCardCoverage = VpassMonthCoverage | "statement_months_absent";
 
 interface MonthCheck {
-  readonly capturedRows: number;
+  /** The rows compared with the stated total. */
+  readonly countedRows: number;
+  /** Finalized header rows (`45`, `4C`) left out of `countedRows`; 0 on a customized page. */
+  readonly excludedHeaderRows: number;
   readonly statedTotal: number | null;
   readonly coverage: VpassMonthCoverage;
 }
@@ -208,13 +213,19 @@ function objectField(value: unknown, key: string): unknown {
  * the raw pages the walk kept. A finalized statement page
  * (`WebMeisaiTopDisplayServiceBean`) states `webMeisaiTopK3Vo.allCnt`; a
  * customized page (`CustomizedMeisaiAnsDisplayServiceBean`) states `total`.
- * The rows are the pages' `meisaiList` entries, as the walk counts them. The
- * stated total is the last one the pages carry, which is the value the walk
- * itself stopped on; a page that carries the field unparsable leaves the
- * month unverified. Nothing else is inferred from the count.
+ * The rows are the pages' `meisaiList` entries, except that on a finalized
+ * page the two header kinds `45` and `4C` are not counted (`allCnt` does not
+ * count them: ADR 0023's 2026-11-19 amendment, the owner's decision D1); they
+ * are recorded as `excludedHeaderRows`. Every other entry is counted, an
+ * unrecognized one included, so a row kind nobody has observed is never
+ * dropped here (the parser refuses it). A customized page's rows are all
+ * counted. The stated total is the last one the pages carry, which is the
+ * value the walk itself stopped on; a page that carries the field unparsable
+ * leaves the month unverified. Nothing else is inferred from the count.
  */
 function monthCheck(capture: VpassMonthCapture): MonthCheck {
-  let capturedRows = 0;
+  let countedRows = 0;
+  let excludedHeaderRows = 0;
   let statedTotal: number | null = null;
   let readable = true;
   for (const page of capture.pages) {
@@ -230,7 +241,16 @@ function monthCheck(capture: VpassMonthCapture): MonthCheck {
     const customized = objectField(content, "CustomizedMeisaiAnsDisplayServiceBean");
     const bean = finalized ?? customized;
     const rows = objectField(bean, "meisaiList");
-    if (Array.isArray(rows)) capturedRows += rows.length;
+    // Header rows are left out only of rows read from the finalized bean: a
+    // `WebMeisaiTopDisplayServiceBean` that is present but `null` leaves the
+    // customized bean's rows all counted.
+    const finalizedRows = finalized !== undefined && bean === finalized;
+    if (Array.isArray(rows)) {
+      for (const row of rows) {
+        if (finalizedRows && isFinalizedHeaderRow(row)) excludedHeaderRows += 1;
+        else countedRows += 1;
+      }
+    }
     const stated =
       finalized !== undefined
         ? objectField(objectField(finalized, "webMeisaiTopK3Vo"), "allCnt")
@@ -243,10 +263,15 @@ function monthCheck(capture: VpassMonthCapture): MonthCheck {
   const coverage: VpassMonthCoverage =
     !readable || statedTotal === null
       ? "stated_total_unverified"
-      : capturedRows === statedTotal
+      : countedRows === statedTotal
         ? "complete"
         : "stated_total_mismatch";
-  return { capturedRows, statedTotal: readable ? statedTotal : null, coverage };
+  return {
+    countedRows,
+    excludedHeaderRows,
+    statedTotal: readable ? statedTotal : null,
+    coverage,
+  };
 }
 
 /** The card unit's coverage: `complete` only when every walked month is. */
@@ -275,7 +300,8 @@ function manifestBytes(
     summary[month] = {
       pages: capture.pages.length,
       transactions: capture.transactionCount,
-      capturedRows: check.capturedRows,
+      countedRows: check.countedRows,
+      excludedHeaderRows: check.excludedHeaderRows,
       statedTotal: check.statedTotal,
       coverage: check.coverage,
     };
@@ -458,10 +484,12 @@ async function planFor(run: VpassCardRun, binding: VpassCardBinding): Promise<Pe
           unitKind: "card",
           artifactCount: cardArtifactCount,
           // The card unit is `complete` only when every statement month the
-          // provider listed was walked and each month's captured rows equal
-          // the row count the provider stated for it (ADR 0023 option 8,
-          // ADR 0026). Otherwise it is `partial`, registration records a
-          // `partial` unit report and a `partial` fetch run, and neither
+          // provider listed was walked and each month's counted rows (a
+          // finalized page's `45` and `4C` header rows left out) equal the
+          // row count the provider stated for it (ADR 0023 option 8 and its
+          // 2026-11-19 amendment, ADR 0026). Otherwise it is `partial`,
+          // registration records a `partial` unit report and a `partial`
+          // fetch run, and neither
           // identity nor the trusted binding reads the run, so nothing
           // binds; the reason is the closed `coverage` code in
           // `manifest.json` and in the persist diagnostic. The rolling
@@ -566,13 +594,13 @@ export async function persistCardRun(
         (c) =>
           c.coverage === "stated_total_mismatch" &&
           c.statedTotal !== null &&
-          c.capturedRows < c.statedTotal,
+          c.countedRows < c.statedTotal,
       ).length,
       excessMonthCount: checks.filter(
         (c) =>
           c.coverage === "stated_total_mismatch" &&
           c.statedTotal !== null &&
-          c.capturedRows > c.statedTotal,
+          c.countedRows > c.statedTotal,
       ).length,
     },
   };

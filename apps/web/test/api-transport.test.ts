@@ -146,6 +146,27 @@ describe("browser JSON transport", () => {
       expect((await errorFor(path)).message).toContain("形式");
     }
   });
+  test("the overview page that asked for the full detail never renders a summary (ADR 0123)", async () => {
+    const coverage = { limit: 500, truncated: false };
+    const full = { counts: [], sources: [], fetchRuns: [], parseRuns: [], coverage };
+    const summary = {
+      detail: "summary",
+      counts: [],
+      sources: [],
+      fetchRuns: { byStatus: [], notSuccessful: [], notSuccessfulOmitted: [] },
+      parseRuns: { byStatus: [], notOk: [], notOkOmitted: [] },
+      coverage,
+    };
+    serve(Response.json(summary));
+    expect((await errorFor("/api/overview?detail=full")).message).toContain("形式");
+    fetchSpy!.mockRestore();
+    serve(Response.json(full));
+    expect(await getJson("/api/overview?detail=full", signal())).toEqual(full);
+    // Without a detail named, either shape is an overview.
+    fetchSpy!.mockRestore();
+    serve(Response.json(summary));
+    expect(await getJson("/api/overview", signal())).toEqual(summary);
+  });
   test("preserves empty results and exact large minor-unit strings", async () => {
     const body = { transactions: [transaction] };
     serve(Response.json(body));

@@ -1019,7 +1019,239 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
     expect(blockers(pastStop)).toEqual([
       { connectionId: "account-one", code: "credit_past_months" },
     ]);
+    // The refusal names its check in closed codes; the body never reaches the log.
+    expect(pastStop.logs).toContain(
+      '{"event":"myjcb-credit-past-months-refused","reason":"content_type_not_json","menuMonthPositions":[0,1,2],"schedulePositions":[],"menuLinksBeyondRange":0,"contentTypeFamily":"empty"}',
+    );
     expectNoLeak(pastStop);
+    const textPast = await run((url) =>
+      url.pathname.endsWith("/detailPastJson.json")
+        ? new Response(leak, { headers: { "content-type": "text/plain; charset=utf-8" } })
+        : undefined,
+    );
+    expect(textPast.logs).toContain(
+      '"reason":"content_type_not_json","menuMonthPositions":[0,1,2],"schedulePositions":[],"menuLinksBeyondRange":0,"contentTypeFamily":"text"',
+    );
+    expectNoLeak(textPast);
+    const htmlPast = await run((url) =>
+      url.pathname.endsWith("/detailPastJson.json") ? html(leak) : undefined,
+    );
+    expect(htmlPast.logs).toContain(
+      '"reason":"content_type_not_json","menuMonthPositions":[0,1,2],"schedulePositions":[],"menuLinksBeyondRange":0,"contentTypeFamily":"html"',
+    );
+    expectNoLeak(htmlPast);
+    const errorPast = await run((url) =>
+      url.pathname.endsWith("/detailPastJson.json")
+        ? Response.json({ jsonrpc: "2.0", result: { errId: leak, errMessage: leak }, id: "x" })
+        : undefined,
+    );
+    expect(blockers(errorPast)).toEqual([
+      { connectionId: "account-one", code: "credit_past_months" },
+    ]);
+    expect(errorPast.logs).toContain(
+      '"reason":"error_reported","menuMonthPositions":[0,1,2],"schedulePositions":[],"menuLinksBeyondRange":0,"errIdType":"string"',
+    );
+    expectNoLeak(errorPast);
+    const statusPast = await run((url) =>
+      url.pathname.endsWith("/detailPastJson.json")
+        ? new Response(leak, { status: 503 })
+        : undefined,
+    );
+    expect(statusPast.logs).toContain(
+      '"reason":"http_status","menuMonthPositions":[0,1,2],"schedulePositions":[],"menuLinksBeyondRange":0,"status":503',
+    );
+    expectNoLeak(statusPast);
+  });
+});
+
+describe("a refused past-month response names the check that refused it", () => {
+  /** The refusal line `collectCredit` logs for the past-month response `past`. */
+  async function refusal(
+    past: unknown,
+    schedules: Readonly<Record<number, string>> = {},
+  ): Promise<{ error: unknown; lines: string[] }> {
+    const lines: string[] = [];
+    const spy = spyOn(console, "warn").mockImplementation((...values: unknown[]) => {
+      lines.push(values.map(String).join(" "));
+    });
+    try {
+      const inner = client({ 0: mutable }, [], schedules);
+      const error = await collectCredit(
+        {
+          ...inner,
+          postCreditPastJson:
+            typeof past === "function"
+              ? (past as CreditReadClient["postCreditPastJson"])
+              : async () =>
+                  response(
+                    typeof past === "string" ? past : JSON.stringify(past),
+                    "application/json",
+                  ),
+        },
+        "x",
+      ).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+      return {
+        error,
+        lines: lines.filter((line) => line.includes("myjcb-credit-past-months-refused")),
+      };
+    } finally {
+      spy.mockRestore();
+    }
+  }
+  const envelope = (detailPastJsonInfo: unknown) => ({
+    jsonrpc: "2.0",
+    result: { errId: "0", errMessage: "", detailPastJsonInfo },
+    id: "030100601",
+  });
+
+  test.each([
+    [
+      "not JSON",
+      "{",
+      '{"event":"myjcb-credit-past-months-refused","reason":"json_invalid","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0}',
+    ],
+    [
+      "no result",
+      { jsonrpc: "2.0", id: "030100601" },
+      '{"event":"myjcb-credit-past-months-refused","reason":"result_missing","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"topLevelType":"object"}',
+    ],
+    [
+      "no month list",
+      { jsonrpc: "2.0", result: { errId: "0" }, id: "030100601" },
+      '{"event":"myjcb-credit-past-months-refused","reason":"info_missing","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"infoType":"undefined"}',
+    ],
+    [
+      "an item that is not an object",
+      envelope([{ detailMonth: "9", detailAvailableFlag: "0" }, "synthetic"]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"item_malformed","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":2,"itemIndex":2,"itemType":"string"}',
+    ],
+    [
+      "a month outside 0..17",
+      envelope([{ detailMonth: "18", detailAvailableFlag: "1" }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"monthType":"string","monthLength":2,"monthPosition":18}',
+    ],
+    [
+      "a numeric month outside 0..17 names its position",
+      envelope([{ detailMonth: 18, detailAvailableFlag: "1" }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"monthType":"number","monthPosition":18}',
+    ],
+    [
+      "a month that is not digits names its length only",
+      envelope([{ detailMonth: "x18", detailAvailableFlag: "1" }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"monthType":"string","monthLength":3}',
+    ],
+    [
+      "a four-digit month names its length only",
+      envelope([{ detailMonth: "1000", detailAvailableFlag: "1" }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"monthType":"string","monthLength":4}',
+    ],
+    [
+      "an empty month names its length only",
+      envelope([{ detailMonth: "", detailAvailableFlag: "1" }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"monthType":"string","monthLength":0}',
+    ],
+    [
+      "a large numeric month names no shape",
+      envelope([{ detailMonth: 1000, detailAvailableFlag: "1" }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"monthType":"number"}',
+    ],
+    [
+      "a negative month names no shape",
+      envelope([{ detailMonth: -1, detailAvailableFlag: "1" }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"monthType":"number"}',
+    ],
+    [
+      "a fractional month names no shape",
+      envelope([{ detailMonth: 17.5, detailAvailableFlag: "1" }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"monthType":"number"}',
+    ],
+    [
+      "a null month names its type only",
+      envelope([{ detailMonth: null, detailAvailableFlag: "1" }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"monthType":"null"}',
+    ],
+    [
+      "a zero-padded month names its length and position",
+      envelope([{ detailMonth: "017", detailAvailableFlag: "1" }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"month_out_of_range","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"monthType":"string","monthLength":3,"monthPosition":17}',
+    ],
+    [
+      "a repeated month",
+      envelope([
+        { detailMonth: "9", detailAvailableFlag: "0" },
+        { detailMonth: 9, detailAvailableFlag: "0" },
+      ]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"month_duplicate","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":2,"itemIndex":2,"detailMonth":9}',
+    ],
+    [
+      "an availability flag of another shape",
+      envelope([{ detailMonth: "9", detailAvailableFlag: "2" }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"flag_malformed","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"flagType":"string"}',
+    ],
+    [
+      "a settlement label that is not a string",
+      envelope([{ detailMonth: "9", detailAvailableFlag: "1", settlementYM: null }]),
+      '{"event":"myjcb-credit-past-months-refused","reason":"settlement_malformed","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0,"itemCount":1,"itemIndex":1,"settlementType":"null"}',
+    ],
+  ])("%s", async (_name, past, line) => {
+    const { error, lines } = await refusal(past);
+    expect(error).toBeInstanceOf(StopConditionError);
+    expect(error).toMatchObject({ code: "collect-credit-past-months" });
+    expect(lines).toEqual([line]);
+  });
+
+  test("a schedule position the response offers names the positions only", async () => {
+    const skipPage = "<h1>ショッピングスキップ払いご利用明細(未確定分)</h1>";
+    const { error, lines } = await refusal(
+      envelope([
+        { detailMonth: "8", detailAvailableFlag: "1" },
+        { detailMonth: "12", detailAvailableFlag: "1" },
+      ]),
+      { 8: skipPage },
+    );
+    expect(error).toMatchObject({ code: "collect-credit-past-months" });
+    expect(lines).toEqual([
+      '{"event":"myjcb-credit-past-months-refused","reason":"schedule_overlap","menuMonthPositions":[0],"schedulePositions":[8],"menuLinksBeyondRange":0,"itemCount":2,"overlapPositions":[8]}',
+    ]);
+  });
+
+  test("a body that is not UTF-8 is refused as utf8_invalid", async () => {
+    const { error, lines } = await refusal(async () => ({
+      ...response("", "application/json"),
+      body: new Uint8Array([0x7b, 0xff, 0x7d]).buffer,
+    }));
+    expect(error).toMatchObject({ code: "collect-credit-past-months" });
+    expect(lines).toEqual([
+      '{"event":"myjcb-credit-past-months-refused","reason":"utf8_invalid","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0}',
+    ]);
+  });
+
+  test("an error that is not a refusal is logged as unclassified, without its message", async () => {
+    const { error, lines } = await refusal(async () => {
+      throw new TypeError("synthetic failure text");
+    });
+    expect(error).toMatchObject({ code: "collect-credit-past-months" });
+    expect(connectionStopCode(error)).toBe("credit_past_months");
+    expect(lines).toEqual([
+      '{"event":"myjcb-credit-past-months-refused","reason":"unclassified","menuMonthPositions":[0],"schedulePositions":[],"menuLinksBeyondRange":0}',
+    ]);
+  });
+
+  test("an accepted response logs no refusal", async () => {
+    const pages = { 0: mutable };
+    const lines: string[] = [];
+    const spy = spyOn(console, "warn").mockImplementation((...values: unknown[]) => {
+      lines.push(values.map(String).join(" "));
+    });
+    try {
+      await collectCredit(client(pages, [{ detailMonth: "9", detailAvailableFlag: "0" }]), "x");
+    } finally {
+      spy.mockRestore();
+    }
+    expect(lines.filter((line) => line.includes("myjcb-credit-past-months-refused"))).toEqual([]);
   });
 });
 
