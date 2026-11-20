@@ -146,6 +146,11 @@ export interface CreditMenuPositions {
   readonly months: readonly number[];
   /** Positions under 「ボーナス#回払い・ショッピングスキップ払い」, ascending. */
   readonly schedules: readonly number[];
+  /**
+   * Detail links naming a position above 17, which are not read; present
+   * only when there is one. A count only, for the past-month refusal log.
+   */
+  readonly linksBeyondRange?: number;
 }
 
 /**
@@ -171,6 +176,7 @@ export function readCreditMenuGroups(html: string): CreditMenuPositions {
   const schedules = new Set<number>();
   let unrecognized = 0;
   let outside = 0;
+  let beyond = 0;
   let heading: string | undefined;
   const visit = (node: HtmlNode): void => {
     // A link inside a heading belongs to that heading.
@@ -178,7 +184,8 @@ export function readCreditMenuGroups(html: string): CreditMenuPositions {
       heading = compactText(node);
     if (isElement(node) && node.tagName === "a") {
       const position = creditDetailLinkPosition(node);
-      if (position !== undefined) {
+      if (position !== undefined && position > 17) beyond += 1;
+      else if (position !== undefined) {
         if (heading === undefined) outside += 1;
         else {
           const text = heading;
@@ -211,10 +218,17 @@ export function readCreditMenuGroups(html: string): CreditMenuPositions {
     );
   }
   const ascending = (values: Set<number>) => [...values].sort((left, right) => left - right);
-  return { months: ascending(months), schedules: ascending(schedules) };
+  return {
+    months: ascending(months),
+    schedules: ascending(schedules),
+    ...(beyond > 0 ? { linksBeyondRange: beyond } : {}),
+  };
 }
 
-/** The `detailMonth` a menu link opens, or undefined for any other link. */
+/**
+ * The `detailMonth` a menu link opens (one or two digits, so at most 99), or
+ * undefined for any other link. The caller reads only positions up to 17.
+ */
 function creditDetailLinkPosition(link: HtmlElement): number | undefined {
   const href = link.attrs.find((attribute) => attribute.name === "href")?.value;
   if (href === undefined) return undefined;
@@ -228,8 +242,7 @@ function creditDetailLinkPosition(link: HtmlElement): number | undefined {
   if (url.pathname !== "/iss-pc/member/details_inquiry/detail.html") return undefined;
   const month = url.searchParams.get("detailMonth");
   if (month === null || !/^\d{1,2}$/u.test(month)) return undefined;
-  const position = Number(month);
-  return position <= 17 ? position : undefined;
+  return Number(month);
 }
 
 export function extractGeneralJsonDiscriminator(html: string): string {
@@ -933,10 +946,24 @@ function numericMonth(value: unknown, itemCount: number, itemIndex: number): num
     throw new PastMonthsRefusalError(
       "MyJCB past-month detailMonth was outside 0..17",
       "month_out_of_range",
-      { itemCount, itemIndex, monthType: jsonType(value) },
+      { itemCount, itemIndex, monthType: jsonType(value), ...monthShape(value) },
     );
   }
   return number;
+}
+
+/**
+ * The shape of a refused `detailMonth`: a string's length, and the position it
+ * names when it is one to three ASCII digits (or an integer 0..999). A
+ * position is an index into the statement list, never an amount or a date.
+ */
+function monthShape(value: unknown): { monthLength?: number; monthPosition?: number } {
+  if (typeof value === "number")
+    return Number.isInteger(value) && value >= 0 && value <= 999 ? { monthPosition: value } : {};
+  if (typeof value !== "string") return {};
+  return /^\d{1,3}$/u.test(value)
+    ? { monthLength: value.length, monthPosition: Number(value) }
+    : { monthLength: value.length };
 }
 
 function availabilityFlag(value: unknown, itemCount: number, itemIndex: number): boolean {

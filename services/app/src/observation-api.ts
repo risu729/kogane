@@ -32,6 +32,9 @@ import {
 } from "./balances-v2";
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
 import { identityReadMode } from "./identity-read";
+import { readDetail } from "../../../packages/application/src/query/read-detail.ts";
+import { overviewSummary } from "../../../packages/application/src/query/overview-detail.ts";
+import type { OverviewPage } from "../../../packages/observation-shared/src/api-contract";
 
 /** Validated request scope. Each route passes only the keys its reader query accepts. */
 interface RequestScope {
@@ -206,7 +209,14 @@ export async function readObservationRoute(
   }
   if (path === V2_LATEST_PATH) return { body: await latestBalancePage(env, url, identityRead) };
   if (path === V2_HISTORY_PATH) return { body: await balanceHistoryPage(env, url, identityRead) };
-  if (path === "/api/overview") return { body: boundedPage({ ...(await reader.overview()) }) };
+  if (path === "/api/overview") {
+    // `summary` (the default) or `full` (ADR 0123, amendment 2026-11-19): the
+    // summary is the full page, shaped by the one function the tool shares.
+    const detail = readDetail(url.searchParams.get("detail"));
+    if (detail === null) throw new HttpError(400, "invalid_detail");
+    const page = boundedPage({ ...(await reader.overview()) }) as unknown as OverviewPage;
+    return { body: detail === "full" ? page : overviewSummary(page) };
+  }
   if (path === "/api/transactions") {
     const transactions = await organizeRows(
       d1Executor(env.DB),
