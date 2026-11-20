@@ -234,7 +234,7 @@ a ホーム panel as the way to take it off. The operator answered "what changed
 since yesterday?" on the web only by reading the ホーム page's newest-runs
 table and the parse history, which are the newest windows across every
 source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
-(pull request 1457, open) is the same pattern for another read.
+(pull request 1457, merged) is the same pattern for another read.
 
 ### Options considered
 
@@ -245,14 +245,16 @@ source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
    for the window. The answer is one screen at today's scale (ADR 0127's
    size test: twenty busy sources in one answer), so ホーム holds it.
 3. **Keep the guard entry.** ADR 0081 point 1 makes a read the UI offers an
-   MCP read too, not the reverse, so the entry was allowed; but the owner
-   asked for the panel rather than the entry.
+   MCP read too, not the reverse, so the entry was allowed. This amendment
+   proposes the panel instead, so the operator reads on the web the answer
+   an agent reads; the owner has not asked for it, and it stands only if the
+   owner approves the UI addition.
 
 ### Decision
 
 1. **Panel.** 最近の変化 on the ホーム page, after the summary counts and
-   before the source cards (`apps/web/src/changes-since.tsx`). It reads
-   `GET /api/v2/changes` only, through `useInfiniteQuery` and `getJson`, so
+   the 判断待ち panel (ADR 0126) and before the source cards
+   (`apps/web/src/changes-since.tsx`). It reads `GET /api/v2/changes` only, through `useInfiniteQuery` and `getJson`, so
    every answer is checked by `validChangesSince` before it renders, and a
    malformed answer is an error, never a partial panel. It writes nothing.
 2. **Window.** Three fixed windows, 24時間 (the default), 7日間 and 30日間,
