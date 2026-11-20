@@ -9,7 +9,11 @@
 import { accessIdentity } from "./auth";
 import { type Answer, auditContext, auditedRoute, UpstreamLost, upstreamOutcome } from "./audit";
 import { principalFor } from "./grants";
-import { boundedText, HttpError } from "./http";
+import { boundedText, HttpError, json } from "./http";
+import {
+  scheduleSnapshotSummary,
+  type ScheduleSnapshot,
+} from "../../../packages/collection/src/schedule-model.ts";
 import {
   type OperationCall,
   type OperationName,
@@ -52,6 +56,55 @@ async function relay(
  */
 export function relayScheduleSnapshot(env: Env): Promise<Response> {
   return relay(new Request("https://kogane.invalid/", { method: "GET" }), env, "");
+}
+
+/**
+ * The schedules page at one detail (ADR 0123), the answer of the page's GET
+ * and of `kogane.schedules.read`: `full` is the Processor's snapshot relayed
+ * as it is; `summary` is `scheduleSnapshotSummary` of that same snapshot.
+ * A refusal the Processor answers is relayed as it is under either detail.
+ */
+export async function scheduleSnapshotResponse(
+  env: Env,
+  detail: ScheduleReadDetail,
+): Promise<Response> {
+  const upstream = await relayScheduleSnapshot(env);
+  if (detail === "full" || upstream.status !== 200) return upstream;
+  let snapshot: unknown;
+  try {
+    snapshot = await upstream.json();
+  } catch {
+    throw new HttpError(503, "scheduling_unavailable");
+  }
+  // A snapshot without its lists is not summarized into an empty page.
+  const lists = snapshot as Partial<Record<keyof ScheduleSnapshot, unknown>> | null;
+  if (
+    lists === null ||
+    typeof lists !== "object" ||
+    !Array.isArray(lists.schedules) ||
+    !Array.isArray(lists.maintenance) ||
+    !Array.isArray(lists.leases)
+  )
+    throw new HttpError(503, "scheduling_unavailable");
+  return json(scheduleSnapshotSummary(snapshot as ScheduleSnapshot));
+}
+
+/** The details the schedules page's GET answers; absent is `summary` (ADR 0123). */
+const SCHEDULE_READ_DETAILS = ["summary", "full"] as const;
+type ScheduleReadDetail = (typeof SCHEDULE_READ_DETAILS)[number];
+
+/** The page GET's one query parameter, `detail`; anything else is `invalid_query`. */
+function scheduleReadDetail(url: URL): ScheduleReadDetail {
+  const keys = [...url.searchParams.keys()];
+  const detail = url.searchParams.get("detail");
+  if (url.search === "") return "summary";
+  if (
+    keys.length !== 1 ||
+    keys[0] !== "detail" ||
+    !(SCHEDULE_READ_DETAILS as readonly (string | null)[]).includes(detail)
+  )
+    throw new HttpError(400, "invalid_query");
+  return detail as ScheduleReadDetail;
 }
 /** Service tokens cannot edit settings. This only reconciles future reservations. */
 export async function scheduleBootstrapApi(
@@ -184,10 +237,12 @@ async function scheduleRoute(
   subject: string,
   suffix: string,
 ): Promise<Response> {
-  if (url.search) throw new HttpError(400, "invalid_query");
+  // Only the page's GET takes a query: its `detail`.
+  const detail = request.method === "GET" && suffix === "" ? scheduleReadDetail(url) : null;
+  if (detail === null && url.search) throw new HttpError(400, "invalid_query");
   if (!principalCan(principalFor(env, subject), "interpretation.accept"))
     throw new HttpError(403, "operator_required");
-  if (request.method === "GET" && suffix === "") return relayScheduleSnapshot(env);
+  if (detail !== null) return scheduleSnapshotResponse(env, detail);
   if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
   // A job id, a lease release, or the decision on one survey proposal (ADR 0050).
   throw new HttpError(404, "not_found");

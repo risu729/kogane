@@ -288,3 +288,44 @@ export class StopConditionError extends Error {
     super(message);
   }
 }
+
+/**
+ * Why the past-month availability read (`detailPastJson.json`) was refused,
+ * as a closed code. The stop code stays `credit_past_months`; this names the
+ * check inside it, so a refusal can be placed from the log line
+ * `myjcb-credit-past-months-refused` without reading the response.
+ */
+export const PAST_MONTHS_REFUSAL_REASONS = [
+  "request_invalid",
+  "http_status",
+  "content_type_not_json",
+  "response_oversize",
+  "utf8_invalid",
+  "json_invalid",
+  "result_missing",
+  "error_reported",
+  "info_missing",
+  "item_malformed",
+  "month_out_of_range",
+  "month_duplicate",
+  "flag_malformed",
+  "settlement_malformed",
+  "schedule_overlap",
+] as const;
+export type PastMonthsRefusalReason = (typeof PAST_MONTHS_REFUSAL_REASONS)[number];
+
+/**
+ * A refusal of the past-month availability read. Its `details` are counts,
+ * small `detailMonth` positions and JavaScript type names only: never a
+ * provider value, message or amount.
+ */
+export class PastMonthsRefusalError extends StopConditionError {
+  constructor(
+    message: string,
+    readonly reason: PastMonthsRefusalReason,
+    readonly details: Readonly<Record<string, number | string | readonly number[]>> = {},
+    code: StopConditionCode = "unknown-upstream-state",
+  ) {
+    super(message, code);
+  }
+}

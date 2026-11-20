@@ -3,6 +3,7 @@
     "target": "ES2022",
     "module": "Preserve",
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "types": ["bun", "@cloudflare/workers-types"],

@@ -726,11 +726,28 @@ export function applyMigrations(
   return { db, migrations };
 }
 
+/** Apply the profile's migrations to a fresh database and describe the result. */
 export function buildSchemaLedger(
   root: string,
   profile: LedgerProfile = CORE_PROFILE,
 ): SchemaLedger {
   const { db, migrations } = applyMigrations(root, profile);
+  const ledger = describeSchema(db, migrations, profile);
+  db.close();
+  return ledger;
+}
+
+/**
+ * Describe a database `applyMigrations` built. It only reads `sqlite_master`
+ * and the PRAGMAs, and it leaves `db` open, so a caller that needs the raw
+ * schema rows as well (the test's independent guard check) replays the
+ * migrations once instead of twice.
+ */
+export function describeSchema(
+  db: Database,
+  migrations: MigrationRecord[],
+  profile: LedgerProfile = CORE_PROFILE,
+): SchemaLedger {
   const master = db
     .query("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY name")
     .all() as MasterRow[];
@@ -872,7 +889,6 @@ export function buildSchemaLedger(
   ) as Record<Classification, string[]>;
   for (const table of tables) (byClassification[table.classification] ??= []).push(table.name);
 
-  db.close();
   return {
     generatedBy: "scripts/core-schema-ledger.ts",
     plan: profile.plan,

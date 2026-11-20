@@ -77,3 +77,35 @@ test("coverage status counts partition organized observations without negative r
     }),
   ).toBe(true);
 });
+test("an account-list line names its entity, label origin, sources and newest capture (ADR 0120)", () => {
+  const row = {
+    account: "account_synthetic",
+    label: "Synthetic bank (via aggregator)",
+    labelOrigin: "connection",
+    role: "aggregator-mirror",
+    status: "provider-local",
+    sources: ["synthetic"],
+    references: 2,
+    observedCount: 3,
+    connection: "unresolved",
+    lastFetchedAt: "2099-01-01T00:00:00.000Z",
+  };
+  const valid = (patch: Record<string, unknown>) =>
+    validIdentityResponse("/api/identity/account-list", {
+      rows: [{ ...row, ...patch }],
+      coverage: { limit: 100, truncated: false, nextOffset: null },
+    });
+  expect(valid({})).toBe(true);
+  expect(valid({ connection: null, lastFetchedAt: null, labelOrigin: "card-name" })).toBe(true);
+  for (const patch of [
+    { label: "" },
+    { labelOrigin: "guess" },
+    { status: "confirmed" },
+    { sources: [] },
+    { references: 0 },
+    { observedCount: -1 },
+    { connection: "candidate" },
+    { lastFetchedAt: "2099-01-01" },
+  ])
+    expect(valid(patch), JSON.stringify(patch)).toBe(false);
+});
