@@ -260,7 +260,11 @@ function statement(db: D1Database, write: SqlWrite): D1PreparedStatement {
 /**
  * Saves one job revision. The `applied` audit record (ADR 0064) is the last
  * statement of the same batch, joined to the revision row this call wrote,
- * so a version check that matched nothing leaves no revision and no record.
+ * so a version check that matched nothing leaves no revision and no record
+ * (`revision_conflict`). The schedule row, its history row and the record are
+ * written together or not at all: a history row the schema refuses raises,
+ * nothing of the batch is written, and the route answers its closed
+ * `scheduling_unavailable`.
  */
 export async function updateSchedule(
   env: Env,
@@ -338,8 +342,15 @@ export async function updateSchedule(
       id,
       row.revision,
     ),
+    // The history row copies the row the UPDATE above wrote, and only when it
+    // wrote one (`changes()=1`): a version check that matched nothing copies
+    // nothing, even when a same-actor, same-millisecond winner's row matches
+    // the other conditions. A plain INSERT, never `OR IGNORE`: a history row
+    // the schema refuses (a CHECK, NOT NULL or the UNIQUE revision) raises
+    // and rolls the schedule update back with it, so the job never moves
+    // without its own history row.
     env.DB.prepare(
-      "INSERT OR IGNORE INTO collection_schedule_revisions(schedule_id,revision,enabled,timezone,pattern_json,actor,created_at) SELECT id,revision,enabled,timezone,pattern_json,updated_by,updated_at FROM collection_schedules WHERE id=? AND revision=? AND updated_by=? AND updated_at=?",
+      "INSERT INTO collection_schedule_revisions(schedule_id,revision,enabled,timezone,pattern_json,actor,created_at) SELECT id,revision,enabled,timezone,pattern_json,updated_by,updated_at FROM collection_schedules WHERE id=? AND revision=? AND updated_by=? AND updated_at=? AND changes()=1",
     ).bind(id, next, actor, now),
     statement(env.DB, record),
   ]);
@@ -963,9 +974,15 @@ async function writeRevision(
     scope: input.scope,
   };
   // The version check and a delegated principal's budget are in the INSERT
-  // itself, so two writers that read the same revision cannot both succeed.
+  // itself, so two writers that read the same revision cannot both succeed:
+  // the loser's SELECT yields no row, and its INSERT changes nothing. That
+  // check also means the INSERT never reaches an existing (id, revision) — it
+  // writes only past the rule's highest revision — so it is a plain INSERT
+  // with no conflict to skip, never `OR IGNORE`: a revision the schema
+  // refuses (a CHECK, NOT NULL or trigger) raises, nothing of the batch is
+  // written, and it is never answered as `revision_conflict`.
   const statements = [
-    env.DB.prepare(`INSERT OR IGNORE INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at,actor_kind,change_reason,decision_ref)
+    env.DB.prepare(`INSERT INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at,actor_kind,change_reason,decision_ref)
     SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE COALESCE((SELECT MAX(revision) FROM provider_maintenance_rules WHERE id=?),0)=?${
       delegated
         ? ` AND (${DELEGATED_WRITES_SINCE_SQL})<? AND (SELECT count(*) FROM provider_maintenance_rules WHERE source=?)=?`
@@ -1049,7 +1066,10 @@ async function writeRevision(
  * returns as one batch, whose INSERT checks the revision and the budget again.
  * Never edits a job, enables or disables one, releases a lease or starts
  * collection. A refusal is a closed code; an unexpected storage failure (a
- * batch that raised) still throws, and then nothing of the batch was written.
+ * batch that raised, a revision the schema refuses among them) still throws,
+ * and then nothing of the batch was written. Only an INSERT whose version or
+ * budget check matched nothing is `revision_conflict` (or
+ * `maintenance_write_budget_exceeded`).
  */
 export async function writeMaintenanceRevision(
   env: Env,

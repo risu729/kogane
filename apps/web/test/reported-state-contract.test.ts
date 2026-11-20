@@ -50,6 +50,13 @@ describe("reported state HTTP contract", () => {
       false,
     );
     expect(mutate((copy) => delete copy["coverage"])).toBe(false);
+    // The manifest pins the body's filters and each row's identity (INV09).
+    expect(mutate((copy) => (copy["manifest"]["filters"]["account"] = "acct-sbi"))).toBe(false);
+    expect(mutate((copy) => delete copy["manifest"]["rows"])).toBe(false);
+    expect(mutate((copy) => (copy["manifest"]["rows"][0][2] = "guessed"))).toBe(false);
+    expect(mutate((copy) => (copy["manifest"]["statementAccounts"][0] = ["balance:1"]))).toBe(
+      false,
+    );
   });
 
   test("the left-out statements are counts by closed reason, named as a gap exactly when present", async () => {

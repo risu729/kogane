@@ -1,5 +1,5 @@
 // Synthetic responses in the production client; no provider, login or collection.
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
@@ -7,6 +7,7 @@ import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared
 import type { ObservationDetail } from "../../../packages/observation-shared/src/api-contract.ts";
 import { economicReadinessFixture } from "../../../packages/observation-shared/test/economic-readiness-fixture.ts";
 import { auditView } from "./a11y-audit.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -47,8 +48,13 @@ function detail(id: number): ObservationDetail {
   };
 }
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("transaction economic-readiness explanation", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let mode: "ok" | "unavailable" | "refused" | "mismatch" | "malformed" | "delayed" | "held" = "ok";
@@ -109,7 +115,6 @@ describe.if(runnable)("transaction economic-readiness explanation", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   });
   afterAll(async () => {
     release?.();

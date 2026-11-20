@@ -304,6 +304,23 @@ function validCoverage(value: unknown): boolean {
   );
 }
 
+const ROW_REF = /^(?:position|balance):[1-9][0-9]*$/u;
+const identity = member(IDENTITY_STATUSES);
+
+/** `[ref, accountId, accountIdentity, instrumentId, instrumentIdentity]`. */
+function validManifestRow(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length === 5 &&
+    typeof value[0] === "string" &&
+    ROW_REF.test(value[0]) &&
+    nullableText(value[1]) &&
+    identity(value[2]) &&
+    nullableText(value[3]) &&
+    identity(value[4])
+  );
+}
+
 function validManifest(value: unknown): boolean {
   return (
     record(value) &&
@@ -312,8 +329,13 @@ function validManifest(value: unknown): boolean {
       "date",
       "cutoff",
       "policies",
+      "metricRegistryRelease",
+      "filters",
       "snapshotRefs",
+      "containersWithoutSnapshot",
+      "rows",
       "statementRefs",
+      "statementAccounts",
       "settlementRefs",
       "statementsBeforeWindow",
     ]) &&
@@ -321,8 +343,23 @@ function validManifest(value: unknown): boolean {
     date(value.date) &&
     validInstantText(value.cutoff) &&
     list(value.policies, text) &&
+    text(value.metricRegistryRelease) &&
+    record(value.filters) &&
+    exactKeys(value.filters, ["source", "account"]) &&
+    nullableText(value.filters.source) &&
+    nullableText(value.filters.account) &&
     list(value.snapshotRefs, ref) &&
+    list(value.containersWithoutSnapshot, text) &&
+    // Positions and balances are each bounded; both together, twice the bound.
+    Array.isArray(value.rows) &&
+    value.rows.length <= 2 * BOUND &&
+    value.rows.every(validManifestRow) &&
     list(value.statementRefs, ref) &&
+    list(
+      value.statementAccounts,
+      (entry) =>
+        Array.isArray(entry) && entry.length === 2 && ref(entry[0]) && nullableText(entry[1]),
+    ) &&
     list(value.settlementRefs, text) &&
     list<Record<string, unknown>>(
       value.statementsBeforeWindow,
@@ -399,6 +436,11 @@ export function validReportedState(value: unknown): boolean {
     validCoverage(value.coverage) &&
     validManifest(value.manifest) &&
     countsAgree(value.coverage, value.manifest) &&
+    // The manifest pins the filters the body was answered under.
+    (value.manifest as { filters: Record<string, unknown> }).filters.source ===
+      value.filters.source &&
+    (value.manifest as { filters: Record<string, unknown> }).filters.account ===
+      value.filters.account &&
     typeof value.contextId === "string" &&
     /^[0-9a-f]{64}$/u.test(value.contextId)
   );

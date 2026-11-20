@@ -9,7 +9,16 @@ import type { AggregationRule, MeasurementKind, SignMeaning, SubjectKind } from 
 import { addDays, daysBetween, formatLocalDate, parseLocalDate, type CivilDate } from "./time.ts";
 import type { Quantity } from "./values.ts";
 
-export const REPORTED_STATE_SCHEMA = "reported-state-v1";
+/**
+ * v2: the manifest pins every input the answer reads (INV09; ADR 0019's
+ * context amendment of 2026-11-19): the filters, the metric registry release,
+ * the containers without a snapshot, each listed or counted row with the
+ * identity it was read under, each payable's account and each settlement
+ * review's decision. A v1 manifest named only snapshot, statement and review
+ * ids, so a mapping correction, a review decision, a parse activated over the
+ * same artifact or another account filter kept the context id.
+ */
+export const REPORTED_STATE_SCHEMA = "reported-state-v2";
 /** `same-day` / `recent` (captured at most `RECENT_DAYS` before the date) / `stale`; `collection-freshness-v1` uses the same thresholds. */
 export const DATED_STATE_FRESHNESS_POLICY = "dated-state-freshness-v1";
 /** Which containers and rows a reported state lists (ADR 0019, decision 2). */
@@ -209,13 +218,36 @@ interface ReportedStateCoverage {
   /** Nothing is totalled: a reported state is never a net-asset figure. */
   netAssets: "not-computed";
 }
+/**
+ * One position or balance the answer lists or counts, with the identity it
+ * was read under: `[ref, accountId, accountIdentity, instrumentId,
+ * instrumentIdentity]`. The identity is the one the answer shows, so a later
+ * mapping revision or identity run that changes it changes the manifest.
+ */
+export type ReportedStateManifestRow = [
+  ref: string,
+  accountId: string | null,
+  accountIdentity: IdentityStatus,
+  instrumentId: string | null,
+  instrumentIdentity: IdentityStatus,
+];
 interface ReportedStateManifest {
   schemaVersion: typeof REPORTED_STATE_SCHEMA;
   date: string;
   cutoff: string;
   policies: string[];
+  /** `METRIC_REGISTRY_RELEASE`: it decides each balance's metric and which rows are excluded. */
+  metricRegistryRelease: string;
+  filters: { source: string | null; account: string | null };
   snapshotRefs: string[];
+  /** `sourceId/parserName/dataset` of each perimeter container without a snapshot, sorted. */
+  containersWithoutSnapshot: string[];
+  /** Every listed or counted position and balance, sorted by ref. */
+  rows: ReportedStateManifestRow[];
   statementRefs: string[];
+  /** `[statementRef, accountId]` of each payable, sorted by ref. */
+  statementAccounts: [ref: string, accountId: string | null][];
+  /** `card-settlement:<id>@decision:<decision revision id>`, or `@proposed` before any decision. */
   settlementRefs: string[];
   /**
    * The statements the payable window leaves out, counted per source,

@@ -7,7 +7,7 @@
 // readable due date is its own status, never a guess.
 import { validCardSettlementFacts } from "../../../domain/src/card-settlement.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
-import { resolveMetric } from "../../../domain/src/metrics.ts";
+import { METRIC_REGISTRY_RELEASE, resolveMetric } from "../../../domain/src/metrics.ts";
 import {
   DATED_STATE_FRESHNESS_POLICY,
   DATED_STATE_PERIMETER_POLICY,
@@ -33,6 +33,7 @@ import {
   type ReportedSettlement,
   type ReportedSnapshot,
   type ReportedState,
+  type ReportedStateManifestRow,
   type StatementsBeforeWindow,
   type StatementsBeforeWindowReason,
   type UncountedReportedState,
@@ -74,6 +75,15 @@ export interface DatedStateInput {
   source?: string;
   /** Only this resolved account id. */
   account?: string;
+  /**
+   * Only these resolved account ids (the reconstructed state's scope, ADR
+   * 0116); not with `account`. A provider account is then listed once per
+   * resolved account its rows map to, so no row of one account is listed
+   * under another. A one-account list is read as `account`, so it answers
+   * what `account` answers, context id included. A longer list is not among
+   * the manifest's filters: the rows the manifest pins fix what it lists.
+   */
+  accounts?: readonly string[];
 }
 
 interface SettlementRow {
@@ -83,6 +93,7 @@ interface SettlementRow {
   id: string;
   facts_json: string;
   status: ReportedSettlement["reviewStatus"];
+  decision_revision_id: string | null;
 }
 
 const DAY_MS = 86_400_000;
@@ -112,9 +123,26 @@ function snapshotKey(row: { parser_name: string; snapshot_artifact_id: number })
   return `${row.parser_name}|artifact:${row.snapshot_artifact_id}`;
 }
 
-/** Text order by UTF-16 code units, as the manifest's ref lists are sorted. */
-function codeUnitOrder(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
+const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * A row's pin in the manifest: its ref and the identity the answer shows for
+ * it (the account and instrument mappings and their statuses, as `accountOf`
+ * and `instrument` read them), so a later mapping revision or identity run
+ * that changes what the answer shows changes the context id (INV09).
+ */
+function manifestRow(
+  ref: string,
+  row: DatedPositionRow | DatedBalanceRow,
+): ReportedStateManifestRow {
+  const recorded = row.identity_recorded === 1;
+  return [
+    ref,
+    row.account_id,
+    recorded ? identityStatus(1, row.account_status) : "not-recorded",
+    row.instrument_id,
+    recorded ? identityStatus(1, row.instrument_status) : "not-recorded",
+  ];
 }
 
 function bounded<T>(rows: T[]): T[] {
@@ -164,7 +192,13 @@ export async function queryDatedState(
     Date.parse(cutoff) - UNDATED_STATEMENT_WINDOW_DAYS * DAY_MS,
   ).toISOString();
   const source = input.source ?? null;
-  const account = input.account ?? null;
+  if ((input.account ?? null) !== null && input.accounts !== undefined)
+    throw new Error("invalid_query");
+  // A one-account list is the `account` read, its filters and so its context
+  // id included (ADR 0116; the manifest pins the request's filters, INV09).
+  const single = input.accounts?.length === 1 ? input.accounts[0]! : null;
+  const account = input.account ?? single;
+  const scope = input.accounts === undefined || single !== null ? null : new Set(input.accounts);
   const counted = input.includeStatementsBeforeWindow !== false;
 
   const [positionRows, balanceRows, perimeter, statementRows, omittedRows] = await Promise.all([
@@ -186,7 +220,9 @@ export async function queryDatedState(
   if (omittedRows !== null) bounded(omittedRows);
 
   const wanted = (sourceId: string, accountId: string | null): boolean =>
-    (source === null || sourceId === source) && (account === null || accountId === account);
+    (source === null || sourceId === source) &&
+    (account === null || accountId === account) &&
+    (scope === null || (accountId !== null && scope.has(accountId)));
 
   // Every chosen snapshot, a complete-empty one included.
   const snapshots = new Map<string, ReportedSnapshot>();
@@ -256,11 +292,14 @@ export async function queryDatedState(
     status: row.identity_recorded === 1 ? identityStatus(1, row.instrument_status) : "not-recorded",
   });
 
+  // Every position and balance the answer lists or counts, with its identity.
+  const pinnedRows: ReportedStateManifestRow[] = [];
   const positions = new Map<number, ReportedPosition>();
   for (const row of positionRows) {
     if (!wanted(row.source_id, row.account_id)) continue;
     let position = positions.get(row.id);
     if (position === undefined) {
+      pinnedRows.push(manifestRow(`position:${row.id}`, row));
       position = {
         ref: `position:${row.id}`,
         snapshotRef: `artifact:${row.snapshot_artifact_id}`,
@@ -294,6 +333,7 @@ export async function queryDatedState(
   const excludedRows = new Map<ExclusionReason, number>();
   for (const row of balanceRows) {
     if (!wanted(row.source_id, row.account_id)) continue;
+    pinnedRows.push(manifestRow(`balance:${row.id}`, row));
     const metric = resolveMetric({
       family: "balance",
       sourceId: row.source_id,
@@ -405,15 +445,15 @@ export async function queryDatedState(
     counts = {
       manifest: [...keyed.values()].sort(
         (a, b) =>
-          codeUnitOrder(a.sourceId, b.sourceId) ||
+          byText(a.sourceId, b.sourceId) ||
           (a.accountId === b.accountId
             ? 0
             : a.accountId === null
               ? -1
               : b.accountId === null
                 ? 1
-                : codeUnitOrder(a.accountId, b.accountId)) ||
-          codeUnitOrder(a.reasonCode, b.reasonCode),
+                : byText(a.accountId, b.accountId)) ||
+          byText(a.reasonCode, b.reasonCode),
       ),
       coverage: [...omitted.values()].sort(
         (a, b) => a.sourceId.localeCompare(b.sourceId) || a.reasonCode.localeCompare(b.reasonCode),
@@ -440,8 +480,24 @@ export async function queryDatedState(
               ? -1
               : 1),
   );
-  // A state read without the count records none: its context id claims only
-  // the inputs it read (ADR 0019, amendment of 2026-11-18).
+  const containersWithoutSnapshot = perimeter
+    .filter((row) => row.snapshot_artifact_id === null)
+    .filter((row) => source === null || row.perimeter_source_id === source)
+    .map((row) => ({
+      sourceId: row.perimeter_source_id,
+      parserName: row.parser_name,
+      dataset: row.dataset,
+      reasonCode: "no_complete_snapshot_before_cutoff" as const,
+    }));
+  // The manifest pins every input the answer reads (INV09): the request's
+  // filters, the releases the code applies, the chosen snapshots and the
+  // containers without one, each listed or counted row (its id names its
+  // parse run) with the identity it was read under, each payable's account,
+  // each settlement review at its decision and, when counted, the statements
+  // the payable window leaves out. Observations, candidates and decisions are
+  // append-only, so these ids fix what they name. A state read without the
+  // count records none: its context id claims only the inputs it read (ADR
+  // 0019, amendment of 2026-11-18).
   const manifest: UncountedReportedState["manifest"] & {
     statementsBeforeWindow?: ManifestStatementsBeforeWindow[];
   } = {
@@ -449,9 +505,23 @@ export async function queryDatedState(
     date,
     cutoff,
     policies: [DATED_STATE_FRESHNESS_POLICY, DATED_STATE_PERIMETER_POLICY],
+    metricRegistryRelease: METRIC_REGISTRY_RELEASE,
+    filters: { source, account },
     snapshotRefs: [...new Set(chosen.map((snapshot) => snapshot.ref))].sort(),
+    containersWithoutSnapshot: containersWithoutSnapshot
+      .map((entry) => `${entry.sourceId}/${entry.parserName}/${entry.dataset}`)
+      .sort(),
+    rows: pinnedRows.sort((a, b) => byText(a[0], b[0])),
     statementRefs: payables.map((payable) => payable.ref).sort(),
-    settlementRefs: settlementRows.map((row) => `card-settlement:${row.id}`).sort(),
+    statementAccounts: payables
+      .map((payable): [string, string | null] => [payable.ref, payable.accountId])
+      .sort((a, b) => byText(a[0], b[0])),
+    settlementRefs: settlementRows
+      .map(
+        (row) =>
+          `card-settlement:${row.id}@${row.decision_revision_id === null ? "proposed" : `decision:${row.decision_revision_id}`}`,
+      )
+      .sort(),
     ...(counts === null ? {} : { statementsBeforeWindow: counts.manifest }),
   };
   const state: UncountedReportedState = {
@@ -464,15 +534,7 @@ export async function queryDatedState(
     accounts: listedAccounts,
     payables,
     coverage: {
-      containersWithoutSnapshot: perimeter
-        .filter((row) => row.snapshot_artifact_id === null)
-        .filter((row) => source === null || row.perimeter_source_id === source)
-        .map((row) => ({
-          sourceId: row.perimeter_source_id,
-          parserName: row.parser_name,
-          dataset: row.dataset,
-          reasonCode: "no_complete_snapshot_before_cutoff" as const,
-        })),
+      containersWithoutSnapshot,
       staleSnapshots: chosen
         .filter((snapshot) => snapshot.freshness === "stale")
         .map((snapshot) => ({
@@ -491,7 +553,7 @@ export async function queryDatedState(
       ...(counts === null ? {} : { statementsBeforeWindow: counts.coverage }),
       netAssets: "not-computed",
     },
-    manifest: { ...manifest, policies: [...manifest.policies] },
+    manifest,
     contextId: await canonicalDigest(manifest),
   };
   if (counts === null) return state;

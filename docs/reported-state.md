@@ -92,8 +92,8 @@ A perimeter container with no snapshot before the cutoff is listed in
   each, and its rows without a mapping once more with no account, so no row
   is listed under an account its own mapping does not name; entries of one
   provider account are ordered by account id, the one without first. The
-  manifest names no entry, so this keying leaves the context id as it was.
-  Each entry lists:
+  manifest pins each row with the account it was read under, so the entries
+  an answer lists are fixed by its context id. Each entry lists:
   - `positions`: the provider quantity as decimal text, the instrument mapping,
     and the provider valuations matched as `POSITION_VALUATIONS_SQL` matches
     them (same parse run, account and code, and the locator guard
@@ -138,18 +138,31 @@ A perimeter container with no snapshot before the cutoff is listed in
   no amount and no settlement status. The `/state` page lists the counts
   under 一覧にない期間外の請求 in its coverage notes;
   `kogane.reported-state.read` answers the same body.
-- `manifest` (schema, date, cutoff, policy ids, snapshot, statement and
-  settlement refs, and `statementsBeforeWindow`) and
-  `contextId = canonicalDigest(manifest)`. The manifest's
-  `statementsBeforeWindow` lists `{sourceId, accountId, reasonCode, count}`
-  per source, resolved account (`null` when none resolves) and reason, only
-  counts above zero, ordered by those three; the coverage's counts are these
-  added per source and reason, and the wire contract refuses an answer where
-  they disagree. So a changed count, or a statement left out whose resolved
-  account changes, gives a new `contextId` (INV09). Since the
+- `manifest` and `contextId = canonicalDigest(manifest)`. Under
+  `reported-state-v2` the manifest pins every input the answer reads (INV09;
+  [ADR 0019, context amendment](adr/0019-dated-reported-state.md#context-amendment--2026-11-19)):
+  the schema, date and cutoff; the policy ids and `metricRegistryRelease`; the
+  request's `filters`; the chosen `snapshotRefs` and the
+  `containersWithoutSnapshot` (`source/parser/dataset`); `rows`, every
+  position and balance listed or counted as excluded, each as
+  `[ref, accountId, accountIdentity, instrumentId, instrumentIdentity]` (the
+  row id names its parse run, so a parse activated over the same artifact
+  changes it); the `statementRefs` and `statementAccounts`
+  (`[ref, accountId]`); `settlementRefs`, each review as
+  `card-settlement:<id>@decision:<decision revision id>`, or `@proposed`
+  before any decision; and `statementsBeforeWindow`, the statements the
+  window leaves out as `{sourceId, accountId, reasonCode, count}` per source,
+  resolved account (`null` when none resolves) and reason, only counts above
+  zero, ordered by those three. The coverage's counts are these added per
+  source and reason, and the wire contract refuses an answer where they
+  disagree. Another filter, a mapping revision or identity run that changes
+  what a row shows, a review decision, an activated parse, a registry
+  release, a changed count, or a statement left out whose resolved account
+  changes is therefore a new context id; an unchanged store keeps its id.
+  Since the
   [ADR 0019 amendment of 2026-11-18](adr/0019-dated-reported-state.md#statements-before-the-window-amendment--2026-11-18)
-  every manifest carries the key (`[]` when nothing is left out), so every
-  reported-state `contextId` changed once with it.
+  every manifest carries `statementsBeforeWindow` (`[]` when nothing is left
+  out), so every reported-state `contextId` changed once with it.
 
 `queryDatedState` counts the statements before the window unless it is called
 with `includeStatementsBeforeWindow: false`. The holdings change below, the
@@ -160,7 +173,9 @@ they build on has no `statementsBeforeWindow` in its coverage or manifest and
 names every liability gap. The reported context ids they pin are the digests
 of that manifest without the count: they record no count they did not read,
 they differ from the `/state` answer's `contextId` for the same date and
-filters, and they stayed as they were before the amendment.
+filters, and the 2026-11-18 amendment left them as they were (the context
+amendment of 2026-11-19 changed them once, as it changed every reported-state
+context id).
 
 `source` narrows accounts, payables and coverage to one source; `account` to
 one resolved account id. The answer has no total, subtotal or net worth, and
@@ -343,7 +358,11 @@ answer under two seconds.
   read's timing there reflects the snapshot CTEs, not many positions.
 - Identity, account mappings and settlement reviews are read as they are today,
   not as they were on `D`: a later mapping correction or review changes an
-  earlier date's answer (and its `contextId`).
+  earlier date's answer and its `contextId` (the manifest pins each row's
+  identity and each review's decision). A correction that leaves every pinned
+  row's account, instrument and statuses as they were (a mapping revision to
+  the same account and status) keeps the id; one to a balance counted as
+  excluded moves it although the answer shows only the count.
 - A settlement's debit date is the reviewed bank row's date, whenever that row
   was captured; the bank capture itself is not bounded by the cutoff.
 - Statements due before `D − 31` days, and statements without a readable due

@@ -1,5 +1,5 @@
 // Synthetic collector -> shared storage -> real registration/publication -> reader.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
@@ -18,19 +18,23 @@ import { createD1ObservationReader } from "../../../packages/read-model/src/d1.t
 import { sbiForeignCashHistory } from "../../../packages/parsers/src/parsers/sbi-foreign-cash-history.ts";
 import { sbiYenDetailHistory } from "../../../packages/parsers/src/parsers/sbi-yen-detail-history.ts";
 import type { CashHistoryKind } from "../../../packages/parsers/src/parsers/sbi-cash-history-schema.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
+// Started while the module loads, never in a hook (test/support/settle.ts).
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {};",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB"],
+    r2Buckets: ["EVIDENCE"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default {};",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB"],
-      r2Buckets: ["EVIDENCE"],
-    }),
-  );
   const db = await mf.getD1Database("DB");
   for (const file of migrationFiles(CORE_MIGRATIONS_URL))
     await applyTestSql(db, migrationSql(CORE_MIGRATIONS_URL, file));

@@ -12,7 +12,7 @@
 // key: packages/parsers/test/coverage-contract.test.ts and
 // sbi-shinsei-parsers.test.ts prove that is exactly 0.1.2's output. Every
 // value is synthetic (the parser-boundary fixture and variants of it).
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { Miniflare } from "miniflare";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
@@ -34,6 +34,7 @@ import type { CardSettlementFacts } from "../../../packages/domain/src/card-sett
 import { sbiShinseiTopBalancesAndActivity } from "../../../packages/parsers/src/parsers/sbi-shinsei-top-balances-and-activity.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 import { changeMutationPlanners } from "../src/change-commands.ts";
+import { settledTest } from "./support/settle.ts";
 
 const FIXTURE = new URL(
   "../../../tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/top-accounts-balance-and-activity.json",
@@ -52,10 +53,10 @@ const actor: Principal = {
 };
 const now = "2098-01-01T00:00:00.000Z";
 let sequence = 0;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  db = env.DB;
-}, 60000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+db = env.DB;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

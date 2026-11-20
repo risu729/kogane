@@ -5,7 +5,7 @@ import { CARD_SETTLEMENT_AUTOMATION_SHADOW_SQL } from "../src/card-settlement-sh
 // the observed one (vertical th/td rows after an h3.hdg-H3 heading), and every
 // bank, branch, digit and name string is made up.
 import { readFileSync } from "node:fs";
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 import {
@@ -20,12 +20,13 @@ import { smbcDirectTransactions } from "../../../packages/parsers/src/parsers/sm
 import { cardSettlementEligible } from "../../../packages/domain/src/card-settlement.ts";
 import { bankSourceIdForDisplayedName } from "../../../packages/domain/src/card-debit-account.ts";
 import { CARD_DEBIT_ACCOUNT_STATEMENT_REFUSALS } from "../../../packages/domain/src/card-settlement-review.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare, env: Env, db: D1Database;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  db = env.DB;
-}, 60000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+db = env.DB;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

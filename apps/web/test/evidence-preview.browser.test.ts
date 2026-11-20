@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
@@ -10,6 +10,7 @@ import type {
   EvidenceArtifactDetail,
   EvidenceMeta,
 } from "../../../packages/observation-shared/src/evidence-contract.ts";
+import { settledTest } from "./settle.ts";
 
 const CLIENT = join(import.meta.dir, "..", "dist-evidence");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -77,9 +78,14 @@ function fixture(
   };
 }
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("inline original preview under production CSP", () => {
   let server: ReturnType<typeof Bun.serve>;
-  let browser: Browser;
   let origin: string;
   let body = html;
   let detail = fixture(body, "text/html; charset=utf-8");
@@ -116,7 +122,6 @@ describe.if(runnable)("inline original preview under production CSP", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   });
   afterAll(async () => {
     await browser?.close();

@@ -417,3 +417,81 @@ manifest counts that do not add up to the coverage's),
 `apps/web/test/reported-state.browser.test.ts` (the page lists the counts) and
 `services/app/test/reported-state-api.test.ts` (on workerd, a store without
 statements counts none and does not name the gap), all on synthetic data.
+
+## Context amendment — 2026-11-19
+
+- Status: proposed
+- Date: 2026-11-19
+
+**Context.** Decision 3 made `contextId = canonicalDigest(manifest)` and the
+manifest named the date, cutoff, policy ids and the ids of the chosen
+snapshots, listed statements and settlement reviews. The answer reads more
+than that, so its context id stayed equal while the answer changed (INV09,
+[ADR 0001](0001-domain-axes.md)):
+
+- the `account` filter: two filters over the same snapshots and statements
+  listed different accounts under one id;
+- the current account and instrument mappings, and the identity run each row
+  is read under: a mapping correction changed an entry's account or a
+  position's instrument, although the Consequences above and
+  [reported state: limits](../reported-state.md#limits) said it changed the
+  context id;
+- a review's decision: `card_settlement_reviews` is a candidate with its
+  newest decision, so accepting a listed review settled a payable under the
+  same `card-settlement:<id>`;
+- the published parse run of a chosen artifact: an activation or rollback onto
+  another parse of the same artifact changed every row while `artifact:<id>`
+  stayed;
+- the metric registry release (each balance's metric and which rows are
+  excluded) and the perimeter's containers without a snapshot (the policy
+  rows a migration adds).
+
+**Options considered.** (1) Add each mapping row's id: rejected, it needs the
+dated reads to select more columns, a query rewrite with its own proof, while
+the answer already carries the values those rows decide. (2) Digest the whole
+answer: rejected, the manifest would no longer say what was read, and the id
+would move with the presentation. (3) Pin what the answer reads in the
+manifest: the filters, the releases, every listed or counted row with the
+identity it was read under, each payable's account and each review at its
+decision: chosen.
+
+**Decision.** `reported-state-v2`. The manifest adds `metricRegistryRelease`,
+`filters`, `containersWithoutSnapshot` (`source/parser/dataset`, sorted),
+`rows` (every position and balance the answer lists or counts as excluded, as
+`[ref, accountId, accountIdentity, instrumentId, instrumentIdentity]` in ref
+order; a row id names its parse run) and `statementAccounts`
+(`[statementRef, accountId]`), and each `settlementRefs` entry becomes
+`card-settlement:<id>@decision:<decision revision id>`, or `@proposed` before
+any decision. The `statementsBeforeWindow` counts of the statements-before-window
+amendment above stay the manifest's last key, after `settlementRefs`; a state
+read without the count (its decision 6) has the new keys and no counts. The
+wire contract checks the new keys and that the manifest's filters are the
+body's.
+
+**Consequences.** Every reported-state context id changes once, and with it
+the `reportedContextIds` of the holdings change between two dates, the
+reported state's `contextId` inside a valuation on a date, and the
+`startContextId` and `endContextId` of a reconstructed state, so their context
+ids change once too. Nothing stores a reported-state context id, so
+nothing is rebuilt; the cost is a larger manifest (at most one row entry per
+position and balance, inside the existing 5,000-row bounds). A mapping
+correction that leaves every pinned row's account, instrument and statuses as
+they were keeps the id. A balance counted as excluded is pinned with its
+identity too, although the answer shows only its count (its account decides
+whether an `account` filter counts it), so a correction to its instrument
+alone is a new id over an unchanged answer. A stale client that validates
+`reported-state-v1` refuses a v2 body instead of displaying it. Identity and
+reviews are still today's, not as of `D` (Consequences above): the id now
+says which ones were read.
+
+**Verification.** `packages/application/test/dated-state-query.test.ts`
+("the context id moves with every input the answer reads": the account filter,
+an account mapping revision, an instrument mapping revision, another parse of
+the same artifact activated, and a decision on a listed review each change the
+id; an unchanged store keeps it; each case failed on the v1 manifest) and
+"the context id is a digest of the manifest" (which also checks that the
+manifest names the registry release and the coverage's containers without a
+snapshot);
+`apps/web/test/reported-state-contract.test.ts` (a manifest whose filters are
+not the body's, without `rows`, with an unknown identity status or a short
+statement account is refused).

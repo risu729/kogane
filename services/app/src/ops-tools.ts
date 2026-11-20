@@ -143,7 +143,7 @@ export const OPS_MCP_TOOLS = [
     name: "kogane.ops.operation.list",
     title: "List accepted operations",
     description:
-      "List one page of every accepted operation, whichever principal requested it (the operator in the browser or any MCP client), newest first, as summaries without stages or execution (ADR 0086). Filter by kind or status; pass nextCursor as cursor for the next page. status is the stored status: the READ projection is not checked here, so a request kogane.ops.operation.get reads as completed may be listed, and filtered, as running. Follow one with kogane.ops.operation.get.",
+      "List one page of every accepted operation, whichever principal requested it (the operator in the browser or any MCP client), newest first, as summaries without stages or execution (ADR 0086). Filter by kind or status; pass nextCursor as cursor for the next page. Each summary's status is the one kogane.ops.operation.get answers (a running collection, import or replay whose projected stage the READ projection covers reads completed); storedStatus is the stored status, and the status filter matches storedStatus, as each page's statusFilterMatches says, so a status=running page can hold rows whose status is completed. Follow one with kogane.ops.operation.get.",
     inputSchema: inputSchema(operationListSchema),
     annotations: READ_HINTS,
   },
