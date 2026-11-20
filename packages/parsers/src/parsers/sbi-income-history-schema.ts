@@ -199,7 +199,16 @@ export function auditIncomeJson(
           row,
           INCOME_SUMMARY_FIELDS,
           ["currencyCode", "category"],
-          ["receivedTotalLc", "dividendTotalLc", "taxTotalLc", "currencyCode"],
+          // Yen gross/tax totals are null for a US category from 2026-11-19 on;
+          // checkedSummary decides where null is allowed.
+          [
+            "dividendTotal",
+            "taxTotal",
+            "receivedTotalLc",
+            "dividendTotalLc",
+            "taxTotalLc",
+            "currencyCode",
+          ],
         );
     } else {
       const body = object(parsed.shape, ["profitLossSummary", "profitLossSummaryDetails"]);
@@ -287,8 +296,17 @@ function checkedSummary(text: string, kind: IncomeHistoryKind) {
     for (const row of categories) {
       code(row["category"], ["DOMESTIC_STOCK_SPOT", "FOREIGN_STOCK_US"]);
       code(row["currencyCode"], row["category"] === "FOREIGN_STOCK_US" ? ["USD"] : [null]);
-      for (const key of ["receivedTotal", "dividendTotal", "taxTotal"])
+      incomeMoney(row["receivedTotal"], "JPY");
+      for (const key of ["dividendTotal", "taxTotal"]) {
+        // Only a US category may omit its yen gross/tax total, and only while
+        // the USD total it converts is present (observed 2026-11-19).
+        if (row[key] === null) {
+          if (row["category"] !== "FOREIGN_STOCK_US" || row[`${key}Lc`] === null)
+            throw new IncomeHistoryError("sbi_income_history_money");
+          continue;
+        }
         incomeMoney(row[key], "JPY");
+      }
       for (const key of ["receivedTotalLc", "dividendTotalLc", "taxTotalLc"])
         if (row[key] !== null) {
           if (row["category"] === "FOREIGN_STOCK_US") incomeMoney(row[key], "USD");

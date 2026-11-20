@@ -1082,3 +1082,27 @@ each element to that exact key set, and emits provider valuations under
 elements that would give the same subject. Whether those amounts are a breakdown of a `summaryDetails` category was
 not established, so nothing sums them with other subjects; the container stays
 an aggregate excluded from the dated-state perimeter.
+
+## 2026-11-19: US dividend summary without yen gross and tax
+
+Every scheduled income collection since 2026-11-12 stopped with
+`sbi_income_history_schema` before retaining anything. A read-only check in the
+owner's signed-in Chrome on 2026-11-19 (normal `配当金・分配金履歴` menu, same
+summary and row requests as above; types, codes and counts only, no values
+copied) found:
+
+- Summary: `countTotal` 15, categories `DOMESTIC_STOCK_SPOT` (12, currency
+  null, all yen totals numeric) and `FOREIGN_STOCK_US` (3, currency USD).
+  For the US category `dividendTotal` and `taxTotal` are now **null**, while
+  `receivedTotal` and the three `Lc` totals are numbers.
+- Rows: 15, dates `YYYYMMDD`. US rows (`SPECIFIC_NORMAL` 1, `NISA_GROWTH` 2)
+  have null yen `dividendUnitCost`, `dividendTotal`, `taxTotal`, `incomeTax`,
+  `residentTax`, numeric yen `receivedAmount`, and numeric `Lc` values.
+  Domestic rows are as before.
+
+The summary audit admitted null only for the `Lc` totals, so the first
+response was refused. A null yen `dividendTotal`/`taxTotal` is now accepted
+only for `FOREIGN_STOCK_US` while the matching USD total is present; the yen
+`receivedTotal` stays required, and a domestic null is still refused. The
+parser already publishes US payments in USD from the `Lc` fields, so nothing
+it emits changes. Tracked under #1236.
