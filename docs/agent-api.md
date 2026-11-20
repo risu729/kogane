@@ -1731,8 +1731,10 @@ whatever their cursor kind:
   with every other argument repeated as it was. `cursor` is an opaque token or
   an id the read minted; `offset` a position.
 - `paging.stoppedBy` is `limit` (the page is full), `bytes` (the answer
-  reached its byte bound first) or `budget` (rows follow but the grant's
-  `maxRows` withholds the next page: `next` is null, `hasMore` true). It says
+  reached its byte bound first), `budget` (rows follow but the grant's
+  `maxRows` withholds the next page: `next` is null, `hasMore` true) or
+  `walk` (a scan bound ended the page: it may be short or empty, and `next`
+  continues it). No converted read in S1 answers `walk` yet. It says
   nothing about whether the data behind the page is complete; each read's own
   reasons do.
 - A refused continuation is `400 invalid_cursor` (not a token this read

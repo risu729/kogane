@@ -141,9 +141,8 @@ S1 converts `events.read` on main's unfiltered offset pages; the events-filters 
 filtered activity list paged by a keyset `cursor`, where `walk.bound` can end a page early. The two
 conflict in `services/app/src/events-api.ts` and in the `events.read` description in
 `page-read-tools.ts`. Whichever merges second resolves it: if events-filters merges first, S1 is
-rebased so a filtered page answers `next: {arguments: {cursor}}`; a page the walk bound ended
-early has no stop reason in the contract (`limit`, `bytes` and `budget` each mean something else),
-so it needs a decision before the second of the two merges; if S1 merges first, events-filters adds `next` and
+rebased so a filtered page answers `next: {arguments: {cursor}}`, and a page the walk bound ended
+early says `stoppedBy: "walk"` (added to the contract for this, ADR 0128 §2); if S1 merges first, events-filters adds `next` and
 `paging` to its filtered branch, and its walk tests follow `next.arguments`. Moving `events.read`
 out of S1 into its own slice after events-filters avoids the conflict entirely.
 

@@ -31,6 +31,10 @@ export const PAGING_STOPS = [
   "bytes",
   // Items follow, but this grant's row budget withholds the next page.
   "budget",
+  // A scan bound ended the page (a filtered read walks at most so many rows
+  // per call): `returned` may be below `limit`, even zero, and the read
+  // continues where the walk stopped, so `hasMore` is true.
+  "walk",
 ] as const;
 export type PagingStop = (typeof PAGING_STOPS)[number];
 
@@ -205,14 +209,14 @@ export function continuationOf(
  * - `withheld`: items follow but the grant's row budget refuses the next page;
  *   `next` must then be null, and the page says `stoppedBy: "budget"`.
  * - `stoppedBy`: what ended a page that has a continuation (`limit` unless
- *   the byte bound ended it first).
+ *   the byte bound (`bytes`) or a scan bound (`walk`) ended it first).
  */
 export function pagedFields(input: {
   limit: number | null;
   returned: number;
   next: Continuation["arguments"] | null;
   withheld?: boolean;
-  stoppedBy?: "limit" | "bytes";
+  stoppedBy?: "limit" | "bytes" | "walk";
 }): PagedFields {
   if (input.withheld && input.next !== null)
     throw new RangeError("a withheld page has no continuation");

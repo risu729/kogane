@@ -89,13 +89,13 @@ paging: {
   limit: number | null; // the most items a page holds, in the page's unit; null when only a byte bound applies
   returned: number; // items on this page, in the same unit
   hasMore: boolean; // items follow this page in the read's order
-  stoppedBy: "limit" | "bytes" | "budget" | null;
+  stoppedBy: "limit" | "bytes" | "budget" | "walk" | null;
 }
 ```
 
 Invariants, checked by one shared validator: `hasMore` is false exactly when `stoppedBy` is null;
 `next` is non-null exactly when `hasMore` is true and `stoppedBy` is not `budget`; `returned <= limit`
-when `limit` is a number.
+when `limit` is a number; `returned == limit` when `stoppedBy` is `limit`.
 
 - **Why `paging`, not `page`.** `page` already names an input (`store.read`, `evidence.read`) and two
   versioned result shapes with exact keys: `snapshot-page-v1`'s page info (balances, reward expiry,
@@ -109,6 +109,14 @@ when `limit` is a number.
 - **Why `stoppedBy`.** It separates "the page is full" (`limit`), "the answer reached its byte bound"
   (`bytes`, purchase lines, changes since) and "rows follow but this grant may not read them"
   (`budget`, today `nextPage: "budget_exceeded"`, and today silent on the candidate reads).
+- **`walk`** (added 2026-11-20 for the events-filters branch, approved with this ADR): a scan bound
+  ended the page. A filtered read that walks at most so many rows per call (the filtered
+  `events.read` activity list walks at most 5,000 live revisions) can stop before it has `limit`
+  matches: `returned` may be below `limit`, even zero, and `hasMore` is true, because the read
+  continues where the walk stopped (`next` names that position). None of the other three is honest
+  for that page: it is not full (`limit`), no byte bound applied (`bytes`), and nothing is withheld
+  (`budget`). A client treats it like any other continuing page and calls again with
+  `next.arguments`; a short or empty `walk` page is never the end of the list.
 
 ### 3. Argument names
 

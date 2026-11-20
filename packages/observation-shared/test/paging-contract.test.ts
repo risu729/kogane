@@ -66,6 +66,29 @@ describe("paging", () => {
     expect(validPaging({ limit: 10, returned: 0, hasMore: false, stoppedBy: null })).toBe(true);
   });
 
+  test("a page a scan bound ended (walk) may be short or empty, and always continues", () => {
+    expect(validPaging({ limit: 200, returned: 0, hasMore: true, stoppedBy: "walk" })).toBe(true);
+    expect(validPaging({ limit: 200, returned: 37, hasMore: true, stoppedBy: "walk" })).toBe(true);
+    expect(validPaging({ limit: 200, returned: 200, hasMore: true, stoppedBy: "walk" })).toBe(true);
+    expect(validPaging({ limit: 200, returned: 0, hasMore: false, stoppedBy: "walk" })).toBe(false);
+    expect(validPaging({ limit: 200, returned: 201, hasMore: true, stoppedBy: "walk" })).toBe(
+      false,
+    );
+    // It continues: a walk-ended page has a next, and is never a withheld one.
+    const walked = pagedFields({
+      limit: 200,
+      returned: 0,
+      next: { cursor: "synthetic-token" },
+      stoppedBy: "walk",
+    });
+    expect(walked).toEqual({
+      next: { arguments: { cursor: "synthetic-token" } },
+      paging: { limit: 200, returned: 0, hasMore: true, stoppedBy: "walk" },
+    });
+    expect(validPagedFields(walked)).toBe(true);
+    expect(validPagedFields({ ...walked, next: null })).toBe(false);
+  });
+
   test("exact keys only", () => {
     expect(validPaging({ limit: 10, returned: 1, hasMore: false, stoppedBy: null, total: 1 })).toBe(
       false,
