@@ -7,7 +7,7 @@
 // range of `economic_event_revisions_current` and every filter by key, and the
 // answer on D1 equals the answer on bun:sqlite for the same rows. Every value
 // is synthetic.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
   ACTIVITY_FILTER_WALK,
@@ -27,6 +27,7 @@ import {
   migrationSql,
   splitSqlStatements,
 } from "../../../packages/storage-d1/src/migrations.ts";
+import { settledTest } from "./support/settle.ts";
 
 const NONE: ActivityFilters = { since: null, before: null, account: null, source: null };
 const SINCE = "2099-03-01T00:00:00.000Z";
@@ -43,19 +44,18 @@ const FILTERS: Record<string, ActivityFilters> = {
   },
 };
 
-let mf: Miniflare;
-beforeAll(() => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default {fetch(){return new Response('local')}}",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["SMALL", "LARGE", "PLANS"],
-    }),
-  );
-});
+// Started while the module loads, never in a hook (test/support/settle.ts).
+const mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {fetch(){return new Response('local')}}",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["SMALL", "LARGE", "PLANS"],
+  }),
+);
+const test = settledTest();
 afterAll(async () => {
-  await mf?.dispose();
+  await mf.dispose();
 });
 
 /** Five recent events, which sort before the history (`ev-` < `history-`); answers the history's parse run. */
