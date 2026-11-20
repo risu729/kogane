@@ -556,17 +556,17 @@ describe("untrusted provider content (AT71)", () => {
         annotations: readOnly,
       },
       {
-        name: "kogane.changes.since",
-        required: ["since"],
-        closed: false,
-        properties: ["after", "since"],
-        annotations: readOnly,
-      },
-      {
         name: "kogane.decisions.pending",
         required: [],
         closed: false,
         properties: [],
+        annotations: readOnly,
+      },
+      {
+        name: "kogane.changes.since",
+        required: ["since"],
+        closed: false,
+        properties: ["after", "since"],
         annotations: readOnly,
       },
       {
