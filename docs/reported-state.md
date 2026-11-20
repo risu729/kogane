@@ -122,12 +122,27 @@ A perimeter container with no snapshot before the cutoff is listed in
 
 - `coverage`: containers without a snapshot, stale snapshots, the excluded
   perimeter and excluded row counts, `liabilitiesCoverage: "partial"` with
-  `liabilitiesMissing` (`unbilled_card_usage`, `installment_remaining`,
-  `loan_balances`, `statements_before_window`), the payable window, and
-  `netAssets: "not-computed"`.
+  `liabilitiesMissing` (`unbilled_card_usage`, `installment_remaining` and
+  `loan_balances` always; `statements_before_window` when the answer leaves a
+  statement out), the payable window (`payablesFromPaymentDate`),
+  `statementsBeforeWindow`, and `netAssets: "not-computed"`.
+  `statementsBeforeWindow` counts the statements as of the cutoff that the
+  window leaves out, per source and reason: `due_before_window` (a readable
+  due date before `D − 31` days) or `undated_captured_before_window` (no
+  readable due date, captured more than 45 days before the cutoff). Each
+  statement is either a payable or counted there, never both
+  (`DATED_STATEMENTS_BEFORE_WINDOW_SQL`, the complement of the window over
+  the same statement facts). Only counts above zero are listed, under the same
+  `source` and `account` filters as the payables, so a statement whose account
+  is unresolved is counted only without an `account` filter. The entry carries
+  no amount and no settlement status. The `/state` page lists the counts
+  under 一覧にない期間外の請求 in its coverage notes;
+  `kogane.reported-state.read` answers the same body.
 - `manifest` and `contextId = canonicalDigest(manifest)`. Under
-  `reported-state-v2` the manifest pins every input the answer reads (INV09;
-  [ADR 0019, context amendment](adr/0019-dated-reported-state.md#context-amendment--2026-11-19)):
+  `reported-state-v3` the manifest pins every input the answer reads (INV09;
+  [ADR 0019, context amendment](adr/0019-dated-reported-state.md#context-amendment--2026-11-19)
+  and
+  [statements-before-window amendment](adr/0019-dated-reported-state.md#statements-before-the-window-amendment--2026-11-18)):
   the schema, date and cutoff; the policy ids and `metricRegistryRelease`; the
   request's `filters`; the chosen `snapshotRefs` and the
   `containersWithoutSnapshot` (`source/parser/dataset`); `rows`, every
@@ -135,12 +150,37 @@ A perimeter container with no snapshot before the cutoff is listed in
   `[ref, accountId, accountIdentity, instrumentId, instrumentIdentity]` (the
   row id names its parse run, so a parse activated over the same artifact
   changes it); the `statementRefs` and `statementAccounts`
-  (`[ref, accountId]`); and `settlementRefs`, each review as
+  (`[ref, accountId]`); `settlementRefs`, each review as
   `card-settlement:<id>@decision:<decision revision id>`, or `@proposed`
-  before any decision. Another filter, a mapping revision or identity run
-  that changes what a row shows, a review decision, an activated parse or a
-  registry release is therefore a new context id; an unchanged store keeps
-  its id.
+  before any decision; and `statementsBeforeWindow`, the statements the
+  window leaves out as `{sourceId, accountId, reasonCode, count}` per source,
+  resolved account (`null` when none resolves) and reason, only counts above
+  zero, ordered by those three. The coverage's counts are these added per
+  source and reason, and the wire contract refuses an answer where they
+  disagree. Another filter, a mapping revision or identity run that changes
+  what a row shows, a review decision, an activated parse, a registry
+  release, a changed count, or a statement left out whose resolved account
+  changes is therefore a new context id; an unchanged store keeps its id.
+  `reported-state-v2` (the context amendment of 2026-11-19, released first)
+  has no `statementsBeforeWindow`; since `reported-state-v3` (the
+  [ADR 0019 amendment of 2026-11-18](adr/0019-dated-reported-state.md#statements-before-the-window-amendment--2026-11-18))
+  every manifest carries it (`[]` when nothing is left out) and names v3, so
+  every reported-state `contextId` changed once more with it.
+
+`queryDatedState` counts the statements before the window unless it is called
+with `includeStatementsBeforeWindow: false`. The holdings change below, the
+[reconstructed state](reconstructed-state.md) and the
+[valuation on a date](calculation-and-reports.md#valuation-on-a-date) pass
+`false`: they do not run `DATED_STATEMENTS_BEFORE_WINDOW_SQL`, and the state
+they build on has no `statementsBeforeWindow` in its coverage or manifest and
+names every liability gap. The reported context ids they pin are the digests
+of that manifest without the count: they record no count they did not read,
+and they differ from the `/state` answer's `contextId` for the same date and
+filters. The context amendment of 2026-11-19 (`reported-state-v2`) changed
+them once, as it changed every reported-state context id, and
+`reported-state-v3` changed them once more: their manifest gains no count but
+names the schema version, so those ids, and the context ids of the reads that
+pin them, are new under v3. Nothing stores them, so nothing is rebuilt.
 
 `source` narrows accounts, payables and coverage to one source; `account` to
 one resolved account id. The answer has no total, subtotal or net worth, and
@@ -205,7 +245,8 @@ holdings in key order with counts per status, the position containers
 without a capture on either date and the stale snapshots, and states
 `total: "not-computed"` and `valuation: "not-computed"`: holdings are never
 added or valued. The change is between the two chosen captures; a stale one is
-shown with its age. The manifest pins both reported context ids and every
+shown with its age. The manifest pins both reported context ids (of the dated reads without the
+count of statements before the window, above) and every
 key's side refs, status and reasons; `contextId` is its digest. More than 500
 positions on a date is refused (`holding_limit_exceeded`), as is a reported
 state past its own bound (`dated_state_limit_exceeded`); a malformed request,
@@ -269,24 +310,28 @@ answer is not paged, so a filter change has no page to reset.
 Measured on `bun:sqlite` with every CORE migration and no table statistics, on
 the statement-scale store of `packages/read-model/test/card-usage-scale-fixture.ts`
 (`STATEMENT_SCALE`: 730 daily captures of three Vpass cards, a MyJCB
-connection, SMBC and St.George; 27,006 artifacts, 16,056 published parses,
-628,171 transaction and 16,790 balance observations, 5,840 statement totals,
-3,763 settlement candidates), with `KOGANE_DATED_STATE_SCALE=full`:
+connection, SMBC and St.George; 27,736 artifacts, 16,786 published parses,
+632,599 transaction and 18,250 balance observations, 5,840 statement totals,
+3,763 settlement candidates), with `KOGANE_DATED_STATE_SCALE=full`, on
+2026-11-18 (median of three, one run on a machine shared with other test
+processes):
 
 | Read                                  | Median |
 | ------------------------------------- | ------ |
-| `queryDatedState`, today              | 398 ms |
-| `queryDatedState`, a date a year back | 346 ms |
-| `DATED_POSITIONS_SQL`                 | 93 ms  |
-| `DATED_BALANCES_SQL`                  | 92 ms  |
-| `DATED_SNAPSHOTS_SQL`                 | 83 ms  |
-| `DATED_STATEMENTS_SQL`                | 105 ms |
+| `queryDatedState`, today              | 507 ms |
+| `queryDatedState`, a date a year back | 455 ms |
+| `DATED_POSITIONS_SQL`                 | 92 ms  |
+| `DATED_BALANCES_SQL`                  | 113 ms |
+| `DATED_SNAPSHOTS_SQL`                 | 126 ms |
+| `DATED_STATEMENTS_SQL`                | 76 ms  |
+| `DATED_STATEMENTS_BEFORE_WINDOW_SQL`  | 79 ms  |
 
-The four reads are issued concurrently through the executor, one statement
+The five reads are issued concurrently through the executor, one statement
 each, plus the settlement read. What grows with history: the snapshot CTEs
 read every artifact once per read (through
 `idx_fetch_artifacts_source_dataset_time`), as the current-state reads do, and
-the statement read ranks every captured statement total before the cutoff, as
+the statement read and the count of the statements before the window each
+rank every captured statement total before the cutoff, as
 `card_statement_facts` does. Everything else is reached by key: parses through
 `published_parse_runs`, observations through their `parse_run_id` indexes,
 identities through the identity runs of the chosen parses only, owners through
@@ -302,10 +347,12 @@ concurrently through the executor) plus two keyed reads: the position
 quantities by primary key and `DATED_SNAPSHOT_UNITS_SQL` (artifacts and fetch
 units by primary key; its plan is checked in
 `packages/read-model/test/dated-state.test.ts`). At `STATEMENT_SCALE`, a month
-ending today took 1,198 ms (median of three, one run on `bun:sqlite` on a
+ending today took 915 ms on 2026-11-18, neither answer counting the
+statements before the window (median of three, one run on `bun:sqlite` on a
 machine shared with other test processes; the store holds no position
 container). `packages/application/test/holdings-change-scale.test.ts` records
-every statement one answer runs on `STATEMENT_CI_SCALE` and fails on a whole
+every statement one answer runs on `STATEMENT_CI_SCALE` and fails on
+`DATED_STATEMENTS_BEFORE_WINDOW_SQL` or a whole
 scan beyond what the dated reads' own scale test accepts, and requires an
 answer under two seconds.
 
@@ -325,9 +372,20 @@ answer under two seconds.
   was captured; the bank capture itself is not bounded by the cutoff.
 - Statements due before `D − 31` days, and statements without a readable due
   date captured more than 45 days before the cutoff, are not listed, whatever
-  their status. The window is ADR 0019's choice (the plan named none); every
-  answer names the gap (`statements_before_window`) but does not count what it
-  leaves out.
+  their status. The window is ADR 0019's choice (the plan named none). The
+  answer counts them per source and reason (`statementsBeforeWindow`) but does
+  not say whether any was settled: it bounds how many older captured
+  statements could still be unpaid and is not a figure of what is owed.
+- The manifest records how many statements were left out per source, resolved
+  account and reason, not which ones. A swap that keeps every count keeps the
+  `contextId`: a newer capture of an older statement that takes the place of
+  the counted one under the same source, account and reason, or one statement
+  leaving a count as another enters it.
+- Only captured statements are listed or counted. A card or a month whose
+  statement was never captured before the cutoff (or whose capture has no
+  published parse) is neither, and no coverage entry names it: an empty
+  `statementsBeforeWindow` means no captured statement was left out, not that
+  no older bill exists.
 - Only the Vpass and MyJCB statement parsers supply payables; unbilled usage,
   installment remainders and loans are not shown (`liabilitiesMissing`).
 - Adoption and overlap across sources (`selectAdoptedSet`) are not applied:
