@@ -2,9 +2,11 @@
 //
 // It does three separable things and keeps them separable:
 //
-//   1. fixes the input set it used as a manifest and derives the context id
-//      from that manifest, so the same inputs always give the same context and
-//      a corrected price gives a different one (AR12, UC36/AT36);
+//   1. fixes the input set it used, and the release of the code that turns it
+//      into a body, as a manifest and derives the context id from that
+//      manifest, so the same inputs under the same code always give the same
+//      context and a corrected price or a changed rule gives a different one
+//      (AR12, UC36/AT36, INV09);
 //   2. writes a calculation run with typed unvalued reasons, never a zero for
 //      a missing price (addendum 09 section 3);
 //   3. stores the report body once, content-addressed under `reports/`, and
@@ -20,6 +22,8 @@ import {
   canonicalDigest,
   canonicalJson,
   DEFAULT_INSTRUMENT_VALUATION_POLICY,
+  HOLDING_VALUATION_RELEASE,
+  REPORT_BODY_SCHEMA_VERSION,
   replayabilityFor,
   reportPartition,
   reportStorageRef,
@@ -41,7 +45,7 @@ import { createD1ObservationReader } from "../../../packages/read-model/src/d1";
 import { PAGE_LIMIT } from "../../../packages/read-model/src/scope";
 import type { PositionWithValuations } from "../../../packages/observation-shared/src/api-contract.ts";
 
-const INPUT_MANIFEST_VERSION = "report-inputs-v1";
+const INPUT_MANIFEST_VERSION = "report-inputs-v2";
 const DEFAULT_MAX_ROWS = 500;
 /** Positions one reader page returns with their valuations (`PAGE_LIMIT` less its probe row). */
 const POSITION_PAGE = PAGE_LIMIT - 1;
@@ -250,12 +254,56 @@ SELECT position_id, id, base_instrument_ref, base_quantity_coefficient, base_qua
  source_claim_ref, market_ref, adjustment_policy_ref
 FROM ranked WHERE rank_in_key=1`;
 
+/**
+ * The release of `SNAPSHOT_PRICE_SQL` and of how its rows become prices
+ * (`priceObservation`). Bump it with any change that can choose another price,
+ * or none, for the same stored rows; the frozen digest in
+ * `test/report-job-releases.test.ts` fails until it is bumped with the text.
+ */
+export const SNAPSHOT_PRICE_RELEASE = "report-snapshot-price-v1";
+
+/**
+ * The release of how this job turns its inputs into a body: the instrument
+ * class it values under, `quantityFromNormalizedDecimal`, the row and
+ * unvalued-reason mapping, the provider rows, the coverage, `reportPartition`
+ * and the body schema. Bump it with any change that can give another body for
+ * the same manifest.
+ */
+export const REPORT_BUILD_RELEASE = `${REPORT_BODY_SCHEMA_VERSION}:build-v1`;
+
+/**
+ * The code a report body depends on beyond its stored inputs, by release
+ * (INV09). Each is part of the input manifest, so the report id changes with
+ * any of them and a later build never reuses a body an earlier build computed.
+ */
+export interface ReportBuildReleases {
+  /** `SNAPSHOT_PRICE_RELEASE`: which price a holding is valued at. */
+  priceSelectionRelease: string;
+  /** ADR 0020's closed rule list the selection admits, each id with its version, sorted. */
+  priceRuleIds: string[];
+  /** `HOLDING_VALUATION_RELEASE`: `valueHolding` and `summarizeValuation`. */
+  valuationRelease: string;
+  /** `REPORT_BUILD_RELEASE`: rows, partition and body schema. */
+  reportBuildRelease: string;
+}
+
+/** The releases this build ships. */
+export function reportBuildReleases(): ReportBuildReleases {
+  return {
+    priceSelectionRelease: SNAPSHOT_PRICE_RELEASE,
+    priceRuleIds: [...PRICE_RULE_IDS].sort(),
+    valuationRelease: HOLDING_VALUATION_RELEASE,
+    reportBuildRelease: REPORT_BUILD_RELEASE,
+  };
+}
+
 /** The snapshot price of each position, keyed by position observation id. */
 async function snapshotPrices(
   db: D1Database,
   wanted: readonly { ref: string; positionId: number }[],
   unitRef: string,
   cutoff: string,
+  ruleIds: readonly string[],
 ): Promise<Map<number, PriceObservation>> {
   const prices = new Map<number, PriceObservation>();
   if (wanted.length === 0) return prices;
@@ -265,7 +313,7 @@ async function snapshotPrices(
       JSON.stringify(wanted.map((entry) => [entry.ref, entry.positionId])),
       unitRef,
       cutoff,
-      JSON.stringify(PRICE_RULE_IDS),
+      JSON.stringify(ruleIds),
     )
     .all<PriceRow & { position_id: number }>();
   for (const row of rows.results) {
@@ -277,11 +325,12 @@ async function snapshotPrices(
 
 /**
  * Every version this run used, as the set itself rather than as a latest id or
- * a timestamp (AR12). The digest of this object is the context id, so adding a
- * corrected price or a later observation produces a new context instead of
- * silently changing an existing one.
+ * a timestamp (AR12), and the release of the code that turns those inputs into
+ * the body (INV09). The digest of this object is the context id, so a
+ * corrected price, a later observation or a changed rule produces a new
+ * context instead of silently reusing an existing one.
  */
-interface ReportInputManifest {
+interface ReportInputManifest extends ReportBuildReleases {
   schemaVersion: typeof INPUT_MANIFEST_VERSION;
   perimeterRef: string;
   unitRef: string;
@@ -289,6 +338,13 @@ interface ReportInputManifest {
   knowledgeCutoffEffective: string;
   decimalPolicyRelease: string;
   instrumentValuationPolicyId: string;
+  /**
+   * More positions were in scope than the bound kept (the body's
+   * `coverage.truncated`). The position ids name only the kept rows, so the
+   * same first `maxRows` positions with and without positions past the bound
+   * would otherwise give one id for a whole body and a cut one (INV05, INV09).
+   */
+  truncated: boolean;
   positionObservationIds: number[];
   valuationObservationIds: number[];
   priceObservationIds: string[];
@@ -325,12 +381,15 @@ async function restrictionsFor(
 
 /**
  * Build (or reuse) the holdings report at the context implied by the current
- * inputs. Re-running with unchanged inputs reuses the stored artifact; it does
- * not rewrite it.
+ * inputs and the current code. Re-running with unchanged inputs and releases
+ * reuses the stored artifact; it does not rewrite it. `releases` defaults to
+ * the ones this build ships; a test passes another set to stand for a later
+ * build.
  */
 export async function runReportJob(
   env: ReportJobEnv,
   options: ReportJobOptions,
+  releases: ReportBuildReleases = reportBuildReleases(),
 ): Promise<ReportJobResult> {
   const empty: ReportJobResult = {
     generated: 0,
@@ -413,6 +472,7 @@ export async function runReportJob(
     })),
     options.unitRef,
     options.knowledgeCutoff,
+    releases.priceRuleIds,
   );
 
   const manifest: ReportInputManifest = {
@@ -422,6 +482,11 @@ export async function runReportJob(
     knowledgeCutoffEffective: await knowledgeBoundary(env.DB, positionIds),
     decimalPolicyRelease: options.decimalPolicyRelease,
     instrumentValuationPolicyId: DEFAULT_INSTRUMENT_VALUATION_POLICY.policyId,
+    priceSelectionRelease: releases.priceSelectionRelease,
+    priceRuleIds: [...releases.priceRuleIds].sort(),
+    valuationRelease: releases.valuationRelease,
+    reportBuildRelease: releases.reportBuildRelease,
+    truncated,
     positionObservationIds: [...positionIds].sort((a, b) => a - b),
     valuationObservationIds: [...valuationIds].sort((a, b) => a - b),
     priceObservationIds: [...new Set([...prices.values()].map((price) => price.id))].sort(),
@@ -525,7 +590,7 @@ export async function runReportJob(
   });
 
   const body: ReportBody = {
-    schemaVersion: "report-holdings-v1",
+    schemaVersion: REPORT_BODY_SCHEMA_VERSION,
     purpose: "holdings-view",
     contextId,
     calculationRunId: runId,

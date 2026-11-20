@@ -292,7 +292,15 @@ export function parseAccountCandidatesRequest(
   return { ok: true, value: request };
 }
 
-function viewItems(set: AccountCandidateSet, view: AccountCandidateView): AccountCandidateItem[] {
+/**
+ * The items of one view, in the review's order. The page pages them; the
+ * pending-decisions summary (pending-decisions.ts) counts the `open` and
+ * `held` views through this same function, so the two cannot disagree.
+ */
+export function accountCandidateView(
+  set: AccountCandidateSet,
+  view: AccountCandidateView,
+): AccountCandidateItem[] {
   switch (view) {
     case "open":
       return set.candidates.filter((item) => item.status === "proposed" && item.hold === null);
@@ -350,7 +358,7 @@ export async function reviewAccountCandidates(input: {
     throw error;
   }
   const { sourceAccountId } = request;
-  const all = viewItems(set, request.view);
+  const all = accountCandidateView(set, request.view);
   if (
     sourceAccountId !== null &&
     ![...set.candidates, ...set.connections, ...set.unreviewed].some((item) =>

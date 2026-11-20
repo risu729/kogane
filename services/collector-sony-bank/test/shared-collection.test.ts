@@ -19,6 +19,7 @@ import {
 import {
   artifactRole,
   assertCentralSafe,
+  persistRefusalCode,
   persistSharedRun,
   sharedRunDiagnostic,
   sonyBankRunPlan,
@@ -226,6 +227,216 @@ describe("G1-08/G1-09 the outcome of the run survives persistence", () => {
     // The failure mapping is what drops the artifacts; the manifest says so.
     expect(plan.artifacts).toEqual([]);
     expect(plan.run.providerOutcome).toBe("failed");
+  });
+});
+
+describe("a core run that stopped at a step keeps only the finished steps (ADR 0099 amendment 2026-11-18)", () => {
+  const balance = {
+    dataset: "gross-balance",
+    filename: "gross-balance.json",
+    mediaType: "application/json",
+    body: '{"synthetic":"balance"}',
+  };
+  const monthlyCsv = {
+    dataset: "yen-history-csv",
+    filename: "monthly-yen-history.csv",
+    mediaType: "text/csv",
+    body: "synthetic,monthly\n",
+  };
+  const retainedCsv = {
+    dataset: "yen-history-csv",
+    filename: "yen-history.csv",
+    mediaType: "text/csv",
+    body: "synthetic,retained\n",
+  };
+  const stoppedAtRetained = {
+    completed: ["login", "gross-balance", "monthly-history"],
+    failed: "retained-history",
+    notAttempted: ["wallet"],
+  } as const;
+  const stopped = (overrides: Partial<SharedRunInput> = {}) =>
+    input({
+      status: "partial",
+      window: { from: null, to: "2026-09-11" },
+      transactionCount: null,
+      artifacts: [balance, monthlyCsv],
+      failures: [
+        {
+          operation: "retained-history",
+          errorType: "SonyBankError",
+          message: "collector_request_failed",
+          diagnostics: { stage: "history", reason: "http_error", currency: "USD" },
+        },
+      ],
+      coreSteps: stoppedAtRetained,
+      ...overrides,
+    });
+
+  test("the terminal and manifest state the stopped step, the partial scope and no total", async () => {
+    const bucket = new FakeR2Bucket();
+    const outcome = await persistSharedRun(bucket, stopped());
+    expect(outcome.result.outcome).toBe("persisted");
+    const read = await readTerminal(bucket, "sony-bank", runId);
+    if (read.outcome !== "found") throw new Error("unreachable");
+    expect(read.manifest).toMatchObject({
+      providerOutcome: "partial",
+      coverageStatus: "partial",
+      safeErrorCode: "core_retained_history_failed",
+      requestedScope: { scopeKind: "full_snapshot", startValue: null, endValue: "2026-09-11" },
+    });
+    expect(read.manifest.units).toEqual([
+      expect.objectContaining({ coverageStatus: "partial", artifactCount: 2 }),
+    ]);
+    expect(read.manifest.units[0]?.safeErrorCode).toBe("core_retained_history_failed");
+    expect(read.manifest.ranges.map((range) => range.rangeKey)).toEqual(["request-window"]);
+    const manifestEntry = read.manifest.artifacts.find((a) => a.artifactKey === "manifest.json")!;
+    const manifest = JSON.parse(
+      new TextDecoder().decode(bucket.entries.get(manifestEntry.storageRef.key)!.bytes),
+    );
+    expect(manifest.coreSteps).toEqual(stoppedAtRetained);
+    expect(manifest.transactionCount).toBeNull();
+    expect(manifest.failures).toEqual([
+      {
+        operation: "retained-history",
+        errorType: "SonyBankError",
+        message: "collector_request_failed; stage=history; reason=http_error; currency=USD",
+      },
+    ]);
+  });
+
+  test("an allowlisted reason outranks the step code, as ADR 0092 requires", async () => {
+    const plan = await sonyBankRunPlan(
+      stopped({
+        failures: [
+          {
+            operation: "retained-history",
+            errorType: "SonyBankError",
+            message: "collector_request_failed",
+            diagnostics: { stage: "history-csv", reason: "history_csv_count_mismatch" },
+          },
+        ],
+      }),
+    );
+    expect(plan.run.safeErrorCode).toBe("history_csv_count_mismatch");
+    expect(plan.run.units[0]?.safeErrorCode).toBe("history_csv_count_mismatch");
+  });
+
+  // Each refusal is its own test, so a check that stops refusing one of them
+  // fails that test alone.
+  for (const [name, artifacts, coreSteps] of [
+    // A canonical history name is the parser input; only the retained step writes it.
+    ["canonical history before retained", [balance, monthlyCsv, retainedCsv], stoppedAtRetained],
+    // An unprefixed month-window file would read as the retained range.
+    [
+      "unprefixed month window",
+      [balance, { ...monthlyCsv, filename: "yen-history.csv" }],
+      stoppedAtRetained,
+    ],
+    [
+      "summary",
+      [
+        balance,
+        {
+          dataset: "collection-summary",
+          filename: "collection-summary.json",
+          mediaType: "application/json",
+          body: "{}",
+        },
+      ],
+      stoppedAtRetained,
+    ],
+    [
+      "WALLET month",
+      [
+        balance,
+        {
+          dataset: "wallet-history-202609",
+          filename: "wallet-history-2026-09.html",
+          mediaType: "text/html; charset=UTF-8",
+          body: "<html></html>",
+        },
+      ],
+      stoppedAtRetained,
+    ],
+    [
+      "month window before it finished",
+      [balance, monthlyCsv],
+      {
+        completed: ["login", "gross-balance"],
+        failed: "monthly-history",
+        notAttempted: ["retained-history", "wallet"],
+      },
+    ],
+    // The Processor reads the stored name, not the dataset: a balance
+    // stored under a history name would register as that history.
+    [
+      "balance under another name",
+      [{ ...balance, filename: "yen-history.csv" }],
+      stoppedAtRetained,
+    ],
+    // A `monthly-` prefix on a name that is not the dataset's own.
+    [
+      "month window under a foreign name",
+      [balance, { ...monthlyCsv, filename: "monthly-foreign-history-usd.csv" }],
+      stoppedAtRetained,
+    ],
+    [
+      "canonical history under another dataset's name",
+      [balance, { ...retainedCsv, filename: "foreign-history-usd.csv" }],
+      {
+        completed: ["login", "gross-balance", "monthly-history", "retained-history"],
+        failed: "wallet",
+        notAttempted: [],
+      },
+    ],
+    // A core artifact belongs to the account unit; a unit of its own could
+    // be reported complete apart from the stopped run.
+    [
+      "core artifact in its own unit",
+      [{ ...balance, unitKey: "document-0001" }],
+      stoppedAtRetained,
+    ],
+  ] as const)
+    test(`a step-stopped core run never writes what a finished step did not produce: ${name}`, async () => {
+      await expect(sonyBankRunPlan(stopped({ artifacts, coreSteps }))).rejects.toThrow(
+        "core_partial_scope_invalid",
+      );
+    });
+
+  test("a refusal is logged by its closed code only", async () => {
+    const refusal = await sonyBankRunPlan(stopped({ status: "success", failures: [] })).catch(
+      (error: unknown) => error,
+    );
+    expect(persistRefusalCode(refusal)).toBe("core_partial_scope_invalid");
+    expect(persistRefusalCode(new Error("storage unavailable"))).toBe("persistence_failed");
+    expect(persistRefusalCode("core_partial_scope_invalid")).toBe("persistence_failed");
+  });
+
+  test("a stopped core run is never a success: that outcome would make it parseable", async () => {
+    await expect(sonyBankRunPlan(stopped({ status: "success", failures: [] }))).rejects.toThrow(
+      "core_partial_scope_invalid",
+    );
+  });
+
+  test("a stopped core run keeping exactly its finished steps' names is planned", async () => {
+    const finished = await sonyBankRunPlan(
+      stopped({
+        artifacts: [balance, retainedCsv, monthlyCsv],
+        coreSteps: {
+          completed: ["login", "gross-balance", "monthly-history", "retained-history"],
+          failed: "wallet",
+          notAttempted: [],
+        },
+        failures: [{ operation: "wallet", errorType: "SonyBankError", message: "x" }],
+      }),
+    );
+    expect(finished.run.safeErrorCode).toBe("core_wallet_failed");
+    expect(finished.artifacts.map((artifact) => artifact.artifactKey)).toEqual([
+      "gross-balance.json",
+      "yen-history.csv",
+      "monthly-yen-history.csv",
+      "manifest.json",
+    ]);
   });
 });
 

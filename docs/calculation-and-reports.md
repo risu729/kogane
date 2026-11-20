@@ -532,9 +532,19 @@ view and never offering `/export`
 
 `services/processor/src/report-job.ts` builds a
 `ReportInputManifest` — the perimeter, the base unit, the effective knowledge
-boundary, the decimal and instrument-valuation policy ids, and the sorted ids of
-every position observation, valuation observation and price observation it used.
-The context id is the digest of that manifest, so:
+boundary, the decimal and instrument-valuation policy ids, the release of the
+code that turns those inputs into the body, whether positions past the row
+bound were left out (`truncated`), and the sorted ids of every position
+observation, valuation observation and price observation it used.
+The releases (`report-inputs-v2`,
+[ADR 0072, amendment of 2026-11-19](adr/0072-report-artifact-pages.md#amendment-a-report-id-names-the-code-that-computed-its-body-2026-11-19))
+are `priceSelectionRelease` (`SNAPSHOT_PRICE_RELEASE`, the snapshot price
+query), `priceRuleIds` (ADR 0020's closed rule list the query admits, sorted),
+`valuationRelease` (`HOLDING_VALUATION_RELEASE`: `valueHolding` and
+`summarizeValuation`) and `reportBuildRelease` (`REPORT_BUILD_RELEASE`: the
+job's rows, `reportPartition` and the body schema). They are kept by hand;
+only the query text is pinned to its release by a frozen digest. The context
+id is the digest of that manifest, so:
 
 - re-running with unchanged inputs reuses the stored report, including at a
   later clock: the manifest records the newest moment any _included_ evidence
@@ -545,7 +555,19 @@ The context id is the digest of that manifest, so:
 - evidence recorded after the requested knowledge cutoff is excluded, decided by
   `recorded_at_ms` (when Kogane learned it) rather than `fetched_at_ms`, so a
   late import of an old file is not back-dated into an old context (UC63/AT63).
-  Excluding a row changes the id set, so it changes the context too.
+  Excluding a row changes the id set, so it changes the context too;
+- a bumped release changes the manifest, so the next sweep writes one new
+  report for the inputs it sees, even when no evidence changed, and never
+  serves a body the earlier code computed (INV09). Reports already stored keep
+  their ids and bodies; nothing is recomputed. A manifest stored before the
+  releases were recorded stays `report-inputs-v1`, and the report contract
+  reads both versions;
+- a report cut at `maxRows` and one that read every position over the same
+  kept positions differ in `truncated`, so they are two reports: a body
+  stored `complete` is never reused once the scope has grown past the bound
+  (this closes the limit the
+  [amendment of 2026-11-18](adr/0072-report-artifact-pages.md#amendment-a-report-cut-at-its-row-bound-is-not-complete-2026-11-18)
+  recorded).
 
 ## 6. Replayability and evidence-use restrictions
 
@@ -654,7 +676,13 @@ would discard later collection and later decisions (docs/operations.md).
   value beside own valuation (AT30), reuse, a corrected price giving a new
   context while the submitted report keeps its digest (AT36/AT60), the
   knowledge cutoff (AT63), the restriction purge (AT66), and that the stored
-  body and explanation node pass the report page's contract.
+  body and explanation node pass the report page's contract;
+  `services/processor/test/report-job-releases.test.ts` — the manifest's
+  releases, the snapshot price query pinned to its release, and each release
+  changed in turn giving a new report with no reuse while the earlier one
+  keeps its id and body; `services/processor/test/report-job-truncated.test.ts`
+  — a truncated report is `partial-verified-scope`, and the same kept
+  positions with and without positions past the bound give two reports.
 - `services/app/test/reports-api.test.ts` — re-display, Access and
   method gates, refusal of explanation and export under a restriction, the
   decimal policy selection contract, the list's order, paging and query

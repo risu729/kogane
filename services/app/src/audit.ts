@@ -351,6 +351,20 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       rows: Array.isArray(value["items"]) ? value["items"].length : 0,
       truncated: rowsFollow(value),
     };
+  // One row per kind; truncated when a line's count reached its bound.
+  if (operation === "decisions.pending")
+    return {
+      rows: Array.isArray(value["kinds"]) ? value["kinds"].length : 0,
+      truncated:
+        Array.isArray(value["kinds"]) &&
+        value["kinds"].some(
+          (line) =>
+            typeof line === "object" &&
+            line !== null &&
+            (line as Record<string, unknown>)["state"] === "counted" &&
+            (line as Record<string, unknown>)["complete"] === false,
+        ),
+    };
   // Sources the answer covers (listed or unchanged); truncated when it
   // continues past the byte bound, a count is a lower bound, or the events
   // walk ended on a new revision.

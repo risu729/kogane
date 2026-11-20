@@ -262,7 +262,15 @@ Claiming an occurrence of a `collection`-kind job also appends one `alarm`
 audit record (`alarm.occurrence.claim`, principal `alarm:<job id>`) as the
 last statement of the claim batch, joined to the occurrence row it inserted;
 a claim whose record cannot be written is rolled back with it and retried by
-the same bookkeeping wakeup. The outcome stays in the occurrence row. The
+the same bookkeeping wakeup. The claim's occurrence INSERT skips only an
+occurrence already claimed (its id, or its schedule and nominal: one
+`ON CONFLICT … DO NOTHING` clause per key), which logs `claim_conflict`; an
+occurrence row the schema refuses (a CHECK or NOT NULL failure) raises, rolls
+back the whole batch with the schedule's move, logs
+`schedule_bookkeeping_retry` with phase `claim`, and is retried a minute later
+at the same nominal. A refusal that never clears repeats that line every
+minute and claims no new occurrence of that job; the claim builds no row the
+shipped schema refuses. The outcome stays in the occurrence row. The
 `processor-tick` and `sbi-vc-keepalive` occurrences record nothing
 ([audit log](audit-log.md#the-processors-own-records-alarm-and-lane)). The
 single retry of a `not_dispatched` occurrence (the one-retry rule above)
