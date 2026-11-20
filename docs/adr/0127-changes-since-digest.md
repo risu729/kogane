@@ -300,8 +300,12 @@ source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
    stay. Its retry sends the continuation again, except after a `400`: the
    same request would be refused again (its `since` past the digest's bound,
    say, after the page stayed open a day without a refetch), so the retry
-   reads the answer again from the clock (decision 2), and the answers
-   already read and the error stay until that answer arrives.
+   reads the answer again from the clock (decision 2). Any read again of a
+   window whose continuation failed (that retry, a refocused tab, a return
+   to the window) keeps the answers already read and the error until it
+   settles: the panel remembers the failed continuation's error itself,
+   which the query holds until a read settles, so a read that fails anew
+   shows the panel's error state.
 7. **Refusals.** A `403` (the grant refusals, `unauthorized` and
    `evidence_restricted`) or `404` (a deployment without the route, such as
    the local store) shows no panel. Any other failure (`400`, `413
@@ -342,7 +346,9 @@ source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
   that keeps the answer read, with no header count; a continuation refused
   as too old a day later, whose retry keeps the answer read and the error
   beside the button while it reads the 30-day window from the clock again,
-  and then continues on the new `since`; the unauthorized run
+  and then continues on the new `since`; a window whose continuation failed,
+  read again on a return to it, that keeps the answer read and the error
+  beside the button until the reread settles; the unauthorized run
   sections and an events line that is not served; no panel on `403` and on
   `404`; the error state, with no count, on a server error and on an answer
   the contract refuses; the accessibility audit at 1280px and 390px with the

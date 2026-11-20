@@ -215,8 +215,10 @@ The ホーム page's 最近の変化 panel (`apps/web/src/changes-since.tsx`) re
 It sends `since` as the browser's clock minus the chosen window (24時間 by
 default, 7日間, 30日間), taken again on each first read (a refetch on focus or
 a retry included), and a continuation sends its first answer's `since`; the
-retry of a continuation the route refused (`400`) reads the answer again,
-and the answer read stays on screen until the new one arrives. It
+retry of a continuation the route refused (`400`) reads the answer again.
+While a window whose continuation failed is read again (that retry, a
+refocus, a return to the window), its answer read and the continuation's
+error stay on screen until the read settles. It
 checks every answer with `validChangesSince`, and
 shows the digest's counts per source by closed state, with labels typed by the
 domain's closed lists. A count the digest cut, and every count of an

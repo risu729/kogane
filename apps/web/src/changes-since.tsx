@@ -402,22 +402,27 @@ function Answer({
   );
 }
 
+/**
+ * The errors of continuations that failed, by identity. The query holds its
+ * last error until a read settles; this keeps that error read as the
+ * continuation's while a later read runs, whatever direction it fetches in.
+ */
+const continuationErrors = new WeakSet<Error>();
+
 export function ChangesSincePanel({ sources }: { sources: Overview["sources"] }): ReactNode {
   const [chosen, setChosen] = useState<WindowKey>("day");
   const span = WINDOWS.find((entry) => entry.key === chosen)!;
   const query = useChangesSince(span.key, span.hours);
   // `isFetchNextPageError` reads the running fetch's direction, so a reread
-  // started after a failed continuation (its retry, a refocused tab) clears
-  // it while the continuation's error is still the query's. The window whose
-  // continuation failed is kept until a read settles, so the answer read and
-  // the error beside the button stay while the reread runs (decision 6).
-  const [continuationFailed, setContinuationFailed] = useState<WindowKey | null>(null);
-  const settledContinuation = query.isFetchNextPageError ? span.key : null;
-  if (!query.isFetching && continuationFailed !== settledContinuation)
-    setContinuationFailed(settledContinuation);
+  // started after a failed continuation (its retry, a refocused tab, a return
+  // to the window, a remount) clears it while the continuation's error is
+  // still the query's. The error itself is remembered, and the query keeps
+  // that object until a read settles, so the answer read and the error beside
+  // the button stay while the reread runs (decision 6). A read that fails
+  // anew throws a new error, which only a failed continuation marks.
+  if (query.isFetchNextPageError && query.error !== null) continuationErrors.add(query.error);
   const failedOnContinuation =
-    query.isError &&
-    (query.isFetching ? continuationFailed === span.key : query.isFetchNextPageError);
+    query.isError && query.error !== null && continuationErrors.has(query.error);
   // A caller the route refuses (it is the reader's), or a deployment without
   // the route (the local store): the panel is not shown.
   if (query.error instanceof ApiError && (query.error.status === 403 || query.error.status === 404))

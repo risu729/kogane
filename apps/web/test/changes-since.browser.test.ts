@@ -491,6 +491,58 @@ describe.if(runnable)("the 最近の変化 panel on ホーム", () => {
     }
   }, 30_000);
 
+  test("a window whose continuation failed keeps its answer while it is read again on return", async () => {
+    mode = "continuation_failed";
+    const page = await browser.newPage();
+    try {
+      const panel = await open(page);
+      await panel.getByRole("button", { name: "続きを読み込む" }).click();
+      const failed = panel
+        .getByRole("alert")
+        .filter({ hasText: "最近の変化の続きを読み込めませんでした" });
+      await failed.waitFor({ timeout: 10_000 });
+      // Another window is read and settles; the first window's failed
+      // continuation is still its query's error.
+      const week = page.waitForResponse(
+        (response) =>
+          response.url().includes(`${CHANGES_SINCE_PATH}?`) && !response.url().includes("after="),
+      );
+      await panel.getByRole("button", { name: "7日間" }).click();
+      await week;
+      await panel.getByRole("button", { name: "続きを読み込む" }).waitFor({ timeout: 10_000 });
+      // Back on the first window, its stale answer is read again. The reread
+      // is held: while it runs, the answer read and the error beside the
+      // button stay, not a whole-panel error in their place.
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      await page.route(`**${CHANGES_SINCE_PATH}?*`, async (request) => {
+        await held;
+        await request.continue();
+      });
+      const reread = page.waitForRequest((request) =>
+        request.url().includes(`${CHANGES_SINCE_PATH}?`),
+      );
+      await panel.getByRole("button", { name: "24時間" }).click();
+      await reread;
+      await failed
+        .getByRole("button", { name: "最近の変化の続きを再試行中…" })
+        .waitFor({ timeout: 10_000 });
+      expect(await panel.locator("li.changes-source").count()).toBe(2);
+      expect(
+        await panel
+          .getByRole("alert")
+          .filter({ hasText: "最近の変化を読み込めませんでした" })
+          .count(),
+      ).toBe(0);
+      release();
+      // The reread settles with no error, and the continuation is offered again.
+      await panel.getByRole("button", { name: "続きを読み込む" }).waitFor({ timeout: 10_000 });
+      expect(await panel.getByRole("alert").count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
   test("a continuation refused as too old is retried by reading the answer again from the clock", async () => {
     mode = "bounded";
     const page = await browser.newPage();
