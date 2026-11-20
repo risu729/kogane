@@ -1,4 +1,4 @@
-import { beforeAll, afterAll, test, expect } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { type Miniflare } from "miniflare";
 import { startPipeline, seedArtifact, publishParse, racedBeforeBatch } from "./harness.ts";
 import { smbcDirectTransactions } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
@@ -13,6 +13,7 @@ import {
   type Principal,
 } from "../../../packages/application/src/index.ts";
 import { changeMutationPlanners } from "../src/change-commands.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare, env: Env, db: D1Database;
 const actor: Principal = {
@@ -23,10 +24,10 @@ const actor: Principal = {
 };
 const now = "2098-01-01T00:00:00.000Z";
 let sequence = 0;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  db = env.DB;
-}, 60000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+db = env.DB;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

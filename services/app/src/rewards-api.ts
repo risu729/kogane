@@ -28,9 +28,11 @@ import {
   isRewardPath,
   rewardQueryParameters,
 } from "../../../packages/observation-shared/src/api-schema";
+import { tokyoToday } from "../../../packages/application/src/index";
 import { d1Executor } from "../../../packages/read-model/src/d1";
 import {
   createRewardReader,
+  HOLDING_CUT_BY_PAGE,
   type Page,
   type RewardHoldingView,
 } from "../../../packages/read-model/src/index";
@@ -38,6 +40,24 @@ import { HttpError, json } from "./http";
 import { rewardExpiryFromRead, rewardReadContext, rewardSimulationsFromRead } from "./rewards-read";
 
 const REWARDS_PREFIX = "/api/v2/rewards";
+
+/**
+ * The goal search's clock at `now` (epoch milliseconds): that day's civil
+ * date in Asia/Tokyo (UTC+9, no daylight saving time), named with its zone
+ * (ADR 0049, amendment of 2026-11-18). A UTC date is the previous Tokyo day
+ * from 00:00 to 09:00 JST, and a `null` zone would let an offer of another
+ * zone be judged against this date; with the zone named, such an offer's
+ * validity or deadline stays a review reason (`needs_rule_verification`).
+ */
+function searchClock(now: number) {
+  return {
+    kind: "local-date",
+    // The expiry window's default `from` is the same day (`tokyoToday`).
+    value: tokyoToday(now),
+    zone: "Asia/Tokyo",
+    basis: "derived",
+  } as const;
+}
 
 interface BucketDto {
   bucketRef: string;
@@ -64,8 +84,28 @@ function bucketDto(bucket: RewardBucket): BucketDto {
   };
 }
 
-function holdingDto(view: RewardHoldingView, membership: readonly MembershipState[]) {
+/**
+ * A holding's totals, or the reason there are none: when the page holds only
+ * some of the holding's buckets, a sum of them is a part of the holding and
+ * is never given as its consumable quantity or a per-kind subtotal (INV05).
+ * The buckets themselves are still listed.
+ */
+function holdingTotals(view: RewardHoldingView) {
   const summary = summarizeHolding(view.holding, view.qualification);
+  if (!view.cutByPage) return summary;
+  const cut = (unitRef: string): Quantity => ({
+    unitRef,
+    value: { status: "missing", reasonCode: HOLDING_CUT_BY_PAGE },
+  });
+  return {
+    ...summary,
+    consumable: cut(summary.consumable.unitRef),
+    byKind: summary.byKind.map((entry) => ({ ...entry, quantity: cut(entry.quantity.unitRef) })),
+  };
+}
+
+function holdingDto(view: RewardHoldingView, membership: readonly MembershipState[]) {
+  const summary = holdingTotals(view);
   return {
     programId: view.program.programId,
     programRef: view.program.programRef,
@@ -258,21 +298,14 @@ export async function readRewardRoute(
         release: CONVERSION_SEARCH_RELEASE,
       };
     const quantity = decimalQuantity(unitRef ?? sourceUnits[0]!, quantityText);
+    const clock = searchClock(Date.now());
     // Every stored version is its own candidate here, named by its offerRef.
-    const result = findConversionPaths(
-      matching,
-      {
-        quantity,
-        clock: {
-          kind: "local-date",
-          value: new Date().toISOString().slice(0, 10),
-          zone: null,
-          basis: "derived",
-        },
-      },
-      goal,
-      { maxDepth: depth, maxCandidates: 8, maxExpansions: 500, requiredCompletionBy: null },
-    );
+    const result = findConversionPaths(matching, { quantity, clock }, goal, {
+      maxDepth: depth,
+      maxCandidates: 8,
+      maxExpansions: 500,
+      requiredCompletionBy: null,
+    });
     return {
       paths: result.paths,
       // The search is bounded by depth and candidate caps, so no path is
@@ -286,6 +319,9 @@ export async function readRewardRoute(
       expansions: result.expansions,
       stoppedBy: result.stoppedBy,
       budget: result.budget,
+      // The day and zone the search was judged from: the release names the
+      // traversal, not its input, so an answer names the clock it started on.
+      clock,
       basis: "policy-estimated",
       release: result.release,
     };

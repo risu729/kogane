@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -7,6 +7,7 @@ import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared
 import { settlementReview } from "../../../packages/application/test/card-settlement-fixture.ts";
 import { cardSettlementImpact } from "../../../packages/domain/src/card-settlement.ts";
 import type { CardSettlementReview } from "../../../packages/domain/src/card-settlement-review.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -44,6 +45,91 @@ const noReader = {
   reason: "source_has_no_debit_account_statement",
   latest: null,
   lastNamed: null,
+};
+const exact = (value: string) => ({ value, unit: "JPY", status: "exact" });
+const bankLine = {
+  account: "acct-bank-a",
+  sourceAccount: "smbc-bank:synthetic-a",
+  label: "架空銀行 普通",
+  notes: ["other_debits_not_modelled"],
+};
+/** The 次回の引落 view (ADR 0114's 2026-11-19 amendment). Every value is invented. */
+const upcomingBills = {
+  apiVersion: 2,
+  schemaVersion: "kogane-card-upcoming-bills-v1",
+  view: "upcoming",
+  date: "2098-03-20",
+  zone: "Asia/Tokyo",
+  rules: ["card-upcoming-bills-v1", "card-debit-account-answer-v1"],
+  cardsMax: 100,
+  bills: [
+    {
+      card: { source: "vpass", sourceAccount: "vpass:card-001", label: "架空カード（card-001）" },
+      statementPeriod: "2098-03",
+      debitDate: "2098-03-26",
+      amount: exact("30000"),
+      debitAccount: {
+        answer: "accepted-settlement",
+        account: "acct-bank-a",
+        sourceAccount: "smbc-bank:synthetic-a",
+        label: "架空銀行 普通",
+        since: "2098-02-26",
+        codes: [],
+      },
+    },
+    {
+      card: { source: "vpass", sourceAccount: "vpass:card-002", label: null },
+      statementPeriod: "2098-03",
+      debitDate: "2098-03-27",
+      amount: { unit: "JPY", status: "unparsed", reason: "stored:unparsed" },
+      debitAccount: {
+        answer: "unknown",
+        account: null,
+        sourceAccount: null,
+        label: null,
+        since: null,
+        codes: ["no_debit_account_evidence"],
+      },
+    },
+  ],
+  byDebitAccount: [
+    {
+      ...bankLine,
+      debitDate: "2098-03-26",
+      bills: 1,
+      cardBills: exact("30000"),
+      balance: { ...exact("50000"), capturedAt: "2098-03-19T01:00:00.000Z" },
+      covers: "yes",
+      reasons: [],
+    },
+    {
+      account: null,
+      sourceAccount: null,
+      label: null,
+      debitDate: "2098-03-27",
+      bills: 1,
+      cardBills: { unit: "JPY", status: "missing", reason: "bill_not_exact" },
+      balance: null,
+      covers: "unknown",
+      reasons: ["debit_account_unknown", "bill_not_exact"],
+      notes: ["other_debits_not_modelled"],
+    },
+  ],
+  notListed: [
+    {
+      card: "vpass:card-003",
+      source: "vpass",
+      reason: "payment_date_not_published",
+      last: { period: "2098-03", debitDate: null },
+    },
+    {
+      card: "vpass:card-004",
+      source: "vpass",
+      reason: "statement_total_refund_or_zero",
+      last: { period: "2098-03", debitDate: "2098-03-26" },
+    },
+  ],
+  cardsTruncated: false,
 };
 const debitAccounts = {
   apiVersion: 2,
@@ -243,8 +329,13 @@ const truncated = {
   ],
 };
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("card settlement review", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let review = settlementReview();
@@ -265,6 +356,7 @@ describe.if(runnable)("card settlement review", () => {
   const unmatchedReads: string[] = [];
   let debitAccountsPage: unknown = debitAccounts;
   const debitAccountReads: string[] = [];
+  let upcomingPage: unknown = upcomingBills;
   /** Why the grouped list has no next page. */
   let statementsEnd = "none";
   const posted: { operation: string; body: Record<string, unknown> }[] = [];
@@ -284,6 +376,7 @@ describe.if(runnable)("card settlement review", () => {
     unmatchedReads.length = 0;
     debitAccountsPage = debitAccounts;
     debitAccountReads.length = 0;
+    upcomingPage = upcomingBills;
     statementsEnd = "none";
     posted.length = 0;
   });
@@ -391,6 +484,11 @@ describe.if(runnable)("card settlement review", () => {
           unmatchedReads.push(offset);
           return Response.json(unmatchedPages?.get(offset) ?? unmatchedPage);
         }
+        if (
+          url.pathname === "/api/v2/reconciliation/card-debit-accounts" &&
+          url.search === "?view=upcoming"
+        )
+          return Response.json(upcomingPage);
         if (url.pathname === "/api/v2/reconciliation/card-debit-accounts") {
           debitAccountReads.push(url.search);
           return Response.json(debitAccountsPage);
@@ -472,7 +570,6 @@ describe.if(runnable)("card settlement review", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
@@ -554,6 +651,49 @@ describe.if(runnable)("card settlement review", () => {
     await page.close();
   });
 
+  test("次回の引落 lists each bill, its debit account and the server's covers, with no action", async () => {
+    const page = await open();
+    const section = page.getByRole("region", { name: "次回の引落" });
+    await section.getByText("vpass:card-001").first().waitFor();
+    const text = await section.innerText();
+    expect(text).toContain("2098-03-20 以降に引き落とされるカードの請求です。");
+    expect(text).toContain("架空カード（card-001）");
+    expect(text).toContain("30000 JPY");
+    // Not exact: its reason, never a zero (INV05).
+    expect(text).toContain("不明（stored:unparsed） · JPY");
+    expect(text).toContain("架空銀行 普通");
+    const lines = section.locator(".debit-account-card");
+    expect(await lines.count()).toBe(2);
+    expect(await lines.nth(0).locator(".badge").getAttribute("class")).toContain("badge-ok");
+    expect(await lines.nth(0).innerText()).toContain("残高で足ります");
+    const unknown = await lines.nth(1).innerText();
+    expect(unknown).toContain("判定できません");
+    expect(unknown).toContain("引落口座が分かりません。");
+    expect(unknown).toContain("請求額が確定していない請求があります。");
+    expect(text).toContain("ほかの引落や入金は含みません");
+    expect(text).toContain("カード会社が引落日を示していません");
+    // A refund statement is listed apart, never netted against a bill.
+    expect(text).toContain("最新の請求総額が0円以下（返金など）のため");
+    expect(await section.getByRole("button").count()).toBe(0);
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  });
+
+  test("a covers its figures do not carry is refused before it renders", async () => {
+    upcomingPage = {
+      ...upcomingBills,
+      byDebitAccount: [
+        { ...upcomingBills.byDebitAccount[0]!, balance: { ...exact("100"), capturedAt: null } },
+        upcomingBills.byDebitAccount[1]!,
+      ],
+    };
+    const page = await open();
+    const section = page.getByRole("region", { name: "次回の引落" });
+    await section.getByRole("alert").waitFor();
+    expect(await section.innerText()).not.toContain("残高で足ります");
+    await page.close();
+  });
+
   test("an older stated account says a newer reading does not confirm it, and a cut list says so", async () => {
     const unresolved = {
       ...namedReading,
@@ -615,6 +755,29 @@ describe.if(runnable)("card settlement review", () => {
     await page.close();
   });
 
+  test("a statement total that is not exact shows its reason, and a bare null is refused (INV05)", async () => {
+    const first = debitAccounts.items[0]!;
+    const withTotal = (amount: unknown) => ({
+      ...debitAccounts,
+      items: [{ ...first, latestStatement: { ...first.latestStatement!, amount } }],
+    });
+    debitAccountsPage = withTotal({
+      unitRef: "JPY",
+      value: { status: "unparsed", reasonCode: "stored:unparsed" },
+    });
+    let page = await open();
+    let section = page.getByRole("region", { name: "カードの引落口座" });
+    await section.getByText("myjcb:synthetic:root").waitFor();
+    expect(await section.innerText()).toContain("請求総額 不明（stored:unparsed） · JPY");
+    await page.close();
+    debitAccountsPage = withTotal(null);
+    page = await open();
+    section = page.getByRole("region", { name: "カードの引落口座" });
+    await section.getByRole("alert").waitFor();
+    expect(await section.innerText()).not.toContain("myjcb:synthetic:root");
+    await page.close();
+  });
+
   test("statements without a candidate show their reason and the planner's answer, with no action", async () => {
     const page = await open();
     const section = page.getByRole("region", { name: "照合候補のない請求" });
@@ -627,6 +790,37 @@ describe.if(runnable)("card settlement review", () => {
     expect(text).toContain("返金の割り当ては未対応");
     expect(text).toContain("まだ採用できません");
     expect(await section.getByRole("button", { name: /採用/u }).count()).toBe(0);
+    await page.close();
+  });
+
+  test("an unmatched statement total that is not exact shows its reason, and a bare null is refused (INV05)", async () => {
+    const [first] = unmatched.items;
+    const withTotal = (amount: unknown) => ({
+      ...unmatched,
+      items: [
+        {
+          ...first!,
+          statement: { ...first!.statement, amount },
+          code: "statement_not_comparable",
+          debitsInWindow: null,
+          planner: null,
+        },
+      ],
+    });
+    unmatchedPage = withTotal({
+      unitRef: "JPY",
+      value: { status: "unparsed", reasonCode: "stored:unparsed" },
+    });
+    let page = await open();
+    let section = page.getByRole("region", { name: "照合候補のない請求" });
+    await section.getByText("MyJCB · 対象月 2098-01", { exact: false }).waitFor();
+    expect(await section.innerText()).toContain("請求総額 不明（stored:unparsed） · JPY");
+    await page.close();
+    unmatchedPage = withTotal(null);
+    page = await open();
+    section = page.getByRole("region", { name: "照合候補のない請求" });
+    await section.getByRole("alert").waitFor();
+    expect(await section.innerText()).not.toContain("対象月 2098-01");
     await page.close();
   });
 

@@ -5,9 +5,16 @@
 // answer is the application service's (`reviewCardDebitAccounts`), the one an
 // agent gets from `kogane.card-settlements.debit-accounts` under its own
 // grant, so a page and an agent read one answer. It plans, approves and
-// commits nothing.
+// commits nothing. `?view=upcoming` is the `次回の引落` section: each card's
+// next bill and whether its debit account's reported balance covers it
+// (`reviewUpcomingCardBills`, the same service as the tool's
+// `view: "upcoming"`; ADR 0114's 2026-11-19 amendment).
 import { ERROR_STATUS } from "../../../packages/application/src/index";
 import { reviewCardDebitAccounts } from "../../../packages/application/src/query/card-debit-accounts.ts";
+import {
+  reviewUpcomingCardBills,
+  tokyoDate,
+} from "../../../packages/application/src/query/card-upcoming-bills.ts";
 import { CARD_DEBIT_ACCOUNTS_PATH } from "../../../packages/observation-shared/src/card-debit-accounts-contract.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { readerGrant } from "./agent-api";
@@ -19,8 +26,9 @@ export { CARD_DEBIT_ACCOUNTS_PATH };
 
 /**
  * Call only after the Access authentication gate; `subject` is the subject it
- * proved. Returns null for any other path. The route takes no parameter: any
- * query parameter is refused, never ignored.
+ * proved. Returns null for any other path. The route takes one optional
+ * parameter, `view=upcoming`; any other parameter, or that one repeated or
+ * with another value, is refused, never ignored.
  */
 export async function cardDebitAccountsApi(
   request: Request,
@@ -35,7 +43,18 @@ export async function cardDebitAccountsApi(
   const principal = principalFor(env, subject);
   if (principal.kind !== "human" || !principal.capabilities.includes("interpretation.accept"))
     throw new HttpError(403, "operator_required");
-  if ([...url.searchParams.keys()].length > 0) throw new HttpError(400, "invalid_query");
+  const keys = [...url.searchParams.keys()];
+  const upcoming = keys.length === 1 && url.searchParams.getAll("view").join() === "upcoming";
+  if (keys.length > 0 && !upcoming) throw new HttpError(400, "invalid_query");
+  if (upcoming) {
+    const bills = await reviewUpcomingCardBills({
+      grant: readerGrant(subject),
+      sql: d1Executor(env.DB),
+      date: tokyoDate(Date.now()),
+    });
+    if (!bills.ok) return json(bills.error, ERROR_STATUS[bills.error.code]);
+    return json({ apiVersion: 2, ...bills.review });
+  }
   const outcome = await reviewCardDebitAccounts({
     grant: readerGrant(subject),
     sql: d1Executor(env.DB),

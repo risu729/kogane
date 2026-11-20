@@ -39,8 +39,17 @@ const racing = pageReadHarness("report-read-racing", {
   }),
 });
 
-/** One stored report of `context`, its run complete, its body and explanation in R2. */
-async function storeReport(reportId: string, context: string): Promise<string> {
+/**
+ * One stored report of `context`, its run complete, its body and explanation in
+ * R2. `truncatedComplete` stores the body the report job wrote before ADR 0072's
+ * amendment of 2026-11-18: `complete` although its positions were cut at the
+ * row bound.
+ */
+async function storeReport(
+  reportId: string,
+  context: string,
+  truncatedComplete = false,
+): Promise<string> {
   const body: ReportBody = {
     schemaVersion: "report-holdings-v1",
     purpose: "holdings-view",
@@ -48,7 +57,7 @@ async function storeReport(reportId: string, context: string): Promise<string> {
     calculationRunId: `run-${reportId}`,
     policyRefs: ["decimal-v1", "instrument-valuation-v1"],
     unitRef: "JPY",
-    partition: "partial-verified-scope",
+    partition: truncatedComplete ? "complete" : "partial-verified-scope",
     subtotal: { coefficient: "10000", scale: 0 },
     rows: [
       {
@@ -60,7 +69,11 @@ async function storeReport(reportId: string, context: string): Promise<string> {
         value: { coefficient: "10000", scale: 0 },
       },
     ],
-    coverage: { scopeRef: "perimeter:test", coveredRef: "positions:1", truncated: false },
+    coverage: {
+      scopeRef: "perimeter:test",
+      coveredRef: "positions:1",
+      truncated: truncatedComplete,
+    },
   };
   const bytes = new TextEncoder().encode(canonicalJson(body));
   const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (byte) =>
@@ -94,6 +107,7 @@ beforeAll(async () => {
   await seedRegistry();
   vanishing = await storeReport("rpt:synthetic-open", "ctx-open");
   await storeReport("rpt:synthetic-restricted", "ctx-restricted");
+  await storeReport("rpt:synthetic-truncated", "ctx-truncated", true);
   // Its run is complete, but its body has left R2.
   await env.EVIDENCE.delete(await storeReport("rpt:synthetic-gone", "ctx-gone"));
   await env.DB.prepare(
@@ -173,8 +187,34 @@ describe("report page reads", () => {
       "rpt:synthetic-gone",
       "rpt:synthetic-open",
       "rpt:synthetic-restricted",
+      "rpt:synthetic-truncated",
     ]);
     expect(await tableCounts()).toEqual(before);
+  });
+
+  it("state a body stored complete but cut at its row bound as partial, as the page does", async () => {
+    // The stored body is shown as stored; the partition the reader states
+    // beside it is the one the page shows, over HTTP and MCP alike (INV05;
+    // ADR 0072, amendment of 2026-11-18).
+    const served = await page.expectSameAnswer(
+      `/api/v2/reports/${encodeURIComponent("rpt:synthetic-truncated")}`,
+      REPORTS,
+      { reportId: "rpt:synthetic-truncated" },
+    );
+    expect(served.status).toBe(200);
+    expect(served.body.body).toMatchObject({
+      partition: "complete",
+      coverage: { truncated: true },
+    });
+    expect(served.body.partition).toBe("partial-verified-scope");
+    expect(
+      validApiResponse(
+        `/api/v2/reports/${encodeURIComponent("rpt:synthetic-truncated")}`,
+        served.body,
+      ),
+    ).toBe(true);
+    const open = await page.mcp(REPORTS, { reportId: "rpt:synthetic-open" });
+    expect(open.body.data.partition).toBe("partial-verified-scope");
   });
 
   it("refuse a restricted report on every view, where the operator page still shows its body", async () => {
@@ -297,6 +337,15 @@ describe("collection quality page reads", () => {
         { source: "sony-bank", view: "cells", offset: 0 },
       ],
       ["/api/collection-quality/sony-bank/accounts", { source: "sony-bank", view: "accounts" }],
+      // The full answers the summaries are shaped from (ADR 0123).
+      ["/api/collection-quality?detail=full", { detail: "full" }],
+      ["/api/collection-quality/sony-bank?detail=full", { source: "sony-bank", detail: "full" }],
+      [
+        "/api/collection-quality/sony-bank?offset=0&detail=full",
+        { source: "sony-bank", offset: 0, detail: "full" },
+      ],
+      // The status view (ADR 0045, amendment 2026-11-19): its one query, which takes no `detail`.
+      ["/api/collection-quality?view=status", { view: "status" }],
     ] as const) {
       const route = await page.route(query);
       expect(route.status, query).toBe(200);
@@ -369,6 +418,12 @@ describe("collection quality page reads", () => {
       { source: "sony-bank", view: "accounts", offset: 0 },
       { source: "sony-bank", view: "unknown" },
       { source: "sony-bank/accounts" },
+      // The status view is the summary's: it names no source and no page.
+      { view: "status", source: "sony-bank" },
+      { view: "status", offset: 0 },
+      // It is compact already, so it takes no `detail` (ADR 0123).
+      { view: "status", detail: "full" },
+      { view: "status", detail: "summary" },
     ]) {
       const overHttp = await page.http(QUALITY, args);
       expect(overHttp.status, JSON.stringify(args)).toBe(400);
@@ -435,11 +490,14 @@ describe("the audit rows of the report and collection quality reads", () => {
     expect(
       (await page.mcp(REPORTS, { reportId: "rpt:synthetic-open", view: "explanation" })).isError,
     ).toBe(false);
-    const cells = await page.http(QUALITY, { source: "sony-bank" }, EVIDENCE_GRANT);
+    const cells = await page.http(QUALITY, { source: "sony-bank", detail: "full" }, EVIDENCE_GRANT);
     expect(cells.status).toBe(200);
     const accounts = await page.mcp(QUALITY, { source: "sony-bank", view: "accounts" });
     expect(accounts.isError).toBe(false);
     expect(accounts.body.data.cells).toBe(cells.body.data.cells.length);
+    const status = await page.mcp(QUALITY, { view: "status" });
+    expect(status.isError).toBe(false);
+    expect(status.body.data.sources.length).toBeGreaterThan(0);
     const rows = (
       await env.DB.prepare(
         "SELECT path,operation,risk_class,result,diff_json FROM audit_records WHERE rowid>? ORDER BY rowid",
@@ -456,7 +514,7 @@ describe("the audit rows of the report and collection quality reads", () => {
     });
     expect(rows).toEqual([
       read("mcp", "reports.read", 50, true),
-      read("agent-http", "reports.read", 3),
+      read("agent-http", "reports.read", 4),
       // One report, not its events.
       read("agent-http", "reports.read", 1),
       read("mcp", "reports.read", 1),
@@ -468,6 +526,8 @@ describe("the audit rows of the report and collection quality reads", () => {
       ),
       // The cells the account view read, never its accounts.
       read("mcp", "collection-quality.read", cells.body.data.cells.length),
+      // The status view counts its job lines.
+      read("mcp", "collection-quality.read", status.body.data.sources.length),
     ]);
   });
 });

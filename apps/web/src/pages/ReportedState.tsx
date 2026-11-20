@@ -70,6 +70,10 @@ const LIABILITY_GAPS: Record<string, string> = {
   statements_before_window:
     "引落予定日が基準日の31日より前の請求と、引落予定日が不明で45日より前に取得した請求",
 };
+const WINDOW_REASONS: Record<string, string> = {
+  due_before_window: "引落予定日が基準日の31日より前",
+  undated_captured_before_window: "引落予定日が不明で、基準日の45日より前に取得",
+};
 
 const label = (labels: Record<string, string>, code: string): string =>
   Object.hasOwn(labels, code) ? labels[code]! : code;
@@ -95,14 +99,30 @@ function SnapshotLine({ snapshot }: { snapshot: ReportedSnapshot }): ReactNode {
   );
 }
 
-function AccountCard({ account, index }: { account: ReportedAccount; index: number }): ReactNode {
+function AccountCard({
+  account,
+  index,
+  split,
+}: {
+  account: ReportedAccount;
+  index: number;
+  /** The provider account is listed more than once (its rows map to several accounts). */
+  split: boolean;
+}): ReactNode {
   const id = `reported-account-${index}`;
-  // Every account has these tables; the account names each one apart.
-  const accountName = `${account.sourceId} · ${account.sourceAccount}`;
+  // Every account has these tables; the account names each one apart, and a
+  // provider account listed once per resolved account is named by that account.
+  const resolved = account.accountId ?? IDENTITY[account.identityStatus];
+  const accountName = `${account.sourceId} · ${account.sourceAccount}${split ? ` · ${resolved}` : ""}`;
   return (
     <Panel
       id={id}
-      title={<SourceAccount source={account.sourceId} account={account.sourceAccount} />}
+      title={
+        <>
+          <SourceAccount source={account.sourceId} account={account.sourceAccount} />
+          {split ? <span className="table-secondary">{resolved}</span> : null}
+        </>
+      }
       count={
         <Badge tone={account.identityStatus === "identified" ? "ok" : "neutral"}>
           {IDENTITY[account.identityStatus]}
@@ -307,6 +327,22 @@ function CoverageNotes({ state }: { state: ReportedState }): ReactNode {
         負債は一部だけです。次のものは含まれていません:{" "}
         {coverage.liabilitiesMissing.map((code) => label(LIABILITY_GAPS, code)).join("、")}。
       </p>
+      {coverage.statementsBeforeWindow.length === 0 ? null : (
+        <>
+          <p>
+            次の請求は期間外のため一覧にありません。引落済みかどうかはここでは確認していません。
+          </p>
+          <ul className="warning-list" aria-label="一覧にない期間外の請求">
+            {coverage.statementsBeforeWindow.map((entry) => (
+              <li key={`${entry.sourceId}/${entry.reasonCode}`}>
+                {entry.sourceId}{" "}
+                <span className="dim">· {label(WINDOW_REASONS, entry.reasonCode)}</span>:{" "}
+                {entry.count} 件
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       <details className="inline-disclosure">
         <summary>対象外にしているもの</summary>
         <ul className="warning-list">
@@ -409,9 +445,20 @@ export function ReportedStatePage(): ReactNode {
                   ) : (
                     state.accounts.map((account, index) => (
                       <AccountCard
-                        key={`${account.sourceId}/${account.sourceAccount}`}
+                        key={JSON.stringify([
+                          account.sourceId,
+                          account.sourceAccount,
+                          account.accountId,
+                        ])}
                         account={account}
                         index={index}
+                        split={
+                          state.accounts.filter(
+                            (other) =>
+                              other.sourceId === account.sourceId &&
+                              other.sourceAccount === account.sourceAccount,
+                          ).length > 1
+                        }
                       />
                     ))
                   )}

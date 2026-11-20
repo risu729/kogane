@@ -1,56 +1,60 @@
 // Real workerd Durable Object alarms, named service RPC and ctx.exports loopback.
 // Provider service is synthetic and cannot reach an external account.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import jobs from "../../../config/alarm-jobs.json";
 import { LAYER_A_SQL, layerBMigrations, applyMigration } from "./harness";
 import { applyTestReadMigrations } from "./migration-setup.ts";
+import { settledTest } from "./support/settle.ts";
 let mf: Miniflare, db: D1Database, alarms: Env["SCHEDULE_ALARMS"];
+// Started while the module loads, never in a hook (test/support/settle.ts).
+const bundle = await Bun.build({
+  entrypoints: [new URL("../src/schedule-entrypoint.ts", import.meta.url).pathname],
+  target: "browser",
+  format: "esm",
+  external: ["cloudflare:workers"],
+});
+if (!bundle.success) throw new Error("native_alarm_bundle_failed");
+const serviceBindings = Object.fromEntries(
+  jobs
+    .filter((job) => job.workspace?.startsWith("collector-"))
+    .map((job) => [
+      `SCHEDULE_${job.workspace!.replace("collector-", "").replaceAll("-", "_").toUpperCase()}`,
+      { name: "provider", entrypoint: "ScheduledCollection" },
+    ]),
+);
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    workers: [
+      {
+        name: "processor",
+        modules: true,
+        script: await bundle.outputs[0]!.text(),
+        compatibilityDate: "2026-09-07",
+        compatibilityFlags: ["nodejs_compat", "enable_ctx_exports"],
+        d1Databases: ["DB", "READ"],
+        r2Buckets: ["EVIDENCE", "DATA"],
+        // ADR 0048: the dispatch lane may call the mizuho-bank connection only.
+        bindings: {
+          SCHEDULES_ENABLED: "true",
+          OPS_DISPATCH_ENABLED: "true",
+          OPS_COLLECTOR_DISPATCH_CONNECTIONS: JSON.stringify(["mizuho-bank"]),
+        },
+        serviceBindings,
+        durableObjects: { SCHEDULE_ALARMS: { className: "ScheduleAlarm", useSQLite: true } },
+      },
+      {
+        name: "provider",
+        modules: true,
+        script: `import {WorkerEntrypoint} from "cloudflare:workers";let calls=0,ops=[];export class ScheduledCollection extends WorkerEntrypoint {async runScheduled(cron,time) {calls++;return {status:"completed",runIds:["synthetic-native-run"],failureCode:null};}async runOperation(request) {ops.push(request);return {status:"completed",runIds:["synthetic-operation-run"],failureCode:null};}}export default {fetch(request){return Response.json(new URL(request.url).pathname==="/ops"?{ops}:{calls});}};`,
+        compatibilityDate: "2026-09-07",
+      },
+    ],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  const bundle = await Bun.build({
-    entrypoints: [new URL("../src/schedule-entrypoint.ts", import.meta.url).pathname],
-    target: "browser",
-    format: "esm",
-    external: ["cloudflare:workers"],
-  });
-  if (!bundle.success) throw new Error("native_alarm_bundle_failed");
-  const serviceBindings = Object.fromEntries(
-    jobs
-      .filter((job) => job.workspace?.startsWith("collector-"))
-      .map((job) => [
-        `SCHEDULE_${job.workspace!.replace("collector-", "").replaceAll("-", "_").toUpperCase()}`,
-        { name: "provider", entrypoint: "ScheduledCollection" },
-      ]),
-  );
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      workers: [
-        {
-          name: "processor",
-          modules: true,
-          script: await bundle.outputs[0]!.text(),
-          compatibilityDate: "2026-09-07",
-          compatibilityFlags: ["nodejs_compat", "enable_ctx_exports"],
-          d1Databases: ["DB", "READ"],
-          r2Buckets: ["EVIDENCE", "DATA"],
-          // ADR 0048: the dispatch lane may call the mizuho-bank connection only.
-          bindings: {
-            SCHEDULES_ENABLED: "true",
-            OPS_DISPATCH_ENABLED: "true",
-            OPS_COLLECTOR_DISPATCH_CONNECTIONS: JSON.stringify(["mizuho-bank"]),
-          },
-          serviceBindings,
-          durableObjects: { SCHEDULE_ALARMS: { className: "ScheduleAlarm", useSQLite: true } },
-        },
-        {
-          name: "provider",
-          modules: true,
-          script: `import {WorkerEntrypoint} from "cloudflare:workers";let calls=0,ops=[];export class ScheduledCollection extends WorkerEntrypoint {async runScheduled(cron,time) {calls++;return {status:"completed",runIds:["synthetic-native-run"],failureCode:null};}async runOperation(request) {ops.push(request);return {status:"completed",runIds:["synthetic-operation-run"],failureCode:null};}}export default {fetch(request){return Response.json(new URL(request.url).pathname==="/ops"?{ops}:{calls});}};`,
-          compatibilityDate: "2026-09-07",
-        },
-      ],
-    }),
-  );
   db = (await mf.getD1Database("DB", "processor")) as unknown as D1Database;
   await db.exec(LAYER_A_SQL);
   for (const name of layerBMigrations()) await applyMigration(db, name);

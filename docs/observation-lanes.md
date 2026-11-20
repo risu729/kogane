@@ -76,12 +76,16 @@ consumed.
 
 Processing: the incremental lane reads unprocessed items in id order, pages the
 run's eligible artifacts (`observation_fetch_artifacts` with a successful run
-and no failures) 100 at a time, inserts `INSERT OR IGNORE` jobs for every
-deployed parser that accepts the artifact, and advances the item's
-`cursor_artifact_id`. An item is marked processed with an outcome
-(`jobs_created`, `no_new_jobs`, `not_eligible`) only after its last page; a
-sweep interrupted mid-run resumes from the cursor, and re-issued inserts are
-no-ops. The item's `jobs_created` is read from the table when the cursor moves
+and no failures) 100 at a time, inserts a job for every deployed parser that
+accepts the artifact, and advances the item's `cursor_artifact_id`. An item is
+marked processed with an outcome (`jobs_created`, `no_new_jobs`,
+`not_eligible`) only after its last page; a sweep interrupted mid-run resumes
+from the cursor, and re-issued inserts are no-ops: the insert skips only a job
+whose key `(fetch_artifact_id, parser_name, parser_version)` exists
+(`ON CONFLICT … DO NOTHING`; the repair lane's inserts do the same). A job the
+schema refuses (a CHECK or NOT NULL failure) raises and fails the sweep before
+the item's cursor moves, so an artifact is never passed with no job; the
+same page is read again on the next sweep. The item's `jobs_created` is read from the table when the cursor moves
 (the incremental jobs of the artifacts examined), not from the sweep's own
 inserts, so jobs a stopped sweep inserted before it could move the cursor still
 count, and the update is fenced on the cursor it read, so two sweeps never count
@@ -384,8 +388,8 @@ collection delays `decision_outbox` on that tick by the same amount.
 
 Neither is a parse lane: they create no `observation_parse_jobs` rows and have
 no job budget. `collection_scan` is bounded by one R2 list page (25 keys), at
-most five continuations that find their terminal (of up to 25 pending runs
-read) and five registration attempts per tick, and the
+most five continuations that find their terminal and are not answered from
+their row (of up to 25 pending runs read) and five registration attempts per tick, and the
 invocation's operation budget of 500 (ADR 0010); a terminal already
 registered, already blocked or refused `retryable` within the last 24 hours
 is answered from its row and spends none of the five, so a page of judged

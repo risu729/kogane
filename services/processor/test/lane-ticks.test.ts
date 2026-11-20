@@ -5,7 +5,7 @@
 // Synthetic stage results only: every count below is invented, and the
 // "provider text" in the failing stage is a made-up string that must never
 // reach a row.
-import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import { afterAll, beforeEach, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import {
   LANE_TICK_RETENTION,
@@ -15,12 +15,13 @@ import { LANE_TICK_COUNTS, laneTick } from "../src/lane-ticks.ts";
 import { runScheduled, type ScheduledStages } from "../src/worker.ts";
 import { startPipeline } from "./harness.ts";
 import { maskRandomTokens } from "../../../packages/application/test/random-tokens.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });
@@ -114,7 +115,9 @@ const RESULTS = {
     enabled: true,
     scanned: 4,
     promoted: 2,
+    known: 1,
     skipped: 1,
+    quantity_incomplete: 0,
     cursor: 812,
     release: "reward-promotion-v1",
   },
@@ -275,7 +278,13 @@ test("a tick records one row per recorded lane with exactly the counts its log l
   expect(counts["instrument_auto_adoption"]).toEqual(RESULTS.instrumentAutoAdoption);
   // Identifiers, cursors, release names and open-ended outcome keys stay in
   // the log line only.
-  expect(counts["reward_claims_sweep"]).toEqual({ scanned: 4, promoted: 2, skipped: 1 });
+  expect(counts["reward_claims_sweep"]).toEqual({
+    scanned: 4,
+    promoted: 2,
+    known: 1,
+    skipped: 1,
+    quantity_incomplete: 0,
+  });
   expect(counts["price_promotion"]).toEqual(RESULTS.prices);
   expect(counts["operation_dispatch"]).toEqual({
     claimed: 1,

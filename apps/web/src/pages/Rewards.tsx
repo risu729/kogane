@@ -102,6 +102,8 @@ const REASON_LABELS: Record<string, string> = {
   provider_expiry_unparsed: "取得元の期限表示を読み取れませんでした",
   provider_expiry_not_a_calendar_date: "取得元の期限表示が暦日として成立しません",
   stored_expiry_invalid: "保存された期限の形式を読み取れませんでした",
+  holding_cut_by_page:
+    "この残高の内訳がページの上限で途中までしか読めていないため、合計を出していません",
 };
 
 function reasonText(code: string): string {
@@ -125,8 +127,10 @@ function Quantity({ quantity }: { quantity: RewardQuantity }): ReactNode {
   if (quantity.value.status !== "exact")
     return (
       <span>
-        <Badge tone="warn">未確定</Badge>{" "}
-        <span className="reward-unit">{quantity.value.reasonCode}</span>
+        <Badge tone="warn" title={quantity.value.reasonCode}>
+          未確定
+        </Badge>{" "}
+        <span className="reward-unit">{reasonText(quantity.value.reasonCode)}</span>
       </span>
     );
   const { coefficient, scale } = quantity.value.value;

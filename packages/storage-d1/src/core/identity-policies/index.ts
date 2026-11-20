@@ -9,10 +9,11 @@ import { mizuhoPolicy } from "./mizuho.ts";
 import { myJcbPolicy } from "./myjcb.ts";
 import { sbiSecuritiesPolicy } from "./sbi-securities.ts";
 import { sbiShinseiPolicy } from "./sbi-shinsei.ts";
+import { smbcBankPolicy } from "./smbc-bank.ts";
 import { vpassPolicy, type VpassBinding } from "./vpass.ts";
 
 /** Highest policy version the current build can select. */
-export const IDENTITY_POLICY_VERSION = 2;
+export const IDENTITY_POLICY_VERSION = 3;
 /** Policy version every source is eligible for without auxiliary evidence. */
 export const BASE_IDENTITY_POLICY_VERSION = 1;
 
@@ -52,8 +53,13 @@ export interface AvailableIdentityEvidence {
   vpassBindings: readonly VpassBinding[];
   /** MyJCB: the parse's artifact is a J-POINT capture (`jpoint-balance`). Absent reads as false. */
   myJcbJPointArtifact?: boolean;
-  /** SBI Securities: the parse's artifact is a foreign positions capture. Absent reads as false. */
-  sbiForeignPositionsArtifact?: boolean;
+  /**
+   * SBI Securities: the parse's artifact is a foreign trade, positions or cash
+   * balances capture, whose rows carry an account discriminator. Absent reads as false.
+   */
+  sbiForeignDiscriminatedArtifact?: boolean;
+  /** SMBC: the parse's artifact is an AUD foreign ordinary balance capture. Absent reads as false. */
+  smbcForeignOrdinaryAudBalanceArtifact?: boolean;
 }
 export const NO_EVIDENCE: AvailableIdentityEvidence = { vpassBindings: [] };
 
@@ -79,6 +85,7 @@ const SOURCE_POLICIES: readonly IdentityPolicyModule[] = [
   sbiShinseiPolicy,
   myJcbPolicy,
   sbiSecuritiesPolicy,
+  smbcBankPolicy,
 ];
 
 function policyModuleFor(sourceId: string): IdentityPolicyModule | undefined {
@@ -102,6 +109,21 @@ export function requiredIdentityPolicySql(artifactAlias: string): string {
     THEN ${module.version}`,
   ).join(" ");
   return `CASE ${branches} ELSE ${BASE_IDENTITY_POLICY_VERSION} END`;
+}
+
+/**
+ * The highest version any artifact of the alias's source can require, as SQL:
+ * the source module's version, else the base version. It never reads
+ * auxiliary evidence, so a parse sealed at least that high is complete
+ * without evaluating `requiredIdentityPolicySql`, whatever the build's
+ * highest version is (ADR 0117).
+ */
+export function identityPolicyCeilingSql(artifactAlias: string): string {
+  validAlias(artifactAlias);
+  const branches = SOURCE_POLICIES.map(
+    (module) => `WHEN '${module.sourceId}' THEN ${module.version}`,
+  ).join(" ");
+  return `CASE ${artifactAlias}.source_id ${branches} ELSE ${BASE_IDENTITY_POLICY_VERSION} END`;
 }
 
 /** Loads the evidence a version at or above the module's version may use. */
@@ -163,4 +185,5 @@ export { MIZUHO_POLICY_VERSION } from "./mizuho.ts";
 export { MYJCB_POLICY_VERSION } from "./myjcb.ts";
 export { SBI_SECURITIES_POLICY_VERSION } from "./sbi-securities.ts";
 export { SBI_SHINSEI_POLICY_VERSION } from "./sbi-shinsei.ts";
+export { SMBC_BANK_POLICY_VERSION } from "./smbc-bank.ts";
 export { trustedVpassBinding, VPASS_POLICY_FAMILY, type VpassBinding } from "./vpass.ts";

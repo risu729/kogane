@@ -17,6 +17,33 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## Vpass credit snapshots keep the card name (credit-snapshot 1.1.0)
+
+2026-11-20. Owner approval of the readable-label proposal, 2026-11-19 03:29
+UTC ([ADR 0120](adr/0120-readable-account-labels.md)).
+
+`vpass-credit-snapshot@1.1.0` keeps the provider's card product name
+(`cardName` of `authoriShokaiVo` in `credit/authori.json`, of the revolving
+bean in `credit/revo.json`) as `extra._kogane.cardName` on each observation of
+that file, for the read-time account label `<card name>（card-00N）`. A name
+that is empty, over 64 characters, has a control character or a run of four or
+more digits is left out, never thrown. `userName` is never copied. Every
+metric, amount, `asOf` and locator is unchanged.
+
+| Parser                | Previous | Release |
+| --------------------- | -------- | ------- |
+| vpass-credit-snapshot | 1.0.2    | 1.1.0   |
+
+Migration `0104_vpass_credit_card_name_policy.sql` advances the shipped
+credit-snapshot policy's exact `required_parser_version` to `1.1.0`, as 0102
+did, retaining every operator choice. Until a card's newest capture has a
+1.1.0 parse the card has no current credit snapshot: the next daily run is
+parsed under 1.1.0 by the incremental lane, and the repair lane re-parses the
+stored captures; old parse runs and observations stay append-only. Production
+was not read for this release beyond the counts in the ADR. Tests:
+`packages/parsers/test/vpass-credit.test.ts`,
+`packages/storage-d1/test/vpass-credit-card-name-policy.test.ts`.
+
 ## V Point Pay: the parser checks the sender, not the recipient (notification-event 1.1.0)
 
 2026-11-18. Owner decisions, 2026-11-18 04:42 UTC (the recipient check moves
@@ -1213,6 +1240,30 @@ of `nextPageRow`, which the walk compares with `allCnt` and sends back as the
 next page's cursor, as it did before; and whether any live month logs
 `stated_total_unverified` or `stated_total_mismatch`, which the next
 collection's persist diagnostic shows.
+
+## Vpass finalized header rows and `allCnt` (2026-11-19)
+
+The owner's counts-only read of one natural collector run (2026-11-18 21:00
+UTC, 7 of 7 cards): its `vpass-statement-count-shapes` and
+`vpass-shared-collection` lines, and a bounded projection over its stored
+pages inside the Cloudflare API sandbox that returned only per-month count
+differences and row-kind counts (no amount, text, month or identifier):
+
+- Customized months already met their `total`.
+- Every finalized page (30 months across the 7 cards) carried exactly one `45`
+  and one `4C` row, and in all 30 months `allCnt` equalled the number of
+  `4K/002`, `4K/005` and `4K/007` rows. 3 months had `4K/002` rows.
+- `allCnt` was stable across pages, and every month was one page.
+
+What changes, on the owner's decision D1 (pending until the PR merges): the
+collector's month check leaves a finalized page's `45` and `4C` rows out of
+the count it compares with `allCnt`, and nothing in any parser
+([ADR 0023's 2026-11-19 amendment](adr/0023-vpass-collector-card-binding.md#amendment-2026-11-19-a-finalized-pages-45-and-4c-header-rows-are-not-counted)).
+Before it, every finalized month was `stated_total_mismatch` and every card
+run `partial`, so no new statement page was parsed. **Unknown, kept as
+limits:** what the header rows mean beyond not being counted by `allCnt`,
+and whether a multi-page finalized month repeats them on later pages (no
+observed month had a second page).
 
 ## SBI Shinsei stored-capture shapes (activity parser 0.1.2, board parser 1.0.1)
 

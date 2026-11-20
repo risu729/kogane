@@ -762,8 +762,8 @@ the same correlation id; the `applied` record is authoritative.
 
 **What "in the writer's batch" requires.** A D1 batch rolls back only when a
 statement raises; a guard that matches no row (`UPDATE … WHERE revision = ?`,
-`INSERT OR IGNORE … SELECT … WHERE …`, as `updateSchedule` and the maintenance
-writers use) leaves a committed batch with no effect. So the `applied` /
+`INSERT … SELECT … WHERE …`, as `updateSchedule` and the maintenance writers
+use) leaves a committed batch with no effect. So the `applied` /
 `accepted` statement is a plain `INSERT … SELECT … WHERE` joined to the
 writer's own guard or to the row the effect wrote (the commit batch's
 reservation, the new revision row at `revision + 1`, the released lease), never

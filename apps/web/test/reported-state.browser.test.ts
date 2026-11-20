@@ -1,6 +1,6 @@
 // 基準日の保有状況 in the production client against a server whose answers
 // the query itself produces (packages/application/test/reported-state-world.ts).
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -11,6 +11,7 @@ import {
 } from "../../../packages/application/test/reported-state-world.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { tokyoToday } from "../src/reported-state-api.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -18,8 +19,13 @@ const runnable = existsSync(join(client, "index.html")) && existsSync(executable
 if (!runnable && (!existsSync(join(client, "index.html")) || process.env["CI"] === "true"))
   process.exitCode = 1;
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("reported state on a date", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let advertised = true;
@@ -57,7 +63,6 @@ describe.if(runnable)("reported state on a date", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
@@ -119,6 +124,27 @@ describe.if(runnable)("reported state on a date", () => {
     await page.close();
   }, 30_000);
 
+  test("a provider account whose rows map apart is one card per resolved account, each named by it", async () => {
+    const page = await open();
+    await choose(page, "2026-09-10");
+    // The world's foreign capture of sbi-a has no recorded identity and its
+    // domestic one maps to acct-sbi: two cards, the unmapped one first, and
+    // no holding listed under an account its own row does not name.
+    const holdings = async (name: string): Promise<string> =>
+      page.getByRole("region", { name, exact: true }).innerText();
+    expect(await holdings("sbi-securities · sbi-a · 口座の対応付けなしの保有銘柄")).toContain(
+      "VTX",
+    );
+    expect(await holdings("sbi-securities · sbi-a · 口座の対応付けなしの保有銘柄")).not.toContain(
+      "1001",
+    );
+    expect(await holdings("sbi-securities · sbi-a · acct-sbiの保有銘柄")).toContain("1001");
+    expect(await holdings("sbi-securities · sbi-a · acct-sbiの保有銘柄")).not.toContain("VTX");
+    // An account listed once keeps its plain name.
+    await page.getByRole("region", { name: "smbc-bank · smbc-aの残高", exact: true }).waitFor();
+    await page.close();
+  }, 30_000);
+
   test("card payables say where each stands on the date", async () => {
     const page = await open();
     await choose(page, "2026-09-10");
@@ -143,6 +169,10 @@ describe.if(runnable)("reported state on a date", () => {
     const main = await page.locator("main").innerText();
     expect(main).toContain("負債は一部だけです。");
     expect(main).toContain("まだ請求に載っていないカード利用");
+    // The statements the window leaves out are counted, never listed.
+    const older = await page.getByRole("list", { name: "一覧にない期間外の請求" }).innerText();
+    expect(older).toContain("vpass · 引落予定日が基準日の31日より前: 1 件");
+    expect(older).toContain("vpass · 引落予定日が不明で、基準日の45日より前に取得: 1 件");
     await page.close();
   }, 30_000);
 

@@ -14,7 +14,7 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { beforeAll, describe, expect, test } from "bun:test";
 import {
-  ACCOUNT_SOURCES_SQL,
+  ACCOUNTS_SOURCES_SQL,
   CLAIMS_SQL,
   ECONOMIC_SELECTOR_PRESENT_SQL,
   KEY_HOLDERS_SQL,
@@ -22,6 +22,7 @@ import {
 } from "../../read-model/src/economic-selector.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { explain } from "../../read-model/test/card-usage-plan.ts";
+import { SETTLEMENT_SQL } from "../src/query/card-purchases.ts";
 import { readReconstructedState } from "../src/query/reconstructed-state-read.ts";
 import { reconstructedScaleStore } from "./reconstructed-state-scale-store.ts";
 import { WORLD_GRANT } from "./reconstructed-state-world.ts";
@@ -89,9 +90,11 @@ async function timed(run: () => unknown, runs = 3): Promise<number> {
  * (dated-state-scale.test.ts); the statement read's CTEs and `b`, its one pass
  * over balance observations, as `card_statement_facts` makes it (ibid.); the
  * selector's schema probe, epoch read, view arms and materialized key list
- * (economic-selector.test.ts); and `m`, the account mapping table, which no
- * index orders by account (ADR 0058). Any other scan, or one of these aliases
- * in another statement, fails.
+ * (economic-selector.test.ts); `m`, the account mapping table, which no
+ * index orders by account (ADR 0058); and the settlement-review read's key
+ * list `w` and its subqueries, which a scope with a card statement runs
+ * (dated-state-scale.test.ts). Any other scan, or one of these aliases in
+ * another statement, fails.
  */
 const DATED_CONTAINERS = new Set([
   "a",
@@ -116,14 +119,25 @@ const SELECTOR = new Map<string, Set<string>>([
   [SELECTOR_EPOCHS_SQL, new Set(["economic_identity_epochs"])],
   [CLAIMS_SQL, new Set(["economic_revision_claims"])],
   [KEY_HOLDERS_SQL, new Set(["w"])],
-  [ACCOUNT_SOURCES_SQL, new Set(["m"])],
+  [ACCOUNTS_SOURCES_SQL, new Set(["m"])],
 ]);
 function accepted(sql: string, name: string): boolean {
   if (name === "CONSTANT" || name === "json_each") return true;
   const dated = name.startsWith("dated_") || /^\(subquery-\d+\)$/u.test(name);
+  if (sql === SETTLEMENT_SQL) return name === "w" || /^\(subquery-\d+\)$/u.test(name);
   if (sql.startsWith("WITH dated_snapshot_policies")) return dated || DATED_CONTAINERS.has(name);
   if (sql.startsWith("WITH dated_statement_ranked")) return dated || DATED_STATEMENTS.has(name);
   return SELECTOR.get(sql)?.has(name) ?? false;
+}
+
+/** The SMBC account and every other account the store maps, up to the scope's 20. */
+function mappedScope(): string[] {
+  const others = db
+    .query(
+      "SELECT DISTINCT account_id FROM current_account_mappings WHERE account_id<>? ORDER BY account_id LIMIT 19",
+    )
+    .all(ACCOUNT) as { account_id: string }[];
+  return [ACCOUNT, ...others.map((row) => row.account_id)];
 }
 
 describe("one read at the route's bounds", () => {
@@ -154,6 +168,77 @@ describe("one read at the route's bounds", () => {
   );
 
   test(
+    "a scope of every mapped account runs each statement as often as one account does, and scans nothing more (ADR 0116)",
+    async () => {
+      const scope = mappedScope();
+      const counts = (runs: Map<string, number>, statements: Map<string, readonly unknown[]>) => {
+        const inner = recording(statements);
+        const count = (sql: string) => runs.set(sql, (runs.get(sql) ?? 0) + 1);
+        return {
+          all: <T>(sql: string, args: readonly unknown[]) => {
+            count(sql);
+            return inner.all<T>(sql, args);
+          },
+          first: <T>(sql: string, args: readonly unknown[]) => {
+            count(sql);
+            return inner.first<T>(sql, args);
+          },
+        };
+      };
+      const ask = async (body: Record<string, unknown>) => {
+        const runs = new Map<string, number>();
+        const statements = new Map<string, readonly unknown[]>();
+        const outcome = await readReconstructedState({
+          grant: WORLD_GRANT,
+          sql: counts(runs, statements),
+          body: { from: FROM, to: TODAY, ...body },
+          now: NOW,
+        });
+        return { outcome, runs, statements };
+      };
+      const one = await ask({ account: ACCOUNT });
+      const many = await ask({ accounts: scope });
+      expect(scope.length).toBeGreaterThan(2);
+      expect(one.outcome.ok).toBe(true);
+      // At STATEMENT_SCALE one card account's purchases alone pass the
+      // selector's bound of 2,000 events, so the whole scope is refused, never
+      // cut to the accounts that fit. At the CI scale it is answered.
+      if (FULL) {
+        expect(many.outcome).toMatchObject({ ok: false, refusal: "result_limit_exceeded" });
+        // Which bound, and how each account answers alone (printed, not asserted).
+        const alone: Record<string, string> = {};
+        for (const account of scope) {
+          const outcome = (await ask({ account })).outcome;
+          alone[account] = outcome.ok ? outcome.body.status : outcome.refusal;
+        }
+        console.log(
+          `reconstructed-state scope at full scale: ${JSON.stringify({ refs: many.outcome.ok ? [] : many.outcome.refs, alone })}`,
+        );
+      } else {
+        if (!many.outcome.ok) throw new Error(many.outcome.refusal);
+        expect(many.outcome.body.accounts).toEqual([...scope].sort());
+        expect(many.outcome.body.reconstruction!.accounts.map((row) => row.accountId)).toEqual(
+          [...scope].sort(),
+        );
+      }
+      for (const [sql, runs] of many.runs)
+        expect([sql.slice(0, 60), runs]).toEqual([
+          sql.slice(0, 60),
+          Math.min(runs, one.runs.get(sql) ?? 2),
+        ]);
+      const scanned: string[] = [];
+      for (const [sql, args] of many.statements)
+        for (const step of explain(db, sql, args)) {
+          if (!step.detail.startsWith("SCAN ") || step.detail.includes("VIRTUAL TABLE")) continue;
+          const name = step.detail.slice(5).split(" ")[0]!;
+          if (!accepted(sql, name)) scanned.push(`${step.detail} :: ${sql.slice(0, 60)}`);
+        }
+      expect(scanned).toEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  test(
     "timings (printed, not asserted)",
     async () => {
       const latest = await read({});
@@ -171,6 +256,11 @@ describe("one read at the route's bounds", () => {
         instantNearStartMs: await timed(() =>
           read({ cut: { coreEpoch: epoch, instant: logStart } }),
         ),
+        scopeAccounts: mappedScope().length,
+        // Refused as a whole at STATEMENT_SCALE (the test above), so only timed at the CI scale.
+        scopeLatestMs: FULL
+          ? null
+          : await timed(() => read({ account: undefined, accounts: mappedScope() })),
       };
       console.log(`reconstructed-state scale ${FULL ? "full" : "ci"}: ${JSON.stringify(figures)}`);
       expect(figures.commits).toBe(existingCommits + EVENTS * REVISIONS);

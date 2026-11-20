@@ -206,3 +206,309 @@ read; wrong types; the row bound) and
 `services/app/test/reported-state-api.test.ts` ("refuses with the route's
 codes and the same status on the route and both agent paths": the route,
 `POST /api/agent/v1/reported-state.read` and `/mcp` on the same requests).
+
+## Account entries amendment — 2026-11-18
+
+- Status: proposed
+- Date: 2026-11-18
+
+**Context.** `queryDatedState` listed one account entry per (source,
+provider account) and named it after the first row that had an account
+mapping, in row-id order. An identity can key a source account on more than
+the provider account (SBI Securities' foreign positions add the provider's
+specific-account code, `packages/identity/src/sbi.ts`), so the rows of one
+provider account can map to two resolved accounts, and a capture whose
+identity is not recorded yet can sit beside a mapped one of the same
+provider account. The rows of the second account were then listed under the
+first one's id, and the holdings change between two dates, which takes each
+holding's account from its entry, read a holding whose mapping never changed
+as `account_differs` and kept it under the `account` filter of an account
+its mapping does not name.
+
+**Options considered.** (1) Leave the entry per provider account with no
+account when its rows disagree: rejected, the holdings change's `account`
+filter would then lose rows that do name the account. (2) Carry an account
+on each position and balance: rejected, a wider wire contract for what an
+entry already states. (3) One entry per (source, provider account, resolved
+account): chosen; it is what the `account` filter already listed for each
+account.
+
+**Decision.** An entry is keyed by the source, the provider account and the
+resolved account of its rows (null when a row has no mapping). Entries of one
+provider account are ordered by account id, the entry without one first. A
+provider account whose rows all map to one account is listed exactly as
+before.
+
+**Consequences.** The answer is unchanged for every store in which all rows
+of a provider account map to one account. The manifest names no account
+entry, so the manifest and the context id are unchanged in every store: for
+a provider account whose rows map apart, the same context id now names the
+corrected entries. The wire shape and `reported-state-v1` are unchanged; the
+contract already took several entries of one provider account. A provider
+account with rows of two accounts is two entries; a capture whose identity is
+not recorded yet beside a mapped one of the same provider account is listed
+apart as `not-recorded` instead of under the mapped account. The page keys
+its account cards by the three values. The holdings change takes each
+holding's account from its own entry, so it no longer reports
+`account_differs` for such a holding.
+
+**Verification.** `packages/application/test/dated-state-query.test.ts` (a
+provider account whose containers map to two accounts is listed under each,
+and each entry equals the `account`-filtered answer) and
+`packages/application/test/holdings-change-query.test.ts` (each holding keeps
+its own row's account, is `compared`, and the `account` filter keeps only
+the holdings of that account); both fail on the previous keying.
+`apps/web/test/reported-state.browser.test.ts` ("a provider account whose
+rows map apart is one card per resolved account, each named by it") pins the
+page.
+
+## Statements before the window amendment — 2026-11-18
+
+- Status: proposed
+- Date: 2026-11-18
+
+**Context.** Decision 2 lists as payables of D only the statements due on or
+after `D − 31` days and those without a readable due date captured in the 45
+days before the cutoff. Every answer named the gap
+(`liabilitiesMissing: statements_before_window`) but did not count it, so a
+reader could not tell an answer that left nothing out from one that left out
+years of statements, and the gap was named even on a store holding no
+statement at all ([reported state, limits](../reported-state.md#limits)).
+
+**Options considered.**
+
+1. List every statement as of the cutoff. Rejected for the reason decision 2
+   gives: it grows without bound and turns years of paid bills into rows.
+2. Count the statements left out and give each its settlement status, through
+   the settlement read over every older statement. Rejected for now: it reads
+   a review per older statement on every answer, and a status per older bill
+   would want its review refs in the manifest, which grows without bound.
+3. Count the statements left out per source and reason, from the same
+   statement facts as the payables, with no amount and no status. Chosen.
+
+For where the count sits, keeping it out of the manifest (coverage only) was
+rejected: decision 3 lists statement observations among the manifest's
+inputs, and INV09 ([domain contracts](../domain-contracts.md)) asks for a new
+`contextId` when an input differs, so a late parse of an older capture would
+change the answer under the same id. Recording the counts per source and
+reason only was rejected: under no filter, resolving an older statement's
+account would change the inputs and not the id. Chosen: the counts per
+source, resolved account and reason, decision 4.
+
+For the reads that build on `queryDatedState` and never show the count (the
+holdings change, the reconstructed state and the valuation on a date),
+counting anyway was rejected (a second ranking of every statement total per
+dated state, discarded), and so was a marker such as
+`statementsBeforeWindow: "not-read"` in their dated manifest (it would change
+their context ids for no input they read). Chosen: they skip the read, and
+their dated manifest has no `statementsBeforeWindow` key, decision 6.
+
+**Decision.**
+
+1. `coverage.statementsBeforeWindow` lists `{sourceId, reasonCode, count}`
+   for every source and reason with at least one statement as of the cutoff
+   that the window leaves out: `due_before_window` (a readable due date before
+   `payablesFromPaymentDate`) or `undated_captured_before_window` (no readable
+   due date, captured before the undated bound). It is the complement of the
+   payable window over the same statement facts
+   (`DATED_STATEMENTS_BEFORE_WINDOW_SQL` beside `DATED_STATEMENTS_SQL`, with
+   the same parameters): a statement is a payable or counted, never both and
+   never neither. The read counts rows (`count(*)` per source, resolved
+   account and reason) and reads no amount; the counts are added per source
+   and reason in the query layer.
+2. The `source` and `account` filters apply as they do to the payables: the
+   account is the one the keyed ownership CTEs resolve, so a statement with
+   no resolved account is counted only without an `account` filter.
+3. `liabilitiesMissing` names `statements_before_window` exactly when
+   `statementsBeforeWindow` is not empty; the other three gaps are always
+   named. The wire contract refuses a count that is not a positive integer, an
+   unknown reason, any other field (an amount included), and an answer that
+   names the gap without a count or counts without naming it.
+4. The manifest records the counts: `manifest.statementsBeforeWindow` lists
+   `{sourceId, accountId, reasonCode, count}` per source, resolved account
+   (`null` when none resolves) and reason, under the answer's filters, only
+   counts above zero, ordered by source, account (`null` first) and reason in
+   UTF-16 code units. `contextId` is its digest as before, so a changed count,
+   a statement left out that moves to another resolved account, or a new
+   source or reason gives a new `contextId`. The coverage's counts are the
+   manifest's added per source and reason, and the wire contract refuses an
+   answer where they disagree, a count that is not a positive integer, an
+   empty or non-text account, a repeated (source, account, reason) and any
+   other field.
+5. The `/state` page lists the counts under 一覧にない期間外の請求; the agent
+   read `kogane.reported-state.read` answers the same body through
+   `readReportedState` (ADR 0081: no new route or tool, and the parity map's
+   entry for `/api/v2/reported-state` is unchanged).
+6. `queryDatedState` takes `includeStatementsBeforeWindow` (counted unless it
+   is `false`). The reported-state read leaves it unset. The holdings change
+   (ADR 0075), the reconstructed state (ADR 0052) and the valuation on a date
+   (ADR 0056) pass `false`: they do not run
+   `DATED_STATEMENTS_BEFORE_WINDOW_SQL`, and the state they read
+   (`UncountedReportedState`) has no `statementsBeforeWindow` in its coverage
+   or its manifest, names every liability gap (it cannot tell whether one is
+   left out), and has the `contextId` of that manifest. The reported context
+   ids those reads pin are therefore ids of a manifest without the count:
+   they claim no input that was not read, they are not the `/state` answer's
+   `contextId` for the same date and filters, and a statement left out
+   changes neither them nor the reads' own context ids.
+7. `reported-state-v3`. The context amendment of 2026-11-19 below was
+   released first, as `reported-state-v2` without `statementsBeforeWindow`,
+   and the wire contract's exact keys refuse a body with a key it does not
+   know or without one it requires. Adding the key under the same version
+   would make the released v2 contract and this one refuse each other's
+   bodies under one version string, so the counts ship as a new version (as
+   ADR 0015 and the context amendment did when the manifest changed). A
+   client that validates `reported-state-v2` refuses a v3 body instead of
+   displaying it.
+
+**Consequences.**
+
+- The window and the payables are unchanged; `DATED_STATEMENTS_SQL` keeps its
+  text.
+- Every reported-state answer runs one more statement, which ranks the
+  statement totals before the cutoff again (as `card_statement_facts` does)
+  and resolves owners for the older statements through the keyed ownership
+  CTEs. The holdings change, the reconstructed state and the valuation on a
+  date skip it (decision 6) and run what they ran before. At
+  `STATEMENT_SCALE` on 2026-11-18 the count took 79 ms and the whole answer
+  507 ms today and 455 ms a year back (`bun:sqlite`, a shared machine;
+  [reported state, cost](../reported-state.md#cost)), under the one-second
+  target.
+- Every reported-state `contextId` changes once more with this amendment,
+  after the context amendment of 2026-11-19 changed it: every manifest
+  gains `statementsBeforeWindow` (`[]` when nothing is left out) and names
+  `reported-state-v3`. The dated manifests of the holdings change, the
+  reconstructed state and the valuation on a date gain no count, but they
+  name the schema version too, so the reported context ids they pin
+  (`reportedContextIds`, the valuation's reported `contextId`, and
+  `startContextId` and `endContextId`), and with them those reads' own
+  context ids, also change once more; until this amendment, the context
+  amendment of 2026-11-19 had been the last to change them. Nothing stores a
+  reported-state context id or one that embeds it, so nothing is rebuilt. No
+  test or fixture pinned a literal context id of any of these reads.
+- The count says nothing about settlement: an older statement that was
+  settled long ago is counted as one that never was. It bounds how many
+  older captured statements could still be unpaid; it is not a figure of what
+  is owed.
+- The count covers captured statements only. Before this amendment a store
+  with no statement still named `statements_before_window`; now it names no
+  such gap, and a card or month whose statement was never captured is
+  neither listed nor counted, with no coverage entry of its own (a limit,
+  [reported state, limits](../reported-state.md#limits)).
+- The manifest records counts, not which statements were counted (their refs
+  would grow without bound). A swap that keeps every count keeps the
+  `contextId`: a newer capture of an older statement that takes the place of
+  the counted one under the same source, resolved account and reason, or one
+  statement leaving a count as another enters it (a limit,
+  [reported state, limits](../reported-state.md#limits)).
+- The manifest grows with the number of sources, resolved accounts and
+  reasons that have a statement left out, not with history; the read's own
+  row bound (5,000, refused rather than cut) bounds it.
+
+**Verification.** `packages/read-model/test/dated-state.test.ts` ("statements
+the payable window leaves out": per source, account and reason; on random
+synthetic stores the listed and counted statements split the statements as
+of the cutoff exactly, with statements placed on each boundary: a due date on
+`D − 31` days and the day before, an undated capture on the 45-day bound and
+a millisecond before, and captures just before and at the cutoff), `packages/application/test/dated-state-query.test.ts`
+(counts under the source and account filters in the coverage and the
+manifest, the gap named only when a statement is left out; an older
+statement published after an answer, and then its account resolved, each
+give a new `contextId` while the listed refs stay the same; a state read
+without the count runs no `DATED_STATEMENTS_BEFORE_WINDOW_SQL`, records no
+count and is otherwise the counted answer),
+`packages/application/test/holdings-change-query.test.ts`,
+`packages/application/test/valuation-on-date-query.test.ts` and
+`packages/application/test/reconstructed-state-query.test.ts` (each records
+every statement it runs: no `DATED_STATEMENTS_BEFORE_WINDOW_SQL`; the pinned
+reported context id is the uncounted state's; a statement left out changes
+the reported state's `contextId`, not theirs),
+`packages/application/test/holdings-change-scale.test.ts` (the same on the
+scaled store), `packages/application/test/dated-state-scale.test.ts`
+(the count equals an independent count of the due-before-window statement
+keys; no whole scan beyond the statement ranking's own),
+`apps/web/test/reported-state-contract.test.ts` (the refusals above, and
+manifest counts that do not add up to the coverage's),
+`apps/web/test/reported-state.browser.test.ts` (the page lists the counts) and
+`services/app/test/reported-state-api.test.ts` (on workerd, a store without
+statements counts none and does not name the gap), all on synthetic data.
+
+## Context amendment — 2026-11-19
+
+- Status: proposed
+- Date: 2026-11-19
+
+**Context.** Decision 3 made `contextId = canonicalDigest(manifest)` and the
+manifest named the date, cutoff, policy ids and the ids of the chosen
+snapshots, listed statements and settlement reviews. The answer reads more
+than that, so its context id stayed equal while the answer changed (INV09,
+[ADR 0001](0001-domain-axes.md)):
+
+- the `account` filter: two filters over the same snapshots and statements
+  listed different accounts under one id;
+- the current account and instrument mappings, and the identity run each row
+  is read under: a mapping correction changed an entry's account or a
+  position's instrument, although the Consequences above and
+  [reported state: limits](../reported-state.md#limits) said it changed the
+  context id;
+- a review's decision: `card_settlement_reviews` is a candidate with its
+  newest decision, so accepting a listed review settled a payable under the
+  same `card-settlement:<id>`;
+- the published parse run of a chosen artifact: an activation or rollback onto
+  another parse of the same artifact changed every row while `artifact:<id>`
+  stayed;
+- the metric registry release (each balance's metric and which rows are
+  excluded) and the perimeter's containers without a snapshot (the policy
+  rows a migration adds).
+
+**Options considered.** (1) Add each mapping row's id: rejected, it needs the
+dated reads to select more columns, a query rewrite with its own proof, while
+the answer already carries the values those rows decide. (2) Digest the whole
+answer: rejected, the manifest would no longer say what was read, and the id
+would move with the presentation. (3) Pin what the answer reads in the
+manifest: the filters, the releases, every listed or counted row with the
+identity it was read under, each payable's account and each review at its
+decision: chosen.
+
+**Decision.** `reported-state-v2`. The manifest adds `metricRegistryRelease`,
+`filters`, `containersWithoutSnapshot` (`source/parser/dataset`, sorted),
+`rows` (every position and balance the answer lists or counts as excluded, as
+`[ref, accountId, accountIdentity, instrumentId, instrumentIdentity]` in ref
+order; a row id names its parse run) and `statementAccounts`
+(`[statementRef, accountId]`), and each `settlementRefs` entry becomes
+`card-settlement:<id>@decision:<decision revision id>`, or `@proposed` before
+any decision. The wire contract checks the new keys and that the manifest's
+filters are the body's. This amendment was released before the
+statements-before-window amendment above: `reported-state-v2` has no
+`statementsBeforeWindow`. From `reported-state-v3` (that amendment's seventh
+decision) the counts are the manifest's last key, after `settlementRefs`; a
+state read without the count (its decision 6) has the keys of this amendment
+and no counts.
+
+**Consequences.** Every reported-state context id changes once, and with it
+the `reportedContextIds` of the holdings change between two dates, the
+reported state's `contextId` inside a valuation on a date, and the
+`startContextId` and `endContextId` of a reconstructed state, so their context
+ids change once too. Nothing stores a reported-state context id, so
+nothing is rebuilt; the cost is a larger manifest (at most one row entry per
+position and balance, inside the existing 5,000-row bounds). A mapping
+correction that leaves every pinned row's account, instrument and statuses as
+they were keeps the id. A balance counted as excluded is pinned with its
+identity too, although the answer shows only its count (its account decides
+whether an `account` filter counts it), so a correction to its instrument
+alone is a new id over an unchanged answer. A stale client that validates
+`reported-state-v1` refuses a v2 body instead of displaying it. Identity and
+reviews are still today's, not as of `D` (Consequences above): the id now
+says which ones were read.
+
+**Verification.** `packages/application/test/dated-state-query.test.ts`
+("the context id moves with every input the answer reads": the account filter,
+an account mapping revision, an instrument mapping revision, another parse of
+the same artifact activated, and a decision on a listed review each change the
+id; an unchanged store keeps it; each case failed on the v1 manifest) and
+"the context id is a digest of the manifest" (which also checks that the
+manifest names the registry release and the coverage's containers without a
+snapshot);
+`apps/web/test/reported-state-contract.test.ts` (a manifest whose filters are
+not the body's, without `rows`, with an unknown identity status or a short
+statement account is refused).

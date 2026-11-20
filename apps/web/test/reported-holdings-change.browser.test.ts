@@ -1,7 +1,7 @@
 // 保有数量の変化 (the /state page's panel) in the production client against a
 // server whose answers the queries themselves produce
 // (packages/application/test/holdings-change-world.ts and reported-state-world.ts).
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
@@ -9,6 +9,7 @@ import { auditView } from "./a11y-audit.ts";
 import {
   holdingsChangeBody,
   holdingsChangeWorld,
+  sharedCodeHoldingsWorld,
 } from "../../../packages/application/test/holdings-change-world.ts";
 import {
   reportedStateBody,
@@ -17,6 +18,7 @@ import {
 import { HoldingsChangeError } from "../../../packages/application/src/query/holdings-change.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { holdingsChangeQueryRefusal } from "../../../packages/observation-shared/src/reported-holdings-change-contract.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -27,18 +29,26 @@ if (!runnable && (!existsSync(join(client, "index.html")) || process.env["CI"] =
 const DESKTOP = { width: 1280, height: 1000 };
 const MOBILE = { width: 390, height: 844 };
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("reported holdings change between two dates", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let tooMany = false;
+  let sharedCode = false;
   const requests: URL[] = [];
   const state = reportedStateWorld();
   const holdings = holdingsChangeWorld();
+  const sharedCodeHoldings = sharedCodeHoldingsWorld();
   // The world's minimal registry lacks the broker; the source filter needs it.
   holdings.db.run("INSERT INTO sources(id,provider) VALUES('sbi-securities','synthetic')");
   beforeEach(() => {
     tooMany = false;
+    sharedCode = false;
     requests.length = 0;
   });
   beforeAll(async () => {
@@ -65,7 +75,7 @@ describe.if(runnable)("reported holdings change between two dates", () => {
           const account = url.searchParams.get("account");
           try {
             return Response.json(
-              await holdingsChangeBody(holdings, {
+              await holdingsChangeBody(sharedCode ? sharedCodeHoldings : holdings, {
                 from: url.searchParams.get("from")!,
                 to: url.searchParams.get("to")!,
                 ...(source === null ? {} : { source }),
@@ -87,7 +97,6 @@ describe.if(runnable)("reported holdings change between two dates", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
@@ -158,7 +167,12 @@ describe.if(runnable)("reported holdings change between two dates", () => {
     expect(region).toContain("開始日までにこの取得元の完全な取得結果がありません");
     // Each row's reasons are their own list, named after the holding.
     expect(
-      await page.getByRole("list", { name: "1004 を比較できない理由", exact: true }).innerText(),
+      await page
+        .getByRole("list", {
+          name: "1004（sbi-securities · sbi-a · sbi-domestic-cash-positions · domestic-cash-positions）を比較できない理由",
+          exact: true,
+        })
+        .innerText(),
     ).toContain("基準日の数量を正確に読み取れません");
     // The provider's quantities as reported, and the absent side as a status.
     expect(region).toContain("12.5");
@@ -173,6 +187,45 @@ describe.if(runnable)("reported holdings change between two dates", () => {
     expect(main).toContain("比較済み 3 件");
     await page.close();
   }, 30_000);
+
+  test("rows of one code in two accounts name their reasons apart", async () => {
+    sharedCode = true;
+    const page = await open();
+    await compare(page, "2026-09-01");
+    expect(await changes(page)).toEqual([
+      ["1004", "数値なし（比較できません）"],
+      ["1004", "数値なし（比較できません）"],
+    ]);
+    // Each row's reasons are named after its whole key, so the two lists are
+    // told apart by their account, and no two lists of the table share a name.
+    // The name reads as the row header does.
+    expect(
+      await page
+        .getByRole("region", { name: "保有数量の変化の一覧" })
+        .locator("tbody th .holdings-change-capture")
+        .allInnerTexts(),
+    ).toEqual([
+      "sbi-securities · sbi-a · sbi-domestic-cash-positions · domestic-cash-positions",
+      "sbi-securities · sbi-b · sbi-domestic-cash-positions · domestic-cash-positions",
+    ]);
+    for (const account of ["sbi-a", "sbi-b"])
+      expect(
+        await page
+          .getByRole("list", {
+            name: `1004（sbi-securities · ${account} · sbi-domestic-cash-positions · domestic-cash-positions）を比較できない理由`,
+            exact: true,
+          })
+          .innerText(),
+      ).toContain("基準日の数量を正確に読み取れません");
+    const names = await page
+      .getByRole("region", { name: "保有数量の変化の一覧" })
+      .getByRole("list")
+      .evaluateAll((lists) => lists.map((list) => list.getAttribute("aria-label")));
+    expect(names).toHaveLength(2);
+    expect(new Set(names).size).toBe(2);
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
 
   test("a start date on or after the page's date cannot be asked", async () => {
     const page = await open();
@@ -234,8 +287,9 @@ describe.if(runnable)("reported holdings change between two dates", () => {
       ["changeSource", "sbi-securities"],
       ["changeAccount", "acct-sbi"],
     ]);
-    // Every holding of the world is this source's and maps to this account;
-    // the server's own filters are stated.
+    // Every domestic holding maps to this account; the foreign capture's
+    // identity is not recorded, so no listing names VTX for it (ADR 0019,
+    // account entries amendment). The server's own filters are stated.
     expect((await changes(page)).map(([code]) => code)).toEqual([
       "1001",
       "1002",
@@ -243,7 +297,6 @@ describe.if(runnable)("reported holdings change between two dates", () => {
       "1004",
       "1005",
       "1006",
-      "VTX",
     ]);
     expect(await page.locator("main").innerText()).toContain("sbi-securities · acct-sbi");
     // Another registered source lists no holding: an empty comparison, not a zero.

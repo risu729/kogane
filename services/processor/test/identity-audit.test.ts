@@ -256,18 +256,41 @@ test("only MyJCB J-POINT captures sealed at policy 1 count as pending (ADR 0089)
     db.close();
   }
 });
-test("only SBI foreign positions captures sealed at policy 1 count as pending (ADR 0113)", () => {
+test("only SBI foreign trade, positions and cash balances captures sealed below policy 3 count as pending (ADR 0117)", () => {
   const db = fixture();
   try {
+    // Pending: trades and balances sealed at 1, positions sealed at 2 (ADR 0113)
+    // and positions sealed at 1. Not pending: a positions parse sealed at 3, the
+    // foreign cash history and a domestic capture sealed at 1.
     db.exec(`INSERT INTO sources VALUES ('sbi-securities');
-      INSERT INTO fetch_artifacts(id,source_id,fetch_run_id,dataset) VALUES (20,'sbi-securities',1,'foreign-cash-positions'),(21,'sbi-securities',1,'foreign-trade-records'),(22,'sbi-securities',1,'domestic-cash-positions');
-      INSERT INTO parse_runs VALUES (20,20,'ok',NULL),(21,21,'ok',NULL),(22,22,'ok',NULL);
-      INSERT INTO published_parse_runs VALUES (20,'parser-20',20),(21,'parser-21',21),(22,'parser-22',22);
-      INSERT INTO identity_runs VALUES ('sb20',20,1,'2099'),('sb21',21,1,'2099'),('sb22',22,1,'2099');
-      INSERT INTO identity_run_seals VALUES ('sb20',0,'2099'),('sb21',0,'2099'),('sb22',0,'2099');`);
+      INSERT INTO fetch_artifacts(id,source_id,fetch_run_id,dataset) VALUES (20,'sbi-securities',1,'foreign-cash-positions'),(21,'sbi-securities',1,'foreign-trade-records'),(22,'sbi-securities',1,'domestic-cash-positions'),(23,'sbi-securities',1,'foreign-cash-balances'),(24,'sbi-securities',1,'foreign-cash-history'),(25,'sbi-securities',1,'foreign-cash-positions'),(26,'sbi-securities',1,'foreign-cash-positions');
+      INSERT INTO parse_runs VALUES (20,20,'ok',NULL),(21,21,'ok',NULL),(22,22,'ok',NULL),(23,23,'ok',NULL),(24,24,'ok',NULL),(25,25,'ok',NULL),(26,26,'ok',NULL);
+      INSERT INTO published_parse_runs VALUES (20,'parser-20',20),(21,'parser-21',21),(22,'parser-22',22),(23,'parser-23',23),(24,'parser-24',24),(25,'parser-25',25),(26,'parser-26',26);
+      INSERT INTO identity_runs VALUES ('sb20',20,1,'2099'),('sb21',21,1,'2099'),('sb22',22,1,'2099'),('sb23',23,1,'2099'),('sb24',24,1,'2099'),('sb25',25,2,'2099'),('sb26',26,3,'2099');
+      INSERT INTO identity_run_seals VALUES ('sb20',0,'2099'),('sb21',0,'2099'),('sb22',0,'2099'),('sb23',0,'2099'),('sb24',0,'2099'),('sb25',0,'2099'),('sb26',0,'2099');`);
     const query = IDENTITY_AUDIT_QUERIES.find((q) => q.name === "pending_parses")!;
     expect(db.query(query.sql).all()).toContainEqual({
       source: "sbi-securities",
+      lineage: "current",
+      eligible_parses: 7,
+      pending_parses: 4,
+    });
+  } finally {
+    db.close();
+  }
+});
+test("only SMBC AUD balance captures sealed at policy 1 count as pending (ADR 0118)", () => {
+  const db = fixture();
+  try {
+    db.exec(`INSERT INTO sources VALUES ('smbc-bank');
+      INSERT INTO fetch_artifacts(id,source_id,fetch_run_id,dataset) VALUES (30,'smbc-bank',1,'foreign-ordinary-aud-balance'),(31,'smbc-bank',1,'foreign-ordinary-aud-history'),(32,'smbc-bank',1,'balance-normalized');
+      INSERT INTO parse_runs VALUES (30,30,'ok',NULL),(31,31,'ok',NULL),(32,32,'ok',NULL);
+      INSERT INTO published_parse_runs VALUES (30,'parser-30',30),(31,'parser-31',31),(32,'parser-32',32);
+      INSERT INTO identity_runs VALUES ('sm30',30,1,'2099'),('sm31',31,1,'2099'),('sm32',32,1,'2099');
+      INSERT INTO identity_run_seals VALUES ('sm30',0,'2099'),('sm31',0,'2099'),('sm32',0,'2099');`);
+    const query = IDENTITY_AUDIT_QUERIES.find((q) => q.name === "pending_parses")!;
+    expect(db.query(query.sql).all()).toContainEqual({
+      source: "smbc-bank",
       lineage: "current",
       eligible_parses: 3,
       pending_parses: 1,

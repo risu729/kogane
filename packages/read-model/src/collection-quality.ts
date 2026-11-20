@@ -705,3 +705,67 @@ SELECT * FROM (
 )
 ${CELL_ORDER}
  LIMIT ${ACCOUNT_COVERAGE_CELL_BOUND + 1}`;
+
+// ── status (ADR 0045, amendment 2026-11-19) ──────────────────────────────
+
+/**
+ * Receipts the status view reads per job: the newest this many, plus one that
+ * only says older ones exist (`failuresSinceSuccess` answers `"100+"` then).
+ */
+export const STATUS_OCCURRENCE_WINDOW = 100;
+/** Visible fetch runs the status view reads per source to see a recovery. */
+export const STATUS_RUN_WINDOW = 100;
+
+export interface StatusOccurrenceRow {
+  schedule_id: string;
+  nominal_at: string;
+  started_at: string;
+  finished_at: string | null;
+  status: string;
+  failure_code: string | null;
+}
+
+/**
+ * The newest STATUS_OCCURRENCE_WINDOW + 1 receipts of each job in `?1` (a
+ * JSON array of job ids), newest first per job; a job with fewer has all of
+ * them. The window's edge is found by an OFFSET on UNIQUE(schedule_id,
+ * nominal_at) and the window is a range of that index, so the cost is per
+ * job and window, never per receipt the job holds.
+ */
+export const STATUS_OCCURRENCES_SQL = `SELECT o.schedule_id, o.nominal_at, o.started_at, o.finished_at, o.status, o.failure_code
+  FROM json_each(?1) wanted
+  CROSS JOIN collection_schedule_occurrences o ON o.schedule_id = wanted.value
+ WHERE o.nominal_at >= coalesce((SELECT edge.nominal_at FROM collection_schedule_occurrences edge
+                                  WHERE edge.schedule_id = wanted.value
+                                  ORDER BY edge.nominal_at DESC
+                                  LIMIT 1 OFFSET ${STATUS_OCCURRENCE_WINDOW}), '')
+ ORDER BY o.schedule_id, o.nominal_at DESC`;
+
+export interface StatusRunRow {
+  source_id: string;
+  id: number;
+  /**
+   * 1 when the run is a successful fetch run (`successfulFetchRuns`), the
+   * predicate the summary's V Point recovery reads. Whether a parse of it is
+   * published yet is the Processor's later stage, which the view's
+   * `notPublishing` reports apart.
+   */
+  succeeded: number;
+  completed_at: string | null;
+}
+
+/**
+ * The newest STATUS_RUN_WINDOW visible fetch runs of each CORE source in `?1`
+ * (a JSON array), newest first per source, through `idx_fetch_runs_source`:
+ * whether each succeeded and when it completed.
+ */
+export const STATUS_RUNS_SQL = `SELECT f.source_id, f.id,
+       CASE WHEN ${successfulFetchRuns.predicate("f")} THEN 1 ELSE 0 END AS succeeded,
+       f.completed_at
+  FROM json_each(?1) wanted
+  CROSS JOIN ${visibleEvidence.fetchRuns} f ON f.source_id = wanted.value
+ WHERE f.id >= coalesce((SELECT edge.id FROM ${visibleEvidence.fetchRuns} edge
+                          WHERE edge.source_id = wanted.value
+                          ORDER BY edge.id DESC
+                          LIMIT 1 OFFSET ${STATUS_RUN_WINDOW - 1}), 0)
+ ORDER BY f.source_id, f.id DESC`;
