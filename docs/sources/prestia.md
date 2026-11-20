@@ -1192,7 +1192,7 @@ compares the page with the newest capture of the same key that has a
 published parse
 ([ADR 0026's amendment of 2026-10-08](../adr/0026-collector-unit-coverage.md#amendment-2026-10-08-global-pass-replay-compares-records-with-detail-tables)).
 
-## 2026-11-20: deposit-account activity on PRESTIA Online (desktop)
+## PRESTIA Online deposit-account activity, desktop (2026-11-20)
 
 Read-only observation for
 [#1235](https://github.com/risu729/kogane/issues/1235), in the owner's own
@@ -1218,9 +1218,8 @@ maxlength 10). An account picker lists every deposit account with the columns
 period currently selected). 照会する posts `/ib/accountinfo/ACKSDSPnext2.prst`.
 Paging posts `ACKSDSPpages` (page number), `ACKSDSPpreviouspage` and
 `ACKSDSPnextpage`. The CSV link posts `ACKSDSPtorihikidownload` (not
-exercised). The picker on the observed account listed four rows: yen
-ordinary, MultiMoney yen ordinary, MultiMoney foreign ordinary (one currency)
-and one foreign time deposit.
+exercised). The picker has one row per deposit account, and a foreign
+MultiMoney account has one row per currency.
 
 **Limits stated on the page.** At most 180 days; at most 250 rows for yen
 ordinary, MultiMoney yen ordinary and yen current accounts, and 150 for USD
@@ -1232,16 +1231,17 @@ date first, every header sortable. Yen accounts: 日付 | 取引内容 | 出金 
 Foreign accounts add 為替レート (`-` on every observed row). 日付 is
 `YYYY/MM/DD`; 取引内容 is bilingual `<Japanese> / <English>` and may carry a
 counter-account reference; exactly one of 出金 / 入金 holds an amount, written
-`9,999 JPY` or `9,999.99 AUD` (thousands separators, the ISO code after the
+`9,999 JPY` or `9,999.99 USD` (thousands separators, the ISO code after the
 number, the currency's minor digits). There is no running-balance column and
 no row identifier. `TOTAL_ROW` and `TOTAL_PAGE` carry the query's row and page
-counts (an 80-row foreign query had 4 pages; a 12-row yen query had 1), and
-the page also prints `N件`. An empty period shows message code `ACKSDSP13`
+counts (`TOTAL_PAGE` is `TOTAL_ROW` / 20 rounded up), and the page also
+prints `N件`. An empty period shows message code `ACKSDSP13`
 (指定された照会期間の取引履歴が存在しません) with zero rows. How a query over the
 cap reports the cut was not reached: no observed query came near 250 or 150.
 
-**Consequences for #1235.** The packaged Android app names the same routes on
-the mobile host (`ACKZDSPkozashosai`, `ACKSDSPpages`, `ACKSDSPnext2`; see
+**Consequences for #1235.** The packaged Android app names the same query and
+paging routes on the mobile host (`ACKSDSPnext2`, `ACKSDSPpages`) with its own
+entry `ACKZDSPkozashosai` (see
 [Confirmed application architecture](#confirmed-application-architecture-and-read-paths)),
 so the flow above is the likely mobile flow, but the mobile markup of the
 picker, the period form and the result rows is unobserved. A parser needs that
@@ -1250,7 +1250,7 @@ Because rows carry no identifier and two identical rows on one day are
 possible, publication needs an identity of date, description, signed amount
 and the occurrence index among identical rows of the same query.
 
-## 2026-11-20: statement list on PRESTIA Online (desktop)
+## PRESTIA Online statement list, desktop (2026-11-20)
 
 Read-only observation for
 [#1253](https://github.com/risu729/kogane/issues/1253) in the same session; no
@@ -1267,7 +1267,9 @@ the row index (`0`–`11`) as the second `doTransaction` argument and target
 statement appears from the 5th business day of the following month (March's
 may take longer), that the transaction statement is monthly and, without
 activity, once a year as of the end of March, that the balance report follows
-the same rule on mutual-fund holdings, and that six years are kept. Whether the search returns every month of a year
-on one page and what the 閲覧する response is (PDF bytes or a viewer page)
+the same rule on mutual-fund holdings, and that six years are kept. Because the
+link carries no stable file name, the content hash stays the statement's
+identity. Whether the search returns every month of a year on one page and
+what the 閲覧する response is (PDF bytes or a viewer page)
 are unobserved, as is the mobile equivalent: the app's packaged routes list
 no statement route.
