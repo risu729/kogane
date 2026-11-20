@@ -51,6 +51,12 @@ import type {
   CardSettlementReview,
   CardSettlementStatementPage,
 } from "../../domain/src/card-settlement-review.ts";
+import { CARD_DEBIT_ACCOUNT_CANDIDATES_SQL } from "../src/query/card-debit-accounts.ts";
+import {
+  EXPECTED_CARD_DEBIT_ACCOUNT_CANDIDATES_SQL,
+  RESERVED_BY_MONTH_SQL,
+} from "./card-debit-account-candidates-guard.ts";
+import { LEGACY_CARD_DEBIT_ACCOUNT_CANDIDATES_SQL } from "./card-debit-account-candidates-legacy-sql.ts";
 import { LEGACY_CARD_SETTLEMENT_STATEMENT_GROUP_SQL } from "./card-settlement-statement-group-legacy-sql.ts";
 import { LEGACY_CARD_SETTLEMENT_STATEMENT_OLDER_SQL } from "./card-settlement-statement-older-legacy-sql.ts";
 import {
@@ -948,6 +954,31 @@ describe("card settlement readiness reads on a scaled store without statistics",
     expect(text).toContain("card_settlement_debit_account_evidence_candidate");
     // The page's reading is found by its unique (raw_sha256, card, version) key.
     expect(text).toContain("card_debit_account_statement_object");
+  });
+
+  test("the debit-account candidate read equals the shipped one less the guard's month reservations, and scans the candidates once", () => {
+    // docs/card-settlements.md, Debit account per card: the shipped rows, less
+    // every proposal an accepted candidate reserves by card month alone.
+    const found = rows(CARD_DEBIT_ACCOUNT_CANDIDATES_SQL, []);
+    expect(found.length).toBeGreaterThan(0);
+    expect(found).toEqual(rows(EXPECTED_CARD_DEBIT_ACCOUNT_CANDIDATES_SQL, []));
+    // The sweep's reviews of this history name one statement key per card
+    // month, so nothing is reserved by month alone: the shipped answer.
+    expect(rows(RESERVED_BY_MONTH_SQL, [])).toEqual([]);
+    expect(found).toEqual(rows(LEGACY_CARD_DEBIT_ACCOUNT_CANDIDATES_SQL, []));
+    const plan = explain(db, CARD_DEBIT_ACCOUNT_CANDIDATES_SQL, []);
+    const details = plan.map((step) => step.detail);
+    // The candidates are scanned once (`c`) with each latest decision by key;
+    // the covered months are materialized once and each proposal probes them
+    // through an automatic index, never a scan per candidate.
+    expect(statementPlanProblems(plan, ["c", "live", "settled", "settled_month", "m"])).toEqual([]);
+    expect(details.filter((detail) => /^SCAN /u.test(detail)).sort()).toEqual(
+      ["SCAN c", "SCAN live", "SCAN settled"].sort(),
+    );
+    expect(details.filter((detail) => detail === "MATERIALIZE settled_month")).toHaveLength(1);
+    expect(details).toContain(
+      "SEARCH m USING AUTOMATIC COVERING INDEX (card_source_id=? AND card_account_id=? AND period=?)",
+    );
   });
 
   test.if(FULL)(
