@@ -102,7 +102,9 @@ offered page size; what remains is that the refusal says nothing.
    the route's refusal (`400 invalid_detail` on the balance routes,
    `400 invalid_query` on the others; `400 invalid_request` on the tool's
    closed schema). The account view of ADR 0088 has its full answer only:
-   `detail` with it is refused.
+   `detail` with it is refused (until the
+   [amendment of 2026-11-20](#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20),
+   which gives it a paged summary).
 2. **A summary is its full answer, shaped by one function.** Each read builds
    its full answer as before and, for `summary`, passes it to one pure
    function the route and the tool share: `latestBalanceSummary` and
@@ -252,7 +254,9 @@ offered page size; what remains is that the refusal says nothing.
 - Left as they are, and over 8 KB at this scale: `kogane.observations.list`
   `{kind: balances}` (the v1 grouped list, about 520 KB) and the collection
   quality account view (about 107 KB for Vpass in production, issue 1414's
-  proposal). Each is a follow-up of its own.
+  proposal). Each is a follow-up of its own; the
+  [amendment of 2026-11-20](#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20)
+  gives the account view a summary.
   `kogane.schedules.maintenance.read` (about 15 KB) and `kogane.store.read`
   `{page: overview}` (about 9 KB) were too; the
   [amendment below](#amendment-the-store-overview-and-the-maintenance-read-answer-a-summary-by-default-2026-11-19)
@@ -261,7 +265,8 @@ offered page size; what remains is that the refusal says nothing.
   branch) adds a view to the same tool and route. `detail` is defined only
   for the summary without a source and for `view: cells`; every other view
   has one detail, its own answer, and refuses `detail` as the account view
-  does here. The status view is already one short line per job, so it gets
+  does here (the account view takes it since the amendment of 2026-11-20).
+  The status view is already one short line per job, so it gets
   no `summary`/`full` pair. It landed first (ADR 0045, amendment of
   2026-11-19), so this ADR applies that rule to it: `detail` with
   `view: status` is `400 invalid_request` on the tool, and
@@ -613,3 +618,229 @@ Measured as the bytes of the MCP result's structured content
   overview refuses a summary; `apps/web/test/overview-counts.browser.test.ts`
   answers the overview only when asked for `detail=full`, and the page still
   renders every run.
+
+## Amendment: the collection quality account view answers a paged summary by default (2026-11-20)
+
+- Status: proposed. **Owner approval is needed before merge**: it changes
+  the published description and the default answer of
+  `kogane.collection-quality.read` with `view: "accounts"`, the default
+  answer of `GET /api/collection-quality/<sourceId>/accounts`, and the
+  queries that route takes (`detail` and `offset`, where it took none).
+  Whether the account view's default becomes the summary, as here and as for
+  the other views, or stays `full` with `summary` opt-in, is the owner's
+  decision (as D2 above).
+- Date: 2026-11-20
+- Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414)
+  (point 1, "Responses are huge and get truncated"); the follow-up this
+  ADR's consequences list (the account view, about 107 KB for Vpass in
+  production)
+- Carried by: `accountCoverageSummary` in
+  `packages/application/src/query/collection-quality-detail.ts`,
+  `packages/observation-shared/src/collection-quality-contract.ts`
+  (`ACCOUNT_SUMMARY_LINE_PAGE`, `ACCOUNT_SUMMARY_BYTES`,
+  `pageReadAnswerBytes`, the summary's wire check),
+  `services/app/src/collection-quality-api.ts`,
+  `services/app/src/page-read-tools.ts`, `services/app/src/audit.ts`,
+  `apps/web/src/pages/CollectionQuality.tsx`
+- Builds on: [ADR 0088](0088-collection-quality-per-account.md) (the account
+  view and its full answer), [ADR 0081](0081-ui-parity-through-mcp.md)
+
+### Context
+
+The decision above left the account view of
+[ADR 0088](0088-collection-quality-per-account.md) with its full answer
+only, and `detail` with it refused. That answer lists every period of every
+account a source's observations name, each with its unit key, period,
+current rule, cell state, standing, capture, observation count, reasons and
+freshness, and every unattributed cell. Issue 1414's proposal records about
+107 KB for Vpass in production. A synthetic source at the read's bound
+(below: 62 accounts, as SBI Shinsei has, 2,000 cells) answers about 1 MB.
+An MCP client shows the first 8 KB, so an agent asking which accounts a
+source names, and whether their data is current, read nothing usable.
+
+### Options considered
+
+1. **The decision's pattern: `detail`, `summary` the default, one pure
+   function from the full answer, the web UI asking for `full`; the summary
+   one line per account, then per unit of unattributed cells, paged by
+   line, each page held to 8 KB by measuring it (chosen).**
+2. **The same with a fixed number of lines a page and no byte measure.** An
+   account line is about 470 bytes with a 64-hex id and no reason, about
+   780 with eight reasons and a 30-character label, and about 1.8 KB with
+   every reason, status, kind and provider type and a 200-character label
+   (the page's other fields are about 750), so no fixed count is under 8 KB for every source
+   without being far under it for most; a label or period text near the
+   schema's 512 characters passes any count.
+3. **One unpaged answer: counts per standing and state over the whole
+   source, with a pointer to `full`.** Bounded, but it drops which accounts
+   the source names; ADR 0088 lists every account a source's observations
+   name precisely because whether each is the owner's is not decided there,
+   and an agent reads further by account id.
+4. **A cursor (ADR 0119).** The read is one statement over the whole source
+   at one instant; a cursor would bind nothing an offset does not, and the
+   cell summary beside it already pages by `offset`.
+
+### Decision
+
+1. **`detail` and `offset`.** `GET /api/collection-quality/<sourceId>/accounts`
+   takes `detail`, `summary` or `full`, absent being `summary`, and, with
+   the summary, `offset` (an integer from 0, as on the cell route). `full`
+   is ADR 0088's answer, byte for byte and without a `detail` key, unpaged:
+   `offset` with it is `400 invalid_query` on the route and
+   `400 invalid_request` (`refs: ["offset"]`) on the tool. Another detail, a
+   repeated or empty parameter, or any other parameter is
+   `400 invalid_query`; an offset that is not a decimal integer is
+   `400 invalid_offset`. `kogane.collection-quality.read` with
+   `view: "accounts"` takes the same `detail` and `offset` (its input schema
+   is unchanged: both were already properties of the tool) and passes them
+   to the same reader. The collection quality page asks for `full`.
+2. **One function.** The reader reads the full answer as before and, for
+   `summary`, passes it to `accountCoverageSummary(full, offset)`, which the
+   route and the tool share (ADR 0081). It reads nothing the full answer
+   does not and adds no state.
+3. **The summary.** `{ apiVersion: 3, detail: "summary", freshnessAsOf,
+   dataTypesVersion, dataTypes, sourceId, latestFetchRun, cells, accounts,
+   unattributed, coverage }`:
+   - `dataTypes`: the source's catalogue as each provider data type under
+     its status (`collected`, `partial`, `notCollected`), or null where the
+     catalogue does not describe the source. Dropped: each entry's parsers
+     and tracking issue (in `full`).
+   - `accounts`: one line per account, in the full answer's order (by id):
+     `accountId` (what reads it further: `detail: "full"`, the identity
+     pages), `label` (the stored label the full answer already shows),
+     `statuses` (its mapping statuses), `freshness` (that of its newest named
+     capture, as in `full`), `kinds` (its observation kinds),
+     `dataTypes` (how many data types name it), `providerTypes` (the union
+     of their provider data types), `periods` (`count`, and the smallest and
+     largest named period, both null when none is named), `standings` and
+     `cellStates` (its periods counted by standing and by cell state, each
+     summing to `periods.count`), `newestCapturedAt` and `reasons` (the union
+     of its periods' cell reasons). Dropped: each data type's dataset,
+     parser and freshness, and each period's unit key, period kind and
+     MyJCB state, current rule, capture run, observation count, own
+     freshness and which reasons are on which period (all in `full`; ADR
+     0045's cell summary drops the same per-period fields).
+   - `unattributed`: after the accounts, one line per dataset, parser and
+     fetch unit of the cells no observation attributes to an account, in
+     order of first appearance, as the cell summary's lines are: `cells`,
+     the first and last named period, the cells counted by state, and the
+     union of their reasons.
+   - `coverage`: `{ accounts, unattributedCells, lines, limit: 20, offset,
+     truncated, nextOffset }`, the whole answer's account count,
+     unattributed cell count and line count, and where the next page starts
+     (null on the last page). `cells` is the full answer's.
+   - Every closed state, reason, status, kind and provider data type of
+     what a line collapses is on it, and every period and cell is counted
+     once. Nothing in it is an amount, and no value that is not exact is
+     shown as a count: a count here is of stored rows, and a freshness
+     keeps its state and age as `full` has them (INV05). No provider text is
+     added: the texts are the ids, label, datasets, parsers, unit keys and
+     period labels `full` already shows.
+4. **8 KB by construction.** A page holds the lines from `offset` in order,
+   at most `ACCOUNT_SUMMARY_LINE_PAGE` (20), and stops before the line that
+   would carry the tool's answer past `ACCOUNT_SUMMARY_BYTES` (8,192): the
+   UTF-8 bytes of `{ schemaVersion: "kogane-page-read-v1", data }`
+   serialized with `JSON.stringify`, as the MCP adapter writes the tool's
+   text content (`pageReadAnswerBytes`; the route answers `data` alone, 47
+   bytes shorter). A page that cannot hold its first line within that
+   budget (texts near the schema's 512 characters, in multi-byte
+   characters) is refused whole with `413 result_limit_exceeded`, as a read
+   past its bound is, never cut; `detail: "full"` answers it.
+5. **Wire check.** The validator (`validCollectionQualityResponse`, reached
+   from `validApiResponse`) takes the detail a request asked for and accepts
+   that shape only on the account path, as on the other paths: the page's
+   `getJson` passes `detail=full`, so it refuses a summary. A summary passes
+   only with every line's counts summing to its periods or cells, a
+   `current` or `older-current` standing never exceeding its cell state's
+   count, accounts sorted and before the unattributed lines, a page's
+   `nextOffset` where its lines end (null exactly on the last page), an
+   account's age that of its `newestCapturedAt`, and the answer within
+   8,192 bytes.
+6. **Audit.** The account view's record still counts the cells read (its
+   `cells`), never an account; a summary page is `truncated` while more
+   lines follow (`coverage.truncated`).
+7. **Owner approval.** As point 5 of the decision: the tool's description
+   and default answer, the route's default answer and queries are published
+   changes, merged only with the owner's approval.
+
+### Consequences
+
+Measured as the bytes of the tool's answer (`pageReadAnswerBytes`, which
+`services/app/test/mcp-answer-size.test.ts` checks against the real `/mcp`
+result):
+
+| Read                                                                                                                                                                                                          |      Full | Summary                                                             |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------: | ------------------------------------------------------------------- |
+| `kogane.collection-quality.read` `{source: "sony-bank", view: "accounts"}`, synthetic store (one cell, no account named)                                                                                      |     1,639 | 1,162                                                               |
+| realistic worst (62 accounts, each three data types of ten months, two statuses, a 64-hex id, a 30-character label and eight reasons a period; 140 unattributed cells of seven units; 2,000 cells, the bound) | 1,025,853 | 9 pages: six of 9 accounts at 7,817–7,819, then 8,100, 7,879, 2,572 |
+| 25 accounts, every reason, status, kind and provider type, 200-character labels                                                                                                                               |         — | 10 pages, 4 to 9 lines, at most 7,987                               |
+
+- An agent's first account read fits what its client shows and names the
+  first accounts with their states; `offset` reads the rest, and
+  `detail: "full"` (about 1 MB at the bound) or the identity reads give each
+  period. Production was not read: the 107 KB above is issue 1414's
+  measure of the full answer.
+- The tool's description stays within the 2,048 characters a client
+  accepts (2,040), shortened elsewhere to make room.
+- A client of the route that relied on its full answer must ask for
+  `detail=full`; the repository's only client, the web page, does.
+- Open limits: the pages are separate reads at their own instant, not one
+  snapshot (as the cell summary's): a capture or identity run recorded
+  between two pages can move a line across a page boundary, and an age can
+  change at midnight Asia/Tokyo, which can change where a page ends. A page
+  ends where its own `nextOffset` says, so following it repeats or skips a
+  line only when the answer itself changed between the reads, which
+  `coverage.lines` then shows. A line whose texts alone pass 8 KB is
+  refused, so the accounts after it are read with a larger `offset` or in
+  `full`. Fewer lines a page fit than the line limit for accounts (about 9
+  at the realistic worst), so a source with 62 accounts takes seven pages
+  to list them.
+
+### Verification
+
+- `packages/application/test/collection-quality-detail.test.ts`: on the
+  realistic worst above (`test/account-coverage-scale.ts`, whose full answer
+  passes ADR 0088's wire check) every page passes the wire check under
+  `summary` only and is within 8,192 bytes, and the pages list every
+  account once in order, each line equal to its full entry's counts by
+  standing and state, its statuses, kinds, freshness, newest capture and
+  the union of its reasons and provider types, and every unattributed cell
+  once with its reasons; the full answer is over 100 times 8 KB; the same
+  with every reason, status, kind and provider type and 200-character
+  labels, where the bytes end each page before the line limit; 45
+  unattributed units, where the line limit ends them (20, 20, 5); an
+  offset past the end answers an empty last page; an uncataloged source
+  keeps `dataTypes` null; a line of 512-character multi-byte texts is
+  refused (`CollectionQualityLimitError`); and a page that miscounts a
+  standing or state, misorders accounts, misplaces `nextOffset` or
+  `truncated`, drops a line, misstates an age, carries an unknown reason or
+  another limit, puts an unattributed line before its accounts, or passes
+  8 KB fails the wire check.
+- `packages/application/test/account-coverage.test.ts`: every store answer
+  of ADR 0088's tests (unresolved mappings, newest-not-current periods,
+  corrected mappings, unattributed cells) also pages into summaries that
+  pass the wire check under `summary` only and count every account, period
+  and unattributed cell once.
+- `packages/observation-shared/test/account-coverage-contract.test.ts`: each
+  detail passes only where it was asked for and under its own source's path,
+  and miscounted or mispaged pages fail.
+- `services/app/test/mcp-answer-size.test.ts`: the account summary on the
+  route equals `accountCoverageSummary` of the route's full answer, the tool
+  answers it under `data`, its bytes are `pageReadAnswerBytes` of it and
+  under 8 KB; `detail: "full"` with `offset` is refused on the tool and the
+  route; the realistic worst pages under 8 KB through the envelope.
+- `services/app/test/page-read-reports.test.ts`: the route, `/api/agent/v1/*`
+  and `/mcp` give one body for the account view's default, `offset`,
+  `detail: summary` with `offset` and `detail: full`; `detail: full` with
+  `offset`, an unknown detail, another parameter and a repeated `offset` are
+  `invalid_query`, a negative offset `invalid_offset`; the tool refuses
+  `detail: full` with `offset` and an unknown detail.
+- `services/app/test/collection-quality-api.test.ts`: the route's full
+  answer under `detail=full` and its summary by default, each passing the
+  validator under its own detail only.
+- `apps/web/test/collection-quality.browser.test.ts`: the synthetic server
+  answers the account view only when asked for `detail=full`, and the page
+  requests exactly `/accounts?detail=full`.
+- `services/app/test/ui-mcp-parity.test.ts` passes unchanged: no route or
+  tool was added, and the description keeps its pinned terms within 2,048
+  characters.

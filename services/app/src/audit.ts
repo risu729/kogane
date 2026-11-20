@@ -281,12 +281,17 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     return { rows: data ? 1 : 0, truncated: false };
   }
   // The collection quality account view (ADR 0088) counts the cells it read
-  // (its `cells`, a number), never an account; it is never cut. The summary
-  // and the cell page fall through to the page rule below.
+  // (its `cells`, a number), never an account; its full answer is never cut,
+  // and its summary is truncated while more lines follow (ADR 0123,
+  // amendment 2026-11-20). The summary and the cell page fall through to the
+  // page rule below.
   if (operation === "collection-quality.read") {
     const data = (value["data"] ?? {}) as Record<string, unknown>;
     if (typeof data["cells"] === "number" && Array.isArray(data["accounts"]))
-      return { rows: data["cells"], truncated: false };
+      return {
+        rows: data["cells"],
+        truncated: ((data["coverage"] ?? {}) as Record<string, unknown>)["truncated"] === true,
+      };
     // The status view (ADR 0045, amendment 2026-11-19) counts its job lines; it is never cut.
     if (data["view"] === "status" && Array.isArray(data["sources"]))
       return { rows: data["sources"].length, truncated: false };

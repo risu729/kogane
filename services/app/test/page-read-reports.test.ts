@@ -337,6 +337,19 @@ describe("collection quality page reads", () => {
         { source: "sony-bank", view: "cells", offset: 0 },
       ],
       ["/api/collection-quality/sony-bank/accounts", { source: "sony-bank", view: "accounts" }],
+      // The account view's summary pages its lines (ADR 0123, amendment 2026-11-20).
+      [
+        "/api/collection-quality/sony-bank/accounts?offset=0",
+        { source: "sony-bank", view: "accounts", offset: 0 },
+      ],
+      [
+        "/api/collection-quality/sony-bank/accounts?detail=summary&offset=1",
+        { source: "sony-bank", view: "accounts", detail: "summary", offset: 1 },
+      ],
+      [
+        "/api/collection-quality/sony-bank/accounts?detail=full",
+        { source: "sony-bank", view: "accounts", detail: "full" },
+      ],
       // The full answers the summaries are shaped from (ADR 0123).
       ["/api/collection-quality?detail=full", { detail: "full" }],
       ["/api/collection-quality/sony-bank?detail=full", { source: "sony-bank", detail: "full" }],
@@ -350,7 +363,33 @@ describe("collection quality page reads", () => {
       const route = await page.route(query);
       expect(route.status, query).toBe(200);
       expect(validApiResponse(query.split("?")[0]!, route.body), query).toBe(true);
-      if ("view" in args && args.view === "accounts") {
+      if (
+        "view" in args &&
+        args.view === "accounts" &&
+        !("detail" in args && args.detail === "full")
+      )
+        expect(route.body).toMatchObject({
+          apiVersion: 3,
+          detail: "summary",
+          dataTypesVersion: "provider-data-types-v1",
+          dataTypes: { collected: expect.arrayContaining(["cash_movement"]) },
+          accounts:
+            "offset" in args && args.offset === 1
+              ? []
+              : [
+                  expect.objectContaining({
+                    accountId: "synthetic-quality-account",
+                    providerTypes: ["cash_movement"],
+                    freshness: expect.objectContaining({ ageDays: expect.any(Number) }),
+                  }),
+                ],
+        });
+      if (
+        "view" in args &&
+        args.view === "accounts" &&
+        "detail" in args &&
+        args.detail === "full"
+      ) {
         expect(route.body).toMatchObject({
           apiVersion: 3,
           dataTypesVersion: "provider-data-types-v1",
@@ -407,15 +446,24 @@ describe("collection quality page reads", () => {
       expect(overHttp, query).toEqual({ status, body: refusal });
       expect((await page.mcp(QUALITY, args)).body).toEqual(refusal);
     }
-    // The account view takes no query on its route; a tool argument outside
-    // its closed shape is refused before any read, as for every page read.
-    expect((await page.route("/api/collection-quality/sony-bank/accounts?offset=0")).status).toBe(
-      400,
-    );
+    // The account view's full answer is unpaged (ADR 0123, amendment
+    // 2026-11-20); a tool argument outside its closed shape is refused before
+    // any read, as for every page read.
+    for (const query of [
+      "/api/collection-quality/sony-bank/accounts?detail=full&offset=0",
+      "/api/collection-quality/sony-bank/accounts?detail=compact",
+      "/api/collection-quality/sony-bank/accounts?limit=10",
+      "/api/collection-quality/sony-bank/accounts?offset=0&offset=1",
+    ])
+      expect((await page.route(query)).body, query).toMatchObject({ error: "invalid_query" });
+    expect(
+      (await page.route("/api/collection-quality/sony-bank/accounts?offset=-1")).body,
+    ).toMatchObject({ error: "invalid_offset" });
     for (const args of [
       { view: "accounts" },
       { view: "cells" },
-      { source: "sony-bank", view: "accounts", offset: 0 },
+      { source: "sony-bank", view: "accounts", detail: "full", offset: 0 },
+      { source: "sony-bank", view: "accounts", detail: "compact" },
       { source: "sony-bank", view: "unknown" },
       { source: "sony-bank/accounts" },
       // The status view is the summary's: it names no source and no page.

@@ -890,7 +890,8 @@ answers it, without the request id. A store read that fails is
 Four reads answer one short line per row by default
 ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)), on the route and
 the tool alike: `kogane.balances.read`, `kogane.schedules.read`,
-`kogane.collection-quality.read` (its summary and `view: "cells"`) and
+`kogane.collection-quality.read` (its summary, `view: "cells"` and
+`view: "accounts"`) and
 `kogane.store.read` with `page: "overview"` take `detail`, `summary` (the
 default) or `full`, as does the route (`?detail=`). `full` is the answer these reads gave before 2026-11-19,
 unchanged; the web UI asks for it. A `summary` is derived from that same
@@ -1056,8 +1057,7 @@ beside the stored `body`, the partition the page shows: a body stored
 without `source` the summary (which takes no `offset` and no `view`), with it
 that source's cells (`view: "cells"`, the default; `offset` pages them) or the
 same cells regrouped by the accounts their captures' observations name
-(`view: "accounts"`, `GET /api/collection-quality/{source}/accounts`, unpaged,
-so `offset` or `detail` with it is `400 invalid_request`;
+(`view: "accounts"`, `GET /api/collection-quality/{source}/accounts`;
 [ADR 0088](adr/0088-collection-quality-per-account.md)). With `detail:
 "summary"` (the default; ADR 0123) the summary is one line per source (sources
 whose lines would be equal share one, naming each in `sourceIds`): freshness,
@@ -1069,9 +1069,26 @@ source's cells are read whole (refused past 2,000 cells with
 `413 result_limit_exceeded`, never cut) and answered as one line per dataset,
 parser and fetch unit, collapsed over periods, with the union of the cells'
 reasons, failure codes (`failureCodes`) and coverage causes, 20 lines a page
-(`offset` then counts lines, and `coverage` gives the cell and line counts). The account view
-carries each account's stored label, under `data` like every page read, and
-its audit record counts the cells it read, never an account.
+(`offset` then counts lines, and `coverage` gives the cell and line counts).
+The account view's summary
+([ADR 0123, amendment of 2026-11-20](adr/0123-summary-detail-for-large-reads.md#amendment-the-collection-quality-account-view-answers-a-paged-summary-by-default-2026-11-20);
+proposed, needs the owner's approval) is one line per account, in id order:
+its id (which `detail: "full"` and the identity reads take), stored label,
+mapping statuses, freshness, observation kinds, number of data types, provider
+data types, periods (count, first and last named), the periods counted by
+standing and by cell state, newest capture and the union of the periods'
+reasons; then one line per dataset, parser and fetch unit of the cells no
+observation attributes to an account (cells counted by state, first and last
+period, reasons); and the source's catalogue as each provider data type under
+its status. Lines are paged by `offset`: up to 20 a page, fewer when the next
+would carry the tool's answer past 8,192 bytes (`coverage.nextOffset` is where
+the next page starts), so every page fits what a client shows; a page whose
+first line alone would pass that is `413 result_limit_exceeded`, never cut.
+`detail: "full"` is the unpaged answer of ADR 0088, which the collection
+quality page asks for; `offset` with it is `400 invalid_request`. The account
+view carries each account's stored label, under `data` like every page read,
+and its audit record counts the cells it read, never an account (a summary
+page is truncated while more lines follow).
 `view: "status"` takes no `source`, no `offset` and no `detail`, being
 compact already (any of them is `400 invalid_request`) and answers `GET /api/collection-quality?view=status`:
 whether anything is stuck, in about 5 KB, one line per configured job with

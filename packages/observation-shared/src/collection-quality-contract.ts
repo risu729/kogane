@@ -914,12 +914,12 @@ export function validAccountCoverage(value: unknown): value is AccountCoverage {
 
 /**
  * The three routes, by path; any other path under the prefix is not this
- * contract. The summary and cell routes answer either detail (ADR 0123):
- * `detail`, when the caller names the one it asked for, accepts that shape
- * only, so a page that asked for `full` never takes a summary for it. The
- * status view (`?view=status`, ADR 0045 amendment 2026-11-19) shares the
- * summary's path and takes no `detail`, so only a request naming none may
- * receive it.
+ * contract. The summary, cell and account routes answer either detail
+ * (ADR 0123 and its amendment of 2026-11-20): `detail`, when the caller names
+ * the one it asked for, accepts that shape only, so a page that asked for
+ * `full` never takes a summary for it. The status view (`?view=status`,
+ * ADR 0045 amendment 2026-11-19) shares the summary's path and takes no
+ * `detail`, so only a request naming none may receive it.
  */
 export function validCollectionQualityResponse(
   path: string,
@@ -935,7 +935,11 @@ export function validCollectionQualityResponse(
       (detail === undefined && validCollectionStatus(value))
     );
   const accounts = /^\/api\/collection-quality\/([^/]+)\/accounts$/u.exec(path);
-  if (accounts !== null) return validAccountCoverage(value) && value.sourceId === accounts[1];
+  if (accounts !== null) {
+    if (full && validAccountCoverage(value)) return value.sourceId === accounts[1];
+    const parsed = accountSummary.safeParse(value);
+    return summary && parsed.success && parsed.data.sourceId === accounts[1];
+  }
   const match = /^\/api\/collection-quality\/([^/]+)$/u.exec(path);
   if (match === null) return false;
   if (full && validCollectionQualityCells(value)) return value.sourceId === match[1];
@@ -949,7 +953,8 @@ export function validCollectionQualityResponse(
  * `kogane.collection-quality.read`; `full` is the answer above. A summary is
  * derived from the full answer alone: it adds no state, keeps every closed
  * code and count it collapses, and says how much it collapsed. The account
- * view (ADR 0088) has its full answer only.
+ * view (ADR 0088) takes the same two details (ADR 0123, amendment
+ * 2026-11-20); the status view has one, its own answer.
  */
 export const COLLECTION_QUALITY_DETAILS = ["summary", "full"] as const;
 export type CollectionQualityDetail = (typeof COLLECTION_QUALITY_DETAILS)[number];
@@ -1119,3 +1124,188 @@ const cellSummary = z
     z.refine((value) => (value.coverage.nextOffset === null) === !value.coverage.truncated),
     z.refine((value) => value.coverage.lines <= value.coverage.cells),
   );
+
+/**
+ * The `summary` detail of the account view (ADR 0123, amendment 2026-11-20):
+ * one line per account the full answer lists (in its order, by id), then one
+ * line per dataset, parser and fetch unit of its unattributed cells (in order
+ * of first appearance), paged by line. A page holds at most this many lines,
+ * and fewer when the next would carry the tool's answer past
+ * `ACCOUNT_SUMMARY_BYTES`.
+ */
+export const ACCOUNT_SUMMARY_LINE_PAGE = 20;
+/**
+ * The bytes a page of the account summary is held to: the UTF-8 bytes of the
+ * tool's answer, `{ schemaVersion, data }` serialized as the MCP adapter
+ * writes it, which is what an MCP client shows (issue 1414).
+ */
+export const ACCOUNT_SUMMARY_BYTES = 8_192;
+/** The page reads' result envelope (`services/app/src/page-read-tools.ts`). */
+const PAGE_READ_SCHEMA_VERSION = "kogane-page-read-v1";
+
+/** The bytes of `data` as a page read tool answers it (`{ schemaVersion, data }`, serialized). */
+export function pageReadAnswerBytes(data: unknown): number {
+  return new TextEncoder().encode(JSON.stringify({ schemaVersion: PAGE_READ_SCHEMA_VERSION, data }))
+    .length;
+}
+
+/**
+ * One account, collapsed over its data types and periods: what the full
+ * answer lists for it, counted. Its id reads it further (`detail: "full"`,
+ * the identity pages); its label is the stored label the full answer shows.
+ */
+const accountLine = z
+  .strictObject({
+    accountId: text,
+    label: z.string().check(z.maxLength(512)),
+    statuses: distinct(z.enum(MAPPING_STATUSES)).check(z.minLength(1)),
+    /** The account's freshness: that of its newest named capture, as in `full`. */
+    freshness,
+    /** The distinct observation kinds of its data types. */
+    kinds: distinct(z.enum(OBSERVATION_KINDS)).check(z.minLength(1)),
+    /** How many data types (dataset, parser, observation kind) name it. */
+    dataTypes: id,
+    /** The distinct provider data types of those data types (`provider-data-types-v1`). */
+    providerTypes: distinct(z.enum(PROVIDER_DATA_TYPES), PROVIDER_DATA_TYPES.length),
+    /** How many periods (cells under one kind) name it, and the smallest and largest named one. */
+    periods: z.strictObject({ count: id, first: z.nullable(text), last: z.nullable(text) }),
+    /** Its periods counted by standing. */
+    standings: z.strictObject({
+      current: count,
+      olderCurrent: count,
+      newestNotCurrent: count,
+    }),
+    /** The same periods counted by their cell's state. */
+    cellStates: z.strictObject({ current: count, olderCurrent: count, noCurrent: count }),
+    /** The newest capture that names it. */
+    newestCapturedAt: instant,
+    /** The union of its periods' cell reasons. */
+    reasons: distinct(z.enum(CELL_REASONS)),
+  })
+  .check(
+    // Every collapsed period is counted once by standing and once by cell state.
+    z.refine(
+      (value) =>
+        value.standings.current +
+          value.standings.olderCurrent +
+          value.standings.newestNotCurrent ===
+          value.periods.count &&
+        value.cellStates.current + value.cellStates.olderCurrent + value.cellStates.noCurrent ===
+          value.periods.count,
+    ),
+    // A `current` or `older-current` standing is its cell's state.
+    z.refine(
+      (value) =>
+        value.standings.current <= value.cellStates.current &&
+        value.standings.olderCurrent <= value.cellStates.olderCurrent,
+    ),
+    z.refine(
+      (value) => value.kinds.length <= value.dataTypes && value.dataTypes <= value.periods.count,
+    ),
+    z.refine(
+      (value) =>
+        (value.periods.first === null) === (value.periods.last === null) &&
+        (value.periods.first === null || value.periods.first <= value.periods.last!),
+    ),
+    // A named capture always has an age.
+    z.refine((value) => value.freshness.ageDays !== null),
+  );
+
+/** Unattributed cells of one dataset, parser and fetch unit, collapsed over periods. */
+const unattributedLine = z
+  .strictObject({
+    dataset: z.nullable(text),
+    parser: z.nullable(text),
+    unitKey: z.nullable(text),
+    cells: id,
+    periods: z.strictObject({ first: z.nullable(text), last: z.nullable(text) }),
+    current: count,
+    olderCurrent: count,
+    noCurrent: count,
+    reasons: distinct(z.enum(CELL_REASONS)),
+  })
+  .check(z.refine((value) => value.current + value.olderCurrent + value.noCurrent === value.cells));
+
+const accountSummary = z
+  .strictObject({
+    apiVersion: z.literal(ACCOUNT_COVERAGE_API_VERSION),
+    detail: z.literal("summary"),
+    freshnessAsOf,
+    dataTypesVersion: z.literal(PROVIDER_DATA_TYPES_VERSION),
+    /** The source's catalogue: each data type under its status; null as in `full`. */
+    dataTypes: z.nullable(
+      z
+        .strictObject({
+          collected: distinct(z.enum(PROVIDER_DATA_TYPES), PROVIDER_DATA_TYPES.length),
+          partial: distinct(z.enum(PROVIDER_DATA_TYPES), PROVIDER_DATA_TYPES.length),
+          notCollected: distinct(z.enum(PROVIDER_DATA_TYPES), PROVIDER_DATA_TYPES.length),
+        })
+        .check(
+          z.refine((value) => {
+            const all = [...value.collected, ...value.partial, ...value.notCollected];
+            return all.length > 0 && new Set(all).size === all.length;
+          }),
+        ),
+    ),
+    sourceId,
+    latestFetchRun: fetchRun,
+    /** Every cell of the source was read, as in `full`. */
+    cells: count,
+    accounts: z.array(accountLine).check(
+      z.maxLength(ACCOUNT_SUMMARY_LINE_PAGE),
+      z.refine((values) =>
+        values.every(
+          (value, index) => index === 0 || values[index - 1]!.accountId < value.accountId,
+        ),
+      ),
+    ),
+    unattributed: z.array(unattributedLine).check(z.maxLength(ACCOUNT_SUMMARY_LINE_PAGE)),
+    coverage: z.strictObject({
+      /** Accounts in the whole answer: the first lines. */
+      accounts: count,
+      /** Cells listed apart in the whole answer. */
+      unattributedCells: count,
+      /** Lines in the whole answer: its accounts, then its unattributed lines. */
+      lines: count,
+      limit: z.literal(ACCOUNT_SUMMARY_LINE_PAGE),
+      offset: count,
+      truncated: z.boolean(),
+      nextOffset: z.nullable(count),
+    }),
+  })
+  .check(
+    z.refine((value) => value.cells <= ACCOUNT_COVERAGE_CELL_BOUND),
+    z.refine((value) => {
+      const { coverage } = value;
+      const listed = value.accounts.length + value.unattributed.length;
+      const end = coverage.offset + listed;
+      return (
+        listed <= ACCOUNT_SUMMARY_LINE_PAGE &&
+        coverage.accounts <= coverage.lines &&
+        coverage.lines - coverage.accounts <= coverage.unattributedCells &&
+        coverage.unattributedCells <= value.cells &&
+        // The accounts come first: a page lists those its range holds, then unattributed lines.
+        value.accounts.length === Math.max(0, Math.min(end, coverage.accounts) - coverage.offset) &&
+        value.unattributed.reduce((sum, line) => sum + line.cells, 0) <=
+          coverage.unattributedCells &&
+        // A page ends where the next one starts, or at the last line; an
+        // empty page lies past the last line.
+        (listed === 0
+          ? !coverage.truncated && coverage.nextOffset === null && coverage.offset >= coverage.lines
+          : coverage.truncated
+            ? coverage.nextOffset === end && end < coverage.lines
+            : coverage.nextOffset === null && end === coverage.lines)
+      );
+    }),
+    // An account's age is that of its newest named capture, to the answer's date.
+    z.refine((value) =>
+      value.accounts.every((line) =>
+        ageOf(line.newestCapturedAt, value.freshnessAsOf.date, line.freshness.ageDays),
+      ),
+    ),
+    // What a client shows: the page fits it by construction.
+    z.refine((value) => pageReadAnswerBytes(value) <= ACCOUNT_SUMMARY_BYTES),
+  );
+export type AccountCoverageAccountLine = z.output<typeof accountLine>;
+export type AccountCoverageUnattributedLine = z.output<typeof unattributedLine>;
+export type AccountCoverageSummary = z.output<typeof accountSummary>;

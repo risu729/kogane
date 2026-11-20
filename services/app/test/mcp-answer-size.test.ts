@@ -22,13 +22,21 @@ import {
   latestBalanceSummary,
 } from "../../../packages/application/src/query/read-detail";
 import {
+  accountCoverageSummary,
   collectionQualityCellSummary,
   collectionQualitySummaryLines,
 } from "../../../packages/application/src/query/collection-quality-detail";
+import {
+  REALISTIC_ACCOUNT_SCALE,
+  syntheticAccountCoverage,
+} from "../../../packages/application/test/account-coverage-scale";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import {
+  ACCOUNT_SUMMARY_BYTES,
+  type AccountCoverage,
   COLLECTION_QUALITY_API_VERSION,
   COLLECTION_QUALITY_LINE_PAGE,
+  pageReadAnswerBytes,
   type CollectionQualityCell,
   type CollectionQualityCells,
   validCollectionQualityCells,
@@ -133,6 +141,7 @@ function calls(): [string, Record<string, unknown>][] {
     ["kogane.collection-quality.read", { source: "sony-bank" }],
     ["kogane.collection-quality.read", { source: "sony-bank", detail: "full" }],
     ["kogane.collection-quality.read", { source: "sony-bank", view: "accounts" }],
+    ["kogane.collection-quality.read", { source: "sony-bank", view: "accounts", detail: "full" }],
     ["kogane.evidence.read", { page: "meta" }],
     ["kogane.schedules.read", {}],
     ["kogane.schedules.read", { detail: "full" }],
@@ -171,6 +180,7 @@ describe("MCP read answer sizes (ADR 0123)", () => {
       "kogane.schedules.read {}",
       "kogane.collection-quality.read {}",
       'kogane.collection-quality.read {"source":"sony-bank"}',
+      'kogane.collection-quality.read {"source":"sony-bank","view":"accounts"}',
       'kogane.store.read {"page":"overview"}',
       "kogane.schedules.maintenance.read {}",
     ])
@@ -363,19 +373,81 @@ describe("kogane.collection-quality.read summary (ADR 0123)", () => {
     expect((await page.route("/api/collection-quality/sony-bank?detail=full")).body).toMatchObject({
       cells: [expect.any(Object)],
     });
-    // The account view has one detail.
-    expect(
-      (await page.route("/api/collection-quality/sony-bank/accounts?detail=full")).status,
-    ).toBe(400);
+  });
+
+  it("answers the account view as its full answer's summary, on the route and the tool alike (amendment 2026-11-20)", async () => {
+    const path = "/api/collection-quality/sony-bank/accounts";
+    const summary = await page.route(path);
+    const full = await page.route(`${path}?detail=full`);
+    expect(summary.status).toBe(200);
+    expect(full.status).toBe(200);
+    expect(full.body).not.toHaveProperty("detail");
+    expect(validApiResponse(path, summary.body, "summary")).toBe(true);
+    expect(validApiResponse(path, summary.body, "full")).toBe(false);
+    expect(validApiResponse(path, full.body, "full")).toBe(true);
+    expect(validApiResponse(path, full.body, "summary")).toBe(false);
+    // Both answers count ages to their own instant, which can differ by a call.
+    const { freshnessAsOf: _a, ...summaryRest } = summary.body as Record<string, unknown>;
+    const { freshnessAsOf: _b, ...derived } = accountCoverageSummary(
+      full.body as AccountCoverage,
+      0,
+    ) as unknown as Record<string, unknown>;
+    expect(summaryRest).toEqual(derived);
+    // The tool answers the route's body under `data`; the bytes the summary
+    // is held to are exactly the tool's answer, as the client receives it.
+    const tool = await page.mcp("kogane.collection-quality.read", {
+      source: "sony-bank",
+      view: "accounts",
+    });
+    expect(tool.isError).toBe(false);
+    expect(tool.body.schemaVersion).toBe("kogane-page-read-v1");
+    expect(Object.keys(tool.body.data)).toEqual(Object.keys(summary.body as object));
+    expect(bytes(tool.body)).toBe(pageReadAnswerBytes(tool.body.data));
+    expect(bytes(tool.body)).toBeLessThanOrEqual(ACCOUNT_SUMMARY_BYTES);
+    const fullTool = await page.mcp("kogane.collection-quality.read", {
+      source: "sony-bank",
+      view: "accounts",
+      detail: "full",
+    });
+    expect(Object.keys(fullTool.body.data)).toEqual(Object.keys(full.body as object));
+    // The full answer stays unpaged.
     expect(
       (
         await page.mcp("kogane.collection-quality.read", {
           source: "sony-bank",
           view: "accounts",
           detail: "full",
+          offset: 0,
         })
       ).body,
-    ).toEqual({ error: "invalid_request", refs: ["detail"] });
+    ).toEqual({ error: "invalid_request", refs: ["offset"] });
+    expect((await page.route(`${path}?detail=full&offset=0`)).status).toBe(400);
+  });
+
+  it("pages the account view of a source with 62 accounts under 8 KB through the tool's envelope", () => {
+    const full = syntheticAccountCoverage(REALISTIC_ACCOUNT_SCALE, "sbi-shinsei");
+    expect(validApiResponse("/api/collection-quality/sbi-shinsei/accounts", full, "full")).toBe(
+      true,
+    );
+    expect(bytes({ schemaVersion: "kogane-page-read-v1", data: full })).toBeGreaterThan(
+      100 * CLIENT_BYTES,
+    );
+    const accounts: string[] = [];
+    let apart = 0;
+    for (let offset: number | null = 0; offset !== null;) {
+      const summary = accountCoverageSummary(full, offset);
+      expect(
+        validApiResponse("/api/collection-quality/sbi-shinsei/accounts", summary, "summary"),
+      ).toBe(true);
+      expect(bytes({ schemaVersion: "kogane-page-read-v1", data: summary })).toBeLessThanOrEqual(
+        CLIENT_BYTES,
+      );
+      accounts.push(...summary.accounts.map((line) => line.accountId));
+      apart += summary.unattributed.reduce((sum, line) => sum + line.cells, 0);
+      offset = summary.coverage.nextOffset;
+    }
+    expect(accounts).toEqual(full.accounts.map((account) => account.accountId));
+    expect(apart).toBe(full.unattributed.length);
   });
 
   it("collapses a source the size of the Vpass cells (about 300) into pages under 8 KB", () => {
