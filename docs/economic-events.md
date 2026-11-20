@@ -1365,7 +1365,16 @@ An agent reads both routes through `kogane.events.read`
 only:
 
 - `GET /api/v2/card-purchases?offset=N&period=YYYY-MM`, or
-  `?eventId=<purchase_…|refund_…>` alone for one event.
+  `?eventId=<purchase_…|refund_…>` alone for one event;
+- `GET /api/v2/card-purchases?view=cards&period=YYYY-MM` or
+  `?view=cards&usageMonth=YYYY-MM`: the same whole-filter figures grouped by
+  card, with each card's statements and settlement status and no per-event
+  explanation (`queryCardPurchaseCards`,
+  [ADR 0125](adr/0125-card-purchases-per-card-view.md),
+  [agent API](agent-api.md#per-card-view-adr-0125)). `view=events` is the
+  default; `usageMonth` outside `view=cards`, an `offset` or `eventId` inside
+  it, or not exactly one month is `400 invalid_query`, and a malformed month
+  `400 invalid_period`.
 
 It explains recognised card purchases
 (`packages/application/src/query/card-purchases.ts`): per event, its state and

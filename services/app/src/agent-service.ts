@@ -22,8 +22,8 @@ import {
   ERROR_STATUS,
   executeQuery,
   type HoldingsProjection,
+  answerPurchasesExplain,
   explain,
-  explainCardPurchases,
   financialError,
   type Grant,
   grantAllowsSource,
@@ -281,11 +281,11 @@ async function agentRead(
     case "kogane.purchases.explain": {
       // Whether the deployment serves it is the transport's question (it
       // needs the store's schema); everything else — the capability, the
-      // perimeter, the bounds and what a candidate may carry — is the
-      // application service's.
+      // perimeter, the bounds, the view and what a candidate may carry — is
+      // the application service's.
       const parsed = parsePurchasesExplainRequest(body);
       if (!parsed.ok) return failure(parsed.code, "purchases.explain", parsed.refs);
-      const outcome = await explainCardPurchases({
+      const outcome = await answerPurchasesExplain({
         grant: context.grant,
         sql: d1Executor(context.db),
         request: parsed.value,

@@ -120,3 +120,10 @@ page past `maxRows`.
 **Verification.** `packages/application/test/purchases-explain.test.ts`
 ("a next page the same grant would be refused is not offered, and says why"),
 on 101 synthetic events.
+
+## Amendment: a per-card view (2026-11-19, ADR 0125)
+
+Status: proposed. [ADR 0125](0125-card-purchases-per-card-view.md) adds
+`view: cards` (with `usageMonth`) to this tool and to the operator route: the
+same whole-filter figures grouped by card, without the per-event explanation.
+`view: events` (the default) is the page this ADR decided, unchanged.
