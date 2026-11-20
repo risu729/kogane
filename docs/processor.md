@@ -75,7 +75,8 @@ Only new work does: a registration, a pending run the listing reaches, a
 first verdict, a retry that is due, a missing terminal. A registration that
 threw spends none (amendment of 2026-11-06, below). The continuations that run before the listing have their own bound of
 five and spend none of these; a continuation whose terminal is not found
-spends none of that five either (§3.3, amendment of 2026-11-08). A terminal
+spends none of that five either (§3.3, amendment of 2026-11-08), nor does one
+answered from its `collection_runs` row (§3.3, amendment of 2026-11-19). A terminal
 CORE has already judged under the current registration contract and the same
 terminal digest is answered from its `collection_runs` row and spends
 nothing:
@@ -345,8 +346,8 @@ the `registered` stage says `pending` and names the fetch run, and everything
 written so far stays in CORE, unsealed and invisible to normal readers. The
 next call reads what exists and does only what is missing. The
 `collection_scan` lane continues up to five pending runs, oldest first, before
-it lists anything (one whose terminal is not found spends none of the five;
-see below), so a large run finishes over consecutive ticks instead of
+it lists anything (one whose terminal is not found, or that is answered from
+its row, spends none of the five; see below), so a large run finishes over consecutive ticks instead of
 waiting for the walk to come round to it. A registration that could not start
 because the invocation's budget was already spent is `deferred`: nothing was
 registered, the queue retries the message, the scan leaves its cursor, and an
@@ -362,7 +363,8 @@ terminal write then failed, would break that. Its continuation answers
 `missing`, which records nothing, so the run stays the oldest pending one.
 Such a continuation spends none of the five: the lane reads up to 25 pending
 runs (`DEFAULT_SCAN_CONTINUATION_READS`), oldest first, and stops once five
-continuations found their terminal. A missing terminal costs one R2 read of
+continuations found their terminal and were not answered from a row (below).
+A missing terminal costs one R2 read of
 the 500 operations and is tried again on every tick, so the run registers
 from the progress CORE holds as soon as its terminal is found again (or when
 the queue delivers its notification, or the walk lists it). Each tick's
@@ -372,11 +374,32 @@ and oldest pending age (§13) keep counting them. **Open limit:** when more
 than 20 of the 25 oldest pending runs have no terminal, fewer than five
 continuations find one on a tick and a pending run after those 25 is not
 continued at all; the walk still continues it when it lists its terminal, as
-before this amendment. It does not cover a pending run whose terminal key now
-holds other bytes: the new digest's row is blocked
-`terminal_digest_conflict`, the pending row stays pending, and it spends one
-of the five on every tick. Nor does it cover a pending run whose continuation
-throws on every tick: that records nothing either, and still spends one.
+before this amendment.
+
+**A pending run whose terminal key now holds other bytes**
+([ADR 0024, amendment of 2026-11-19](adr/0024-collection-scan-judged-terminals.md#amendment-2026-11-19-a-continuation-answered-from-its-row-spends-no-continuation)).
+Its continuation reads a new digest, so it inserts a row for that digest,
+which is blocked `terminal_digest_conflict`; the pending row stays pending and
+the oldest, so the run is continued on every tick. The first verdict is new
+work and spends one of the five. Every later tick answers it from the blocked
+row (`alreadyJudged`), as the listing answers a judged terminal: three
+operations (the terminal read, the conditional insert and the row read),
+nothing written, and none of the five spent, so the runs after it are
+continued in its place. The same holds for any continuation CORE answers from
+its row (`already_registered`, for a run the queue registered between the
+pending read and the continuation). Such runs share the 25 pending runs read
+with the missing ones above. An answer from a row costs at most five
+operations (§2: four for an unreadable terminal already recorded, five
+for a retryable refusal within its interval), so the continuations answered
+from rows cost at most 125 of the 500 per tick, as a listed page of 25 judged
+terminals does; 25 digest conflicts measure 75 (50 D1 statements, 25 R2
+reads). Every registration still starts only while its reserve fits the
+budget, so the registrations of the five continuations that spend one and of
+the listing stay within the 500. **Open limit:** the pending row of such a run
+is never closed; it stays in `registration.pending` and is read on every tick.
+A pending run whose continuation throws on every tick records nothing either,
+and still spends one (the amendment of 2026-11-08 keeps it bounded by the
+five, because a throw can come after any number of operations).
 
 The final step is never split by a yield, but an invocation can still end
 inside it. The next call then re-enters it: the run report is found under its
