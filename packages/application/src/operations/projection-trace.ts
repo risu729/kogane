@@ -105,7 +105,7 @@ export function projectionRequirement(evidenceRef: string | null): ProjectionReq
 interface ReadInstance {
   contract_version: string;
 }
-interface ReadPointer {
+export interface ReadPointer {
   snapshot_id: string;
   source_revision: number;
   core_epoch: string;
@@ -115,17 +115,21 @@ interface CoreRevision {
 }
 
 /**
- * Whether the published READ snapshot covers `requirement`. `read` is the
- * READ database, or null when this deployment binds none. Three singleton
- * reads: the READ instance and pointer, and CORE's epoch.
+ * What READ and CORE say right now, read once and compared with any number of
+ * stored requirements (`coverageAt`): the published pointer and CORE's
+ * current epoch, or the closed reason no pointer can be compared. Three
+ * singleton reads: the READ instance and pointer, then, only when READ
+ * answered, CORE's epoch. `read` is the READ database, or null when this
+ * deployment binds none.
  */
-export async function projectionCoverage(
+export type ProjectionWatermark =
+  | { state: "pending"; reasonCode: "read_model_unavailable" }
+  | { state: "published"; pointer: ReadPointer; coreEpoch: string | null };
+
+export async function projectionWatermark(
   core: Pick<CommandStore, "first">,
   read: SqlExecutor | null | undefined,
-  requirement: ProjectionRequirement | null,
-): Promise<ProjectionVerdict> {
-  if (requirement === null)
-    return { state: "pending", reasonCode: "projection_revision_unrecorded" };
+): Promise<ProjectionWatermark> {
   if (!read) return { state: "pending", reasonCode: "read_model_unavailable" };
   let instance: ReadInstance | null;
   let pointer: ReadPointer | null;
@@ -141,13 +145,41 @@ export async function projectionCoverage(
   if (instance === null || instance.contract_version !== READ_CONTRACT_VERSION || pointer === null)
     return { state: "pending", reasonCode: "read_model_unavailable" };
   const current = await core.first<CoreRevision>(CORE_REVISION_SQL, []);
+  return { state: "published", pointer, coreEpoch: current?.core_epoch ?? null };
+}
+
+/** Whether the watermark covers `requirement`; no read. */
+export function coverageAt(
+  watermark: ProjectionWatermark,
+  requirement: ProjectionRequirement | null,
+): ProjectionVerdict {
+  if (requirement === null)
+    return { state: "pending", reasonCode: "projection_revision_unrecorded" };
+  if (watermark.state === "pending") return watermark;
+  const { pointer, coreEpoch } = watermark;
   if (
-    current === null ||
+    coreEpoch === null ||
     pointer.core_epoch !== requirement.coreEpoch ||
-    current.core_epoch !== requirement.coreEpoch
+    coreEpoch !== requirement.coreEpoch
   )
     return { state: "pending", reasonCode: "read_model_context_changed" };
   if (pointer.source_revision < requirement.sourceRevision)
     return { state: "pending", reasonCode: "projection_behind" };
   return { state: "completed", evidenceRef: `read-snapshot:${pointer.snapshot_id}` };
+}
+
+/**
+ * Whether the published READ snapshot covers `requirement`. `read` is the
+ * READ database, or null when this deployment binds none. A requirement
+ * nobody stored is answered without reading; otherwise the three singleton
+ * reads of `projectionWatermark`.
+ */
+export async function projectionCoverage(
+  core: Pick<CommandStore, "first">,
+  read: SqlExecutor | null | undefined,
+  requirement: ProjectionRequirement | null,
+): Promise<ProjectionVerdict> {
+  if (requirement === null)
+    return { state: "pending", reasonCode: "projection_revision_unrecorded" };
+  return coverageAt(await projectionWatermark(core, read), requirement);
 }
