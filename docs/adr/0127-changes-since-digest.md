@@ -332,7 +332,8 @@ source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
   as そのほか 0件以上, and なし only for uncut sections; unchanged sources
   collapsed until opened;
   `notCovered` with its reasons; a continued answer with `after`, its header
-  and unchanged counts as 以上 until the last answer; the unauthorized run
+  and unchanged counts as 以上 until the last answer; a failed continuation
+  that keeps the answer read, with no header count; the unauthorized run
   sections and an events line that is not served; no panel on `403` and on
   `404`; the error state, with no count, on a server error and on an answer
   the contract refuses; the accessibility audit at 1280px and 390px with the

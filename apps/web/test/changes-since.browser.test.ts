@@ -156,7 +156,15 @@ const secondPage = (since: string) =>
 
 const SINCE = hoursAgo(24);
 
-type Mode = "answer" | "paged" | "refused" | "not_served" | "failed" | "malformed" | "narrow";
+type Mode =
+  | "answer"
+  | "paged"
+  | "continuation_failed"
+  | "refused"
+  | "not_served"
+  | "failed"
+  | "malformed"
+  | "narrow";
 
 // Launched while the module loads, and only for a suite that runs: a timeout
 // kills a browser a hook launched (test/settle.ts).
@@ -237,6 +245,10 @@ describe.if(runnable)("the 最近の変化 panel on ホーム", () => {
               );
             case "paged":
               return Response.json(after === null ? firstPage(since) : secondPage(since));
+            case "continuation_failed":
+              return after === null
+                ? Response.json(firstPage(since))
+                : Response.json({ error: "internal" }, { status: 500 });
             default:
               return Response.json(answer(since));
           }
@@ -437,6 +449,36 @@ describe.if(runnable)("the 最近の変化 panel on ホーム", () => {
         "新しい記録のない取得元（2件）",
       );
       expect(await auditView(page)).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  test("a failed continuation keeps the answer read, and nothing reads as complete", async () => {
+    mode = "continuation_failed";
+    const page = await browser.newPage();
+    try {
+      const panel = await open(page);
+      await panel.getByRole("button", { name: "続きを読み込む" }).click();
+      await panel
+        .getByRole("alert")
+        .filter({ hasText: "最近の変化の続きを読み込めませんでした" })
+        .waitFor({ timeout: 10_000 });
+      // The first answer's lines stay, still as an unfinished list.
+      expect(await panel.locator("li.changes-source").count()).toBe(2);
+      expect(await panel.getByText("一覧は続きます", { exact: false }).count()).toBe(1);
+      expect(await panel.locator("summary").first().textContent()).toBe(
+        "新しい記録のない取得元（1件以上）",
+      );
+      // No header count while the read is in error, and no whole-panel error.
+      expect(await panel.locator(".panel-head .count").count()).toBe(0);
+      expect(
+        await panel
+          .getByRole("alert")
+          .filter({ hasText: "最近の変化を読み込めませんでした" })
+          .count(),
+      ).toBe(0);
+      expect(await panel.getByText("この期間に新しく記録されたものはありません。").count()).toBe(0);
     } finally {
       await page.close();
     }
