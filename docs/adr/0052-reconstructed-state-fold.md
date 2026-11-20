@@ -323,7 +323,7 @@ Status: accepted (merged 2026-10-09 in #592).
 
 ## Amendment: compose the validated fold and late explanation (2026-11-12)
 
-- Status: proposed until this amendment's implementation merges.
+- Status: accepted (merged 2026-11-13 in [#1329](https://github.com/risu729/kogane/pull/1329))
 
 ### Context
 
