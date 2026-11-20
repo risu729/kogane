@@ -685,7 +685,7 @@ describe("untrusted provider content (AT71)", () => {
         name: "kogane.reported-holdings-change.read",
         required: ["from", "to"],
         closed: false,
-        properties: ["account", "from", "source", "to"],
+        properties: ["account", "cursor", "detail", "from", "limit", "source", "to"],
         annotations: readOnly,
       },
       {

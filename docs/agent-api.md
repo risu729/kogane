@@ -1240,6 +1240,31 @@ the answer is the page as before: unlike the reads of
 `test/reward-expiry-window.test.ts` is under 2 KB, against about 71 KB for the
 default 50-row page.
 
+`kogane.reported-holdings-change.read` takes `{ from, to, source?, account?,
+detail?, limit?, cursor? }`, the route's parameters
+([reported state](reported-state.md#http-contract-and-page); ADR 0075,
+amendment 2026-11-19, proposed). `detail` is `summary` (the default) or
+`full`. The summary answers "how did my holdings change" in one call: it
+lists only the holdings whose change is not an exact zero (`compared` with a
+nonzero change, `listed_at_start_only`, `listed_at_end_only`, then
+`not_comparable` with its reasons), counts the others in `unchanged`, and
+never reads a missing, unparsed or conflicting quantity as unchanged: such a
+side is its `quantityStatus` with no number, and its holding is listed as
+`not_comparable` and counted in `reasonCounts`. Each line keeps its unit, its
+`position:` and `artifact:` refs (readable with `kogane.observations.get`)
+and a `container` ref into the page's `containers`; nothing is added
+(`total: "not-computed"`). Ten lines a page by default, `limit` 10, 25, 50 or
+100; `cursor` is the previous page's `nextCursor`, at any of those sizes, and
+is refused `cursor_mismatch` for other dates or filters (with `mustMatch`:
+`from`, `to`, `source`, `account`, as ADR 0123's reads), `410
+context_expired` once the comparison's `contextId` moved and
+`invalid_cursor` otherwise. A default page measured 3.2–5.6 KB with 80
+SBI-shaped holdings, and at most 6.1 KB at the longest key shape, where the
+full answer was 136 KB and 106 KB (ADR 0075's amendment has the
+measurements). `full` is the unpaged comparison the page shows, with each
+side's capture, identity and provider text and the manifest; it takes no
+`limit` or `cursor`. Both details carry the comparison's `contextId`.
+
 `kogane.reports.read` takes `{ reportId?, view?, offset?, decimalPolicy? }`:
 without `reportId` it is the list (`offset` only), with it the detail
 (`view: "body"`, the default) or the explanation (`view: "explanation"`);
