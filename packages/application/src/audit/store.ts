@@ -11,6 +11,7 @@ import type { CommandStore } from "../command/contract.ts";
 import type { SqlWrite } from "../../../storage-d1/src/core/operations.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
 import { validLocalDateText } from "../../../domain/src/time.ts";
+import { pagedFields, type PagedFields } from "../../../observation-shared/src/paging-contract.ts";
 import {
   AUDIT_COLUMNS,
   type AuditRow,
@@ -226,9 +227,14 @@ export interface AuditRecordView {
   diff: Record<string, unknown>;
 }
 
+/**
+ * One page, or why its cursor is refused (ADR 0128): `invalid_cursor` for a
+ * cursor this read did not issue, `cursor_mismatch` for one issued under
+ * other filters. `cursor` is deprecated in favour of `next` and `paging`.
+ */
 export type AuditPageOutcome =
-  | { ok: true; records: AuditRecordView[]; cursor: string | null }
-  | { ok: false; code: "invalid_query" | "stale_context" };
+  | ({ ok: true; records: AuditRecordView[]; cursor: string | null } & PagedFields)
+  | { ok: false; code: "invalid_cursor" | "cursor_mismatch" };
 
 /**
  * A calendar day `YYYY-MM-DD`. Read by the domain's civil-date parser, so a
@@ -363,8 +369,8 @@ export async function readAuditPage(
   let after: { at: string; id: string } | null = null;
   if (cursor !== null) {
     const decoded = decodeCursor(cursor);
-    if (decoded === null) return { ok: false, code: "invalid_query" };
-    if (decoded.f !== digest) return { ok: false, code: "stale_context" };
+    if (decoded === null) return { ok: false, code: "invalid_cursor" };
+    if (decoded.f !== digest) return { ok: false, code: "cursor_mismatch" };
     after = decoded;
   }
   const { sql, scopeBinds } = perimeter
@@ -384,13 +390,19 @@ export async function readAuditPage(
   ]);
   const page = rows.slice(0, pageSize);
   const last = page.at(-1);
+  const next =
+    rows.length > pageSize && last
+      ? encodeCursor({ at: last.recorded_at, id: last.audit_id, f: digest })
+      : null;
   return {
     ok: true,
     records: page.map(auditRecordView),
-    cursor:
-      rows.length > pageSize && last
-        ? encodeCursor({ at: last.recorded_at, id: last.audit_id, f: digest })
-        : null,
+    cursor: next,
+    ...pagedFields({
+      limit: pageSize,
+      returned: page.length,
+      next: next === null ? null : { cursor: next },
+    }),
   };
 }
 

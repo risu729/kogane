@@ -1,3 +1,4 @@
+import { continuationOf, pagedFieldsAbsentOrValid, type Paging } from "./paging-contract.ts";
 import {
   CARD_SETTLEMENT_DEBIT_ACCOUNT_ABSENCES,
   CARD_SETTLEMENT_LEAD_SEARCHES,
@@ -28,9 +29,29 @@ const status = (value: unknown) =>
  */
 export function validNextPage(value: Record<string, unknown>, pageSize: number): boolean {
   if (!(CARD_SETTLEMENT_NEXT_PAGE as readonly unknown[]).includes(value.nextPage)) return false;
-  return value.nextPage === "offered"
-    ? revision(value.nextOffset) && value.nextOffset >= pageSize
-    : value.nextOffset === null;
+  const offset =
+    value.nextPage === "offered"
+      ? revision(value.nextOffset) && value.nextOffset >= pageSize
+      : value.nextOffset === null;
+  return offset && pagedAgreesWithNextPage(value, pageSize);
+}
+
+/**
+ * `next` and `paging` (ADR 0128), when the answer has them, say what the
+ * deprecated `nextOffset` and `nextPage` say: the same offset, rows following
+ * exactly when a page is offered or withheld, and a withheld page as
+ * `stoppedBy: "budget"`.
+ */
+function pagedAgreesWithNextPage(value: Record<string, unknown>, pageSize: number): boolean {
+  if (!pagedFieldsAbsentOrValid(value)) return false;
+  if (!Object.hasOwn(value, "paging")) return true;
+  const paging = value.paging as Paging;
+  return (
+    continuationOf(value, "offset") === value.nextOffset &&
+    paging.limit === pageSize &&
+    paging.hasMore === (value.nextPage !== "none") &&
+    (paging.stoppedBy === "budget") === (value.nextPage === "budget_exceeded")
+  );
 }
 
 /** The provider-stated debit-account evidence: read-only, never a blocker. */

@@ -13,6 +13,7 @@ import {
   isActivityBasis,
   type ActivityBasis,
 } from "../../../packages/read-model/src/index";
+import { offsetPagedFields } from "../../../packages/observation-shared/src/paging-contract.ts";
 import { HttpError, json } from "./http";
 
 const V2_PATHS = ["/api/v2/activity", "/api/v2/obligations"] as const;
@@ -70,10 +71,26 @@ export async function readEventsRoute(
   const offset = offsetOf(url);
   const reader = createEventsReader(d1Executor(env.DB), { pageSize: EVENTS_PAGE_SIZE });
   if (path === "/api/v2/obligations")
-    return { apiVersion: 2, ...(await reader.obligations({ offset })) };
+    return { apiVersion: 2, ...paged(await reader.obligations({ offset }), offset) };
   const basisParam = url.searchParams.get("basis");
   if (basisParam !== null && !isActivityBasis(basisParam))
     throw new HttpError(400, "invalid_query");
   const basis: ActivityBasis = basisParam ?? DEFAULT_ACTIVITY_BASIS;
-  return { apiVersion: 2, basis, ...(await reader.activity({ basis, offset })) };
+  return { apiVersion: 2, basis, ...paged(await reader.activity({ basis, offset }), offset) };
+}
+
+/**
+ * A page with its `next` and `paging` (ADR 0128). The reader's `nextCursor`
+ * is the next offset as text; it stays, deprecated, for one release.
+ */
+function paged<T extends { items: unknown[]; nextCursor: string | null }>(page: T, offset: number) {
+  return {
+    ...page,
+    ...offsetPagedFields({
+      limit: EVENTS_PAGE_SIZE,
+      offset,
+      returned: page.items.length,
+      hasMore: page.nextCursor !== null,
+    }),
+  };
 }

@@ -1,3 +1,11 @@
+import {
+  continuationOf,
+  pagedFields,
+  pagedFieldsAbsentOrValid,
+  type PagedFields,
+  type PagedWireFields,
+  type Paging,
+} from "./paging-contract.ts";
 import { validAccountConnection, type AccountConnection } from "./account-connection-contract";
 export type IdentityStatus = "identified" | "provider-local" | "aggregate" | "unresolved";
 export type IdentityOrigin = {
@@ -59,8 +67,9 @@ export interface IdentityCoverageRow {
   aggregate: number;
   unresolved: number;
 }
-export interface IdentityPage<T> {
+export interface IdentityPage<T> extends PagedWireFields {
   rows: T[];
+  /** Deprecated in favour of `next` and `paging` (ADR 0128); kept for one release. */
   coverage: { limit: number; nextOffset: number | null; truncated: boolean };
 }
 export type IdentityCoverage = IdentityPage<IdentityCoverageRow>;
@@ -71,6 +80,15 @@ export function nextIdentityOffset(offset: number, hasMore: boolean): number | n
   const next = offset + IDENTITY_PAGE_LIMIT;
   if (!Number.isSafeInteger(next)) throw new RangeError("pagination_offset_overflow");
   return next;
+}
+/** The `next` and `paging` of an identity page at `offset` holding `returned` rows (ADR 0128). */
+export function identityPaging(offset: number, returned: number, hasMore: boolean): PagedFields {
+  const next = nextIdentityOffset(offset, hasMore);
+  return pagedFields({
+    limit: IDENTITY_PAGE_LIMIT,
+    returned,
+    next: next === null ? null : { offset: next },
+  });
 }
 const object = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
@@ -104,6 +122,15 @@ export function validIdentityResponse(path: string, value: unknown): boolean {
     value.coverage.limit !== 100 ||
     typeof value.coverage.truncated !== "boolean" ||
     !(value.coverage.nextOffset === null || count(value.coverage.nextOffset))
+  )
+    return false;
+  // `next` and `paging` (ADR 0128) agree with the deprecated coverage.
+  if (
+    !pagedFieldsAbsentOrValid(value) ||
+    (Object.hasOwn(value, "paging") &&
+      (continuationOf(value, "offset") !== value.coverage.nextOffset ||
+        (value.paging as Paging).returned !== value.rows.length ||
+        (value.paging as Paging).hasMore !== value.coverage.truncated))
   )
     return false;
   return value.rows.every((row) => {

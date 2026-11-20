@@ -36,6 +36,7 @@ import {
   type HoldingsChangeContainer,
 } from "./holdings-change.ts";
 import { decodeKeysetCursor, encodeKeysetCursor } from "./paging.ts";
+import { pagedFields, type PagedFields } from "../../observation-shared/src/paging-contract.ts";
 import type { REPORTED_STATE_ZONE } from "./reported-state.ts";
 import { decimalToString, isZeroDecimal, type ValueStatus } from "./values.ts";
 
@@ -87,7 +88,8 @@ interface HoldingsChangeSummaryPage {
   nextCursor: string | null;
 }
 
-export interface HoldingsChangeSummary {
+/** `next` and `paging` (ADR 0128) beside the deprecated `page.nextCursor`. */
+export interface HoldingsChangeSummary extends PagedFields {
   schemaVersion: typeof HOLDINGS_CHANGE_SUMMARY_SCHEMA;
   detail: "summary";
   policy: typeof HOLDINGS_CHANGE_POLICY;
@@ -248,6 +250,15 @@ export async function summarizeHoldingsChange(
     };
   });
 
+  const nextCursor = hasMore
+    ? encodeKeysetCursor({
+        s: change.contextId,
+        f: await cursorFilterDigest(change),
+        k: "",
+        t: offset + shown.length,
+      })
+    : null;
+
   const reasonCounts: Partial<Record<HoldingChangeReason, number>> = {};
   for (const reason of HOLDING_CHANGE_REASONS) {
     const holdings = change.holdings.filter((holding) => holding.reasons.includes(reason)).length;
@@ -275,15 +286,13 @@ export async function summarizeHoldingsChange(
         limit: request.limit,
         listed: lines.length,
         hasMore,
-        nextCursor: hasMore
-          ? encodeKeysetCursor({
-              s: change.contextId,
-              f: await cursorFilterDigest(change),
-              k: "",
-              t: offset + shown.length,
-            })
-          : null,
+        nextCursor,
       },
+      ...pagedFields({
+        limit: request.limit,
+        returned: items.length,
+        next: nextCursor === null ? null : { cursor: nextCursor },
+      }),
       coverage: {
         containersWithoutSnapshot: change.coverage.containersWithoutSnapshot.map((entry) => ({
           ...entry,

@@ -1,5 +1,6 @@
 // Public scheduling contract. No credentials, bank values or provider response text.
 import type { MaintenanceSurveyView } from "./maintenance-survey-model";
+import { pagedFields, type PagedFields } from "../../observation-shared/src/paging-contract";
 export type SchedulePattern =
   | { kind: "daily"; time: string; weekdays: number[] }
   | { kind: "interval"; minutes: number };
@@ -250,7 +251,8 @@ export const MAINTENANCE_SUMMARY_LINES = 16;
  * lines that page holds, and its `scheduleCount` and `ruleCount` say how
  * many it has in all.
  */
-export interface MaintenanceSummary {
+/** `next` and `paging` (ADR 0128) sit beside the deprecated `coverage.nextOffset`. */
+export interface MaintenanceSummary extends PagedFields {
   detail: "summary";
   sources: {
     source: string;
@@ -371,6 +373,7 @@ export function maintenanceReadSummary(read: MaintenanceRead, offset = 0): Maint
       rules: whole.rules.slice(Math.max(0, from - schedules), Math.max(0, to - schedules)),
     });
   }
+  const nextOffset = end < first ? end : null;
   return {
     detail: "summary",
     sources: page,
@@ -380,8 +383,13 @@ export function maintenanceReadSummary(read: MaintenanceRead, offset = 0): Maint
       lines: first,
       limit: MAINTENANCE_SUMMARY_LINES,
       offset,
-      nextOffset: end < first ? end : null,
+      nextOffset,
     },
+    ...pagedFields({
+      limit: MAINTENANCE_SUMMARY_LINES,
+      returned: Math.max(0, Math.min(end, first) - offset),
+      next: nextOffset === null ? null : { offset: nextOffset },
+    }),
   };
 }
 export const TIME = /^([01]\d|2[0-3]):[0-5]\d$/u;

@@ -12,6 +12,12 @@
 // operation-record-contract.test.ts` pins them to the application's own.
 import { hasExactKeys, isOneOf, isRecord, isSafeInt, type Guard } from "../../domain/src/guards.ts";
 import { validInstantText } from "../../domain/src/time.ts";
+import {
+  continuationOf,
+  pagedFieldsAbsentOrValid,
+  type PagedWireFields,
+  type Paging,
+} from "./paging-contract.ts";
 
 export const OPERATION_RECORD_PATH_PREFIX = "/api/ops/v1/operations/";
 const OPERATION_RECORD_SCHEMA = "kogane-operation-v1";
@@ -542,7 +548,8 @@ export interface OperationSummaryWire {
   updatedAt: string;
 }
 
-export interface OperationListPageWire {
+/** `next` and `paging` (ADR 0128) sit beside the deprecated `nextCursor`. */
+export interface OperationListPageWire extends PagedWireFields {
   schemaVersion: typeof OPERATION_LIST_SCHEMA;
   statusFilterMatches: typeof STATUS_FILTER_MATCHES;
   operations: OperationSummaryWire[];
@@ -631,7 +638,18 @@ export function validOperationListPage(
 ): value is OperationListPageWire {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["schemaVersion", "statusFilterMatches", "operations", "nextCursor"]) ||
+    !(
+      hasExactKeys(value, ["schemaVersion", "statusFilterMatches", "operations", "nextCursor"]) ||
+      hasExactKeys(value, [
+        "schemaVersion",
+        "statusFilterMatches",
+        "operations",
+        "nextCursor",
+        "next",
+        "paging",
+      ])
+    ) ||
+    !pagedFieldsAbsentOrValid(value) ||
     value.schemaVersion !== OPERATION_LIST_SCHEMA ||
     value.statusFilterMatches !== STATUS_FILTER_MATCHES ||
     !Array.isArray(value.operations) ||
@@ -650,5 +668,11 @@ export function validOperationListPage(
   )
     return false;
   // The service names the last row as the cursor exactly when a row follows it.
-  return value.nextCursor === null || value.nextCursor === rows.at(-1)?.operationId;
+  if (value.nextCursor !== null && value.nextCursor !== rows.at(-1)?.operationId) return false;
+  // `next` and `paging` say the same (ADR 0128).
+  return (
+    !Object.hasOwn(value, "paging") ||
+    (continuationOf(value, "cursor") === value.nextCursor &&
+      (value.paging as Paging).returned === rows.length)
+  );
 }

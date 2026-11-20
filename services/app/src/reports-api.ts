@@ -8,6 +8,7 @@ import {
   type CalculationRunRow,
   type ReportArtifactRow,
 } from "../../../packages/application/src/query/report-artifacts.ts";
+import { offsetPagedFields } from "../../../packages/observation-shared/src/paging-contract.ts";
 import { HttpError, json } from "./http";
 import { decimalPolicySelection } from "./decimal-policy";
 import {
@@ -99,6 +100,12 @@ async function listReports(env: Env, url: Pick<URL, "searchParams">): Promise<un
       createdAt: row.created_at,
     })),
     nextCursor: rows.length > REPORTS_PAGE_SIZE ? String(offset + REPORTS_PAGE_SIZE) : null,
+    ...offsetPagedFields({
+      limit: REPORTS_PAGE_SIZE,
+      offset,
+      returned: page.length,
+      hasMore: rows.length > REPORTS_PAGE_SIZE,
+    }),
   };
 }
 

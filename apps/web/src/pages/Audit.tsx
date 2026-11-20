@@ -328,7 +328,9 @@ function Refusal({ error, onRestart }: { error: ApiError; onRestart: () => void 
     );
   if (error.status === 404)
     return <EmptyState>この接続先は監査ログを提供していません。</EmptyState>;
-  if (error.status === 409)
+  // A cursor issued under other filters, or one the log no longer issues
+  // (ADR 0128): start again from the newest record.
+  if (error.code === "cursor_mismatch" || error.code === "invalid_cursor")
     return (
       <div className="state state-error" role="alert">
         <span className="state-title">続きのページを読めません</span>
@@ -360,7 +362,7 @@ function Records({ filters }: { filters: AuditFilters }): ReactNode {
   if (
     query.isError &&
     query.error instanceof ApiError &&
-    [400, 403, 404, 409].includes(query.error.status)
+    [400, 403, 404].includes(query.error.status)
   )
     return <Refusal error={query.error} onRestart={restart} />;
   return (

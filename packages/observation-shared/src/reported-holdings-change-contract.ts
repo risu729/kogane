@@ -10,6 +10,7 @@
 // The summary (`detail=summary`, the default; ADR 0075 amendment 2026-11-19)
 // has its own validator below: changed lines only, the same closed codes and
 // the same refusal of a total.
+import { continuationOf, pagedFieldsAbsentOrValid, type Paging } from "./paging-contract.ts";
 import {
   HOLDINGS_CHANGE_DETAILS,
   HOLDINGS_CHANGE_SUMMARY_PAGE_SIZES,
@@ -619,7 +620,11 @@ function validReasonCounts(value: unknown, notComparable: number): boolean {
 export function validReportedHoldingsChangeSummary(value: unknown): boolean {
   if (
     !record(value) ||
+    // `next` and `paging` (ADR 0128) beside the deprecated `page`, in the
+    // release that keeps both.
+    !pagedFieldsAbsentOrValid(value) ||
     !exactKeys(value, [
+      ...(Object.hasOwn(value, "paging") ? (["next", "paging"] as const) : []),
       "apiVersion",
       "schemaVersion",
       "detail",
@@ -687,6 +692,10 @@ export function validReportedHoldingsChangeSummary(value: unknown): boolean {
     (page.hasMore
       ? typeof page.nextCursor === "string" && HOLDINGS_CHANGE_CURSOR.test(page.nextCursor)
       : page.nextCursor === null) &&
+    (!Object.hasOwn(value, "paging") ||
+      (continuationOf(value, "cursor") === page.nextCursor &&
+        (value.paging as Paging).limit === page.limit &&
+        (value.paging as Paging).returned === items.length)) &&
     validContainers(value.containers, items) &&
     items.every((item) => validSummaryLine(item, value.containers as Record<string, unknown>)) &&
     order.every((index, at) => at === 0 || index >= order[at - 1]!) &&

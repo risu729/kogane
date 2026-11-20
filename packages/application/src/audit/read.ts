@@ -9,8 +9,14 @@ import {
   auditRecordView,
 } from "./store.ts";
 import { AUDIT_ID } from "./vocabulary.ts";
+import type { PagedFields } from "../../../observation-shared/src/paging-contract.ts";
 
-type Refusal = "unauthorized" | "evidence_restricted" | "invalid_query" | "stale_context";
+type Refusal =
+  | "unauthorized"
+  | "evidence_restricted"
+  | "invalid_query"
+  | "invalid_cursor"
+  | "cursor_mismatch";
 function perimeter(grant: Grant): AuditReadPerimeter | null {
   if (!grantAllows(grant, "audit.read") || grant.scopes.accounts !== "*") return null;
   return {
@@ -46,7 +52,8 @@ export async function readAuditForGrant(input: {
   filters: AuditPageFilters;
   cursor: string | null;
 }): Promise<
-  { ok: true; records: AuditRecordView[]; cursor: string | null } | { ok: false; code: Refusal }
+  | ({ ok: true; records: AuditRecordView[]; cursor: string | null } & PagedFields)
+  | { ok: false; code: Refusal }
 > {
   const p = perimeter(input.grant);
   if (!p)

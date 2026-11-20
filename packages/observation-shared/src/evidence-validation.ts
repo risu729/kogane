@@ -9,6 +9,12 @@ import type {
   EvidenceRunList,
 } from "./evidence-contract.ts";
 import { EVIDENCE_PAGE_LIMIT } from "./evidence-contract.ts";
+import {
+  continuationOf,
+  pagedFieldsAbsentOrValid,
+  type PagedWireFields,
+  type Paging,
+} from "./paging-contract.ts";
 
 type Check<T> = (value: unknown) => value is T;
 type Shape<T> = { [K in keyof T]-?: Check<T[K]> };
@@ -116,18 +122,42 @@ const meta = object<EvidenceMeta>({
   }),
   sources: array(object<EvidenceMeta["sources"][number]>({ id: isEvidenceSourceId, label: text })),
 });
+/**
+ * `next` and `paging` (ADR 0128), judged by `pagedAgrees` beside the
+ * deprecated `nextCursor` they must agree with; absent during the release
+ * that keeps both.
+ */
+const deferred =
+  <T>(): Check<T> =>
+  (_value): _value is T =>
+    true;
+function pagedAgrees(list: { items: unknown[]; nextCursor: string | null }): boolean {
+  const value = list as unknown as Record<string, unknown> & typeof list;
+  if (!pagedFieldsAbsentOrValid(value)) return false;
+  if (!Object.hasOwn(value, "paging")) return true;
+  const paging = value.paging as Paging;
+  return (
+    continuationOf(value, "cursor") === value.nextCursor &&
+    paging.limit === EVIDENCE_PAGE_LIMIT &&
+    paging.returned === value.items.length
+  );
+}
 const runs = object<EvidenceRunList>({
   apiVersion: version,
   sourceId: isEvidenceSourceId,
   coverage: literal("sealed-only"),
   items: array(run),
   nextCursor: nullable(isEvidenceCursor),
+  next: deferred<PagedWireFields["next"]>(),
+  paging: deferred<PagedWireFields["paging"]>(),
 });
 const artifacts = object<EvidenceArtifactList>({
   apiVersion: version,
   run,
   items: array(artifact),
   nextCursor: nullable(isEvidenceCursor),
+  next: deferred<PagedWireFields["next"]>(),
+  paging: deferred<PagedWireFields["paging"]>(),
 });
 const detail = object<EvidenceArtifactDetail>({
   apiVersion: version,
@@ -202,7 +232,8 @@ export function validEvidenceResponse(path: string, value: unknown): boolean {
         value.items.every((item) => item.sourceId === request.sourceId) &&
         unique(value.items.map((item) => item.id)) &&
         (value.nextCursor === null ||
-          (value.items.length > 0 && value.nextCursor !== request.cursor))
+          (value.items.length > 0 && value.nextCursor !== request.cursor)) &&
+        pagedAgrees(value)
       );
     case "artifacts":
       return (
@@ -212,7 +243,8 @@ export function validEvidenceResponse(path: string, value: unknown): boolean {
         unique(value.items.map((item) => item.id)) &&
         value.items.length <= value.run.artifactCount &&
         (value.nextCursor === null ||
-          (value.items.length > 0 && value.nextCursor !== request.cursor))
+          (value.items.length > 0 && value.nextCursor !== request.cursor)) &&
+        pagedAgrees(value)
       );
     case "artifact":
       return (

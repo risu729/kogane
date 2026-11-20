@@ -161,20 +161,27 @@ when `limit` is a number.
 - **Inputs are replaced outright** where renamed (`after` in S5): the owner's MCP clients re-list the
   tools each session and the web UI moves in the same pull request, and an old name is refused, never
   misread.
-- **Web UI.** Each slice's validators accept and check `next` and `paging` on the answers it converts;
-  the pages keep reading the old fields until S9 moves them to `next`/`paging` (or a slice that edits
-  a page anyway moves it earlier).
-- **Conformance.** One walk test (`services/app/test/paging-conformance.test.ts`) calls each converted
-  tool over `/mcp`, follows only `next.arguments`, and checks it reaches `next: null` with every
-  seeded item once, no duplicate and no gap, and `paging` consistent on every page. A registry test
-  lists every published tool that takes a continuation argument as either converted (walked) or not
-  yet converted with its slice; the not-yet list must be empty at S9.
+- **Web UI.** Each slice's shared validators check `next` and `paging` when an answer carries them,
+  and that they say what the old fields say; until S9 they also accept an answer without them (the
+  wire types declare them optional, `PagedWireFields`), so the UI's fixtures and any answer cached
+  across a deploy still validate. The server sends both on every converted read, which the
+  conformance walk checks. The pages keep reading the old fields until S9 moves them to
+  `next`/`paging` (or a slice that edits a page anyway moves it earlier); S9 makes the new fields
+  required. A page that explains a refused cursor moves with the refusal in the same slice (S1: the
+  監査ログ and 依頼の一覧 pages).
+- **Conformance.** A shared walk (`packages/observation-shared/test-support/paging-walk.ts`) calls a
+  converted tool, follows only `next.arguments`, and checks it reaches `next: null` with every seeded
+  item once, no duplicate and no gap, and `next` and `paging` valid on every page. A registry
+  (`services/app/test/paging-registry.ts`) names every published tool that takes a continuation
+  argument as either walked (with the test that walks it) or waiting (with its slice), and
+  `ui-mcp-parity.test.ts` checks the published tool list against it; the waiting list must be empty
+  at S9.
 
 ### 6. Slices
 
 S1 (this ADR's pull request) adds the contract to `packages/observation-shared/src/paging-contract.ts`
-and converts the reads no in-flight branch touches; S2–S7 convert the rest after the branches named in
-the plan merge; S8 binds offsets; S9 removes the deprecated fields. The plan's §3 names each slice and
+and converts the reads no in-flight branch touches, except `rewards.read`, whose holdings page unit
+needs a decision first (S1b); S2–S7 convert the rest after the branches named in the plan merge; S8 binds offsets; S9 removes the deprecated fields. The plan's §3 names each slice and
 what it waits for.
 
 ## Consequences
@@ -197,10 +204,20 @@ what it waits for.
 - `packages/observation-shared/test/paging-contract.test.ts`: the validator accepts each legal
   combination of `next` and `paging` and refuses each broken invariant; the builders produce only
   valid values; the refusal builders produce the family's codes and statuses.
-- `services/app/test/paging-conformance.test.ts`: the walk over every converted tool on `/mcp`, and the
-  registry of converted and not-yet-converted paged tools.
+- `services/app/test/paging-conformance.test.ts` and `paging-conformance-cards.test.ts`: the walk
+  over the converted reads on `/mcp` (the operations list on its route too, with the same calls and
+  rows), with the refusals of a changed filter and a foreign cursor; the holdings change and the
+  purchase lines and events are walked in their own test files on their seeded stores, and the
+  maintenance summary over the pure function the tool answers
+  (`packages/collection/test/maintenance-summary.test.ts`).
+- `services/app/test/ui-mcp-parity.test.ts`: every published tool that takes a continuation argument
+  is walked or waiting for a named slice; each walked tool's description names `next.arguments` and
+  `paging`.
 - The existing parity tests (route, `/api/agent/v1/*` and `/mcp` give one answer) cover the new fields
   on every converted page read; each converted read's own test checks `next` and `paging` against its
   old fields on a first, middle and last page.
-- `services/app/test/ui-mcp-parity.test.ts`: every description stays within 2,048 characters.
+- `services/app/test/ui-mcp-parity.test.ts`: every published description stays within 2,048
+  characters.
+- The frozen-handler differential tests of the card settlement routes strip `next` and `paging` only
+  after checking they agree with `nextOffset` and `nextPage`, so every other byte is still compared.
 - The web UI's schema tests accept the converted answers with the new fields.
