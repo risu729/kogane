@@ -37,6 +37,18 @@ const LABELS: ReadonlyMap<string, string> = new Map([
 export const SBI_SHINSEI_POLICY_VERSION = 2;
 
 /**
+ * The SMBC identity policy version that classifies the AUD foreign ordinary
+ * deposit reference (ADR 0118). Under policy 1 no rule matched
+ * `smbc-bank:ordinary-foreign-aud`, so it was `unresolved` under the source's
+ * yen-deposit label; a run recorded under policy 1 keeps that mapping as
+ * evidence, and a policy-2 run appends the classification as a new mapping
+ * revision of the same source account.
+ */
+export const SMBC_BANK_POLICY_VERSION = 2;
+/** `smbc-foreign-ordinary-balance`'s one reference (`SOURCE_ACCOUNT`). */
+const SMBC_FOREIGN_ORDINARY_AUD = "smbc-bank:ordinary-foreign-aud";
+
+/**
  * The parser's fixed non-account references (`SBI_SHINSEI_FX_BOARD_ACCOUNT`,
  * `SBI_SHINSEI_CUSTOMER_ACCOUNT`). Each takes the role and `aggregate` status
  * the rules already give the same kind of provider statement elsewhere: the
@@ -153,6 +165,20 @@ export function otherIdentity(input: IdentityInput): IdentityPlan {
       break;
     case "smbc-bank":
       if (a === "smbc-bank:ordinary-yen") account("deposit", "audited-ordinary-yen-scope");
+      // The AUD balance of the login's one foreign ordinary account: the
+      // collector refuses a top page without exactly one foreign ordinary
+      // detail link, and a detail page without exactly one `通貨：A$`
+      // section (docs/sources/smbc-bank.md). The history page heads that
+      // account with `外貨` and its own account number, which the observation
+      // found differs from the top form's `moudaiAcNo`; the rule keys it apart
+      // from the yen ordinary deposit and claims no relation between them.
+      else if (
+        a === SMBC_FOREIGN_ORDINARY_AUD &&
+        (input.policyVersion ?? SMBC_BANK_POLICY_VERSION) >= SMBC_BANK_POLICY_VERSION
+      ) {
+        account("deposit", "collector-single-foreign-ordinary-aud-scope");
+        plan.account.label = "三井住友銀行 外貨普通預金（AUD）";
+      }
       break;
     case "mizuho-bank":
       // The parser's reference: yen ordinary deposit, 3-digit branch code and

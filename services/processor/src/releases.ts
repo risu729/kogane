@@ -155,6 +155,18 @@ async function deployedReleases(
   );
 }
 
+/**
+ * Registers one release. A release already registered is skipped: its
+ * `release_id` is the digest of its manifest, so the same id is the same
+ * release (`ON CONFLICT(release_id) DO NOTHING`, the table's only key). The
+ * stable-code-digest trigger runs before that check and still refuses a
+ * changed parser at the same version. A release the schema refuses (a CHECK or
+ * NOT NULL failure) raises; `OR IGNORE` skipped it without an error and the
+ * parse went on under an id with no `parser_releases` row. The parse attempt
+ * and the register route answer any registration that raises as
+ * `parser_release_conflict`, the refused row included; in the sweep's batch
+ * (`registerDeployedReleases`) it fails the sweep.
+ */
 export function releaseInsert(
   db: D1Database,
   release: RegisteredRelease,
@@ -162,9 +174,10 @@ export function releaseInsert(
 ): D1PreparedStatement {
   return db
     .prepare(
-      `INSERT OR IGNORE INTO parser_releases(release_id,parser_name,semantic_version,code_digest,
+      `INSERT INTO parser_releases(release_id,parser_name,semantic_version,code_digest,
         input_contract_version,output_contract_version,metadata_extractor_release,
-        dependency_digests_json,registered_at) VALUES(?,?,?,?,?,?,?,?,?)`,
+        dependency_digests_json,registered_at) VALUES(?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(release_id) DO NOTHING`,
     )
     .bind(
       release.releaseId,
@@ -200,6 +213,8 @@ export async function registerDeployedReleases(
   const releases = await deployedReleases(LEGACY_METADATA_RELEASE, parsers);
   const results = await db.batch(releases.map((release) => releaseInsert(db, release, now)));
   registered = true;
+  // Each statement's own `changes`: 1 for a new release, 0 for a skipped one
+  // (`parser_releases` has no trigger that writes).
   return results.reduce((total, result) => total + result.meta.changes, 0);
 }
 

@@ -708,6 +708,28 @@ Resume implementation when a held contract provides an observed schema; first
 resolve the foreign-time selection boundary. The existing movement collector
 is unchanged, and transfers into or out of deposits are not classified as income.
 
+## 2026-11-20: foreign time-deposit history
+
+Read-only check in the owner's signed-in Chrome for
+[issue 1243](https://github.com/risu729/kogane/issues/1243). The transaction
+menu's `取引履歴 定期預金` leads to `/pages/da/daea0200/`, whose product list
+offers `円定期預金商品`, `外貨定期預金商品`, `積み立て定期預金` and further
+products, and, for foreign products, a currency list. `表示` with blank dates
+(the screen's default period) sent POST
+`/custom-web00/daea/cust-web/timedeposit-transaction/hystorylist-acquisition`
+with private account fields plus `timeAndSavingsBasisProductTyp=02` (foreign),
+`currencyCd` (ISO code), `rescDnTrNUSg=0`, `rescTrNUSg=0`, `maximumAcqCnt=10`,
+`acquisitionStartCount=1`. For each currency queried, the response was the
+empty shape seen on 2026-11-09: only `errors` with code `EFA00005` and
+`responseBizCommon.bizResult` `8`, matching the visible
+`該当する定期預金はありません。`.
+
+This is a history route searched over the default period, not a contract
+list. It shows no foreign time-deposit activity in that period; it does not
+prove that no older contract is still held, and products such as
+`積み立て定期預金` were not queried separately. A held contract still needs an
+observed schema before any parser is added.
+
 ## 2026-11-11: retained history row order and CSV encoding
 
 Read-only owner-browser observation at `/pages/ea/eaba0600/`, with the start
@@ -751,3 +773,25 @@ An older CSV replay cannot displace a newer JSON-only correction. JSON-only
 retained history keeps the legacy same-day/page-order limitation; it is not a
 substitute for the complete official CSV and is not guaranteed to identify a
 day's final transaction. Unrelated sources keep their existing ordering.
+
+## 2026-11-19: currencies outside the minor-unit table
+
+The first scheduled runs of the retained-history query (from fetch run 1923,
+2026-11-18 21:00 UTC) stored one CSV and one first JSON page for each of the
+eight foreign currencies CAD, CHF, EUR, GBP, HKD, NZD, SEK and ZAR. Each held
+a single movement with a blank `為替レート`. A read-only replay (closed
+categories and parser throw sites only, no payload) showed every one of the
+16 artifacts refused at the same place: the amount was "not exactly
+representable" because Kogane's minor-unit table (`packages/parsers/src/money.ts`)
+names only JPY, USD and AUD, so no minor-unit integer could exist for these
+currencies at all. JPY, USD and AUD published unchanged.
+
+History parsers 1.0.5 (JSON) and 1.0.6 (CSV) keep the exact provider decimal as
+`amountText`/`amountScale` and omit `amountMinor` for any currency the table
+does not name, the way the SBI Shinsei parsers record foreign savings. The
+amount must still be an unsigned exact decimal and the balance an exact
+decimal. Known-exponent currencies keep their existing minor-unit checks and
+row identities. For the other currencies the row identity uses canonical exact
+decimals (`1.50` and `1.5` are the same row), so the CSV and a JSON page name
+one row. No exponent is added to the shared table here: that would change
+other parsers' outputs and is a separate decision.

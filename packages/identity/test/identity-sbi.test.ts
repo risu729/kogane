@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { sbiIdentity } from "../src/sbi.ts";
 import type { IdentityInput } from "../src/types.ts";
-import type { ArtifactMeta, Observation } from "../../parsers/src/types.ts";
+import type { ArtifactMeta, Observation, Parser } from "../../parsers/src/types.ts";
+import { sbiForeignCashHistory } from "../../parsers/src/parsers/sbi-foreign-cash-history.ts";
+import {
+  sbiIncomePayments,
+  sbiRealisedGains,
+} from "../../parsers/src/parsers/sbi-income-history.ts";
+import { incomeBundle } from "../../parsers/test/fixtures/sbi-income.ts";
 import { sbiDomesticCashPositions } from "../../parsers/src/parsers/sbi-domestic-cash-positions.ts";
 import { sbiDomesticTradeRecords } from "../../parsers/src/parsers/sbi-domestic-trade-records.ts";
 import { sbiForeignCashPositions } from "../../parsers/src/parsers/sbi-foreign-cash-positions.ts";
@@ -45,6 +51,17 @@ function fromObservation(observation: Observation, ordinal: number): IdentityInp
     extra: observation.extra,
   });
 }
+const ARTIFACT: ArtifactMeta = {
+  id: 1,
+  sourceId: "sbi-securities",
+  runStatus: "success",
+  runFailureCount: 0,
+  dataset: null,
+  url: null,
+  mime: "application/json",
+  fetchedAt: "2099-01-01T00:00:00Z",
+  sha256: "synthetic",
+};
 describe("SBI identity", () => {
   test("friendly names are display-only and custody labels preserve exact codes", () => {
     const original = sbiIdentity(input({ securityName: "Synthetic old name" }));
@@ -389,5 +406,72 @@ describe("SBI identity", () => {
         sbiIdentity(input({ sourceAccount: `sbi-securities:domestic:deposit-type=${code}` }))
           .account.label,
       ).toBe(`SBI証券 国内株式 ${label}（区分コード: ${code}）`);
+  });
+
+  test("through the real parsers: references no SBI rule classifies stay unresolved with a closed reason", () => {
+    // What docs/identity-sbi.md states as today's limit: these parsers'
+    // references are organized, never classified by guess.
+    const parse = (parser: Parser, bytes: Uint8Array, dataset: string, fetchRunId = 4) =>
+      parser
+        .parse(bytes, { ...ARTIFACT, dataset })
+        .observations.map((observation, ordinal) =>
+          sbiIdentity({ ...fromObservation(observation, ordinal), fetchRunId }),
+        );
+
+    // Foreign cash history rows state no discriminator: every one, in every
+    // capture, is the bare foreign reference, unresolved.
+    const historyBytes = readFileSync(
+      new URL(
+        "../../../tests/fixtures/observation-pipeline/sbi-parser-boundaries/foreign-cash-history.json",
+        import.meta.url,
+      ),
+    );
+    const history = parse(sbiForeignCashHistory, historyBytes, "foreign-cash-history");
+    // Another capture of the same rows: nothing scopes the reference to its run.
+    expect(
+      parse(sbiForeignCashHistory, historyBytes, "foreign-cash-history", 99).map(
+        (plan) => plan.account.key,
+      ),
+    ).toEqual(history.map((plan) => plan.account.key));
+    expect(history.length).toBeGreaterThan(0);
+    for (const plan of history) {
+      expect(plan.account).toEqual({
+        key: ["sbi-securities:foreign"],
+        label: "SBI証券 外国株式（預り区分: 未確定）",
+        role: "foreign-brokerage",
+        status: "unresolved",
+        reason: "exact-provider-account-reference",
+      });
+      expect(plan.issues).toEqual([
+        "missing-specificAccountCode",
+        "missing-trade-currency",
+        "missing-security-identifier",
+      ]);
+    }
+
+    // Reported income and realised gains: `sbi-securities:<kind>:<accountType>`
+    // is no account scope the rule knows, and no security identifier is read.
+    for (const [parser, kind, dataset] of [
+      [sbiIncomePayments, "income", "income-payments"],
+      [sbiRealisedGains, "gains", "realised-gains"],
+    ] as const) {
+      const plans = parse(
+        parser,
+        new TextEncoder().encode(JSON.stringify(incomeBundle(kind))),
+        dataset,
+      );
+      expect(plans.length).toBeGreaterThan(0);
+      for (const plan of plans) {
+        expect(plan.account.key).toHaveLength(1);
+        expect(plan.account.key[0]).toStartWith(`sbi-securities:${kind}:`);
+        expect(plan.account).toMatchObject({
+          label: "SBI証券（口座区分未確定）",
+          role: "unknown",
+          status: "unresolved",
+        });
+        expect(plan.issues).toEqual(["unknown-sbi-account-scope"]);
+        expect(plan.instruments.map((item) => item.role)).toEqual(["unit"]);
+      }
+    }
   });
 });

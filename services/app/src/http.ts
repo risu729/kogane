@@ -8,9 +8,23 @@ export class HttpError extends Error {
      * amount or an exception message (addendum 10 §9, G3-08).
      */
     readonly refs: readonly string[] = [],
+    /**
+     * Closed hints that travel beside the code, such as `mustMatch` on a
+     * `cursor_mismatch` (ADR 0123): input names only, never a value.
+     */
+    readonly hints: HttpErrorHints = {},
   ) {
     super(code);
   }
+}
+
+/**
+ * The hints an `HttpError` may carry beside its code. The keys are closed, so
+ * a hint can never replace the body's `error`, `requestId` or `refs`.
+ */
+export interface HttpErrorHints {
+  /** The argument names a continuation must repeat as they were (ADR 0123). */
+  readonly mustMatch?: readonly string[];
 }
 
 /**
