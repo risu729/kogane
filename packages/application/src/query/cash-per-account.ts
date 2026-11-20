@@ -43,7 +43,10 @@ import {
   CASH_LEFT_OUT_METRICS,
   CASH_LEFT_OUT_REASONS,
   CASH_METRIC_IDS,
+  CASH_PAGE_BYTES,
   CASH_REPORTED_TWICE,
+  cashAnswerBytes,
+  type CashPerAccountPage,
   type SnapshotDataCoverage,
 } from "../../../observation-shared/src/api-contract.ts";
 import { type ProjectionMeasureRow, subtotalCountKey } from "../../../read-model/src/index";
@@ -394,4 +397,41 @@ export function cashPageLines(
     measurements += count;
   }
   return page;
+}
+
+/**
+ * One page has no room for its first line (or, with no line left, for its
+ * header) within `CASH_PAGE_BYTES`: the read is refused (the route's `413
+ * result_limit_exceeded`), never answered past the bytes or with a line cut.
+ */
+export class CashPageLimitError extends Error {
+  constructor() {
+    super("cash_page_limit_exceeded");
+  }
+}
+
+/**
+ * One page of the cash read: whole lines from `start` up to `limit`
+ * measurements (`cashPageLines`), and fewer when the next line would carry
+ * the tool's answer past `CASH_PAGE_BYTES`, measured on the page `render`
+ * builds of the lines taken (its cursor included) as `/mcp` writes it. A
+ * line is never cut; a page that cannot hold its first line is refused
+ * (`CashPageLimitError`).
+ */
+export function cashPage(
+  lines: readonly KeyedCashLine[],
+  start: number,
+  limit: number,
+  render: (taken: readonly KeyedCashLine[], hasMore: boolean) => CashPerAccountPage,
+): CashPerAccountPage {
+  const candidates = cashPageLines(lines, start, limit);
+  // With no line left (an empty scope), the page is its header alone.
+  let answer: CashPerAccountPage | null = candidates.length === 0 ? render([], false) : null;
+  for (let end = 1; end <= candidates.length; end += 1) {
+    const next = render(candidates.slice(0, end), start + end < lines.length);
+    if (cashAnswerBytes(next) > CASH_PAGE_BYTES) break;
+    answer = next;
+  }
+  if (answer === null || cashAnswerBytes(answer) > CASH_PAGE_BYTES) throw new CashPageLimitError();
+  return answer;
 }

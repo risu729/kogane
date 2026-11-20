@@ -235,7 +235,7 @@ every other latest measurement counted under a closed reason. Its counted
 amounts are the known-assets subtotal's, except that two adopted amounts of
 one unit on one account entity are both left uncounted with
 `cash:account_reported_twice`. Its lines page under the cursor below, whole
-lines up to `limit` measurements; its page and the rules of what is cash are
+lines up to `limit` measurements and 8 KB a page; its page and the rules of what is cash are
 in [agent API: UI read pages](agent-api.md#ui-read-pages) and
 [ADR 0123](adr/0123-summary-detail-for-large-reads.md) (amendment of
 2026-11-20).

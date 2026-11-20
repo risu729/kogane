@@ -701,9 +701,30 @@ export interface CashLeftOut {
 }
 
 /**
+ * The bytes a cash page is held to: the UTF-8 bytes of the tool's answer,
+ * `{ schemaVersion: "kogane-page-read-v1", data }` serialized as `/mcp`
+ * writes its text content, at most the 8 KB an MCP client shows (issue
+ * 1414). The route answers `data` alone, which is shorter.
+ */
+export const CASH_PAGE_BYTES = 8_192;
+
+/**
+ * The bytes of a page read tool's answer that carries `data`, as `/mcp`
+ * writes it (`services/app/src/page-read-tools.ts` names the envelope; a
+ * test there pins this to the text `/mcp` answers).
+ */
+export function cashAnswerBytes(data: unknown): number {
+  return new TextEncoder().encode(JSON.stringify({ schemaVersion: "kogane-page-read-v1", data }))
+    .length;
+}
+
+/**
  * A page holds whole lines up to `limit` measurements (ten by default,
- * `DEFAULT_SUMMARY_PAGE_LIMIT`), as `limit` counts rows on the latest page; a
- * line with more measurements than `limit` is a page of its own.
+ * `DEFAULT_SUMMARY_PAGE_LIMIT`), as `limit` counts rows on the latest page,
+ * and fewer when the next line would carry the tool's answer past
+ * `CASH_PAGE_BYTES`. A line with more measurements than `limit` is a page of
+ * its own; a page that cannot hold its first line within the bytes is
+ * refused (`413 result_limit_exceeded`), never cut.
  */
 export interface CashPageInfo extends SnapshotPageInfo {
   /** Lines in the whole scope; the page holds at most `limit` of them. */

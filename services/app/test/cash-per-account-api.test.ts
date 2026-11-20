@@ -12,10 +12,13 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import { decimalToString } from "../../../packages/domain/src/values";
 import {
+  CASH_PAGE_BYTES,
   CASH_REPORTED_TWICE,
+  cashAnswerBytes,
   type CashPerAccountPage,
   type LatestBalanceSummaryPage,
 } from "../../../packages/observation-shared/src/api-contract";
+import { projectionMeasureSql } from "../../../packages/read-model/src/balance-projection-sql";
 import { pageReadHarness } from "./page-read-harness";
 import { seedRegistry } from "./fixtures";
 import { buildSnapshot, cashSources, entityOf, seedCashSource, smbcCapture } from "./cash-store";
@@ -47,6 +50,8 @@ async function allPages(
     const answer = await page.expectSameAnswer(`${PATH}${search ? `?${search}` : ""}`, TOOL, {
       collection: "cash",
       ...args,
+      // The tool takes the page size as a number.
+      ...(args["limit"] === undefined ? {} : { limit: Number(args["limit"]) }),
     });
     expect(answer.status).toBe(200);
     const body = answer.body as CashPerAccountPage;
@@ -168,12 +173,22 @@ describe("cash per account", () => {
   it("continues a cursor at another page size, and refuses it with other filters", async () => {
     const first = (await page.route(PATH)).body as CashPerAccountPage;
     const cursor = first.page.nextCursor!;
-    const next = (await page.route(`${PATH}?limit=25&cursor=${encodeURIComponent(cursor)}`))
-      .body as CashPerAccountPage;
-    const seen = [...first.lines, ...next.lines].map((line) => line.account);
+    // The rest at 25 measurements a page, each page ending at 8 KB first if it comes first.
+    const rest: CashPerAccountPage[] = [];
+    let next: string | null = cursor;
+    while (next !== null) {
+      const body = (await page.route(`${PATH}?limit=25&cursor=${encodeURIComponent(next)}`))
+        .body as CashPerAccountPage;
+      expect(body.page.limit).toBe(25);
+      rest.push(body);
+      next = body.page.nextCursor;
+    }
+    expect(rest[0]!.lines.length).toBeGreaterThan(first.lines.length);
+    const seen = [...first.lines, ...rest.flatMap((entry) => entry.lines)].map(
+      (line) => line.account,
+    );
     expect(new Set(seen).size).toBe(seen.length);
     expect(seen).toHaveLength(30);
-    expect(next.page.nextCursor).toBeNull();
     const mismatch = await page.expectSameAnswer(
       `${PATH}?source=smbc-bank&cursor=${encodeURIComponent(cursor)}`,
       TOOL,
@@ -264,6 +279,79 @@ describe("cash per account", () => {
     // A fresh walk reads the new grouping: one line fewer, the moved reference on the seen line.
     const fresh = (await page.route(`${PATH}?limit=500`)).body as CashPerAccountPage;
     expect(fresh.page.lines).toBe(unseen.page.lines - 1);
+  });
+
+  it("holds every page to 8 KB as /mcp writes it, and refuses one line that cannot fit", async () => {
+    // The bytes the page is held to are the text `/mcp` answers.
+    const answer = await page.mcpMessage({
+      method: "tools/call",
+      params: { name: TOOL, arguments: { collection: "cash", limit: 500 } },
+    });
+    const text = answer["result"].content[0].text as string;
+    const body = answer["result"].structuredContent.data as CashPerAccountPage;
+    expect(new TextEncoder().encode(text).length).toBe(cashAnswerBytes(body));
+    expect(cashAnswerBytes(body)).toBeLessThanOrEqual(CASH_PAGE_BYTES);
+    // `limit` 500 would take every line; the bytes end the page first, and the walk lists each once.
+    expect(body.page.hasMore).toBe(true);
+    const { pages, sizes } = await allPages({ limit: "500" });
+    for (const size of sizes) expect(size).toBeLessThanOrEqual(CASH_PAGE_BYTES);
+    expect(pages.flatMap((entry) => entry.lines)).toHaveLength(body.page.lines);
+    // An account whose label alone passes the bytes: no page can hold its line.
+    const line = pages.at(-1)!.lines.at(-1)!;
+    const observation = line.references[0]!.amounts[0]!.observationId;
+    const reference = (await env.DB.prepare(
+      "SELECT source_account_id FROM identity_observations WHERE kind='balance' AND observation_id=?",
+    )
+      .bind(observation)
+      .first<string>("source_account_id"))!;
+    const entity = `acc_${"e".repeat(64)}`;
+    const label = "合成".padEnd(3_000, "円");
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO accounts VALUES (?,?,'cash','provider-local')").bind(
+        entity,
+        label,
+      ),
+      env.DB.prepare(
+        `INSERT INTO account_mappings
+           SELECT ?1, ?2, max(revision)+1, ?3, 'manual', 'synthetic-long-label', 1, '2026-11-19T00:00:00Z', ?4, 'provider-local'
+           FROM account_mappings WHERE source_account_id=?2`,
+      ).bind(`cash-long-${String(observation)}`, reference, entity, label),
+    ]);
+    const source = line.references[0]!.source;
+    const refused = await page.expectSameAnswer(`${PATH}?source=${source}`, TOOL, {
+      collection: "cash",
+      source,
+    });
+    expect(refused.status).toBe(413);
+    expect(refused.body).toMatchObject({ error: "result_limit_exceeded" });
+  });
+});
+
+describe("the measure read on D1", () => {
+  it("searches one snapshot by key under every filter the route takes, without table statistics", async () => {
+    // No ANALYZE has run on the READ database: the planner has no statistics.
+    const stats = await env.READ.prepare(
+      "SELECT count(*) AS n FROM sqlite_master WHERE name='sqlite_stat1'",
+    ).first<number>("n");
+    expect(stats).toBe(0);
+    for (const scope of [
+      {},
+      { source: "smbc-bank" },
+      { account: "smbc-bank:synthetic-ordinary-0012" },
+      { instrument: "JPY" },
+      { source: "smbc-bank", account: "smbc-bank:synthetic-ordinary-0012", instrument: "JPY" },
+    ]) {
+      const query = projectionMeasureSql("a".repeat(64), scope);
+      const plan = await env.READ.prepare(`EXPLAIN QUERY PLAN ${query.sql}`)
+        .bind(...query.args)
+        .all<{ detail: string }>();
+      const detail = plan.results.map((row) => row.detail).join(" | ");
+      expect(detail, JSON.stringify(scope)).toMatch(
+        /SEARCH current_balance_projection USING INDEX current_balance_projection_order \(snapshot_id=\?/u,
+      );
+      expect(detail, JSON.stringify(scope)).not.toContain("SCAN current_balance_projection");
+      expect(detail, JSON.stringify(scope)).not.toMatch(/USE TEMP B-TREE/u);
+    }
   });
 });
 

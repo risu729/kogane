@@ -88,8 +88,10 @@ import {
 } from "../../../packages/application/src/query/read-detail.ts";
 import {
   cashGrouping,
-  cashPageLines,
+  cashPage,
+  CashPageLimitError,
   cashPerAccount,
+  type KeyedCashLine,
 } from "../../../packages/application/src/query/cash-per-account.ts";
 import { CASH_METRIC_IDS } from "../../../packages/observation-shared/src/api-contract.ts";
 
@@ -865,9 +867,11 @@ export async function balanceHistoryPage(
  * subtotals per unit and per source over the whole filter scope, and the
  * scope's other measurements counted under a closed reason. The lines page
  * under the snapshot cursor of the other two routes (ADR 0119): whole lines
- * up to `limit` measurements, ten by default, any offered size, a cursor
- * bound to the route, the scope and the read mode. Every page reads the whole scope, so the subtotals and the
- * left-out counts are the same on every page.
+ * up to `limit` measurements, ten by default, any offered size, and fewer
+ * when the next line would carry the tool's answer past 8 KB (`cashPage`); a
+ * cursor bound to the route, the scope, the read mode and the grouping.
+ * Every page reads the whole scope, so the subtotals and the left-out counts
+ * are the same on every page.
  */
 export async function cashPerAccountPage(
   env: Env,
@@ -929,14 +933,13 @@ export async function cashPerAccountPage(
   const start = resolved.afterRowSeq + 1;
   if (start > 0 && (start >= answer.lines.length || resolved.afterSortKey !== grouping))
     throw new HttpError(410, "context_expired");
-  const page = cashPageLines(answer.lines, start, limit);
-  const hasMore = start + page.length < answer.lines.length;
-  const last = page[page.length - 1];
-  return {
+  // Whole lines up to `limit` measurements and the 8 KB an MCP client shows,
+  // measured with this very cursor; no room for one line is 413, never a cut.
+  const render = (taken: readonly KeyedCashLine[], hasMore: boolean): CashPerAccountPage => ({
     schemaVersion: SNAPSHOT_PAGE_SCHEMA_VERSION,
     collection: "cash",
     policyRelease: KNOWN_ASSETS_POLICY,
-    lines: page.map((entry) => entry.line),
+    lines: taken.map((entry) => entry.line),
     subtotals: answer.subtotals,
     leftOut: answer.leftOut,
     liabilitiesCoverage: "unknown",
@@ -944,20 +947,25 @@ export async function cashPerAccountPage(
     page: {
       limit,
       hasMore,
-      nextCursor:
-        hasMore && last
-          ? encodeReadCursor({
-              snapshotId,
-              readInstanceId: target.instanceId,
-              filterDigest: digest,
-              // A digest: a cursor carries no account key or label.
-              sortKey: grouping,
-              position: start + page.length - 1,
-            })
-          : null,
+      nextCursor: hasMore
+        ? encodeReadCursor({
+            snapshotId,
+            readInstanceId: target.instanceId,
+            filterDigest: digest,
+            // A digest: a cursor carries no account key or label.
+            sortKey: grouping,
+            position: start + taken.length - 1,
+          })
+        : null,
       snapshotId,
       paginationVersion: KEYSET_PAGINATION_VERSION,
       lines: answer.lines.length,
     },
-  };
+  });
+  try {
+    return cashPage(answer.lines, start, limit, render);
+  } catch (error) {
+    if (error instanceof CashPageLimitError) throw new HttpError(413, "result_limit_exceeded");
+    throw error;
+  }
 }

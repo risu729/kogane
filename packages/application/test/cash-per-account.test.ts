@@ -7,11 +7,16 @@
 import { describe, expect, test } from "bun:test";
 import {
   cashLeftOutReason,
+  cashPage,
+  CashPageLimitError,
   cashPageLines,
   cashPerAccount,
+  type KeyedCashLine,
   type OrganizedMeasureRow,
 } from "../src/query/cash-per-account.ts";
+import { encodeReadCursor } from "../../storage-d1/src/read/cursor.ts";
 import {
+  cashAnswerBytes,
   CASH_LEFT_OUT_REASONS,
   CASH_METRIC_IDS,
   CASH_REPORTED_TWICE,
@@ -407,17 +412,52 @@ describe("the validator", () => {
 });
 
 describe("size", () => {
-  /** The default first page (`DEFAULT_SUMMARY_PAGE_LIMIT` measurements), in bytes. */
+  /**
+   * The route's page of `cashPage` over `rows`, with a cursor as long as the
+   * route's (64-hex snapshot, filter and grouping digests, a READ instance id).
+   */
+  function walk(rows: OrganizedMeasureRow[], limit: number = DEFAULT_SUMMARY_PAGE_LIMIT) {
+    const answer = cashPerAccount(rows, false);
+    const render =
+      (start: number) =>
+      (taken: readonly KeyedCashLine[], hasMore: boolean): CashPerAccountPage => ({
+        ...page(rows),
+        lines: taken.map((entry) => entry.line),
+        page: {
+          limit,
+          hasMore,
+          nextCursor: hasMore
+            ? encodeReadCursor({
+                snapshotId: "a".repeat(64),
+                readInstanceId: "read-synthetic-0000000000000000000000000000",
+                filterDigest: "b".repeat(64),
+                sortKey: "c".repeat(64),
+                position: start + taken.length - 1,
+              })
+            : null,
+          snapshotId: "a".repeat(64),
+          paginationVersion: "keyset-v2",
+          lines: answer.lines.length,
+        },
+      });
+    const pages: CashPerAccountPage[] = [];
+    let start = 0;
+    do {
+      const next = cashPage(answer.lines, start, limit, render(start));
+      expect(validApiResponse("/api/v2/balances/cash", next)).toBe(true);
+      pages.push(next);
+      start += next.lines.length;
+    } while (pages.at(-1)!.page.hasMore);
+    return { answer, pages };
+  }
+
+  /** The default first page (`DEFAULT_SUMMARY_PAGE_LIMIT` measurements), in bytes, as `/mcp` writes it. */
   function firstPageBytes(rows: OrganizedMeasureRow[]): number {
-    const full = page(rows);
+    const { pages } = walk(rows);
     const lines = cashPageLines(cashPerAccount(rows, false).lines, 0, DEFAULT_SUMMARY_PAGE_LIMIT);
-    const first: CashPerAccountPage = {
-      ...full,
-      lines: lines.map((entry) => entry.line),
-      page: { ...full.page, limit: DEFAULT_SUMMARY_PAGE_LIMIT, hasMore: true, nextCursor: "c" },
-    };
-    expect(validApiResponse("/api/v2/balances/cash", first)).toBe(true);
-    return new TextEncoder().encode(JSON.stringify(first)).length;
+    // At these widths the bytes cut nothing: the page is the measurements' page.
+    expect(pages[0]!.lines).toHaveLength(lines.length);
+    return cashAnswerBytes(pages[0]);
   }
 
   const SOURCES = [
@@ -434,9 +474,14 @@ describe("size", () => {
    * label, a 48-character provider key), spread over five sources; one in
    * `brokerEvery` a broker account with four currencies; every other amount
    * stale with two reasons; and every registry metric that is not cash in
-   * the scope.
+   * the scope. `widths` lengthens the label (characters) and the provider
+   * key past today's.
    */
-  function store(lines: number, brokerEvery: number): OrganizedMeasureRow[] {
+  function store(
+    lines: number,
+    brokerEvery: number,
+    widths: { label: number; key: number } = { label: 20, key: 48 },
+  ): OrganizedMeasureRow[] {
     const rows: OrganizedMeasureRow[] = [];
     for (let index = 0; index < lines; index += 1) {
       const broker = index % brokerEvery === 0;
@@ -444,9 +489,9 @@ describe("size", () => {
       const base = {
         subject_scope_key: `source_account:synthetic-ref-${String(index)}`,
         source_id: source,
-        source_account: `${source}:${"synthetic-ordinary-0000".padEnd(47 - source.length, "0")}`,
+        source_account: `${source}:${"synthetic-ordinary-0000".padEnd(widths.key - 1 - source.length, "0")}`,
         account: `acc_${index.toString(16).padStart(64, "f")}`,
-        label: "合成普通預金".padEnd(20, "円"),
+        label: "合成普通預金".padEnd(widths.label, "円"),
         metric_id: broker ? "broker.foreign-cash-deposit" : "deposit.balance",
         quantity_coefficient: "123456789012",
         quantity_scale: 2,
@@ -510,5 +555,51 @@ describe("size", () => {
       expect(taken.length === 1 || taken.reduce((sum, count) => sum + count, 0) <= 5).toBe(true);
     expect(pages.flat()).toEqual(counts);
     expect(cashPageLines(lines, 0, 1)).toHaveLength(1);
+  });
+
+  test("past today's widths, a page stops before the line that would pass 8 KB, and every line is listed once", () => {
+    const sizes: string[] = [];
+    for (const [label, widths, limit] of [
+      ["labels of 120 characters, keys of 200", { label: 120, key: 200 }, 10],
+      ["labels of 512 characters, keys of 512", { label: 512, key: 512 }, 10],
+      ["labels of 512 characters, keys of 512, limit 500", { label: 512, key: 512 }, 500],
+      ["today's widths, limit 500", { label: 20, key: 48 }, 500],
+    ] as const) {
+      const rows = store(30, 5, widths);
+      const { answer, pages } = walk(rows, limit);
+      for (const entry of pages) expect(cashAnswerBytes(entry), label).toBeLessThanOrEqual(8_192);
+      // Whole lines, each once, in order; the bytes cut a page short, never a line.
+      expect(
+        pages.flatMap((entry) => entry.lines),
+        label,
+      ).toEqual(answer.lines.map((entry) => entry.line));
+      // At these widths the bytes, not the measurements, end at least one page.
+      let start = 0;
+      let trimmed = false;
+      for (const entry of pages) {
+        const measured = cashPageLines(answer.lines, start, limit).length;
+        expect(entry.lines.length, label).toBeLessThanOrEqual(measured);
+        if (entry.lines.length < measured) trimmed = true;
+        start += entry.lines.length;
+      }
+      expect(trimmed, label).toBe(true);
+      sizes.push(
+        `${label}: ${String(pages.length)} pages, largest ${String(Math.max(...pages.map(cashAnswerBytes)))} bytes`,
+      );
+    }
+    console.log(`cash pages past today's widths: ${sizes.join("; ")}`);
+  });
+
+  test("a page that cannot hold one line within 8 KB is refused, never cut", () => {
+    // One account whose label alone passes the bytes.
+    expect(() => walk(store(3, 1_000, { label: 3_000, key: 48 }))).toThrow(CashPageLimitError);
+    // A header that alone passes them: one cash measurement in each of 80
+    // sources and units, each its own `bySource` subtotal.
+    const wide = Array.from({ length: 80 }, (_, index) =>
+      row({ source_id: `synthetic-source-${String(index).padStart(3, "0")}`, unit_ref: "JPY" }),
+    );
+    expect(() => walk(wide)).toThrow(CashPageLimitError);
+    // An empty scope is its header alone, and fits.
+    expect(walk([]).pages).toHaveLength(1);
   });
 });

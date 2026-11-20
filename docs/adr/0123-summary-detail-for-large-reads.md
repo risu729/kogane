@@ -722,13 +722,20 @@ subject, which is the provider reference, not the account entity.
    up to three metric ids with the most rows (`CASH_LEFT_OUT_METRICS`) and
    `moreMetrics`, the overview summary's bound.
 6. **Read and paging.** One read of the snapshot's latest rows of the scope
-   in compact columns (`measureRows`): the subtotal's predicates, its
-   5,000-row bound (`413 result_limit_exceeded` past it, never a partial
-   answer), and a plan that searches one snapshot through
-   `current_balance_projection_order` without table statistics. Only the
+   in compact columns (`measureRows`): the subtotal's scope and view
+   predicates, its 5,000-row bound (`413 result_limit_exceeded` past it,
+   never a partial answer; the bound counts every latest row of the scope,
+   of every metric and state, where the subtotal counts its adopted exact
+   rows, so the cash read is refused on a smaller scope than the one where
+   the subtotal reports itself unavailable), and a plan that searches one
+   snapshot through `current_balance_projection_order` without table
+   statistics, on SQLite and on D1. Only the
    cash rows are organized. A page holds whole lines up to `limit`
    measurements (10 by default, the offered sizes of the balance read), so
-   a line with more is a page alone. The cursor is the balance cursor
+   a line with more is a page alone, and fewer when the next line would
+   carry the tool's answer past 8,192 bytes as `/mcp` writes it (the
+   overview summary's and the account summary's rule); a page that cannot
+   hold its first line is `413 result_limit_exceeded`. The cursor is the balance cursor
    (snapshot, READ instance, a digest of the route, `source`, `account`,
    `instrument` and `identityRead`), continues at any offered `limit` (ADR
    0119), answers `400 cursor_mismatch` with `mustMatch` otherwise, and
@@ -746,23 +753,32 @@ subject, which is the provider reference, not the account entity.
 
 ### Consequences
 
-Measured as the bytes of the MCP result's structured content:
+Measured as the UTF-8 bytes of the text `/mcp` answers (`{ schemaVersion,
+data }` serialized, the page's own cursor included):
 
 | Read                                                                                                                                                                                                                         |                      Bytes |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------: |
 | `{collection: cash}`, synthetic store of 30 cash accounts in four units over five sources (`test/cash-per-account-api.test.ts`), each page                                                                                   | 6,184, 6,713, 6,649, 2,961 |
 | `{collection: cash}`, the answer-size store of #1414 (no cash metric: only `leftOut`)                                                                                                                                        |                        564 |
-| first page, 30 accounts with 64-hex ids, 20-character labels, 48-character keys, half their amounts stale, two four-currency accounts, every registry metric left out (`packages/application/test/cash-per-account.test.ts`) |                      7,582 |
-| the same, every account a one-currency deposit                                                                                                                                                                               |                      6,663 |
-| the same, every account four currencies                                                                                                                                                                                      |                      5,046 |
+| first page, 30 accounts with 64-hex ids, 20-character labels, 48-character keys, half their amounts stale, two four-currency accounts, every registry metric left out (`packages/application/test/cash-per-account.test.ts`) |                      8,065 |
+| the same, every account a one-currency deposit                                                                                                                                                                               |                      7,146 |
+| the same, every account four currencies                                                                                                                                                                                      |                      5,529 |
 
 - Q2 is one call: `bySource` and `byUnit` answer "per bank" and "in all"
-  on the first page, and the lines page at about 6 to 7 KB.
-- Open limits: the headroom of a first page at the realistic worst above
-  is about 600 bytes. Longer labels or provider keys, more sources holding
-  several units (each source and unit is a `bySource` entry of about 140
-  bytes with reasons), or more reasons per amount pass 8 KB; `limit` 10 is
-  the smallest offered size, so no argument shortens a page further.
+  on the first page, and the lines page at about 6 to 8 KB.
+- Every page is held to 8,192 bytes by construction (`CASH_PAGE_BYTES`,
+  `cashPage`, and the validator): a page ends before the line that would
+  carry the tool's answer past them, measured with its own cursor, so
+  longer labels or provider keys, more sources holding several units or
+  more reasons per amount make pages shorter, never larger. At the
+  realistic worst above the measurements end the first page 127 bytes
+  short of the bound; with 120-character labels and 200-character keys
+  the bytes end it (nine pages of 30 accounts), and with 512-character
+  labels and keys a page holds one account.
+- Open limit: a page that cannot hold its first line within 8,192 bytes
+  (a label of thousands of characters, or a `bySource` of some 80 sources
+  and units, which every page repeats) is `413 result_limit_exceeded`,
+  never cut; no argument shortens the header.
 - Open limit and owner decision: the known-assets subtotal of the latest
   page and `financial.query` `holdings` key on the provider reference, so
   an account entity reached through two references of one source that the
@@ -778,6 +794,11 @@ Measured as the bytes of the MCP result's structured content:
   allow-list is the precedent), not this read's.
 - The organization (entity, label) is the current identity's, not the
   snapshot's, as on the latest page.
+- Open limit: `cash:account_reported_twice` is decided within the filter
+  scope. An account entity whose two references fall on either side of a
+  `source` or `account` filter has one of them in the filtered answer, and
+  that one is counted there while the unfiltered answer counts neither.
+  Within one answer nothing is added twice.
 - No screen reads the route yet: like `kogane.changes.since`, it is an
   agent's everyday question; a page is a later slice. `ui-mcp-parity.test.ts`
   passes unchanged (the route is the mapped tool's).
@@ -796,7 +817,11 @@ Measured as the bytes of the MCP result's structured content:
   CORE is partial; the validator refuses a counted amount that is not
   adopted, a zero subtotal, a partial subtotal or an uncounted amount
   without reasons, and a net worth; pages hold whole lines up to their
-  measurements; the size rows above.
+  measurements; the size rows above, measured with a cursor as long as the
+  route's; past today's widths (labels of 120 and 512 characters, keys of
+  200 and 512, `limit` 500) every page is within 8,192 bytes and the walk
+  lists every line once; a line or a header that cannot fit is
+  `CashPageLimitError`.
 - `services/app/test/cash-per-account-api.test.ts`: every page is the same
   answer on the route, `/api/agent/v1/balances.read` and `/mcp`, validates,
   and is under 8 KB; the pages list 30 accounts once each with the same
@@ -806,12 +831,19 @@ Measured as the bytes of the MCP result's structured content:
   `cursor_mismatch` with `mustMatch` under another source and from a
   latest page; two references of one account are one line and not added;
   a cursor is `410 context_expired` after an identity decision moves a
-  reference of a line past the cursor onto an account before it;
-  the published description is within 2,048 characters and names every
-  closed term.
+  reference of a line past the cursor onto an account before it; the
+  bytes measured are those of the text `/mcp` answers, `limit` 500 pages
+  end at 8,192 bytes and list every account once, and an account whose
+  label alone passes them is `413 result_limit_exceeded` on all three
+  paths; the published description is within 2,048 characters and names
+  every closed term.
 - `packages/storage-d1/test/statement-plans.test.ts`: `projectionMeasureSql`
   under every filter searches one snapshot by key, without table
-  statistics.
+  statistics; `cash-per-account-api.test.ts` checks the same on the D1
+  READ binding (no `sqlite_stat1`): a search of
+  `current_balance_projection_order` by snapshot under every filter, no
+  scan and no temporary sort. `packages/storage-d1/test/read-cursor.test.ts`:
+  `measureRows` answers 5,000 rows and refuses 5,001.
 - `services/app/test/mcp-answer-size.test.ts` measures the cash call among
   every read tool's default answer and keeps it under 8 KB; the schema pins
   (`agent-api.test.ts` unchanged: no property was added; `conformance.test.ts`,

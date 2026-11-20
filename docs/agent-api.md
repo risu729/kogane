@@ -979,7 +979,10 @@ leftOut, liabilitiesCoverage: "unknown", dataCoverage, page }`:
   subtotal.
 - **Paging.** A page holds whole lines up to `limit` measurements (10 by
   default; 10, 25, 50, 100, 200 or 500), a line with more being a page
-  alone; `page.lines` counts the scope's lines. The cursor is the v2 balance
+  alone, and fewer when the next line would carry the tool's answer past
+  8,192 bytes as `/mcp` writes it (UTF-8, cursor included); a page that
+  cannot hold its first line is `413 result_limit_exceeded`, never cut.
+  `page.lines` counts the scope's lines. The cursor is the v2 balance
   cursor: bound to the snapshot, the route, `source`, `account`,
   `instrument` and `identityRead`, continued at any offered `limit`
   ([ADR 0119](adr/0119-cursor-page-size.md)), `400 cursor_mismatch` with

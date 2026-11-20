@@ -103,6 +103,8 @@ import {
   CASH_LEFT_OUT_METRICS,
   CASH_LEFT_OUT_REASONS,
   CASH_METRIC_IDS,
+  CASH_PAGE_BYTES,
+  cashAnswerBytes,
   OVERVIEW_FETCH_RUN_STATUSES,
   OVERVIEW_LINE_FAILURE_CODES,
   OVERVIEW_PARSE_RUN_STATUSES,
@@ -1080,7 +1082,9 @@ const cashPerAccountPage: Check<CashPerAccountPage> = (value): value is CashPerA
       .flatMap((line) => line.references)
       .reduce((sum, reference) => sum + reference.amounts.length, 0) <= value.page.limit) &&
   value.lines.length <= value.page.lines &&
-  value.page.hasMore === (value.page.nextCursor !== null);
+  value.page.hasMore === (value.page.nextCursor !== null) &&
+  // At most the bytes an MCP client shows, as the tool answers it.
+  cashAnswerBytes(value) <= CASH_PAGE_BYTES;
 
 /** A full page carries no `detail`; a summary page says it is one. */
 const fullPage =
