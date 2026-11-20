@@ -20,10 +20,12 @@
 import {
   projectionCoverageSql,
   projectionLegacyPageSql,
+  projectionMeasureSql,
   projectionPageSql,
   projectionSubtotalSql,
   SUBTOTAL_ROW_BOUND,
   type ProjectionInputsRow,
+  type ProjectionMeasureRow,
   type ProjectionPageRow,
 } from "../../../read-model/src/balance-projection-sql.ts";
 import {
@@ -129,6 +131,15 @@ export function createReadProjectionReader(
       const query = projectionSubtotalSql(snapshotId, scope, metricIds);
       const rows = await read.all<SubtotalRow>(query.sql, query.args);
       // An oversized scope has no subtotal rather than a partial one (INV05).
+      return rows.length > SUBTOTAL_ROW_BOUND ? null : rows;
+    },
+    async measureRows(
+      snapshotId: string,
+      scope: CollectionScope,
+    ): Promise<ProjectionMeasureRow[] | null> {
+      const query = projectionMeasureSql(snapshotId, scope);
+      const rows = await read.all<ProjectionMeasureRow>(query.sql, query.args);
+      // The same bound as the subtotal: an oversized scope is no answer, never a partial one.
       return rows.length > SUBTOTAL_ROW_BOUND ? null : rows;
     },
   };

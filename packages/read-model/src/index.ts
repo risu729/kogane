@@ -143,6 +143,7 @@ export {
   PROJECTION_PAGE_LIMITS,
   type ProjectionPageLimit,
   type ProjectionInputsRow,
+  type ProjectionMeasureRow,
   type ProjectionPageRow,
   PROJECTION_INPUTS_SQL,
   projectionRelationsSql,
@@ -150,6 +151,7 @@ export {
   balanceHistoryKeysetSql,
   projectionCoverageSql,
   projectionLegacyPageSql,
+  projectionMeasureSql,
   projectionPageSql,
   projectionSubtotalSql,
 } from "./balance-projection-sql";
