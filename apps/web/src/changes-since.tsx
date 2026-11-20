@@ -423,7 +423,14 @@ export function ChangesSincePanel({ sources }: { sources: Overview["sources"] })
         <ErrorState
           error={query.error!}
           label="最近の変化の続き"
-          onRetry={() => void query.fetchNextPage()}
+          // A refused continuation (400: its `since` has passed the digest's
+          // bound since the first page was read, say) would be refused again
+          // as sent; the retry reads the answer again from the clock instead.
+          onRetry={() =>
+            void (query.error instanceof ApiError && query.error.status === 400
+              ? query.refetch()
+              : query.fetchNextPage())
+          }
           retrying={query.isFetchingNextPage}
         />
       ) : (

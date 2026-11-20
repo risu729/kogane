@@ -297,7 +297,10 @@ source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
    `after` = `next.after` and appends that answer's sources and unchanged
    sources. The events line and `notCovered` are the first answer's. A failed
    continuation is an error beside the button, and the answers already read
-   stay.
+   stay. Its retry sends the continuation again, except after a `400`: the
+   same request would be refused again (its `since` past the digest's bound,
+   say, after the page stayed open a day without a refetch), so the retry
+   reads the answer again from the clock (decision 2).
 7. **Refusals.** A `403` (the grant refusals, `unauthorized` and
    `evidence_restricted`) or `404` (a deployment without the route, such as
    the local store) shows no panel. Any other failure (`400`, `413
@@ -335,7 +338,9 @@ source, with no time bound and no per-source view. ADR 0126's 判断待ち panel
   collapsed until opened;
   `notCovered` with its reasons; a continued answer with `after`, its header
   and unchanged counts as 以上 until the last answer; a failed continuation
-  that keeps the answer read, with no header count; the unauthorized run
+  that keeps the answer read, with no header count; a continuation refused
+  as too old a day later, whose retry reads the 30-day window from the clock
+  again and then continues on the new `since`; the unauthorized run
   sections and an events line that is not served; no panel on `403` and on
   `404`; the error state, with no count, on a server error and on an answer
   the contract refuses; the accessibility audit at 1280px and 390px with the

@@ -160,6 +160,7 @@ type Mode =
   | "answer"
   | "paged"
   | "continuation_failed"
+  | "bounded"
   | "refused"
   | "not_served"
   | "failed"
@@ -183,6 +184,8 @@ describe.if(runnable)("the 最近の変化 panel on ホーム", () => {
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let mode: Mode = "answer";
+  /** The server's clock in mode `bounded`, which refuses a `since` past the digest's bound. */
+  let serverNow = Date.now();
   const requests: URLSearchParams[] = [];
   beforeAll(async () => {
     server = Bun.serve({
@@ -245,6 +248,10 @@ describe.if(runnable)("the 最近の変化 panel on ホーム", () => {
               );
             case "paged":
               return Response.json(after === null ? firstPage(since) : secondPage(since));
+            case "bounded":
+              return Date.parse(since) < serverNow - CHANGES_SINCE_MAX_DAYS * 24 * HOUR
+                ? Response.json({ error: "invalid_query" }, { status: 400 })
+                : Response.json(after === null ? firstPage(since) : secondPage(since));
             case "continuation_failed":
               return after === null
                 ? Response.json(firstPage(since))
@@ -479,6 +486,64 @@ describe.if(runnable)("the 最近の変化 panel on ホーム", () => {
           .count(),
       ).toBe(0);
       expect(await panel.getByText("この期間に新しく記録されたものはありません。").count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 30_000);
+
+  test("a continuation refused as too old is retried by reading the answer again from the clock", async () => {
+    mode = "bounded";
+    const page = await browser.newPage();
+    try {
+      const start = Date.now();
+      serverNow = start;
+      await page.clock.setFixedTime(start);
+      const panel = await open(page);
+      await panel.getByText("一覧は続きます", { exact: false }).waitFor();
+      const chosen = page.waitForResponse((response) =>
+        response.url().includes(`${CHANGES_SINCE_PATH}?`),
+      );
+      await panel.getByRole("button", { name: "30日間" }).click();
+      expect((await chosen).status()).toBe(200);
+      // A day later, with no refocus in between, the first page's since is
+      // past the digest's bound, so its continuation is refused as sent.
+      const later = start + 25 * HOUR;
+      serverNow = later;
+      await page.clock.setFixedTime(later);
+      const refused = page.waitForResponse((response) => response.url().includes("after="));
+      await panel.getByRole("button", { name: "続きを読み込む" }).click();
+      expect((await refused).status()).toBe(400);
+      const failed = panel
+        .getByRole("alert")
+        .filter({ hasText: "最近の変化の続きを読み込めませんでした" });
+      await failed.waitFor({ timeout: 10_000 });
+      // The retry reads the first page again from 30 days before the clock,
+      // not the refused continuation again.
+      const again = new Date(later - 30 * 24 * HOUR).toISOString();
+      const reread = page.waitForRequest(
+        (request) => {
+          const query = new URL(request.url()).searchParams;
+          return (
+            request.url().includes(`${CHANGES_SINCE_PATH}?`) &&
+            query.get("after") === null &&
+            query.get("since") === again
+          );
+        },
+        { timeout: 10_000 },
+      );
+      await failed.getByRole("button", { name: "再試行" }).click();
+      await reread;
+      await panel.locator(`time[datetime="${again}"]`).waitFor();
+      const continued = page.waitForResponse((response) => response.url().includes("after="));
+      await panel.getByRole("button", { name: "続きを読み込む" }).click();
+      const answered = await continued;
+      expect(answered.status()).toBe(200);
+      expect(new URL(answered.url()).searchParams.get("since")).toBe(again);
+      await panel
+        .locator("li.changes-source")
+        .filter({ hasText: "synthetic-securities" })
+        .waitFor();
+      expect(await panel.getByRole("alert").count()).toBe(0);
     } finally {
       await page.close();
     }
