@@ -319,7 +319,14 @@ settlement candidate is listed, by source and source account, at most 100
 
 - `latestStatement`: its newest current statement total (by period, then due
   date), with the provider's total and due date, so a card whose last
-  statement is zero still shows how old its answer is;
+  statement is zero still shows how old its answer is. The total is always a
+  quantity: one that is not exact keeps its decimal-v1 status with the reason
+  `stored:<status>` (`missing`, `unparsed`, `conflict`), or `missing` with
+  `decimal_not_projected` when no decimal-v1 value was recorded, the reasons
+  the card purchase read gives the same view's `providerTotal`; it is never
+  null or zero (INV05), and the page shows it as unknown with that reason. An
+  `exact` status without both decimal-v1 columns, which CORE 0024's CHECK
+  never stores, fails the read (`card_debit_accounts_row_invalid`);
 - `stated`: the readings the settlement sweep compared with a candidate (the
   `card_debit_account_statement` rows under `CARD_INFORMATION_READER_VERSION`
   that `card_settlement_debit_account_evidence` cites under
@@ -354,9 +361,10 @@ settlement candidate is listed, by source and source account, at most 100
 
 The page shows it as `カードの引落口座` above `照合候補のない請求`, from
 `GET /api/v2/reconciliation/card-debit-accounts` (operator-only, no
-parameter: any is `400 invalid_query`); agents read the same answer through
+parameter but `view=upcoming`, [below](#upcoming-bills): any other is
+`400 invalid_query`); agents read the same answer through
 `kogane.card-settlements.debit-accounts` ([agent API](agent-api.md#each-cards-debit-account)).
-A malformed evidence or candidate row fails the read
+A malformed evidence, candidate or statement-total row fails the read
 (`card_debit_accounts_row_invalid`), never an answer.
 
 Limits:
@@ -389,6 +397,89 @@ Limits:
   per connection, Vpass's `card-00N`).
 - Nothing is stored: the answer is read from the evidence, decisions and
   candidates each time.
+
+### Upcoming bills
+
+Design: [ADR 0114's 2026-11-19 amendment](adr/0114-card-debit-account-answer.md#amendment-2026-11-19-the-upcoming-view-answers-each-cards-next-bill-and-whether-its-account-covers-it).
+`reviewUpcomingCardBills` (`packages/application/src/query/card-upcoming-bills.ts`,
+rule `card-upcoming-bills-v1` in `packages/domain/src/card-upcoming-bills.ts`)
+answers, for today in Asia/Tokyo, each card's next bill, the account it is
+debited from and whether that account's reported balance covers it. It reads
+the per-card answer above and the [reported state](reported-state.md) for the
+date, and nothing else but the account entities' labels.
+
+- A bill is a card's newest current statement whose provider due date is on
+  or after the date and whose total is not an exact zero or below. Any other
+  card is listed with a closed reason and its last statement: `no_statement`,
+  `payment_date_not_published` (a statement with no readable due date, such
+  as an importer-era Vpass row), `no_statement_due`, `statement_settled` (an
+  accepted settlement of the card covers that month), or
+  `statement_total_refund_or_zero` (an exact total of zero or below, the
+  [unmatched statements](#unmatched-statements) code: nothing is debited for
+  it, so it is never summed into a line, where a refund would offset the
+  bills of other cards debited from the same account). A total that is not
+  exact has no known sign: it stays a bill with its status and reason, and
+  makes its lines `unknown` (`bill_not_exact`).
+- The debit account is the per-card answer's, with its basis and codes. The
+  bank source account is mapped to the account entity the reported state maps
+  it to, when it maps it to exactly one.
+- One line per debit account and debit date counts every bill to the account
+  due by then, summed with `sumQuantities`. The balance is the
+  `deposit.balance` of the entity's references from the newest capture,
+  never a sum of references. `covers` is `yes` or `no` only on exact figures
+  with no reason; otherwise `unknown` with `debit_account_unknown`,
+  `bill_not_exact`, `balance_not_exact`, `balance_before_previous_debit` (the
+  balance was captured on or before the latest card debit from the account
+  due by the date), `cards_with_unknown_account` (a bill with no known
+  account is due by the line's date) or `cards_with_unknown_due_date` (a card
+  of this account, or of an unknown one, has a newest statement with no
+  readable due date that no accepted settlement pays, so its total may be
+  debited by then: it is never left out as if it were zero).
+- An account entity's balance comes from the newest capture among its
+  references; two references captured together that disagree are
+  `conflict` / `balances_disagree`, and references are never added.
+
+The page shows it as `次回の引落` above `カードの引落口座`, from
+`GET /api/v2/reconciliation/card-debit-accounts?view=upcoming` (operator-only;
+`view=upcoming` is the route's one parameter, and any other parameter or
+value is `400 invalid_query`); agents read the same answer through
+`kogane.card-settlements.debit-accounts` with `view: "upcoming"`
+([agent API](agent-api.md#next-card-bills)).
+
+Limits:
+
+- `covers` compares known card bills with the provider's latest balance only:
+  other debits, deposits before the debit date and unbilled card usage are
+  not modelled (`other_debits_not_modelled` on every line).
+- No closing date is answered: neither card source stores one, only the
+  statement month and the due date.
+- Whether a refund statement's credit reaches the bank account, or is carried
+  into the card's next statement, is not observed: a refund is never netted
+  against a bill or added to a balance, so a line can read `no` where the
+  bank would have paid.
+- A card whose debit account is unknown (every Vpass card without an accepted
+  settlement) makes the account lines due on or after its bill `unknown`.
+- A card whose newest statement has no readable due date and no accepted
+  settlement paying it makes every line of its account, or every line when
+  its account is unknown, `unknown` (`cards_with_unknown_due_date`), with no
+  age bound: it lasts until the card has a newer statement with a due date or
+  that settlement is accepted, so a closed card's last such statement keeps
+  it until then. Until the Vpass collector's finalized statements are parsed
+  (proposal v2, Unit A), an importer-era Vpass row with no due date as a
+  card's newest statement does this.
+- Vpass cards are labelled by their account entity, the same for every Vpass
+  card; the source account (`vpass:card-00N`) tells them apart.
+- The reported state reads every account to find the debit accounts. Past its
+  row bound every balance is `missing` / `reported_state_limit_exceeded`.
+- A bank source account is joined to its account entity only through the
+  reported state's entries. A source account the answer names that has no
+  balance or position in the reported state for the date keeps a line of its
+  own (`balance_not_reported`), even if an identity mapping puts it under an
+  entity another line names; that entity's line then does not count its bills.
+- A statement already due before the date is taken as debited on its due
+  date (`no_statement_due`). A bank that debits it later, for example on the
+  next business day, is not modelled; `balance_before_previous_debit` only
+  covers a balance captured on or before the due date itself.
 
 ## Candidate and decision lifecycle
 
@@ -463,8 +554,18 @@ rows, each due date read once per page), or
 `equal_amount_debit_awaiting_sweep` when the window holds a debit the sweep's
 matcher pairs with it, so its candidate appears on the sweep's next pass.
 `debitsInWindow` is the number of rows the read returned (null when none was
-made). Amounts and dates are the provider's; an inexact total is `null`, never
-zero.
+made). Amounts and dates are the provider's. The total is always a quantity
+([ADR 0074, amendment 2026-11-19](adr/0074-card-statement-allocation-planner.md#amendment-2026-11-19-a-statement-total-that-is-not-exact-keeps-its-reason)):
+one that is not exact keeps its decimal-v1 status with the reason
+`stored:<status>` (`missing`, `unparsed`, `conflict`), or `missing` with
+`decimal_not_projected` when no decimal-v1 value was recorded, the reasons
+the card purchase read and each card's debit account give the same view's
+total (one helper, `statementTotal` in
+`packages/application/src/query/card-statement-total.ts`); it is never null
+or zero (INV05), and the page shows it as unknown with that reason. Such a
+statement is still `statement_not_comparable`. An `exact` status without both
+decimal-v1 columns, or a status outside decimal-v1, which CORE 0024's CHECK
+never stores, fails the read (`card_statements_unmatched_row_invalid`).
 
 For `no_equal_amount_debit` only, `planner` is the ADR 0074 planner's answer
 ([amendment 2026-11-07](adr/0074-card-statement-allocation-planner.md#amendment-2026-11-07-a-read-only-caller-on-the-review-page))
@@ -1150,6 +1251,13 @@ readings per card, and the candidates one row per card, bank account and
 decision state. `services/processor/test/card-debit-accounts.test.ts` checks
 without table statistics that readings and decisions are reached by key. Not
 measured on the scale store or on D1.
+
+Upcoming bills cost that read, the reported state for the date (its four
+reads, each bounded by `DATED_STATE_ROW_BOUND`, and its settlement read), and
+`ACCOUNT_LABELS_SQL`, one primary-key lookup per account entity named.
+`packages/application/test/card-upcoming-bills.test.ts` checks that the view
+issues only those reads and, without table statistics, that labels are
+reached by `accounts`' key. Not measured on the scale store or on D1.
 
 ### Readiness
 

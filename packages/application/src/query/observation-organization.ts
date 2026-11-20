@@ -13,6 +13,7 @@ import {
   organizationSql,
 } from "../../../read-model/src/index";
 import { connectionAccountLabel, readAccountConnections } from "./account-connections.ts";
+import { displayAccountLabel, entityAccountLabels } from "./account-labels.ts";
 import {
   preferredInstrumentNames,
   type PreferredInstrumentName,
@@ -81,7 +82,7 @@ const unavailable = (): ObservationOrganization => ({
  * Organizes already-authorized observation references. `latest` decorates
  * with current mapping revisions; `as-recorded` with the revisions the sealed
  * identity run pinned. Display-only overlays (preferred instrument names,
- * connection labels) are current in both modes and carry their own evidence;
+ * connection labels, entity labels) are current in both modes and carry their own evidence;
  * they never change which account or instrument a row is attributed to.
  */
 export async function observationOrganizations(
@@ -196,6 +197,13 @@ export async function observationOrganizations(
   const connections = accountRefs.size
     ? await readAccountConnections(reads, [...accountRefs.values()])
     : new Map();
+  // One label per account entity (ADR 0120), whichever reference a row came through.
+  const entityLabels = await entityAccountLabels(
+    reads,
+    [...output.values()].flatMap((organization) =>
+      organization.account ? [organization.account.targetId] : [],
+    ),
+  );
   for (const organization of output.values()) {
     if (organization.account) {
       const account = organization.account;
@@ -209,6 +217,11 @@ export async function observationOrganizations(
           connection,
         );
       }
+      account.label = displayAccountLabel(
+        account.label,
+        account.method,
+        entityLabels.get(account.targetId),
+      );
     }
     for (const instrument of organization.instruments) {
       const name = names.get(instrument.referenceId);

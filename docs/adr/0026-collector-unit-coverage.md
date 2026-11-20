@@ -472,6 +472,9 @@ code shows it after deploy. (2026-09-27: both fields were seen on the live
 site, `allCnt` as a string and `total` as a number, and both are read as
 exact counts; the walk's stops and what stays unobserved are in
 [ADR 0023's note](0023-vpass-collector-card-binding.md#note-2026-09-27-both-stated-total-fields-are-on-the-live-site).)
+(2026-11-19, proposed: a finalized page's `45` and `4C` header rows, which
+`allCnt` does not count, are left out of the month's count;
+[ADR 0023's amendment](0023-vpass-collector-card-binding.md#amendment-2026-11-19-a-finalized-pages-45-and-4c-header-rows-are-not-counted).)
 
 ## Amendment 2026-09-27: GLOBAL PASS pagination observed; sanitizer refusals get closed codes
 

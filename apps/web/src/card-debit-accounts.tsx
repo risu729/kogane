@@ -165,12 +165,7 @@ function CardRow({ item }: { item: CardDebitAccountCard }): ReactNode {
           <span className="dim">
             {" "}
             · 最新の請求 <Nullable value={statement.period} /> · 請求総額{" "}
-            {statement.amount === null ? (
-              <Nullable value={null} placeholder="不明" />
-            ) : (
-              <SettlementQuantity value={statement.amount} />
-            )}{" "}
-            · 引落予定日{" "}
+            <SettlementQuantity value={statement.amount} /> · 引落予定日{" "}
             {statement.paymentDate === null ? (
               <Nullable value={null} placeholder="不明" />
             ) : (

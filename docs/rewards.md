@@ -361,6 +361,8 @@ CORE migration `0041_reward_revision_triggers.sql` adds the original 5 tables to
 
 All are STRICT, without FKs to CORE. `building` rows are invisible to readers through the pointer.
 
+Limit: the writer inserts estimates, simulations and input refs with `INSERT OR IGNORE` (`packages/storage-d1/src/read/rewards.ts`), so that a resent chunk is a no-op. SQLite's `OR IGNORE` also skips, without raising, a row that fails a CHECK or NOT NULL constraint (a trigger's `RAISE(ABORT)`, a foreign key or a STRICT type error still raises), and the seal records the build's own `estimate_count` and output digest, not the stored rows. A projection row that broke a CHECK would therefore be left out of a snapshot sealed `complete`, silently. The projection builds no such row today (`amountOf` in `packages/read-model/src/reward-projection.ts` pairs the amount status and columns as the CHECK requires).
+
 <a id="保存済みsimulationの扱いg2-20"></a>
 
 ### Stored simulations (G2-20)
@@ -388,9 +390,54 @@ There are currently no such rows. CORE `conversion_simulations` was deleted in 0
 | `GET /api/v2/rewards/holdings`        | CORE claims; independent of READ    | Same as left                                                                               |
 | `GET /api/v2/rewards/offers/simulate` | Pure query, no writes               | Same as left                                                                               |
 
+Each row's `quantity` is the amount at risk: `exact` with its decimal-v1 value, or `missing` / `unparsed` / `conflict` with the reason `decimal-v1:<status>`. READ migrations 0002 and 0004 CHECK that the status is one of these four and that a row is `exact` exactly when both decimal-v1 columns are set. A pairing that CHECK refuses (`exact` without both columns, a status that is not exact with both, or another status) is a store the schema never admits; the read refuses it (`reward_estimate_amount_invalid`, like a provider display section that fails validation) rather than serving a value nobody stored or an `exact` status with a reason. The route and `kogane.rewards.read` both run the read inside `catalogue`, so both answer `503 catalogue_read_failed` (a tool result with `isError: true` on `/mcp`). The CHECK admits a status that is not exact with one of the two columns set, which the writer never stores; such a row keeps its status and reason, and the stray column is not shown.
+
 `expiryBasis` is returned only when stored evidence satisfies `validRewardExpiryBasis`; otherwise it is `null`. `null` means either that evidence was not recorded by a build before `reward-projection-v2` or that the stored value fails validation, not that no computed expiry exists. Evidence is not reconstructed from other columns. Validation also rejects `date` / `no-expiry` for unverified rule versions, `no-expiry` for bounded rules or families other than `none`, and `agree`/`disagree` with an unreadable displayed expiry. If CORE rule `applicability_json` has unreadable `tiers` / `validPeriod`, they are treated as a tier no claim meets and a period containing no day, not all tiers or always valid. The shared response validator (`api-validation.ts`) checks `RewardReadExpiryRow.expiryBasis` with `optional(nullable(validRewardExpiryBasis))`. Responses containing damaged evidence are rejected; `null` and an absent field (an App predating it) are accepted. The screen performs the same validation before rendering.
 
-No published snapshot, a different epoch or a changed restriction returns 503 (`reward_read_model_unavailable` / `reward_read_model_context_changed` / `reward_read_model_restriction_changed`), not an empty success. Cursors use the same `{snapshotId, readInstanceId, filterDigest, position}` as U11. A cursor for another query is 400 `cursor_mismatch`; another instance or a retired snapshot is 410 `context_expired`. A different cursor is never reinterpreted as an offset.
+No published snapshot, a different epoch or a changed restriction returns 503 (`reward_read_model_unavailable` / `reward_read_model_context_changed` / `reward_read_model_restriction_changed`), not an empty success. Cursors use the same `{snapshotId, readInstanceId, filterDigest, position}` as U11. A cursor for another query (another route, `program` or window) is 400 `cursor_mismatch`, with `mustMatch` naming the inputs that must repeat (`["collection", "program", "from", "before"]` on expiry, absent included, `["collection"]` on simulations; [ADR 0123](adr/0123-summary-detail-for-large-reads.md)); another instance or a retired snapshot is 410 `context_expired`. A different cursor is never reinterpreted as an offset. The page size is not part of the query: a cursor read at one offered `limit` (25, 50, 100, 200) continues at another from where its page ended, and the next cursor is issued at the size asked now ([ADR 0119](adr/0119-cursor-page-size.md)).
+
+#### Deadline window and summary
+
+[ADR 0049, amendment of 2026-11-19](adr/0049-reward-expiry-basis.md#amendment-a-deadline-window-and-a-summary-on-the-expiry-read)
+(proposed). `GET /api/v2/rewards/expiry` takes `from` and `before` (calendar dates, `YYYY-MM-DD`), compared
+with each row's `expiresOn` as text: `from` is inclusive, `before` exclusive. Without `from` it is today's
+Asia/Tokyo date (`tokyoToday` in `packages/application/src/query/reward-expiry-window.ts`, the goal search's
+day); without `before` the window has no end. A malformed date is `400 invalid_date`; a window with no day
+(`from` on or after `before`) is `400 invalid_date_range`. With neither parameter the page is exactly the page
+above.
+
+- **Windowed page** (`detail` absent or `full`): the rows whose `expiresOn` lies inside the window, in snapshot
+  order, paged by `limit` and `cursor` as above, plus `window` (the window, `fromBasis` `request` or `today`,
+  `today`, `calendar`) with `rows`: how many rows of the read lay inside, before and after it, and how many
+  were left out with no date (`deadline_unknown`). Rows are counted as the page lists them, one per bucket and
+  rule. The window is part of the cursor's query: a cursor read under one window is `400 cursor_mismatch`
+  under another, without one, or the other way round. `providerDisplaySections` stays the snapshot's complete
+  set.
+- **Summary** (`detail=summary`, unpaged: `limit` or `cursor` is `400 invalid_query`): per programme and unit,
+  the buckets inside the window, their total and the earliest lines (20 across programmes); the
+  provider-displayed portions inside it (3); and `counts` of buckets and displays inside, before and after the
+  window and left out, by closed reason. A bucket is one bucket, not one row per rule: its rows are grouped by
+  programme, holding and bucket, and one whose rows carry different deadlines (or a date beside none) is left
+  out as `deadline_differs_by_rule`, never given one of them. Totals are `sumQuantities` per programme and unit,
+  so two units are never added; a total over an amount that is not exact is `not-exact` with the statuses
+  that prevented it, never a partial sum or a zero, and a stored "exact" value that is not a decimal-v1
+  decimal is read as `unparsed` (`decimal-v1:invalid`). A provider-displayed portion (ADR 0068) is listed,
+  never added to a total. A display with no readable date is `display_date_unknown`; a section that displayed
+  nothing is `provider_expiry_not_displayed` or `provider_expiry_unavailable`. Without a window every dated
+  bucket counts as inside.
+
+`detail` here is opt-in: absent is `full`, the page as it was, unlike the balance, schedule and collection
+quality reads whose absent `detail` is `summary` ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)).
+Another value is `400 invalid_query`, as on the schedule and collection quality routes (`invalid_request` on
+the tool's closed schema). A page's `detail` is not bound to its cursor; the summary takes none.
+
+Both read every estimate row of the snapshot (narrowed to `program`) through the shipped page query with a
+bound of 1,000 rows, and filter in the App; the query text is unchanged. A larger snapshot is
+`413 result_limit_exceeded`, never cut. Today's build writes at most 400 rows (200 buckets, at most two seeded
+rules a programme). Limits: `from` defaulted to today is resolved per request, so a windowed walk that
+crosses Tokyo midnight without an explicit `from` is `cursor_mismatch` on its next page; a summary lists at
+most 20 bucket lines and 3 displays, and its totals and counts cover the rest; `deadline_differs_by_rule`
+needs a rule that computes a date, which no stored holding receives today (§2.1).
 
 Retained snapshots: a cursor that still names an older, retained snapshot is refused with the same
 503 code as the published one when the CORE epoch or visibility revision that snapshot was captured
@@ -417,6 +464,7 @@ To stop the writer, deploy processor `REWARD_READ_PROJECTION_ENABLED=false`. No 
 - `packages/storage-d1/test/reward-read-writer.test.ts` — Identical input rebuilds exactly; changing evaluation time produces a different snapshot; an existing snapshot's evaluation time/calendar are immutable (G2-19). A stored simulation retaining only its digest becomes `not_reproducible` (G2-20). Triggers reject rows naming unfixed rules/offers. Chunk resends, lease loss and forward-only pointers are covered.
 - `services/processor/test/reward-read-projection.test.ts` — The lane on actual D1: flag-off prevents execution; lane ordering; builds lacking budget stay unpublished and resume with their own time; unstable capture becomes `pending`; dropping all READ reward tables does not change even 1 CORE claim/rule/offer/stored-input row and expires old cursors (G0-09).
 - `services/app/test/rewards-v2-read.test.ts` — Route 503/cursors/reproducibility, `/api/meta` advertisement and 503 without READ.
+- `services/app/test/rewards-read-amount.test.ts` — An expiry row's `quantity` is exact with its value or non-exact with `decimal-v1:<status>`, also when a non-exact row keeps one stray column; every pairing the READ CHECK refuses (an `exact` status without both columns, a non-exact one with both, an unknown status) fails the read instead of being served; over all 20 pairings of five statuses and the two columns set or null, the read serves exactly what the CHECK admits. `services/app/test/page-read-rewards.test.ts` shows the route, `/api/agent/v1/rewards.read` and `/mcp` answer such a row with the same `503 catalogue_read_failed`. `packages/storage-d1/test/reward-read-writer.test.ts` shows the table never stores such a row: a plain insert fails the CHECK, and the writer's `INSERT OR IGNORE` stores nothing (and raises nothing: see the limit below).
 
 <a id="合成データで確認したことadr-0049"></a>
 
