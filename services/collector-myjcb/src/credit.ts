@@ -36,7 +36,12 @@ import type {
   UnreadMonth,
   UnreadMonthCode,
 } from "./types";
-import { HumanRequiredError, StopConditionError, type StopConditionCode } from "./types";
+import {
+  HumanRequiredError,
+  PastMonthsRefusalError,
+  StopConditionError,
+  type StopConditionCode,
+} from "./types";
 
 /**
  * The stage each stop condition names, as the closed stop code the terminal
@@ -98,6 +103,34 @@ export interface CreditStop {
   /** The `detailMonth` whose fetch, state, period, ledger or export failed. */
   readonly position: number;
   readonly capturedMonthCount: number;
+}
+
+/**
+ * Logs which check refused the past-month availability read, in closed codes,
+ * counts and `detailMonth` positions only (the response is never logged).
+ * An error that is not a past-month refusal is logged as `unclassified`.
+ */
+function logPastMonthsRefusal(
+  error: unknown,
+  menu: {
+    readonly menuMonthPositions: readonly number[];
+    readonly schedulePositions: readonly number[];
+    readonly menuLinksBeyondRange: number;
+  },
+): void {
+  const refusal = error instanceof PastMonthsRefusalError ? error : undefined;
+  console.warn(
+    JSON.stringify({
+      event: "myjcb-credit-past-months-refused",
+      reason: refusal?.reason ?? "unclassified",
+      // The menu's own month and schedule positions, so a refused position
+      // can be read against what the menu offered.
+      menuMonthPositions: menu.menuMonthPositions,
+      schedulePositions: menu.schedulePositions,
+      menuLinksBeyondRange: menu.menuLinksBeyondRange,
+      ...refusal?.details,
+    }),
+  );
 }
 
 export async function collectionStage<T>(
@@ -191,18 +224,21 @@ export async function collectCredit(
     budget.remainingBytes > MAX_DOCUMENT_RUN_BYTES
   )
     throw new Error("myjcb_document_budget_invalid");
-  const { menuHtml, initialMonths, schedulePositions } = await collectionStage(
-    "collect-credit-menu",
-    async () => {
+  const { menuHtml, initialMonths, schedulePositions, menuLinksBeyondRange } =
+    await collectionStage("collect-credit-menu", async () => {
       const menu = await client.get("credit-menu", new URLSearchParams({ link_id: linkId }));
       const menuHtml = decodeMyJcbHtml(menu.body, menu.contentType);
       const groups = readCreditMenuGroups(menuHtml);
       if (groups.months.length === 0) {
         throw new Error("MyJCB credit menu did not enumerate detailMonth values");
       }
-      return { menuHtml, initialMonths: groups.months, schedulePositions: groups.schedules };
-    },
-  );
+      return {
+        menuHtml,
+        initialMonths: groups.months,
+        schedulePositions: groups.schedules,
+        menuLinksBeyondRange: groups.linksBeyondRange ?? 0,
+      };
+    });
   const artifacts: RawArtifact[] = [
     {
       dataset: "credit-menu",
@@ -227,13 +263,30 @@ export async function collectCredit(
   const { pastResponse, pastMonths } = await collectionStage(
     "collect-credit-past-months",
     async () => {
-      const pastResponse = await client.postCreditPastJson({
-        generalJsonShikibetuId: discriminator,
-        id: "030100601",
-        detailMonth: firstMonth,
-      });
-      const pastJson = new TextDecoder("utf-8", { fatal: true }).decode(pastResponse.body);
-      return { pastResponse, pastMonths: parsePastMonthAvailability(pastJson) };
+      try {
+        const pastResponse = await client.postCreditPastJson({
+          generalJsonShikibetuId: discriminator,
+          id: "030100601",
+          detailMonth: firstMonth,
+        });
+        let pastJson: string;
+        try {
+          pastJson = new TextDecoder("utf-8", { fatal: true }).decode(pastResponse.body);
+        } catch {
+          throw new PastMonthsRefusalError(
+            "MyJCB past-month response was not valid UTF-8",
+            "utf8_invalid",
+          );
+        }
+        return { pastResponse, pastMonths: parsePastMonthAvailability(pastJson) };
+      } catch (error) {
+        logPastMonthsRefusal(error, {
+          menuMonthPositions: initialMonths,
+          schedulePositions,
+          menuLinksBeyondRange,
+        });
+        throw error;
+      }
     },
   );
   artifacts.push({
@@ -251,11 +304,23 @@ export async function collectCredit(
   // A position the menu shows as a schedule page cannot also be a month the
   // past-months response offers; that has not been observed, so it is not
   // resolved either way.
-  if (availableMonths.some((month) => schedulePositions.includes(month))) {
-    throw new StopConditionError(
+  const overlapPositions = availableMonths.filter((month) => schedulePositions.includes(month));
+  if (overlapPositions.length > 0) {
+    const error = new PastMonthsRefusalError(
       "MyJCB past-months response offered a position the menu lists as a schedule page",
+      "schedule_overlap",
+      {
+        itemCount: pastMonths.length,
+        overlapPositions,
+      },
       "collect-credit-past-months",
     );
+    logPastMonthsRefusal(error, {
+      menuMonthPositions: initialMonths,
+      schedulePositions,
+      menuLinksBeyondRange,
+    });
+    throw error;
   }
 
   const unreadMonths: UnreadMonth[] = [];

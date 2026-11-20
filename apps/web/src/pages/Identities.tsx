@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import { useViewState } from "../view-state.tsx";
 import {
+  useIdentityAccountList,
   useIdentityAccounts,
   useIdentityCoverage,
   useIdentityInstruments,
@@ -10,6 +11,7 @@ import {
 import { EmptyState, Kv, KvRow, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
 import {
   IDENTITY_PAGE_LIMIT,
+  type IdentityAccountListRow,
   type IdentityStatus,
 } from "../../../../packages/observation-shared/src/identity-contract.ts";
 import { AccountConnectionDetails, AccountConnectionInventory } from "../account-connection.tsx";
@@ -169,9 +171,26 @@ export function IdentitiesPage(): ReactNode {
       <InstrumentCoverage source={source} />
       <Panel
         id="identity-list"
-        title={tab === "accounts" ? "整理済みの口座" : "整理済みの通貨・銘柄"}
+        title={
+          tab === "account-list"
+            ? "口座一覧"
+            : tab === "accounts"
+              ? "整理済みの口座"
+              : "整理済みの通貨・銘柄"
+        }
       >
         <div className="tab-row" role="group" aria-label="一覧の種類">
+          <button
+            type="button"
+            className="button"
+            aria-pressed={tab === "account-list"}
+            onClick={() => {
+              setTab("account-list");
+              setOffset(0);
+            }}
+          >
+            口座一覧
+          </button>
           <button
             type="button"
             className="button"
@@ -195,7 +214,9 @@ export function IdentitiesPage(): ReactNode {
             通貨・銘柄
           </button>
         </div>
-        {tab === "accounts" ? (
+        {tab === "account-list" ? (
+          <AccountList source={source} offset={offset} change={setOffset} />
+        ) : tab === "accounts" ? (
           <Accounts source={source} offset={offset} change={setOffset} />
         ) : (
           <Instruments source={source} offset={offset} change={setOffset} />
@@ -293,6 +314,94 @@ function Card({
       <p className="identity-card-meta">{meta}</p>
       {children}
     </article>
+  );
+}
+const LABEL_ORIGINS: Record<IdentityAccountListRow["labelOrigin"], string> = {
+  manual: "手動で設定",
+  connection: "連携先の名前",
+  "card-name": "カード名",
+  mapping: "取得元の既定",
+};
+const CONNECTION_STATES: Record<NonNullable<IdentityAccountListRow["connection"]>, string> = {
+  confirmed: "接続先を確認済み",
+  unresolved: "個別口座は未確定",
+  "evidence-ineligible": "根拠が集計対象外",
+};
+/** One line per account (ADR 0120): the name every read shows for it, and where the name came from. */
+function AccountList({
+  source,
+  offset,
+  change,
+}: {
+  source: string;
+  offset: number;
+  change: (n: number) => void;
+}) {
+  const query = useIdentityAccountList(source, offset);
+  return (
+    <QueryBoundary query={query} label="口座一覧" coverageNotice={false}>
+      {(data) => (
+        <>
+          {!data.rows.length ? (
+            <div className="panel-body">
+              <EmptyState>
+                整理済みの口座がありません。上の整理状況で未処理件数を確認できます。
+              </EmptyState>
+            </div>
+          ) : (
+            <div className="table-scroll" role="region" aria-label="口座一覧の表" tabIndex={0}>
+              <table className="identity-coverage-table">
+                <caption>口座ごとの表示名、名前の根拠、取得元と最新の取得</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">口座</th>
+                    <th scope="col">名前の根拠</th>
+                    <th scope="col">区分</th>
+                    <th scope="col">状態</th>
+                    <th scope="col">取得元</th>
+                    <th scope="col" className="num">
+                      参照
+                    </th>
+                    <th scope="col" className="num">
+                      記録
+                    </th>
+                    <th scope="col">連携</th>
+                    <th scope="col">最新の取得</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((row) => (
+                    <tr key={row.account}>
+                      <td>
+                        {row.label}
+                        <br />
+                        <code>{row.account}</code>
+                      </td>
+                      <td>{LABEL_ORIGINS[row.labelOrigin]}</td>
+                      <td>{row.role}</td>
+                      <td>
+                        <IdentityStatusBadge status={row.status} />
+                      </td>
+                      <td>{row.sources.join(", ")}</td>
+                      <td className="num">{row.references}</td>
+                      <td className="num">{row.observedCount}</td>
+                      <td>{row.connection === null ? "—" : CONNECTION_STATES[row.connection]}</td>
+                      <td>{row.lastFetchedAt ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <Pages
+            label="一覧のページ"
+            offset={offset}
+            next={data.coverage.nextOffset}
+            change={change}
+          />
+        </>
+      )}
+    </QueryBoundary>
   );
 }
 function Accounts({

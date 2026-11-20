@@ -17,6 +17,10 @@ import worker from "../src/worker";
 import { delegatedMaintenanceSchema as scheduleUpdateSchema } from "../../../packages/application/src/index";
 import { scheduleRoute } from "../../processor/src/schedule-store";
 import { ScheduleAlarm } from "../../processor/src/schedule-alarm";
+import {
+  MAINTENANCE_SUMMARY_LINES,
+  maintenanceReadSummary,
+} from "../../../packages/collection/src/schedule-model";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 import { maskRandomTokens } from "../../../packages/application/test/random-tokens";
 
@@ -257,7 +261,7 @@ describe("the maintenance read: one function on both agent paths", () => {
 
   it("answers HTTP and MCP with the same object, and records one read on each path", async () => {
     const before = (await records("schedules.maintenance.read")).length;
-    for (const args of [{ source: "vpass" }, {}]) {
+    for (const args of [{ source: "vpass" }, { detail: "full" }]) {
       const viaMcp = await tool(READER, READ, args);
       const viaHttp = await http(READER, READ, args);
       expect(viaMcp.isError).toBe(false);
@@ -307,6 +311,81 @@ describe("the maintenance read: one function on both agent paths", () => {
       expect([subject, args, viaHttp]).toEqual([subject, args, { status, body: { error } }]);
       expect(viaMcp).toMatchObject({ isError: true, structuredContent: { error } });
     }
+    expect(relayed).toEqual([]);
+  });
+
+  it("answers the summary in pages of lines, each the full read's summary, alike on both paths (ADR 0123)", async () => {
+    const full = await http(READER, READ, { detail: "full" });
+    expect(full.status).toBe(200);
+    // `full` is the Processor's read as it is: no `detail`, no page.
+    expect(full.body).not.toHaveProperty("detail");
+    expect(full.body).not.toHaveProperty("coverage");
+    const pages = [];
+    for (let offset: number | null = 0; offset !== null;) {
+      const args = offset === 0 ? {} : { offset };
+      const viaMcp = await tool(READER, READ, args);
+      const viaHttp = await http(READER, READ, args);
+      expect(viaHttp.status).toBe(200);
+      expect(viaHttp.body).toEqual(viaMcp.structuredContent);
+      expect(viaHttp.body).toEqual(maintenanceReadSummary(full.body, offset));
+      pages.push(viaHttp.body);
+      offset = viaHttp.body.coverage.nextOffset;
+    }
+    expect(pages.length).toBeGreaterThan(1);
+    // Every source in the full read's order (one whose lines continue is
+    // listed on both pages), and every job and rule line once.
+    const sources = pages.flatMap((entry) => entry.sources);
+    expect(
+      sources
+        .map((entry) => entry.source)
+        .filter((source, index, all) => index === 0 || all[index - 1] !== source),
+    ).toEqual(full.body.sources.map((entry: { source: string }) => entry.source));
+    expect(sources.flatMap((entry) => entry.schedules)).toHaveLength(
+      full.body.sources.flatMap((entry: { schedules: unknown[] }) => entry.schedules).length,
+    );
+    for (const entry of pages) {
+      const lines = entry.sources.reduce(
+        (sum: number, source: { schedules: unknown[]; rules: unknown[] }) =>
+          sum + source.schedules.length + source.rules.length,
+        0,
+      );
+      // Every page but the last is full: 16 lines.
+      if (entry.coverage.nextOffset === null)
+        expect(lines).toBeLessThanOrEqual(MAINTENANCE_SUMMARY_LINES);
+      else expect(lines).toBe(MAINTENANCE_SUMMARY_LINES);
+    }
+    const ruleLines = sources.flatMap((entry) => entry.rules);
+    const fullRules = full.body.sources.flatMap((entry: { rules: unknown[] }) => entry.rules);
+    expect(ruleLines).toHaveLength(fullRules.length);
+    // The migrations' rules were disabled by a newer revision: the summary
+    // says so, and keeps both revisions' actor kinds and change reasons.
+    expect(ruleLines.length).toBeGreaterThan(0);
+    for (const rule of ruleLines)
+      expect(rule).toMatchObject({ enabled: false, revisions: 2, changeReasons: [null] });
+  });
+
+  it("refuses a detail it does not offer, and an offset with the full read", async () => {
+    relayed.length = 0;
+    for (const args of [
+      { detail: "compact" },
+      { detail: "full", offset: 0 },
+      { offset: -1 },
+      { offset: 1.5 },
+    ]) {
+      const viaMcp = await tool(READER, READ, args);
+      const viaHttp = await http(READER, READ, args);
+      expect([args, viaHttp]).toEqual([args, { status: 400, body: { error: "invalid_request" } }]);
+      expect(viaMcp).toMatchObject({
+        isError: true,
+        structuredContent: { error: "invalid_request" },
+      });
+    }
+    // The re-survey read has one detail: neither argument is its.
+    for (const args of [{ detail: "full" }, { offset: 0 }])
+      expect(await tool(READER, "kogane.schedules.survey.read", args)).toMatchObject({
+        isError: true,
+        structuredContent: { error: "invalid_request" },
+      });
     expect(relayed).toEqual([]);
   });
 

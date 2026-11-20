@@ -83,9 +83,17 @@ A perimeter container with no snapshot before the cutoff is listed in
   included, each with its capture time, the capture's Tokyo date, its age in
   days and its freshness under `dated-state-freshness-v1`: `same-day` (age 0),
   `recent` (1–3 days), `stale` (more).
-- `accounts`: one per (source, provider account), with the snapshots its rows
-  came from, its resolved account and identity status (the current account
-  mapping of the row's identity, or `not-recorded`), and:
+- `accounts`: one per (source, provider account, resolved account), with the
+  snapshots its rows came from, its resolved account and identity status (the
+  current account mapping of its rows' identities, or `not-recorded`). A
+  provider account whose rows map to two accounts (an identity can key a
+  source account on more than the provider account, as SBI Securities'
+  foreign positions do with the specific-account code) is listed once under
+  each, and its rows without a mapping once more with no account, so no row
+  is listed under an account its own mapping does not name; entries of one
+  provider account are ordered by account id, the one without first. The
+  manifest names no entry, so this keying leaves the context id as it was.
+  Each entry lists:
   - `positions`: the provider quantity as decimal text, the instrument mapping,
     and the provider valuations matched as `POSITION_VALUATIONS_SQL` matches
     them (same parse run, account and code, and the locator guard
@@ -219,7 +227,13 @@ condition). It asks nothing until a start date 比較の開始日 before the pag
 基準日 is chosen, then lists each holding key with each side's provider text
 and capture date, the server's change with its sign (`+2.5`, `±0`, `-3.5`)
 for `compared` rows, `数値なし` for rows listed on one date only and for
-`not_comparable` rows, whose reasons it states in words. It shows counts per
+`not_comparable` rows, whose reasons it states in words. Each row's header
+reads the whole holding key: code and market, then source, provider account,
+parser and dataset. Each row's reasons are a list named after that header (as
+in
+`1004（sbi-securities · sbi-a · sbi-domestic-cash-positions · domestic-cash-positions）を比較できない理由`),
+so no two rows' lists share a name, and the rows of one code in two accounts,
+sources or containers are told apart by ear as by eye. It shows counts per
 status and the coverage notes, never a total, valuation or sum of changes.
 
 The panel also takes the route's `source` and `account` filters (取得元 and

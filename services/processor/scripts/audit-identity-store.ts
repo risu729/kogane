@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { getPlatformProxy } from "wrangler";
 import { IDENTITY_AUDIT_QUERIES, validateIdentityAudit } from "../src/identity-audit.ts";
 
@@ -8,7 +9,7 @@ let stage = "setup";
 try {
   if (process.argv.length > 2) throw new Error("unexpected_arguments");
   proxy = await getPlatformProxy<{ DB: D1Database }>({
-    configPath: new URL("../wrangler.diagnostic.jsonc", import.meta.url).pathname,
+    configPath: fileURLToPath(new URL("../wrangler.diagnostic.jsonc", import.meta.url)),
     persist: false,
     remoteBindings: true,
   });
