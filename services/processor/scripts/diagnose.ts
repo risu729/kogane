@@ -1,5 +1,6 @@
 // Read-only, in-memory parser diagnostic. Never print raw bytes, identifiers,
 // financial values, provider keys or unfiltered exception messages.
+import { fileURLToPath } from "node:url";
 import { getPlatformProxy } from "wrangler";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
@@ -7,7 +8,7 @@ import { parse } from "parse5";
 import { classifyParserRejection, topActivityShape } from "./parser-rejection.ts";
 
 const proxy = await getPlatformProxy<{ DB: D1Database; EVIDENCE: R2Bucket }>({
-  configPath: new URL("../wrangler.diagnostic.jsonc", import.meta.url).pathname,
+  configPath: fileURLToPath(new URL("../wrangler.diagnostic.jsonc", import.meta.url)),
   persist: false,
   remoteBindings: true,
 });

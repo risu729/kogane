@@ -279,6 +279,80 @@ describe("non-SBI account identification", () => {
       });
   });
 
+  test("a MyJCB J-POINT acquisition bucket keys the connection's total, never its own account", () => {
+    // `myjcb-jpoint-history` files each acquisition date under its own
+    // reference; ADR 0107 maps every one to the connection's J-POINT holding.
+    const bucket = (connection: string, date: string) =>
+      otherIdentity(
+        input("myjcb", `myjcb:${connection}:j-point:acquired:${date}`, {
+          kind: "balance",
+          currency: null,
+          instrument: "J_POINT",
+        }),
+      );
+    const plan = bucket("synthetic-connection", "2099-01-01");
+    expect(plan.account).toEqual({
+      key: ["myjcb:synthetic-connection:j-point:total"],
+      label: "MyJCB J-POINT",
+      role: "reward-account",
+      status: "provider-local",
+      reason: "provider-jpoint-acquisition-bucket",
+    });
+    expect(plan.issues).toEqual([]);
+    // Every date and every run of one connection is the total's reference.
+    expect(bucket("synthetic-connection", "2099-02-01").account.key).toEqual(plan.account.key);
+    expect(
+      otherIdentity(input("myjcb", "myjcb:synthetic-connection:j-point:total", { fetchRunId: 99 }))
+        .account.key,
+    ).toEqual(plan.account.key);
+    // Another connection's bucket is another connection's total.
+    expect(bucket("other-connection", "2099-01-01").account.key).toEqual([
+      "myjcb:other-connection:j-point:total",
+    ]);
+    for (const unexpected of [
+      "myjcb:synthetic-connection:j-point:acquired:2099-01",
+      "myjcb:synthetic-connection:j-point:acquired:20990101",
+      "myjcb:synthetic-connection:j-point:acquired:2099-01-01:extra",
+      "myjcb:Synthetic:j-point:acquired:2099-01-01",
+    ])
+      expect(otherIdentity(input("myjcb", unexpected)).account).toEqual({
+        key: [unexpected],
+        label: "MyJCB請求口座",
+        role: "source-account",
+        status: "unresolved",
+        reason: "unrecognized-source-account",
+      });
+  });
+
+  test("under policy 1 the SMBC AUD ordinary deposit stays the unrecognized default, one reference for every run", () => {
+    // `smbc-foreign-ordinary-balance` emits this constant. Under policy 1 no
+    // rule classifies it, so it takes the default plan, including the source's
+    // yen-deposit label; policy 2 classifies it (ADR 0118).
+    const aud = (fetchRunId: number) =>
+      otherIdentity(
+        input("smbc-bank", "smbc-bank:ordinary-foreign-aud", {
+          kind: "balance",
+          currency: null,
+          instrument: "AUD",
+          fetchRunId,
+          policyVersion: 1,
+        }),
+      );
+    const plan = aud(4);
+    expect(plan.account).toEqual({
+      key: ["smbc-bank:ordinary-foreign-aud"],
+      label: "三井住友銀行 円普通預金",
+      role: "source-account",
+      status: "unresolved",
+      reason: "unrecognized-source-account",
+    });
+    expect(plan.issues).toEqual(["unrecognized-source-account"]);
+    expect(plan.instruments.map((item) => [item.role, item.value, item.status])).toEqual([
+      ["unit", "AUD", "identified"],
+    ]);
+    expect(aud(5).account.key).toEqual(plan.account.key);
+  });
+
   test.each([
     ["global-pass", "global-pass:card", "debit-card-activity", "provider-local"],
     ["myjcb", "myjcb:synthetic-connection:root", "card-statement-aggregate", "aggregate"],

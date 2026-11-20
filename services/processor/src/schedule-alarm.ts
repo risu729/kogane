@@ -63,8 +63,8 @@ function errorName(error: unknown): string {
 }
 /**
  * One structured line per alarm decision (ADR 0085 follow-up): which job,
- * which occurrence, and what the alarm did with it. Identifiers, instants and
- * closed codes only.
+ * which occurrence, and what the alarm did with it. Identifiers, schedule
+ * revisions, instants, durations and closed codes only.
  */
 function logAlarm(record: Record<string, unknown>): void {
   try {
@@ -193,11 +193,15 @@ export class ScheduleAlarm extends DurableObject<Env> {
           )
           .run();
         if (claimed.meta.changes !== 1) return null;
+        // The fence above bound `row.revision`, and the UPDATE changed the row
+        // only if the stored revision still equalled it, so this is the
+        // revision the retry was fenced on. A log line, not an audit record.
         logAlarm({
           event: "schedule_alarm",
           jobId: id,
           occurrenceId: retry.id,
           outcome: "retry_claimed",
+          scheduleRevision: row.revision,
         });
         return {
           job: jobFor(id),
@@ -260,9 +264,17 @@ export class ScheduleAlarm extends DurableObject<Env> {
               crypto.randomUUID(),
             )
           : null;
+      // An occurrence already claimed is skipped and answered `claim_conflict`
+      // below: its id, or its (schedule_id, nominal_at) under another id. Those
+      // are the table's two keys, so each has its own clause (SQLite 3.35+, as
+      // D1 runs it). Any other refusal (a CHECK or NOT NULL failure) raises,
+      // rolls back the batch, schedule move included, and the alarm retries
+      // in a minute (`schedule_bookkeeping_retry`); `OR IGNORE` skipped such a
+      // row, moved the schedule past its nominal and logged `claim_conflict`.
       const results = await this.env.DB.batch([
-        this.env.DB.prepare(`INSERT OR IGNORE INTO collection_schedule_occurrences(id,schedule_id,nominal_at,started_at,status,dispatch_protocol,attempt_ref)
-          SELECT ?,id,next_nominal_at,?,'started',1,? FROM collection_schedules WHERE id=? AND revision=? AND enabled=1 AND next_nominal_at=?`).bind(
+        this.env.DB.prepare(`INSERT INTO collection_schedule_occurrences(id,schedule_id,nominal_at,started_at,status,dispatch_protocol,attempt_ref)
+          SELECT ?,id,next_nominal_at,?,'started',1,? FROM collection_schedules WHERE id=? AND revision=? AND enabled=1 AND next_nominal_at=?
+          ON CONFLICT(id) DO NOTHING ON CONFLICT(schedule_id,nominal_at) DO NOTHING`).bind(
           occurrenceId,
           claimedAt,
           attemptRef,

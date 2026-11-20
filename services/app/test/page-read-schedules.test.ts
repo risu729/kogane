@@ -125,7 +125,8 @@ describe("kogane.schedules.read", () => {
   it("answers the page without its survey part, relayed with no actor, and writes nothing", async () => {
     const before = await tableCounts();
     relayed.length = 0;
-    const route = await page.route("/api/ops/v1/schedules");
+    // The full page (ADR 0123); the summary is `mcp-answer-size.test.ts`'s.
+    const route = await page.route("/api/ops/v1/schedules?detail=full");
     expect(route.status).toBe(200);
     const body = route.body as Record<string, unknown>;
     expect(Object.keys(body)).toEqual(
@@ -135,13 +136,13 @@ describe("kogane.schedules.read", () => {
       expect.arrayContaining([expect.objectContaining({ source: "vpass" })]),
     );
     const { survey: _survey, ...withoutSurvey } = body;
-    const overHttp = await page.http(TOOL, {});
+    const overHttp = await page.http(TOOL, { detail: "full" });
     expect(overHttp).toEqual({
       status: 200,
       body: { schemaVersion: "kogane-page-read-v1", data: withoutSurvey },
     });
     expect(overHttp.body.data).not.toHaveProperty("survey");
-    const overMcp = await page.mcp(TOOL, {});
+    const overMcp = await page.mcp(TOOL, { detail: "full" });
     expect(overMcp).toEqual({ isError: false, body: overHttp.body });
     // The page and both tool calls read the one snapshot, never as an operator or an agent.
     expect(relayed).toEqual(
@@ -156,7 +157,7 @@ describe("kogane.schedules.read", () => {
   });
 
   it("refuses any argument, a narrower or missing grant, and answers the route's refusal", async () => {
-    for (const args of [{ source: "vpass" }, { survey: true }]) {
+    for (const args of [{ source: "vpass" }, { survey: true }, { detail: "compact" }]) {
       const overHttp = await page.http(TOOL, args);
       expect(overHttp.status, JSON.stringify(args)).toBe(400);
       expect(overHttp.body).toMatchObject({ error: "invalid_request" });
