@@ -357,7 +357,8 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
   }
   // 0056/0059 advance the board reader (ADR 0028 and its amendment). 0084
   // follows the shared CSV release for all four exact-version policies. 0102
-  // advances only the complete shipped Vpass default to its compatible reader.
+  // advances only the complete shipped Vpass default to its compatible reader,
+  // and 0104 to the reader that keeps the card name (ADR 0120).
   // Each UPDATE names its previous value, so reopening preserves later pins
   // and operator-selected alternatives.
   for (const migration of [
@@ -365,6 +366,7 @@ export function openStore(stateDir?: string, options: OpenStoreOptions = {}): St
     "0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql",
     "0084_csv_reader_release_snapshot_policies.sql",
     "0102_vpass_authori_transition_policy.sql",
+    "0104_vpass_credit_card_name_policy.sql",
   ])
     db.exec(
       readFileSync(

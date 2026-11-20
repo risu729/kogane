@@ -100,9 +100,9 @@ function tool<Schema extends z.ZodType>(definition: PageReadTool<Schema>) {
 
 const TOOLS = {
   "kogane.identity.read": tool({
-    title: "Identity pages: connections, account and instrument mappings, coverage",
+    title: "Identity pages: connections, accounts, account and instrument mappings, coverage",
     description:
-      "One page of the owner UI's identity read: `connections` (aggregator connections and the source accounts they hold), `accounts` or `instruments` (each source reference with its current mapping, label, status, reason, revision and first observation), or `coverage` (per source, how many eligible observations are organized and how they resolved). The same answer as GET /api/identity/<collection>, under records.read and a whole-store read grant. `identityRead` is `latest` (default) or `as-recorded`; `connections` takes no other argument. Read-only.",
+      "One page of the owner UI's identity read: `account-list` (one line per account with its readable label and where the label came from, its role, status, sources, reference and observation counts, aggregator connection state and newest capture time; start here to name accounts), `connections` (aggregator connections and the source accounts they hold), `accounts` or `instruments` (each source reference with its current mapping, label, status, reason, revision and first observation), or `coverage` (per source, how many eligible observations are organized and how they resolved). The same answer as GET /api/identity/<collection>, under records.read and a whole-store read grant. `identityRead` is `latest` (default) or `as-recorded`; `connections` takes no other argument. Read-only.",
     schema: z.strictObject({
       collection: z.enum(IDENTITY_COLLECTIONS),
       source: ROUTE_TEXT.optional(),
@@ -280,13 +280,13 @@ const TOOLS = {
   "kogane.collection-quality.read": tool({
     title: "Collection quality per job, source, dataset and account",
     description:
-      "Collection stages in closed codes. `detail: summary` (the default) or `full`. Without `source`: summary is one line per source (freshness, newest fetch run, reasons, each job's newest receipt status, failure code and terminal codes, unregistered collectors and their codes, data types counted collected/partial/not collected; equal lines share one with `sourceIds`); full is the job/source summaries (schedules, alarm, latest runs and stages, terminals, provider data types under `provider-data-types-v1` each `collected`, `partial` or `not_collected` with parsers and tracking issue). With `source`, `view: cells` (default): summary collapses every cell into one line per dataset, parser and unit (cell count, first and last period, counts by state, newest capture, freshness of the newest current capture, reasons, failure codes, coverage causes), 20 lines a page (`offset` counts lines); full answers the cells by unit, dataset and period (`offset` pages 500). `view: accounts` (no `offset`, no `detail`) regroups the cells by the accounts their newest or current capture's observations name: per account its label, mapping statuses and data types with periods, standing and reasons, and apart the cells no observation attributes; a fetch unit key is never read as an account. Freshness is `collection-freshness-v1`, counted to `freshnessAsOf` (Asia/Tokyo days): `same-day`, `recent` (1-3 days), `stale`, `human-required`, `disabled` or `no-capture`; in `view: accounts` each period carries its named capture's freshness, independent of standing, and the answer is self-contained (`dataTypesVersion`, source `dataTypes`, each parser's `providerTypes`). Identifiers, capture times, counts, labels and codes only, no amount. The same answer as GET /api/collection-quality, /api/collection-quality/{source} and /api/collection-quality/{source}/accounts with the same `detail`, under evidence.read and a whole-store read grant. Served while the store has the scheduling tables. Read-only.",
+      "Collection stages in closed codes. `detail: summary` (default) or `full`. Without `source`: summary: a line per source (freshness, newest fetch run, reasons, each job's newest receipt status, failure and terminal codes, unregistered collectors' codes, data types counted by status; equal lines share one via `sourceIds`); full: job/source summaries (schedules, alarm, runs and stages, terminals, data types under `provider-data-types-v1`, each with its status, parsers and tracking issue). `view: status` (no `source`, `offset` or `detail`) says if anything is stuck, a line per configured job: `lastRun` (`recovered` if a later fetch run succeeded), `lastSuccessAt`, `failuresSinceSuccess` (newest 100 receipts, else `100+`), `failureCode`, `state` (`ok`; `degraded`: a dataset's newest parse over 3 days old; `failing`; `needs-owner`; `disabled`), `notPublishing` datasets with reasons. With `source`, `view: cells` (default): summary: a line per dataset, parser and unit (cell count, first/last period, counts by state, newest capture, freshness, reasons, failure codes, coverage causes), 20 lines a page (`offset` counts lines); full: cells by unit, dataset and period (`offset` pages 500). `view: accounts` (no `offset` or `detail`) regroups cells by the accounts their newest or current capture's observations name: label, mapping statuses, data types with periods, standing and reasons; unattributed cells apart; a unit key is never an account. Freshness is `collection-freshness-v1`, to `freshnessAsOf` (Asia/Tokyo days): `same-day`, `recent` (1-3 days), `stale`, `human-required`, `disabled`, `no-capture`; in `view: accounts` per named capture, independent of standing, and self-contained (`dataTypesVersion`, `dataTypes`, parsers' `providerTypes`). Ids, times, counts, labels, codes; no amount. Same answer as GET /api/collection-quality (or ?view=status), /api/collection-quality/{source}[/accounts] with the same `detail`, under evidence.read on the whole store. Served while its tables exist. Read-only.",
     schema: z.strictObject({
       source: z
         .string()
         .regex(/^[a-z0-9][a-z0-9-]{0,99}$/u)
         .optional(),
-      view: z.enum(["cells", "accounts"]).optional(),
+      view: z.enum(["cells", "accounts", "status"]).optional(),
       offset: OFFSET.optional(),
       detail: READ_DETAIL.optional(),
     }),
@@ -298,7 +298,21 @@ const TOOLS = {
     ],
     needs: "collectionQuality",
     read: (env, { source, view, ...params }) => {
-      // A view names one source's page; the account view is unpaged.
+      // The status view is the summary's: no source and no offset; it is
+      // compact already, so it has one detail and takes no `detail` (ADR 0123).
+      if (view === "status") {
+        const wrong = [
+          ...(source === undefined ? [] : ["source"]),
+          ...(params.offset === undefined ? [] : ["offset"]),
+          ...(params.detail === undefined ? [] : ["detail"]),
+        ];
+        if (wrong.length > 0) throw new HttpError(400, "invalid_request", wrong);
+        return readCollectionQuality(env, {
+          pathname: "/api/collection-quality",
+          searchParams: new URLSearchParams({ view: "status" }),
+        });
+      }
+      // Any other view names one source's page; the account view is unpaged.
       if (source === undefined && view !== undefined)
         throw new HttpError(400, "invalid_request", ["view"]);
       // The account view has one detail, its full answer (ADR 0123).

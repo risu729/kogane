@@ -1056,3 +1056,24 @@ month positions), or `unclassified` for any other error. It carries counts,
 `detailMonth` positions and type names only, never the response, an error id
 or a label. The checks themselves are unchanged; the fix follows
 once a run names the reason.
+
+### First reason: `month_out_of_range` on the ninth item (2026-11-19)
+
+The requested run of 2026-11-19 03:11 UTC and the scheduled run of
+2026-11-19 21:00 UTC both logged `reason` `month_out_of_range` with
+`itemCount` 9, item position 9 and a string `detailMonth`. Items 1 to 8 passed
+every item check. The last stored past-month response (2026-11-10 to
+2026-11-14, one digest) held nine items whose `detailMonth` strings were `9`
+to `17` in order. So the ninth item's `detailMonth` is now a string the check
+refuses; the log did not say what it names. A window shifted to `10..18`
+(the menu gaining a position) fits, but is not observed.
+
+Every refusal line now also carries the menu's own `menuMonthPositions` and
+`schedulePositions`, and `menuLinksBeyondRange`: the number of menu detail
+links naming a position above 17, which the menu reader has always skipped
+without a trace. `month_out_of_range` adds `monthLength` (for a string) and
+`monthPosition` (the position named, when the value is one to three ASCII
+digits or an integer `0..999`). A position is an index into the statement
+list, not an amount or a date. The `0..17` bound (the read allowlist in
+`policy.ts`, the client, both parsers and the shared parsers) stays as it is
+until a run shows the position.
