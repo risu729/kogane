@@ -41,7 +41,7 @@ export class OverviewSummaryLimitError extends Error {
 }
 
 /** The bytes of the tool's answer that carries `data`, as the tool serializes it. */
-export function overviewAnswerBytes(data: unknown): number {
+function overviewAnswerBytes(data: unknown): number {
   return new TextEncoder().encode(JSON.stringify({ schemaVersion: PAGE_READ_SCHEMA_VERSION, data }))
     .length;
 }
