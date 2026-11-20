@@ -5,9 +5,9 @@ import { beforeAll, expect, test } from "bun:test";
 import { QualityStore } from "../../../packages/read-model/test/collection-quality-fixture.ts";
 import { myJcbJPointHistory } from "../../../packages/parsers/src/parsers/myjcb-jpoint-history.ts";
 import { syntheticJPointHistory } from "../../../packages/parsers/test/myjcb-jpoint-history-fixture.ts";
+import { fullCoreSchema } from "../../../packages/read-model/test/card-usage-scale-fixture.ts";
 import { fromTemplate } from "../../../packages/read-model/test/schema-template.ts";
-import { Database, type SQLQueryBindings } from "bun:sqlite";
-import { readdirSync, readFileSync } from "node:fs";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { rewardCandidateQuery, REWARD_PROMOTION_RELEASE } from "../src/reward-claims-job.ts";
 import { FROZEN_REWARD_CANDIDATE_QUERY } from "./reward-claims-legacy-query.ts";
 const PRODUCER = "collector-r2-importer",
@@ -161,13 +161,9 @@ const overrides: Partial<Spec>[] = [
 ];
 function fullSchema(): Database {
   const db = fromTemplate("reward-candidate-differential-full-core", () => {
-    const db = new Database(":memory:");
-    db.exec("PRAGMA foreign_keys=ON");
-    const dir = new URL("../../../packages/storage-d1/migrations/core/", import.meta.url);
-    for (const file of readdirSync(dir)
-      .filter((f) => f.endsWith(".sql"))
-      .sort())
-      db.exec(readFileSync(new URL(file, dir), "utf8"));
+    // The same migrated CORE bytes `QualityStore` copies, so the process
+    // replays the migrations once for both kinds of store, in `beforeAll`.
+    const db = fullCoreSchema();
     db.run(
       "INSERT INTO ingest_clients(id,display_name,active) VALUES(?,'Synthetic reward query',1)",
       [CLIENT],
@@ -742,15 +738,19 @@ for (const randomSeed of [null, 1, 2, 3, 4])
       const connections = randomSeed === null ? 8 : 4,
         captures = randomSeed === null ? 20 : 12;
       let index = 0;
-      for (let c = 0; c < connections; c++)
-        for (let n = 0; n < captures; n++) {
-          const conn = `synthetic-history-${c}`;
-          const mode: HistoryMode =
-            randomSeed === null
-              ? "complete"
-              : (["complete", "partial", "failed", "mismatch"] as const)[Math.floor(next() * 4)]!;
-          expected.set(conn, seedHistoryCapture(store, ++index, conn, mode));
-        }
+      // One transaction for the seed, as the candidate stores above write
+      // theirs; the rows, triggers and constraint checks are the same.
+      store.db.transaction(() => {
+        for (let c = 0; c < connections; c++)
+          for (let n = 0; n < captures; n++) {
+            const conn = `synthetic-history-${c}`;
+            const mode: HistoryMode =
+              randomSeed === null
+                ? "complete"
+                : (["complete", "partial", "failed", "mismatch"] as const)[Math.floor(next() * 4)]!;
+            expected.set(conn, seedHistoryCapture(store, ++index, conn, mode));
+          }
+      })();
       // A native legacy family is present in the same CORE store. Its exact
       // candidate bytes remain the frozen query's, not a restated expectation.
       const legacyRun = store.run({

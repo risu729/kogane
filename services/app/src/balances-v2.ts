@@ -11,7 +11,8 @@
 // position: no account label, no provider metric, no amount. Every
 // continuation request goes through the same Access gate and the same scope
 // resolution as the first, and a cursor whose filter digest differs is
-// refused rather than reinterpreted.
+// refused rather than reinterpreted. The page size alone is not a different
+// query: a cursor read at another offered size continues (ADR 0119).
 
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { metricById, resolveMetric, UNKNOWN_METRIC } from "../../../packages/domain/src/metrics.ts";
@@ -19,20 +20,28 @@ import {
   KEYSET_PAGINATION_VERSION,
   SNAPSHOT_PAGE_SCHEMA_VERSION,
 } from "../../../packages/domain/src/paging.ts";
-import { addDecimals, integerDecimal } from "../../../packages/domain/src/values.ts";
+import {
+  addDecimals,
+  integerDecimal,
+  normalizeDecimal,
+} from "../../../packages/domain/src/values.ts";
 import type {
   BalanceEvidenceMember,
   BalanceHistoryItem,
   BalanceHistoryPage,
+  BalanceHistorySummaryPage,
+  BalanceReadDetail,
   BalanceHistoryRow,
   BalanceRow,
   KnownAssetsSubtotals,
   LatestBalanceItem,
   LatestBalancePage,
+  LatestBalanceSummaryPage,
   MeasureDescriptor,
   ObservedQuantityWire,
   SnapshotDataCoverage,
 } from "../../../packages/observation-shared/src/api-contract.ts";
+import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import {
   BALANCE_INTERPRETATION_POLICY_VERSION,
   classifyBalance,
@@ -42,6 +51,7 @@ import type { IdentityReadMode } from "../../../packages/read-model/src/index";
 import {
   d1Executor,
   DEFAULT_PROJECTION_PAGE_LIMIT,
+  DEFAULT_SUMMARY_PAGE_LIMIT,
   KNOWN_ASSETS_POLICY,
   knownAssetMetricIds,
   PROJECTION_PAGE_LIMITS,
@@ -70,6 +80,11 @@ import {
   organizationContext,
   organizeRows,
 } from "../../../packages/application/src/query/observation-organization.ts";
+import {
+  balanceHistorySummary,
+  latestBalanceSummary,
+  readDetail,
+} from "../../../packages/application/src/query/read-detail.ts";
 
 export const V2_LATEST_PATH = "/api/v2/balances/latest";
 export const V2_HISTORY_PATH = "/api/v2/balances/history";
@@ -205,9 +220,21 @@ function scopeOf(url: Pick<URL, "searchParams">): V2Scope {
   };
 }
 
-function pageLimit(url: Pick<URL, "searchParams">): number {
+/**
+ * How much each row says (ADR 0123): `summary` (the default) or `full`. It
+ * picks the default page size and the shape of each row, never the rows, so
+ * a cursor is not bound to it and continues under either detail.
+ */
+function detailOf(url: Pick<URL, "searchParams">): BalanceReadDetail {
+  const detail = readDetail(url.searchParams.get("detail"));
+  if (detail === null) throw new HttpError(400, "invalid_detail");
+  return detail;
+}
+
+function pageLimit(url: Pick<URL, "searchParams">, detail: BalanceReadDetail): number {
   const text = url.searchParams.get("limit");
-  if (text === null) return DEFAULT_PROJECTION_PAGE_LIMIT;
+  if (text === null)
+    return detail === "summary" ? DEFAULT_SUMMARY_PAGE_LIMIT : DEFAULT_PROJECTION_PAGE_LIMIT;
   // One of the offered sizes as written: `Number` alone would also read
   // "0x32", "5e1" or " 50" as 50.
   const limit = Number(text);
@@ -217,9 +244,10 @@ function pageLimit(url: Pick<URL, "searchParams">): number {
 }
 
 /**
- * What the cursor is bound to: the route, the resolved scope, the page size
- * and the identity read mode. Changing any of them makes a stored cursor
- * belong to a different query, and the continuation is refused.
+ * What the cursor carries: the digest of the route, the resolved scope, the
+ * page size and the identity read mode. Changing the route, the scope or the
+ * mode makes a stored cursor belong to a different query, and the
+ * continuation is refused; another offered page size continues it (ADR 0119).
  */
 async function filterDigest(
   route: string,
@@ -230,33 +258,20 @@ async function filterDigest(
   return await canonicalDigest({ route, scope, limit, mode });
 }
 
-function quantityOf(row: {
-  value_status: ProjectionPageRow["value_status"];
-  quantity_coefficient: string | null;
-  quantity_scale: number | null;
-  unit_ref: string;
-  amount_minor: string | null;
-  amount_text: string | null;
-}): ObservedQuantityWire {
+/**
+ * The quantity a calculation may use. `normalized` carries the basis its
+ * decimal-v1 value rests on: how the observation's own representations
+ * normalized (docs/normalized-decimals.md, input contract), `agreement` only
+ * when both were valid and equal, `minor_units` or `decimal_text` when one
+ * alone was. The basis belongs to the stored normalization, not to the
+ * adoption outcome, so it is read from the store and never inferred here.
+ */
+function quantityOf(
+  normalized: NormalizedDecimal,
+  row: { unit_ref: string; amount_minor: string | null; amount_text: string | null },
+): ObservedQuantityWire {
   return {
-    normalized:
-      row.value_status === "exact" &&
-      row.quantity_coefficient !== null &&
-      row.quantity_scale !== null
-        ? {
-            policyVersion: "decimal-v1",
-            status: "exact",
-            coefficient: row.quantity_coefficient,
-            scale: row.quantity_scale,
-            basis: "agreement",
-          }
-        : {
-            policyVersion: "decimal-v1",
-            status: row.value_status,
-            coefficient: null,
-            scale: null,
-            basis: "none",
-          },
+    normalized,
     unitReference: row.unit_ref || null,
     sourceRepresentation: {
       amountText: row.amount_text,
@@ -265,6 +280,45 @@ function quantityOf(row: {
       // contract for known currencies, never guessed from the value.
       legacyMinorUnitExponent: minorUnitExponent(row.unit_ref) ?? null,
     },
+  };
+}
+
+/**
+ * A projection row's value with its basis. The projection stores the value
+ * but not its basis. That value is the representative observation's stored
+ * decimal-v1 row, captured when the snapshot was built. Neither side can
+ * change afterwards (stored decimals refuse updates, a sealed snapshot is
+ * immutable), so the same observation's stored row carries the basis. Should
+ * the two values ever differ, the page is refused rather than labelled with a
+ * basis nobody recorded for that value.
+ */
+function projectedNormalized(
+  row: Pick<ProjectionPageRow, "value_status" | "quantity_coefficient" | "quantity_scale">,
+  stored: NormalizedDecimal,
+): NormalizedDecimal {
+  if (
+    row.value_status !== "exact" ||
+    row.quantity_coefficient === null ||
+    row.quantity_scale === null
+  )
+    return {
+      policyVersion: "decimal-v1",
+      status: row.value_status,
+      coefficient: null,
+      scale: null,
+      basis: "none",
+    };
+  if (stored.status !== "exact" || stored.coefficient === null || stored.scale === null)
+    throw new Error("projection_decimal_mismatch");
+  const value = normalizeDecimal(BigInt(stored.coefficient), stored.scale);
+  if (value.coefficient !== row.quantity_coefficient || value.scale !== row.quantity_scale)
+    throw new Error("projection_decimal_mismatch");
+  return {
+    policyVersion: "decimal-v1",
+    status: "exact",
+    coefficient: row.quantity_coefficient,
+    scale: row.quantity_scale,
+    basis: stored.basis,
   };
 }
 
@@ -488,6 +542,21 @@ async function knownAssetSubtotals(
   };
 }
 
+/**
+ * The inputs a balance cursor is bound to, by the names `kogane.balances.read`
+ * takes them (`collection` is the route's path on HTTP): a continuation must
+ * repeat each one as it was, absent included.
+ */
+const BALANCE_CURSOR_INPUTS = [
+  "collection",
+  "source",
+  "account",
+  "instrument",
+  "metric",
+  "view",
+  "identityRead",
+] as const;
+
 interface Continuation {
   snapshot: BalanceSnapshotRow;
   afterRowSeq: number;
@@ -500,12 +569,15 @@ interface Continuation {
  * membership stays fixed while the reader pages. A cursor for another query
  * is `cursor_mismatch` (400) and a snapshot that no longer exists is
  * `context_expired` (410): the reader is never moved silently to a newer
- * list.
+ * list. The page size is not part of the query: a cursor read at another
+ * offered size continues at the size asked now (ADR 0119), so `pageSizes`
+ * gives the same query's digest at each of them, computed only for a cursor.
  */
 async function continuation(
   target: ReadTarget,
   url: Pick<URL, "searchParams">,
   digest: string,
+  pageSizes: () => Promise<readonly string[]>,
 ): Promise<Continuation | null> {
   if (target.contractMismatch) throw new HttpError(503, "read_model_unavailable");
   const text = url.searchParams.get("cursor");
@@ -518,6 +590,7 @@ async function continuation(
   const snapshot = await target.reader.snapshot(cursor.snapshotId);
   const rejection = checkReadCursor(cursor, {
     filterDigest: digest,
+    pageSizeDigests: await pageSizes(),
     // A cursor from another physical read model — a rebuilt READ database, or
     // the CORE projection this deployment no longer serves — expires. Snapshot
     // ids are digests of content and repeat across rebuilds, so the instance
@@ -525,9 +598,18 @@ async function continuation(
     readInstanceId: target.instanceId,
     snapshotReadable: snapshot !== null,
   });
-  if (rejection === "cursor_mismatch") throw new HttpError(400, "cursor_mismatch");
+  // A cursor continues only the query it was read for; the answer names the
+  // inputs that must repeat. The page size and the detail need not (ADR 0119,
+  // ADR 0123).
+  if (rejection === "cursor_mismatch")
+    throw new HttpError(400, "cursor_mismatch", [], { mustMatch: BALANCE_CURSOR_INPUTS });
   if (rejection !== null || snapshot === null) throw new HttpError(410, "context_expired");
   return { snapshot, afterRowSeq: cursor.position, afterSortKey: cursor.sortKey };
+}
+
+/** The digests of one query at every offered page size (`continuation`). */
+function pageSizeDigests(route: string, scope: V2Scope, mode: IdentityReadMode): Promise<string[]> {
+  return Promise.all(PROJECTION_PAGE_LIMITS.map((size) => filterDigest(route, scope, size, mode)));
 }
 
 /**
@@ -577,13 +659,16 @@ export async function latestBalancePage(
   env: Env,
   url: Pick<URL, "searchParams">,
   mode: IdentityReadMode,
-): Promise<LatestBalancePage> {
+): Promise<LatestBalancePage | LatestBalanceSummaryPage> {
+  const detail = detailOf(url);
   const target = await readTarget(env);
   const reader = target.reader;
   const scope = scopeOf(url);
-  const limit = pageLimit(url);
+  const limit = pageLimit(url, detail);
   const digest = await filterDigest(V2_LATEST_PATH, scope, limit, mode);
-  const resolved = await continuation(target, url, digest);
+  const resolved = await continuation(target, url, digest, () =>
+    pageSizeDigests(V2_LATEST_PATH, scope, mode),
+  );
   // No published snapshot at all: the read model is unavailable, which is a
   // different answer from "you hold no balances" (05 §7, G3-01).
   if (!resolved) throw new HttpError(503, "read_model_unavailable");
@@ -605,7 +690,7 @@ export async function latestBalancePage(
     return {
       observationId: row.observation_id,
       row: { ...withDecimals[index]!, interpretation: interpretationOf(row, evidence) },
-      quantity: quantityOf(row),
+      quantity: quantityOf(projectedNormalized(row, withDecimals[index]!.normalized), row),
       metric: measureOf(row.metric_id, row.definition_release),
       adoption: {
         state: row.state as LatestBalanceItem["adoption"]["state"],
@@ -652,7 +737,9 @@ export async function latestBalancePage(
       organized.map((row) => row.organization),
     ),
   };
-  return body;
+  // The summary is this page, line by line: the same rows, cursor, coverage
+  // and subtotals (ADR 0123).
+  return detail === "full" ? body : latestBalanceSummary(body);
 }
 
 /**
@@ -664,13 +751,16 @@ export async function balanceHistoryPage(
   env: Env,
   url: Pick<URL, "searchParams">,
   mode: IdentityReadMode,
-): Promise<BalanceHistoryPage> {
+): Promise<BalanceHistoryPage | BalanceHistorySummaryPage> {
+  const detail = detailOf(url);
   const target = await readTarget(env);
   const reader = target.reader;
   const scope = scopeOf(url);
-  const limit = pageLimit(url);
+  const limit = pageLimit(url, detail);
   const digest = await filterDigest(V2_HISTORY_PATH, scope, limit, mode);
-  const resolved = await continuation(target, url, digest);
+  const resolved = await continuation(target, url, digest, () =>
+    pageSizeDigests(V2_HISTORY_PATH, scope, mode),
+  );
   if (!resolved) throw new HttpError(503, "read_model_unavailable");
   const refusal = await snapshotRefusal(target, resolved.snapshot);
   if (refusal !== null) throw new HttpError(503, refusal);
@@ -710,10 +800,9 @@ export async function balanceHistoryPage(
     return {
       observationId: row.id,
       row: historyRow,
-      quantity: quantityOf({
-        value_status: historyRow.normalized?.status ?? "missing",
-        quantity_coefficient: historyRow.normalized?.coefficient ?? null,
-        quantity_scale: historyRow.normalized?.scale ?? null,
+      // A history item is one observation: its quantity is that
+      // observation's stored normalization, basis included.
+      quantity: quantityOf(withDecimals[index]!.normalized, {
         unit_ref: row.instrument,
         amount_minor: row.amount_minor,
         amount_text: row.amount_text,
@@ -759,5 +848,5 @@ export async function balanceHistoryPage(
       organized.map((row) => row.organization),
     ),
   };
-  return body;
+  return detail === "full" ? body : balanceHistorySummary(body);
 }
