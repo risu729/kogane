@@ -205,7 +205,8 @@ offered page size; what remains is that the refusal says nothing.
    `400 cursor_mismatch` and now carries `mustMatch`, the argument names that
    must repeat: `collection`, `source`, `account`, `instrument`, `metric`,
    `view`, `identityRead` for balances; `collection` and `program` for reward
-   expiry (`collection` for simulations). `HttpError` carries such closed
+   expiry, with `from` and `before` once its deadline window (ADR 0049,
+   amendment of 2026-11-19) binds them (`collection` for simulations). `HttpError` carries such closed
    hints beside its code (`hints`), and the Worker and the page reads answer
    them; names only, never a value.
 5. **Owner approval.** The input schemas of the three tools, their default

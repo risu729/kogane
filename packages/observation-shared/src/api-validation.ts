@@ -18,8 +18,21 @@ import type {
   RewardReadExpiryRow,
   RewardPage,
   RewardReadExpiryPage,
+  RewardReadExpiryWindowedPage,
+  RewardExpirySummary,
+  RewardExpirySummaryAmount,
+  RewardExpirySummaryDisplay,
+  RewardExpirySummaryLine,
+  RewardExpirySummaryProgram,
+  RewardExpirySummaryTotal,
+  RewardExpiryWindow,
+  RewardExpiryWindowCounts,
 } from "./reward-contract.ts";
-import { validRewardExpiryBasis, validRewardBucketKind } from "./reward-contract.ts";
+import {
+  REWARD_EXPIRY_LEFT_OUT_REASONS,
+  validRewardExpiryBasis,
+  validRewardBucketKind,
+} from "./reward-contract.ts";
 // Runtime checks for the shared HTTP contract; no database or UI dependencies.
 // Shape<T> requires a validator for every declared field when contracts evolve.
 import { isDecimalMinorUnit } from "../../parsers/src/money.ts";
@@ -1070,7 +1083,101 @@ const rewardReadExpiry = object<RewardReadExpiryRow>({
   // recorded"; an absent key is a response from an App before the field.
   expiryBasis: optional(nullable(validRewardExpiryBasis)),
 });
-const rewardReadPage = object<RewardReadExpiryPage>({
+const rewardSnapshot = object<RewardReadExpiryPage["snapshot"]>({
+  snapshotId: hash,
+  evaluatedAt: validInstantText,
+  evaluationCalendar: text,
+  ruleSetDigest: hash,
+  ruleCount: identifier,
+  claimsRelease: text,
+  claimsHighWater: identifier,
+  release: text,
+});
+// ADR 0049, amendment of 2026-11-19: the window a windowed page or a summary
+// was read over, and how the rest fell.
+const rewardExpiryWindow = object<RewardExpiryWindow>({
+  from: validLocalDateText,
+  before: nullable(validLocalDateText),
+  fromBasis: literal("request", "today"),
+  today: validLocalDateText,
+  calendar: literal("Asia/Tokyo"),
+});
+const rewardWindowCounts = object<RewardExpiryWindowCounts>({
+  inWindow: identifier,
+  beforeWindow: identifier,
+  afterWindow: identifier,
+  leftOut: array(
+    object<RewardExpiryWindowCounts["leftOut"][number]>({
+      reasonCode: literal(...REWARD_EXPIRY_LEFT_OUT_REASONS),
+      count: identifier,
+    }),
+  ),
+});
+const decimalText: Check<string> = (value): value is string =>
+  typeof value === "string" && /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/u.test(value);
+// An amount or a total that is not exact carries no value (INV05).
+const rewardSummaryAmount: Check<RewardExpirySummaryAmount> = (
+  value,
+): value is RewardExpirySummaryAmount =>
+  record(value) &&
+  (value["status"] === "exact"
+    ? decimalText(value["value"])
+    : literal("missing", "unparsed", "conflict")(value["status"]) &&
+      value["value"] === null &&
+      text(value["reasonCode"]));
+const rewardSummaryTotal: Check<RewardExpirySummaryTotal> = (
+  value,
+): value is RewardExpirySummaryTotal =>
+  record(value) &&
+  (value["status"] === "exact"
+    ? decimalText(value["value"])
+    : value["status"] === "not-exact" &&
+      value["value"] === null &&
+      array(text)(value["reasonCodes"]) &&
+      (value["reasonCodes"] as string[]).length > 0);
+const rewardExpirySummary = object<RewardExpirySummary>({
+  detail: literal("summary"),
+  window: nullable(rewardExpiryWindow),
+  programs: array(
+    object<RewardExpirySummaryProgram>({
+      programId: text,
+      unitRef: text,
+      buckets: identifier,
+      total: rewardSummaryTotal,
+      lines: array(
+        object<RewardExpirySummaryLine>({
+          holdingRef: text,
+          bucketRef: text,
+          kind: validRewardBucketKind,
+          expiresOn: validLocalDateText,
+          basis: literal("provider-observed", "policy-estimated"),
+          amount: rewardSummaryAmount,
+        }),
+      ),
+    }),
+  ),
+  providerDisplays: array(
+    object<RewardExpirySummaryDisplay>({
+      programId: text,
+      holdingRef: text,
+      parentBucketRef: text,
+      displayRef: text,
+      unitRef: text,
+      expiresOn: validLocalDateText,
+      amount: rewardSummaryAmount,
+    }),
+  ),
+  counts: object<RewardExpirySummary["counts"]>({
+    buckets: rewardWindowCounts,
+    providerDisplays: rewardWindowCounts,
+  }),
+  lineLimit: object<RewardExpirySummary["lineLimit"]>({
+    buckets: identifier,
+    providerDisplays: identifier,
+  }),
+  snapshot: rewardSnapshot,
+});
+const rewardReadPage = object<RewardReadExpiryPage & { window?: unknown }>({
   providerDisplaySections: optional(array(validRewardProviderExpirySection)),
   rows: array(rewardReadExpiry),
   page: object<RewardReadExpiryPage["page"]>({
@@ -1078,16 +1185,12 @@ const rewardReadPage = object<RewardReadExpiryPage>({
     hasMore: boolean,
     nextCursor: nullableText,
   }),
-  snapshot: object<RewardReadExpiryPage["snapshot"]>({
-    snapshotId: hash,
-    evaluatedAt: validInstantText,
-    evaluationCalendar: text,
-    ruleSetDigest: hash,
-    ruleCount: identifier,
-    claimsRelease: text,
-    claimsHighWater: identifier,
-    release: text,
-  }),
+  // Present exactly when the request named a window.
+  window: optional(
+    (value): value is RewardReadExpiryWindowedPage["window"] =>
+      rewardExpiryWindow(value) && record(value) && rewardWindowCounts(value["rows"]),
+  ),
+  snapshot: rewardSnapshot,
 });
 
 // A response may say which interpretation it was computed under; when it does,
@@ -1097,7 +1200,11 @@ const endpoints: Record<string, Check<unknown>> = {
   "/api/v2/rewards/holdings": rewardPage(rewardHolding),
   "/api/v2/rewards/expiry": (value): value is unknown =>
     record(value) &&
-    ("snapshot" in value ? rewardReadPage(value) : rewardPage(rewardExpiry)(value)),
+    (value["detail"] === "summary"
+      ? rewardExpirySummary(value)
+      : "snapshot" in value
+        ? rewardReadPage(value)
+        : rewardPage(rewardExpiry)(value)),
   "/api/meta": metadata,
   "/api/overview": (value): value is Overview | OverviewSummary =>
     fullPage(overview)(value) || overviewSummary(value),

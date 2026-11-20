@@ -875,8 +875,9 @@ page's. A cursor is bound to neither `detail` nor `limit`
 ([ADR 0119](adr/0119-cursor-page-size.md)); a cursor read with other filters
 is `400 cursor_mismatch` with `mustMatch`, the argument names that must
 repeat (`collection`, `source`, `account`, `instrument`, `metric`,
-`view`, `identityRead` on `kogane.balances.read`; `collection` and
-`program` on `kogane.rewards.read`), on the route and the tool alike.
+`view`, `identityRead` on `kogane.balances.read`; `collection`, `program`,
+`from` and `before` on `kogane.rewards.read`'s expiry), on the route and the
+tool alike.
 `test/mcp-answer-size.test.ts` measures every read tool's default answer on
 a store at the scale of [issue 1414](https://github.com/risu729/kogane/issues/1414)
 and keeps the summaries under the 8 KB a client shows, with the overview
@@ -964,6 +965,30 @@ does. `kogane.reconcile.propose` writes, so a store failure there stays
 read tool's read (an operations or decision tool, the dispatcher).
 Until 2026-11-18 every read tool outside the page reads answered a store
 failure inside its read with `500 internal_error`.
+
+`kogane.rewards.read` with `collection: "expiry"` also takes `from`, `before`
+and `detail` ([ADR 0049, amendment of 2026-11-19](adr/0049-reward-expiry-basis.md#amendment-a-deadline-window-and-a-summary-on-the-expiry-read),
+proposed; [rewards: deadline window and summary](rewards.md#deadline-window-and-summary)).
+`from` (inclusive, default today's Asia/Tokyo date) and `before` (exclusive)
+are `YYYY-MM-DD` and window each row's `expiresOn`. With neither there is no
+window: a summary then counts every dated bucket inside, past deadlines too.
+A windowed page lists the rows inside and counts the rest under
+`window.rows`, and its cursor is bound to the window (`400 cursor_mismatch` under another). `detail: "summary"`
+(unpaged; `limit` or `cursor` is `400 invalid_query`) answers "which points
+expire soon" in one call: per programme and unit the buckets inside the
+window with their total, added with `sumQuantities` once per bucket (not once
+per rule) and `not-exact` with reasons when an amount is not exact; the
+earliest 20 bucket lines; up to 3 provider-displayed portions, never added;
+and counts inside, before, after and left out by closed reason
+(`deadline_unknown`, `deadline_differs_by_rule`, `display_date_unknown`,
+`provider_expiry_not_displayed`, `provider_expiry_unavailable`). A malformed
+date is `400 invalid_date`, a window with no day `400 invalid_date_range`, a
+snapshot over 1,000 rows `413 result_limit_exceeded`. Without these arguments
+the answer is the page as before: unlike the reads of
+[ADR 0123](adr/0123-summary-detail-for-large-reads.md), absent `detail` here is
+`full`. A summary of the synthetic store in
+`test/reward-expiry-window.test.ts` is under 2 KB, against about 71 KB for the
+default 50-row page.
 
 `kogane.reports.read` takes `{ reportId?, view?, offset?, decimalPolicy? }`:
 without `reportId` it is the list (`offset` only), with it the detail
