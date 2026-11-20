@@ -216,7 +216,12 @@ function count(summary: ScanSummary, result: RegisterTerminalOutcome): void {
  * nothing and spends none of them, so the next pending run is tried in its
  * place, up to `maxContinuationReads` runs read in all. Without that, five
  * such runs, the oldest, would take every continuation on every tick
- * (ADR 0024, amendment of 2026-11-08).
+ * (ADR 0024, amendment of 2026-11-08). A continuation answered from CORE's
+ * row (`already_registered`, or a verdict already recorded, such as the
+ * `terminal_digest_conflict` of a pending run whose terminal key now holds
+ * other bytes) spends none of them either, as in the listing: it costs the
+ * same three operations and writes nothing (ADR 0024, amendment of
+ * 2026-11-19).
  *
  * The cursor only advances when the whole page was dealt with. A tick that
  * runs out of its registration budget leaves the cursor where it was, so the
@@ -312,6 +317,7 @@ export async function collectionScan(
     if (continuedWork >= maxContinuations) break;
     summary.continued += 1;
     const missingBefore = summary.missing;
+    const answeredBefore = summary.alreadyRegistered + summary.alreadyJudged;
     if (!(await attempt({ source: run.source, runId: run.run_id }))) {
       budgetExhausted = true;
       break;
@@ -321,7 +327,15 @@ export async function collectionScan(
     // It costs the terminal read and none of the five; it stays pending and
     // is tried again next tick, so it registers once its terminal is found.
     if (summary.missing > missingBefore) summary.continuedMissing += 1;
-    else continuedWork += 1;
+    // Nor does an answer read from CORE's row: a pending run whose terminal
+    // now holds other bytes is blocked `terminal_digest_conflict` under the
+    // new digest on its first tick (a first verdict, which spends one) and
+    // answered from that row on every later one, while its pending row stays
+    // pending and the oldest. Spending one there would let five such runs
+    // keep every continuation from the others for good (ADR 0024, amendment
+    // of 2026-11-19), as five missing terminals did.
+    else if (summary.alreadyRegistered + summary.alreadyJudged === answeredBefore)
+      continuedWork += 1;
   }
 
   const state = await readCollectionScanState(env.DB);

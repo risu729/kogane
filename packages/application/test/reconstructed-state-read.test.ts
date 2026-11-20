@@ -5,11 +5,14 @@
 // amount and date is invented.
 import { describe, expect, test } from "bun:test";
 import { DATED_BALANCES_SQL, DATED_STATE_ROW_BOUND } from "../../read-model/src/dated-state.ts";
+import { explain } from "../../read-model/test/card-usage-plan.ts";
+import { fullCoreSchema } from "../../read-model/test/card-usage-scale-fixture.ts";
 import { storeExecutor } from "../../read-model/test/economic-history-fixture.ts";
 import { ERROR_STATUS } from "../src/errors.ts";
 import {
   parseReconstructedStateRequest,
   readReconstructedState,
+  RECONSTRUCTED_STATE_ACCOUNTS_SQL,
   RECONSTRUCTED_STATE_REFUSALS,
   reconstructedStateBodyFromQuery,
   reconstructedStateError,
@@ -26,6 +29,8 @@ import {
   WORLD_GRANT,
   WORLD_NO_GUARD,
   WORLD_PRE_LOG,
+  WORLD_SCOPE_BANK,
+  WORLD_SCOPE_SAVINGS,
   WORLD_TO,
 } from "./reconstructed-state-world.ts";
 
@@ -154,14 +159,73 @@ describe("refusals", () => {
     expect(refusal(await ask({ basis: "cash" }))).toBe("answered");
   });
 
-  test("the scope: one known account, never instruments or several accounts", async () => {
+  test("the scope: known accounts, at most 20, each once, never instruments", async () => {
     expect(refusal(await ask({ account: "acct-nowhere" }))).toBe("unknown_account");
     expect(refusal(await ask({ account: " x" }))).toBe("invalid_account");
     expect(refusal(await ask({ instrument: "inst-1" }))).toBe("scope_unsupported");
-    const two = params();
-    two.append("account", WORLD_CARD);
-    expect(refusal(await reconstructedStateOutcome(worlds, two, NOW))).toBe("scope_unsupported");
     expect(refusal(await ask({ offset: "0" }))).toBe("invalid_query");
+    const scope = (accounts: string[]) => {
+      const search = new URLSearchParams();
+      for (const account of accounts) search.append("account", account);
+      search.set("from", WORLD_FROM);
+      search.set("to", WORLD_TO);
+      return reconstructedStateOutcome(worlds, search, NOW);
+    };
+    // A card account in the scope: no reported container, so the scope is unavailable.
+    const withCard = body(await scope([WORLD_BANK, WORLD_CARD]));
+    expect([withCard.accounts, withCard.status]).toEqual([[WORLD_BANK, WORLD_CARD], "unavailable"]);
+    // Which id is unknown is not said: the refusal names the key.
+    expect(await scope([WORLD_BANK, "acct-nowhere"])).toEqual({
+      ok: false,
+      refusal: "unknown_account",
+      refs: ["accounts"],
+    });
+    expect(await scope([WORLD_BANK, WORLD_BANK])).toEqual({
+      ok: false,
+      refusal: "invalid_account",
+      refs: ["accounts"],
+    });
+    const many = Array.from({ length: 21 }, (_, index) => `acct-${String(index)}`);
+    expect(await scope(many)).toEqual({
+      ok: false,
+      refusal: "too_many_accounts",
+      refs: ["maxAccounts:20"],
+    });
+    expect(refusal(await scope(many.slice(0, 20)))).toBe("unknown_account");
+  });
+
+  test("a scope of two accounts at two providers: each account's cells, nothing added", async () => {
+    const search = new URLSearchParams({
+      account: WORLD_SCOPE_SAVINGS,
+      from: WORLD_FROM,
+      to: WORLD_TO,
+    });
+    search.append("account", WORLD_SCOPE_BANK);
+    const answer = body(await reconstructedStateOutcome(worlds, search, NOW));
+    expect(answer.accounts).toEqual([WORLD_SCOPE_BANK, WORLD_SCOPE_SAVINGS]);
+    expect(answer.status).toBe("incomplete");
+    expect(
+      answer.reconstruction!.cells.map((cell) => [
+        cell.accountId,
+        cell.unitRef,
+        cell.reconstructed.value.status === "exact" ? cell.reconstructed.value.value : null,
+        cell.explanation.status,
+      ]),
+    ).toEqual([
+      [WORLD_SCOPE_BANK, "JPY", { coefficient: "9000", scale: 0 }, "not_comparable"],
+      [WORLD_SCOPE_SAVINGS, "JPY", { coefficient: "49900", scale: 0 }, "not_comparable"],
+    ]);
+    expect(answer.reconstruction!.netWorth).toBe("not-computed");
+    // The same scope as a body list, in either order: the same answer.
+    const listed = body(
+      await readReconstructedState({
+        grant: WORLD_GRANT,
+        sql: storeExecutor(worlds.get(WORLD_SCOPE_BANK)!.db),
+        body: { accounts: [WORLD_SCOPE_BANK, WORLD_SCOPE_SAVINGS], from: WORLD_FROM, to: WORLD_TO },
+        now: NOW,
+      }),
+    );
+    expect(listed.contextId).toBe(answer.contextId);
   });
 
   test("the cut", async () => {
@@ -191,12 +255,40 @@ describe("refusals", () => {
         NOW,
       ),
     ).toEqual({ ok: false, refusal: "invalid_query", refs: [] });
+    // Several accounts are an `accounts` list; a list under `account` is malformed.
     expect(
       parseReconstructedStateRequest(
         { account: [WORLD_BANK], from: WORLD_FROM, to: WORLD_TO },
         NOW,
       ),
-    ).toMatchObject({ refusal: "scope_unsupported" });
+    ).toEqual({ ok: false, refusal: "invalid_account", refs: ["account"] });
+    expect(
+      parseReconstructedStateRequest(
+        { account: WORLD_BANK, accounts: [WORLD_BANK], from: WORLD_FROM, to: WORLD_TO },
+        NOW,
+      ),
+    ).toEqual({ ok: false, refusal: "invalid_query", refs: ["account", "accounts"] });
+    for (const accounts of [[], WORLD_BANK, [WORLD_BANK, " x"], [WORLD_BANK, 1]])
+      expect(
+        parseReconstructedStateRequest({ accounts, from: WORLD_FROM, to: WORLD_TO }, NOW),
+      ).toEqual({ ok: false, refusal: "invalid_account", refs: ["accounts"] });
+    expect(
+      parseReconstructedStateRequest(
+        { accounts: [WORLD_CARD, WORLD_BANK], from: WORLD_FROM, to: WORLD_TO },
+        NOW,
+      ),
+    ).toMatchObject({
+      ok: true,
+      value: { accounts: [WORLD_CARD, WORLD_BANK], accountKey: "accounts" },
+    });
+    expect(
+      reconstructedStateBodyFromQuery(
+        new URLSearchParams(`account=${WORLD_BANK}&account=${WORLD_CARD}`),
+      ),
+    ).toEqual({ ok: true, body: { accounts: [WORLD_BANK, WORLD_CARD] } });
+    expect(
+      reconstructedStateBodyFromQuery(new URLSearchParams(`account=${WORLD_BANK}&account=`)),
+    ).toEqual({ ok: false, refusal: "invalid_query", refs: ["account"] });
     expect(reconstructedStateBodyFromQuery(new URLSearchParams("account="))).toMatchObject({
       refusal: "invalid_query",
     });
@@ -282,6 +374,16 @@ describe("refusals read nothing, bounds are refused, and today is Tokyo's", () =
       [{ ...base, instrument: "inst-1" }, "scope_unsupported"],
       [{ ...base, extra: true }, "invalid_query"],
       [{ ...base, account: " x" }, "invalid_account"],
+      [{ from: WORLD_FROM, to: WORLD_TO, accounts: [WORLD_BANK, WORLD_BANK] }, "invalid_account"],
+      [
+        {
+          from: WORLD_FROM,
+          to: WORLD_TO,
+          accounts: Array.from({ length: 21 }, (_, index) => `acct-${String(index)}`),
+        },
+        "too_many_accounts",
+      ],
+      [{ ...base, accounts: [WORLD_BANK] }, "invalid_query"],
       [{ ...base, setVersion: "abc" }, "invalid_query"],
     ];
     for (const [body, code] of cases)
@@ -337,5 +439,61 @@ describe("refusals read nothing, bounds are refused, and today is Tokyo's", () =
     // 16:00 UTC on 4/30 is 01:00 on 5/1 in Tokyo; 14:59:59 UTC is still 4/30.
     expect(refusal(await ask("2026-04-30T16:00:00Z"))).toBe("answered");
     expect(refusal(await ask("2026-04-30T14:59:59Z"))).toBe("range_in_future");
+  });
+});
+
+describe("the scope's account check (ADR 0116)", () => {
+  // The shipped one-account text, frozen: ADR 0116 replaced it with one count for the list.
+  const LEGACY_ACCOUNT_SQL = "SELECT 1 AS present FROM accounts WHERE id=?1";
+
+  test("counts, for random and scaled lists of distinct ids, what the frozen one-account check finds", () => {
+    let state = 7;
+    const next = () => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return state / 2_147_483_648;
+    };
+    for (const size of [3, 40, 5_000]) {
+      const db = fullCoreSchema();
+      const insert = db.prepare(
+        "INSERT INTO accounts(id,label,role,status) VALUES(?,'Synthetic','asset','identified')",
+      );
+      const known: string[] = [];
+      for (let index = 0; index < size; index += 1) {
+        // Ids of the route's pattern, some of them reading as numbers.
+        const id = next() < 0.2 ? String(index) : `acct-${String(index)}`;
+        insert.run(id);
+        known.push(id);
+      }
+      const pool = [...known, "acct-missing", "0x1", "1.0", "01"];
+      for (let round = 0; round < 50; round += 1) {
+        const list = [
+          ...new Set(
+            Array.from(
+              { length: 1 + Math.floor(next() * 20) },
+              () => pool[Math.floor(next() * pool.length)]!,
+            ),
+          ),
+        ];
+        const legacy = list.filter((id) => db.query(LEGACY_ACCOUNT_SQL).get(id) !== null).length;
+        const counted = db.query(RECONSTRUCTED_STATE_ACCOUNTS_SQL).get(JSON.stringify(list)) as {
+          present: number;
+        };
+        expect([size, list, counted.present]).toEqual([size, list, legacy]);
+      }
+    }
+  });
+
+  test("reads each id by the primary key, without table statistics", () => {
+    const db = fullCoreSchema();
+    expect(
+      db.query("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'sqlite_stat%'").get(),
+    ).toEqual({ n: 0 });
+    const steps = explain(db, RECONSTRUCTED_STATE_ACCOUNTS_SQL, [JSON.stringify(["a", "b"])]);
+    expect(
+      steps.filter(
+        (step) => step.detail.startsWith("SCAN ") && !step.detail.includes("VIRTUAL TABLE"),
+      ),
+    ).toEqual([]);
+    expect(steps.some((step) => /^SEARCH a USING /u.test(step.detail))).toBe(true);
   });
 });

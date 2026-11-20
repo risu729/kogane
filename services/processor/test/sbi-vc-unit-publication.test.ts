@@ -1,7 +1,7 @@
 // The real collector DO runs in a subprocess with its own generated Env. Its
 // synthetic R2 bytes then take the production registration, parse/publication
 // and reader paths on local D1. No provider or credential is contacted.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
@@ -15,19 +15,23 @@ import { createD1ObservationReader, PAGE_LIMIT } from "../../../packages/read-mo
 import { registerCollectionRun } from "../src/collection/index.ts";
 import { sweep } from "../src/worker.ts";
 import { applyTestReadMigrations, applyTestSql } from "./migration-setup.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
+// Started while the module loads, never in a hook (test/support/settle.ts).
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {};",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB", "READ"],
+    r2Buckets: ["EVIDENCE"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default {};",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB", "READ"],
-      r2Buckets: ["EVIDENCE"],
-    }),
-  );
   const DB = await mf.getD1Database("DB");
   for (const file of migrationFiles(CORE_MIGRATIONS_URL))
     await applyTestSql(DB, migrationSql(CORE_MIGRATIONS_URL, file));

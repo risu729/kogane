@@ -59,8 +59,10 @@ import { validReportedState } from "./reported-state-contract.ts";
 import { validReportResponse } from "./report-artifact-contract.ts";
 import { validCollectionQualityResponse } from "./collection-quality-contract.ts";
 import {
+  OPERATION_LIST_PATH,
   OPERATION_RECORD_PATH_PREFIX,
   operationIdOfPath,
+  validOperationListPage,
   validOperationRecord,
 } from "./operation-contract.ts";
 import {
@@ -1320,6 +1322,7 @@ export function validApiResponse(path: string, value: unknown, detail?: ReadDeta
   if (path === INSTRUMENT_HISTORY_PATH) return validInstrumentHistoryRead(value);
   if (path === ACCOUNT_HISTORY_PATH) return validAccountHistoryRead(value);
   if (path === INSTRUMENT_COVERAGE_PATH) return validInstrumentCoverage(value);
+  if (path === OPERATION_LIST_PATH) return validOperationListPage(value);
   if (path.startsWith(OPERATION_RECORD_PATH_PREFIX)) {
     // The record of exactly the operation the path names, or nothing.
     const operationId = operationIdOfPath(path);

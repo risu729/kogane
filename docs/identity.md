@@ -34,7 +34,12 @@ carry their connection/account keys). Changing the principal in that slot
 requires a new producer/connection epoch, not silently reusing it. No rule
 claims multi-login identity from a parser constant. Provider-local accounts
 remain visibly provider-local until evidence or an explicit correction links
-them. Ordinal-only card/reward references are scoped to the fetch run.
+them. Ordinal-only card/reward references are scoped to the fetch run, and
+so, from identity policy 3, is an SBI Securities foreign custody or cash
+balance row that states no account discriminator, so it never joins the
+foreign cash history's account
+([ADR 0117](adr/0117-sbi-foreign-account-discriminator-identity.md),
+[SBI](identity-sbi.md)).
 
 `source_accounts` preserve the exact reference; `accounts` are the independent
 targets. Append-only `account_mappings` can link several references to one
@@ -180,7 +185,11 @@ second candidate or separated pair for the bare code. Example: `7203` held on
 An adoption is an `assign` identity command under actor
 `rule:instrument-auto-v1`: a `rule` mapping revision onto the listing's
 instrument and a `rule` `assign` decision naming both identifiers, guarded on
-both identifiers' revisions as read, and a `lane` audit record. A later
+both identifiers' revisions as read and on no `listed_as` relation, in any
+status, naming either identifier or either instrument when it is written (a
+keep-apart or a proposal recorded after the read stops it,
+[ADR 0055 amendment 2026-11-19](adr/0055-instrument-candidates.md#amendment-2026-11-19-the-adoption-re-checks-listed_as-when-it-writes)),
+and a `lane` audit record. A later
 identity policy version does not revert it. A person or an agent undoes it
 with `identity.assign` of the bare code back onto its own instrument, which
 the rule never touches again (a `release-override` of that mapping hands it

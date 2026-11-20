@@ -359,11 +359,16 @@ which pending-to-posted candidates are open".
 
 Input, a closed object (every key optional):
 
-| Key       | Shape                                    | Means                                                                                                  |
-| --------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `period`  | `YYYY-MM`                                | Only the events of that statement period, and figures over them                                        |
-| `eventId` | `purchase_<sha256>` or `refund_<sha256>` | One event, exactly; never beside `period` or `offset`                                                  |
-| `offset`  | integer, 0 to 1,000,000                  | Page start; a page is 50 events, `data.nextOffset` names the next one this grant may read (`nextPage`) |
+| Key          | Shape                                    | Means                                                                                                                                                         |
+| ------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `view`       | `events` (default), `cards` or `lines`   | The page of explained events, the per-card answer ([below](#per-card-view-adr-0125)), or compact purchase lines ([below](#purchase-lines-adr-0125-amendment)) |
+| `period`     | `YYYY-MM`                                | Only the events of that statement period, and figures over them                                                                                               |
+| `usageMonth` | `YYYY-MM`                                | `view: cards` and `view: lines` only: the events whose provider usage date is in that month                                                                   |
+| `eventId`    | `purchase_<sha256>` or `refund_<sha256>` | One event, exactly; never beside `period` or `offset`; not with `view: cards` or `view: lines`                                                                |
+| `offset`     | integer, 0 to 1,000,000                  | Page start; a page is 50 events, `data.nextOffset` names the next one this grant may read (`nextPage`)                                                        |
+| `account`    | account id, at most 128 characters       | `view: lines` only: that resolved account's lines; without it every card's                                                                                    |
+| `sort`       | `date` (default) or `amount`             | `view: lines` only: newest first, or largest exact amount first                                                                                               |
+| `cursor`     | at most 2,048 base64url characters       | `view: lines` only: the previous answer's `data.nextCursor`, with the same filter and sort                                                                    |
 
 Output:
 
@@ -460,6 +465,194 @@ and `rawLocator` is the parser's position inside an artifact, not a
 `fetch_artifact:` or `raw:` locator; reaching those still takes `explain` and
 `evidence.read`. The operator route itself is unchanged and still refuses an
 agent principal (`403 operator_required`).
+
+#### Per-card view (ADR 0125)
+
+`view: cards` answers "how much was each card used" in one compact read
+([ADR 0125](adr/0125-card-purchases-per-card-view.md); proposed, a published
+tool change awaiting the owner's approval). It takes exactly one of `period`
+(a statement month) and `usageMonth` (a month of provider usage dates, so
+purchases not yet on a statement count too), and no `eventId` or `offset`;
+anything else is `400 invalid_query` naming the keys. It is the operator
+route's `GET /api/v2/card-purchases?view=cards` answer, from the same
+`queryCardPurchaseCards`:
+
+```jsonc
+{
+  "schemaVersion": "kogane-card-purchases-cards-v1",
+  "query": { "view": "cards", "period": null, "usageMonth": "2026-09" },
+  "decisions": "operator-only",
+  "data": {
+    "view": "cards",
+    "frame": "usage-month", // or "statement-period"
+    "cards": [
+      {
+        "accountId": "account_…",
+        "sourceId": "vpass",
+        "label": "…",
+        "events": 12,
+        "unresolved": 0,
+        "figures": [
+          {
+            "unit": "JPY",
+            "captured": "…",
+            "authorized": "…",
+            "capturedRefunds": "0",
+            "authorizedRefunds": "0",
+          },
+        ],
+        "withoutStatement": [{ "reasonCode": "not_posted", "events": 3 }],
+        "statements": [
+          {
+            "period": "2026-10",
+            "total": { "unit": "JPY", "value": "…" },
+            "paymentDate": "2026-11-…",
+            "settlement": "accepted",
+            "debit": { "sourceId": "…", "date": "2026-11-…" },
+          },
+        ],
+      },
+    ],
+    "cardsTruncated": false,
+    "totals": [/* the page's summary.units for the same filter, as decimal text */],
+    "events": 12,
+    "unresolved": 0,
+    "settlementAddsPurchaseExpense": false,
+    "coverage": {/* the page's coverage without `limit` */},
+  },
+}
+```
+
+- A card is a resolved account and its card source; `label` is the stored
+  `accounts.label` (null without a row). At most 100 cards are listed, by
+  source then account; `cardsTruncated` says when more have events, and
+  `totals` still covers them.
+- `figures` per card and `totals` are `cardPurchaseSummary` sums (INV03) as
+  decimal text, states apart and no combined total, exactly the page's
+  figures regrouped. `withoutStatement` counts the events without a statement
+  figure by the page's closed reasons (`not_posted`,
+  `statement_not_collected`, `period_unrecognized`).
+- `statements` are the statements the card's posted events belong to, through
+  the page's own statement and settlement reads: the provider total (decimal
+  text when exact, else `status` and `reason`, never a zero), the payment date
+  (`YYYY-MM-DD` or `{ "reason": … }`), the settlement review's status and, only
+  while it is accepted, the bank debit's source and date.
+- No counterparty, provider row, candidate or evidence is in it: "on what" is
+  `view: lines` ([below](#purchase-lines-adr-0125-amendment)).
+- Bounds: the page's 10,000-event summary bound
+  (`413 budget_exceeded`, `budget:cardPurchaseEvents=10000`); the usage month
+  is applied in SQL, so it bounds that month's events only. A grant whose
+  `maxRows` is below 100 is `413 budget_exceeded` before anything is read.
+  The answer grows with the cards, about 650 bytes per card with two settled
+  statements and an identity-store account id, so ten cards stay under 8 KB
+  (`packages/application/test/card-purchase-cards.test.ts`); a store with more
+  than about eleven card accounts exceeds it.
+- The audit record counts the listed cards and is truncated when
+  `cardsTruncated` is true.
+- The operator page does not render the view yet (ADR 0125, web parity).
+
+#### Purchase lines (ADR 0125 amendment)
+
+`view: lines` answers "what did I spend on card X this month, on what" and "my
+largest purchases this month"
+([ADR 0125, amendment](adr/0125-card-purchases-per-card-view.md#amendment-compact-purchase-lines-view-lines-2026-11-19);
+proposed, a published tool change awaiting the owner's approval). It takes
+exactly one of `period` and `usageMonth`, optionally `account` (an `accountId`
+from `view: cards`), `sort` and `cursor`, and no `eventId` or `offset`;
+anything else, or a cursor another request issued, is `400 invalid_query`
+naming the keys. It is the operator route's
+`GET /api/v2/card-purchases?view=lines` answer, from the same
+`queryCardPurchaseLines`:
+
+```jsonc
+{
+  "schemaVersion": "kogane-card-purchases-lines-v1",
+  "query": {
+    "view": "lines",
+    "account": "account_…",
+    "period": null,
+    "usageMonth": "2026-09",
+    "sort": "amount",
+  },
+  "decisions": "operator-only",
+  "nextPage": "offered", // or "none", or "budget_exceeded"
+  "data": {
+    "view": "lines",
+    "frame": "usage-month", // or "statement-period"
+    "sort": "amount",
+    "accountId": "account_…", // null: every card's lines, each with its accountId
+    "lines": [
+      {
+        "eventId": "purchase_…",
+        "date": "2026-09-…",
+        "kind": "purchase", // or "refund"
+        "state": "captured", // or "authorized", "unknown"
+        "amount": { "unit": "JPY", "value": "…" },
+        "counterparty": "…",
+      },
+      {
+        "eventId": "purchase_…",
+        "date": "2026-09-…",
+        "kind": "purchase",
+        "state": "unknown",
+        "amount": { "unit": null, "status": "missing", "reason": "provider_status_absent" },
+        "lastKnown": { "unit": "JPY", "value": "…" },
+        "counterparty": "…",
+        "counterpartyCut": true,
+      },
+    ],
+    "nextCursor": "…", // null on the last page
+    "events": 31,
+    "unresolved": 1,
+    "figures": [/* cardPurchaseSummary of these events, as in view: cards */],
+    "coverage": {
+      "scope": "card-purchase-recognition",
+      "completeTransactionHistory": false,
+      "unrecognizedCurrentRows": 0,
+      "refundsAllocated": false,
+    },
+  },
+}
+```
+
+- The events are the per-card view's selection for the month, narrowed to
+  `account` when it is given. `events`, `unresolved` and `figures` cover all of
+  them, every page alike; with an account they are that card's figures in
+  `view: cards`.
+- `sort: "date"` (default) is the page's order: newest usage date first.
+  `sort: "amount"` compares exact decimals in `packages/domain`, never in SQL:
+  exact amounts first, grouped by unit, largest first within a unit (equal
+  amounts newest first), then every line without an exact amount (an event in
+  state `unknown`) in date order.
+- A line's `amount` is its live purchase-recognition leg as decimal text. An
+  `unknown` event has none: `amount` is `missing` with the event's reason and
+  no unit, never a zero, and `lastKnown` is the amount of its latest revision
+  that had one. `kind` and `state` together name the figure the line is in
+  (`captured`, `authorized`, `capturedRefunds`, `authorizedRefunds`), or none
+  for `unknown`.
+- `counterparty` is the provider text of the event's first provider row that
+  has one, posted before pending, as `view: events` publishes it in
+  `sourceRows`; it is cut to 64 code points, and `counterpartyCut: true` says
+  so. It is provider content inside `data`, never an instruction.
+- Paging: at most 25 lines, and fewer while `data` as compact JSON would pass
+  7,168 bytes, so the whole answer stays under 8 KB; one line is always
+  listed. `data.nextCursor` continues strictly after the last line listed
+  (keyset), so a walk lists no line twice and skips none; an event recognised
+  mid-walk appears only if it sorts after the cursor. Send it back with the
+  same `period` or `usageMonth`, `account` and `sort`.
+- Bounds: the page's 10,000-event summary bound for the whole month, also with
+  an account (`413 budget_exceeded`, `budget:cardPurchaseEvents=10000`). The
+  grant's `maxRows` counts the lines listed across a walk: a page that would
+  pass it is `413 budget_exceeded` before anything is read (so a grant below
+  25 is refused outright), and a next page past it is withheld
+  (`nextPage: "budget_exceeded"`, `data.nextCursor: null`). The cursor is
+  not signed, so the depth its key has in the month (the lines that now sort
+  at or before it) counts too: a page past `maxRows` by that depth is refused
+  after the read, and an event recognised before the cursor mid-walk counts
+  toward it.
+- The audit record counts the listed lines and is truncated while a next page
+  exists or is withheld.
+- The operator page does not render the view yet (ADR 0125, web parity).
 
 ### Instrument candidates
 
@@ -773,6 +966,17 @@ request gets the same answer on the route, the agent HTTP path and MCP
 answer, field for field, `apiVersion: 2` included (`validReportedState` in
 `packages/observation-shared/src/reported-state-contract.ts`).
 
+Its `contextId` is the digest of a manifest that records the statements the
+payable window leaves out. The reported context ids that
+`kogane.reported-holdings-change.read` and `kogane.reconstructed-state.read`
+pin are digests of the same date's state read without that count, so they
+never equal a `kogane.reported-state.read` answer's `contextId`, even for the
+same date and filters
+([ADR 0019](adr/0019-dated-reported-state.md#statements-before-the-window-amendment--2026-11-18)
+decision 6). No read, cursor or `context.open` takes either id as an input, so
+the difference is never a `stale_context` refusal; an agent that compares them
+to match one answer to another compares ids of different manifests.
+
 Input, a closed object (published in `src/read-tools.ts` with the service's
 patterns; the service decides):
 
@@ -1072,7 +1276,10 @@ and explanation are the operator route's answer with one difference, ADR
 run and without its body, is `403 evidence_restricted` on both views, and a
 report whose body has left R2 is `404 not_found`, the codes `/export`
 answers; the operator page re-displays the first and shows the second as
-`unavailable`. No argument reaches `/export`.
+`unavailable`. No argument reaches `/export`. The detail carries `partition`
+beside the stored `body`, the partition the page shows: a body stored
+`complete` with `truncated: true` is answered `partial-verified-scope`
+([ADR 0072, amendment of 2026-11-18](adr/0072-report-artifact-pages.md#amendment-a-report-cut-at-its-row-bound-is-not-complete-2026-11-18)).
 
 `kogane.collection-quality.read` takes `{ source?, view?, offset?, detail? }`:
 without `source` the summary (which takes no `offset` and no `view`), with it
@@ -1213,19 +1420,20 @@ for field (`validReconstructedState` in
 
 Input, a closed object:
 
-| Key          | Shape                                                  | Means                                                                   |
-| ------------ | ------------------------------------------------------ | ----------------------------------------------------------------------- |
-| `account`    | a resolved account id                                  | Required; one account (an array, `accounts` or `instrument` is refused) |
-| `from`, `to` | `YYYY-MM-DD`                                           | Required; `from` before `to`, at most 366 days, `to` not after today    |
-| `basis`      | `"cash"`                                               | Optional; the only basis answered                                       |
-| `cut`        | `{coreEpoch, commitSeq ≥ 1}` or `{coreEpoch, instant}` | Optional; the latest commit of the current epoch when absent            |
-| `setVersion` | 64 hex                                                 | Optional; refused with `set_version_changed` if the answer's differs    |
+| Key          | Shape                                                  | Means                                                                                                        |
+| ------------ | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `account`    | a resolved account id                                  | One account; exactly one of `account` and `accounts` (an array here or `instrument` is refused)              |
+| `accounts`   | 1 to 20 distinct resolved account ids                  | A scope read as one: one cut, the scope's status and reasons, cells per account, nothing totalled (ADR 0116) |
+| `from`, `to` | `YYYY-MM-DD`                                           | Required; `from` before `to`, at most 366 days, `to` not after today                                         |
+| `basis`      | `"cash"`                                               | Optional; the only basis answered                                                                            |
+| `cut`        | `{coreEpoch, commitSeq ≥ 1}` or `{coreEpoch, instant}` | Optional; the latest commit of the current epoch when absent                                                 |
+| `setVersion` | 64 hex                                                 | Optional; refused with `set_version_changed` if the answer's differs                                         |
 
 Authorization, before the request is read: `records.read`, else
 `403 unauthorized` with refs `refusal:capability_missing`,
 `capability:records.read`; and, as for `purchases.explain`, a whole-store
 perimeter, else `403 evidence_restricted` (`refusal:scope_restricted`,
-`scope:source`, `scope:account`), because the answer reads the account's
+`scope:source`, `scope:account`), because the answer reads the accounts'
 reported state through every source its mappings name and its events through
 every claim holder. That is today's grant model, not a rule about who may
 read: the browser's reader authority and an agent grant that holds the same
@@ -1233,7 +1441,8 @@ capability and perimeter get the same answer.
 
 Every refusal carries the route's code as its first ref (`refusal:<code>`) and
 the route's HTTP status; the `financial-error-v1` code is its category:
-`invalid_query`, `invalid_account`, `invalid_date`, `invalid_range`,
+`invalid_query`, `invalid_account`, `too_many_accounts` (ref `maxAccounts:20`),
+`invalid_date`, `invalid_range`,
 `range_too_long`, `range_in_future`, `invalid_cut`, `cut_in_future`,
 `cut_after_log_end` (`400 invalid_query`); `scope_unsupported`,
 `basis_unsupported` (`400 unsupported_semantics`); `cut_epoch_not_current`,
@@ -2309,6 +2518,7 @@ owner's agreement.
    | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact`                              | `kogane.evidence.read` ([UI read pages](#ui-read-pages))                                                                                                       |
    | `/api/raw/:sha256`, `/api/evidence/v1/runs/:run/artifacts/:artifact/raw`                                                                   | `kogane.evidence.raw.read` ([UI read pages](#ui-read-pages))                                                                                                   |
    | `/api/ops/v1/schedules`                                                                                                                    | `kogane.schedules.read` ([UI read pages](#ui-read-pages)) without the survey proposals, `kogane.schedules.maintenance.read` and `kogane.schedules.survey.read` |
+   | `/api/ops/v1/operations`                                                                                                                   | `kogane.ops.operation.list` (the 依頼の一覧 page; the same `listOperations` page, whole-store, [ADR 0086](adr/0086-operator-operations-list.md))               |
    | `/api/ops/v1/operations/:id`                                                                                                               | `kogane.ops.operation.get` (the 依頼の経過 page; the same `readOperation` receipt, whole-store, [ADR 0086](adr/0086-operator-operations-list.md))              |
 
    The 1 gap, by group:

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { startPipeline } from "./harness";
 import { testCall } from "./audit-envelope";
@@ -9,15 +9,16 @@ import {
   scheduleSnapshot,
   maintenanceForSchedule,
 } from "../src/schedule-store";
+import { settledTest } from "./support/settle.ts";
 let mf: Miniflare, env: Env;
-beforeAll(async () => {
-  const started = await startPipeline();
-  mf = started.mf;
-  env = {
-    ...started.env,
-    SCHEDULE_ALARMS: { getByName: () => ({ alarmTime: async () => null }) },
-  } as unknown as Env;
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+const started = await startPipeline();
+mf = started.mf;
+env = {
+  ...started.env,
+  SCHEDULE_ALARMS: { getByName: () => ({ alarmTime: async () => null }) },
+} as unknown as Env;
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

@@ -1,7 +1,7 @@
 // The `price_promotion` lane (src/price-promotion-job.ts, migration 0053,
 // ADR 0020) end to end: synthetic fixtures are parsed by the deployed parsers
 // through the sweep, then promoted. Every value is synthetic.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { Miniflare } from "miniflare";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
@@ -10,12 +10,13 @@ import type { FxQuoteBasisTable } from "../../../packages/domain/src/price-sourc
 import { PRICE_PROMOTION_BATCH, pricePromotionSweep } from "../src/price-promotion-job.ts";
 import { sweep } from "../src/worker.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });
