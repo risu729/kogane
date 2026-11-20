@@ -84,8 +84,12 @@ from the cursor, and re-issued inserts are no-ops: the insert skips only a job
 whose key `(fetch_artifact_id, parser_name, parser_version)` exists
 (`ON CONFLICT … DO NOTHING`; the repair lane's inserts do the same). A job the
 schema refuses (a CHECK or NOT NULL failure) raises and fails the sweep before
-the item's cursor moves, so an artifact is never passed with no job; the
-same page is read again on the next sweep. The item's `jobs_created` is read from the table when the cursor moves
+the item's cursor moves, so an artifact is never passed with no job; the same
+page is read again on the next sweep. Limit: job creation runs before any lane
+executes a job, so while such a job stays refused every sweep fails the same
+way (`observation_sweep_failed`, with the error's class as its code) and no
+lane parses anything; the shipped writers build no row the shipped schema
+refuses. The item's `jobs_created` is read from the table when the cursor moves
 (the incremental jobs of the artifacts examined), not from the sweep's own
 inserts, so jobs a stopped sweep inserted before it could move the cursor still
 count, and the update is fenced on the cursor it read, so two sweeps never count
