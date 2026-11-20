@@ -983,10 +983,11 @@ leftOut, liabilitiesCoverage: "unknown", dataCoverage, page }`:
   cursor: bound to the snapshot, the route, `source`, `account`,
   `instrument` and `identityRead`, continued at any offered `limit`
   ([ADR 0119](adr/0119-cursor-page-size.md)), `400 cursor_mismatch` with
-  `mustMatch` otherwise, and `410 context_expired` when the line it stopped
-  at is no longer at its position (an identity decision regrouped the
-  lines). It carries a digest of that line's key, never an account key or
-  label.
+  `mustMatch` otherwise, and `410 context_expired` when an identity
+  decision between two pages changed the grouping of the scope's lines
+  anywhere (merged, split, relabelled or reordered them). It carries a
+  digest of every line's key, label and references' observations, never an
+  account key or label.
 - **Filters.** `source`, `account`, `instrument` (the unit), `identityRead`,
   `limit`, `cursor`; `metric`, `view` and `detail` are `400 invalid_query`.
   A scope of more than 5,000 latest rows is `413 result_limit_exceeded`,

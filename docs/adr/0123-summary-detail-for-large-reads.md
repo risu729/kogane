@@ -732,9 +732,11 @@ subject, which is the provider reference, not the account entity.
    (snapshot, READ instance, a digest of the route, `source`, `account`,
    `instrument` and `identityRead`), continues at any offered `limit` (ADR
    0119), answers `400 cursor_mismatch` with `mustMatch` otherwise, and
-   carries a digest of the line it stopped at: when an identity decision
-   between two pages moves that line, the cursor is `410 context_expired`
-   instead of skipping or repeating one.
+   carries a digest of the whole grouping (every line's key and label, and
+   its references' observations): when an identity decision between two
+   pages merges, splits, relabels or reorders any line of the scope, the
+   cursor is `410 context_expired` instead of skipping or repeating a line
+   or continuing under other subtotals.
 7. **Arguments.** `source`, `account`, `instrument`, `identityRead`,
    `limit`, `cursor`; `metric`, `view` and `detail` are the route's
    `400 invalid_query` (one detail, its own lines). The snapshot, its
@@ -803,6 +805,8 @@ Measured as the bytes of the MCP result's structured content:
   `view` and `detail` refused; a cursor continues at 25 and is
   `cursor_mismatch` with `mustMatch` under another source and from a
   latest page; two references of one account are one line and not added;
+  a cursor is `410 context_expired` after an identity decision moves a
+  reference of a line past the cursor onto an account before it;
   the published description is within 2,048 characters and names every
   closed term.
 - `packages/storage-d1/test/statement-plans.test.ts`: `projectionMeasureSql`

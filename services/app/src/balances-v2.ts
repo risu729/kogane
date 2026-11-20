@@ -87,6 +87,7 @@ import {
   readDetail,
 } from "../../../packages/application/src/query/read-detail.ts";
 import {
+  cashGrouping,
   cashPageLines,
   cashPerAccount,
 } from "../../../packages/application/src/query/cash-per-account.ts";
@@ -918,16 +919,16 @@ export async function cashPerAccountPage(
     await snapshotBehind(reader, resolved.snapshot),
   );
   // The lines are in a fixed order over a fixed snapshot, so a position is a
-  // line index. The account a line is keyed by comes from the current
-  // identity, not from the snapshot: a mapping decided between two pages can
-  // regroup the lines, and then the line the cursor names is no longer at its
-  // position, which expires the cursor instead of skipping or repeating one.
+  // line index. The account a line is keyed by and the label it sorts by come
+  // from the current identity, not from the snapshot: a mapping decided
+  // between two pages can merge, split or reorder lines anywhere in the scope,
+  // and change the subtotals with them. The cursor carries a digest of the
+  // whole grouping, so any such change expires it instead of continuing a
+  // walk over another grouping, which could skip or repeat a line.
+  const grouping = await canonicalDigest({ cashLines: cashGrouping(answer.lines) });
   const start = resolved.afterRowSeq + 1;
-  if (start > 0) {
-    const previous = answer.lines[resolved.afterRowSeq];
-    if (previous === undefined || (await lineDigest(previous.key)) !== resolved.afterSortKey)
-      throw new HttpError(410, "context_expired");
-  }
+  if (start > 0 && (start >= answer.lines.length || resolved.afterSortKey !== grouping))
+    throw new HttpError(410, "context_expired");
   const page = cashPageLines(answer.lines, start, limit);
   const hasMore = start + page.length < answer.lines.length;
   const last = page[page.length - 1];
@@ -949,8 +950,8 @@ export async function cashPerAccountPage(
               snapshotId,
               readInstanceId: target.instanceId,
               filterDigest: digest,
-              // A digest, not the key: a cursor carries no account key or label.
-              sortKey: await lineDigest(last.key),
+              // A digest: a cursor carries no account key or label.
+              sortKey: grouping,
               position: start + page.length - 1,
             })
           : null,
@@ -959,9 +960,4 @@ export async function cashPerAccountPage(
       lines: answer.lines.length,
     },
   };
-}
-
-/** What a cash cursor carries of the line it stopped at. */
-async function lineDigest(key: string): Promise<string> {
-  return await canonicalDigest({ cashLine: key });
 }

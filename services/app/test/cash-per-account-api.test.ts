@@ -230,6 +230,41 @@ describe("cash per account", () => {
       .body as LatestBalanceSummaryPage;
     expect(latest.subtotals.knownAssetsSubtotal![0]!.adoptedCount).toBe(9);
   });
+
+  it("expires a cursor when an identity decision regroups lines anywhere in the scope", async () => {
+    const first = (await page.route(PATH)).body as CashPerAccountPage;
+    expect(first.page.hasMore).toBe(true);
+    // A reference of a line the first page did not reach is mapped onto the
+    // account of a line it did: the line at the cursor stays where it was,
+    // but the rest of the walk and the subtotals now answer another grouping.
+    const seen = first.lines[0]!;
+    const unseen = (await page.route(`${PATH}?limit=500`)).body as CashPerAccountPage;
+    const moved = unseen.lines.at(-1)!;
+    expect(first.lines.map((line) => line.account)).not.toContain(moved.account);
+    const observation = moved.references[0]!.amounts[0]!.observationId;
+    const reference = (await env.DB.prepare(
+      "SELECT source_account_id FROM identity_observations WHERE kind='balance' AND observation_id=?",
+    )
+      .bind(observation)
+      .first<string>("source_account_id"))!;
+    await env.DB.prepare(
+      `INSERT INTO account_mappings
+         SELECT ?1, ?2, max(revision)+1, ?3, 'manual', 'synthetic-merge', 1, '2026-11-19T00:00:00Z', ?4, 'provider-local'
+         FROM account_mappings WHERE source_account_id=?2`,
+    )
+      .bind(`cash-regroup-${String(observation)}`, reference, seen.account, seen.label)
+      .run();
+    const next = await page.expectSameAnswer(
+      `${PATH}?cursor=${encodeURIComponent(first.page.nextCursor!)}`,
+      TOOL,
+      { collection: "cash", cursor: first.page.nextCursor! },
+    );
+    expect(next.status).toBe(410);
+    expect(next.body).toMatchObject({ error: "context_expired" });
+    // A fresh walk reads the new grouping: one line fewer, the moved reference on the seen line.
+    const fresh = (await page.route(`${PATH}?limit=500`)).body as CashPerAccountPage;
+    expect(fresh.page.lines).toBe(unseen.page.lines - 1);
+  });
 });
 
 describe("the published tool", () => {

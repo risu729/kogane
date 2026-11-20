@@ -349,6 +349,27 @@ export function cashPerAccount(
   };
 }
 
+/**
+ * What a cash cursor is bound to beside the snapshot: every line of the scope
+ * in order, with its key, its label and the observations of each reference.
+ * The snapshot fixes the rows, but the account a row is grouped under and the
+ * label a line sorts by come from the current identity, so a decision between
+ * two pages can merge, split or reorder lines anywhere in the scope, and with
+ * them the subtotals. Any such change moves this value, and the cursor
+ * expires instead of continuing a walk over another grouping.
+ */
+export function cashGrouping(lines: readonly KeyedCashLine[]): unknown {
+  return lines.map(({ key, line }) => [
+    key,
+    line.label,
+    line.references.map((reference) => [
+      reference.source,
+      reference.sourceAccount,
+      reference.amounts.map((amount) => amount.observationId),
+    ]),
+  ]);
+}
+
 /** How many measurements a line holds, over all its references. */
 function cashLineMeasurements(line: CashLine): number {
   return line.references.reduce((sum, reference) => sum + reference.amounts.length, 0);
