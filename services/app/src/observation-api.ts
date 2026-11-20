@@ -24,9 +24,11 @@ import {
 } from "../../../packages/observation-shared/src/api-schema";
 import {
   balanceHistoryPage,
+  cashPerAccountPage,
   latestBalancePage,
   balanceReadConfigured,
   legacyLatestFromProjection,
+  V2_CASH_PATH,
   V2_HISTORY_PATH,
   V2_LATEST_PATH,
 } from "./balances-v2";
@@ -74,7 +76,7 @@ function boundedPage(value: Record<string, unknown>, offset?: number): Record<st
 }
 
 const OBSERVATION_PATH =
-  /^\/api\/(meta|overview|transactions|balances|positions|artifacts|observations|raw|filter-options|v2\/balances\/(latest|history))(\/|$)/;
+  /^\/api\/(meta|overview|transactions|balances|positions|artifacts|observations|raw|filter-options|v2\/balances\/(latest|history|cash))(\/|$)/;
 
 /** A route request: its path and query, which is all the observation readers read. */
 export interface RouteRequest {
@@ -209,6 +211,7 @@ export async function readObservationRoute(
   }
   if (path === V2_LATEST_PATH) return { body: await latestBalancePage(env, url, identityRead) };
   if (path === V2_HISTORY_PATH) return { body: await balanceHistoryPage(env, url, identityRead) };
+  if (path === V2_CASH_PATH) return { body: await cashPerAccountPage(env, url, identityRead) };
   if (path === "/api/overview") {
     // `summary` (the default) or `full` (ADR 0123, amendment 2026-11-19): the
     // summary is the full page, shaped by the one function the tool shares.

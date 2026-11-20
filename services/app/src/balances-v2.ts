@@ -33,6 +33,7 @@ import type {
   BalanceReadDetail,
   BalanceHistoryRow,
   BalanceRow,
+  CashPerAccountPage,
   KnownAssetsSubtotals,
   LatestBalanceItem,
   LatestBalancePage,
@@ -85,9 +86,15 @@ import {
   latestBalanceSummary,
   readDetail,
 } from "../../../packages/application/src/query/read-detail.ts";
+import {
+  cashPageLines,
+  cashPerAccount,
+} from "../../../packages/application/src/query/cash-per-account.ts";
+import { CASH_METRIC_IDS } from "../../../packages/observation-shared/src/api-contract.ts";
 
 export const V2_LATEST_PATH = "/api/v2/balances/latest";
 export const V2_HISTORY_PATH = "/api/v2/balances/history";
+export const V2_CASH_PATH = "/api/v2/balances/cash";
 
 /** This deployment reads balance snapshots when the READ binding is present. */
 export function balanceReadConfigured(env: Env): boolean {
@@ -849,4 +856,112 @@ export async function balanceHistoryPage(
     ),
   };
   return detail === "full" ? body : balanceHistorySummary(body);
+}
+
+/**
+ * Cash per account (ADR 0123, amendment 2026-11-20): the latest cash
+ * measurements of one fixed snapshot, one line per account, with exact
+ * subtotals per unit and per source over the whole filter scope, and the
+ * scope's other measurements counted under a closed reason. The lines page
+ * under the snapshot cursor of the other two routes (ADR 0119): whole lines
+ * up to `limit` measurements, ten by default, any offered size, a cursor
+ * bound to the route, the scope and the read mode. Every page reads the whole scope, so the subtotals and the
+ * left-out counts are the same on every page.
+ */
+export async function cashPerAccountPage(
+  env: Env,
+  url: Pick<URL, "searchParams">,
+  mode: IdentityReadMode,
+): Promise<CashPerAccountPage> {
+  const target = await readTarget(env);
+  const reader = target.reader;
+  // The route accepts only these filters (`LIST_REQUEST_SCHEMA`); a metric or
+  // a view would make the subtotals answer another question.
+  const { source, account, instrument } = scopeOf(url);
+  const scope: V2Scope = {
+    ...(source === undefined ? {} : { source }),
+    ...(account === undefined ? {} : { account }),
+    ...(instrument === undefined ? {} : { instrument }),
+  };
+  const limit = pageLimit(url, "summary");
+  const digest = await filterDigest(V2_CASH_PATH, scope, limit, mode);
+  const resolved = await continuation(target, url, digest, () =>
+    pageSizeDigests(V2_CASH_PATH, scope, mode),
+  );
+  if (!resolved) throw new HttpError(503, "read_model_unavailable");
+  const refusal = await snapshotRefusal(target, resolved.snapshot);
+  if (refusal !== null) throw new HttpError(503, refusal);
+  const snapshotId = resolved.snapshot.snapshot_id;
+  const rows = await reader.measureRows(snapshotId, scope);
+  // An oversized scope is refused, never answered in part (INV05).
+  if (rows === null) throw new HttpError(413, "result_limit_exceeded");
+  // Only the cash rows are organized: the others are counted, never named.
+  const cash = rows.filter((row) => (CASH_METRIC_IDS as readonly string[]).includes(row.metric_id));
+  const organized = await organizeRows(
+    d1Executor(env.DB),
+    "balance",
+    cash.map((row) => ({ id: row.observation_id })),
+    mode,
+  );
+  const accounts = new Map(
+    organized.map(({ id, organization }) => [id, organization.account ?? null] as const),
+  );
+  const answer = cashPerAccount(
+    rows.map((row) => {
+      const organizedAccount = accounts.get(row.observation_id) ?? null;
+      return {
+        ...row,
+        account: organizedAccount?.targetId ?? null,
+        label: organizedAccount?.label ?? null,
+      };
+    }),
+    await snapshotBehind(reader, resolved.snapshot),
+  );
+  // The lines are in a fixed order over a fixed snapshot, so a position is a
+  // line index. The account a line is keyed by comes from the current
+  // identity, not from the snapshot: a mapping decided between two pages can
+  // regroup the lines, and then the line the cursor names is no longer at its
+  // position, which expires the cursor instead of skipping or repeating one.
+  const start = resolved.afterRowSeq + 1;
+  if (start > 0) {
+    const previous = answer.lines[resolved.afterRowSeq];
+    if (previous === undefined || (await lineDigest(previous.key)) !== resolved.afterSortKey)
+      throw new HttpError(410, "context_expired");
+  }
+  const page = cashPageLines(answer.lines, start, limit);
+  const hasMore = start + page.length < answer.lines.length;
+  const last = page[page.length - 1];
+  return {
+    schemaVersion: SNAPSHOT_PAGE_SCHEMA_VERSION,
+    collection: "cash",
+    policyRelease: KNOWN_ASSETS_POLICY,
+    lines: page.map((entry) => entry.line),
+    subtotals: answer.subtotals,
+    leftOut: answer.leftOut,
+    liabilitiesCoverage: "unknown",
+    dataCoverage: answer.dataCoverage,
+    page: {
+      limit,
+      hasMore,
+      nextCursor:
+        hasMore && last
+          ? encodeReadCursor({
+              snapshotId,
+              readInstanceId: target.instanceId,
+              filterDigest: digest,
+              // A digest, not the key: a cursor carries no account key or label.
+              sortKey: await lineDigest(last.key),
+              position: start + page.length - 1,
+            })
+          : null,
+      snapshotId,
+      paginationVersion: KEYSET_PAGINATION_VERSION,
+      lines: answer.lines.length,
+    },
+  };
+}
+
+/** What a cash cursor carries of the line it stopped at. */
+async function lineDigest(key: string): Promise<string> {
+  return await canonicalDigest({ cashLine: key });
 }

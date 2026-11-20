@@ -170,11 +170,11 @@ const TOOLS = {
       ),
   }),
   "kogane.balances.read": tool({
-    title: "Latest balances and balance history of the published snapshot",
+    title: "Latest balances, balance history and cash per account of the published snapshot",
     description:
-      "One page of the v2 balance read: `latest` (each adopted balance of the published snapshot, with the page's coverage and known-asset subtotals) or `history` (the visible balance observations up to that snapshot). `detail: summary` (the default) answers one line per row: observationId, source, account with its label, mapping status and lineage, metric (registry id and provider name), amount {value, unit, status, scale} (a value that is not exact has no value and keeps its status as the reason, never a zero), asOf, reasons, and for `latest` freshness and adoption; a `history` row of a superseded, pending or failed parse says so (`parse:superseded`, `parse:pending`, `parse:error`); 10 rows by default. `detail: full` answers each row with its whole provenance (organization, product, instruments, interpretation, quantity, metric, adoption evidence, temporal reference); 100 rows by default. The same answer as GET /api/v2/balances/latest or /api/v2/balances/history with the same `detail`, under records.read and a whole-store read grant. Filters `source`, `account`, `instrument`, `metric`, `view`; `limit` is one of 10, 25, 50, 100, 200 or 500; `cursor` is the previous page's `nextCursor` and continues at any offered `limit` and either `detail`. A cursor read with other filters is 400 cursor_mismatch with `mustMatch`, the arguments that must repeat. 503 read_model_unavailable while no snapshot is published. Read-only.",
+      "One page of the v2 balance read of the published snapshot: `latest` (each adopted balance, with the coverage and known-asset subtotals), `history` (the visible balance observations up to it) or `cash` (how much cash per account and per bank, in one call). `detail: summary` (the default) answers one line per row: observationId, source, account with its label, mapping status and lineage, metric (registry id, provider name), amount {value, unit, status, scale} (a value that is not exact has no value and keeps its status as the reason, never a zero), asOf, reasons, and for `latest` freshness and adoption; a superseded, pending or failed `history` row says so (`parse:superseded`, `parse:pending`, `parse:error`); 10 rows by default. `detail: full` answers each row with its whole provenance; 100 rows by default. `cash` takes no `detail`, `metric` or `view`: one line per account (entity, label, amounts of deposit.balance, broker.foreign-cash-deposit and exchange.cash-balance, each with source, sourceAccount, unit, value, status, adoption, `counted`, asOf, reasons; 10 lines by default), exact `subtotals` byUnit and bySource over the whole scope (never across units; no value when nothing is counted, never a zero; `partial` with reasons when an amount is not counted; two adopted amounts of one unit on one account are `cash:account_reported_twice`, not added), `leftOut` (every other measurement, by closed reason) and liabilitiesCoverage unknown. The same answer as GET /api/v2/balances/<collection>, under records.read and a whole-store read grant. Filters `source`, `account`, `instrument`, `metric`, `view`; `limit` is 10, 25, 50, 100, 200 or 500; `cursor` is the previous `nextCursor` and continues at any offered `limit` and `detail`. A cursor read with other filters is 400 cursor_mismatch with `mustMatch`, the arguments that must repeat. 503 read_model_unavailable while no snapshot is published; 413 result_limit_exceeded past 5,000 rows. Read-only.",
     schema: z.strictObject({
-      collection: z.enum(["latest", "history"]),
+      collection: z.enum(["latest", "history", "cash"]),
       source: FILTER_TEXT.optional(),
       account: FILTER_TEXT.optional(),
       instrument: FILTER_TEXT.optional(),
@@ -186,7 +186,7 @@ const TOOLS = {
       detail: READ_DETAIL.optional(),
     }),
     capability: "records.read",
-    routes: ["/api/v2/balances/latest", "/api/v2/balances/history"],
+    routes: ["/api/v2/balances/latest", "/api/v2/balances/history", "/api/v2/balances/cash"],
     read: (env, { collection, ...params }) =>
       observationBody(env, `/api/v2/balances/${collection}`, params),
   }),

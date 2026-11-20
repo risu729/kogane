@@ -66,7 +66,7 @@ describe("observation page reads", () => {
       ["/api/meta", "/api/overview", "/api/filter-options"],
       ["/api/transactions", "/api/balances", "/api/positions", "/api/artifacts"],
       ["/api/observations/:kind/:id", "/api/artifacts/:id"],
-      ["/api/v2/balances/latest", "/api/v2/balances/history"],
+      ["/api/v2/balances/latest", "/api/v2/balances/history", "/api/v2/balances/cash"],
     ]);
   });
 
