@@ -207,6 +207,29 @@ The hand-off in both directions is by reference, never by number or prose:
 
 See [Agent API](agent-api.md) for the grants, tools and result contract.
 
+### Recent changes on ホーム
+
+The ホーム page's 最近の変化 panel (`apps/web/src/changes-since.tsx`) reads
+`GET /api/v2/changes`, the service of `kogane.changes.since`
+([ADR 0127, amendment of 2026-11-20](adr/0127-changes-since-digest.md#amendment-2026-11-20-the-ホーム-panel-reads-the-route)).
+It sends `since` as the browser's clock minus the chosen window (24時間 by
+default, 7日間, 30日間), taken again on each first read (a refetch on focus or
+a retry included), and a continuation sends its first answer's `since`; the
+retry of a continuation the route refused (`400`) reads the answer again.
+While a window whose continuation failed is read again (that retry, a
+refocus, a return to the window), its answer read and the continuation's
+error stay on screen until the read settles; a continuation refused for
+authentication (`401`) withdraws the answer read, and the panel shows its
+error state. It
+checks every answer with `validChangesSince`, and
+shows the digest's counts per source by closed state, with labels typed by the
+domain's closed lists. A count the digest cut, and every count of an
+incomplete events line, reads 以上, and the states or kinds such a section or
+line does not list read そのほか 0件以上; unchanged sources and what the digest does
+not cover sit in closed disclosures; 続きを読み込む follows `next.after`. A
+`403` or `404` from the route hides the panel; any other failure, a malformed
+answer included, is the error state with no count.
+
 ## Safe preview
 
 From the repository root:
