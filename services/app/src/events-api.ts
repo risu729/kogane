@@ -97,7 +97,11 @@ function instantOf(text: string): string | null {
     civil.getUTCSeconds() !== Number(second)
   )
     return null;
-  return new Date(at).toISOString();
+  // `created_at` is compared in `strftime`'s four-digit years; an instant
+  // whose UTC form leaves them (`+010000-…`, `-000001-…`) would compare as
+  // text before every one of them.
+  const iso = new Date(at).toISOString();
+  return /^\d{4}-/u.test(iso) ? iso : null;
 }
 
 /**

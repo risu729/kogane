@@ -278,6 +278,20 @@ describe("the filtered activity list", () => {
         ["since:format"],
       ],
       ["before=yesterday", { before: "yesterday" }, "invalid_query", ["before:format"]],
+      // Instants whose UTC form leaves the four-digit years `created_at` is
+      // compared in: `+010000-…` would sort before every recorded time.
+      [
+        "since=9999-12-31T23:00:00-02:00",
+        { since: "9999-12-31T23:00:00-02:00" },
+        "invalid_query",
+        ["since:format"],
+      ],
+      [
+        "before=0000-01-01T00:30:00%2B01:00",
+        { before: "0000-01-01T00:30:00+01:00" },
+        "invalid_query",
+        ["before:format"],
+      ],
       [
         "since=2099-02-02T00:00:00Z&before=2099-02-02T09:00:00%2B09:00",
         { since: "2099-02-02T00:00:00Z", before: "2099-02-02T09:00:00+09:00" },

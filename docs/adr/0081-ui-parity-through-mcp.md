@@ -761,9 +761,11 @@ leg by key until `LIMIT` and `OFFSET` are met.
    exist names no source. `obligations` takes none (`400 invalid_query`, as
    before).
 2. **Closed refusals.** A malformed value is `400 invalid_query` with a ref per
-   refused filter: `since:format`, `before:format` (no zone, no time, or no
-   real calendar time), `account:format`, `source:format` (the evidence
-   browser's source charset); `since` at or after `before` is `window:empty`.
+   refused filter: `since:format`, `before:format` (no zone, no time, no
+   real calendar time, or one whose UTC form leaves the years 0000 to 9999
+   that `created_at` is compared in), `account:format`, `source:format` (the
+   evidence browser's source charset); `since` at or after `before` is
+   `window:empty`.
    An `offset` beside a filter or a cursor is `400 invalid_query` with
    `refs: ["offset"]`.
 3. **The unfiltered list is the shipped one.** Without a filter or a cursor,
