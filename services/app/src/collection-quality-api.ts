@@ -4,7 +4,9 @@
 // (packages/application/src/query/collection-quality.ts, ADR 0045,
 // docs/evidence-browser.md); and `GET /api/collection-quality/<sourceId>/accounts`,
 // the same source's cells regrouped by the accounts their captures'
-// observations name (ADR 0088). Read-only, GET-only, and served under the reader
+// observations name (ADR 0088); and `GET /api/collection-quality?view=status`,
+// one line per configured job saying whether it is stuck (ADR 0045, amendment
+// 2026-11-19). Read-only, GET-only, and served under the reader
 // authority every signed-in subject already has over the evidence routes: it
 // shows identifiers, capture times, counts and codes the evidence pages and
 // the schedule page already hold, and no amount. A store without the
@@ -15,6 +17,7 @@ import {
   queryCollectionQualityCells,
   queryCollectionQualitySummary,
 } from "../../../packages/application/src/query/collection-quality.ts";
+import { queryCollectionQualityStatus } from "../../../packages/application/src/query/collection-quality-status.ts";
 import {
   collectionQualityCellSummary,
   collectionQualitySummaryLines,
@@ -27,6 +30,7 @@ import {
   COLLECTION_QUALITY_SUMMARY_CELL_BOUND,
   type CollectionQualityCells,
   type CollectionQualityDetail,
+  COLLECTION_STATUS_VIEW,
   validCollectionQualityAlarms,
   type CollectionQualitySummary,
 } from "../../../packages/observation-shared/src/collection-quality-contract.ts";
@@ -37,6 +41,8 @@ import { HttpError, json } from "./http";
 
 const SOURCE = /^[a-z0-9][a-z0-9-]{0,99}$/u;
 const OFFSET = /^(?:0|[1-9][0-9]{0,6})$/u;
+/** The status view's query (ADR 0045, amendment 2026-11-19), exactly. */
+const STATUS_SEARCH = "?view=status";
 
 /** Served only where the store has what the read joins: the scheduling and collection tables. */
 export async function collectionQualityAvailable(env: Env): Promise<boolean> {
@@ -62,8 +68,15 @@ export async function collectionQualityApi(
     throw new HttpError(403, "scope_restricted");
   if (!(await collectionQualityAvailable(env))) throw new HttpError(404, "not_found");
   // The account view takes no query at all, not even an empty one (`?`); the
-  // summary takes only its `detail` (ADR 0123), checked by the reader.
+  // summary takes its `detail` (ADR 0123), checked by the reader, or else is
+  // its status view, `?view=status` exactly, which takes no `detail`.
   if (path.endsWith(ACCOUNT_COVERAGE_SUFFIX) && url.search)
+    throw new HttpError(400, "invalid_query");
+  if (
+    path === COLLECTION_QUALITY_PATH &&
+    url.searchParams.has("view") &&
+    url.search !== STATUS_SEARCH
+  )
     throw new HttpError(400, "invalid_query");
   return json(await readCollectionQuality(env, url));
 }
@@ -84,6 +97,17 @@ export async function readCollectionQuality(
   const asOf = new Date().toISOString();
   try {
     if (path === COLLECTION_QUALITY_PATH) {
+      if (url.searchParams.has("view")) {
+        // The status view is compact already: it takes no `detail` (ADR 0123).
+        const keys = [...url.searchParams.keys()];
+        if (
+          keys.length !== 1 ||
+          keys[0] !== "view" ||
+          url.searchParams.get("view") !== COLLECTION_STATUS_VIEW
+        )
+          throw new HttpError(400, "invalid_query");
+        return await queryCollectionQualityStatus(d1Executor(env.DB), { asOf });
+      }
       const detail = detailOf(url.searchParams, []);
       const summary = await queryCollectionQualitySummary(d1Executor(env.DB), { asOf });
       await readAlarms(env, summary);

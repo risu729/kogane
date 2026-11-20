@@ -308,6 +308,47 @@ describe("collection quality", () => {
     expect(await counts()).toEqual(before);
   });
 
+  it("serves the status view at ?view=status exactly, one line per configured job, and writes nothing (ADR 0045, 2026-11-19)", async () => {
+    const before = await counts();
+    const path = `${PATH}?view=status`;
+    const response = await call(path);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = (await response.json()) as {
+      view: string;
+      sources: { job: string; state: string; notPublishing: unknown[] }[];
+    };
+    expect(validApiResponse(PATH, body)).toBe(true);
+    expect(body.view).toBe("status");
+    const jobs = (
+      await env.DB.prepare("SELECT id FROM collection_schedules ORDER BY id").all<{ id: string }>()
+    ).results.map((job) => job.id);
+    expect(body.sources.map((line) => line.job)).toEqual(jobs);
+    expect(body.sources.find((line) => line.job === "sony-bank")).toMatchObject({
+      state: "ok",
+      notPublishing: [],
+    });
+    for (const refused of [
+      `${PATH}?view=cells`,
+      `${PATH}?view=Status`,
+      `${PATH}?view=status&view=status`,
+      `${PATH}?view=status&offset=0`,
+      `${PATH}?offset=0&view=status`,
+      // The status view is compact already: it takes no `detail` (ADR 0123).
+      `${PATH}?view=status&detail=full`,
+      `${PATH}?view=status&detail=summary`,
+      `${PATH}?detail=full&view=status`,
+    ]) {
+      const answer = await call(refused);
+      expect(answer.status, refused).toBe(400);
+      expect(((await answer.json()) as { error: string }).error).toBe("invalid_query");
+    }
+    expect((await call(path, { subject: null })).status).toBe(401);
+    expect((await call(path, { method: "POST" })).status).toBe(405);
+    expect((await call(path, { schema: false })).status).toBe(404);
+    expect(await counts()).toEqual(before);
+  });
+
   it("is behind Access, GET-only, and absent from a store without the scheduling tables", async () => {
     expect((await call(PATH, { subject: null })).status).toBe(401);
     expect((await call(PATH, { method: "POST" })).status).toBe(405);

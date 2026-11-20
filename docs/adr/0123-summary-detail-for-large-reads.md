@@ -261,9 +261,11 @@ offered page size; what remains is that the refusal says nothing.
   for the summary without a source and for `view: cells`; every other view
   has one detail, its own answer, and refuses `detail` as the account view
   does here. The status view is already one short line per job, so it gets
-  no `summary`/`full` pair; whichever of the two lands second applies that
-  rule to it (a refusal of `detail` with `view: status`) and keeps the
-  tool's description under the 2,048 characters a client accepts.
+  no `summary`/`full` pair. It landed first (ADR 0045, amendment of
+  2026-11-19), so this ADR applies that rule to it: `detail` with
+  `view: status` is `400 invalid_request` on the tool, and
+  `?view=status&detail=...` is `400 invalid_query` on the route; the tool's
+  description stays under the 2,048 characters a client accepts.
 
 ## Verification
 

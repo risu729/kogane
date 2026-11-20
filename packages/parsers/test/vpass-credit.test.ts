@@ -141,3 +141,50 @@ test("unobserved shapes, flags, numbers, dates and sessions fail closed", () => 
     "vpass_credit_amount_invalid",
   );
 });
+
+test("each observation keeps the card's product name for the read-time label (ADR 0120)", () => {
+  for (const [value, artifact] of [
+    [authori(), meta],
+    [revo(), { ...meta, artifactKey: "credit/revo.json" as const }],
+  ] as const) {
+    const result = parse(value, artifact);
+    expect(result.observations.length).toBeGreaterThan(0);
+    for (const row of result.observations)
+      expect(row.extra).toMatchObject({ _kogane: { cardName: "Synthetic card" } });
+  }
+});
+
+test("a name that could carry a card number, or is not a plain name, is left out, never thrown", () => {
+  for (const name of [
+    "Synthetic 1234 card",
+    "Synthetic １２３４",
+    "",
+    "  ",
+    "a\u0001b",
+    "x".repeat(65),
+    7,
+  ]) {
+    const value = authori();
+    Object.assign(value.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo, {
+      cardName: name,
+    });
+    if (typeof name !== "string") {
+      expect(() => parse(value)).toThrow("vpass_credit_vo_type");
+      continue;
+    }
+    const result = parse(value);
+    expect(result.observations).toHaveLength(12);
+    for (const row of result.observations) {
+      const kogane = (row.extra as { _kogane: Record<string, unknown> })._kogane;
+      expect(kogane).not.toHaveProperty("cardName");
+      expect(kogane).toMatchObject({ nonAdditive: true, sharedCredit: true });
+    }
+  }
+  const value = revo();
+  Object.assign(value.body.content.CustomizedRevoShokaiAnsPcDisplayServiceBean, {
+    cardName: "Synthetic 123 card",
+  });
+  expect(
+    parse(value, { ...meta, artifactKey: "credit/revo.json" }).observations[0]?.extra,
+  ).toMatchObject({ _kogane: { cardName: "Synthetic 123 card" } });
+});
