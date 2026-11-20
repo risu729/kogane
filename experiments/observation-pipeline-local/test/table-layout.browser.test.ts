@@ -1,6 +1,6 @@
 // Local fixture values simulate the financial API contract for rendering tests.
 // Column geometry needs a real layout engine: API tests cannot catch clipped money.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Locator } from "playwright";
@@ -15,6 +15,7 @@ import {
   CENTRAL_STORE_CAPABILITIES,
   LOCAL_STORE_CAPABILITIES,
 } from "../../../packages/observation-shared/src/api-schema.ts";
+import { settledTest } from "../../../apps/web/test/settle.ts";
 
 const clients = {
   local: join(import.meta.dir, "../../../apps/web/dist"),
@@ -68,9 +69,14 @@ async function verifyLongIdentity(row: Locator): Promise<void> {
   expect((await row.boundingBox())!.height).toBeLessThanOrEqual(300);
 }
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (apps/web/test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("transaction columns at desktop and phone widths", () => {
   const fixture = buildFixture();
-  let browser: Browser;
   const servers: ReturnType<typeof Bun.serve>[] = [];
   const origins: Record<string, string> = {};
 
@@ -212,7 +218,6 @@ describe.if(runnable)("transaction columns at desktop and phone widths", () => {
       servers.push(server);
       origins[mode] = `http://127.0.0.1:${server.port}`;
     }
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
 
   afterAll(async () => {

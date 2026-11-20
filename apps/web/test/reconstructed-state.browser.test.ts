@@ -4,7 +4,7 @@
 // once coverage is declared (a complete cell with an unexplained difference),
 // which no store can produce today: the page must show it as unexplained, with
 // its figure, never as an adjustment or a zero. Every value is invented.
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
@@ -23,6 +23,7 @@ import {
   WORLD_TO,
 } from "../../../packages/application/test/reconstructed-state-world.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -35,8 +36,13 @@ const UNEXPLAINED = "acct-unexplained";
 /** Not a world: the bank answer with its start figure reshaped to a liability-positive metric. */
 const LIABILITY = "acct-liability";
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("reconstructed state", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let advertised = true;
@@ -112,7 +118,6 @@ describe.if(runnable)("reconstructed state", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
