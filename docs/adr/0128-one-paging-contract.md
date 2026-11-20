@@ -140,14 +140,39 @@ when `limit` is a number.
 - `retryWith` has the same shape as `next` so one client rule covers both: merge `.arguments` into the
   last call.
 - **Body.** Routes answer `{error, requestId, refs?, mustMatch?, retryWith?}` as today; a tool answers
-  the same without `requestId` (page reads already do; read tools that drop `refs` keep them from S1
-  on for the converted tools). **Keep** `financial-error-v1` for the agent query path: it is a
+  the same without `requestId` (page reads already do). The read tools still drop `refs` from an
+  `HttpError` they catch (`services/app/src/read-tools.ts`); none of the S1 paging refusals carries
+  refs, and keeping them there is left to the slice that next edits that path. **Keep** `financial-error-v1` for the agent query path: it is a
   versioned schema whose remedies `kogane.capabilities` publishes; **fix later** (S7): it gains
   `invalid_cursor` and `cursor_mismatch` (400, argument names as `argument:<name>` refs) and answers
   `context_expired` at 410.
 - **Keep** `invalid_request` (400, refs naming the argument) for a token that fails its published
   pattern, and `invalid_offset` for a malformed offset on a route: those are the argument's form, not
   its meaning. **Keep** `413 raw_too_large`: no argument set retrieves a larger object.
+
+### Published changes in S1, for the owner's approval
+
+Every item below changes what a published tool or route answers; none merges before the owner
+approves it.
+
+- **New result fields** `next` and `paging` on `kogane.identity.read`, `kogane.events.read`,
+  `kogane.reports.read` (list), `kogane.evidence.read` (runs, artifacts),
+  `kogane.reported-holdings-change.read` (summary), `kogane.card-settlements.read`, `.statements`
+  and `.unmatched`, `kogane.purchases.explain` (`view: events` and `lines`, at the wrapper's top
+  level), `kogane.ops.operation.list`, `kogane.audit.search` and `kogane.schedules.maintenance.read`
+  (summary), and on their routes (`/api/identity/*`, `/api/v2/activity`, `/api/v2/obligations`,
+  `/api/v2/reports`, `/api/evidence/v1/.../runs` and `.../artifacts`,
+  `/api/v2/reported-holdings-change`, `/api/v2/reconciliation/card-settlements[/statements]`,
+  `/api/v2/reconciliation/card-statements-unmatched`, `/api/ops/v1/operations`, `/api/v2/audit`). Every other field
+  is unchanged.
+- **`audit.search` and `GET /api/v2/audit`**: a cursor issued under other filters, `409
+  stale_context`, becomes `400 cursor_mismatch` with `mustMatch` (the six filter parameters on the
+  route, `["filters"]` on the tool); a cursor that does not decode, `400 invalid_query`, becomes
+  `400 invalid_cursor`. A malformed filter stays `400 invalid_query`.
+- **`ops.operation.list` and `GET /api/ops/v1/operations`**: a cursor that names no operation,
+  `404 receipt_not_found` with ref `cursor`, becomes `400 invalid_cursor` with ref `cursor`.
+  `kogane.ops.operation.get` keeps `404 receipt_not_found` for an id that names nothing.
+- **Descriptions** of the twelve tools name `next.arguments`, `paging` and the deprecated fields.
 
 ### 5. Migration
 
