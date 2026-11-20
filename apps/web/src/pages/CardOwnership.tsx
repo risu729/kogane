@@ -143,7 +143,7 @@ function OwnershipForm({
               <ul className="warning-list">
                 {/* A side's own blocker (an unresolved mapping) can repeat here. */}
                 {[...new Set(side.ownerDefaultBlockers)].map((code) => (
-                  <li key={code}>{ownershipBlockerText(code)}</li>
+                  <li key={code}>{ownershipBlockerText(code, "owner-default")}</li>
                 ))}
               </ul>
             </Notice>
@@ -202,9 +202,13 @@ function OwnershipForm({
           </div>
           {side.selfDeclarationBlockers.length > 0 ? (
             <Notice tone="warn" inline role="note">
-              {side.selfDeclarationBlockers.includes("single_account_scope_unconfirmed")
-                ? "この記録は集約・未解決、または個別のカード請求口座／預金口座と確認できない範囲です。表示件数をカード枚数とみなさず、個別口座との対応を先に確認してください。本人申告は記録できません。"
-                : "既存の判断・矛盾または口座の更新を確認する必要があります。本人申告で上書きせず、記録済みの根拠を確認してください。"}
+              本人申告は次の理由で記録できません。
+              <ul className="warning-list">
+                {/* A side's own blocker (an unresolved mapping) can repeat here. */}
+                {[...new Set(side.selfDeclarationBlockers)].map((code) => (
+                  <li key={code}>{ownershipBlockerText(code, "sole-personal")}</li>
+                ))}
+              </ul>
             </Notice>
           ) : null}
         </>

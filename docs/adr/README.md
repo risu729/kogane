@@ -31,7 +31,7 @@ for current behavior.
 - [ADR 0016: Key MyJCB pending statements by payment month, current while their position shows them](0016-myjcb-pending-statement-slots.md)
 - [ADR 0017: Add card purchase review command kinds with one rebuild, not relation markers](0017-card-purchase-review-commands.md)
 - [ADR 0018: SBI Shinsei as the second bank debit adapter of card settlement review](0018-sbi-shinsei-bank-debit-adapter.md)
-- [ADR 0019: Reported state on a date from the latest complete capture before it](0019-dated-reported-state.md) — accepted; agent read `kogane.reported-state.read` (amendment 2026-11-06, #953); request rules amendment 2026-11-08 accepted (#1173)
+- [ADR 0019: Reported state on a date from the latest complete capture before it](0019-dated-reported-state.md) — accepted; agent read `kogane.reported-state.read` (amendment 2026-11-06, #953); request rules amendment 2026-11-08 accepted (#1173); account entries per resolved account amendment 2026-11-18 proposed
 - [ADR 0020: Prices are provider observations promoted by a closed rule list](0020-price-promotion-by-rule.md)
 - [ADR 0021: Collectors state the registration contract; the Processor's refusals stay](0021-collector-registration-contract.md)
 - [ADR 0022: Give registered shared-R2 artifacts their parser dataset](0022-registration-artifact-datasets.md)
@@ -119,7 +119,7 @@ for current behavior.
 - [ADR 0109: Isolate SBI supplementary completeness from core publication](0109-sbi-supplemental-unit-eligibility.md) — proposed; independent retained cash, income/gains and weekly units, preserved core refusal and legacy snapshot partition compatibility
 
 - [ADR 0110: Keep the coherent Workers stack while the upstream CTE expansion regression is unresolved](0110-workers-cte-regression.md) — proposed; retired 2026-11-16: the fixed Workers stack (Wrangler 4.162.0, workerd 1.20261113.1) is on main; the release exclusions and the probe task are removed
-- [ADR 0112: Pin the branded Stable Chrome payload in collector images](0112-pinned-chrome-collector-builds.md) — proposed; signed official package provenance, bounded extraction, retained wrapper/channel paths and offline image validation without APT
+- [ADR 0112: Pin the branded Stable Chrome payload in collector images](0112-pinned-chrome-collector-builds.md) — accepted; signed official package provenance, bounded extraction, retained wrapper/channel paths and offline image validation without APT
 - [ADR 0113: Map an SBI Securities code with no RIC, MIC or country as unresolved under identity policy 2, for foreign positions captures only](0113-sbi-scopeless-security-identity.md) — proposed; no shared `unknown-country` placeholder, a fetch-run-scoped `unresolved` identifier, re-identifies foreign positions captures only
 - [ADR 0114: Answer each card's debit account from stated evidence first, then accepted settlements](0114-card-debit-account-answer.md) — proposed; per-card read over ADR 0032 evidence and accepted settlements, undecided candidates listed but never answering, one service for the カード照合 section and `kogane.card-settlements.debit-accounts`
 - [ADR 0115: V Point Pay notification provenance: the parser checks the sender, the collector checks the recipient](0115-v-point-pay-email-sender-and-recipient-checks.md) — proposed; recipient compared only by the collector at receipt, recorded as a mailbox by the parser; provenance v2 records the stored message's From so the parser checks the sender in both delivery forms
