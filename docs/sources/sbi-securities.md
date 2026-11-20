@@ -1011,9 +1011,10 @@ was not observable with the current one-page data and remains unsupported.
 shapes and exact labels. The normal collector requests all retained yen pages
 and the retained USD statement, preserving per-page raw inputs. Unknown labels,
 positive transfer controls, unknown currencies, changed totals or missing pages
-keep coverage partial. The catalogue remains partial under #1226 until foreign
-continuation/transfer semantics and actual scheduled retained publication,
-freshness and the execution budget are verified. Dividend-labelled cash rows
+keep coverage partial. Scheduled runs now publish every retained yen page and
+the USD statement with complete coverage; the catalogue remains partial under
+#446 because a USD statement longer than one page has not been observed and is
+refused. Dividend-labelled cash rows
 publish settlement cash only; they establish no separate income dataset.
 
 ## 2026-11-10: My Assets income and realised gains
