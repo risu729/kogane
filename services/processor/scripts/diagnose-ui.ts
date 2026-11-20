@@ -1,7 +1,8 @@
+import { fileURLToPath } from "node:url";
 import { getPlatformProxy } from "wrangler";
 import { evidenceReader } from "../../app/src/observations.ts";
 const proxy = await getPlatformProxy<{ DB: D1Database }>({
-  configPath: new URL("../wrangler.diagnostic.jsonc", import.meta.url).pathname,
+  configPath: fileURLToPath(new URL("../wrangler.diagnostic.jsonc", import.meta.url)),
   persist: false,
   remoteBindings: true,
 });

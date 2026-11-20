@@ -734,11 +734,12 @@ rules, two more programmes, eight J-POINT sections): 6,875 bytes.
    pure functions the route and the tool share (chosen).** The shipped page
    query is reused unchanged with a larger `LIMIT`; the build caps a snapshot
    at 200 buckets, so the read is bounded.
-4. **`summary` the default, as [ADR 0123](https://github.com/risu729/kogane/pull/1458)
-   proposes for other reads.** That proposal is not merged and its default is
-   the owner's decision; the web page reads the full page. Here `detail`
-   defaults to `full`, so no published answer changes; if the owner adopts
-   ADR 0123's default, the expiry read can follow it in that change.
+4. **`summary` the default, as [ADR 0123](0123-summary-detail-for-large-reads.md)
+   makes it for the balance, schedule and collection quality reads.** ADR 0123
+   left the reward reads' defaults unchanged, and the web page reads the full
+   page. Here `detail` defaults to `full`, so no published answer changes; a
+   later change can make the expiry read's default `summary` as ADR 0123 did
+   for its reads.
 
 ### Decision
 
@@ -829,8 +830,10 @@ Limits:
   holding receives one today (the table above).
 - A windowed full page counts rows (one per bucket and rule), a summary
   buckets.
-- If ADR 0123 merges first, its `mustMatch` on this route's
-  `cursor_mismatch` must also name `from` and `before`.
+- ADR 0123 merged first: this route's `cursor_mismatch` names `mustMatch:
+  ["collection", "program", "from", "before"]`, absent included. Its
+  `detail` stays opt-in here (absent is `full`), unlike the reads ADR 0123
+  defaults to `summary`.
 
 ### Verification
 

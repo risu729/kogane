@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { getPlatformProxy } from "wrangler";
 import { readFileSync } from "node:fs";
 const [command = "catchup", argument = "100", source] = process.argv.slice(2);
@@ -11,7 +12,7 @@ if (source && !/^[a-z0-9-]{1,100}$/.test(source)) throw new Error("Invalid sourc
 const body = command === "revise" ? readFileSync(argument, "utf8") : undefined;
 if (body && Buffer.byteLength(body) > 4096) throw new Error("Revision body too large");
 const proxy = await getPlatformProxy<{ OBSERVATIONS: Fetcher }>({
-  configPath: new URL("../wrangler.ops.jsonc", import.meta.url).pathname,
+  configPath: fileURLToPath(new URL("../wrangler.ops.jsonc", import.meta.url)),
   persist: false,
   remoteBindings: true,
 });

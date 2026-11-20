@@ -390,7 +390,7 @@ There are currently no such rows. CORE `conversion_simulations` was deleted in 0
 
 `expiryBasis` is returned only when stored evidence satisfies `validRewardExpiryBasis`; otherwise it is `null`. `null` means either that evidence was not recorded by a build before `reward-projection-v2` or that the stored value fails validation, not that no computed expiry exists. Evidence is not reconstructed from other columns. Validation also rejects `date` / `no-expiry` for unverified rule versions, `no-expiry` for bounded rules or families other than `none`, and `agree`/`disagree` with an unreadable displayed expiry. If CORE rule `applicability_json` has unreadable `tiers` / `validPeriod`, they are treated as a tier no claim meets and a period containing no day, not all tiers or always valid. The shared response validator (`api-validation.ts`) checks `RewardReadExpiryRow.expiryBasis` with `optional(nullable(validRewardExpiryBasis))`. Responses containing damaged evidence are rejected; `null` and an absent field (an App predating it) are accepted. The screen performs the same validation before rendering.
 
-No published snapshot, a different epoch or a changed restriction returns 503 (`reward_read_model_unavailable` / `reward_read_model_context_changed` / `reward_read_model_restriction_changed`), not an empty success. Cursors use the same `{snapshotId, readInstanceId, filterDigest, position}` as U11. A cursor for another query (another route or `program`) is 400 `cursor_mismatch`; another instance or a retired snapshot is 410 `context_expired`. A different cursor is never reinterpreted as an offset. The page size is not part of the query: a cursor read at one offered `limit` (25, 50, 100, 200) continues at another from where its page ended, and the next cursor is issued at the size asked now ([ADR 0119](adr/0119-cursor-page-size.md)).
+No published snapshot, a different epoch or a changed restriction returns 503 (`reward_read_model_unavailable` / `reward_read_model_context_changed` / `reward_read_model_restriction_changed`), not an empty success. Cursors use the same `{snapshotId, readInstanceId, filterDigest, position}` as U11. A cursor for another query (another route, `program` or window) is 400 `cursor_mismatch`, with `mustMatch` naming the inputs that must repeat (`["collection", "program", "from", "before"]` on expiry, absent included, `["collection"]` on simulations; [ADR 0123](adr/0123-summary-detail-for-large-reads.md)); another instance or a retired snapshot is 410 `context_expired`. A different cursor is never reinterpreted as an offset. The page size is not part of the query: a cursor read at one offered `limit` (25, 50, 100, 200) continues at another from where its page ended, and the next cursor is issued at the size asked now ([ADR 0119](adr/0119-cursor-page-size.md)).
 
 #### Deadline window and summary
 
@@ -421,6 +421,11 @@ above.
   never added to a total. A display with no readable date is `display_date_unknown`; a section that displayed
   nothing is `provider_expiry_not_displayed` or `provider_expiry_unavailable`. Without a window every dated
   bucket counts as inside.
+
+`detail` here is opt-in: absent is `full`, the page as it was, unlike the balance, schedule and collection
+quality reads whose absent `detail` is `summary` ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)).
+Another value is `400 invalid_query`, as on the schedule and collection quality routes (`invalid_request` on
+the tool's closed schema). A page's `detail` is not bound to its cursor; the summary takes none.
 
 Both read every estimate row of the snapshot (narrowed to `program`) through the shipped page query with a
 bound of 1,000 rows, and filter in the App; the query text is unchanged. A larger snapshot is

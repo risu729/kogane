@@ -354,7 +354,12 @@ describe("the reward expiry window and summary", () => {
     ]) {
       const refused = await page.route(query);
       expect(refused.status, query).toBe(400);
-      expect(refused.body, query).toMatchObject({ error: "cursor_mismatch" });
+      // The answer names every input bound to the cursor, the window
+      // included (ADR 0123).
+      expect(refused.body, query).toMatchObject({
+        error: "cursor_mismatch",
+        mustMatch: ["collection", "program", "from", "before"],
+      });
     }
     const plain = (await page.route("/api/v2/rewards/expiry?limit=25")).body as WindowedPage;
     expect(plain.page.hasMore).toBe(true);
@@ -370,7 +375,10 @@ describe("the reward expiry window and summary", () => {
       },
     );
     expect(crossed.status).toBe(400);
-    expect(crossed.body).toMatchObject({ error: "cursor_mismatch" });
+    expect(crossed.body).toMatchObject({
+      error: "cursor_mismatch",
+      mustMatch: ["collection", "program", "from", "before"],
+    });
   });
 
   it("binds a cursor to the `from` it resolved, whether defaulted or named", async () => {

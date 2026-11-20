@@ -15,6 +15,7 @@
 // through `wrangler.diagnostic.jsonc`; nothing is written anywhere. Each
 // rejection prints its closed category (scripts/parser-rejection.ts) and the
 // last line is a count per category.
+import { fileURLToPath } from "node:url";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 import { parseCsv } from "../../../packages/parsers/src/parsers/util.ts";
@@ -34,8 +35,10 @@ import {
   throwSites,
   topActivityShape,
 } from "./parser-rejection.ts";
-const cli = new URL("../node_modules/wrangler/bin/wrangler.js", import.meta.url).pathname;
-const processorDir = new URL("..", import.meta.url).pathname;
+// fileURLToPath, not URL.pathname: on Windows the pathname keeps a leading
+// slash before the drive letter and percent-encoded characters.
+const cli = fileURLToPath(new URL("../node_modules/wrangler/bin/wrangler.js", import.meta.url));
+const processorDir = fileURLToPath(new URL("..", import.meta.url));
 async function command(args: string[]): Promise<Uint8Array> {
   const child = Bun.spawn(["node", cli, ...args, "--config", "wrangler.diagnostic.jsonc"], {
     cwd: processorDir,

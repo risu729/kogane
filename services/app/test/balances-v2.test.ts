@@ -146,7 +146,7 @@ describe("v2 balance read model", () => {
   });
 
   it("returns typed quantities, measures, adoption and time, and never a net worth", async () => {
-    const response = await call("/api/v2/balances/latest");
+    const response = await call("/api/v2/balances/latest?detail=full");
     expect(response.status).toBe(200);
     const body = (await response.json()) as LatestPage;
     expect(validApiResponse("/api/v2/balances/latest", body)).toBe(true);
@@ -390,7 +390,7 @@ describe("v2 balance read model", () => {
       .run();
     expect((await build()).status).toBe("complete");
     const body = (await (
-      await call("/api/v2/balances/latest?account=v2-stale-account")
+      await call("/api/v2/balances/latest?account=v2-stale-account&detail=full")
     ).json()) as LatestPage;
     expect(body.items).toHaveLength(1);
     expect(body.items[0]!.adoption.state).toBe("stale");
@@ -425,7 +425,7 @@ describe("v2 balance read model", () => {
       .run();
     expect((await build()).status).toBe("complete");
     const body = (await (
-      await call("/api/v2/balances/latest?account=sbi-vc-trade:main")
+      await call("/api/v2/balances/latest?account=sbi-vc-trade:main&detail=full")
     ).json()) as LatestPage & {
       subtotals: { reasonCode: string | null; knownAssetsSubtotal: unknown };
     };
@@ -484,12 +484,12 @@ describe("v2 balance read model", () => {
         }),
       );
     const latest = (await (
-      await call("/api/v2/balances/latest?account=v2-basis-account")
+      await call("/api/v2/balances/latest?account=v2-basis-account&detail=full")
     ).json()) as { items: BasisItem[] };
     expect(validApiResponse("/api/v2/balances/latest", latest)).toBe(true);
     expect(bases(latest.items)).toEqual(expected);
     const history = (await (
-      await call("/api/v2/balances/history?account=v2-basis-account")
+      await call("/api/v2/balances/history?account=v2-basis-account&detail=full")
     ).json()) as { items: BasisItem[] };
     expect(validApiResponse("/api/v2/balances/history", history)).toBe(true);
     expect(bases(history.items)).toEqual(expected);

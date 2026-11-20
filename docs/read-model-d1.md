@@ -186,7 +186,7 @@ is different from the CORE path:
 | --------------------------------------------- | ----------------------------------------------------- |
 | No published snapshot                         | `503 read_model_unavailable` — never an empty success |
 | Cursor from another read instance or snapshot | `410 context_expired`                                 |
-| Cursor for another route, filter or read mode | `400 cursor_mismatch`                                 |
+| Cursor for another route, filter or read mode | `400 cursor_mismatch` with `mustMatch` (ADR 0123)     |
 | CORE restored under a new epoch               | `503 read_model_context_changed`                      |
 | A use restriction changed                     | `503 read_model_restriction_changed`                  |
 

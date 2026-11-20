@@ -780,6 +780,75 @@ the reader is the route's status with `{ error, refs? }`, as the Worker
 answers it, without the request id. A store read that fails is
 `503 catalogue_read_failed`, as on the route.
 
+Four reads answer one short line per row by default
+([ADR 0123](adr/0123-summary-detail-for-large-reads.md)), on the route and
+the tool alike: `kogane.balances.read`, `kogane.schedules.read`,
+`kogane.collection-quality.read` (its summary and `view: "cells"`) and
+`kogane.store.read` with `page: "overview"` take `detail`, `summary` (the
+default) or `full`, as does the route (`?detail=`). `full` is the answer these reads gave before 2026-11-19,
+unchanged; the web UI asks for it. A `summary` is derived from that same
+answer by one function in `packages/application` or
+`packages/collection`, so the route and the tool give the same summary, and
+it keeps every id that reads a row in full (`observationId`, a job id, a
+source and dataset), every unit, every closed code and count it collapses, and
+every value that is not exact as its status (`missing`, `unparsed`,
+`conflict`) with no value (INV05). A balance summary page is
+`{ schemaVersion, detail: "summary", accounts, metrics, items, page,
+dataCoverage, subtotals }`: each item is `{ observationId, account, metric,
+amount: { value, unit, status, scale }, asOf, reasons }`, with `freshness`
+and `adoption` on `latest` and its reasons `adoption:<code>` and
+`freshness:<code>`; a `history` line's reasons say when its row is not a
+current successful parse's (`parse:superseded`, `parse:pending`,
+`parse:error`, closed codes), since history carries superseded and failed
+parses' rows beside current ones. `account`
+and `metric` are page-local refs (`a1`, `m1`) into `accounts` (`source`,
+`sourceAccount`, account entity, label, mapping `status` and `lineage`
+(`current` or `historical`), the last four null when the organization is
+unavailable; one entry per distinct six, so a provider account organized two
+ways on a page is two entries) and `metrics` (`source`, registry metric id,
+provider metric), so a long id or label is written once per page.
+Its page size defaults to 10 (`full`: 100), so a page that names a new
+account on every line still fits 8 KB; the offered sizes are 10, 25, 50,
+100, 200 and 500. The page, cursor, coverage and subtotals are the full
+page's. A cursor is bound to neither `detail` nor `limit`
+([ADR 0119](adr/0119-cursor-page-size.md)); a cursor read with other filters
+is `400 cursor_mismatch` with `mustMatch`, the argument names that must
+repeat (`collection`, `source`, `account`, `instrument`, `metric`,
+`view`, `identityRead` on `kogane.balances.read`; `collection`, `program`,
+`from` and `before` on `kogane.rewards.read`'s expiry), on the route and the
+tool alike.
+`test/mcp-answer-size.test.ts` measures every read tool's default answer on
+a store at the scale of [issue 1414](https://github.com/risu729/kogane/issues/1414)
+and keeps the summaries under the 8 KB a client shows, with the overview
+and the maintenance read (below) also at their realistic worst (the
+overview under 7 KB there) and the overview at its bound.
+
+The overview summary (`GET /api/overview`, `kogane.store.read`
+`{page: "overview"}`; ADR 0123, amendment of 2026-11-19) is
+`{ detail: "summary", counts, sources, fetchRuns, parseRuns, unitUpdates?,
+unitUpdatesOmitted?, coverage }`, shaped by `overviewSummary`
+(`packages/application/src/query/overview-detail.ts`): the counts and the
+coverage as the full page has them; the sources as `{ sourceIds, artifacts }`,
+sources with the same artifact count sharing a line; `fetchRuns.byStatus`
+and `parseRuns.byStatus`, one line per status of the newest-500 window
+(`success`, `partial`; `ok`, `pending`, `error`) with its run count, its
+source or parser count, the parse lines' superseded, warning and
+unreadable-warning counts and `failureCodes` (every distinct closed code the
+Processor wrote as `parse_runs.error` for the status's runs, newest first),
+and the newest run's ids and times; `fetchRuns.notSuccessful` and
+`parseRuns.notOk`, one line per source or parser and status that is not a
+success, with its run count and newest run (a parse line also with its
+newest three `failureCodes` and `moreFailureCodes`, how many more it has);
+and `unitUpdates`, when the page has them, per source and dataset. Each of
+those three lists holds the five lines with the newest runs
+(`OVERVIEW_SUMMARY_LINES`); the lines left out are counted per status, with
+their runs, in `notSuccessfulOmitted`, `notOkOmitted` and
+`unitUpdatesOmitted`, and listed by `detail: "full"`. It drops
+provider names, producers, session ids, parser versions and warnings. `detail` on `meta` or `filter-options` is the route's
+`400 invalid_query`, and another value `400 invalid_detail` (the tool's
+schema: `400 invalid_request`). The parameter exists where a store advertises
+`sharedQuery`; the local store answers its full overview alone.
+
 Authorization, in order, after the Access check and the grant lookup: the
 tool's capability, else `403 unauthorized` (`capability:<name>`); then sources
 and accounts both `"*"`, else `403 evidence_restricted` (`scope:source`,
@@ -854,7 +923,9 @@ and counts inside, before, after and left out by closed reason
 `provider_expiry_not_displayed`, `provider_expiry_unavailable`). A malformed
 date is `400 invalid_date`, a window with no day `400 invalid_date_range`, a
 snapshot over 1,000 rows `413 result_limit_exceeded`. Without these arguments
-the answer is the page as before. A summary of the synthetic store in
+the answer is the page as before: unlike the reads of
+[ADR 0123](adr/0123-summary-detail-for-large-reads.md), absent `detail` here is
+`full`. A summary of the synthetic store in
 `test/reward-expiry-window.test.ts` is under 2 KB, against about 71 KB for the
 default 50-row page.
 
@@ -871,17 +942,28 @@ report whose body has left R2 is `404 not_found`, the codes `/export`
 answers; the operator page re-displays the first and shows the second as
 `unavailable`. No argument reaches `/export`.
 
-`kogane.collection-quality.read` takes `{ source?, view?, offset? }`:
+`kogane.collection-quality.read` takes `{ source?, view?, offset?, detail? }`:
 without `source` the summary (which takes no `offset` and no `view`), with it
 that source's cells (`view: "cells"`, the default; `offset` pages them) or the
 same cells regrouped by the accounts their captures' observations name
 (`view: "accounts"`, `GET /api/collection-quality/{source}/accounts`, unpaged,
-so `offset` with it is `400 invalid_request`;
-[ADR 0088](adr/0088-collection-quality-per-account.md)). The account view
+so `offset` or `detail` with it is `400 invalid_request`;
+[ADR 0088](adr/0088-collection-quality-per-account.md)). With `detail:
+"summary"` (the default; ADR 0123) the summary is one line per source (sources
+whose lines would be equal share one, naming each in `sourceIds`): freshness,
+newest fetch run, reasons, each job's newest receipt status and failure code
+with its terminals' distinct blocked and failure codes (`terminalCodes`), the
+count of unregistered collectors and their distinct codes
+(`unregisteredCodes`), and the provider data types counted by status; and a
+source's cells are read whole (refused past 2,000 cells with
+`413 result_limit_exceeded`, never cut) and answered as one line per dataset,
+parser and fetch unit, collapsed over periods, with the union of the cells'
+reasons, failure codes (`failureCodes`) and coverage causes, 20 lines a page
+(`offset` then counts lines, and `coverage` gives the cell and line counts). The account view
 carries each account's stored label, under `data` like every page read, and
 its audit record counts the cells it read, never an account.
-`view: "status"` takes no `source` and no `offset` (either is
-`400 invalid_request`) and answers `GET /api/collection-quality?view=status`:
+`view: "status"` takes no `source`, no `offset` and no `detail`, being
+compact already (any of them is `400 invalid_request`) and answers `GET /api/collection-quality?view=status`:
 whether anything is stuck, in about 5 KB, one line per configured job with
 `enabled`, `lastRun` (`at`, `status`, `failureCode`, and `recovered` when a
 successful fetch run of the job's source completed after the failed receipt
@@ -949,7 +1031,15 @@ and travel only encoded under `data`. An object over 1 MiB is
 `413 raw_too_large` before it is read ([ADR 0081, amendment of
 2026-11-07](adr/0081-ui-parity-through-mcp.md#amendment-2026-11-07-raw-evidence-bytes-over-mcp)).
 
-`kogane.schedules.read` takes no argument and answers the schedules page
+`kogane.schedules.read` takes `{ detail? }`. With `detail: "summary"` (the
+default; ADR 0123) it answers one line per job (id, source, kind, enabled,
+supported, next run, reservation, `dispatch` — its `collectionRequest`'s,
+null when no collector serves one, absent when the snapshot does not say —,
+and its newest occurrence's nominal time, status and failure code), each source's maintenance reference status with its count of
+rules, and the held leases, shaped by `scheduleSnapshotSummary`
+(`packages/collection/src/schedule-model.ts`), which
+`GET /api/ops/v1/schedules` applies to the same snapshot. With
+`detail: "full"` it answers the schedules page
 (each job's `collectionRequest` included: the CORE source a
 `kogane.ops.collection.request` names for it and whether the Processor would
 dispatch it, [schedules](schedules.md#収集を依頼-collection-request)):
@@ -1056,7 +1146,13 @@ none), so financial scope and maintenance scope never stand in for each other:
 It is listed on `/mcp` to a grant holding `schedules.read`, after the other
 tools, and served on `POST /api/agent/v1/schedules.maintenance.read` as well:
 one function answers both, so the two return the same object, each recorded as
-a `read` on its own path. Without the capability it is `403 unauthorized`; a
+a `read` on its own path. It takes `{ source?, detail?, offset? }`
+([ADR 0123](adr/0123-summary-detail-for-large-reads.md), amendment of
+2026-11-19): `detail: "full"` is the Processor's read as it is, and
+`detail: "summary"`, the default, is `maintenanceReadSummary` of it, 16 lines
+(jobs and rules) a page with `offset` the previous page's
+`coverage.nextOffset`; `offset` with `full` is `400 invalid_request`. The
+summary's fields are in [schedules](schedules.md#agent-maintenance-tools). Without the capability it is `403 unauthorized`; a
 source outside `scheduleSources`, existing or not, is
 `403 source_not_granted`. What it reads back is in
 [schedules](schedules.md#agent-maintenance-tools). `kogane.capabilities`

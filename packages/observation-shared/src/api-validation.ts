@@ -94,6 +94,13 @@ import type {
   OrganizedAccount,
   OrganizedInstrument,
 } from "./organization-contract.ts";
+import {
+  BALANCE_HISTORY_REASONS,
+  OVERVIEW_FETCH_RUN_STATUSES,
+  OVERVIEW_LINE_FAILURE_CODES,
+  OVERVIEW_PARSE_RUN_STATUSES,
+  OVERVIEW_SUMMARY_LINES,
+} from "./api-contract.ts";
 import type {
   ApiMetadata,
   ArtifactDetail,
@@ -103,9 +110,16 @@ import type {
   BalanceEvidenceMember,
   BalanceHistoryItem,
   BalanceHistoryPage,
+  BalanceHistorySummaryItem,
+  BalanceHistorySummaryPage,
   KnownAssetsSubtotals,
   LatestBalanceItem,
   LatestBalancePage,
+  LatestBalanceSummaryItem,
+  LatestBalanceSummaryPage,
+  SummaryAccount,
+  SummaryAmount,
+  SummaryMetric,
   MeasureDescriptor,
   ObservedQuantityWire,
   SnapshotDataCoverage,
@@ -118,6 +132,7 @@ import type {
   ObservationKind,
   ObservationRef,
   Overview,
+  OverviewSummary,
   ParseRunDetail,
   PositionRow,
   PositionWithValuations,
@@ -451,6 +466,210 @@ const overview = object<Overview>({
     }),
   ),
 });
+// The summary detail of the overview (ADR 0123, amendment 2026-11-19): every
+// status is one of the closed set and listed once, a line per source or
+// parser names a status other than the success one, each list is capped, and
+// its lines with the ones it left out count exactly the runs of their status.
+type OverviewFetchLine = OverviewSummary["fetchRuns"]["byStatus"][number];
+/** A closed failure code, as `safeCode` in the collection quality read writes one. */
+const failureCode: Check<string> = (value): value is string =>
+  typeof value === "string" && /^[a-z][a-z0-9_]{0,63}$/u.test(value);
+type OverviewParseLine = OverviewSummary["parseRuns"]["byStatus"][number];
+const overviewSummaryShape = object<OverviewSummary>({
+  detail: literal("summary"),
+  counts: array(object<Overview["counts"][number]>({ table: text, rows: number })),
+  sources: array(
+    object<OverviewSummary["sources"][number]>({ sourceIds: array(text), artifacts: number }),
+  ),
+  fetchRuns: object<OverviewSummary["fetchRuns"]>({
+    byStatus: array(
+      object<OverviewFetchLine>({
+        status: literal(...OVERVIEW_FETCH_RUN_STATUSES),
+        runs: identifier,
+        sources: identifier,
+        newest: object<OverviewFetchLine["newest"]>({
+          id: identifier,
+          sourceId: text,
+          startedAt: text,
+          completedAt: nullableText,
+        }),
+      }),
+    ),
+    notSuccessful: array(
+      object<OverviewSummary["fetchRuns"]["notSuccessful"][number]>({
+        sourceId: text,
+        status: literal(...OVERVIEW_FETCH_RUN_STATUSES.filter((status) => status !== "success")),
+        runs: identifier,
+        newest: object<OverviewSummary["fetchRuns"]["notSuccessful"][number]["newest"]>({
+          id: identifier,
+          startedAt: text,
+          completedAt: nullableText,
+        }),
+      }),
+    ),
+    notSuccessfulOmitted: array(
+      object<OverviewSummary["fetchRuns"]["notSuccessfulOmitted"][number]>({
+        status: literal(...OVERVIEW_FETCH_RUN_STATUSES.filter((status) => status !== "success")),
+        lines: identifier,
+        runs: identifier,
+      }),
+    ),
+  }),
+  parseRuns: object<OverviewSummary["parseRuns"]>({
+    byStatus: array(
+      object<OverviewParseLine>({
+        status: literal(...OVERVIEW_PARSE_RUN_STATUSES),
+        runs: identifier,
+        superseded: number,
+        withWarnings: number,
+        unreadableWarnings: number,
+        parsers: identifier,
+        failureCodes: array(failureCode),
+        newest: object<OverviewParseLine["newest"]>({
+          id: identifier,
+          artifactId: identifier,
+          parser: text,
+          parsedAt: text,
+        }),
+      }),
+    ),
+    notOk: array(
+      object<OverviewSummary["parseRuns"]["notOk"][number]>({
+        parser: text,
+        status: literal(...OVERVIEW_PARSE_RUN_STATUSES.filter((status) => status !== "ok")),
+        runs: identifier,
+        superseded: number,
+        failureCodes: array(failureCode),
+        moreFailureCodes: identifier,
+        newest: object<OverviewSummary["parseRuns"]["notOk"][number]["newest"]>({
+          id: identifier,
+          artifactId: identifier,
+          parsedAt: text,
+        }),
+      }),
+    ),
+    notOkOmitted: array(
+      object<OverviewSummary["parseRuns"]["notOkOmitted"][number]>({
+        status: literal(...OVERVIEW_PARSE_RUN_STATUSES.filter((status) => status !== "ok")),
+        lines: identifier,
+        runs: identifier,
+      }),
+    ),
+  }),
+  unitUpdatesOmitted: optional(
+    object<NonNullable<OverviewSummary["unitUpdatesOmitted"]>>({
+      lines: identifier,
+      runs: identifier,
+    }),
+  ),
+  unitUpdates: optional(
+    array(
+      object<NonNullable<OverviewSummary["unitUpdates"]>[number]>({
+        sourceId: text,
+        dataset: text,
+        runs: identifier,
+        newest: object<NonNullable<OverviewSummary["unitUpdates"]>[number]["newest"]>({
+          fetchRunId: identifier,
+          fetchedAt: text,
+          updatedUnits: number,
+          staleUnits: number,
+        }),
+      }),
+    ),
+  ),
+  coverage: object<OverviewSummary["coverage"]>({ limit: number, truncated: boolean }),
+});
+/**
+ * Each status once; a capped list holds at most `OVERVIEW_SUMMARY_LINES`
+ * lines and leaves lines out only when full, each status's omitted entry
+ * once; and a status's per-source or per-parser lines with its omitted ones
+ * count exactly its runs and its sources or parsers (`distinct`), one line
+ * each.
+ */
+function linesCountStatus<Line extends { status: string; runs: number }>(
+  byStatus: readonly Line[],
+  distinct: (line: Line) => number,
+  lines: readonly { status: string; runs: number }[],
+  omitted: readonly { status: string; lines: number; runs: number }[],
+  success: string,
+): boolean {
+  const statuses = byStatus.map((line) => line.status);
+  if (new Set(statuses).size !== statuses.length) return false;
+  if (!capped(lines.length, omitted)) return false;
+  if (new Set(omitted.map((entry) => entry.status)).size !== omitted.length) return false;
+  const listed = (status: string) => lines.filter((entry) => entry.status === status);
+  const left = (status: string) => omitted.find((entry) => entry.status === status);
+  return (
+    byStatus.every(
+      (line) =>
+        line.status === success ||
+        (listed(line.status).reduce((sum, entry) => sum + entry.runs, 0) +
+          (left(line.status)?.runs ?? 0) ===
+          line.runs &&
+          listed(line.status).length + (left(line.status)?.lines ?? 0) === distinct(line)),
+    ) && [...lines, ...omitted].every((entry) => statuses.includes(entry.status))
+  );
+}
+/** At most the cap listed, and lines left out only from a full list, each counting its runs. */
+function capped(listed: number, omitted: readonly { lines: number; runs: number }[]): boolean {
+  return (
+    listed <= OVERVIEW_SUMMARY_LINES &&
+    omitted.every((entry) => entry.lines > 0 && entry.runs >= entry.lines) &&
+    (omitted.length === 0 || listed === OVERVIEW_SUMMARY_LINES)
+  );
+}
+/**
+ * A failing parser's line lists at most `OVERVIEW_LINE_FAILURE_CODES` codes,
+ * counts the rest only when it is full, and each of its codes is on its
+ * status's line, which lists each code once.
+ */
+function failureCodesKept(summary: OverviewSummary): boolean {
+  const byStatus = new Map(
+    summary.parseRuns.byStatus.map((line) => [line.status, line.failureCodes]),
+  );
+  return (
+    summary.parseRuns.byStatus.every(
+      (line) => new Set(line.failureCodes).size === line.failureCodes.length,
+    ) &&
+    summary.parseRuns.notOk.every(
+      (line) =>
+        line.failureCodes.length <= OVERVIEW_LINE_FAILURE_CODES &&
+        new Set(line.failureCodes).size === line.failureCodes.length &&
+        (line.moreFailureCodes === 0 || line.failureCodes.length === OVERVIEW_LINE_FAILURE_CODES) &&
+        line.failureCodes.every((code) => byStatus.get(line.status)?.includes(code)) &&
+        (byStatus.get(line.status)?.length ?? 0) >=
+          line.failureCodes.length + line.moreFailureCodes,
+    )
+  );
+}
+/** `unitUpdatesOmitted` is present exactly with `unitUpdates`, and bounds it as the run lists. */
+function unitUpdatesCapped(summary: OverviewSummary): boolean {
+  if (summary.unitUpdates === undefined) return summary.unitUpdatesOmitted === undefined;
+  if (summary.unitUpdatesOmitted === undefined) return false;
+  const { lines, runs } = summary.unitUpdatesOmitted;
+  return lines === 0
+    ? runs === 0 && summary.unitUpdates.length <= OVERVIEW_SUMMARY_LINES
+    : capped(summary.unitUpdates.length, [{ lines, runs }]);
+}
+const overviewSummary: Check<OverviewSummary> = (value): value is OverviewSummary =>
+  overviewSummaryShape(value) &&
+  linesCountStatus(
+    value.fetchRuns.byStatus,
+    (line) => line.sources,
+    value.fetchRuns.notSuccessful,
+    value.fetchRuns.notSuccessfulOmitted,
+    "success",
+  ) &&
+  linesCountStatus(
+    value.parseRuns.byStatus,
+    (line) => line.parsers,
+    value.parseRuns.notOk,
+    value.parseRuns.notOkOmitted,
+    "ok",
+  ) &&
+  failureCodesKept(value) &&
+  unitUpdatesCapped(value);
+
 const observationRef = object<ObservationRef>({
   kind: observationKind,
   id: identifier,
@@ -621,6 +840,127 @@ const balanceHistoryPage: Check<BalanceHistoryPage> = (value): value is BalanceH
   })(value) &&
   withoutNetWorth(value) &&
   value.items.length <= value.page.limit;
+
+// The summary detail of the same pages (ADR 0123): one line per row, the page,
+// coverage and subtotals as the full page has them. A value that is not exact
+// carries no value and no scale, only its status (INV05).
+const summaryAmount: Check<SummaryAmount> = (value): value is SummaryAmount =>
+  object<SummaryAmount>({
+    value: nullableText,
+    unit: nullableText,
+    status: literal("exact", "missing", "unparsed", "conflict"),
+    scale: nullable(identifier),
+  })(value) &&
+  (value.status === "exact"
+    ? value.value !== null && value.scale !== null
+    : value.value === null && value.scale === null);
+const summaryAccount: Check<SummaryAccount> = (value): value is SummaryAccount =>
+  object<SummaryAccount>({
+    ref: text,
+    source: text,
+    sourceAccount: text,
+    account: nullableText,
+    label: nullableText,
+    status: nullable(literal("identified", "provider-local", "aggregate", "unresolved")),
+    lineage: nullable(literal("current", "historical")),
+  })(value) &&
+  // An organized row names all four; an unavailable organization none.
+  (value.account === null
+    ? value.label === null && value.status === null && value.lineage === null
+    : value.label !== null && value.status !== null && value.lineage !== null);
+const summaryMetric = object<SummaryMetric>({
+  ref: text,
+  source: text,
+  metric: text,
+  providerMetric: text,
+});
+const historySummaryFields = {
+  observationId: identifier,
+  account: text,
+  metric: text,
+  amount: summaryAmount,
+  asOf: nullableText,
+};
+const historySummaryItem = object<BalanceHistorySummaryItem>({
+  ...historySummaryFields,
+  // Closed codes, each at most once: a parse status outside the closed set
+  // is not a reason the line can carry.
+  reasons: (value): value is BalanceHistorySummaryItem["reasons"] =>
+    subset(BALANCE_HISTORY_REASONS)(value),
+});
+const latestSummaryItem = object<LatestBalanceSummaryItem>({
+  ...historySummaryFields,
+  freshness: literal("current", "stale", "unknown"),
+  adoption: literal("adopted", "excluded", "unresolved", "conflict", "stale"),
+  reasons: array(text),
+});
+/**
+ * Every line names an account and a metric of its page, every one is named,
+ * and each entry is listed once: no two refs name the same entry.
+ */
+function refsNamed(entries: readonly { ref: string }[], named: readonly string[]): boolean {
+  const refs = entries.map((entry) => entry.ref);
+  const contents = entries.map(({ ref: _ref, ...entry }) => JSON.stringify(entry));
+  return (
+    new Set(refs).size === refs.length &&
+    new Set(contents).size === contents.length &&
+    named.every((ref) => refs.includes(ref)) &&
+    refs.every((ref) => named.includes(ref))
+  );
+}
+function accountsNamed(value: {
+  accounts: SummaryAccount[];
+  metrics: SummaryMetric[];
+  items: { account: string; metric: string }[];
+}): boolean {
+  return (
+    refsNamed(
+      value.accounts,
+      value.items.map((item) => item.account),
+    ) &&
+    refsNamed(
+      value.metrics,
+      value.items.map((item) => item.metric),
+    )
+  );
+}
+const latestBalanceSummaryPage: Check<LatestBalanceSummaryPage> = (
+  value,
+): value is LatestBalanceSummaryPage =>
+  object<LatestBalanceSummaryPage>({
+    schemaVersion: literal("snapshot-page-v1"),
+    detail: literal("summary"),
+    accounts: array(summaryAccount),
+    metrics: array(summaryMetric),
+    items: array(latestSummaryItem),
+    page: pageInfo,
+    dataCoverage: snapshotCoverage,
+    subtotals,
+  })(value) &&
+  withoutNetWorth(value) &&
+  withoutNetWorth(value.subtotals) &&
+  accountsNamed(value) &&
+  value.items.length <= value.page.limit;
+const balanceHistorySummaryPage: Check<BalanceHistorySummaryPage> = (
+  value,
+): value is BalanceHistorySummaryPage =>
+  object<BalanceHistorySummaryPage>({
+    schemaVersion: literal("snapshot-page-v1"),
+    detail: literal("summary"),
+    accounts: array(summaryAccount),
+    metrics: array(summaryMetric),
+    items: array(historySummaryItem),
+    page: pageInfo,
+    dataCoverage: snapshotCoverage,
+  })(value) &&
+  withoutNetWorth(value) &&
+  accountsNamed(value) &&
+  value.items.length <= value.page.limit;
+/** A full page carries no `detail`; a summary page says it is one. */
+const fullPage =
+  <T>(check: Check<T>): Check<T> =>
+  (value): value is T =>
+    check(value) && !Object.hasOwn(value as object, "detail");
 
 const rewardBucket = object<RewardBucketRow>({
   bucketRef: text,
@@ -865,7 +1205,8 @@ const endpoints: Record<string, Check<unknown>> = {
         ? rewardReadPage(value)
         : rewardPage(rewardExpiry)(value)),
   "/api/meta": metadata,
-  "/api/overview": overview,
+  "/api/overview": (value): value is Overview | OverviewSummary =>
+    fullPage(overview)(value) || overviewSummary(value),
   "/api/transactions": object<{
     transactions: TransactionRow[];
     interpretationContext?: InterpretationContext;
@@ -882,8 +1223,23 @@ const endpoints: Record<string, Check<unknown>> = {
   "/api/artifacts": object<{ artifacts: ArtifactRow[] }>({
     artifacts: array(artifact),
   }),
-  "/api/v2/balances/latest": latestBalancePage,
-  "/api/v2/balances/history": balanceHistoryPage,
+  "/api/v2/balances/latest": (value): value is LatestBalancePage | LatestBalanceSummaryPage =>
+    fullPage(latestBalancePage)(value) || latestBalanceSummaryPage(value),
+  "/api/v2/balances/history": (value): value is BalanceHistoryPage | BalanceHistorySummaryPage =>
+    fullPage(balanceHistoryPage)(value) || balanceHistorySummaryPage(value),
+};
+
+/** Each detail's own check of the balance pages and the overview (ADR 0123). */
+const pagesByDetail: Record<string, Record<ReadDetail, Check<unknown>>> = {
+  "/api/v2/balances/latest": {
+    full: fullPage(latestBalancePage),
+    summary: latestBalanceSummaryPage,
+  },
+  "/api/v2/balances/history": {
+    full: fullPage(balanceHistoryPage),
+    summary: balanceHistorySummaryPage,
+  },
+  "/api/overview": { full: fullPage(overview), summary: overviewSummary },
 };
 
 /**
@@ -911,8 +1267,29 @@ function validSharedQueryResponse(value: unknown): boolean {
   );
 }
 
-/** Additive fields are allowed; required fields and their nullability are checked. */
-export function validApiResponse(path: string, value: unknown): boolean {
+/** `summary` or `full` (ADR 0123): the detail a request asked for. */
+type ReadDetail = "summary" | "full";
+
+/**
+ * The `detail` a request's query asks for when it names one the reads offer,
+ * for `validApiResponse`'s third argument; absent or anything else is
+ * `undefined` (either shape).
+ */
+export function requestedDetail(search: string): ReadDetail | undefined {
+  const detail = new URLSearchParams(search).get("detail");
+  return detail === "summary" || detail === "full" ? detail : undefined;
+}
+
+/**
+ * Additive fields are allowed; required fields and their nullability are
+ * checked. `detail` names the detail the request asked for (ADR 0123): the
+ * paths that answer one (the v2 balance pages, the overview and the
+ * collection quality summary and cells) then accept that shape only; without
+ * it they accept either.
+ */
+export function validApiResponse(path: string, value: unknown, detail?: ReadDetail): boolean {
+  if (detail !== undefined && Object.hasOwn(pagesByDetail, path))
+    return pagesByDetail[path]![detail](value);
   if (path === AUDIT_PAGE_PATH) return validAuditPage(value);
   if (path === "/api/v2/reconciliation/card-settlements/ownership")
     return validCardOwnershipReview(value);
@@ -930,7 +1307,7 @@ export function validApiResponse(path: string, value: unknown): boolean {
   if (path === "/api/v2/reports" || path.startsWith("/api/v2/reports/"))
     return validReportResponse(path, value) ?? false;
   if (path.startsWith("/api/collection-quality"))
-    return validCollectionQualityResponse(path, value);
+    return validCollectionQualityResponse(path, value, detail);
   if (path === INSTRUMENT_CANDIDATES_PATH) return validInstrumentCandidateReview(value);
   if (path === ACCOUNT_CANDIDATES_PATH) return validAccountCandidateReview(value);
   if (path === INSTRUMENT_HISTORY_PATH) return validInstrumentHistoryRead(value);
