@@ -5,7 +5,7 @@
 // that is not exact kept as its status, each list's next offset, and a page
 // under its byte budget however long the names on it are.
 import { expect, test } from "bun:test";
-import { balanceListSummary } from "../src/query/read-detail.ts";
+import { BalanceListSummaryLimitError, balanceListSummary } from "../src/query/read-detail.ts";
 import { validApiResponse } from "../../observation-shared/src/api-validation.ts";
 import {
   BALANCE_LIST_SUMMARY_BYTES,
@@ -267,6 +267,7 @@ test("takes latest and history in turn, naming each account and metric once acro
       truncated: false,
       nextOffset: null,
       latestNextOffset: null,
+      next: null,
     },
   } satisfies BalanceListSummaryPage);
   // No text of the interpretation, no provider amount text, no release.
@@ -293,7 +294,18 @@ test("continues each list where its lines stop, and past the full window", () =>
     truncated: true,
     nextOffset: null,
     latestNextOffset: BALANCE_LIST_SUMMARY_LINES,
+    // History has ended: the next page passes it at its end, never at 0.
+    next: { offset: 4, latestOffset: BALANCE_LIST_SUMMARY_LINES },
   });
+  const second = balanceListSummary(list(latest.slice(BALANCE_LIST_SUMMARY_LINES), []), {
+    offset: 4,
+    latestOffset: BALANCE_LIST_SUMMARY_LINES,
+  });
+  expect(second.latest.map((line) => line.observationId)).toEqual(
+    latest.slice(BALANCE_LIST_SUMMARY_LINES).map((entry) => entry.id),
+  );
+  expect(second.history).toEqual([]);
+  expect(second.coverage).toMatchObject({ truncated: false, next: null });
   // A window the full answer cut at 500 continues past it, at the line count.
   const cut = balanceListSummary(
     list(latest.slice(0, 3), history.slice(0, 2), {
@@ -308,6 +320,7 @@ test("continues each list where its lines stop, and past the full window", () =>
     truncated: true,
     nextOffset: 502,
     latestNextOffset: 503,
+    next: { offset: 502, latestOffset: 503 },
   });
   // An empty list is an empty page, not a refusal.
   expect(balanceListSummary(list([], []), { offset: 0, latestOffset: 0 })).toEqual({
@@ -321,6 +334,7 @@ test("continues each list where its lines stop, and past the full window", () =>
       truncated: false,
       nextOffset: null,
       latestNextOffset: null,
+      next: null,
     },
   });
 });
@@ -373,25 +387,25 @@ test("stops before its byte budget on a page whose every line names a long accou
     truncated: true,
     nextOffset: 1_000 + summary.history.length,
     latestNextOffset: 1_000 + summary.latest.length,
+    next: {
+      offset: 1_000 + summary.history.length,
+      latestOffset: 1_000 + summary.latest.length,
+    },
   });
-  // Paged through, the window's every id is read exactly once, in order.
+  // Paged through by `next` alone, the window's every id is read exactly once, in order.
   const seen = { latest: [] as number[], history: [] as number[] };
-  let at = { offset: 0, latestOffset: 0 };
-  for (let pages = 0; pages < 1_000; pages++) {
+  let at: { offset: number; latestOffset: number } | null = { offset: 0, latestOffset: 0 };
+  for (let pages = 0; at !== null && pages < 1_000; pages++) {
     const page = balanceListSummary(
       list(full.latest.slice(at.latestOffset) as never, full.history.slice(at.offset) as never),
-      { offset: 0, latestOffset: 0 },
+      at,
     );
     expect(toolBytes(page)).toBeLessThan(CLIENT_BYTES);
     seen.latest.push(...page.latest.map((line) => line.observationId));
     seen.history.push(...page.history.map((line) => line.observationId));
-    if (!page.coverage.truncated) break;
-    at = {
-      offset: at.offset + (page.coverage.nextOffset ?? full.history.length - at.offset),
-      latestOffset:
-        at.latestOffset + (page.coverage.latestNextOffset ?? full.latest.length - at.latestOffset),
-    };
+    at = page.coverage.next;
   }
+  expect(at).toBeNull();
   expect(seen.latest).toEqual(full.latest.map((entry) => entry.id));
   expect(seen.history).toEqual(full.history.map((entry) => entry.id));
 });
@@ -446,6 +460,151 @@ test("the validator refuses a summary that drops a ref, folds its own id or misc
         summary.latest[1]!,
       ],
     },
+    // `next` is there exactly while a list has more, and agrees with each list's own offset.
+    (({ next: _next, ...coverage }) => ({ ...summary, coverage }))(summary.coverage),
+    { ...summary, coverage: { ...summary.coverage, next: { offset: 1, latestOffset: 2 } } },
+    {
+      ...summary,
+      coverage: {
+        ...summary.coverage,
+        truncated: true,
+        nextOffset: 1,
+        latestNextOffset: null,
+        next: null,
+      },
+    },
+    {
+      ...summary,
+      coverage: {
+        ...summary.coverage,
+        truncated: true,
+        nextOffset: 1,
+        latestNextOffset: 2,
+        next: { offset: 1, latestOffset: 3 },
+      },
+    },
+    {
+      ...summary,
+      coverage: {
+        ...summary.coverage,
+        truncated: true,
+        nextOffset: 1,
+        latestNextOffset: null,
+        next: { offset: 2, latestOffset: 2 },
+      },
+    },
   ];
   for (const value of broken) expect(validApiResponse(PATH, value, "summary")).toBe(false);
 });
+
+/** An account label `characters` long, all three-byte characters. */
+const longLabel = (id: number, characters: number): RowOptions => ({
+  account: `synthetic-account-${id}`,
+  label: "合".repeat(characters),
+});
+const named = (id: number, characters: number) => row(id, longLabel(id, characters));
+
+test("refuses a page whose first line alone passes its byte budget, never answering past it", () => {
+  const at = { offset: 0, latestOffset: 0 };
+  // One line whose own account label is over the budget: refused, not answered over 8 KB.
+  expect(() => balanceListSummary(list([named(1, 2_600)], []), at)).toThrow(
+    BalanceListSummaryLimitError,
+  );
+  expect(() => balanceListSummary(list([], [historyRow(1, OK, longLabel(1, 2_600))]), at)).toThrow(
+    BalanceListSummaryLimitError,
+  );
+  // The largest first line that fits is answered, at or under the budget.
+  let fits = 0;
+  for (let characters = 2_300; characters < 2_600; characters++) {
+    try {
+      const page = balanceListSummary(list([named(1, characters)], []), at);
+      expect(new TextEncoder().encode(JSON.stringify(page)).length).toBeLessThanOrEqual(
+        BALANCE_LIST_SUMMARY_BYTES,
+      );
+      expect(toolBytes(page)).toBeLessThan(CLIENT_BYTES);
+      fits = characters;
+    } catch (error) {
+      expect(error).toBeInstanceOf(BalanceListSummaryLimitError);
+      break;
+    }
+  }
+  expect(fits).toBeGreaterThan(2_300);
+  // A later line that does not fit ends the page before it; the next page,
+  // where it is first, is the one refused.
+  const latest = [row(1), named(2, 2_600)];
+  const first = balanceListSummary(list(latest, []), at);
+  expect(first.latest.map((line) => line.observationId)).toEqual([1]);
+  expect(first.coverage.next).toEqual({ offset: 0, latestOffset: 1 });
+  expect(() => balanceListSummary(list(latest.slice(1), []), first.coverage.next!)).toThrow(
+    BalanceListSummaryLimitError,
+  );
+});
+
+test("following `next` alone reads every row of both lists once, as `full` lists them (fuzzed)", () => {
+  let seed = 20_261_120;
+  const random = () => {
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return seed / 2_147_483_648;
+  };
+  const integer = (below: number) => Math.floor(random() * below);
+  for (let round = 0; round < 300; round++) {
+    // A store's two lists, sometimes past the route's 500-row window, with
+    // names from short to long, so pages are cut by the line cap, by the
+    // byte budget, or by the end of either list.
+    const length = () => (random() < 0.1 ? 480 + integer(80) : integer(40));
+    const options = (index: number): RowOptions => ({
+      account: `synthetic-account-${integer(6)}`,
+      label: random() < 0.2 ? null : "合".repeat(1 + integer(random() < 0.2 ? 400 : 20)),
+      metric: `synthetic_metric_${integer(4)}_${"m".repeat(integer(random() < 0.2 ? 300 : 10))}`,
+      value: random() < 0.1 ? null : String(1 + index),
+      conflict: random() < 0.1,
+    });
+    const store = {
+      latest: Array.from({ length: length() }, (_, index) =>
+        row(1_000_000 + index, options(index)),
+      ),
+      history: Array.from({ length: length() }, (_, index) =>
+        historyRow(
+          2_000_000 + index,
+          pick(random, [OK, OK, { superseded_by_parse_run_id: 7, parse_status: "error" }]),
+          options(index),
+        ),
+      ),
+    };
+    // The route's full answer at these offsets: 500 rows a list.
+    const route = (at: { offset: number; latestOffset: number }) =>
+      list(
+        store.latest.slice(at.latestOffset, at.latestOffset + 500),
+        store.history.slice(at.offset, at.offset + 500),
+        {
+          limit: 500,
+          truncated:
+            store.latest.length > at.latestOffset + 500 || store.history.length > at.offset + 500,
+          nextOffset: store.history.length > at.offset + 500 ? at.offset + 500 : null,
+          latestNextOffset:
+            store.latest.length > at.latestOffset + 500 ? at.latestOffset + 500 : null,
+        },
+      );
+    const seen = { latest: [] as number[], history: [] as number[] };
+    let at: { offset: number; latestOffset: number } | null = { offset: 0, latestOffset: 0 };
+    let pages = 0;
+    for (; at !== null; pages++) {
+      expect(pages).toBeLessThan(500);
+      const page = balanceListSummary(route(at), at);
+      expect(validApiResponse(PATH, page, "summary")).toBe(true);
+      expect(toolBytes(page)).toBeLessThan(CLIENT_BYTES);
+      // Every page that has a row left answers at least one line.
+      if (page.coverage.next !== null)
+        expect(page.latest.length + page.history.length).toBeGreaterThan(0);
+      seen.latest.push(...page.latest.map((line) => line.observationId));
+      seen.history.push(...page.history.map((line) => line.observationId));
+      at = page.coverage.next;
+    }
+    expect(seen.latest).toEqual(store.latest.map((entry) => entry.id));
+    expect(seen.history).toEqual(store.history.map((entry) => entry.id));
+  }
+});
+
+function pick<T>(random: () => number, choices: readonly T[]): T {
+  return choices[Math.floor(random() * choices.length)]!;
+}

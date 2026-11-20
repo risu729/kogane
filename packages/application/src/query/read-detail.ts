@@ -232,17 +232,32 @@ function interpretedMetric(item: LineInput): Omit<BalanceListSummaryMetric, "ref
 const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
 
 /**
+ * The first line of a `GET /api/balances` summary page, with its own account
+ * and metric entries, passes `BALANCE_LIST_SUMMARY_BYTES` alone: the read is
+ * refused (the route's `413 result_limit_exceeded`, naming `detail: "full"`),
+ * never answered past the budget and never with the line cut.
+ */
+export class BalanceListSummaryLimitError extends Error {
+  constructor() {
+    super("balance_list_summary_limit_exceeded");
+  }
+}
+
+/**
  * The summary of one `GET /api/balances` answer (the v1 grouped list), read
  * at `offset` (history) and `latestOffset` (latest). Its lines are the first
  * rows of each list, latest and history taken in turn, at most
  * `BALANCE_LIST_SUMMARY_LINES` of each, stopping before the line that would
- * take the page past `BALANCE_LIST_SUMMARY_BYTES` (the first line is always
- * kept, so a page always moves on). Accounts and metrics are named once per
- * page across both lists. Each list's next offset is where its next summary
- * page starts, null when neither this window nor the full answer has more.
- * A latest line keeps the ids its group folded in (`duplicates`) and its
- * conflict; a history line its parse reasons. The interpretation's label
- * and reason text and `interpretationContext` are in `full` only.
+ * take the page past `BALANCE_LIST_SUMMARY_BYTES`; a first line that passes
+ * it alone throws `BalanceListSummaryLimitError`, so a page that answers
+ * holds at least one line whenever its window has one and moves on.
+ * Accounts and metrics are named once per page across both lists. Each
+ * list's next offset is where its next summary page starts, null when
+ * neither this window nor the full answer has more; `next` is both offsets
+ * of the next page, an ended list's at its end, null when neither list has
+ * more. A latest line keeps the ids its group folded in (`duplicates`) and
+ * its conflict; a history line its parse reasons. The interpretation's
+ * label and reason text and `interpretationContext` are in `full` only.
  */
 export function balanceListSummary(
   page: BalanceListPage,
@@ -297,6 +312,7 @@ export function balanceListSummary(
       page.coverage.latestNextOffset,
       at.latestOffset,
     );
+    const truncated = nextOffset !== null || latestNextOffset !== null;
     return {
       detail: "summary",
       accounts: built.accounts,
@@ -305,16 +321,26 @@ export function balanceListSummary(
       history,
       coverage: {
         limit: BALANCE_LIST_SUMMARY_LINES,
-        truncated: nextOffset !== null || latestNextOffset !== null,
+        truncated,
         nextOffset,
         latestNextOffset,
+        // Both offsets of the next page: a list that has ended is passed at
+        // its end, where it answers no line, so following `next` alone never
+        // starts a list again or reads a line twice.
+        next: truncated
+          ? { offset: at.offset + history.length, latestOffset: at.latestOffset + latest.length }
+          : null,
       },
     };
   };
-  let summary = build(Math.min(1, order.length));
-  for (let count = 2; count <= order.length; count++) {
+  let summary = build(0);
+  for (let count = 1; count <= order.length; count++) {
     const wider = build(count);
-    if (jsonBytes(wider) > BALANCE_LIST_SUMMARY_BYTES) break;
+    if (jsonBytes(wider) > BALANCE_LIST_SUMMARY_BYTES) {
+      // Not even the first line fits: refused, never answered past the budget.
+      if (count === 1) throw new BalanceListSummaryLimitError();
+      break;
+    }
     summary = wider;
   }
   return summary;

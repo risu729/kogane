@@ -633,6 +633,7 @@ Measured as the bytes of the MCP result's structured content
   `BALANCE_LIST_SUMMARY_LINES` and `BALANCE_LIST_SUMMARY_BYTES` in
   `packages/observation-shared/src/api-contract.ts`,
   `services/app/src/observation-api.ts`, `services/app/src/page-read-tools.ts`,
+  `services/app/src/http.ts` (the `retryWith` hint),
   `packages/observation-shared/src/api-schema.ts`,
   `packages/observation-shared/src/api-validation.ts`, `apps/web/src/api.ts`
 
@@ -708,9 +709,15 @@ with a label and reason text) where the v2 pages have an adoption.
      history taken in turn (latest 1, history 1, latest 2, ...), at most
      `BALANCE_LIST_SUMMARY_LINES` (10) of each, stopping before the line
      that would take the page's JSON past `BALANCE_LIST_SUMMARY_BYTES`
-     (7,680 bytes, which leaves the tool result's envelope under 8 KB). The
-     first line is always kept, so a page always moves on. Lines are left
-     out from the end and read on the next page, never cut.
+     (7,680 bytes in UTF-8; the tool result's text is the page inside the
+     page read's envelope, `{"schemaVersion":"kogane-page-read-v1","data":
+     ...}`, 47 bytes more, so it stays under 8 KB). Lines are left out from
+     the end and read on the next page, never cut. When the first line alone
+     (with its own account and metric entries) passes the budget, the read
+     is refused, `413 result_limit_exceeded` with the closed hint
+     `retryWith: { detail: "full" }`, as the other reads refuse rather than
+     answer past 8 KB; so a page that answers holds at least one line
+     whenever its window has one, and moves on.
    - A line is `{ observationId, account, metric, amount: { value, unit,
      status, scale }, asOf, reasons }`: the amount from the row's stored
      decimal under its row's unit (`instrument`), a value that is not exact
@@ -732,7 +739,12 @@ with a label and reason text) where the v2 pages have an adoption.
      `nextOffset` and `latestNextOffset` are the `offset` and `latestOffset`
      at which each list's next summary page starts, null when neither this
      window nor the full answer has more; `truncated` says either is not
-     null.
+     null. It adds `next`, the one hint a caller follows:
+     `{ offset, latestOffset }` of the next page, null exactly when neither
+     list has more. A list that has ended is given at its end, where it
+     answers no line, so passing both offsets of `next` (with the same
+     filters) until it is null reads every line of both lists once and never
+     starts a list again, without knowing either list's length.
    - A row without its stored decimal or its interpretation, or a history
      row whose parse status is outside `parse_runs.status`'s closed set, is
      refused (the summary throws), never written as missing, zero or an
@@ -753,30 +765,32 @@ which `content`'s text serializes):
 
 | Read                                                                                                                      |    Full | Summary                                       |
 | ------------------------------------------------------------------------------------------------------------------------- | ------: | --------------------------------------------- |
-| `kogane.observations.list` `{kind: "balances"}`, the synthetic store above (120 balances on 12 accounts)                  | 538,779 | 7,381 (10 + 10 lines)                         |
-| the same with 60 accounts, each with a 64-character Japanese label, a long provider key and three long metrics of its own | 929,049 | 7,668 first page (7 + 6 lines); at most 7,705 |
-| pure, 500 rows a list, every line a new account and metric with the names above and every reason set (`read-detail` test) |       — | 6,795 (4 + 3 lines)                           |
+| `kogane.observations.list` `{kind: "balances"}`, the synthetic store above (120 balances on 12 accounts)                  | 538,779 | 7,420 (10 + 10 lines)                         |
+| the same with 60 accounts, each with a 64-character Japanese label, a long provider key and three long metrics of its own | 929,049 | 7,705 first page (7 + 6 lines); at most 7,726 |
+| pure, 500 rows a list, every line a new account and metric with the names above and every reason set (`read-detail` test) |       — | 6,838 (4 + 3 lines)                           |
+| a line whose account label alone is 2,700 Japanese characters (`observation-list-limit` test)                             |       — | `413`, never a page over 8 KB (8,837 before)  |
 
 - An agent's first balance list read fits what its client shows, and every
-  row of both lists is read once by following `nextOffset` and
-  `latestNextOffset`.
+  row of both lists is read once by following `coverage.next`.
 - A client of `GET /api/balances` that relied on the full default must ask
   for `detail=full`. The repository's clients are the web UI, which does,
   and the conformance checks, which read `detail=full` for the rows and check
   that the default is the summary exactly where `detail` is offered. Saved
   reports and the shared query do not read this route.
-- Open limits. A page holds at least one line, so a single line whose own
-  account and metric names together pass about 7 KB (names of thousands of
-  characters; the schema does not bound them, and nothing seen comes near)
-  would make that page pass 8 KB. A summary page reads its full window, as
+- Open limits. A line whose own account and metric names together pass
+  about 7 KB (names of thousands of characters; the schema does not bound
+  them, and nothing seen comes near) cannot be read in `summary`: the page
+  where it comes first is `413 result_limit_exceeded` with
+  `retryWith: { detail: "full" }`, and the caller reads that window in
+  `full` (whose answer is not held to 8 KB). A summary page reads its full window, as
   `full` does (up to 5,000 candidates grouped and 500 history rows), so
   paging a 500-row list takes at least 50 such reads (10 of its lines a
   page), and about 140 when every line names a new account and metric with
   the long names above; `kogane.balances.read` (one snapshot, keyset paged)
-  stays the cheaper read of balances. When one list ends (its next offset null) and the other
-  continues, the caller passes the ended list's end as its offset to read
-  nothing more of it; an `offset` left out starts that list again, as in
-  `full`. Offset pages are fresh reads, not one snapshot: a row recorded
+  stays the cheaper read of balances. A caller that follows one list's own
+  next offset and leaves the other offset out starts that other list again
+  at 0 on every page, as in `full`; `coverage.next` carries both. Offset
+  pages are fresh reads, not one snapshot: a row recorded
   between two pages can move lines across a page boundary, as in `full`.
 
 ### Verification
@@ -788,16 +802,25 @@ which `content`'s text serializes):
   entry per classification); none of the interpretation's text, the
   provider amount text or a release in it; each shape passes the validator
   under its own detail only; each list's next offset at the line count,
-  past a full window cut at 500, and null when nothing is left; an empty
-  list is an empty page; 500 rows a list with every line a new long account
-  and metric stays under the byte budget and under 8 KB with the envelope,
-  cut before the line cap, and paged through reads every id of both lists
-  once in order; a row without its decimal or its interpretation, or with a
-  parse status outside the closed set, is refused; a summary that drops or
-  repeats a ref, folds its own id or two ids, adds a conflict to a folded
-  line, carries another reason, miscounts `truncated`, changes `limit`,
-  holds eleven lines, names an unknown kind or writes a not-exact value as
-  `"0"` fails the validator.
+  past a full window cut at 500, and null when nothing is left, and `next`
+  with an ended list at its end; an empty list is an empty page; 500 rows
+  a list with every line a new long account and metric stays under the
+  byte budget and under 8 KB with the envelope, cut before the line cap,
+  and paged through by `next` alone reads every id of both lists once in
+  order; a first line over the budget alone (latest or history) is refused
+  with `BalanceListSummaryLimitError`, the largest that fits is answered
+  under it, and a later line that does not fit ends its page and is refused
+  on the next; 300 fuzzed stores (lists of 0 to 560 rows, past the 500-row
+  window, names short to long) walked by `next` alone through a model of
+  the route read every row of both lists once, in `full`'s order, every
+  page valid, under 8 KB and holding a line while one is left; a row
+  without its decimal or its interpretation, or with a parse status outside
+  the closed set, is refused; a summary that drops or repeats a ref, folds
+  its own id or two ids, adds a conflict to a folded line, carries another
+  reason, miscounts `truncated`, changes `limit`, holds eleven lines, names
+  an unknown kind, writes a not-exact value as `"0"`, or leaves out `next`,
+  gives it while nothing is left, withholds it while a list has more, or
+  disagrees with a list's own next offset fails the validator.
 - `packages/application/test/read-detail.test.ts` passes unchanged: the v2
   summaries' line builder answers as before.
 - `services/app/test/mcp-answer-size.test.ts`: the list's default is under
@@ -805,15 +828,22 @@ which `content`'s text serializes):
   (538,779 bytes, as before this amendment); the summary equals `balanceListSummary` of the full answer
   at the same offsets on the route, `/api/agent/v1/*` and `/mcp`, with and
   without offsets and a filter, and `detail: full` on the tool is the
-  route's full body; paging on `/mcp` reads every row of both lists once
-  with every page's text under 8 KB; every value that is not exact is its
+  route's full body; paging on `/mcp` by `coverage.next` alone reads every
+  row of both lists once with every page's text under 8 KB; every value
+  that is not exact is its
   status with no value; `compact` is `invalid_detail` on the route and
   `invalid_request` on the tool, and `detail` on the other lists
   `invalid_query` on both.
 - `services/app/test/observation-list-summary.test.ts`: the 60-account store
   above through `/mcp`: the first page is cut by its byte budget before the
-  line cap, every page's text is under 8 KB, and paging reads every row of
-  both lists once.
+  line cap, every page's text is under 8 KB, and paging by `coverage.next`
+  alone reads every row of both lists once.
+- `services/app/test/observation-list-limit.test.ts`: a line whose account
+  label alone passes the budget is `413 result_limit_exceeded` with
+  `retryWith: { detail: "full" }` on the route, `/api/agent/v1/*` and
+  `/mcp` alike, `full` answers its row, another account's summary is
+  unaffected, and paging the whole list answers every page under 8 KB until
+  the page where that line is first, which is refused.
 - `services/app/test/page-read-observations.test.ts`: the route and the tool
   give the same list under no detail, `summary` and `full`, and refuse
   `detail` on transactions and positions alike; `compact` is outside the

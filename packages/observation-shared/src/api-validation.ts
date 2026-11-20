@@ -1037,12 +1037,21 @@ const balanceListSummary: Check<BalanceListSummaryPage> = (
       truncated: boolean,
       nextOffset: nullableIdentifier,
       latestNextOffset: nullableIdentifier,
+      next: nullable(object({ offset: identifier, latestOffset: identifier })),
     }),
   })(value) &&
   value.latest.length <= value.coverage.limit &&
   value.history.length <= value.coverage.limit &&
   value.coverage.truncated ===
     (value.coverage.nextOffset !== null || value.coverage.latestNextOffset !== null) &&
+  // `next` is there exactly while a list has more, and carries each list's
+  // own next offset where it has one.
+  (value.coverage.next === null) === !value.coverage.truncated &&
+  (value.coverage.next === null ||
+    ((value.coverage.nextOffset === null ||
+      value.coverage.next.offset === value.coverage.nextOffset) &&
+      (value.coverage.latestNextOffset === null ||
+        value.coverage.next.latestOffset === value.coverage.latestNextOffset))) &&
   // Accounts and metrics are named once per page, across both lists.
   accountsNamed({
     accounts: value.accounts,

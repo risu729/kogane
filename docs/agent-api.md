@@ -966,8 +966,10 @@ balance summaries), is `{ detail: "summary", accounts, metrics, latest,
 history, coverage }`: the first rows of each list of the full answer, latest
 and history taken in turn, at most 10 of each
 (`BALANCE_LIST_SUMMARY_LINES`), stopping before the line that would take the
-page past 7,680 bytes of JSON (`BALANCE_LIST_SUMMARY_BYTES`; the first line
-is always kept). A line is `{ observationId, account, metric, amount: {
+page past 7,680 bytes of JSON in UTF-8 (`BALANCE_LIST_SUMMARY_BYTES`; the
+tool's text adds the 47-byte page read envelope). When the first line alone
+passes it, the read is `413 result_limit_exceeded` with
+`retryWith: { detail: "full" }`, never a page over 8 KB. A line is `{ observationId, account, metric, amount: {
 value, unit, status, scale }, asOf, reasons }`; a latest line adds
 `duplicates`, the ids of the other observations its group folded in, and
 its reason is `interpretation:conflict` when its witnesses disagreed; a
@@ -980,7 +982,10 @@ classification its row does not carry. Both lists share one set of refs.
 `coverage` has the full answer's keys for this page: `limit` is 10,
 `nextOffset` and `latestNextOffset` are the `offset` and `latestOffset` of
 each list's next summary page (null when nothing is left), and `truncated`
-says either list has more. Dropped: the interpretation's label and reason
+says either list has more. `coverage.next` is the one hint to follow:
+`{ offset, latestOffset }` of the next page, an ended list at its end (where
+it answers no line), null when neither list has more; passing both with the
+same filters until it is null reads every line once. Dropped: the interpretation's label and reason
 text and policy release, each row's provider amount text, parser,
 `observed_at`, instrument organization and product claim, and
 `interpretationContext`. `detail` on the other lists is the route's

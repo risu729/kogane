@@ -33,6 +33,7 @@ import {
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
 import { identityReadMode } from "./identity-read";
 import {
+  BalanceListSummaryLimitError,
   balanceListSummary,
   readDetail,
 } from "../../../packages/application/src/query/read-detail.ts";
@@ -341,7 +342,16 @@ export async function readObservationRoute(
         latestNextOffset: latest.length > 500 ? latestOffset + 500 : null,
       },
     };
-    return { body: detail === "full" ? full : balanceListSummary(full, { offset, latestOffset }) };
+    if (detail === "full") return { body: full };
+    try {
+      return { body: balanceListSummary(full, { offset, latestOffset }) };
+    } catch (error) {
+      // Its first line alone passes the byte budget: refused, never answered
+      // past it or with the line cut; `full` answers the same window.
+      if (error instanceof BalanceListSummaryLimitError)
+        throw new HttpError(413, "result_limit_exceeded", [], { retryWith: { detail: "full" } });
+      throw error;
+    }
   }
   if (path === "/api/positions") {
     const entries = await reader.listPositions({

@@ -78,9 +78,10 @@ describe("kogane.observations.list balances summary at its realistic worst", () 
       2 * BALANCE_LIST_SUMMARY_LINES,
     );
     const seen = { latest: [] as number[], history: [] as number[] };
-    let at = { offset: 0, latestOffset: 0 };
+    // Following `coverage.next` alone, as an agent does.
+    let at: { offset: number; latestOffset: number } | null = { offset: 0, latestOffset: 0 };
     let largest = 0;
-    for (let pages = 0; pages < 500; pages++) {
+    for (let pages = 0; at !== null && pages < 500; pages++) {
       const { bytes, data } = await call(at);
       largest = Math.max(largest, bytes);
       expect(bytes).toBeLessThan(CLIENT_BYTES);
@@ -89,12 +90,9 @@ describe("kogane.observations.list balances summary at its realistic worst", () 
       seen.history.push(
         ...data.history.map((line: { observationId: number }) => line.observationId),
       );
-      if (!data.coverage.truncated) break;
-      at = {
-        offset: data.coverage.nextOffset ?? full.history.length,
-        latestOffset: data.coverage.latestNextOffset ?? full.latest.length,
-      };
+      at = data.coverage.next;
     }
+    expect(at).toBeNull();
     console.log(JSON.stringify({ largestPageBytes: largest }));
     expect(seen.latest).toEqual(full.latest.map((row) => row.id));
     expect(seen.history).toEqual(full.history.map((row) => row.id));

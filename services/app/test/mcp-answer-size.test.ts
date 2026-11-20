@@ -367,8 +367,9 @@ describe("kogane.observations.list balances summary (ADR 0123, amendment 2026-11
     expect(full.latest).toHaveLength(REALISTIC_BALANCES);
     expect(full.history).toHaveLength(REALISTIC_BALANCES);
     const seen = { latest: [] as number[], history: [] as number[] };
-    let at = { offset: 0, latestOffset: 0 };
-    for (let pages = 0; pages < 100; pages++) {
+    // An agent follows `coverage.next` alone: it never needs the lists' lengths.
+    let at: { offset: number; latestOffset: number } | null = { offset: 0, latestOffset: 0 };
+    for (let pages = 0; at !== null && pages < 100; pages++) {
       const message = await page.mcpMessage({
         method: "tools/call",
         params: { name: "kogane.observations.list", arguments: { kind: "balances", ...at } },
@@ -381,12 +382,9 @@ describe("kogane.observations.list balances summary (ADR 0123, amendment 2026-11
       seen.history.push(
         ...data.history.map((line: { observationId: number }) => line.observationId),
       );
-      if (!data.coverage.truncated) break;
-      at = {
-        offset: data.coverage.nextOffset ?? full.history.length,
-        latestOffset: data.coverage.latestNextOffset ?? full.latest.length,
-      };
+      at = data.coverage.next;
     }
+    expect(at).toBeNull();
     expect(seen.latest).toEqual(full.latest.map((row) => row.id));
     expect(seen.history).toEqual(full.history.map((row) => row.id));
   });

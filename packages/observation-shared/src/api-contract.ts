@@ -595,9 +595,12 @@ export interface BalanceListPage {
 export const BALANCE_LIST_SUMMARY_LINES = 10;
 /**
  * The most bytes a summary page of `GET /api/balances` serializes to as JSON
- * (UTF-8), leaving room for the tool result's envelope under the 8 KB a
- * client shows. A page stops before the line that would pass it, and holds
- * at least one line whenever the window has one, so it always moves on.
+ * (UTF-8). The tool result's text is that page inside the page read's
+ * envelope (`{"schemaVersion":"kogane-page-read-v1","data":...}`, 47 bytes
+ * more), so it stays under the 8 KB a client shows. A page stops before the
+ * line that would pass it; a first line that passes it alone is refused
+ * (`413 result_limit_exceeded`), so a page that answers holds at least one
+ * line whenever its window has one, and always moves on.
  */
 export const BALANCE_LIST_SUMMARY_BYTES = 7_680;
 
@@ -642,10 +645,11 @@ export interface BalanceListLatestLine extends BalanceSummaryLine {
  * `{kind: "balances"}` (ADR 0123, amendment of 2026-11-20): the first lines
  * of each list of the full answer, latest and history taken in turn, up to
  * `BALANCE_LIST_SUMMARY_LINES` each and `BALANCE_LIST_SUMMARY_BYTES` in all.
- * `coverage` has the full answer's shape for this page: `limit` is the lines
+ * `coverage` has the full answer's keys for this page: `limit` is the lines
  * a list may hold, `nextOffset` and `latestNextOffset` are where the next
  * summary page of each list starts (null when nothing is left), and
- * `truncated` says either list has more.
+ * `truncated` says either list has more. It adds `next`, the one hint to
+ * follow.
  */
 export interface BalanceListSummaryPage {
   detail: "summary";
@@ -653,7 +657,16 @@ export interface BalanceListSummaryPage {
   metrics: BalanceListSummaryMetric[];
   latest: BalanceListLatestLine[];
   history: BalanceHistorySummaryItem[];
-  coverage: BalanceListPage["coverage"];
+  coverage: BalanceListPage["coverage"] & {
+    /**
+     * The `offset` and `latestOffset` of the next summary page, null exactly
+     * when neither list has more. A list that has ended is given at its end,
+     * where it answers no line, so a caller that passes both (with the same
+     * filters) until `next` is null reads every line of both lists once and
+     * never starts a list again; leaving an offset out starts that list at 0.
+     */
+    next: { offset: number; latestOffset: number } | null;
+  };
 }
 
 /**
