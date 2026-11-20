@@ -60,7 +60,8 @@ const CARD_NAMES_SQL = `WITH runs AS MATERIALIZED (
  CROSS JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
  CROSS JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
  CROSS JOIN eligible_identity_runs r ON r.id=ir.id
- WHERE p.status='ok' AND f.status='success' AND f.failure_count=0
+ -- A published parse is an ok one (the 0026 publication triggers).
+ WHERE f.status='success' AND f.failure_count=0
   AND r.policy_version=(SELECT max(newer.policy_version) FROM eligible_identity_runs newer
    JOIN identity_run_seals newer_seal ON newer_seal.identity_run_id=newer.id
    WHERE newer.parse_run_id=r.parse_run_id)
