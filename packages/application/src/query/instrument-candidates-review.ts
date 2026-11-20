@@ -240,7 +240,15 @@ export function parseInstrumentCandidatesRequest(
 
 const refs = (ids: readonly string[]): string[] => ids.map((id) => `identifier:${id}`);
 
-function viewItems(resolution: InstrumentResolution, view: InstrumentCandidateView): ReviewItem[] {
+/**
+ * The items of one view, in the review's order. The page pages them; the
+ * pending-decisions summary (pending-decisions.ts) counts the `open` and
+ * `held` views through this same function, so the two cannot disagree.
+ */
+export function instrumentCandidateView(
+  resolution: InstrumentResolution,
+  view: InstrumentCandidateView,
+): ReviewItem[] {
   const candidates = (keep: (candidate: ResolutionCandidate) => boolean): ReviewCandidate[] =>
     resolution.candidates.filter(keep).map((candidate) => ({
       ...candidate,
@@ -260,6 +268,31 @@ function viewItems(resolution: InstrumentResolution, view: InstrumentCandidateVi
       }));
     case "hints":
       return resolution.hints.map((hint) => ({ ...hint, evidenceRefs: refs(hint.identifierIds) }));
+  }
+}
+
+/**
+ * The whole candidate read, or the bound it is refused at (`budget:<bound>`).
+ * Shared by the review and the pending-decisions summary, so both refuse the
+ * same store the same way.
+ */
+export async function boundedInstrumentResolution(
+  sql: SqlExecutor,
+): Promise<{ ok: true; resolution: InstrumentResolution } | { ok: false; bound: string }> {
+  // A count of one row per published parse, not a walk (read-model
+  // `IDENTITY_OBSERVATION_COUNT_SQL`); an upper bound, so the refusal fails closed.
+  if ((await readIdentityObservationCount(sql)) > CURRENT_IDENTITY_OBSERVATION_BOUND)
+    return {
+      ok: false,
+      bound: `budget:identityObservations=${String(CURRENT_IDENTITY_OBSERVATION_BOUND)}`,
+    };
+  try {
+    return { ok: true, resolution: await queryInstrumentResolution(sql) };
+  } catch (error) {
+    // A store past the read's bounds is refused whole, never answered in part.
+    if (error instanceof InstrumentResolutionLimitError)
+      return { ok: false, bound: "budget:instrumentResolution" };
+    throw error;
   }
 }
 
@@ -295,21 +328,9 @@ export async function reviewInstrumentCandidates(input: {
   if (request.offset + INSTRUMENT_CANDIDATES_PAGE_SIZE > grant.budget.maxRows)
     return fail("budget_exceeded", [`budget:maxRows=${String(grant.budget.maxRows)}`]);
 
-  // A count of one row per published parse, not a walk (read-model
-  // `IDENTITY_OBSERVATION_COUNT_SQL`); an upper bound, so the refusal fails closed.
-  if ((await readIdentityObservationCount(sql)) > CURRENT_IDENTITY_OBSERVATION_BOUND)
-    return fail("budget_exceeded", [
-      `budget:identityObservations=${String(CURRENT_IDENTITY_OBSERVATION_BOUND)}`,
-    ]);
-  let resolution: InstrumentResolution;
-  try {
-    resolution = await queryInstrumentResolution(sql);
-  } catch (error) {
-    // A store past the read's bounds is refused whole, never answered in part.
-    if (error instanceof InstrumentResolutionLimitError)
-      return fail("budget_exceeded", ["budget:instrumentResolution"]);
-    throw error;
-  }
+  const read = await boundedInstrumentResolution(sql);
+  if (!read.ok) return fail("budget_exceeded", [read.bound]);
+  const { resolution } = read;
   const { identifierId } = request;
   if (
     identifierId !== null &&
@@ -317,7 +338,7 @@ export async function reviewInstrumentCandidates(input: {
   )
     return fail("evidence_restricted", ["identifierId"]);
 
-  const all = viewItems(resolution, request.view).filter(
+  const all = instrumentCandidateView(resolution, request.view).filter(
     (item) => identifierId === null || namedIdentifiers(item).includes(identifierId),
   );
   const items = all.slice(request.offset, request.offset + INSTRUMENT_CANDIDATES_PAGE_SIZE);

@@ -5,10 +5,11 @@
 //
 // The production alarm and its SQL are bundled unchanged; only the Durable
 // Object base is replaced, and every collector is a synthetic stub.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { loadBundleFixture } from "./bundle-module-fixture.ts";
 import { startPipeline } from "./harness";
+import { settledTest } from "./support/settle.ts";
 
 interface Storage {
   get<T>(key: string): Promise<T | undefined>;
@@ -27,8 +28,10 @@ interface Alarm {
 }
 let mf: Miniflare, env: Env, AlarmClass: new (state: State, env: Env) => Alarm;
 let bundleFixture: { dispose(): Promise<void> } | undefined;
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
   // No synthetic occurrence may wait for a seeded maintenance window: every
   // current rule gets a disabled revision.
   await env.DB.prepare(

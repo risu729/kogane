@@ -79,7 +79,8 @@ page passes when:
   settlement candidate is named by its billing month and creation time). A pager is
   `Pagination`: a named group whose status speaks its label before the count,
   and a page with two pagers gives each its own label. Retry buttons inside
-  alerts are distinct by name.
+  alerts are distinct by name: each shows 再試行 and is named for the read it
+  repeats (`取引を再試行`).
 - Loading and error states carry `role="status"` or `role="alert"`.
 - Every visible table has a caption (visually hidden when the panel title
   already says it) and every header cell a `scope`; every `.table-scroll` is

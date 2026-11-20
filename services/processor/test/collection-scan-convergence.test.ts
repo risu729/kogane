@@ -867,33 +867,164 @@ test("pending runs without a terminal beyond the continuations read leave the re
   expect(sealed(harness)).toBe(1);
 });
 
-test("a pending run whose terminal now holds other bytes still spends a continuation", async () => {
-  // The open limit of ADR 0024's amendment of 2026-11-08: the new digest's
-  // row is blocked `terminal_digest_conflict` and the pending row stays
-  // pending, so it is continued, and spends a continuation, on every tick.
-  const harness = collectionHarness();
-  await persistPending(harness, "run-001");
-  harness.bucket.entries.delete(terminalKey(SOURCE, "run-001"));
+/** A run left `pending` whose terminal key then holds another manifest. */
+async function pendingWithOtherBytes(harness: CollectionHarness, id: string): Promise<void> {
+  await persistPending(harness, id);
+  harness.bucket.entries.delete(terminalKey(SOURCE, id));
   await persistSyntheticRun(harness, {
-    run: { runId: "run-001" },
-    artifacts: [await artifact("other.json", '{"synthetic":"other"}')],
+    run: { runId: id },
+    artifacts: [await artifact("other.json", `{"synthetic":"other-${id}"}`)],
   });
+}
+
+const digestConflicts = (h: CollectionHarness) =>
+  countOf(
+    h,
+    `SELECT count(*) AS n FROM collection_runs WHERE blocked_code = 'terminal_digest_conflict'`,
+  );
+
+test("pending runs whose terminal now holds other bytes spend a continuation on their first tick only", async () => {
+  // ADR 0024, amendment of 2026-11-19 (an open limit of the amendment of
+  // 2026-11-08): the new digest's row is blocked `terminal_digest_conflict`
+  // and the pending row stays pending, the oldest, so it is continued on
+  // every tick. Its first verdict is new work and spends one of the five;
+  // every later tick answers it from that row, which spends none, so the
+  // pending run after it is continued in its place.
+  const harness = collectionHarness();
+  for (let n = 1; n <= 5; n += 1) await pendingWithOtherBytes(harness, runId(n));
+  await persistPending(harness, "run-006");
+  walkPast(harness, "run-006");
+
+  const first = await tick(harness, START_MS + HOUR_MS);
+  expect(first).toMatchObject({ continued: 5, continuedMissing: 0, blocked: 5, registered: 0 });
+  expect(sealed(harness)).toBe(0);
+  expect(digestConflicts(harness)).toBe(5);
+
+  // Before the amendment this tick was the first one again (`continued: 5`,
+  // nothing registered), and so was every later one.
+  walkPast(harness, "run-006");
+  const second = await tick(harness, START_MS + HOUR_MS + 5 * 60 * 1000);
+  expect(second).toMatchObject({
+    continued: 6,
+    continuedMissing: 0,
+    alreadyJudged: 5,
+    registered: 1,
+    pending: 0,
+  });
+  expect(sealed(harness)).toBe(1);
+
+  // Each later answer costs the terminal read, the conditional insert and
+  // the row read, and writes nothing; the five stay pending.
+  walkPast(harness, "run-006");
+  const stagesBefore = stageRows(harness);
+  const budget = new RegistrationBudget();
+  const third = await tick(harness, START_MS + HOUR_MS + 10 * 60 * 1000, { budget });
+  expect(third).toMatchObject({ continued: 5, alreadyJudged: 5, registered: 0 });
+  expect({ ...budget.meter }).toEqual({ d1Statements: 10, d1Batches: 0, r2Operations: 5 });
+  expect(stageRows(harness)).toBe(stagesBefore);
+  expect(digestConflicts(harness)).toBe(5);
+});
+
+test("a continuation answered from its row spends none of a single continuation", async () => {
+  // The same rule at the smallest bound: with one continuation, the run
+  // after a digest conflict is continued once the conflict is recorded.
+  const harness = collectionHarness();
+  await pendingWithOtherBytes(harness, "run-001");
   await persistPending(harness, "run-002");
   walkPast(harness, "run-002");
   const options: ScanOptions = { maxContinuations: 1 };
   const first = await tick(harness, START_MS + HOUR_MS, options);
-  expect(first).toMatchObject({ continued: 1, continuedMissing: 0, blocked: 1, registered: 0 });
+  expect(first).toMatchObject({ continued: 1, blocked: 1, registered: 0 });
   walkPast(harness, "run-002");
   const second = await tick(harness, START_MS + HOUR_MS + 5 * 60 * 1000, options);
-  expect(second).toMatchObject({ continued: 1, alreadyJudged: 1, registered: 0 });
+  expect(second).toMatchObject({ continued: 2, alreadyJudged: 1, registered: 1 });
+  expect(sealed(harness)).toBe(1);
+  expect(digestConflicts(harness)).toBe(1);
+});
+
+test("a continuation answered already_registered spends none of a single continuation", async () => {
+  // The other answer from a row: the queue registers a pending run between
+  // the scan's pending read and its continuation. Simulated by registering
+  // run-001 in full when the continuation first reads its terminal.
+  const harness = collectionHarness();
+  await persistPending(harness, "run-001");
+  await persistPending(harness, "run-002");
+  walkPast(harness, "run-002");
+  const at = START_MS + HOUR_MS;
+  const raceKey = terminalKey(SOURCE, "run-001");
+  let raced = false;
+  const evidence = new Proxy(harness.bucket, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property, target);
+      if (typeof value !== "function") return value;
+      if (property !== "get") return value.bind(target);
+      return async (key: string) => {
+        if (!raced && key === raceKey) {
+          raced = true;
+          const queued = await registerCollectionRun(
+            harness.env,
+            { source: SOURCE, runId: "run-001" },
+            { now: () => new Date(at) },
+          );
+          expect(queued).toMatchObject({ outcome: "registered" });
+        }
+        return target.get(key);
+      };
+    },
+  });
+  const summary = await collectionScan(
+    { ...harness.env, EVIDENCE: evidence as unknown as CollectionHarness["env"]["EVIDENCE"] },
+    { budget: new RegistrationBudget(), now: () => new Date(at), maxContinuations: 1 },
+  );
+  expect(raced).toBe(true);
+  // Before the amendment of 2026-11-19: `continued: 1, registered: 0`.
+  expect(summary).toMatchObject({
+    continued: 2,
+    alreadyRegistered: 1,
+    alreadyJudged: 0,
+    registered: 1,
+    pending: 0,
+  });
+  expect(sealed(harness)).toBe(2);
+});
+
+test("25 pending runs answered from their rows cost three operations each, and a 26th is not read", async () => {
+  // The worst case of the amendment of 2026-11-19 at the deployed bounds:
+  // every one of the 25 pending runs read is answered from its row, so the
+  // continuations cost 25 terminal reads and 50 statements, 75 of the
+  // invocation's 500, and write nothing. A 26th pending run is not read.
+  const harness = collectionHarness();
+  for (let n = 1; n <= 25; n += 1) await pendingWithOtherBytes(harness, runId(n));
+  await persistPending(harness, "run-026");
+  // Five first verdicts per tick, each spending one of the five continuations;
+  // the conflicts recorded on earlier ticks are answered and spend none.
+  // (`blocked` counts both; `alreadyJudged` the answers alone.)
+  for (let i = 0; i < 5; i += 1) {
+    walkPast(harness, "run-026");
+    const summary = await tick(harness, START_MS + HOUR_MS + i * 5 * 60 * 1000);
+    expect(summary).toMatchObject({
+      continued: 5 * (i + 1),
+      blocked: 5 * (i + 1),
+      alreadyJudged: 5 * i,
+    });
+    expect(digestConflicts(harness)).toBe(5 * (i + 1));
+  }
+  expect(digestConflicts(harness)).toBe(25);
+
+  walkPast(harness, "run-026");
+  const stagesBefore = stageRows(harness);
+  const budget = new RegistrationBudget();
+  const worst = await tick(harness, START_MS + 2 * HOUR_MS, { budget });
+  expect(worst).toMatchObject({
+    continued: 25,
+    alreadyJudged: 25,
+    blocked: 25,
+    registered: 0,
+    budgetExhausted: false,
+  });
+  expect({ ...budget.meter }).toEqual({ d1Statements: 50, d1Batches: 0, r2Operations: 25 });
+  expect(stageRows(harness)).toBe(stagesBefore);
   expect(sealed(harness)).toBe(0);
-  expect(
-    countOf(
-      harness,
-      `SELECT count(*) AS n FROM collection_runs
-        WHERE run_id = 'run-001' AND blocked_code = 'terminal_digest_conflict'`,
-    ),
-  ).toBe(1);
 });
 
 test("a pending run whose continuation throws still spends a continuation", async () => {

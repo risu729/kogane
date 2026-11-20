@@ -155,10 +155,36 @@ test deadlines are unchanged.
 
 When a case times out, Bun's test runner sends SIGTERM to every child process
 a hook or a case of the file spawned (it prints `killed 1 dangling process`)
-and leaves the ones spawned while the module loaded. A Chromium launched in
-`beforeAll` is such a process: one timeout killed it, and every later case of
-the file failed to open a page (`Target page, context or browser has been
-closed`). The browser tests of `apps/web` and
+and leaves the ones spawned while the module loaded;
+`services/processor/test/bun-timeout-kill.test.ts` pins both on a fixture. A
+Miniflare started in `beforeAll` is such a process, so one timeout kills its
+workerd: the timed-out case's request fails with `ECONNRESET` and every later
+case of the file with `ECONNREFUSED`. The timed-out case's body also keeps
+running against the shared store while later cases read it.
+Every processor test file that shares one Miniflare across its cases, but
+the one named below, therefore starts it while the module loads (a top-level
+`await`; `startPipeline` also bundles the Worker and applies the schema
+there), keeps its seeding and any schema setup of its own in `beforeAll`,
+disposes it in `afterAll`, and declares its cases with `settledTest()` from
+`services/processor/test/support/settle.ts`. That `test`
+keeps each case's body, and its `afterEach` waits for the body to settle before
+the next case begins, so a timeout fails that case alone; Bun still reports a
+late rejection as an error between tests. The wait is bounded by `afterEach`'s
+default 5 s deadline: a body that has not settled by then fails its case at
+the hook and goes on running while the next case reads the store.
+`settledTest()` refuses `test.concurrent`, since it keeps one body at a time;
+`services/processor/test/settled-test.test.ts` pins its behaviour on a fixture.
+Bun loads, runs and finishes one test file before it loads the next, so a
+runtime started at load is disposed before the next file starts its own. Files that
+start a runtime per case, in `beforeEach` or in the case itself
+(`unit-scope.test.ts`, `sbi-supplemental-snapshot-compatibility.test.ts`, the
+card purchase worlds), lose only that case's runtime at a timeout.
+`miniflare-d1-lifetime.test.ts` still starts its two runtimes in `beforeAll`;
+only its last case reads them.
+
+A Chromium launched in `beforeAll` is such a process too: one timeout killed
+it, and every later case of the file failed to open a page (`Target page,
+context or browser has been closed`). The browser tests of `apps/web` and
 `experiments/observation-pipeline-local`, and
 `experiments/st-george-automation/test/probe.test.ts`, therefore launch their
 one Chromium while the module loads (a top-level `await`). Where `describe.if`

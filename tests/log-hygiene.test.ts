@@ -159,6 +159,12 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     count: 1,
     reason: "classifyError keeps a message only when it is already a code-shaped token",
   },
+  "services/collector-sony-bank/src/shared-collection.ts": {
+    count: 2,
+    reason:
+      "persistRefusalCode returns the message only when it is one of the closed plan refusal " +
+      "codes; any other text becomes persistence_failed",
+  },
   "services/collector-st-george/container/browser.mjs": {
     count: 2,
     reason: "a CollectionError's message is one of its closed FAILURE_CODES",
@@ -188,6 +194,12 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
   "services/processor/src/metadata-extractors/index.ts": {
     count: 1,
     reason: "a MetadataError's message is its closed code",
+  },
+  "services/processor/src/reward-claims-job.ts": {
+    count: 1,
+    reason:
+      "a refused claim batch's D1 error is tested for a constraint failure only; the lane " +
+      "records the RewardClaimWriteRefused class as its code and the text is dropped",
   },
   "services/processor/src/worker.ts": {
     count: 8,
