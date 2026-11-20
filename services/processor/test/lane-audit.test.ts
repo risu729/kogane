@@ -8,18 +8,19 @@
 // writer could add while the lane runs — an operator's decision, an agent's
 // proposal — which the record must not name. The purchase recognition lane's
 // own rows are covered end to end in `card-purchase-lane-audit.test.ts`.
-import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import { afterAll, beforeEach, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { LANE_AUDIT, RECONCILIATION_RULE_ACTOR, resolveLaneRef } from "../src/lane-audit.ts";
 import { LANE_TICK_COUNTS } from "../src/lane-ticks.ts";
 import { runScheduled, type ScheduledStages } from "../src/worker.ts";
 import { startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });

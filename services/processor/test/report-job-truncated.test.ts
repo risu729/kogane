@@ -2,21 +2,19 @@
 // when every position it does hold is valued: the positions it never read are
 // missing from its subtotal (INV05). Every row is synthetic: made-up accounts,
 // security codes, quantities and prices.
-import { afterAll, beforeAll, expect, test } from "bun:test";
-import type { Miniflare } from "miniflare";
+import { afterAll, expect } from "bun:test";
 import { validReportBody, type ReportBody } from "../../../packages/domain/src/reports.ts";
 import { runReportJob, type ReportJobEnv } from "../src/report-job.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
-let mf: Miniflare;
-let env: Env;
-let jobEnv: ReportJobEnv;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  jobEnv = { DB: env.DB, EVIDENCE: env.EVIDENCE, REPORTS_ENABLED: "true" };
-}, 30000);
+// The runtime starts while the module loads, so a case that times out fails
+// alone (docs/ci.md, Miniflare under Bun; test/support/settle.ts).
+const { mf, env } = await startPipeline();
+const jobEnv: ReportJobEnv = { DB: env.DB, EVIDENCE: env.EVIDENCE, REPORTS_ENABLED: "true" };
+const test = settledTest();
 afterAll(async () => {
-  await mf?.dispose();
+  await mf.dispose();
 });
 
 const options = {

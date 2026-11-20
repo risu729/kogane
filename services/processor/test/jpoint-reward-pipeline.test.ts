@@ -1,5 +1,5 @@
 // Synthetic SOURCE -> total-only claims -> bounded same-input provider READ sections.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { startPipeline, seedArtifact, seedUnitRun, publishParse } from "./harness.ts";
 import { promoteRewardClaims } from "../src/reward-claims-job.ts";
@@ -8,9 +8,12 @@ import { rewardProviderSections } from "../../../packages/storage-d1/src/read/re
 import { createRewardReader } from "../../../packages/read-model/src/rewards.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import type { RewardProviderExpiryDisplayMetadata } from "../../../packages/domain/src/reward-expiry-observations.ts";
+import { settledTest } from "./support/settle.ts";
 let mf: Miniflare;
 let env: Env;
-beforeAll(async () => ({ mf, env } = await startPipeline()), 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => await mf?.dispose());
 let id = 9600;
 const observed: RewardProviderExpiryDisplayMetadata = {
