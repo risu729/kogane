@@ -24,14 +24,25 @@
 // A summary carries identifiers, closed codes, counts and timestamps only. The
 // stored request (`request_json`) is never read here: a rebuild's `reason` is
 // free text, and the list is not where a payload is shown.
+//
+// A row's `status` is the one `readOperation` answers for it: a stored
+// `running` request whose `projected` stage READ covers reads `completed`
+// (ADR 0048, amended 2026-11-07). That is derived after the page is read, for
+// the page's rows only (`recordStatuses`: one read of their stages by primary
+// key and at most one reading of READ). The arms above select by the stored
+// status, which the index holds and READ cannot change, so the `status`
+// filter matches `storedStatus`, every row carries it, and the page says so
+// in `statusFilterMatches` (ADR 0086, amendment of 2026-11-18, projection).
 import type { CommandStore, Principal } from "../command/contract.ts";
 import { commandError, type CommandResult } from "../command/errors.ts";
+import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import {
   type DispatchState,
   OPERATION_KINDS,
   OPERATION_STATUSES,
   type OperationKind,
   type OperationStatus,
+  recordStatuses,
 } from "./requests.ts";
 
 /** Rows on a page when the caller names no limit. */
@@ -50,13 +61,16 @@ export interface OperationListQuery {
 
 /**
  * One request as the list shows it: what `readOperation` shows, without stages
- * or execution, and with the stored `status` (the `projected` stage is not
- * derived here, so READ is never read).
+ * or execution. `status` is the record's (READ consulted as the single read
+ * does); `storedStatus` is the stored one, which the `status` filter matches.
  */
 export interface OperationSummary {
   operationId: string;
   kind: OperationKind;
+  /** The status `readOperation` answers for this request. */
   status: OperationStatus;
+  /** `ops_requests.status`: what the `status` filter matches. */
+  storedStatus: OperationStatus;
   source: string | null;
   dispatch: { state: DispatchState; attempts: number };
   failureCode: string | null;
@@ -64,8 +78,13 @@ export interface OperationSummary {
   updatedAt: string;
 }
 
+/** The summary field the `status` filter matches: always the stored status. */
+export const STATUS_FILTER_MATCHES = "storedStatus";
+
 export interface OperationListPage {
-  schemaVersion: "kogane-operation-list-v1";
+  schemaVersion: "kogane-operation-list-v2";
+  /** The summary field the `status` filter matched, stated on every page. */
+  statusFilterMatches: typeof STATUS_FILTER_MATCHES;
   operations: OperationSummary[];
   /** The cursor of the next page, or null when this page is the last. */
   nextCursor: string | null;
@@ -133,11 +152,12 @@ function compound(parts: readonly string[]): string {
   return compound(nested);
 }
 
-function summaryOf(row: ListRow): OperationSummary {
+function summaryOf(row: ListRow, status: OperationStatus): OperationSummary {
   return {
     operationId: row.operation_id,
     kind: row.kind as OperationKind,
-    status: row.status as OperationStatus,
+    status,
+    storedStatus: row.status as OperationStatus,
     source: row.source_id,
     dispatch: { state: row.dispatch_state as DispatchState, attempts: row.dispatch_attempts },
     failureCode: row.failure_code,
@@ -156,6 +176,12 @@ export async function listOperations(input: {
   /** The verified caller. It is not a filter: every caller is shown the same pages. */
   principal: Principal;
   query: OperationListQuery;
+  /**
+   * The READ database, read only, as `readOperation` is given it; null or
+   * absent when this deployment binds none, and then no row reads `completed`
+   * through `projected`, as no record does.
+   */
+  readStore?: SqlExecutor | null;
 }): Promise<CommandResult<{ page: OperationListPage }>> {
   const { store, query } = input;
   const binds: unknown[] = [query.limit + 1];
@@ -170,11 +196,23 @@ export async function listOperations(input: {
     operationListSql(arms.length, query.cursor !== null),
     binds,
   );
-  const page = rows.slice(0, query.limit).map(summaryOf);
+  const shown = rows.slice(0, query.limit);
+  // The record's status for the page's rows: a fixed number of reads per page.
+  const statuses = await recordStatuses(
+    store,
+    input.readStore,
+    shown.map((row) => ({
+      operationId: row.operation_id,
+      kind: row.kind as OperationKind,
+      status: row.status as OperationStatus,
+    })),
+  );
+  const page = shown.map((row) => summaryOf(row, statuses.get(row.operation_id)!));
   return {
     ok: true,
     page: {
-      schemaVersion: "kogane-operation-list-v1",
+      schemaVersion: "kogane-operation-list-v2",
+      statusFilterMatches: STATUS_FILTER_MATCHES,
       operations: page,
       nextCursor: rows.length > query.limit ? page[page.length - 1]!.operationId : null,
     },

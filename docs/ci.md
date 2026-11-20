@@ -182,12 +182,30 @@ card purchase worlds), lose only that case's runtime at a timeout.
 `miniflare-d1-lifetime.test.ts` still starts its two runtimes in `beforeAll`;
 only its last case reads them.
 
-The browser tests of `apps/web` and `experiments/observation-pipeline-local`,
-and `experiments/st-george-automation/test/probe.test.ts`, launch Chromium
-through Playwright in `beforeAll` (`activity-semantics.browser.test.ts` and
-`synthetic-display.browser.test.ts` launch it in their case). A timeout kills
-that browser the same way, and every later case of the file then fails to open
-a page; these files still start it in the hook.
+A Chromium launched in `beforeAll` is such a process too: one timeout killed
+it, and every later case of the file failed to open a page (`Target page,
+context or browser has been closed`). The browser tests of `apps/web` and
+`experiments/observation-pipeline-local`, and
+`experiments/st-george-automation/test/probe.test.ts`, therefore launch their
+one Chromium while the module loads (a top-level `await`). Where `describe.if`
+guards the suite, the launch runs only when the suite will: a suite skipped for
+a missing build or Chromium launches nothing. The probe has no such guard and
+always launches; it keeps a failed launch and rethrows it in its browser
+suite's `beforeAll`, so a missing Chromium fails that suite alone, as it did
+before, and the probe's route cases still run. Their local server and seeding
+stay in `beforeAll`, the browser is closed in `afterAll`, and their cases are
+declared with `settledTest()` from `apps/web/test/settle.ts`. That `test`
+keeps each case's body, and its `afterEach` waits for the body to settle before
+the next case begins, so a timeout fails that case alone; Bun still reports a
+late rejection as an error between tests. The wait is bounded by `afterEach`'s
+default 5 s deadline: a body that has not settled by then fails its case at the
+hook and goes on driving the browser while the next case runs.
+`activity-semantics.browser.test.ts` and `synthetic-display.browser.test.ts`
+launch Chromium inside their only case, which a timeout fails alone.
+`bun test` loads and runs one file at a time, and each file closes its browser
+before the next one loads, so a workspace's test run holds at most one
+Chromium; with the three browser workspaces' `ci` tasks run in parallel, as
+CI's `MISE_JOBS` allows, at most three are alive at once.
 
 hk's `repository` check
 invokes this graph, never `check` or `verify`, avoiding recursion. Selected root aliases for old operational `<short>:<verb>` names keep the

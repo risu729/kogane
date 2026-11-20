@@ -6,11 +6,12 @@
 //  * a refused receipt re-check says what the server refused,
 //  * one receipt re-check runs at a time, so an older answer can never
 //    replace a newer one on screen.
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -55,8 +56,13 @@ function receipt(published: boolean) {
   };
 }
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("change confirmation refusals", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   /** How the next `operation` re-check answers. */
@@ -128,7 +134,6 @@ describe.if(runnable)("change confirmation refusals", () => {
       },
     });
     origin = `http://127.0.0.1:${String(server.port)}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();
