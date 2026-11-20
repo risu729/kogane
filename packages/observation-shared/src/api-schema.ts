@@ -279,7 +279,8 @@ export type CapabilityRequirement =
   | "measureViews"
   | "identityReadModes"
   | "balancesV2"
-  | "rewardsV2";
+  | "rewardsV2"
+  | "sharedQuery";
 
 /**
  * The reward routes as this Worker advertises them. `readModel` says whether a
@@ -318,9 +319,16 @@ export function withBalancesV2(
 
 /**
  * Every query parameter a list endpoint understands, keyed by path. Paths
- * absent here (metadata, overview, details, raw bytes) accept no parameters.
+ * absent here (metadata, details, raw bytes) accept no parameters.
  */
 export const LIST_REQUEST_SCHEMA = {
+  // `summary` (the default) or `full` (ADR 0123, amendment 2026-11-19). The
+  // summary is shaped by the shared application service, so a store that
+  // does not advertise `sharedQuery` (the local store) answers the full
+  // overview only and refuses the parameter.
+  "/api/overview": {
+    detail: "sharedQuery",
+  },
   "/api/transactions": {
     source: "collectionFilters",
     account: "collectionFilters",
@@ -363,6 +371,8 @@ export const LIST_REQUEST_SCHEMA = {
     identityRead: "identityReadModes",
     cursor: "balancesV2",
     limit: "balancesV2",
+    // `summary` (the default) or `full` (ADR 0123).
+    detail: "balancesV2",
   },
   "/api/v2/balances/history": {
     source: "collectionFilters",
@@ -373,6 +383,8 @@ export const LIST_REQUEST_SCHEMA = {
     identityRead: "identityReadModes",
     cursor: "balancesV2",
     limit: "balancesV2",
+    // `summary` (the default) or `full` (ADR 0123).
+    detail: "balancesV2",
   },
 } as const satisfies Record<string, Record<string, CapabilityRequirement>>;
 export type ListPath = keyof typeof LIST_REQUEST_SCHEMA;
@@ -408,6 +420,8 @@ export function capabilityGrants(
       return capabilities.balancesV2;
     case "rewardsV2":
       return capabilities.rewardsV2;
+    case "sharedQuery":
+      return capabilities.sharedQuery;
   }
 }
 
@@ -432,7 +446,10 @@ export const REWARD_REQUEST_SCHEMA = {
   "/api/v2/rewards/holdings": ["program", "offset"],
   // `cursor` and `limit` page a published reward snapshot (U16); `offset`
   // stays for the request-time answer a deployment without one still gives.
-  "/api/v2/rewards/expiry": ["program", "offset", "cursor", "limit"],
+  // `from` (inclusive, default today in Asia/Tokyo) and `before` (exclusive)
+  // window the deadlines; `detail` is `full` (default) or `summary` (ADR 0049,
+  // amendment of 2026-11-19).
+  "/api/v2/rewards/expiry": ["program", "offset", "cursor", "limit", "from", "before", "detail"],
   // The saved simulations of a published snapshot, with their reproducibility
   // (U16, G2-20). Served only where `rewardsV2ReadModel` is `read-d1`; without
   // a snapshot it is `503`, never an empty success.

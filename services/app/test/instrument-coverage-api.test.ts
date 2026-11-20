@@ -278,7 +278,7 @@ describe("kogane.instruments.coverage", () => {
                 ? ["kogane.card-settlements.unmatched", "kogane.card-settlements.debit-accounts"]
                 : []),
               ...(capabilities.includes("records.read") && whole
-                ? ["kogane.economic-readiness.read"]
+                ? ["kogane.changes.since", "kogane.economic-readiness.read"]
                 : []),
               ...(cardSettlements && capabilities.includes("records.read") && whole
                 ? [

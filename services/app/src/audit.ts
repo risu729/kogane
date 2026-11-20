@@ -307,6 +307,9 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     const data = (value["data"] ?? {}) as Record<string, unknown>;
     if (typeof data["cells"] === "number" && Array.isArray(data["accounts"]))
       return { rows: data["cells"], truncated: false };
+    // The status view (ADR 0045, amendment 2026-11-19) counts its job lines; it is never cut.
+    if (data["view"] === "status" && Array.isArray(data["sources"]))
+      return { rows: data["sources"].length, truncated: false };
   }
   if (
     operation === "identity.read" ||
@@ -348,10 +351,38 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       rows: Array.isArray(value["items"]) ? value["items"].length : 0,
       truncated: rowsFollow(value),
     };
+  // Sources the answer covers (listed or unchanged); truncated when it
+  // continues past the byte bound, a count is a lower bound, or the events
+  // walk ended on a new revision.
+  if (operation === "changes.since") {
+    const sources = Array.isArray(value["sources"]) ? value["sources"] : [];
+    const unchanged = Array.isArray(value["unchanged"]) ? value["unchanged"] : [];
+    const events = (value["events"] ?? {}) as Record<string, unknown>;
+    return {
+      rows: sources.length + unchanged.length,
+      truncated:
+        value["next"] !== null ||
+        sources.some(
+          (line) =>
+            typeof line === "object" &&
+            line !== null &&
+            Array.isArray((line as Record<string, unknown>)["cut"]) &&
+            ((line as Record<string, unknown>)["cut"] as unknown[]).length > 0,
+        ) ||
+        (events["state"] === "counted" && events["complete"] === false),
+    };
+  }
   // Cards listed; truncated when more cards exist than the answer lists.
+  // The upcoming view counts its bills and the cards it does not list.
   if (operation === "card-settlements.debit-accounts")
     return {
-      rows: Array.isArray(value["items"]) ? value["items"].length : 0,
+      rows:
+        value["view"] === "upcoming"
+          ? (Array.isArray(value["bills"]) ? value["bills"].length : 0) +
+            (Array.isArray(value["notListed"]) ? value["notListed"].length : 0)
+          : Array.isArray(value["items"])
+            ? value["items"].length
+            : 0,
       truncated: value["cardsTruncated"] === true,
     };
   if (operation === "instruments.candidates" || operation === "accounts.candidates") {

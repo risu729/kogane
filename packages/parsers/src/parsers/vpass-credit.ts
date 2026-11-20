@@ -25,6 +25,26 @@ const ALL_TITLES = [
 ] as readonly string[];
 const INTEGER = /^[+-]?\d{1,16}$/u;
 
+/**
+ * The card's product name as the provider shows it (ADR 0120), kept for the
+ * read-time account label. A name that carries a run of four or more digits
+ * could be part of a card number, and a name with control characters or over
+ * 64 characters is not a plain product name: it is left out, never thrown, so
+ * the snapshot is not lost over a label.
+ */
+export function vpassCardName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const name = value.trim();
+  if (
+    name.length === 0 ||
+    name.length > 64 ||
+    /[\u0000-\u001f\u007f]/u.test(name) ||
+    /[0-9０-９]{4}/u.test(name)
+  )
+    return undefined;
+  return name;
+}
+
 function integer(value: unknown): bigint {
   if (typeof value !== "string" || !INTEGER.test(value))
     throw new Error("vpass_credit_amount_invalid");
@@ -116,6 +136,7 @@ function reported(
   locator: string,
   precision: number,
   extra: Record<string, unknown>,
+  cardName: string | undefined,
   asOf?: string,
 ): BalanceObservation {
   const card = artifact.fetchUnitKey;
@@ -132,13 +153,18 @@ function reported(
     rawLocator: locator,
     extra: {
       ...extra,
-      _kogane: { reportedPrecisionJPY: precision, nonAdditive: true, sharedCredit: true },
+      _kogane: {
+        reportedPrecisionJPY: precision,
+        nonAdditive: true,
+        sharedCredit: true,
+        ...(cardName === undefined ? {} : { cardName }),
+      },
     },
   };
 }
 export const vpassCreditSnapshot: Parser = {
   name: "vpass-credit-snapshot",
-  version: "1.0.2",
+  version: "1.1.0",
   accepts: (artifact) =>
     artifact.sourceId === "vpass" &&
     artifact.dataset === "credit-snapshot" &&
@@ -194,6 +220,7 @@ export const vpassCreditSnapshot: Parser = {
               `json:$.body.content.AuthoriShokaiDisplayServiceBean.authoriShokaiVo.${prefix}${suffix}`,
               1000,
               { providerField: `${prefix}${suffix}`, providerDisplay: text },
+              vpassCardName(vo["cardName"]),
               asOf,
             ),
           );
@@ -240,6 +267,7 @@ export const vpassCreditSnapshot: Parser = {
             `json:$.body.content.CustomizedRevoShokaiAnsPcDisplayServiceBean.${field}`,
             1,
             { providerField: field },
+            vpassCardName(bean["cardName"]),
           ),
         );
     } else throw new Error("vpass_credit_artifact_invalid");

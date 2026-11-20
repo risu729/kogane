@@ -72,13 +72,14 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
     collected("cash_movement", ["mobile-suica-sf-history"]),
   ],
   // Money Forward ME (aggregator): monthly transactions of the current and 11
-  // past months and observed detail-page aggregates/points are parsed.
-  // Native product balances, gated card debt and securities remain unavailable.
+  // past months and the stored detail-page balances, holdings and points
+  // (#1240) are parsed. Native product balances, gated card debt and
+  // securities remain unavailable; the source tracker #452 holds them.
   "moneyforward-me": [
-    partial("balance", ["moneyforward-detail-balances"], 1240),
+    partial("balance", ["moneyforward-detail-balances"], 452),
     partial("cash_movement", ["moneyforward-monthly-transactions"], 452),
-    partial("position", ["moneyforward-detail-balances"], 1240),
-    partial("reward_balance", ["moneyforward-detail-balances"], 1240),
+    partial("position", ["moneyforward-detail-balances"], 452),
+    partial("reward_balance", ["moneyforward-detail-balances"], 452),
   ],
   // MyJCB: credit statements and their ledger, J-POINT balance with its
   // nearest expiry, and observed debit ordinary/difference statements; the
@@ -122,11 +123,13 @@ export const PROVIDER_DATA_TYPE_CATALOGUE: Readonly<
   "sbi-securities": [
     partial("position", ["sbi-domestic-cash-positions", "sbi-foreign-cash-positions"], 1237),
     collected("execution", ["sbi-domestic-trade-records", "sbi-foreign-trade-records"]),
-    // USD continuation and scheduled retained-coverage proof remain outstanding (#1226).
+    // Scheduled runs publish every retained yen page and the USD statement
+    // with complete coverage (#1226). A USD statement longer than one page has
+    // not been observed and is refused, so this stays partial under #446.
     partial(
       "settlement_cash",
       ["sbi-foreign-cash-balances", "sbi-yen-detail-history", "sbi-foreign-cash-history"],
-      1226,
+      446,
     ),
     partial("income", ["sbi-income-payments"], 1236),
     partial(

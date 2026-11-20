@@ -358,6 +358,21 @@ export {
   reportedStateBodyFromQuery,
 } from "./query/reported-state-read.ts";
 export {
+  parseRewardExpiryWindow,
+  REWARD_EXPIRY_DETAILS,
+  REWARD_EXPIRY_SUMMARY_BUCKET_LINES,
+  REWARD_EXPIRY_SUMMARY_DISPLAY_LINES,
+  REWARD_EXPIRY_WINDOW_ROW_BOUND,
+  type RewardExpiryDetail,
+  type RewardExpiryWindowRefusal,
+  type RewardExpiryWindowRow,
+  rewardExpirySummary,
+  rowsInRewardExpiryWindow,
+  tokyoToday,
+  type WindowPlace,
+  windowPlace,
+} from "./query/reward-expiry-window.ts";
+export {
   DEFAULT_EXPLAIN_DEPTH,
   explain,
   type ExplainReader,
