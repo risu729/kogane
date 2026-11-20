@@ -31,15 +31,24 @@ import {
   type CardPurchaseKind,
   type CardPurchaseSourceId,
 } from "../../../domain/src/card-purchase.ts";
-import type {
-  CardPurchaseCandidate,
-  CardPurchasePage,
-  CardPurchaseRevisionEntry,
-  CardPurchaseSettlementLink,
-  CardPurchaseSourceRow,
-  CardPurchaseStatementLink,
-  CardPurchaseUnrecognizedReasons,
-  CardPurchaseView,
+import {
+  CARD_PURCHASE_CARDS_MAX,
+  CARD_PURCHASE_STATEMENT_REASONS,
+  cardFigures,
+  compactAmount,
+  compactDate,
+  type CardPurchaseCard,
+  type CardPurchaseCardsPage,
+  type CardPurchaseCardStatement,
+  type CardPurchaseStatementReason,
+  type CardPurchaseCandidate,
+  type CardPurchasePage,
+  type CardPurchaseRevisionEntry,
+  type CardPurchaseSettlementLink,
+  type CardPurchaseSourceRow,
+  type CardPurchaseStatementLink,
+  type CardPurchaseUnrecognizedReasons,
+  type CardPurchaseView,
 } from "../../../domain/src/card-purchase-view.ts";
 import {
   validCardSettlementFacts,
@@ -223,7 +232,7 @@ interface CurrentRow extends CurrentCardUsageRow {
  * revision is a 0047 invariant, so a row is an event. Only the columns the
  * figures, the order and the statement links read; the rest is PAGE_SQL's.
  */
-const SELECTION_SQL = `SELECT c.event_id,c.revision,c.kind,c.state,c.unknown_reason,c.account_id,c.source_id,
+export const SELECTION_SQL = `SELECT c.event_id,c.revision,c.kind,c.state,c.unknown_reason,c.account_id,c.source_id,
   c.statement_period,json_extract(c.facts_json,'$.providerStatus') AS provider_status,
   json_extract(c.facts_json,'$.usageDate') AS usage_date,
   l.leg_index,l.subject_ref,l.unit_ref,l.value_status,l.coefficient,l.scale,l.value_reason_code,l.role,l.basis
@@ -231,6 +240,26 @@ const SELECTION_SQL = `SELECT c.event_id,c.revision,c.kind,c.state,c.unknown_rea
  LEFT JOIN economic_legs l ON l.event_id=c.event_id AND l.revision=c.revision
  WHERE (?1 IS NULL OR c.statement_period=?1) AND (?2 IS NULL OR c.event_id=?2)
  LIMIT ?3`;
+
+/** The predicate of `SELECTION_SQL` that the usage-month selection replaces. */
+const EVENT_ID_PREDICATE = "AND (?2 IS NULL OR c.event_id=?2)";
+/**
+ * `SELECTION_SQL` with a provider usage month (`?2`, `YYYY-MM`) in place of
+ * the event id: the same columns, joins and whole-filter bound (`?3`), built
+ * from the shipped text so the two cannot drift. The usage date is the
+ * recognition's own `facts_json.usageDate`, which the 0047 trigger keeps a
+ * `YYYY-MM-DD` civil date, so its first seven characters are its month.
+ */
+export const USAGE_MONTH_SELECTION_SQL = SELECTION_SQL.replace(
+  EVENT_ID_PREDICATE,
+  "AND substr(json_extract(c.facts_json,'$.usageDate'),1,7)=?2",
+);
+if (!SELECTION_SQL.includes(EVENT_ID_PREDICATE) || USAGE_MONTH_SELECTION_SQL === SELECTION_SQL)
+  throw new Error("card_purchase_selection_sql_changed");
+
+/** The stored label of each listed account, by primary key. */
+export const ACCOUNT_LABELS_SQL = `SELECT a.id,a.label FROM json_each(?1) w
+ JOIN accounts a ON a.id=w.value`;
 
 /**
  * The stored facts (validated before anything is shown), the evidence and the
@@ -536,6 +565,85 @@ function unrecognizedReasonCounts(
   return { complete: classifiedRows === total, counts: entries };
 }
 
+interface StatementChain {
+  statements: Map<string, { row: StatementRow; link: LinkedStatement }>;
+  settlements: Map<string, CardPurchaseSettlementLink>;
+}
+
+/**
+ * The newest provider statement of every (account, source, period) a posted
+ * event of `events` names, and each one's settlement review: the page and
+ * the per-card view read the same chain.
+ */
+async function statementChain(
+  sql: SqlExecutor,
+  events: readonly LiveEvent[],
+): Promise<StatementChain> {
+  const triples = new Map<string, [string, string, string]>();
+  for (const event of events)
+    if (event.posted && event.statementPeriod !== null)
+      triples.set(tripleKey(event.accountId, event.sourceId, event.statementPeriod), [
+        event.accountId,
+        event.sourceId,
+        event.statementPeriod,
+      ]);
+  const statements: StatementChain["statements"] = new Map();
+  if (triples.size > 0)
+    for (const row of await sql.all<StatementRow>(STATEMENT_SQL, [
+      JSON.stringify([...triples.values()]),
+    ]))
+      statements.set(tripleKey(row.account_id, row.source_id, row.period), {
+        row,
+        link: statementLink(row),
+      });
+  const settlements: StatementChain["settlements"] = new Map();
+  if (statements.size > 0)
+    for (const row of await sql.all<SettlementRow>(SETTLEMENT_SQL, [
+      JSON.stringify(
+        [...statements.values()].map(({ row }) => [row.account_id, row.source_id, row.period]),
+      ),
+    ]))
+      settlements.set(tripleKey(row.account_id, row.source_id, row.period), settlementLink(row));
+  return { statements, settlements };
+}
+
+/**
+ * One pass over current usage: which of `keys` the provider still displays,
+ * and every unrecognised current row with the reason the writer skips it.
+ */
+async function currentUsage(
+  sql: SqlExecutor,
+  keys: readonly string[],
+): Promise<{
+  currentKeys: Set<string>;
+  unrecognizedCurrentRows: number;
+  unrecognizedReasons: CardPurchaseUnrecognizedReasons;
+}> {
+  const current = await sql.all<CurrentRow>(CURRENT_SQL, [
+    0,
+    -1,
+    JSON.stringify([...new Set(keys)]),
+    CARD_PURCHASE_UNRECOGNIZED_LIMIT,
+  ]);
+  const currentKeys = new Set(
+    current.flatMap((row) =>
+      row.on_page === 1 && row.recognition_key !== null ? [row.recognition_key] : [],
+    ),
+  );
+  const unrecognizedCurrentRows = current[0]?.unrecognized_total ?? 0;
+  if (!Number.isSafeInteger(unrecognizedCurrentRows) || unrecognizedCurrentRows < 0)
+    throw new Error("card_usage_count_missing");
+  const unrecognizedReasons = unrecognizedReasonCounts(
+    // A row on the page is returned past the bound too; only the first `?4`
+    // unrecognised rows by observation id are classified.
+    current.filter(
+      (row) => row.unrecognized === 1 && row.position <= CARD_PURCHASE_UNRECOGNIZED_LIMIT,
+    ),
+    unrecognizedCurrentRows,
+  );
+  return { currentKeys, unrecognizedCurrentRows, unrecognizedReasons };
+}
+
 /**
  * Offset lists, a statement-period filter and exact-id reads share one DTO.
  * The summary covers every live event the filter selects, not only the page.
@@ -565,31 +673,7 @@ export async function queryCardPurchases(
 
   // Statements and their settlements, for every posted event of the filter:
   // the page needs its own, and the summary shows all of them beside the figures.
-  const triples = new Map<string, [string, string, string]>();
-  for (const event of events)
-    if (event.posted && event.statementPeriod !== null)
-      triples.set(tripleKey(event.accountId, event.sourceId, event.statementPeriod), [
-        event.accountId,
-        event.sourceId,
-        event.statementPeriod,
-      ]);
-  const statements = new Map<string, { row: StatementRow; link: LinkedStatement }>();
-  if (triples.size > 0)
-    for (const row of await sql.all<StatementRow>(STATEMENT_SQL, [
-      JSON.stringify([...triples.values()]),
-    ]))
-      statements.set(tripleKey(row.account_id, row.source_id, row.period), {
-        row,
-        link: statementLink(row),
-      });
-  const settlements = new Map<string, CardPurchaseSettlementLink>();
-  if (statements.size > 0)
-    for (const row of await sql.all<SettlementRow>(SETTLEMENT_SQL, [
-      JSON.stringify(
-        [...statements.values()].map(({ row }) => [row.account_id, row.source_id, row.period]),
-      ),
-    ]))
-      settlements.set(tripleKey(row.account_id, row.source_id, row.period), settlementLink(row));
+  const { statements, settlements } = await statementChain(sql, events);
 
   const page = events.slice(offset, offset + CARD_PURCHASE_PAGE_SIZE);
   const selected = JSON.stringify(
@@ -616,27 +700,9 @@ export async function queryCardPurchases(
 
   // One pass over current usage: the page's current keys, and each
   // unrecognised row with the reason the writer skips it.
-  const current = await sql.all<CurrentRow>(CURRENT_SQL, [
-    0,
-    -1,
-    JSON.stringify([...new Set(keyRows.map((row) => row.recognition_key))]),
-    CARD_PURCHASE_UNRECOGNIZED_LIMIT,
-  ]);
-  const currentKeys = new Set(
-    current.flatMap((row) =>
-      row.on_page === 1 && row.recognition_key !== null ? [row.recognition_key] : [],
-    ),
-  );
-  const unrecognizedCurrentRows = current[0]?.unrecognized_total ?? 0;
-  if (!Number.isSafeInteger(unrecognizedCurrentRows) || unrecognizedCurrentRows < 0)
-    throw new Error("card_usage_count_missing");
-  const unrecognizedReasons = unrecognizedReasonCounts(
-    // A row on the page is returned past the bound too; only the first `?4`
-    // unrecognised rows by observation id are classified.
-    current.filter(
-      (row) => row.unrecognized === 1 && row.position <= CARD_PURCHASE_UNRECOGNIZED_LIMIT,
-    ),
-    unrecognizedCurrentRows,
+  const { currentKeys, unrecognizedCurrentRows, unrecognizedReasons } = await currentUsage(
+    sql,
+    keyRows.map((row) => row.recognition_key),
   );
 
   // Pending-to-posted candidates touching the page's rows, resolved by the
@@ -790,6 +856,151 @@ export async function queryCardPurchases(
       // Nothing plans or writes a refund allocation (ADR 0017's kind only).
       refundsAllocated: false,
       limit: CARD_PURCHASE_PAGE_SIZE,
+    },
+  };
+}
+
+/** The per-card read's filter: exactly one of a statement period and a usage month (ADR 0125). */
+export interface CardPurchaseCardsQuery {
+  /** A statement period, `YYYY-MM`, as the page filters. */
+  period?: string;
+  /** A provider usage month, `YYYY-MM`: the events whose usage date falls in it. */
+  usageMonth?: string;
+}
+
+/**
+ * The per-card view of the card purchase read (`view: cards`, ADR 0125): the
+ * whole-filter selection of `queryCardPurchases`, under the same bound,
+ * grouped by card (resolved account and source), with each card's figures
+ * from `cardPurchaseSummary` (exact decimals added in the domain, INV03), the
+ * statements its posted events belong to with their settlement reviews (the
+ * page's own chain), and the count of events without a statement figure by
+ * the page's closed reason. No per-event explanation, provider row or
+ * candidate is read. A usage month selects by `facts_json.usageDate`.
+ */
+export async function queryCardPurchaseCards(
+  sql: SqlExecutor,
+  input: CardPurchaseCardsQuery,
+): Promise<CardPurchaseCardsPage> {
+  const period = input.period ?? null;
+  const usageMonth = input.usageMonth ?? null;
+  if (period !== null && !CARD_PURCHASE_PERIOD.test(period)) throw new Error("invalid_period");
+  if (usageMonth !== null && !CARD_PURCHASE_PERIOD.test(usageMonth))
+    throw new Error("invalid_usage_month");
+  // Exactly one month: it keeps each card to the one or two statements its
+  // events can belong to, so the answer grows with the cards, not the history.
+  if ((period === null) === (usageMonth === null)) throw new Error("invalid_query");
+
+  const rows =
+    usageMonth === null
+      ? await sql.all<SelectionRow>(SELECTION_SQL, [period, null, CARD_PURCHASE_SUMMARY_LIMIT + 1])
+      : await sql.all<SelectionRow>(USAGE_MONTH_SELECTION_SQL, [
+          null,
+          usageMonth,
+          CARD_PURCHASE_SUMMARY_LIMIT + 1,
+        ]);
+  if (rows.length > CARD_PURCHASE_SUMMARY_LIMIT) throw new CardPurchaseLimitError();
+  const events = liveEvents(rows);
+  const totals = cardPurchaseSummary(events.map(summaryRevision));
+  if (!totals.ok) throw new Error("card_purchase_amount_invalid");
+
+  const cardKey = (event: LiveEvent): string => JSON.stringify([event.sourceId, event.accountId]);
+  const byCard = new Map<string, LiveEvent[]>();
+  for (const event of events) {
+    const key = cardKey(event);
+    const list = byCard.get(key);
+    if (list === undefined) byCard.set(key, [event]);
+    else list.push(event);
+  }
+  const sourceOrder = (sourceId: CardPurchaseSourceId) => CARD_PURCHASE_SOURCES.indexOf(sourceId);
+  const ordered = [...byCard.values()].sort((a, b) => {
+    const x = a[0]!,
+      y = b[0]!;
+    if (x.sourceId !== y.sourceId) return sourceOrder(x.sourceId) - sourceOrder(y.sourceId);
+    return x.accountId < y.accountId ? -1 : x.accountId > y.accountId ? 1 : 0;
+  });
+  const listed = ordered.slice(0, CARD_PURCHASE_CARDS_MAX);
+  const listedEvents = listed.flat();
+
+  // Only the listed cards' statements, settlements and labels are read.
+  const { statements, settlements } = await statementChain(sql, listedEvents);
+  const accountIds = [...new Set(listed.map((card) => card[0]!.accountId))];
+  const labels = new Map<string, string>();
+  if (accountIds.length > 0)
+    for (const row of await sql.all<{ id: string; label: string }>(ACCOUNT_LABELS_SQL, [
+      JSON.stringify(accountIds),
+    ]))
+      labels.set(row.id, row.label);
+  const { unrecognizedCurrentRows, unrecognizedReasons } = await currentUsage(sql, []);
+
+  const cards = listed.map((cardEvents): CardPurchaseCard => {
+    const first = cardEvents[0]!;
+    const figures = cardPurchaseSummary(cardEvents.map(summaryRevision));
+    if (!figures.ok) throw new Error("card_purchase_amount_invalid");
+    const reasons = new Map<CardPurchaseStatementReason, number>();
+    const periods = new Set<string>();
+    for (const event of cardEvents) {
+      const reasonCode: CardPurchaseStatementReason | null = !event.posted
+        ? "not_posted"
+        : event.statementPeriod === null
+          ? "period_unrecognized"
+          : statements.has(tripleKey(event.accountId, event.sourceId, event.statementPeriod))
+            ? null
+            : "statement_not_collected";
+      if (reasonCode === null) periods.add(event.statementPeriod!);
+      else reasons.set(reasonCode, (reasons.get(reasonCode) ?? 0) + 1);
+    }
+    return {
+      accountId: first.accountId,
+      sourceId: first.sourceId,
+      label: labels.get(first.accountId) ?? null,
+      events: cardEvents.length,
+      unresolved: figures.summary.unresolved,
+      figures: figures.summary.units.map(cardFigures),
+      withoutStatement: CARD_PURCHASE_STATEMENT_REASONS.flatMap((reasonCode) => {
+        const count = reasons.get(reasonCode);
+        return count === undefined ? [] : [{ reasonCode, events: count }];
+      }),
+      statements: [...periods]
+        .sort()
+        .reverse()
+        .map((statementPeriod): CardPurchaseCardStatement => {
+          const key = tripleKey(first.accountId, first.sourceId, statementPeriod);
+          const { link } = statements.get(key)!;
+          const settlement = settlements.get(key) ?? null;
+          return {
+            period: statementPeriod,
+            total: compactAmount(link.providerTotal),
+            paymentDate: compactDate(link.paymentDate),
+            settlement: settlement?.reviewStatus ?? null,
+            debit:
+              settlement === null || settlement.bankDebit === null
+                ? null
+                : {
+                    sourceId: settlement.bankDebit.sourceId,
+                    date: compactDate(settlement.bankDebit.occurred),
+                  },
+          };
+        }),
+    };
+  });
+
+  return {
+    view: "cards",
+    frame: usageMonth !== null ? "usage-month" : "statement-period",
+    cards,
+    cardsTruncated: ordered.length > listed.length,
+    totals: totals.summary.units.map(cardFigures),
+    events: events.length,
+    unresolved: totals.summary.unresolved,
+    settlementAddsPurchaseExpense: false,
+    coverage: {
+      scope: "card-purchase-recognition",
+      completeTransactionHistory: false,
+      unsupportedShapes: [...CARD_USAGE_EXCLUSIONS],
+      unrecognizedCurrentRows,
+      unrecognizedReasons,
+      refundsAllocated: false,
     },
   };
 }

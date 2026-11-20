@@ -12,8 +12,10 @@ import {
   validCardPurchasePage,
 } from "../../observation-shared/src/card-purchase-contract.ts";
 import { ERROR_STATUS } from "../src/errors.ts";
-import { queryCardPurchases } from "../src/query/card-purchases.ts";
+import { queryCardPurchaseCards, queryCardPurchases } from "../src/query/card-purchases.ts";
 import {
+  answerPurchasesExplain,
+  explainCardPurchaseCards,
   explainCardPurchases,
   parsePurchasesExplainRequest,
   type PurchasesExplainOutcome,
@@ -409,6 +411,92 @@ describe("the request is closed", () => {
       [{ eventId: event, period: "2026-09" }, "invalid_query", ["eventId", "period"]],
     ] as const)
       expect(parsePurchasesExplainRequest(body)).toEqual({ ok: false, code, refs: [...refs] });
+  });
+
+  test("a view: events is the page's request, cards takes a period or a usage month (ADR 0125)", () => {
+    const event = `purchase_${"a".repeat(64)}`;
+    expect(parsePurchasesExplainRequest({ view: "events", period: "2026-09" })).toEqual({
+      ok: true,
+      value: { period: "2026-09" },
+    });
+    for (const [body, value] of [
+      [
+        { view: "cards", period: "2026-09" },
+        { view: "cards", period: "2026-09" },
+      ],
+      [
+        { view: "cards", usageMonth: "2026-08" },
+        { view: "cards", usageMonth: "2026-08" },
+      ],
+    ] as const)
+      expect(parsePurchasesExplainRequest(body)).toEqual({ ok: true, value });
+    for (const [body, refs] of [
+      [{ view: "summary" }, ["view"]],
+      [{ view: null }, ["view"]],
+      [{ usageMonth: "2026-08" }, ["usageMonth"]],
+      [{ view: "events", usageMonth: "2026-08" }, ["usageMonth"]],
+      [{ view: "cards", usageMonth: "202608" }, ["usageMonth"]],
+      [{ view: "cards", usageMonth: 202608 }, ["usageMonth"]],
+      [{ view: "cards", period: "2026-09", usageMonth: "2026-08" }, ["period", "usageMonth"]],
+      [{ view: "cards" }, ["period", "usageMonth"]],
+      [{ view: "cards", period: "2026-09", offset: 0 }, ["offset"]],
+      [{ view: "cards", usageMonth: "2026-08", eventId: event }, ["eventId"]],
+    ] as const)
+      expect(parsePurchasesExplainRequest(body)).toEqual({
+        ok: false,
+        code: "invalid_query",
+        refs: [...refs],
+      });
+  });
+});
+
+describe("the per-card view (ADR 0125)", () => {
+  test("is graded like the page, refused past the budget, and answers the page's per-card reader", async () => {
+    const { w } = await world();
+    const before = tables(w.db);
+    const ok = await explainCardPurchaseCards({
+      grant: grant(),
+      sql: w.sql,
+      request: { period: "2026-09" },
+    });
+    expect(ok).toEqual({
+      ok: true,
+      explanation: {
+        schemaVersion: "kogane-card-purchases-cards-v1",
+        query: { view: "cards", period: "2026-09", usageMonth: null },
+        decisions: "operator-only",
+        data: await queryCardPurchaseCards(w.sql, { period: "2026-09" }),
+      },
+    });
+    // The dispatcher picks the view.
+    expect(
+      await answerPurchasesExplain({
+        grant: grant(),
+        sql: w.sql,
+        request: { view: "cards", period: "2026-09" },
+      }),
+    ).toEqual(ok);
+    for (const [refused, code, refs] of [
+      [grant({ capabilities: ["summary.read"] }), "unauthorized", ["capability:records.read"]],
+      [
+        grant({ scopes: { sources: ["vpass"], accounts: "*" } }),
+        "evidence_restricted",
+        ["scope:source"],
+      ],
+      [
+        grant({ budget: { maxRows: 99, maxProposalTargets: 1, maxExplainDepth: 1 } }),
+        "budget_exceeded",
+        ["budget:maxRows=99"],
+      ],
+    ] as const) {
+      const outcome = await explainCardPurchaseCards({
+        grant: refused,
+        sql: w.sql,
+        request: { usageMonth: "2026-08" },
+      });
+      expect(outcome).toMatchObject({ ok: false, error: { code, refs: [...refs] } });
+    }
+    expect(tables(w.db)).toEqual(before);
   });
 });
 

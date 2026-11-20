@@ -16,7 +16,7 @@ import type {
 } from "./pending-posted-review.ts";
 import type { ProposalStatus, RationaleCode, RejectionConditionCode } from "./reconcile.ts";
 import type { TemporalValue } from "./time.ts";
-import type { Quantity } from "./values.ts";
+import { decimalToString, type Quantity } from "./values.ts";
 
 /** A provider row behind a purchase. Counterparty text is read from Layer B, never stored. */
 export interface CardPurchaseSourceRow {
@@ -231,4 +231,135 @@ export interface AgentCardPurchaseView extends Omit<CardPurchaseView, "candidate
 /** The operator's page with each candidate's review affordances removed; nothing else differs. */
 export interface AgentCardPurchasePage extends Omit<CardPurchasePage, "items"> {
   items: AgentCardPurchaseView[];
+}
+
+// ---------------------------------------------------------------------------
+// Per card (ADR 0125)
+// ---------------------------------------------------------------------------
+
+/**
+ * One amount in the compact form of the per-card view: decimal text when it
+ * is exact, else its status and reason, never a zero (INV05).
+ */
+export type CompactAmount =
+  | { unit: string; value: string }
+  | { unit: string; status: "missing" | "unparsed" | "conflict"; reason: string };
+
+/** A provider civil date as `YYYY-MM-DD`, or the reason there is none (INV05). */
+export type CompactDate = string | { reason: string };
+
+/**
+ * `CardPurchaseUnitTotals` as decimal text. Every figure is the exact sum
+ * `cardPurchaseSummary` computed (it refuses a leg without an exact amount),
+ * so each one is exact; the states stay apart and there is no combined total.
+ */
+export interface CardPurchaseCardFigures {
+  unit: string;
+  captured: string;
+  authorized: string;
+  capturedRefunds: string;
+  authorizedRefunds: string;
+}
+
+/** A provider statement that the filter's posted purchases of one card were posted to. */
+export interface CardPurchaseCardStatement {
+  period: string;
+  /** The provider's own total, never compared with or reduced by the purchases. */
+  total: CompactAmount;
+  paymentDate: CompactDate;
+  /**
+   * The status of the statement's settlement review (accepted first, as the
+   * page picks it), or null when it has none.
+   */
+  settlement: CardSettlementStatus | null;
+  /**
+   * The bank debit an accepted review cites: its source and date; null unless
+   * the review is accepted. Its amount and account are the review's
+   * (`kogane.card-settlements.read`, `kogane.card-settlements.debit-accounts`).
+   */
+  debit: { sourceId: string; date: CompactDate } | null;
+}
+
+/** One card: a resolved account and the card source its purchases were recognised from. */
+export interface CardPurchaseCard {
+  accountId: string;
+  sourceId: CardPurchaseSourceId;
+  /** The account's stored label (`accounts.label`), or null when the store has no row for it. */
+  label: string | null;
+  /** Live purchase and refund events of this card in the filter. */
+  events: number;
+  /** Of them, those in state `unknown`: counted, never summed. */
+  unresolved: number;
+  figures: CardPurchaseCardFigures[];
+  /**
+   * Events without a statement figure, by the closed reason the page gives
+   * each one; only reasons some event has, in the closed order.
+   */
+  withoutStatement: { reasonCode: CardPurchaseStatementReason; events: number }[];
+  /** The statements this card's posted events in the filter belong to, newest period first. */
+  statements: CardPurchaseCardStatement[];
+}
+
+/** A quantity in the compact form: decimal text when exact, else its status and reason. */
+export function compactAmount(quantity: Quantity): CompactAmount {
+  const { value } = quantity;
+  return value.status === "exact"
+    ? { unit: quantity.unitRef, value: decimalToString(value.value) }
+    : { unit: quantity.unitRef, status: value.status, reason: value.reasonCode };
+}
+
+/**
+ * A provider time as a civil date: a local date is its `YYYY-MM-DD`; an
+ * unknown time keeps its reason; an instant or a period is not a civil date
+ * and says so rather than being cut to one.
+ */
+export function compactDate(time: TemporalValue): CompactDate {
+  if (time.kind === "local-date") return time.value;
+  if (time.kind === "unknown") return { reason: time.reasonCode };
+  return { reason: `not_a_civil_date:${time.kind}` };
+}
+
+/**
+ * The figures of one unit as decimal text. `cardPurchaseSummary` returns only
+ * exact sums; a figure that is not exact here is a broken invariant, so it
+ * fails the answer instead of being shown as anything.
+ */
+export function cardFigures(totals: CardPurchaseUnitTotals): CardPurchaseCardFigures {
+  const text = (quantity: Quantity): string => {
+    if (quantity.value.status !== "exact" || quantity.unitRef !== totals.unitRef)
+      throw new Error("card_purchase_amount_invalid");
+    return decimalToString(quantity.value.value);
+  };
+  return {
+    unit: totals.unitRef,
+    captured: text(totals.captured),
+    authorized: text(totals.authorized),
+    capturedRefunds: text(totals.capturedRefunds),
+    authorizedRefunds: text(totals.authorizedRefunds),
+  };
+}
+
+/** The most cards one per-card answer lists; `cardsTruncated` says when more exist. */
+export const CARD_PURCHASE_CARDS_MAX = 100;
+
+/**
+ * The per-card answer of the card purchase read (`view: cards`, ADR 0125):
+ * the same whole-filter selection and figures as `CardPurchasePage.summary`,
+ * grouped by card, without the per-event explanation.
+ */
+export interface CardPurchaseCardsPage {
+  view: "cards";
+  /** What selected the events: one statement period, or one month of provider usage dates. */
+  frame: "statement-period" | "usage-month";
+  /** Every card with a live event in the filter, by source and then account; at most 100. */
+  cards: CardPurchaseCard[];
+  /** True when more cards than `cards` lists have events in the filter; `totals` still covers them. */
+  cardsTruncated: boolean;
+  /** The figures of every card together: `CardPurchasePage.summary.units` for the same filter. */
+  totals: CardPurchaseCardFigures[];
+  events: number;
+  unresolved: number;
+  /** Accepting a card settlement never adds purchase expense. */
+  settlementAddsPurchaseExpense: false;
+  coverage: Omit<CardPurchasePage["coverage"], "limit">;
 }

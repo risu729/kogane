@@ -311,13 +311,18 @@ export {
   type ReportedStateRow,
 } from "./query/execute.ts";
 export {
+  answerPurchasesExplain,
+  explainCardPurchaseCards,
   explainCardPurchases,
   parsePurchasesExplainRequest,
   PURCHASES_EXPLAIN_CAPABILITY,
   PURCHASES_EXPLAIN_KEYS,
   PURCHASES_EXPLAIN_MAX_OFFSET,
+  PURCHASES_EXPLAIN_VIEWS,
   PURCHASES_NEXT_PAGE,
+  type PurchasesCardsAnswer,
   type PurchasesExplainOutcome,
+  type PurchasesExplainRequest,
   type PurchasesExplanation,
   type PurchasesNextPage,
   withoutReviewAffordances,

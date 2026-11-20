@@ -11,6 +11,7 @@ import {
   CARD_PURCHASE_EVENT_ID,
   CARD_PURCHASE_PERIOD,
   CardPurchaseLimitError,
+  queryCardPurchaseCards,
   queryCardPurchases,
 } from "../../../packages/application/src/query/card-purchases.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
@@ -18,7 +19,35 @@ import { principalFor } from "./grants";
 import { HttpError, json } from "./http";
 
 export const CARD_PURCHASES_PATH = "/api/v2/card-purchases";
-const PARAMETERS = ["offset", "period", "eventId"];
+const PARAMETERS = ["offset", "period", "eventId", "view", "usageMonth"];
+
+/**
+ * `?view=cards` (ADR 0125): the per-card answer `kogane.purchases.explain`
+ * returns as `data` for `view: cards`, from the same `queryCardPurchaseCards`.
+ * Exactly one of a statement `period` and a `usageMonth`; no `offset` or
+ * `eventId`.
+ */
+async function cardsView(env: Env, params: URLSearchParams): Promise<Response> {
+  if (params.has("offset") || params.has("eventId")) throw new HttpError(400, "invalid_query");
+  const period = params.get("period");
+  const usageMonth = params.get("usageMonth");
+  if ((period === null) === (usageMonth === null)) throw new HttpError(400, "invalid_query");
+  for (const value of [period, usageMonth])
+    if (value !== null && !CARD_PURCHASE_PERIOD.test(value))
+      throw new HttpError(400, "invalid_period");
+  let page;
+  try {
+    page = await queryCardPurchaseCards(d1Executor(env.DB), {
+      ...(period === null ? {} : { period }),
+      ...(usageMonth === null ? {} : { usageMonth }),
+    });
+  } catch (error) {
+    // A filter too large to total is refused, never partially summed.
+    if (error instanceof CardPurchaseLimitError) throw new HttpError(413, "result_limit_exceeded");
+    throw error;
+  }
+  return json({ apiVersion: 2, ...page });
+}
 
 /**
  * Served only where CORE 0047 is applied, so a build deployed ahead of the
@@ -49,6 +78,10 @@ export async function cardPurchasesApi(
       value.length > 128
     )
       throw new HttpError(400, "invalid_query");
+  const view = url.searchParams.get("view") ?? "events";
+  if (view !== "events" && view !== "cards") throw new HttpError(400, "invalid_query");
+  if (view === "cards") return cardsView(env, url.searchParams);
+  if (url.searchParams.has("usageMonth")) throw new HttpError(400, "invalid_query");
   const text = url.searchParams.get("offset") ?? "0";
   const offset = Number(text);
   if (!/^(0|[1-9]\d*)$/u.test(text) || !Number.isSafeInteger(offset) || offset > 1_000_000)
