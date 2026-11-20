@@ -72,8 +72,9 @@ export interface DatedStateInput {
    * Only these resolved account ids (the reconstructed state's scope, ADR
    * 0116); not with `account`. A provider account is then listed once per
    * resolved account its rows map to, so no row of one account is listed
-   * under another. Not part of the manifest, like the other filters: a
-   * one-account list answers what `account` answers.
+   * under another. A one-account list is read as `account`, so it answers
+   * what `account` answers, context id included. A longer list is not among
+   * the manifest's filters: the rows the manifest pins fix what it lists.
    */
   accounts?: readonly string[];
 }
@@ -167,9 +168,13 @@ export async function queryDatedState(
     Date.parse(cutoff) - UNDATED_STATEMENT_WINDOW_DAYS * DAY_MS,
   ).toISOString();
   const source = input.source ?? null;
-  const account = input.account ?? null;
-  if (account !== null && input.accounts !== undefined) throw new Error("invalid_query");
-  const scope = input.accounts === undefined ? null : new Set(input.accounts);
+  if ((input.account ?? null) !== null && input.accounts !== undefined)
+    throw new Error("invalid_query");
+  // A one-account list is the `account` read, its filters and so its context
+  // id included (ADR 0116; the manifest pins the request's filters, INV09).
+  const single = input.accounts?.length === 1 ? input.accounts[0]! : null;
+  const account = input.account ?? single;
+  const scope = input.accounts === undefined || single !== null ? null : new Set(input.accounts);
 
   const [positionRows, balanceRows, perimeter, statementRows] = await Promise.all([
     sql.all<DatedPositionRow>(DATED_POSITIONS_SQL, [cutoff]),
