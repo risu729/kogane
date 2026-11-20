@@ -845,9 +845,14 @@ tables. Every answer is checked by `validApiResponse` against
 are answered by one reader, `readCollectionQuality`
 (`services/app/src/collection-quality-api.ts`), which
 `kogane.collection-quality.read` also calls
-([agent API](agent-api.md#ui-read-pages)).
+([agent API](agent-api.md#ui-read-pages)). The summary and the cells take
+`detail`: absent or `summary` answers them as short lines derived from the
+answers below, and `detail=full` answers them as described here, which the
+collection quality page asks for
+([ADR 0123](adr/0123-summary-detail-for-large-reads.md),
+[agent API](agent-api.md#ui-read-pages)).
 
-- **Summary** (`/api/collection-quality`, no parameters): every configured job
+- **Summary** (`/api/collection-quality?detail=full`, no other parameter): every configured job
   (`collection_schedules`) under the CORE sources its collectors register
   under, and every visible source. Per job: enabled, supported, a held
   execution lease, and the newest receipt with each run it names as CORE has
@@ -860,7 +865,7 @@ are answered by one reader, `readCollectionQuality`
   `user_action_required`, `lease_held`, `dataset_withheld`, ...). Jobs whose
   source registers under no CORE source (the Processor tick) are listed apart.
   More than 200 jobs or sources is `413 result_limit_exceeded`, never cut.
-- **Status** (`/api/collection-quality?view=status`, that query exactly;
+- **Status** (`/api/collection-quality?view=status`, that query exactly, no `detail`;
   [ADR 0045, amendment of 2026-11-19](adr/0045-collection-quality-read.md#amendment-2026-11-19-a-status-view-one-line-per-configured-job)):
   one line per configured job saying whether it is stuck: `lastRun` (with
   `recovered` when a successful fetch run of its source followed a failed
@@ -869,8 +874,9 @@ are answered by one reader, `readCollectionQuality`
   `failureCode`, a closed `state` (`ok`, `degraded`, `failing`,
   `needs-owner`, `disabled`) and `notPublishing` (datasets whose newest
   capture has no published parse, with the cells' reasons). The page shows
-  it as a table at its top.
-- **Cells** (`/api/collection-quality/<sourceId>?offset=N`): per dataset,
+  it as a table at its top. It is compact already, so it has no summary
+  detail ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)).
+- **Cells** (`/api/collection-quality/<sourceId>?offset=N&detail=full`): per dataset,
   parser, fetch unit and period, the newest capture (run success, unit outcome,
   artifacts, raw objects stored, parse states, failure codes, incomplete
   coverage claims) and the current capture (its fetch run and capture time),

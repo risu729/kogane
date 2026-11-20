@@ -81,6 +81,7 @@ import type {
   OrganizedAccount,
   OrganizedInstrument,
 } from "./organization-contract.ts";
+import { BALANCE_HISTORY_REASONS } from "./api-contract.ts";
 import type {
   ApiMetadata,
   ArtifactDetail,
@@ -90,9 +91,16 @@ import type {
   BalanceEvidenceMember,
   BalanceHistoryItem,
   BalanceHistoryPage,
+  BalanceHistorySummaryItem,
+  BalanceHistorySummaryPage,
   KnownAssetsSubtotals,
   LatestBalanceItem,
   LatestBalancePage,
+  LatestBalanceSummaryItem,
+  LatestBalanceSummaryPage,
+  SummaryAccount,
+  SummaryAmount,
+  SummaryMetric,
   MeasureDescriptor,
   ObservedQuantityWire,
   SnapshotDataCoverage,
@@ -609,6 +617,127 @@ const balanceHistoryPage: Check<BalanceHistoryPage> = (value): value is BalanceH
   withoutNetWorth(value) &&
   value.items.length <= value.page.limit;
 
+// The summary detail of the same pages (ADR 0123): one line per row, the page,
+// coverage and subtotals as the full page has them. A value that is not exact
+// carries no value and no scale, only its status (INV05).
+const summaryAmount: Check<SummaryAmount> = (value): value is SummaryAmount =>
+  object<SummaryAmount>({
+    value: nullableText,
+    unit: nullableText,
+    status: literal("exact", "missing", "unparsed", "conflict"),
+    scale: nullable(identifier),
+  })(value) &&
+  (value.status === "exact"
+    ? value.value !== null && value.scale !== null
+    : value.value === null && value.scale === null);
+const summaryAccount: Check<SummaryAccount> = (value): value is SummaryAccount =>
+  object<SummaryAccount>({
+    ref: text,
+    source: text,
+    sourceAccount: text,
+    account: nullableText,
+    label: nullableText,
+    status: nullable(literal("identified", "provider-local", "aggregate", "unresolved")),
+    lineage: nullable(literal("current", "historical")),
+  })(value) &&
+  // An organized row names all four; an unavailable organization none.
+  (value.account === null
+    ? value.label === null && value.status === null && value.lineage === null
+    : value.label !== null && value.status !== null && value.lineage !== null);
+const summaryMetric = object<SummaryMetric>({
+  ref: text,
+  source: text,
+  metric: text,
+  providerMetric: text,
+});
+const historySummaryFields = {
+  observationId: identifier,
+  account: text,
+  metric: text,
+  amount: summaryAmount,
+  asOf: nullableText,
+};
+const historySummaryItem = object<BalanceHistorySummaryItem>({
+  ...historySummaryFields,
+  // Closed codes, each at most once: a parse status outside the closed set
+  // is not a reason the line can carry.
+  reasons: (value): value is BalanceHistorySummaryItem["reasons"] =>
+    subset(BALANCE_HISTORY_REASONS)(value),
+});
+const latestSummaryItem = object<LatestBalanceSummaryItem>({
+  ...historySummaryFields,
+  freshness: literal("current", "stale", "unknown"),
+  adoption: literal("adopted", "excluded", "unresolved", "conflict", "stale"),
+  reasons: array(text),
+});
+/**
+ * Every line names an account and a metric of its page, every one is named,
+ * and each entry is listed once: no two refs name the same entry.
+ */
+function refsNamed(entries: readonly { ref: string }[], named: readonly string[]): boolean {
+  const refs = entries.map((entry) => entry.ref);
+  const contents = entries.map(({ ref: _ref, ...entry }) => JSON.stringify(entry));
+  return (
+    new Set(refs).size === refs.length &&
+    new Set(contents).size === contents.length &&
+    named.every((ref) => refs.includes(ref)) &&
+    refs.every((ref) => named.includes(ref))
+  );
+}
+function accountsNamed(value: {
+  accounts: SummaryAccount[];
+  metrics: SummaryMetric[];
+  items: { account: string; metric: string }[];
+}): boolean {
+  return (
+    refsNamed(
+      value.accounts,
+      value.items.map((item) => item.account),
+    ) &&
+    refsNamed(
+      value.metrics,
+      value.items.map((item) => item.metric),
+    )
+  );
+}
+const latestBalanceSummaryPage: Check<LatestBalanceSummaryPage> = (
+  value,
+): value is LatestBalanceSummaryPage =>
+  object<LatestBalanceSummaryPage>({
+    schemaVersion: literal("snapshot-page-v1"),
+    detail: literal("summary"),
+    accounts: array(summaryAccount),
+    metrics: array(summaryMetric),
+    items: array(latestSummaryItem),
+    page: pageInfo,
+    dataCoverage: snapshotCoverage,
+    subtotals,
+  })(value) &&
+  withoutNetWorth(value) &&
+  withoutNetWorth(value.subtotals) &&
+  accountsNamed(value) &&
+  value.items.length <= value.page.limit;
+const balanceHistorySummaryPage: Check<BalanceHistorySummaryPage> = (
+  value,
+): value is BalanceHistorySummaryPage =>
+  object<BalanceHistorySummaryPage>({
+    schemaVersion: literal("snapshot-page-v1"),
+    detail: literal("summary"),
+    accounts: array(summaryAccount),
+    metrics: array(summaryMetric),
+    items: array(historySummaryItem),
+    page: pageInfo,
+    dataCoverage: snapshotCoverage,
+  })(value) &&
+  withoutNetWorth(value) &&
+  accountsNamed(value) &&
+  value.items.length <= value.page.limit;
+/** A full page carries no `detail`; a summary page says it is one. */
+const fullPage =
+  <T>(check: Check<T>): Check<T> =>
+  (value): value is T =>
+    check(value) && !Object.hasOwn(value as object, "detail");
+
 const rewardBucket = object<RewardBucketRow>({
   bucketRef: text,
   kind: validRewardBucketKind,
@@ -775,8 +904,22 @@ const endpoints: Record<string, Check<unknown>> = {
   "/api/artifacts": object<{ artifacts: ArtifactRow[] }>({
     artifacts: array(artifact),
   }),
-  "/api/v2/balances/latest": latestBalancePage,
-  "/api/v2/balances/history": balanceHistoryPage,
+  "/api/v2/balances/latest": (value): value is LatestBalancePage | LatestBalanceSummaryPage =>
+    fullPage(latestBalancePage)(value) || latestBalanceSummaryPage(value),
+  "/api/v2/balances/history": (value): value is BalanceHistoryPage | BalanceHistorySummaryPage =>
+    fullPage(balanceHistoryPage)(value) || balanceHistorySummaryPage(value),
+};
+
+/** Each detail's own check of the balance pages (ADR 0123). */
+const balancePagesByDetail: Record<string, Record<ReadDetail, Check<unknown>>> = {
+  "/api/v2/balances/latest": {
+    full: fullPage(latestBalancePage),
+    summary: latestBalanceSummaryPage,
+  },
+  "/api/v2/balances/history": {
+    full: fullPage(balanceHistoryPage),
+    summary: balanceHistorySummaryPage,
+  },
 };
 
 /**
@@ -804,8 +947,29 @@ function validSharedQueryResponse(value: unknown): boolean {
   );
 }
 
-/** Additive fields are allowed; required fields and their nullability are checked. */
-export function validApiResponse(path: string, value: unknown): boolean {
+/** `summary` or `full` (ADR 0123): the detail a request asked for. */
+type ReadDetail = "summary" | "full";
+
+/**
+ * The `detail` a request's query asks for when it names one the reads offer,
+ * for `validApiResponse`'s third argument; absent or anything else is
+ * `undefined` (either shape).
+ */
+export function requestedDetail(search: string): ReadDetail | undefined {
+  const detail = new URLSearchParams(search).get("detail");
+  return detail === "summary" || detail === "full" ? detail : undefined;
+}
+
+/**
+ * Additive fields are allowed; required fields and their nullability are
+ * checked. `detail` names the detail the request asked for (ADR 0123): the
+ * paths that answer one (the v2 balance pages and the collection quality
+ * summary and cells) then accept that shape only; without it they accept
+ * either.
+ */
+export function validApiResponse(path: string, value: unknown, detail?: ReadDetail): boolean {
+  if (detail !== undefined && Object.hasOwn(balancePagesByDetail, path))
+    return balancePagesByDetail[path]![detail](value);
   if (path === AUDIT_PAGE_PATH) return validAuditPage(value);
   if (path === "/api/v2/reconciliation/card-settlements/ownership")
     return validCardOwnershipReview(value);
@@ -823,7 +987,7 @@ export function validApiResponse(path: string, value: unknown): boolean {
   if (path === "/api/v2/reports" || path.startsWith("/api/v2/reports/"))
     return validReportResponse(path, value) ?? false;
   if (path.startsWith("/api/collection-quality"))
-    return validCollectionQualityResponse(path, value);
+    return validCollectionQualityResponse(path, value, detail);
   if (path === INSTRUMENT_CANDIDATES_PATH) return validInstrumentCandidateReview(value);
   if (path === ACCOUNT_CANDIDATES_PATH) return validAccountCandidateReview(value);
   if (path === INSTRUMENT_HISTORY_PATH) return validInstrumentHistoryRead(value);

@@ -29,11 +29,14 @@ import type {
   BalanceEvidenceMember,
   BalanceHistoryItem,
   BalanceHistoryPage,
+  BalanceHistorySummaryPage,
+  BalanceReadDetail,
   BalanceHistoryRow,
   BalanceRow,
   KnownAssetsSubtotals,
   LatestBalanceItem,
   LatestBalancePage,
+  LatestBalanceSummaryPage,
   MeasureDescriptor,
   ObservedQuantityWire,
   SnapshotDataCoverage,
@@ -48,6 +51,7 @@ import type { IdentityReadMode } from "../../../packages/read-model/src/index";
 import {
   d1Executor,
   DEFAULT_PROJECTION_PAGE_LIMIT,
+  DEFAULT_SUMMARY_PAGE_LIMIT,
   KNOWN_ASSETS_POLICY,
   knownAssetMetricIds,
   PROJECTION_PAGE_LIMITS,
@@ -76,6 +80,11 @@ import {
   organizationContext,
   organizeRows,
 } from "../../../packages/application/src/query/observation-organization.ts";
+import {
+  balanceHistorySummary,
+  latestBalanceSummary,
+  readDetail,
+} from "../../../packages/application/src/query/read-detail.ts";
 
 export const V2_LATEST_PATH = "/api/v2/balances/latest";
 export const V2_HISTORY_PATH = "/api/v2/balances/history";
@@ -211,9 +220,21 @@ function scopeOf(url: Pick<URL, "searchParams">): V2Scope {
   };
 }
 
-function pageLimit(url: Pick<URL, "searchParams">): number {
+/**
+ * How much each row says (ADR 0123): `summary` (the default) or `full`. It
+ * picks the default page size and the shape of each row, never the rows, so
+ * a cursor is not bound to it and continues under either detail.
+ */
+function detailOf(url: Pick<URL, "searchParams">): BalanceReadDetail {
+  const detail = readDetail(url.searchParams.get("detail"));
+  if (detail === null) throw new HttpError(400, "invalid_detail");
+  return detail;
+}
+
+function pageLimit(url: Pick<URL, "searchParams">, detail: BalanceReadDetail): number {
   const text = url.searchParams.get("limit");
-  if (text === null) return DEFAULT_PROJECTION_PAGE_LIMIT;
+  if (text === null)
+    return detail === "summary" ? DEFAULT_SUMMARY_PAGE_LIMIT : DEFAULT_PROJECTION_PAGE_LIMIT;
   // One of the offered sizes as written: `Number` alone would also read
   // "0x32", "5e1" or " 50" as 50.
   const limit = Number(text);
@@ -521,6 +542,21 @@ async function knownAssetSubtotals(
   };
 }
 
+/**
+ * The inputs a balance cursor is bound to, by the names `kogane.balances.read`
+ * takes them (`collection` is the route's path on HTTP): a continuation must
+ * repeat each one as it was, absent included.
+ */
+const BALANCE_CURSOR_INPUTS = [
+  "collection",
+  "source",
+  "account",
+  "instrument",
+  "metric",
+  "view",
+  "identityRead",
+] as const;
+
 interface Continuation {
   snapshot: BalanceSnapshotRow;
   afterRowSeq: number;
@@ -562,7 +598,11 @@ async function continuation(
     readInstanceId: target.instanceId,
     snapshotReadable: snapshot !== null,
   });
-  if (rejection === "cursor_mismatch") throw new HttpError(400, "cursor_mismatch");
+  // A cursor continues only the query it was read for; the answer names the
+  // inputs that must repeat. The page size and the detail need not (ADR 0119,
+  // ADR 0123).
+  if (rejection === "cursor_mismatch")
+    throw new HttpError(400, "cursor_mismatch", [], { mustMatch: BALANCE_CURSOR_INPUTS });
   if (rejection !== null || snapshot === null) throw new HttpError(410, "context_expired");
   return { snapshot, afterRowSeq: cursor.position, afterSortKey: cursor.sortKey };
 }
@@ -619,11 +659,12 @@ export async function latestBalancePage(
   env: Env,
   url: Pick<URL, "searchParams">,
   mode: IdentityReadMode,
-): Promise<LatestBalancePage> {
+): Promise<LatestBalancePage | LatestBalanceSummaryPage> {
+  const detail = detailOf(url);
   const target = await readTarget(env);
   const reader = target.reader;
   const scope = scopeOf(url);
-  const limit = pageLimit(url);
+  const limit = pageLimit(url, detail);
   const digest = await filterDigest(V2_LATEST_PATH, scope, limit, mode);
   const resolved = await continuation(target, url, digest, () =>
     pageSizeDigests(V2_LATEST_PATH, scope, mode),
@@ -696,7 +737,9 @@ export async function latestBalancePage(
       organized.map((row) => row.organization),
     ),
   };
-  return body;
+  // The summary is this page, line by line: the same rows, cursor, coverage
+  // and subtotals (ADR 0123).
+  return detail === "full" ? body : latestBalanceSummary(body);
 }
 
 /**
@@ -708,11 +751,12 @@ export async function balanceHistoryPage(
   env: Env,
   url: Pick<URL, "searchParams">,
   mode: IdentityReadMode,
-): Promise<BalanceHistoryPage> {
+): Promise<BalanceHistoryPage | BalanceHistorySummaryPage> {
+  const detail = detailOf(url);
   const target = await readTarget(env);
   const reader = target.reader;
   const scope = scopeOf(url);
-  const limit = pageLimit(url);
+  const limit = pageLimit(url, detail);
   const digest = await filterDigest(V2_HISTORY_PATH, scope, limit, mode);
   const resolved = await continuation(target, url, digest, () =>
     pageSizeDigests(V2_HISTORY_PATH, scope, mode),
@@ -804,5 +848,5 @@ export async function balanceHistoryPage(
       organized.map((row) => row.organization),
     ),
   };
-  return body;
+  return detail === "full" ? body : balanceHistorySummary(body);
 }

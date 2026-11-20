@@ -521,7 +521,12 @@ describe("the schedule settings routes (ui)", () => {
     expect(saved.response.headers.has("x-kogane-audit-recorded")).toBe(false);
     expect(await recordsOf(saved.requestId)).toEqual([]);
     const page = await call("/api/ops/v1/schedules", {
-      environment: { SCHEDULES_ENABLED: "true", PIPELINE: pipeline(() => Response.json({})) },
+      environment: {
+        SCHEDULES_ENABLED: "true",
+        PIPELINE: pipeline(() =>
+          Response.json({ schedules: [], maintenance: [], occurrences: [], leases: [] }),
+        ),
+      },
     });
     expect(page.response.status).toBe(200);
     expect(await recordsOf(page.requestId)).toEqual([]);

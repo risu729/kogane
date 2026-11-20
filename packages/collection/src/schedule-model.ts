@@ -110,6 +110,72 @@ export interface ScheduleSnapshot {
   /** The official-site re-survey (ADR 0050); absent from a Processor that predates it. */
   survey?: MaintenanceSurveyView;
 }
+/**
+ * The schedules page in one line per job (ADR 0123): the `summary` detail of
+ * `GET /api/ops/v1/schedules` and `kogane.schedules.read`. Each job keeps its
+ * closed states (kind, enabled, supported, reservation, and whether a
+ * collection request for it would be dispatched, absent where the snapshot
+ * has none) and its newest occurrence (its status and closed failure code),
+ * each source its maintenance reference status and how many maintenance
+ * rules it has, and every held lease is listed. The occurrence list, the
+ * rules' patterns and the re-survey are in the `full` detail only.
+ */
+export interface ScheduleSummary {
+  detail: "summary";
+  schedules: {
+    id: string;
+    source: string | null;
+    kind: ScheduleView["kind"];
+    enabled: boolean;
+    supported: boolean;
+    nextRunAt: string | null;
+    reservation: ScheduleView["reservation"];
+    /**
+     * `collectionRequest.dispatch`: null when no collector serves a request
+     * for the job, absent when the snapshot does not say (an older Processor).
+     */
+    dispatch?: ScheduleCollectionRequest["dispatch"] | null;
+    latest: Pick<ScheduleOccurrence, "nominalAt" | "status" | "failureCode"> | null;
+  }[];
+  maintenance: { source: string; status: ScheduleView["maintenance"]["status"]; rules: number }[];
+  leases: ScheduleSnapshot["leases"];
+}
+/** The summary of one schedules snapshot; derived from it alone, so it says nothing the snapshot does not. */
+export function scheduleSnapshotSummary(snapshot: ScheduleSnapshot): ScheduleSummary {
+  const maintenance = new Map<string, ScheduleSummary["maintenance"][number]>();
+  for (const schedule of snapshot.schedules)
+    if (schedule.source !== null && !maintenance.has(schedule.source))
+      maintenance.set(schedule.source, {
+        source: schedule.source,
+        status: schedule.maintenance.status,
+        rules: snapshot.maintenance.filter((rule) => rule.source === schedule.source).length,
+      });
+  return {
+    detail: "summary",
+    schedules: snapshot.schedules.map((schedule) => ({
+      id: schedule.id,
+      source: schedule.source,
+      kind: schedule.kind,
+      enabled: schedule.enabled,
+      supported: schedule.supported,
+      nextRunAt: schedule.nextRunAt,
+      reservation: schedule.reservation,
+      ...(schedule.collectionRequest === undefined
+        ? {}
+        : { dispatch: schedule.collectionRequest?.dispatch ?? null }),
+      latest:
+        schedule.latest === null
+          ? null
+          : {
+              nominalAt: schedule.latest.nominalAt,
+              status: schedule.latest.status,
+              failureCode: schedule.latest.failureCode,
+            },
+    })),
+    maintenance: [...maintenance.values()],
+    leases: snapshot.leases,
+  };
+}
 export const TIME = /^([01]\d|2[0-3]):[0-5]\d$/u;
 export const ZONES = ["Asia/Tokyo", "UTC", "Australia/Sydney"] as const;
 const DAY = 86_400_000;

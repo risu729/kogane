@@ -170,12 +170,15 @@ interface Continuation {
  * context is gone is `context_expired` (410). Neither ever falls back to the
  * newest snapshot. A cursor read at another offered page size continues at
  * the size asked now (ADR 0119); `pageSizes` is computed only for a cursor.
+ * `mustMatch` names, by `kogane.rewards.read`'s argument names (the route's
+ * path is `collection`), the inputs a `cursor_mismatch` says must repeat.
  */
 async function continuation(
   context: RewardReadContext,
   url: Pick<URL, "searchParams">,
   digest: string,
   pageSizes: () => Promise<readonly string[]>,
+  mustMatch: readonly string[],
 ): Promise<Continuation> {
   const text = url.searchParams.get("cursor");
   if (text === null) return { snapshot: context.snapshot, afterRowSeq: -1 };
@@ -188,7 +191,9 @@ async function continuation(
     readInstanceId: context.readInstanceId,
     snapshotReadable: named !== null,
   });
-  if (rejection === "cursor_mismatch") throw new HttpError(400, "cursor_mismatch");
+  // The answer names the inputs a continuation must repeat (ADR 0123).
+  if (rejection === "cursor_mismatch")
+    throw new HttpError(400, "cursor_mismatch", [], { mustMatch });
   if (
     rejection !== null ||
     named === null ||
@@ -319,8 +324,12 @@ export async function rewardExpiryFromRead(
   const limit = pageLimit(url);
   const scope = { program: program ?? null };
   const digest = await filterDigest("/api/v2/rewards/expiry", { ...scope, limit });
-  const resolved = await continuation(context, url, digest, () =>
-    pageSizeDigests("/api/v2/rewards/expiry", scope),
+  const resolved = await continuation(
+    context,
+    url,
+    digest,
+    () => pageSizeDigests("/api/v2/rewards/expiry", scope),
+    ["collection", "program"],
   );
   const rows = await rewardEstimatePage(context.read, resolved.snapshot.snapshot_id, {
     programId: program,
@@ -362,8 +371,12 @@ export async function rewardSimulationsFromRead(
 ): Promise<Record<string, unknown>> {
   const limit = pageLimit(url);
   const digest = await filterDigest("/api/v2/rewards/simulations", { limit });
-  const resolved = await continuation(context, url, digest, () =>
-    pageSizeDigests("/api/v2/rewards/simulations", {}),
+  const resolved = await continuation(
+    context,
+    url,
+    digest,
+    () => pageSizeDigests("/api/v2/rewards/simulations", {}),
+    ["collection"],
   );
   const rows = await rewardSimulationPage(context.read, resolved.snapshot.snapshot_id, {
     afterRowSeq: resolved.afterRowSeq,

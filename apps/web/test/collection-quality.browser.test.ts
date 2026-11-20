@@ -100,6 +100,14 @@ describe.if(runnable)("collection quality browser", () => {
           });
         if (url.pathname === "/api/collection-quality" && url.search === "?view=status")
           return Response.json(await queryCollectionQualityStatus(executor, { asOf: AS_OF }));
+        // The page reads the full summary and cells; the routes' default is the summary (ADR 0123).
+        // The status view, matched above, takes no `detail`.
+        if (
+          url.pathname.startsWith("/api/collection-quality") &&
+          !url.pathname.endsWith("/accounts") &&
+          url.searchParams.get("detail") !== "full"
+        )
+          return Response.json({ error: "synthetic_summary_not_served" }, { status: 400 });
         if (url.pathname === "/api/collection-quality")
           return Response.json(await queryCollectionQualitySummary(executor, { asOf: AS_OF }));
         if (
