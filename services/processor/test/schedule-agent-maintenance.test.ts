@@ -11,7 +11,7 @@
 // audit record: the builder admits no `delegated` record until S3 (ADR 0064,
 // audit vocabulary). The record's batch is shown with the operator's edit,
 // which is reachable, at the end of this file.
-import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn } from "bun:test";
 import type { Database as SqliteDatabase } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
@@ -39,6 +39,7 @@ import { ACCEPTED_REASON, proposalRef } from "../src/maintenance-survey/decision
 import { envelopeHeaders, testCall } from "./audit-envelope";
 import { maskRandomTokens } from "../../../packages/application/test/random-tokens.ts";
 import { newAuditId } from "../../../packages/application/src/audit/record";
+import { settledTest } from "./support/settle.ts";
 
 const DELEGATE = "mcp-client:maintenance-owner-synthetic";
 const OTHER_DELEGATE = "mcp-client:other-owner-synthetic";
@@ -60,46 +61,49 @@ beforeAll(() => {
   fullCoreDatabase().close();
 }, 60_000);
 
+// Started while the module loads, never in a hook (test/support/settle.ts).
+const bundle = await Bun.build({
+  entrypoints: [new URL("../src/schedule-entrypoint.ts", import.meta.url).pathname],
+  target: "browser",
+  format: "esm",
+  external: ["cloudflare:workers"],
+});
+if (!bundle.success) throw new Error("agent_maintenance_bundle_failed");
+const serviceBindings = Object.fromEntries(
+  jobs
+    .filter((job) => job.workspace?.startsWith("collector-"))
+    .map((job) => [
+      `SCHEDULE_${job.workspace!.replace("collector-", "").replaceAll("-", "_").toUpperCase()}`,
+      { name: "provider", entrypoint: "ScheduledCollection" },
+    ]),
+);
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    workers: [
+      {
+        name: "processor",
+        modules: true,
+        script: await bundle.outputs[0]!.text(),
+        compatibilityDate: "2026-09-07",
+        compatibilityFlags: ["nodejs_compat", "enable_ctx_exports"],
+        d1Databases: ["DB", "READ"],
+        r2Buckets: ["EVIDENCE", "DATA"],
+        bindings: { SCHEDULES_ENABLED: "true" },
+        serviceBindings,
+        durableObjects: { SCHEDULE_ALARMS: { className: "ScheduleAlarm", useSQLite: true } },
+      },
+      {
+        name: "provider",
+        modules: true,
+        script: `import {WorkerEntrypoint} from "cloudflare:workers";let calls=0;export class ScheduledCollection extends WorkerEntrypoint {async runScheduled(cron,time) {calls++;return {status:"completed",runIds:["synthetic-agent-run"],failureCode:null};}}export default {fetch(){return Response.json({calls});}};`,
+        compatibilityDate: "2026-09-07",
+      },
+    ],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  const bundle = await Bun.build({
-    entrypoints: [new URL("../src/schedule-entrypoint.ts", import.meta.url).pathname],
-    target: "browser",
-    format: "esm",
-    external: ["cloudflare:workers"],
-  });
-  if (!bundle.success) throw new Error("agent_maintenance_bundle_failed");
-  const serviceBindings = Object.fromEntries(
-    jobs
-      .filter((job) => job.workspace?.startsWith("collector-"))
-      .map((job) => [
-        `SCHEDULE_${job.workspace!.replace("collector-", "").replaceAll("-", "_").toUpperCase()}`,
-        { name: "provider", entrypoint: "ScheduledCollection" },
-      ]),
-  );
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      workers: [
-        {
-          name: "processor",
-          modules: true,
-          script: await bundle.outputs[0]!.text(),
-          compatibilityDate: "2026-09-07",
-          compatibilityFlags: ["nodejs_compat", "enable_ctx_exports"],
-          d1Databases: ["DB", "READ"],
-          r2Buckets: ["EVIDENCE", "DATA"],
-          bindings: { SCHEDULES_ENABLED: "true" },
-          serviceBindings,
-          durableObjects: { SCHEDULE_ALARMS: { className: "ScheduleAlarm", useSQLite: true } },
-        },
-        {
-          name: "provider",
-          modules: true,
-          script: `import {WorkerEntrypoint} from "cloudflare:workers";let calls=0;export class ScheduledCollection extends WorkerEntrypoint {async runScheduled(cron,time) {calls++;return {status:"completed",runIds:["synthetic-agent-run"],failureCode:null};}}export default {fetch(){return Response.json({calls});}};`,
-          compatibilityDate: "2026-09-07",
-        },
-      ],
-    }),
-  );
   db = (await mf.getD1Database("DB", "processor")) as unknown as D1Database;
   await db.exec(LAYER_A_SQL);
   for (const name of layerBMigrations()) await applyMigration(db, name);

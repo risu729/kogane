@@ -3,7 +3,7 @@
 // resolution world (packages/application/test/instrument-resolution-world.ts);
 // the account coverage beside them is a fixed synthetic page. A refusal is
 // shown as its reason, never as zeros, and no total across sources appears.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -14,6 +14,7 @@ import {
   type World,
 } from "../../../packages/application/test/instrument-resolution-world.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -29,8 +30,13 @@ const GRANT = {
 const PANEL = 'section[aria-labelledby="identity-instrument-coverage"]';
 const PAGE = { limit: 100, truncated: false, nextOffset: null };
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("instrument counts on the identity page", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let store: World;
@@ -97,7 +103,6 @@ describe.if(runnable)("instrument counts on the identity page", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();

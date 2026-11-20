@@ -3,7 +3,7 @@
 // writer, and the next run and the one run after the window are computed by
 // the existing schedule code (ScheduleAlarm, `afterMaintenance`), not by the
 // survey. Synthetic pages, synthetic collector stubs, no provider contact.
-import { afterAll, afterEach, beforeAll, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, spyOn } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { loadBundleFixture } from "./bundle-module-fixture.ts";
 import { nextNominal } from "../../../packages/collection/src/schedule-model.ts";
@@ -21,6 +21,7 @@ import { maintenanceSurveyLane } from "../src/maintenance-survey/lane.ts";
 import { scheduleRoute } from "../src/schedule-store.ts";
 import { startPipeline } from "./harness.ts";
 import { envelopeHeaders, testCall } from "./audit-envelope.ts";
+import { settledTest } from "./support/settle.ts";
 
 const MIZUHO = "https://www.mizuhobank.co.jp/direct/time.html";
 const CONFIG = loadSurveyConfig({
@@ -60,8 +61,10 @@ interface Alarm {
 
 let mf: Miniflare, base: Env, AlarmClass: new (state: State, env: Env) => Alarm;
 let bundleFixture: { dispose(): Promise<void> } | undefined;
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env: base } = await startPipeline());
+const test = settledTest();
 beforeAll(async () => {
-  ({ mf, env: base } = await startPipeline());
   // The production alarm, bundled unchanged; only the platform base class is replaced.
   const bundle = await Bun.build({
     entrypoints: [new URL("../src/schedule-alarm.ts", import.meta.url).pathname],

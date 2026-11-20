@@ -11,7 +11,7 @@
 // synthetic row, the shape a migration that tightens the table would leave. It
 // is added with `ALTER TABLE … ADD COLUMN`, which D1 runs, rather than a
 // table rebuild. Every value is synthetic.
-import { afterAll, expect, test } from "bun:test";
+import { afterAll, expect } from "bun:test";
 import {
   LEGACY_METADATA_RELEASE,
   MANIFEST_METADATA_RELEASE,
@@ -31,10 +31,12 @@ import {
 import { sweep } from "../src/worker.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import { seedArtifact, startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 // Started while the module loads, so a timed-out case cannot take its
 // workerd with it; every case shares it.
 const { mf, env } = await startPipeline();
+const test = settledTest();
 afterAll(async () => {
   await mf.dispose();
 });

@@ -273,7 +273,7 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       };
     return { rows: countOf(data), truncated: false };
   }
-  // One account's reconstructed state, when there is one to show.
+  // One reconstructed state (of one account or a scope, ADR 0116), when there is one to show.
   if (operation === "reconstructed-state.read")
     return { rows: value["reconstruction"] ? 1 : 0, truncated: false };
   // The dated reported state: its accounts and its payables. A read past the

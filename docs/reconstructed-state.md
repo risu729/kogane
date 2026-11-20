@@ -1,7 +1,8 @@
 # Reconstructed state
 
-What adopted events imply for an account's balances and holdings, folded from
-a start snapshot and compared with what the provider reported at the end.
+What adopted events imply for the balances and holdings of an account, or of
+a scope of up to 20 accounts, folded from a start snapshot and compared with
+what each provider reported at the end.
 This is phase 11's first piece
 ([roadmap](roadmap.md#layers-8--11--dated-reported-and-reconstructed-state)),
 decided in [ADR 0052](adr/0052-reconstructed-state-fold.md). It sits beside
@@ -13,7 +14,9 @@ difference between them is shown, never absorbed.
 ([ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md)) reads
 the stored event rows at a cut of the economic commit log, the B adapter turns
 its selection into the fold's input, and `queryReconstructedState` composes
-them for one account, one range, on the cash basis. One application service,
+them for a scope of one to 20 accounts
+([ADR 0116](adr/0116-reconstructed-state-account-scope.md)), one range, on the
+cash basis, at one cut. Nothing is added across accounts. One application service,
 `readReconstructedState`, serves it as `GET /api/v2/reconstructed-state`, as
 the agent tool `kogane.reconstructed-state.read` and through the
 `残高の再構成` page (`/reconstruction`); see
@@ -111,26 +114,39 @@ this; the summary:
 
 ## The query
 
-`queryReconstructedState(sql, { account, from, to, basis, cut, now })`:
-one account, at most 366 days ending no later than the caller's date, `cash`
-only. It answers `unavailable` without CORE 0070 (`economic_guard_missing`)
-or for an account no reported container lists (`no_reported_container`), then
+`queryReconstructedState(sql, { accounts, from, to, basis, cut, now })`:
+one to `RECONSTRUCTION_ACCOUNTS_MAX` (20) distinct accounts, sorted in the
+answer, at most 366 days ending no later than the caller's date, `cash` only.
+The scope is read as one: one cut, one selector load over the closure of
+every account, one `queryDatedState` per end date narrowed to the accounts
+(each account's rows as its one-account read lists them), one read of every
+account's mapped sources (`ACCOUNTS_SOURCES_SQL`) and one fold, whose cells
+are per (account, unit) and whose `accounts` list each account's reported
+containers and cell count. The status and reasons are the scope's: the union
+of every account's reasons under one precedence.
+It answers `unavailable` without CORE 0070 (`economic_guard_missing`)
+or when an account of the scope has no reported container
+(`no_reported_container`; the others are still folded and shown), then
 by precedence `indeterminate` (`log_empty`, `cut_before_log_start`,
 `knowledge_unlogged`, `snapshot_boundary_unknown`), `needs_review`
 (`identity_changed`, `claim_conflict`, `alias_conflict`,
 `revision_chain_inconsistent`, `writer_unsupported`, `revision_left_out`),
-`incomplete` (every other cell gap, `nothing_to_reconstruct`,
-`positions_not_folded`) or `complete`, listing every reason. It returns the
+`incomplete` (every other cell gap, `nothing_to_reconstruct` when an account
+has no cell, `positions_not_folded`) or `complete`, listing every reason. It
+returns the scope (`accounts`), the
 cut, the selector's diagnostics, both reported context ids, the fold's state,
-the late part (at the cut of the end capture, when the account's end balances
-share one capture), and an outer manifest pinning the releases, the cut, the
+the late part (at the cut of the end capture, when every end balance of the
+scope comes from captures of one instant), and an outer manifest
+(`reconstructed-state-query-v2`) pinning the scope, the releases, the cut, the
 set version, the identity epoch and pins, alias rule versions, the coverage
 producer, both snapshot contexts and the fold manifest's digest, with its
 `contextId`.
 
 ## HTTP, agent tool and page
 
-`GET /api/v2/reconstructed-state?account=…&from=YYYY-MM-DD&to=YYYY-MM-DD`
+`GET /api/v2/reconstructed-state?account=…&from=YYYY-MM-DD&to=YYYY-MM-DD`,
+with `account` repeated for a scope of up to 20 accounts (the agent tool takes
+`account` or an `accounts` list, exactly one of them), and
 with optional `basis=cash`, a cut (`coreEpoch` with exactly one of
 `commitSeq`, at least 1, or `instant`, a UTC instant) and `setVersion` (the
 set version the answer must still have). GET and HEAD only, under the reader
@@ -144,16 +160,17 @@ views exist (`404` elsewhere); without CORE 0070 it answers `200` with
 Refusals, one closed code each (the same codes the agent tool carries as
 `refusal:<code>`, [agent API](agent-api.md#reconstructed-state)):
 
-| Status | Code                                                                                                                                                                                                                                                                             |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 400    | `invalid_query`, `scope_unsupported` (several accounts, an instrument), `invalid_account`, `invalid_date`, `invalid_range`, `range_too_long` (over 366 days), `range_in_future` (after today in Tokyo), `basis_unsupported`, `invalid_cut`, `cut_in_future`, `cut_after_log_end` |
-| 403    | `scope_restricted`, `capability_missing`: agent grants only (the route's reader authority always passes)                                                                                                                                                                         |
-| 404    | `unknown_account` (no `accounts` row)                                                                                                                                                                                                                                            |
-| 409    | `cut_epoch_not_current`, `set_version_changed`                                                                                                                                                                                                                                   |
-| 413    | `result_limit_exceeded`: a selector, fold or reported-state bound, refused rather than cut                                                                                                                                                                                       |
+| Status | Code                                                                                                                                                                                                                                                                                                                                                                        |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `invalid_query` (also both `account` and `accounts`), `scope_unsupported` (an instrument), `invalid_account` (also an empty list or an account twice), `too_many_accounts` (over 20), `invalid_date`, `invalid_range`, `range_too_long` (over 366 days), `range_in_future` (after today in Tokyo), `basis_unsupported`, `invalid_cut`, `cut_in_future`, `cut_after_log_end` |
+| 403    | `scope_restricted`, `capability_missing`: agent grants only (the route's reader authority always passes)                                                                                                                                                                                                                                                                    |
+| 404    | `unknown_account` (an account with no `accounts` row; the ref names the key, never the id)                                                                                                                                                                                                                                                                                  |
+| 409    | `cut_epoch_not_current`, `set_version_changed`                                                                                                                                                                                                                                                                                                                              |
+| 413    | `result_limit_exceeded`: a selector, fold or reported-state bound, refused rather than cut                                                                                                                                                                                                                                                                                  |
 
 The page `残高の再構成` (`/reconstruction`, shown while the capability is)
-asks for one account (the accounts reported on the end date are offered), a
+asks for one account, or several separated by spaces or commas (at most 20,
+none twice; the accounts reported on the end date are offered), a
 range and a cut (latest, a sequence or an instant). The form validates dates and
 UTC instants with the domain calendar parser and refuses commit sequences
 above the largest safe integer before sending; the service validates them again.
@@ -169,7 +186,11 @@ selector's unlogged, inconsistent, identity, conflict and unsupported
 entries), the late part and each leg's disposition. Every code is shown
 beside its words. A difference is shown as a difference, never as an
 adjustment or a zero; an absent figure is shown with its reason; a refusal is
-shown with its code. A pin button re-asks the resolved sequence. The page
+shown with its code. A pin button re-asks the resolved sequence. With several
+accounts, the cell and disposition tables gain an account column, a
+`口座ごとの状況` panel lists each account's reported containers, cell count
+and family coverage, and the page says that the status and reasons are the
+scope's; nothing is totalled across accounts. The page
 writes, adopts and approves nothing, and shows no valuation.
 
 ## Step 1: knowledge selection
@@ -323,8 +344,20 @@ an assurance of identical output identities across reader versions.
   of CPU per request on Workers Paid (no `limits.cpu_ms` is set) that rest is
   about 2%, and the whole wall time about 6%. 26 D1 statements per answer
   (ADR 0058, amendment of 2026-10-09). Remote D1 is not measured.
-- The page and the route answer one account and a range; an instrument
-  quantity is never folded (positions are counted), and no valuation is shown.
+- The page and the route answer a scope of one to 20 accounts and a range; an
+  instrument quantity is never folded (positions are counted), and no
+  valuation is shown. A scope shares one cut, one load and one read per date:
+  on the CI-scale statement store, the six mapped accounts together took
+  about as long as the SMBC account alone (about 0.14 s each on `bun:sqlite`
+  locally, not asserted); not measured on workerd or remote D1
+  ([ADR 0116](adr/0116-reconstructed-state-account-scope.md)).
+- A scope's status and reasons are the scope's: a selector reason (an
+  unlogged revision, a conflict, an identity change) does not say which
+  account it concerns, an account without a reported container makes the
+  whole scope `unavailable`, and a scope whose end balances come from captures
+  at different instants has no late part (`end_captures_differ`). A smaller
+  scope or one account answers those. A scope whose union passes a bound is
+  refused as a whole.
 - The input is provisional. Of ADR 0052's held questions, 2 and 8 are
   answered, 1 mostly and 5 partly; 4, 7 and 10 are narrowed but still held,
   and 3, 6, 9 and 11 are held as written (ADR 0052, amendment).
@@ -335,8 +368,8 @@ an assurance of identical output identities across reader versions.
 - An instant cut at or after the log's last `known_at` is `provisional`: a
   later commit from a lagging worker clock can still resolve it to a later
   sequence. The resolved sequence reproduces the answer.
-- The load is whole-history: an account touching more than 2,000 events is
-  refused at every range.
+- The load is whole-history: a scope whose accounts together touch more than
+  2,000 events is refused at every range.
 - Newly accepted SBI Shinsei settlements from the admitted
   `sbi-shinsei-top-balances-and-activity` parser carry the provider's civil
   posting date. The cash fold applies a date strictly between snapshots;
@@ -353,7 +386,7 @@ an assurance of identical output identities across reader versions.
 - No producer states family or history coverage (`coverage-producer-none-v1`),
   so no real account can be `complete` today.
 - Positions carry provider text only and are counted, never folded; only the
-  cash basis and one account are answered. How a reported holding changed
+  cash basis is answered. How a reported holding changed
   between two dates is the reported state's own comparison
   ([holdings changes between two dates](reported-state.md#holdings-changes-between-two-dates),
   ADR 0075), not a reconstruction: no event moves a security quantity yet.

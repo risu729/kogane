@@ -1,6 +1,6 @@
 // Synthetic production-contract responses only. No collector, store or raw
 // financial body is opened by this browser suite.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -13,6 +13,7 @@ import type {
   EvidenceRun,
   EvidenceRunList,
 } from "../../../packages/observation-shared/src/evidence-contract.ts";
+import { settledTest } from "./settle.ts";
 
 const CLIENT = join(import.meta.dir, "..", "dist-evidence");
 const configuredBrowser = process.env["CHROMIUM_PATH"];
@@ -85,9 +86,14 @@ const detail: EvidenceArtifactDetail = {
   },
 };
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("production evidence navigation", () => {
   let server: ReturnType<typeof Bun.serve>;
-  let browser: Browser;
   let origin: string;
   let runStatus = 200;
   let metadataStatus = 200;
@@ -173,7 +179,6 @@ describe.if(runnable)("production evidence navigation", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   });
   afterAll(async () => {
     await browser?.close();

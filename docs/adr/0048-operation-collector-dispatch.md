@@ -828,6 +828,9 @@ publication. A newer unrelated run is not evidence for this operation.
   scan, new capability, grant, resource or provider action.
 - The detail page explicitly distinguishes the original deadline failure
   from current publication. The operations list remains a stored summary.
+  (Since [ADR 0086's second 2026-11-18 amendment](0086-operator-operations-list.md#amendment-2026-11-18-a-listed-requests-status-is-the-one-its-record-reads)
+  the list shows the status the record reads, `projected` included; it still
+  carries no current result.)
 - This implementation supplies the same-operation reporting contract; it
   does not itself prove the original production run published or close its
   production acceptance gate.
