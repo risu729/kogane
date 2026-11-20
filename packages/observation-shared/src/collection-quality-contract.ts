@@ -412,6 +412,142 @@ const summary = z
     ),
   );
 
+// ── status view (ADR 0045, amendment 2026-11-19) ─────────────────────────
+
+/** `GET /api/collection-quality?view=status`: one line per configured job. */
+export const COLLECTION_STATUS_VIEW = "status";
+export const COLLECTION_STATUS_API_VERSION = 1;
+/** A `failuresSinceSuccess` past the receipts the view reads per job. */
+export const FAILURES_BEYOND_WINDOW = "100+";
+/** A dataset whose newest parsed capture is older than this many Tokyo days is `degraded`. */
+export const STATUS_DEGRADED_AFTER_DAYS = 3;
+/**
+ * A job's state, most urgent first after `disabled`: `disabled` (the job is
+ * not enabled), `needs-owner` (its newest unrecovered failure, or a dataset
+ * it captures, waits on the owner: the `user_action_required` rule),
+ * `failing` (failures since its newest success), `degraded` (its attempts
+ * succeed, but a dataset's newest parsed capture is more than
+ * STATUS_DEGRADED_AFTER_DAYS old) and `ok`.
+ */
+const COLLECTION_STATUS_STATES = ["disabled", "needs-owner", "failing", "degraded", "ok"] as const;
+/** Cell reasons a not-publishing dataset does not repeat: on every cell, or about identity. */
+export const NOT_PUBLISHING_OMITTED_REASONS: readonly CellReason[] = [
+  "retention_not_assessed",
+  "identity_unresolved",
+  "identity_not_recorded",
+  "published_without_observations",
+];
+const FAILED_STATUSES: readonly OccurrenceStatus[] = ["failed", "uncertain", "not_dispatched"];
+export type CollectionStatusState = (typeof COLLECTION_STATUS_STATES)[number];
+
+const jobRun = z
+  .strictObject({
+    at: instant,
+    status: z.enum(OCCURRENCE_STATUSES),
+    failureCode: z.optional(code),
+    /** A successful fetch run of the job's source after the failure and before the next receipt. */
+    recovered: z.optional(z.strictObject({ at: instant, by: z.literal("fetch_run") })),
+  })
+  .check(
+    z.refine(
+      (value) =>
+        value.recovered === undefined ||
+        (FAILED_STATUSES.includes(value.status) &&
+          Date.parse(value.recovered.at) > Date.parse(value.at)),
+    ),
+  );
+
+const notPublishing = z.strictObject({
+  dataset: text,
+  /** Distinct fetch units among the dataset's cells that do not publish (0 when it has none). */
+  units: count,
+  newestParsedCapture: z.nullable(instant),
+  ageDays: count,
+  reasons: distinct(z.enum(CELL_REASONS)).check(
+    z.refine(
+      (values) =>
+        values.every((value) => !NOT_PUBLISHING_OMITTED_REASONS.includes(value)) &&
+        values.every(
+          (value, index) =>
+            index === 0 || CELL_REASONS.indexOf(values[index - 1]!) < CELL_REASONS.indexOf(value),
+        ),
+    ),
+  ),
+});
+
+const statusRow = z
+  .strictObject({
+    job: sourceId,
+    /** The job's source, in the job vocabulary of `config/alarm-jobs.json`; null for the Processor tick. */
+    source: z.nullable(sourceId),
+    enabled: z.boolean(),
+    lastRun: z.nullable(jobRun),
+    lastSuccessAt: z.nullable(instant),
+    failuresSinceSuccess: z.union([count, z.literal(FAILURES_BEYOND_WINDOW)]),
+    failureCode: z.nullable(code),
+    state: z.enum(COLLECTION_STATUS_STATES),
+    notPublishing: z.array(notPublishing).check(
+      z.maxLength(COLLECTION_QUALITY_BOUND),
+      z.refine((values) =>
+        values.every((value, index) => index === 0 || values[index - 1]!.dataset < value.dataset),
+      ),
+    ),
+  })
+  .check(
+    z.refine((value) => {
+      const failing = value.failuresSinceSuccess !== 0;
+      if (failing !== (value.failureCode !== null)) return false;
+      if ((value.state === "disabled") === value.enabled) return false;
+      if (value.state === "failing" && !failing) return false;
+      if ((value.state === "ok" || value.state === "degraded") && failing) return false;
+      const stale = value.notPublishing.some((entry) => entry.ageDays > STATUS_DEGRADED_AFTER_DAYS);
+      const owner = value.notPublishing.some((entry) =>
+        entry.reasons.includes("user_action_required"),
+      );
+      if (value.state === "degraded" && !stale) return false;
+      if (value.state === "ok" && (stale || owner)) return false;
+      return true;
+    }),
+  );
+
+const collectionStatus = z
+  .strictObject({
+    apiVersion: z.literal(COLLECTION_STATUS_API_VERSION),
+    view: z.literal(COLLECTION_STATUS_VIEW),
+    asOf: instant,
+    sources: z.array(statusRow).check(
+      z.maxLength(COLLECTION_QUALITY_BOUND),
+      z.refine((values) =>
+        values.every((value, index) => index === 0 || values[index - 1]!.job < value.job),
+      ),
+    ),
+  })
+  .check(
+    z.refine((value) => {
+      const date = tokyoDate(value.asOf);
+      return (
+        date !== null &&
+        value.sources.every((row) =>
+          row.notPublishing.every(
+            (entry) =>
+              entry.newestParsedCapture === null ||
+              ageOf(entry.newestParsedCapture, date, entry.ageDays),
+          ),
+        )
+      );
+    }),
+  );
+
+export type CollectionStatusRun = z.output<typeof jobRun>;
+export type CollectionStatusNotPublishing = z.output<typeof notPublishing>;
+export type CollectionStatusRow = z.output<typeof statusRow>;
+export type CollectionStatus = z.output<typeof collectionStatus>;
+
+/** `GET /api/collection-quality?view=status`. */
+export function validCollectionStatus(value: unknown): value is CollectionStatus {
+  return collectionStatus.safeParse(value).success;
+}
+
 const period = z
   .strictObject({
     kind: z.enum(PERIOD_KINDS),
@@ -776,11 +912,210 @@ export function validAccountCoverage(value: unknown): value is AccountCoverage {
   return accountCoverage.safeParse(value).success;
 }
 
-/** The three routes, by path; any other path under the prefix is not this contract. */
-export function validCollectionQualityResponse(path: string, value: unknown): boolean {
-  if (path === COLLECTION_QUALITY_PATH) return validCollectionQualitySummary(value);
+/**
+ * The three routes, by path; any other path under the prefix is not this
+ * contract. The summary and cell routes answer either detail (ADR 0123):
+ * `detail`, when the caller names the one it asked for, accepts that shape
+ * only, so a page that asked for `full` never takes a summary for it. The
+ * status view (`?view=status`, ADR 0045 amendment 2026-11-19) shares the
+ * summary's path and takes no `detail`, so only a request naming none may
+ * receive it.
+ */
+export function validCollectionQualityResponse(
+  path: string,
+  value: unknown,
+  detail?: CollectionQualityDetail,
+): boolean {
+  const full = detail !== "summary";
+  const summary = detail !== "full";
+  if (path === COLLECTION_QUALITY_PATH)
+    return (
+      (full && validCollectionQualitySummary(value)) ||
+      (summary && summaryLines.safeParse(value).success) ||
+      (detail === undefined && validCollectionStatus(value))
+    );
   const accounts = /^\/api\/collection-quality\/([^/]+)\/accounts$/u.exec(path);
   if (accounts !== null) return validAccountCoverage(value) && value.sourceId === accounts[1];
   const match = /^\/api\/collection-quality\/([^/]+)$/u.exec(path);
-  return match !== null && validCollectionQualityCells(value) && value.sourceId === match[1];
+  if (match === null) return false;
+  if (full && validCollectionQualityCells(value)) return value.sourceId === match[1];
+  const parsed = cellSummary.safeParse(value);
+  return summary && parsed.success && parsed.data.sourceId === match[1];
 }
+
+/**
+ * The `summary` detail of the collection quality reads (ADR 0123), the
+ * default of the summary and cell routes and of
+ * `kogane.collection-quality.read`; `full` is the answer above. A summary is
+ * derived from the full answer alone: it adds no state, keeps every closed
+ * code and count it collapses, and says how much it collapsed. The account
+ * view (ADR 0088) has its full answer only.
+ */
+export const COLLECTION_QUALITY_DETAILS = ["summary", "full"] as const;
+export type CollectionQualityDetail = (typeof COLLECTION_QUALITY_DETAILS)[number];
+/** Summary lines of one source's cells per page. */
+export const COLLECTION_QUALITY_LINE_PAGE = 20;
+/** More cells than this in one source's summary is refused (413), never cut. */
+export const COLLECTION_QUALITY_SUMMARY_CELL_BOUND = 2_000;
+
+type Freshness = z.output<typeof freshness>;
+
+/**
+ * One line of the summary: a source's freshness, newest fetch run, reasons,
+ * jobs and data type counts. Sources whose lines are otherwise the same
+ * share one, and `sourceIds` names each of them.
+ */
+export interface CollectionQualitySourceLine {
+  sourceIds: string[];
+  freshness: Freshness;
+  latestFetchRun: CollectionQualityFetchRun | null;
+  reasons: CollectionQualitySource["reasons"];
+  /** Each job with its newest receipt's nominal time, status and closed failure code. */
+  schedules: CollectionQualityScheduleLine[];
+  /** How many collectors registered runs under no CORE source. */
+  unregistered: number;
+  /** Their distinct closed blocked and failure codes. */
+  unregisteredCodes: string[];
+  /** The provider data types by status; null where the catalogue does not describe the source. */
+  dataTypes: { collected: number; partial: number; notCollected: number } | null;
+}
+
+export interface CollectionQualityScheduleLine {
+  id: string;
+  enabled: boolean;
+  latest:
+    | (Pick<CollectionQualityOccurrence, "nominalAt" | "status" | "failureCode"> & {
+        /** The distinct closed blocked and failure codes of the receipt's terminals. */
+        terminalCodes: string[];
+      })
+    | null;
+}
+
+export interface CollectionQualitySummaryLines {
+  apiVersion: typeof COLLECTION_QUALITY_API_VERSION;
+  detail: "summary";
+  freshnessAsOf: CollectionQualitySummary["freshnessAsOf"];
+  sources: CollectionQualitySourceLine[];
+  otherSchedules: CollectionQualityScheduleLine[];
+}
+
+/**
+ * One dataset, parser and fetch unit of a source, collapsed over its periods:
+ * how many cells (periods) it has and in which state, the named periods it
+ * spans, its newest capture, the freshness of its newest current capture,
+ * and the union of its cells' reasons.
+ */
+export interface CollectionQualityCellLine {
+  dataset: string | null;
+  parser: string | null;
+  unitKey: string | null;
+  cells: number;
+  /** The smallest and largest named period value; both null when no cell names one. */
+  periods: { first: string | null; last: string | null };
+  current: number;
+  olderCurrent: number;
+  noCurrent: number;
+  newestCapturedAt: string;
+  /** That of the cell whose current capture is newest; with none, that of its first cell. */
+  freshness: Freshness;
+  reasons: CollectionQualityCell["reasons"];
+  /** The distinct unit and parse failure codes of the cells' newest captures. */
+  failureCodes: string[];
+  /** The distinct coverage causes of the cells' newest captures. */
+  coverageCauses: string[];
+}
+
+export interface CollectionQualityCellSummary {
+  apiVersion: typeof COLLECTION_QUALITY_API_VERSION;
+  detail: "summary";
+  freshnessAsOf: CollectionQualityCells["freshnessAsOf"];
+  sourceId: string;
+  latestFetchRun: CollectionQualityCells["latestFetchRun"];
+  lines: CollectionQualityCellLine[];
+  /** Every cell of the source was read; `offset` pages the lines. */
+  coverage: {
+    cells: number;
+    lines: number;
+    limit: typeof COLLECTION_QUALITY_LINE_PAGE;
+    truncated: boolean;
+    nextOffset: number | null;
+  };
+}
+
+const scheduleLine = z.strictObject({
+  id: sourceId,
+  enabled: z.boolean(),
+  latest: z.nullable(
+    z.strictObject({
+      nominalAt: instant,
+      status: z.enum(OCCURRENCE_STATUSES),
+      failureCode: z.nullable(code),
+      terminalCodes: distinct(code),
+    }),
+  ),
+});
+const summaryLines = z.strictObject({
+  apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
+  detail: z.literal("summary"),
+  freshnessAsOf,
+  sources: z.array(
+    z.strictObject({
+      sourceIds: z.array(sourceId).check(z.minLength(1), z.maxLength(COLLECTION_QUALITY_BOUND)),
+      freshness,
+      latestFetchRun: fetchRun,
+      reasons: distinct(z.enum(SOURCE_REASONS)),
+      schedules: z.array(scheduleLine).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
+      unregistered: count,
+      unregisteredCodes: distinct(code),
+      dataTypes: z.nullable(
+        z.strictObject({ collected: count, partial: count, notCollected: count }),
+      ),
+    }),
+  ),
+  otherSchedules: z.array(scheduleLine).check(z.maxLength(COLLECTION_QUALITY_BOUND)),
+});
+const cellSummary = z
+  .strictObject({
+    apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
+    detail: z.literal("summary"),
+    freshnessAsOf,
+    sourceId,
+    latestFetchRun: fetchRun,
+    lines: z
+      .array(
+        z
+          .strictObject({
+            dataset: z.nullable(text),
+            parser: z.nullable(text),
+            unitKey: z.nullable(text),
+            cells: id,
+            periods: z.strictObject({ first: z.nullable(text), last: z.nullable(text) }),
+            current: count,
+            olderCurrent: count,
+            noCurrent: count,
+            newestCapturedAt: instant,
+            freshness,
+            reasons: distinct(z.enum(CELL_REASONS)),
+            failureCodes: distinct(code),
+            coverageCauses: distinct(code),
+          })
+          .check(
+            // Every collapsed cell is counted once, under its state.
+            z.refine(
+              (value) => value.current + value.olderCurrent + value.noCurrent === value.cells,
+            ),
+          ),
+      )
+      .check(z.maxLength(COLLECTION_QUALITY_LINE_PAGE)),
+    coverage: z.strictObject({
+      cells: count,
+      lines: count,
+      limit: z.literal(COLLECTION_QUALITY_LINE_PAGE),
+      truncated: z.boolean(),
+      nextOffset: z.nullable(count),
+    }),
+  })
+  .check(
+    z.refine((value) => (value.coverage.nextOffset === null) === !value.coverage.truncated),
+    z.refine((value) => value.coverage.lines <= value.coverage.cells),
+  );

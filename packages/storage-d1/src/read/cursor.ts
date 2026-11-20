@@ -24,7 +24,10 @@ export interface ReadCursor {
   snapshotId: string;
   /** The physical READ database it was read from; null for the CORE projection. */
   readInstanceId: string | null;
-  /** Digest of the route, the resolved scope, the page size and the read mode. */
+  /**
+   * Digest of the route, the resolved scope, the page size and the read mode.
+   * The page size it covers does not bind a continuation (`checkReadCursor`).
+   */
   filterDigest: string;
   /** Opaque position inside the snapshot's contract order, and its sort key. */
   position: number;
@@ -56,16 +59,25 @@ export function decodeReadCursor(text: string): ReadCursor | null {
 /**
  * Whether a decoded cursor may continue this request.
  *
- * `cursor_mismatch` means it belongs to another query (a changed filter or page
- * size); `context_expired` means the fixed context it names is gone — the
- * snapshot was retired or deleted, or the READ database it was built in no
+ * `cursor_mismatch` means it belongs to another query (a changed route, filter
+ * or read mode); `context_expired` means the fixed context it names is gone —
+ * the snapshot was retired or deleted, or the READ database it was built in no
  * longer exists. The two are never the same answer, and neither ever falls back
  * to the newest snapshot.
+ *
+ * The page size is not part of the query (ADR 0119). A cursor's digest still
+ * covers the size its page was read at, so `pageSizeDigests` lists the same
+ * query's digest at every size the route offers, and a cursor carrying one of
+ * them continues at the size asked now. Its position is a keyset position in
+ * the snapshot's fixed order, which no page size moves, so the next page
+ * repeats and skips no row. Without `pageSizeDigests` only `filterDigest`
+ * matches.
  */
 export function checkReadCursor(
   cursor: ReadCursor,
   expected: {
     filterDigest: string;
+    pageSizeDigests?: readonly string[];
     readInstanceId: string | null;
     snapshotReadable: boolean;
   },
@@ -80,7 +92,10 @@ export function checkReadCursor(
       ...(cursor.readInstanceId === null ? {} : { r: cursor.readInstanceId }),
     },
     {
-      filterDigest: expected.filterDigest,
+      filterDigest:
+        expected.pageSizeDigests?.includes(cursor.filterDigest) === true
+          ? cursor.filterDigest
+          : expected.filterDigest,
       readInstanceId: expected.readInstanceId,
       snapshotReadable: expected.snapshotReadable,
     },
