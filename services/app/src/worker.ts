@@ -37,6 +37,7 @@ import {
   cardStatementsUnmatchedApi,
 } from "./card-statements-unmatched-api";
 import { CARD_DEBIT_ACCOUNTS_PATH, cardDebitAccountsApi } from "./card-debit-accounts-api";
+import { PENDING_DECISIONS_PATH, pendingDecisionsApi } from "./pending-decisions-api";
 import { CHANGES_SINCE_PATH, changesSinceApi } from "./changes-since-api";
 import { instrumentCandidatesApi } from "./instrument-candidates-api";
 import { instrumentHistoryApi } from "./instrument-history-api";
@@ -63,6 +64,7 @@ function classify(path: string): string {
   )
     return "card_settlement_review";
   if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
+  if (path === PENDING_DECISIONS_PATH) return "pending_decisions";
   if (path === CHANGES_SINCE_PATH) return "changes_since";
   if (path === REPORTED_STATE_PATH) return "reported_state";
   if (path === REPORTED_HOLDINGS_CHANGE_PATH) return "reported_holdings_change";
@@ -138,6 +140,9 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     cardDebitAccountsApi(request, env, url, subject),
   );
   if (debitAccountsResponse) return debitAccountsResponse;
+  // Operator-only and read-only: what waits for a decision (ADR 0126).
+  const pendingResponse = await catalogue(() => pendingDecisionsApi(request, env, url, subject));
+  if (pendingResponse) return pendingResponse;
   // Reader authority and read-only: what was recorded since a time (ADR 0127).
   const changesResponse = await catalogue(() => changesSinceApi(request, env, url, subject));
   if (changesResponse) return changesResponse;

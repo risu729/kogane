@@ -21,33 +21,35 @@ export interface CursorPayload {
 
 const MAX_OFFSET = 1_000_000;
 
-function base64url(bytes: Uint8Array): string {
+/** The canonical JSON of `payload` as unpadded base64url: the form of every cursor here. */
+export function encodeCursorJson(payload: unknown): string {
   let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
+  for (const byte of new TextEncoder().encode(canonicalJson(payload)))
+    binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/gu, "-").replace(/\//gu, "_").replace(/=+$/u, "");
 }
 
+/** The JSON value of an unpadded base64url cursor, or null for anything else. */
+export function decodeCursorJson(text: string, maxLength: number): unknown {
+  if (text.length > maxLength || !/^[A-Za-z0-9_-]+$/u.test(text)) return null;
+  try {
+    const padded = text.replace(/-/gu, "+").replace(/_/gu, "/");
+    const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
+    return JSON.parse(
+      new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0))),
+    ) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 export function encodeCursor(payload: CursorPayload): string {
-  return base64url(new TextEncoder().encode(canonicalJson(payload)));
+  return encodeCursorJson(payload);
 }
 
 /** `null` for anything that is not a cursor this service issued. */
 export function decodeCursor(text: string): CursorPayload | null {
-  if (text.length > 2048 || !/^[A-Za-z0-9_-]+$/u.test(text)) return null;
-  let json: string;
-  try {
-    const padded = text.replace(/-/gu, "+").replace(/_/gu, "/");
-    const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
-    json = new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
-  } catch {
-    return null;
-  }
-  let value: unknown;
-  try {
-    value = JSON.parse(json);
-  } catch {
-    return null;
-  }
+  const value = decodeCursorJson(text, 2048);
   if (
     !isRecord(value) ||
     !hasExactKeys(value, ["basisRef", "queryDigest", "offset"]) ||

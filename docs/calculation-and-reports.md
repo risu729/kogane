@@ -310,10 +310,13 @@ kinds `invalid_policy`, a source or an account that does not exist
 `unknown_source` or `unknown_account`, and
 more than 500 holdings or 500 price keys and currencies is refused, never cut.
 The manifest (engine, as-of, base unit, policies by digest, the reported
-state's date, cutoff, filters, quantity policy, context id and position
+state's date, cutoff, filters, quantity policy, context id (of the dated read
+without the count of statements before the payable window, so not the `/state`
+answer's; [reported state](reported-state.md#the-answer)) and position
 containers without a snapshot, snapshots and holdings by id with outcomes,
 and the selection manifest) holds no amount; its digest is the context id, so
-a corrected price, or a different reported-state answer on D, gives a new
+a corrected price, or a different reported-state answer on D (other than in
+its count of statements before the window), gives a new
 context.
 
 This is not the report job: the report job values only at a price claimed

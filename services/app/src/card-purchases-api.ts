@@ -7,10 +7,16 @@
 // served only while `cardPurchasesAvailable` is, and without those actions
 // (packages/application/src/query/purchases-explain.ts, docs/agent-api.md).
 import { storeHasFeature } from "../../../packages/application/src/query/store-schema.ts";
+import { CARD_PURCHASE_LINE_SORTS } from "../../../packages/domain/src/card-purchase-view.ts";
 import {
+  CARD_PURCHASE_ACCOUNT,
   CARD_PURCHASE_EVENT_ID,
+  CARD_PURCHASE_LINES_CURSOR_MAX,
   CARD_PURCHASE_PERIOD,
   CardPurchaseLimitError,
+  linesCursorFits,
+  queryCardPurchaseCards,
+  queryCardPurchaseLines,
   queryCardPurchases,
 } from "../../../packages/application/src/query/card-purchases.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
@@ -18,7 +24,91 @@ import { principalFor } from "./grants";
 import { HttpError, json } from "./http";
 
 export const CARD_PURCHASES_PATH = "/api/v2/card-purchases";
-const PARAMETERS = ["offset", "period", "eventId"];
+const PARAMETERS = [
+  "offset",
+  "period",
+  "eventId",
+  "view",
+  "usageMonth",
+  "account",
+  "sort",
+  "cursor",
+];
+/** The line view's own parameters, refused beside any other view. */
+const LINE_PARAMETERS = ["account", "sort", "cursor"];
+
+/**
+ * `?view=lines` (ADR 0125 amendment): the line answer
+ * `kogane.purchases.explain` returns as `data` for `view: lines`, from the
+ * same `queryCardPurchaseLines`. Exactly one of a statement `period` and a
+ * `usageMonth`, optionally an `account`, a `sort` and the previous page's
+ * `cursor`; no `offset` or `eventId`.
+ */
+async function linesView(env: Env, params: URLSearchParams): Promise<Response> {
+  if (params.has("offset") || params.has("eventId")) throw new HttpError(400, "invalid_query");
+  const period = params.get("period");
+  const usageMonth = params.get("usageMonth");
+  if ((period === null) === (usageMonth === null)) throw new HttpError(400, "invalid_query");
+  for (const value of [period, usageMonth])
+    if (value !== null && !CARD_PURCHASE_PERIOD.test(value))
+      throw new HttpError(400, "invalid_period");
+  const account = params.get("account");
+  const sort = params.get("sort");
+  const cursor = params.get("cursor");
+  if (
+    (account !== null && !CARD_PURCHASE_ACCOUNT.test(account)) ||
+    (sort !== null && !(CARD_PURCHASE_LINE_SORTS as readonly string[]).includes(sort))
+  )
+    throw new HttpError(400, "invalid_query");
+  const query = {
+    ...(period === null ? {} : { period }),
+    ...(usageMonth === null ? {} : { usageMonth }),
+    ...(account === null ? {} : { account }),
+    ...(sort === null ? {} : { sort: sort as (typeof CARD_PURCHASE_LINE_SORTS)[number] }),
+  };
+  // A cursor this read did not issue for this request is refused before reading.
+  if (cursor !== null && !linesCursorFits(cursor, query)) throw new HttpError(400, "invalid_query");
+  let page;
+  try {
+    page = await queryCardPurchaseLines(d1Executor(env.DB), {
+      ...query,
+      ...(cursor === null ? {} : { cursor }),
+    });
+  } catch (error) {
+    // A filter too large to read is refused, never partially listed.
+    if (error instanceof CardPurchaseLimitError) throw new HttpError(413, "result_limit_exceeded");
+    throw error;
+  }
+  return json({ apiVersion: 2, ...page });
+}
+
+/**
+ * `?view=cards` (ADR 0125): the per-card answer `kogane.purchases.explain`
+ * returns as `data` for `view: cards`, from the same `queryCardPurchaseCards`.
+ * Exactly one of a statement `period` and a `usageMonth`; no `offset` or
+ * `eventId`.
+ */
+async function cardsView(env: Env, params: URLSearchParams): Promise<Response> {
+  if (params.has("offset") || params.has("eventId")) throw new HttpError(400, "invalid_query");
+  const period = params.get("period");
+  const usageMonth = params.get("usageMonth");
+  if ((period === null) === (usageMonth === null)) throw new HttpError(400, "invalid_query");
+  for (const value of [period, usageMonth])
+    if (value !== null && !CARD_PURCHASE_PERIOD.test(value))
+      throw new HttpError(400, "invalid_period");
+  let page;
+  try {
+    page = await queryCardPurchaseCards(d1Executor(env.DB), {
+      ...(period === null ? {} : { period }),
+      ...(usageMonth === null ? {} : { usageMonth }),
+    });
+  } catch (error) {
+    // A filter too large to total is refused, never partially summed.
+    if (error instanceof CardPurchaseLimitError) throw new HttpError(413, "result_limit_exceeded");
+    throw error;
+  }
+  return json({ apiVersion: 2, ...page });
+}
 
 /**
  * Served only where CORE 0047 is applied, so a build deployed ahead of the
@@ -46,9 +136,17 @@ export async function cardPurchasesApi(
       !PARAMETERS.includes(key) ||
       url.searchParams.getAll(key).length !== 1 ||
       !value ||
-      value.length > 128
+      value.length > (key === "cursor" ? CARD_PURCHASE_LINES_CURSOR_MAX : 128)
     )
       throw new HttpError(400, "invalid_query");
+  const view = url.searchParams.get("view") ?? "events";
+  if (view !== "events" && view !== "cards" && view !== "lines")
+    throw new HttpError(400, "invalid_query");
+  if (view === "lines") return linesView(env, url.searchParams);
+  if (LINE_PARAMETERS.some((key) => url.searchParams.has(key)))
+    throw new HttpError(400, "invalid_query");
+  if (view === "cards") return cardsView(env, url.searchParams);
+  if (url.searchParams.has("usageMonth")) throw new HttpError(400, "invalid_query");
   const text = url.searchParams.get("offset") ?? "0";
   const offset = Number(text);
   if (!/^(0|[1-9]\d*)$/u.test(text) || !Number.isSafeInteger(offset) || offset > 1_000_000)
