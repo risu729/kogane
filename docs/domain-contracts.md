@@ -176,7 +176,11 @@ policy it applies; none has a default.
   1. candidates of another metric or unit are excluded;
   2. non-exact values and partial or unknown coverage are unresolved;
   3. `same` evidence is bundled when it agrees; disagreements stay
-     `conflicting_evidence` unless `conflictRule: "prefer-lowest-rank"`;
+     `conflicting_evidence` unless `conflictRule: "prefer-lowest-rank"`.
+     `same` is read as an equivalence: a bundle is a connected component of
+     `same` claims, so `a ≡ c` and `b ≡ c` make one bundle of a, b and c
+     even with no claim between a and b
+     ([ADR 0001, amendment 2026-11-18](adr/0001-domain-axes.md#amendment-2026-11-18-same-is-an-equivalence-in-adoption));
   4. a total and its complete, pairwise-disjoint breakdown are alternatives
      (`preferBreakdown`, default true); a mismatch leaves both unresolved with
      a warning;

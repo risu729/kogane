@@ -19,6 +19,8 @@ import {
   PARTIAL_ID,
   partialDetail,
   RESTRICTED_ID,
+  TRUNCATED_ID,
+  truncatedCompleteDetail,
   UNEXPLAINED_ID,
 } from "./report-fixture.ts";
 
@@ -52,6 +54,7 @@ describe.if(runnable)("fixed report artifacts", () => {
       return Response.json(detail);
     }
     if (id === COMPLETE_ID) return Response.json(completeDetail());
+    if (id === TRUNCATED_ID) return Response.json(truncatedCompleteDetail());
     if (id === RESTRICTED_ID) return Response.json(partialDetail(RESTRICTED_ID, "restricted"));
     if (id === UNEXPLAINED_ID) return Response.json(partialDetail(UNEXPLAINED_ID));
     if (id === COLON_ID) return Response.json(partialDetail(COLON_ID));
@@ -191,14 +194,30 @@ describe.if(runnable)("fixed report artifacts", () => {
     await page.close();
   }, 30_000);
 
-  test("a complete report names its whole figure and a truncated catalogue", async () => {
+  test("a complete report names its whole figure", async () => {
     const page = await open(`/reports/${COMPLETE_ID}`, "評価レポートの内容");
     await page.getByRole("region", { name: "保有資産ごとの評価" }).waitFor();
     const main = await page.locator("main").innerText();
     expect(main).toContain("評価額の合計");
     expect(main).toContain("すべて評価済み");
     expect(main).toContain("保存内容のみ（入力からは再計算できない）");
+    expect(main).not.toContain("保有資産が上限で打ち切られています。");
+    await page.close();
+  }, 30_000);
+
+  test("a body stored complete but cut at the row bound is shown as a partial subtotal", async () => {
+    // Every row it holds is valued, but positions past the bound were never
+    // read: its figure is not the whole (INV05).
+    const page = await open(`/reports/${TRUNCATED_ID}`, "評価レポートの内容");
+    await page.getByRole("region", { name: "保有資産ごとの評価" }).waitFor();
+    const main = await page.locator("main").innerText();
+    expect(main).toContain("評価できた保有資産だけの小計");
+    expect(main).toContain("確認できた範囲のみ評価");
+    expect(main).toContain("上限を超えた保有資産を含みません。");
     expect(main).toContain("保有資産が上限で打ち切られています。");
+    expect(main).not.toContain("評価額の合計");
+    expect(main).not.toContain("すべて評価済み");
+    expect(main).not.toContain("すべての保有資産を評価できたレポートです。");
     await page.close();
   }, 30_000);
 

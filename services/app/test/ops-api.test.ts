@@ -26,7 +26,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import demo from "./snapshot-worker";
 import worker from "../src/worker";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
-import { validOperationRecord } from "../../../packages/observation-shared/src/operation-contract";
+import {
+  validOperationListPage,
+  validOperationRecord,
+} from "../../../packages/observation-shared/src/operation-contract";
 import { PURCHASES_TOOL_NAME } from "../src/agent-service";
 import { MCP_TOOLS, RECONSTRUCTED_STATE_MCP_TOOLS } from "../src/mcp";
 import { OPS_MCP_TOOLS, OPS_TOOL_NAMES } from "../src/ops-tools";
@@ -1276,6 +1279,8 @@ describe("the operator lists every principal's operations (ADR 0086)", () => {
     const own = await list("?limit=50");
     expect(own.status).toBe(200);
     expect(own.json["schemaVersion"]).toBe("kogane-operation-list-v1");
+    // The page the 依頼の一覧 page reads, over the real migrations.
+    expect(validOperationListPage(own.json)).toBe(true);
     const stored = await storedIds();
     expect(idsOf(own.json)).toEqual(stored.slice(0, 50));
     expect(own.json["nextCursor"]).toBe(stored.length > 50 ? stored[49] : null);
@@ -1314,7 +1319,10 @@ describe("the operator lists every principal's operations (ADR 0086)", () => {
     const second = await list(`?limit=2&cursor=${first.json["nextCursor"]}`, LISTER_PEER);
     expect(idsOf(second.json)).toEqual(all.slice(2, 4));
     expect(second.json["nextCursor"]).toBe(all.length > 4 ? all[3] : null);
+    expect(validOperationListPage(first.json)).toBe(true);
+    expect(validOperationListPage(second.json)).toBe(true);
     const imports = await list("?kind=import&limit=50");
+    expect(validOperationListPage(imports.json, { kind: "import" })).toBe(true);
     expect(idsOf(imports.json)).toEqual((await storedIds("kind='import'")).slice(0, 50));
     expect(idsOf(imports.json).length).toBeGreaterThan(0);
     const projections = await list("?status=accepted&kind=projection&limit=50");
