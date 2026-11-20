@@ -297,7 +297,14 @@ describe("collection quality page reads", () => {
         { source: "sony-bank", view: "cells", offset: 0 },
       ],
       ["/api/collection-quality/sony-bank/accounts", { source: "sony-bank", view: "accounts" }],
-      // The status view (ADR 0045, amendment 2026-11-19): the summary path's one query.
+      // The full answers the summaries are shaped from (ADR 0123).
+      ["/api/collection-quality?detail=full", { detail: "full" }],
+      ["/api/collection-quality/sony-bank?detail=full", { source: "sony-bank", detail: "full" }],
+      [
+        "/api/collection-quality/sony-bank?offset=0&detail=full",
+        { source: "sony-bank", offset: 0, detail: "full" },
+      ],
+      // The status view (ADR 0045, amendment 2026-11-19): its one query, which takes no `detail`.
       ["/api/collection-quality?view=status", { view: "status" }],
     ] as const) {
       const route = await page.route(query);
@@ -374,6 +381,9 @@ describe("collection quality page reads", () => {
       // The status view is the summary's: it names no source and no page.
       { view: "status", source: "sony-bank" },
       { view: "status", offset: 0 },
+      // It is compact already, so it takes no `detail` (ADR 0123).
+      { view: "status", detail: "full" },
+      { view: "status", detail: "summary" },
     ]) {
       const overHttp = await page.http(QUALITY, args);
       expect(overHttp.status, JSON.stringify(args)).toBe(400);
@@ -440,7 +450,7 @@ describe("the audit rows of the report and collection quality reads", () => {
     expect(
       (await page.mcp(REPORTS, { reportId: "rpt:synthetic-open", view: "explanation" })).isError,
     ).toBe(false);
-    const cells = await page.http(QUALITY, { source: "sony-bank" }, EVIDENCE_GRANT);
+    const cells = await page.http(QUALITY, { source: "sony-bank", detail: "full" }, EVIDENCE_GRANT);
     expect(cells.status).toBe(200);
     const accounts = await page.mcp(QUALITY, { source: "sony-bank", view: "accounts" });
     expect(accounts.isError).toBe(false);

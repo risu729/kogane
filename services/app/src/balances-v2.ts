@@ -11,7 +11,8 @@
 // position: no account label, no provider metric, no amount. Every
 // continuation request goes through the same Access gate and the same scope
 // resolution as the first, and a cursor whose filter digest differs is
-// refused rather than reinterpreted.
+// refused rather than reinterpreted. The page size alone is not a different
+// query: a cursor read at another offered size continues (ADR 0119).
 
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { metricById, resolveMetric, UNKNOWN_METRIC } from "../../../packages/domain/src/metrics.ts";
@@ -28,11 +29,14 @@ import type {
   BalanceEvidenceMember,
   BalanceHistoryItem,
   BalanceHistoryPage,
+  BalanceHistorySummaryPage,
+  BalanceReadDetail,
   BalanceHistoryRow,
   BalanceRow,
   KnownAssetsSubtotals,
   LatestBalanceItem,
   LatestBalancePage,
+  LatestBalanceSummaryPage,
   MeasureDescriptor,
   ObservedQuantityWire,
   SnapshotDataCoverage,
@@ -47,6 +51,7 @@ import type { IdentityReadMode } from "../../../packages/read-model/src/index";
 import {
   d1Executor,
   DEFAULT_PROJECTION_PAGE_LIMIT,
+  DEFAULT_SUMMARY_PAGE_LIMIT,
   KNOWN_ASSETS_POLICY,
   knownAssetMetricIds,
   PROJECTION_PAGE_LIMITS,
@@ -75,6 +80,11 @@ import {
   organizationContext,
   organizeRows,
 } from "../../../packages/application/src/query/observation-organization.ts";
+import {
+  balanceHistorySummary,
+  latestBalanceSummary,
+  readDetail,
+} from "../../../packages/application/src/query/read-detail.ts";
 
 export const V2_LATEST_PATH = "/api/v2/balances/latest";
 export const V2_HISTORY_PATH = "/api/v2/balances/history";
@@ -210,9 +220,21 @@ function scopeOf(url: Pick<URL, "searchParams">): V2Scope {
   };
 }
 
-function pageLimit(url: Pick<URL, "searchParams">): number {
+/**
+ * How much each row says (ADR 0123): `summary` (the default) or `full`. It
+ * picks the default page size and the shape of each row, never the rows, so
+ * a cursor is not bound to it and continues under either detail.
+ */
+function detailOf(url: Pick<URL, "searchParams">): BalanceReadDetail {
+  const detail = readDetail(url.searchParams.get("detail"));
+  if (detail === null) throw new HttpError(400, "invalid_detail");
+  return detail;
+}
+
+function pageLimit(url: Pick<URL, "searchParams">, detail: BalanceReadDetail): number {
   const text = url.searchParams.get("limit");
-  if (text === null) return DEFAULT_PROJECTION_PAGE_LIMIT;
+  if (text === null)
+    return detail === "summary" ? DEFAULT_SUMMARY_PAGE_LIMIT : DEFAULT_PROJECTION_PAGE_LIMIT;
   // One of the offered sizes as written: `Number` alone would also read
   // "0x32", "5e1" or " 50" as 50.
   const limit = Number(text);
@@ -222,9 +244,10 @@ function pageLimit(url: Pick<URL, "searchParams">): number {
 }
 
 /**
- * What the cursor is bound to: the route, the resolved scope, the page size
- * and the identity read mode. Changing any of them makes a stored cursor
- * belong to a different query, and the continuation is refused.
+ * What the cursor carries: the digest of the route, the resolved scope, the
+ * page size and the identity read mode. Changing the route, the scope or the
+ * mode makes a stored cursor belong to a different query, and the
+ * continuation is refused; another offered page size continues it (ADR 0119).
  */
 async function filterDigest(
   route: string,
@@ -519,6 +542,21 @@ async function knownAssetSubtotals(
   };
 }
 
+/**
+ * The inputs a balance cursor is bound to, by the names `kogane.balances.read`
+ * takes them (`collection` is the route's path on HTTP): a continuation must
+ * repeat each one as it was, absent included.
+ */
+const BALANCE_CURSOR_INPUTS = [
+  "collection",
+  "source",
+  "account",
+  "instrument",
+  "metric",
+  "view",
+  "identityRead",
+] as const;
+
 interface Continuation {
   snapshot: BalanceSnapshotRow;
   afterRowSeq: number;
@@ -531,12 +569,15 @@ interface Continuation {
  * membership stays fixed while the reader pages. A cursor for another query
  * is `cursor_mismatch` (400) and a snapshot that no longer exists is
  * `context_expired` (410): the reader is never moved silently to a newer
- * list.
+ * list. The page size is not part of the query: a cursor read at another
+ * offered size continues at the size asked now (ADR 0119), so `pageSizes`
+ * gives the same query's digest at each of them, computed only for a cursor.
  */
 async function continuation(
   target: ReadTarget,
   url: Pick<URL, "searchParams">,
   digest: string,
+  pageSizes: () => Promise<readonly string[]>,
 ): Promise<Continuation | null> {
   if (target.contractMismatch) throw new HttpError(503, "read_model_unavailable");
   const text = url.searchParams.get("cursor");
@@ -549,6 +590,7 @@ async function continuation(
   const snapshot = await target.reader.snapshot(cursor.snapshotId);
   const rejection = checkReadCursor(cursor, {
     filterDigest: digest,
+    pageSizeDigests: await pageSizes(),
     // A cursor from another physical read model — a rebuilt READ database, or
     // the CORE projection this deployment no longer serves — expires. Snapshot
     // ids are digests of content and repeat across rebuilds, so the instance
@@ -556,9 +598,18 @@ async function continuation(
     readInstanceId: target.instanceId,
     snapshotReadable: snapshot !== null,
   });
-  if (rejection === "cursor_mismatch") throw new HttpError(400, "cursor_mismatch");
+  // A cursor continues only the query it was read for; the answer names the
+  // inputs that must repeat. The page size and the detail need not (ADR 0119,
+  // ADR 0123).
+  if (rejection === "cursor_mismatch")
+    throw new HttpError(400, "cursor_mismatch", [], { mustMatch: BALANCE_CURSOR_INPUTS });
   if (rejection !== null || snapshot === null) throw new HttpError(410, "context_expired");
   return { snapshot, afterRowSeq: cursor.position, afterSortKey: cursor.sortKey };
+}
+
+/** The digests of one query at every offered page size (`continuation`). */
+function pageSizeDigests(route: string, scope: V2Scope, mode: IdentityReadMode): Promise<string[]> {
+  return Promise.all(PROJECTION_PAGE_LIMITS.map((size) => filterDigest(route, scope, size, mode)));
 }
 
 /**
@@ -608,13 +659,16 @@ export async function latestBalancePage(
   env: Env,
   url: Pick<URL, "searchParams">,
   mode: IdentityReadMode,
-): Promise<LatestBalancePage> {
+): Promise<LatestBalancePage | LatestBalanceSummaryPage> {
+  const detail = detailOf(url);
   const target = await readTarget(env);
   const reader = target.reader;
   const scope = scopeOf(url);
-  const limit = pageLimit(url);
+  const limit = pageLimit(url, detail);
   const digest = await filterDigest(V2_LATEST_PATH, scope, limit, mode);
-  const resolved = await continuation(target, url, digest);
+  const resolved = await continuation(target, url, digest, () =>
+    pageSizeDigests(V2_LATEST_PATH, scope, mode),
+  );
   // No published snapshot at all: the read model is unavailable, which is a
   // different answer from "you hold no balances" (05 §7, G3-01).
   if (!resolved) throw new HttpError(503, "read_model_unavailable");
@@ -683,7 +737,9 @@ export async function latestBalancePage(
       organized.map((row) => row.organization),
     ),
   };
-  return body;
+  // The summary is this page, line by line: the same rows, cursor, coverage
+  // and subtotals (ADR 0123).
+  return detail === "full" ? body : latestBalanceSummary(body);
 }
 
 /**
@@ -695,13 +751,16 @@ export async function balanceHistoryPage(
   env: Env,
   url: Pick<URL, "searchParams">,
   mode: IdentityReadMode,
-): Promise<BalanceHistoryPage> {
+): Promise<BalanceHistoryPage | BalanceHistorySummaryPage> {
+  const detail = detailOf(url);
   const target = await readTarget(env);
   const reader = target.reader;
   const scope = scopeOf(url);
-  const limit = pageLimit(url);
+  const limit = pageLimit(url, detail);
   const digest = await filterDigest(V2_HISTORY_PATH, scope, limit, mode);
-  const resolved = await continuation(target, url, digest);
+  const resolved = await continuation(target, url, digest, () =>
+    pageSizeDigests(V2_HISTORY_PATH, scope, mode),
+  );
   if (!resolved) throw new HttpError(503, "read_model_unavailable");
   const refusal = await snapshotRefusal(target, resolved.snapshot);
   if (refusal !== null) throw new HttpError(503, refusal);
@@ -789,5 +848,5 @@ export async function balanceHistoryPage(
       organized.map((row) => row.organization),
     ),
   };
-  return body;
+  return detail === "full" ? body : balanceHistorySummary(body);
 }

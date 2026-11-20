@@ -225,7 +225,11 @@ export default {
       const known = error instanceof HttpError;
       errorCode = known ? error.code : "internal_error";
       const refs = known && error.refs.length > 0 ? { refs: error.refs } : {};
-      response = json({ error: errorCode, requestId, ...refs }, known ? error.status : 500);
+      const hints = known ? error.hints : {};
+      response = json(
+        { error: errorCode, requestId, ...refs, ...hints },
+        known ? error.status : 500,
+      );
     }
     try {
       console.log(

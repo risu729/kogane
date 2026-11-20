@@ -62,6 +62,7 @@ describe("shared API schema", () => {
         identityRead: "identityReadModes",
         cursor: "balancesV2",
         limit: "balancesV2",
+        detail: "balancesV2",
       },
       "/api/v2/balances/history": {
         source: "collectionFilters",
@@ -72,6 +73,7 @@ describe("shared API schema", () => {
         identityRead: "identityReadModes",
         cursor: "balancesV2",
         limit: "balancesV2",
+        detail: "balancesV2",
       },
     });
     expect(LIST_PATH_CAPABILITY).toEqual({

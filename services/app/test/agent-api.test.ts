@@ -655,6 +655,7 @@ describe("untrusted provider content (AT71)", () => {
           "account",
           "collection",
           "cursor",
+          "detail",
           "identityRead",
           "instrument",
           "limit",
@@ -696,7 +697,7 @@ describe("untrusted provider content (AT71)", () => {
         name: "kogane.collection-quality.read",
         required: [],
         closed: false,
-        properties: ["offset", "source", "view"],
+        properties: ["detail", "offset", "source", "view"],
         annotations: readOnly,
       },
       {
