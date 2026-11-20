@@ -33,6 +33,10 @@ export function createSmokeProxy(pagePort, tlsPort, denied = () => {}) {
     upstream.end();
   });
   proxy.on("connect", (request, socket, head) => {
+    // The server hands over the raw socket with no error listener. Chrome can
+    // reset a refused tunnel before the 403 is written; that reset must not
+    // crash the smoke process.
+    socket.on("error", () => {});
     if (request.url !== `127.0.0.1:${tlsPort}`) {
       denied();
       socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
@@ -53,7 +57,7 @@ export function createSmokeProxy(pagePort, tlsPort, denied = () => {}) {
 export async function runImageSmoke() {
   const launch = await import(pathToFileURL("/app/browser-launch.mjs"));
   const { chromium } = await import(pathToFileURL("/app/node_modules/playwright/index.mjs"));
-  const version = "157.0.8103.78";
+  const version = "158.0.8127.36";
   const directory = await mkdtemp(join(tmpdir(), "chrome-image-smoke-"));
   const profilesBefore = (await readdir(tmpdir())).filter((name) =>
     name.startsWith("kogane-globalpass-profile-"),
