@@ -24,7 +24,7 @@ async function temporary() {
 afterEach(async () => {
   for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true });
 });
-const version = "157.0.8103.78-1";
+const version = "158.0.8127.36-1";
 const manifest = {
   schemaVersion: 1,
   package: "google-chrome-stable",
@@ -162,7 +162,7 @@ test("untrusted manifest URL changes fail before any download or file creation",
     expect(called).toBe(false);
     await expect(stat(target)).rejects.toThrow();
   }
-  const changedVersion = "158.0.8103.78-1";
+  const changedVersion = "159.0.8127.36-1";
   expect(() =>
     validateManifest({
       ...manifest,

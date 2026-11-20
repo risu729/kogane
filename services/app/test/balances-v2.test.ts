@@ -146,7 +146,7 @@ describe("v2 balance read model", () => {
   });
 
   it("returns typed quantities, measures, adoption and time, and never a net worth", async () => {
-    const response = await call("/api/v2/balances/latest");
+    const response = await call("/api/v2/balances/latest?detail=full");
     expect(response.status).toBe(200);
     const body = (await response.json()) as LatestPage;
     expect(validApiResponse("/api/v2/balances/latest", body)).toBe(true);
@@ -274,6 +274,59 @@ describe("v2 balance read model", () => {
     expect((await build()).status).toBe("complete");
   }, 180_000);
 
+  it("continues a cursor at another offered page size, from where its page ended (ADR 0119)", async () => {
+    // The page size is not part of the query: a cursor read at 50 continues
+    // at 100 and at 200, and the pages join into exactly the list one wider
+    // page reads, with no row repeated or skipped, on the same snapshot.
+    const ids = (page: LatestPage) => page.items.map((item) => item.observationId);
+    const whole = (await (await call("/api/v2/balances/latest?limit=500")).json()) as LatestPage;
+    expect(whole.items.length).toBeGreaterThan(350);
+    const first = (await (await call("/api/v2/balances/latest?limit=50")).json()) as LatestPage;
+    expect(first.page.snapshotId).toBe(whole.page.snapshotId);
+    const second = await call(
+      `/api/v2/balances/latest?limit=100&cursor=${encodeURIComponent(first.page.nextCursor!)}`,
+    );
+    expect(second.status).toBe(200);
+    const secondPage = (await second.json()) as LatestPage;
+    expect(validApiResponse("/api/v2/balances/latest", secondPage)).toBe(true);
+    expect(secondPage.page.limit).toBe(100);
+    expect(secondPage.page.snapshotId).toBe(whole.page.snapshotId);
+    // The next cursor is minted at the size asked now, and is itself
+    // continued at another size.
+    const third = (await (
+      await call(
+        `/api/v2/balances/latest?limit=200&cursor=${encodeURIComponent(secondPage.page.nextCursor!)}`,
+      )
+    ).json()) as LatestPage;
+    expect(third.page.limit).toBe(200);
+    expect([...ids(first), ...ids(secondPage), ...ids(third)]).toEqual(ids(whole).slice(0, 350));
+
+    // The same on history, whose cursor is a sort key and an id.
+    type HistoryPage = { items: { observationId: number }[]; page: { nextCursor: string } };
+    const history = async (query: string) =>
+      (await (await call(`/api/v2/balances/history?${query}`)).json()) as HistoryPage;
+    const historyIds = (page: HistoryPage) => page.items.map((item) => item.observationId);
+    const wholeHistory = await history("limit=200");
+    const narrow = await history("limit=50");
+    const wide = await history(`limit=100&cursor=${encodeURIComponent(narrow.page.nextCursor)}`);
+    expect([...historyIds(narrow), ...historyIds(wide)]).toEqual(
+      historyIds(wholeHistory).slice(0, 150),
+    );
+
+    // A changed filter is still another query, whatever the page size.
+    const filtered = await call(
+      `/api/v2/balances/latest?limit=100&source=other-test&cursor=${encodeURIComponent(first.page.nextCursor!)}`,
+    );
+    expect(filtered.status).toBe(400);
+    expect(await filtered.json()).toMatchObject({ error: "cursor_mismatch" });
+    // So is another identity read mode: the cursor was read in the default.
+    const otherMode = await call(
+      `/api/v2/balances/latest?limit=100&identityRead=as-recorded&cursor=${encodeURIComponent(first.page.nextCursor!)}`,
+    );
+    expect(otherMode.status).toBe(400);
+    expect(await otherMode.json()).toMatchObject({ error: "cursor_mismatch" });
+  });
+
   it("refuses a cursor from another query and an expired snapshot", async () => {
     const first = (await (await call("/api/v2/balances/latest?limit=50")).json()) as LatestPage;
     expect(first.page.nextCursor).not.toBeNull();
@@ -285,8 +338,10 @@ describe("v2 balance read model", () => {
     );
     expect(mismatch.status).toBe(400);
     expect(await mismatch.json()).toMatchObject({ error: "cursor_mismatch" });
-    // A different page size is also a different query.
-    expect((await call(`/api/v2/balances/latest?limit=100&cursor=${cursor}`)).status).toBe(400);
+    // Another route is another query too: a latest cursor does not page history.
+    const otherRoute = await call(`/api/v2/balances/history?limit=50&cursor=${cursor}`);
+    expect(otherRoute.status).toBe(400);
+    expect(await otherRoute.json()).toMatchObject({ error: "cursor_mismatch" });
     // A malformed cursor is refused before any read.
     const malformed = await call("/api/v2/balances/latest?cursor=not-a-cursor");
     expect(malformed.status).toBe(400);
@@ -335,7 +390,7 @@ describe("v2 balance read model", () => {
       .run();
     expect((await build()).status).toBe("complete");
     const body = (await (
-      await call("/api/v2/balances/latest?account=v2-stale-account")
+      await call("/api/v2/balances/latest?account=v2-stale-account&detail=full")
     ).json()) as LatestPage;
     expect(body.items).toHaveLength(1);
     expect(body.items[0]!.adoption.state).toBe("stale");
@@ -370,7 +425,7 @@ describe("v2 balance read model", () => {
       .run();
     expect((await build()).status).toBe("complete");
     const body = (await (
-      await call("/api/v2/balances/latest?account=sbi-vc-trade:main")
+      await call("/api/v2/balances/latest?account=sbi-vc-trade:main&detail=full")
     ).json()) as LatestPage & {
       subtotals: { reasonCode: string | null; knownAssetsSubtotal: unknown };
     };
@@ -383,6 +438,112 @@ describe("v2 balance read model", () => {
       { unitRef: "BTC", coefficient: "5", scale: 1, adoptedCount: 1 },
       { unitRef: "JPY", coefficient: "1200", scale: 0, adoptedCount: 1 },
     ]);
+  });
+
+  it("states the decimal-v1 basis each observation's value rests on, never a blanket agreement", async () => {
+    // `basis` is how the observation's own representations normalized
+    // (docs/normalized-decimals.md): both valid and equal is `agreement`, one
+    // valid representation alone is `minor_units` or `decimal_text`. A
+    // currency with no known exponent has no valid minor-unit reading.
+    const run = await seedRun({ count: 1, source: "other-test", dataset: "basis-fixture" });
+    const parse = await parseRun(run.artifacts[0].id, "v2-basis-fixture");
+    await env.DB.prepare(
+      `INSERT INTO balance_observations
+         (parse_run_id,source_account,metric,instrument,amount_minor,amount_text,as_of,raw_locator,extra_json)
+       VALUES (?1,'v2-basis-account','basis-a','JPY','1200',NULL,'2026-09-07','basis:a','{}'),
+              (?1,'v2-basis-account','basis-b','JPY',NULL,'1300','2026-09-07','basis:b','{}'),
+              (?1,'v2-basis-account','basis-c','JPY','1400','1400','2026-09-07','basis:c','{}'),
+              (?1,'v2-basis-account','basis-d','XTS','1500','15.00','2026-09-07','basis:d','{}'),
+              (?1,'v2-basis-account','basis-e','USD','1500','15.00','2026-09-07','basis:e','{}'),
+              (?1,'v2-basis-account','basis-f','JPY',NULL,'n/a','2026-09-07','basis:f','{}')`,
+    )
+      .bind(parse)
+      .run();
+    expect((await build()).status).toBe("complete");
+    const expected = {
+      "basis-a": "minor_units",
+      "basis-b": "decimal_text",
+      "basis-c": "agreement",
+      "basis-d": "decimal_text",
+      // Both representations of 15.00 agree. The stored value drops the
+      // trailing zeros, and so does the projected one, so the page serves it.
+      "basis-e": "agreement",
+      // Neither representation is valid: not exact, so no basis.
+      "basis-f": "none",
+    };
+    type BasisItem = {
+      row: { metric: string; normalized: Record<string, unknown> };
+      quantity: { normalized: Record<string, unknown> };
+    };
+    const bases = (items: BasisItem[]) =>
+      Object.fromEntries(
+        items.map((item) => {
+          // The quantity and the evidence row of one item never disagree.
+          expect(item.quantity.normalized).toEqual(item.row.normalized);
+          return [item.row.metric, item.quantity.normalized.basis];
+        }),
+      );
+    const latest = (await (
+      await call("/api/v2/balances/latest?account=v2-basis-account&detail=full")
+    ).json()) as { items: BasisItem[] };
+    expect(validApiResponse("/api/v2/balances/latest", latest)).toBe(true);
+    expect(bases(latest.items)).toEqual(expected);
+    const history = (await (
+      await call("/api/v2/balances/history?account=v2-basis-account&detail=full")
+    ).json()) as { items: BasisItem[] };
+    expect(validApiResponse("/api/v2/balances/history", history)).toBe(true);
+    expect(bases(history.items)).toEqual(expected);
+    const quantity = (metric: string) =>
+      latest.items.find((item) => item.row.metric === metric)?.quantity.normalized;
+    expect(quantity("basis-e")).toMatchObject({ status: "exact", coefficient: "15", scale: 0 });
+    expect(quantity("basis-f")).toMatchObject({ status: "unparsed", coefficient: null });
+  });
+
+  it("refuses a latest page whose projected value is not its observation's stored value", async () => {
+    // The projection stores the value but not its basis, so the route reads
+    // the basis from the observation's stored decimal. A projected value that
+    // differs from that row is refused, never labelled with a basis recorded
+    // for another value. Only a damaged snapshot can get here, so this
+    // synthetic store lifts the sealed-row guard for the length of the test
+    // and puts it back afterwards.
+    const run = await seedRun({ count: 1, source: "other-test", dataset: "mismatch-fixture" });
+    const parse = await parseRun(run.artifacts[0].id, "v2-mismatch-fixture");
+    await env.DB.prepare(
+      `INSERT INTO balance_observations
+         (parse_run_id,source_account,metric,instrument,amount_minor,amount_text,as_of,raw_locator,extra_json)
+       VALUES (?1,'v2-mismatch-account','mismatch-a','JPY','1600','1600','2026-09-07','mismatch:a','{}')`,
+    )
+      .bind(parse)
+      .run();
+    expect((await build()).status).toBe("complete");
+    const path = "/api/v2/balances/latest?account=v2-mismatch-account";
+    expect((await call(path)).status).toBe(200);
+    const guard = await env.READ.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='current_balance_projection_sealed_no_update'",
+    ).first<{ sql: string }>();
+    expect(guard).not.toBeNull();
+    await env.READ.prepare("DROP TRIGGER current_balance_projection_sealed_no_update").run();
+    const damage = (coefficient: string) =>
+      env.READ.prepare(
+        "UPDATE current_balance_projection SET quantity_coefficient=?1 WHERE metric='mismatch-a'",
+      )
+        .bind(coefficient)
+        .run();
+    try {
+      await damage("1601");
+      // The Worker answers any unreadable store this way (docs/agent-api.md);
+      // the exception text and the value never reach the client.
+      const refused = await call(path);
+      expect(refused.status).toBe(503);
+      const text = await refused.text();
+      expect(JSON.parse(text)).toMatchObject({ error: "catalogue_read_failed" });
+      expect(text).not.toContain("projection_decimal_mismatch");
+      expect(text).not.toContain("1601");
+    } finally {
+      await damage("1600");
+      await env.READ.prepare(guard!.sql).run();
+    }
+    expect((await call(path)).status).toBe(200);
   });
 
   it("serves the v1 list from the projection with exactly the rows it serves today", async () => {

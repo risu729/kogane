@@ -76,12 +76,16 @@ consumed.
 
 Processing: the incremental lane reads unprocessed items in id order, pages the
 run's eligible artifacts (`observation_fetch_artifacts` with a successful run
-and no failures) 100 at a time, inserts `INSERT OR IGNORE` jobs for every
-deployed parser that accepts the artifact, and advances the item's
-`cursor_artifact_id`. An item is marked processed with an outcome
-(`jobs_created`, `no_new_jobs`, `not_eligible`) only after its last page; a
-sweep interrupted mid-run resumes from the cursor, and re-issued inserts are
-no-ops. The item's `jobs_created` is read from the table when the cursor moves
+and no failures) 100 at a time, inserts a job for every deployed parser that
+accepts the artifact, and advances the item's `cursor_artifact_id`. An item is
+marked processed with an outcome (`jobs_created`, `no_new_jobs`,
+`not_eligible`) only after its last page; a sweep interrupted mid-run resumes
+from the cursor, and re-issued inserts are no-ops: the insert skips only a job
+whose key `(fetch_artifact_id, parser_name, parser_version)` exists
+(`ON CONFLICT … DO NOTHING`; the repair lane's inserts do the same). A job the
+schema refuses (a CHECK or NOT NULL failure) raises and fails the sweep before
+the item's cursor moves, so an artifact is never passed with no job; the
+same page is read again on the next sweep. The item's `jobs_created` is read from the table when the cursor moves
 (the incremental jobs of the artifacts examined), not from the sweep's own
 inserts, so jobs a stopped sweep inserted before it could move the cursor still
 count, and the update is fenced on the cursor it read, so two sweeps never count
