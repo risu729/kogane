@@ -2,21 +2,19 @@
 // when every position it does hold is valued: the positions it never read are
 // missing from its subtotal (INV05). Every row is synthetic: made-up accounts,
 // security codes, quantities and prices.
-import { afterAll, beforeAll, expect, test } from "bun:test";
-import type { Miniflare } from "miniflare";
+import { afterAll, expect } from "bun:test";
 import { validReportBody, type ReportBody } from "../../../packages/domain/src/reports.ts";
 import { runReportJob, type ReportJobEnv } from "../src/report-job.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
-let mf: Miniflare;
-let env: Env;
-let jobEnv: ReportJobEnv;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  jobEnv = { DB: env.DB, EVIDENCE: env.EVIDENCE, REPORTS_ENABLED: "true" };
-}, 30000);
+// The runtime starts while the module loads, so a case that times out fails
+// alone (docs/ci.md, Miniflare under Bun; test/support/settle.ts).
+const { mf, env } = await startPipeline();
+const jobEnv: ReportJobEnv = { DB: env.DB, EVIDENCE: env.EVIDENCE, REPORTS_ENABLED: "true" };
+const test = settledTest();
 afterAll(async () => {
-  await mf?.dispose();
+  await mf.dispose();
 });
 
 const options = {
@@ -99,4 +97,42 @@ test("a report cut at its row bound is a partial subtotal even when every row it
   expect(cutBody.coverage.truncated).toBe(true);
   expect(cutBody.partition).toBe("partial-verified-scope");
   expect(cutBody.subtotal).toEqual({ coefficient: "1500", scale: 0 });
+}, 120_000);
+
+test("the same kept positions with and without positions past the bound are two reports", async () => {
+  // Positions page in source, account and security code order, so a position
+  // whose code sorts last falls past a bound that kept every earlier one. The
+  // kept ids are the same; only the cut differs, and the manifest names it
+  // (INV05, INV09; ADR 0072, amendment of 2026-11-19).
+  const whole = await runReportJob(jobEnv, options);
+  const wholeBody = await storedBody(whole.contentDigest);
+  expect(wholeBody.coverage.truncated).toBe(false);
+  expect(wholeBody.partition).toBe("complete");
+  const kept = wholeBody.rows.length;
+
+  await seedValuedPosition(8009, "SYN-Z");
+  const cut = await runReportJob(jobEnv, {
+    ...options,
+    now: "2026-09-08T00:05:00.000Z",
+    maxRows: kept,
+  });
+  expect(cut).toMatchObject({ generated: 1, reused: 0, truncated: true });
+  expect(cut.reportId).not.toBe(whole.reportId);
+  expect(cut.partition).toBe("partial-verified-scope");
+  const cutBody = await storedBody(cut.contentDigest);
+  expect(cutBody.rows.map((row) => row.subjectRef)).toEqual(
+    wholeBody.rows.map((row) => row.subjectRef),
+  );
+  expect(cutBody.coverage.truncated).toBe(true);
+
+  const manifest = async (contentDigest: string | null) =>
+    (
+      JSON.parse(
+        await (await env.EVIDENCE.get(`reports/${contentDigest ?? ""}.explanation`))!.text(),
+      ) as { inputManifest: { truncated: boolean; positionObservationIds: number[] } }
+    ).inputManifest;
+  const wholeManifest = await manifest(whole.contentDigest);
+  const cutManifest = await manifest(cut.contentDigest);
+  expect(cutManifest.positionObservationIds).toEqual(wholeManifest.positionObservationIds);
+  expect([wholeManifest.truncated, cutManifest.truncated]).toEqual([false, true]);
 }, 120_000);

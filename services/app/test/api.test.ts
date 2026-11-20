@@ -263,6 +263,7 @@ describe("production observation API", () => {
         reportedStateOnDate: true,
         reconstructedStateOnDate: true,
         reportArtifacts: true,
+        pendingDecisions: true,
         eventsV2: true,
         rewardsV2: true,
         cardPurchaseRecognition: true,

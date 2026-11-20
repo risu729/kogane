@@ -104,6 +104,7 @@ function calls(): [string, Record<string, unknown>][] {
     ["kogane.accounts.candidates", {}],
     ["kogane.card-settlements.unmatched", {}],
     ["kogane.card-settlements.debit-accounts", {}],
+    ["kogane.decisions.pending", {}],
     ["kogane.card-settlements.read", {}],
     ["kogane.card-settlements.statements", {}],
     ["kogane.audit.search", {}],
@@ -175,6 +176,7 @@ describe("MCP read answer sizes (ADR 0123)", () => {
       'kogane.collection-quality.read {"source":"sony-bank"}',
       'kogane.store.read {"page":"overview"}',
       "kogane.schedules.maintenance.read {}",
+      "kogane.decisions.pending {}",
     ])
       expect(sizes.get(call), call).toBeLessThan(CLIENT_BYTES);
     // The two reads the amendment of 2026-11-19 summarizes were over it in full.

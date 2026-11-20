@@ -110,6 +110,7 @@ const READS: readonly {
     args: {},
     route: "/api/v2/reconciliation/card-debit-accounts",
   },
+  { tool: "kogane.decisions.pending", args: {}, route: "/api/v2/decisions/pending" },
   {
     tool: "kogane.card-settlements.read",
     args: {},

@@ -371,7 +371,10 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
         await page.locator("main").getByRole("alert").waitFor();
         expect(await page.locator("main").innerText()).not.toContain(freshLabel);
         failure = 503;
-        await page.locator("main").getByRole("button", { name: "再試行", exact: true }).click();
+        await page
+          .locator("main")
+          .getByRole("button", { name: "口座を再試行", exact: true })
+          .click();
         await page
           .locator("main")
           .getByText(/HTTP 503/)
@@ -382,7 +385,10 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
         await page.locator("main").getByRole("alert").waitFor();
         expect(await page.locator("main").innerText()).not.toContain(freshLabel);
         failure = 0;
-        await page.locator("main").getByRole("button", { name: "再試行", exact: true }).click();
+        await page
+          .locator("main")
+          .getByRole("button", { name: "口座を再試行", exact: true })
+          .click();
         await page
           .getByRole("heading", { name: new RegExp(freshLabel) })
           .first()
@@ -432,8 +438,20 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
       await page.getByText(/^整理状況を読み込めませんでした.*408/).waitFor();
       await page.getByText(/^銘柄の整理状況を読み込めませんでした.*408/).waitFor();
       await page.getByText(/取得経路の対応を読み込めませんでした.*408/).waitFor();
+      // Each retry names the read it repeats.
+      for (const label of ["口座", "整理状況", "銘柄の整理状況", "取得経路の対応"])
+        expect(
+          await page
+            .locator("main")
+            .getByRole("button", { name: `${label}を再試行`, exact: true })
+            .count(),
+        ).toBe(1);
+      // Those four, and no other retry.
       expect(
-        await page.locator("main").getByRole("button", { name: "再試行", exact: true }).count(),
+        await page
+          .locator("main")
+          .getByRole("button", { name: /再試行/ })
+          .count(),
       ).toBe(4);
       expect(await page.locator("main").innerText()).not.toContain("読み込んでいます");
     } finally {

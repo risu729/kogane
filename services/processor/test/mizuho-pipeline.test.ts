@@ -1,7 +1,7 @@
 import { applyTestReadMigrations, applyTestSql } from "./migration-setup.ts";
 // Synthetic HTML only. Exercise the production terminal, registry, parser,
 // publication and READ projection boundaries against every real migration.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
@@ -22,20 +22,24 @@ import {
 } from "../../../packages/parsers/test/mizuho-fixture.ts";
 import { latestBalancesSql, transactionsSql } from "../../../packages/read-model/src/sql.ts";
 import { PAGE_LIMIT } from "../../../packages/read-model/src/scope.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
 
+// Started while the module loads, never in a hook (test/support/settle.ts).
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {};",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB", "READ"],
+    r2Buckets: ["EVIDENCE", "DATA"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default {};",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB", "READ"],
-      r2Buckets: ["EVIDENCE", "DATA"],
-    }),
-  );
   const db = await mf.getD1Database("DB");
   const read = await mf.getD1Database("READ");
   for (const file of migrationFiles(CORE_MIGRATIONS_URL))

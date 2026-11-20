@@ -2,7 +2,7 @@
 // provenance, the content-addressed body, proposals, freshness, failures and
 // the tick record. Every page is synthetic and served by a stub transport;
 // the URLs are the registered references already in config/, never fetched.
-import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import { afterAll, beforeEach, expect } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { sha256Hex } from "../../../packages/evidence-contract/src/digest.ts";
 import { loadSurveyConfig } from "../src/maintenance-survey/config.ts";
@@ -12,6 +12,7 @@ import { maintenanceSurveyLane, retryDelay } from "../src/maintenance-survey/lan
 import type { SurveyTransport } from "../src/maintenance-survey/page.ts";
 import { runScheduled } from "../src/worker.ts";
 import { startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
 const MIZUHO = "https://www.mizuhobank.co.jp/direct/time.html";
 const SONY = "https://sonybank.jp/guide/hours.html";
@@ -49,9 +50,9 @@ const PAGE = `<!doctype html><html><head><title>synthetic</title></head><body>
 </body></html>`;
 
 let mf: Miniflare, env: Env;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-}, 30000);
+// Started while the module loads, never in a hook (test/support/settle.ts).
+({ mf, env } = await startPipeline());
+const test = settledTest();
 afterAll(async () => {
   await mf?.dispose();
 });
