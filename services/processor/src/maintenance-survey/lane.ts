@@ -94,11 +94,15 @@ export async function maintenanceSurveyLane(
   if (targets.length === 0) return result;
   const started = now();
   const startedIso = new Date(started).toISOString();
-  // A page newly allowlisted is due at once.
+  // A page newly allowlisted is due at once. A page that has a cursor keeps
+  // it (`ON CONFLICT(target_id) DO NOTHING`, the table's only key); a cursor
+  // the schema refuses (the target id CHECK) raises and fails the tick, where
+  // `OR IGNORE` left the page without a cursor and never surveyed it, with no
+  // error. The validated configuration admits only ids the CHECK accepts.
   await env.DB.batch(
     targets.map((t) =>
       env.DB.prepare(
-        "INSERT OR IGNORE INTO maintenance_survey_cursors(target_id,next_due_at) VALUES(?,?)",
+        "INSERT INTO maintenance_survey_cursors(target_id,next_due_at) VALUES(?,?) ON CONFLICT(target_id) DO NOTHING",
       ).bind(t.id, startedIso),
     ),
   );

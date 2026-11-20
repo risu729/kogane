@@ -63,6 +63,10 @@ for (const file of [
  *   expected.json, `window-end-not-stated` in the observed-shapes file). 0.1.3
  *   adds `_kogane.identityOrigin: "provider-id"` to every transaction row,
  *   right after `amountSignSource`, and changes nothing else.
+ * - `vpass-credit-snapshot` 1.1.0 (ADR 0120, 2026-11-20): its cases were frozen
+ *   under 1.0.x. 1.1.0 adds `_kogane.cardName` (the file's card name, here the
+ *   fixture's "Synthetic card") last in `_kogane` of every observation, and
+ *   changes nothing else.
  */
 const RELEASE_DELTAS: Record<string, (frozen: Observation[]) => Observation[]> = {
   "sbi-shinsei-top-balances-and-activity@0.1.4": (frozen) =>
@@ -82,6 +86,15 @@ const RELEASE_DELTAS: Record<string, (frozen: Observation[]) => Observation[]> =
         ),
       );
       return { ...observation, extra: { ...observation.extra, _kogane: withOrigin } };
+    }),
+  "vpass-credit-snapshot@1.1.0": (frozen) =>
+    frozen.map((observation) => {
+      const kogane = observation.extra["_kogane"] as Record<string, unknown>;
+      expect(Object.keys(kogane)).not.toContain("cardName");
+      return {
+        ...observation,
+        extra: { ...observation.extra, _kogane: { ...kogane, cardName: "Synthetic card" } },
+      };
     }),
 };
 

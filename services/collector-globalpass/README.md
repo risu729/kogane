@@ -72,7 +72,7 @@ Before storage, only the 2 screen shapes confirmed by auditing 35 existing HTML 
 
 `packages/collection` writes runs directly to shared DATA, and the Processor registers DATA terminals in-process ([processor.md](../../docs/processor.md)). Private Service Binding `RAW_EVIDENCE_IMPORTER`, `POST /backfill-raw-evidence`, `scripts/backfill-raw-evidence.sh` and the dedicated source bucket were retired on 2026-09-13 ([legacy-retirement.md](../../docs/legacy-retirement.md)). Backfill runs also write through the terminal in 1 operation, without 10-artifact transfer batches or deferral.
 
-No Queue is introduced: 1 run has at most 15 HTML + 1 manifest, and measurements fit the 15-minute window. Queue splitting would repeat browser login and Turnstile each month and complicate completeness boundaries. Reconsider only after measuring a time-limit overrun.
+No Queue is introduced: a `daily` run has at most 10 HTML pages (2 months × the 5-page cap, `ACTIVITY_PAGE_CAP` in `container/server.mjs`) + 1 manifest. The daily runs whose durations are recorded here (one page per month) fit the 15-minute window; no duration of a run near the page cap is recorded. A `backfill` could hold up to 75 pages (15 months × 5); the 15-month backfill of 2026-08-30 predates page walking, a multi-page backfill has not been measured, and no Worker entry point requests one. Queue splitting would repeat browser login and Turnstile each month and complicate completeness boundaries. Reconsider only after measuring a time-limit overrun.
 
 ## Secret
 

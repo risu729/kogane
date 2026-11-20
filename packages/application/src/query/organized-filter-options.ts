@@ -3,6 +3,7 @@
 // `/api/filter-options` and `kogane.store.read` share it.
 import type { FilterOptions } from "../../../observation-shared/src/api-contract";
 import { connectionAccountLabel, readAccountConnections } from "./account-connections.ts";
+import { displayAccountLabel, entityAccountLabels } from "./account-labels.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 const KINDS = { transactions: "transaction", balances: "balance", positions: "position" } as const;
 
@@ -49,16 +50,24 @@ export async function organizedFilterOptions(
       sourceAccount: row.source_account,
     })),
   );
+  const entities = await entityAccountLabels(
+    reads,
+    rows.map((row) => row.target_id),
+  );
   const names = new Map<string, { labels: Set<string>; targets: Set<string> }>();
   for (const row of rows) {
     const key = JSON.stringify([row.source_id, row.source_account]);
     const group = names.get(key) ?? { labels: new Set<string>(), targets: new Set<string>() };
     group.labels.add(
-      connectionAccountLabel(
-        row.label,
+      displayAccountLabel(
+        connectionAccountLabel(
+          row.label,
+          row.method,
+          row.source_id,
+          connections.get(row.reference_id),
+        ),
         row.method,
-        row.source_id,
-        connections.get(row.reference_id),
+        entities.get(row.target_id),
       ),
     );
     group.targets.add(row.target_id);

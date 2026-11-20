@@ -17,9 +17,14 @@ balances, calculate holdings, or invent an instrument's ISIN/network.
 
 `packages/identity` contains deterministic, independently
 tested source rules. The production pipeline persists their interpretation in
-migration `0018`. All four observation shapes and every merged parser source
-are covered; the manual PayPay CSV path is also handled. Provider specifics are
-in [SBI](identity-sbi.md) and [other sources](identity-sources.md).
+migration `0018`. All four observation shapes and every merged parser's
+observations are organized; the manual PayPay CSV path is also handled. A
+reference no rule classifies stays `unresolved` with a closed issue: today SBI
+Securities' foreign cash history, reported income and realised gains. From
+identity policy 2 the SMBC AUD foreign ordinary deposit is a provider-local
+`deposit` with its own label; policy-1 runs keep the unresolved mapping they
+recorded ([ADR 0118](adr/0118-smbc-aud-deposit-identity.md)). Provider specifics
+are in [SBI](identity-sbi.md) and [other sources](identity-sources.md).
 
 A source account reference consists of source, producer, and exact source
 account/discriminators. **Producer is a collector credential-slot boundary,
