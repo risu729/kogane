@@ -122,7 +122,7 @@ test("the real local parser runner publishes independent Vpass card units and re
   expect(latestBalances(store)).toHaveLength(28);
 });
 
-test("reopening advances the shipped 0092 policy through 0103 and preserves an operator's rollback and version pin", () => {
+test("reopening advances the shipped 0092 policy through 0104 and preserves an operator's rollback and version pin", () => {
   const store = database();
   const policy = () =>
     store.db

@@ -1362,7 +1362,13 @@
       "sha256": "54e07f3efa8b9f844f6c62e8030390d4a9abf2510f650848c00584b29b8f7823"
     },
     {
-      "file": "0103_vpass_credit_card_name_policy.sql",
+      "file": "0103_sbi_income_policy_version_0_1_3.sql",
+      "statementCount": 1,
+      "insertStatements": [],
+      "sha256": "910bcb3b0a44fbadacbc91945a9e2f23f575fc3ff4c2a5bae5ca4635e9cecedc"
+    },
+    {
+      "file": "0104_vpass_credit_card_name_policy.sql",
       "statementCount": 1,
       "insertStatements": [],
       "sha256": "64476ce0e5c03a918938a4c3e72d7e02faf1c0ad7896b12b892b11effba73f24"

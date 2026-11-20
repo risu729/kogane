@@ -101,7 +101,7 @@ four or more digits (ASCII or full-width) is left out, never thrown, so a
 snapshot is never lost over a label; the read checks the same shape again.
 `userName` is never copied. The financial observations are unchanged.
 
-Migration `0103_vpass_credit_card_name_policy.sql` advances the shipped
+Migration `0104_vpass_credit_card_name_policy.sql` advances the shipped
 credit-snapshot policy's `required_parser_version` from `1.0.2` to `1.1.0`, as
 0102 did, retaining every operator choice. Membership pins the version
 exactly, so between the deploy and the first 1.1.0 parse of a card's newest
@@ -147,7 +147,7 @@ observations reach.
 ## Consequences
 
 - No identity, mapping or attribution changes; rollback is a code rollback.
-  Migration 0103 is not reverted by a rollback: a rolled-back 1.0.2 reader
+  Migration 0104 is not reverted by a rollback: a rolled-back 1.0.2 reader
   would not meet the 1.1.0 pin, so a rollback of the parser also needs the
   policy row set back (as 0102's would).
 - Each organized page reads the current references of its accounts (one pass

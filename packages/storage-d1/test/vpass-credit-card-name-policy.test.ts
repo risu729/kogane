@@ -6,14 +6,14 @@ import { coreDatabase } from "./sqlite.ts";
 // ADR 0120: the credit-snapshot policy advances from reader 1.0.2 to 1.1.0
 // only where it is still the shipped default 0102 left.
 const sql = readFileSync(
-  new URL("../migrations/core/0103_vpass_credit_card_name_policy.sql", import.meta.url),
+  new URL("../migrations/core/0104_vpass_credit_card_name_policy.sql", import.meta.url),
   "utf8",
 );
 const select =
   "SELECT * FROM dataset_snapshot_policies WHERE source_id='vpass' AND dataset='credit-snapshot' AND parser_name='vpass-credit-snapshot'";
 let image: Uint8Array;
 beforeAll(() => {
-  const db = coreDatabase("0017", "0103");
+  const db = coreDatabase("0017", "0104");
   image = db.serialize();
   db.close();
 }, 60_000);

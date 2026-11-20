@@ -34,7 +34,7 @@ metric, amount, `asOf` and locator is unchanged.
 | --------------------- | -------- | ------- |
 | vpass-credit-snapshot | 1.0.2    | 1.1.0   |
 
-Migration `0103_vpass_credit_card_name_policy.sql` advances the shipped
+Migration `0104_vpass_credit_card_name_policy.sql` advances the shipped
 credit-snapshot policy's exact `required_parser_version` to `1.1.0`, as 0102
 did, retaining every operator choice. Until a card's newest capture has a
 1.1.0 parse the card has no current credit snapshot: the next daily run is
