@@ -20,11 +20,23 @@ import {
   REPO_ROOT,
   applyMigrations,
   buildSchemaLedger,
+  describeSchema,
   renderSchemaMarkdown,
   splitSqlStatements,
 } from "./core-schema-ledger.ts";
 
-const ledger = buildSchemaLedger(REPO_ROOT);
+// The CORE migrations are replayed once for the whole file. Each replay takes
+// over a second (the table rebuilds' RENAMEs re-parse the whole schema), and
+// the guard case below used to replay them a second time inside its own
+// five-second deadline, which it missed under parallel load. It reads the
+// trigger SQL of this same database instead, taken before the ledger
+// describes it: the same rows a second replay of the same files would return.
+const core = applyMigrations(REPO_ROOT);
+const coreTriggerRows = core.db
+  .query("SELECT name, sql FROM sqlite_master WHERE type='trigger'")
+  .all() as { name: string; sql: string }[];
+const ledger = describeSchema(core.db, core.migrations);
+core.db.close();
 const readLedger = buildSchemaLedger(REPO_ROOT, READ_PROFILE);
 
 describe("SQL statement splitter", () => {
@@ -158,20 +170,15 @@ describe("G0-01 CORE schema ledger", () => {
     // a trigger named `*_no_update` whose WHEN clause allows a pointer to be
     // set is not an append-only guard. `decision_revisions` is the case on
     // disk: its `superseded_by` is set once, like the supersede-only tables.
-    const { db } = applyMigrations(REPO_ROOT);
+    // The trigger SQL is read straight from sqlite_master, not from the
+    // ledger, so the check does not trust the ledger's own WHEN filter.
     const conditional = new Set(
-      (
-        db.query("SELECT name, sql FROM sqlite_master WHERE type='trigger'").all() as {
-          name: string;
-          sql: string;
-        }[]
-      )
+      coreTriggerRows
         .filter((trigger) =>
           /\sWHEN\s/iu.test(trigger.sql.replaceAll(/--[^\n]*/gu, "").split(/\bBEGIN\b/iu)[0]!),
         )
         .map((trigger) => trigger.name),
     );
-    db.close();
     for (const table of ledger.tables)
       for (const name of [...table.noUpdateTriggers, ...table.noDeleteTriggers])
         expect({ table: table.name, trigger: name, conditional: conditional.has(name) }).toEqual({

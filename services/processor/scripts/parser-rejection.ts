@@ -299,7 +299,8 @@ export function throwSites(error: unknown): string[] {
   if (!(error instanceof Error)) return [];
   const stack = error.stack ?? "";
   const frames = error.message === "" ? stack : stack.replace(error.message, "");
-  return [...frames.matchAll(/parsers\/([a-z0-9-]+\.ts:\d+:\d+)/gu)].map((match) => match[1]!);
+  // Windows stacks use backslash separators.
+  return [...frames.matchAll(/parsers[\\/]([a-z0-9-]+\.ts:\d+:\d+)/gu)].map((match) => match[1]!);
 }
 
 /** The coarse reasons `diagnose.ts` printed before throw sites were closed. */

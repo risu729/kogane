@@ -234,3 +234,20 @@ test("an answer its evidence does not carry, or an unknown code, is refused", ()
   ).toBe(false);
   expect(validCardDebitAccountsReview(page(Array.from({ length: 101 }, () => card())))).toBe(false);
 });
+
+test("a statement total that is not exact carries its status and reason; a bare null is refused (INV05)", () => {
+  const statement = card().latestStatement;
+  const withTotal = (amount: unknown) => card({ latestStatement: { ...statement, amount } });
+  for (const value of [
+    { status: "unparsed", reasonCode: "stored:unparsed" },
+    { status: "missing", reasonCode: "decimal_not_projected" },
+  ])
+    expect(validCardDebitAccountsReview(page([withTotal({ unitRef: "JPY", value })]))).toBe(true);
+  for (const amount of [
+    null,
+    undefined,
+    // An exact status carries a value, never a reason.
+    { unitRef: "JPY", value: { status: "exact", reasonCode: "stored:exact" } },
+  ])
+    expect(validCardDebitAccountsReview(page([withTotal(amount)]))).toBe(false);
+});

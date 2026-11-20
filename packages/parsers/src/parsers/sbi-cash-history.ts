@@ -1,7 +1,8 @@
 import type { ArtifactMeta, Observation, ParseResult } from "../types.ts";
 import { containerClaim } from "./coverage.ts";
-import { exactMoney, normalizedDate, stableFingerprint } from "./sbi-strict.ts";
+import { exactMoney, stableFingerprint } from "./sbi-strict.ts";
 import {
+  cashRowDate,
   parseCashHistoryJson,
   validateCashHistory,
   type CashHistoryKind,
@@ -24,10 +25,7 @@ export function parseRetainedCashHistory(
         currency,
         "cash history amount",
       );
-      const asOf = normalizedDate(
-        row[kind === "yen" ? "payDepDate" : "valueDate"],
-        "cash history date",
-      );
+      const asOf = cashRowDate(row, kind, "cash history date");
       const credit = row[kind === "yen" ? "payDepKbn" : "tradeType"] === "入金";
       const description = String(row[kind === "yen" ? "dispAbstract" : "description"]);
       const fingerprint =
