@@ -544,4 +544,25 @@ describe("what each filter keeps", () => {
     expect(third).toMatchObject({ items: [], walked: 0, next: null });
     world.db.close();
   });
+
+  test("a page that lists its last match exactly as it fills ends the list", async () => {
+    const world = store();
+    const filters = { ...NONE, account: "account_2" };
+    // One match, a page of one, a walk that reaches the end: nothing follows.
+    const whole = await createEventsReader(executor(world.db), {
+      pageSize: 1,
+      filterWalk: 200,
+    }).filteredActivity({ basis: "cash-movement", filters, after: null });
+    expect(whole.items.map((item) => item.eventId)).toEqual(["ev-c"]);
+    expect(whole.next).toBeNull();
+    expect(whole.dataCoverage.truncated).toBe(false);
+    // The same page at the walk's exact bound continues after the last walked.
+    const bounded = await createEventsReader(executor(world.db), {
+      pageSize: 1,
+      filterWalk: 3,
+    }).filteredActivity({ basis: "cash-movement", filters, after: null });
+    expect(bounded.items.map((item) => item.eventId)).toEqual(["ev-c"]);
+    expect(bounded.next).toEqual({ eventId: "ev-c", revision: 2 });
+    world.db.close();
+  });
 });
