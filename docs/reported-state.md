@@ -23,6 +23,7 @@ is [reconstructed state](reconstructed-state.md) (served by `GET /api/v2/reconst
 | Page                | 基準日の保有状況 at `/state` (`apps/web/src/pages/ReportedState.tsx`), capability `reportedStateOnDate`                                                                                        |
 | Two dates           | `queryHoldingsChange` in `packages/application/src/query/holdings-change.ts` ([below](#holdings-changes-between-two-dates))                                                                    |
 | Two dates, HTTP     | `GET /api/v2/reported-holdings-change` (`services/app/src/reported-holdings-change-api.ts`)                                                                                                    |
+| Two dates, summary  | `summarizeHoldingsChange` in `packages/domain/src/holdings-change-summary.ts` (the default `detail`), validated by `validReportedHoldingsChangeSummary`                                        |
 | Two dates, agent    | `kogane.reported-holdings-change.read` (`services/app/src/page-read-tools.ts`), the route's `readHoldingsChange`                                                                               |
 | Two dates, contract | `validReportedHoldingsChange` in `packages/observation-shared/src/reported-holdings-change-contract.ts`, with the request shape rule `holdingsChangeQueryRefusal` the route and the page apply |
 | Two dates, page     | panel 保有数量の変化 on `/state` (`apps/web/src/pages/ReportedHoldingsChange.tsx`)                                                                                                             |
@@ -255,20 +256,50 @@ have their own codes.
 
 ### HTTP, contract and page
 
-`GET /api/v2/reported-holdings-change?from=YYYY-MM-DD&to=YYYY-MM-DD[&source=…][&account=…]`
+`GET /api/v2/reported-holdings-change?from=YYYY-MM-DD&to=YYYY-MM-DD[&source=…][&account=…][&detail=summary|full][&limit=…][&cursor=…]`
 (ADR 0075, 2026-11-06 amendment) is exposed as the reported state is: GET and
 HEAD only, served to every signed-in reader, and `404` exactly where
 `/api/v2/reported-state` is not served. `400 invalid_query` for any other,
-repeated or empty parameter or a malformed source or account, `400
+repeated or empty parameter, a malformed source, account or cursor, a
+`detail` other than `summary` or `full`, a `limit` other than 10, 25, 50 or
+100, and a `limit` or `cursor` with `detail=full`; `400
 invalid_date` for a missing, malformed or impossible date, `400
 invalid_range` when `from` is not before `to`, `400 date_in_future` when `to`
 is after today in Tokyo, `404 unknown_source` and `404 unknown_account`, and
 `413 result_limit_exceeded` (with `refs` naming `holding_limit_exceeded` or
-`dated_state_limit_exceeded`) rather than a cut answer. The body is
-`{ apiVersion: 2, …HoldingsChange }`.
+`dated_state_limit_exceeded`) rather than a cut answer. With `detail=full` the
+body is `{ apiVersion: 2, …HoldingsChange }`, unpaged.
 
-`validReportedHoldingsChange`, which the browser applies through
-`validApiResponse`, refuses any field it does not name (a total, a
+Without `detail`, or with `detail=summary` (ADR 0075, amendment 2026-11-19;
+proposed), the body is one page of `summarizeHoldingsChange` in
+`packages/domain/src/holdings-change-summary.ts`
+(`reported-holdings-change-summary-v1`) over the same comparison: the
+holdings whose change is not an exact zero, in status order (`compared`,
+`listed_at_start_only`, `listed_at_end_only`, `not_comparable`) and key order
+within; `unchanged` counts the `compared` holdings with a zero change, which
+are not listed; `reasonCounts` counts the holdings carrying each reason; a
+line keeps its container (a page-local `c1`, `c2`, … ref into `containers`),
+provider account, market, code, unit, status, reasons, each side's state with
+its position or artifact ref and, when listed, the quantity as exact decimal
+text or null with its `quantityStatus`, and the change as exact decimal
+text. The full answer's `counts`, `coverage` (no total, no valuation) and
+`contextId` are kept; the capture times, identities, provider text and
+manifest are not. Ten lines a page by default (`limit` 10, 25, 50 or 100);
+`page.nextCursor` continues at any size and is bound to the comparison's
+`contextId` and the request's dates and filters: `400 invalid_cursor` for a
+cursor that does not decode or names no line, `400 cursor_mismatch` for one
+of other dates or filters (its `mustMatch` names `from`, `to`, `source` and
+`account`, as ADR 0123's reads do), and `410 context_expired` once the comparison has
+moved. Every page computes the comparison again.
+
+`validReportedHoldingsChange` (the full answer) and
+`validReportedHoldingsChangeSummary` (a body with `detail: "summary"`) are
+applied through `validApiResponse`; the summary's validator refuses a total,
+a listed zero change, a number for a quantity that is not exact, a change
+off `compared`, lines out of status order, counts that do not add up and
+container refs that are not defined once in order of use. The full answer's
+validator, which the page applies to its own answer, refuses any field it
+does not name (a total, a
 valuation, a sum), any status, reason or side state outside the closed lists,
 reasons out of the domain's order or missing a side's own reason, a change on
 a row that is not `compared`, a change that is not an exact decimal in the
@@ -303,7 +334,9 @@ sent, and a URL holding a repeated, empty or malformed filter asks nothing and
 offers to remove it rather than widening the comparison. `404 unknown_source`
 and `unknown_account` are stated in words, never shown as an empty
 comparison, and the answer's own `filters` are shown beside its dates. The
-answer is not paged, so a filter change has no page to reset.
+page asks for `detail=full`, the unpaged answer, and refuses any other shape
+(`useReportedHoldingsChange` applies `validReportedHoldingsChange` itself), so
+a filter change has no page to reset.
 
 ## Cost
 
