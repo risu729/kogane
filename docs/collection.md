@@ -758,18 +758,30 @@ months that were captured, one `terminal` report,
 `requestedScope.scopeKind = full_snapshot`. The run's `coverageStatus` is
 `partial` even on success: a card exposes a rolling window of statement months,
 so a finished run is not a claim about the card's whole history. The card unit
-is `complete` only when every month's captured rows (the pages' `meisaiList`
-entries) equal the total the provider states for it (`webMeisaiTopK3Vo.allCnt`
-on a finalized statement page, a string on the live site, `total` on a
-customized one, a number; both read by `providerCount` as a non-negative safe
-integer or a string of ASCII digits only); otherwise it is
+is `complete` only when every month's counted rows equal the total the
+provider states for it (`webMeisaiTopK3Vo.allCnt` on a finalized statement
+page, a string on the live site, `total` on a customized one, a number; both
+read by `providerCount` as a non-negative safe integer or a string of ASCII
+digits only). The counted rows are the pages' `meisaiList` entries, except
+that on a finalized page the two header kinds `45` (5 data cells) and `4C`
+(4 data cells, empty `data[1]`) are left out, because `allCnt` does not count
+them (the owner's counts-only read of 30 finalized months, decision D1;
+[ADR 0023's 2026-11-19 amendment](adr/0023-vpass-collector-card-binding.md#amendment-2026-11-19-a-finalized-pages-45-and-4c-header-rows-are-not-counted)).
+The classifier is `src/statement-rows.ts`, shared with the counts-only
+diagnostic; every other entry is counted, a row of an unknown shape included,
+and the statement parser refuses an unknown kind. A customized page's rows are
+all counted. Otherwise the unit is
 `partial`, which makes registration record the whole fetch run as `partial`,
 which neither identity nor the trusted card binding reads
 ([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented),
-[ADR 0026](adr/0026-collector-unit-coverage.md)). `manifest.json` records each month's `capturedRows`, `statedTotal`
-and closed `coverage` code (`complete`, `stated_total_unverified`,
-`stated_total_mismatch`) and the card's code, which the persist diagnostic
-also logs (`statement_months_absent` when no month was walked). The month
+[ADR 0026](adr/0026-collector-unit-coverage.md)). `manifest.json` records each
+month's `countedRows`, `excludedHeaderRows` (0 for a customized month),
+`statedTotal` and closed `coverage` code (`complete`,
+`stated_total_unverified`, `stated_total_mismatch`) and the card's code, which
+the persist diagnostic also logs (`statement_months_absent` when no month was
+walked). Manifests written before this rule name the count `capturedRows`
+and counted every entry; nothing but a reader of the stored object reads
+either field. The month
 walk (`src/statement-walk.ts`) stops a finalized month after a page whose
 `allCnt` is below its `nextPageRow` or on an empty page after the first, and a
 customized month once its rows reach `total` with `pageFlg` `1` or `3` or on
@@ -777,8 +789,9 @@ an empty answer page; it does not read `pageNo` or `lastPage`, whose meaning
 is unobserved
 ([ADR 0023's note](adr/0023-vpass-collector-card-binding.md#note-2026-09-27-both-stated-total-fields-are-on-the-live-site)).
 `producerVersion` is `vpass-worker-card-v1`, the schema version central
-storage recorded for a card-scoped Vpass run, and `manifest.json` holds exactly
-the summary central storage held for one.
+storage recorded for a card-scoped Vpass run, and `manifest.json` holds the
+summary central storage held for one plus the per-month counts and codes
+above.
 
 A card (or a session that failed before a card was selected, as unit `run`)
 that collected nothing persists a `failed` terminal with no artifact at all

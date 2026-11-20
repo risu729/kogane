@@ -1241,6 +1241,30 @@ next page's cursor, as it did before; and whether any live month logs
 `stated_total_unverified` or `stated_total_mismatch`, which the next
 collection's persist diagnostic shows.
 
+## Vpass finalized header rows and `allCnt` (2026-11-19)
+
+The owner's counts-only read of one natural collector run (2026-11-18 21:00
+UTC, 7 of 7 cards): its `vpass-statement-count-shapes` and
+`vpass-shared-collection` lines, and a bounded projection over its stored
+pages inside the Cloudflare API sandbox that returned only per-month count
+differences and row-kind counts (no amount, text, month or identifier):
+
+- Customized months already met their `total`.
+- Every finalized page (30 months across the 7 cards) carried exactly one `45`
+  and one `4C` row, and in all 30 months `allCnt` equalled the number of
+  `4K/002`, `4K/005` and `4K/007` rows. 3 months had `4K/002` rows.
+- `allCnt` was stable across pages, and every month was one page.
+
+What changes, on the owner's decision D1 (pending until the PR merges): the
+collector's month check leaves a finalized page's `45` and `4C` rows out of
+the count it compares with `allCnt`, and nothing in any parser
+([ADR 0023's 2026-11-19 amendment](adr/0023-vpass-collector-card-binding.md#amendment-2026-11-19-a-finalized-pages-45-and-4c-header-rows-are-not-counted)).
+Before it, every finalized month was `stated_total_mismatch` and every card
+run `partial`, so no new statement page was parsed. **Unknown, kept as
+limits:** what the header rows mean beyond not being counted by `allCnt`,
+and whether a multi-page finalized month repeats them on later pages (no
+observed month had a second page).
+
 ## SBI Shinsei stored-capture shapes (activity parser 0.1.2, board parser 1.0.1)
 
 Observed on 2026-09-27 by the owner's local agent replaying stored captures

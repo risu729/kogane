@@ -10,6 +10,7 @@
 // stored or logged).
 import { describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import {
   objectKey,
@@ -28,6 +29,7 @@ import {
   type VpassCardRun,
 } from "../src/shared-collection";
 import worker from "../src/worker";
+import { vpassStatementPage } from "../../../packages/parsers/src/parsers/vpass";
 
 const sessionRunId = "2026-09-11T21-00-00-000Z";
 const secret = "synthetic-session-material";
@@ -208,14 +210,16 @@ describe("G1-02/G1-08/G1-16 a card run persists its sanitized set and then the t
           "202608": {
             pages: 1,
             transactions: 1,
-            capturedRows: 1,
+            countedRows: 1,
+            excludedHeaderRows: 0,
             statedTotal: 1,
             coverage: "complete",
           },
           "202609": {
             pages: 1,
             transactions: 1,
-            capturedRows: 1,
+            countedRows: 1,
+            excludedHeaderRows: 0,
             statedTotal: 1,
             coverage: "complete",
           },
@@ -645,9 +649,232 @@ describe("ADR 0023 option 8 / ADR 0026 the card unit is complete only when every
   });
 });
 
+describe("ADR 0023 2026-11-19 amendment (D1): a finalized page's `45` and `4C` header rows are not counted", () => {
+  // Rows in the shapes the statement parser accepts (synthetic text only).
+  const webRow = (data: string[]) => ({
+    columnsSize: data.length,
+    columnsSizeS: String(data.length),
+    data,
+    maxIndex: String(data.length - 1),
+    rowType: data[0],
+    shiharaiPatternFlag: 0,
+  });
+  const header45 = webRow(["45", "SYNTHETIC LABEL", "", "", ""]);
+  const header4C = webRow(["4C", "", "SYNTHETIC LABEL", ""]);
+  const row4K002 = webRow(["4K", "002", "", "SYNTHETIC LABEL"]);
+  const purchase = (subtype: "005" | "007" | "006" = "005") =>
+    webRow([
+      "4K",
+      subtype,
+      "",
+      "26/08/15",
+      "SYNTHETIC SHOP",
+      "1,234",
+      "１",
+      ...Array<string>(subtype === "007" ? 7 : 4).fill(""),
+    ]);
+  const finalizedPage = (rows: unknown[], allCnt: string, nextPageRow: string) =>
+    envelope({
+      WebMeisaiTopDisplayServiceBean: {
+        meisaiList: rows,
+        webMeisaiTopK3Vo: { allCnt, nextPageRow },
+      },
+    });
+  const month = (...rawJson: string[]) => ({
+    pages: rawJson.map((raw, index) => ({ kind: "top" as const, index, rawJson: raw })),
+    transactionCount: 0,
+  });
+  /** The card unit's coverage and the month's manifest summary. */
+  const checked = async (capture: VpassCardRun["months"][string]) => {
+    const plan = await vpassCardRunPlan(run({ months: { "209901": capture } }));
+    const manifest = plan.artifacts.find((artifact) => artifact.artifactKey === "manifest.json")!;
+    if (manifest.body.kind !== "bytes") throw new Error("manifest_not_bytes");
+    const summary = JSON.parse(new TextDecoder().decode(manifest.body.bytes)) as {
+      coverage: string;
+      months: Record<string, unknown>;
+    };
+    return {
+      unit: plan.run.units[0]!.coverageStatus,
+      coverage: summary.coverage,
+      month: summary.months["209901"],
+    };
+  };
+
+  test("one page with one `45`, one `4C` and the rows `allCnt` counts: complete", async () => {
+    expect(
+      await checked(month(finalizedPage([header45, header4C, purchase(), purchase()], "2", "3"))),
+    ).toEqual({
+      unit: "complete",
+      coverage: "complete",
+      month: {
+        pages: 1,
+        transactions: 0,
+        countedRows: 2,
+        excludedHeaderRows: 2,
+        statedTotal: 2,
+        coverage: "complete",
+      },
+    });
+  });
+
+  test("a `4K/002` row is counted, as `allCnt` counts it", async () => {
+    const rows = [header45, header4C, row4K002, purchase(), purchase("007")];
+    expect(await checked(month(finalizedPage(rows, "3", "4")))).toMatchObject({
+      unit: "complete",
+      month: { countedRows: 3, excludedHeaderRows: 2, statedTotal: 3 },
+    });
+    // Counting only `4K/005` and `4K/007` would make this month whole; it is not.
+    expect(await checked(month(finalizedPage(rows, "2", "3")))).toMatchObject({
+      unit: "partial",
+      month: { countedRows: 3, statedTotal: 2, coverage: "stated_total_mismatch" },
+    });
+  });
+
+  test("a two-page month with header rows on the first page only: complete", async () => {
+    expect(
+      await checked(
+        month(
+          finalizedPage([header45, header4C, purchase(), purchase()], "3", "3"),
+          finalizedPage([purchase("007")], "3", "5"),
+        ),
+      ),
+    ).toMatchObject({
+      unit: "complete",
+      month: { pages: 2, countedRows: 3, excludedHeaderRows: 2, statedTotal: 3 },
+    });
+  });
+
+  test("a two-page month with header rows on every page: complete", async () => {
+    expect(
+      await checked(
+        month(
+          finalizedPage([header45, header4C, purchase(), purchase()], "3", "3"),
+          finalizedPage([header45, header4C, row4K002], "3", "5"),
+        ),
+      ),
+    ).toMatchObject({
+      unit: "complete",
+      month: { pages: 2, countedRows: 3, excludedHeaderRows: 4, statedTotal: 3 },
+    });
+  });
+
+  test("the header rows still never make up for a missing row", async () => {
+    // Without the exclusion, two header rows would pad a month two rows short
+    // to its stated total.
+    expect(
+      await checked(month(finalizedPage([header45, header4C, purchase(), purchase()], "4", "5"))),
+    ).toMatchObject({
+      unit: "partial",
+      month: { countedRows: 2, excludedHeaderRows: 2, coverage: "stated_total_mismatch" },
+    });
+  });
+
+  test("a row of any other shape is counted, never excluded", async () => {
+    // Unknown kinds and header-like rows whose shape differs from the
+    // classifier's: rowType disagreeing with data[0], a `45` of 4 cells, a
+    // `4C` whose second cell is not empty, and a row with no data.
+    for (const odd of [
+      webRow(["4K", "006", "", "", ""]),
+      webRow(["4L", "005", "", "", ""]),
+      { ...header45, rowType: "4K" },
+      webRow(["45", "SYNTHETIC LABEL", "", ""]),
+      webRow(["4C", "x", "SYNTHETIC LABEL", ""]),
+      { rowType: "45" },
+    ]) {
+      expect(
+        await checked(month(finalizedPage([header45, header4C, purchase(), odd], "2", "3"))),
+      ).toMatchObject({
+        unit: "complete",
+        month: { countedRows: 2, excludedHeaderRows: 2 },
+      });
+      expect(
+        await checked(month(finalizedPage([header45, header4C, purchase(), odd], "1", "2"))),
+      ).toMatchObject({ unit: "partial", month: { coverage: "stated_total_mismatch" } });
+    }
+  });
+
+  test("an unknown row kind in a complete month is still refused by the statement parser", async () => {
+    // `allCnt` counts the unknown row here, so the month check passes and the
+    // run would be parsed; the parser then refuses the page instead of
+    // publishing it without that row (ADR 0004).
+    const page = (rows: unknown[], allCnt: string) => {
+      const root = JSON.parse(
+        readFileSync(
+          new URL(
+            "../../../tests/fixtures/observation-pipeline/vpass-parser-boundaries/web.json",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      ) as { body: { content: { WebMeisaiTopDisplayServiceBean: Record<string, unknown> } } };
+      const bean = root.body.content.WebMeisaiTopDisplayServiceBean;
+      bean["meisaiList"] = rows;
+      bean["webMeisaiTopK3Vo"] = { allCnt, nextPageRow: String(Number(allCnt) + 1) };
+      return JSON.stringify(root);
+    };
+    const parseStored = async (rawJson: string) => {
+      const plan = await vpassCardRunPlan(run({ months: { "202608": month(rawJson) } }));
+      const stored = plan.artifacts.find(
+        (artifact) => artifact.artifactKey === "months/202608/top-000.json",
+      )!;
+      if (stored.body.kind !== "bytes") throw new Error("page_not_bytes");
+      const bytes = stored.body.bytes;
+      return {
+        unit: plan.run.units[0]!.coverageStatus,
+        parse: () =>
+          vpassStatementPage.parse(bytes, {
+            id: 1,
+            sourceId: "vpass",
+            runStatus: "success",
+            runFailureCount: 0,
+            dataset: "statement-page",
+            url: null,
+            mime: "application/json",
+            artifactKey: "months/202608/top-000.json",
+            fetchUnitKey: "card-001",
+            fetchedAt: "2026-09-11T21:04:00.000Z",
+            sha256: stored.sha256,
+          }),
+      };
+    };
+    const known = await parseStored(page([header45, header4C, row4K002, purchase()], "2"));
+    expect(known.unit).toBe("complete");
+    expect(known.parse().observations.filter((o) => o.kind === "transaction")).toHaveLength(1);
+    const unknown = await parseStored(page([header45, header4C, purchase(), purchase("006")], "2"));
+    expect(unknown.unit).toBe("complete");
+    expect(unknown.parse).toThrow("has an unsupported provider subtype");
+  });
+
+  test("a customized page is unchanged: every row is counted, header-shaped or not", async () => {
+    const customized = (rows: unknown[], total: number) =>
+      envelope({
+        CustomizedMeisaiAnsDisplayServiceBean: { meisaiList: rows, total, pageFlg: "3" },
+      });
+    const rows = [header45, header4C, { amount: 1, shop: "SYNTHETIC SHOP" }];
+    expect(await checked(month(customized(rows, 3)))).toMatchObject({
+      unit: "complete",
+      month: { countedRows: 3, excludedHeaderRows: 0, statedTotal: 3 },
+    });
+    expect(await checked(month(customized(rows, 1)))).toMatchObject({
+      unit: "partial",
+      month: { countedRows: 3, excludedHeaderRows: 0, coverage: "stated_total_mismatch" },
+    });
+    // A `null` finalized bean beside a customized one does not make the
+    // customized rows finalized ones (the parser refuses the page as well).
+    const mixed = envelope({
+      WebMeisaiTopDisplayServiceBean: null,
+      CustomizedMeisaiAnsDisplayServiceBean: { meisaiList: rows, total: 1, pageFlg: "3" },
+    });
+    expect(await checked(month(mixed))).toMatchObject({
+      unit: "partial",
+      month: { countedRows: 3, excludedHeaderRows: 0 },
+    });
+  });
+});
+
 describe("statement shape diagnostics do not change persistence or coverage", () => {
   test.each(["available", "throwing-logger", "over-bound"])(
-    "unchanged bytes, calls and partial status with %s diagnostics",
+    "unchanged bytes, calls and coverage with %s diagnostics",
     async (mode) => {
       const detailRow = {
         rowType: "4K",
@@ -696,7 +923,10 @@ describe("statement shape diagnostics do not change persistence or coverage", ()
         const expected = await persistRun(baseline, await vpassCardRunPlan(card));
         const outcome = await persistCardRun(actual, card);
         expect(outcome.result).toEqual(expected);
-        expect(outcome.coverage).toBe("stated_total_mismatch");
+        // One `45` header row and one `4K/005` row against `allCnt` 1: the header
+        // is not counted (ADR 0023, 2026-11-19 amendment), so the card is
+        // `complete`; before that amendment it was `stated_total_mismatch`.
+        expect(outcome.coverage).toBe("complete");
         expect(actual.putKeys).toEqual(baseline.putKeys);
         expect(actualHead.mock.calls).toEqual(baselineHead.mock.calls);
         expect(actualGet.mock.calls).toEqual(baselineGet.mock.calls);
