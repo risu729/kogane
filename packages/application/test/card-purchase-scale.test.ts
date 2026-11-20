@@ -16,12 +16,19 @@ import {
   unboundedScans,
 } from "../../read-model/test/card-usage-plan.ts";
 import { CI_SCALE, scaledStore } from "../../read-model/test/card-usage-scale-fixture.ts";
-import { cardFigures } from "../../domain/src/card-purchase-view.ts";
+import {
+  CARD_PURCHASE_LINES_BYTES,
+  CARD_PURCHASE_LINES_MAX,
+  cardFigures,
+  type CardPurchaseLine,
+} from "../../domain/src/card-purchase-view.ts";
 import {
   ACCOUNT_LABELS_SQL,
   CARD_PURCHASE_PAGE_SIZE,
+  type CardPurchaseLinesQuery,
   CURRENT_SQL,
   queryCardPurchaseCards,
+  queryCardPurchaseLines,
   queryCardPurchases,
   SELECTION_SQL,
   USAGE_MONTH_SELECTION_SQL,
@@ -200,6 +207,91 @@ describe("card purchases on a scaled store without statistics", () => {
     );
     expect(steps(ACCOUNT_LABELS_SQL, ['["a","b"]']).filter((d) => d.startsWith("SCAN a"))).toEqual(
       [],
+    );
+  });
+
+  test("the line view (ADR 0125 amendment) lists the page's events of each month, every page bounded", async () => {
+    const seen: string[] = [];
+    const sql = executor(false, seen);
+    const everything = db.query(SELECTION_SQL).all(null, null, 10_001) as {
+      event_id: string;
+      usage_date: string;
+      statement_period: string | null;
+      account_id: string;
+    }[];
+    const walk = async (query: CardPurchaseLinesQuery) => {
+      const lines: CardPurchaseLine[] = [];
+      let cursor: string | null = null;
+      do {
+        const page = await queryCardPurchaseLines(sql, {
+          ...query,
+          ...(cursor === null ? {} : { cursor }),
+        });
+        expect(page.lines.length).toBeLessThanOrEqual(CARD_PURCHASE_LINES_MAX);
+        expect(new TextEncoder().encode(JSON.stringify(page)).length).toBeLessThanOrEqual(
+          CARD_PURCHASE_LINES_BYTES,
+        );
+        lines.push(...page.lines);
+        cursor = page.nextCursor;
+      } while (cursor !== null);
+      return lines;
+    };
+    // Every statement period: by date, the page's own events in the page's order.
+    const periods = [
+      ...new Set(everything.flatMap((row) => (row.statement_period ? [row.statement_period] : []))),
+    ];
+    let paged = false;
+    for (const period of periods) {
+      const items: string[] = [];
+      let offset: number | null = 0;
+      while (offset !== null) {
+        const page = await queryCardPurchases(sql, { period, offset });
+        items.push(...page.items.map((item) => item.eventId));
+        offset = page.nextOffset;
+      }
+      const byDate = await walk({ period });
+      paged ||= byDate.length > CARD_PURCHASE_LINES_MAX;
+      expect(byDate.map((line) => line.eventId)).toEqual(items);
+      // By amount: the same events, none twice.
+      const byAmount = (await walk({ period, sort: "amount" })).map((line) => line.eventId);
+      expect(byAmount.length).toBe(new Set(byAmount).size);
+      expect([...byAmount].sort()).toEqual([...items].sort());
+    }
+    expect(paged).toBe(true);
+    // Every usage month of one account: that account's events with a usage date in it.
+    const account = everything[0]!.account_id;
+    const months = [...new Set(everything.map((row) => row.usage_date.slice(0, 7)))];
+    for (const month of months) {
+      const ids = (await walk({ usageMonth: month, account, sort: "amount" })).map(
+        (line) => line.eventId,
+      );
+      expect(ids.sort()).toEqual(
+        [
+          ...new Set(
+            everything
+              .filter((row) => row.account_id === account && row.usage_date.startsWith(`${month}-`))
+              .map((row) => row.event_id),
+          ),
+        ].sort(),
+      );
+    }
+    // Without statistics the listed lines' provider rows are keyed reads: no
+    // leg, key or observation table is walked.
+    const keysQuery = seen.find((query) =>
+      query.includes("FROM card_purchase_recognition_keys k"),
+    )!;
+    const listed = JSON.stringify(
+      everything.slice(0, CARD_PURCHASE_LINES_MAX).map((row) => ({
+        eventId: row.event_id,
+        revision: 1,
+      })),
+    );
+    const keySteps = explain(db, keysQuery, [listed]).map((step) => step.detail);
+    expect(
+      keySteps.filter((detail) => /^SCAN (?:k|t|card_purchase_recognition_keys)\b/u.test(detail)),
+    ).toEqual([]);
+    expect(keySteps.some((detail) => /^SEARCH t USING INTEGER PRIMARY KEY/u.test(detail))).toBe(
+      true,
     );
   });
 });

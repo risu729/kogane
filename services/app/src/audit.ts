@@ -263,6 +263,14 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     const cards = page["cards"];
     if (Array.isArray(cards))
       return { rows: cards.length, truncated: page["cardsTruncated"] === true };
+    // The line view (ADR 0125 amendment) its lines, truncated while lines follow.
+    const lines = page["lines"];
+    if (Array.isArray(lines))
+      return {
+        rows: lines.length,
+        truncated:
+          typeof page["nextCursor"] === "string" || value["nextPage"] === "budget_exceeded",
+      };
     return { rows: countOf(data), truncated: false };
   }
   // One reconstructed state (of one account or a scope, ADR 0116), when there is one to show.

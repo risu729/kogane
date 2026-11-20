@@ -313,6 +313,7 @@ export {
 export {
   answerPurchasesExplain,
   explainCardPurchaseCards,
+  explainCardPurchaseLines,
   explainCardPurchases,
   parsePurchasesExplainRequest,
   PURCHASES_EXPLAIN_CAPABILITY,
@@ -324,6 +325,7 @@ export {
   type PurchasesExplainOutcome,
   type PurchasesExplainRequest,
   type PurchasesExplanation,
+  type PurchasesLinesAnswer,
   type PurchasesNextPage,
   withoutReviewAffordances,
 } from "./query/purchases-explain.ts";
