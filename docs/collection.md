@@ -335,6 +335,45 @@ underscores, and codes outside the display grammar become `unclassified`.
 This read adds no provider call or automatic retry. See
 [collection quality](read-model.md#collection-quality).
 
+### Is anything stuck? (the collection status view)
+
+`GET /api/collection-quality?view=status` and `kogane.collection-quality.read`
+with `{ view: "status" }` answer, one line per configured job, whether its
+collection works
+([ADR 0045, amendment of 2026-11-19](adr/0045-collection-quality-read.md#amendment-2026-11-19-a-status-view-one-line-per-configured-job);
+the collection quality page shows it as a table at its top). The rules, as
+the code applies them:
+
+- A receipt that `failed`, was `uncertain` or `not_dispatched` is
+  **recovered** when a visible successful fetch run (`success` with no
+  failure, the predicate the summary's V Point recovery reads) of the job's
+  CORE source completed strictly after the receipt finished (its start when
+  it has none) and strictly before the job's next receipt started. V Point's
+  daily `reauthentication_pending`, which its email follow-up run repairs
+  about 20 seconds later, is such a receipt: its code stays under `lastRun`
+  and the job reads `ok`, also before that run's parses publish on a later
+  Processor tick. A re-authentication request stores nothing and fails, so it
+  does not recover it; a failed or partial run does not either.
+- `failuresSinceSuccess` counts the receipts after the newest one that
+  completed or was recovered, from the newest 101 (a running newest receipt
+  is skipped, so the edge receipt can still end an exact count), and says
+  `"100+"` (at least 100) when none of them is a success and the job holds
+  more than 100. `failureCode` is the newest counted receipt's code.
+- `state` is the first of `disabled` (not enabled), `needs-owner` (the newest
+  counted code is `human_required…`, `manual_agreement_required`, or an
+  unrecovered V Point session code; or a dataset's cells say
+  `user_action_required`), `failing` (any counted receipt), `degraded` (a
+  dataset's newest parsed capture is more than 3 Asia/Tokyo days old while
+  newer captures are not published) and `ok`. A maintenance window defers a
+  job's next receipt; it writes no failed receipt, so it is none of these.
+- `notPublishing` lists, per dataset some parser reads, the cells whose newest
+  capture has no published parse, with their stored reasons (`unit_failed`,
+  `run_not_successful`, `not_parse_eligible`, `parse_pending`, ...). A
+  published parse with no observation (#450) is published and not listed.
+
+Limits: a recovery is seen only within the source's newest 100 runs; a
+keepalive is reported on its own line; a disabled job's datasets are not read.
+
 ### Artifact datasets at registration (ADR 0022)
 
 A terminal names no parser dataset, and no collector adds one: the Processor
@@ -368,6 +407,12 @@ carried over unchanged, so no capture is parsed twice.
 | `delivered-documents.json` (documents run)                                                | `provider_response`          |
 | `delivered-document-NNNN.pdf` (documents run)                                             | `provider_export`            |
 | `manifest.json`                                                                           | `collector_manifest`         |
+
+Every run requests two ranges per currency: the month window `defaultWindow`
+names (stored under the `monthly-` keys) and all retained history through the
+same end date, with no start date (stored under the unprefixed keys, which are
+the ones registration maps;
+[ADR 0099](adr/0099-sony-retained-history.md)). Both must pass the checks below.
 
 For each currency/window, the first JSON history page's `countCnt` is the
 expected total, already checked against every walked JSON page. A zero total
@@ -574,7 +619,15 @@ position come from the artifact key, as before
 
 Terminal fields: `producer: collector-myjcb`; one unit per connection
 (`<connectionId>`, `unitKind: connection`), so several cards in one run stay distinguishable and
-are never merged into one (G1-16); no ranges, because the statement periods are
+are never merged into one (G1-16); beside it, when the connection reports
+them, `<connectionId>:j-point` (`reward-balance`),
+`<connectionId>:j-point-history` (`reward-history`, holding
+`jpoint-inquiry.html`, `jpoint-history.html` and `jpoint-history.json`),
+`<connectionId>:debit-other` (`debit-other-statements`), one
+`<connectionId>:document:credit:YYYY-MM:<kind>` unit per credit file
+(`statement-document`) and `<connectionId>:document-discovery`
+(`statement-document-discovery`), each with its own coverage and closed code,
+and none of their artifacts counted in the connection unit; no ranges, because the statement periods are
 provider labels rather than machine ranges and stay in the manifest artifact;
 one `terminal` report carrying the outcome; `requestedScope.scopeKind =
 full_snapshot` over the connections. The run's `coverageStatus` is `partial`
@@ -772,18 +825,30 @@ months that were captured, one `terminal` report,
 `requestedScope.scopeKind = full_snapshot`. The run's `coverageStatus` is
 `partial` even on success: a card exposes a rolling window of statement months,
 so a finished run is not a claim about the card's whole history. The card unit
-is `complete` only when every month's captured rows (the pages' `meisaiList`
-entries) equal the total the provider states for it (`webMeisaiTopK3Vo.allCnt`
-on a finalized statement page, a string on the live site, `total` on a
-customized one, a number; both read by `providerCount` as a non-negative safe
-integer or a string of ASCII digits only); otherwise it is
+is `complete` only when every month's counted rows equal the total the
+provider states for it (`webMeisaiTopK3Vo.allCnt` on a finalized statement
+page, a string on the live site, `total` on a customized one, a number; both
+read by `providerCount` as a non-negative safe integer or a string of ASCII
+digits only). The counted rows are the pages' `meisaiList` entries, except
+that on a finalized page the two header kinds `45` (5 data cells) and `4C`
+(4 data cells, empty `data[1]`) are left out, because `allCnt` does not count
+them (the owner's counts-only read of 30 finalized months, decision D1;
+[ADR 0023's 2026-11-19 amendment](adr/0023-vpass-collector-card-binding.md#amendment-2026-11-19-a-finalized-pages-45-and-4c-header-rows-are-not-counted)).
+The classifier is `src/statement-rows.ts`, shared with the counts-only
+diagnostic; every other entry is counted, a row of an unknown shape included,
+and the statement parser refuses an unknown kind. A customized page's rows are
+all counted. Otherwise the unit is
 `partial`, which makes registration record the whole fetch run as `partial`,
 which neither identity nor the trusted card binding reads
 ([ADR 0023](adr/0023-vpass-collector-card-binding.md#amendment-option-3-implemented),
-[ADR 0026](adr/0026-collector-unit-coverage.md)). `manifest.json` records each month's `capturedRows`, `statedTotal`
-and closed `coverage` code (`complete`, `stated_total_unverified`,
-`stated_total_mismatch`) and the card's code, which the persist diagnostic
-also logs (`statement_months_absent` when no month was walked). The month
+[ADR 0026](adr/0026-collector-unit-coverage.md)). `manifest.json` records each
+month's `countedRows`, `excludedHeaderRows` (0 for a customized month),
+`statedTotal` and closed `coverage` code (`complete`,
+`stated_total_unverified`, `stated_total_mismatch`) and the card's code, which
+the persist diagnostic also logs (`statement_months_absent` when no month was
+walked). Manifests written before this rule name the count `capturedRows`
+and counted every entry; nothing but a reader of the stored object reads
+either field. The month
 walk (`src/statement-walk.ts`) stops a finalized month after a page whose
 `allCnt` is below its `nextPageRow` or on an empty page after the first, and a
 customized month once its rows reach `total` with `pageFlg` `1` or `3` or on
@@ -791,8 +856,9 @@ an empty answer page; it does not read `pageNo` or `lastPage`, whose meaning
 is unobserved
 ([ADR 0023's note](adr/0023-vpass-collector-card-binding.md#note-2026-09-27-both-stated-total-fields-are-on-the-live-site)).
 `producerVersion` is `vpass-worker-card-v1`, the schema version central
-storage recorded for a card-scoped Vpass run, and `manifest.json` holds exactly
-the summary central storage held for one.
+storage recorded for a card-scoped Vpass run, and `manifest.json` holds the
+summary central storage held for one plus the per-month counts and codes
+above.
 
 A card (or a session that failed before a card was selected, as unit `run`)
 that collected nothing persists a `failed` terminal with no artifact at all
@@ -1024,7 +1090,12 @@ for this artifact, with the CP932 charset a constant of the source.
 Delivered reports additionally use the exact new-mailbox handoff observed on
 2026-11-11. After ordinary domestic and foreign work, the collector uses the
 remaining shared eleven-minute budget to corroborate the current list and
-archive supported single-file PDFs. The private inventory and per-document
+archive supported single-file PDFs. A list of more than 999 rows (listed,
+declared or issued) is refused with `sbi_mailbox_rows_over_bound` on
+`mailbox-index`: the mailbox terminal has one unit per row plus the index, and
+a terminal holds at most 1,000 units. That terminal then fails with the same
+code, the cursor stays where it was, and nothing in the mailbox is archived
+until it shrinks below the bound (an open limit). The private inventory and per-document
 metadata retain provider fields; no handoff material is persisted. Each original
 PDF has its own `provider_document` artifact/unit and kind/date/identity/hash
 locator, while identical bytes reuse one content-addressed DATA object.
@@ -1039,30 +1110,30 @@ after durable terminal persistence. Legacy and unsupported document formats,
 HTTP-only session readiness and scheduled production coverage remain unproved
 or unsupported ([ADR 0108](adr/0108-sbi-delivered-documents.md)).
 
-| Artifact key                                 | Role                | Unit       |
-| -------------------------------------------- | ------------------- | ---------- |
-| `domestic-cash-positions.json`               | `collector_derived` | `domestic` |
-| `account-assets-current.json`                | `collector_derived` | `domestic` |
-| `account-assets-history-source.json`         | `provider_response` | `domestic` |
-| `account-assets-history-inventory.json`      | `collector_derived` | `domestic` |
-| `account-assets-history-<year>.json`         | `collector_derived` | `domestic` |
-| `income-payments-summary-source.json`        | `provider_response` | `domestic` |
-| `income-payments-rows-source.json`           | `provider_response` | `domestic` |
-| `income-payments.json`                       | `collector_derived` | `domestic` |
-| `realised-gains-all-summary-source.json`     | `provider_response` | `domestic` |
-| `realised-gains-summary-source.json`         | `provider_response` | `domestic` |
-| `realised-gains-rows-source.json`            | `provider_response` | `domestic` |
-| `realised-gains.json`                        | `collector_derived` | `domestic` |
-| `yen-detail-history.json`                    | `collector_derived` | `domestic` |
-| `yen-detail-history-page-NNNN-source.json`   | `provider_response` | `domestic` |
-| `foreign-cash-history.json`                  | `collector_derived` | `domestic` |
-| `foreign-cash-history-page-NNNN-source.json` | `provider_response` | `domestic` |
-| `domestic-trade-records.json`                | `collector_derived` | `domestic` |
-| `foreign-cash-positions.json`                | `collector_derived` | `foreign`  |
-| `foreign-cash-balances.json`                 | `collector_derived` | `foreign`  |
-| `foreign-trade-records.json`                 | `collector_derived` | `foreign`  |
-| `domestic-trade-records-<from>-<to>.json`    | `collector_derived` | `domestic` |
-| `foreign-trade-records-<from>-<to>.json`     | `collector_derived` | `foreign`  |
+| Artifact key                                 | Role                | Unit                    |
+| -------------------------------------------- | ------------------- | ----------------------- |
+| `domestic-cash-positions.json`               | `collector_derived` | `domestic`              |
+| `account-assets-current.json`                | `collector_derived` | `domestic`              |
+| `account-assets-history-source.json`         | `provider_response` | `weekly-assets`         |
+| `account-assets-history-inventory.json`      | `collector_derived` | `weekly-assets`         |
+| `account-assets-history-<year>.json`         | `collector_derived` | `weekly-assets`         |
+| `income-payments-summary-source.json`        | `provider_response` | `income-history-income` |
+| `income-payments-rows-source.json`           | `provider_response` | `income-history-income` |
+| `income-payments.json`                       | `collector_derived` | `income-history-income` |
+| `realised-gains-all-summary-source.json`     | `provider_response` | `income-history-gains`  |
+| `realised-gains-summary-source.json`         | `provider_response` | `income-history-gains`  |
+| `realised-gains-rows-source.json`            | `provider_response` | `income-history-gains`  |
+| `realised-gains.json`                        | `collector_derived` | `income-history-gains`  |
+| `yen-detail-history.json`                    | `collector_derived` | `cash-history-yen`      |
+| `yen-detail-history-page-NNNN-source.json`   | `provider_response` | `cash-history-yen`      |
+| `foreign-cash-history.json`                  | `collector_derived` | `cash-history-foreign`  |
+| `foreign-cash-history-page-NNNN-source.json` | `provider_response` | `cash-history-foreign`  |
+| `domestic-trade-records.json`                | `collector_derived` | `domestic`              |
+| `foreign-cash-positions.json`                | `collector_derived` | `foreign`               |
+| `foreign-cash-balances.json`                 | `collector_derived` | `foreign`               |
+| `foreign-trade-records.json`                 | `collector_derived` | `foreign`               |
+| `domestic-trade-records-<from>-<to>.json`    | `collector_derived` | `domestic`              |
+| `foreign-trade-records-<from>-<to>.json`     | `collector_derived` | `foreign`               |
 
 Weekly asset history comes from the observed no-query/no-body GET
 `/account/api/assets/valuations` in the existing main-site session. The
@@ -1072,7 +1143,8 @@ A derived inventory records every expected calendar-year shard
 hash/request/capture time. Yearly shards retain all profiles, native tuples
 and residual rows while keeping at most 53 weeks under the unchanged parser
 output budget. Their transformation inputs name both the source and inventory.
-Missing or changed shards make the domestic unit/run partial. Registration v5
+Missing or changed shards make the `weekly-assets` unit and the run partial
+(`sbi_asset_history_shard_inventory`). Registration v5
 names only yearly derivatives as the history dataset; source/inventory are unparsed;
 v1–v4 stay frozen. The parser separates available window coverage from
 unavailable null profiles and emits no extra points for native ALL tuples.
@@ -1092,18 +1164,21 @@ totals, dates, known codes, exact amounts and unique yen ids. Yen direction
 counts and exact sums match their controls; positive transfer controls stay
 unsupported until observed. USD duplicates retain occurrence identities, and
 the production reader chooses one revision per logical id across overlapping
-runs. Both statements use the domestic main-site session/unit. Registration
+runs. Both statements use the domestic main-site session; their units are
+`cash-history-yen` and `cash-history-foreign`. Registration
 v7 adds only the new USD derivative; raw pages stay unmapped and earlier
-mappings stay frozen. Catalogue status remains partial under #1226 pending
-unobserved semantics and scheduled proof
+mappings stay frozen. Catalogue status remains partial under #446 pending
+unobserved semantics (a USD statement longer than one page is refused)
 ([ADR 0102](adr/0102-sbi-retained-cash-history.md)).
 
 Except for the exact weekly/cash-history source bytes above, the bytes are
 `JSON.stringify(artifact.body)` — the collector's re-encoded view
 of each response, exactly what the retired legacy path wrote to the per-source
-bucket and the importer forwarded centrally. A dataset is attributed to a unit
-by the same rule the importer used (`foreign-` prefix → `foreign`), except the
-new main-site foreign cash statement and its raw inputs, which are domestic.
+bucket and the importer forwarded centrally. A core dataset is attributed to a
+unit by the same rule the importer used (`foreign-` prefix → `foreign`). The
+weekly-asset, cash-statement and income/gains datasets and their retained
+inputs belong to their own units instead (table above), so the main-site
+foreign cash statement is never in `foreign`.
 
 Each normal collection walks the historically exercised execution-history
 interval in at most thirteen non-overlapping windows per scope, each at most 90 days,
@@ -1141,7 +1216,8 @@ Terminal: `source: sbi-securities`, `producer: collector-sbi-securities`,
 requested scope (`domestic`, `foreign`, kind `scope`) carrying that scope's own
 artifact count, coverage and error code — a scope that failed does not make the
 other scope's data look incomplete, and a scope that produced nothing is
-`unknown` rather than an observation of zero. `requestedScope` is a
+`unknown` rather than an observation of zero. Each supplementary unit that has
+an artifact or a failure in the run is added the same way, also kind `scope`. `requestedScope` is a
 `date_range` with a matching `requested-window` range when an internal caller
 named a window, and otherwise `full_snapshot`. Every artifact with a window
 also states `<artifactKey>:requested`, attributed to its scope. Registration
@@ -1480,8 +1556,9 @@ keep-alive and the daily collection — both unchanged. Terminal source id
   still excludes that whole account unit. Neither another run's successful
   unit nor the raw lists can rescue it
   ([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-sbi-vcs-unfiltered-evidence-is-independent-of-its-classic-account-unit-2026-11-10)).
-- `transformations`: one `redacted` step per dataset (`sbi-vc-trade-worker`);
-  the unredacted envelope carried the session key and is not retained.
+- `transformations`: one `redacted` step per JSON dataset
+  (`sbi-vc-trade-worker`); the unredacted envelope carried the session key and
+  is not retained. Each PDF/ZIP document states an `extracted` step instead.
 - Report evidence adds independent year-index, annual-index, per-document and
   CSV-check units. Monthly and P&L indices cover 2018 through the capture's Tokyo
   year; annual zero is explicit complete-empty index evidence. Unknown annual

@@ -349,17 +349,43 @@ describe.if(runnable)("explicit card ownership review", () => {
       await page.close();
     });
   }
-  for (const blocker of ["contrary_evidence_recorded", "single_account_scope_unconfirmed"]) {
-    test(`${blocker} blocks self-declaration without disabling explicit evidence review`, async () => {
-      review.sides[0]!.selfDeclarationBlockers = [blocker];
+  // A fragment of each reason the self-declaration notice gives, per code.
+  const selfDeclarationReasons: Record<string, string> = {
+    ownership_claims_require_review: "記録済みの保有者の判断",
+    single_account_scope_unconfirmed: "個別のカード請求口座・預金口座と確認できない範囲",
+    contrary_evidence_recorded: "矛盾の記録があります",
+    account_mapping_unresolved: "口座への対応がまだ一つに定まっていません",
+    source_changed: "請求または銀行明細が更新されています",
+  };
+  for (const blockers of [
+    ["ownership_claims_require_review"],
+    ["contrary_evidence_recorded"],
+    ["single_account_scope_unconfirmed"],
+    // A scope blocker must not hide a recorded claim.
+    ["single_account_scope_unconfirmed", "ownership_claims_require_review"],
+    // A side's own blocker is a blocker of the declaration too, not a recorded judgement.
+    ["source_changed"],
+  ]) {
+    test(`${blockers.join(" and ")} blocks self-declaration, each reason shown, without disabling explicit evidence review`, async () => {
+      review.sides[0]!.selfDeclarationBlockers = blockers;
       const page = await open();
       const form = page.getByRole("region", { name: "カード請求の支払義務を負う人", exact: true });
       await form.getByLabel("保有者の識別名", { exact: true }).fill("本人A");
       await form.getByLabel("根拠の種類", { exact: true }).selectOption("self-declared");
       await form.getByLabel("本人申告の補足・判断の理由", { exact: true }).fill("本人申告");
       await form.getByRole("checkbox").check();
-      if (blocker === "single_account_scope_unconfirmed") {
-        expect(await form.innerText()).toContain("表示件数をカード枚数とみなさず");
+      const reasons = form.getByRole("note").filter({ hasText: "本人申告は次の理由" });
+      expect(await reasons.getByRole("listitem").count()).toBe(blockers.length);
+      const text = await reasons.innerText();
+      for (const code of blockers) expect(text).toContain(selfDeclarationReasons[code]!);
+      // Only the codes the answer carries are named.
+      for (const [code, fragment] of Object.entries(selfDeclarationReasons))
+        if (!blockers.includes(code)) expect(text).not.toContain(fragment);
+      if (blockers.includes("single_account_scope_unconfirmed")) {
+        expect(text).toContain("表示件数をカード枚数とみなさず");
+        // The owner default's wider scope (a card connection root) does not
+        // admit a self-declaration, so the reason does not say it does.
+        expect(text).not.toContain("カード会社の接続全体・預金口座のいずれとも");
       }
       expect(
         await form
@@ -376,6 +402,24 @@ describe.if(runnable)("explicit card ownership review", () => {
       await page.close();
     });
   }
+  test("an unresolved mapping is named once in the self-declaration reasons", async () => {
+    // The read model answers the side's own blocker and, with no mapping to
+    // read a declaration context from, the same code again.
+    review.sides[0]!.blockers = ["account_mapping_unresolved"];
+    review.sides[0]!.accountId = null;
+    review.sides[0]!.selfDeclarationBlockers = [
+      "account_mapping_unresolved",
+      "account_mapping_unresolved",
+    ];
+    const page = await open();
+    const form = page.getByRole("region", { name: "カード請求の支払義務を負う人", exact: true });
+    await form.getByLabel("根拠の種類", { exact: true }).selectOption("self-declared");
+    const reasons = form.getByRole("note").filter({ hasText: "本人申告は次の理由" });
+    expect(await reasons.getByRole("listitem").allInnerTexts()).toEqual([
+      "原本から口座への対応がまだ一つに定まっていません。口座の整理を確認してください。",
+    ]);
+    await page.close();
+  });
   test("missing mappings cannot be cured by typing a plausible owner and mobile evidence wraps", async () => {
     review.sides[0]!.blockers = ["account_mapping_unresolved"];
     review.sides[0]!.accountId = null;
@@ -446,6 +490,20 @@ describe.if(runnable)("explicit card ownership review", () => {
     const page = await open();
     await page.getByRole("region", { name: "カード請求の支払義務を負う人", exact: true }).waitFor();
     await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  test("the self-declaration form, with its blocker reasons, passes the accessibility audit", async () => {
+    review.sides[0]!.selfDeclarationBlockers = [
+      "single_account_scope_unconfirmed",
+      "ownership_claims_require_review",
+    ];
+    const page = await open();
+    const form = page.getByRole("region", { name: "カード請求の支払義務を負う人", exact: true });
+    await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
+    await form.getByLabel("根拠の種類", { exact: true }).selectOption("self-declared");
+    await form.getByRole("note").filter({ hasText: "本人申告は次の理由" }).waitFor();
     expect(await auditView(page)).toEqual([]);
     await page.close();
   }, 60_000);

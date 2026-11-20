@@ -1,6 +1,9 @@
 import type { ReactNode } from "react";
 import type { CardOwnershipSide } from "../../../packages/domain/src/card-ownership-review.ts";
-import { readOwnershipDeclaration } from "../../../packages/domain/src/ownership-declaration.ts";
+import {
+  readOwnershipDeclaration,
+  type OwnershipDeclarationScope,
+} from "../../../packages/domain/src/ownership-declaration.ts";
 import { Link } from "./router.tsx";
 import { Kv, KvRow, Notice } from "./ui.tsx";
 export const OWNERSHIP_ROLES = {
@@ -18,15 +21,28 @@ const BLOCKERS: Record<string, string> = {
 };
 /** The declaration's own closed codes (`ownershipDeclarationBlockers`). */
 const DECLARATION_BLOCKERS: Record<string, string> = {
-  single_account_scope_unconfirmed:
-    "この記録はカード請求口座・カード会社の接続全体・預金口座のいずれとも確認できない範囲です。口座の整理を先に確認してください。",
   ownership_claims_require_review:
     "この口座には記録済みの保有者の判断（却下・期間付きを含む）があります。記録済みの判断は上書きしません。",
   contrary_evidence_recorded:
     "この口座または根拠に矛盾の記録があります。記録済みの根拠を確認して判断してください。",
 };
-/** One blocker code in Japanese; an unknown code is shown as the code itself. */
-export function ownershipBlockerText(code: string): string {
+/**
+ * `single_account_scope_unconfirmed` per scope: the owner default also admits
+ * a card connection root, the self-declaration only an individual card
+ * statement or deposit account (`declarationAccountScope`).
+ */
+const SCOPE_UNCONFIRMED: Record<OwnershipDeclarationScope, string> = {
+  "owner-default":
+    "この記録はカード請求口座・カード会社の接続全体・預金口座のいずれとも確認できない範囲です。口座の整理を先に確認してください。",
+  "sole-personal":
+    "この記録は個別のカード請求口座・預金口座と確認できない範囲です（カード会社の接続全体・集約・未解決を含む）。表示件数をカード枚数とみなさず、個別口座との対応を先に確認してください。",
+};
+/**
+ * One blocker code of a declaration of `scope` in Japanese; an unknown code
+ * is shown as the code itself.
+ */
+export function ownershipBlockerText(code: string, scope: OwnershipDeclarationScope): string {
+  if (code === "single_account_scope_unconfirmed") return SCOPE_UNCONFIRMED[scope];
   return BLOCKERS[code] ?? DECLARATION_BLOCKERS[code] ?? code;
 }
 export function ownerLabel(ref: string): string {

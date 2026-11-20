@@ -5,7 +5,10 @@
 // only its query-parameter checks. Moved here from
 // `services/app/src/identity-api.ts` (ADR 0081 point 2), so no adapter holds
 // this SQL.
-import type { IdentityOrigin } from "../../../observation-shared/src/identity-contract.ts";
+import type {
+  IdentityAccountListRow,
+  IdentityOrigin,
+} from "../../../observation-shared/src/identity-contract.ts";
 import {
   IDENTITY_PAGE_LIMIT,
   nextIdentityOffset,
@@ -21,9 +24,16 @@ import {
   listAccountConnections,
   readAccountConnections,
 } from "./account-connections.ts";
+import { displayAccountLabel, entityAccountLabels } from "./account-labels.ts";
 import { preferredInstrumentNames } from "./preferred-instrument-names.ts";
 
 const LIMIT = IDENTITY_PAGE_LIMIT;
+/**
+ * The references `account-list` groups in one read. Production holds a few
+ * dozen; more than this is refused (`identity_account_list_limit`), never cut,
+ * since a cut would split an account's references across an unseen page.
+ */
+export const ACCOUNT_LIST_REFERENCE_LIMIT = 2000;
 // Evaluate the canonical eligibility view once, before joining instrument roles.
 // Source-account provenance is enforced on every immutable identity observation.
 const CURRENT = `current AS MATERIALIZED (
@@ -55,18 +65,32 @@ const ELIGIBLE = `all_observations AS (
  * later correction changes `latest` and not `as-recorded`.
  */
 export function identityQuery(
-  collection: "accounts" | "instruments" | "coverage",
+  collection: "accounts" | "account-list" | "instruments" | "coverage",
   filtered: boolean,
   mode: IdentityReadMode = "latest",
 ): string {
   const current = CURRENT.replace("FILTER", filtered ? "s.source_id=?1" : "1");
   const offset = filtered ? "?2" : "?1";
   const recorded = mode === "as-recorded";
-  if (collection === "accounts")
+  // `account-list` reads every reference (bounded) and groups them by account
+  // in `readIdentityAccountList`; it adds the entity's own row and when each
+  // reference's newest capture was recorded.
+  const list = collection === "account-list";
+  if (collection === "accounts" || list)
     return `WITH ${current}, counts AS MATERIALIZED (
     SELECT source_account_id,source_id,count(*) observedCount,min(kind||':'||observation_id) originKey
     FROM current GROUP BY source_account_id,source_id
   )${
+    list
+      ? `, runs AS MATERIALIZED (
+    SELECT DISTINCT source_account_id,parse_run_id FROM current
+  ), seen AS MATERIALIZED (
+    SELECT r.source_account_id,max(f.first_recorded_at_ms) lastFetchedAtMs
+    FROM runs r JOIN parse_runs p ON p.id=r.parse_run_id JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+    JOIN fetch_runs f ON f.id=a.fetch_run_id GROUP BY r.source_account_id
+  )`
+      : ""
+  }${
     recorded
       ? `, pinned AS MATERIALIZED (
     SELECT c.source_account_id,c.source_id,c.account_mapping_id,c.identity_run_id,
@@ -77,8 +101,10 @@ export function identityQuery(
   } SELECT s.id referenceId,m.account_id targetId,m.label,a.role,m.status,c.source_id source,
     s.reference_json reference,s.producer_id producer,json_extract(s.reference_json,'$[0]') sourceAccount,m.method,m.reason,m.revision,c.observedCount,c.originKey${
       recorded ? ",ctx.policy_release identityRelease" : ""
+    }${list ? ",a.label accountLabel,a.status accountStatus,seen.lastFetchedAtMs" : ""}
+    FROM counts c JOIN source_accounts s ON s.id=c.source_account_id${
+      list ? " LEFT JOIN seen ON seen.source_account_id=c.source_account_id" : ""
     }
-    FROM counts c JOIN source_accounts s ON s.id=c.source_account_id
     ${
       recorded
         ? `JOIN pinned p ON p.source_account_id=c.source_account_id AND p.source_id=c.source_id AND p.rank=1
@@ -86,7 +112,7 @@ export function identityQuery(
     JOIN identity_run_contexts ctx ON ctx.identity_run_id=p.identity_run_id`
         : "JOIN current_account_mappings m ON m.source_account_id=s.id JOIN accounts a ON a.id=m.account_id"
     }
-    ORDER BY c.source_id,s.id LIMIT 101 OFFSET ${offset}`;
+    ORDER BY c.source_id,s.id LIMIT ${list ? ACCOUNT_LIST_REFERENCE_LIMIT + 1 : 101} OFFSET ${offset}`;
   if (collection === "instruments")
     return `WITH ${current}, counts AS MATERIALIZED (
     SELECT u.identifier_id,o.source_id,count(DISTINCT o.id) observedCount,min(o.kind||':'||o.observation_id) originKey
@@ -148,7 +174,13 @@ function origin(row: Record<string, unknown>): Record<string, unknown> {
   return { ...rest, origin: { kind, id: Number(id) } as IdentityOrigin };
 }
 /** The identity pages, each `GET /api/identity/<collection>`. */
-export const IDENTITY_COLLECTIONS = ["connections", "accounts", "instruments", "coverage"] as const;
+export const IDENTITY_COLLECTIONS = [
+  "connections",
+  "accounts",
+  "account-list",
+  "instruments",
+  "coverage",
+] as const;
 export type IdentityCollection = (typeof IDENTITY_COLLECTIONS)[number];
 
 /** The query of one non-connection page, already checked by its route. */
@@ -163,12 +195,14 @@ export async function readIdentityConnections(sql: SqlExecutor) {
   return { connections: await listAccountConnections(sql) };
 }
 
-/** One page of accounts, instruments or coverage, with its interpretation context. */
+/** One page of accounts, account-list, instruments or coverage, with its interpretation context. */
 export async function readIdentityPage(
   sql: SqlExecutor,
   collection: Exclude<IdentityCollection, "connections">,
-  { source, offset, mode }: IdentityPageQuery,
+  query: IdentityPageQuery,
 ): Promise<Record<string, unknown>> {
+  if (collection === "account-list") return readIdentityAccountList(sql, query);
+  const { source, offset, mode } = query;
   const bindings = source === null ? [offset] : [source, offset];
   const results = await sql.all<Record<string, unknown>>(
     identityQuery(collection, source !== null, mode),
@@ -191,6 +225,10 @@ export async function readIdentityPage(
         sourceAccount: String(row.sourceAccount),
       })),
     );
+    const entities = await entityAccountLabels(
+      sql,
+      results.slice(0, LIMIT).map((row) => String(row.targetId)),
+    );
     for (const row of results) {
       const connection = connections.get(String(row.referenceId));
       if (connection) {
@@ -202,6 +240,11 @@ export async function readIdentityPage(
           connection,
         );
       }
+      row.label = displayAccountLabel(
+        String(row.label),
+        row.method as "rule" | "manual",
+        entities.get(String(row.targetId)),
+      );
       delete row.producer;
       delete row.sourceAccount;
       delete row.method;
@@ -216,5 +259,102 @@ export async function readIdentityPage(
   return {
     ...page(collection === "coverage" ? results : results.map(origin), offset),
     interpretationContext: interpretationContext(mode, identityReleaseFor(mode, releases)),
+  };
+}
+
+interface AccountListReference {
+  referenceId: string;
+  targetId: string;
+  label: string;
+  role: string;
+  source: string;
+  producer: string;
+  sourceAccount: string;
+  method: "rule" | "manual";
+  observedCount: number;
+  identityRelease?: string;
+  accountLabel: string;
+  accountStatus: IdentityAccountListRow["status"];
+  lastFetchedAtMs: number | null;
+}
+
+const one = <T>(values: Iterable<T>): T | undefined => {
+  const set = new Set(values);
+  return set.size === 1 ? [...set][0] : undefined;
+};
+
+/**
+ * `GET /api/identity/account-list` (ADR 0120): one line per account entity
+ * that current identity observations reach, with the entity's readable label,
+ * where the per-reference `accounts` page has one line per source reference.
+ * Every reference is read (refused past `ACCOUNT_LIST_REFERENCE_LIMIT`) and
+ * grouped here, so an entity is never split across pages; the entities are
+ * then paged by `offset`, 100 a page. `source` keeps the references of that
+ * source only; the label is still the entity's.
+ */
+export async function readIdentityAccountList(
+  sql: SqlExecutor,
+  { source, offset, mode }: IdentityPageQuery,
+): Promise<Record<string, unknown>> {
+  const references = await sql.all<AccountListReference>(
+    identityQuery("account-list", source !== null, mode),
+    source === null ? [0] : [source, 0],
+  );
+  if (references.length > ACCOUNT_LIST_REFERENCE_LIMIT)
+    throw new Error("identity_account_list_limit");
+  const byAccount = new Map<string, AccountListReference[]>();
+  for (const reference of references) {
+    const group = byAccount.get(reference.targetId) ?? [];
+    group.push(reference);
+    byAccount.set(reference.targetId, group);
+  }
+  // References arrive ordered by source then reference id: an account is
+  // placed where its first reference is, so the order is stable across reads.
+  const accounts = [...byAccount.keys()];
+  const shown = accounts.slice(offset, offset + LIMIT);
+  const shownReferences = shown.flatMap((account) => byAccount.get(account)!);
+  const [entities, connections] = await Promise.all([
+    entityAccountLabels(sql, shown),
+    readAccountConnections(sql, shownReferences),
+  ]);
+  const rows: IdentityAccountListRow[] = shown.map((account) => {
+    const group = byAccount.get(account)!;
+    const manual = one(group.filter((r) => r.method === "manual").map((r) => r.label));
+    const entity = entities.get(account);
+    const [label, labelOrigin]: [string, IdentityAccountListRow["labelOrigin"]] =
+      manual !== undefined
+        ? [manual, "manual"]
+        : entity
+          ? [entity.label, entity.origin]
+          : [one(group.map((r) => r.label)) ?? group[0]!.accountLabel, "mapping"];
+    const statuses = group.flatMap((r) => {
+      const connection = connections.get(r.referenceId);
+      return connection ? [connection.status] : [];
+    });
+    const fetched = group.flatMap((r) => (r.lastFetchedAtMs === null ? [] : [r.lastFetchedAtMs]));
+    return {
+      account,
+      label,
+      labelOrigin,
+      role: group[0]!.role,
+      status: group[0]!.accountStatus,
+      sources: [...new Set(group.map((r) => r.source))].sort(),
+      references: group.length,
+      observedCount: group.reduce((sum, r) => sum + r.observedCount, 0),
+      connection: statuses.length ? (one(statuses) ?? "unresolved") : null,
+      lastFetchedAt: fetched.length ? new Date(Math.max(...fetched)).toISOString() : null,
+    };
+  });
+  const more = accounts.length > offset + LIMIT;
+  return {
+    rows,
+    coverage: { limit: LIMIT, truncated: more, nextOffset: nextIdentityOffset(offset, more) },
+    interpretationContext: interpretationContext(
+      mode,
+      identityReleaseFor(
+        mode,
+        shownReferences.map((r) => r.identityRelease),
+      ),
+    ),
   };
 }
