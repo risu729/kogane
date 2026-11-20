@@ -178,9 +178,10 @@ export interface ApiCapabilities {
    */
   readonly reportedStateOnDate?: boolean;
   /**
-   * `GET /api/v2/reconstructed-state` is served: one account's balances
-   * reconstructed from adopted events over a range, beside the reported state
-   * at both ends, at a cut of the economic commit log. Served exactly where
+   * `GET /api/v2/reconstructed-state` is served: the balances of one account,
+   * or of a scope of up to 20 (ADR 0116), reconstructed from adopted events
+   * over a range, beside the reported state at both ends, at a cut of the
+   * economic commit log. Served exactly where
    * `reportedStateOnDate` is; without CORE 0070 it answers `unavailable`.
    */
   readonly reconstructedStateOnDate?: boolean;

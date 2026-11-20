@@ -1,7 +1,7 @@
 // 保有数量の変化 (the /state page's panel) in the production client against a
 // server whose answers the queries themselves produce
 // (packages/application/test/holdings-change-world.ts and reported-state-world.ts).
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
@@ -18,6 +18,7 @@ import {
 import { HoldingsChangeError } from "../../../packages/application/src/query/holdings-change.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { holdingsChangeQueryRefusal } from "../../../packages/observation-shared/src/reported-holdings-change-contract.ts";
+import { settledTest } from "./settle.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -28,8 +29,13 @@ if (!runnable && (!existsSync(join(client, "index.html")) || process.env["CI"] =
 const DESKTOP = { width: 1280, height: 1000 };
 const MOBILE = { width: 390, height: 844 };
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("reported holdings change between two dates", () => {
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let tooMany = false;
@@ -91,7 +97,6 @@ describe.if(runnable)("reported holdings change between two dates", () => {
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   }, 60_000);
   afterAll(async () => {
     await browser?.close();

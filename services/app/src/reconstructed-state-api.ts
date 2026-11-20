@@ -1,9 +1,10 @@
-// `GET /api/v2/reconstructed-state?account=…&from=YYYY-MM-DD&to=YYYY-MM-DD`
+// `GET /api/v2/reconstructed-state?account=…[&account=…]&from=YYYY-MM-DD&to=YYYY-MM-DD`
 // `[&basis=cash][&coreEpoch=…&commitSeq=N | &coreEpoch=…&instant=…][&setVersion=…]`:
-// one account's balances reconstructed from adopted events over a range,
-// beside what its provider reported at both ends, at one cut of the economic
-// commit log (docs/reconstructed-state.md, ADR 0058 and its 2026-10-09
-// amendment). The route is an adapter: the parameters, the request rules, the
+// the balances of one account, or of a scope of up to 20 (`account`
+// repeated), reconstructed from adopted events over a range, beside what
+// their providers reported at both ends, at one cut of the economic commit
+// log (docs/reconstructed-state.md, ADR 0058 and its 2026-10-09 amendment,
+// ADR 0116). The route is an adapter: the parameters, the request rules, the
 // grant check, the bounds and the refusal codes are the application
 // service's (`readReconstructedState`), which the agent tool
 // `kogane.reconstructed-state.read` calls too.

@@ -143,6 +143,19 @@ export function validReportBody(value: unknown): value is ReportBody {
   return value.partition !== "not-computable" || value.subtotal === null;
 }
 
+/**
+ * The partition a holdings report states. A report cut at its row bound left
+ * positions unread, so its figure is a subtotal of part of the scope even when
+ * every row it holds is valued: it is never `complete` (INV05; ADR 0072,
+ * amendment of 2026-11-18). The report job stores this, and the report reader
+ * answers it beside a stored body, so a body the job wrote `complete` with
+ * `truncated: true` before that amendment is read as partial by the page and
+ * by `kogane.reports.read` alike, without rewriting it.
+ */
+export function reportPartition(partition: ResultPartition, truncated: boolean): ResultPartition {
+  return truncated && partition === "complete" ? "partial-verified-scope" : partition;
+}
+
 export function validReportRow(value: unknown): value is ReportRow {
   if (
     !isRecord(value) ||

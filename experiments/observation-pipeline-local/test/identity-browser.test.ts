@@ -1,6 +1,6 @@
 // Local fixture values simulate the financial API contract for rendering tests.
 // Local synthetic fixtures only. No connection to a user browser or real account.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -15,6 +15,7 @@ import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared
 import { INSTRUMENT_COVERAGE_PATH } from "../../../packages/observation-shared/src/instrument-coverage-contract.ts";
 import type { InstrumentCoverage } from "../../../packages/application/src/query/instrument-coverage.ts";
 import { INSTRUMENT_CANDIDATE_POLICY } from "../../../packages/domain/src/instrument-candidates.ts";
+import { settledTest } from "../../../apps/web/test/settle.ts";
 
 const client = join(import.meta.dir, "../../../apps/web/dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -30,13 +31,18 @@ const pageTwo = "IDENTITY_SECOND_PAGE";
 // The coverage contract bounds a source at 128 characters.
 const instrumentSource = "synthetic-instrument-source";
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (apps/web/test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath });
+const test = settledTest();
+
 describe.if(runnable)("protected identity client on local synthetic server", () => {
   const fixture = buildFixture();
   const observation = fixture.store.db
     .query("SELECT id FROM transaction_observations LIMIT 1")
     .get() as { id: number };
   const requests: string[] = [];
-  let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   beforeAll(async () => {
@@ -183,7 +189,6 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
       },
     });
     origin = `http://127.0.0.1:${server.port}`;
-    browser = await chromium.launch({ executablePath });
   });
   afterAll(async () => {
     await browser?.close();

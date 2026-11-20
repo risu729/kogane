@@ -11,7 +11,7 @@
 // Skipped unless a Chromium binary is available. The environment provides one
 // at PLAYWRIGHT_BROWSERS_PATH; CHROMIUM_PATH overrides it.
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect } from "bun:test";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
@@ -19,6 +19,7 @@ import { createApi } from "../src/api.ts";
 import { insertObservation, insertParseRun, publishParseRun } from "../src/store.ts";
 import { buildFixture, RETIRED_DESCRIPTION } from "./fixture.ts";
 import { auditPage, openDisclosures, tabWalk } from "../../../apps/web/test/a11y-audit.ts";
+import { settledTest } from "../../../apps/web/test/settle.ts";
 
 const CLIENT_DIR = join(import.meta.dir, "..", "..", "..", "apps", "web", "dist");
 
@@ -64,9 +65,14 @@ if (!runnable) {
   }
 }
 
+// Launched while the module loads, and only for a suite that runs: a timeout
+// kills a browser a hook launched (apps/web/test/settle.ts).
+let browser: Browser;
+if (runnable) browser = await chromium.launch({ executablePath: executablePath! });
+const test = settledTest();
+
 describe.if(runnable)("evidence browser in a real browser", () => {
   const fixture = buildFixture();
-  let browser: Browser;
   let baseUrl: string;
   let server: ReturnType<typeof Bun.serve>;
   const consoleErrors: string[] = [];
@@ -126,9 +132,6 @@ describe.if(runnable)("evidence browser in a real browser", () => {
     });
     server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: app.fetch });
     baseUrl = `http://127.0.0.1:${server.port}`;
-
-    const { chromium } = await import("playwright");
-    browser = await chromium.launch({ executablePath: executablePath! });
   }, 60_000);
 
   afterAll(async () => {

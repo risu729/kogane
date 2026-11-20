@@ -92,6 +92,42 @@ test("companion section retains empty coverage, idempotent chunks, conflicts and
   });
   s.sqlite.close();
 });
+test("a section row that breaks a CHECK fails its chunk instead of being left out", async () => {
+  // The writer skips only a re-sent key; `INSERT OR IGNORE` skipped this row
+  // too, with no error, and moved the checkpoint past it.
+  const s = await setup();
+  const [row] = await rewardProviderSectionRows([section]);
+  const ctx = { lease: "lease", fence: s.fence, now, rowsWritten: 0 };
+  await expect(
+    writeRewardProviderSectionChunk(s.db, s.snapshotId, [{ ...row!, rowKey: "" }], ctx),
+  ).rejects.toThrow(/CHECK constraint failed/u);
+  expect(await rewardProviderCheckpoint(s.db, s.snapshotId)).toBe(-1);
+  expect(s.sqlite.query("SELECT count(*) n FROM reward_provider_expiry_sections").get()).toEqual({
+    n: 0,
+  });
+  s.sqlite.close();
+});
+test("a new section key at a written position is refused, not skipped", async () => {
+  // Only the order index on (snapshot_id,row_seq) can refuse this row; a
+  // targetless `ON CONFLICT DO NOTHING` would skip it like `OR IGNORE` did.
+  const s = await setup();
+  const [row] = await rewardProviderSectionRows([section]);
+  const ctx = { lease: "lease", fence: s.fence, now, rowsWritten: 0 };
+  expect(await writeRewardProviderSectionChunk(s.db, s.snapshotId, [row!], ctx)).toBe("written");
+  await expect(
+    writeRewardProviderSectionChunk(
+      s.db,
+      s.snapshotId,
+      [{ ...row!, rowKey: "synthetic-displaced-section" }],
+      { ...ctx, rowsWritten: 1 },
+    ),
+  ).rejects.toThrow(/UNIQUE constraint failed/u);
+  expect(await rewardProviderCheckpoint(s.db, s.snapshotId)).toBe(0);
+  expect(s.sqlite.query("SELECT count(*) n FROM reward_provider_expiry_sections").get()).toEqual({
+    n: 1,
+  });
+  s.sqlite.close();
+});
 test("provider-only section seals without a fake rule; rows and count are immutable", async () => {
   const s = await setup();
   const rows = await rewardProviderSectionRows([section]);

@@ -498,13 +498,28 @@ export interface RewardHoldingView {
   /** Observed-at text per bucket, exactly as the provider reported it. */
   observedAt: Record<string, string>;
   qualification: QualificationMeasure[];
+  /**
+   * The page may hold only some of this holding's buckets: its buckets run
+   * past the page's last row, or the page starts at an offset and the
+   * holding may have begun on the page before. A total over `buckets` is then
+   * a part of the holding, never its whole (INV05).
+   */
+  cutByPage: boolean;
 }
+
+/** The reason a holding's totals are not given while the page cuts its buckets. */
+export const HOLDING_CUT_BY_PAGE = "holding_cut_by_page";
 
 export interface RewardReader {
   holdings(scope: { programId?: string; offset: number }): Promise<Page<RewardHoldingView>>;
   expiryRules(programId?: string): Promise<ExpiryRule[]>;
   membership(programId?: string): Promise<MembershipState[]>;
   offers(scope: { offerId?: string; offset: number }): Promise<Page<ConversionOffer>>;
+}
+
+/** One holding's key among a page's bucket rows. */
+function holdingKey(row: RewardBucketSqlRow): string {
+  return `${row.program_id}\u0000${row.holding_ref}`;
 }
 
 export function createRewardReader(sql: SqlExecutor, release = REWARD_READ_RELEASE): RewardReader {
@@ -521,7 +536,7 @@ export function createRewardReader(sql: SqlExecutor, release = REWARD_READ_RELEA
       const truncated = rows.length > REWARD_PAGE_LIMIT;
       const views = new Map<string, RewardHoldingView>();
       for (const row of rows.slice(0, REWARD_PAGE_LIMIT)) {
-        const key = `${row.program_id} ${row.holding_ref}`;
+        const key = holdingKey(row);
         let view = views.get(key);
         if (!view) {
           view = {
@@ -537,6 +552,9 @@ export function createRewardReader(sql: SqlExecutor, release = REWARD_READ_RELEA
             sourceId: row.source_id,
             observedAt: {},
             qualification: [],
+            // The rows are ordered by holding, so only the first holding of
+            // a page that starts past row 0 can have begun on an earlier page.
+            cutByPage: views.size === 0 && scope.offset > 0,
           };
           views.set(key, view);
         }
@@ -565,6 +583,11 @@ export function createRewardReader(sql: SqlExecutor, release = REWARD_READ_RELEA
           });
         else view.holding.buckets.push(bucket);
       }
+      // The row past the page belongs to the page's last holding: that
+      // holding continues on the next page.
+      const next = rows[REWARD_PAGE_LIMIT];
+      const continued = next ? views.get(holdingKey(next)) : undefined;
+      if (continued) continued.cutByPage = true;
       return {
         rows: [...views.values()],
         coverage: {
