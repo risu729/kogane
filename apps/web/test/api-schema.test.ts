@@ -45,6 +45,7 @@ describe("shared API schema", () => {
         offset: "paginationVersion:offset-v1",
         latestOffset: "paginationVersion:offset-v1",
         identityRead: "identityReadModes",
+        detail: "sharedQuery",
       },
       "/api/positions": {
         source: "collectionFilters",
@@ -180,6 +181,7 @@ describe("shared API schema", () => {
       "offset",
       "latestOffset",
       "identityRead",
+      "detail",
     ]);
     expect(allowedQueryParameters("/api/artifacts", CENTRAL_STORE_CAPABILITIES)).toEqual([
       "source",
@@ -239,6 +241,22 @@ describe("shared API schema", () => {
       "?source=demo-bank&account=x&view=balances",
     );
     expect(listRequestSearch("/api/balances", LOCAL_STORE_CAPABILITIES, params)).toBe("");
+    // The balance list's detail (ADR 0123, amendment 2026-11-20) is sent where
+    // the shared service shapes its summary, never to the local store.
+    expect(
+      listRequestSearch(
+        "/api/balances",
+        CENTRAL_STORE_CAPABILITIES,
+        new URLSearchParams("view=summaries&detail=full"),
+      ),
+    ).toBe("?view=summaries&detail=full");
+    expect(
+      listRequestSearch(
+        "/api/balances",
+        LOCAL_STORE_CAPABILITIES,
+        new URLSearchParams("view=summaries&detail=full"),
+      ),
+    ).toBe("");
     const partial: ApiCapabilities = { ...CENTRAL_STORE_CAPABILITIES, measureViews: ["balances"] };
     expect(listRequestSearch("/api/balances", partial, new URLSearchParams("view=summaries"))).toBe(
       "",

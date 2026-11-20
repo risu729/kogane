@@ -128,7 +128,7 @@ describe("production observation API", () => {
         9007199254740993,'2026-09-07',CAST(x AS TEXT),'{}' FROM n`)
       .bind(parse!.id)
       .run();
-    const base = "/api/balances?source=other-test&account=large-balance-account";
+    const base = "/api/balances?source=other-test&account=large-balance-account&detail=full";
     const first = (await (await call(base)).json()) as {
       latest: { id: number }[];
       history: { id: number }[];
@@ -395,7 +395,7 @@ describe("production observation API", () => {
       expect(response.headers.get("cache-control")).toBe("no-store");
       expect(validApiResponse(path, await response.json()), path).toBe(true);
     }
-    const balances = (await (await call("/api/balances")).json()) as {
+    const balances = (await (await call("/api/balances?detail=full")).json()) as {
       latest: { amount_minor: string }[];
     };
     expect(balances.latest.some((row) => row.amount_minor === "9007199254740993")).toBe(true);

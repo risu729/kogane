@@ -160,6 +160,7 @@ describe("shared contract pin", () => {
         offset: "paginationVersion:offset-v1",
         latestOffset: "paginationVersion:offset-v1",
         identityRead: "identityReadModes",
+        detail: "sharedQuery",
       },
       "/api/positions": {
         source: "collectionFilters",

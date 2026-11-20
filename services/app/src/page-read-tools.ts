@@ -132,7 +132,7 @@ const TOOLS = {
   "kogane.observations.list": tool({
     title: "Lists of transactions, balances, positions or artifacts",
     description:
-      "One page of an evidence browser list: `transactions`, `balances` (the latest grouped balances and their history), `positions` (with valuations) or `artifacts` (stored captures, newest first). Each observation row carries its normalized decimal and its identity organization. The same answer as GET /api/<kind>, under records.read and a whole-store read grant. Filters are the route's: `source`, `account`, `from`/`to` (YYYY-MM-DD) and `q` for transactions; `instrument`, `metric` and `view` for balances; `offset` (and `latestOffset` for balances) pages up to 500 rows; `cursor` pages artifacts. A filter the list does not take is refused, as on the route. Read-only.",
+      "One page of an evidence browser list: `transactions`, `balances` (the latest grouped balances and their history), `positions` (with valuations) or `artifacts` (stored captures, newest first). Each observation row carries its normalized decimal and its identity organization. The same answer as GET /api/<kind> with the same `detail`, under records.read and a whole-store read grant. Filters are the route's: `source`, `account`, `from`/`to` (YYYY-MM-DD) and `q` for transactions; `instrument`, `metric` and `view` for balances; `offset` (and `latestOffset` for balances) pages up to 500 rows; `cursor` pages artifacts. A filter the list does not take is refused, as on the route. `balances` takes `detail`: `summary` (the default) answers the first lines of each list, latest and history in turn, up to 10 each and under 8 KB: observationId, `account` and `metric` refs into page-local `accounts` (source, sourceAccount, entity, label, mapping status, lineage) and `metrics` (source, providerMetric and the interpretation's closed kind, measurementKind, assetClass, timeBasis), amount {value, unit, status, scale} (a value that is not exact has no value and keeps its status, never a zero) and asOf; a latest line's `duplicates` (the ids its group folded in) and `interpretation:conflict`, a history line's `parse:superseded`, `parse:pending`, `parse:error`; `coverage.nextOffset` and `latestNextOffset` start each list's next page. `full` answers up to 500 rows a list with each row's organization and interpretation. The adopted balances of the published snapshot are kogane.balances.read's. Read-only.",
     schema: z.strictObject({
       kind: z.enum(["transactions", "balances", "positions", "artifacts"]),
       source: FILTER_TEXT.optional(),
@@ -147,6 +147,7 @@ const TOOLS = {
       latestOffset: OFFSET.optional(),
       cursor: FILTER_TEXT.optional(),
       identityRead: IDENTITY_READ.optional(),
+      detail: READ_DETAIL.optional(),
     }),
     capability: "records.read",
     routes: ["/api/transactions", "/api/balances", "/api/positions", "/api/artifacts"],

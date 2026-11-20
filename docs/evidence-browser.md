@@ -224,6 +224,12 @@ succeeded.
 A balance is a measurement, so each metric an institution reports is its
 own row; nothing is collapsed into one number per account.
 
+On the central store the route's default is a summary of both lists (the
+first lines of each, under 8 KB a page), so the page asks for
+`/api/balances?detail=full`; the local store takes no `detail` and answers
+in full ([ADR 0123](adr/0123-summary-detail-for-large-reads.md), amendment
+of 2026-11-20).
+
 ### Positions — `/positions`
 
 Each current position with its quantity as a decimal string and an

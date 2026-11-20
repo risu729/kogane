@@ -19,6 +19,7 @@ import { overviewSummary } from "../../../packages/application/src/query/overvie
 import type { OverviewPage } from "../../../packages/observation-shared/src/api-contract";
 import {
   balanceHistorySummary,
+  balanceListSummary,
   latestBalanceSummary,
 } from "../../../packages/application/src/query/read-detail";
 import {
@@ -117,6 +118,7 @@ function calls(): [string, Record<string, unknown>][] {
     ["kogane.store.read", { page: "filter-options", kind: "balances" }],
     ["kogane.observations.list", { kind: "transactions" }],
     ["kogane.observations.list", { kind: "balances" }],
+    ["kogane.observations.list", { kind: "balances", detail: "full" }],
     ["kogane.observations.list", { kind: "positions" }],
     ["kogane.observations.list", { kind: "artifacts" }],
     ["kogane.observations.get", { kind: "balance", id: balanceId }],
@@ -173,8 +175,13 @@ describe("MCP read answer sizes (ADR 0123)", () => {
       'kogane.collection-quality.read {"source":"sony-bank"}',
       'kogane.store.read {"page":"overview"}',
       "kogane.schedules.maintenance.read {}",
+      'kogane.observations.list {"kind":"balances"}',
     ])
       expect(sizes.get(call), call).toBeLessThan(CLIENT_BYTES);
+    // The v1 grouped list in full (ADR 0123, amendment 2026-11-20) is what it was.
+    expect(
+      sizes.get('kogane.observations.list {"kind":"balances","detail":"full"}'),
+    ).toBeGreaterThan(10 * CLIENT_BYTES);
     // The two reads the amendment of 2026-11-19 summarizes were over it in full.
     expect(sizes.get('kogane.store.read {"page":"overview","detail":"full"}')).toBeGreaterThan(
       CLIENT_BYTES,
@@ -314,6 +321,111 @@ describe("kogane.balances.read summary (ADR 0123)", () => {
     });
     expect(answer.isError).toBe(true);
     expect(answer.body.error).toBe("invalid_request");
+  });
+});
+
+describe("kogane.observations.list balances summary (ADR 0123, amendment 2026-11-20)", () => {
+  it("is the full list shaped by the one shared function, on the route and the tool alike", async () => {
+    for (const query of ["", "?offset=3&latestOffset=7", "?source=vpass"]) {
+      const params = new URLSearchParams(query);
+      const at = {
+        offset: Number(params.get("offset") ?? 0),
+        latestOffset: Number(params.get("latestOffset") ?? 0),
+      };
+      const args = {
+        kind: "balances",
+        ...Object.fromEntries(
+          [...params].map(([key, value]) => [key, key === "source" ? value : Number(value)]),
+        ),
+      };
+      const summary = await page.route(`/api/balances${query}`);
+      expect(summary.status).toBe(200);
+      const full = await page.route(`/api/balances${query}${query ? "&" : "?"}detail=full`);
+      expect(full.status).toBe(200);
+      expect(full.body).not.toHaveProperty("detail");
+      expect(validApiResponse("/api/balances", full.body, "full")).toBe(true);
+      expect(validApiResponse("/api/balances", summary.body, "summary")).toBe(true);
+      expect(validApiResponse("/api/balances", summary.body, "full")).toBe(false);
+      expect(validApiResponse("/api/balances", full.body, "summary")).toBe(false);
+      expect(summary.body).toEqual(balanceListSummary(full.body as never, at));
+      expect(await page.http("kogane.observations.list", args)).toEqual({
+        status: 200,
+        body: { schemaVersion: "kogane-page-read-v1", data: summary.body },
+      });
+      expect((await page.mcp("kogane.observations.list", args)).body.data).toEqual(summary.body);
+      expect(
+        (await page.mcp("kogane.observations.list", { ...args, detail: "full" })).body.data,
+      ).toEqual(full.body);
+    }
+  });
+
+  it("pages every row of both lists once, each page under 8 KB on /mcp", async () => {
+    const full = (await page.route("/api/balances?detail=full")).body as {
+      latest: { id: number }[];
+      history: { id: number }[];
+    };
+    expect(full.latest).toHaveLength(REALISTIC_BALANCES);
+    expect(full.history).toHaveLength(REALISTIC_BALANCES);
+    const seen = { latest: [] as number[], history: [] as number[] };
+    let at = { offset: 0, latestOffset: 0 };
+    for (let pages = 0; pages < 100; pages++) {
+      const message = await page.mcpMessage({
+        method: "tools/call",
+        params: { name: "kogane.observations.list", arguments: { kind: "balances", ...at } },
+      });
+      // What a client shows: the result's text, which is its structured content serialized.
+      const text = message["result"].content[0].text as string;
+      expect(new TextEncoder().encode(text).length).toBeLessThan(CLIENT_BYTES);
+      const data = message["result"].structuredContent.data;
+      seen.latest.push(...data.latest.map((line: { observationId: number }) => line.observationId));
+      seen.history.push(
+        ...data.history.map((line: { observationId: number }) => line.observationId),
+      );
+      if (!data.coverage.truncated) break;
+      at = {
+        offset: data.coverage.nextOffset ?? full.history.length,
+        latestOffset: data.coverage.latestNextOffset ?? full.latest.length,
+      };
+    }
+    expect(seen.latest).toEqual(full.latest.map((row) => row.id));
+    expect(seen.history).toEqual(full.history.map((row) => row.id));
+  });
+
+  it("keeps a value that is not exact as its status, never a zero", async () => {
+    const answer = await page.mcp("kogane.observations.list", { kind: "balances" });
+    const lines = [...answer.body.data.latest, ...answer.body.data.history] as {
+      amount: { value: string | null; unit: string | null; status: string; scale: number | null };
+    }[];
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines)
+      expect(line.amount).toEqual(
+        line.amount.status === "exact"
+          ? {
+              value: expect.stringMatching(/^[1-9][0-9]*$/u),
+              unit: "JPY",
+              status: "exact",
+              scale: 0,
+            }
+          : { value: null, unit: "JPY", status: "unparsed", scale: null },
+      );
+  });
+
+  it("refuses a detail it does not offer, and a detail on the other lists", async () => {
+    expect((await page.route("/api/balances?detail=compact")).body).toMatchObject({
+      error: "invalid_detail",
+    });
+    const answer = await page.mcp("kogane.observations.list", {
+      kind: "balances",
+      detail: "compact",
+    });
+    expect(answer.isError).toBe(true);
+    expect(answer.body.error).toBe("invalid_request");
+    for (const kind of ["transactions", "positions", "artifacts"]) {
+      expect((await page.route(`/api/${kind}?detail=full`)).status).toBe(400);
+      expect((await page.mcp("kogane.observations.list", { kind, detail: "full" })).body).toEqual({
+        error: "invalid_query",
+      });
+    }
   });
 });
 

@@ -887,13 +887,14 @@ the reader is the route's status with `{ error, refs? }`, as the Worker
 answers it, without the request id. A store read that fails is
 `503 catalogue_read_failed`, as on the route.
 
-Four reads answer one short line per row by default
+Five reads answer one short line per row by default
 ([ADR 0123](adr/0123-summary-detail-for-large-reads.md)), on the route and
 the tool alike: `kogane.balances.read`, `kogane.schedules.read`,
-`kogane.collection-quality.read` (its summary and `view: "cells"`) and
-`kogane.store.read` with `page: "overview"` take `detail`, `summary` (the
-default) or `full`, as does the route (`?detail=`). `full` is the answer these reads gave before 2026-11-19,
-unchanged; the web UI asks for it. A `summary` is derived from that same
+`kogane.collection-quality.read` (its summary and `view: "cells"`),
+`kogane.store.read` with `page: "overview"` and `kogane.observations.list`
+with `kind: "balances"` take `detail`, `summary` (the
+default) or `full`, as does the route (`?detail=`). `full` is the answer these reads gave before 2026-11-19
+(the balance list: before 2026-11-20), unchanged; the web UI asks for it. A `summary` is derived from that same
 answer by one function in `packages/application` or
 `packages/collection`, so the route and the tool give the same summary, and
 it keeps every id that reads a row in full (`observationId`, a job id, a
@@ -955,6 +956,37 @@ provider names, producers, session ids, parser versions and warnings. `detail` o
 `400 invalid_query`, and another value `400 invalid_detail` (the tool's
 schema: `400 invalid_request`). The parameter exists where a store advertises
 `sharedQuery`; the local store answers its full overview alone.
+
+The v1 grouped balance list (`GET /api/balances`,
+`kogane.observations.list` `{kind: "balances"}`; ADR 0123, amendment of
+2026-11-20) takes the same `detail`, `summary` the default, and the web
+balances page asks for `full`. The summary, shaped by `balanceListSummary`
+(`packages/application/src/query/read-detail.ts`, the line builder of the v2
+balance summaries), is `{ detail: "summary", accounts, metrics, latest,
+history, coverage }`: the first rows of each list of the full answer, latest
+and history taken in turn, at most 10 of each
+(`BALANCE_LIST_SUMMARY_LINES`), stopping before the line that would take the
+page past 7,680 bytes of JSON (`BALANCE_LIST_SUMMARY_BYTES`; the first line
+is always kept). A line is `{ observationId, account, metric, amount: {
+value, unit, status, scale }, asOf, reasons }`; a latest line adds
+`duplicates`, the ids of the other observations its group folded in, and
+its reason is `interpretation:conflict` when its witnesses disagreed; a
+history line's reasons are `parse:superseded`, `parse:pending` and
+`parse:error`, as on the v2 history. `accounts` are the v2 summary's
+entries, and a `metrics` entry is `{ source, providerMetric, kind,
+measurementKind, assetClass, timeBasis }`, the closed codes of the row's
+interpretation, one entry per distinct entry, so a line never resolves to a
+classification its row does not carry. Both lists share one set of refs.
+`coverage` has the full answer's keys for this page: `limit` is 10,
+`nextOffset` and `latestNextOffset` are the `offset` and `latestOffset` of
+each list's next summary page (null when nothing is left), and `truncated`
+says either list has more. Dropped: the interpretation's label and reason
+text and policy release, each row's provider amount text, parser,
+`observed_at`, instrument organization and product claim, and
+`interpretationContext`. `detail` on the other lists is the route's
+`400 invalid_query`, another value `400 invalid_detail`, and the parameter
+exists where a store advertises `sharedQuery`. The adopted balances of the
+published snapshot are `kogane.balances.read`'s.
 
 Authorization, in order, after the Access check and the grant lookup: the
 tool's capability, else `403 unauthorized` (`capability:<name>`); then sources

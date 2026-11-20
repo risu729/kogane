@@ -283,7 +283,10 @@ is present and answer `503 read_model_unavailable` until that snapshot is
 published. With no READ binding those paths answer 404. The v1 routes keep
 `paginationVersion: "offset-v1"`.
 
-`/api/balances` is unchanged. When READ is bound and a snapshot is published
+`/api/balances` keeps its rows. Its default answer on the central store is a
+summary of the rows ([ADR 0123](adr/0123-summary-detail-for-large-reads.md),
+amendment of 2026-11-20), and `detail=full` gives the list unchanged. When
+READ is bound and a snapshot is published
 it is served through a compat adapter over the same projection — identical
 rows, order, offset window and `interpretation` record, proved by a parity
 test on one synthetic fixture. The adapter declines when the snapshot is
