@@ -10,8 +10,7 @@
 // refuses, is not listed as open; that the read writes nothing, is graded
 // before it reads, and reaches readings, decisions and settled months by key
 // without table statistics. Every value is synthetic.
-import { afterAll, beforeAll, expect, test } from "bun:test";
-import type { Miniflare } from "miniflare";
+import { afterAll, beforeAll, expect } from "bun:test";
 import {
   CARD_DEBIT_ACCOUNT_CANDIDATES_SQL,
   CARD_DEBIT_ACCOUNT_READINGS_SQL,
@@ -34,15 +33,18 @@ import { cardSettlementSweep } from "../src/card-settlement-job.ts";
 import { changeMutationPlanners } from "../src/change-commands.ts";
 import { identifyParse, type IdentityResolver } from "../src/identity-store.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
+import { settledTest } from "./support/settle.ts";
 
-let mf: Miniflare, env: Env, db: D1Database;
-beforeAll(async () => {
-  ({ mf, env } = await startPipeline());
-  db = env.DB;
-  await seed();
-}, 60000);
+// The cases share one store and build on each other's writes, so one case
+// that times out must fail alone (docs/ci.md, Miniflare under Bun): the
+// runtime starts while the module loads and each case settles before the next
+// begins (test/support/settle.ts).
+const { mf, env } = await startPipeline();
+const db = env.DB;
+const test = settledTest();
+beforeAll(seed, 60000);
 afterAll(async () => {
-  await mf?.dispose();
+  await mf.dispose();
 });
 
 const WHOLE: Grant = {
@@ -294,7 +296,10 @@ async function review(grant: Grant = WHOLE) {
 const byCard = (items: readonly CardDebitAccountCard[]) =>
   new Map(items.map((item) => [item.card.sourceAccount, item]));
 
-/** Rows per table of the store, so a read that writes anything is seen. */
+/** Rows per table of the store, so a read that writes anything is seen. Each
+ * table is a column of one statement (D1 returns at most 100 columns), all in
+ * one batch: a statement per table cost a synchronous round trip to workerd
+ * per `prepare`, 1-2 s per call on the CORE schema. */
 async function rowCounts(): Promise<Record<string, number>> {
   const tables = (
     await db
@@ -303,11 +308,27 @@ async function rowCounts(): Promise<Record<string, number>> {
       )
       .all<{ name: string }>()
   ).results;
+  const chunks = Array.from({ length: Math.ceil(tables.length / 100) }, (_, n) =>
+    tables.slice(n * 100, n * 100 + 100),
+  );
+  const results = await db.batch<Record<string, number>>(
+    chunks.map((chunk) =>
+      db.prepare(
+        "SELECT " +
+          chunk.map(({ name }, column) => `(SELECT count(*) FROM "${name}") AS c${column}`).join(),
+      ),
+    ),
+  );
   const counts: Record<string, number> = {};
-  for (const { name } of tables)
-    counts[name] = (await db
-      .prepare(`SELECT count(*) AS n FROM "${name}"`)
-      .first<{ n: number }>())!.n;
+  chunks.forEach((chunk, n) =>
+    chunk.forEach(({ name }, column) => {
+      const count = results[n]!.results[0]![`c${column}`];
+      // A count read under the wrong column would compare equal before and
+      // after any write, so it fails here instead.
+      if (typeof count !== "number") throw new Error(`no row count for ${name}`);
+      counts[name] = count;
+    }),
+  );
   return counts;
 }
 

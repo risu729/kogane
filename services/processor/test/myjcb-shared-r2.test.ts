@@ -11,7 +11,7 @@ import { applyTestReadMigrations, applyTestSql } from "./migration-setup.ts";
 // datasets) and ADR 0026 (a whole connection's unit claims complete
 // coverage, so the run is eligible for parse jobs). Everything is synthetic: no amount, merchant, account label or
 // date here is a production value.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, beforeAll, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
@@ -31,20 +31,24 @@ import { registerCollectionRun } from "../src/collection/index.ts";
 import { cardPurchaseSweep } from "../src/card-purchase-job.ts";
 import { identitySweep } from "../src/identity-store.ts";
 import { scheduledPaymentRows, sweep } from "../src/worker.ts";
+import { settledTest } from "./support/settle.ts";
 
 let mf: Miniflare;
 let env: Env;
 
+// Started while the module loads, never in a hook (test/support/settle.ts).
+mf = new Miniflare(
+  convertV4MiniflareOptions({
+    modules: true,
+    script: "export default {};",
+    compatibilityDate: "2026-09-07",
+    d1Databases: ["DB", "READ"],
+    r2Buckets: ["EVIDENCE"],
+  }),
+);
+await mf.ready;
+const test = settledTest();
 beforeAll(async () => {
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: "export default {};",
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB", "READ"],
-      r2Buckets: ["EVIDENCE"],
-    }),
-  );
   const db = await mf.getD1Database("DB");
   const read = await mf.getD1Database("READ");
   for (const file of migrationFiles(CORE_MIGRATIONS_URL))

@@ -101,7 +101,9 @@ subject. A browser session whose verified subject claims the agent-only
 namespace (`403 actor_not_supported`, before any tool) is recorded on
 `agent-http` under that subject. A read records its row count
 (`financial.query`: the result's rows and whether more exist; `explain`:
-nodes; `purchases.explain`: purchases; `instruments.candidates` and
+nodes; `purchases.explain`: purchases (`view: cards`: cards listed, truncated
+when `cardsTruncated`; `view: lines`: lines listed, truncated while a next
+page exists or is withheld); `instruments.candidates` and
 `accounts.candidates`: items on the page, truncated when the total is larger; `card-settlements.unmatched`: statements on the page, truncated when a next page follows; `card-settlements.debit-accounts`: cards listed, truncated when more cards exist (`cardsTruncated`); `changes.since`: the sources the answer covers (listed and unchanged), truncated when it continues past the byte bound (`next`), a source's count is cut or the events line is incomplete; `instruments.coverage`: source rows, never truncated; `economic-readiness.read`: the manifest's rows, never truncated; `card-settlements.read`: reviews on the page, truncated when another page follows; `card-settlements.statements`: statements on the grouped page (never their candidates), truncated when another page follows; `card-settlements.ownership`: one candidate, never truncated; `reconstructed-state.read`: one
 when the answer carries a reconstruction, else none; `reported-state.read`:
 the answer's accounts plus payables, never truncated; `instruments.history`

@@ -67,6 +67,22 @@ export function reportedStateWorld(): DatedStore {
     minor: 1_000,
     fetchedAt: "2026-09-03T01:00:00Z",
   });
+  // Older statements the payable window leaves out on these dates: counted,
+  // never listed.
+  store.statement({
+    card: "card-a",
+    period: "2026-06",
+    paymentDate: "2026-06-26",
+    minor: 20_000,
+    fetchedAt: "2026-06-05T01:00:00Z",
+  });
+  store.statement({
+    card: "card-c",
+    period: "2026-06",
+    paymentDate: null,
+    minor: 700,
+    fetchedAt: "2026-06-03T01:00:00Z",
+  });
   return store;
 }
 

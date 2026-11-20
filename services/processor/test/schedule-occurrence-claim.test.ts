@@ -6,11 +6,12 @@
 // applies to CHECK and NOT NULL failures: it skipped such a row, moved the
 // schedule past its nominal and logged `claim_conflict`. Every value is
 // synthetic.
-import { afterAll, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, expect, spyOn } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { LAYER_A_SQL, applyMigration, layerBMigrations } from "./harness.ts";
 import { loadBundleFixture } from "./bundle-module-fixture.ts";
+import { settledTest } from "./support/settle.ts";
 
 interface State {
   storage: {
@@ -38,6 +39,7 @@ const mf = new Miniflare(
 );
 await mf.ready;
 const db = (await mf.getD1Database("DB")) as unknown as D1Database;
+const test = settledTest();
 let AlarmClass: new (state: State, env: Env) => Alarm;
 let fixture: { dispose(): Promise<void> } | undefined;
 beforeAll(async () => {

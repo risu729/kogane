@@ -17,7 +17,9 @@
 //    one a tick.
 // 3. Each adoption is an `assign` identity command with method `rule` under
 //    the rule's actor, guarded on the subject's mapping revision it was
-//    computed on, at most `ADOPTIONS_PER_TICK` a tick. The lane audit record
+//    computed on, on the anchor's mapping as read, and on no `listed_as`
+//    relation about either identifier or either instrument recorded since,
+//    at most `ADOPTIONS_PER_TICK` a tick. The lane audit record
 //    (`lane-audit.ts`) names the decisions it wrote.
 import {
   INSTRUMENT_AUTO_ADOPTION_ACTOR,
@@ -32,7 +34,10 @@ import {
 } from "../../../packages/application/src/query/instrument-resolution.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { readIdentityObservationCount } from "../../../packages/read-model/src/instrument-resolution.ts";
-import { executeIdentityCommand } from "../../../packages/storage-d1/src/core/identity-commands.ts";
+import {
+  executeIdentityCommand,
+  type IdentityCommandResult,
+} from "../../../packages/storage-d1/src/core/identity-commands.ts";
 import { IDENTITY_POLICY_VERSION } from "../../../packages/storage-d1/src/core/identity-store.ts";
 
 export const INSTRUMENT_AUTO_ADOPTION_LANE = "instrument_auto_adoption";
@@ -58,9 +63,24 @@ export const INSTRUMENT_AUTO_ADOPTION_SQL = {
  JOIN instrument_identifiers a ON a.namespace='mic-symbol' AND a.scope IN (${MICS}) AND a.value=s.value
  JOIN current_instrument_mappings ma ON ma.identifier_id=a.id AND ma.method='rule'
  WHERE s.namespace='sbi-security-code' AND s.scope='JP' AND ma.instrument_id<>ms.instrument_id`,
-  /** The command's guard: the anchor's current mapping is the rule revision the read saw. */
-  anchorUnchanged: `EXISTS(SELECT 1 FROM current_instrument_mappings anchor
- WHERE anchor.identifier_id=? AND anchor.revision=? AND anchor.instrument_id=? AND anchor.method='rule')`,
+  /**
+   * The command's guard, bound by `adoptionGuardBinds`: the anchor's current
+   * mapping is the rule revision the read saw, and still no `listed_as`
+   * relation, in any status, names either identifier or either instrument
+   * (the subject's by its current mapping, which the command's expected
+   * revision pins). The read required the same (`instrumentAutoAdoptions`,
+   * condition 4); a keep-apart or a proposal recorded between the read and
+   * this write stops it, so the rule never adopts a pair someone recorded a
+   * judgement about in that window. Key seeks only: the anchor's and the
+   * subject's mappings by `UNIQUE(identifier_id, revision)`, the relations by
+   * `entity_relations_to` and `entity_relations_from`.
+   */
+  adoptionGuard: `EXISTS(SELECT 1 FROM current_instrument_mappings anchor
+ WHERE anchor.identifier_id=? AND anchor.revision=? AND anchor.instrument_id=? AND anchor.method='rule')
+ AND NOT EXISTS(SELECT 1 FROM entity_relations r WHERE r.kind='listed_as' AND r.to_ref IN (?,?))
+ AND NOT EXISTS(SELECT 1 FROM entity_relations r WHERE r.kind='listed_as' AND r.from_ref IN (?,
+  (SELECT 'instrument:'||subject.instrument_id FROM current_instrument_mappings subject
+   WHERE subject.identifier_id=?)))`,
   /** Whether this lane ran the full read after `?2`: its own ticks, by the `(lane, id)` index. */
   evaluatedSince: `SELECT 1 AS evaluated FROM processor_lane_ticks
  WHERE lane=?1 AND outcome='ran' AND started_at_ms>?2 AND json_extract(counts_json,'$.evaluated')=1
@@ -79,9 +99,10 @@ export interface InstrumentAutoAdoptionResult {
   /** Adoptions not written because the subject's mapping moved (another tick, a person). */
   conflicts: number;
   /**
-   * Adoptions refused for another reason: the anchor's mapping moved after
-   * the read (the guard; the command reports `target_missing`), the target
-   * vanished, or an invalid command.
+   * Adoptions refused for another reason: the anchor's mapping moved, or a
+   * `listed_as` relation about the pair was recorded, after the read (the
+   * guard; the command reports `target_missing`), the target vanished, or an
+   * invalid command.
    */
   refused: number;
 }
@@ -133,40 +154,7 @@ export async function instrumentAutoAdoptionLane(
   result.eligible = adoptions.length;
 
   for (const adoption of adoptions.slice(0, ADOPTIONS_PER_TICK)) {
-    const outcome = await executeIdentityCommand(
-      db,
-      {
-        // One operation per subject revision: a resend of the same adoption
-        // replays, and an adoption of a later revision is a new operation.
-        operationId: `${INSTRUMENT_AUTO_ADOPTION_POLICY}:${adoption.subjectIdentifierId}:r${String(adoption.subjectMappingRevision)}`,
-        actorId: INSTRUMENT_AUTO_ADOPTION_ACTOR,
-        actorVerification: "server",
-        action: "assign",
-        kind: "instrument",
-        referenceId: adoption.subjectIdentifierId,
-        expectedRevision: adoption.subjectMappingRevision,
-        targetId: adoption.targetInstrumentId,
-        reason: reason(adoption),
-      },
-      IDENTITY_POLICY_VERSION,
-      {
-        method: "rule",
-        evidenceRefs: [
-          `identifier:${adoption.anchorIdentifierId}`,
-          `identifier:${adoption.subjectIdentifierId}`,
-        ],
-        // The anchor must still be where the read saw it: a person who
-        // re-mapped it in between has decided, and nothing is written.
-        guard: {
-          sql: INSTRUMENT_AUTO_ADOPTION_SQL.anchorUnchanged,
-          binds: [
-            adoption.anchorIdentifierId,
-            adoption.anchorMappingRevision,
-            adoption.targetInstrumentId,
-          ],
-        },
-      },
-    );
+    const outcome = await adoptInstrument(db, adoption);
     if (outcome.ok) {
       if (!outcome.replayed) result.adopted += 1;
     } else if (outcome.error === "revision_conflict" || outcome.error === "idempotency_conflict")
@@ -174,6 +162,63 @@ export async function instrumentAutoAdoptionLane(
     else result.refused += 1;
   }
   return result;
+}
+
+/** The binds of `INSTRUMENT_AUTO_ADOPTION_SQL.adoptionGuard` for one adoption. */
+export function adoptionGuardBinds(adoption: PlannedInstrumentAutoAdoption): unknown[] {
+  return [
+    adoption.anchorIdentifierId,
+    adoption.anchorMappingRevision,
+    adoption.targetInstrumentId,
+    `identifier:${adoption.anchorIdentifierId}`,
+    `identifier:${adoption.subjectIdentifierId}`,
+    `instrument:${adoption.targetInstrumentId}`,
+    adoption.subjectIdentifierId,
+  ];
+}
+
+/**
+ * Write one adoption the read planned: an `assign` identity command under the
+ * rule's actor that writes nothing unless the subject is still at the
+ * revision read and `adoptionGuard` holds.
+ */
+export function adoptInstrument(
+  db: D1Database,
+  adoption: PlannedInstrumentAutoAdoption,
+): Promise<IdentityCommandResult> {
+  return executeIdentityCommand(
+    db,
+    {
+      // One operation per subject revision: a resend of the same adoption
+      // replays, and an adoption of a later revision is a new operation.
+      operationId: `${INSTRUMENT_AUTO_ADOPTION_POLICY}:${adoption.subjectIdentifierId}:r${String(adoption.subjectMappingRevision)}`,
+      actorId: INSTRUMENT_AUTO_ADOPTION_ACTOR,
+      actorVerification: "server",
+      action: "assign",
+      kind: "instrument",
+      referenceId: adoption.subjectIdentifierId,
+      expectedRevision: adoption.subjectMappingRevision,
+      targetId: adoption.targetInstrumentId,
+      reason: reason(adoption),
+    },
+    IDENTITY_POLICY_VERSION,
+    {
+      method: "rule",
+      evidenceRefs: [
+        `identifier:${adoption.anchorIdentifierId}`,
+        `identifier:${adoption.subjectIdentifierId}`,
+      ],
+      // The anchor must still be where the read saw it, and nobody may have
+      // recorded a `listed_as` about the pair since: a person who re-mapped
+      // the anchor or kept the pair apart in between has decided, and an
+      // agent who proposed a relation has asked for a review. Nothing is
+      // written then.
+      guard: {
+        sql: INSTRUMENT_AUTO_ADOPTION_SQL.adoptionGuard,
+        binds: adoptionGuardBinds(adoption),
+      },
+    },
+  );
 }
 
 /**
