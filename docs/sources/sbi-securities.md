@@ -469,9 +469,12 @@ its mailbox with `sbi_mailbox_transport_failed`, so another step refuses too.
 Every refusal collapses into that one closed code, so the client now logs one
 `sbi-mailbox-refused` line per refusal with closed values only: the step
 (`landing`, `entry`, `connect`, `sso`, `application` or `api` with the API
-name), the redirect hop, the last HTTP status and media type, and for a
-refused redirect its host (an SBI or mailbox host, else `other`) and a plain
-path (else `unsafe`). It never logs a query, cookie, form field or body.
+name), the redirect hop, the last HTTP status, the media type when it is one
+of the flow's own (else `other`), and for a refused redirect its host when it
+is one of the flow's hosts and its route by name (`main-link`, `handoff`,
+`landing`, `entry`, `connect`, `sso`, `bootstrap`, `application`, `api-<name>`),
+else `other`. It never logs provider text: no path, query, cookie, form field
+or body.
 
 ## Assessment scale
 

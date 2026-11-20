@@ -413,31 +413,43 @@ test("a refusal logs its step, hop, status and refused redirect target in closed
   const logged: string[] = [];
   const original = console.log;
   console.log = (line: string) => logged.push(line);
-  try {
-    const refusedRedirect = new MailboxHttp([], async (input) => {
+  const redirecting = (onward: string) =>
+    new MailboxHttp([], async (input) => {
       const url = new URL(input instanceof Request ? input.url : input.toString()).href;
       return new Response(null, {
         status: 302,
-        headers: {
-          location:
-            url === MAILBOX_MAIN_LINK
-              ? HANDOFF
-              : "https://www.sbisec.co.jp/ETGate/;jsessionid=synthetic?secret=1",
-        },
+        headers: { location: url === MAILBOX_MAIN_LINK ? HANDOFF : onward },
       });
     });
-    await expect(refusedRedirect.open()).rejects.toThrow("sbi_mailbox_transport_failed");
-    expect(refusedRedirect.lastDiagnosis).toEqual({
-      step: "landing",
-      hop: 1,
-      status: 302,
-      refusedHost: "www.sbisec.co.jp",
-      refusedPath: "unsafe",
-    });
+  try {
+    for (const [onward, host, route] of [
+      [
+        "https://www.sbisec.co.jp/ETGate/;jsessionid=synthetic?secret=1",
+        "www.sbisec.co.jp",
+        "other",
+      ],
+      ["https://m.sbisec.co.jp/s/Synthetic0Token1Synthetic2Token3", "m.sbisec.co.jp", "other"],
+      ["https://synthetic-host.invalid/secret/path", "other", "other"],
+      ["https://evil-e-shishobako.ne.jp/", "other", "other"],
+      [`${MAILBOX_SSO}?secret=1`, "plus.e-shishobako.ne.jp", "sso"],
+    ] as const) {
+      const client = redirecting(onward);
+      await expect(client.open()).rejects.toThrow("sbi_mailbox_transport_failed");
+      expect(client.lastDiagnosis).toEqual({
+        step: "landing",
+        hop: 1,
+        status: 302,
+        refusedHost: host,
+        refusedRoute: route,
+      });
+    }
     const { fetcher } = sequence();
     const badEntry = new MailboxHttp([], async (input, init) =>
       new URL(input instanceof Request ? input.url : input.toString()).href === MAILBOX_ENTRY
-        ? new Response("{}", { status: 403, headers: { "content-type": "application/json" } })
+        ? new Response("{}", {
+            status: 403,
+            headers: { "content-type": "application/x-synthetic-secret" },
+          })
         : fetcher(input, init),
     );
     await expect(badEntry.open()).rejects.toThrow("sbi_mailbox_transport_failed");
@@ -445,7 +457,7 @@ test("a refusal logs its step, hop, status and refused redirect target in closed
       step: "entry",
       hop: 0,
       status: 403,
-      contentType: "application/json",
+      contentType: "other",
     });
     const api = new MailboxHttp(
       [],
@@ -453,15 +465,25 @@ test("a refusal logs its step, hop, status and refused redirect target in closed
     );
     await api.open();
     await expect(api.api("summary")).rejects.toThrow("sbi_mailbox_transport_failed");
-    expect(api.lastDiagnosis).toMatchObject({ step: "api", api: "summary", status: 500 });
+    // A new step starts from a fresh diagnosis on the same client.
+    expect(api.lastDiagnosis).toEqual({
+      step: "api",
+      api: "summary",
+      hop: 0,
+      status: 500,
+    });
   } finally {
     console.log = original;
   }
   const records = logged.map((line) => JSON.parse(line) as Record<string, unknown>);
   expect(records.map((record) => [record.event, record.code, record.step])).toEqual([
-    ["sbi-mailbox-refused", "sbi_mailbox_transport_failed", "landing"],
+    ...Array.from({ length: 5 }, () => [
+      "sbi-mailbox-refused",
+      "sbi_mailbox_transport_failed",
+      "landing",
+    ]),
     ["sbi-mailbox-refused", "sbi_mailbox_transport_failed", "entry"],
     ["sbi-mailbox-refused", "sbi_mailbox_transport_failed", "api"],
   ]);
-  expect(logged.join("\n")).not.toMatch(/synthetic|secret|jsessionid/u);
+  expect(logged.join("\n")).not.toMatch(/synthetic|secret|jsessionid|token|evil/iu);
 });

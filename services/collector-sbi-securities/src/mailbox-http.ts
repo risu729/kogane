@@ -54,18 +54,27 @@ type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Re
 type MailboxStep = "landing" | "entry" | "connect" | "sso" | "application" | "api";
 /**
  * Where a refusal happened, in closed values only: the step, the redirect hop,
- * the last HTTP status and media type, and for a refused redirect its host and
- * a plain path. Never a query, cookie, form field or body.
+ * the last HTTP status and a known media type, and for a refused redirect a
+ * known host and a known route name. Never provider text: no path, query,
+ * cookie, form field or body.
  */
-export interface MailboxDiagnosis {
+interface MailboxDiagnosis {
   step: MailboxStep;
   api?: MailboxApi;
   hop: number;
   status?: number;
-  contentType?: string;
-  refusedHost?: string;
-  refusedPath?: string;
+  contentType?: (typeof MEDIA_TYPES)[number] | "other";
+  refusedHost?: (typeof KNOWN_HOSTS)[number] | "other";
+  refusedRoute?: string;
 }
+const MEDIA_TYPES = ["text/html", "application/json", "application/pdf", "text/plain"] as const;
+const KNOWN_HOSTS = [
+  "site4.sbisec.co.jp",
+  "www.sbisec.co.jp",
+  "m.sbisec.co.jp",
+  "login.sbisec.co.jp",
+  "plus.e-shishobako.ne.jp",
+] as const;
 
 /** A separate request-local jar; no authorization header is accepted or forwarded. */
 export class MailboxHttp {
@@ -102,7 +111,7 @@ export class MailboxHttp {
 
   /** The closed diagnosis of the latest step, for logs and tests. */
   get lastDiagnosis(): Readonly<MailboxDiagnosis> {
-    return this.diagnosis;
+    return { ...this.diagnosis };
   }
 
   private at(step: MailboxStep, api?: MailboxApi): void {
@@ -281,8 +290,8 @@ export class MailboxHttp {
         fail();
       }
       if (!destinations.has(next.href) && !via(next)) {
-        this.diagnosis.refusedHost = providerHost(next);
-        this.diagnosis.refusedPath = plainPath(next);
+        this.diagnosis.refusedHost = knownHost(next);
+        this.diagnosis.refusedRoute = knownRoute(next);
         await cancel(response);
         fail();
       }
@@ -343,7 +352,7 @@ export class MailboxHttp {
       this.signals.set(response, signal);
       this.diagnosis.status = response.status;
       const mime = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
-      if (mime && /^[a-z]+\/[a-z0-9.+-]{1,60}$/u.test(mime)) this.diagnosis.contentType = mime;
+      if (mime) this.diagnosis.contentType = MEDIA_TYPES.find((type) => type === mime) ?? "other";
       else delete this.diagnosis.contentType;
       if (this.leaseSignal.aborted) {
         await cancel(response);
@@ -480,13 +489,29 @@ function matches(cookie: MailboxCookie, url: URL): boolean {
     (!cookie.secure || url.protocol === "https:")
   );
 }
-function providerHost(url: URL): string {
-  return sbiDomain(url.hostname) || url.hostname.endsWith("e-shishobako.ne.jp")
-    ? url.hostname
-    : "other";
+function knownHost(url: URL): (typeof KNOWN_HOSTS)[number] | "other" {
+  return KNOWN_HOSTS.find((host) => host === url.hostname) ?? "other";
 }
-function plainPath(url: URL): string {
-  return /^[A-Za-z0-9/_.-]{1,80}$/u.test(url.pathname) ? url.pathname : "unsafe";
+/** The flow's own routes by name; any other origin and path is `other`. */
+const KNOWN_ROUTES: ReadonlyArray<readonly [string, string]> = [
+  ["main-link", MAILBOX_MAIN_LINK],
+  ["handoff", "https://m.sbisec.co.jp/switchnavi"],
+  ["landing", MOBILE_LANDING],
+  ["entry", MAILBOX_ENTRY],
+  ["connect", MAILBOX_CONNECT],
+  ["sso", MAILBOX_SSO],
+  ["bootstrap", MAILBOX_BOOTSTRAP],
+  ["application", MAILBOX_APPLICATION],
+  ...Object.entries(API_PATHS).map(
+    ([kind, path]) => [`api-${kind}`, new URL(path, MAILBOX_ORIGIN).href] as const,
+  ),
+].map(([name, href]) => {
+  const url = new URL(href);
+  return [name, `${url.origin}${url.pathname}`] as const;
+});
+function knownRoute(url: URL): string {
+  const route = `${url.origin}${url.pathname}`;
+  return KNOWN_ROUTES.find(([, known]) => known === route)?.[0] ?? "other";
 }
 function sbiDomain(domain: string): boolean {
   return domain === "sbisec.co.jp" || domain.endsWith(".sbisec.co.jp");
