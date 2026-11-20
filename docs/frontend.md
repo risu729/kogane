@@ -206,6 +206,20 @@ The hand-off in both directions is by reference, never by number or prose:
 
 See [Agent API](agent-api.md) for the grants, tools and result contract.
 
+### Recent changes on ホーム
+
+The ホーム page's 最近の変化 panel (`apps/web/src/changes-since.tsx`) reads
+`GET /api/v2/changes`, the service of `kogane.changes.since`
+([ADR 0127, amendment of 2026-11-20](adr/0127-changes-since-digest.md#amendment-2026-11-20-the-ホーム-panel-reads-the-route)).
+It sends `since` as the browser's clock minus the chosen window (24時間 by
+default, 7日間, 30日間), checks every answer with `validChangesSince`, and
+shows the digest's counts per source by closed state, with labels typed by the
+domain's closed lists. A count the digest cut, and every count of an
+incomplete events line, reads 以上; unchanged sources and what the digest does
+not cover sit in closed disclosures; 続きを読み込む follows `next.after`. A
+`403` or `404` from the route hides the panel; any other failure, a malformed
+answer included, is the error state with no count.
+
 ## Safe preview
 
 From the repository root:
