@@ -287,6 +287,9 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     const data = (value["data"] ?? {}) as Record<string, unknown>;
     if (typeof data["cells"] === "number" && Array.isArray(data["accounts"]))
       return { rows: data["cells"], truncated: false };
+    // The status view (ADR 0045, amendment 2026-11-19) counts its job lines; it is never cut.
+    if (data["view"] === "status" && Array.isArray(data["sources"]))
+      return { rows: data["sources"].length, truncated: false };
   }
   if (
     operation === "identity.read" ||

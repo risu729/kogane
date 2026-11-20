@@ -1386,3 +1386,20 @@ remains in the view's unattributed list. Its exact account/currency/request
 range remains in the derived artifact, and its hashed account unit, terminal
 report, dated ranges and complete-empty parser claim retain the evidence.
 No amount or synthetic statement observation is created to force attribution.
+
+## Importer-era snapshots superseded (2026-11-19)
+
+The last captures the retired R2 importer stored (fetch run 716,
+2026-09-10 21:01 UTC) carry the unit `primary`; native runs carry no unit.
+Until this fix the importer's capture stayed a current snapshot beside the
+native one, so dated reported state showed each deposit account's 2026-09-10
+balance next to its current one, and collection quality showed the
+importer's `primary` cells as current. Snapshot ranking now treats the two as
+one partition for the three container datasets
+([ADR 0109 amendment](../adr/0109-sbi-supplemental-unit-eligibility.md#amendment-2026-11-19-sbi-shinseis-importer-partition-joins-the-native-one)).
+Collection quality still keys cells by the stored unit: the `primary` cells
+remain, now `no-current` (`no_current_capture`), and the account view lists
+their periods as `newest-not-current`, aged from the importer's capture.
+Daily runs have ended `success` again since the balance-summary fix of
+2026-11-09 ([#1257](https://github.com/risu729/kogane/pull/1257)); run 1911
+(2026-11-18 21:00 UTC) is current for every dataset.

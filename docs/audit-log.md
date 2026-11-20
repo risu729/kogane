@@ -114,7 +114,8 @@ else its first list (connections, transactions, …; one for `meta`, which has n
 truncated when the page says more follow (`coverage.truncated`,
 `page.hasMore` or a `nextCursor`), except that `collection-quality.read`'s
 account view counts the cells it read (its `cells`), never an account, and is
-never truncated; `reports.read`: the list's items,
+never truncated, and its status view counts its job lines (`sources`), never
+truncated; `reports.read`: the list's items,
 truncated when a cursor follows, and one for a report or its explanation;
 `observations.get` and `evidence.raw.read`: one, never the bytes; the others one).
 Whole-store and multi-source reads carry no scope. A replay names the earlier
