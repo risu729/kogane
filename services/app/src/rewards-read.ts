@@ -260,22 +260,34 @@ function expiryBasis(value: string | null): RewardExpiryBasis | null {
   }
 }
 
-/** A row's amount at risk in the programme's own unit; a status that is not exact keeps its reason. */
-function quantityOf(row: RewardEstimateRow): Quantity {
-  return {
-    unitRef: row.unit_ref,
-    value:
-      row.amount_status === "exact" && row.amount_coefficient !== null
-        ? {
-            status: "exact",
-            value: { coefficient: row.amount_coefficient, scale: row.amount_scale ?? 0 },
-            normalizationVersion: "decimal-v1",
-          }
-        : {
-            status: row.amount_status as "missing" | "unparsed" | "conflict",
-            reasonCode: `decimal-v1:${row.amount_status}`,
-          },
-  };
+/**
+ * The row's amount at risk. READ 0002 and 0004 CHECK that the status is one
+ * of the four and that a row is `exact` exactly when both decimal-v1 columns
+ * are set. A pairing that CHECK refuses (`exact` without both columns, a
+ * status that is not exact with both, or another status) is a READ store the
+ * schema never admits: it fails the read (`reward_estimate_amount_invalid`)
+ * rather than being shown as a value nobody stored or a reason nobody
+ * recorded. A status that is not exact with one stray column is one the CHECK
+ * admits (the writer never stores it); it keeps its reason, and the stray
+ * column is never shown as a value.
+ */
+function estimateQuantity(row: RewardEstimateRow): Quantity {
+  const coefficient = row.amount_coefficient;
+  const scale = row.amount_scale;
+  const columns = coefficient !== null && scale !== null;
+  const status = row.amount_status;
+  if (status === "exact" && coefficient !== null && scale !== null)
+    return {
+      unitRef: row.unit_ref,
+      value: {
+        status: "exact",
+        value: { coefficient, scale },
+        normalizationVersion: "decimal-v1",
+      },
+    };
+  if ((status === "missing" || status === "unparsed" || status === "conflict") && !columns)
+    return { unitRef: row.unit_ref, value: { status, reasonCode: `decimal-v1:${status}` } };
+  throw new Error("reward_estimate_amount_invalid");
 }
 
 function estimateDto(row: RewardEstimateRow) {
@@ -290,17 +302,7 @@ function estimateDto(row: RewardEstimateRow) {
     // A date, in the rule's own calendar; null keeps the row in a
     // deadline-ordered list rather than dropping it (addendum 08 §8).
     expiresOn: row.expires_on,
-    quantity: {
-      unitRef: row.unit_ref,
-      value:
-        row.amount_status === "exact" && row.amount_coefficient !== null
-          ? {
-              status: "exact",
-              value: { coefficient: row.amount_coefficient, scale: row.amount_scale },
-              normalizationVersion: "decimal-v1",
-            }
-          : { status: row.amount_status, reasonCode: `decimal-v1:${row.amount_status}` },
-    },
+    quantity: estimateQuantity(row),
     providerObserved: temporal(row.provider_observed_json),
     policyEstimated: temporal(row.policy_estimated_json),
     reasonCodes: refs(row.reason_codes_json),
@@ -406,7 +408,7 @@ export async function rewardExpiryFromRead(
         bucketKind: row.bucket_kind,
         basis: row.deadline_basis as RewardExpiryWindowRow["basis"],
         expiresOn: row.expires_on,
-        quantity: quantityOf(row),
+        quantity: estimateQuantity(row),
       })),
       await rewardProviderSections(context.read, context.snapshot.snapshot_id, program),
       window,

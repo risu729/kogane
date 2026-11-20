@@ -331,6 +331,27 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       rows: Array.isArray(value["items"]) ? value["items"].length : 0,
       truncated: rowsFollow(value),
     };
+  // Sources the answer covers (listed or unchanged); truncated when it
+  // continues past the byte bound, a count is a lower bound, or the events
+  // walk ended on a new revision.
+  if (operation === "changes.since") {
+    const sources = Array.isArray(value["sources"]) ? value["sources"] : [];
+    const unchanged = Array.isArray(value["unchanged"]) ? value["unchanged"] : [];
+    const events = (value["events"] ?? {}) as Record<string, unknown>;
+    return {
+      rows: sources.length + unchanged.length,
+      truncated:
+        value["next"] !== null ||
+        sources.some(
+          (line) =>
+            typeof line === "object" &&
+            line !== null &&
+            Array.isArray((line as Record<string, unknown>)["cut"]) &&
+            ((line as Record<string, unknown>)["cut"] as unknown[]).length > 0,
+        ) ||
+        (events["state"] === "counted" && events["complete"] === false),
+    };
+  }
   // Cards listed; truncated when more cards exist than the answer lists.
   if (operation === "card-settlements.debit-accounts")
     return {
