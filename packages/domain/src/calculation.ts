@@ -37,6 +37,16 @@ import {
 export const CALCULATION_CONTRACT_VERSION = "calculation-v1";
 
 /**
+ * The release of the holding valuation code: `valueHolding` (with the
+ * `valueAtPrice` arithmetic it calls) and `summarizeValuation`. Bump it with
+ * any change that can give another outcome, reason, subtotal or partition for
+ * the same quantity, price and policy. A stored report names it in its input
+ * manifest, so a bump gives the next report a new id instead of reusing a body
+ * the old code computed (INV09; ADR 0072, amendment of 2026-11-19).
+ */
+export const HOLDING_VALUATION_RELEASE = "holding-valuation-v1";
+
+/**
  * Why a cell has no value. These are not interchangeable: "we have no price"
  * and "we do not know which account this is" lead to different repairs, and
  * neither is a zero (addendum 09 section 3).
