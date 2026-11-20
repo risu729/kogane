@@ -220,6 +220,229 @@ the page renders the total through `SettlementQuantity` only.
 - `apps/web/test/card-settlement.browser.test.ts`: the section shows
   `不明（stored:unparsed） · JPY` and refuses a `null` total before it renders.
 
+## Amendment 2026-11-19: the `upcoming` view answers each card's next bill and whether its account covers it
+
+- Status: proposed. It changes the published input schema and answers of
+  `kogane.card-settlements.debit-accounts`, so it needs the owner's approval
+  before merge (decision D3 of the 2026-11-19 MCP proposal v2). No catalogue
+  operation is added.
+- Date: 2026-11-19
+- Tracking: [issue 1414](https://github.com/risu729/kogane/issues/1414)
+  (task-level answers in one or two MCP calls),
+  [issue 1415](https://github.com/risu729/kogane/issues/1415) (next debit
+  date, amount and account), [issue 1357](https://github.com/risu729/kogane/issues/1357)
+- Related: [ADR 0019](0019-dated-reported-state.md) (reported state on a
+  date), [ADR 0081](0081-ui-parity-through-mcp.md) (UI/MCP parity),
+  [ADR 0004](0004-payment-type-shapes-from-evidence.md), INV03, INV05,
+  INV06, INV07
+
+### Context
+
+The owner asked (issue 1414, 2026-11-19) for answers to everyday questions in
+one or two MCP calls, each under the 8 KB an MCP client shows. "How much is my
+next card bill, from which account, and will that account cover it?" took
+`card-settlements.debit-accounts` (about 1 KB of evidence per card),
+`reported-state.read` (every account's figures) and arithmetic in the client.
+The debit-account read already carries each card's newest current statement
+(`latestStatement {period, paymentDate, amount}`) and its answer. What was
+missing: which statements are still to be paid, readable labels, the debit
+account's balance, and a comparison done with exact decimals on the server.
+
+What the stored data proves, and what it does not:
+
+- Both card sources store the statement month (`period`), the provider's due
+  date (`_kogane.paymentDate`: Vpass `shiharaiDate`, the MyJCB
+  `お支払い金額合計` heading) and the total. Neither stores a closing date,
+  so the answer names the statement month and never a closing date
+  (ADR 0004).
+- Vpass statements without a readable due date exist in the store (the
+  importer era). Whether such a statement is still to be paid is unknown.
+- Bank balances are provider figures in the reported state (ADR 0019). The
+  reported state is keyed by source account, the debit-account answer by
+  bank source account, and an account entity can have several references.
+- Nothing models a bank account's other debits and credits (salary,
+  utilities, transfers).
+
+### Options considered
+
+1. **A view of the existing read, over the services that already answer each
+   part (chosen).** `kogane.card-settlements.debit-accounts` with
+   `view: "upcoming"` (route `?view=upcoming`): one application service that
+   calls `reviewCardDebitAccounts` and `queryDatedState` and adds one keyed
+   read of account labels.
+2. **A new tool `kogane.cards.upcoming-bills`.** Rejected in the review of
+   proposal v2: a second catalogue operation for a projection of an existing
+   read, and one more tool for a client to choose between.
+3. **Store each card's next bill in a table written by a lane.** Rejected for
+   the reason of this ADR's option 3: a writer for a projection of
+   append-only evidence, stale between ticks.
+4. **Compare each bill alone with the balance.** Rejected: two bills from one
+   account due on nearby days would each fit a balance that cannot pay both.
+
+### Decision
+
+`reviewUpcomingCardBills` (`packages/application/src/query/card-upcoming-bills.ts`)
+answers for today's date in Asia/Tokyo, under rule `card-upcoming-bills-v1`
+(`packages/domain/src/card-upcoming-bills.ts`, pure):
+
+1. **Bills.** A bill is a card's newest current statement (this ADR's
+   `latestStatement`) whose provider due date is on or after the date and
+   whose total is not an exact zero or below. Every other card is in
+   `notListed` with its last statement and a closed reason: `no_statement`,
+   `payment_date_not_published`, `no_statement_due`, `statement_settled` (an
+   accepted settlement of the card already covers that statement month), or
+   `statement_total_refund_or_zero` (an exact total of zero or below: a
+   refund, or nothing to pay; the code and predicate `refundOrZeroTotal` of
+   the [unmatched statements](../card-settlements.md#unmatched-statements),
+   reused rather than restated). Nothing is debited for such a statement, and
+   whether a refund reaches the bank account is not observed (ADR 0004), so
+   it is never summed into a line. A total that is not exact has no known
+   sign: it keeps its status and reason (the 2026-11-18 amendment), stays a
+   bill, never zero (INV05), and makes its lines `unknown`
+   (`bill_not_exact`).
+2. **Debit account.** Each bill carries the card's answer: `answer` (the
+   basis, or `unknown`), the bank `sourceAccount` it names, the account
+   entity and its label, `since` (the stated page's capture date or the
+   accepted debit date) and the answer's codes (its notes, or its unknown
+   reason). The entity is the one the reported state maps that bank source
+   account to, when it maps it to exactly one; its references are the
+   reported-state entries of that entity. Labels are `accounts.label`. Vpass
+   card product names are not shown yet (proposal v2, Unit F).
+3. **Lines.** `byDebitAccount` has one line per debit account (the entity,
+   else the bank source account; bills with no known account share a line
+   whose `account` and `sourceAccount` are null) and debit date. A line counts
+   every bill to that account due on or before its date, and `cardBills` is
+   their sum through `sumQuantities` (INV03). A bill that is not exact makes
+   the sum `missing` with `bill_not_exact`.
+4. **Balance.** The `deposit.balance` of the entity's references in the
+   reported state for the date (ADR 0019), in the bills' unit, from the
+   newest capture. References are one account, so balances are never summed
+   (INV06). Two references captured together that disagree are `conflict` /
+   `balances_disagree`; no balance is `missing` / `balance_not_reported`; a
+   reported-state read past its row bound makes every balance `missing` /
+   `reported_state_limit_exceeded` rather than refusing the view.
+5. **`covers`** (closed): `yes` (balance at least `cardBills`) or `no`,
+   compared with `compareQuantities`, only when both are exact and no reason
+   holds. Otherwise `unknown` with its reasons, in this order:
+   `debit_account_unknown`, `bill_not_exact`, `balance_not_exact`,
+   `balance_before_previous_debit` (the balance was captured on or before the
+   Asia/Tokyo date of the latest card debit from the account due on or before
+   the date: an accepted settlement's debit, or the due date of a statement
+   already due of a card the account answers for, so the balance may not show
+   it), `cards_with_unknown_account` (a bill due on or before the line's
+   date has no known account and might be debited from this one) and
+   `cards_with_unknown_due_date` (a card debited from this account, or from
+   an unknown one, has a newest statement with no readable due date that no
+   accepted settlement pays: whether and when it is debited is unknown, so
+   its total is never left out of the comparison as if it were zero,
+   INV05). Every line carries the note `other_debits_not_modelled`: only
+   known card bills are compared with the provider's balance.
+
+The `カード照合` page's `次回の引落` section
+(`GET /api/v2/reconciliation/card-debit-accounts?view=upcoming`, operator-only)
+and the MCP tool with `view: "upcoming"` are adapters over that one function
+(ADR 0081). The route takes `view=upcoming` and no other parameter; the tool
+takes `{ view?: "upcoming" }`. Both grade the grant through
+`reviewCardDebitAccounts` (`records.read` over the whole store, the card
+bound) before anything is read. The view only reads: no table, lane, writer,
+command or catalogue operation is added.
+
+### Consequences
+
+- One call answers "next debit date, amount, debit account, does it cover".
+  Ten cards with labels measured 5.7 KB in the synthetic test, which asserts
+  under 8 KB.
+- Until proposal v2's Unit A ships, the Vpass collector's finalized
+  statements are not parsed (every unit is `partial`), so a Vpass card whose
+  newest parsed statement is already due reads `no_statement_due` with that
+  statement. The answer says so instead of listing no card.
+- `covers: yes` is not a forecast: other debits from the account, deposits
+  before the debit date and unbilled card usage are not modelled, as the note
+  on every line says.
+- A Vpass card without an accepted settlement is on the unknown line, and its
+  bill makes the account lines due on or after it `unknown`
+  (`cards_with_unknown_account`).
+- A card whose newest statement has no readable due date (an importer-era
+  Vpass row) and no accepted settlement makes every line of its account, or
+  every line when its account is unknown, `unknown`
+  (`cards_with_unknown_due_date`). Added in review: before it, such a
+  statement was left out of the comparison, so its account could read `yes`.
+  Only the card's newest statement counts, so it lasts until the card has a
+  newer statement with a due date or a settlement paying that statement is
+  accepted. A card with no newer statement (a closed one) keeps it until the
+  settlement is accepted, and no age bound applies (unlike ADR 0019's
+  `UNDATED_STATEMENT_WINDOW_DAYS` for payables): a statement with no due date
+  is never taken as paid. Until Unit A ships, a Vpass card whose newest parsed
+  statement is an importer-era row with no due date does this, and a Vpass
+  card with no accepted settlement has no known account, so every line reads
+  `unknown`.
+- A refund or zero statement is not a bill (`statement_total_refund_or_zero`).
+  Fixed in review: before it, a negative exact total was summed into
+  `cardBills` and offset the other cards' bills to the same account, so a
+  refund of 5,000 beside a bill of 30,000 read 25,000 and `yes` against a
+  balance of 26,000, though the bank debits the 30,000. Leaving the credit
+  out can only raise a line's `cardBills`, so it never makes a `yes` the
+  figures do not carry. The page's wire contract
+  (`validUpcomingCardBills`) refuses a bill with an exact total of zero or
+  below. A line that read `unknown` only because a refund
+  with no known account was a bill due by its date
+  (`cards_with_unknown_account`) can now read `yes` or `no`: nothing is
+  debited for the refund. If a provider were seen to credit a
+  refund to the bank account, the balance would understate what pays the
+  bills and a line could read `no` where the bank pays: conservative, and
+  unmodelled until observed. A refund statement whose due date is not
+  readable still counts as `payment_date_not_published` and makes its lines
+  `unknown` (`cards_with_unknown_due_date`), as any undated statement does.
+- A bank source account is joined to its entity only through the reported
+  state; one with no balance or position there keeps its own line, so an
+  entity's line does not count bills named through it. A statement due
+  before the date is taken as debited on its due date; a later debit (the
+  next business day) is not modelled.
+- Cost: the debit-account read (this ADR's cost), the reported state for the
+  date (ADR 0019's reads, each bounded by `DATED_STATE_ROW_BOUND`) with its
+  settlement read, and `ACCOUNT_LABELS_SQL` (one primary-key lookup per entity
+  named). The reported state reads every account, not only the debit
+  accounts: the price of reusing its snapshot rules rather than restating
+  them.
+- The published schema of `kogane.card-settlements.debit-accounts` gains an
+  optional `view` and its description a paragraph. This is an owner approval
+  item before merge (D3); no catalogue entry changes.
+
+### Verification
+
+- `packages/domain/test/card-upcoming-bills.test.ts`: which statements are
+  bills, and each `notListed` reason; a refund beside a bill on one account
+  (the bill alone is summed and the line reads `no`, the refund is in
+  `notListed`), a zero total that is not a bill beside a positive one that
+  is, a total that is not exact staying a bill beside a refund that does
+  not, and a refund with no known debit account leaving no line `unknown`
+  while an undated one keeps `cards_with_unknown_due_date`; `yes` and `no` on exact figures, with an equal balance covering; a
+  later line counting the earlier bills; each `unknown` reason and their
+  order; the unknown-account line; a statement with no due date that no
+  settlement pays, on its own account and on an unknown one.
+- `packages/application/test/card-upcoming-bills.test.ts`: on a synthetic
+  store with the CORE migrations, an exact bill its account covers, one it
+  does not, one with no known account, one not exact, a provider that
+  published no due date (paid by a settlement, and not), a card with no
+  statement due, a refund statement beside another card's bill to an account
+  that does not cover the bill, a balance captured before the previous debit
+  and one not reported, and an entity with two references: the newest
+  capture is taken, never the sum, and two disagreeing captures at once are
+  a conflict. The answer passes the wire contract through the route's
+  dispatch, and a contradicting `covers`, a silent `unknown` or a bill with
+  an exact total of zero or below is refused; ten cards stay under 8 KB; the read writes nothing, issues only the reads it composes, is
+  refused before reading under a narrowed grant, and reaches labels by key
+  without table statistics.
+- `services/app/test/card-debit-accounts-api.test.ts`: the route, the agent
+  route and the MCP tool give the same answer; other views and parameters
+  are refused on both; the audit record counts the bills and the cards not
+  listed.
+- `services/app/test/ui-mcp-parity.test.ts`: the mapped route's view is the
+  tool's one view, and the published description names it.
+- `apps/web/test/card-settlement.browser.test.ts`: the `次回の引落` section
+  shows the bills, lines and reasons, offers no action, passes the
+  accessibility audit, and refuses a `covers` its figures do not carry.
+
 ## Amendment 2026-11-19: a statement is settled by the acceptance guard's identity
 
 - Status: proposed

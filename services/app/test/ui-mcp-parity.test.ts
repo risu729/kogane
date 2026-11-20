@@ -45,7 +45,11 @@ import {
   processorCall,
   resolveDelegation,
   REVIEW_PLANNERS,
+  REWARD_EXPIRY_SUMMARY_BUCKET_LINES,
+  REWARD_EXPIRY_SUMMARY_DISPLAY_LINES,
+  REWARD_EXPIRY_WINDOW_ROW_BOUND,
 } from "../../../packages/application/src/index";
+import { REWARD_EXPIRY_LEFT_OUT_REASONS } from "../../../packages/observation-shared/src/reward-contract.ts";
 import {
   delegatedDecisionAllowed,
   delegatedPlanAllowed,
@@ -57,6 +61,17 @@ import {
 } from "../src/delegated-decision-tools";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 import { routeServes, uiApiPatterns } from "./ui-routes";
+import { READ_MCP_TOOLS } from "../src/read-tools";
+import {
+  CARD_DEBIT_ACCOUNT_ANSWER_CODES,
+  CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS,
+  STATED_ABSENT_REASONS,
+} from "../../../packages/domain/src/card-debit-account-answer";
+import {
+  COVERS_UNKNOWN_REASONS,
+  NOT_LISTED_REASONS,
+  UPCOMING_BILL_NOTES,
+} from "../../../packages/domain/src/card-upcoming-bills";
 
 // ── 1. catalogue operations on `ui` ──────────────────────────────────────
 
@@ -153,6 +168,8 @@ const TOOLS_WITHOUT_UI_ROUTE: Readonly<Record<string, string>> = {
   "kogane.reconcile.propose": "an agent's relation proposal; no screen offers it",
   "kogane.events.read":
     "GET /api/v2/activity and /api/v2/obligations, which no screen reads (ADR 0072); plan D19",
+  "kogane.changes.since":
+    "GET /api/v2/changes, which no screen reads yet (ADR 0127: an agent's everyday question; a page is a later slice)",
   "kogane.audit.get":
     "one audit record by id (readAuditRecordForGrant); the audit page reads pages only (readAuditPage, kogane.audit.search)",
 };
@@ -295,6 +312,33 @@ describe("catalogue operations on ui are published on mcp (ADR 0081, point 4)", 
 });
 
 describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
+  it("serves the カード照合 page's 次回の引落 view as the debit-accounts tool's one view", async () => {
+    // The page reads `?view=upcoming` of the mapped route (ADR 0114's
+    // 2026-11-19 amendment); the tool takes the same view, and nothing else.
+    const route = "/api/v2/reconciliation/card-debit-accounts";
+    const tool = "kogane.card-settlements.debit-accounts";
+    expect(READ_ROUTE_TOOLS[route]).toEqual([tool]);
+    expect([...uiApiPatterns().keys()].some((pattern) => routeServes(route, pattern))).toBe(true);
+    const schema = READ_MCP_TOOLS.find((entry) => entry.name === tool)!.inputSchema as {
+      properties: Record<string, unknown>;
+    };
+    expect(Object.keys(schema.properties)).toEqual(["view"]);
+    expect(JSON.stringify(schema.properties["view"])).toContain('"upcoming"');
+    const published = (await publishedDefinitions()).find((entry) => entry.name === tool)!;
+    for (const term of ["次回の引落", "?view=upcoming", "covers", "other_debits_not_modelled"])
+      expect(published.description).toContain(term);
+    // The condensed description still names every closed code of both views.
+    for (const code of [
+      ...STATED_ABSENT_REASONS,
+      ...CARD_DEBIT_ACCOUNT_ANSWER_CODES,
+      ...CARD_DEBIT_ACCOUNT_UNKNOWN_REASONS,
+      ...COVERS_UNKNOWN_REASONS,
+      ...NOT_LISTED_REASONS,
+      ...UPCOMING_BILL_NOTES,
+    ])
+      expect(published.description, code).toContain(code);
+  });
+
   it("publishes the self-contained account catalogue and named-capture freshness contract", async () => {
     expect(READ_ROUTE_TOOLS["/api/collection-quality/:source/accounts"]).toEqual([
       "kogane.collection-quality.read",
@@ -309,6 +353,30 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
       "dataTypesVersion",
       "providerTypes",
       "provider-data-types-v1",
+    ])
+      expect(tool.description).toContain(term);
+  });
+  it("names the reward expiry window, its summary and every closed code they answer", async () => {
+    const tool = (await publishedDefinitions()).find(
+      (entry) => entry.name === "kogane.rewards.read",
+    )!;
+    expect(tool.description.length).toBeLessThanOrEqual(2048);
+    for (const term of [
+      "`from`",
+      "`before`",
+      "Asia/Tokyo",
+      "`detail: summary`",
+      // Without `from` or `before` nothing is windowed: `from` is not today then.
+      "with neither there is no window",
+      `earliest ${String(REWARD_EXPIRY_SUMMARY_BUCKET_LINES)} bucket lines`,
+      `up to ${String(REWARD_EXPIRY_SUMMARY_DISPLAY_LINES)} provider-displayed portions`,
+      `${REWARD_EXPIRY_WINDOW_ROW_BOUND.toLocaleString("en-US")} rows`,
+      "cursor_mismatch",
+      "invalid_date",
+      "invalid_date_range",
+      "result_limit_exceeded",
+      "not-exact",
+      ...REWARD_EXPIRY_LEFT_OUT_REASONS,
     ])
       expect(tool.description).toContain(term);
   });
