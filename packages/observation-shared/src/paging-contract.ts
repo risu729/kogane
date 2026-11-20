@@ -31,9 +31,9 @@ export const PAGING_STOPS = [
   "bytes",
   // Items follow, but this grant's row budget withholds the next page.
   "budget",
-  // A scan bound ended the page (a filtered read walks at most so many rows
-  // per call): `returned` may be below `limit`, even zero, and the read
-  // continues where the walk stopped, so `hasMore` is true.
+  // A scan bound ended the page before it was full (a filtered read walks at
+  // most so many rows per call): `returned` is below `limit`, perhaps zero,
+  // and the read continues where the walk stopped, so `hasMore` is true.
   "walk",
 ] as const;
 export type PagingStop = (typeof PAGING_STOPS)[number];
@@ -125,6 +125,10 @@ export function validPaging(value: unknown): value is Paging {
   if (value.limit !== null && value.returned > value.limit) return false;
   // A page the limit stopped is full.
   if (value.stoppedBy === "limit" && value.returned !== value.limit) return false;
+  // A page the walk ended is not full: a full page says `limit`, whatever
+  // else ended the walk at the same row.
+  if (value.stoppedBy === "walk" && value.limit !== null && value.returned >= value.limit)
+    return false;
   return value.hasMore === (value.stoppedBy !== null);
 }
 

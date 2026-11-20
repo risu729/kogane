@@ -1733,8 +1733,9 @@ whatever their cursor kind:
 - `paging.stoppedBy` is `limit` (the page is full), `bytes` (the answer
   reached its byte bound first), `budget` (rows follow but the grant's
   `maxRows` withholds the next page: `next` is null, `hasMore` true) or
-  `walk` (a scan bound ended the page: it may be short or empty, and `next`
-  continues it). No converted read in S1 answers `walk` yet. It says
+  `walk` (a scan bound ended the page before it was full: it holds fewer than
+  `limit` items, perhaps none, and `next` continues it; a full page says
+  `limit`). No converted read in S1 answers `walk` yet. It says
   nothing about whether the data behind the page is complete; each read's own
   reasons do.
 - A refused continuation is `400 invalid_cursor` (not a token this read

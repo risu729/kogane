@@ -66,10 +66,24 @@ describe("paging", () => {
     expect(validPaging({ limit: 10, returned: 0, hasMore: false, stoppedBy: null })).toBe(true);
   });
 
-  test("a page a scan bound ended (walk) may be short or empty, and always continues", () => {
+  test("a page a scan bound ended (walk) is short or empty, and always continues", () => {
     expect(validPaging({ limit: 200, returned: 0, hasMore: true, stoppedBy: "walk" })).toBe(true);
     expect(validPaging({ limit: 200, returned: 37, hasMore: true, stoppedBy: "walk" })).toBe(true);
-    expect(validPaging({ limit: 200, returned: 200, hasMore: true, stoppedBy: "walk" })).toBe(true);
+    expect(validPaging({ limit: 200, returned: 199, hasMore: true, stoppedBy: "walk" })).toBe(true);
+    expect(validPaging({ limit: null, returned: 3, hasMore: true, stoppedBy: "walk" })).toBe(true);
+    // A full page says `limit`, even when the walk ended at the same row:
+    // `walk` always means fewer than `limit` items.
+    expect(validPaging({ limit: 200, returned: 200, hasMore: true, stoppedBy: "walk" })).toBe(
+      false,
+    );
+    expect(() =>
+      pagedFields({
+        limit: 200,
+        returned: 200,
+        next: { cursor: "synthetic-token" },
+        stoppedBy: "walk",
+      }),
+    ).toThrow(RangeError);
     expect(validPaging({ limit: 200, returned: 0, hasMore: false, stoppedBy: "walk" })).toBe(false);
     expect(validPaging({ limit: 200, returned: 201, hasMore: true, stoppedBy: "walk" })).toBe(
       false,
